@@ -21,50 +21,53 @@
 ./gradlew :composeApp:run          # デスクトップアプリを起動
 ```
 
-## Dropbox App Key（`DROPBOX_APP_KEY`）
+## クラウドストレージとの連携
 
-Gradle のカスタムタスク（`generateBuildConfig`）で実現している。優先順位:
+ビルド時にAPIキーを指定することで、クラウドストレージと連携（同期）ができるようになる。
 
-1. `-PdropboxAppKey=...`（Gradle プロパティ）
-2. 環境変数 `DROPBOX_APP_KEY`
-3. `local.properties` の `dropbox.app.key`（git 管理外。`local.properties.example` を参照）
-4. 空文字
+プロパティーの値は[local.properties.example](../local.properties.example)を参照。
+ビルド時にはこのファイルを `local.properties` にコピーして編集すること。
 
-生成される `works.merc.keryx.app.BuildConfig.DROPBOX_APP_KEY` が空の場合、
-`CloudStorageAvailability.dropboxAvailable` が `false` になり、Setup / Settings 画面から
-Dropbox 連携が完全に非表示になる。
+APIキーが指定されていないクラウドサービスは連携機能が表示されず、どのサービスにも指定されなければ（設定ダイアログのタブなどに）連携機能自体が表れない。
+**連携できるクラウドストレージは同時に1つのみ**であり、複数のストレージに分散保存はできない。
 
-## Google Drive Client ID / Secret（`GOOGLE_DRIVE_CLIENT_ID` / `GOOGLE_DRIVE_CLIENT_SECRET`）
+Gradle のカスタムタスク（`generateBuildConfig`）で実現している。
 
-Dropbox App Key と同じく Gradle のカスタムタスク（`generateBuildConfig`）で生成する。
-Google Cloud Console で **「デスクトップアプリ」タイプの OAuth クライアント**を作成し、その
-クライアント ID とクライアントシークレットを指定する（Google のデスクトップ向けクライアントは
-任意のカスタムスキームを許可せず、リダイレクトは `http://127.0.0.1:<ポート>` のループバックで
-受ける。アプリ側は `LoopbackRedirectTransport` で一時 HTTP サーバーを立てて受信する）。フローは
-PKCE（`code_verifier`）を使うが、**クライアントシークレットは別途必要**——「デスクトップアプリ」
-タイプの OAuth クライアントは iOS/Android と異なり完全な public client として扱われず、Google の
-トークンエンドポイントは `client_secret` を伴わないトークン交換・リフレッシュを
-`invalid_request: client_secret is missing` で拒否する（PKCE の有無に関わらず）。スコープは
-`drive.appdata`（ユーザーの Drive に見えないアプリ専用フォルダー）のみを要求する。開発中は OAuth
-同意画面を「テスト」公開ステータスにしてテストユーザーを登録すれば足りる。
+以下に各サービスでのAPIキーの取得方法を示す。
 
-クライアント ID の優先順位:
+### Dropbox
 
-1. `-PgoogleDriveClientId=...`（Gradle プロパティ）
-2. 環境変数 `GOOGLE_DRIVE_CLIENT_ID`
-3. `local.properties` の `googledrive.client.id`（git 管理外。`local.properties.example` を参照）
-4. 空文字
+1. [DBX Platform](https://www.dropbox.com/developers/apps/create)で連携先アプリを作成
+  - すでに作成済みの場合は[App Console](https://www.dropbox.com/developers/apps)から検索
+  - "Choose an API": `Scoped access`
+  - "Choose the type of access you need": `App folder`
+  - これはドライブ内の任意のファイルではなく、アプリ専用フォルダーへのみアクセスを許可する
+2. "Settings" で以下を設定
+  - "Redirect URIs": `keryx://oauth2/callback`
+  - "Allow public clients (Implicit Grant & PKCE)": `Allow`
+3. "Permissions" で以下をチェック
+  - `files.content.write`
+  - `files.content.read`
+4. "Settings" 内の "App key" を `local.properties` に指定
 
-クライアントシークレットの優先順位（同じ規則）:
+### Google Drive
 
-1. `-PgoogleDriveClientSecret=...`（Gradle プロパティ）
-2. 環境変数 `GOOGLE_DRIVE_CLIENT_SECRET`
-3. `local.properties` の `googledrive.client.secret`（git 管理外）
-4. 空文字
+1. [Google Cloudコンソール](https://console.cloud.google.com)でプロジェクトを作成
+2. メニューの「API とサービス」→「ライブラリ」と辿り、「Google Drive API」を探す
+  - 検索ボックスに "drive" と入れるか、メニューの「カテゴリ」から「ストレージ」で絞り込み
+  - 「有効にする」をクリック
+3. メニューの「API とサービス」→「OAuth 同意画面」と辿り、「データアクセス」をクリック
+  - 「スコープを追加または削除」をクリック
+  - "Google Drive API" の `.../auth/drive.appdata` をチェック
+  - これはドライブ内の任意のファイルではなく、アプリ専用フォルダーへのみアクセスを許可する
+4. メニューの「API とサービス」→「認証情報」と辿り、「OAuth 2.0 クライアント ID」を作成
+  - 上部の「＋認証情報を作成」→「OAuth クライアント ID」
+  - アプリケーションの種類: 「デスクトップアプリ」
+  - 同画面内の「クライアント ID」と「クライアント シークレット」を `local.properties` に指定
 
-生成される `works.merc.keryx.app.BuildConfig.GOOGLE_DRIVE_CLIENT_ID` または
-`GOOGLE_DRIVE_CLIENT_SECRET` のいずれかが空の場合、`CloudStorageAvailability.googleDriveAvailable`
-が `false` になり、Setup / Settings 画面から Google Drive 連携が完全に非表示になる。
+※OAuth2認可後のリダイレクト先はDropboxのように任意に決められないため、 `http://127.0.0.1:<ポート>` のループバックで受ける（アプリ側は `LoopbackRedirectTransport` で一時 HTTP サーバーを立てて受信する）。
+※フローはPKCE（`code_verifier`）を使うが、**クライアントシークレットは別途必要**。
+※開発中は公開ステータスを「テスト」にしてテストユーザーを登録すれば事足りる。
 
 ## パッケージング
 
