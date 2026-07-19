@@ -20,38 +20,52 @@ If toolchain auto-download is blocked in a sandbox:
 ./gradlew :composeApp:run          # Launch the desktop app
 ```
 
-## Dropbox App Key (`DROPBOX_APP_KEY`)
+## Cloud Storage Integration
 
-Implemented via a Gradle custom task (`generateBuildConfig`). Priority:
+Specify API keys at build time to enable cloud storage (sync) integration.
 
-1. `-PdropboxAppKey=...` (Gradle property)
-2. Environment variable `DROPBOX_APP_KEY`
-3. `local.properties` `dropbox.app.key` (not in git; see `local.properties.example`)
-4. Empty string
+Property values are referenced from [local.properties.example](../local.properties.example).
+Copy this file to `local.properties` and edit it during the build.
 
-The generated `works.merc.keryx.app.BuildConfig.DROPBOX_APP_KEY` being empty causes
-`CloudStorageAvailability.dropboxAvailable` to return `false`, completely hiding Dropbox integration from the Setup / Settings screens.
+Services without an API key will not show integration options. If no service is configured, the integration itself does not appear (e.g., tabs in the settings dialog).
+**Only one cloud storage can be connected at a time**, and data cannot be distributed across multiple storages.
 
-## Google Drive Client ID / Secret (`GOOGLE_DRIVE_CLIENT_ID` / `GOOGLE_DRIVE_CLIENT_SECRET`)
+This is implemented via a Gradle custom task (`generateBuildConfig`).
 
-Also generated via the Gradle custom task (`generateBuildConfig`).
-In Google Cloud Console, create an **"Desktop app" type OAuth client**, and use its client ID and client secret (Google's desktop client does not allow arbitrary custom schemes; redirects must be received at `http://127.0.0.1:<port>`. The app uses `LoopbackRedirectTransport` to stand up a temporary HTTP server to receive it). The flow uses PKCE (`code_verifier`), but **the client secret is also required separately** — unlike iOS/Android, Google's "Desktop app" OAuth client is not treated as a full public client, and Google's token endpoint rejects token exchange / refresh without `client_secret` with `invalid_request: client_secret is missing` (regardless of PKCE). The scope requested is `drive.appdata` only (an app-specific hidden folder in the user's Drive). During development, set the OAuth consent screen to "Testing" and register test users.
+Below is how to obtain API keys for each service.
 
-Client ID priority:
+### Dropbox
 
-1. `-PgoogleDriveClientId=...` (Gradle property)
-2. Environment variable `GOOGLE_DRIVE_CLIENT_ID`
-3. `local.properties` `googledrive.client.id` (not in git; see `local.properties.example`)
-4. Empty string
+1. Create an app on [DBX Platform](https://www.dropbox.com/developers/apps/create)
+   - If already created, search from [App Console](https://www.dropbox.com/developers/apps)
+   - "Choose an API": `Scoped access`
+   - "Choose the type of access you need": `App folder`
+   - This grants access only to the app-specific folder, not arbitrary files in the drive.
+2. In "Settings", configure the following:
+   - "Redirect URIs": `keryx://oauth2/callback`
+   - "Allow public clients (Implicit Grant & PKCE)": `Allow`
+3. Check the following in "Permissions":
+   - `files.content.write`
+   - `files.content.read`
+4. Specify the "App key" in `local.properties` (copy of [local.properties.example](../local.properties.example)).
 
-Client secret priority (same rules):
+### Google Drive
 
-1. `-PgoogleDriveClientSecret=...`
-2. Environment variable `GOOGLE_DRIVE_CLIENT_SECRET`
-3. `local.properties` `googledrive.client.secret` (not in git)
-4. Empty string
+1. Create a project in the [Google Cloud Console](https://console.cloud.google.com)
+2. Navigate to "APIs & Services" → "Library" and find the "Google Drive API"
+   - Enter "drive" in the search box, or narrow down from "Storage" in the sidebar
+   - Click "Enable"
+3. Navigate to "APIs & Services" → "OAuth consent screen", then click "Data Access"
+   - Click "Add or remove scopes"
+   - Check `.../auth/drive.appdata` for "Google Drive API"
+   - This grants access only to the app-specific folder, not arbitrary files in the drive.
+4. Navigate to "APIs & Services" → "Credentials" and create an **"OAuth 2.0 Client ID"**
+   - "Create credentials" → "OAuth client ID" at the top
+   - Application type: "Desktop app"
+   - Specify the "Client ID" and "Client Secret" shown on the same page in `local.properties` (copy of [local.properties.example](../local.properties.example))
 
-If either generated `works.merc.keryx.app.BuildConfig.GOOGLE_DRIVE_CLIENT_ID` or `GOOGLE_DRIVE_CLIENT_SECRET` is empty, `CloudStorageAvailability.googleDriveAvailable` returns `false`, completely hiding Google Drive integration from the Setup / Settings screens.
+The redirect after OAuth2 cannot be arbitrarily determined like Dropbox, so it is received via loopback at `http://127.0.0.1:<port>` (the app temporarily sets up an HTTP server with `LoopbackRedirectTransport` to receive it).
+The flow uses PKCE (`code_verifier`), but **a client secret is also required separately** — unlike iOS/Android, Google's "Desktop app" OAuth client is not treated as a full public client, and Google's token endpoint rejects token exchange / refresh without `client_secret` with `invalid_request: client_secret is missing` (regardless of PKCE). The scope requested is `drive.appdata` only (an app-specific hidden folder in the user's Drive). During development, set the OAuth consent screen to "Testing" and register test users.
 
 ## Packaging
 
