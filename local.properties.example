@@ -1,0 +1,39 @@
+# Copy this file to `local.properties` and fill in your own values.
+# `local.properties` is git-ignored and never committed.
+#
+# Priority (each property is resolved in this order):
+#   1. -P<gradleProperty> (Gradle project property, e.g. `./gradlew -PdropboxAppKey=...`)
+#   2. Environment variable
+#   3. `local.properties` value
+#   4. Default (empty string or noted below)
+
+# Dropbox OAuth App Key.
+#   Gradle property: -PdropboxAppKey=...
+#   Environment variable: DROPBOX_APP_KEY
+#   Default: (empty)
+# Leave empty (or omit the file entirely) to disable Dropbox sync — the
+# Dropbox option is then hidden from the Setup / Settings screens.
+# See docs/build.md for how to obtain an App Key.
+dropbox.app.key=
+
+# Google Drive OAuth Client ID, from the same "Desktop app" OAuth client.
+#   Gradle property: -PgoogleDriveClientId=...
+#   Environment variable: GOOGLE_DRIVE_CLIENT_ID
+#   Default: (empty)
+# Leave empty (or omit) to disable Google Drive sync — the Google Drive
+# option is then hidden from the Setup / Settings screens.
+# See docs/build.md for how to obtain a Client ID.
+googledrive.client.id=
+
+# Google Drive OAuth Client Secret.
+#   Gradle property: -PgoogleDriveClientSecret=...
+#   Environment variable: GOOGLE_DRIVE_CLIENT_SECRET
+#   Default: (empty)
+# Google's token endpoint requires secret even though the flow uses PKCE.
+googledrive.client.secret=
+
+# GitHub "owner/repo" slug the update checker polls (releases/latest API).
+#   Gradle property: -PupdateRepo=...
+#   Environment variable: UPDATE_REPO
+#   Default: shimataro/keryx
+update.repo=

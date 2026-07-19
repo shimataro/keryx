@@ -1,0 +1,253 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Default (fallback) locale = Japanese. The system locale selects a matching
+  values-<lang>/ set if present, otherwise falls back to this file. Add e.g.
+  values-en/strings.xml to ship English. Every user-facing string lives here.
+-->
+<resources>
+    <string name="app_name">Keryx</string>
+
+    <!-- common -->
+    <string name="common_cancel">キャンセル</string>
+    <string name="common_save">保存</string>
+    <string name="common_delete">削除</string>
+    <string name="common_create">作成</string>
+    <string name="common_add">追加</string>
+    <string name="common_ok">OK</string>
+    <string name="common_back">戻る</string>
+    <string name="common_abort">中止</string>
+    <string name="common_menu_item_with_shortcut">%1$s (%2$s)</string>
+
+    <!-- setup -->
+    <string name="setup_title">Keryx へようこそ</string>
+    <string name="setup_choose_mode">同期方法を選んでください（後からでも変更できます）</string>
+    <string name="setup_local_only">ローカルのみで使う</string>
+    <string name="setup_local_desc">このデバイス単体で使用します</string>
+    <string name="setup_dropbox">Dropbox で同期する</string>
+    <string name="setup_dropbox_desc">複数デバイスで購読・既読を共有します</string>
+    <string name="setup_dropbox_wip">Dropbox 連携は準備中です</string>
+    <string name="setup_google_drive">Google Drive で同期する</string>
+    <string name="setup_google_drive_desc">複数デバイスで購読・既読を共有します</string>
+    <string name="setup_connecting">クラウドストレージに接続中...</string>
+    <string name="setup_abort_connect_confirm_title">接続を中止しますか？</string>
+    <string name="setup_abort_connect_confirm_body">まだ何も保存されていません。</string>
+    <string name="oauth_loopback_success">認証が完了しました。このタブを閉じてアプリに戻ってください。</string>
+    <string name="setup_auth_failed">認証に失敗しました</string>
+    <string name="setup_cloud_has_data">Dropbox に既存のデータが見つかりました。インポートしますか？</string>
+    <string name="setup_import_and_start">インポートして開始</string>
+    <string name="setup_skip_import">スキップして開始</string>
+
+    <!-- home -->
+    <string name="home_add_feed">フィードを追加</string>
+    <string name="home_add_feed_hint">フィード URL を入力</string>
+    <string name="home_add_feed_confirm">確認</string>
+    <string name="home_add_feed_subscribe">購読する</string>
+    <string name="home_add_feed_article_count">記事 %1$d 件</string>
+    <string name="home_add_feed_links_found">フィードリンクが見つかりました</string>
+    <string name="home_add_feed_select_links">購読するフィードを選択してください</string>
+    <string name="home_add_feed_select_all">すべて選択</string>
+    <string name="home_add_feed_clear_all">すべて解除</string>
+    <string name="home_add_feed_selected_count">%1$d / %2$d 件選択中</string>
+    <string name="home_add_feed_subscribed">%1$d 件のフィードを追加しました</string>
+    <string name="home_add_feed_partial">%1$d 件追加、%2$d 件失敗しました</string>
+    <string name="home_add_feed_type_rss">RSS</string>
+    <string name="home_add_feed_type_atom">Atom</string>
+    <string name="home_add_feed_loading_preview">確認中…</string>
+    <string name="home_add_feed_loading_subscribe">購読中…</string>
+    <string name="home_all_feeds">すべてのフィード</string>
+    <string name="home_starred">スター付き</string>
+    <string name="home_tags">タグ</string>
+    <string name="home_add_tag">タグを追加</string>
+    <string name="home_edit_tags">タグを編集</string>
+    <string name="home_new_tag_hint">タグ名を入力</string>
+    <string name="home_tag_name_duplicate">同じ名前のタグが既にあります</string>
+    <string name="home_tag_color">色</string>
+    <string name="home_delete_tag_confirm">タグ「%1$s」を削除しますか？</string>
+    <string name="home_tag_deleted">タグを削除しました</string>
+    <string name="home_edit_tag_menu">編集</string>
+    <string name="home_edit_tag">タグを編集</string>
+    <string name="home_delete_tag_menu">削除</string>
+    <string name="home_assign_tags">タグを設定</string>
+    <string name="home_folders">フォルダー</string>
+    <string name="home_add_folder">フォルダーを追加</string>
+    <string name="home_new_folder_hint">フォルダー名を入力</string>
+    <string name="home_folder_name_duplicate">同じ名前のフォルダーが既にあります</string>
+    <string name="home_delete_folder_confirm">フォルダー「%1$s」を削除しますか？フィード自体は削除されず、「フォルダーなし」に移動します。</string>
+    <string name="home_edit_folder_menu">編集</string>
+    <string name="home_edit_folder">フォルダーを編集</string>
+    <string name="home_delete_folder_menu">削除</string>
+    <string name="home_move_to_folder">フォルダーに移動</string>
+    <string name="home_no_folder">フォルダーなし</string>
+    <string name="home_rename_feed_menu">タイトルを変更</string>
+    <string name="home_rename_feed">タイトルを変更</string>
+    <string name="home_rename_feed_hint">空欄にすると既定のタイトルに戻ります</string>
+    <string name="home_unsubscribe_menu">購読を削除</string>
+    <string name="home_unsubscribe_title">「%1$s」の購読を削除しますか？</string>
+    <string name="home_unsubscribe_body">スター付き記事は引き続き閲覧できます。</string>
+    <string name="home_refresh">更新</string>
+    <string name="home_refreshing">新着を確認中…</string>
+    <string name="home_feed_error">フィードのエラー</string>
+    <string name="home_feed_error_count">%1$d 回連続でエラーが発生しています</string>
+    <string name="home_feed_error_refresh_now">今すぐ更新</string>
+    <string name="home_mark_all_read">すべて既読にする</string>
+    <string name="home_no_feeds">フィードが登録されていません\n「+」ボタンで追加してください</string>
+    <string name="home_no_articles">記事がありません</string>
+    <string name="home_unread_only">未読のみ</string>
+    <string name="home_sort_newest">新しい順</string>
+    <string name="home_sort_oldest">古い順</string>
+    <string name="home_sort_disabled_search">検索結果は関連度順で表示されます</string>
+    <string name="home_already_subscribed">このフィードはすでに購読済みです</string>
+    <string name="home_sync">同期</string>
+    <string name="home_syncing">同期中…</string>
+    <string name="home_notifications">通知</string>
+    <string name="home_open_site">サイトを開く</string>
+    <string name="home_no_article_selected">記事を選択してください</string>
+    <string name="home_search">記事を検索</string>
+    <string name="home_search_placeholder">記事を検索…</string>
+    <string name="home_search_too_short">3文字以上の語句を入力してください</string>
+    <string name="home_search_no_results">該当する記事がありません</string>
+    <string name="home_search_hint">↑↓ で移動 · Enter で開く</string>
+    <string name="home_search_clear">クリア</string>
+
+    <!-- article -->
+    <string name="article_mark_as_unread">未読に戻す</string>
+    <string name="article_mark_as_read">既読にする</string>
+    <string name="article_open_in_browser">ブラウザーで開く</string>
+    <string name="article_star">スター</string>
+    <string name="article_unstar">スターを外す</string>
+    <string name="article_no_content">本文がありません</string>
+    <string name="article_copy_url">URL をコピー</string>
+    <string name="article_url_copied">URL をコピーしました</string>
+    <string name="article_prev">前の記事</string>
+    <string name="article_next">次の記事</string>
+
+    <!-- settings -->
+    <string name="settings_tab_general">一般</string>
+    <string name="settings_tab_notifications">通知</string>
+    <string name="settings_tab_data">データ</string>
+    <string name="settings_theme">テーマ</string>
+    <string name="settings_theme_system">システムに合わせる</string>
+    <string name="settings_theme_light">ライト</string>
+    <string name="settings_theme_dark">ダーク</string>
+    <string name="settings_cache">記事のキャッシュ保持期間</string>
+    <string name="settings_days7">7日</string>
+    <string name="settings_days30">30日</string>
+    <string name="settings_days90">90日</string>
+    <string name="settings_unlimited">無期限</string>
+    <string name="settings_read_timeout">フィード読み取りタイムアウト</string>
+    <string name="settings_seconds10">10秒</string>
+    <string name="settings_seconds30">30秒</string>
+    <string name="settings_seconds60">60秒</string>
+    <string name="settings_data_management">データ管理</string>
+    <string name="settings_import_opml">OPML をインポート</string>
+    <string name="settings_export_opml">OPML をエクスポート</string>
+    <string name="settings_import_success">%1$d 件のフィードを追加しました</string>
+    <string name="settings_import_failed">%1$d 件の追加に失敗しました</string>
+    <string name="settings_export_success">エクスポートしました</string>
+    <string name="settings_import_cancelled">キャンセルしました</string>
+    <string name="settings_refresh_interval">フィード更新間隔</string>
+    <string name="settings_refresh_min15">15分</string>
+    <string name="settings_refresh_min30">30分</string>
+    <string name="settings_refresh_hour1">1時間</string>
+    <string name="settings_refresh_hour3">3時間</string>
+    <string name="settings_refresh_manual">手動のみ</string>
+    <string name="settings_desktop">デスクトップ</string>
+    <string name="settings_notification_enabled">新着通知を有効にする</string>
+    <string name="settings_start_minimized">起動時にトレイに収納する</string>
+    <string name="settings_cloud_sync">クラウド同期</string>
+    <string name="settings_cloud_sync_hint">接続できるクラウドは1つです。</string>
+    <string name="settings_dropbox_disconnect">連携を解除</string>
+    <string name="settings_dropbox_connect">連携する</string>
+    <string name="settings_google_drive_connect">連携する</string>
+    <string name="settings_google_drive_disconnect">連携を解除</string>
+    <string name="settings_cloud_disconnect_confirm_title">%1$sとの連携を解除しますか？</string>
+    <string name="settings_cloud_disconnect_confirm_body">ローカルのデータはそのまま残ります。</string>
+    <string name="settings_cloud_abort_connect_confirm_title">%1$sへの接続を中止しますか？</string>
+    <string name="settings_cloud_abort_connect_confirm_body">まだ何も保存されていません。</string>
+    <string name="settings_cloud_switch_confirm_title">%1$s に切り替えますか？</string>
+    <string name="settings_cloud_switch_confirm_body">%1$s との連携は解除されます。</string>
+    <string name="settings_cloud_switch_confirm_action">切り替える</string>
+    <string name="settings_last_synced">最終同期: %1$s</string>
+    <string name="settings_font_size">文字サイズ</string>
+    <string name="settings_font_small">小</string>
+    <string name="settings_font_medium">標準</string>
+    <string name="settings_font_large">大</string>
+    <string name="settings_font_xlarge">特大</string>
+    <string name="settings_article_list">記事一覧</string>
+    <string name="settings_article_list_all">すべて</string>
+    <string name="settings_article_list_unread_only">未読のみ</string>
+    <string name="settings_updates">アップデート</string>
+    <string name="settings_version">バージョン %1$s</string>
+    <string name="settings_project_page">プロジェクトページ</string>
+    <string name="settings_licenses">オープンソースライセンス</string>
+    <string name="settings_update_check_interval">アップデート確認間隔</string>
+    <string name="settings_update_check_startup_only">起動時のみ</string>
+    <string name="settings_update_check_daily">毎日</string>
+    <string name="settings_update_check_3days">3日ごと</string>
+    <string name="settings_update_check_weekly">毎週</string>
+    <string name="settings_update_check_now">更新を確認</string>
+    <string name="settings_update_check_up_to_date">最新版です</string>
+    <string name="settings_update_check_available">新しいバージョン %1$s があります</string>
+    <string name="settings_update_check_failed">確認できませんでした</string>
+    <string name="settings_update_open_release_page">リリースページを開く</string>
+
+    <!-- feed notifications -->
+    <string name="feed_gone_title">フィードが削除されました</string>
+    <string name="feed_gone_message">「%1$s」は削除されたフィードです（HTTP 410 Gone）。購読を解除することをおすすめします。</string>
+    <string name="feed_new_articles">新着記事が %1$d 件あります</string>
+    <string name="feed_url_changed">「%1$s」の URL が変更されました</string>
+    <string name="update_available_notification">新しいバージョン %1$s が利用可能です</string>
+
+    <!-- tray -->
+    <string name="tray_show">表示</string>
+    <string name="tray_hide">非表示</string>
+    <string name="tray_quit">終了</string>
+
+    <!-- application menu bar -->
+    <string name="menu_file">ファイル</string>
+    <string name="menu_file_add_feed">フィードを追加…</string>
+    <string name="menu_file_add_folder">フォルダーを追加…</string>
+    <string name="menu_file_add_tag">タグを追加…</string>
+    <string name="menu_file_import_opml">OPML をインポート…</string>
+    <string name="menu_file_export_opml">OPML をエクスポート…</string>
+    <string name="menu_file_close_window">ウインドウを閉じる</string>
+    <string name="menu_file_quit">Keryx を終了</string>
+    <string name="menu_view">表示</string>
+    <string name="menu_view_search">検索…</string>
+    <string name="menu_view_unread_only">未読のみ表示</string>
+    <string name="menu_view_toggle_sort">表示順を切り替え</string>
+    <string name="menu_view_mark_all_read">すべて既読にする</string>
+    <string name="menu_article">記事</string>
+    <string name="menu_article_toggle_read">既読/未読を切り替え</string>
+    <string name="menu_article_toggle_star">スター</string>
+    <string name="menu_article_open_in_browser">ブラウザーで開く</string>
+    <string name="menu_article_copy_url">URL をコピー</string>
+    <string name="menu_feed">フィード</string>
+    <string name="menu_feed_refresh_all">すべて更新</string>
+    <string name="menu_feed_sync_now">今すぐ同期</string>
+    <string name="menu_settings">設定…</string>
+    <string name="menu_help">ヘルプ</string>
+    <string name="menu_help_project_page">プロジェクトページを開く</string>
+    <string name="menu_help_about">Keryx について</string>
+
+    <!-- notification center -->
+    <string name="notification_empty">通知はありません</string>
+    <string name="notification_dismiss_all">すべて消去</string>
+    <string name="notification_dismiss">この通知を消去</string>
+    <string name="notification_level_error">エラー</string>
+    <string name="notification_level_warning">警告</string>
+    <string name="notification_level_info">情報</string>
+
+    <!-- errors -->
+    <string name="error_feed_timeout">フィードの取得がタイムアウトしました</string>
+    <string name="error_feed_fetch">フィードの取得に失敗しました</string>
+    <string name="error_feed_parse">フィードの形式を解析できませんでした</string>
+    <string name="error_cloud_auth">クラウドストレージの認証に失敗しました</string>
+    <string name="error_cloud_storage">同期に失敗しました。後でもう一度お試しください</string>
+    <string name="error_sync_conflict">同期の競合が解決できませんでした</string>
+    <string name="error_schema_version">アプリを最新バージョンに更新してください</string>
+    <string name="error_feed_gone">フィードが削除されました</string>
+    <string name="error_feed_not_found">フィードが見つかりませんでした</string>
+    <string name="error_invalid_url">フィード URL が正しくありません</string>
+    <string name="error_generic">エラーが発生しました</string>
+</resources>

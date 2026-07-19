@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  - push
+
+jobs:
+  build:
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v6
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Build & Test
+        shell: bash
+        run: ./gradlew build --no-configuration-cache
+        env:
+          DROPBOX_APP_KEY: ""
+          GOOGLE_DRIVE_CLIENT_ID: ""
+          GOOGLE_DRIVE_CLIENT_SECRET: ""
+
+      - name: Upload test reports
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: test-reports-${{ matrix.os }}
+          path: |
+            composeApp/build/reports/tests/
+            composeApp/build/test-results/
+          if-no-files-found: warn

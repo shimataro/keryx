@@ -1,0 +1,151 @@
+-- Articles fetched from feeds. Read / starred state lives here and syncs with a
+-- timestamp-last-wins policy (read_at / starred_at). Never soft-deleted; kept
+-- even when the feed is soft-deleted, so starred articles remain viewable.
+-- is_read / is_starred are 0/1 (Long). All timestamps are Unix milliseconds.
+-- search_text = COALESCE(content, summary, '') and feeds articles_fts.
+
+CREATE TABLE articles (
+    id            TEXT    NOT NULL PRIMARY KEY,
+    feed_id       TEXT    NOT NULL,
+    guid          TEXT    NOT NULL,
+    url           TEXT    NOT NULL,
+    title         TEXT    NOT NULL,
+    summary       TEXT,
+    content       TEXT,
+    author        TEXT,
+    published_at  INTEGER,
+    thumbnail_url TEXT,
+    is_read       INTEGER NOT NULL DEFAULT 0,
+    read_at       INTEGER,
+    is_starred    INTEGER NOT NULL DEFAULT 0,
+    starred_at    INTEGER,
+    cached_at     INTEGER NOT NULL,
+    search_text   TEXT    NOT NULL DEFAULT '',
+    updated_at    INTEGER NOT NULL,
+    created_at    INTEGER NOT NULL,
+    FOREIGN KEY (feed_id) REFERENCES feeds(id),
+    UNIQUE (feed_id, guid)
+);
+
+CREATE INDEX idx_articles_feed_id    ON articles(feed_id);
+CREATE INDEX idx_articles_is_read    ON articles(is_read);
+CREATE INDEX idx_articles_is_starred ON articles(is_starred);
+CREATE INDEX idx_articles_published  ON articles(published_at DESC, created_at DESC, id DESC);
+
+watchAll:
+SELECT a.* FROM articles a
+INNER JOIN feeds f ON f.id = a.feed_id
+WHERE f.deleted_at IS NULL
+ORDER BY a.published_at DESC, a.created_at DESC, a.id DESC;
+
+watchStarred:
+SELECT * FROM articles WHERE is_starred = 1 ORDER BY published_at DESC, created_at DESC, id DESC;
+
+watchByFeed:
+SELECT * FROM articles WHERE feed_id = ? ORDER BY published_at DESC, created_at DESC, id DESC;
+
+watchByTag:
+SELECT a.* FROM articles a
+INNER JOIN feeds f ON f.id = a.feed_id
+INNER JOIN feed_tags ft ON ft.feed_id = f.id
+WHERE ft.tag_id = ? AND ft.deleted_at IS NULL AND f.deleted_at IS NULL
+ORDER BY a.published_at DESC, a.created_at DESC, a.id DESC;
+
+watchByFolder:
+SELECT a.* FROM articles a
+INNER JOIN feeds f ON f.id = a.feed_id
+WHERE f.folder_id = ? AND f.deleted_at IS NULL
+ORDER BY a.published_at DESC, a.created_at DESC, a.id DESC;
+
+getById:
+SELECT * FROM articles WHERE id = ?;
+
+getByFeedAndGuid:
+SELECT * FROM articles WHERE feed_id = ? AND guid = ?;
+
+watchUnreadCount:
+SELECT COUNT(*) FROM articles a
+INNER JOIN feeds f ON f.id = a.feed_id
+WHERE a.is_read = 0 AND f.deleted_at IS NULL;
+
+watchStarredUnreadCount:
+SELECT COUNT(*) FROM articles WHERE is_read = 0 AND is_starred = 1;
+
+-- Lightweight change ping: re-emits whenever the `articles` table is mutated (SQLDelight
+-- notifies listeners table-wide, so the value need not change to fire). Used only as a signal
+-- to re-run FTS search; the count value itself is discarded by the collector.
+countArticles:
+SELECT COUNT(*) FROM articles;
+
+watchUnreadCountsByFeed:
+SELECT feed_id, COUNT(*) AS cnt FROM articles WHERE is_read = 0 GROUP BY feed_id;
+
+watchUnreadCountsByTag:
+SELECT ft.tag_id, COUNT(*) AS cnt
+FROM articles a
+INNER JOIN feed_tags ft ON ft.feed_id = a.feed_id
+WHERE a.is_read = 0 AND ft.deleted_at IS NULL
+GROUP BY ft.tag_id;
+
+watchUnreadCountsByFolder:
+SELECT f.folder_id, COUNT(*) AS cnt
+FROM articles a
+INNER JOIN feeds f ON f.id = a.feed_id
+WHERE a.is_read = 0 AND f.folder_id IS NOT NULL AND f.deleted_at IS NULL
+GROUP BY f.folder_id;
+
+insert:
+INSERT INTO articles (
+    id, feed_id, guid, url, title, summary, content, author, published_at,
+    thumbnail_url, is_read, read_at, is_starred, starred_at, cached_at,
+    search_text, updated_at, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(feed_id, guid) DO UPDATE SET
+    url = excluded.url,
+    title = excluded.title,
+    summary = excluded.summary,
+    content = excluded.content,
+    author = excluded.author,
+    published_at = excluded.published_at,
+    thumbnail_url = excluded.thumbnail_url,
+    cached_at = excluded.cached_at,
+    search_text = excluded.search_text,
+    updated_at = excluded.updated_at;
+
+updateReadStatus:
+UPDATE articles SET is_read = ?, read_at = ?, updated_at = ? WHERE id = ?;
+
+updateStarStatus:
+UPDATE articles SET is_starred = ?, starred_at = ?, updated_at = ? WHERE id = ?;
+
+markAllReadAll:
+UPDATE articles SET is_read = 1, read_at = ?, updated_at = ? WHERE is_read = 0;
+
+markAllReadByFeed:
+UPDATE articles SET is_read = 1, read_at = ?, updated_at = ? WHERE feed_id = ? AND is_read = 0;
+
+markAllReadByTag:
+UPDATE articles SET is_read = 1, read_at = ?, updated_at = ?
+WHERE is_read = 0 AND feed_id IN (
+    SELECT feed_id FROM feed_tags WHERE tag_id = ? AND deleted_at IS NULL
+);
+
+markAllReadByFolder:
+UPDATE articles SET is_read = 1, read_at = ?, updated_at = ?
+WHERE is_read = 0 AND feed_id IN (
+    SELECT id FROM feeds WHERE folder_id = ? AND deleted_at IS NULL
+);
+
+deleteExpired:
+DELETE FROM articles
+WHERE is_starred = 0
+  AND cached_at < ?
+  AND id NOT IN (
+      SELECT id FROM articles AS a2
+      WHERE a2.feed_id = articles.feed_id
+      ORDER BY a2.published_at DESC, a2.created_at DESC, a2.id DESC
+      LIMIT 10
+  );
+
+lastRowId:
+SELECT last_insert_rowid();

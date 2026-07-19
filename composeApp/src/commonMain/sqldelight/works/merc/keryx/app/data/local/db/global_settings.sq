@@ -1,0 +1,22 @@
+-- Global settings (KVS). Synced across devices. Timestamp-last-wins.
+-- value is a JSON string. Known keys: read_timeout_seconds, cache_retention_days,
+-- article_list_default_unread_only.
+
+CREATE TABLE global_settings (
+    key        TEXT    NOT NULL PRIMARY KEY,
+    value      TEXT    NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+get:
+SELECT value FROM global_settings WHERE key = ?;
+
+watch:
+SELECT value FROM global_settings WHERE key = ?;
+
+upsert:
+INSERT INTO global_settings (key, value, updated_at)
+VALUES (?, ?, ?)
+ON CONFLICT(key) DO UPDATE SET
+    value = excluded.value,
+    updated_at = excluded.updated_at;

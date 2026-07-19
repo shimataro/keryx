@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  release:
+    types:
+      - published
+
+jobs:
+  package-macos:
+    name: Package (macOS arm64)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      # The tag is the single source of truth for the released version: `v0.1.0` -> `0.1.0`.
+      # jpackage rejects anything that isn't MAJOR[.MINOR[.PATCH]], so reject a malformed tag
+      # here rather than letting the packaging step fail with a cryptic message.
+      - name: Resolve version from tag
+        id: version
+        run: |
+          tag='${{ github.event.release.tag_name }}'
+          version="${tag#v}"
+          if ! [[ "$version" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+            echo "::error::Tag '$tag' does not yield a jpackage-compatible version (got '$version')."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v6
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Package DMG
+        run: ./gradlew :composeApp:packageDmg -PappVersion=${{ steps.version.outputs.version }}
+        env:
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          GOOGLE_DRIVE_CLIENT_ID: ${{ secrets.GOOGLE_DRIVE_CLIENT_ID }}
+          GOOGLE_DRIVE_CLIENT_SECRET: ${{ secrets.GOOGLE_DRIVE_CLIENT_SECRET }}
+
+      # macos-latest runners are arm64, so the artifact name records the architecture to leave
+      # room for an x86_64 (or universal) build alongside it later.
+      - name: Rename artifact
+        id: artifact
+        run: |
+          src=$(find composeApp/build/compose/binaries/main/dmg -maxdepth 1 -name '*.dmg' | head -n 1)
+          if [ -z "$src" ]; then
+            echo "::error::No DMG produced under composeApp/build/compose/binaries/main/dmg."
+            exit 1
+          fi
+          dest="Keryx-${{ steps.version.outputs.version }}-macos-arm64.dmg"
+          mv "$src" "$dest"
+          echo "path=$dest" >> "$GITHUB_OUTPUT"
+
+      - name: Attach to release
+        run: gh release upload '${{ github.event.release.tag_name }}' '${{ steps.artifact.outputs.path }}' --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}

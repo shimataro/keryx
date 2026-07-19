@@ -1,0 +1,33 @@
+-- Tags for organizing feeds. Soft-deleted (deleted_at). Timestamp-last-wins sync.
+
+CREATE TABLE tags (
+    id         TEXT    NOT NULL PRIMARY KEY,
+    name       TEXT    NOT NULL UNIQUE,
+    color      TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    deleted_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+watchAll:
+SELECT * FROM tags WHERE deleted_at IS NULL ORDER BY sort_order ASC, name COLLATE NOCASE ASC;
+
+getById:
+SELECT * FROM tags WHERE id = ?;
+
+getByName:
+SELECT * FROM tags WHERE name = ?;
+
+upsert:
+INSERT INTO tags (id, name, color, sort_order, deleted_at, updated_at, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+    name = excluded.name,
+    color = excluded.color,
+    sort_order = excluded.sort_order,
+    deleted_at = excluded.deleted_at,
+    updated_at = excluded.updated_at;
+
+softDelete:
+UPDATE tags SET deleted_at = ?, updated_at = ? WHERE id = ?;

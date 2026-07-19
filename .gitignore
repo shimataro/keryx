@@ -1,0 +1,12 @@
+.gradle/
+build/
+.kotlin/
+*.log
+
+# Local machine config (never commit)
+local.properties
+
+# IDE
+.idea/
+*.iml
+.DS_Store

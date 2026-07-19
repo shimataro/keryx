@@ -1,0 +1,118 @@
+package works.merc.keryx.app.data.cloud
+
+import io.ktor.client.HttpClient
+import io.ktor.client.request.forms.submitForm
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.URLBuilder
+import io.ktor.http.parameters
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.CloudAuthException
+import works.merc.keryx.app.core.DROPBOX_AUTHORIZE_ENDPOINT
+import works.merc.keryx.app.core.DROPBOX_REVOKE_ENDPOINT
+import works.merc.keryx.app.core.DROPBOX_TOKEN_ENDPOINT
+import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.core.SystemClock
+
+/**
+ * Handles the Dropbox OAuth 2.0 authorization-code-with-PKCE flow: building the
+ * authorize URL, exchanging the code for tokens, and refreshing. Requests
+ * offline access so a refresh token is issued.
+ */
+class DropboxAuthManager(
+    private val client: HttpClient,
+    private val json: Json = Json { ignoreUnknownKeys = true },
+    private val clock: Clock = SystemClock,
+) : CloudAuthManager {
+    private val scopes = "files.content.write files.content.read account_info.read"
+
+    override fun buildAuthorizeUrl(
+        clientId: String,
+        redirectUri: String,
+        codeChallenge: String,
+        state: String,
+    ): String = URLBuilder(DROPBOX_AUTHORIZE_ENDPOINT).apply {
+        parameters.append("client_id", clientId)
+        parameters.append("response_type", "code")
+        parameters.append("redirect_uri", redirectUri)
+        parameters.append("code_challenge", codeChallenge)
+        parameters.append("code_challenge_method", "S256")
+        parameters.append("token_access_type", "offline")
+        parameters.append("scope", scopes)
+        parameters.append("state", state)
+    }.buildString()
+
+    override suspend fun exchangeCode(
+        clientId: String,
+        code: String,
+        codeVerifier: String,
+        redirectUri: String,
+    ): Result<OAuthTokens> = tokenRequest(
+        parameters {
+            append("grant_type", "authorization_code")
+            append("code", code)
+            append("client_id", clientId)
+            append("redirect_uri", redirectUri)
+            append("code_verifier", codeVerifier)
+        },
+    )
+
+    override suspend fun refresh(clientId: String, refreshToken: String): Result<OAuthTokens> = tokenRequest(
+        parameters {
+            append("grant_type", "refresh_token")
+            append("refresh_token", refreshToken)
+            append("client_id", clientId)
+        },
+        keepRefreshToken = refreshToken,
+    )
+
+    override suspend fun revoke(accessToken: String): Result<Unit> = try {
+        val response = client.post(DROPBOX_REVOKE_ENDPOINT) {
+            header("Authorization", "Bearer $accessToken")
+        }
+        if (response.status.value in 200..299) {
+            Result.Ok(Unit)
+        } else {
+            Result.Err(CloudAuthException("Revoke failed (HTTP ${response.status.value})"))
+        }
+    } catch (e: Throwable) {
+        Result.Err(CloudAuthException(e.message ?: "Revoke failed"))
+    }
+
+    private suspend fun tokenRequest(
+        form: io.ktor.http.Parameters,
+        keepRefreshToken: String? = null,
+    ): Result<OAuthTokens> = try {
+        val response = client.submitForm(DROPBOX_TOKEN_ENDPOINT, form)
+        if (response.status.value !in 200..299) {
+            Result.Err(CloudAuthException("Token request failed (HTTP ${response.status.value})"))
+        } else {
+            val dto = json.decodeFromString<TokenResponse>(response.bodyAsText())
+            val access = dto.accessToken
+            if (access == null) {
+                Result.Err(CloudAuthException("Token response had no access_token"))
+            } else {
+                Result.Ok(
+                    OAuthTokens(
+                        accessToken = access,
+                        refreshToken = dto.refreshToken ?: keepRefreshToken,
+                        expiresAtMillis = dto.expiresInSeconds?.let { clock.nowMillis() + it * 1000L },
+                    ),
+                )
+            }
+        }
+    } catch (e: Throwable) {
+        Result.Err(CloudAuthException(e.message ?: "Token request failed"))
+    }
+
+    @Serializable
+    private data class TokenResponse(
+        @SerialName("access_token") val accessToken: String? = null,
+        @SerialName("refresh_token") val refreshToken: String? = null,
+        @SerialName("expires_in") val expiresInSeconds: Long? = null,
+    )
+}

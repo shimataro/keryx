@@ -1,0 +1,28 @@
+-- Many-to-many between feeds and tags. Tag attach/detach is expressed with the
+-- deleted_at soft-delete flag (NULL = currently attached). Timestamp-last-wins.
+
+CREATE TABLE feed_tags (
+    feed_id    TEXT    NOT NULL,
+    tag_id     TEXT    NOT NULL,
+    deleted_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (feed_id, tag_id),
+    FOREIGN KEY (feed_id) REFERENCES feeds(id),
+    FOREIGN KEY (tag_id) REFERENCES tags(id)
+);
+
+watchTagIdsForFeed:
+SELECT tag_id FROM feed_tags WHERE feed_id = ? AND deleted_at IS NULL;
+
+watchFeedIdsForTag:
+SELECT feed_id FROM feed_tags WHERE tag_id = ? AND deleted_at IS NULL;
+
+watchAllActive:
+SELECT feed_id, tag_id FROM feed_tags WHERE deleted_at IS NULL;
+
+upsert:
+INSERT INTO feed_tags (feed_id, tag_id, deleted_at, updated_at)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(feed_id, tag_id) DO UPDATE SET
+    deleted_at = excluded.deleted_at,
+    updated_at = excluded.updated_at;

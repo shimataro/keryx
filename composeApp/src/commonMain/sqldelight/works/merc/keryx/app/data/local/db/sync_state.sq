@@ -1,0 +1,15 @@
+-- Cloud sync metadata (KVS, device-local — NOT synced). Known keys:
+-- last_synced_at (Unix ms), cloud_file_rev (Dropbox rev for conflict detection).
+
+CREATE TABLE sync_state (
+    key   TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+get:
+SELECT value FROM sync_state WHERE key = ?;
+
+upsert:
+INSERT INTO sync_state (key, value)
+VALUES (?, ?)
+ON CONFLICT(key) DO UPDATE SET value = excluded.value;

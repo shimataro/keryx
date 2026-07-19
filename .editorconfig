@@ -1,0 +1,24 @@
+# http://editorconfig.org/
+# https://github.com/editorconfig/editorconfig/wiki/EditorConfig-Properties
+root = true
+
+
+# recommended settings; DO NOT CHANGE!
+[*]
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+
+# common settings
+indent_style = space
+indent_size = 2
+tab_width = 2
+max_line_length = off
+
+
+# Markdown
+[*.md]
+indent_size = 2
+tab_width = 2

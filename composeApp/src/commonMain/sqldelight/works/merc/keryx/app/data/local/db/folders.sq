@@ -1,0 +1,33 @@
+CREATE TABLE folders (
+    id         TEXT    NOT NULL PRIMARY KEY,
+    name       TEXT    NOT NULL UNIQUE,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    deleted_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+watchAll:
+SELECT * FROM folders WHERE deleted_at IS NULL ORDER BY sort_order ASC, name COLLATE NOCASE ASC;
+
+getById:
+SELECT * FROM folders WHERE id = ?;
+
+getByName:
+SELECT * FROM folders WHERE name = ?;
+
+upsert:
+INSERT INTO folders (id, name, sort_order, deleted_at, updated_at, created_at)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+    name = excluded.name, sort_order = excluded.sort_order,
+    deleted_at = excluded.deleted_at, updated_at = excluded.updated_at;
+
+softDelete:
+UPDATE folders SET deleted_at = ?, updated_at = ? WHERE id = ?;
+
+updateSortOrder:
+UPDATE folders SET sort_order = ?, updated_at = ? WHERE id = ?;
+
+nextSortOrder:
+SELECT COALESCE(MAX(sort_order), -1) + 1 FROM folders WHERE deleted_at IS NULL;

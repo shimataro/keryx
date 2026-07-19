@@ -1,0 +1,112 @@
+-- Subscribed feeds. Soft-deleted (deleted_at) so starred articles keep their
+-- feed reference. `url` is the unique subscription key; `id` (UUID) is stable
+-- across URL changes. All timestamps are Unix milliseconds (Long).
+--
+-- `sort_order` is a relative value that only has meaning within the same
+-- `folder_id` group (including the "no folder" group, folder_id = NULL); it's
+-- fine for values to collide across different groups, since comparisons and
+-- numbering always happen within a single group.
+--
+-- `folder_updated_at` / `sort_order_updated_at` / `custom_title_updated_at` /
+-- `deleted_updated_at` are field-specific last-wins timestamps for the user-editable
+-- fields (like articles' read_at/starred_at), kept separate from the row's `updated_at`
+-- so a content refresh (which bumps updated_at but not these fields) can't clobber a
+-- folder move / reorder / rename / unsubscribe made on another device during the sync
+-- merge. NULL = no such event yet (distinct from "happened at time 0"). Only the
+-- corresponding user action sets them; `upsert` (refresh) never does.
+
+CREATE TABLE feeds (
+    id            TEXT    NOT NULL PRIMARY KEY,
+    url           TEXT    NOT NULL UNIQUE,
+    site_url      TEXT,
+    title         TEXT    NOT NULL,
+    description   TEXT,
+    favicon_url   TEXT,
+    etag          TEXT,
+    last_modified TEXT,
+    error_count   INTEGER NOT NULL DEFAULT 0,
+    last_error    TEXT,
+    custom_title  TEXT,
+    folder_id     TEXT REFERENCES folders(id),
+    deleted_at    INTEGER,
+    updated_at    INTEGER NOT NULL,
+    created_at    INTEGER NOT NULL,
+    sort_order    INTEGER NOT NULL DEFAULT 0,
+    folder_updated_at INTEGER,
+    sort_order_updated_at INTEGER,
+    custom_title_updated_at INTEGER,
+    deleted_updated_at INTEGER
+);
+
+watchAll:
+SELECT * FROM feeds WHERE deleted_at IS NULL ORDER BY sort_order ASC, title COLLATE NOCASE ASC;
+
+getById:
+SELECT * FROM feeds WHERE id = ?;
+
+getByUrl:
+SELECT * FROM feeds WHERE url = ?;
+
+getAllIncludingDeleted:
+SELECT * FROM feeds;
+
+upsert:
+INSERT INTO feeds (
+    id, url, site_url, title, description, favicon_url, etag, last_modified,
+    error_count, last_error, custom_title, deleted_at, updated_at, created_at, sort_order
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+    url = excluded.url,
+    site_url = excluded.site_url,
+    title = excluded.title,
+    description = excluded.description,
+    favicon_url = excluded.favicon_url,
+    etag = excluded.etag,
+    last_modified = excluded.last_modified,
+    deleted_at = excluded.deleted_at,
+    updated_at = excluded.updated_at,
+    sort_order = excluded.sort_order;
+
+softDelete:
+UPDATE feeds SET deleted_at = ?, updated_at = ?, deleted_updated_at = ? WHERE id = ?;
+
+-- Stamps the subscription-state timestamp on re-subscribe (upsert has already cleared
+-- deleted_at back to NULL); lets an unsubscribe -> re-subscribe propagate over a refresh.
+stampResubscribed:
+UPDATE feeds SET deleted_updated_at = ? WHERE id = ?;
+
+updateCustomTitle:
+UPDATE feeds SET custom_title = ?, updated_at = ?, custom_title_updated_at = ? WHERE id = ?;
+
+updateFaviconUrl:
+UPDATE feeds SET favicon_url = ?, updated_at = ? WHERE id = ?;
+
+updateCacheHeaders:
+UPDATE feeds SET etag = ?, last_modified = ?, updated_at = ? WHERE id = ?;
+
+updateUrl:
+UPDATE feeds SET url = ?, updated_at = ? WHERE id = ?;
+
+incrementErrorCount:
+UPDATE feeds SET error_count = error_count + 1, last_error = ?, updated_at = ? WHERE id = ?;
+
+resetErrorCount:
+UPDATE feeds SET error_count = 0, last_error = NULL, updated_at = ? WHERE id = ?;
+
+updateFolder:
+UPDATE feeds SET folder_id = ?, updated_at = ?, folder_updated_at = ? WHERE id = ?;
+
+updateSortOrder:
+UPDATE feeds SET sort_order = ?, updated_at = ?, sort_order_updated_at = ? WHERE id = ?;
+
+-- Updates a moved feed's own folder_id and sort_order together.
+updateFolderAndSortOrder:
+UPDATE feeds SET folder_id = ?, sort_order = ?, updated_at = ?, folder_updated_at = ?, sort_order_updated_at = ? WHERE id = ?;
+
+-- All surviving feeds belonging to the given folder (NULL = "no folder"), in display order.
+getByFolder:
+SELECT * FROM feeds WHERE deleted_at IS NULL AND (folder_id = :folderId OR (folder_id IS NULL AND :folderId IS NULL)) ORDER BY sort_order ASC, title COLLATE NOCASE ASC;
+
+-- The next sort_order value to append to the end of the given folder's group (NULL = "no folder").
+nextSortOrderInGroup:
+SELECT COALESCE(MAX(sort_order), -1) + 1 FROM feeds WHERE deleted_at IS NULL AND (folder_id = :folderId OR (folder_id IS NULL AND :folderId IS NULL));

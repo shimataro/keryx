@@ -1,0 +1,371 @@
+---
+name: ui-guidelines
+description: Keryx UI/Compose style guidelines. Read when adding or modifying Compose under `ui/` (home / common / settings / setup / article) or `platform/NativeMenu`. Defines pane tonal roles, divider policy, article card style, layout stability, flat native-feel components (buttons / toggles / text fields / overflow menus), dialog/popup conventions, and icon usage rules.
+---
+
+# UI Guidelines (Compose Multiplatform)
+
+Style conventions for Keryx's Compose UI. Follow these when adding or modifying
+UI anywhere under `ui/` — the Home screen's 3-pane layout and list rows
+(`ui/home/`), the shared flat controls (`ui/common/`), settings (`ui/settings/`),
+setup (`ui/setup/`), the article reader (`ui/article/`), and the native
+overflow menu (`platform/NativeMenu`).
+
+## Layout stability under state changes
+
+**A value's on/off state must never change a sibling's position, and must
+never add/remove a layout slot.** If an element (icon, badge, indicator) only
+sometimes renders based on data (e.g. starred/unread/error), always reserve
+its layout space unconditionally and make only the *innermost* content
+conditional — never wrap the reservation itself in an `if`, and never let a
+conditional element sit as a plain sibling in a `Row`/`Column` next to
+content whose position must stay fixed (e.g. a title `Text`).
+
+- Bad: `if (starred) { Icon(...); Spacer(...) }` before a `Text` — the `Text`
+  shifts horizontally by the icon+spacer width depending on `starred`.
+- Good: an always-present `Box`/fixed-size slot that conditionally shows the
+  `Icon` inside it, so the slot's size never depends on the condition.
+- This applies to *aggregate* size too, not just presence: stacking two
+  conditional slots in one `Column` (e.g. "star slot on top, dot slot below")
+  and centering the whole `Column` still shifts the *dot's* position from
+  where it sat before the star slot existed, because centering an 18dp-tall
+  column is not the same as centering an 8dp one. Prefer one `Box` sized to
+  a stable reference (e.g. the row height or the favicon height) with each
+  indicator placed via its own `Modifier.align(...)`, so each indicator's
+  position is independent of whether its siblings are shown.
+- Real incident: `ArticleRow`'s star icon used to render conditionally right
+  before the title `Text`, shifting the title ~18dp depending on
+  `is_starred`. Fixed by moving the star into an always-present indicator
+  `Box` (see Article card style below) instead of the title row.
+- Compose gotcha to watch for when reserving space like this:
+  `Modifier.size(x)` **clamps to the parent's incoming constraints** — if the
+  reserved slot has a fixed narrow width (e.g. `8.dp`) and the inner icon
+  needs to render *larger* than that width, `Modifier.size(20.dp)` silently
+  gets shrunk back down to `8.dp` with no error. Use
+  `Modifier.requiredSize(x)` when the child is meant to overflow its
+  container's declared bounds.
+- **Prefer disabled over hidden.** When a control's availability depends on
+  state (an action needs a selection, a precondition isn't met yet, a
+  feature is temporarily unavailable), render it in a disabled/inactive
+  visual state (lowered opacity, non-interactive, `enabled = false`) rather
+  than conditionally hiding it. Hiding a control moves every element after
+  it and makes the surrounding layout jump each time the condition flips;
+  showing it disabled keeps the layout stable and tells the user the
+  feature exists but isn't currently usable, instead of having it vanish
+  unpredictably. Reserve actual hide/show (not just disable) for elements
+  that are conceptually never relevant in the current context (e.g. a
+  Dropbox-only menu item when `CloudStorageAvailability.dropboxAvailable`
+  is `false`), not for elements that are merely temporarily inactive.
+
+## Pane structure & tonal roles
+
+The 3 panes (`FeedListPane` / `ArticleListPane` / `ArticleDetailPane`) do not
+share a common `TopAppBar`. Each action icon lives in the pane it operates on,
+not in global chrome:
+
+- Feed-management icons (add feed / refresh all / cloud sync) — top of
+  `FeedListPane`
+- Settings — bottom-left of `FeedListPane`
+- Article-related icons (search / notifications / sort / mark all read) —
+  header row of `ArticleListPane`
+
+Panes are tinted left-to-right with increasingly bright Material3 tonal
+surface roles, so boundaries read from tone alone rather than requiring a
+hard line: `surfaceContainerLow` (`FeedListPane`) → `surfaceContainer`
+(`ArticleListPane`) → `surface` (`ArticleDetailPane`). See
+[KeryxTheme.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/theme/KeryxTheme.kt)
+for the base color scheme and each pane file for where the tone is applied.
+
+The macOS traffic-light inset (`WindowChrome.titleBarInsetDp`) is applied
+only to the pane that sits in the window's top-left corner — currently
+`FeedListPane`'s header row.
+
+## Divider policy
+
+- **Between panes**: keep `ResizableDivider`, but de-emphasize it — idle
+  color `MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)`, hover
+  color `MaterialTheme.colorScheme.primary` (signals it's draggable). See
+  [ResizableDivider.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/ResizableDivider.kt).
+- **Within a pane, where a fixed control row meets a scrollable area**
+  (header → list, list → footer): no `HorizontalDivider()`. Both sides share
+  the same tone inside one `Column`, so spacing alone is enough to separate
+  them.
+- **Semantic section breaks inside a scrollable list** (e.g. `FeedListPane`'s
+  "All Feeds/Unread/Starred" → "Tags" → "Feeds" groups) may still use a
+  `HorizontalDivider()` — that's a different kind of boundary (grouping
+  unrelated list sections), not a fixed-row/scroll-area boundary.
+- **Between individual rows in a list** (e.g. article rows): no divider.
+  Separate rows with padding and the selection-highlight background
+  (`selectionBackground`) instead. The highlight itself is an inset rounded
+  rectangle, not a pane-edge-to-pane-edge block: `Modifier.fillMaxWidth()`,
+  then `.padding(horizontal = 8.dp, vertical = 2.dp)` (the outer margin) →
+  `.clip(MaterialTheme.shapes.small)` → `.background(selectionBackground(...))`
+  → the row's existing interactive modifiers (`clickable` /
+  `dragAndDropSource` / `dragAndDropTarget`) → the row's inner content
+  padding (reduced by 8dp horizontally from its pre-inset value, to keep icon
+  positions roughly stable). `clip`/`background` must sit before the
+  interactive modifiers so click/drag hit-testing matches the rounded inset,
+  not the full row width. For `ArticleRow`, the `.heightIn(min = rowHeight)`
+  call must stay *after* the inner content padding (see Article card style
+  below) — the outer margin doesn't affect that ordering.
+
+## Article card style
+
+`ArticleRow` in
+[ArticleListPane.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/ArticleListPane.kt):
+
+- Row height and favicon size are computed once per pane (not per row) via
+  `rememberArticleRowMetrics()`, from typography `lineHeight`s and density/fontScale
+  only — never from per-article content (title length, starred state, etc.). This
+  avoids a past bug where `Modifier.height(IntrinsicSize.Min)` + `fillMaxHeight(fraction)`
+  produced a few px of row-to-row jitter, because Compose's intrinsic-measurement pass
+  gives the weighted title/metadata `Column` a different width share than the real
+  measurement pass. Do not reintroduce `IntrinsicSize.Min`/`fillMaxHeight`/`aspectRatio`
+  for this row.
+- Layout, left to right: unread dot (8dp) → favicon (`Box(Modifier.size(faviconSize))`
+  with a Coil `AsyncImage` using `ContentScale.Crop` and a `primaryContainer` background
+  chip behind it so transparent-background favicons stay visible against the dark theme,
+  falling back to `Icons.Filled.Public` on load failure) → a column with the title and
+  metadata.
+- Title uses `minLines = 2, maxLines = 2` (matching the height computed by
+  `rememberArticleRowMetrics()`); `FontWeight.Bold` + `onSurface` when unread, normal
+  weight + `onSurfaceVariant` when read.
+- Metadata line (feed name · timestamp) uses `labelSmall` +
+  `onSurfaceVariant.copy(alpha = 0.7f)`.
+- No divider between rows (see Divider policy above).
+- Favicon loading goes through Coil3's `AsyncImage`; the `ImageLoader` is
+  configured once at startup via `configureImageLoader(...)` in
+  [ImageLoaderSetup.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/di/ImageLoaderSetup.kt)
+  (called from [main.kt](../../../composeApp/src/desktopMain/kotlin/works/merc/keryx/app/main.kt)):
+  network fetch via the app's existing `HttpClient`, SVG decoding support,
+  and an on-disk cache under `AppDirs.cacheDir()`.
+
+## Overflow / context menus
+
+Feed and tag row "..." menus use a real OS-native context menu, not Material3's
+`DropdownMenu`/`DropdownMenuItem` — a Compose-drawn popup never actually looks
+native no matter how it's styled. Use
+[`NativeOverflowMenu`](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/platform/NativeMenu.kt)
+(`platform/NativeMenu.kt`, desktop `actual` in `NativeMenu.desktop.kt`) for any
+new "..." / overflow menu:
+
+```kotlin
+NativeOverflowMenu(
+    items = listOf(
+        NativeMenuItem(stringResource(Res.string.some_action)) { onSomeAction() },
+    ),
+    tooltip = stringResource(Res.string.common_more_options),
+)
+```
+
+- The desktop `actual` renders via `java.awt.PopupMenu`/`MenuItem` (the same
+  approach `main.kt`'s `MacTray` uses for the tray icon), so it gets the OS's
+  actual Look & Feel instead of an approximation.
+- `items` is expected to have a **stable size** per call site (e.g. always 2 for
+  a tag row, always 4 for a feed row) — the `PopupMenu`/`MenuItem`s are created
+  once and reused, with labels/click targets updated reactively. It isn't meant
+  for menus whose item count changes at runtime.
+- Do not reach for `androidx.compose.material3.DropdownMenu` for this kind of
+  menu going forward.
+
+## Text input dialogs
+
+`TextPromptDialog` in
+[FeedListPane.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/FeedListPane.kt)
+(shared by the add/edit tag and rename feed dialogs) and the add-feed dialog in
+[HomeScreen.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/HomeScreen.kt)
+follow this pattern for single-field dialogs. **The field itself is
+[`KeryxTextField`](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/common/KeryxTextField.kt),
+not M3's `OutlinedTextField`** — an `expect`/`actual` drop-in (desktop `actual`:
+`KeryxTextField.desktop.kt`) that renders a flat, thin-bordered native-feel field
+(hairline `outlineVariant` border, `shapes.small`, border → `primary` on focus /
+`error` when `isError`) instead of M3's tall outlined box with a floating label.
+When an Android target is added, its `actual` should go back to M3's
+`OutlinedTextField`/`TextField` (Material is the desirable look there). Don't reach
+for `OutlinedTextField`/`TextField`/`BasicTextField` directly at a call site — use
+`KeryxTextField`. Its `modifier` param lands on the inner text field, so a
+`focusRequester` / `onFocusChanged { it.isFocused }` on it behaves as it did on
+`OutlinedTextField`.
+
+- **Validation**: a `blockingError: (String) -> String?` callback returns a
+  message that blocks confirm (e.g. duplicate tag name); a separate
+  `infoHint: (String) -> String?` returns a non-blocking hint (e.g. "leaving
+  this blank resets to the default title"). Either feeds `isError` /
+  `supportingText` on the `OutlinedTextField`; both return `null` when there's
+  nothing to show.
+- **Blank input**: blocked by default; pass `allowBlank = true` when an empty
+  value is meaningful (e.g. "reset to default") rather than invalid.
+- **Confirm**: also triggerable via IME Done —
+  `KeyboardOptions(imeAction = ImeAction.Done)` +
+  `KeyboardActions(onDone = { submit() })` — and the confirm button is
+  `enabled = false` while validation fails.
+- **Autofocus**: a `FocusRequester` + `LaunchedEffect(Unit) { focusRequester.requestFocus() }`
+  focuses the field as soon as the dialog appears.
+- **Placeholder contrast**: handled inside `KeryxTextField` (placeholder drawn at
+  `onSurfaceVariant.copy(alpha = 0.6f)`) — call sites no longer pass a
+  `colors = OutlinedTextFieldDefaults.colors(...)` override. Material3's default
+  `onSurfaceVariant` placeholder color was too close in brightness to the
+  entered-text color (`onSurface`, alpha 1.0) to tell empty-with-hint apart from
+  filled-in at a glance; the flat field bakes in the darker placeholder.
+
+## Native-feel restyle (flat press feedback, icon set, popovers)
+
+The app intentionally does not embed AWT/Swing widgets via `SwingPanel` (e.g.
+for `Switch`/dropdowns) — JetBrains Compose Multiplatform has unresolved
+z-order/overdraw/crash bugs for `SwingPanel` inside scrollable containers, and
+every candidate control here lives inside one (`SettingsScreen`'s
+`verticalScroll` `Column`, `FeedListPane`/`ArticleListPane`'s `LazyColumn`).
+The one existing native-widget exception, `platform/NativeMenu.kt`
+(`NativeOverflowMenu`, see above), works around this by calling
+`java.awt.PopupMenu.show()` on demand instead of embedding a persistent
+Compose-tree node — don't extend that pattern to other controls. Instead, the
+native *feel* comes entirely from Compose-side theme/shape/indication/icon
+choices:
+
+- **Flat press feedback, no ripple**: `KeryxTheme.kt` provides a custom
+  `IndicationNodeFactory` (`FlatIndication`) via
+  `CompositionLocalProvider(LocalIndication provides ...)`, applied once for
+  the whole app. It draws an immediate, non-animated `onSurface`-ish low-alpha
+  rectangle overlay while pressed — no ripple spread/fade. Don't add
+  per-call-site `indication = rememberRipple(...)` (or any other indication)
+  overrides going forward; if a control needs a different feel, change
+  `FlatIndication` itself so the app stays consistent. `LocalIndication` only
+  affects plain `Modifier.clickable`/`selectable`/`toggleable` call sites,
+  though — M3 components (`Button`/`IconButton`/`Switch`/`Checkbox`/…)
+  hardcode `ripple()` internally and never consult it. `KeryxTheme.kt` also
+  provides `CompositionLocalProvider(LocalRippleConfiguration provides ...)`
+  with every `RippleAlpha` channel zeroed, as a global safety net for those
+  components (there's no public API to disable the ripple *animation* itself,
+  but zero alpha makes it invisible). For buttons specifically, prefer
+  `ui/common/FlatButtons.kt`'s `FlatButton` (primary/filled — `primary` fill),
+  `FlatTonalButton` (secondary — `secondaryContainer` fill + hairline
+  `outlineVariant` border, for actions that still need clear button affordance
+  like OPML import/export, Dropbox disconnect, update check, setup cards), and
+  `FlatTextButton` (bare, inline) over M3's `Button`/`FilledTonalButton`/
+  `TextButton` — they're built on plain `Modifier.clickable` so they pick up
+  `FlatIndication` directly rather than relying on the `RippleConfiguration`
+  fallback. A solid fill (not a transparent outline) is what makes a secondary
+  action read as a tactile button rather than a link, so there is intentionally
+  no transparent "outlined" flat button.
+- **`SegmentedControl<T>` / `ToggleChip`**
+  (`ui/common/SegmentedControl.kt`): the replacement for Material3's
+  `FilterChip` for both "pick one of N" (`SegmentedControl`, used by
+  `SettingsScreen`'s theme/font-size/cache/timeout/refresh-interval rows) and
+  standalone boolean toggles (`ToggleChip`, used by `ArticleListPane`'s
+  "unread only"). Both render as a bordered (`outlineVariant`) block that,
+  when selected/checked, fills solid with `primary` and switches its label to
+  `onPrimary`, using `Modifier.selectable`/`Modifier.toggleable` rather than
+  `FilterChip`'s pill shape. The label is always `FontWeight.Bold` (selected
+  and unselected alike) rather than only bolding on selection —
+  `ToggleChip` sits before a `weight(1f)` `Spacer` in `ArticleListPane`'s
+  header row, so a selection-only weight change would shift the icons after
+  it by a few px each time it's toggled; keeping the weight constant avoids
+  that jitter, and the solid fill + `onPrimary` contrast already reads as
+  clearly selected on its own. Reach for these, not `FilterChip`, for any new
+  chip-like selection/toggle UI.
+- **`FlatSwitch` / `FlatCheckbox`** (`ui/common/FlatToggles.kt`): flat replacements
+  for M3's `Switch`/`Checkbox`, built on plain `Modifier.toggleable` (no ripple) with
+  the same tokens as `SegmentedControl` (hairline `outlineVariant` border, `primary`
+  fill when on, `onPrimary` content). `FlatSwitch` is a pill track with a snapping
+  thumb (no slide animation, matching the app's immediate on/off convention);
+  `FlatCheckbox` is a rounded square that fills `primary` + shows a `Check` when
+  checked. Don't use M3's `Switch`/`Checkbox` directly at a call site. Count badges
+  overlaid on an icon (e.g. the notification bell in `ArticleListPane`) likewise use a
+  plain `Box`/`Text` pill (`error` fill, `onError` text) instead of M3's
+  `BadgedBox`/`Badge`.
+- **`KeryxTextField`** (`ui/common/KeryxTextField.kt`, expect/actual): the
+  replacement for M3's `OutlinedTextField` for every text input — a flat,
+  thin-bordered field on desktop, M3 on a future Android `actual`. See the Text
+  input dialogs section above; don't use `OutlinedTextField`/`BasicTextField`
+  directly at a call site.
+- **Icon set — chrome vs. semantic state**: action/chrome icons (add, refresh,
+  cloud sync, settings, folder/tag management, search, notifications, sort,
+  mark-all-read, mark-unread, open-in-browser, back, close) use
+  `Icons.Outlined.*` / `Icons.AutoMirrored.Outlined.*`. Icons that encode
+  persistent state rather than an action — `Star`/`StarBorder`, `Folder`,
+  `Error`, `Public`, `CircleNotifications`, `Icons.AutoMirrored.Filled.Article`
+  — stay `Filled`, since they're meant to read as "on/set" indicators, not
+  as clickable chrome. Follow this split for any new icon: ask "is this a
+  button, or a status marker?"
+- **Flat surface pattern**: `NotificationCenterSheet`, `SetupScreen`'s
+  `OptionCard`, and `TooltipIconButton`'s tooltip all use the same look for a
+  "raised" panel instead of M3's tonal-elevation `Card`:
+  `Surface(shape = MaterialTheme.shapes.<small|medium>, color =
+  MaterialTheme.colorScheme.surfaceContainerLow (or surfaceContainerHighest
+  for the tooltip), border = BorderStroke(1.dp,
+  MaterialTheme.colorScheme.outlineVariant), tonalElevation = 0.dp)` — a flat
+  fill plus a hairline border reads as native chrome; M3's default tonal
+  elevation (mixing primary into the surface color to fake a shadow) doesn't.
+  `AlertDialog` usages follow the same spirit even though they keep the
+  scrim: pass `containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+  tonalElevation = 0.dp` (no border needed — the scrim already separates it).
+  `Snackbar` similarly gets `containerColor =
+  MaterialTheme.colorScheme.surfaceContainerHighest` instead of M3's default
+  `inverseSurface`, so it doesn't look like a different color system.
+- **Icon grouping (`ToolbarIconGroup`)**: related toolbar icons (e.g. add feed/refresh/cloud sync,
+  search/notifications, sort/mark-all-read, star/mark-unread, copy-url/open-in-browser) are clustered
+  into a rounded capsule via `ToolbarIconGroup` (`ui/common/TooltipIconButton.kt`), separated from other
+  clusters in the same row by an 8dp `Spacer`. It renders with the same "flat surface pattern" tokens as
+  everything else here (`surfaceContainerHighest` fill + `outlineVariant` 1.dp border, `tonalElevation =
+  0.dp`) — this is a stand-in for a native grouped-toolbar look (e.g. macOS's glass/blur toolbar
+  clustering), adopted because Compose Multiplatform has no native glass/blur primitive. When this app
+  gets a native SwiftUI UI (iOS/iPadOS/macOS, see `external-spec.md`), replace `ToolbarIconGroup`'s
+  usages with SwiftUI's native toolbar grouping (glass effect included) rather than trying to fake glass
+  in Compose. Only wrap icons in `ToolbarIconGroup` where the cluster always has 2+ icons — a single icon
+  in a capsule reads as visual noise, so lone icons (e.g. the settings icon) stay bare.
+- **Other native-migration candidates**: besides `ToolbarIconGroup`, these are Compose-side hand-rolled
+  approximations of something with a genuine native macOS/SwiftUI equivalent — worth swapping for the
+  real thing during a future SwiftUI port rather than porting the Compose approximation as-is:
+  - `ResizableDivider` (`ui/home/ResizableDivider.kt`) — hand-built pane divider with manual
+    hover/cursor/drag handling → native `NSSplitView`/SwiftUI `NavigationSplitView`/`HSplitView` divider.
+  - `WindowChrome.titleBarInsetDp` (`platform/WindowChrome.kt`) — manual inset math to dodge the
+    traffic-light buttons → disappears entirely with a native full-size-content-view + unified toolbar.
+  - The inline article search — `ArticleListPane`'s search `KeryxTextField` bound to
+    `HomeViewModel.searchQuery` (results render reactively in the article list;
+    `SearchResults.kt`'s `CenteredHint` covers the too-short-query / no-results states) →
+    SwiftUI's `.searchable()`.
+  - `selectionBackground()` (`ui/home/HomeCommon.kt`) row highlight in `ArticleListPane`/`FeedListPane` —
+    hand-computed focused/unfocused-pane dimming → native `List` row selection already dims the same way.
+  - `SettingsScreen`'s `SwitchRow` — now uses `FlatSwitch` (`ui/common/FlatToggles.kt`), consistent with
+    the app's other flat controls → SwiftUI's native `Toggle` on a future SwiftUI port.
+  - The drag-and-drop insertion-line system in `FeedListPane.kt` (`InsertionLine`, `DropBoundary`,
+    `RowHalf`, `resolveHalf`) — hand-computed row-half hit-testing and a manually drawn insertion line
+    (explicitly modeled on macOS Notes' reorder UI) → SwiftUI `List`'s native `.onMove`/`.onInsert`
+    reordering, which draws insertion indicators and row-shift animation for free.
+  - `homeKeyboardShortcuts` (`ui/home/KeyboardNav.kt`) — an `onPreviewKeyEvent` key trap for app
+    shortcuts (⌘/Ctrl+F, J/K, U, S, arrow-key pane nav) that's invisible from outside the app → SwiftUI's
+    menu-bar `Commands`/`.keyboardShortcut()`, which register real, discoverable menu items with standard
+    key-equivalent conflict resolution.
+  - `Snackbar`/`SnackbarHost` (OPML import/export results, URL-copied toast) — weaker candidate than the
+    others since SwiftUI has no 1:1 Snackbar equivalent; a SwiftUI port would need a bespoke transient
+    banner view rather than a drop-in native replacement.
+  - The Settings dialog's tab switcher (`KeryxDialogTabBar` in `ui/common/KeryxDialogs.kt`, used by
+    `KeryxTabDialog`) — a flat Compose-drawn icon-over-label tab row, deliberately *not* styled to
+    mimic macOS's native toolbar/segmented-control chrome → a native NSToolbar-style preferences tab
+    switcher on a future SwiftUI port. Two rounds of AWT/Swing interop (`SwingPanel` +
+    `JToggleButton`s with Aqua `JButton.buttonType` client properties) were tried and dropped before
+    landing on the Compose version: `"segmented"` reads as a cramped joined pill unsuited to this
+    layout, and `"toolbarItem"` (the semantically correct type — Apple's own docs describe it as "a
+    button that displays an icon with a label underneath ... intended for use on the window frame")
+    doesn't reliably indicate a `JToggleButton`'s selected state under Aqua, a known, still-open JDK
+    bug (JDK-8250953). Don't re-attempt native Aqua chrome for this control — treat it the same as
+    `ToolbarIconGroup`/`ResizableDivider`/etc. above, a SwiftUI-port target, not a
+    Compose-Swing-interop target.
+- **Icon hover feedback**: `TooltipIconButton` shows a subtle circular highlight on hover
+  (`MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)`, no animation, same immediate on/off
+  convention as `FlatIndication`/`ResizableDivider`), using `hoverable` on the same
+  `MutableInteractionSource` passed to its `clickable`. Don't add a separate hover mechanism per call
+  site — extend `TooltipIconButton` itself if the feel needs to change everywhere.
+- **Popup vs. Dialog**: non-modal, anchored info panels (no scrim, dismiss on
+  outside click, positioned relative to the control that opened them) use
+  `androidx.compose.ui.window.Popup` — `NotificationCenterSheet`, opened from
+  `ArticleListPane`'s bell icon, is the first example (a `Box` around the
+  `TooltipIconButton` holds local `showNotifications` state and anchors the
+  `Popup` with `alignment = Alignment.TopEnd` + a small `y` offset). Anything
+  that demands full attention and blocks the rest of the UI (confirmations,
+  text-prompt forms, the add-feed flow) stays an `AlertDialog`/`Dialog`
+  — see `TextPromptDialog`, the various `AlertDialog` usages
+  in `FeedListPane.kt`. (Search is neither — it's an inline field in
+  `ArticleListPane`, see the Flat surface / migration notes above.) Don't reach for `Popup` for anything that should block
+  interaction with the rest of the window, and don't reach for `Dialog` for
+  something that's meant to feel like a lightweight, dismissable overlay.

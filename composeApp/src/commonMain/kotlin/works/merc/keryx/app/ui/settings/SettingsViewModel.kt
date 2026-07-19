@@ -1,0 +1,281 @@
+package works.merc.keryx.app.ui.settings
+
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.jetbrains.compose.resources.getString
+import works.merc.keryx.app.core.CloudStorageAvailability
+import works.merc.keryx.app.core.CloudStorageType
+import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.data.local.LocalSettings
+import works.merc.keryx.app.data.opml.OpmlCodec
+import works.merc.keryx.app.domain.ActivityCenter
+import works.merc.keryx.app.domain.CloudSession
+import works.merc.keryx.app.domain.FeedRepository
+import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.domain.SyncRepository
+import works.merc.keryx.app.domain.UpdateChecker
+import works.merc.keryx.app.domain.UpdateStatus
+import works.merc.keryx.app.platform.FileIO
+import works.merc.keryx.app.platform.FilePicker
+import works.merc.keryx.app.resources.Res
+import works.merc.keryx.app.resources.settings_export_opml
+import works.merc.keryx.app.resources.settings_import_opml
+
+import works.merc.keryx.app.ui.home.formatTimestamp
+
+/** A transient result of an OPML operation, surfaced as a snackbar. */
+sealed interface OpmlResult {
+    data class Imported(val added: Int, val failed: Int) : OpmlResult
+    data object Exported : OpmlResult
+    data object Cancelled : OpmlResult
+}
+
+class SettingsViewModel(
+    private val settingsRepository: SettingsRepository,
+    private val cloudSession: CloudSession,
+    private val syncRepository: SyncRepository,
+    private val feedRepository: FeedRepository,
+    private val updateChecker: UpdateChecker,
+    private val activityCenter: ActivityCenter,
+    // Token store / sync touch the OS Keychain (macOS shells out to `security`, which may
+    // block and show an authorization dialog), so keep them off the Main/EDT dispatcher.
+    private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
+) : ViewModel() {
+
+    val localSettings = settingsRepository.localSettings
+
+    /** Cloud providers configured in this build, in display order. */
+    val availableCloudTypes: List<CloudStorageType> = CloudStorageAvailability.available
+
+    var readTimeoutSeconds by mutableStateOf(settingsRepository.getReadTimeoutSeconds())
+        private set
+
+    /** null == unlimited. */
+    var cacheRetentionDays by mutableStateOf(settingsRepository.getCacheRetentionDays())
+        private set
+
+    /** The currently-connected provider, or null (local-only). At most one at a time. */
+    var connectedType by mutableStateOf(cloudSession.connectedType())
+        private set
+
+    /** The provider whose connect flow is currently running, or null. */
+    var connectingType by mutableStateOf<CloudStorageType?>(null)
+        private set
+
+    /** The provider whose last connect attempt failed, or null. */
+    var connectFailedType by mutableStateOf<CloudStorageType?>(null)
+        private set
+
+    private var authorizationJob: Job? = null
+
+    /** True only while actively waiting on the OAuth browser redirect for [connectingType]. */
+    var canCancelConnect by mutableStateOf(false)
+        private set
+
+    var opmlResult by mutableStateOf<OpmlResult?>(null)
+
+    /** True while an OPML import is running (a native file dialog then per-feed fetches). */
+    var importingOpml by mutableStateOf(false)
+        private set
+
+    /** True while an OPML export is running. */
+    var exportingOpml by mutableStateOf(false)
+        private set
+
+    var checkingForUpdate by mutableStateOf(false)
+        private set
+
+    /** Timestamp of the last successful sync, formatted for display. null when never synced or not connected. */
+    var lastSyncedAtText by mutableStateOf<String?>(null)
+        private set
+
+    /** Set by [checkForUpdate]. Does not affect the automatic update-check schedule. */
+    var updateCheckResult by mutableStateOf<UpdateStatus?>(null)
+        private set
+
+    init {
+        refreshLastSyncedAt()
+        viewModelScope.launch {
+            // Skip the initial replay (current state at VM creation) — already handled by the
+            // explicit call above. Only react to genuine sync completions afterward, covering
+            // sync paths this ViewModel has no other visibility into (manual "sync now" on Home,
+            // debounced syncs, the background loop).
+            activityCenter.syncing.drop(1).collect { syncing ->
+                if (!syncing) refreshLastSyncedAt()
+            }
+        }
+    }
+
+    private fun update(transform: (LocalSettings) -> LocalSettings) {
+        settingsRepository.saveLocalSettings(transform(settingsRepository.getLocalSettings()))
+    }
+
+    fun setThemeMode(mode: String) = update { it.copy(themeMode = mode) }
+    fun setFontScale(scale: Double) = update { it.copy(fontSizeScale = scale) }
+    fun setRefreshIntervalMinutes(minutes: Int) = update { it.copy(refreshIntervalMinutes = minutes) }
+    fun setNotificationEnabled(enabled: Boolean) = update { it.copy(notificationEnabled = enabled) }
+    fun setStartMinimized(enabled: Boolean) = update { it.copy(startMinimized = enabled) }
+    fun setUpdateCheckIntervalHours(hours: Int) = update { it.copy(updateCheckIntervalHours = hours) }
+
+    /**
+     * Manual "check for update" (About section). Deliberately does not touch
+     * [LocalSettings.lastUpdateCheckAt] — that timestamp belongs to the automatic
+     * startup/background schedule (see main.kt's `checkForUpdateAndNotify`), so a manual check
+     * never perturbs it.
+     */
+    fun checkForUpdate() {
+        viewModelScope.launch {
+            checkingForUpdate = true
+            updateCheckResult = updateChecker.check()
+            checkingForUpdate = false
+        }
+    }
+
+    fun updateReadTimeout(seconds: Int) {
+        settingsRepository.setReadTimeoutSeconds(seconds)
+        readTimeoutSeconds = seconds
+    }
+
+    fun updateCacheRetention(days: Int?) {
+        settingsRepository.setCacheRetentionDays(days)
+        cacheRetentionDays = days
+    }
+
+    fun connect(type: CloudStorageType) {
+        viewModelScope.launch {
+            connectingType = type
+            connectFailedType = null
+            val flow = cloudSession.connectFlow(type)
+            if (flow == null) {
+                connectFailedType = type
+                connectingType = null
+                return@launch
+            }
+            // Run only the interruptible OAuth-authorization wait as a child job. Cancelling a
+            // child does not propagate up to the parent (structured concurrency), so the success
+            // tail (saveTokens -> update settings -> sync) runs to completion once authorization
+            // resolves — never leaving durable tokens/settings behind a cancelled UI.
+            val waitJob = async { flow.connect() }
+            authorizationJob = waitJob
+            canCancelConnect = true
+            val result = try {
+                waitJob.await()
+            } catch (e: CancellationException) {
+                connectingType = null
+                return@launch
+            } finally {
+                authorizationJob = null
+                canCancelConnect = false
+            }
+            when (result) {
+                is Result.Ok -> {
+                    withContext(dispatcher) { cloudSession.saveTokens(type, result.value) }
+                    update { it.copy(cloudStorageType = type.id) }
+                    connectedType = type
+                    withContext(dispatcher) { syncRepository.sync() }
+                }
+                is Result.Err -> connectFailedType = type
+            }
+            connectingType = null
+        }
+    }
+
+    fun cancelConnect() {
+        authorizationJob?.cancel()
+    }
+
+    fun disconnect() {
+        val type = connectedType ?: return
+        viewModelScope.launch {
+            withContext(dispatcher) { cloudSession.disconnect(type) }
+            update { it.copy(cloudStorageType = null) }
+            connectedType = null
+            lastSyncedAtText = null
+        }
+    }
+
+    fun switchTo(newType: CloudStorageType) {
+        val oldType = connectedType ?: return connect(newType)
+        viewModelScope.launch {
+            connectingType = newType
+            withContext(dispatcher) { cloudSession.disconnect(oldType) }
+            update { it.copy(cloudStorageType = null) }
+            connectedType = null
+            lastSyncedAtText = null
+            connect(newType)
+        }
+    }
+
+    private fun refreshLastSyncedAt() {
+        lastSyncedAtText = syncRepository.lastSyncedAt()?.let { formatTimestamp(it) }
+    }
+
+    fun exportOpml() {
+        if (exportingOpml || importingOpml) return
+        viewModelScope.launch {
+            exportingOpml = true
+            try {
+                val path = FilePicker.pickSaveFile(getString(Res.string.settings_export_opml), "keryx.opml")
+                if (path == null) {
+                    opmlResult = OpmlResult.Cancelled
+                    return@launch
+                }
+                val feeds = feedRepository.getAllFeeds().map {
+                    OpmlCodec.ExportFeed(
+                        title = it.custom_title?.takeIf { t -> t.isNotBlank() } ?: it.title,
+                        xmlUrl = it.url,
+                        htmlUrl = it.site_url,
+                    )
+                }
+                FileIO.writeText(path, OpmlCodec.export(feeds))
+                opmlResult = OpmlResult.Exported
+            } finally {
+                exportingOpml = false
+            }
+        }
+    }
+
+    fun importOpml() {
+        if (importingOpml || exportingOpml) return
+        viewModelScope.launch {
+            importingOpml = true
+            try {
+                val path = FilePicker.pickOpenFile(getString(Res.string.settings_import_opml), listOf("opml", "xml"))
+                if (path == null) {
+                    opmlResult = OpmlResult.Cancelled
+                    return@launch
+                }
+                val xml = FileIO.readText(path) ?: run {
+                    opmlResult = OpmlResult.Cancelled
+                    return@launch
+                }
+                var added = 0
+                var failed = 0
+                for (entry in OpmlCodec.import(xml)) {
+                    when (feedRepository.subscribeFeed(entry.xmlUrl)) {
+                        is Result.Ok -> added++
+                        is Result.Err -> failed++
+                    }
+                }
+                opmlResult = OpmlResult.Imported(added, failed)
+            } finally {
+                importingOpml = false
+            }
+        }
+    }
+
+    fun clearOpmlResult() {
+        opmlResult = null
+    }
+}

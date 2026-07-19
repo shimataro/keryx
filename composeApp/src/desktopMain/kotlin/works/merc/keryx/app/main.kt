@@ -1,0 +1,713 @@
+package works.merc.keryx.app
+
+import androidx.compose.foundation.window.WindowDraggableArea
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.LocalWindowExceptionHandlerFactory
+import androidx.compose.ui.window.Notification
+import androidx.compose.ui.window.Tray
+import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowExceptionHandler
+import androidx.compose.ui.window.WindowExceptionHandlerFactory
+import androidx.compose.ui.window.WindowPosition
+import androidx.compose.ui.window.WindowState
+import androidx.compose.ui.window.application
+import androidx.compose.ui.window.isTraySupported
+import androidx.compose.ui.window.rememberTrayState
+import io.ktor.client.HttpClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import org.jetbrains.compose.resources.getString
+import org.jetbrains.compose.resources.painterResource
+import org.jetbrains.compose.resources.stringResource
+import org.koin.core.context.startKoin
+import org.koin.mp.KoinPlatform
+import works.merc.keryx.app.core.AppNotification
+import works.merc.keryx.app.core.AppNotificationLevel
+import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.SystemClock
+import works.merc.keryx.app.core.WINDOW_DEFAULT_HEIGHT
+import works.merc.keryx.app.core.WINDOW_DEFAULT_WIDTH
+import works.merc.keryx.app.core.WINDOW_MIN_HEIGHT
+import works.merc.keryx.app.core.WINDOW_MIN_WIDTH
+import works.merc.keryx.app.core.valueOrNull
+import works.merc.keryx.app.data.local.FtsManager
+import works.merc.keryx.app.di.appModule
+import works.merc.keryx.app.di.configureImageLoader
+import works.merc.keryx.app.di.platformModule
+import works.merc.keryx.app.domain.ActivityCenter
+import works.merc.keryx.app.domain.ArticleRepository
+import works.merc.keryx.app.domain.CloudSession
+import works.merc.keryx.app.domain.FeedRepository
+import works.merc.keryx.app.domain.IdGenerator
+import works.merc.keryx.app.domain.NewArticleNotifier
+import works.merc.keryx.app.domain.NotificationCenter
+import works.merc.keryx.app.domain.NotificationMessages
+import works.merc.keryx.app.domain.OAuthCallbackParams
+import works.merc.keryx.app.domain.parseOAuthUri
+import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.domain.SyncRepository
+import works.merc.keryx.app.domain.UpdateChecker
+import works.merc.keryx.app.domain.UpdateStatus
+import works.merc.keryx.app.domain.shouldCheckForUpdate
+import works.merc.keryx.app.platform.AppDirs
+import works.merc.keryx.app.platform.LocalNativeWindow
+import works.merc.keryx.app.platform.LocalWindowDragArea
+import works.merc.keryx.app.platform.WindowChrome
+import works.merc.keryx.app.resources.Res
+import works.merc.keryx.app.resources.app_icon
+import works.merc.keryx.app.resources.tray_hide
+import works.merc.keryx.app.resources.tray_icon
+import works.merc.keryx.app.resources.update_available_notification
+import works.merc.keryx.app.resources.tray_icon_macos
+import works.merc.keryx.app.resources.tray_quit
+import works.merc.keryx.app.resources.tray_show
+import works.merc.keryx.app.ui.AppMenuBar
+import works.merc.keryx.app.ui.home.HomeViewModel
+import works.merc.keryx.app.ui.menu.MenuCommand
+import works.merc.keryx.app.ui.menu.MenuController
+import java.awt.Desktop
+import java.awt.Dimension
+import java.awt.Frame
+import java.awt.Image
+import java.awt.MenuItem
+import java.awt.PopupMenu
+import java.awt.SystemTray
+import java.awt.Taskbar
+import java.awt.TrayIcon
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
+import java.io.File
+import javax.swing.SwingUtilities
+import javax.swing.UIManager
+
+internal val isMacOs = System.getProperty("os.name").lowercase().contains("mac")
+
+private const val LOG_TAG = "Main"
+
+private val activationRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+@OptIn(FlowPreview::class, ExperimentalComposeUiApi::class)
+fun main(args: Array<String>) {
+    // If the OS launched us with a custom-scheme redirect URI (Windows/Linux),
+    // capture it before single-instance coordination.
+    val incomingUri = args.firstOrNull { it.startsWith("keryx://") }
+    // Must be set before any AWT/Compose initialization, otherwise macOS falls back to the main class name.
+    System.setProperty("apple.awt.application.name", "Keryx")
+    // Render the application menu bar (AppMenuBar) in the macOS system menu bar rather than inside the
+    // window — the window uses a merged/transparent title bar (apple.awt.fullWindowContent), so an
+    // in-window menu bar would be out of place. Must also be set before AWT initializes.
+    if (isMacOs) {
+        System.setProperty("apple.laf.useScreenMenuBar", "true")
+    }
+
+    val singleInstanceCoordinator = SingleInstanceCoordinator(File(AppDirs.appDataDir()))
+    if (!singleInstanceCoordinator.tryAcquireLock()) {
+        singleInstanceCoordinator.signalRunningInstance(incomingUri)
+        return
+    }
+    // startActivationListener is registered after Koin initialization (see below)
+    // so we can inject the URI callback flow.
+
+    startKoin { modules(appModule, platformModule) }
+    val koin = KoinPlatform.getKoin()
+
+    // Register activation listener now that Koin is ready so we can emit
+    // incoming URIs into the shared callback flow.
+    val callbackFlow = koin.get<MutableSharedFlow<OAuthCallbackParams>>()
+    singleInstanceCoordinator.startActivationListener { uri ->
+        if (!uri.isNullOrBlank()) {
+            runCatching { callbackFlow.tryEmit(parseOAuthUri(uri)) }
+        }
+        activationRequests.tryEmit(Unit)
+    }
+
+    configureImageLoader(koin.get<HttpClient>(), AppDirs.cacheDir())
+
+    // Startup recovery: recreate articles_fts if a previous sync dropped it, and backfill any
+    // articles missing from the index (e.g. fetched before the FTS index existed).
+    koin.get<FtsManager>().ensureIndexed()
+
+    val settingsRepository = koin.get<SettingsRepository>()
+    // Local settings are persisted off-thread and coalesced (see SettingsRepository), so a change
+    // made shortly before quitting may not have hit disk yet. Flush on JVM shutdown so the latest
+    // value (theme, pane widths, last-selected article, setup completion, …) is never lost on exit.
+    Runtime.getRuntime().addShutdownHook(
+        Thread { runCatching { runBlocking { settingsRepository.flush() } } },
+    )
+    val saved = settingsRepository.getLocalSettings()
+
+    // Both still before any AWT/Compose initialization (SingleInstanceCoordinator/Koin/settings
+    // loading above don't touch AWT) — kept together since it's unconfirmed whether
+    // setLookAndFeel itself begins toolkit init, which would make setting the appearance
+    // property afterwards too late.
+    //
+    // Without setLookAndFeel, javax.swing.JButton (KeryxAlertDialog's native button row) renders
+    // with Swing's generic cross-platform look instead of the OS-native one.
+    runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
+        .onFailure { Log.warn(LOG_TAG, "Could not set the system look and feel", it) }
+    // Without this, Aqua's Swing L&F always paints light-mode colors regardless of the OS's
+    // actual Dark Mode setting (JDK-8235363), which looks mismatched against this app's own dark
+    // theme. Follow the app's own theme choice rather than a static "system" value so Swing's
+    // native buttons match the rest of the (Compose-themed) dialog card even when the user has
+    // overridden the app's theme independently of the OS. Note: changing the in-app theme without
+    // restarting won't update this — it's read once at startup.
+    if (isMacOs) {
+        System.setProperty(
+            "apple.awt.application.appearance",
+            when (saved.themeMode) {
+                "light" -> "NSAppearanceNameAqua"
+                "dark" -> "NSAppearanceNameDarkAqua"
+                else -> "system"
+            },
+        )
+    }
+
+    val appScope = koin.get<CoroutineScope>()
+
+    // Pre-warm HomeViewModel (and its eagerly-shared query flows, see HomeViewModel.started)
+    // before the window is shown, so feeds/articles are already populated by the time Home
+    // is first composed instead of flashing empty lists. Skipped for not-yet-set-up users
+    // to avoid spinning up query flows they won't see (mirrors App.kt's own setup-complete check).
+    if (settingsRepository.isSetupComplete()) {
+        koin.get<HomeViewModel>()
+    }
+
+    appScope.launch { runStartupTasks(koin) }
+
+    // Bridges background "new articles" counts to the tray (TrayState only exists
+    // inside the application {} scope) and to the in-app snackbar (HomeViewModel).
+    val newArticleNotifier = koin.get<NewArticleNotifier>()
+    val newArticleNotifications = newArticleNotifier.trayEvents
+    appScope.launch { backgroundUpdateLoop(koin) }
+
+    val menuController = koin.get<MenuController>()
+
+    // Replace the JVM's default "About" panel (which shows "java" + the JVM version) with our
+    // own About dialog, and route the native "Settings…" (⌘,) item to our Settings screen. Both
+    // live in the macOS app (Keryx) menu, so they are omitted from AppMenuBar there. Registered
+    // after the apple.awt.* properties above, since touching Desktop initializes AWT. macOS-only in
+    // practice (APP_ABOUT / APP_PREFERENCES are unsupported elsewhere).
+    runCatching {
+        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.APP_ABOUT)) {
+            Desktop.getDesktop().setAboutHandler { menuController.send(MenuCommand.About) }
+        }
+    }.onFailure { Log.warn(LOG_TAG, "Could not install the About menu handler", it) }
+    runCatching {
+        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.APP_PREFERENCES)) {
+            Desktop.getDesktop().setPreferencesHandler { menuController.send(MenuCommand.OpenSettings) }
+        }
+    }.onFailure { Log.warn(LOG_TAG, "Could not install the Preferences menu handler", it) }
+
+    // Register custom URI scheme handler (macOS). Windows/Linux receive the URI
+    // via command-line arguments forwarded through SingleInstanceCoordinator.
+    runCatching {
+        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.APP_OPEN_URI)) {
+            Desktop.getDesktop().setOpenURIHandler { event ->
+                val uri = event.uri.toString()
+                if (uri.startsWith("keryx://")) {
+                    runCatching { callbackFlow.tryEmit(parseOAuthUri(uri)) }
+                }
+            }
+        }
+    }.onFailure { Log.warn(LOG_TAG, "Could not install URI handler", it) }
+
+    // Register custom URI scheme on Windows so the OS knows how to handle keryx:// URIs.
+    if (System.getProperty("os.name").lowercase().contains("win")) {
+        registerWindowsUriScheme()
+    }
+
+    application {
+        var windowVisible by remember { mutableStateOf(!saved.startMinimized) }
+        val windowState = remember {
+            WindowState(
+                position = WindowPosition.Aligned(Alignment.Center),
+                width = (saved.windowWidth ?: WINDOW_DEFAULT_WIDTH.toDouble()).coerceAtLeast(WINDOW_MIN_WIDTH.toDouble()).dp,
+                height = (saved.windowHeight ?: WINDOW_DEFAULT_HEIGHT.toDouble()).coerceAtLeast(WINDOW_MIN_HEIGHT.toDouble()).dp,
+            )
+        }
+
+        // Persist window size (debounced).
+        LaunchedEffect(windowState) {
+            snapshotFlow { windowState.size }.debounce(500).collect { size ->
+                val current = settingsRepository.getLocalSettings()
+                settingsRepository.saveLocalSettings(
+                    current.copy(
+                        windowWidth = size.width.value.toDouble(),
+                        windowHeight = size.height.value.toDouble(),
+                    ),
+                )
+            }
+        }
+
+        val unreadCount by koin.get<ArticleRepository>().watchUnreadCount().collectAsState(0L)
+
+        // Dock/taskbar icon override (used below) needs the full branded icon, not the
+        // small transparent tray glyph windowBaseImage uses for the window's own
+        // title-bar/taskbar icon. Declared here (before the Dock activation-policy effect)
+        // so that effect can re-apply the icon after a visibility toggle.
+        val dockBaseImage = rememberDrawableImage(Res.drawable.app_icon)
+        val dockBadgedImage = remember(dockBaseImage, unreadCount) { dockBaseImage?.let { drawUnreadBadge(it, unreadCount) } }
+
+        // macOS only: the Dock icon / Cmd+Tab entry doesn't follow window visibility
+        // on its own (apple.awt.UIElement is read once at AWT startup), so drive it
+        // explicitly via the Cocoa activation policy whenever visibility changes.
+        LaunchedEffect(windowVisible) {
+            if (isMacOs) {
+                SwingUtilities.invokeLater { MacActivationPolicy.setDockIconVisible(windowVisible) }
+                if (windowVisible) {
+                    // Switching the policy back to Regular recreates the Dock tile from
+                    // scratch and discards the runtime taskbar.iconImage override, so
+                    // re-apply the branded icon on a *later* EDT turn (guaranteed FIFO,
+                    // after the tile is recreated).
+                    SwingUtilities.invokeLater { applyBrandedDockIcon(dockBadgedImage) }
+                }
+            }
+        }
+
+        val trayState = rememberTrayState()
+        val trayIconResource = if (isMacOs) Res.drawable.tray_icon_macos else Res.drawable.tray_icon
+        val trayBaseImage = rememberDrawableImage(trayIconResource)
+        val trayBadgedImage = remember(trayBaseImage, unreadCount) { trayBaseImage?.let { drawUnreadDot(it, unreadCount) } }
+
+        // Window always uses the non-mac tray_icon regardless of platform (existing
+        // behavior). Reuse trayBaseImage when it's the same resource to avoid loading
+        // tray_icon twice; on macOS the tray uses tray_icon_macos, so it's loaded separately.
+        val windowBaseImage = if (trayIconResource == Res.drawable.tray_icon) trayBaseImage else rememberDrawableImage(Res.drawable.tray_icon)
+        val windowBadgedImage = remember(windowBaseImage, unreadCount) { windowBaseImage?.let { drawUnreadBadge(it, unreadCount) } }
+        val windowBadgedPainter = remember(windowBadgedImage) { windowBadgedImage?.let { BitmapPainter(it.toComposeImageBitmap()) } }
+
+        if (!isMacOs) {
+            // On macOS, MacTray below consumes newArticleNotifications directly since
+            // Tray()'s own composable body (the only place that turns a queued
+            // TrayState notification into an actual TrayIcon.displayMessage call) is
+            // not part of the composition there.
+            LaunchedEffect(Unit) {
+                newArticleNotifications.collect { message ->
+                    trayState.sendNotification(Notification("Keryx", message))
+                }
+            }
+        }
+
+        if (isTraySupported) {
+            if (isMacOs) {
+                MacTray(
+                    image = trayBadgedImage,
+                    tooltip = if (unreadCount > 0) "Keryx ($unreadCount)" else "Keryx",
+                    showLabel = stringResource(Res.string.tray_show),
+                    hideLabel = stringResource(Res.string.tray_hide),
+                    quitLabel = stringResource(Res.string.tray_quit),
+                    windowVisible = windowVisible,
+                    onToggle = { windowVisible = !windowVisible },
+                    onQuit = ::exitApplication,
+                    newArticleNotifications = newArticleNotifications,
+                )
+            } else {
+                val trayBadgedPainter = remember(trayBadgedImage) { trayBadgedImage?.let { BitmapPainter(it.toComposeImageBitmap()) } }
+                trayBadgedPainter?.let { painter ->
+                    Tray(
+                        icon = painter,
+                        state = trayState,
+                        tooltip = if (unreadCount > 0) "Keryx ($unreadCount)" else "Keryx",
+                        onAction = { windowVisible = !windowVisible },
+                        menu = {
+                            Item(
+                                if (windowVisible) stringResource(Res.string.tray_hide) else stringResource(Res.string.tray_show),
+                                onClick = { windowVisible = !windowVisible },
+                            )
+                            Item(stringResource(Res.string.tray_quit), onClick = ::exitApplication)
+                        },
+                    )
+                }
+            }
+        }
+
+        // Log any exception surfaced during composition/rendering before the default
+        // handler runs; otherwise EDT crashes never reach keryx.N.log (background paths
+        // already log via runCatching). We capture the current (default) factory and
+        // delegate to it, so its existing behavior (error dialog + rethrow) is preserved
+        // unchanged - we only add the log line. Logging is guarded so a logger failure
+        // can't swallow the original crash. Remembered because LocalWindowExceptionHandlerFactory
+        // is a static CompositionLocal: providing a fresh value would force the whole
+        // Window/App subtree to recompose on every unrelated recomposition of this scope.
+        val defaultExceptionFactory = LocalWindowExceptionHandlerFactory.current
+        val exceptionHandlerFactory = remember(defaultExceptionFactory) {
+            WindowExceptionHandlerFactory { win ->
+                val downstream = defaultExceptionFactory.exceptionHandler(win)
+                WindowExceptionHandler { throwable ->
+                    runCatching { Log.error(LOG_TAG, "Uncaught exception in window", throwable) }
+                    downstream.onException(throwable)
+                }
+            }
+        }
+        CompositionLocalProvider(LocalWindowExceptionHandlerFactory provides exceptionHandlerFactory) {
+        Window(
+            onCloseRequest = { windowVisible = false },
+            title = "Keryx",
+            state = windowState,
+            visible = windowVisible,
+            icon = windowBadgedPainter ?: painterResource(Res.drawable.tray_icon),
+        ) {
+            // Run synchronously during composition (not via LaunchedEffect, which is
+            // dispatched as a coroutine after composition commits) so the chrome switch
+            // happens as early as possible, minimizing the standard-title-bar flash.
+            remember {
+                window.minimumSize = Dimension(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
+                if (isMacOs) {
+                    // Measure the OS's actual title bar height *before* switching to
+                    // the transparent/merged style, since fullWindowContent changes
+                    // how insets are reported afterward. This adapts automatically
+                    // to whatever the current macOS version/system settings use,
+                    // instead of hardcoding a guessed constant.
+                    WindowChrome.titleBarInsetDp = window.insets.top.toFloat()
+                    window.rootPane.putClientProperty("apple.awt.fullWindowContent", true)
+                    window.rootPane.putClientProperty("apple.awt.transparentTitleBar", true)
+                    window.rootPane.putClientProperty("apple.awt.windowTitleVisible", false)
+                }
+                Unit
+            }
+
+            // Application menu bar (macOS: system menu bar; Windows/Linux: in-window). Closing the
+            // window hides to the tray, matching onCloseRequest.
+            AppMenuBar(onCloseWindow = { windowVisible = false }, onQuit = ::exitApplication)
+
+            // A second launch signals this instance (via SingleInstanceCoordinator's
+            // loopback socket) instead of opening its own window. Bring this window
+            // to front and restore it from the tray / OS-level minimized state.
+            LaunchedEffect(Unit) {
+                activationRequests.collect {
+                    windowVisible = true
+                    SwingUtilities.invokeLater {
+                        window.isVisible = true
+                        window.extendedState = window.extendedState and Frame.ICONIFIED.inv()
+                        if (isMacOs) {
+                            // LaunchedEffect(windowVisible) above only re-fires on a value change, so it
+                            // won't call activateIgnoringOtherApps when the window was already visible
+                            // (just backgrounded, not tray-hidden/minimized). Call it unconditionally here
+                            // on every activation signal instead - harmless no-op when the Dock policy is
+                            // already REGULAR.
+                            MacActivationPolicy.setDockIconVisible(true)
+                            // As above: re-apply the branded icon on a later EDT turn, since the policy
+                            // switch may have recreated the Dock tile and dropped the icon override.
+                            SwingUtilities.invokeLater { applyBrandedDockIcon(dockBadgedImage) }
+                        }
+                        window.toFront()
+                        window.requestFocus()
+                    }
+                }
+            }
+
+            // Menu commands that must be visible on screen — "About Keryx" and "Settings…" from the
+            // native macOS app menu — may fire while the window is tray-hidden, so surface it. App()
+            // handles the actual navigation/dialog off the same MenuController.commands flow.
+            LaunchedEffect(Unit) {
+                menuController.commands.collect { command ->
+                    if (command == MenuCommand.About || command == MenuCommand.OpenSettings) {
+                        windowVisible = true
+                    }
+                }
+            }
+
+            // Dock/taskbar badge. Native macOS badge API (Taskbar.setIconBadge) was
+            // tried and confirmed to call through without error but never actually
+            // render on this macOS/JDK combination (verified via temporary logging)
+            // - so macOS uses the same full-icon-composite fallback as other
+            // platforms below instead.
+            LaunchedEffect(unreadCount, dockBadgedImage) {
+                if (Taskbar.isTaskbarSupported()) {
+                    val taskbar = Taskbar.getTaskbar()
+                    SwingUtilities.invokeLater {
+                        when {
+                            taskbar.isSupported(Taskbar.Feature.ICON_BADGE_IMAGE_WINDOW) ->
+                                taskbar.setWindowIconBadge(window, drawBadgeOnlyImage(unreadCount))
+                            else -> applyBrandedDockIcon(dockBadgedImage)
+                        }
+                    }
+                }
+            }
+
+            // macOS integrates the title bar into the content, losing the OS's drag-to-move, so we wrap
+            // the header strip in WindowDraggableArea to restore it. Windows/Linux keep the OS title bar,
+            // so this stays a pass-through (no-op). WindowDraggableArea can only be called within
+            // FrameWindowScope, so we capture that receiver (this@Window) and close over it in the wrapper.
+            val frameScope = this
+            val dragWrapper: @Composable (Modifier, @Composable () -> Unit) -> Unit =
+                if (isMacOs) {
+                    { mod, dragContent -> with(frameScope) { WindowDraggableArea(mod) { dragContent() } } }
+                } else {
+                    { _, dragContent -> dragContent() }
+                }
+            CompositionLocalProvider(
+                LocalNativeWindow provides window,
+                LocalWindowDragArea provides dragWrapper,
+            ) {
+                App()
+            }
+        }
+        } // CompositionLocalProvider(LocalWindowExceptionHandlerFactory)
+    }
+}
+
+/**
+ * Re-applies the branded (badged) Dock icon on the EDT. Switching the macOS activation policy back
+ * to Regular recreates the Dock tile from scratch and discards any runtime `taskbar.iconImage`
+ * override, so this must run again after every hide→restore cycle. No-op when the branded image
+ * isn't ready yet or the platform lacks `ICON_IMAGE` support (e.g. Windows, which uses the
+ * `setWindowIconBadge` overlay path in the badge effect instead).
+ */
+private fun applyBrandedDockIcon(image: Image?) {
+    if (image == null || !Taskbar.isTaskbarSupported()) return
+    val taskbar = Taskbar.getTaskbar()
+    if (taskbar.isSupported(Taskbar.Feature.ICON_IMAGE)) {
+        taskbar.iconImage = image
+    }
+}
+
+/**
+ * macOS-only replacement for the Compose `Tray()` composable.
+ *
+ * `Tray()` wires the icon's popup menu via `TrayIcon.setPopupMenu()`, which on
+ * macOS shows the popup on *any* click (left or right) - a long-standing
+ * AWT/macOS limitation (Compose upstream has an unresolved TODO for this). To
+ * get "right-click = menu, left-click = toggle", this bypasses `setPopupMenu`
+ * and drives a raw `TrayIcon`/`PopupMenu` pair with a manual `MouseListener`.
+ */
+@Composable
+private fun MacTray(
+    image: Image?,
+    tooltip: String,
+    showLabel: String,
+    hideLabel: String,
+    quitLabel: String,
+    windowVisible: Boolean,
+    onToggle: () -> Unit,
+    onQuit: () -> Unit,
+    newArticleNotifications: SharedFlow<String>,
+) {
+    val image = image ?: return
+
+    val currentOnToggle by rememberUpdatedState(onToggle)
+    val currentOnQuit by rememberUpdatedState(onQuit)
+
+    // TrayIcon isn't a java.awt.Component, so PopupMenu.show(...) needs some
+    // origin Component. This Frame exists only to host the PopupMenu and is
+    // 0x0 so it's never visually noticeable. It must still be isVisible=true,
+    // since PopupMenu.show() requires origin.isShowing() to be true, and
+    // pack() alone (creating a peer without showing it) isn't enough.
+    val dummyFrame = remember {
+        Frame().apply {
+            isUndecorated = true
+            setSize(0, 0)
+            location = java.awt.Point(0, 0)
+            setFocusableWindowState(false)
+            isVisible = true
+        }
+    }
+    val toggleItem = remember { MenuItem() }
+    val quitItem = remember { MenuItem() }
+    val popupMenu = remember {
+        PopupMenu().apply {
+            add(toggleItem)
+            add(quitItem)
+        }
+    }
+    DisposableEffect(dummyFrame, popupMenu) {
+        dummyFrame.add(popupMenu)
+        onDispose { dummyFrame.dispose() }
+    }
+
+    val trayIcon = remember { TrayIcon(image).apply { isImageAutoSize = true } }
+    LaunchedEffect(trayIcon, image) {
+        trayIcon.image = image
+    }
+    DisposableEffect(trayIcon, popupMenu) {
+        val listener = object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                when (e.button) {
+                    MouseEvent.BUTTON1 -> currentOnToggle()
+                    MouseEvent.BUTTON3 -> {
+                        // TrayIcon's MouseEvent x/y are already screen-absolute
+                        // coordinates. Translate them into dummyFrame's local
+                        // coordinate space (rather than assuming the frame
+                        // stays exactly at (0,0)) so the menu opens at the
+                        // click location instead of wherever the frame is.
+                        val origin = dummyFrame.locationOnScreen
+                        popupMenu.show(dummyFrame, e.xOnScreen - origin.x, e.yOnScreen - origin.y)
+                    }
+                }
+            }
+        }
+        trayIcon.addMouseListener(listener)
+        val systemTray = SystemTray.getSystemTray()
+        systemTray.add(trayIcon)
+        onDispose {
+            trayIcon.removeMouseListener(listener)
+            systemTray.remove(trayIcon)
+        }
+    }
+
+    LaunchedEffect(toggleItem) {
+        toggleItem.addActionListener { currentOnToggle() }
+    }
+    LaunchedEffect(quitItem) {
+        quitItem.addActionListener { currentOnQuit() }
+    }
+    LaunchedEffect(trayIcon, tooltip) {
+        trayIcon.toolTip = tooltip
+    }
+    LaunchedEffect(toggleItem, windowVisible, showLabel, hideLabel) {
+        toggleItem.label = if (windowVisible) hideLabel else showLabel
+    }
+    LaunchedEffect(quitItem, quitLabel) {
+        quitItem.label = quitLabel
+    }
+
+    // Tray()'s own composable body is what turns a queued TrayState notification
+    // into an actual TrayIcon.displayMessage(...) call; since MacTray replaces
+    // Tray() entirely on macOS, it must consume newArticleNotifications itself.
+    LaunchedEffect(trayIcon) {
+        newArticleNotifications.collect { message ->
+            trayIcon.displayMessage("Keryx", message, TrayIcon.MessageType.NONE)
+        }
+    }
+}
+
+/**
+ * Cache cleanup (once per 24h) + Dropbox sync if connected + an unconditional feed
+ * refresh/new-article check + an unconditional update check.
+ */
+private suspend fun runStartupTasks(koin: org.koin.core.Koin) {
+    runCatching {
+        val settingsRepository = koin.get<SettingsRepository>()
+        val settings = settingsRepository.getLocalSettings()
+        val now = SystemClock.nowMillis()
+        val last = settings.lastCacheCleanupAt
+        val dayMillis = 24L * 60 * 60 * 1000
+        if (last == null || now - last >= dayMillis) {
+            val days = settingsRepository.getCacheRetentionDays()
+            koin.get<ArticleRepository>().deleteExpiredArticles(days)
+            settingsRepository.saveLocalSettings(settings.copy(lastCacheCleanupAt = now))
+        }
+        if (koin.get<CloudSession>().isConnected()) {
+            koin.get<SyncRepository>().sync()
+        }
+        refreshFeedsAndNotify(koin)
+        checkForUpdateAndNotify(koin)
+        maybeRebuildFtsIndex(koin)
+    }.onFailure { Log.error(LOG_TAG, "Startup tasks failed", it) }
+}
+
+/**
+ * Once-per-24h healing rebuild of the full FTS index, run only while the app is idle (no sync / feed
+ * refresh in flight) so it never competes with a foreground operation — with `busy_timeout` set, a
+ * concurrent search waits rather than erroring anyway. Re-indexes content that incremental indexing
+ * ([FtsManager.indexMissing]) left stale and sweeps entries left by cache-cleanup deletions. A cheap
+ * no-op until 24h elapse. Shared by [runStartupTasks] and [backgroundUpdateLoop].
+ */
+private fun maybeRebuildFtsIndex(koin: org.koin.core.Koin) {
+    val activityCenter = koin.get<ActivityCenter>()
+    if (activityCenter.syncing.value || activityCenter.feedRefreshing.value) return
+    val settingsRepository = koin.get<SettingsRepository>()
+    val now = SystemClock.nowMillis()
+    val last = settingsRepository.getLocalSettings().lastFtsRebuiltAt
+    val dayMillis = 24L * 60 * 60 * 1000
+    if (last != null && now - last < dayMillis) return
+    koin.get<FtsManager>().rebuildIndex()
+    settingsRepository.saveLocalSettings(settingsRepository.getLocalSettings().copy(lastFtsRebuiltAt = now))
+}
+
+/**
+ * Refreshes all feeds and, if new articles were fetched and notifications are enabled, notifies
+ * via [NewArticleNotifier]. Shared by [runStartupTasks] and [backgroundUpdateLoop].
+ */
+private suspend fun refreshFeedsAndNotify(koin: org.koin.core.Koin) {
+    val settingsRepository = koin.get<SettingsRepository>()
+    val results = koin.get<ActivityCenter>().trackFeedRefresh { koin.get<FeedRepository>().refreshAll() }
+    val newCount = results.values.sumOf { it.valueOrNull ?: 0 }
+    if (newCount > 0 && settingsRepository.getLocalSettings().notificationEnabled) {
+        koin.get<NewArticleNotifier>().notifyBackground(koin.get<NotificationMessages>().newArticles(newCount))
+    }
+}
+
+/**
+ * Desktop background refresh loop (coroutine equivalent of a periodic timer). Also drives the
+ * periodic (non-startup) update check on its own, independent cadence — see
+ * [shouldCheckForUpdate] — so setting feed refresh to "manual only" (minutes <= 0) doesn't starve
+ * update checking of everything but the once-per-launch startup check. Feed refresh is similarly
+ * skipped here when "manual only" is set, but still gets one unconditional check at startup via
+ * [runStartupTasks].
+ */
+private suspend fun backgroundUpdateLoop(koin: org.koin.core.Koin) {
+    val settingsRepository = koin.get<SettingsRepository>()
+    while (true) {
+        val minutes = settingsRepository.getLocalSettings().refreshIntervalMinutes
+        delay(if (minutes <= 0) 60_000L else minutes * 60_000L)
+        runCatching {
+            if (minutes > 0) {
+                refreshFeedsAndNotify(koin)
+                koin.get<SyncRepository>().sync()
+            }
+            val settings = settingsRepository.getLocalSettings()
+            if (shouldCheckForUpdate(SystemClock.nowMillis(), settings.lastUpdateCheckAt, settings.updateCheckIntervalHours)) {
+                checkForUpdateAndNotify(koin)
+            }
+            maybeRebuildFtsIndex(koin)
+        }.onFailure { Log.error(LOG_TAG, "Background update cycle failed", it) }
+    }
+}
+
+/**
+ * Runs [UpdateChecker.check] and records [LocalSettings.lastUpdateCheckAt]. This is the only
+ * place that writes that timestamp — the Settings screen's manual "check for update" button calls
+ * [UpdateChecker.check] directly instead, so it never perturbs the automatic schedule.
+ */
+private suspend fun checkForUpdateAndNotify(koin: org.koin.core.Koin) {
+    val settingsRepository = koin.get<SettingsRepository>()
+    val status = koin.get<UpdateChecker>().check()
+    settingsRepository.saveLocalSettings(
+        settingsRepository.getLocalSettings().copy(lastUpdateCheckAt = SystemClock.nowMillis()),
+    )
+    if (status is UpdateStatus.Available) {
+        val message = getString(Res.string.update_available_notification, status.version)
+        koin.get<NotificationCenter>().add(
+            AppNotification(
+                id = IdGenerator.newId(),
+                level = AppNotificationLevel.INFO,
+                message = message,
+                timestampMillis = SystemClock.nowMillis(),
+            ),
+        )
+    }
+}
+
+/** Registers the keryx:// URL scheme in the Windows registry so browsers can redirect back to the app. */
+private fun registerWindowsUriScheme() {
+    val currentExe = ProcessHandle.current().info().command().orElse("keryx.exe")
+    runCatching {
+        val reg = "reg.exe"
+        ProcessBuilder(reg, "add", "HKEY_CLASSES_ROOT\\keryx", "/ve", "/d", "URL:keryx Protocol", "/f").start().waitFor()
+        ProcessBuilder(reg, "add", "HKEY_CLASSES_ROOT\\keryx", "/v", "URL Protocol", "/d", "", "/f").start().waitFor()
+        ProcessBuilder(reg, "add", "HKEY_CLASSES_ROOT\\keryx\\shell\\open\\command", "/ve", "/d", "\"$currentExe\" \"%1\"", "/f").start().waitFor()
+    }.onFailure { Log.warn(LOG_TAG, "Could not register Windows URI scheme", it) }
+}

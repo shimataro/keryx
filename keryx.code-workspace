@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"claudeCode.respectGitIgnore": true,
+		"claudeCode.initialPermissionMode": "plan",
+	},
+	"extensions": {
+		"recommendations": [
+			"editorconfig.editorconfig",
+			"vscjava.vscode-gradle",
+			"redhat.vscode-xml",
+			"fwcd.kotlin",
+			"tamasfe.even-better-toml",
+		],
+	},
+}
