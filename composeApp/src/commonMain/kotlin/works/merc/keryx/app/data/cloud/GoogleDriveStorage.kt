@@ -1,6 +1,7 @@
 package works.merc.keryx.app.data.cloud
 
 import io.ktor.client.HttpClient
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.patch
@@ -118,6 +119,18 @@ class GoogleDriveStorage(
         } else {
             createFile(token, name, data)
         }
+    }
+
+    override suspend fun delete(path: String): Result<Unit> = withToken { token ->
+        // Idempotent: if the file is already absent, report success (nothing to delete).
+        val existing = when (val f = findFile(token, fileName(path))) {
+            is Result.Err -> return@withToken f
+            is Result.Ok -> f.value ?: return@withToken Result.Ok(Unit)
+        }
+        val response = client.delete("$apiBase/files/${existing.id}") {
+            header("Authorization", "Bearer $token")
+        }
+        okOrError(response) // Drive returns 204 on success, which okOrError accepts.
     }
 
     override suspend fun exists(path: String): Result<Boolean> = withToken { token ->

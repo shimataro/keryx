@@ -129,6 +129,24 @@ class DropboxStorage(
         }
     }
 
+    override suspend fun delete(path: String): Result<Unit> = withToken { token ->
+        val response = client.post("$apiBase/2/files/delete_v2") {
+            header("Authorization", "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { put("path", path) }.toString())
+        }
+        when {
+            response.status.value in 200..299 -> Result.Ok(Unit)
+            // delete_v2 reports an already-absent path as 409 with a "not_found" error summary.
+            // Treat that as success so delete is idempotent.
+            response.status.value == 409 -> {
+                val body = response.bodyAsText()
+                if (body.contains("not_found")) Result.Ok(Unit) else mapError(409, body)
+            }
+            else -> mapError(response.status.value, response.bodyAsText())
+        }
+    }
+
     private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> {
         val token = accessTokenProvider()
             ?: return Result.Err(CloudAuthException("Not connected to Dropbox"))

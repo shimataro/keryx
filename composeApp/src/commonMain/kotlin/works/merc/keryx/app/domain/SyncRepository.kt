@@ -68,9 +68,40 @@ class SyncRepository(
 
     suspend fun sync(): Result<Unit> {
         val result = activityCenter.trackSync { mutex.withLock { syncLocked() } }
-        // Surface a genuine sync failure to the notification center — the callers all discard the
-        // Result, so without this an auth/storage error is completely invisible. Conflicts are
-        // retried internally (never user-facing) and a no-op sync returns Ok, so neither notifies.
+        emitErrorNotification(result)
+        return result
+    }
+
+    /**
+     * Discards the cloud sync data and re-uploads this device's local DB fresh: deletes the cloud
+     * file, then [createFresh]. Recovery path for a corrupt / incompatible cloud DB. Runs the whole
+     * delete-then-create under a single lock (calling [sync] here would deadlock — the mutex is not
+     * reentrant).
+     */
+    suspend fun resetCloudData(): Result<Unit> {
+        val cloud = cloudProvider() ?: return Result.Ok(Unit)
+        val result = activityCenter.trackSync {
+            mutex.withLock {
+                when (val del = cloud.delete(CLOUD_DB_PATH)) {
+                    is Result.Err -> {
+                        Log.error(TAG, "Reset: delete failed: ${del.exception.message}")
+                        del
+                    }
+                    // The cloud file is gone, so re-create it from the local DB.
+                    is Result.Ok -> createFresh(cloud)
+                }
+            }
+        }
+        emitErrorNotification(result)
+        return result
+    }
+
+    /**
+     * Surface a genuine failure to the notification center — callers discard the Result, so without
+     * this an auth/storage error is invisible. Conflicts are retried internally (never user-facing)
+     * and a no-op returns Ok, so neither notifies.
+     */
+    private suspend fun emitErrorNotification(result: Result<Unit>) {
         if (result is Result.Err && result.exception !is SyncConflictException) {
             notificationCenter.add(
                 AppNotification(
@@ -81,7 +112,6 @@ class SyncRepository(
                 ),
             )
         }
-        return result
     }
 
     private suspend fun syncLocked(): Result<Unit> {

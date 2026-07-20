@@ -96,6 +96,10 @@ class SettingsViewModel(
     var checkingForUpdate by mutableStateOf(false)
         private set
 
+    /** True while a "reset cloud data" (delete + fresh re-upload) is running. */
+    var resetting by mutableStateOf(false)
+        private set
+
     /** Timestamp of the last successful sync, formatted for display. null when never synced or not connected. */
     var lastSyncedAtText by mutableStateOf<String?>(null)
         private set
@@ -206,6 +210,24 @@ class SettingsViewModel(
             update { it.copy(cloudStorageType = null) }
             connectedType = null
             lastSyncedAtText = null
+        }
+    }
+
+    /**
+     * Discards the cloud sync data and re-uploads this device's local DB fresh — recovery for a
+     * corrupt / incompatible cloud DB. Errors surface via the notification center (from
+     * [SyncRepository]); on success a new sync timestamp is shown.
+     */
+    fun resetCloudData() {
+        if (connectedType == null) return
+        viewModelScope.launch {
+            resetting = true
+            try {
+                withContext(dispatcher) { syncRepository.resetCloudData() }
+            } finally {
+                resetting = false
+            }
+            refreshLastSyncedAt()
         }
     }
 

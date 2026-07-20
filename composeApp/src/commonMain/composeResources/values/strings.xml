@@ -167,6 +167,10 @@
     <string name="settings_cloud_switch_confirm_title">%1$s に切り替えますか？</string>
     <string name="settings_cloud_switch_confirm_body">%1$s との連携は解除されます。</string>
     <string name="settings_cloud_switch_confirm_action">切り替える</string>
+    <string name="settings_cloud_reset">同期データをリセット</string>
+    <string name="settings_cloud_reset_confirm_title">クラウドの同期データをリセットしますか？</string>
+    <string name="settings_cloud_reset_confirm_body">クラウド上の同期データを削除し、この端末のデータで作り直します。他の端末で未同期の変更がある場合は失われることがあります。</string>
+    <string name="settings_cloud_reset_confirm_action">リセット</string>
     <string name="settings_last_synced">最終同期: %1$s</string>
     <string name="settings_font_size">文字サイズ</string>
     <string name="settings_font_small">小</string>

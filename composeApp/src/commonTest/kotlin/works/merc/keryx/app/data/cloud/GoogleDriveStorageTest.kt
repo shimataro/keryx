@@ -61,6 +61,23 @@ class GoogleDriveStorageTest {
     }
 
     @Test
+    fun deleteRemovesExistingFile() = runTest {
+        val s = storage(
+            "tok",
+            { respond(foundFile(), HttpStatusCode.OK) },     // findFile
+            { respond("", HttpStatusCode.NoContent) },        // DELETE → 204
+        )
+        assertIs<Result.Ok<Unit>>(s.delete(CLOUD_DB_PATH))
+    }
+
+    @Test
+    fun deleteMissingFileIsSuccessWithNoSecondRequest() = runTest {
+        // Only one queued response: findFile returns empty, so no DELETE is issued.
+        val s = storage("tok", { respond(notFound, HttpStatusCode.OK) })
+        assertIs<Result.Ok<Unit>>(s.delete(CLOUD_DB_PATH))
+    }
+
+    @Test
     fun uploadCreatesNewFileWhenNoneExists() = runTest {
         val s = storage(
             "tok",

@@ -55,6 +55,7 @@ private class FakeCloudStorage : CloudStorage {
     var downloadCount = 0
     var uploadCount = 0
     var createCount = 0
+    var deleteCount = 0
 
     /** When set, [download] suspends on this gate before returning, so a test can observe an in-flight sync. */
     var downloadGate: CompletableDeferred<Unit>? = null
@@ -63,11 +64,13 @@ private class FakeCloudStorage : CloudStorage {
     private val downloadQueue = ArrayDeque<Result<CloudFile>>()
     private val uploadQueue = ArrayDeque<Result<Unit>>()
     private val createQueue = ArrayDeque<Result<Unit>>()
+    private val deleteQueue = ArrayDeque<Result<Unit>>()
 
     fun queueExists(r: Result<Boolean>) = existsQueue.addLast(r)
     fun queueDownload(r: Result<CloudFile>) = downloadQueue.addLast(r)
     fun queueUpload(r: Result<Unit>) = uploadQueue.addLast(r)
     fun queueCreate(r: Result<Unit>) = createQueue.addLast(r)
+    fun queueDelete(r: Result<Unit>) = deleteQueue.addLast(r)
 
     fun put(path: String, data: ByteArray, rev: String) {
         files[path] = data to rev
@@ -104,6 +107,13 @@ private class FakeCloudStorage : CloudStorage {
         if (files.containsKey(path)) return Result.Err(SyncConflictException())
         revCounter++
         files[path] = data to "r$revCounter"
+        return Result.Ok(Unit)
+    }
+
+    override suspend fun delete(path: String): Result<Unit> {
+        deleteCount++
+        deleteQueue.removeFirstOrNull()?.let { return it }
+        files.remove(path) // idempotent: succeeds whether or not it existed
         return Result.Ok(Unit)
     }
 }
@@ -470,6 +480,40 @@ class SyncRepositoryTest {
 
         assertIs<Result.Ok<Unit>>(repo.sync())
         assertTrue(notificationCenter.items.value.isEmpty())
+    }
+
+    @Test
+    fun resetCloudDataDeletesThenRecreates() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1") // a pre-existing (e.g. incompatible) cloud file
+        val repo = newRepo(cloud, clockMillis = 55_000L)
+
+        val result = repo.resetCloudData()
+
+        assertIs<Result.Ok<Unit>>(result)
+        assertEquals(1, cloud.deleteCount)
+        assertEquals(1, cloud.createCount)
+        assertTrue(cloud.files.containsKey(CLOUD_DB_PATH))
+        assertEquals(55_000L, repo.lastSyncedAt())
+        assertTrue(notificationCenter.items.value.isEmpty())
+    }
+
+    @Test
+    fun resetCloudDataDeleteFailureSurfacesErrorAndDoesNotCreate() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1")
+        cloud.queueDelete(Result.Err(CloudAuthException("revoked")))
+        val repo = newRepo(cloud)
+
+        val result = repo.resetCloudData()
+
+        assertIs<Result.Err>(result)
+        assertIs<CloudAuthException>(result.exception)
+        assertEquals(1, cloud.deleteCount)
+        assertEquals(0, cloud.createCount)
+        val notes = notificationCenter.items.value
+        assertEquals(1, notes.size)
+        assertEquals(AppNotificationLevel.ERROR, notes.first().level)
     }
 
     @Test
