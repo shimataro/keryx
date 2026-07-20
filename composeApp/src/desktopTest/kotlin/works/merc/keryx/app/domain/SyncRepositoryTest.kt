@@ -11,6 +11,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.CLOUD_DB_PATH
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
@@ -52,6 +53,7 @@ private class FakeCloudStorage : CloudStorage {
     var existsCount = 0
     var downloadCount = 0
     var uploadCount = 0
+    var createCount = 0
 
     /** When set, [download] suspends on this gate before returning, so a test can observe an in-flight sync. */
     var downloadGate: CompletableDeferred<Unit>? = null
@@ -59,10 +61,12 @@ private class FakeCloudStorage : CloudStorage {
     private val existsQueue = ArrayDeque<Result<Boolean>>()
     private val downloadQueue = ArrayDeque<Result<CloudFile>>()
     private val uploadQueue = ArrayDeque<Result<Unit>>()
+    private val createQueue = ArrayDeque<Result<Unit>>()
 
     fun queueExists(r: Result<Boolean>) = existsQueue.addLast(r)
     fun queueDownload(r: Result<CloudFile>) = downloadQueue.addLast(r)
     fun queueUpload(r: Result<Unit>) = uploadQueue.addLast(r)
+    fun queueCreate(r: Result<Unit>) = createQueue.addLast(r)
 
     fun put(path: String, data: ByteArray, rev: String) {
         files[path] = data to rev
@@ -91,6 +95,24 @@ private class FakeCloudStorage : CloudStorage {
         files[path] = data to "r$revCounter"
         return Result.Ok(Unit)
     }
+
+    override suspend fun create(path: String, data: ByteArray): Result<Unit> {
+        createCount++
+        createQueue.removeFirstOrNull()?.let { return it }
+        // Create-only: refuse to overwrite an existing file, as the real backends do.
+        if (files.containsKey(path)) return Result.Err(SyncConflictException())
+        revCounter++
+        files[path] = data to "r$revCounter"
+        return Result.Ok(Unit)
+    }
+}
+
+/** A [NotificationMessages] fake for sync tests: encodes the failing exception type into the message. */
+private object FakeSyncNotificationMessages : NotificationMessages {
+    override suspend fun feedGone(feedTitle: String): String = "gone:$feedTitle"
+    override suspend fun feedUrlChanged(feedTitle: String): String = "urlChanged:$feedTitle"
+    override suspend fun newArticles(count: Int): String = "new:$count"
+    override suspend fun syncFailed(exception: KeryxException): String = "syncFailed:${exception::class.simpleName}"
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -112,6 +134,7 @@ class SyncRepositoryTest {
         ftsManager = FtsManager(localDriver)
         ftsManager.ensureIndexed()
         tempDir = Files.createTempDirectory("keryx-sync-test").toFile()
+        notificationCenter = NotificationCenter()
     }
 
     @AfterTest
@@ -120,6 +143,8 @@ class SyncRepositoryTest {
         tempDir.deleteRecursively()
         localFile.delete()
     }
+
+    private lateinit var notificationCenter: NotificationCenter
 
     private fun TestScope.newRepo(
         cloud: CloudStorage,
@@ -134,6 +159,8 @@ class SyncRepositoryTest {
             clock = Clock { clockMillis },
             scope = this,
             activityCenter = activityCenter,
+            notificationCenter = notificationCenter,
+            notificationMessages = FakeSyncNotificationMessages,
             localDbPath = localFile.absolutePath,
             tempDir = tempDir.absolutePath,
         )
@@ -154,7 +181,7 @@ class SyncRepositoryTest {
     private fun tempCloudDbFile(): File = File(tempDir, "cloud_keryx.db")
 
     @Test
-    fun firstSyncEverUploadsWithoutDownload() = runTest {
+    fun firstSyncEverCreatesWithoutDownloadOrOverwrite() = runTest {
         val cloud = FakeCloudStorage()
         val repo = newRepo(cloud)
 
@@ -162,9 +189,30 @@ class SyncRepositoryTest {
 
         assertIs<Result.Ok<Unit>>(result)
         assertEquals(0, cloud.downloadCount)
-        assertEquals(1, cloud.uploadCount)
+        // First-ever sync uses create-only (never an unconditional overwrite).
+        assertEquals(1, cloud.createCount)
+        assertEquals(0, cloud.uploadCount)
         assertTrue(cloud.files.containsKey(CLOUD_DB_PATH))
         assertEquals(1_000L, repo.lastSyncedAt())
+    }
+
+    @Test
+    fun createConflictFallsBackToDownloadMergeInsteadOfOverwriting() = runTest {
+        // exists() wrongly reports "absent", but the cloud file actually exists (another device's
+        // data). create() must 409, and sync must fall through to download→merge→update rather than
+        // clobber the existing data with a fresh upload.
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1")
+        cloud.queueExists(Result.Ok(false))
+        val repo = newRepo(cloud)
+
+        val result = repo.sync()
+
+        assertIs<Result.Ok<Unit>>(result)
+        assertEquals(1, cloud.createCount)
+        assertEquals(1, cloud.downloadCount)
+        assertEquals(1, cloud.uploadCount)
+        assertFalse(tempCloudDbFile().exists())
     }
 
     @Test
@@ -336,6 +384,50 @@ class SyncRepositoryTest {
         assertIs<CloudStorageException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+    }
+
+    @Test
+    fun syncFailureIsAddedToNotificationCenter() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.queueExists(Result.Err(CloudAuthException("no token")))
+        val repo = newRepo(cloud)
+
+        assertIs<Result.Err>(repo.sync())
+
+        val notes = notificationCenter.items.value
+        assertEquals(1, notes.size)
+        assertEquals(AppNotificationLevel.ERROR, notes.first().level)
+        assertEquals("syncFailed:CloudAuthException", notes.first().message)
+    }
+
+    @Test
+    fun successfulSyncAddsNoNotification() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1")
+        val repo = newRepo(cloud)
+
+        assertIs<Result.Ok<Unit>>(repo.sync())
+        assertTrue(notificationCenter.items.value.isEmpty())
+    }
+
+    @Test
+    fun noProviderNoOpAddsNoNotification() = runTest {
+        val repo = SyncRepository(
+            driver = localDriver,
+            db = localDb,
+            ftsManager = ftsManager,
+            cloudProvider = { null },
+            clock = Clock { 1_000L },
+            scope = this,
+            activityCenter = ActivityCenter(backgroundScope),
+            notificationCenter = notificationCenter,
+            notificationMessages = FakeSyncNotificationMessages,
+            localDbPath = localFile.absolutePath,
+            tempDir = tempDir.absolutePath,
+        )
+
+        assertIs<Result.Ok<Unit>>(repo.sync())
+        assertTrue(notificationCenter.items.value.isEmpty())
     }
 
     @Test

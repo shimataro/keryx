@@ -182,6 +182,10 @@ class SettingsViewModel(
                 is Result.Ok -> {
                     withContext(dispatcher) { cloudSession.saveTokens(type, result.value) }
                     update { it.copy(cloudStorageType = type.id) }
+                    // Persist the provider selection to disk before the initial sync. Tokens are
+                    // saved durably to the keychain above, so without this flush a crash could leave
+                    // tokens present but cloudStorageType null → every later sync a silent no-op.
+                    withContext(dispatcher) { settingsRepository.flush() }
                     connectedType = type
                     withContext(dispatcher) { syncRepository.sync() }
                 }

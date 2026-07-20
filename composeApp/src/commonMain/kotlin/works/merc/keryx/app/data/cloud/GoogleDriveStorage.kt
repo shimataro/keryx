@@ -104,6 +104,22 @@ class GoogleDriveStorage(
         }
     }
 
+    override suspend fun create(path: String, data: ByteArray): Result<Unit> = withToken { token ->
+        val name = fileName(path)
+        // Best-effort create-only: Drive has no atomic create-if-absent, so we check first and
+        // fail with a conflict when the file already exists rather than overwriting it. The small
+        // check-then-write window is reconciled by the sync retry loop, as with upload().
+        val existing = when (val f = findFile(token, name)) {
+            is Result.Err -> return@withToken f
+            is Result.Ok -> f.value
+        }
+        if (existing != null) {
+            Result.Err(SyncConflictException())
+        } else {
+            createFile(token, name, data)
+        }
+    }
+
     override suspend fun exists(path: String): Result<Boolean> = withToken { token ->
         when (val f = findFile(token, fileName(path))) {
             is Result.Err -> f

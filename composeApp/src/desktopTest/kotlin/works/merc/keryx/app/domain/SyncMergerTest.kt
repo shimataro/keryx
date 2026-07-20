@@ -181,6 +181,34 @@ class SyncMergerTest {
     }
 
     @Test
+    fun localReadNotRevertedByOlderCloudEvenWhenCloudBringsContent() {
+        // Regression guard: a read made locally (newer read_at) must survive a merge with a cloud row
+        // that is unread (older/NULL read_at) but carries body content. The ON CONFLICT branch relies
+        // on `excluded` being the SELECT's already-merged value (per-field CASE against the local row),
+        // so the content OR-merge must never drag read/star state backwards.
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f1", now = 100)
+        insertArticle(cloudDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100, content = "cloud body")
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("f1", now = 50)
+        insertArticle(localDb, "a1", "f1", "g1", isRead = 1, readAt = 300, updatedAt = 50, content = null, summary = "local summary")
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
+        // Read state is preserved (local newer)...
+        assertEquals(1L, merged.is_read)
+        assertEquals(300L, merged.read_at)
+        // ...while the body still OR-merges in the cloud content.
+        assertEquals("cloud body", merged.content)
+        verifyDriver.close()
+    }
+
+    @Test
     fun articleContentOrMergesOnConflictAndRecomputesSearchText() {
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFeed("f1", now = 100)

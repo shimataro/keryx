@@ -7,6 +7,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import works.merc.keryx.app.core.AppNotification
+import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.CLOUD_DB_PATH
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudStorageException
@@ -44,6 +46,8 @@ class SyncRepository(
     private val clock: Clock,
     private val scope: CoroutineScope,
     private val activityCenter: ActivityCenter,
+    private val notificationCenter: NotificationCenter,
+    private val notificationMessages: NotificationMessages,
     private val localDbPath: String = FileIO.join(AppDirs.appDataDir(), DB_FILE_NAME),
     private val tempDir: String = AppDirs.tempDir(),
 ) : SyncScheduler {
@@ -60,22 +64,56 @@ class SyncRepository(
         }
     }
 
-    suspend fun sync(): Result<Unit> =
-        activityCenter.trackSync { mutex.withLock { syncLocked() } }
+    suspend fun sync(): Result<Unit> {
+        val result = activityCenter.trackSync { mutex.withLock { syncLocked() } }
+        // Surface a genuine sync failure to the notification center — the callers all discard the
+        // Result, so without this an auth/storage error is completely invisible. Conflicts are
+        // retried internally (never user-facing) and a no-op sync returns Ok, so neither notifies.
+        if (result is Result.Err && result.exception !is SyncConflictException) {
+            notificationCenter.add(
+                AppNotification(
+                    id = IdGenerator.newId(),
+                    level = AppNotificationLevel.ERROR,
+                    message = notificationMessages.syncFailed(result.exception),
+                    timestampMillis = clock.nowMillis(),
+                ),
+            )
+        }
+        return result
+    }
 
     private suspend fun syncLocked(): Result<Unit> {
-        val cloud = cloudProvider() ?: return Result.Ok(Unit)
+        val cloud = cloudProvider() ?: run {
+            Log.info(TAG, "Sync skipped: no cloud provider connected")
+            return Result.Ok(Unit)
+        }
 
-        // First sync ever: no cloud file yet → just upload the local DB.
+        // First sync ever: no cloud file yet → create it (create-only, never overwrite).
+        // If the file actually already exists (a wrong `exists=false`, a scope/account mismatch,
+        // or a concurrent creator), `createFresh` returns SyncConflictException and we fall through
+        // to the download→merge→update path instead of clobbering the other device's data.
         when (val exists = cloud.exists(CLOUD_DB_PATH)) {
-            is Result.Err -> return exists
-            is Result.Ok -> if (!exists.value) return uploadFresh(cloud)
+            is Result.Err -> {
+                Log.error(TAG, "Sync: exists() failed: ${exists.exception.message}")
+                return exists
+            }
+            is Result.Ok -> if (!exists.value) {
+                when (val created = createFresh(cloud)) {
+                    is Result.Ok -> return Result.Ok(Unit)
+                    is Result.Err ->
+                        if (created.exception !is SyncConflictException) return created
+                    // else: cloud file already exists → continue into the merge path below.
+                }
+            }
         }
 
         repeat(SYNC_MAX_RETRY) {
             val cloudFile = when (val d = cloud.download(CLOUD_DB_PATH)) {
                 is Result.Ok -> d.value
-                is Result.Err -> return d
+                is Result.Err -> {
+                    Log.error(TAG, "Sync: download failed: ${d.exception.message}")
+                    return d
+                }
             }
 
             when (val merged = mergeCloud(cloudFile.data)) {
@@ -84,7 +122,10 @@ class SyncRepository(
             }
             setSyncState(SYNC_STATE_CLOUD_FILE_REV, cloudFile.rev)
 
-            val bytes = snapshotBytesForUpload()
+            val bytes = when (val b = snapshotBytesForUpload()) {
+                is Result.Ok -> b.value
+                is Result.Err -> return b
+            }
 
             when (val upload = cloud.upload(CLOUD_DB_PATH, bytes, expectedRev = cloudFile.rev)) {
                 is Result.Ok -> {
@@ -92,16 +133,29 @@ class SyncRepository(
                     return Result.Ok(Unit)
                 }
                 is Result.Err ->
-                    if (upload.exception is SyncConflictException) return@repeat else return upload
+                    if (upload.exception is SyncConflictException) {
+                        return@repeat
+                    } else {
+                        Log.error(TAG, "Sync: upload failed: ${upload.exception.message}")
+                        return upload
+                    }
             }
         }
         Log.warn(TAG, "Sync failed after $SYNC_MAX_RETRY retries (rev conflict never resolved)")
         return Result.Err(CloudStorageException("Sync failed after $SYNC_MAX_RETRY retries"))
     }
 
-    private suspend fun uploadFresh(cloud: CloudStorage): Result<Unit> {
-        val bytes = snapshotBytesForUpload()
-        return when (val r = cloud.upload(CLOUD_DB_PATH, bytes, expectedRev = null)) {
+    /**
+     * First-ever upload: creates the cloud file with a create-only write (never an unconditional
+     * overwrite). Returns [SyncConflictException] if the file already exists, so the caller can fall
+     * back to the merge path rather than destroy the existing data.
+     */
+    private suspend fun createFresh(cloud: CloudStorage): Result<Unit> {
+        val bytes = when (val b = snapshotBytesForUpload()) {
+            is Result.Ok -> b.value
+            is Result.Err -> return b
+        }
+        return when (val r = cloud.create(CLOUD_DB_PATH, bytes)) {
             is Result.Ok -> {
                 setSyncState(SYNC_STATE_LAST_SYNCED_AT, clock.nowMillis().toString())
                 Result.Ok(Unit)
@@ -143,12 +197,26 @@ class SyncRepository(
      * Builds the bytes to upload: an FTS-free, consistent snapshot of the local DB. The live DB and
      * its `articles_fts` index are untouched (see [DatabaseSnapshot]), so a concurrent search never
      * sees a missing index.
+     *
+     * Returns [Result.Err] rather than a partial/empty payload: an export failure or a truncated /
+     * non-SQLite snapshot must never be uploaded over good cloud data. The `finally` still deletes
+     * the temp file even on failure.
      */
-    private fun snapshotBytesForUpload(): ByteArray {
+    private fun snapshotBytesForUpload(): Result<ByteArray> {
         val snapshotPath = FileIO.join(tempDir, "upload_keryx.db")
-        try {
+        return try {
             DatabaseSnapshot.exportForUpload(localDbPath, snapshotPath)
-            return FileIO.readBytes(snapshotPath) ?: ByteArray(0)
+            val bytes = FileIO.readBytes(snapshotPath)
+            when {
+                bytes == null || bytes.size < SQLITE_HEADER.size ->
+                    Result.Err(CloudStorageException("Snapshot missing or too small to upload"))
+                !bytes.copyOf(SQLITE_HEADER.size).contentEquals(SQLITE_HEADER) ->
+                    Result.Err(CloudStorageException("Snapshot is not a valid SQLite file"))
+                else -> Result.Ok(bytes)
+            }
+        } catch (e: Throwable) {
+            Log.error(TAG, "Snapshot export failed", e)
+            Result.Err(CloudStorageException("Snapshot export failed: ${e.message}"))
         } finally {
             FileIO.delete(snapshotPath)
         }
@@ -160,6 +228,12 @@ class SyncRepository(
 
     private companion object {
         const val TAG = "Sync"
+
+        /** The 16-byte magic string every valid SQLite database file starts with. */
+        val SQLITE_HEADER = byteArrayOf(
+            0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66,
+            0x6f, 0x72, 0x6d, 0x61, 0x74, 0x20, 0x33, 0x00,
+        )
     }
 
     fun lastSyncedAt(): Long? =
