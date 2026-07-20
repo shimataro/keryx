@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.getString
 import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.core.CloudStorageType
+import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.opml.OpmlCodec
@@ -116,7 +117,13 @@ class SettingsViewModel(
             // sync paths this ViewModel has no other visibility into (manual "sync now" on Home,
             // debounced syncs, the background loop).
             activityCenter.syncing.drop(1).collect { syncing ->
-                if (!syncing) refreshLastSyncedAt()
+                // Guarded: a transient read failure must not kill this long-lived collector (which
+                // would silently stop all future last-synced refreshes) or leak as an uncaught
+                // exception. Best-effort UI state — log and carry on.
+                if (!syncing) {
+                    runCatching { refreshLastSyncedAt() }
+                        .onFailure { Log.warn(TAG, "Failed to refresh last-synced time", it) }
+                }
             }
         }
     }
@@ -303,5 +310,9 @@ class SettingsViewModel(
 
     fun clearOpmlResult() {
         opmlResult = null
+    }
+
+    private companion object {
+        const val TAG = "SettingsVM"
     }
 }
