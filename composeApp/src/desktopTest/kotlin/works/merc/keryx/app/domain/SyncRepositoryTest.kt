@@ -11,6 +11,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.CLOUD_DB_PATH
 import works.merc.keryx.app.core.Clock
@@ -415,11 +416,12 @@ class SyncRepositoryTest {
         assertIs<CloudDataIncompatibleException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
-        // Surfaced to the notification center.
+        // Surfaced to the notification center, with a reset action offered.
         val notes = notificationCenter.items.value
         assertEquals(1, notes.size)
         assertEquals(AppNotificationLevel.ERROR, notes.first().level)
         assertEquals("syncFailed:CloudDataIncompatibleException", notes.first().message)
+        assertEquals(AppNotificationAction.RESET_CLOUD_DATA, notes.first().action)
     }
 
     @Test
@@ -450,6 +452,8 @@ class SyncRepositoryTest {
         assertEquals(1, notes.size)
         assertEquals(AppNotificationLevel.ERROR, notes.first().level)
         assertEquals("syncFailed:CloudAuthException", notes.first().message)
+        // A non-recoverable-by-reset error carries no action button.
+        assertNull(notes.first().action)
     }
 
     @Test

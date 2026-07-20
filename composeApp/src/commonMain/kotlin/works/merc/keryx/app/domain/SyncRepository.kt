@@ -8,6 +8,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import works.merc.keryx.app.core.AppNotification
+import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.CLOUD_DB_PATH
 import works.merc.keryx.app.core.Clock
@@ -103,12 +104,20 @@ class SyncRepository(
      */
     private suspend fun emitErrorNotification(result: Result<Unit>) {
         if (result is Result.Err && result.exception !is SyncConflictException) {
+            // A corrupt/incompatible cloud DB is only fixable by resetting it, so offer that as an
+            // inline action. Other errors (auth, transient) carry no action.
+            val action = if (result.exception is CloudDataIncompatibleException) {
+                AppNotificationAction.RESET_CLOUD_DATA
+            } else {
+                null
+            }
             notificationCenter.add(
                 AppNotification(
                     id = IdGenerator.newId(),
                     level = AppNotificationLevel.ERROR,
                     message = notificationMessages.syncFailed(result.exception),
                     timestampMillis = clock.nowMillis(),
+                    action = action,
                 ),
             )
         }

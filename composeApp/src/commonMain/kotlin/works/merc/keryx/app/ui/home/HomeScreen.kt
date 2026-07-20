@@ -40,6 +40,7 @@ import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import works.merc.keryx.app.core.ARTICLE_LIST_PANE_WIDTH_DEFAULT
+import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.DETAIL_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.DiscoveredFeedLink
@@ -68,6 +69,9 @@ import works.merc.keryx.app.resources.home_add_feed_subscribe
 import works.merc.keryx.app.resources.home_add_feed_type_atom
 import works.merc.keryx.app.resources.home_add_feed_type_rss
 import works.merc.keryx.app.resources.home_already_subscribed
+import works.merc.keryx.app.resources.settings_cloud_reset_confirm_action
+import works.merc.keryx.app.resources.settings_cloud_reset_confirm_body
+import works.merc.keryx.app.resources.settings_cloud_reset_confirm_title
 import works.merc.keryx.app.ui.common.FlatTextButton
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
 import works.merc.keryx.app.ui.common.FlatCheckbox
@@ -259,6 +263,26 @@ fun HomeScreen() {
             // Full success closes silently — the new feed appearing in the list is the confirmation.
             // Partial/total failure keeps the dialog open (see runSubscribe) to show what failed.
             onSubscribed = { showAddFeed = false },
+        )
+    }
+
+    // A notification's "reset cloud data" action (raised for a corrupt/incompatible cloud DB) opens
+    // its confirmation here — hosted at the screen level, outside the bell popup which dismisses on
+    // focus loss. On confirm, reset and clear the now-stale error notification.
+    notifVm.pendingAction?.takeIf { it.action == AppNotificationAction.RESET_CLOUD_DATA }?.let { pending ->
+        KeryxAlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            tonalElevation = 0.dp,
+            onDismissRequest = { notifVm.clearPendingAction() },
+            title = stringResource(Res.string.settings_cloud_reset_confirm_title),
+            text = { Text(stringResource(Res.string.settings_cloud_reset_confirm_body)) },
+            confirmText = stringResource(Res.string.settings_cloud_reset_confirm_action),
+            onConfirm = {
+                vm.resetCloudData()
+                notifVm.dismiss(pending.id)
+                notifVm.clearPendingAction()
+            },
+            dismissText = stringResource(Res.string.common_cancel),
         )
     }
 }
