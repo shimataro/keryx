@@ -20,6 +20,7 @@ import works.merc.keryx.app.core.SYNC_DEBOUNCE_MS
 import works.merc.keryx.app.core.SYNC_MAX_RETRY
 import works.merc.keryx.app.core.SYNC_STATE_CLOUD_FILE_REV
 import works.merc.keryx.app.core.SYNC_STATE_LAST_SYNCED_AT
+import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.core.SyncConflictException
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.local.FtsManager
@@ -184,6 +185,13 @@ class SyncRepository(
             driver.notifyListeners("folders", "feeds", "tags", "feed_tags", "articles", "global_settings")
             return Result.Ok(Unit)
         } catch (e: KeryxException) {
+            // The merge-abort path (e.g. an incompatible/newer cloud schema) is otherwise silent:
+            // the notification is the only signal. Log it so it's recoverable after release.
+            if (e is SchemaVersionException) {
+                Log.warn(TAG, "Cloud DB merge aborted: cloud schema v${e.cloudVersion} is incompatible with local v${e.localVersion}")
+            } else {
+                Log.warn(TAG, "Cloud DB merge aborted: ${e.message}")
+            }
             return Result.Err(e)
         } catch (e: Throwable) {
             Log.error(TAG, "Cloud DB merge failed", e)

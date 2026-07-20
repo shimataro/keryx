@@ -369,6 +369,11 @@ class SyncRepositoryTest {
         assertIs<SchemaVersionException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+        // The merge-abort is user-visible via the notification center (the only signal for this path).
+        val notes = notificationCenter.items.value
+        assertEquals(1, notes.size)
+        assertEquals(AppNotificationLevel.ERROR, notes.first().level)
+        assertEquals("syncFailed:SchemaVersionException", notes.first().message)
     }
 
     @Test
