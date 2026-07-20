@@ -11,6 +11,7 @@ import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.CLOUD_DB_PATH
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.DB_FILE_NAME
 import works.merc.keryx.app.core.KeryxException
@@ -194,11 +195,36 @@ class SyncRepository(
             }
             return Result.Err(e)
         } catch (e: Throwable) {
+            val msg = e.message ?: ""
+            // Distinguish a permanently-unusable cloud DB (corrupt file or incompatible/foreign
+            // schema) from a genuinely transient failure: the former will never succeed on retry,
+            // so it must not be reported as "try again later".
+            if (isUnusableCloudDb(msg)) {
+                Log.warn(TAG, "Cloud DB unusable (corrupt or incompatible schema): $msg")
+                return Result.Err(CloudDataIncompatibleException("Cloud DB unusable: $msg"))
+            }
             Log.error(TAG, "Cloud DB merge failed", e)
             return Result.Err(CloudStorageException("Merge failed: ${e.message}"))
         } finally {
             FileIO.delete(tempPath)
         }
+    }
+
+    /**
+     * Heuristic classification of a merge failure as "the cloud DB is unusable" (corrupt or an
+     * incompatible schema) rather than transient, by matching SQLite's error text. On no match we
+     * fall back to [CloudStorageException] (transient), so a miss never regresses behavior.
+     */
+    private fun isUnusableCloudDb(message: String): Boolean {
+        val m = message.lowercase()
+        return listOf(
+            "not a database",
+            "malformed",
+            "disk image",
+            "no such column",
+            "no such table",
+            "file is encrypted",
+        ).any { it in m }
     }
 
     /**

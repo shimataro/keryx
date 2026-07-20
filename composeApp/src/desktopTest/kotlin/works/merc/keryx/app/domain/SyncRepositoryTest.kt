@@ -15,6 +15,7 @@ import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.CLOUD_DB_PATH
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
+import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.core.Result
@@ -173,6 +174,20 @@ class SyncRepositoryTest {
             driver.execute(null, "PRAGMA user_version = $userVersion;", 0)
         }
         driver.close()
+        val bytes = file.readBytes()
+        file.delete()
+        return bytes
+    }
+
+    /** A valid SQLite file whose schema is NOT the keryx schema (user_version matches local). */
+    private fun foreignSchemaDbBytes(): ByteArray {
+        val file = File(tempDir, "foreign.db")
+        DriverManager.getConnection("jdbc:sqlite:${file.absolutePath}").use { conn ->
+            conn.createStatement().use { st ->
+                st.execute("PRAGMA user_version = ${KeryxDatabase.Schema.version}")
+                st.execute("CREATE TABLE unrelated (x INTEGER)")
+            }
+        }
         val bytes = file.readBytes()
         file.delete()
         return bytes
@@ -377,16 +392,38 @@ class SyncRepositoryTest {
     }
 
     @Test
-    fun genericMergeFailureIsWrappedAsCloudStorageException() = runTest {
+    fun corruptCloudDbIsReportedAsIncompatible() = runTest {
         val cloud = FakeCloudStorage()
-        // Not a valid SQLite file: ATTACH/PRAGMA will throw a plain SQLException.
+        // Not a valid SQLite file: opening it throws "file is not a database" — a permanent,
+        // non-retryable condition, reported as CloudDataIncompatibleException (not a transient error).
         cloud.put(CLOUD_DB_PATH, byteArrayOf(1, 2, 3, 4), "r1")
         val repo = newRepo(cloud)
 
         val result = repo.sync()
 
         assertIs<Result.Err>(result)
-        assertIs<CloudStorageException>(result.exception)
+        assertIs<CloudDataIncompatibleException>(result.exception)
+        assertEquals(0, cloud.uploadCount)
+        assertFalse(tempCloudDbFile().exists())
+        // Surfaced to the notification center.
+        val notes = notificationCenter.items.value
+        assertEquals(1, notes.size)
+        assertEquals(AppNotificationLevel.ERROR, notes.first().level)
+        assertEquals("syncFailed:CloudDataIncompatibleException", notes.first().message)
+    }
+
+    @Test
+    fun incompatibleSchemaCloudDbIsReportedAsIncompatible() = runTest {
+        // A valid SQLite file (user_version matches local) but a foreign schema: the merge statements
+        // hit "no such table: cloud.folders", which must be classified as incompatible, not transient.
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, foreignSchemaDbBytes(), "r1")
+        val repo = newRepo(cloud)
+
+        val result = repo.sync()
+
+        assertIs<Result.Err>(result)
+        assertIs<CloudDataIncompatibleException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
     }

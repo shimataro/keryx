@@ -246,6 +246,7 @@
     <string name="error_cloud_storage">同期に失敗しました。後でもう一度お試しください</string>
     <string name="error_sync_conflict">同期の競合が解決できませんでした</string>
     <string name="error_schema_version">クラウドの同期データが非対応のバージョンです。アプリを更新するか、クラウドの同期データを削除してください。</string>
+    <string name="error_cloud_data_incompatible">クラウドの同期データが壊れているか、非対応の形式です。クラウドの同期データを削除して作り直してください。</string>
     <string name="error_feed_gone">フィードが削除されました</string>
     <string name="error_feed_not_found">フィードが見つかりませんでした</string>
     <string name="error_invalid_url">フィード URL が正しくありません</string>
