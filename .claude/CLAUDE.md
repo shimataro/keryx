@@ -39,6 +39,13 @@ mobile (Android/iOS) targets planned for later.
 ./gradlew :composeApp:packageDmg     # Package (macOS; use packageMsi/packageDeb on Windows/Linux)
 ```
 
+## Commit messages
+
+After implementing a plan that changes source code, output a concise commit
+message in English for the resulting diff (`git diff`). Do not commit unless
+asked. Follow the repo's Conventional Commits style (`fix(scope): ...`,
+`docs(scope): ...`, etc.).
+
 ## Architecture
 
 Layered: UI (Compose) → ViewModel (androidx.lifecycle + Koin) → Repository → DataSource (SQLDelight / Ktor)
