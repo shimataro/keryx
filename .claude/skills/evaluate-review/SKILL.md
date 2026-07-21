@@ -49,7 +49,9 @@ gh api repos/{owner}/{repo}/pulls/comments/{comment_id}
 - From the JSON response, extract:
   - `body` — the review text
   - `path` — file under review
-  - `line` / `original_line` — line number
+  - `line` / `original_line` — ending line of the comment
+  - `start_line` / `original_start_line` — starting line of the comment (for multi-line comments)
+  - `side` / `start_side` — side of the diff (`LEFT` or `RIGHT`)
   - `diff_hunk` — diff context provided by GitHub
   - `commit_id` — commit SHA at which the comment was left
 - **Verify the comment belongs to the requested PR.** Extract `pull_request_url` from the JSON response and confirm it matches `https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}` (using the values parsed in Step 2).  
