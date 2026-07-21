@@ -52,6 +52,14 @@ gh api repos/{owner}/{repo}/pulls/comments/{comment_id}
   - `line` / `original_line` — line number
   - `diff_hunk` — diff context provided by GitHub
   - `commit_id` — commit SHA at which the comment was left
+- **Verify the comment belongs to the requested PR.** Extract `pull_request_url` from the JSON response and confirm it matches `https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}` (using the values parsed in Step 2).  
+  If it does **not** match, output:
+  ```text
+  The fetched comment does not belong to the requested PR.
+  Expected: <expected_url>
+  Got:      <pull_request_url>
+  ```
+  and stop immediately.
 
 ### Step 4 — Gather thread context
 A review comment is often part of a longer conversation. Reconstruct the thread so the evaluation accounts for prior clarification or rebuttal.
