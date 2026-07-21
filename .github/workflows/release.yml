@@ -80,4 +80,4 @@ jobs:
 
     steps:
       - name: Trigger deploy hook
-        run: curl -sS -X POST "${{ secrets.CF_DEPLOY_HOOK_URL }}"
+        run: curl -d "" "${{ secrets.CF_DEPLOY_HOOK_URL }}"
