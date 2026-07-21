@@ -26,6 +26,7 @@ import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SyncConflictException
+import works.merc.keryx.app.core.map
 
 /**
  * [CloudStorage] backed by the Google Drive API v3, storing the sync DB in the
@@ -95,7 +96,7 @@ class GoogleDriveStorage(
             is Result.Ok -> f.value
         }
         if (existing == null) {
-            createFile(token, name, data)
+            createFile(token, name, data).map { }
         } else {
             // Best-effort optimistic concurrency: bail if the remote changed since download().
             if (expectedRev != null && existing.version != expectedRev) {
@@ -117,7 +118,27 @@ class GoogleDriveStorage(
         if (existing != null) {
             Result.Err(SyncConflictException())
         } else {
-            createFile(token, name, data)
+            when (val created = createFile(token, name, data)) {
+                is Result.Err -> created
+                is Result.Ok -> {
+                    val createdId = created.value
+                    val listResult = listFilesByName(token, name)
+                    if (listResult is Result.Err) return@withToken listResult
+                    val files = (listResult as Result.Ok).value
+                    if (files.none { it.id == createdId }) {
+                        return@withToken Result.Err(CloudStorageException("Created file disappeared immediately"))
+                    }
+                    for (file in files) {
+                        if (file.id != createdId) {
+                            when (val del = deleteById(token, file.id)) {
+                                is Result.Err -> return@withToken del
+                                is Result.Ok -> Unit
+                            }
+                        }
+                    }
+                    Result.Ok(Unit)
+                }
+            }
         }
     }
 
@@ -133,6 +154,18 @@ class GoogleDriveStorage(
         okOrError(response) // Drive returns 204 on success, which okOrError accepts.
     }
 
+    /** Deletes a file by its Drive ID. 404 is treated as success (idempotent). */
+    private suspend fun deleteById(token: String, fileId: String): Result<Unit> {
+        val response = client.delete("$apiBase/files/$fileId") {
+            header("Authorization", "Bearer $token")
+        }
+        return when {
+            response.status.value in 200..299 -> Result.Ok(Unit)
+            response.status.value == 404 -> Result.Ok(Unit)
+            else -> mapError(response.status.value, response.bodyAsText())
+        }
+    }
+
     override suspend fun exists(path: String): Result<Boolean> = withToken { token ->
         when (val f = findFile(token, fileName(path))) {
             is Result.Err -> f
@@ -140,8 +173,8 @@ class GoogleDriveStorage(
         }
     }
 
-    /** Looks up the single app-data file by name; returns null when absent. */
-    private suspend fun findFile(token: String, name: String): Result<DriveFile?> {
+    /** Lists all app-data files matching [name] (there should be at most one). */
+    private suspend fun listFilesByName(token: String, name: String): Result<List<DriveFile>> {
         val response = client.get("$apiBase/files") {
             header("Authorization", "Bearer $token")
             url {
@@ -156,16 +189,27 @@ class GoogleDriveStorage(
         val files = (json.parseToJsonElement(response.bodyAsText()) as? JsonObject)
             ?.get("files")?.jsonArray
             ?: return Result.Err(CloudStorageException("Missing files array in response"))
-        val first = files.firstOrNull()?.jsonObject ?: return Result.Ok(null)
-        val id = first["id"]?.jsonPrimitive?.content
-            ?: return Result.Err(CloudStorageException("File metadata missing id"))
-        val version = first["version"]?.jsonPrimitive?.content
-            ?: return Result.Err(CloudStorageException("File metadata missing version"))
-        return Result.Ok(DriveFile(id, version))
+        val result = files.map { fileObj ->
+            val obj = fileObj.jsonObject
+            val id = obj["id"]?.jsonPrimitive?.content
+                ?: return Result.Err(CloudStorageException("File metadata missing id"))
+            val version = obj["version"]?.jsonPrimitive?.content
+                ?: return Result.Err(CloudStorageException("File metadata missing version"))
+            DriveFile(id, version)
+        }
+        return Result.Ok(result)
     }
 
-    /** Creates the file in appDataFolder via a multipart/related upload (metadata + media). */
-    private suspend fun createFile(token: String, name: String, data: ByteArray): Result<Unit> {
+    /** Looks up the single app-data file by name; returns null when absent. */
+    private suspend fun findFile(token: String, name: String): Result<DriveFile?> {
+        return when (val listResult = listFilesByName(token, name)) {
+            is Result.Err -> listResult
+            is Result.Ok -> Result.Ok(listResult.value.firstOrNull())
+        }
+    }
+
+    /** Creates the file in appDataFolder via a multipart/related upload (metadata + media). Returns the created file id. */
+    private suspend fun createFile(token: String, name: String, data: ByteArray): Result<String> {
         val boundary = "keryx-${Random.nextLong().toULong()}"
         val metadata = buildJsonObject {
             put("name", name)
@@ -190,7 +234,13 @@ class GoogleDriveStorage(
             contentType(ContentType("multipart", "related").withParameter("boundary", boundary))
             setBody(body)
         }
-        return okOrError(response)
+        if (response.status.value !in 200..299) {
+            return mapError(response.status.value, response.bodyAsText())
+        }
+        val id = (json.parseToJsonElement(response.bodyAsText()) as? JsonObject)
+            ?.get("id")?.jsonPrimitive?.content
+            ?: return Result.Err(CloudStorageException("File metadata missing id"))
+        return Result.Ok(id)
     }
 
     /** Overwrites the file's content with a simple media upload. */

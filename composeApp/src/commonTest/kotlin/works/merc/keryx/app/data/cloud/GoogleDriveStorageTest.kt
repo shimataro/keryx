@@ -128,6 +128,66 @@ class GoogleDriveStorageTest {
     }
 
     @Test
+    fun createNewFileSucceeds() = runTest {
+        val s = storage(
+            "tok",
+            { respond(notFound, HttpStatusCode.OK) },
+            { respond("""{"id":"F1","version":"r1"}""", HttpStatusCode.OK) },
+            { respond("""{"files":[{"id":"F1","version":"r1"}]}""", HttpStatusCode.OK) },
+        )
+        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        assertIs<Result.Ok<Unit>>(r)
+    }
+
+    @Test
+    fun createReturnsConflictWhenAlreadyExists() = runTest {
+        val s = storage("tok", { respond(foundFile(), HttpStatusCode.OK) })
+        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        assertIs<Result.Err>(r)
+        assertIs<SyncConflictException>(r.exception)
+    }
+
+    @Test
+    fun createReconcilesRacingDuplicates() = runTest {
+        val s = storage(
+            "tok",
+            { respond(notFound, HttpStatusCode.OK) },
+            { respond("""{"id":"F1","version":"r1"}""", HttpStatusCode.OK) },
+            { respond("""{"files":[{"id":"F1","version":"r1"},{"id":"F2","version":"r2"}]}""", HttpStatusCode.OK) },
+            { respond("", HttpStatusCode.NoContent) },
+        )
+        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        assertIs<Result.Ok<Unit>>(r)
+    }
+
+    @Test
+    fun createPropagatesPostCreateListError() = runTest {
+        val s = storage(
+            "tok",
+            { respond(notFound, HttpStatusCode.OK) },
+            { respond("""{"id":"F1","version":"r1"}""", HttpStatusCode.OK) },
+            { respondError(HttpStatusCode.InternalServerError) },
+        )
+        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+    }
+
+    @Test
+    fun createPropagatesPostCreateDeleteError() = runTest {
+        val s = storage(
+            "tok",
+            { respond(notFound, HttpStatusCode.OK) },
+            { respond("""{"id":"F1","version":"r1"}""", HttpStatusCode.OK) },
+            { respond("""{"files":[{"id":"F1","version":"r1"},{"id":"F2","version":"r2"}]}""", HttpStatusCode.OK) },
+            { respondError(HttpStatusCode.InternalServerError) },
+        )
+        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+    }
+
+    @Test
     fun missingTokenIsAuthError() = runTest {
         val s = storage(token = null)
         val r = s.download(CLOUD_DB_PATH)
