@@ -78,20 +78,23 @@ A review comment is often part of a longer conversation. Reconstruct the thread 
    - Any author push-back or reviewer concession that changes the expected outcome.
 
 ### Step 5 — Gather code context
-1. Fetch PR metadata to obtain the head commit SHA:
+1. Use the `commit_id` extracted in Step 3 to load the code exactly as it existed when the comment was left.
+2. If the reviewed file exists in the local working tree **and matches `commit_id`**, read it for full context.
+3. Otherwise, fetch the file content at `commit_id`:
+   ```bash
+   gh api repos/{owner}/{repo}/contents/{path}?ref={commit_id}
+   ```
+   Decode the `content` field from base64 if necessary.
+4. Fetch the diff for that commit to understand the change being reviewed:
+   ```bash
+   gh api repos/{owner}/{repo}/commits/{commit_id} --jq '.files[] | select(.filename == "{path}") | .patch'
+   ```
+   (The `diff_hunk` from Step 3 already provides the immediate surrounding context.)
+5. **Separately**, fetch the current PR head SHA and compare it to `commit_id`:
    ```bash
    gh api repos/{owner}/{repo}/pulls/{pull_number} --jq '.head.sha'
    ```
-2. If the reviewed file exists in the local working tree, read it for full context.
-3. If the local file is absent or differs, fetch the file content at the PR head commit:
-   ```bash
-   gh api repos/{owner}/{repo}/contents/{path}?ref={head_sha}
-   ```
-   Decode the `content` field from base64 if necessary.
-4. Also read the PR diff for the file to understand the change being reviewed:
-   ```bash
-   gh pr diff {pull_number} --repo {owner}/{repo}
-   ```
+   If the head has advanced, briefly check whether the issue noted in the review comment has already been fixed in a later commit. If so, note this in the evaluation reasoning.
 
 ### Step 6 — Evaluate validity
 Analyze the review comment against the code and project conventions. Consider:
