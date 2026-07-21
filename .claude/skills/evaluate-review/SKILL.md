@@ -84,7 +84,7 @@ A review comment is often part of a longer conversation. Reconstruct the thread 
    ```bash
    gh api repos/{owner}/{repo}/contents/{path}?ref={commit_id}
    ```
-   Decode the `content` field from base64 if necessary.
+   **URL-encode the `{path}` segment** before interpolation (e.g. space → `%20`, `#` → `%23`, `?` → `%3F`) while preserving `/` between directory components. Decode the `content` field from base64 if necessary.
 4. Fetch the diff for that commit to understand the change being reviewed:
    ```bash
    gh api repos/{owner}/{repo}/commits/{commit_id} --jq '.files[] | select(.filename == "{path}") | .patch'
