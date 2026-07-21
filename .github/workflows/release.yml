@@ -75,6 +75,8 @@ jobs:
     name: Trigger Cloudflare Pages deploy hook
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    needs: package-macos
+    permissions: {}
 
     steps:
       - name: Trigger deploy hook
