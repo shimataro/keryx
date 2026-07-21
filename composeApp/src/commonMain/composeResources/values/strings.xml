@@ -201,6 +201,7 @@
     <string name="feed_new_articles">新着記事が %1$d 件あります</string>
     <string name="feed_url_changed">「%1$s」の URL が変更されました</string>
     <string name="update_available_notification">新しいバージョン %1$s が利用可能です</string>
+    <string name="notification_app_translocated">Keryx が一時的な場所で実行されています。Dropbox 連携などが失敗する場合は、Keryx を「アプリケーション」フォルダへ移動してから起動し直してください。</string>
 
     <!-- tray -->
     <string name="tray_show">表示</string>

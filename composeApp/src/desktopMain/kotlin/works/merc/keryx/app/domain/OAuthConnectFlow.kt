@@ -1,6 +1,7 @@
 package works.merc.keryx.app.domain
 
 import works.merc.keryx.app.core.CloudAuthException
+import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.OAUTH_CONNECT_TIMEOUT_MS
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.cloud.CloudAuthManager
@@ -41,7 +42,13 @@ class OAuthConnectFlow(
         val callback = transport.capture(state, timeoutMillis) { uri ->
             redirectUri = uri
             BrowserOpener.open(authManager.buildAuthorizeUrl(clientId, uri, challenge, state))
-        } ?: return Result.Err(CloudAuthException("Authorization timed out"))
+        } ?: run {
+            // Timed out: the OAuth redirect callback never reached the app within timeoutMillis.
+            // On macOS this most often means the keryx:// URI was routed to a different/stale bundle
+            // (or an App-Translocated copy) rather than the running instance. See docs/sync-architecture.md.
+            Log.warn(TAG, "OAuth authorization timed out after ${timeoutMillis}ms — callback never received")
+            return Result.Err(CloudAuthException("Authorization timed out"))
+        }
 
         if (callback.error != null) {
             return Result.Err(CloudAuthException(callback.error))
@@ -55,5 +62,9 @@ class OAuthConnectFlow(
             ?: return Result.Err(CloudAuthException("Redirect URI was not established"))
 
         return authManager.exchangeCode(clientId, code, verifier, usedRedirectUri)
+    }
+
+    private companion object {
+        const val TAG = "OAuthConnect"
     }
 }
