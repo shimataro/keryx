@@ -68,10 +68,10 @@ A review comment is often part of a longer conversation. Reconstruct the thread 
 
 1. Fetch **all** review comments on the PR:
    ```bash
-   gh api repos/{owner}/{repo}/pulls/{pull_number}/comments
+   gh api --paginate repos/{owner}/{repo}/pulls/{pull_number}/comments
    ```
 2. Build the reply graph using the `in_reply_to_id` field. Each comment either starts a thread (`in_reply_to_id` is absent) or replies to another.
-3. Identify which thread contains the target `comment_id`. Walk the chain backward to collect every preceding comment in that thread, in chronological order.
+3. Identify which thread contains the target `comment_id`. Using the reply graph from step 2, follow the `in_reply_to_id` chain backward from the target comment to locate the root of the thread. Then collect **all** comments in that thread—both ancestors and descendants—and present the complete conversation in chronological order.
 4. Include this conversation history in your analysis. Pay attention to:
    - Whether earlier rounds already accepted, rejected, or refined the point.
    - Whether the target comment is a follow-up that narrows or shifts the request.
