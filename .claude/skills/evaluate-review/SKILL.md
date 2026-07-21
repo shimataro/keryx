@@ -90,6 +90,7 @@ Analyze the review comment against the code and project conventions. Consider:
 2. **Relevance** — Does the comment apply to the code at the stated location?
 3. **Constructiveness** — Does it clearly identify a problem or suggest a valid improvement?
 4. **Project conventions** — Does it align with the project's documented rules (check `.claude/CLAUDE.md` and `docs/*.md`)?
+5. **Language / library / framework correctness** — When the comment concerns usage of a language runtime, library, or framework, verify the claim against the **official documentation of the exact version the project uses**. Prefer official docs (API reference, language spec, release notes) over blog posts or Stack Overflow. If the docs do not cover the point, inspect the source code of that version directly. Do not rely on memory or general assumptions.
 
 Output the evaluation in this exact format:
 
