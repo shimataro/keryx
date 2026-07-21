@@ -72,7 +72,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
   deploy-pages:
-    name: Trigger Cloudflare Pages deploy hook
+    name: Update "https://keryx.merc.works" (trigger Cloudflare Pages deploy hook)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: package-macos
