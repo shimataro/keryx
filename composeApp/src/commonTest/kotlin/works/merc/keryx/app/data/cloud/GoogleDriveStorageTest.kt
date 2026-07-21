@@ -71,6 +71,16 @@ class GoogleDriveStorageTest {
     }
 
     @Test
+    fun deleteReturning404AfterListIsSuccess() = runTest {
+        val s = storage(
+            "tok",
+            { respond(foundFile(), HttpStatusCode.OK) },     // listFilesByName
+            { respondError(HttpStatusCode.NotFound) },        // DELETE → 404
+        )
+        assertIs<Result.Ok<Unit>>(s.delete(CLOUD_DB_PATH))
+    }
+
+    @Test
     fun deleteMissingFileIsSuccessWithNoSecondRequest() = runTest {
         // Only one queued response: listFilesByName returns empty, so no DELETE is issued.
         val s = storage("tok", { respond(notFound, HttpStatusCode.OK) })
@@ -84,6 +94,17 @@ class GoogleDriveStorageTest {
             { respond("""{"files":[{"id":"F1","version":"r1"},{"id":"F2","version":"r2"}]}""", HttpStatusCode.OK) },
             { respond("", HttpStatusCode.NoContent) },
             { respond("", HttpStatusCode.NoContent) },
+        )
+        assertIs<Result.Ok<Unit>>(s.delete(CLOUD_DB_PATH))
+    }
+
+    @Test
+    fun deleteOneOfManyReturning404IsSuccess() = runTest {
+        val s = storage(
+            "tok",
+            { respond("""{"files":[{"id":"F1","version":"r1"},{"id":"F2","version":"r2"}]}""", HttpStatusCode.OK) },
+            { respondError(HttpStatusCode.NotFound) },        // DELETE F1 → 404
+            { respond("", HttpStatusCode.NoContent) },        // DELETE F2 → 204
         )
         assertIs<Result.Ok<Unit>>(s.delete(CLOUD_DB_PATH))
     }
