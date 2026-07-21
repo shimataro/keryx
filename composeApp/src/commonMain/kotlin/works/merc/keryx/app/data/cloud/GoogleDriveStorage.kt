@@ -125,11 +125,17 @@ class GoogleDriveStorage(
                     val listResult = listFilesByName(token, name)
                     if (listResult is Result.Err) return@withToken listResult
                     val files = (listResult as Result.Ok).value
-                    if (files.none { it.id == createdId }) {
+                    val winner = files.minByOrNull { it.id }
+                    if (winner == null) {
                         return@withToken Result.Err(CloudStorageException("Created file disappeared immediately"))
                     }
+                    if (winner.id != createdId) {
+                        // Lost the race — the sync flow will download the winner's file and retry.
+                        return@withToken Result.Err(SyncConflictException())
+                    }
+                    // We are the winner — safely delete every duplicate.
                     for (file in files) {
-                        if (file.id != createdId) {
+                        if (file.id != winner.id) {
                             when (val del = deleteById(token, file.id)) {
                                 is Result.Err -> return@withToken del
                                 is Result.Ok -> Unit
@@ -143,15 +149,18 @@ class GoogleDriveStorage(
     }
 
     override suspend fun delete(path: String): Result<Unit> = withToken { token ->
-        // Idempotent: if the file is already absent, report success (nothing to delete).
-        val existing = when (val f = findFile(token, fileName(path))) {
-            is Result.Err -> return@withToken f
-            is Result.Ok -> f.value ?: return@withToken Result.Ok(Unit)
+        val name = fileName(path)
+        val listResult = listFilesByName(token, name)
+        if (listResult is Result.Err) return@withToken listResult
+        val files = (listResult as Result.Ok).value
+        if (files.isEmpty()) return@withToken Result.Ok(Unit)
+        for (file in files) {
+            when (val del = deleteById(token, file.id)) {
+                is Result.Err -> return@withToken del
+                is Result.Ok -> Unit
+            }
         }
-        val response = client.delete("$apiBase/files/${existing.id}") {
-            header("Authorization", "Bearer $token")
-        }
-        okOrError(response) // Drive returns 204 on success, which okOrError accepts.
+        Result.Ok(Unit)
     }
 
     /** Deletes a file by its Drive ID. 404 is treated as success (idempotent). */
@@ -200,11 +209,13 @@ class GoogleDriveStorage(
         return Result.Ok(result)
     }
 
-    /** Looks up the single app-data file by name; returns null when absent. */
+    /** Looks up the single app-data file by name; returns null when absent.
+     *  When transient duplicates exist (e.g. from a racing create), the
+     *  deterministic winner (lowest id) is returned so all callers converge. */
     private suspend fun findFile(token: String, name: String): Result<DriveFile?> {
         return when (val listResult = listFilesByName(token, name)) {
             is Result.Err -> listResult
-            is Result.Ok -> Result.Ok(listResult.value.firstOrNull())
+            is Result.Ok -> Result.Ok(listResult.value.minByOrNull { it.id })
         }
     }
 

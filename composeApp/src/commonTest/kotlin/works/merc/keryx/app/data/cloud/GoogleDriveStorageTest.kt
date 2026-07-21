@@ -64,7 +64,7 @@ class GoogleDriveStorageTest {
     fun deleteRemovesExistingFile() = runTest {
         val s = storage(
             "tok",
-            { respond(foundFile(), HttpStatusCode.OK) },     // findFile
+            { respond(foundFile(), HttpStatusCode.OK) },     // listFilesByName
             { respond("", HttpStatusCode.NoContent) },        // DELETE → 204
         )
         assertIs<Result.Ok<Unit>>(s.delete(CLOUD_DB_PATH))
@@ -72,8 +72,19 @@ class GoogleDriveStorageTest {
 
     @Test
     fun deleteMissingFileIsSuccessWithNoSecondRequest() = runTest {
-        // Only one queued response: findFile returns empty, so no DELETE is issued.
+        // Only one queued response: listFilesByName returns empty, so no DELETE is issued.
         val s = storage("tok", { respond(notFound, HttpStatusCode.OK) })
+        assertIs<Result.Ok<Unit>>(s.delete(CLOUD_DB_PATH))
+    }
+
+    @Test
+    fun deleteRemovesAllMatchingFiles() = runTest {
+        val s = storage(
+            "tok",
+            { respond("""{"files":[{"id":"F1","version":"r1"},{"id":"F2","version":"r2"}]}""", HttpStatusCode.OK) },
+            { respond("", HttpStatusCode.NoContent) },
+            { respond("", HttpStatusCode.NoContent) },
+        )
         assertIs<Result.Ok<Unit>>(s.delete(CLOUD_DB_PATH))
     }
 
@@ -158,6 +169,19 @@ class GoogleDriveStorageTest {
         )
         val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
         assertIs<Result.Ok<Unit>>(r)
+    }
+
+    @Test
+    fun createReturnsConflictWhenNotTheDeterministicWinner() = runTest {
+        val s = storage(
+            "tok",
+            { respond(notFound, HttpStatusCode.OK) },                                      // findFile / listFilesByName
+            { respond("""{"id":"F2","version":"r2"}""", HttpStatusCode.OK) },             // createFile
+            { respond("""{"files":[{"id":"F1","version":"r1"},{"id":"F2","version":"r2"}]}""", HttpStatusCode.OK) }, // listFiles (post-create)
+        )
+        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        assertIs<Result.Err>(r)
+        assertIs<SyncConflictException>(r.exception)
     }
 
     @Test
