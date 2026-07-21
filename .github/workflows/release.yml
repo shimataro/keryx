@@ -70,3 +70,12 @@ jobs:
         run: gh release upload '${{ github.event.release.tag_name }}' '${{ steps.artifact.outputs.path }}' --clobber
         env:
           GH_TOKEN: ${{ github.token }}
+
+  deploy-pages:
+    name: Trigger Cloudflare Pages deploy hook
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Trigger deploy hook
+        run: curl -sS -X POST "${{ secrets.CF_DEPLOY_HOOK_URL }}"
