@@ -70,3 +70,14 @@ jobs:
         run: gh release upload '${{ github.event.release.tag_name }}' '${{ steps.artifact.outputs.path }}' --clobber
         env:
           GH_TOKEN: ${{ github.token }}
+
+  deploy-pages:
+    name: Update "https://keryx.merc.works" (trigger Cloudflare Pages deploy hook)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: package-macos
+    permissions: {}
+
+    steps:
+      - name: Trigger deploy hook
+        run: curl -d "" "${{ secrets.CF_DEPLOY_HOOK_URL }}"
