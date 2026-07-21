@@ -239,6 +239,12 @@ class SyncRepository(
             // schema) from a genuinely transient failure: the former will never succeed on retry,
             // so it must not be reported as "try again later".
             if (isUnusableCloudDb(msg)) {
+                val hasExpectedSchema = DatabaseMerger.validateSchema(tempPath, KeryxDatabase.Schema.version)
+                if (hasExpectedSchema) {
+                    // Schema looks correct: this is an app bug, not incompatible data.
+                    Log.error(TAG, "Cloud DB merge failed despite compatible schema", e)
+                    return Result.Err(CloudStorageException("Merge failed: ${e.message}"))
+                }
                 Log.warn(TAG, "Cloud DB unusable (corrupt or incompatible schema): $msg")
                 return Result.Err(CloudDataIncompatibleException("Cloud DB unusable: $msg"))
             }

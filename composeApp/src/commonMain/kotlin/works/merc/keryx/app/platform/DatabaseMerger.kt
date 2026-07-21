@@ -22,4 +22,13 @@ expect object DatabaseMerger {
         localSchemaVersion: Long,
         mergeStatements: List<String>,
     )
+
+    /**
+     * Validates that the database at [dbPath] contains the expected Keryx schema
+     * (tables and columns) for [schemaVersion]. Returns `true` if structurally compatible.
+     *
+     * Must be updated when [works.merc.keryx.app.data.local.db.KeryxDatabase.Schema.version]
+     * is bumped and [works.merc.keryx.app.domain.MergeSql] references new tables or columns.
+     */
+    fun validateSchema(dbPath: String, schemaVersion: Long): Boolean
 }

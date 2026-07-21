@@ -10,8 +10,10 @@ import works.merc.keryx.app.insertTag
 import works.merc.keryx.app.platform.DatabaseMerger
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** Verifies the ATTACH-DATABASE merge (timestamp-last-wins) via [DatabaseMerger]. */
 class SyncMergerTest {
@@ -819,6 +821,34 @@ class SyncMergerTest {
         assertEquals(1, active.size)
         assertEquals("t1", active[0].tag_id)
         verifyDriver.close()
+    }
+
+    @Test
+    fun validateSchemaReturnsTrueForValidKeryxDb() {
+        val (file, driver, _) = fileDb()
+        driver.close()
+        assertTrue(DatabaseMerger.validateSchema(file.absolutePath, 1L))
+    }
+
+    @Test
+    fun validateSchemaReturnsFalseForForeignSchemaDb() {
+        val file = java.io.File.createTempFile("foreign", ".db")
+        java.sql.DriverManager.getConnection("jdbc:sqlite:${file.absolutePath}").use { conn ->
+            conn.createStatement().use { st ->
+                st.execute("PRAGMA user_version = 1")
+                st.execute("CREATE TABLE unrelated (x INTEGER)")
+            }
+        }
+        assertFalse(DatabaseMerger.validateSchema(file.absolutePath, 1L))
+        file.delete()
+    }
+
+    @Test
+    fun validateSchemaReturnsFalseForCorruptFile() {
+        val file = java.io.File.createTempFile("corrupt", ".db")
+        file.writeBytes(byteArrayOf(1, 2, 3, 4))
+        assertFalse(DatabaseMerger.validateSchema(file.absolutePath, 1L))
+        file.delete()
     }
 
     private fun reopen(file: java.io.File): Triple<java.io.File, app.cash.sqldelight.db.SqlDriver, KeryxDatabase> {

@@ -441,6 +441,32 @@ class SyncRepositoryTest {
     }
 
     @Test
+    fun mergeFailureWithCompatibleSchemaIsReportedAsStorageException() = runTest {
+        // The cloud DB has a valid schema, but a local table is missing, forcing a structural
+        // merge failure. Because the cloud DB itself is schema-compatible, this is an app bug
+        // (not incompatible data) and must NOT offer the destructive RESET_CLOUD_DATA action.
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1")
+        // Remove a local table so merge fails structurally while the cloud DB is valid.
+        localDriver.execute(null, "DROP TABLE global_settings", 0)
+
+        val repo = newRepo(cloud)
+        val result = repo.sync()
+
+        assertIs<Result.Err>(result)
+        assertIs<CloudStorageException>(result.exception)
+        assertEquals(0, cloud.uploadCount)
+        assertFalse(tempCloudDbFile().exists())
+
+        val notes = notificationCenter.items.value
+        assertEquals(1, notes.size)
+        assertEquals(AppNotificationLevel.ERROR, notes.first().level)
+        assertEquals("syncFailed:CloudStorageException", notes.first().message)
+        // A transient / app-bug error must not offer the reset-cloud-data action.
+        assertNull(notes.first().action)
+    }
+
+    @Test
     fun syncFailureIsAddedToNotificationCenter() = runTest {
         val cloud = FakeCloudStorage()
         cloud.queueExists(Result.Err(CloudAuthException("no token")))
