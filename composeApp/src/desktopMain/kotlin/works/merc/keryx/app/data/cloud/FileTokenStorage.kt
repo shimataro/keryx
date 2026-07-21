@@ -21,8 +21,15 @@ class FileTokenStorage(
     private val file = File(dirOverride ?: AppDirs.appDataDir(), fileName)
 
     override fun save(tokens: OAuthTokens) {
-        file.parentFile?.mkdirs()
-        file.writeText(json.encodeToString(tokens))
+        // Persisting must never throw: this is the last-resort store, and a failure here (unwritable
+        // data dir, a pre-existing root-owned/read-only token file) would otherwise propagate up
+        // through CloudSession.saveTokens() and abort the connect flow *after* the token is already
+        // held in memory — leaving the user unable to link at all. Swallow and log instead; the
+        // in-memory session still works, only cross-restart persistence is lost.
+        runCatching {
+            file.parentFile?.mkdirs()
+            file.writeText(json.encodeToString(tokens))
+        }.onFailure { e -> Log.warn(TAG, "Token file could not be written", e) }
         runCatching { file.setReadable(false, false); file.setReadable(true, true) }
         runCatching { file.setWritable(false, false); file.setWritable(true, true) }
     }

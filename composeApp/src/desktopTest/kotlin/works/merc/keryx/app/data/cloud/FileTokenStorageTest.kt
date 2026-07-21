@@ -41,6 +41,22 @@ class FileTokenStorageTest {
     }
 
     @Test
+    fun saveDoesNotThrowWhenFileCannotBeWritten() {
+        // dirOverride points at an existing regular FILE, so the token path's parent is not a
+        // directory and writeText fails. save() must swallow the failure rather than propagate it
+        // (which would otherwise abort the connect flow after the token is already held in memory).
+        val blockingFile = FileIO.join(AppDirs.tempDir(), "token-block-${Random.nextInt()}")
+        FileIO.writeText(blockingFile, "not a directory")
+        try {
+            val storage = FileTokenStorage(dirOverride = blockingFile)
+            storage.save(OAuthTokens(accessToken = "access-123")) // must not throw
+            assertNull(storage.load())
+        } finally {
+            FileIO.delete(blockingFile)
+        }
+    }
+
+    @Test
     fun clearDeletesFileAndSubsequentLoadReturnsNull() {
         storage.save(OAuthTokens(accessToken = "access-123"))
         assertEquals("access-123", storage.load()?.accessToken)
