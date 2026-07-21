@@ -289,7 +289,7 @@ private fun CloudSyncTabContent(vm: SettingsViewModel) {
                     connected = connected == type,
                     connecting = vm.connectingType == type,
                     canCancel = vm.canCancelConnect,
-                    idleEnabled = vm.connectingType == null,
+                    idleEnabled = vm.connectingType == null && !vm.resetting,
                     failed = vm.connectFailedType == type,
                     lastSyncedAtText = if (connected == type) vm.lastSyncedAtText else null,
                     resetting = vm.resetting,
