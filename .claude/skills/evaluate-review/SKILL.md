@@ -7,12 +7,12 @@ Evaluate a GitHub pull-request review comment and, if it is technically sound, p
 
 ## Usage
 
-```
+```text
 /evaluate-review <github-pr-review-url>
 ```
 
 Example:
-```
+```text
 /evaluate-review https://github.com/shimataro/keryx/pull/3#discussion_r3618156689
 ```
 
@@ -27,13 +27,13 @@ Check whether a URL argument was passed to the skill.
 ### Step 2 — Validate URL format
 Parse the URL. It must match the pattern of a GitHub PR review-comment link:
 
-```
+```text
 https://github.com/<owner>/<repo>/pull/<number>#discussion_r<comment_id>
 ```
 
 - Extract `owner`, `repo`, `pull_number`, and `comment_id`.
 - If the URL does **not** match this pattern, output exactly:
-  ```
+  ```text
   The provided URL does not appear to be a GitHub PR review comment link.
   ```
   and stop.
@@ -116,6 +116,6 @@ If the evaluation is **Valid** or **Partially Valid** **and** the comment calls 
 4. Call `ExitPlanMode` to submit the plan for user approval.
 
 If the review is **Invalid** or no code change is required, state clearly:
-```
+```text
 No implementation plan is needed.
 ```
