@@ -6,6 +6,8 @@
 
 A local-first, cross-platform RSS reader
 
+🌐 **Website**: <https://keryx.merc.works>
+
 ## Features
 
 - **Multi-device sync**: via cloud storage (Dropbox / Google Drive)

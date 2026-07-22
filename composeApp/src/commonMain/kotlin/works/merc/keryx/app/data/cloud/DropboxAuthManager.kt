@@ -7,6 +7,7 @@ import io.ktor.client.request.post
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.URLBuilder
 import io.ktor.http.parameters
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -79,6 +80,8 @@ class DropboxAuthManager(
         } else {
             Result.Err(CloudAuthException("Revoke failed (HTTP ${response.status.value})"))
         }
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: Throwable) {
         Result.Err(CloudAuthException(e.message ?: "Revoke failed"))
     }
@@ -105,6 +108,8 @@ class DropboxAuthManager(
                 )
             }
         }
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: Throwable) {
         Result.Err(CloudAuthException(e.message ?: "Token request failed"))
     }

@@ -8,6 +8,7 @@ import io.ktor.client.plugins.timeout
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsText
+import kotlinx.coroutines.CancellationException
 import works.merc.keryx.app.core.FEED_TIMEOUT_RETRY_COUNT
 import works.merc.keryx.app.core.FeedDiscoveryException
 import works.merc.keryx.app.core.FeedFetchException
@@ -41,6 +42,10 @@ class FeedFetcher(
         while (true) {
             try {
                 return doFetch(url, etag, lastModified, redirectCount = 0, permanentTarget = null)
+            } catch (e: CancellationException) {
+                // Coroutine cancellation is not a fetch failure — rethrow so a cancelled refresh
+                // never becomes a bogus FeedFetchException/FeedTimeoutException (and never retries).
+                throw e
             } catch (e: Throwable) {
                 if (isTimeout(e)) {
                     if (attempt < FEED_TIMEOUT_RETRY_COUNT) {

@@ -5,10 +5,14 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.respondError
 import io.ktor.http.HttpStatusCode
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 
 class UpdateCheckerTest {
 
@@ -56,6 +60,27 @@ class UpdateCheckerTest {
     fun missingFieldsAreFailed() = runTest {
         val status = checker(body = """{"unrelated":"field"}""").check()
         assertIs<UpdateStatus.Failed>(status)
+    }
+
+    @Test
+    fun cancellationPropagatesNotConvertedToFailed() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val started = CompletableDeferred<Unit>()
+        val client = HttpClient(MockEngine {
+            started.complete(Unit)
+            gate.await()
+            respond("""[{"tag_name":"v1.2.3","html_url":"https://ex.com/1.2.3"}]""")
+        }) {
+            expectSuccess = false
+        }
+        val checker = UpdateChecker(client, "1.0.0", repoSlug = "owner/repo")
+        var status: UpdateStatus? = null
+        val job = launch { status = checker.check() }
+        runCurrent()
+        started.await()
+        job.cancel()
+        job.join()
+        assertNull(status)
     }
 }
 
