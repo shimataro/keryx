@@ -39,6 +39,21 @@ mobile (Android/iOS) targets planned for later.
 ./gradlew :composeApp:packageDmg     # Package (macOS; use packageMsi/packageDeb on Windows/Linux)
 ```
 
+## Branching
+
+When a turn has changed tracked files while the current branch is a version branch
+(`v0`, `v1`, … — anything matching `v*`, the default/integration branch), do not
+leave the edits on that branch. After making the changes, **propose** an appropriate
+branch name, and **only once the user agrees**, create that branch and switch to it
+(`git switch -c <name>` / `git checkout -b <name>` carries the uncommitted changes
+along — no stash needed). Never create or switch branches without agreement.
+
+Branch names follow the repo convention `<type>/<kebab-summary>`, where `<type>` is
+the Conventional Commits type of the change (`feat`, `fix`, `refactor`, `docs`,
+`chore`, `build`, `test`, `ci`), e.g. `feat/m17n-english`,
+`refactor/split-oversized-ui-panes`. Once on a feature branch (i.e. not `v*`), this
+rule no longer triggers.
+
 ## Commit messages
 
 After implementing a plan that changes source code, output a concise commit
