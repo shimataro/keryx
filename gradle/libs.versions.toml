@@ -17,13 +17,9 @@ jna = "5.19.1"
 composewebview = "1.0.0-beta-02"
 slf4j = "2.0.18"
 
-# material3 and material-icons-extended are versioned independently from the
-# Compose Multiplatform plugin (compose-multiplatform). When bumping
-# compose-multiplatform, verify/update ONLY compose-material3 to the version that
-# release aligns to. material-icons-extended is frozen at 1.7.3 by JetBrains
-# (CMP-9684, deprecated in favour of Material Symbols) with no newer release, so
-# it stays pinned and does not track the Compose MP release.
-compose-material-icons-extended = "1.7.3"
+# material3 is versioned independently from the Compose Multiplatform plugin
+# (compose-multiplatform). When bumping compose-multiplatform, verify/update
+# compose-material3 to the version that release aligns to.
 compose-material3 = "1.9.0"
 
 [libraries]
@@ -31,7 +27,6 @@ compose-material3 = "1.9.0"
 compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "compose-multiplatform" }
 compose-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "compose-multiplatform" }
 compose-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "compose-material3" }
-compose-material-icons-extended = { module = "org.jetbrains.compose.material:material-icons-extended", version.ref = "compose-material-icons-extended" }
 compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "compose-multiplatform" }
 compose-components-resources = { module = "org.jetbrains.compose.components:components-resources", version.ref = "compose-multiplatform" }
 compose-ui-tooling-preview = { module = "org.jetbrains.compose.ui:ui-tooling-preview", version.ref = "compose-multiplatform" }
