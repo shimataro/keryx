@@ -16,8 +16,9 @@ here.
   `/refactor domain/`, `/refactor composeApp/src/commonMain/kotlin/.../ui/home`).
 - **Default (no argument):** production source under
   `composeApp/src/commonMain/kotlin` + `composeApp/src/desktopMain/kotlin`.
-  Exclude `build/` and generated code (SQLDelight, Compose Resources,
-  `BuildConfig`) — those are regenerated, never hand-edited.
+- **Always excluded (every invocation, even an explicit path argument):**
+  `build/` and generated code (SQLDelight, Compose Resources, `BuildConfig`) —
+  those are regenerated, never hand-edited.
 - Test code (`commonTest/`, `desktopTest/`) may be tidied, but **never in the
   same batch as the production code it verifies** — don't weaken the oracle and
   the code under test at the same time.
