@@ -9,7 +9,7 @@ import androidx.compose.ui.Modifier
  * Drop-in replacement for a single-line `androidx.compose.material3.OutlinedTextField`. The desktop
  * `actual` renders a flat, thin-bordered native-feel field (hairline `outlineVariant` border, small
  * corner radius, accent-colored border on focus) instead of M3's tall outlined box with its floating
- * label — matching the app's Native-feel restyle conventions (see `.claude/ui-guidelines.md`). When an
+ * label — matching the app's Native-feel restyle conventions (see `.claude/skills/ui-guidelines/SKILL.md`). When an
  * Android target is added, its `actual` can go back to M3's `OutlinedTextField`/`TextField`, which is
  * the desirable look on Android.
  *

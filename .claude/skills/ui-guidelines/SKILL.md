@@ -171,7 +171,7 @@ NativeOverflowMenu(
 ## Text input dialogs
 
 `TextPromptDialog` in
-[FeedListPane.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/FeedListPane.kt)
+[TextPromptDialog.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/TextPromptDialog.kt)
 (shared by the add/edit tag and rename feed dialogs) and the add-feed dialog in
 [HomeScreen.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/HomeScreen.kt)
 follow this pattern for single-field dialogs. **The field itself is

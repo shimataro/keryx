@@ -19,7 +19,7 @@ import androidx.compose.ui.unit.dp
  * Flat replacements for M3's `Button`/`OutlinedButton`/`TextButton`, built on plain
  * `Modifier.clickable` (no `indication` override) so presses use the app-wide flat
  * [androidx.compose.foundation.LocalIndication] instead of M3's hardcoded ripple. See
- * `.claude/ui-guidelines.md`. Intentionally have no `colors`/`contentColor` override params — no
+ * `.claude/skills/ui-guidelines/SKILL.md`. Intentionally have no `colors`/`contentColor` override params — no
  * existing call site customizes colors.
  */
 @Composable

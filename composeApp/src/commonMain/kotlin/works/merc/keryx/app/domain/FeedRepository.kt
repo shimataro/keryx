@@ -144,9 +144,10 @@ class FeedRepository(
     private data class RefreshOutcome(val result: Result<Int>, val hadArticles: Boolean)
 
     /**
-     * Fetches and upserts one feed's articles without touching the FTS index. Callers
-     * (e.g. [refreshAll]) are responsible for incrementally indexing the new rows once, in bulk
-     * ([FtsManager.indexMissing]), if [RefreshOutcome.hadArticles] is true for any refreshed feed.
+     * Refreshes a feed's metadata and articles.
+     *
+     * @param feed The feed to refresh.
+     * @return The article upsert result and whether the fetched feed contained articles.
      */
     private suspend fun refreshFeedArticles(feed: Feeds): RefreshOutcome {
         val fetched = when (val r = feedFetcher.fetch(feed.url, feed.etag, feed.last_modified)) {
@@ -157,7 +158,7 @@ class FeedRepository(
                     feeds.incrementErrorCount(ex.messageText, clock.nowMillis(), feed.id)
                 }
                 if (ex is FeedNotFoundException && ex.isGone) {
-                    notify(messages.feedGone(displayTitle(feed)), AppNotificationLevel.WARNING)
+                    notify(messages.feedGone(feed.displayTitle()), AppNotificationLevel.WARNING)
                 }
                 return RefreshOutcome(r, hadArticles = false)
             }
@@ -195,7 +196,7 @@ class FeedRepository(
 
         if (fetched.redirectUrl != null && fetched.redirectUrl != feed.url) {
             feeds.updateUrl(fetched.redirectUrl, clock.nowMillis(), feed.id)
-            notify(messages.feedUrlChanged(displayTitle(feed)), AppNotificationLevel.WARNING)
+            notify(messages.feedUrlChanged(feed.displayTitle()), AppNotificationLevel.WARNING)
         }
 
         val newCount = articleRepository.upsertParsed(feed.id, fetched.articles)
@@ -228,9 +229,12 @@ class FeedRepository(
         }
     }
 
-    private fun displayTitle(feed: Feeds): String =
-        feed.custom_title?.takeIf { it.isNotBlank() } ?: feed.title
-
+    /**
+     * Adds a notification with the specified message and severity level.
+     *
+     * @param message The notification message.
+     * @param level The notification severity level.
+     */
     private suspend fun notify(message: String, level: AppNotificationLevel) {
         notificationCenter.add(
             AppNotification(

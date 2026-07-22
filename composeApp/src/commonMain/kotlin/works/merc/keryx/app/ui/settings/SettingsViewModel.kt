@@ -22,6 +22,7 @@ import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.opml.OpmlCodec
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.CloudSession
+import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
@@ -254,6 +255,11 @@ class SettingsViewModel(
         lastSyncedAtText = syncRepository.lastSyncedAt()?.let { formatTimestamp(it) }
     }
 
+    /**
+     * Exports all subscribed feeds to an OPML file selected by the user.
+     *
+     * Updates the OPML result to indicate whether the export completed or was canceled.
+     */
     fun exportOpml() {
         if (exportingOpml || importingOpml) return
         viewModelScope.launch {
@@ -266,7 +272,7 @@ class SettingsViewModel(
                 }
                 val feeds = feedRepository.getAllFeeds().map {
                     OpmlCodec.ExportFeed(
-                        title = it.custom_title?.takeIf { t -> t.isNotBlank() } ?: it.title,
+                        title = it.displayTitle(),
                         xmlUrl = it.url,
                         htmlUrl = it.site_url,
                     )
