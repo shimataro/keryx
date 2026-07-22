@@ -17,6 +17,9 @@ jna = "5.19.1"
 composewebview = "1.0.0-beta-02"
 slf4j = "2.0.18"
 
+# material3 and material-icons-extended are versioned independently from the
+# Compose Multiplatform plugin (compose-multiplatform). When bumping
+# compose-multiplatform, verify/update these two to the versions that release aligns to.
 compose-material-icons-extended = "1.7.3"
 compose-material3 = "1.9.0"
 
@@ -29,7 +32,7 @@ compose-material-icons-extended = { module = "org.jetbrains.compose.material:mat
 compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "compose-multiplatform" }
 compose-components-resources = { module = "org.jetbrains.compose.components:components-resources", version.ref = "compose-multiplatform" }
 compose-ui-tooling-preview = { module = "org.jetbrains.compose.ui:ui-tooling-preview", version.ref = "compose-multiplatform" }
-compose-ui-test-junit4 = { module = "org.jetbrains.compose.ui:ui-test-junit4", version.ref = "compose-multiplatform" }
+compose-ui-test = { module = "org.jetbrains.compose.ui:ui-test", version.ref = "compose-multiplatform" }
 
 # --- SQLDelight (local DB) ---
 sqldelight-driver-jdbc-sqlite = { module = "app.cash.sqldelight:sqlite-driver", version.ref = "sqldelight" }

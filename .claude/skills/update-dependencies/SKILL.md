@@ -95,6 +95,13 @@ These move as a group and can break if one outpaces the others:
   the current Compose MP.
 - Keep **Compose MP itself on its latest _stable_** (do not adopt a `1.x.0-beta` just to
   enable a newer lifecycle — stable is the constraint).
+- **`compose-material3` and `compose-material-icons-extended` are versioned independently
+  from `compose-multiplatform`** (the direct-dependency declarations in `libs.versions.toml`
+  do not use `version.ref = "compose-multiplatform"`). When bumping `compose-multiplatform`,
+  update these two to the versions that release aligns to — verify against the resolved tree
+  (`./gradlew :composeApp:dependencies --configuration desktopRuntimeClasspath`, which shows
+  what the aligned versions actually are; material-icons-extended is currently frozen at 1.7.3
+  by JetBrains). Leaving them stale means Compose sub-artifacts silently pin to an older minor.
 
 ## Step 4 — Apply and verify
 

@@ -210,7 +210,7 @@ kotlin {
                 implementation(libs.kotlinx.coroutines.test)
                 implementation(libs.sqldelight.driver.jdbc.sqlite)
                 implementation(libs.sqlite.jdbc)
-                implementation(libs.compose.ui.test.junit4)
+                implementation(libs.compose.ui.test)
             }
         }
     }
