@@ -19,7 +19,10 @@ slf4j = "2.0.18"
 
 # material3 and material-icons-extended are versioned independently from the
 # Compose Multiplatform plugin (compose-multiplatform). When bumping
-# compose-multiplatform, verify/update these two to the versions that release aligns to.
+# compose-multiplatform, verify/update ONLY compose-material3 to the version that
+# release aligns to. material-icons-extended is frozen at 1.7.3 by JetBrains
+# (CMP-9684, deprecated in favour of Material Symbols) with no newer release, so
+# it stays pinned and does not track the Compose MP release.
 compose-material-icons-extended = "1.7.3"
 compose-material3 = "1.9.0"
 
