@@ -111,7 +111,7 @@ class SyncRepository(
             } else {
                 null
             }
-            notificationCenter.add(
+            notificationCenter.addCoalescing(
                 AppNotification(
                     id = IdGenerator.newId(),
                     level = AppNotificationLevel.ERROR,

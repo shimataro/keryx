@@ -483,6 +483,41 @@ class SyncRepositoryTest {
     }
 
     @Test
+    fun repeatedIdenticalSyncFailuresCoalesceIntoOneNotification() = runTest {
+        // The background loop / debounced scheduler call sync() repeatedly; an identical recurring
+        // failure (e.g. a persistent auth error) must collapse to a single notification rather than
+        // piling up one entry per cycle.
+        val cloud = FakeCloudStorage()
+        cloud.queueExists(Result.Err(CloudAuthException("no token")))
+        cloud.queueExists(Result.Err(CloudAuthException("no token")))
+        cloud.queueExists(Result.Err(CloudAuthException("no token")))
+        val repo = newRepo(cloud)
+
+        repeat(3) { assertIs<Result.Err>(repo.sync()) }
+
+        val notes = notificationCenter.items.value
+        assertEquals(1, notes.size)
+        assertEquals("syncFailed:CloudAuthException", notes.first().message)
+    }
+
+    @Test
+    fun differentSyncFailureTypesRemainSeparateNotifications() = runTest {
+        // Distinct failure kinds carry distinct messages and must not coalesce into one entry.
+        val cloud = FakeCloudStorage()
+        cloud.queueExists(Result.Err(CloudAuthException("no token")))
+        cloud.queueExists(Result.Err(CloudStorageException("network down")))
+        val repo = newRepo(cloud)
+
+        repeat(2) { assertIs<Result.Err>(repo.sync()) }
+
+        val messages = notificationCenter.items.value.map { it.message }.toSet()
+        assertEquals(
+            setOf("syncFailed:CloudAuthException", "syncFailed:CloudStorageException"),
+            messages,
+        )
+    }
+
+    @Test
     fun successfulSyncAddsNoNotification() = runTest {
         val cloud = FakeCloudStorage()
         cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1")
