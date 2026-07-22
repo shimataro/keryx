@@ -24,4 +24,5 @@ its respective license.
 | java-keyring | MIT | <https://github.com/javakeyring/java-keyring> |
 | JNA | Apache-2.0 / LGPL-2.1 | <https://github.com/java-native-access/jna> |
 | Compose WebView | Apache-2.0 | <https://github.com/kdroidFilter/ComposeNativeWebView> |
+| Material Icons | Apache-2.0 | <https://github.com/google/material-design-icons> |
 | SLF4J | MIT | <https://github.com/qos-ch/slf4j> |

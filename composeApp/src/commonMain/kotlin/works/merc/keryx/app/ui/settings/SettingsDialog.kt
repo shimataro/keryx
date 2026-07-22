@@ -17,20 +17,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Cloud
-import androidx.compose.material.icons.outlined.FileDownload
-import androidx.compose.material.icons.outlined.FileUpload
-import androidx.compose.material.icons.outlined.LinkOff
-import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.RestartAlt
-import androidx.compose.material.icons.outlined.Storage
-import androidx.compose.material.icons.outlined.Tune
-import androidx.compose.material.icons.outlined.Update
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -69,6 +58,8 @@ import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.FlatTooltipContent
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
 import works.merc.keryx.app.ui.common.KeryxDialogTab
+import works.merc.keryx.app.ui.common.KeryxIcon
+import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.KeryxTabDialog
 import works.merc.keryx.app.ui.common.SegmentedControl
 import works.merc.keryx.app.resources.Res
@@ -160,13 +151,13 @@ fun SettingsDialog(onDismiss: () -> Unit) {
     // The cloud-sync tab exists only when at least one cloud provider was configured at build time
     // (mirrors the old section-level hiding). availableCloudTypes is stable across the dialog's life.
     val tabs = buildList {
-        add(KeryxDialogTab("general", stringResource(Res.string.settings_tab_general), Icons.Outlined.Tune))
-        add(KeryxDialogTab("notifications", stringResource(Res.string.settings_tab_notifications), Icons.Outlined.Notifications))
+        add(KeryxDialogTab("general", stringResource(Res.string.settings_tab_general), KeryxIcons.Tune))
+        add(KeryxDialogTab("notifications", stringResource(Res.string.settings_tab_notifications), KeryxIcons.Notifications))
         if (vm.availableCloudTypes.isNotEmpty()) {
-            add(KeryxDialogTab("cloud_sync", stringResource(Res.string.settings_cloud_sync), Icons.Outlined.Cloud))
+            add(KeryxDialogTab("cloud_sync", stringResource(Res.string.settings_cloud_sync), KeryxIcons.Cloud))
         }
-        add(KeryxDialogTab("data", stringResource(Res.string.settings_tab_data), Icons.Outlined.Storage))
-        add(KeryxDialogTab("updates", stringResource(Res.string.settings_updates), Icons.Outlined.Update))
+        add(KeryxDialogTab("data", stringResource(Res.string.settings_tab_data), KeryxIcons.Storage))
+        add(KeryxDialogTab("updates", stringResource(Res.string.settings_updates), KeryxIcons.Update))
     }
 
     KeryxTabDialog(
@@ -425,8 +416,8 @@ private fun DataTabContent(vm: SettingsViewModel) {
                         if (vm.importingOpml) {
                             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                         } else {
-                            Icon(
-                                Icons.Outlined.FileDownload,
+                            KeryxIcon(
+                                KeryxIcons.FileDownload,
                                 contentDescription = null,
                                 modifier = Modifier.size(18.dp),
                             )
@@ -441,8 +432,8 @@ private fun DataTabContent(vm: SettingsViewModel) {
                         if (vm.exportingOpml) {
                             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                         } else {
-                            Icon(
-                                Icons.Outlined.FileUpload,
+                            KeryxIcon(
+                                KeryxIcons.FileUpload,
                                 contentDescription = null,
                                 modifier = Modifier.size(18.dp),
                             )
@@ -492,8 +483,8 @@ private fun UpdatesTabContent(vm: SettingsViewModel) {
                 if (vm.checkingForUpdate) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                 } else {
-                    Icon(
-                        Icons.Outlined.Update,
+                    KeryxIcon(
+                        KeryxIcons.Update,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
                     )
@@ -623,8 +614,8 @@ private fun CloudProviderRow(
                             if (resetting) {
                                 CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                             } else {
-                                Icon(
-                                    Icons.Outlined.RestartAlt,
+                                KeryxIcon(
+                                    KeryxIcons.RestartAlt,
                                     contentDescription = null,
                                     modifier = Modifier.size(18.dp),
                                 )
@@ -635,8 +626,8 @@ private fun CloudProviderRow(
                     }
                     FlatTonalButton(onClick = onDisconnect, enabled = enabled) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Outlined.LinkOff,
+                            KeryxIcon(
+                                KeryxIcons.LinkOff,
                                 contentDescription = null,
                                 modifier = Modifier.size(18.dp),
                             )

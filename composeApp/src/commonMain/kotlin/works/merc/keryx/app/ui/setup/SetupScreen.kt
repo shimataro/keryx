@@ -15,10 +15,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -40,6 +37,8 @@ import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
+import works.merc.keryx.app.ui.common.KeryxIcon
+import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.app_name
 import works.merc.keryx.app.resources.common_abort
@@ -186,8 +185,8 @@ private fun OptionCard(
                             modifier = Modifier.size(18.dp)
                         )
                     } else {
-                        Icon(
-                            Icons.Outlined.Computer,
+                        KeryxIcon(
+                            KeryxIcons.Computer,
                             contentDescription = null,
                             modifier = Modifier.size(18.dp),
                         )

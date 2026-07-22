@@ -23,13 +23,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.Sort
-import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.DoneAll
-import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,7 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import org.jetbrains.compose.resources.painterResource
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
@@ -86,6 +79,8 @@ import works.merc.keryx.app.resources.home_sort_disabled_search
 import works.merc.keryx.app.resources.home_sort_newest
 import works.merc.keryx.app.resources.home_sort_oldest
 import works.merc.keryx.app.resources.home_unread_only
+import works.merc.keryx.app.ui.common.KeryxIcon
+import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.ToggleChip
 import works.merc.keryx.app.ui.common.ToolbarIconGroup
 import works.merc.keryx.app.ui.common.TooltipIconButton
@@ -284,15 +279,15 @@ internal fun ArticleListTopBar(
                 stringResource(Res.string.home_sort_disabled_search)
             }
             TooltipIconButton(tooltip = sortTooltip, onClick = onToggleSort, enabled = sortEnabled) {
-                Icon(
-                    Icons.AutoMirrored.Outlined.Sort,
+                KeryxIcon(
+                    KeryxIcons.Sort,
                     contentDescription = sortTooltip,
                     modifier = Modifier.graphicsLayer(scaleY = if (sortEnabled && !newestFirst) -1f else 1f),
                 )
             }
             val markAllReadTooltip = stringResource(Res.string.home_mark_all_read)
             TooltipIconButton(tooltip = markAllReadTooltip, onClick = onMarkAllRead) {
-                Icon(Icons.Outlined.DoneAll, contentDescription = markAllReadTooltip)
+                KeryxIcon(KeryxIcons.DoneAll, contentDescription = markAllReadTooltip)
             }
         }
     }
@@ -405,7 +400,7 @@ private fun NotificationsBell(notifVm: NotificationCenterViewModel) {
         val notificationsTooltip = stringResource(Res.string.home_notifications)
         TooltipIconButton(tooltip = notificationsTooltip, onClick = { showNotifications = !showNotifications }) {
             Box(contentAlignment = Alignment.TopEnd) {
-                Icon(Icons.Outlined.Notifications, contentDescription = notificationsTooltip)
+                KeryxIcon(KeryxIcons.Notifications, contentDescription = notificationsTooltip)
                 if (notifications.isNotEmpty()) {
                     Box(
                         Modifier
@@ -516,8 +511,8 @@ internal fun ArticleRow(
     ) {
         Box(Modifier.width(8.dp).height(rowHeight)) {
             if (article.is_starred == 1L) {
-                Icon(
-                    Icons.Filled.Star,
+                KeryxIcon(
+                    KeryxIcons.Star,
                     contentDescription = null,
                     tint = StarredColor,
                     modifier = Modifier.requiredSize(14.dp).align(Alignment.TopCenter),
@@ -539,7 +534,7 @@ internal fun ArticleRow(
                     model = feedFavicon,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    error = rememberVectorPainter(Icons.Filled.Public),
+                    error = painterResource(KeryxIcons.PublicFilled),
                     modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(4.dp)),
                 )
             }

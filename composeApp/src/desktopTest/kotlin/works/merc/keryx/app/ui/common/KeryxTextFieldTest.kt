@@ -2,9 +2,6 @@ package works.merc.keryx.app.ui.common
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.Icon
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -51,7 +48,7 @@ class KeryxTextFieldTest {
             KeryxTextField(
                 value = "x",
                 onValueChange = {},
-                trailingIcon = { Icon(Icons.Filled.Close, contentDescription = "Clear") },
+                trailingIcon = { KeryxIcon(KeryxIcons.CloseFilled, contentDescription = "Clear") },
             )
         }
         waitForIdle()

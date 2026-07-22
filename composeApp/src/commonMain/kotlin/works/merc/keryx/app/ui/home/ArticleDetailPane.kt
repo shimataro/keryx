@@ -12,14 +12,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.StarBorder
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.Circle
-import androidx.compose.material.icons.outlined.ContentCopy
-import androidx.compose.material.icons.outlined.Public
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -64,6 +56,8 @@ import works.merc.keryx.app.resources.article_url_copied
 import works.merc.keryx.app.resources.home_no_article_selected
 import works.merc.keryx.app.ui.article.extractLinks
 import works.merc.keryx.app.ui.article.wrapArticleHtml
+import works.merc.keryx.app.ui.common.KeryxIcon
+import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.ToolbarIconGroup
 import works.merc.keryx.app.ui.common.TooltipIconButton
 
@@ -128,15 +122,15 @@ fun ArticleDetailPane(
                 val starred = current.is_starred == 1L
                 val starTooltip = stringResource(if (starred) Res.string.article_unstar else Res.string.article_star)
                 TooltipIconButton(tooltip = starTooltip, onClick = { vm.toggleStar(current) }) {
-                    Icon(
-                        if (starred) Icons.Filled.Star else Icons.Filled.StarBorder,
+                    KeryxIcon(
+                        if (starred) KeryxIcons.Star else KeryxIcons.StarBorder,
                         contentDescription = starTooltip,
                         tint = if (starred) StarredColor else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 val markUnreadTooltip = stringResource(Res.string.article_mark_as_unread)
                 TooltipIconButton(tooltip = markUnreadTooltip, onClick = { vm.markSelectedUnread() }) {
-                    Icon(Icons.Outlined.Circle, contentDescription = markUnreadTooltip)
+                    KeryxIcon(KeryxIcons.Circle, contentDescription = markUnreadTooltip)
                 }
                 if (current.url.isNotBlank()) {
                     val clipboard = LocalClipboard.current
@@ -153,14 +147,14 @@ fun ArticleDetailPane(
                             }
                         },
                     ) {
-                        Icon(
-                            if (showCopied) Icons.Outlined.Check else Icons.Outlined.ContentCopy,
+                        KeryxIcon(
+                            if (showCopied) KeryxIcons.CheckOutlined else KeryxIcons.ContentCopy,
                             contentDescription = copyUrlTooltip,
                         )
                     }
                     val openInBrowserTooltip = stringResource(Res.string.article_open_in_browser)
                     TooltipIconButton(tooltip = openInBrowserTooltip, onClick = { BrowserOpener.open(current.url) }) {
-                        Icon(Icons.Outlined.Public, contentDescription = openInBrowserTooltip)
+                        KeryxIcon(KeryxIcons.PublicOutlined, contentDescription = openInBrowserTooltip)
                     }
                 }
             }
