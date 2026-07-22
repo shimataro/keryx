@@ -1,6 +1,6 @@
 ---
 name: test-writer
-description: Use when writing unit tests for new or modified code in the Keryx KMP app — repositories, DAOs (SQLDelight queries), parsers, cloud clients, sync merge. Follows the existing kotlin-test + Ktor MockEngine conventions under commonTest/ and desktopTest/.
+description: Use when writing unit tests for new or modified code in the Keryx app — repositories, DAOs (SQLDelight queries), parsers, cloud clients, sync merge. Follows the existing kotlin-test + Ktor MockEngine conventions under commonTest/ and desktopTest/.
 tools: Read, Edit, Write, Bash, Glob, Grep
 model: sonnet
 ---

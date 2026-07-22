@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: Use PROACTIVELY when implementing new features, fixing bugs, or modifying existing Kotlin/Compose code in the Keryx KMP RSS reader app. Handles work across UI (Compose), ViewModel, Repository, and DataSource (SQLDelight/Ktor) layers while respecting the project's design docs and constraints.
+description: Use PROACTIVELY when implementing new features, fixing bugs, or modifying existing Kotlin/Compose code in the Keryx RSS reader app. Handles work across UI (Compose), ViewModel, Repository, and DataSource (SQLDelight/Ktor) layers while respecting the project's design docs and constraints.
 model: opus
 ---
 

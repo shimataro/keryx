@@ -1,6 +1,6 @@
 ---
 name: update-dependencies
-description: Use to update dependencies, the JDK/Gradle toolchain, and frameworks to their latest stable / LTS versions in the Keryx KMP app, then verify the build and sync version numbers in the docs. Handles the Maven Central stale-index gotcha and the Kotlin↔Compose↔lifecycle coupling. Invoke explicitly with /update-dependencies, or when asked to "bump versions", "update to latest stable", "update dependencies".
+description: Use to update dependencies, the JDK/Gradle toolchain, and frameworks to their latest stable / LTS versions in the Keryx app, then verify the build and sync version numbers in the docs. Handles the Maven Central stale-index gotcha and the Kotlin↔Compose↔lifecycle coupling. Invoke explicitly with /update-dependencies, or when asked to "bump versions", "update to latest stable", "update dependencies".
 ---
 
 Bump Keryx's dependencies / runtime / build tooling to the **latest stable (or LTS)**

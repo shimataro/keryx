@@ -1,6 +1,6 @@
 ---
 name: refactor
-description: Refactor the Keryx KMP source code for internal quality — reduce duplication, split oversized files/functions/composables, remove dead code, clarify naming, hoist magic numbers, flatten deep nesting, and modernize non-idiomatic Kotlin — behavior-preservingly, keeping the test suite green and never altering the sync/merge/FTS/error-taxonomy invariants or feature behavior. Works across the whole codebase or a single given path. Invoke explicitly with /refactor (optionally /refactor <path>), or when asked to "refactor the source code", "clean up the code", "reduce duplication", "improve code quality".
+description: Refactor the Keryx source code for internal quality — reduce duplication, split oversized files/functions/composables, remove dead code, clarify naming, hoist magic numbers, flatten deep nesting, and modernize non-idiomatic Kotlin — behavior-preservingly, keeping the test suite green and never altering the sync/merge/FTS/error-taxonomy invariants or feature behavior. Works across the whole codebase or a single given path. Invoke explicitly with /refactor (optionally /refactor <path>), or when asked to "refactor the source code", "clean up the code", "reduce duplication", "improve code quality".
 ---
 
 Improve the internal quality of Keryx's source **without changing observable
