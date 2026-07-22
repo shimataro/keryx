@@ -107,8 +107,13 @@ invoke the **`build` skill**:
 ./gradlew :composeApp:desktopTest
 ```
 
-Record the passing test count (`docs/testing.md` currently says 527). If the
-baseline is **red**, stop and report — never refactor on top of failing tests.
+Record the baseline **from this run itself**, not from the `527` literal in
+`docs/testing.md` (which drifts): capture both the passing **count** and the
+**set of test identities** (class + method names) from the Gradle test report
+(`composeApp/build/test-results/desktopTest/*.xml`, or the HTML report under
+`composeApp/build/reports/tests/desktopTest/`). This recorded set is the oracle
+checked in Step 4. If the baseline is **red**, stop and report — never refactor
+on top of failing tests.
 
 ### Step 2 — Inventory candidates
 
@@ -133,9 +138,13 @@ For each approved batch:
    ```bash
    ./gradlew :composeApp:desktopTest
    ```
-3. The **full suite must stay green** with the **same-or-higher** count. On red,
-   fix or revert *that batch* before moving on (feedback loop: change → test →
-   fix/revert → repeat).
+3. The **full suite must stay green** and the **Step 1 baseline set must survive
+   in full** — every recorded baseline test still runs and passes. A
+   matching-or-higher count is *not* sufficient: a deleted test hidden behind a
+   new one leaves the count unchanged. Only a **net addition** of tests is
+   allowed, unless an approved **test-only batch (Step 5)** deliberately changed
+   the set. On red **or a missing baseline test**, fix or revert *that batch*
+   before moving on (feedback loop: change → test → fix/revert → repeat).
 4. Never cross an invariant from `## Do NOT touch`.
 
 Watch `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` especially — a
@@ -184,7 +193,8 @@ English Conventional Commits message (`refactor(scope): …`) per `.claude/CLAUD
 ## How to report
 
 - One line per applied batch: category → files → why behavior is preserved.
-- The final test result and count (e.g. "527 tests, 0 failures — unchanged").
+- The final test result — passing count plus confirmation the Step 1 baseline
+  test set is intact (e.g. "all baseline tests pass, 0 failures, N added").
 - Any doc files updated for consistency (Step 6) — which file and what drifted.
 - Anything deferred or skipped, with the reason.
 - A **"Performance opportunities (report-only, not applied)"** list — each item:
