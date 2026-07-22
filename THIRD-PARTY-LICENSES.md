@@ -4,6 +4,7 @@ Keryx bundles the following open-source libraries. Each is used under the terms 
 its respective license.
 
 > Keep this list in sync with the runtime dependencies in `gradle/libs.versions.toml`
+> and any bundled third-party resources (e.g. icon assets under `composeResources/`)
 > when they change (test-only libraries excluded).
 
 | Library | License (SPDX) | Project |
