@@ -20,8 +20,9 @@ here.
   `build/` and generated code (SQLDelight, Compose Resources, `BuildConfig`) —
   those are regenerated, never hand-edited.
 - Test code (`commonTest/`, `desktopTest/`) may be tidied, but **never in the
-  same batch as the production code it verifies** — don't weaken the oracle and
-  the code under test at the same time.
+  same batch as the production code it verifies** (don't weaken the oracle and
+  the code under test at the same time) and **never by deleting or weakening
+  coverage** — every existing assertion must still hold.
 
 ## Refactoring targets (choose appropriately)
 
@@ -142,9 +143,13 @@ failure there means a DB/merge/sync regression slipped in.
 
 ### Step 5 — Tests
 
-Existing tests are the oracle; keep them passing unchanged. Add or adjust tests
-**only** when a refactor introduces a new extracted seam that warrants coverage
-(constraint #7) — delegate the writing to the **`test-writer` agent** if useful.
+Existing tests are the oracle: they must stay green, and a refactor must
+**never delete or weaken coverage** (no removed or loosened assertions). Two
+kinds of test change are allowed, each in its **own batch, never mixed with the
+production code it verifies** (per `## Scope`): (a) **test-only tidying** — the
+same behavior-preserving cleanups you apply to production code, as long as every
+existing assertion still holds; (b) **new coverage** for a newly extracted seam
+(constraint #7). Delegate the writing to the **`test-writer` agent** if useful.
 Follow `docs/testing.md` conventions.
 
 ### Step 6 — Doc consistency check (targeted, auto-fix)
