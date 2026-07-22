@@ -98,9 +98,12 @@ class SyncRepository(
     }
 
     /**
-     * Surface a genuine failure to the notification center — callers discard the Result, so without
-     * this an auth/storage error is invisible. Conflicts are retried internally (never user-facing)
-     * and a no-op returns Ok, so neither notifies.
+     * Publishes a notification for sync failures that require user attention.
+     *
+     * Sync conflicts are excluded because they are handled internally. Cloud data incompatibility
+     * failures include an action to reset the cloud data.
+     *
+     * @param result The outcome of the sync operation.
      */
     private suspend fun emitErrorNotification(result: Result<Unit>) {
         if (result is Result.Err && result.exception !is SyncConflictException) {
