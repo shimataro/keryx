@@ -22,7 +22,7 @@ import androidx.compose.ui.unit.dp
  * (no `indication` override) so presses use the app-wide flat
  * [androidx.compose.foundation.LocalIndication] instead of M3's hardcoded ripple. Same visual
  * language as [SegmentedControl]/[ToggleChip] (hairline `outlineVariant` border, `primary` fill when
- * on, `onPrimary` content). See `.claude/ui-guidelines.md`. Don't use M3's `Switch`/`Checkbox`
+ * on, `onPrimary` content). See `.claude/skills/ui-guidelines/SKILL.md`. Don't use M3's `Switch`/`Checkbox`
  * directly at a call site.
  */
 @Composable

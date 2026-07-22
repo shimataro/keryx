@@ -41,7 +41,7 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
 /**
  * Non-modal notification panel, shown as an anchored [androidx.compose.ui.window.Popup] from
  * `ArticleListPane`'s bell icon rather than an `AlertDialog` — there's no scrim, so it reads as a
- * transient popover instead of a blocking dialog. See `.claude/ui-guidelines.md` for the
+ * transient popover instead of a blocking dialog. See `.claude/skills/ui-guidelines/SKILL.md` for the
  * Popup-vs-Dialog usage split.
  */
 @Composable

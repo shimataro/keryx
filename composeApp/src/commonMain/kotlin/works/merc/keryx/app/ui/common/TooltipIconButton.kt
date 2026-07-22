@@ -40,7 +40,7 @@ import androidx.compose.ui.unit.dp
  * Flat, non-Material-ripple icon button + tooltip. Re-implements the parts of M3's [IconButton]
  * (min tap target, circular clip, click handling) with plain [Modifier]s so that pressing it uses
  * [androidx.compose.foundation.LocalIndication] (app-wide [FlatIndication][works.merc.keryx.app.ui.theme]
- * flat feedback) instead of M3's hardcoded ripple. See `.claude/ui-guidelines.md`.
+ * flat feedback) instead of M3's hardcoded ripple. See `.claude/skills/ui-guidelines/SKILL.md`.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -76,7 +76,7 @@ fun TooltipIconButton(
 /**
  * The app's flat tooltip surface (shared by [TooltipIconButton] and settings' link rows): a
  * hairline-bordered [Surface] with no tonal elevation, matching the "flat surface pattern" in
- * `.claude/ui-guidelines.md`.
+ * `.claude/skills/ui-guidelines/SKILL.md`.
  */
 @Composable
 internal fun FlatTooltipContent(text: String) {
@@ -97,7 +97,7 @@ internal fun FlatTooltipContent(text: String) {
 
 /**
  * Groups related toolbar icons into a rounded capsule (macOS-toolbar-style clustering). See
- * `.claude/ui-guidelines.md` — this is a flat-fill approximation pending a native replacement
+ * `.claude/skills/ui-guidelines/SKILL.md` — this is a flat-fill approximation pending a native replacement
  * (e.g. SwiftUI's glass toolbar grouping) when this app gets a native SwiftUI UI.
  */
 @Composable
