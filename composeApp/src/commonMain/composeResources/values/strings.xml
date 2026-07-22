@@ -182,8 +182,12 @@
     <string name="settings_article_list_unread_only">未読のみ</string>
     <string name="settings_updates">アップデート</string>
     <string name="settings_version">バージョン %1$s</string>
+    <string name="settings_website">ウェブサイト</string>
     <string name="settings_project_page">プロジェクトページ</string>
     <string name="settings_licenses">オープンソースライセンス</string>
+    <!-- Official website URL. Locale-dependent: the default (Japanese) locale points to /ja/;
+         a future values-en/strings.xml can override this with the root (English) URL. -->
+    <string name="website_url">https://keryx.merc.works/ja/</string>
     <string name="settings_update_check_interval">アップデート確認間隔</string>
     <string name="settings_update_check_startup_only">起動時のみ</string>
     <string name="settings_update_check_daily">毎日</string>
@@ -232,6 +236,7 @@
     <string name="menu_feed_sync_now">今すぐ同期</string>
     <string name="menu_settings">設定…</string>
     <string name="menu_help">ヘルプ</string>
+    <string name="menu_help_website">ウェブサイトを開く</string>
     <string name="menu_help_project_page">プロジェクトページを開く</string>
     <string name="menu_help_about">Keryx について</string>
 
