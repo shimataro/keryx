@@ -4,30 +4,64 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.respondError
+import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 class UpdateCheckerTest {
 
-    private fun checker(currentVersion: String = "1.0.0", body: String, status: HttpStatusCode = HttpStatusCode.OK): UpdateChecker {
-        val client = HttpClient(MockEngine { if (status == HttpStatusCode.OK) respond(body) else respondError(status) }) {
+    /**
+     * Builds a checker whose MockEngine routes by request path: `releases/latest` (the stable-build
+     * path) uses [latestBody]/[latestStatus], and the `releases` list (the pre-stable path) uses
+     * [listBody]/[listStatus]. A test only sets the params for the endpoint its [currentVersion]
+     * will actually hit.
+     */
+    private fun checker(
+        currentVersion: String = "1.0.0",
+        listBody: String? = null,
+        listStatus: HttpStatusCode = HttpStatusCode.OK,
+        latestBody: String? = null,
+        latestStatus: HttpStatusCode = HttpStatusCode.OK,
+    ): UpdateChecker {
+        val client = HttpClient(MockEngine { request ->
+            if (request.url.encodedPath.endsWith("/releases/latest")) {
+                if (latestStatus == HttpStatusCode.OK) respond(latestBody ?: "") else respondError(latestStatus)
+            } else {
+                if (listStatus == HttpStatusCode.OK) respond(listBody ?: "") else respondError(listStatus)
+            }
+        }) {
             expectSuccess = false
         }
         return UpdateChecker(client, currentVersion, repoSlug = "owner/repo")
     }
 
+    // --- Stable build (1.0.0+) → releases/latest ---
+
+    @Test
+    fun stableCurrentQueriesLatestEndpoint() = runTest {
+        val history = mutableListOf<HttpRequestData>()
+        val client = HttpClient(MockEngine { request ->
+            history.add(request)
+            respond("""{"tag_name":"v1.0.0","html_url":"https://ex.com/1.0.0"}""")
+        }) { expectSuccess = false }
+        UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo").check()
+        assertEquals(1, history.size)
+        assertEquals("/repos/owner/repo/releases/latest", history[0].url.encodedPath)
+    }
+
     @Test
     fun sameVersionIsUpToDate() = runTest {
-        val status = checker(body = """[{"tag_name":"v1.0.0","html_url":"https://ex.com/1.0.0"}]""").check()
+        val status = checker(latestBody = """{"tag_name":"v1.0.0","html_url":"https://ex.com/1.0.0"}""").check()
         assertIs<UpdateStatus.UpToDate>(status)
     }
 
     @Test
     fun newerTagIsAvailableWithVPrefixStripped() = runTest {
-        val status = checker(body = """[{"tag_name":"v1.2.3","html_url":"https://ex.com/1.2.3"}]""").check()
+        val status = checker(latestBody = """{"tag_name":"v1.2.3","html_url":"https://ex.com/1.2.3"}""").check()
         assertIs<UpdateStatus.Available>(status)
         assertEquals("1.2.3", status.version)
         assertEquals("https://ex.com/1.2.3", status.url)
@@ -36,8 +70,68 @@ class UpdateCheckerTest {
     @Test
     fun olderTagIsUpToDateNotDowngradeAvailable() = runTest {
         // A dev build ahead of the latest published release must never report "Available".
-        val status = checker(currentVersion = "2.0.0", body = """[{"tag_name":"v1.0.0","html_url":"https://ex.com"}]""").check()
+        val status = checker(
+            currentVersion = "2.0.0",
+            latestBody = """{"tag_name":"v1.0.0","html_url":"https://ex.com"}""",
+        ).check()
         assertIs<UpdateStatus.UpToDate>(status)
+    }
+
+    @Test
+    fun officialStableReleaseIsAvailable() = runTest {
+        val status = checker(
+            currentVersion = "1.0.0",
+            latestBody = """{"tag_name":"v1.1.0","html_url":"https://ex.com/1.1.0","prerelease":false}""",
+        ).check()
+        assertIs<UpdateStatus.Available>(status)
+        assertEquals("1.1.0", status.version)
+    }
+
+    @Test
+    fun stableCurrentLatest404IsUpToDate() = runTest {
+        // releases/latest 404 = the repo has no full release yet (e.g. only pre-releases/drafts).
+        // That means "nothing to offer", NOT a failure — a stable build never gets pre-releases.
+        val status = checker(currentVersion = "1.0.0", latestStatus = HttpStatusCode.NotFound).check()
+        assertIs<UpdateStatus.UpToDate>(status)
+    }
+
+    @Test
+    fun latestServerErrorIsFailed() = runTest {
+        val status = checker(currentVersion = "1.0.0", latestStatus = HttpStatusCode.InternalServerError).check()
+        assertIs<UpdateStatus.Failed>(status)
+    }
+
+    @Test
+    fun missingHtmlUrlIsFailed() = runTest {
+        val status = checker(latestBody = """{"tag_name":"v2.0.0"}""").check()
+        assertIs<UpdateStatus.Failed>(status)
+    }
+
+    @Test
+    fun v1PreReleaseCurrentIsTreatedAsStableAndOfferedStable() = runTest {
+        // A 1.x pre-release build (isBelowStable == false) uses releases/latest and is offered the
+        // next stable, matching the "pre-releases only below 1.0.0" policy.
+        val status = checker(
+            currentVersion = "1.0.1-beta.2",
+            latestBody = """{"tag_name":"v1.0.1","html_url":"https://ex.com/1.0.1"}""",
+        ).check()
+        assertIs<UpdateStatus.Available>(status)
+        assertEquals("1.0.1", status.version)
+    }
+
+    // --- Pre-stable build (0.x) → releases list ---
+
+    @Test
+    fun preStableCurrentQueriesListEndpoint() = runTest {
+        val history = mutableListOf<HttpRequestData>()
+        val client = HttpClient(MockEngine { request ->
+            history.add(request)
+            respond("[]")
+        }) { expectSuccess = false }
+        UpdateChecker(client, currentVersion = "0.0.9", repoSlug = "owner/repo").check()
+        assertEquals(1, history.size)
+        assertEquals("/repos/owner/repo/releases", history[0].url.encodedPath)
+        assertEquals("100", history[0].url.parameters["per_page"])
     }
 
     @Test
@@ -45,7 +139,7 @@ class UpdateCheckerTest {
         // Both this build (0.0.9) and the release (0.1.0) are below 1.0.0 → the pre-release is offered.
         val status = checker(
             currentVersion = "0.0.9",
-            body = """[{"tag_name":"v0.1.0","html_url":"https://ex.com/0.1.0","prerelease":true}]""",
+            listBody = """[{"tag_name":"v0.1.0","html_url":"https://ex.com/0.1.0","prerelease":true}]""",
         ).check()
         assertIs<UpdateStatus.Available>(status)
         assertEquals("0.1.0", status.version)
@@ -57,7 +151,7 @@ class UpdateCheckerTest {
         // 0.1.0-beta is a higher core than 0.0.9 → the eligible prerelease is offered.
         val status = checker(
             currentVersion = "0.0.9",
-            body = """[{"tag_name":"v0.1.0-beta","html_url":"https://ex.com/0.1.0-beta","prerelease":true}]""",
+            listBody = """[{"tag_name":"v0.1.0-beta","html_url":"https://ex.com/0.1.0-beta","prerelease":true}]""",
         ).check()
         assertIs<UpdateStatus.Available>(status)
         assertEquals("0.1.0-beta", status.version)
@@ -68,7 +162,7 @@ class UpdateCheckerTest {
         // Among eligible suffixed prereleases with equal cores, the highest identifier wins.
         val status = checker(
             currentVersion = "0.0.9",
-            body = """[
+            listBody = """[
                 {"tag_name":"v0.1.0-alpha","html_url":"https://ex.com/0.1.0-alpha","prerelease":true},
                 {"tag_name":"v0.1.0-beta","html_url":"https://ex.com/0.1.0-beta","prerelease":true}
             ]""",
@@ -78,33 +172,13 @@ class UpdateCheckerTest {
     }
 
     @Test
-    fun preReleaseIgnoredOnceCurrentIsStable() = runTest {
-        // A 1.0.0+ build never gets pre-releases, even a below-1.0.0 one → no eligible release.
-        val status = checker(
-            currentVersion = "1.0.0",
-            body = """[{"tag_name":"v0.9.0","html_url":"https://ex.com/0.9.0","prerelease":true}]""",
-        ).check()
-        assertIs<UpdateStatus.UpToDate>(status)
-    }
-
-    @Test
     fun preReleaseAtOrAboveStableIsIgnored() = runTest {
         // A pre-release whose version is >= 1.0.0 is never eligible, regardless of current version.
         val status = checker(
             currentVersion = "0.9.0",
-            body = """[{"tag_name":"v1.0.0-rc1","html_url":"https://ex.com/1.0.0-rc1","prerelease":true}]""",
+            listBody = """[{"tag_name":"v1.0.0-rc1","html_url":"https://ex.com/1.0.0-rc1","prerelease":true}]""",
         ).check()
         assertIs<UpdateStatus.UpToDate>(status)
-    }
-
-    @Test
-    fun officialStableReleaseIsAvailable() = runTest {
-        val status = checker(
-            currentVersion = "1.0.0",
-            body = """[{"tag_name":"v1.1.0","html_url":"https://ex.com/1.1.0","prerelease":false}]""",
-        ).check()
-        assertIs<UpdateStatus.Available>(status)
-        assertEquals("1.1.0", status.version)
     }
 
     @Test
@@ -112,7 +186,7 @@ class UpdateCheckerTest {
         // Newest-first: a 1.1.0 pre-release (>= 1.0.0, rejected) precedes the 1.0.0 stable → 1.0.0 wins.
         val status = checker(
             currentVersion = "0.9.0",
-            body = """[
+            listBody = """[
                 {"tag_name":"v1.1.0-beta","html_url":"https://ex.com/1.1.0-beta","prerelease":true},
                 {"tag_name":"v1.0.0","html_url":"https://ex.com/1.0.0","prerelease":false}
             ]""",
@@ -124,34 +198,59 @@ class UpdateCheckerTest {
     @Test
     fun draftIsIgnored() = runTest {
         val status = checker(
-            currentVersion = "1.0.0",
-            body = """[{"tag_name":"v2.0.0","html_url":"https://ex.com/2.0.0","draft":true}]""",
+            currentVersion = "0.0.1",
+            listBody = """[{"tag_name":"v0.2.0","html_url":"https://ex.com/0.2.0","draft":true}]""",
         ).check()
         assertIs<UpdateStatus.UpToDate>(status)
     }
 
     @Test
     fun emptyListIsUpToDate() = runTest {
-        val status = checker(body = "[]").check()
+        val status = checker(currentVersion = "0.0.1", listBody = "[]").check()
         assertIs<UpdateStatus.UpToDate>(status)
     }
 
     @Test
-    fun nonSuccessStatusIsFailed() = runTest {
-        val status = checker(body = "", status = HttpStatusCode.NotFound).check()
+    fun listServerErrorIsFailed() = runTest {
+        val status = checker(currentVersion = "0.0.1", listStatus = HttpStatusCode.InternalServerError).check()
         assertIs<UpdateStatus.Failed>(status)
     }
 
     @Test
     fun malformedJsonIsFailed() = runTest {
-        val status = checker(body = "not json").check()
+        val status = checker(currentVersion = "0.0.1", listBody = "not json").check()
         assertIs<UpdateStatus.Failed>(status)
     }
 
+    // --- Regression: a malformed tag must never mask a valid release (total-order comparator) ---
+
     @Test
-    fun missingHtmlUrlIsFailed() = runTest {
-        val status = checker(body = """[{"tag_name":"v2.0.0"}]""").check()
-        assertIs<UpdateStatus.Failed>(status)
+    fun malformedTagDoesNotHideValidReleaseListedFirst() = runTest {
+        // `broken` is unparseable and appears before a valid release; it must not stay selected and
+        // report UpToDate. Uses a pre-stable current so selection runs over the list path.
+        val status = checker(
+            currentVersion = "0.0.9",
+            listBody = """[
+                {"tag_name":"broken","html_url":"https://ex.com/broken"},
+                {"tag_name":"v0.5.0","html_url":"https://ex.com/0.5.0"}
+            ]""",
+        ).check()
+        assertIs<UpdateStatus.Available>(status)
+        assertEquals("0.5.0", status.version)
+    }
+
+    @Test
+    fun malformedTagDoesNotHideValidReleaseListedLast() = runTest {
+        // Same as above with reversed order → selection is order-independent.
+        val status = checker(
+            currentVersion = "0.0.9",
+            listBody = """[
+                {"tag_name":"v0.5.0","html_url":"https://ex.com/0.5.0"},
+                {"tag_name":"broken","html_url":"https://ex.com/broken"}
+            ]""",
+        ).check()
+        assertIs<UpdateStatus.Available>(status)
+        assertEquals("0.5.0", status.version)
     }
 }
 
@@ -197,6 +296,39 @@ class IsNewerTest {
         assertEquals(true, isNewer("1.0.1+build.7", "1.0.0"))    // core still decides
         assertEquals(false, isNewer("1.0.0-alpha+001", "1.0.0")) // prerelease < release, metadata ignored
         assertEquals(false, isNewer("1.0.0+a", "1.0.0+b"))       // differing metadata → equal
+    }
+}
+
+class CompareReleaseVersionsTest {
+
+    @Test
+    fun equalVersionsCompareZero() {
+        assertEquals(0, compareReleaseVersions("1.0.0", "1.0.0"))
+    }
+
+    @Test
+    fun higherVersionComparesPositive() {
+        assertTrue(compareReleaseVersions("2.0.0", "1.9.9") > 0)
+        assertTrue(compareReleaseVersions("1.0.0", "2.0.0") < 0)
+    }
+
+    @Test
+    fun unparseableRanksBelowParseable() {
+        assertTrue(compareReleaseVersions("broken", "1.0.0") < 0)
+        assertTrue(compareReleaseVersions("1.0.0", "broken") > 0)
+    }
+
+    @Test
+    fun nullRanksBelowParseable() {
+        assertTrue(compareReleaseVersions(null, "1.0.0") < 0)
+        assertTrue(compareReleaseVersions("1.0.0", null) > 0)
+    }
+
+    @Test
+    fun bothUnparseableOrNullCompareZero() {
+        assertEquals(0, compareReleaseVersions("broken", "also-broken"))
+        assertEquals(0, compareReleaseVersions(null, null))
+        assertEquals(0, compareReleaseVersions(null, "broken"))
     }
 }
 

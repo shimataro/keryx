@@ -1,6 +1,7 @@
 package works.merc.keryx.app.domain
 
 import io.ktor.client.HttpClient
+import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsText
@@ -21,14 +22,21 @@ sealed interface UpdateStatus {
 }
 
 /**
- * Polls a GitHub repo's `releases` list for a newer version than [currentVersion]. No telemetry,
- * no auth — a single unauthenticated GET against GitHub's public API.
+ * Polls a GitHub repo for a newer version than [currentVersion]. No telemetry, no auth — a single
+ * unauthenticated GET against GitHub's public API.
  *
- * The list endpoint (not `releases/latest`) is used so pre-releases are visible: `releases/latest`
- * only ever returns the newest non-draft, non-pre-release, which would be a 404 for a repo whose
- * only releases are pre-releases. Candidate policy: official (non-pre-release) releases are always
- * eligible; a pre-release is eligible only while both [currentVersion] and the release are below
- * 1.0.0 (i.e. during the pre-stable phase). Drafts are never eligible.
+ * Candidate policy: official (non-pre-release) releases are always eligible; a pre-release is
+ * eligible only while both [currentVersion] and the release are below 1.0.0 (i.e. during the
+ * pre-stable phase). Drafts are never eligible.
+ *
+ * The endpoint is chosen by [isBelowStable]:
+ * - **Pre-stable build (0.x)**: the `releases` list endpoint, so pre-releases are visible
+ *   (`releases/latest` would 404 for a repo whose only releases are pre-releases). Filtering and
+ *   candidate selection then happen client-side over the returned page.
+ * - **Stable build (1.0.0+, including a 1.x pre-release)**: the `releases/latest` endpoint, which
+ *   returns *the* newest full (non-draft, non-pre-release) release server-side — no pagination
+ *   concern regardless of how many pre-releases precede it. A 404 means the repo has no full
+ *   release yet, i.e. nothing to offer (up to date).
  */
 class UpdateChecker(
     private val client: HttpClient,
@@ -38,23 +46,13 @@ class UpdateChecker(
 ) {
     suspend fun check(): UpdateStatus {
         return try {
-            val response = client.get("https://api.github.com/repos/$repoSlug/releases") {
-                // GitHub's API rejects requests with no User-Agent (403) — Ktor doesn't send one
-                // by default, so this must be set explicitly.
-                header(HttpHeaders.UserAgent, "Keryx/$currentVersion")
-                header(HttpHeaders.Accept, "application/vnd.github+json")
-            }
-            if (response.status.value !in 200..299) {
-                Log.warn(TAG, "Update check failed: HTTP ${response.status.value}")
-                return UpdateStatus.Failed
-            }
-            val releases = json.parseToJsonElement(response.bodyAsText()) as? JsonArray
-                ?: return UpdateStatus.Failed.also { Log.warn(TAG, "Update check failed: unexpected response body") }
-
-            // Pre-releases are only offered while this build itself is still pre-1.0.0.
+            // Pre-releases are only offered while this build itself is still pre-1.0.0. The same
+            // flag also picks the endpoint (list vs. releases/latest).
             val currentIsPreStable = isBelowStable(currentVersion)
+            val releases = (if (currentIsPreStable) fetchReleaseList() else fetchLatestRelease())
+                ?: return UpdateStatus.Failed
+
             val candidate = releases
-                .mapNotNull { it as? JsonObject }
                 .filter { !(it["draft"]?.jsonPrimitive?.booleanOrNull ?: false) }
                 .filter { release ->
                     val isPreRelease = release["prerelease"]?.jsonPrimitive?.booleanOrNull ?: false
@@ -62,7 +60,7 @@ class UpdateChecker(
                 }
                 // GitHub returns releases newest-first, but don't rely on that: pick the highest
                 // version so a rejected newer pre-release never hides an older eligible stable one.
-                .maxWithOrNull { a, b -> if (isNewer(versionOf(b) ?: "", versionOf(a) ?: "")) -1 else 1 }
+                .maxWithOrNull { a, b -> compareReleaseVersions(versionOf(a), versionOf(b)) }
                 ?: return UpdateStatus.UpToDate // no eligible release → nothing to offer
 
             val remoteVersion = versionOf(candidate)
@@ -79,6 +77,50 @@ class UpdateChecker(
             Log.warn(TAG, "Update check failed", e)
             UpdateStatus.Failed
         }
+    }
+
+    /**
+     * Fetches the full `releases` list (pre-stable path). Returns the release objects, or `null` on
+     * HTTP error / unexpected body (→ [UpdateStatus.Failed]). `per_page=100` raises the single-page
+     * limit from GitHub's default 30 so realistic release histories fit in one request.
+     */
+    private suspend fun fetchReleaseList(): List<JsonObject>? {
+        val response = client.get("https://api.github.com/repos/$repoSlug/releases?per_page=100") {
+            applyGitHubHeaders()
+        }
+        if (response.status.value !in 200..299) {
+            Log.warn(TAG, "Update check failed: HTTP ${response.status.value}")
+            return null
+        }
+        val array = json.parseToJsonElement(response.bodyAsText()) as? JsonArray
+            ?: return null.also { Log.warn(TAG, "Update check failed: unexpected response body") }
+        return array.mapNotNull { it as? JsonObject }
+    }
+
+    /**
+     * Fetches the newest full release via `releases/latest` (stable path). Returns a single-element
+     * list, an empty list on 404 (no full release yet → [UpdateStatus.UpToDate]), or `null` on any
+     * other HTTP error / unexpected body (→ [UpdateStatus.Failed]).
+     */
+    private suspend fun fetchLatestRelease(): List<JsonObject>? {
+        val response = client.get("https://api.github.com/repos/$repoSlug/releases/latest") {
+            applyGitHubHeaders()
+        }
+        if (response.status.value == 404) return emptyList()
+        if (response.status.value !in 200..299) {
+            Log.warn(TAG, "Update check failed: HTTP ${response.status.value}")
+            return null
+        }
+        val obj = json.parseToJsonElement(response.bodyAsText()) as? JsonObject
+            ?: return null.also { Log.warn(TAG, "Update check failed: unexpected response body") }
+        return listOf(obj)
+    }
+
+    private fun HttpRequestBuilder.applyGitHubHeaders() {
+        // GitHub's API rejects requests with no User-Agent (403) — Ktor doesn't send one by
+        // default, so this must be set explicitly.
+        header(HttpHeaders.UserAgent, "Keryx/$currentVersion")
+        header(HttpHeaders.Accept, "application/vnd.github+json")
     }
 }
 
@@ -97,6 +139,34 @@ internal fun isNewer(remote: String, local: String): Boolean =
     compareVersions(remote, local)?.let { it > 0 } ?: false
 
 /**
+ * Parses the numeric core (`major.minor.patch`) of a version string into a list of ints, or `null`
+ * when any core segment is non-numeric (unparseable). Build metadata (`+...`) and any prerelease
+ * suffix (`-...`) are stripped first, so `1.0.0-alpha+001` yields `[1, 0, 0]`.
+ */
+private fun parseCore(version: String): List<Int>? {
+    val core = version.substringBefore('+').substringBefore('-').split(".").map { it.toIntOrNull() }
+    return if (core.any { it == null }) null else core.map { it!! }
+}
+
+/**
+ * Total ordering over release version strings for candidate selection. Unlike [isNewer] (a strict
+ * boolean that returns `false` for both "equal" and "unparseable"), this distinguishes those cases:
+ * two equal versions compare `0`, and an unparseable or absent version ranks *strictly below* any
+ * parseable one. Without this consistency, a malformed tag preceding a valid release could stay
+ * selected by [maxWithOrNull] and mask a genuine update.
+ */
+internal fun compareReleaseVersions(a: String?, b: String?): Int {
+    val aOk = a != null && parseCore(a) != null
+    val bOk = b != null && parseCore(b) != null
+    return when {
+        aOk && bOk -> compareVersions(a, b)!!
+        aOk -> 1
+        bOk -> -1
+        else -> 0
+    }
+}
+
+/**
  * Three-way SemVer comparison of two version strings (leading `v` already stripped by [versionOf]).
  * Returns a negative/zero/positive Int like [Comparator], or `null` when either core has a
  * non-numeric segment (undeterminable → callers treat as "not newer"). Build metadata (`+...`) is
@@ -107,14 +177,13 @@ private fun compareVersions(a: String, b: String): Int? {
     // the core (`1.0.0+001`) or the prerelease (`1.0.0-alpha+001`).
     val aClean = a.substringBefore('+')
     val bClean = b.substringBefore('+')
-    val aCore = aClean.substringBefore('-').split(".").map { it.toIntOrNull() }
-    val bCore = bClean.substringBefore('-').split(".").map { it.toIntOrNull() }
-    if (aCore.any { it == null } || bCore.any { it == null }) return null
+    val aCore = parseCore(a) ?: return null
+    val bCore = parseCore(b) ?: return null
 
     val length = maxOf(aCore.size, bCore.size)
     for (i in 0 until length) {
-        val ai = aCore.getOrElse(i) { 0 } ?: 0
-        val bi = bCore.getOrElse(i) { 0 } ?: 0
+        val ai = aCore.getOrElse(i) { 0 }
+        val bi = bCore.getOrElse(i) { 0 }
         if (ai != bi) return ai.compareTo(bi)
     }
 
