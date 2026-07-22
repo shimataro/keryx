@@ -18,6 +18,7 @@ import works.merc.keryx.app.SuspendingCloudConnectFlow
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageType
+import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
@@ -28,6 +29,8 @@ import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.CloudConnectFlow
+import works.merc.keryx.app.domain.NotificationCenter
+import works.merc.keryx.app.domain.NotificationMessages
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
@@ -43,6 +46,14 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+
+/** Minimal [NotificationMessages] fake (SyncRepository requires one; Setup tests never assert on it). */
+private object SetupViewModelTestNotificationMessages : NotificationMessages {
+    override suspend fun feedGone(feedTitle: String): String = "gone:$feedTitle"
+    override suspend fun feedUrlChanged(feedTitle: String): String = "urlChanged:$feedTitle"
+    override suspend fun newArticles(count: Int): String = "new:$count"
+    override suspend fun syncFailed(exception: KeryxException): String = "syncFailed:${exception::class.simpleName}"
+}
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class SetupViewModelTest {
@@ -85,6 +96,8 @@ class SetupViewModelTest {
             clock = clock,
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
             activityCenter = ActivityCenter(),
+            notificationCenter = NotificationCenter(),
+            notificationMessages = SetupViewModelTestNotificationMessages,
             localDbPath = "unused",
             tempDir = "unused",
         )

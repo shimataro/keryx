@@ -30,7 +30,7 @@ sealed class KeryxException(message: String) : Exception(message)
 
 Main subclasses: `FeedFetchException(statusCode)`, `FeedParseException`, `FeedDiscoveryException(candidates)`,
 `FeedTimeoutException`, `FeedNotFoundException(isGone)`, `CloudAuthException`, `CloudStorageException`,
-`SyncConflictException`, `SchemaVersionException(localVersion, cloudVersion)`, `InvalidFeedUrlException`.
+`SyncConflictException`, `SchemaVersionException(localVersion, cloudVersion)`, `CloudDataIncompatibleException`, `InvalidFeedUrlException`.
 
 Helper extensions: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `onOk` / `onErr` / `map`.
 
@@ -61,6 +61,7 @@ When emitting notifications from the Repository, text is localized via `Notifica
 | `CloudStorageException` | ✅ | ✅ | ✅ |
 | `SyncConflictException` | ✅ (internal) | ❌ | ❌ |
 | `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ | ✅ |
+| `CloudDataIncompatibleException` (corrupt / incompatible cloud DB) | ❌ | ❌ | ✅ |
 | `FeedNotFoundException(isGone=true)` | ❌ | ❌ | ✅ |
 
 ## Constants (`core/Constants.kt`)

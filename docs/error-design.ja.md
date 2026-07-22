@@ -30,7 +30,7 @@ sealed class KeryxException(message: String) : Exception(message)
 
 主なサブクラス: `FeedFetchException(statusCode)`, `FeedParseException`, `FeedDiscoveryException(candidates)`,
 `FeedTimeoutException`, `FeedNotFoundException(isGone)`, `CloudAuthException`, `CloudStorageException`,
-`SyncConflictException`, `SchemaVersionException(localVersion, cloudVersion)`, `InvalidFeedUrlException`。
+`SyncConflictException`, `SchemaVersionException(localVersion, cloudVersion)`, `CloudDataIncompatibleException`, `InvalidFeedUrlException`。
 
 補助拡張: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `onOk` / `onErr` / `map`。
 
@@ -70,6 +70,7 @@ Repository から通知を出す際、文言は `NotificationMessages`（`getStr
 | `CloudStorageException` | ✅ | ✅ | ✅ |
 | `SyncConflictException` | ✅（内部） | ❌ | ❌ |
 | `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ | ✅ |
+| `CloudDataIncompatibleException`（破損/非互換なクラウドDB） | ❌ | ❌ | ✅ |
 | `FeedNotFoundException(isGone=true)` | ❌ | ❌ | ✅ |
 
 ## 定数（`core/Constants.kt`）

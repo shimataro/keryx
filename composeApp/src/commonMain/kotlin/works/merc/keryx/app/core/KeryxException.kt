@@ -35,6 +35,13 @@ class SyncConflictException : KeryxException("Sync conflict detected")
 class SchemaVersionException(val localVersion: Long, val cloudVersion: Long) :
     KeryxException("Schema version mismatch")
 
+/**
+ * The cloud sync DB cannot be used: it is corrupt (not a valid SQLite file / malformed) or its
+ * schema is incompatible with this app (foreign/legacy layout). Permanent — retrying will not
+ * help; the user must reset (delete and recreate) the cloud sync data.
+ */
+class CloudDataIncompatibleException(message: String) : KeryxException(message)
+
 // --- User input ---
 
 class InvalidFeedUrlException(message: String) : KeryxException(message)

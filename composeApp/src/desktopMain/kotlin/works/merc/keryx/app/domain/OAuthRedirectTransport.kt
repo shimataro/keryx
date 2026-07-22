@@ -5,6 +5,7 @@ import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.withTimeoutOrNull
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.OAUTH_CUSTOM_URI_REDIRECT
@@ -46,10 +47,16 @@ class CustomUriRedirectTransport(
         state: String,
         timeoutMillis: Long,
         launchBrowser: suspend (redirectUri: String) -> Unit,
-    ): OAuthCallbackParams? {
-        launchBrowser(redirectUri)
-        return withTimeoutOrNull(timeoutMillis) { callbackFlow.first { it.state == state } }
-    }
+    ): OAuthCallbackParams? =
+        // Launch the browser from onSubscription (i.e. *after* this collector is subscribed to the
+        // shared flow) so a fast redirect can't be delivered before we're listening. callbackFlow is
+        // replay=0, so an emission that lands before subscription would otherwise be lost forever and
+        // the wait would run to the full timeout. See docs/sync-architecture.md.
+        withTimeoutOrNull(timeoutMillis) {
+            callbackFlow
+                .onSubscription { launchBrowser(redirectUri) }
+                .first { it.state == state }
+        }
 }
 
 /**

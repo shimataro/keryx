@@ -77,6 +77,7 @@ import works.merc.keryx.app.platform.LocalWindowDragArea
 import works.merc.keryx.app.platform.WindowChrome
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.app_icon
+import works.merc.keryx.app.resources.notification_app_translocated
 import works.merc.keryx.app.resources.tray_hide
 import works.merc.keryx.app.resources.tray_icon
 import works.merc.keryx.app.resources.update_available_notification
@@ -124,9 +125,14 @@ fun main(args: Array<String>) {
 
     val singleInstanceCoordinator = SingleInstanceCoordinator(File(AppDirs.appDataDir()))
     if (!singleInstanceCoordinator.tryAcquireLock()) {
+        // Another instance is already running. On macOS the OAuth redirect URI is delivered via an
+        // Apple event (setOpenURIHandler), not argv, so incomingUri is null here and only a plain
+        // activation is forwarded — see the diagnostic note in docs/sync-architecture.md.
+        Log.info(LOG_TAG, "Single-instance lock held by another instance; forwarding activation (hasUri=${incomingUri != null}) and exiting")
         singleInstanceCoordinator.signalRunningInstance(incomingUri)
         return
     }
+    Log.info(LOG_TAG, "Acquired single-instance lock; running as primary instance from ${currentExecutablePath()}")
     // startActivationListener is registered after Koin initialization (see below)
     // so we can inject the URI callback flow.
 
@@ -138,6 +144,8 @@ fun main(args: Array<String>) {
     val callbackFlow = koin.get<MutableSharedFlow<OAuthCallbackParams>>()
     singleInstanceCoordinator.startActivationListener { uri ->
         if (!uri.isNullOrBlank()) {
+            // Do not log the URI itself — it carries the OAuth authorization code.
+            Log.info(LOG_TAG, "OAuth callback URI received via single-instance activation")
             runCatching { callbackFlow.tryEmit(parseOAuthUri(uri)) }
         }
         activationRequests.tryEmit(Unit)
@@ -227,6 +235,8 @@ fun main(args: Array<String>) {
             Desktop.getDesktop().setOpenURIHandler { event ->
                 val uri = event.uri.toString()
                 if (uri.startsWith("keryx://")) {
+                    // Do not log the URI itself — it carries the OAuth authorization code.
+                    Log.info(LOG_TAG, "OAuth callback URI received via macOS setOpenURIHandler")
                     runCatching { callbackFlow.tryEmit(parseOAuthUri(uri)) }
                 }
             }
@@ -599,6 +609,7 @@ private fun MacTray(
  */
 private suspend fun runStartupTasks(koin: org.koin.core.Koin) {
     runCatching {
+        warnIfAppTranslocated(koin)
         val settingsRepository = koin.get<SettingsRepository>()
         val settings = settingsRepository.getLocalSettings()
         val now = SystemClock.nowMillis()
@@ -699,6 +710,26 @@ private suspend fun checkForUpdateAndNotify(koin: org.koin.core.Koin) {
             ),
         )
     }
+}
+
+/**
+ * macOS App Translocation guard. An unsigned/quarantined Keryx.app launched from a DMG or the
+ * Downloads folder runs from a randomized read-only path, which breaks keryx:// routing and makes
+ * Dropbox OAuth linking silently time out. Warn the user (notification center) to move the app into
+ * /Applications, which clears quarantine and stops translocation. See [isTranslocatedPath].
+ */
+private suspend fun warnIfAppTranslocated(koin: org.koin.core.Koin) {
+    val exePath = currentExecutablePath()
+    if (!isTranslocatedPath(exePath)) return
+    Log.warn(LOG_TAG, "App is running from a translocated path ($exePath); keryx:// OAuth linking may fail")
+    koin.get<NotificationCenter>().add(
+        AppNotification(
+            id = IdGenerator.newId(),
+            level = AppNotificationLevel.WARNING,
+            message = getString(Res.string.notification_app_translocated),
+            timestampMillis = SystemClock.nowMillis(),
+        ),
+    )
 }
 
 /** Registers the keryx:// URL scheme in the Windows registry so browsers can redirect back to the app. */

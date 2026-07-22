@@ -3,6 +3,7 @@ package works.merc.keryx.app.ui.i18n
 import androidx.compose.runtime.Composable
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.CloudAuthException
+import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.FeedFetchException
 import works.merc.keryx.app.core.FeedNotFoundException
@@ -14,6 +15,7 @@ import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.core.SyncConflictException
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.error_cloud_auth
+import works.merc.keryx.app.resources.error_cloud_data_incompatible
 import works.merc.keryx.app.resources.error_cloud_storage
 import works.merc.keryx.app.resources.error_feed_fetch
 import works.merc.keryx.app.resources.error_feed_gone
@@ -33,6 +35,7 @@ fun userMessage(exception: KeryxException): String = stringResource(
         is FeedFetchException -> Res.string.error_feed_fetch
         is FeedParseException -> Res.string.error_feed_parse
         is CloudAuthException -> Res.string.error_cloud_auth
+        is CloudDataIncompatibleException -> Res.string.error_cloud_data_incompatible
         is CloudStorageException -> Res.string.error_cloud_storage
         is SyncConflictException -> Res.string.error_sync_conflict
         is SchemaVersionException -> Res.string.error_schema_version

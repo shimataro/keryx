@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.LinkOff
 import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Update
@@ -81,6 +82,10 @@ import works.merc.keryx.app.resources.settings_cloud_abort_connect_confirm_body
 import works.merc.keryx.app.resources.settings_cloud_abort_connect_confirm_title
 import works.merc.keryx.app.resources.settings_cloud_disconnect_confirm_body
 import works.merc.keryx.app.resources.settings_cloud_disconnect_confirm_title
+import works.merc.keryx.app.resources.settings_cloud_reset
+import works.merc.keryx.app.resources.settings_cloud_reset_confirm_action
+import works.merc.keryx.app.resources.settings_cloud_reset_confirm_body
+import works.merc.keryx.app.resources.settings_cloud_reset_confirm_title
 import works.merc.keryx.app.resources.settings_cloud_switch_confirm_action
 import works.merc.keryx.app.resources.settings_cloud_switch_confirm_body
 import works.merc.keryx.app.resources.settings_cloud_switch_confirm_title
@@ -262,6 +267,8 @@ private fun CloudSyncTabContent(vm: SettingsViewModel) {
     // Confirms switching from the currently-connected provider to a different one (disconnect old,
     // connect new). Holds the target (new) provider.
     var confirmingSwitchTo by remember { mutableStateOf<CloudStorageType?>(null) }
+    // Confirms the destructive "reset cloud data" (delete the cloud DB, re-upload local fresh).
+    var confirmingResetCloudData by remember { mutableStateOf<CloudStorageType?>(null) }
 
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         val connected = vm.connectedType
@@ -282,9 +289,10 @@ private fun CloudSyncTabContent(vm: SettingsViewModel) {
                     connected = connected == type,
                     connecting = vm.connectingType == type,
                     canCancel = vm.canCancelConnect,
-                    idleEnabled = vm.connectingType == null,
+                    idleEnabled = vm.connectingType == null && !vm.resetting,
                     failed = vm.connectFailedType == type,
                     lastSyncedAtText = if (connected == type) vm.lastSyncedAtText else null,
+                    resetting = vm.resetting,
                     // No provider connected yet: a fresh connect is low-risk, so do it directly. A
                     // different provider connected: confirm the switch first.
                     onSelect = {
@@ -292,6 +300,7 @@ private fun CloudSyncTabContent(vm: SettingsViewModel) {
                     },
                     onCancel = { confirmingAbortConnect = type },
                     onDisconnect = { confirmingDisconnect = type },
+                    onResetCloudData = { confirmingResetCloudData = type },
                 )
             }
         }
@@ -318,6 +327,18 @@ private fun CloudSyncTabContent(vm: SettingsViewModel) {
             text = { Text(stringResource(Res.string.settings_cloud_abort_connect_confirm_body)) },
             confirmText = stringResource(Res.string.common_abort),
             onConfirm = { vm.cancelConnect(); confirmingAbortConnect = null },
+            dismissText = stringResource(Res.string.common_cancel),
+        )
+    }
+    confirmingResetCloudData?.let { _ ->
+        KeryxAlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            tonalElevation = 0.dp,
+            onDismissRequest = { confirmingResetCloudData = null },
+            title = stringResource(Res.string.settings_cloud_reset_confirm_title),
+            text = { Text(stringResource(Res.string.settings_cloud_reset_confirm_body)) },
+            confirmText = stringResource(Res.string.settings_cloud_reset_confirm_action),
+            onConfirm = { vm.resetCloudData(); confirmingResetCloudData = null },
             dismissText = stringResource(Res.string.common_cancel),
         )
     }
@@ -557,9 +578,11 @@ private fun CloudProviderRow(
     idleEnabled: Boolean,
     failed: Boolean,
     lastSyncedAtText: String? = null,
+    resetting: Boolean = false,
     onSelect: () -> Unit,
     onCancel: () -> Unit,
     onDisconnect: () -> Unit,
+    onResetCloudData: () -> Unit = {},
 ) {
     // The connected row gets a step-up accent (same secondaryContainer/onSecondaryContainer
     // tokens KeryxDialogTabBar uses for its selected tab) so it still stands out once nested
@@ -588,29 +611,38 @@ private fun CloudProviderRow(
                     contentDescription = null,
                     modifier = Modifier.size(20.dp),
                 )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(type.brandLabel(), style = MaterialTheme.typography.bodyMedium, color = contentColor)
-                    lastSyncedAtText?.let { syncedAt ->
-                        Text(
-                            " （${stringResource(Res.string.settings_last_synced, syncedAt)}）",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (connected) contentColor.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
+                Text(type.brandLabel(), style = MaterialTheme.typography.bodyMedium, color = contentColor)
             }
             if (connected) {
-                // Disabled during a switch: while the old provider's revoke is in flight
-                // (connectingType != null), its own disconnect must not be re-clickable.
-                FlatTonalButton(onClick = onDisconnect, enabled = idleEnabled) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Outlined.LinkOff,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(type.disconnectLabel()))
+                // Disabled during a switch (old provider's revoke in flight, connectingType != null)
+                // or a reset in progress, so neither destructive action can be re-triggered mid-op.
+                val enabled = idleEnabled && !resetting
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    FlatTonalButton(onClick = onResetCloudData, enabled = enabled) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (resetting) {
+                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(
+                                    Icons.Outlined.RestartAlt,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(Res.string.settings_cloud_reset))
+                        }
+                    }
+                    FlatTonalButton(onClick = onDisconnect, enabled = enabled) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Outlined.LinkOff,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(type.disconnectLabel()))
+                        }
                     }
                 }
             } else if (connecting && canCancel) {
@@ -634,6 +666,16 @@ private fun CloudProviderRow(
                     }
                 }
             }
+        }
+        // Last-synced shown as a subtitle under the provider name (only non-null for the connected
+        // row) — its own full-width line so it never wraps against the trailing action buttons.
+        lastSyncedAtText?.let { syncedAt ->
+            Text(
+                stringResource(Res.string.settings_last_synced, syncedAt),
+                style = MaterialTheme.typography.labelSmall,
+                color = contentColor.copy(alpha = 0.8f),
+                modifier = Modifier.padding(start = 28.dp, top = 2.dp),
+            )
         }
         if (failed) {
             Text(
