@@ -189,6 +189,15 @@ class IsNewerTest {
         assertEquals(true, isNewer("0.1.0-beta.2", "0.1.0-beta.1")) // dotted numeric identifiers
         assertEquals(false, isNewer("0.1.0-rc1", "0.1.0-rc1"))   // equal
     }
+
+    @Test
+    fun buildMetadataIsIgnored() {
+        // SemVer §10: build metadata (`+...`) must not affect precedence.
+        assertEquals(false, isNewer("1.0.1+build.7", "1.0.1"))   // metadata alone ≠ newer
+        assertEquals(true, isNewer("1.0.1+build.7", "1.0.0"))    // core still decides
+        assertEquals(false, isNewer("1.0.0-alpha+001", "1.0.0")) // prerelease < release, metadata ignored
+        assertEquals(false, isNewer("1.0.0+a", "1.0.0+b"))       // differing metadata → equal
+    }
 }
 
 class IsBelowStableTest {

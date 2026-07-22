@@ -99,11 +99,16 @@ internal fun isNewer(remote: String, local: String): Boolean =
 /**
  * Three-way SemVer comparison of two version strings (leading `v` already stripped by [versionOf]).
  * Returns a negative/zero/positive Int like [Comparator], or `null` when either core has a
- * non-numeric segment (undeterminable → callers treat as "not newer").
+ * non-numeric segment (undeterminable → callers treat as "not newer"). Build metadata (`+...`) is
+ * stripped and ignored for precedence per SemVer §10.
  */
 private fun compareVersions(a: String, b: String): Int? {
-    val aCore = a.substringBefore('-').split(".").map { it.toIntOrNull() }
-    val bCore = b.substringBefore('-').split(".").map { it.toIntOrNull() }
+    // SemVer §10: build metadata is ignored for precedence. Strip it first — it may follow either
+    // the core (`1.0.0+001`) or the prerelease (`1.0.0-alpha+001`).
+    val aClean = a.substringBefore('+')
+    val bClean = b.substringBefore('+')
+    val aCore = aClean.substringBefore('-').split(".").map { it.toIntOrNull() }
+    val bCore = bClean.substringBefore('-').split(".").map { it.toIntOrNull() }
     if (aCore.any { it == null } || bCore.any { it == null }) return null
 
     val length = maxOf(aCore.size, bCore.size)
@@ -114,8 +119,8 @@ private fun compareVersions(a: String, b: String): Int? {
     }
 
     // Cores equal → compare prerelease per SemVer: absence of a prerelease outranks its presence.
-    val aPre = a.substringAfter('-', "")
-    val bPre = b.substringAfter('-', "")
+    val aPre = aClean.substringAfter('-', "")
+    val bPre = bClean.substringAfter('-', "")
     if (aPre.isEmpty() && bPre.isEmpty()) return 0
     if (aPre.isEmpty()) return 1
     if (bPre.isEmpty()) return -1
