@@ -302,17 +302,42 @@ class GoogleDriveStorageTest {
             { respond(notFound, HttpStatusCode.OK) },
             { respond("""{"id":"F2","version":"r2"}""", HttpStatusCode.OK) },
             { respond("""{"files":[{"id":"F1","version":"r1"},{"id":"F2","version":"r2"}]}""", HttpStatusCode.OK) },
+            { respond("", HttpStatusCode.NoContent) },
         )
         val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
         assertIs<Result.Err>(r)
         assertIs<SyncConflictException>(r.exception)
-        assertEquals(3, history.size)
+        // The loser deletes its own just-created file (F2) so it does not linger as an orphan,
+        // then reports the conflict.
+        assertEquals(4, history.size)
         assertEquals("GET", history[0].method.value)
         assertEquals("/drive/v3/files", history[0].url.encodedPath)
         assertEquals("POST", history[1].method.value)
         assertEquals("/upload/drive/v3/files", history[1].url.encodedPath)
         assertEquals("GET", history[2].method.value)
         assertEquals("/drive/v3/files", history[2].url.encodedPath)
+        assertEquals("DELETE", history[3].method.value)
+        assertEquals("/drive/v3/files/F2", history[3].url.encodedPath)
+        verify()
+    }
+
+    @Test
+    fun createLoserStillReportsConflictWhenOwnCleanupFails() = runTest {
+        // Even if deleting our own orphan fails, the conflict signal must survive so the sync flow
+        // reconverges (a failed best-effort cleanup must not mask the race outcome).
+        val (s, history, verify) = storage(
+            "tok",
+            { respond(notFound, HttpStatusCode.OK) },
+            { respond("""{"id":"F2","version":"r2"}""", HttpStatusCode.OK) },
+            { respond("""{"files":[{"id":"F1","version":"r1"},{"id":"F2","version":"r2"}]}""", HttpStatusCode.OK) },
+            { respondError(HttpStatusCode.InternalServerError) },
+        )
+        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        assertIs<Result.Err>(r)
+        assertIs<SyncConflictException>(r.exception)
+        assertEquals(4, history.size)
+        assertEquals("DELETE", history[3].method.value)
+        assertEquals("/drive/v3/files/F2", history[3].url.encodedPath)
         verify()
     }
 

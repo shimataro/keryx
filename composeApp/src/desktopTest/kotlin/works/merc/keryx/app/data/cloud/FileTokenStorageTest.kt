@@ -57,6 +57,24 @@ class FileTokenStorageTest {
     }
 
     @Test
+    fun savedTokenFileIsNotReadableByGroupOrOthers() {
+        // The refresh token must never be group/world-readable, even transiently. On POSIX
+        // filesystems verify the persisted file is owner-only; skip elsewhere (e.g. Windows).
+        val path = java.nio.file.Paths.get(FileIO.join(dir, ".dropbox_tokens.json"))
+        storage.save(OAuthTokens(accessToken = "access-123", refreshToken = "refresh-456"))
+        val perms = try {
+            java.nio.file.Files.getPosixFilePermissions(path)
+        } catch (_: UnsupportedOperationException) {
+            return // non-POSIX filesystem: nothing to assert
+        }
+        val forbidden = setOf(
+            java.nio.file.attribute.PosixFilePermission.GROUP_READ,
+            java.nio.file.attribute.PosixFilePermission.OTHERS_READ,
+        )
+        assertEquals(emptySet(), perms.intersect(forbidden), "Token file must not be group/other readable")
+    }
+
+    @Test
     fun clearDeletesFileAndSubsequentLoadReturnsNull() {
         storage.save(OAuthTokens(accessToken = "access-123"))
         assertEquals("access-123", storage.load()?.accessToken)

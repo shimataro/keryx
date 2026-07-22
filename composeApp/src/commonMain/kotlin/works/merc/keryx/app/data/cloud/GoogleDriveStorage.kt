@@ -130,7 +130,12 @@ class GoogleDriveStorage(
                         return@withToken Result.Err(CloudStorageException("Created file disappeared immediately"))
                     }
                     if (winner.id != createdId) {
-                        // Lost the race — the sync flow will download the winner's file and retry.
+                        // Lost the race — delete the file we just created so it does not linger as
+                        // an orphan (the winner may have listed before ours became visible and so
+                        // never sees it to clean up). Best-effort: a failed cleanup must not mask the
+                        // conflict signal, and a double-delete with the winner is safe (404 == Ok).
+                        // The sync flow will then download the winner's file and retry.
+                        deleteById(token, createdId)
                         return@withToken Result.Err(SyncConflictException())
                     }
                     // We are the winner — safely delete every duplicate.

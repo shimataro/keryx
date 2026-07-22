@@ -28,10 +28,15 @@ class FileTokenStorage(
         // in-memory session still works, only cross-restart persistence is lost.
         runCatching {
             file.parentFile?.mkdirs()
+            // Restrict the file to owner-only *before* writing the refresh token into it. Creating
+            // it empty first and tightening permissions up front closes the brief window in which a
+            // freshly-written token file was group/world-readable (umask-dependent): writeText into
+            // an already-existing file preserves its permissions rather than recreating it.
+            if (!file.exists()) file.createNewFile()
+            file.setReadable(false, false); file.setReadable(true, true)
+            file.setWritable(false, false); file.setWritable(true, true)
             file.writeText(json.encodeToString(tokens))
         }.onFailure { e -> Log.warn(TAG, "Token file could not be written", e) }
-        runCatching { file.setReadable(false, false); file.setReadable(true, true) }
-        runCatching { file.setWritable(false, false); file.setWritable(true, true) }
     }
 
     override fun load(): OAuthTokens? =
