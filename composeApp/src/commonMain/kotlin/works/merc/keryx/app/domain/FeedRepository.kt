@@ -157,7 +157,7 @@ class FeedRepository(
                     feeds.incrementErrorCount(ex.messageText, clock.nowMillis(), feed.id)
                 }
                 if (ex is FeedNotFoundException && ex.isGone) {
-                    notify(messages.feedGone(displayTitle(feed)), AppNotificationLevel.WARNING)
+                    notify(messages.feedGone(feed.displayTitle()), AppNotificationLevel.WARNING)
                 }
                 return RefreshOutcome(r, hadArticles = false)
             }
@@ -195,7 +195,7 @@ class FeedRepository(
 
         if (fetched.redirectUrl != null && fetched.redirectUrl != feed.url) {
             feeds.updateUrl(fetched.redirectUrl, clock.nowMillis(), feed.id)
-            notify(messages.feedUrlChanged(displayTitle(feed)), AppNotificationLevel.WARNING)
+            notify(messages.feedUrlChanged(feed.displayTitle()), AppNotificationLevel.WARNING)
         }
 
         val newCount = articleRepository.upsertParsed(feed.id, fetched.articles)
@@ -227,9 +227,6 @@ class FeedRepository(
             feeds.updateFaviconUrl(url ?: "", clock.nowMillis(), feed.id)
         }
     }
-
-    private fun displayTitle(feed: Feeds): String =
-        feed.custom_title?.takeIf { it.isNotBlank() } ?: feed.title
 
     private suspend fun notify(message: String, level: AppNotificationLevel) {
         notificationCenter.add(

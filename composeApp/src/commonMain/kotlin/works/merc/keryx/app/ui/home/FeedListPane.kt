@@ -1,10 +1,8 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.draganddrop.dragAndDropSource
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
@@ -22,11 +20,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LocalContentColor
@@ -45,26 +39,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.clipPath
-import org.jetbrains.compose.resources.painterResource
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -74,6 +58,7 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
+import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
 import works.merc.keryx.app.platform.NativeMenuItem
@@ -90,7 +75,6 @@ import works.merc.keryx.app.platform.positionYInRoot
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.resources.common_delete
-import works.merc.keryx.app.resources.common_save
 import works.merc.keryx.app.resources.home_add_feed
 import works.merc.keryx.app.resources.home_add_folder
 import works.merc.keryx.app.resources.home_add_tag
@@ -120,7 +104,6 @@ import works.merc.keryx.app.resources.home_search_placeholder
 import works.merc.keryx.app.resources.home_starred
 import works.merc.keryx.app.resources.home_sync
 import works.merc.keryx.app.resources.home_syncing
-import works.merc.keryx.app.resources.home_tag_color
 import works.merc.keryx.app.resources.home_tag_name_duplicate
 import works.merc.keryx.app.resources.home_tags
 import works.merc.keryx.app.resources.home_unsubscribe_body
@@ -543,7 +526,7 @@ fun FeedListPane(
         )
     }
     confirmingUnsubscribeFeed?.let { feed ->
-        val displayName = feed.custom_title?.takeIf { it.isNotBlank() } ?: feed.title
+        val displayName = feed.displayTitle()
         KeryxAlertDialog(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             tonalElevation = 0.dp,
@@ -978,11 +961,11 @@ private fun FeedRow(
                 .padding(start = if (indented) 36.dp else 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            FeedAvatar(feed.custom_title?.takeIf { it.isNotBlank() } ?: feed.title, feed.favicon_url)
+            FeedAvatar(feed.displayTitle(), feed.favicon_url)
             Spacer(Modifier.width(12.dp))
             CompositionLocalProvider(LocalContentColor provides (selectionContentColorOrNull(selected, focused) ?: LocalContentColor.current)) {
                 Text(
-                    feed.custom_title?.takeIf { it.isNotBlank() } ?: feed.title,
+                    feed.displayTitle(),
                     Modifier.weight(1f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -1003,176 +986,4 @@ private fun FeedRow(
             InsertionLine(indented, visible = activeBoundaryState.value == belowBoundary)
         }
     }
-}
-
-@Composable
-private fun TextPromptDialog(
-    title: String,
-    hint: String,
-    initial: String,
-    allowBlank: Boolean = false,
-    blockingError: (String) -> String? = { null },
-    infoHint: (String) -> String? = { null },
-    extraContent: @Composable () -> Unit = {},
-    onConfirm: (String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var text by remember { mutableStateOf(initial) }
-    val focusRequester = remember { FocusRequester() }
-    val trimmed = text.trim()
-    val error = if (!allowBlank && trimmed.isBlank()) null else blockingError(trimmed)
-    val canConfirm = (allowBlank || trimmed.isNotBlank()) && error == null
-    val message = error ?: infoHint(trimmed)
-
-    fun submit() {
-        if (canConfirm) onConfirm(trimmed)
-    }
-
-    KeryxAlertDialog(
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        tonalElevation = 0.dp,
-        onDismissRequest = onDismiss,
-        title = title,
-        text = {
-            Column {
-                KeryxTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    singleLine = true,
-                    placeholder = hint,
-                    isError = error != null,
-                    supportingText = message,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { submit() }),
-                    modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
-                )
-                LaunchedEffect(Unit) { focusRequester.requestFocus() }
-                extraContent()
-            }
-        },
-        confirmText = stringResource(Res.string.common_save),
-        onConfirm = { submit() },
-        confirmEnabled = canConfirm,
-        dismissText = stringResource(Res.string.common_cancel),
-    )
-}
-
-@Composable
-private fun CountBadge(count: Long, selected: Boolean, focused: Boolean) {
-    Text(
-        count.toString(),
-        style = MaterialTheme.typography.labelSmall,
-        color = selectionContentColorOrNull(selected, focused) ?: MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-}
-
-@Composable
-private fun FeedAvatar(title: String, faviconUrl: String?) {
-    if (faviconUrl.isNullOrBlank()) {
-        LetterAvatar(title)
-    } else {
-        // The favicon must NOT sit in its own graphics layer: the feed row's
-        // `Modifier.dragAndDropSource` records the row into a Picture and draws that snapshot,
-        // and a nested layer's async update (the favicon finishing loading) doesn't invalidate
-        // that recorder — so the favicon would stay invisible until a hover-driven redraw.
-        // Hence rounded corners are clipped at the canvas level (drawWithCache + clipPath, which
-        // creates no layer) instead of `Modifier.clip`, and Coil's own `clipToBounds` is disabled.
-        Box(
-            Modifier.size(18.dp).drawWithCache {
-                val r = 4.dp.toPx()
-                val path = Path().apply { addRoundRect(RoundRect(0f, 0f, size.width, size.height, r, r)) }
-                onDrawWithContent { clipPath(path) { this@onDrawWithContent.drawContent() } }
-            },
-        ) {
-            AsyncImage(
-                model = faviconUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                error = painterResource(KeryxIcons.PublicFilled),
-                clipToBounds = false,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-    }
-}
-
-@Composable
-private fun LetterAvatar(title: String) {
-    val letter = title.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
-    Box(
-        Modifier.size(18.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(letter, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
-    }
-}
-
-/**
- * Selectable tag colors. Chosen to stay clear of the app's Teal-based theme palette
- * (`Teal`/`TealLight` in `ui/theme/KeryxTheme.kt`) so a tag dot never reads as "the same color as
- * a selected row".
- */
-private val TagColorPalette: List<String> = listOf(
-    "#E53935", // red
-    "#FB8C00", // orange
-    "#FDD835", // amber
-    "#43A047", // green
-    "#1E88E5", // blue
-    "#5E35B1", // indigo
-    "#8E24AA", // purple
-    "#D81B60", // pink
-)
-
-/**
- * A horizontally-scrolling row of color swatches for tag color selection: a "no color" swatch
- * (rendered gray, matching `colorFromHex(null)`) followed by [TagColorPalette]. Follows the
- * "Native-feel restyle" convention (`.claude/ui-guidelines.md`) — plain `Modifier.selectable`
- * (no ripple override) so it picks up the app-wide `FlatIndication`, and a border rather than a
- * filled background to indicate selection.
- */
-@Composable
-private fun TagColorPicker(selected: String?, onSelect: (String?) -> Unit) {
-    val rowDescription = stringResource(Res.string.home_tag_color)
-    Spacer(Modifier.height(8.dp))
-    Text(rowDescription, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    Spacer(Modifier.height(4.dp))
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .semantics { contentDescription = rowDescription },
-    ) {
-        ColorSwatch(color = Color(0xFF9E9E9E), isSelected = selected == null, onClick = { onSelect(null) })
-        TagColorPalette.forEach { hex ->
-            Spacer(Modifier.width(8.dp))
-            ColorSwatch(color = colorFromHex(hex), isSelected = selected == hex, onClick = { onSelect(hex) })
-        }
-    }
-}
-
-@Composable
-private fun ColorSwatch(color: Color, isSelected: Boolean, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .size(24.dp)
-            .clip(CircleShape)
-            .then(
-                if (isSelected) {
-                    Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
-                } else {
-                    Modifier
-                },
-            )
-            .background(color, CircleShape)
-            .selectable(selected = isSelected, onClick = onClick),
-    )
-}
-
-private fun colorFromHex(hex: String?): Color {
-    if (hex == null) return Color(0xFF9E9E9E)
-    val clean = hex.removePrefix("#")
-    return runCatching {
-        val v = clean.toLong(16)
-        if (clean.length <= 6) Color(0xFF000000 or v) else Color(v)
-    }.getOrDefault(Color(0xFF9E9E9E))
 }

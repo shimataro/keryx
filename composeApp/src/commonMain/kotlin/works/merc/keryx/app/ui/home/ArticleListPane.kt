@@ -56,6 +56,7 @@ import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.searchTerms
 import works.merc.keryx.app.data.local.db.Articles
+import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.NativeMenuItem
@@ -104,7 +105,7 @@ fun ArticleListPane(
     val selected by vm.selectedArticle.collectAsStateSafe(null)
     val unreadOnly by vm.unreadOnly.collectAsStateSafe(false)
     val newestFirst by vm.newestFirst.collectAsStateSafe(true)
-    val feedTitles = feeds.associate { it.id to (it.custom_title?.takeIf { t -> t.isNotBlank() } ?: it.title) }
+    val feedTitles = feeds.associate { it.id to it.displayTitle() }
     val feedFavicons = feeds.associate { it.id to it.favicon_url }
 
     // Reset the list to the top when the user switches feed/tag/folder/scope, so a new list never
@@ -167,7 +168,7 @@ private fun SearchListPane(
     val selected by vm.selectedArticle.collectAsStateSafe(null)
     val unreadOnly by vm.unreadOnly.collectAsStateSafe(false)
     val feeds by vm.feeds.collectAsStateSafe(emptyList())
-    val feedTitles = feeds.associate { it.id to (it.custom_title?.takeIf { t -> t.isNotBlank() } ?: it.title) }
+    val feedTitles = feeds.associate { it.id to it.displayTitle() }
     val feedFavicons = feeds.associate { it.id to it.favicon_url }
     // A query has usable terms once at least one word is long enough for the trigram index
     // (short words like a lone "ab", or "ab cd" where every word is too short, count as no terms).

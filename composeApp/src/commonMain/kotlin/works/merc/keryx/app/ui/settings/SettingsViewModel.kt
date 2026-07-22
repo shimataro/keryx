@@ -22,6 +22,7 @@ import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.opml.OpmlCodec
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.CloudSession
+import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
@@ -266,7 +267,7 @@ class SettingsViewModel(
                 }
                 val feeds = feedRepository.getAllFeeds().map {
                     OpmlCodec.ExportFeed(
-                        title = it.custom_title?.takeIf { t -> t.isNotBlank() } ?: it.title,
+                        title = it.displayTitle(),
                         xmlUrl = it.url,
                         htmlUrl = it.site_url,
                     )
