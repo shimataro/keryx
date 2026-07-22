@@ -1,5 +1,6 @@
 package works.merc.keryx.app.ui.settings
 
+import androidx.lifecycle.viewModelScope
 import app.cash.sqldelight.db.SqlDriver
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -9,6 +10,7 @@ import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -76,6 +78,12 @@ class SettingsViewModelTest {
     private lateinit var db: KeryxDatabase
     private val dir = FileIO.join(AppDirs.tempDir(), "settings-vm-test-${Random.nextInt()}")
 
+    // ViewModels created via newViewModel(). Their viewModelScope is not tied to runTest's scope,
+    // so it must be cancelled explicitly before driver.close() — otherwise the init collector and
+    // in-flight action coroutines outlive the test and can throw against the closed driver,
+    // surfacing (flakily, on another test) as kotlinx.coroutines.test.UncaughtExceptionsBeforeTest.
+    private val createdViewModels = mutableListOf<SettingsViewModel>()
+
     @BeforeTest
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
@@ -86,9 +94,11 @@ class SettingsViewModelTest {
 
     @AfterTest
     fun tearDown() {
+        createdViewModels.forEach { it.viewModelScope.cancel() }
+        createdViewModels.clear()
+        Dispatchers.resetMain()
         driver.close()
         FileIO.delete(FileIO.join(dir, "local_settings.json"))
-        Dispatchers.resetMain()
     }
 
     private fun failingFetcher(): FeedFetcher {
@@ -170,7 +180,7 @@ class SettingsViewModelTest {
         return SettingsViewModel(
             settingsRepository, session, syncRepository, feedRepository, updateChecker, activityCenter,
             Dispatchers.Unconfined,
-        )
+        ).also { createdViewModels += it }
     }
 
     @Test

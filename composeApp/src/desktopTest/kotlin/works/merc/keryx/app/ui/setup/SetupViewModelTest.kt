@@ -1,5 +1,6 @@
 package works.merc.keryx.app.ui.setup
 
+import androidx.lifecycle.viewModelScope
 import app.cash.sqldelight.db.SqlDriver
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -8,6 +9,7 @@ import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -62,6 +64,12 @@ class SetupViewModelTest {
     private lateinit var db: KeryxDatabase
     private val dir = FileIO.join(AppDirs.tempDir(), "setup-vm-test-${Random.nextInt()}")
 
+    // ViewModels created via newViewModel(). Their viewModelScope is not tied to runTest's scope,
+    // so it must be cancelled explicitly before driver.close() — otherwise in-flight coroutines
+    // outlive the test and can throw against the closed driver, surfacing (flakily, on another
+    // test) as kotlinx.coroutines.test.UncaughtExceptionsBeforeTest.
+    private val createdViewModels = mutableListOf<SetupViewModel>()
+
     @BeforeTest
     fun setUp() {
         Dispatchers.setMain(StandardTestDispatcher())
@@ -72,9 +80,11 @@ class SetupViewModelTest {
 
     @AfterTest
     fun tearDown() {
+        createdViewModels.forEach { it.viewModelScope.cancel() }
+        createdViewModels.clear()
+        Dispatchers.resetMain()
         driver.close()
         FileIO.delete(FileIO.join(dir, "local_settings.json"))
-        Dispatchers.resetMain()
     }
 
     private fun newViewModel(
@@ -111,6 +121,7 @@ class SetupViewModelTest {
             connectFlow = connectFlow ?: FakeCloudConnectFlow(connectResult),
         )
         return SetupViewModel(settingsRepository, cloudSession, syncRepository)
+            .also { createdViewModels += it }
     }
 
     @Test
