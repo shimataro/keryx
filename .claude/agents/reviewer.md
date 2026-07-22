@@ -12,19 +12,31 @@ You do not modify code — you only point out issues.
 
 ### 1. Layer violations
 
-- Does the UI (`ui/`) call the DataSource (`data/`) directly instead of going through a Repository (`domain/`)?
-- Does a ViewModel hold business logic that belongs in a Repository?
+- Does the UI (`ui/`) call the DataSource (`data/`) directly instead of going
+  through a Repository (`domain/`)? The layering is what keeps the UI unaware of
+  sync/DB, so sync and conflict-resolution changes stay contained to `domain/`.
+- Does a ViewModel hold business logic (sync, conflict resolution, multi-step DB
+  work) that belongs in a Repository? (@../../docs/app-architecture.md)
 
 ### 2. Platform boundaries
 
-- Is platform-specific code (java.io, java.sql, java.awt, Ktor CIO, etc.) placed in `desktopMain` behind a `commonMain` `expect`, rather than leaking into `commonMain`?
+- Is platform-specific code (java.io, java.sql, java.awt, Ktor CIO, etc.) behind
+  a `commonMain` `expect` with its `actual` in `desktopMain`, rather than leaking
+  into `commonMain`? This is what keeps the planned Android/iOS targets viable.
+  (CLAUDE.md constraint #4)
 
 ### 3. SQLDelight / FTS / merge
 
+Structural checks; the semantic side is #4. See CLAUDE.md constraints #1–#2.
+
 - Is `articles_fts` kept out of the `.sq` files and managed only by `FtsManager`?
+  It must never be dropped on the live DB — a concurrent search would hit
+  `no such table`.
 - Does full-text search go through `FtsSearch` (rowid join + `MATCH`)?
-- Does any ATTACH-DATABASE merge run through `platform/DatabaseMerger` (single
-  connection), NOT the SQLDelight driver?
+- Does any ATTACH-DATABASE merge run through `platform/DatabaseMerger` on a
+  single connection, NOT the SQLDelight driver? The JVM driver opens a fresh
+  connection per statement, so an `ATTACH` issued there is invisible to the next
+  statement (`no such table: cloud.*`).
 - Does the merge SQL keep explicit column lists and the NOT-EXISTS/EXISTS guards
   (no `SELECT *`)?
 
@@ -115,8 +127,11 @@ Detail: @../../docs/db-schema.md.
 
 ### 7. i18n
 
-- Are there any hardcoded user-facing strings? Every one must come from `composeResources/values/strings.xml`
-  (including tray/notification text via `getString`).
+- Are there any hardcoded user-facing strings? Every one must come from
+  `composeResources/values/strings.xml` — including tray/notification text built
+  outside composition (via `getString`), which is the easy one to miss. Japanese
+  is the only shipped locale, but the mechanism is mandatory. (CLAUDE.md
+  constraint #3)
 
 ### 8. Error handling (@docs/error-design.md)
 
@@ -139,6 +154,22 @@ Detail: @../../docs/db-schema.md.
 - Does new or changed logic (Repository, ViewModel, DataSource, etc.) have a
   corresponding test under `commonTest/`/`desktopTest/`? If not, is the
   omission justified (e.g. UI-only change with no logic)?
+
+### 12. Source language
+
+- Is all source code — comments, KDoc, log/exception messages, non-UI string
+  literals — in English? Non-English here is a finding. Exceptions: UI-facing
+  strings still go through Compose Resources (#7) and stay Japanese; and test
+  assertions matching real rendered UI text may legitimately contain the
+  Japanese string being asserted against. (CLAUDE.md constraint #9)
+
+### 13. Dependency license attribution
+
+- When a shipped runtime dependency in `gradle/libs.versions.toml` is
+  added/removed and its license requires attribution (Apache-2.0, MIT, BSD,
+  etc.), is `THIRD-PARTY-LICENSES.md` kept in sync? It's the single source of
+  truth surfaced in the About dialog; test-only dependencies are excluded.
+  (CLAUDE.md constraint #8)
 
 ## Process
 
