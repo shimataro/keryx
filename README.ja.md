@@ -6,6 +6,8 @@
 
 ローカルファースト・クロスプラットフォームな RSS リーダー
 
+🌐 **ウェブサイト**: <https://keryx.merc.works/ja/>
+
 ## 特徴
 
 - **マルチデバイス同期**: クラウドストレージ経由（Dropbox / Google Drive）

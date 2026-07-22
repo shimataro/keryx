@@ -7,6 +7,9 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.respondError
 import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpStatusCode
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import works.merc.keryx.app.core.CLOUD_DB_PATH
 import works.merc.keryx.app.core.CloudAuthException
@@ -18,6 +21,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -481,6 +485,27 @@ class GoogleDriveStorageTest {
         assertEquals("POST", history[1].method.value)
         assertEquals("/upload/drive/v3/files", history[1].url.encodedPath)
         verify()
+    }
+
+    @Test
+    fun cancellationPropagatesNotConvertedToError() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val started = CompletableDeferred<Unit>()
+        val (s, _, _) = storage(
+            "tok",
+            {
+                started.complete(Unit)
+                gate.await()
+                respond(foundFile(version = "r42"), HttpStatusCode.OK)
+            },
+        )
+        var result: Result<CloudFile>? = null
+        val job = launch { result = s.download(CLOUD_DB_PATH) }
+        runCurrent()
+        started.await()
+        job.cancel()
+        job.join()
+        assertNull(result)
     }
 
     @Test

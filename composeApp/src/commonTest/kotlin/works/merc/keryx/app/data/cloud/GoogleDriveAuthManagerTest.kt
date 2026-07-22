@@ -7,6 +7,9 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.OutgoingContent
 import io.ktor.http.headersOf
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
@@ -14,6 +17,7 @@ import works.merc.keryx.app.core.Result
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class GoogleDriveAuthManagerTest {
@@ -135,5 +139,27 @@ class GoogleDriveAuthManagerTest {
         assertIs<Result.Err>(r)
         assertIs<CloudAuthException>(r.exception)
         assertEquals("Token response had no access_token", r.exception.message)
+    }
+
+    @Test
+    fun cancellationPropagatesNotConvertedToError() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val started = CompletableDeferred<Unit>()
+        val m = manager {
+            started.complete(Unit)
+            gate.await()
+            respond(
+                """{"access_token":"AT","refresh_token":"RT","expires_in":3600}""",
+                HttpStatusCode.OK,
+                headersOf("Content-Type", "application/json"),
+            )
+        }
+        var result: Result<OAuthTokens>? = null
+        val job = launch { result = m.exchangeCode("CLIENTID", "code", "verifier", "http://127.0.0.1:1234/") }
+        runCurrent()
+        started.await()
+        job.cancel()
+        job.join()
+        assertNull(result)
     }
 }
