@@ -6,7 +6,9 @@ import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import works.merc.keryx.app.core.Log
 
@@ -19,8 +21,14 @@ sealed interface UpdateStatus {
 }
 
 /**
- * Polls a GitHub repo's `releases/latest` for a newer version than [currentVersion]. No
- * telemetry, no auth — a single unauthenticated GET against GitHub's public API.
+ * Polls a GitHub repo's `releases` list for a newer version than [currentVersion]. No telemetry,
+ * no auth — a single unauthenticated GET against GitHub's public API.
+ *
+ * The list endpoint (not `releases/latest`) is used so pre-releases are visible: `releases/latest`
+ * only ever returns the newest non-draft, non-pre-release, which would be a 404 for a repo whose
+ * only releases are pre-releases. Candidate policy: official (non-pre-release) releases are always
+ * eligible; a pre-release is eligible only while both [currentVersion] and the release are below
+ * 1.0.0 (i.e. during the pre-stable phase). Drafts are never eligible.
  */
 class UpdateChecker(
     private val client: HttpClient,
@@ -30,7 +38,7 @@ class UpdateChecker(
 ) {
     suspend fun check(): UpdateStatus {
         return try {
-            val response = client.get("https://api.github.com/repos/$repoSlug/releases/latest") {
+            val response = client.get("https://api.github.com/repos/$repoSlug/releases") {
                 // GitHub's API rejects requests with no User-Agent (403) — Ktor doesn't send one
                 // by default, so this must be set explicitly.
                 header(HttpHeaders.UserAgent, "Keryx/$currentVersion")
@@ -40,14 +48,28 @@ class UpdateChecker(
                 Log.warn(TAG, "Update check failed: HTTP ${response.status.value}")
                 return UpdateStatus.Failed
             }
-            val body = json.parseToJsonElement(response.bodyAsText()) as? JsonObject
+            val releases = json.parseToJsonElement(response.bodyAsText()) as? JsonArray
                 ?: return UpdateStatus.Failed.also { Log.warn(TAG, "Update check failed: unexpected response body") }
-            val tagName = body["tag_name"]?.jsonPrimitive?.content
+
+            // Pre-releases are only offered while this build itself is still pre-1.0.0.
+            val currentIsPreStable = isBelowStable(currentVersion)
+            val candidate = releases
+                .mapNotNull { it as? JsonObject }
+                .filter { !(it["draft"]?.jsonPrimitive?.booleanOrNull ?: false) }
+                .filter { release ->
+                    val isPreRelease = release["prerelease"]?.jsonPrimitive?.booleanOrNull ?: false
+                    !isPreRelease || (currentIsPreStable && isBelowStable(versionOf(release)))
+                }
+                // GitHub returns releases newest-first, but don't rely on that: pick the highest
+                // version so a rejected newer pre-release never hides an older eligible stable one.
+                .maxWithOrNull { a, b -> if (isNewer(versionOf(b) ?: "", versionOf(a) ?: "")) -1 else 1 }
+                ?: return UpdateStatus.UpToDate // no eligible release → nothing to offer
+
+            val remoteVersion = versionOf(candidate)
                 ?: return UpdateStatus.Failed.also { Log.warn(TAG, "Update check failed: missing tag_name") }
-            val htmlUrl = body["html_url"]?.jsonPrimitive?.content
+            val htmlUrl = candidate["html_url"]?.jsonPrimitive?.content
                 ?: return UpdateStatus.Failed.also { Log.warn(TAG, "Update check failed: missing html_url") }
 
-            val remoteVersion = tagName.removePrefix("v").removePrefix("V")
             if (isNewer(remoteVersion, currentVersion)) {
                 UpdateStatus.Available(remoteVersion, htmlUrl)
             } else {
@@ -59,6 +81,10 @@ class UpdateChecker(
         }
     }
 }
+
+/** Normalizes a release's `tag_name` (stripping a leading `v`/`V`) into a comparable version string. */
+private fun versionOf(release: JsonObject): String? =
+    release["tag_name"]?.jsonPrimitive?.content?.removePrefix("v")?.removePrefix("V")
 
 /**
  * Strict dot-separated numeric comparison. Unparseable segments are treated as safely "not
@@ -78,6 +104,14 @@ internal fun isNewer(remote: String, local: String): Boolean {
     }
     return false
 }
+
+/**
+ * True when [version]'s major component is 0 (i.e. below 1.0.0). Unparseable or null versions
+ * return false so an undeterminable version is never treated as pre-stable (safe: excluded from
+ * pre-release eligibility rather than wrongly included).
+ */
+internal fun isBelowStable(version: String?): Boolean =
+    (version?.substringBefore('.')?.toIntOrNull() ?: return false) < 1
 
 /**
  * `intervalHours <= 0` means "startup checks only" and is never due for a periodic recheck.

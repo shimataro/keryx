@@ -115,7 +115,7 @@ class SettingsViewModelTest {
 
     private fun updateCheckerReturning(tagName: String): UpdateChecker {
         val client = HttpClient(
-            MockEngine { respond("""{"tag_name":"$tagName","html_url":"https://ex.com/releases/$tagName"}""", HttpStatusCode.OK) },
+            MockEngine { respond("""[{"tag_name":"$tagName","html_url":"https://ex.com/releases/$tagName","prerelease":false,"draft":false}]""", HttpStatusCode.OK) },
         ) { expectSuccess = false }
         return UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo")
     }
