@@ -1,5 +1,6 @@
 package works.merc.keryx.app.ui.home
 
+import androidx.lifecycle.viewModelScope
 import app.cash.sqldelight.db.SqlDriver
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -112,6 +113,12 @@ class HomeViewModelTest {
     private lateinit var db: KeryxDatabase
     private val dir = FileIO.join(AppDirs.tempDir(), "home-vm-test-${Random.nextInt()}")
 
+    // ViewModels created via newViewModel(). Their viewModelScope is not tied to runTest's scope,
+    // so it must be cancelled explicitly before driver.close() — otherwise the eager DB-backed
+    // collectors (SharingStarted.Eagerly) outlive the test and can throw against the closed driver,
+    // surfacing (flakily, on another test) as kotlinx.coroutines.test.UncaughtExceptionsBeforeTest.
+    private val createdViewModels = mutableListOf<HomeViewModel>()
+
     @BeforeTest
     fun setUp() {
         Dispatchers.setMain(StandardTestDispatcher())
@@ -122,9 +129,11 @@ class HomeViewModelTest {
 
     @AfterTest
     fun tearDown() {
+        createdViewModels.forEach { it.viewModelScope.cancel() }
+        createdViewModels.clear()
+        Dispatchers.resetMain()
         driver.close()
         FileIO.delete(FileIO.join(dir, "local_settings.json"))
-        Dispatchers.resetMain()
     }
 
     /** A [FeedFetcher] whose HTTP calls always fail fast, for tests that trigger refresh/sync but don't need real fetches. */
@@ -203,13 +212,15 @@ class HomeViewModelTest {
             syncRepository, cloudSession, activityCenter, Dispatchers.Unconfined,
             // dbWriteDispatcher: Unconfined so read/star writes run inline for deterministic assertions.
             Dispatchers.Unconfined,
-        )
+        ).also { createdViewModels += it }
     }
 
     /**
-     * The viewmodel's exposed StateFlows use `SharingStarted.WhileSubscribed`, so the
-     * underlying DB-backed flows never start emitting until something actively collects
-     * them. Every test that reads `.value` off one of these needs a live collector.
+     * The viewmodel's exposed StateFlows use `SharingStarted.Eagerly` (see [HomeViewModel]), so they
+     * begin collecting their DB-backed upstreams as soon as the ViewModel is created — but under the
+     * virtual test scheduler those collectors only advance once the scheduler is pumped. This helper
+     * keeps an explicit live subscriber per flow so that, together with `testScheduler.advanceUntilIdle()`,
+     * every `.value` reflects the current DB state when asserted.
      */
     private fun TestScope.subscribeAll(vm: HomeViewModel) {
         backgroundScope.launch { vm.feeds.collect {} }

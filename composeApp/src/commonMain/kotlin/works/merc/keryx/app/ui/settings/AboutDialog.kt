@@ -22,6 +22,8 @@ import works.merc.keryx.app.resources.common_ok
 import works.merc.keryx.app.resources.settings_licenses
 import works.merc.keryx.app.resources.settings_project_page
 import works.merc.keryx.app.resources.settings_version
+import works.merc.keryx.app.resources.settings_website
+import works.merc.keryx.app.resources.website_url
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
 
 /**
@@ -59,6 +61,11 @@ internal fun AboutDialogContent() {
             style = MaterialTheme.typography.bodyMedium,
         )
         Spacer(Modifier.height(20.dp))
+        LinkRow(
+            label = stringResource(Res.string.settings_website),
+            url = stringResource(Res.string.website_url),
+        )
+        Spacer(Modifier.height(4.dp))
         LinkRow(
             label = stringResource(Res.string.settings_project_page),
             url = PROJECT_URL,

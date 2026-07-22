@@ -8,6 +8,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.client.statement.readRawBytes
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -152,6 +153,10 @@ class DropboxStorage(
             ?: return Result.Err(CloudAuthException("Not connected to Dropbox"))
         return try {
             block(token)
+        } catch (e: CancellationException) {
+            // Never swallow coroutine cancellation (e.g. a debounced sync superseded by a newer
+            // one) — rethrow so it unwinds silently instead of being mis-logged as a sync error.
+            throw e
         } catch (e: Throwable) {
             Result.Err(CloudStorageException(e.message ?: "Dropbox request failed"))
         }

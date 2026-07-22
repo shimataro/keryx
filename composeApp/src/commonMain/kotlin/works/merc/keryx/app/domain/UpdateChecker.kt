@@ -6,6 +6,7 @@ import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -73,6 +74,8 @@ class UpdateChecker(
             } else {
                 UpdateStatus.UpToDate
             }
+        } catch (e: CancellationException) {
+            throw e // don't swallow coroutine cancellation as a failed update check
         } catch (e: Exception) {
             Log.warn(TAG, "Update check failed", e)
             UpdateStatus.Failed
