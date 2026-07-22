@@ -50,7 +50,7 @@ along — no stash needed). Never create or switch branches without agreement.
 
 Branch names follow the repo convention `<type>/<kebab-summary>`, where `<type>` is
 the Conventional Commits type of the change (`feat`, `fix`, `refactor`, `docs`,
-`chore`, `build`, `test`, `ci`), e.g. `feat/m17n-english`,
+`chore`, `build`, `test`, `ci`, `perf`, `style`), e.g. `feat/m17n-english`,
 `refactor/split-oversized-ui-panes`. Once on a feature branch (i.e. not `v*`), this
 rule no longer triggers.
 
