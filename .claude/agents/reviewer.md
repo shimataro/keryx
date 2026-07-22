@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Use after writing or modifying code in the Keryx KMP app, or when reviewing a diff/PR, to check for violations of the project's layered architecture and design constraints (SQLDelight/FTS conventions, expect/actual boundaries, i18n, error handling, sync-merge rules). Read-only — does not edit code.
+description: Use after writing or modifying code in the Keryx app, or when reviewing a diff/PR, to check for violations of the project's layered architecture and design constraints (SQLDelight/FTS conventions, expect/actual boundaries, i18n, error handling, sync-merge rules). Read-only — does not edit code.
 tools: Read, Grep, Glob, Bash
 model: opus
 ---
