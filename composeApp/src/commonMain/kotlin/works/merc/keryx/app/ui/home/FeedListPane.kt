@@ -27,24 +27,8 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Article
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Error
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.ChevronRight
-import androidx.compose.material.icons.outlined.Cloud
-import androidx.compose.material.icons.outlined.CreateNewFolder
-import androidx.compose.material.icons.outlined.ExpandMore
-import androidx.compose.material.icons.outlined.NewLabel
-import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -70,7 +54,7 @@ import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import org.jetbrains.compose.resources.painterResource
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -143,6 +127,8 @@ import works.merc.keryx.app.resources.home_unsubscribe_body
 import works.merc.keryx.app.resources.home_unsubscribe_menu
 import works.merc.keryx.app.resources.home_unsubscribe_title
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
+import works.merc.keryx.app.ui.common.KeryxIcon
+import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.KeryxTextField
 import works.merc.keryx.app.ui.common.ToolbarIconGroup
 import works.merc.keryx.app.ui.common.TooltipIconButton
@@ -249,7 +235,7 @@ fun FeedListPane(
             ToolbarIconGroup {
                 val addFeedTooltip = stringResource(Res.string.home_add_feed)
                 TooltipIconButton(tooltip = addFeedTooltip, onClick = onAddFeedClick) {
-                    Icon(Icons.Outlined.Add, addFeedTooltip)
+                    KeryxIcon(KeryxIcons.Add, addFeedTooltip)
                 }
                 val refreshing by vm.feedRefreshing.collectAsStateSafe(false)
                 val refreshTooltip = stringResource(
@@ -259,7 +245,7 @@ fun FeedListPane(
                     if (refreshing) {
                         CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                     } else {
-                        Icon(Icons.Outlined.Refresh, refreshTooltip)
+                        KeryxIcon(KeryxIcons.Refresh, refreshTooltip)
                     }
                 }
                 if (vm.cloudConnected) {
@@ -271,7 +257,7 @@ fun FeedListPane(
                         if (syncing) {
                             CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                         } else {
-                            Icon(Icons.Outlined.Cloud, syncTooltip)
+                            KeryxIcon(KeryxIcons.Cloud, syncTooltip)
                         }
                     }
                 }
@@ -284,12 +270,12 @@ fun FeedListPane(
             onValueChange = { vm.setSearchQuery(it) },
             singleLine = true,
             placeholder = stringResource(Res.string.home_search_placeholder),
-            leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+            leadingIcon = { KeryxIcon(KeryxIcons.Search, contentDescription = null) },
             trailingIcon = {
                 if (searchQuery.isNotEmpty()) {
                     val clearLabel = stringResource(Res.string.home_search_clear)
                     TooltipIconButton(tooltip = clearLabel, size = 32.dp, onClick = { vm.setSearchQuery("") }) {
-                        Icon(Icons.Filled.Close, contentDescription = clearLabel)
+                        KeryxIcon(KeryxIcons.CloseFilled, contentDescription = clearLabel)
                     }
                 }
             },
@@ -303,7 +289,7 @@ fun FeedListPane(
             LazyColumn(Modifier.fillMaxSize(), state = listState) {
                 item {
                     SidebarRow(
-                        icon = { Icon(Icons.AutoMirrored.Filled.Article, null) },
+                        icon = { KeryxIcon(KeryxIcons.Article, null) },
                         label = stringResource(Res.string.home_all_feeds),
                         count = totalUnread,
                         selected = filter == ArticleFilter.All,
@@ -311,7 +297,7 @@ fun FeedListPane(
                         onClick = { vm.selectFilter(ArticleFilter.All); onActivated() },
                     )
                     SidebarRow(
-                        icon = { Icon(Icons.Filled.Star, null) },
+                        icon = { KeryxIcon(KeryxIcons.Star, null) },
                         label = stringResource(Res.string.home_starred),
                         count = starredUnread,
                         selected = filter == ArticleFilter.Starred,
@@ -319,7 +305,7 @@ fun FeedListPane(
                         onClick = { vm.selectFilter(ArticleFilter.Starred); onActivated() },
                     )
                     SidebarRow(
-                        icon = { Icon(Icons.Outlined.Search, null) },
+                        icon = { KeryxIcon(KeryxIcons.Search, null) },
                         label = stringResource(Res.string.home_search),
                         count = searchUnread,
                         selected = filter == ArticleFilter.Search,
@@ -341,7 +327,7 @@ fun FeedListPane(
                         )
                         val addFolderTooltip = stringResource(Res.string.home_add_folder)
                         TooltipIconButton(tooltip = addFolderTooltip, onClick = { showAddFolder = true }) {
-                            Icon(Icons.Outlined.CreateNewFolder, addFolderTooltip)
+                            KeryxIcon(KeryxIcons.CreateNewFolder, addFolderTooltip)
                         }
                     }
                 }
@@ -450,7 +436,7 @@ fun FeedListPane(
                         )
                         val addTagTooltip = stringResource(Res.string.home_add_tag)
                         TooltipIconButton(tooltip = addTagTooltip, onClick = { showAddTag = true }) {
-                            Icon(Icons.Outlined.NewLabel, addTagTooltip)
+                            KeryxIcon(KeryxIcons.NewLabel, addTagTooltip)
                         }
                     }
                 }
@@ -784,8 +770,8 @@ private fun FolderGroupHeader(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             CompositionLocalProvider(LocalContentColor provides (selectionContentColorOrNull(selected, focused) ?: LocalContentColor.current)) {
-                Icon(
-                    if (collapsed) Icons.Outlined.ChevronRight else Icons.Outlined.ExpandMore,
+                KeryxIcon(
+                    if (collapsed) KeryxIcons.ChevronRight else KeryxIcons.ExpandMore,
                     contentDescription = null,
                     modifier = Modifier.size(20.dp).clickable(onClick = onToggleCollapse),
                 )
@@ -794,8 +780,8 @@ private fun FolderGroupHeader(
                     Modifier.weight(1f).clickable(onClick = onClick).padding(vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(
-                        Icons.Filled.Folder,
+                    KeryxIcon(
+                        KeryxIcons.Folder,
                         contentDescription = null,
                         tint = selectionContentColorOrNull(selected, focused) ?: MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(18.dp),
@@ -1003,8 +989,8 @@ private fun FeedRow(
                 )
             }
             if (feed.error_count > 0) {
-                Icon(
-                    Icons.Filled.Error,
+                KeryxIcon(
+                    KeryxIcons.ErrorFilled,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.error,
                     modifier = Modifier.size(16.dp),
@@ -1102,7 +1088,7 @@ private fun FeedAvatar(title: String, faviconUrl: String?) {
                 model = faviconUrl,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                error = rememberVectorPainter(Icons.Filled.Public),
+                error = painterResource(KeryxIcons.PublicFilled),
                 clipToBounds = false,
                 modifier = Modifier.fillMaxSize(),
             )

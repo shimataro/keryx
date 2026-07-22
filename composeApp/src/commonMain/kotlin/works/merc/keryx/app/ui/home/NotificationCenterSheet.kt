@@ -11,13 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.DeleteSweep
-import androidx.compose.material.icons.outlined.Error
-import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.Warning
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -41,6 +34,8 @@ import works.merc.keryx.app.resources.notification_level_info
 import works.merc.keryx.app.resources.notification_level_warning
 import works.merc.keryx.app.resources.settings_cloud_reset
 import works.merc.keryx.app.ui.common.FlatTonalButton
+import works.merc.keryx.app.ui.common.KeryxIcon
+import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.TooltipIconButton
 
 /**
@@ -64,7 +59,7 @@ fun NotificationCenterSheet(vm: NotificationCenterViewModel) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 val clearTooltip = stringResource(Res.string.notification_dismiss_all)
                 TooltipIconButton(tooltip = clearTooltip, onClick = { vm.dismissAll() }, enabled = items.isNotEmpty()) {
-                    Icon(Icons.Outlined.DeleteSweep, contentDescription = clearTooltip)
+                    KeryxIcon(KeryxIcons.DeleteSweep, contentDescription = clearTooltip)
                 }
             }
 
@@ -82,13 +77,13 @@ fun NotificationCenterSheet(vm: NotificationCenterViewModel) {
                         Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             val (icon, tint, levelLabel) = when (notification.level) {
                                 AppNotificationLevel.ERROR ->
-                                    Triple(Icons.Outlined.Error, MaterialTheme.colorScheme.error, stringResource(Res.string.notification_level_error))
+                                    Triple(KeryxIcons.ErrorOutlined, MaterialTheme.colorScheme.error, stringResource(Res.string.notification_level_error))
                                 AppNotificationLevel.WARNING ->
-                                    Triple(Icons.Outlined.Warning, Color(0xFFF9A825), stringResource(Res.string.notification_level_warning))
+                                    Triple(KeryxIcons.Warning, Color(0xFFF9A825), stringResource(Res.string.notification_level_warning))
                                 AppNotificationLevel.INFO ->
-                                    Triple(Icons.Outlined.Info, MaterialTheme.colorScheme.primary, stringResource(Res.string.notification_level_info))
+                                    Triple(KeryxIcons.Info, MaterialTheme.colorScheme.primary, stringResource(Res.string.notification_level_info))
                             }
-                            Icon(icon, contentDescription = levelLabel, tint = tint, modifier = Modifier.size(16.dp))
+                            KeryxIcon(icon, contentDescription = levelLabel, tint = tint, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(8.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(notification.message, style = MaterialTheme.typography.bodyMedium)
@@ -104,7 +99,7 @@ fun NotificationCenterSheet(vm: NotificationCenterViewModel) {
                             }
                             val dismissTooltip = stringResource(Res.string.notification_dismiss)
                             TooltipIconButton(tooltip = dismissTooltip, onClick = { vm.dismiss(notification.id) }) {
-                                Icon(Icons.Outlined.Close, contentDescription = dismissTooltip, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(16.dp))
+                                KeryxIcon(KeryxIcons.CloseOutlined, contentDescription = dismissTooltip, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(16.dp))
                             }
                         }
                     }

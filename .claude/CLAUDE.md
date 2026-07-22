@@ -114,7 +114,10 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
    `THIRD-PARTY-LICENSES.md`** (repo root). When adding or removing a shipped
    runtime dependency in `gradle/libs.versions.toml` whose license requires
    attribution (Apache-2.0, MIT, BSD, etc.), add/remove its row (library name /
-   SPDX / project URL) there too — keep the two in sync. Test-only dependencies
+   SPDX / project URL) there too — keep the two in sync. This applies equally to
+   **bundled third-party resources that are not Gradle dependencies** (e.g. icon
+   assets under `composeResources/`) whose license requires attribution: add/remove
+   their row on the same event. Test-only dependencies
    are excluded. This file is surfaced in-app via the About dialog's
    Open Source Licenses link (`LICENSES_URL` in `ui/settings/AboutLicenses.kt`),
    so it is the single source of truth — there is no hardcoded Kotlin list.

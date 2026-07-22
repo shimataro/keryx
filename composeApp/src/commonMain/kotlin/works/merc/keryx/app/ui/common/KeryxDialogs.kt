@@ -17,8 +17,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import org.jetbrains.compose.resources.DrawableResource
+import org.jetbrains.compose.resources.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -66,7 +67,7 @@ expect fun KeryxDialog(
 
 /** One tab in a [KeryxTabDialog]: a stable [id] used for selection/dispatch, a localized [label]
  * (shown under the icon and, on macOS, mirrored as the window title), and an [icon]. */
-data class KeryxDialogTab(val id: String, val label: String, val icon: ImageVector)
+data class KeryxDialogTab(val id: String, val label: String, val icon: DrawableResource)
 
 /**
  * A modeless dialog window (see [KeryxAlertDialog] for why a real `DialogWindow` rather than a
@@ -123,7 +124,7 @@ internal fun KeryxDialogTabBar(
                     .padding(horizontal = 16.dp, vertical = 10.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Icon(tab.icon, contentDescription = null, tint = contentColor, modifier = Modifier.size(32.dp))
+                Icon(painterResource(tab.icon), contentDescription = null, tint = contentColor, modifier = Modifier.size(32.dp))
                 Spacer(Modifier.height(4.dp))
                 Text(
                     tab.label,

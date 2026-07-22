@@ -8,9 +8,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -94,8 +91,8 @@ fun FlatCheckbox(
         contentAlignment = Alignment.Center,
     ) {
         if (checked) {
-            Icon(
-                Icons.Filled.Check,
+            KeryxIcon(
+                KeryxIcons.CheckFilled,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier.size(16.dp),
