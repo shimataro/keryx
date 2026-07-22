@@ -87,22 +87,63 @@ private fun versionOf(release: JsonObject): String? =
     release["tag_name"]?.jsonPrimitive?.content?.removePrefix("v")?.removePrefix("V")
 
 /**
- * Strict dot-separated numeric comparison. Unparseable segments are treated as safely "not
- * newer" (returns false) rather than throwing — a malformed remote tag should never be reported
- * as an available update.
+ * SemVer comparison following prerelease precedence: `[remote] > [local]`? The numeric core
+ * (`major.minor.patch`) is compared first, then a prerelease suffix (`-beta`, `-rc.1`, …) ranks
+ * *below* the same core without one. An unparseable core (non-numeric segment) is treated as safely
+ * "not newer" (returns false) rather than throwing — a malformed remote tag should never be
+ * reported as an available update.
  */
-internal fun isNewer(remote: String, local: String): Boolean {
-    val remoteParts = remote.split(".").map { it.toIntOrNull() }
-    val localParts = local.split(".").map { it.toIntOrNull() }
-    if (remoteParts.any { it == null } || localParts.any { it == null }) return false
+internal fun isNewer(remote: String, local: String): Boolean =
+    compareVersions(remote, local)?.let { it > 0 } ?: false
 
-    val length = maxOf(remoteParts.size, localParts.size)
+/**
+ * Three-way SemVer comparison of two version strings (leading `v` already stripped by [versionOf]).
+ * Returns a negative/zero/positive Int like [Comparator], or `null` when either core has a
+ * non-numeric segment (undeterminable → callers treat as "not newer").
+ */
+private fun compareVersions(a: String, b: String): Int? {
+    val aCore = a.substringBefore('-').split(".").map { it.toIntOrNull() }
+    val bCore = b.substringBefore('-').split(".").map { it.toIntOrNull() }
+    if (aCore.any { it == null } || bCore.any { it == null }) return null
+
+    val length = maxOf(aCore.size, bCore.size)
     for (i in 0 until length) {
-        val r = remoteParts.getOrElse(i) { 0 } ?: 0
-        val l = localParts.getOrElse(i) { 0 } ?: 0
-        if (r != l) return r > l
+        val ai = aCore.getOrElse(i) { 0 } ?: 0
+        val bi = bCore.getOrElse(i) { 0 } ?: 0
+        if (ai != bi) return ai.compareTo(bi)
     }
-    return false
+
+    // Cores equal → compare prerelease per SemVer: absence of a prerelease outranks its presence.
+    val aPre = a.substringAfter('-', "")
+    val bPre = b.substringAfter('-', "")
+    if (aPre.isEmpty() && bPre.isEmpty()) return 0
+    if (aPre.isEmpty()) return 1
+    if (bPre.isEmpty()) return -1
+    return comparePrerelease(aPre, bPre)
+}
+
+/**
+ * Compares two dot-separated prerelease strings per SemVer §11: identifiers are compared field by
+ * field; numeric identifiers compare numerically and rank below alphanumeric ones, alphanumeric
+ * identifiers compare lexically (ASCII), and when all shared fields are equal the longer list wins.
+ */
+private fun comparePrerelease(a: String, b: String): Int {
+    val aIds = a.split(".")
+    val bIds = b.split(".")
+    for (i in 0 until minOf(aIds.size, bIds.size)) {
+        val aId = aIds[i]
+        val bId = bIds[i]
+        val aNum = aId.toIntOrNull()
+        val bNum = bId.toIntOrNull()
+        val cmp = when {
+            aNum != null && bNum != null -> aNum.compareTo(bNum)
+            aNum != null -> -1 // numeric ranks below alphanumeric
+            bNum != null -> 1
+            else -> aId.compareTo(bId)
+        }
+        if (cmp != 0) return cmp
+    }
+    return aIds.size.compareTo(bIds.size)
 }
 
 /**

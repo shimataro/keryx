@@ -52,6 +52,32 @@ class UpdateCheckerTest {
     }
 
     @Test
+    fun suffixedPreReleaseBelowStableIsAvailableWhileCurrentIsPreStable() = runTest {
+        // A conventional prerelease suffix (-beta) must not defeat the version comparison:
+        // 0.1.0-beta is a higher core than 0.0.9 → the eligible prerelease is offered.
+        val status = checker(
+            currentVersion = "0.0.9",
+            body = """[{"tag_name":"v0.1.0-beta","html_url":"https://ex.com/0.1.0-beta","prerelease":true}]""",
+        ).check()
+        assertIs<UpdateStatus.Available>(status)
+        assertEquals("0.1.0-beta", status.version)
+    }
+
+    @Test
+    fun highestSuffixedPreReleaseIsSelected() = runTest {
+        // Among eligible suffixed prereleases with equal cores, the highest identifier wins.
+        val status = checker(
+            currentVersion = "0.0.9",
+            body = """[
+                {"tag_name":"v0.1.0-alpha","html_url":"https://ex.com/0.1.0-alpha","prerelease":true},
+                {"tag_name":"v0.1.0-beta","html_url":"https://ex.com/0.1.0-beta","prerelease":true}
+            ]""",
+        ).check()
+        assertIs<UpdateStatus.Available>(status)
+        assertEquals("0.1.0-beta", status.version)
+    }
+
+    @Test
     fun preReleaseIgnoredOnceCurrentIsStable() = runTest {
         // A 1.0.0+ build never gets pre-releases, even a below-1.0.0 one → no eligible release.
         val status = checker(
@@ -152,6 +178,16 @@ class IsNewerTest {
     @Test
     fun unparseableSegmentsAreNotNewer() {
         assertEquals(false, isNewer("abc", "1.0.0"))
+    }
+
+    @Test
+    fun prereleaseSuffixesCompareBySemVer() {
+        assertEquals(true, isNewer("0.1.0-beta", "0.0.9"))       // higher core wins over suffix
+        assertEquals(false, isNewer("0.1.0-beta", "0.1.0"))      // prerelease < its release
+        assertEquals(true, isNewer("0.1.0", "0.1.0-beta"))       // release > prerelease
+        assertEquals(true, isNewer("0.1.0-beta", "0.1.0-alpha")) // identifier order (beta > alpha)
+        assertEquals(true, isNewer("0.1.0-beta.2", "0.1.0-beta.1")) // dotted numeric identifiers
+        assertEquals(false, isNewer("0.1.0-rc1", "0.1.0-rc1"))   // equal
     }
 }
 
