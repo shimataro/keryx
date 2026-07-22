@@ -23,5 +23,19 @@ interface CloudStorage {
      */
     suspend fun upload(path: String, data: ByteArray, expectedRev: String? = null): Result<Unit>
 
+    /**
+     * Creates [path] with [data] only if it does not already exist. If the file
+     * is already present, fails with [works.merc.keryx.app.core.SyncConflictException]
+     * rather than overwriting it — the safe primitive for the first-ever upload, so a
+     * wrong "does not exist" reading can never destroy another device's data.
+     */
+    suspend fun create(path: String, data: ByteArray): Result<Unit>
+
+    /**
+     * Deletes [path]. Idempotent: succeeds with [Result.Ok] when the file is already absent.
+     * Used to reset (discard) the cloud sync data so a fresh copy can be uploaded.
+     */
+    suspend fun delete(path: String): Result<Unit>
+
     suspend fun exists(path: String): Result<Boolean>
 }

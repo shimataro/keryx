@@ -593,6 +593,12 @@ class HomeViewModel(
         viewModelScope.launch { syncRepository.sync() }
     }
 
+    /** Discards the cloud sync data and re-uploads local fresh (recovery for a corrupt/incompatible
+     *  cloud DB). Errors surface via the notification center from [SyncRepository]. */
+    fun resetCloudData() {
+        viewModelScope.launch { syncRepository.resetCloudData() }
+    }
+
     val cloudConnected: Boolean get() = cloudSession.isConnected()
 
     // --- Tag actions ---

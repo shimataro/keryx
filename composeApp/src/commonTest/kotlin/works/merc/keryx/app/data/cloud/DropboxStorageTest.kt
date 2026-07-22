@@ -61,6 +61,26 @@ class DropboxStorageTest {
     }
 
     @Test
+    fun deleteSuccess() = runTest {
+        val s = storage { respond("""{"metadata":{".tag":"file"}}""", HttpStatusCode.OK) }
+        assertIs<Result.Ok<Unit>>(s.delete(CLOUD_DB_PATH))
+    }
+
+    @Test
+    fun deleteAlreadyGoneIsSuccess() = runTest {
+        val s = storage { respond("""{"error_summary":"path_lookup/not_found/..."}""", HttpStatusCode.Conflict) }
+        assertIs<Result.Ok<Unit>>(s.delete(CLOUD_DB_PATH))
+    }
+
+    @Test
+    fun deleteOtherErrorIsFailure() = runTest {
+        val s = storage { respondError(HttpStatusCode.InternalServerError) }
+        val r = s.delete(CLOUD_DB_PATH)
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+    }
+
+    @Test
     fun missingTokenIsAuthError() = runTest {
         val s = storage(token = null) { respond("{}", HttpStatusCode.OK) }
         val r = s.download(CLOUD_DB_PATH)

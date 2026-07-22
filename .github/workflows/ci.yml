@@ -31,9 +31,20 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
+      # Compose UI tests (runDesktopComposeUiTest) render real Skia/AWT and need a display.
+      # The Linux runner is headless, so run Gradle under a virtual X server (xvfb).
+      - name: Install xvfb (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
       - name: Build & Test
         shell: bash
-        run: ./gradlew build --no-configuration-cache
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a --server-args="-screen 0 1920x1080x24" ./gradlew build --no-configuration-cache
+          else
+            ./gradlew build --no-configuration-cache
+          fi
         env:
           DROPBOX_APP_KEY: ""
           GOOGLE_DRIVE_CLIENT_ID: ""

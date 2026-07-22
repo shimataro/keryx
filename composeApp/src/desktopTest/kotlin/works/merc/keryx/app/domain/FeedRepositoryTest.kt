@@ -50,6 +50,7 @@ private class FakeNotificationMessages : NotificationMessages {
     override suspend fun feedGone(feedTitle: String): String = "gone:$feedTitle"
     override suspend fun feedUrlChanged(feedTitle: String): String = "urlChanged:$feedTitle"
     override suspend fun newArticles(count: Int): String = "new:$count"
+    override suspend fun syncFailed(exception: works.merc.keryx.app.core.KeryxException): String = "syncFailed:${exception::class.simpleName}"
 }
 
 class FeedRepositoryTest {

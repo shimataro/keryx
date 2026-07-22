@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -29,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.stringResource
+import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.notification_dismiss
@@ -37,6 +39,8 @@ import works.merc.keryx.app.resources.notification_empty
 import works.merc.keryx.app.resources.notification_level_error
 import works.merc.keryx.app.resources.notification_level_info
 import works.merc.keryx.app.resources.notification_level_warning
+import works.merc.keryx.app.resources.settings_cloud_reset
+import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.TooltipIconButton
 
 /**
@@ -86,7 +90,18 @@ fun NotificationCenterSheet(vm: NotificationCenterViewModel) {
                             }
                             Icon(icon, contentDescription = levelLabel, tint = tint, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text(notification.message, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                            Column(Modifier.weight(1f)) {
+                                Text(notification.message, style = MaterialTheme.typography.bodyMedium)
+                                // An actionable notification (e.g. an unusable cloud DB) offers its
+                                // recovery action inline, below the message (the popup is too narrow
+                                // to place it alongside).
+                                if (notification.action == AppNotificationAction.RESET_CLOUD_DATA) {
+                                    Spacer(Modifier.height(6.dp))
+                                    FlatTonalButton(onClick = { vm.requestAction(notification) }) {
+                                        Text(stringResource(Res.string.settings_cloud_reset))
+                                    }
+                                }
+                            }
                             val dismissTooltip = stringResource(Res.string.notification_dismiss)
                             TooltipIconButton(tooltip = dismissTooltip, onClick = { vm.dismiss(notification.id) }) {
                                 Icon(Icons.Outlined.Close, contentDescription = dismissTooltip, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(16.dp))

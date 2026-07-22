@@ -90,6 +90,29 @@ class DropboxStorage(
         }
     }
 
+    override suspend fun create(path: String, data: ByteArray): Result<Unit> = withToken { token ->
+        // WriteMode "add" is create-only: if the file already exists Dropbox returns 409
+        // (with autorename=false it does not silently create a copy), which we surface as a
+        // conflict so the caller falls back to the merge path instead of overwriting.
+        val arg = buildJsonObject {
+            put("path", path)
+            put("mode", buildJsonObject { put(".tag", "add") })
+            put("autorename", false)
+        }.toString()
+
+        val response = client.post("$contentBase/2/files/upload") {
+            header("Authorization", "Bearer $token")
+            header("Dropbox-API-Arg", arg)
+            contentType(ContentType.Application.OctetStream)
+            setBody(data)
+        }
+        when {
+            response.status.value in 200..299 -> Result.Ok(Unit)
+            response.status.value == 409 -> Result.Err(SyncConflictException())
+            else -> mapError(response.status.value, response.bodyAsText())
+        }
+    }
+
     override suspend fun exists(path: String): Result<Boolean> = withToken { token ->
         val response = client.post("$apiBase/2/files/get_metadata") {
             header("Authorization", "Bearer $token")
@@ -101,6 +124,24 @@ class DropboxStorage(
             response.status.value == 409 -> {
                 val body = response.bodyAsText()
                 if (body.contains("path/not_found")) Result.Ok(false) else mapError(409, body)
+            }
+            else -> mapError(response.status.value, response.bodyAsText())
+        }
+    }
+
+    override suspend fun delete(path: String): Result<Unit> = withToken { token ->
+        val response = client.post("$apiBase/2/files/delete_v2") {
+            header("Authorization", "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { put("path", path) }.toString())
+        }
+        when {
+            response.status.value in 200..299 -> Result.Ok(Unit)
+            // delete_v2 reports an already-absent path as 409 with a "not_found" error summary.
+            // Treat that as success so delete is idempotent.
+            response.status.value == 409 -> {
+                val body = response.bodyAsText()
+                if (body.contains("not_found")) Result.Ok(Unit) else mapError(409, body)
             }
             else -> mapError(response.status.value, response.bodyAsText())
         }

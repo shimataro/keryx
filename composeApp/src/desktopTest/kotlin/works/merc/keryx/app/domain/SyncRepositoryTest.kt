@@ -11,9 +11,12 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import works.merc.keryx.app.core.AppNotificationAction
+import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.CLOUD_DB_PATH
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
+import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.core.Result
@@ -52,6 +55,8 @@ private class FakeCloudStorage : CloudStorage {
     var existsCount = 0
     var downloadCount = 0
     var uploadCount = 0
+    var createCount = 0
+    var deleteCount = 0
 
     /** When set, [download] suspends on this gate before returning, so a test can observe an in-flight sync. */
     var downloadGate: CompletableDeferred<Unit>? = null
@@ -59,10 +64,14 @@ private class FakeCloudStorage : CloudStorage {
     private val existsQueue = ArrayDeque<Result<Boolean>>()
     private val downloadQueue = ArrayDeque<Result<CloudFile>>()
     private val uploadQueue = ArrayDeque<Result<Unit>>()
+    private val createQueue = ArrayDeque<Result<Unit>>()
+    private val deleteQueue = ArrayDeque<Result<Unit>>()
 
     fun queueExists(r: Result<Boolean>) = existsQueue.addLast(r)
     fun queueDownload(r: Result<CloudFile>) = downloadQueue.addLast(r)
     fun queueUpload(r: Result<Unit>) = uploadQueue.addLast(r)
+    fun queueCreate(r: Result<Unit>) = createQueue.addLast(r)
+    fun queueDelete(r: Result<Unit>) = deleteQueue.addLast(r)
 
     fun put(path: String, data: ByteArray, rev: String) {
         files[path] = data to rev
@@ -91,6 +100,31 @@ private class FakeCloudStorage : CloudStorage {
         files[path] = data to "r$revCounter"
         return Result.Ok(Unit)
     }
+
+    override suspend fun create(path: String, data: ByteArray): Result<Unit> {
+        createCount++
+        createQueue.removeFirstOrNull()?.let { return it }
+        // Create-only: refuse to overwrite an existing file, as the real backends do.
+        if (files.containsKey(path)) return Result.Err(SyncConflictException())
+        revCounter++
+        files[path] = data to "r$revCounter"
+        return Result.Ok(Unit)
+    }
+
+    override suspend fun delete(path: String): Result<Unit> {
+        deleteCount++
+        deleteQueue.removeFirstOrNull()?.let { return it }
+        files.remove(path) // idempotent: succeeds whether or not it existed
+        return Result.Ok(Unit)
+    }
+}
+
+/** A [NotificationMessages] fake for sync tests: encodes the failing exception type into the message. */
+private object FakeSyncNotificationMessages : NotificationMessages {
+    override suspend fun feedGone(feedTitle: String): String = "gone:$feedTitle"
+    override suspend fun feedUrlChanged(feedTitle: String): String = "urlChanged:$feedTitle"
+    override suspend fun newArticles(count: Int): String = "new:$count"
+    override suspend fun syncFailed(exception: KeryxException): String = "syncFailed:${exception::class.simpleName}"
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -112,6 +146,7 @@ class SyncRepositoryTest {
         ftsManager = FtsManager(localDriver)
         ftsManager.ensureIndexed()
         tempDir = Files.createTempDirectory("keryx-sync-test").toFile()
+        notificationCenter = NotificationCenter()
     }
 
     @AfterTest
@@ -120,6 +155,8 @@ class SyncRepositoryTest {
         tempDir.deleteRecursively()
         localFile.delete()
     }
+
+    private lateinit var notificationCenter: NotificationCenter
 
     private fun TestScope.newRepo(
         cloud: CloudStorage,
@@ -134,6 +171,8 @@ class SyncRepositoryTest {
             clock = Clock { clockMillis },
             scope = this,
             activityCenter = activityCenter,
+            notificationCenter = notificationCenter,
+            notificationMessages = FakeSyncNotificationMessages,
             localDbPath = localFile.absolutePath,
             tempDir = tempDir.absolutePath,
         )
@@ -151,10 +190,24 @@ class SyncRepositoryTest {
         return bytes
     }
 
+    /** A valid SQLite file whose schema is NOT the keryx schema (user_version matches local). */
+    private fun foreignSchemaDbBytes(): ByteArray {
+        val file = File(tempDir, "foreign.db")
+        DriverManager.getConnection("jdbc:sqlite:${file.absolutePath}").use { conn ->
+            conn.createStatement().use { st ->
+                st.execute("PRAGMA user_version = ${KeryxDatabase.Schema.version}")
+                st.execute("CREATE TABLE unrelated (x INTEGER)")
+            }
+        }
+        val bytes = file.readBytes()
+        file.delete()
+        return bytes
+    }
+
     private fun tempCloudDbFile(): File = File(tempDir, "cloud_keryx.db")
 
     @Test
-    fun firstSyncEverUploadsWithoutDownload() = runTest {
+    fun firstSyncEverCreatesWithoutDownloadOrOverwrite() = runTest {
         val cloud = FakeCloudStorage()
         val repo = newRepo(cloud)
 
@@ -162,9 +215,30 @@ class SyncRepositoryTest {
 
         assertIs<Result.Ok<Unit>>(result)
         assertEquals(0, cloud.downloadCount)
-        assertEquals(1, cloud.uploadCount)
+        // First-ever sync uses create-only (never an unconditional overwrite).
+        assertEquals(1, cloud.createCount)
+        assertEquals(0, cloud.uploadCount)
         assertTrue(cloud.files.containsKey(CLOUD_DB_PATH))
         assertEquals(1_000L, repo.lastSyncedAt())
+    }
+
+    @Test
+    fun createConflictFallsBackToDownloadMergeInsteadOfOverwriting() = runTest {
+        // exists() wrongly reports "absent", but the cloud file actually exists (another device's
+        // data). create() must 409, and sync must fall through to download→merge→update rather than
+        // clobber the existing data with a fresh upload.
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1")
+        cloud.queueExists(Result.Ok(false))
+        val repo = newRepo(cloud)
+
+        val result = repo.sync()
+
+        assertIs<Result.Ok<Unit>>(result)
+        assertEquals(1, cloud.createCount)
+        assertEquals(1, cloud.downloadCount)
+        assertEquals(1, cloud.uploadCount)
+        assertFalse(tempCloudDbFile().exists())
     }
 
     @Test
@@ -321,21 +395,155 @@ class SyncRepositoryTest {
         assertIs<SchemaVersionException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+        // The merge-abort is user-visible via the notification center (the only signal for this path).
+        val notes = notificationCenter.items.value
+        assertEquals(1, notes.size)
+        assertEquals(AppNotificationLevel.ERROR, notes.first().level)
+        assertEquals("syncFailed:SchemaVersionException", notes.first().message)
     }
 
     @Test
-    fun genericMergeFailureIsWrappedAsCloudStorageException() = runTest {
+    fun corruptCloudDbIsReportedAsIncompatible() = runTest {
         val cloud = FakeCloudStorage()
-        // Not a valid SQLite file: ATTACH/PRAGMA will throw a plain SQLException.
+        // Not a valid SQLite file: opening it throws "file is not a database" — a permanent,
+        // non-retryable condition, reported as CloudDataIncompatibleException (not a transient error).
         cloud.put(CLOUD_DB_PATH, byteArrayOf(1, 2, 3, 4), "r1")
         val repo = newRepo(cloud)
 
         val result = repo.sync()
 
         assertIs<Result.Err>(result)
+        assertIs<CloudDataIncompatibleException>(result.exception)
+        assertEquals(0, cloud.uploadCount)
+        assertFalse(tempCloudDbFile().exists())
+        // Surfaced to the notification center, with a reset action offered.
+        val notes = notificationCenter.items.value
+        assertEquals(1, notes.size)
+        assertEquals(AppNotificationLevel.ERROR, notes.first().level)
+        assertEquals("syncFailed:CloudDataIncompatibleException", notes.first().message)
+        assertEquals(AppNotificationAction.RESET_CLOUD_DATA, notes.first().action)
+    }
+
+    @Test
+    fun incompatibleSchemaCloudDbIsReportedAsIncompatible() = runTest {
+        // A valid SQLite file (user_version matches local) but a foreign schema: the merge statements
+        // hit "no such table: cloud.folders", which must be classified as incompatible, not transient.
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, foreignSchemaDbBytes(), "r1")
+        val repo = newRepo(cloud)
+
+        val result = repo.sync()
+
+        assertIs<Result.Err>(result)
+        assertIs<CloudDataIncompatibleException>(result.exception)
+        assertEquals(0, cloud.uploadCount)
+        assertFalse(tempCloudDbFile().exists())
+    }
+
+    @Test
+    fun mergeFailureWithCompatibleSchemaIsReportedAsStorageException() = runTest {
+        // The cloud DB has a valid schema, but a local table is missing, forcing a structural
+        // merge failure. Because the cloud DB itself is schema-compatible, this is an app bug
+        // (not incompatible data) and must NOT offer the destructive RESET_CLOUD_DATA action.
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1")
+        // Remove a local table so merge fails structurally while the cloud DB is valid.
+        localDriver.execute(null, "DROP TABLE global_settings", 0)
+
+        val repo = newRepo(cloud)
+        val result = repo.sync()
+
+        assertIs<Result.Err>(result)
         assertIs<CloudStorageException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+
+        val notes = notificationCenter.items.value
+        assertEquals(1, notes.size)
+        assertEquals(AppNotificationLevel.ERROR, notes.first().level)
+        assertEquals("syncFailed:CloudStorageException", notes.first().message)
+        // A transient / app-bug error must not offer the reset-cloud-data action.
+        assertNull(notes.first().action)
+    }
+
+    @Test
+    fun syncFailureIsAddedToNotificationCenter() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.queueExists(Result.Err(CloudAuthException("no token")))
+        val repo = newRepo(cloud)
+
+        assertIs<Result.Err>(repo.sync())
+
+        val notes = notificationCenter.items.value
+        assertEquals(1, notes.size)
+        assertEquals(AppNotificationLevel.ERROR, notes.first().level)
+        assertEquals("syncFailed:CloudAuthException", notes.first().message)
+        // A non-recoverable-by-reset error carries no action button.
+        assertNull(notes.first().action)
+    }
+
+    @Test
+    fun successfulSyncAddsNoNotification() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1")
+        val repo = newRepo(cloud)
+
+        assertIs<Result.Ok<Unit>>(repo.sync())
+        assertTrue(notificationCenter.items.value.isEmpty())
+    }
+
+    @Test
+    fun noProviderNoOpAddsNoNotification() = runTest {
+        val repo = SyncRepository(
+            driver = localDriver,
+            db = localDb,
+            ftsManager = ftsManager,
+            cloudProvider = { null },
+            clock = Clock { 1_000L },
+            scope = this,
+            activityCenter = ActivityCenter(backgroundScope),
+            notificationCenter = notificationCenter,
+            notificationMessages = FakeSyncNotificationMessages,
+            localDbPath = localFile.absolutePath,
+            tempDir = tempDir.absolutePath,
+        )
+
+        assertIs<Result.Ok<Unit>>(repo.sync())
+        assertTrue(notificationCenter.items.value.isEmpty())
+    }
+
+    @Test
+    fun resetCloudDataDeletesThenRecreates() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1") // a pre-existing (e.g. incompatible) cloud file
+        val repo = newRepo(cloud, clockMillis = 55_000L)
+
+        val result = repo.resetCloudData()
+
+        assertIs<Result.Ok<Unit>>(result)
+        assertEquals(1, cloud.deleteCount)
+        assertEquals(1, cloud.createCount)
+        assertTrue(cloud.files.containsKey(CLOUD_DB_PATH))
+        assertEquals(55_000L, repo.lastSyncedAt())
+        assertTrue(notificationCenter.items.value.isEmpty())
+    }
+
+    @Test
+    fun resetCloudDataDeleteFailureSurfacesErrorAndDoesNotCreate() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1")
+        cloud.queueDelete(Result.Err(CloudAuthException("revoked")))
+        val repo = newRepo(cloud)
+
+        val result = repo.resetCloudData()
+
+        assertIs<Result.Err>(result)
+        assertIs<CloudAuthException>(result.exception)
+        assertEquals(1, cloud.deleteCount)
+        assertEquals(0, cloud.createCount)
+        val notes = notificationCenter.items.value
+        assertEquals(1, notes.size)
+        assertEquals(AppNotificationLevel.ERROR, notes.first().level)
     }
 
     @Test
