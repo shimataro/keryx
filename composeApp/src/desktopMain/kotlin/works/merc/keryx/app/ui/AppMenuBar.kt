@@ -32,6 +32,8 @@ import works.merc.keryx.app.resources.menu_file_quit
 import works.merc.keryx.app.resources.menu_help
 import works.merc.keryx.app.resources.menu_help_about
 import works.merc.keryx.app.resources.menu_help_project_page
+import works.merc.keryx.app.resources.menu_help_website
+import works.merc.keryx.app.resources.website_url
 import works.merc.keryx.app.resources.menu_settings
 import works.merc.keryx.app.resources.menu_view
 import works.merc.keryx.app.resources.menu_view_mark_all_read
@@ -204,6 +206,11 @@ fun FrameWindowScope.AppMenuBar(
         }
 
         Menu(stringResource(Res.string.menu_help)) {
+            val websiteUrl = stringResource(Res.string.website_url)
+            Item(
+                stringResource(Res.string.menu_help_website),
+                onClick = { BrowserOpener.open(websiteUrl) },
+            )
             Item(
                 stringResource(Res.string.menu_help_project_page),
                 onClick = { BrowserOpener.open(PROJECT_URL) },

@@ -20,6 +20,15 @@ class AboutDialogContentTest {
     }
 
     @Test
+    fun rendersWebsiteLink() = runDesktopComposeUiTest {
+        setContent { AboutDialogContent() }
+        waitForIdle()
+
+        // The official website link (settings_website) opens the locale-specific website_url.
+        onNodeWithText("ウェブサイト").assertIsDisplayed()
+    }
+
+    @Test
     fun rendersLicensesLink() = runDesktopComposeUiTest {
         setContent { AboutDialogContent() }
         waitForIdle()
