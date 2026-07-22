@@ -30,6 +30,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.isTraySupported
 import androidx.compose.ui.window.rememberTrayState
 import io.ktor.client.HttpClient
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
@@ -626,7 +627,7 @@ private suspend fun runStartupTasks(koin: org.koin.core.Koin) {
         refreshFeedsAndNotify(koin)
         checkForUpdateAndNotify(koin)
         maybeRebuildFtsIndex(koin)
-    }.onFailure { Log.error(LOG_TAG, "Startup tasks failed", it) }
+    }.onFailure { if (it is CancellationException) throw it else Log.error(LOG_TAG, "Startup tasks failed", it) }
 }
 
 /**
@@ -684,7 +685,7 @@ private suspend fun backgroundUpdateLoop(koin: org.koin.core.Koin) {
                 checkForUpdateAndNotify(koin)
             }
             maybeRebuildFtsIndex(koin)
-        }.onFailure { Log.error(LOG_TAG, "Background update cycle failed", it) }
+        }.onFailure { if (it is CancellationException) throw it else Log.error(LOG_TAG, "Background update cycle failed", it) }
     }
 }
 
