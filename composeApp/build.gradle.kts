@@ -60,7 +60,7 @@ val resolvedUpdateRepo: String =
 val appVersion: String =
     (project.findProperty("appVersion") as String?)
         ?: System.getenv("APP_VERSION")
-        ?: "0.1.0"
+        ?: "0.0.0"
 
 // jpackage rejects a macOS app-version whose first component is 0 (it enforces the CFBundleVersion
 // rule that versions start at 1), which would otherwise make 0.x impossible to release at all —
