@@ -7,6 +7,9 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.respondError
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import works.merc.keryx.app.core.CLOUD_DB_PATH
 import works.merc.keryx.app.core.CloudAuthException
@@ -18,6 +21,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 
 class DropboxStorageTest {
 
@@ -146,6 +150,25 @@ class DropboxStorageTest {
         val r = s.exists(CLOUD_DB_PATH)
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
+    }
+
+    @Test
+    fun cancellationPropagatesNotConvertedToError() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val started = CompletableDeferred<Unit>()
+        val bytes = byteArrayOf(1, 2, 3, 4)
+        val s = storage {
+            started.complete(Unit)
+            gate.await()
+            respond(bytes, HttpStatusCode.OK, headersOf("dropbox-api-result", """{"rev":"r42"}"""))
+        }
+        var result: Result<CloudFile>? = null
+        val job = launch { result = s.download(CLOUD_DB_PATH) }
+        runCurrent()
+        started.await()
+        job.cancel()
+        job.join()
+        assertNull(result)
     }
 
     @Test

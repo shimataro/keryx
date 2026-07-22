@@ -9,6 +9,10 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import works.merc.keryx.app.core.FEED_TIMEOUT_RETRY_COUNT
 import works.merc.keryx.app.core.FeedDiscoveryException
@@ -153,6 +157,27 @@ class FeedFetcherTest {
         assertIs<Result.Err>(r)
         assertIs<FeedParseException>(r.exception)
         Unit
+    }
+
+    @Test
+    fun cancellationPropagatesNotConvertedToError() = runBlocking {
+        val gate = CompletableDeferred<Unit>()
+        val started = CompletableDeferred<Unit>()
+        val f = fetcherWith {
+            started.complete(Unit)
+            gate.await()
+            respond(RSS, HttpStatusCode.OK)
+        }
+        var result: Result<FetchedFeed>? = null
+        val job = launch(Dispatchers.Default) { result = f.fetch("https://ex.com/feed") }
+        started.await()
+        // Real (non-virtual) delay: give the fetch coroutine a moment to actually suspend on the
+        // gate before we cancel, so this exercises genuine coroutine cancellation rather than a
+        // race where cancel() lands before the HTTP call is even in flight.
+        delay(50)
+        job.cancel()
+        job.join()
+        assertNull(result)
     }
 
     @Test

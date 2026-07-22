@@ -5,6 +5,7 @@ import io.ktor.client.request.forms.submitForm
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.URLBuilder
 import io.ktor.http.parameters
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -87,6 +88,8 @@ class GoogleDriveAuthManager(
         } else {
             Result.Err(CloudAuthException("Revoke failed (HTTP ${response.status.value})"))
         }
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: Throwable) {
         Result.Err(CloudAuthException(e.message ?: "Revoke failed"))
     }
@@ -115,6 +118,8 @@ class GoogleDriveAuthManager(
                 )
             }
         }
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: Throwable) {
         Result.Err(CloudAuthException(e.message ?: "Token request failed"))
     }
