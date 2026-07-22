@@ -43,11 +43,10 @@ private val TagColorPalette: List<String> = listOf(
 )
 
 /**
- * A horizontally-scrolling row of color swatches for tag color selection: a "no color" swatch
- * (rendered gray, matching `colorFromHex(null)`) followed by [TagColorPalette]. Follows the
- * "Native-feel restyle" convention (`.claude/ui-guidelines.md`) — plain `Modifier.selectable`
- * (no ripple override) so it picks up the app-wide `FlatIndication`, and a border rather than a
- * filled background to indicate selection.
+ * Displays selectable swatches for choosing a tag color, including an option to remove the color.
+ *
+ * @param selected The currently selected color value, or `null` when no color is selected.
+ * @param onSelect Invoked with the selected color value, or `null` when no color is selected.
  */
 @Composable
 internal fun TagColorPicker(selected: String?, onSelect: (String?) -> Unit) {
@@ -69,6 +68,13 @@ internal fun TagColorPicker(selected: String?, onSelect: (String?) -> Unit) {
     }
 }
 
+/**
+ * Displays a selectable circular color swatch.
+ *
+ * @param color The swatch fill color.
+ * @param isSelected Whether the swatch is currently selected.
+ * @param onClick The action invoked when the swatch is selected.
+ */
 @Composable
 private fun ColorSwatch(color: Color, isSelected: Boolean, onClick: () -> Unit) {
     Box(
@@ -87,6 +93,12 @@ private fun ColorSwatch(color: Color, isSelected: Boolean, onClick: () -> Unit) 
     )
 }
 
+/**
+ * Converts a hexadecimal color string to a color value.
+ *
+ * @param hex The hexadecimal color string, optionally prefixed with `#`.
+ * @return The parsed color, or gray when the value is null or invalid.
+ */
 internal fun colorFromHex(hex: String?): Color {
     if (hex == null) return Color(0xFF9E9E9E)
     val clean = hex.removePrefix("#")

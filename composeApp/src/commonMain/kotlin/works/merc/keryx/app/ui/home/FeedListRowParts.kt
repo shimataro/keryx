@@ -22,6 +22,12 @@ import works.merc.keryx.app.ui.common.KeryxIcons
 
 // Small leaf composables used to build the rows of FeedListPane (feed avatar + unread-count badge).
 
+/**
+ * Displays a feed avatar using its favicon when available, or the feed title's initial as a fallback.
+ *
+ * @param title The feed title used to create the fallback avatar.
+ * @param faviconUrl The favicon URL, or `null` or blank when the title-based avatar should be displayed.
+ */
 @Composable
 internal fun FeedAvatar(title: String, faviconUrl: String?) {
     if (faviconUrl.isNullOrBlank()) {
@@ -52,6 +58,11 @@ internal fun FeedAvatar(title: String, faviconUrl: String?) {
     }
 }
 
+/**
+ * Displays a circular avatar containing the first character of the title.
+ *
+ * @param title The title from which to derive the avatar character.
+ */
 @Composable
 private fun LetterAvatar(title: String) {
     val letter = title.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
@@ -63,6 +74,13 @@ private fun LetterAvatar(title: String) {
     }
 }
 
+/**
+ * Displays a count badge using a color appropriate for the current selection and focus state.
+ *
+ * @param count The count to display.
+ * @param selected Whether the badge is selected.
+ * @param focused Whether the badge is focused.
+ */
 @Composable
 internal fun CountBadge(count: Long, selected: Boolean, focused: Boolean) {
     Text(

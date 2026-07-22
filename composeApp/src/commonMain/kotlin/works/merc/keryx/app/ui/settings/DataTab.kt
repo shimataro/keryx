@@ -47,7 +47,11 @@ import works.merc.keryx.app.resources.settings_unlimited
 /** How long the inline OPML import/export status stays before auto-clearing. */
 private const val OPML_STATUS_MS = 4000L
 
-/** データ: cache retention / read timeout / OPML import-export. */
+/**
+ * Displays cache retention, read timeout, and OPML import/export settings.
+ *
+ * @param vm The view model that provides setting values and handles updates and OPML operations.
+ */
 @Composable
 internal fun DataTabContent(vm: SettingsViewModel) {
     // Inline status shown right under the OPML import/export buttons (macOS-style transient text).

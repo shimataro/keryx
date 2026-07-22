@@ -31,6 +31,11 @@ import works.merc.keryx.app.resources.settings_theme_light
 import works.merc.keryx.app.resources.settings_theme_system
 
 /** 一般: theme / font size / refresh interval / start-minimized. */
+/**
+ * Renders the general settings tab, including theme, font size, refresh interval, and start-minimized options.
+ *
+ * @param vm The view model that provides current settings and handles setting changes.
+ */
 @Composable
 internal fun GeneralTabContent(vm: SettingsViewModel) {
     val settings by vm.localSettings.collectAsState()

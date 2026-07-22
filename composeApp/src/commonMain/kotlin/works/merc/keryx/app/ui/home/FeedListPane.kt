@@ -116,6 +116,16 @@ import works.merc.keryx.app.ui.common.KeryxTextField
 import works.merc.keryx.app.ui.common.ToolbarIconGroup
 import works.merc.keryx.app.ui.common.TooltipIconButton
 
+/**
+ * Renders the feed list sidebar with feed filters, folders, tags, search, and item management actions.
+ *
+ * @param vm The view model that provides sidebar state and handles feed, folder, and tag operations.
+ * @param focused Whether the sidebar is currently focused.
+ * @param onActivated Called when the sidebar becomes active.
+ * @param modifier Modifier applied to the sidebar.
+ * @param onAddFeedClick Called when the add-feed action is selected.
+ * @param onSearchFieldFocusChange Called when the search field focus changes.
+ */
 @Composable
 fun FeedListPane(
     vm: HomeViewModel,
@@ -839,6 +849,15 @@ private fun NoFolderHeader(
 
 private fun withCheckmark(label: String, checked: Boolean): String = if (checked) "✓ $label" else label
 
+/**
+ * Displays a feed entry with its title, unread count, actions, and drag-and-drop support.
+ *
+ * @param feed The feed to display.
+ * @param count The number of unread articles in the feed.
+ * @param indented Whether to apply folder-level indentation.
+ * @param nextFeedId The ID of the feed that follows this row, or `null` when this is the last feed.
+ * @param folderId The ID of the containing folder, or `null` for feeds without a folder.
+ */
 @Composable
 private fun FeedRow(
     feed: Feeds,

@@ -23,6 +23,19 @@ import works.merc.keryx.app.resources.common_save
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
 import works.merc.keryx.app.ui.common.KeryxTextField
 
+/**
+ * Displays a dialog for entering and validating a single line of text.
+ *
+ * @param title The dialog title.
+ * @param hint The placeholder text for the input field.
+ * @param initial The initial input value.
+ * @param allowBlank Whether blank input can be confirmed.
+ * @param blockingError Produces a validation error message for the trimmed input, or `null` when valid.
+ * @param infoHint Produces supporting text when the input has no validation error, or `null`.
+ * @param extraContent Additional content displayed below the input field.
+ * @param onConfirm Receives the trimmed input when confirmation succeeds.
+ * @param onDismiss Called when the dialog is dismissed.
+ */
 @Composable
 internal fun TextPromptDialog(
     title: String,

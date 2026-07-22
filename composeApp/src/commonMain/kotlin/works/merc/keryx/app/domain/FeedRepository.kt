@@ -144,9 +144,10 @@ class FeedRepository(
     private data class RefreshOutcome(val result: Result<Int>, val hadArticles: Boolean)
 
     /**
-     * Fetches and upserts one feed's articles without touching the FTS index. Callers
-     * (e.g. [refreshAll]) are responsible for incrementally indexing the new rows once, in bulk
-     * ([FtsManager.indexMissing]), if [RefreshOutcome.hadArticles] is true for any refreshed feed.
+     * Refreshes a feed's metadata and articles.
+     *
+     * @param feed The feed to refresh.
+     * @return The article upsert result and whether the fetched feed contained articles.
      */
     private suspend fun refreshFeedArticles(feed: Feeds): RefreshOutcome {
         val fetched = when (val r = feedFetcher.fetch(feed.url, feed.etag, feed.last_modified)) {
@@ -228,6 +229,12 @@ class FeedRepository(
         }
     }
 
+    /**
+     * Adds a notification with the specified message and severity level.
+     *
+     * @param message The notification message.
+     * @param level The notification severity level.
+     */
     private suspend fun notify(message: String, level: AppNotificationLevel) {
         notificationCenter.add(
             AppNotification(

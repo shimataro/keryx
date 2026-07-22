@@ -255,6 +255,11 @@ class SettingsViewModel(
         lastSyncedAtText = syncRepository.lastSyncedAt()?.let { formatTimestamp(it) }
     }
 
+    /**
+     * Exports all subscribed feeds to an OPML file selected by the user.
+     *
+     * Updates the OPML result to indicate whether the export completed or was canceled.
+     */
     fun exportOpml() {
         if (exportingOpml || importingOpml) return
         viewModelScope.launch {

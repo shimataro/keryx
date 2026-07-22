@@ -59,6 +59,9 @@ import works.merc.keryx.app.resources.settings_last_synced
 import works.merc.keryx.app.resources.setup_auth_failed
 
 /** クラウド同期: provider connect/disconnect/switch, with the three confirmation dialogs. */
+/**
+ * Renders cloud storage connection settings and handles provider connection actions.
+ */
 @Composable
 internal fun CloudSyncTabContent(vm: SettingsViewModel) {
     // Confirmation-dialog triggers for the two disruptive cloud-storage actions (disconnect an
@@ -182,21 +185,34 @@ private fun CloudStorageType.brandLabel(): String = when (this) {
     CloudStorageType.GOOGLE_DRIVE -> "Google Drive"
 }
 
+/**
+ * Provides the localized label for connecting to the cloud storage provider.
+ *
+ * @return The provider-specific connect button label resource.
+ */
 private fun CloudStorageType.connectLabel(): StringResource = when (this) {
     CloudStorageType.DROPBOX -> Res.string.settings_dropbox_connect
     CloudStorageType.GOOGLE_DRIVE -> Res.string.settings_google_drive_connect
 }
 
+/**
+ * Gets the localized label for disconnecting from the cloud provider.
+ *
+ * @return The provider-specific disconnect label resource.
+ */
 private fun CloudStorageType.disconnectLabel(): StringResource = when (this) {
     CloudStorageType.DROPBOX -> Res.string.settings_dropbox_disconnect
     CloudStorageType.GOOGLE_DRIVE -> Res.string.settings_google_drive_disconnect
 }
 
 /**
- * One provider's row in the cloud-sync tab: brand icon + name, and a trailing
- * connect/disconnect/abort control (the sole click target — clicking the connect button opens the
- * switch-confirmation dialog instead of connecting directly when a different provider is already
- * connected). A failed connect shows its error inline under this specific row.
+ * Displays a cloud provider with its connection status, available actions, sync information, and
+ * authentication errors.
+ *
+ * @param onSelect Invoked to select or connect the provider.
+ * @param onCancel Invoked to abort an in-progress connection.
+ * @param onDisconnect Invoked to disconnect the provider.
+ * @param onResetCloudData Invoked to reset the provider's cloud data.
  */
 @Composable
 private fun CloudProviderRow(

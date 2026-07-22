@@ -43,6 +43,11 @@ import works.merc.keryx.app.ui.common.FlatTooltipContent
  * `weight(1f)`) together as one visible unit instead of floating disconnected across the dialog's
  * fixed 640dp width.
  */
+/**
+ * Groups settings content in a full-width, styled card.
+ *
+ * @param content The composable content displayed inside the card.
+ */
 @Composable
 internal fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
     Surface(
@@ -61,9 +66,10 @@ internal fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
 }
 
 /**
- * A titled sub-group inside a tab (heading + trailing divider). Used only in tabs that hold more
- * than one sub-group (一般 / データ); single-group tabs omit the heading, which would just repeat
- * the tab name.
+ * Displays a titled settings section followed by a divider.
+ *
+ * @param title The section heading.
+ * @param content The composable content displayed below the heading.
  */
 @Composable
 internal fun Section(title: String, content: @Composable () -> Unit) {
@@ -81,6 +87,12 @@ internal fun Section(title: String, content: @Composable () -> Unit) {
  * tooltip, so it reads clearly as a link.
  */
 @OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Displays a clickable link that opens an external URL.
+ *
+ * @param label The text displayed for the link.
+ * @param url The external URL to open and display in the tooltip.
+ */
 @Composable
 internal fun LinkRow(label: String, url: String) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -104,6 +116,13 @@ internal fun LinkRow(label: String, url: String) {
     }
 }
 
+/**
+ * Displays a labeled switch row.
+ *
+ * @param label The text displayed beside the switch.
+ * @param checked Whether the switch is selected.
+ * @param onChange Called with the new selection state when the switch changes.
+ */
 @Composable
 internal fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

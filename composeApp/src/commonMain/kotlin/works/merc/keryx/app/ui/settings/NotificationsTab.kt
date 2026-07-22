@@ -13,6 +13,11 @@ import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.settings_notification_enabled
 
 /** 通知: new-article notification toggle. */
+/**
+ * Renders the new-article notification setting.
+ *
+ * @param vm The view model that provides the setting state and handles changes.
+ */
 @Composable
 internal fun NotificationsTabContent(vm: SettingsViewModel) {
     val settings by vm.localSettings.collectAsState()

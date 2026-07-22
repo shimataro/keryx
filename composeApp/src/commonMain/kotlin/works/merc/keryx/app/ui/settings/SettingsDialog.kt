@@ -25,6 +25,11 @@ import works.merc.keryx.app.resources.settings_updates
  * file (`GeneralTab` / `NotificationsTab` / `CloudSyncTab` / `DataTab` / `UpdatesTab`), with shared
  * building blocks in `SettingsComponents`.
  */
+/**
+ * Displays the application settings in a tabbed dialog.
+ *
+ * @param onDismiss Called when the dialog should be dismissed.
+ */
 @Composable
 fun SettingsDialog(onDismiss: () -> Unit) {
     val vm = koinInject<SettingsViewModel>()

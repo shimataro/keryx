@@ -86,6 +86,15 @@ import works.merc.keryx.app.ui.common.ToggleChip
 import works.merc.keryx.app.ui.common.ToolbarIconGroup
 import works.merc.keryx.app.ui.common.TooltipIconButton
 
+/**  
+ * Displays the article list for the current filter and routes search filters to the search list.
+ *
+ * @param vm The view model providing article, feed, selection, and filter state.
+ * @param focused Whether the pane currently has focus.
+ * @param onActivated Called when the pane becomes active.
+ * @param modifier Modifier applied to the pane.
+ * @param notifVm Optional view model providing notifications for the toolbar.
+ */
 @Composable
 fun ArticleListPane(
     vm: HomeViewModel,
@@ -142,17 +151,13 @@ fun ArticleListPane(
 }
 
 /**
- * The center pane while the Search scope is active: the same top button row as
- * [ArticleListPaneContent] ([ArticleListTopBar]) over a list of [ArticleRow]s (or a hint when the
- * query is too short or has no matches). Rows reuse [ArticleRow] so search results are visually and
- * behaviourally identical to the normal article list — same favicon/star/unread layout, context
- * menu, and read/star/copy/open actions — the only difference being the matched terms in the title
- * are highlighted via [titleOverride]. Results come from [HomeViewModel.searchResults] and refresh
- * reactively when the underlying article data changes; individual row read/star toggles are
- * immediately reflected via optimistic updates. The unread-only toggle and mark-all-read button
- * are fully functional here (backed by [HomeViewModel.setUnreadOnly] / [HomeViewModel.markAllRead]'s
- * search-scope handling). Sort stays permanently pinned to FTS5 relevance rank — the sort button is
- * shown but disabled ([sortEnabled] = false).
+ * Displays the article search results pane with filtering, selection, and article actions.
+ *
+ * Search results are shown with matched terms highlighted. The pane displays appropriate hints for
+ * short queries and empty results, keeps the selected result visible, and uses relevance ordering.
+ *
+ * @param focused Whether the pane currently has focus.
+ * @param onActivated Called when the pane is activated.
  */
 @Composable
 private fun SearchListPane(
