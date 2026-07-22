@@ -69,6 +69,8 @@ val appModule: Module = module {
             clock = get(),
             scope = get(),
             activityCenter = get(),
+            notificationCenter = get(),
+            notificationMessages = get(),
         )
     }
     single<SyncScheduler> { get<SyncRepository>() }

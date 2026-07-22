@@ -1,6 +1,7 @@
 package works.merc.keryx.app.data.cloud
 
 import io.ktor.client.HttpClient
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.patch
@@ -25,6 +26,7 @@ import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SyncConflictException
+import works.merc.keryx.app.core.map
 
 /**
  * [CloudStorage] backed by the Google Drive API v3, storing the sync DB in the
@@ -94,13 +96,87 @@ class GoogleDriveStorage(
             is Result.Ok -> f.value
         }
         if (existing == null) {
-            createFile(token, name, data)
+            createFile(token, name, data).map { }
         } else {
             // Best-effort optimistic concurrency: bail if the remote changed since download().
             if (expectedRev != null && existing.version != expectedRev) {
                 return@withToken Result.Err(SyncConflictException())
             }
             updateFile(token, existing.id, data)
+        }
+    }
+
+    override suspend fun create(path: String, data: ByteArray): Result<Unit> = withToken { token ->
+        val name = fileName(path)
+        // Best-effort create-only: Drive has no atomic create-if-absent, so we check first and
+        // fail with a conflict when the file already exists rather than overwriting it. The small
+        // check-then-write window is reconciled by the sync retry loop, as with upload().
+        val existing = when (val f = findFile(token, name)) {
+            is Result.Err -> return@withToken f
+            is Result.Ok -> f.value
+        }
+        if (existing != null) {
+            Result.Err(SyncConflictException())
+        } else {
+            when (val created = createFile(token, name, data)) {
+                is Result.Err -> created
+                is Result.Ok -> {
+                    val createdId = created.value
+                    val listResult = listFilesByName(token, name)
+                    if (listResult is Result.Err) return@withToken listResult
+                    val files = (listResult as Result.Ok).value
+                    val winner = files.minByOrNull { it.id }
+                    if (winner == null) {
+                        return@withToken Result.Err(CloudStorageException("Created file disappeared immediately"))
+                    }
+                    if (winner.id != createdId) {
+                        // Lost the race — delete the file we just created so it does not linger as
+                        // an orphan (the winner may have listed before ours became visible and so
+                        // never sees it to clean up). Best-effort: a failed cleanup must not mask the
+                        // conflict signal, and a double-delete with the winner is safe (404 == Ok).
+                        // The sync flow will then download the winner's file and retry.
+                        deleteById(token, createdId)
+                        return@withToken Result.Err(SyncConflictException())
+                    }
+                    // We are the winner — safely delete every duplicate.
+                    for (file in files) {
+                        if (file.id != winner.id) {
+                            when (val del = deleteById(token, file.id)) {
+                                is Result.Err -> return@withToken del
+                                is Result.Ok -> Unit
+                            }
+                        }
+                    }
+                    Result.Ok(Unit)
+                }
+            }
+        }
+    }
+
+    override suspend fun delete(path: String): Result<Unit> = withToken { token ->
+        val name = fileName(path)
+        val listResult = listFilesByName(token, name)
+        if (listResult is Result.Err) return@withToken listResult
+        val files = (listResult as Result.Ok).value
+        if (files.isEmpty()) return@withToken Result.Ok(Unit)
+        for (file in files) {
+            when (val del = deleteById(token, file.id)) {
+                is Result.Err -> return@withToken del
+                is Result.Ok -> Unit
+            }
+        }
+        Result.Ok(Unit)
+    }
+
+    /** Deletes a file by its Drive ID. 404 is treated as success (idempotent). */
+    private suspend fun deleteById(token: String, fileId: String): Result<Unit> {
+        val response = client.delete("$apiBase/files/$fileId") {
+            header("Authorization", "Bearer $token")
+        }
+        return when {
+            response.status.value in 200..299 -> Result.Ok(Unit)
+            response.status.value == 404 -> Result.Ok(Unit)
+            else -> mapError(response.status.value, response.bodyAsText())
         }
     }
 
@@ -111,8 +187,8 @@ class GoogleDriveStorage(
         }
     }
 
-    /** Looks up the single app-data file by name; returns null when absent. */
-    private suspend fun findFile(token: String, name: String): Result<DriveFile?> {
+    /** Lists all app-data files matching [name] (there should be at most one). */
+    private suspend fun listFilesByName(token: String, name: String): Result<List<DriveFile>> {
         val response = client.get("$apiBase/files") {
             header("Authorization", "Bearer $token")
             url {
@@ -127,16 +203,29 @@ class GoogleDriveStorage(
         val files = (json.parseToJsonElement(response.bodyAsText()) as? JsonObject)
             ?.get("files")?.jsonArray
             ?: return Result.Err(CloudStorageException("Missing files array in response"))
-        val first = files.firstOrNull()?.jsonObject ?: return Result.Ok(null)
-        val id = first["id"]?.jsonPrimitive?.content
-            ?: return Result.Err(CloudStorageException("File metadata missing id"))
-        val version = first["version"]?.jsonPrimitive?.content
-            ?: return Result.Err(CloudStorageException("File metadata missing version"))
-        return Result.Ok(DriveFile(id, version))
+        val result = files.map { fileObj ->
+            val obj = fileObj.jsonObject
+            val id = obj["id"]?.jsonPrimitive?.content
+                ?: return Result.Err(CloudStorageException("File metadata missing id"))
+            val version = obj["version"]?.jsonPrimitive?.content
+                ?: return Result.Err(CloudStorageException("File metadata missing version"))
+            DriveFile(id, version)
+        }
+        return Result.Ok(result)
     }
 
-    /** Creates the file in appDataFolder via a multipart/related upload (metadata + media). */
-    private suspend fun createFile(token: String, name: String, data: ByteArray): Result<Unit> {
+    /** Looks up the single app-data file by name; returns null when absent.
+     *  When transient duplicates exist (e.g. from a racing create), the
+     *  deterministic winner (lowest id) is returned so all callers converge. */
+    private suspend fun findFile(token: String, name: String): Result<DriveFile?> {
+        return when (val listResult = listFilesByName(token, name)) {
+            is Result.Err -> listResult
+            is Result.Ok -> Result.Ok(listResult.value.minByOrNull { it.id })
+        }
+    }
+
+    /** Creates the file in appDataFolder via a multipart/related upload (metadata + media). Returns the created file id. */
+    private suspend fun createFile(token: String, name: String, data: ByteArray): Result<String> {
         val boundary = "keryx-${Random.nextLong().toULong()}"
         val metadata = buildJsonObject {
             put("name", name)
@@ -161,7 +250,13 @@ class GoogleDriveStorage(
             contentType(ContentType("multipart", "related").withParameter("boundary", boundary))
             setBody(body)
         }
-        return okOrError(response)
+        if (response.status.value !in 200..299) {
+            return mapError(response.status.value, response.bodyAsText())
+        }
+        val id = (json.parseToJsonElement(response.bodyAsText()) as? JsonObject)
+            ?.get("id")?.jsonPrimitive?.content
+            ?: return Result.Err(CloudStorageException("File metadata missing id"))
+        return Result.Ok(id)
     }
 
     /** Overwrites the file's content with a simple media upload. */

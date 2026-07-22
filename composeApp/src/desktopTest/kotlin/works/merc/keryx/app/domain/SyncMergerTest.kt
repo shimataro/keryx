@@ -10,8 +10,10 @@ import works.merc.keryx.app.insertTag
 import works.merc.keryx.app.platform.DatabaseMerger
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** Verifies the ATTACH-DATABASE merge (timestamp-last-wins) via [DatabaseMerger]. */
 class SyncMergerTest {
@@ -177,6 +179,34 @@ class SyncMergerTest {
         // starred state: local wins (newer starred_at)
         assertEquals(1L, merged.is_starred)
         assertEquals(300L, merged.starred_at)
+        verifyDriver.close()
+    }
+
+    @Test
+    fun localReadNotRevertedByOlderCloudEvenWhenCloudBringsContent() {
+        // Regression guard: a read made locally (newer read_at) must survive a merge with a cloud row
+        // that is unread (older/NULL read_at) but carries body content. The ON CONFLICT branch relies
+        // on `excluded` being the SELECT's already-merged value (per-field CASE against the local row),
+        // so the content OR-merge must never drag read/star state backwards.
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f1", now = 100)
+        insertArticle(cloudDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100, content = "cloud body")
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("f1", now = 50)
+        insertArticle(localDb, "a1", "f1", "g1", isRead = 1, readAt = 300, updatedAt = 50, content = null, summary = "local summary")
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
+        // Read state is preserved (local newer)...
+        assertEquals(1L, merged.is_read)
+        assertEquals(300L, merged.read_at)
+        // ...while the body still OR-merges in the cloud content.
+        assertEquals("cloud body", merged.content)
         verifyDriver.close()
     }
 
@@ -791,6 +821,34 @@ class SyncMergerTest {
         assertEquals(1, active.size)
         assertEquals("t1", active[0].tag_id)
         verifyDriver.close()
+    }
+
+    @Test
+    fun validateSchemaReturnsTrueForValidKeryxDb() {
+        val (file, driver, _) = fileDb()
+        driver.close()
+        assertTrue(DatabaseMerger.validateSchema(file.absolutePath, 1L))
+    }
+
+    @Test
+    fun validateSchemaReturnsFalseForForeignSchemaDb() {
+        val file = java.io.File.createTempFile("foreign", ".db")
+        java.sql.DriverManager.getConnection("jdbc:sqlite:${file.absolutePath}").use { conn ->
+            conn.createStatement().use { st ->
+                st.execute("PRAGMA user_version = 1")
+                st.execute("CREATE TABLE unrelated (x INTEGER)")
+            }
+        }
+        assertFalse(DatabaseMerger.validateSchema(file.absolutePath, 1L))
+        file.delete()
+    }
+
+    @Test
+    fun validateSchemaReturnsFalseForCorruptFile() {
+        val file = java.io.File.createTempFile("corrupt", ".db")
+        file.writeBytes(byteArrayOf(1, 2, 3, 4))
+        assertFalse(DatabaseMerger.validateSchema(file.absolutePath, 1L))
+        file.delete()
     }
 
     private fun reopen(file: java.io.File): Triple<java.io.File, app.cash.sqldelight.db.SqlDriver, KeryxDatabase> {

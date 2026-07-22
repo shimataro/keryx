@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.getString
 import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.core.CloudStorageType
+import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.opml.OpmlCodec
@@ -96,6 +97,10 @@ class SettingsViewModel(
     var checkingForUpdate by mutableStateOf(false)
         private set
 
+    /** True while a "reset cloud data" (delete + fresh re-upload) is running. */
+    var resetting by mutableStateOf(false)
+        private set
+
     /** Timestamp of the last successful sync, formatted for display. null when never synced or not connected. */
     var lastSyncedAtText by mutableStateOf<String?>(null)
         private set
@@ -112,7 +117,13 @@ class SettingsViewModel(
             // sync paths this ViewModel has no other visibility into (manual "sync now" on Home,
             // debounced syncs, the background loop).
             activityCenter.syncing.drop(1).collect { syncing ->
-                if (!syncing) refreshLastSyncedAt()
+                // Guarded: a transient read failure must not kill this long-lived collector (which
+                // would silently stop all future last-synced refreshes) or leak as an uncaught
+                // exception. Best-effort UI state — log and carry on.
+                if (!syncing) {
+                    runCatching { refreshLastSyncedAt() }
+                        .onFailure { Log.warn(TAG, "Failed to refresh last-synced time", it) }
+                }
             }
         }
     }
@@ -182,6 +193,10 @@ class SettingsViewModel(
                 is Result.Ok -> {
                     withContext(dispatcher) { cloudSession.saveTokens(type, result.value) }
                     update { it.copy(cloudStorageType = type.id) }
+                    // Persist the provider selection to disk before the initial sync. Tokens are
+                    // saved durably to the keychain above, so without this flush a crash could leave
+                    // tokens present but cloudStorageType null → every later sync a silent no-op.
+                    withContext(dispatcher) { settingsRepository.flush() }
                     connectedType = type
                     withContext(dispatcher) { syncRepository.sync() }
                 }
@@ -202,6 +217,24 @@ class SettingsViewModel(
             update { it.copy(cloudStorageType = null) }
             connectedType = null
             lastSyncedAtText = null
+        }
+    }
+
+    /**
+     * Discards the cloud sync data and re-uploads this device's local DB fresh — recovery for a
+     * corrupt / incompatible cloud DB. Errors surface via the notification center (from
+     * [SyncRepository]); on success a new sync timestamp is shown.
+     */
+    fun resetCloudData() {
+        if (connectedType == null) return
+        viewModelScope.launch {
+            resetting = true
+            try {
+                withContext(dispatcher) { syncRepository.resetCloudData() }
+            } finally {
+                resetting = false
+            }
+            refreshLastSyncedAt()
         }
     }
 
@@ -277,5 +310,9 @@ class SettingsViewModel(
 
     fun clearOpmlResult() {
         opmlResult = null
+    }
+
+    private companion object {
+        const val TAG = "SettingsVM"
     }
 }

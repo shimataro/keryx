@@ -57,6 +57,68 @@ actual object DatabaseMerger {
     }
 
     /**
+     * Validates that the database at [dbPath] contains the expected Keryx schema
+     * (tables and columns) for [schemaVersion]. Returns `true` if structurally compatible.
+     *
+     * Must be updated when [KeryxDatabase.Schema.version] is bumped and [MergeSql]
+     * references new tables or columns.
+     */
+    actual fun validateSchema(dbPath: String, schemaVersion: Long): Boolean {
+        val expectedTables = when (schemaVersion) {
+            1L -> EXPECTED_SCHEMA_V1
+            else -> return false
+        }
+        return try {
+            DriverManager.getConnection("jdbc:sqlite:$dbPath").use { connection ->
+                expectedTables.all { (tableName, requiredColumns) ->
+                    val actualColumns = connection.createStatement().use { statement ->
+                        statement.executeQuery("PRAGMA table_info($tableName)").use { rs ->
+                            buildSet {
+                                while (rs.next()) {
+                                    add(rs.getString("name").lowercase())
+                                }
+                            }
+                        }
+                    }
+                    requiredColumns.all { it.lowercase() in actualColumns }
+                }
+            }
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * Expected tables and columns for schema version 1.
+     * Keep in sync with [MergeSql] and the `.sq` schema files.
+     */
+    private val EXPECTED_SCHEMA_V1 = mapOf(
+        "folders" to setOf(
+            "id", "name", "sort_order", "deleted_at", "updated_at", "created_at",
+        ),
+        "feeds" to setOf(
+            "id", "url", "site_url", "title", "description", "favicon_url", "etag",
+            "last_modified", "error_count", "last_error", "custom_title", "folder_id",
+            "deleted_at", "updated_at", "created_at", "sort_order",
+            "folder_updated_at", "sort_order_updated_at", "custom_title_updated_at", "deleted_updated_at",
+        ),
+        "tags" to setOf(
+            "id", "name", "color", "sort_order", "deleted_at", "updated_at", "created_at",
+        ),
+        "articles" to setOf(
+            "id", "feed_id", "guid", "url", "title", "summary", "content", "author",
+            "published_at", "thumbnail_url", "is_read", "read_at", "is_starred",
+            "starred_at", "cached_at", "search_text", "updated_at", "created_at",
+        ),
+        "feed_tags" to setOf(
+            "feed_id", "tag_id", "deleted_at", "updated_at",
+        ),
+        "global_settings" to setOf(
+            "key", "value", "updated_at",
+        ),
+    )
+
+    /**
      * If the downloaded cloud DB is older than the local schema, run the SQLDelight migrations on
      * it (in place, on the temp file) so it matches the local schema before merging.
      * A cloud DB newer than the local schema is rejected (the caller must update the app).
