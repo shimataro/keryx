@@ -79,3 +79,16 @@ fun KeryxDatabase.insertFeedTag(feedId: String, tagId: String, now: Long = 0L, d
 fun KeryxDatabase.insertGlobalSetting(key: String, value: String, now: Long = 0L) {
     global_settingsQueries.upsert(key = key, value_ = value, updated_at = now)
 }
+
+/**
+ * Test-only: stamps an article's soft-delete columns. No generated query sets `deleted_at`
+ * directly (production only soft-deletes via `softDeleteExpired`, which is condition-bound), so
+ * tests build tombstone fixtures with this raw UPDATE. Pass NULL to clear (revive).
+ */
+fun SqlDriver.stampArticleDeleted(id: String, deletedAt: Long?, deletedUpdatedAt: Long? = deletedAt) {
+    execute(null, "UPDATE articles SET deleted_at = ?, deleted_updated_at = ? WHERE id = ?", 3) {
+        bindLong(0, deletedAt)
+        bindLong(1, deletedUpdatedAt)
+        bindString(2, id)
+    }
+}

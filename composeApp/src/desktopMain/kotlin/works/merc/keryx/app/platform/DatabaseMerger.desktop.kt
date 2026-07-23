@@ -65,7 +65,7 @@ actual object DatabaseMerger {
      */
     actual fun validateSchema(dbPath: String, schemaVersion: Long): Boolean {
         val expectedTables = when (schemaVersion) {
-            1L -> EXPECTED_SCHEMA_V1
+            2L -> EXPECTED_SCHEMA_V2
             else -> return false
         }
         return try {
@@ -89,10 +89,10 @@ actual object DatabaseMerger {
     }
 
     /**
-     * Expected tables and columns for schema version 1.
+     * Expected tables and columns for schema version 2.
      * Keep in sync with [MergeSql] and the `.sq` schema files.
      */
-    private val EXPECTED_SCHEMA_V1 = mapOf(
+    private val EXPECTED_SCHEMA_V2 = mapOf(
         "folders" to setOf(
             "id", "name", "sort_order", "deleted_at", "updated_at", "created_at",
         ),
@@ -109,6 +109,7 @@ actual object DatabaseMerger {
             "id", "feed_id", "guid", "url", "title", "summary", "content", "author",
             "published_at", "thumbnail_url", "is_read", "read_at", "is_starred",
             "starred_at", "cached_at", "search_text", "updated_at", "created_at",
+            "deleted_at", "deleted_updated_at",
         ),
         "feed_tags" to setOf(
             "feed_id", "tag_id", "deleted_at", "updated_at",

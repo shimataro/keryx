@@ -13,8 +13,10 @@ import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertTag
+import works.merc.keryx.app.stampArticleDeleted
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -467,12 +469,16 @@ class ArticleRepositoryTest {
             val repo = newRepo(db, driver, clock = Clock { now })
             repo.deleteExpiredArticles(retentionDays = 1)
 
-            // cached_at == cutoff survives (comparison is strictly `<`).
-            assertTrue(db.articlesQueries.getById("atCutoff").executeAsOneOrNull() != null)
-            // cached_at < cutoff is deleted.
-            assertNull(db.articlesQueries.getById("beforeCutoff").executeAsOneOrNull())
+            // cached_at == cutoff survives (comparison is strictly `<`) and stays visible.
+            assertNull(db.articlesQueries.getById("atCutoff").executeAsOne().deleted_at)
+            // cached_at < cutoff is soft-deleted: still physically present (so the deletion can
+            // propagate via sync) but tombstoned and hidden from the list.
+            assertNotNull(db.articlesQueries.getById("beforeCutoff").executeAsOne().deleted_at)
+            val visibleIds = db.articlesQueries.watchAll().executeAsList().map { it.id }
+            assertTrue("beforeCutoff" !in visibleIds)
+            assertTrue("atCutoff" in visibleIds)
             for (i in 0 until 10) {
-                assertTrue(db.articlesQueries.getById("recent$i").executeAsOneOrNull() != null)
+                assertNull(db.articlesQueries.getById("recent$i").executeAsOne().deleted_at)
             }
         } finally {
             driver.close()
@@ -496,7 +502,35 @@ class ArticleRepositoryTest {
             val repo = newRepo(db, driver, clock = Clock { now })
             repo.deleteExpiredArticles(retentionDays = 1)
 
-            assertTrue(db.articlesQueries.getById("starredOld").executeAsOneOrNull() != null)
+            // Starred articles are never soft-deleted (still present and not tombstoned).
+            assertNull(db.articlesQueries.getById("starredOld").executeAsOne().deleted_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun upsertDoesNotReviveDeletedArticle() {
+        // A feed refresh re-inserts the same (feed_id, guid) via `insert ... ON CONFLICT`. That path
+        // must preserve an existing tombstone, otherwise refresh would resurrect a deleted article.
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertArticle("a1", "f1", content = "old")
+            driver.stampArticleDeleted("a1", deletedAt = 100)
+
+            // Re-fetch the same article (same feed_id + guid = "a1"), as a refresh would.
+            db.articlesQueries.insert(
+                id = "a1", feed_id = "f1", guid = "a1", url = "https://article/a1", title = "T",
+                summary = null, content = "new", author = null, published_at = null, thumbnail_url = null,
+                is_read = 0, read_at = null, is_starred = 0, starred_at = null, cached_at = 500,
+                search_text = "new", updated_at = 500, created_at = 0,
+            )
+
+            val row = db.articlesQueries.getByFeedAndGuid("f1", "a1").executeAsOne()
+            assertEquals(100L, row.deleted_at)
+            assertEquals("new", row.content) // content did refresh...
+            assertTrue(db.articlesQueries.watchAll().executeAsList().isEmpty()) // ...but it stays hidden
         } finally {
             driver.close()
         }

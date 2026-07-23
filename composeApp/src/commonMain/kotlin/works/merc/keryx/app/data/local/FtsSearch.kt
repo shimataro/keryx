@@ -46,6 +46,7 @@ class FtsSearch(private val driver: SqlDriver) {
                 FROM articles a
                 INNER JOIN articles_fts ON articles_fts.rowid = a.rowid
                 WHERE articles_fts MATCH ?
+                  AND a.deleted_at IS NULL
                 ORDER BY articles_fts.rank;
             """.trimIndent(),
             mapper = { cursor ->

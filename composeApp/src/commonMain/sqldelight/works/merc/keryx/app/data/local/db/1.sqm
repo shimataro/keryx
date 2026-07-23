@@ -1,0 +1,5 @@
+-- Migration 1 -> 2: add soft-delete columns to articles.
+-- deleted_at (NULL = alive) and deleted_updated_at (field-specific last-wins timestamp
+-- for the delete/undelete event). See articles.sq for the full rationale.
+ALTER TABLE articles ADD COLUMN deleted_at INTEGER;
+ALTER TABLE articles ADD COLUMN deleted_updated_at INTEGER;

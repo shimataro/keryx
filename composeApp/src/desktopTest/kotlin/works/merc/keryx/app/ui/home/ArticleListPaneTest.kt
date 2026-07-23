@@ -299,6 +299,8 @@ private fun article(id: String, publishedAt: Long = 0L): Articles = Articles(
     search_text = "",
     updated_at = 0L,
     created_at = 0L,
+    deleted_at = null,
+    deleted_updated_at = null,
 )
 
 private fun articles(count: Int): List<Articles> = List(count) { article("a$it", publishedAt = it.toLong()) }

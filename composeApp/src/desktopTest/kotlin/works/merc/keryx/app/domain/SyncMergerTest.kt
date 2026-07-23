@@ -7,6 +7,7 @@ import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertGlobalSetting
 import works.merc.keryx.app.insertTag
+import works.merc.keryx.app.stampArticleDeleted
 import works.merc.keryx.app.platform.DatabaseMerger
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -827,7 +828,7 @@ class SyncMergerTest {
     fun validateSchemaReturnsTrueForValidKeryxDb() {
         val (file, driver, _) = fileDb()
         driver.close()
-        assertTrue(DatabaseMerger.validateSchema(file.absolutePath, 1L))
+        assertTrue(DatabaseMerger.validateSchema(file.absolutePath, KeryxDatabase.Schema.version))
     }
 
     @Test
@@ -839,7 +840,7 @@ class SyncMergerTest {
                 st.execute("CREATE TABLE unrelated (x INTEGER)")
             }
         }
-        assertFalse(DatabaseMerger.validateSchema(file.absolutePath, 1L))
+        assertFalse(DatabaseMerger.validateSchema(file.absolutePath, KeryxDatabase.Schema.version))
         file.delete()
     }
 
@@ -847,8 +848,136 @@ class SyncMergerTest {
     fun validateSchemaReturnsFalseForCorruptFile() {
         val file = java.io.File.createTempFile("corrupt", ".db")
         file.writeBytes(byteArrayOf(1, 2, 3, 4))
-        assertFalse(DatabaseMerger.validateSchema(file.absolutePath, 1L))
+        assertFalse(DatabaseMerger.validateSchema(file.absolutePath, KeryxDatabase.Schema.version))
         file.delete()
+    }
+
+    @Test
+    fun articleDeletionPropagatesFromNewerCloudTombstone() {
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f1", now = 100)
+        insertArticle(cloudDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 200)
+        cloudDriver.stampArticleDeleted("a1", deletedAt = 200)
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("f1", now = 50)
+        insertArticle(localDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100)
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        assertEquals(200L, verifyDb.articlesQueries.getById("a1").executeAsOne().deleted_at)
+        verifyDriver.close()
+    }
+
+    @Test
+    fun localDeletionNotRevertedByOlderCloudLiveArticle() {
+        // Core regression: the resurrection bug. Local has soft-deleted the article; the cloud still
+        // holds it "alive" (no deletion event) and even with newer content, the merge must not revive it.
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f1", now = 100)
+        insertArticle(cloudDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 300, content = "newer")
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("f1", now = 50)
+        insertArticle(localDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100)
+        localDriver.stampArticleDeleted("a1", deletedAt = 200)
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        assertEquals(200L, verifyDb.articlesQueries.getById("a1").executeAsOne().deleted_at)
+        verifyDriver.close()
+    }
+
+    @Test
+    fun starNewerThanDeletionRevivesArticle() {
+        // Device A deleted the article (t=100); device B starred it later (t=200). A later star means
+        // the user wants to keep it, so the merge revives (deleted_at -> NULL).
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f1", now = 100)
+        insertArticle(cloudDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 200, isStarred = 1, starredAt = 200)
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("f1", now = 50)
+        insertArticle(localDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100)
+        localDriver.stampArticleDeleted("a1", deletedAt = 100)
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
+        assertNull(merged.deleted_at)
+        assertEquals(1L, merged.is_starred)
+        verifyDriver.close()
+    }
+
+    @Test
+    fun deletionNewerThanStarKeepsArticleDeleted() {
+        // Local starred (t=100); cloud deleted later (t=200). Deletion wins.
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f1", now = 100)
+        insertArticle(cloudDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 200)
+        cloudDriver.stampArticleDeleted("a1", deletedAt = 200)
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("f1", now = 50)
+        insertArticle(localDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100, isStarred = 1, starredAt = 100)
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        assertEquals(200L, verifyDb.articlesQueries.getById("a1").executeAsOne().deleted_at)
+        verifyDriver.close()
+    }
+
+    @Test
+    fun readNewerThanDeletionDoesNotRevive() {
+        // Only a newer star revives; a newer read/unread change does not.
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f1", now = 100)
+        insertArticle(cloudDb, "a1", "f1", "g1", isRead = 1, readAt = 200, updatedAt = 200)
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("f1", now = 50)
+        insertArticle(localDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100)
+        localDriver.stampArticleDeleted("a1", deletedAt = 100)
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
+        assertEquals(100L, merged.deleted_at)
+        assertEquals(1L, merged.is_read)
+        verifyDriver.close()
+    }
+
+    @Test
+    fun cloudOnlyDeletedArticleImportedAsTombstone() {
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f2", now = 100)
+        insertArticle(cloudDb, "a9", "f2", "g9", isRead = 0, readAt = null, updatedAt = 100)
+        cloudDriver.stampArticleDeleted("a9", deletedAt = 100)
+        cloudDriver.close()
+
+        val (localFile, localDriver, _) = fileDb()
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        assertEquals(100L, verifyDb.articlesQueries.getById("a9").executeAsOne().deleted_at)
+        verifyDriver.close()
     }
 
     private fun reopen(file: java.io.File): Triple<java.io.File, app.cash.sqldelight.db.SqlDriver, KeryxDatabase> {

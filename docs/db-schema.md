@@ -10,9 +10,10 @@ Target: local SQLite (managed by SQLDelight). `.sq` files are located at
 - All tables are managed by SQLDelight (`.sq`). `articles_fts` is created/maintained separately via raw SQL (`FtsManager`).
 - Logical deletion uses `deleted_at` (NULL = alive). Sync timestamp is `updated_at`.
 - Booleans and timestamps are **INTEGER (`Long`)**. Booleans are 0/1; times are Unix milliseconds.
-- Schema version is managed by `PRAGMA user_version` (currently 1). `DatabaseDriverFactory` drives create/migrate.
-  Since the app is unreleased, no migration history is kept; the base `.sq` is the single current schema (version 1).
-  If the schema changes in the future, add a `.sqm` file (`<from-version>.sqm`) and bump the version.
+- Schema version is managed by `PRAGMA user_version` (currently 2). `DatabaseDriverFactory` drives create/migrate.
+  Version 2 adds `articles.deleted_at` / `deleted_updated_at` via `1.sqm` (SQLDelight derives the version from the
+  highest migration file + 1). When the schema changes, add a `.sqm` file (`<from-version>.sqm`) and the version bumps
+  automatically; `DatabaseMerger.EXPECTED_SCHEMA` / `validateSchema` must be updated to the new version in lockstep.
 
 > **Backward compatibility with the legacy version is not considered** (a pre-release user decision). The schema is the best reasonable form.
 
@@ -40,14 +41,23 @@ Target: local SQLite (managed by SQLDelight). `.sq` files are located at
 
 `id`(PK), `feed_id`(FK→feeds), `guid`, `url`, `title`, `summary`, `content`, `author`,
 `published_at`, `thumbnail_url`, `is_read`, `read_at`, `is_starred`, `starred_at`, `cached_at`,
-`search_text`, `updated_at`, `created_at`. `UNIQUE(feed_id, guid)`.
+`search_text`, `updated_at`, `created_at`, `deleted_at`, `deleted_updated_at`. `UNIQUE(feed_id, guid)`.
 Indexes: `feed_id` / `is_read` / `is_starred` / `published_at DESC`.
 
 - `id` is deterministically generated from `(feed_id, guid)` as **UUIDv5** (`IdGenerator.articleId`). The same article gets the same ID on all devices, so sync merge (articles matched by `id`) can propagate read/star states via last-write-wins. **Reason**: Previously, article IDs were random UUIDv4 generated at fetch time, so when two devices independently fetched the same article they got different IDs, and the guid collision guard in merge skipped them, preventing read-state propagation. The version nibble of v5 guarantees no collision with legacy v4 IDs. The ID generation change only affects new rows; existing rows keep their old ID via `upsert`'s `ON CONFLICT(feed_id, guid)`.
 - Read/star conflict resolution is last-write-wins via `read_at` / `starred_at`.
 - `content` is displayed in preference to `summary`. If both are NULL, open in external browser.
 - `search_text = COALESCE(content, summary, '')`. Computed at insert/update time.
-- No logical deletion. Articles remain with `feed_id` even if the feed is logically deleted (to preserve starred article references).
+- Logical deletion via `deleted_at` (NULL = alive). Cache cleanup is the **only** writer of `deleted_at`
+  (`softDeleteExpired`); starred articles are never deleted. `deleted_updated_at` is a field-specific last-wins
+  timestamp for the delete/undelete event (like `read_at` / `starred_at`, and like `feeds.deleted_updated_at`), kept
+  separate from `updated_at` so a content refresh / read / star change can't clobber a deletion during the sync merge.
+  In the merge, deletion propagates by last-write-wins on `deleted_updated_at`, but a star newer than the deletion
+  **revives** the article (`deleted_at` → NULL), since cleanup only ever deletes non-starred articles. This makes the
+  deletion propagate across devices instead of the article being resurrected from the cloud on the next sync. Rows are
+  never physically removed here (physical GC of old tombstones is future work); the row is kept so its deletion — and
+  starred-article references — survive. All UI/list/search queries filter `deleted_at IS NULL`; `upsert` (feed refresh)
+  never touches `deleted_at`, so a refresh cannot revive a deleted article.
 
 ### tags / feed_tags
 
@@ -112,7 +122,7 @@ Setup completion = file exists.
 
 ## Cache Cleanup
 
-Based on `cache_retention_days`, runs in the background at startup if 24+ hours have passed since the last cleanup. Starred articles and the latest 10 articles per feed are preserved regardless of retention period. If `null` (unlimited), cleanup is skipped.
+Based on `cache_retention_days`, runs in the background at startup if 24+ hours have passed since the last cleanup. Starred articles and the latest 10 articles per feed are preserved regardless of retention period. If `null` (unlimited), cleanup is skipped. Cleanup **soft-deletes** (stamps `articles.deleted_at` / `deleted_updated_at`) rather than physically removing rows, so the deletion propagates via the sync merge instead of being resurrected from the cloud. Physical reclamation of old tombstones is future work.
 
 ## Favicon / Thumbnail
 
