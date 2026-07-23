@@ -3,10 +3,14 @@ package works.merc.keryx.app.domain
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.remote.ParsedArticle
+import works.merc.keryx.app.ftsManager
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class ArticleUpsertTest {
     @Test
@@ -66,6 +70,32 @@ class ArticleUpsertTest {
             repo.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", summary = "only summary")))
             val a = db.articlesQueries.getByFeedAndGuid("f1", "g1").executeAsOne()
             assertEquals("only summary", a.search_text)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun searchTextStripsHtmlTagsSoTagNamesAreNotSearchable() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1L })
+            db.insertFeed("f1")
+            val html = "<div class=\"post\"><p>Kotlin Multiplatform rocks</p></div>"
+            repo.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", content = html)))
+
+            val a = db.articlesQueries.getByFeedAndGuid("f1", "g1").executeAsOne()
+            // Visible text kept; markup removed. content itself stays raw HTML for rendering.
+            assertEquals("Kotlin Multiplatform rocks", a.search_text)
+            assertEquals(html, a.content)
+            assertFalse(a.search_text.contains("div"))
+            assertFalse(a.search_text.contains("class"))
+
+            ftsManager(driver).ensureIndexed()
+            // The visible word is searchable; the HTML tag name / attribute is not.
+            assertContains(FtsSearch(driver).search("Kotlin").map { it.id }, a.id)
+            assertTrue(FtsSearch(driver).search("div").isEmpty())
+            assertTrue(FtsSearch(driver).search("class").isEmpty())
         } finally {
             driver.close()
         }
