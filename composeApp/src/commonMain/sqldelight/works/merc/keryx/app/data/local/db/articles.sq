@@ -148,8 +148,9 @@ WHERE is_read = 0 AND deleted_at IS NULL AND feed_id IN (
 
 -- Soft-deletes expired cache entries (stamps deleted_at / deleted_updated_at so the deletion
 -- propagates via the sync merge instead of being resurrected from the cloud). Keeps starred
--- articles and the latest 10 per feed. `deleted_at IS NULL` makes it idempotent (never
--- re-stamps an already-tombstoned row).
+-- articles and the latest 10 alive per feed (the subquery excludes tombstoned rows, so a
+-- persisted tombstone can't occupy a protected slot and drop live retention below 10).
+-- `deleted_at IS NULL` makes it idempotent (never re-stamps an already-tombstoned row).
 softDeleteExpired:
 UPDATE articles
 SET deleted_at = ?, deleted_updated_at = ?, updated_at = ?
@@ -159,6 +160,7 @@ WHERE is_starred = 0
   AND id NOT IN (
       SELECT id FROM articles AS a2
       WHERE a2.feed_id = articles.feed_id
+        AND a2.deleted_at IS NULL
       ORDER BY a2.published_at DESC, a2.created_at DESC, a2.id DESC
       LIMIT 10
   );

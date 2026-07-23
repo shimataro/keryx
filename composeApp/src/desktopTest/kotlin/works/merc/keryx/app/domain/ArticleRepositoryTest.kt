@@ -510,6 +510,43 @@ class ArticleRepositoryTest {
     }
 
     @Test
+    fun deleteExpiredArticlesProtectsLatest10AliveNotTombstones() {
+        // The "keep latest 10 per feed" protection must count only alive rows. Tombstones now
+        // persist indefinitely (soft delete), so if the protection subquery ranked them too, a
+        // tombstone with a recent published_at would occupy a protected slot and push a truly-alive
+        // article below the top-10, dropping live retention under 10.
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            val oneDayMs = 24 * 60 * 60 * 1000L
+            val now = 10 * oneDayMs
+            val cutoff = now - 1 * oneDayMs // retentionDays = 1
+
+            // 2 tombstoned articles with the newest published_at (e.g. deletions propagated via
+            // sync from another device). They must NOT consume protected slots.
+            for (i in 0 until 2) {
+                db.insertArticle("dead$i", "f1", publishedAt = 2000L + i, cachedAt = now)
+                driver.stampArticleDeleted("dead$i", deletedAt = 100L)
+            }
+            // 10 alive, expired-cached_at articles with older published_at — all should be protected.
+            for (i in 0 until 10) {
+                db.insertArticle("alive$i", "f1", publishedAt = 1000L + i, cachedAt = cutoff - 1)
+            }
+
+            val repo = newRepo(db, driver, clock = Clock { now })
+            repo.deleteExpiredArticles(retentionDays = 1)
+
+            // All 10 alive articles survive. With the old (tombstone-blind) subquery, the 2
+            // tombstones would occupy top-10 slots and the 2 oldest alive rows would be deleted.
+            for (i in 0 until 10) {
+                assertNull(db.articlesQueries.getById("alive$i").executeAsOne().deleted_at)
+            }
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun upsertDoesNotReviveDeletedArticle() {
         // A feed refresh re-inserts the same (feed_id, guid) via `insert ... ON CONFLICT`. That path
         // must preserve an existing tombstone, otherwise refresh would resurrect a deleted article.
