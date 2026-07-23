@@ -6,9 +6,11 @@ Keryx is a local-first, open-source RSS reader. Because it handles your feed dat
 and — if you opt in — cloud-storage credentials, we take security reports
 seriously and appreciate the effort of anyone who helps keep Keryx safe.
 
-Every claim in this document can be verified directly against the source code at
-<https://github.com/shimataro/keryx>. See also [PRIVACY.md](PRIVACY.md) for what
-data the app handles and where it goes.
+The technical claims in this document — how Keryx handles your data and
+credentials — can be verified directly against the source code at
+<https://github.com/shimataro/keryx>; the process and disclosure commitments below
+are policy, not code. See also [PRIVACY.md](PRIVACY.md) for what data the app
+handles and where it goes.
 
 ## Supported Versions
 
