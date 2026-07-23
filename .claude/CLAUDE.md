@@ -43,16 +43,18 @@ mobile (Android/iOS) targets planned for later.
 
 When a turn has changed tracked files while the current branch is a version branch
 (`v0`, `v1`, … — anything matching `v*`, the default/integration branch), do not
-leave the edits on that branch. After making the changes, **propose** an appropriate
-branch name, and **only once the user agrees**, create that branch and switch to it
+leave the edits on that branch. After making the changes, offer a few candidate
+branch names (best first) as choices via the `AskUserQuestion` tool. Once the user
+picks one — or supplies their own via "Other" — create that branch and switch to it
 (`git switch -c <name>` / `git checkout -b <name>` carries the uncommitted changes
-along — no stash needed). Never create or switch branches without agreement.
+along — no stash needed); the user's selection is the agreement to create it. Never
+create or switch branches without the user's selection or explicit name.
 
 Branch names follow the repo convention `<type>/<kebab-summary>`, where `<type>` is
 the Conventional Commits type of the change (`feat`, `fix`, `refactor`, `docs`,
 `chore`, `build`, `test`, `ci`, `perf`, `style`), e.g. `feat/m17n-english`,
-`refactor/split-oversized-ui-panes`. Once on a feature branch (i.e. not `v*`), this
-rule no longer triggers.
+`refactor/split-oversized-ui-panes`. Candidates follow this convention. Once on a
+feature branch (i.e. not `v*`), this rule no longer triggers.
 
 ## Commit messages
 
