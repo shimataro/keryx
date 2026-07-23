@@ -137,7 +137,13 @@ class ArticleRepository(
             emptyList()
         }
 
-    /** Inserts/updates fetched articles, preserving read/star state. Returns the count of *new* articles. */
+    /**
+     * Inserts or updates fetched articles while preserving existing read and starred state.
+     *
+     * @param feedId The identifier of the feed containing the articles.
+     * @param parsed The fetched articles to store.
+     * @return The number of articles that were not previously stored for the feed.
+     */
     fun upsertParsed(feedId: String, parsed: List<ParsedArticle>): Int {
         if (parsed.isEmpty()) return 0
         var newCount = 0
