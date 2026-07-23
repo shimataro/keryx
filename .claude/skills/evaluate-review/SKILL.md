@@ -131,7 +131,15 @@ If the evaluation is **Valid** or **Partially Valid** **and** the comment calls 
    - **Files to modify** — exact file paths
    - **Changes** — concrete, line-level actions
    - **Verification** — how to test (unit tests, manual checks, build)
-4. Call `ExitPlanMode` to submit the plan for user approval.
+4. **Refine the plan**: invoke the `refine-plan` skill, passing the plan file path
+   (`~/.claude/plans/evaluate-review-{comment_id}.md`) as its argument so it targets exactly the
+   file just written (`refine-plan` resolves `$ARGUMENTS` as a file path before falling back to
+   the active Plan Mode file, removing any ambiguity about which document is refined). It runs its
+   fixed checklist (open questions, data integrity, UI/UX, simplicity, codebase match, scope, risk,
+   verification, sequencing), auto-fixes what it can, and trims the plan to final agreed content.
+   If `refine-plan` surfaces a genuine decision it asks the user via `AskUserQuestion`; resolve
+   those before proceeding.
+5. Call `ExitPlanMode` to submit the refined plan for user approval.
 
 If the review is **Invalid** or no code change is required, state clearly:
 ```text
