@@ -5,7 +5,7 @@
 ## 設計方針
 
 - **例外は「予期しないエラー」、`Result` 型は「予期されるエラー」**という使い分け。
-- ネットワーク・同期エラーは頻繁に起きうるため、ユーザーへの通知は控えめ（スナックバー + 通知センター）。
+- ネットワーク・同期エラーは頻繁に起きうるため、ユーザーへの通知は控えめ（通知センター + インライン表現）。
 - UI 層へは ViewModel の `StateFlow` / `mutableStateOf` 経由で伝達する。
 
 ## 例外 vs Result 型
@@ -44,8 +44,10 @@ sealed class KeryxException(message: String) : Exception(message)
     409 `path/not_found`（get_metadata）→ 存在しない、を判別。
 - **Repository 層**: `Result` を受けてビジネスロジック（リトライ等）を適用。
 - **ViewModel 層**: `Result` を UI 状態へ変換。
-- **UI 層**: `ui/i18n/ErrorMessages.kt` の `userMessage(KeryxException)` で `KeryxException` を
-  ローカライズ済みメッセージに変換し、スナックバー / 通知センターへ流す。
+- **UI 層**: `ui/i18n/ErrorMessages.kt` の `userMessage(KeryxException)` は `KeryxException` を
+  インライン表示用（購読追加時のエラーテキストなど）のメッセージ `String` にローカライズするだけで、
+  通知センターへは流さない。通知センターへのエントリは、Repository 層が `NotificationMessages`
+  経由で別途生成する（後述）。
 
 ## 通知センター（`domain/NotificationCenter`）
 
@@ -63,15 +65,15 @@ Repository から通知を出す際、文言は `NotificationMessages`（`getStr
 
 ## エラーの重大度と通知先（抜粋）
 
-| エラー | 自動リトライ | スナックバー | 通知センター |
-| --- | --- | --- | --- |
-| `FeedTimeoutException` / `FeedFetchException` | ✅ | ✅ | ✅ |
-| `FeedParseException` | ❌ | ✅ | ✅ |
-| `CloudStorageException` | ✅ | ✅ | ✅ |
-| `SyncConflictException` | ✅（内部） | ❌ | ❌ |
-| `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ | ✅ |
-| `CloudDataIncompatibleException`（破損/非互換なクラウドDB） | ❌ | ❌ | ✅ |
-| `FeedNotFoundException(isGone=true)` | ❌ | ❌ | ✅ |
+| エラー | 自動リトライ | 通知センター |
+| --- | --- | --- |
+| `FeedTimeoutException` / `FeedFetchException` | ✅ | ✅ |
+| `FeedParseException` | ❌ | ✅ |
+| `CloudStorageException` | ✅ | ✅ |
+| `SyncConflictException` | ✅（内部） | ❌ |
+| `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ |
+| `CloudDataIncompatibleException`（破損/非互換なクラウドDB） | ❌ | ✅ |
+| `FeedNotFoundException(isGone=true)` | ❌ | ✅ |
 
 ## 定数（`core/Constants.kt`）
 

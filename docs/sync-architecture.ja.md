@@ -19,7 +19,7 @@
 /keryx.db   ← 同期用 SQLite（articles_fts なし）
 ```
 
-競合防止は Dropbox の `rev`（リビジョン）チェックで行う（lock ファイルは使わない）。
+競合防止はアップロード時のリビジョンチェックで行う — Dropbox: `rev`、サーバー側の compare-and-set（不一致時 409）。Google Drive: ファイルの `version`、クライアント側で比較後に書き込み（同期のリトライで担保）。lock ファイルは使わない。
 
 ## 同期フロー（`SyncRepository.sync()`）
 
@@ -86,7 +86,7 @@
 
 `PRAGMA user_version` で管理。マージ時に `cloud.user_version` を確認し、クラウドがローカルより新しければ
 `SchemaVersionException` を投げてユーザーにアプリ更新を促す（マージ中止）。
-現在の `user_version` は 1（未リリースのためマイグレーション履歴なし。基底 `.sq` が単一の現行スキーマ）。
+現在の `user_version` は 1（マイグレーション履歴なし。基底 `.sq` が単一の現行スキーマ）。
 
 > **クラウドが古い場合のローカル方向マイグレーション（将来のための仕組み）**: `DatabaseMerger.merge` は
 > マージ本体の前にダウンロードしたクラウド DB の `user_version` を確認し、ローカルより古ければ一時ファイルに

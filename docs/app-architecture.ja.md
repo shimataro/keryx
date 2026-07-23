@@ -18,15 +18,15 @@ composeApp/src/
     core/      Constants, Result, KeryxException, ArticleFilter, AppNotification, Clock, DateTimeParser, CloudStorageAvailability(expect)
     data/local/   DatabaseDriverFactory(expect), FtsManager, FtsSearch, LocalSettings(Store)
     data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels
-    data/cloud/   CloudStorage, DropboxStorage, DropboxAuthManager, Pkce(expect), TokenStorage, DropboxTokens
+    data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, Pkce(expect), TokenStorage, OAuthTokens
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, CloudSession, NotificationCenter, MergeSql, IdGenerator, DropboxConnectFlow
+    domain/       Feed/Article/Tag/Settings/SyncRepository, CloudSession, NotificationCenter, MergeSql, IdGenerator, CloudConnectFlow
     di/           AppModule（+ expect platformModule）
     platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot（すべて expect）
     ui/           theme/, navigation/, setup/, home/（3ペイン + 検索 + 通知センター）, article/, settings/, i18n/
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq（7 テーブル）
   commonMain/composeResources/  values/strings.xml, drawable/
-  desktopMain/kotlin/…/  main.kt + 各 expect の actual（DatabaseDriverFactory, AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, Pkce, PlatformModule）+ CustomUriDropboxConnectFlow, SingleInstanceCoordinator, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）
+  desktopMain/kotlin/…/  main.kt + 各 expect の actual（DatabaseDriverFactory, AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, Pkce, PlatformModule）+ OAuthConnectFlow, OAuthRedirectTransport（CustomUri/Loopback）, OAuthUriParser, SingleInstanceCoordinator, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）
   commonTest/ + desktopTest/
 ```
 
@@ -66,7 +66,7 @@ ATTACH DATABASE マージは**専用の JDBC コネクション 1 本**で行う
 
 ### CloudSession / SyncRepository
 
-`CloudSession` が現在の `CloudStorage`（Dropbox）を提供し、アクセストークンの自動リフレッシュを担う。
+`CloudSession` が現在の `CloudStorage`（Dropbox / Google Drive）を提供し、アクセストークンの自動リフレッシュを担う。
 `SyncRepository` はダウンロード → マージ（`DatabaseMerger`）→ 新記事の増分索引（`indexMissing`）→
 `VACUUM INTO` スナップショット生成（`DatabaseSnapshot`、コピー側で `articles_fts` を除外）→ アップロード
 （rev チェック）、のフローとデバウンス（`SyncScheduler`）を実装する。ライブ DB の FTS は触らない。
@@ -74,7 +74,7 @@ ATTACH DATABASE マージは**専用の JDBC コネクション 1 本**で行う
 ### Provider / DI（Koin）
 
 `appModule`（commonMain）にリポジトリ・サービス・ViewModel を登録。`platformModule`（desktop）に
-HttpClient・TokenStorage・CloudSession・DropboxConnectFlow を登録。ViewModel は単一ウィンドウの
+HttpClient・TokenStorage・CloudSession・CloudConnectFlow を登録。ViewModel は単一ウィンドウの
 デスクトップアプリのためアプリスコープの `single` として登録し、`koinInject()` で取得する。
 
 ## ドメインモデルの方針

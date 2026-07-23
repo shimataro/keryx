@@ -32,7 +32,7 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
 - Non-sync targets: device-local settings, cloud authentication info.
 - Import / export is OPML.
 
-> **DB and sync files are not backward-compatible with the legacy version** (a pre-release user decision).
+> **DB and sync files are not backward-compatible with the legacy version** (a user decision).
 
 ## 5. Conflict Resolution Policy
 

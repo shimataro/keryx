@@ -206,7 +206,7 @@ fun main(args: Array<String>) {
     appScope.launch { runStartupTasks(koin) }
 
     // Bridges background "new articles" counts to the tray (TrayState only exists
-    // inside the application {} scope) and to the in-app snackbar (HomeViewModel).
+    // inside the application {} scope) and to the in-app UI (HomeViewModel).
     val newArticleNotifier = koin.get<NewArticleNotifier>()
     val newArticleNotifications = newArticleNotifier.trayEvents
     appScope.launch { backgroundUpdateLoop(koin) }
