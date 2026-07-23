@@ -24,12 +24,13 @@ class SyncMergerTest {
         isRead: Long, readAt: Long?, updatedAt: Long,
         title: String = "T", content: String? = "c", summary: String? = null,
         isStarred: Long = 0, starredAt: Long? = null,
+        searchText: String = content ?: summary ?: "",
     ) {
         db.articlesQueries.insert(
             id = id, feed_id = feed, guid = guid, url = "u", title = title,
             summary = summary, content = content, author = null, published_at = null, thumbnail_url = null,
             is_read = isRead, read_at = readAt, is_starred = isStarred, starred_at = starredAt, cached_at = updatedAt,
-            search_text = content ?: summary ?: "", updated_at = updatedAt, created_at = 0,
+            search_text = searchText, updated_at = updatedAt, created_at = 0,
         )
     }
 
@@ -849,6 +850,90 @@ class SyncMergerTest {
         file.writeBytes(byteArrayOf(1, 2, 3, 4))
         assertFalse(DatabaseMerger.validateSchema(file.absolutePath, 1L))
         file.delete()
+    }
+
+    @Test
+    fun searchTextPropagatesPlainTextForImportedCloudArticle() {
+        // Production stores search_text as HTML-stripped plain text while content keeps raw HTML.
+        // The merge must propagate that plain-text search_text, NOT re-derive it from raw content
+        // (which would reintroduce searchable tag names/attributes).
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f1", now = 100)
+        insertArticle(
+            cloudDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100,
+            content = "<div class=\"post\">Kotlin rocks</div>", searchText = "Kotlin rocks",
+        )
+        cloudDriver.close()
+
+        val (localFile, localDriver, _) = fileDb()
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
+        assertEquals("Kotlin rocks", merged.search_text)
+        assertFalse(merged.search_text.contains("div"))
+        verifyDriver.close()
+    }
+
+    @Test
+    fun searchTextStaysPlainTextOnConflictUpdateFromCloud() {
+        // Cloud wins the OR-merge for content; merged search_text must be cloud's plain text,
+        // not a re-derivation from the raw HTML content.
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f1", now = 100)
+        insertArticle(
+            cloudDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 300,
+            content = "<p>new body</p>", searchText = "new body",
+        )
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("f1", now = 50)
+        insertArticle(
+            localDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100,
+            content = "<p>old body</p>", searchText = "old body",
+        )
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
+        assertEquals("new body", merged.search_text)
+        assertFalse(merged.search_text.contains("<p>"))
+        verifyDriver.close()
+    }
+
+    @Test
+    fun searchTextTracksWinningBodySourceOnMixedSources() {
+        // Mixed sources: cloud has only a summary, local has full content. The OR-merge keeps the
+        // local content as the displayed body, so search_text must follow that same source (local),
+        // NOT the cloud summary — otherwise FTS would index text the user never sees.
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f1", now = 100)
+        insertArticle(
+            cloudDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 300,
+            content = null, summary = "<b>cloud summary</b>", searchText = "cloud summary",
+        )
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("f1", now = 50)
+        insertArticle(
+            localDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100,
+            content = "<p>local body</p>", summary = null, searchText = "local body",
+        )
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
+        assertEquals("<p>local body</p>", merged.content)
+        assertEquals("local body", merged.search_text)
+        verifyDriver.close()
     }
 
     private fun reopen(file: java.io.File): Triple<java.io.File, app.cash.sqldelight.db.SqlDriver, KeryxDatabase> {

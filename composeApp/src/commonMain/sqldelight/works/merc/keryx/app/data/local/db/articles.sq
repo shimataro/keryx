@@ -2,7 +2,7 @@
 -- timestamp-last-wins policy (read_at / starred_at). Never soft-deleted; kept
 -- even when the feed is soft-deleted, so starred articles remain viewable.
 -- is_read / is_starred are 0/1 (Long). All timestamps are Unix milliseconds.
--- search_text = COALESCE(content, summary, '') and feeds articles_fts.
+-- search_text = plain text of content (else summary), HTML tags stripped; feeds articles_fts.
 
 CREATE TABLE articles (
     id            TEXT    NOT NULL PRIMARY KEY,
