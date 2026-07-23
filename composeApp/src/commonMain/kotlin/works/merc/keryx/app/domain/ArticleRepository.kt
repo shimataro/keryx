@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.HtmlText
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.data.local.db.KeryxDatabase
@@ -145,7 +146,9 @@ class ArticleRepository(
             for (p in parsed) {
                 val exists = articles.getByFeedAndGuid(feedId, p.guid).executeAsOneOrNull() != null
                 if (!exists) newCount++
-                val searchText = p.content ?: p.summary ?: ""
+                // search_text is the FTS body target: strip HTML so tag names/attributes
+                // don't match. content/summary keep their raw HTML for reader rendering.
+                val searchText = (p.content ?: p.summary)?.let { HtmlText.toPlainText(it) } ?: ""
                 // id is a deterministic UUIDv5 of (feed_id, guid) so the same article gets the SAME
                 // id on every device — required for the sync merge (which matches articles by id) to
                 // propagate read/star state cross-device. On re-fetch, ON CONFLICT(feed_id, guid)
