@@ -2,7 +2,7 @@
 
 [日本語](sync-architecture.ja.md)
 
-Target: Dropbox sync. Implementation is in `domain/SyncRepository.kt`, `domain/MergeSql.kt`, `platform/DatabaseMerger`, `platform/DatabaseSnapshot`.
+Target: cloud sync (Dropbox / Google Drive). Implementation is in `domain/SyncRepository.kt`, `domain/MergeSql.kt`, `platform/DatabaseMerger`, `platform/DatabaseSnapshot`.
 
 ## Design Philosophy
 
@@ -56,7 +56,7 @@ Merge SQL (`MergeSql`) key points:
 ## Schema Version
 
 Managed via `PRAGMA user_version`. At merge time, `cloud.user_version` is checked; if the cloud is newer than local, `SchemaVersionException` is thrown to prompt the user to update the app (merge aborts).
-Current `user_version` is 1 (unreleased, so no migration history; base `.sq` is the single current schema).
+Current `user_version` is 1 (no migration history yet; base `.sq` is the single current schema).
 
 > **Local-direction migration for older cloud schema (mechanism for the future)**: `DatabaseMerger.merge` checks the downloaded cloud DB's `user_version` before merging, and if older than local, runs `KeryxDatabase.Schema.migrate` on the temp file to bring it up to the local schema before merging. This prevents merge statements referencing newer columns from failing with `no such column` against an old cloud DB. Currently at single version (1), this uplift branch (`migrateCloudIfOlder`) is empty and does not fire.
 

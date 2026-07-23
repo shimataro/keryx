@@ -11,10 +11,10 @@ Target: local SQLite (managed by SQLDelight). `.sq` files are located at
 - Logical deletion uses `deleted_at` (NULL = alive). Sync timestamp is `updated_at`.
 - Booleans and timestamps are **INTEGER (`Long`)**. Booleans are 0/1; times are Unix milliseconds.
 - Schema version is managed by `PRAGMA user_version` (currently 1). `DatabaseDriverFactory` drives create/migrate.
-  Since the app is unreleased, no migration history is kept; the base `.sq` is the single current schema (version 1).
+  No migration history is kept yet; the base `.sq` is the single current schema (version 1).
   If the schema changes in the future, add a `.sqm` file (`<from-version>.sqm`) and bump the version.
 
-> **Backward compatibility with the legacy version is not considered** (a pre-release user decision). The schema is the best reasonable form.
+> **Backward compatibility with the legacy version is not considered** (a user decision). The schema is the best reasonable form.
 
 ## Table List
 
@@ -116,4 +116,4 @@ Based on `cache_retention_days`, runs in the background at startup if 24+ hours 
 
 ## Favicon / Thumbnail
 
-Image binaries are not stored in the DB; only URLs are kept (non-sync target). In α, image display itself is omitted.
+Image binaries are not stored in the DB; only URLs are kept (non-sync target). Favicons are displayed (Coil3 `AsyncImage`); article thumbnail (`thumbnail_url`) display is still omitted in α.

@@ -86,7 +86,7 @@
 
 `PRAGMA user_version` で管理。マージ時に `cloud.user_version` を確認し、クラウドがローカルより新しければ
 `SchemaVersionException` を投げてユーザーにアプリ更新を促す（マージ中止）。
-現在の `user_version` は 1（未リリースのためマイグレーション履歴なし。基底 `.sq` が単一の現行スキーマ）。
+現在の `user_version` は 1（マイグレーション履歴なし。基底 `.sq` が単一の現行スキーマ）。
 
 > **クラウドが古い場合のローカル方向マイグレーション（将来のための仕組み）**: `DatabaseMerger.merge` は
 > マージ本体の前にダウンロードしたクラウド DB の `user_version` を確認し、ローカルより古ければ一時ファイルに

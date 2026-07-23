@@ -18,15 +18,15 @@ composeApp/src/
     core/      Constants, Result, KeryxException, ArticleFilter, AppNotification, Clock, DateTimeParser, CloudStorageAvailability(expect)
     data/local/   DatabaseDriverFactory(expect), FtsManager, FtsSearch, LocalSettings(Store)
     data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels
-    data/cloud/   CloudStorage, DropboxStorage, DropboxAuthManager, Pkce(expect), TokenStorage, DropboxTokens
+    data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, Pkce(expect), TokenStorage, OAuthTokens
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, CloudSession, NotificationCenter, MergeSql, IdGenerator, DropboxConnectFlow
+    domain/       Feed/Article/Tag/Settings/SyncRepository, CloudSession, NotificationCenter, MergeSql, IdGenerator, CloudConnectFlow
     di/           AppModule (+ expect platformModule)
     platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot (all expect)
     ui/           theme/, navigation/, setup/, home/ (3-pane + search + notification center), article/, settings/, i18n/
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq (7 tables)
   commonMain/composeResources/  values/strings.xml, drawable/
-  desktopMain/kotlin/…/  main.kt + actual implementations of each expect (DatabaseDriverFactory, AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, Pkce, PlatformModule) + CustomUriDropboxConnectFlow, SingleInstanceCoordinator, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage)
+  desktopMain/kotlin/…/  main.kt + actual implementations of each expect (DatabaseDriverFactory, AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, Pkce, PlatformModule) + OAuthConnectFlow, OAuthRedirectTransport (CustomUri/Loopback), OAuthUriParser, SingleInstanceCoordinator, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage)
   commonTest/ + desktopTest/
 ```
 
@@ -58,11 +58,11 @@ ATTACH DATABASE merge runs through `platform/DatabaseMerger`, NOT the SQLDelight
 
 ### CloudSession / SyncRepository
 
-`CloudSession` provides the current `CloudStorage` (Dropbox) and handles automatic access-token refresh. `SyncRepository` implements the download → merge (`DatabaseMerger`) → incremental index of new articles (`indexMissing`) → `VACUUM INTO` snapshot generation (`DatabaseSnapshot`, excludes `articles_fts` on the copy side) → upload (rev check) flow, along with debouncing (`SyncScheduler`). The live DB's FTS is untouched.
+`CloudSession` provides the current `CloudStorage` (Dropbox / Google Drive) and handles automatic access-token refresh. `SyncRepository` implements the download → merge (`DatabaseMerger`) → incremental index of new articles (`indexMissing`) → `VACUUM INTO` snapshot generation (`DatabaseSnapshot`, excludes `articles_fts` on the copy side) → upload (rev check) flow, along with debouncing (`SyncScheduler`). The live DB's FTS is untouched.
 
 ### Provider / DI (Koin)
 
-`appModule` (`commonMain`) registers repositories, services, and ViewModels. `platformModule` (`desktop`) registers HttpClient, TokenStorage, CloudSession, and DropboxConnectFlow. ViewModels are registered as app-scope `single` for a single-window desktop app and obtained via `koinInject()`.
+`appModule` (`commonMain`) registers repositories, services, and ViewModels. `platformModule` (`desktop`) registers HttpClient, TokenStorage, CloudSession, and CloudConnectFlow. ViewModels are registered as app-scope `single` for a single-window desktop app and obtained via `koinInject()`.
 
 ## Domain Model Policy
 

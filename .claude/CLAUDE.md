@@ -1,7 +1,7 @@
 # Keryx (Kotlin Multiplatform)
 
 A cross-platform RSS reader (Kotlin Multiplatform / Compose Multiplatform).
-Local-first, Dropbox sync, no account required.
+Local-first, Dropbox / Google Drive sync, no account required.
 
 It targets desktop (Windows/macOS/Linux) via Compose Multiplatform first, with
 mobile (Android/iOS) targets planned for later.
