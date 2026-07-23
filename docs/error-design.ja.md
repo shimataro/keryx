@@ -44,8 +44,10 @@ sealed class KeryxException(message: String) : Exception(message)
     409 `path/not_found`（get_metadata）→ 存在しない、を判別。
 - **Repository 層**: `Result` を受けてビジネスロジック（リトライ等）を適用。
 - **ViewModel 層**: `Result` を UI 状態へ変換。
-- **UI 層**: `ui/i18n/ErrorMessages.kt` の `userMessage(KeryxException)` で `KeryxException` を
-  ローカライズ済みメッセージに変換し、通知センターへ流す。
+- **UI 層**: `ui/i18n/ErrorMessages.kt` の `userMessage(KeryxException)` は `KeryxException` を
+  インライン表示用（購読追加時のエラーテキストなど）のメッセージ `String` にローカライズするだけで、
+  通知センターへは流さない。通知センターへのエントリは、Repository 層が `NotificationMessages`
+  経由で別途生成する（後述）。
 
 ## 通知センター（`domain/NotificationCenter`）
 

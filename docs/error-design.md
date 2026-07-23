@@ -41,7 +41,7 @@ Helper extensions: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `
   - `DropboxStorage`: 401/403 → `CloudAuthException`, 409 (upload) → `SyncConflictException`, 409 `path/not_found` (get_metadata) → does not exist.
 - **Repository layer**: Receives `Result` and applies business logic (retries, etc.).
 - **ViewModel layer**: Converts `Result` into UI state.
-- **UI layer**: `ui/i18n/ErrorMessages.kt`'s `userMessage(KeryxException)` converts `KeryxException` into a localized message and feeds it to the notification center.
+- **UI layer**: `ui/i18n/ErrorMessages.kt`'s `userMessage(KeryxException)` only localizes a `KeryxException` into a message `String` for inline display (e.g. the add-feed error text); it does not dispatch to the notification center. Notification-center entries are populated separately, from the Repository layer via `NotificationMessages` (see below).
 
 ## Notification Center (`domain/NotificationCenter`)
 
