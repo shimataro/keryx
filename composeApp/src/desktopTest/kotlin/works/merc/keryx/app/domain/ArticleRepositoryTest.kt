@@ -16,7 +16,6 @@ import works.merc.keryx.app.insertTag
 import works.merc.keryx.app.stampArticleDeleted
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -472,8 +471,13 @@ class ArticleRepositoryTest {
             // cached_at == cutoff survives (comparison is strictly `<`) and stays visible.
             assertNull(db.articlesQueries.getById("atCutoff").executeAsOne().deleted_at)
             // cached_at < cutoff is soft-deleted: still physically present (so the deletion can
-            // propagate via sync) but tombstoned and hidden from the list.
-            assertNotNull(db.articlesQueries.getById("beforeCutoff").executeAsOne().deleted_at)
+            // propagate via sync) but tombstoned and hidden from the list. All three cleanup
+            // timestamps are stamped to `now` — deleted_updated_at in particular drives deletion
+            // last-write-wins ordering in the sync merge, so assert it, not just visibility.
+            val deleted = db.articlesQueries.getById("beforeCutoff").executeAsOne()
+            assertEquals(now, deleted.deleted_at)
+            assertEquals(now, deleted.deleted_updated_at)
+            assertEquals(now, deleted.updated_at)
             val visibleIds = db.articlesQueries.watchAll().executeAsList().map { it.id }
             assertTrue("beforeCutoff" !in visibleIds)
             assertTrue("atCutoff" in visibleIds)
