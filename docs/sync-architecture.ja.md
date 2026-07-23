@@ -19,7 +19,7 @@
 /keryx.db   ← 同期用 SQLite（articles_fts なし）
 ```
 
-競合防止は Dropbox の `rev`（リビジョン）チェックで行う（lock ファイルは使わない）。
+競合防止はアップロード時のリビジョンチェックで行う — Dropbox: `rev`、サーバー側の compare-and-set（不一致時 409）。Google Drive: ファイルの `version`、クライアント側で比較後に書き込み（同期のリトライで担保）。lock ファイルは使わない。
 
 ## 同期フロー（`SyncRepository.sync()`）
 

@@ -163,7 +163,13 @@ object MergeSql {
                 WHEN c.cached_at IS NOT NULL AND l.cached_at IS NOT NULL THEN MAX(c.cached_at, l.cached_at)
                 ELSE COALESCE(c.cached_at, l.cached_at)
             END,
-            COALESCE(c.content, l.content, c.summary, l.summary, ''),
+            CASE
+                WHEN c.content IS NOT NULL THEN c.search_text
+                WHEN l.content IS NOT NULL THEN l.search_text
+                WHEN c.summary IS NOT NULL THEN c.search_text
+                WHEN l.summary IS NOT NULL THEN l.search_text
+                ELSE ''
+            END,
             c.updated_at, c.created_at,
             -- deleted_at: last-wins by deleted_updated_at, but revived (NULL) when the winning
             -- star is newer than the winning deletion event (cache cleanup only deletes non-starred
@@ -193,7 +199,7 @@ object MergeSql {
                 WHEN excluded.cached_at IS NOT NULL AND cached_at IS NOT NULL THEN MAX(excluded.cached_at, cached_at)
                 ELSE COALESCE(excluded.cached_at, cached_at)
             END,
-            search_text = COALESCE(excluded.content, content, excluded.summary, summary, ''),
+            search_text = excluded.search_text,
             is_read = excluded.is_read, read_at = excluded.read_at,
             is_starred = excluded.is_starred, starred_at = excluded.starred_at,
             deleted_at = excluded.deleted_at, deleted_updated_at = excluded.deleted_updated_at,

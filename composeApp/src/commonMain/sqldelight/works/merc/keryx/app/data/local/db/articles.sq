@@ -1,7 +1,7 @@
 -- Articles fetched from feeds. Read / starred state lives here and syncs with a
 -- timestamp-last-wins policy (read_at / starred_at). is_read / is_starred are
 -- 0/1 (Long). All timestamps are Unix milliseconds.
--- search_text = COALESCE(content, summary, '') and feeds articles_fts.
+-- search_text = plain text of content (else summary), HTML tags stripped; feeds articles_fts.
 --
 -- Soft-deleted via deleted_at (NULL = alive). Cache cleanup is the only writer of
 -- deleted_at (softDeleteExpired); starred articles are never deleted. `deleted_updated_at`

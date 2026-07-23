@@ -5,7 +5,7 @@
 ## Design Philosophy
 
 - **Exceptions** are for "unexpected errors"; the **`Result` type** is for "expected errors".
-- Network and sync errors can occur frequently, so user notifications are kept restrained (snackbar + notification center).
+- Network and sync errors can occur frequently, so user notifications are kept restrained (notification center + inline expressions).
 - Errors propagate to the UI layer via ViewModel `StateFlow` / `mutableStateOf`.
 
 ## Exception vs Result Type
@@ -41,7 +41,7 @@ Helper extensions: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `
   - `DropboxStorage`: 401/403 → `CloudAuthException`, 409 (upload) → `SyncConflictException`, 409 `path/not_found` (get_metadata) → does not exist.
 - **Repository layer**: Receives `Result` and applies business logic (retries, etc.).
 - **ViewModel layer**: Converts `Result` into UI state.
-- **UI layer**: `ui/i18n/ErrorMessages.kt`'s `userMessage(KeryxException)` converts `KeryxException` into a localized message and feeds it to the snackbar / notification center.
+- **UI layer**: `ui/i18n/ErrorMessages.kt`'s `userMessage(KeryxException)` only localizes a `KeryxException` into a message `String` for inline display (e.g. the add-feed error text); it does not dispatch to the notification center. Notification-center entries are populated separately, from the Repository layer via `NotificationMessages` (see below).
 
 ## Notification Center (`domain/NotificationCenter`)
 
@@ -54,15 +54,15 @@ When emitting notifications from the Repository, text is localized via `Notifica
 
 ## Error Severity and Notification Destinations (excerpt)
 
-| Error | Auto-retry | Snackbar | Notification Center |
-| --- | --- | --- | --- |
-| `FeedTimeoutException` / `FeedFetchException` | ✅ | ✅ | ✅ |
-| `FeedParseException` | ❌ | ✅ | ✅ |
-| `CloudStorageException` | ✅ | ✅ | ✅ |
-| `SyncConflictException` | ✅ (internal) | ❌ | ❌ |
-| `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ | ✅ |
-| `CloudDataIncompatibleException` (corrupt / incompatible cloud DB) | ❌ | ❌ | ✅ |
-| `FeedNotFoundException(isGone=true)` | ❌ | ❌ | ✅ |
+| Error | Auto-retry | Notification Center |
+| --- | --- | --- |
+| `FeedTimeoutException` / `FeedFetchException` | ✅ | ✅ |
+| `FeedParseException` | ❌ | ✅ |
+| `CloudStorageException` | ✅ | ✅ |
+| `SyncConflictException` | ✅ (internal) | ❌ |
+| `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ |
+| `CloudDataIncompatibleException` (corrupt / incompatible cloud DB) | ❌ | ✅ |
+| `FeedNotFoundException(isGone=true)` | ❌ | ✅ |
 
 ## Constants (`core/Constants.kt`)
 

@@ -2,7 +2,7 @@
 
 [日本語](sync-architecture.ja.md)
 
-Target: Dropbox sync. Implementation is in `domain/SyncRepository.kt`, `domain/MergeSql.kt`, `platform/DatabaseMerger`, `platform/DatabaseSnapshot`.
+Target: cloud sync (Dropbox / Google Drive). Implementation is in `domain/SyncRepository.kt`, `domain/MergeSql.kt`, `platform/DatabaseMerger`, `platform/DatabaseSnapshot`.
 
 ## Design Philosophy
 
@@ -17,7 +17,7 @@ Target: Dropbox sync. Implementation is in `domain/SyncRepository.kt`, `domain/M
 /keryx.db   ← Sync SQLite (without articles_fts)
 ```
 
-Conflict prevention is done via Dropbox `rev` (revision) check (no lock file).
+Conflict prevention is done via a revision check on upload — Dropbox: `rev`, a real server-side compare-and-set (409 on mismatch); Google Drive: the file's `version` field, compared client-side before writing (mitigated by the sync retry loop). No lock file is used.
 
 ## Sync Flow (`SyncRepository.sync()`)
 

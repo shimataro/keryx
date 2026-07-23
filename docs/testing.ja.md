@@ -50,7 +50,7 @@
 ./gradlew :composeApp:desktopTest
 ```
 
-現在 527 テスト。パーサ、フェッチャのリダイレクト/304/404/410/タイムアウト/ディスカバリ、
+スイートはパーサ、フェッチャのリダイレクト/304/404/410/タイムアウト/ディスカバリ、
 OPML、Dropbox ストレージ/認証、PKCE、OAuth ループバックサーバ、マージ（後勝ち・OR マージ・衝突ガード・
 FK ガード）、スキーマ、ローカル設定、記事 upsert、URL リゾルバ、日時パーサ、Result、Repository 層
 （Article/Feed/Tag/Settings）、CloudSession、NotificationCenter、IdGenerator、SyncRepository、
@@ -61,9 +61,9 @@ ViewModel 層（Home/Settings/Setup/NotificationCenter）、ArticleWebViewHtml�
 マージ SQL・同期オーケストレーションの退行を意味するので特に注意する。
 
 既知の未カバー範囲: `SettingsViewModel.exportOpml`/`importOpml`（`FilePicker` にテスト用シームが無い
-ネイティブダイアログ）、`DesktopDropboxConnectFlow.connect()` のブラウザー起動〜コールバック待受〜
+ネイティブダイアログ）、`OAuthConnectFlow.connect()` のブラウザー起動〜コールバック待受〜
 コード交換部分（`BrowserOpener`/`OAuthLoopbackServer` の実I/Oに依存し、シームなしにはモック不可。
-App Key 空チェックで即エラーになる分岐のみ `DesktopDropboxConnectFlowTest` でカバー済み）、
+App Key 空チェックで即エラーになる分岐のみ `OAuthConnectFlowTest` でカバー済み）、
 `DatabaseDriverFactory.desktop.kt`（`AppDirs.appDataDir()` を直接参照しておりテスト用の
 ディレクトリ差し替えができない）、`FeedDragAndDrop.desktop.kt`（`DragAndDropTransferable` が
 ライブラリ内部型でありテストコードから中身を取り出せない上、`draggedFeedId()`/`draggedFolderId()`/

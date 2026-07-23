@@ -15,7 +15,7 @@ Target: local SQLite (managed by SQLDelight). `.sq` files are located at
   highest migration file + 1). When the schema changes, add a `.sqm` file (`<from-version>.sqm`) and the version bumps
   automatically; `DatabaseMerger.EXPECTED_SCHEMA` / `validateSchema` must be updated to the new version in lockstep.
 
-> **Backward compatibility with the legacy version is not considered** (a pre-release user decision). The schema is the best reasonable form.
+> **Backward compatibility with the legacy version is not considered** (a user decision). The schema is the best reasonable form.
 
 ## Table List
 
@@ -126,4 +126,4 @@ Based on `cache_retention_days`, runs in the background at startup if 24+ hours 
 
 ## Favicon / Thumbnail
 
-Image binaries are not stored in the DB; only URLs are kept (non-sync target). In α, image display itself is omitted.
+Image binaries are not stored in the DB; only URLs are kept (non-sync target). Favicons are displayed (Coil3 `AsyncImage`); article thumbnail (`thumbnail_url`) display is still omitted in α.

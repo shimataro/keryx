@@ -36,7 +36,7 @@ import works.merc.keryx.app.resources.settings_import_opml
 
 import works.merc.keryx.app.ui.home.formatTimestamp
 
-/** A transient result of an OPML operation, surfaced as a snackbar. */
+/** A transient result of an OPML operation, surfaced inline near the action. */
 sealed interface OpmlResult {
     data class Imported(val added: Int, val failed: Int) : OpmlResult
     data object Exported : OpmlResult
