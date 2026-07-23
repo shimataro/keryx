@@ -906,6 +906,36 @@ class SyncMergerTest {
         verifyDriver.close()
     }
 
+    @Test
+    fun searchTextTracksWinningBodySourceOnMixedSources() {
+        // Mixed sources: cloud has only a summary, local has full content. The OR-merge keeps the
+        // local content as the displayed body, so search_text must follow that same source (local),
+        // NOT the cloud summary — otherwise FTS would index text the user never sees.
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f1", now = 100)
+        insertArticle(
+            cloudDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 300,
+            content = null, summary = "<b>cloud summary</b>", searchText = "cloud summary",
+        )
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("f1", now = 50)
+        insertArticle(
+            localDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100,
+            content = "<p>local body</p>", summary = null, searchText = "local body",
+        )
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
+        assertEquals("<p>local body</p>", merged.content)
+        assertEquals("local body", merged.search_text)
+        verifyDriver.close()
+    }
+
     private fun reopen(file: java.io.File): Triple<java.io.File, app.cash.sqldelight.db.SqlDriver, KeryxDatabase> {
         val driver = app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
         return Triple(file, driver, KeryxDatabase(driver))

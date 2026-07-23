@@ -163,7 +163,13 @@ object MergeSql {
                 WHEN c.cached_at IS NOT NULL AND l.cached_at IS NOT NULL THEN MAX(c.cached_at, l.cached_at)
                 ELSE COALESCE(c.cached_at, l.cached_at)
             END,
-            COALESCE(NULLIF(c.search_text, ''), NULLIF(l.search_text, ''), ''),
+            CASE
+                WHEN c.content IS NOT NULL THEN c.search_text
+                WHEN l.content IS NOT NULL THEN l.search_text
+                WHEN c.summary IS NOT NULL THEN c.search_text
+                WHEN l.summary IS NOT NULL THEN l.search_text
+                ELSE ''
+            END,
             c.updated_at, c.created_at
         FROM cloud.articles c
         LEFT JOIN main.articles l ON l.id = c.id
