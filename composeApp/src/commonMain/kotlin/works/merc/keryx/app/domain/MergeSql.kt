@@ -177,13 +177,14 @@ object MergeSql {
             CASE
                 WHEN (CASE WHEN COALESCE(c.starred_at, 0) >= COALESCE(l.starred_at, 0) THEN c.is_starred ELSE l.is_starred END) = 1
                      AND (CASE WHEN COALESCE(c.starred_at, 0) >= COALESCE(l.starred_at, 0) THEN COALESCE(c.starred_at, 0) ELSE COALESCE(l.starred_at, 0) END)
-                         > (CASE WHEN COALESCE(c.deleted_updated_at, 0) >= COALESCE(l.deleted_updated_at, 0) THEN COALESCE(c.deleted_updated_at, 0) ELSE COALESCE(l.deleted_updated_at, 0) END)
+                         > (CASE WHEN c.deleted_updated_at IS NOT NULL AND (l.deleted_updated_at IS NULL OR c.deleted_updated_at >= l.deleted_updated_at)
+                                 THEN COALESCE(c.deleted_updated_at, 0) ELSE COALESCE(l.deleted_updated_at, 0) END)
                     THEN NULL
-                WHEN COALESCE(c.deleted_updated_at, 0) >= COALESCE(l.deleted_updated_at, 0) THEN c.deleted_at
+                WHEN c.deleted_updated_at IS NOT NULL AND (l.deleted_updated_at IS NULL OR c.deleted_updated_at >= l.deleted_updated_at) THEN c.deleted_at
                 ELSE l.deleted_at
             END,
             -- deleted_updated_at: field-specific last-wins winner.
-            CASE WHEN COALESCE(c.deleted_updated_at, 0) >= COALESCE(l.deleted_updated_at, 0)
+            CASE WHEN c.deleted_updated_at IS NOT NULL AND (l.deleted_updated_at IS NULL OR c.deleted_updated_at >= l.deleted_updated_at)
                  THEN c.deleted_updated_at ELSE l.deleted_updated_at END
         FROM cloud.articles c
         LEFT JOIN main.articles l ON l.id = c.id
@@ -206,7 +207,10 @@ object MergeSql {
             updated_at = excluded.updated_at
         WHERE COALESCE(excluded.read_at, 0) >= COALESCE(read_at, 0)
            OR COALESCE(excluded.starred_at, 0) >= COALESCE(starred_at, 0)
-           OR COALESCE(excluded.deleted_updated_at, 0) >= COALESCE(deleted_updated_at, 0)
+           OR (
+               excluded.deleted_updated_at IS NOT NULL
+               AND (deleted_updated_at IS NULL OR excluded.deleted_updated_at >= deleted_updated_at)
+           )
            OR excluded.summary IS NOT NULL
            OR excluded.content IS NOT NULL;
     """.trimIndent()

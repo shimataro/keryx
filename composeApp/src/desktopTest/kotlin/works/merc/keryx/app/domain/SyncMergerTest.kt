@@ -982,6 +982,29 @@ class SyncMergerTest {
     }
 
     @Test
+    fun localDeletionAtEpochZeroNotClobberedByCloudNoEvent() {
+        // Synthetic edge case: Clock.now() never produces timestamp 0 in real usage, but this
+        // exercises the NULL-aware fix directly — a real deletion event at t=0 must not be treated
+        // as equivalent to "no deletion event" (NULL) and lost to the cloud's live copy.
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f1", now = 100)
+        insertArticle(cloudDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100)
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("f1", now = 50)
+        insertArticle(localDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 50)
+        localDriver.stampArticleDeleted("a1", deletedAt = 0)
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        assertEquals(0L, verifyDb.articlesQueries.getById("a1").executeAsOne().deleted_at)
+        verifyDriver.close()
+    }
+
+    @Test
     fun searchTextPropagatesPlainTextForImportedCloudArticle() {
         // Production stores search_text as HTML-stripped plain text while content keeps raw HTML.
         // The merge must propagate that plain-text search_text, NOT re-derive it from raw content
