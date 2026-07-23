@@ -22,6 +22,13 @@ data class FtsHit(
  */
 class FtsSearch(private val driver: SqlDriver) {
 
+    /**
+     * Searches articles using all terms in the query and returns matching active articles
+     * in relevance order, with matched title terms marked for highlighting.
+     *
+     * @param rawQuery The user-entered search query.
+     * @return The matching article identifiers and marked titles.
+     */
     fun search(rawQuery: String): List<FtsHit> {
         val terms = searchTerms(rawQuery)
         if (terms.isEmpty()) return emptyList()

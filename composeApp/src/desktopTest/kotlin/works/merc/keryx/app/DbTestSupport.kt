@@ -81,9 +81,14 @@ fun KeryxDatabase.insertGlobalSetting(key: String, value: String, now: Long = 0L
 }
 
 /**
- * Test-only: stamps an article's soft-delete columns. No generated query sets `deleted_at`
- * directly (production only soft-deletes via `softDeleteExpired`, which is condition-bound), so
- * tests build tombstone fixtures with this raw UPDATE. Pass NULL to clear (revive).
+ * Sets an article's soft-deletion timestamps for test fixtures.
+ *
+ * Passing `null` for `deletedAt` clears the deletion state. When omitted, `deletedUpdatedAt`
+ * uses the same value as `deletedAt`.
+ *
+ * @param id The article identifier.
+ * @param deletedAt The soft-deletion timestamp, or `null` to clear it.
+ * @param deletedUpdatedAt The timestamp for the deletion-state update.
  */
 fun SqlDriver.stampArticleDeleted(id: String, deletedAt: Long?, deletedUpdatedAt: Long? = deletedAt) {
     execute(null, "UPDATE articles SET deleted_at = ?, deleted_updated_at = ? WHERE id = ?", 3) {

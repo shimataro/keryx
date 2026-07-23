@@ -175,6 +175,11 @@ class ArticleRepository(
         return newCount
     }
 
+    /**
+     * Soft-deletes articles older than the specified retention period.
+     *
+     * @param retentionDays The maximum number of days articles may be retained; `null` disables expiration.
+     */
     fun deleteExpiredArticles(retentionDays: Int?) {
         if (retentionDays == null) return
         val now = clock.nowMillis()

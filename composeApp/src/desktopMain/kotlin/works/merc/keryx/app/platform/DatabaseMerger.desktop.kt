@@ -57,11 +57,11 @@ actual object DatabaseMerger {
     }
 
     /**
-     * Validates that the database at [dbPath] contains the expected Keryx schema
-     * (tables and columns) for [schemaVersion]. Returns `true` if structurally compatible.
+     * Validates that the database at [dbPath] contains the required tables and columns for [schemaVersion].
      *
-     * Must be updated when [KeryxDatabase.Schema.version] is bumped and [MergeSql]
-     * references new tables or columns.
+     * @param dbPath The path to the database to validate.
+     * @param schemaVersion The schema version whose structure is required.
+     * @return `true` if the database contains all required tables and columns, `false` otherwise.
      */
     actual fun validateSchema(dbPath: String, schemaVersion: Long): Boolean {
         val expectedTables = when (schemaVersion) {
