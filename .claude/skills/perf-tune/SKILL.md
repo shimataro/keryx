@@ -264,8 +264,11 @@ Each axis has its own method.
   allocation/heap delta in that same disposable code (e.g. `System.gc()` +
   `Runtime.totalMemory() - Runtime.freeMemory()` sampled before and after — an
   **approximate retained-heap proxy, not a precise allocation count** — or a real
-  allocation counter such as `ThreadMXBean.getThreadAllocatedBytes()`) — never an
-  unspecified local measurement —
+  allocation counter such as `com.sun.management.ThreadMXBean.getThreadAllocatedBytes()`,
+  the JDK-specific extension interface rather than the standard
+  `java.lang.management.ThreadMXBean`, and only valid where
+  `isThreadAllocatedMemorySupported()` / `isThreadAllocatedMemoryEnabled()` report
+  it available) — never an unspecified local measurement —
   this never means adding a profiler dependency or a telemetry service (see the
   security invariant above). **Call counts are candidate evidence only** (e.g. how
   many `Ksoup.parse` calls N articles cost): reading the code establishes how often
