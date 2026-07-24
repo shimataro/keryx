@@ -148,7 +148,7 @@ object MergeSql {
         INSERT INTO main.articles (
             id, feed_id, guid, url, title, summary, content, author, published_at,
             thumbnail_url, is_read, read_at, is_starred, starred_at, cached_at,
-            search_text, updated_at, created_at
+            search_text, updated_at, created_at, deleted_at, deleted_updated_at
         )
         SELECT
             c.id, c.feed_id, c.guid, c.url, c.title,
@@ -170,7 +170,22 @@ object MergeSql {
                 WHEN l.summary IS NOT NULL THEN l.search_text
                 ELSE ''
             END,
-            c.updated_at, c.created_at
+            c.updated_at, c.created_at,
+            -- deleted_at: last-wins by deleted_updated_at, but revived (NULL) when the winning
+            -- star is newer than the winning deletion event (cache cleanup only deletes non-starred
+            -- articles, so a later star means the user wants to keep it).
+            CASE
+                WHEN (CASE WHEN COALESCE(c.starred_at, 0) >= COALESCE(l.starred_at, 0) THEN c.is_starred ELSE l.is_starred END) = 1
+                     AND (CASE WHEN COALESCE(c.starred_at, 0) >= COALESCE(l.starred_at, 0) THEN COALESCE(c.starred_at, 0) ELSE COALESCE(l.starred_at, 0) END)
+                         > (CASE WHEN c.deleted_updated_at IS NOT NULL AND (l.deleted_updated_at IS NULL OR c.deleted_updated_at >= l.deleted_updated_at)
+                                 THEN COALESCE(c.deleted_updated_at, 0) ELSE COALESCE(l.deleted_updated_at, 0) END)
+                    THEN NULL
+                WHEN c.deleted_updated_at IS NOT NULL AND (l.deleted_updated_at IS NULL OR c.deleted_updated_at >= l.deleted_updated_at) THEN c.deleted_at
+                ELSE l.deleted_at
+            END,
+            -- deleted_updated_at: field-specific last-wins winner.
+            CASE WHEN c.deleted_updated_at IS NOT NULL AND (l.deleted_updated_at IS NULL OR c.deleted_updated_at >= l.deleted_updated_at)
+                 THEN c.deleted_updated_at ELSE l.deleted_updated_at END
         FROM cloud.articles c
         LEFT JOIN main.articles l ON l.id = c.id
         WHERE NOT EXISTS (
@@ -188,9 +203,14 @@ object MergeSql {
             search_text = excluded.search_text,
             is_read = excluded.is_read, read_at = excluded.read_at,
             is_starred = excluded.is_starred, starred_at = excluded.starred_at,
+            deleted_at = excluded.deleted_at, deleted_updated_at = excluded.deleted_updated_at,
             updated_at = excluded.updated_at
         WHERE COALESCE(excluded.read_at, 0) >= COALESCE(read_at, 0)
            OR COALESCE(excluded.starred_at, 0) >= COALESCE(starred_at, 0)
+           OR (
+               excluded.deleted_updated_at IS NOT NULL
+               AND (deleted_updated_at IS NULL OR excluded.deleted_updated_at >= deleted_updated_at)
+           )
            OR excluded.summary IS NOT NULL
            OR excluded.content IS NOT NULL;
     """.trimIndent()

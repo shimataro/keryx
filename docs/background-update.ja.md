@@ -45,7 +45,7 @@ while (true) {
 ## FTS 全再構築の日次 heal（`maybeRebuildFtsIndex`）
 
 hot path（フィード更新・同期マージ）は `FtsManager.indexMissing()` で新記事だけを増分投入する（全再構築はしない）。
-そのため、本文が更新された既存記事の索引の古さと、キャッシュ削除で残る索引エントリを解消するため、全再構築を
+そのため、本文が更新された既存記事の索引の古さを解消するため、全再構築を
 **日次アイドル**に降格して実行する。`runStartupTasks` と `backgroundUpdateLoop` の各周回から
 `maybeRebuildFtsIndex` を呼び、`local_settings.lastFtsRebuiltAt` の 24h ゲートと `ActivityCenter`（同期・更新が非実行）の
 アイドル判定を満たすときだけ `rebuildIndex()` を実行して `lastFtsRebuiltAt` を記録する。`'rebuild'` は原子的＋

@@ -4,6 +4,7 @@ import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.ftsManager
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
+import works.merc.keryx.app.stampArticleDeleted
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -29,6 +30,39 @@ class FtsSearchTest {
             ftsManager(driver).ensureIndexed()
 
             assertEquals(listOf("a1"), FtsSearch(driver).search("Kotlin").map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun softDeletedArticleIsExcludedFromSearch() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertArticle("a1", "f1", "Kotlin one", "shared body")
+            db.insertArticle("a2", "f1", "Kotlin two", "shared body")
+            driver.stampArticleDeleted("a2", deletedAt = 100)
+            ftsManager(driver).ensureIndexed()
+
+            // a2 is still indexed (index isn't touched on soft-delete) but excluded by the query.
+            assertEquals(listOf("a1"), FtsSearch(driver).search("Kotlin").map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun articleDeletedAfterIndexingIsExcludedFromSearch() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertArticle("a1", "f1", "Kotlin only", "body")
+            ftsManager(driver).ensureIndexed()
+            assertEquals(listOf("a1"), FtsSearch(driver).search("Kotlin").map { it.id })
+
+            driver.stampArticleDeleted("a1", deletedAt = 100)
+            assertEquals(emptyList(), FtsSearch(driver).search("Kotlin").map { it.id })
         } finally {
             driver.close()
         }

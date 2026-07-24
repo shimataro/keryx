@@ -184,9 +184,22 @@ class ArticleRepository(
         return newCount
     }
 
+    /**
+     * Soft-deletes articles older than the specified retention period.
+     *
+     * @param retentionDays The maximum number of days articles may be retained; `null` disables expiration.
+     */
     fun deleteExpiredArticles(retentionDays: Int?) {
         if (retentionDays == null) return
-        val cutoff = clock.nowMillis() - retentionDays.toLong() * 24 * 60 * 60 * 1000
-        articles.deleteExpired(cutoff)
+        val now = clock.nowMillis()
+        val cutoff = now - retentionDays.toLong() * 24 * 60 * 60 * 1000
+        // Soft-delete (not physical DELETE) so the deletion propagates via the sync merge
+        // instead of being resurrected from the cloud on the next sync.
+        articles.softDeleteExpired(
+            deleted_at = now,
+            deleted_updated_at = now,
+            updated_at = now,
+            cached_at = cutoff,
+        )
     }
 }

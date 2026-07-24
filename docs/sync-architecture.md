@@ -43,7 +43,7 @@ Merge SQL (`MergeSql`) key points:
 - feeds / tags / folders / global_settings: last-write-wins (including logical deletion). However, the `ON CONFLICT` in the feeds statement **does not handle user-edited fields (`folder_id` / `sort_order` / `custom_title` / `deleted_at`) at all** (delegated to dedicated statements below). This prevents these fields from being overwritten just because the content is newer.
   The `ON CONFLICT` only handles content fields (url/title/description/etag etc. + `updated_at`).
   feeds are matched **`id`** so feed ids must be deterministically generated from `url` as **UUIDv5** at subscription time (`IdGenerator.feedId`), ensuring the same feed has the same id on all devices. With random ids, two devices independently subscribing to the same URL would get different ids and the URL collision guard would skip them, preventing convergence (and article ids derived from `feed_id` would also diverge). See `feeds` section in [db-schema.md](db-schema.md) for details.
-- articles: Read (`read_at`) / star (`starred_at`) are last-write-wins, body is OR merge, `search_text` is recalculated.
+- articles: Read (`read_at`) / star (`starred_at`) are last-write-wins, body is OR merge, `search_text` is recalculated. Deletion is last-write-wins on `deleted_at` / `deleted_updated_at` (field-specific, like read/star), so a cache-cleanup soft-delete propagates instead of being resurrected from the cloud; a star newer than the deletion revives the article (`deleted_at` → NULL). `upsert` (feed refresh) never writes `deleted_at`, so a refresh cannot revive a deleted article.
   Articles are matched **`id`** so article IDs must be deterministically generated from `(feed_id, guid)` as **UUIDv5** (`IdGenerator.articleId`), ensuring the same article has the same ID on all devices. With random IDs, two devices independently fetching the same article would get different IDs and the guid collision guard below would skip them, preventing read-state propagation (this was a fixed bug). See `articles` section in [db-schema.md](db-schema.md) for details.
 - feed_tags: last-write-wins. Only imported if the referenced feed / tag exists in main (FK protection).
 - **feeds user-edited fields are merged independently via dedicated statements using field-specific timestamps** (same design as `read_at` / `starred_at` for articles, separated from row-level `updated_at` = content refresh update):
@@ -56,9 +56,9 @@ Merge SQL (`MergeSql`) key points:
 ## Schema Version
 
 Managed via `PRAGMA user_version`. At merge time, `cloud.user_version` is checked; if the cloud is newer than local, `SchemaVersionException` is thrown to prompt the user to update the app (merge aborts).
-Current `user_version` is 1 (no migration history yet; base `.sq` is the single current schema).
+Current `user_version` is 2 (`1.sqm` adds `articles.deleted_at` / `deleted_updated_at`).
 
-> **Local-direction migration for older cloud schema (mechanism for the future)**: `DatabaseMerger.merge` checks the downloaded cloud DB's `user_version` before merging, and if older than local, runs `KeryxDatabase.Schema.migrate` on the temp file to bring it up to the local schema before merging. This prevents merge statements referencing newer columns from failing with `no such column` against an old cloud DB. Currently at single version (1), this uplift branch (`migrateCloudIfOlder`) is empty and does not fire.
+> **Local-direction migration for older cloud schema**: `DatabaseMerger.merge` checks the downloaded cloud DB's `user_version` before merging, and if older than local, runs `KeryxDatabase.Schema.migrate` on the temp file to bring it up to the local schema before merging. This prevents merge statements referencing newer columns from failing with `no such column` against an old cloud DB. With version 2, this uplift branch (`migrateCloudIfOlder`) now fires for a version-1 cloud DB, applying `1.sqm` to the downloaded copy so the article merge can reference `deleted_at`.
 
 ## FTS5 Handling
 
@@ -68,7 +68,7 @@ Index maintenance is two-tier:
 
 - **Hot path (after feed refresh / sync merge)**: `FtsManager.indexMissing()` incrementally indexes only unindexed new articles (O(new rows), does not wipe index). Full rebuild (`'rebuild'`) is O(total indexed text) and heavy, and could reject running searches, so it is not used on hot paths. Indexes of existing articles with updated body text remain stale until the next rebuild (acceptable; they still match old tokens so searches do not regress to zero results).
 - **Healing full rebuild (`rebuildIndex()` = `'rebuild'`)**:
-  Executed only in the daily idle pass in `main.kt` (`maybeRebuildFtsIndex`, gated by `local_settings.lastFtsRebuiltAt` 24h gate + `ActivityCenter` idle). Rebuilds stale existing rows and sweeps entries left by cache-cleanup deletions. `'rebuild'` is a single atomic statement (readers see only before or after) + `busy_timeout` wait, so running searches do not regress to zero results either.
+  Executed only in the daily idle pass in `main.kt` (`maybeRebuildFtsIndex`, gated by `local_settings.lastFtsRebuiltAt` 24h gate + `ActivityCenter` idle). Rebuilds stale existing rows (body text updated since incremental indexing). `'rebuild'` is a single atomic statement (readers see only before or after) + `busy_timeout` wait, so running searches do not regress to zero results either.
 
 On startup, `FtsManager.ensureIndexed()` (initial creation + unindexed row incremental insert) is called as before.
 
@@ -98,4 +98,4 @@ Two redirect reception methods:
 
 ## Sync Target Article Range
 
-Only articles within the cache retention period are targeted (articles past retention are removed by startup cache cleanup and consequently excluded from upload).
+Startup cache cleanup **soft-deletes** articles past the retention period (stamps `deleted_at` / `deleted_updated_at`) rather than physically removing them. The tombstones are uploaded and propagate via the merge (last-write-wins on `deleted_updated_at`), so a device that missed the deletion converges instead of re-adding the article. The rows are not physically reclaimed yet (physical GC of old tombstones is future work), so soft-deleted articles still ride along in the uploaded snapshot until then.

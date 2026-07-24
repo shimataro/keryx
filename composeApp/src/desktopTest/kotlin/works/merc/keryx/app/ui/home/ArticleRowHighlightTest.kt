@@ -100,4 +100,6 @@ private fun article(id: String): Articles = Articles(
     search_text = "",
     updated_at = 0L,
     created_at = 0L,
+    deleted_at = null,
+    deleted_updated_at = null,
 )

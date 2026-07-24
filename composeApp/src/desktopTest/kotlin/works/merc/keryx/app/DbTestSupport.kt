@@ -79,3 +79,21 @@ fun KeryxDatabase.insertFeedTag(feedId: String, tagId: String, now: Long = 0L, d
 fun KeryxDatabase.insertGlobalSetting(key: String, value: String, now: Long = 0L) {
     global_settingsQueries.upsert(key = key, value_ = value, updated_at = now)
 }
+
+/**
+ * Sets an article's soft-deletion timestamps for test fixtures.
+ *
+ * Passing `null` for `deletedAt` clears the deletion state. When omitted, `deletedUpdatedAt`
+ * uses the same value as `deletedAt`.
+ *
+ * @param id The article identifier.
+ * @param deletedAt The soft-deletion timestamp, or `null` to clear it.
+ * @param deletedUpdatedAt The timestamp for the deletion-state update.
+ */
+fun SqlDriver.stampArticleDeleted(id: String, deletedAt: Long?, deletedUpdatedAt: Long? = deletedAt) {
+    execute(null, "UPDATE articles SET deleted_at = ?, deleted_updated_at = ? WHERE id = ?", 3) {
+        bindLong(0, deletedAt)
+        bindLong(1, deletedUpdatedAt)
+        bindString(2, id)
+    }
+}

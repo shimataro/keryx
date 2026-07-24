@@ -10,9 +10,11 @@
 - 全テーブルは SQLDelight（`.sq`）で管理。`articles_fts` のみ生 SQL（`FtsManager`）で別途作成する。
 - 論理削除は `deleted_at`（NULL = 生存）。同期タイムスタンプは `updated_at`。
 - 真偽値・タイムスタンプは **INTEGER（`Long`）**。真偽値は 0/1、時刻は Unix ミリ秒。
-- スキーマバージョンは `PRAGMA user_version`（現在 1）。`DatabaseDriverFactory` が create/migrate を駆動。
-  現時点ではマイグレーション履歴を持たず、基底 `.sq` が単一の現行スキーマ（バージョン 1）。
-  将来スキーマを変える場合は `.sqm` ファイル（`<移行元バージョン>.sqm`）を追加してバージョンを上げる。
+- スキーマバージョンは `PRAGMA user_version`（現在 2）。`DatabaseDriverFactory` が create/migrate を駆動。
+  バージョン 2 は `1.sqm` で `articles.deleted_at` / `deleted_updated_at` を追加する（SQLDelight は最大の
+  マイグレーションファイル + 1 でバージョンを導出）。スキーマを変える場合は `.sqm` ファイル
+  （`<移行元バージョン>.sqm`）を追加すればバージョンは自動で上がる。あわせて
+  `DatabaseMerger.EXPECTED_SCHEMA` / `validateSchema` を新バージョンに追随させること。
 
 > **旧版（前身実装）との互換性は考慮しない**（ユーザーの決定）。スキーマは合理的な最良形とする。
 
@@ -53,7 +55,7 @@
 
 `id`(PK), `feed_id`(FK→feeds), `guid`, `url`, `title`, `summary`, `content`, `author`,
 `published_at`, `thumbnail_url`, `is_read`, `read_at`, `is_starred`, `starred_at`, `cached_at`,
-`search_text`, `updated_at`, `created_at`。`UNIQUE(feed_id, guid)`。
+`search_text`, `updated_at`, `created_at`, `deleted_at`, `deleted_updated_at`。`UNIQUE(feed_id, guid)`。
 インデックス: `feed_id` / `is_read` / `is_starred` / `published_at DESC`。
 
 - `id` は `(feed_id, guid)` から **UUIDv5** で決定的に生成する（`IdGenerator.articleId`）。同じ記事は
@@ -65,7 +67,15 @@
 - 既読・スターの競合解決は `read_at` / `starred_at` で後勝ち。
 - `content` は `summary` より優先して表示。両方 NULL なら外部ブラウザーで開く。
 - `search_text = COALESCE(content, summary, '')`。挿入・更新時に計算する。
-- 論理削除しない。フィードが論理削除されても `feed_id` を保持したまま残す（スター記事の参照維持）。
+- `deleted_at`（NULL = 生存）で論理削除する。`deleted_at` を書き込むのは**キャッシュ削除のみ**
+  （`softDeleteExpired`）で、スター付き記事は削除しない。`deleted_updated_at` は削除/復活イベントの
+  フィールド別後勝ちタイムスタンプ（`read_at` / `starred_at`、および `feeds.deleted_updated_at` と同様）で、
+  コンテンツ更新・既読・スター変更が同期マージで削除を上書きしないよう `updated_at` とは分離する。
+  マージでは `deleted_updated_at` の後勝ちで削除が伝播するが、削除より新しいスターがあれば記事を
+  **復活**（`deleted_at` → NULL）させる（キャッシュ削除は非スター記事しか消さないため）。これにより、
+  削除が次回同期でクラウドから復活せず、他デバイスへ伝播する。ここでは行を物理削除しない（古い
+  トゥームストーンの物理GCは将来対応）。全 UI/一覧/検索クエリは `deleted_at IS NULL` で除外し、
+  `upsert`（フィード更新）は `deleted_at` に触れないため、更新が削除済み記事を復活させることはない。
 
 ### tags / feed_tags
 
@@ -116,7 +126,7 @@ INSERT INTO articles_fts(articles_fts) VALUES('rebuild');
 DROP して行う。[sync-architecture.ja.md](sync-architecture.ja.md) の「FTS5 の扱い」）。フィード更新・
 同期マージの後は `FtsManager.indexMissing()` で**未索引の新記事だけを増分投入**する（全 `'rebuild'` は毎回だと
 重くスケールしないため使わない）。全再構築は日次アイドル pass（`local_settings.lastFtsRebuiltAt`
-の 24h ゲート）でのみ行い、増分で古くなった既存行の作り直しとキャッシュ削除で残った索引エントリの一掃を担う。
+の 24h ゲート）でのみ行い、増分投入以降に本文が更新されて古くなった既存行の作り直しを担う。
 **起動時に `FtsManager.ensureIndexed()` を呼び、テーブルが無ければ作成し、索引に未登録の記事があれば増分投入する**。
 
 ## local_settings.json（keryx.db 外・非同期）
@@ -141,6 +151,8 @@ DROP して行う。[sync-architecture.ja.md](sync-architecture.ja.md) の「FTS
 
 `cache_retention_days` に基づき、起動時に前回削除から 24 時間以上経過していればバックグラウンドで実行。
 スター付き記事とフィードごとの最新 10 件は保持期間に関わらず削除しない。`null`（無期限）なら実行しない。
+削除は行の物理削除ではなく**論理削除**（`articles.deleted_at` / `deleted_updated_at` を刻む）で、削除が
+クラウドから復活せず同期マージで伝播する。古いトゥームストーンの物理回収は将来対応。
 
 ## favicon・サムネイル
 

@@ -97,8 +97,8 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
    which is O(all indexed text) and would block/zero-out concurrent searches. The
    whole index is only rebuilt in the rare healing pass: a once-per-24h idle pass
    in `main.kt` (`maybeRebuildFtsIndex`, gated on `lastFtsRebuiltAt` +
-   `ActivityCenter` idle), which also re-indexes content that incremental indexing
-   left stale and sweeps entries left by cache-cleanup deletions. On startup, `FtsManager.ensureIndexed()`
+   `ActivityCenter` idle), which re-indexes content that incremental indexing
+   left stale. On startup, `FtsManager.ensureIndexed()`
    creates the table on first run and backfills any missing rows. `busy_timeout`
    (set in `DatabaseDriverFactory`) lets a search wait out, rather than error on,
    the brief write lock of an incremental insert or a rebuild.

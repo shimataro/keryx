@@ -13,6 +13,7 @@ import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertTag
+import works.merc.keryx.app.stampArticleDeleted
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -467,12 +468,21 @@ class ArticleRepositoryTest {
             val repo = newRepo(db, driver, clock = Clock { now })
             repo.deleteExpiredArticles(retentionDays = 1)
 
-            // cached_at == cutoff survives (comparison is strictly `<`).
-            assertTrue(db.articlesQueries.getById("atCutoff").executeAsOneOrNull() != null)
-            // cached_at < cutoff is deleted.
-            assertNull(db.articlesQueries.getById("beforeCutoff").executeAsOneOrNull())
+            // cached_at == cutoff survives (comparison is strictly `<`) and stays visible.
+            assertNull(db.articlesQueries.getById("atCutoff").executeAsOne().deleted_at)
+            // cached_at < cutoff is soft-deleted: still physically present (so the deletion can
+            // propagate via sync) but tombstoned and hidden from the list. All three cleanup
+            // timestamps are stamped to `now` — deleted_updated_at in particular drives deletion
+            // last-write-wins ordering in the sync merge, so assert it, not just visibility.
+            val deleted = db.articlesQueries.getById("beforeCutoff").executeAsOne()
+            assertEquals(now, deleted.deleted_at)
+            assertEquals(now, deleted.deleted_updated_at)
+            assertEquals(now, deleted.updated_at)
+            val visibleIds = db.articlesQueries.watchAll().executeAsList().map { it.id }
+            assertTrue("beforeCutoff" !in visibleIds)
+            assertTrue("atCutoff" in visibleIds)
             for (i in 0 until 10) {
-                assertTrue(db.articlesQueries.getById("recent$i").executeAsOneOrNull() != null)
+                assertNull(db.articlesQueries.getById("recent$i").executeAsOne().deleted_at)
             }
         } finally {
             driver.close()
@@ -496,7 +506,72 @@ class ArticleRepositoryTest {
             val repo = newRepo(db, driver, clock = Clock { now })
             repo.deleteExpiredArticles(retentionDays = 1)
 
-            assertTrue(db.articlesQueries.getById("starredOld").executeAsOneOrNull() != null)
+            // Starred articles are never soft-deleted (still present and not tombstoned).
+            assertNull(db.articlesQueries.getById("starredOld").executeAsOne().deleted_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun deleteExpiredArticlesProtectsLatest10AliveNotTombstones() {
+        // The "keep latest 10 per feed" protection must count only alive rows. Tombstones now
+        // persist indefinitely (soft delete), so if the protection subquery ranked them too, a
+        // tombstone with a recent published_at would occupy a protected slot and push a truly-alive
+        // article below the top-10, dropping live retention under 10.
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            val oneDayMs = 24 * 60 * 60 * 1000L
+            val now = 10 * oneDayMs
+            val cutoff = now - 1 * oneDayMs // retentionDays = 1
+
+            // 2 tombstoned articles with the newest published_at (e.g. deletions propagated via
+            // sync from another device). They must NOT consume protected slots.
+            for (i in 0 until 2) {
+                db.insertArticle("dead$i", "f1", publishedAt = 2000L + i, cachedAt = now)
+                driver.stampArticleDeleted("dead$i", deletedAt = 100L)
+            }
+            // 10 alive, expired-cached_at articles with older published_at — all should be protected.
+            for (i in 0 until 10) {
+                db.insertArticle("alive$i", "f1", publishedAt = 1000L + i, cachedAt = cutoff - 1)
+            }
+
+            val repo = newRepo(db, driver, clock = Clock { now })
+            repo.deleteExpiredArticles(retentionDays = 1)
+
+            // All 10 alive articles survive. With the old (tombstone-blind) subquery, the 2
+            // tombstones would occupy top-10 slots and the 2 oldest alive rows would be deleted.
+            for (i in 0 until 10) {
+                assertNull(db.articlesQueries.getById("alive$i").executeAsOne().deleted_at)
+            }
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun upsertDoesNotReviveDeletedArticle() {
+        // A feed refresh re-inserts the same (feed_id, guid) via `insert ... ON CONFLICT`. That path
+        // must preserve an existing tombstone, otherwise refresh would resurrect a deleted article.
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertArticle("a1", "f1", content = "old")
+            driver.stampArticleDeleted("a1", deletedAt = 100)
+
+            // Re-fetch the same article (same feed_id + guid = "a1"), as a refresh would.
+            db.articlesQueries.insert(
+                id = "a1", feed_id = "f1", guid = "a1", url = "https://article/a1", title = "T",
+                summary = null, content = "new", author = null, published_at = null, thumbnail_url = null,
+                is_read = 0, read_at = null, is_starred = 0, starred_at = null, cached_at = 500,
+                search_text = "new", updated_at = 500, created_at = 0,
+            )
+
+            val row = db.articlesQueries.getByFeedAndGuid("f1", "a1").executeAsOne()
+            assertEquals(100L, row.deleted_at)
+            assertEquals("new", row.content) // content did refresh...
+            assertTrue(db.articlesQueries.watchAll().executeAsList().isEmpty()) // ...but it stays hidden
         } finally {
             driver.close()
         }

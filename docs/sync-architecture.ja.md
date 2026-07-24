@@ -60,7 +60,7 @@
   デバイスが独立購読した同一フィードが別 id になり、URL 衝突ガードにスキップされて収束しない（feed が
   収束しないと記事 id も `feed_id` 由来で食い違い記事も収束しない）。詳細は
   [db-schema.ja.md](db-schema.ja.md) の `feeds` 節。
-- articles: 既読（`read_at`）・スター（`starred_at`）は後勝ち、本文は OR マージ、`search_text` を再計算。
+- articles: 既読（`read_at`）・スター（`starred_at`）は後勝ち、本文は OR マージ、`search_text` を再計算。削除は `deleted_at` / `deleted_updated_at` の後勝ち（既読・スターと同じフィールド別）で、キャッシュ削除の論理削除がクラウドから復活せず伝播する。削除より新しいスターがあれば記事を復活（`deleted_at` → NULL）させる。`upsert`（フィード更新）は `deleted_at` に書き込まないため、更新が削除済み記事を復活させることはない。
   記事を **`id` で照合**するため、記事 ID は `(feed_id, guid)` から **UUIDv5** で決定的に生成し
   （`IdGenerator.articleId`）、同じ記事が全デバイスで同一 ID になることが前提。ランダム ID だと両
   デバイスが独立取得した同一記事が別 ID になり、下記の guid 衝突ガードにスキップされて既読が伝播しない
@@ -86,13 +86,14 @@
 
 `PRAGMA user_version` で管理。マージ時に `cloud.user_version` を確認し、クラウドがローカルより新しければ
 `SchemaVersionException` を投げてユーザーにアプリ更新を促す（マージ中止）。
-現在の `user_version` は 1（マイグレーション履歴なし。基底 `.sq` が単一の現行スキーマ）。
+現在の `user_version` は 2（`1.sqm` が `articles.deleted_at` / `deleted_updated_at` を追加する）。
 
-> **クラウドが古い場合のローカル方向マイグレーション（将来のための仕組み）**: `DatabaseMerger.merge` は
+> **クラウドが古い場合のローカル方向マイグレーション**: `DatabaseMerger.merge` は
 > マージ本体の前にダウンロードしたクラウド DB の `user_version` を確認し、ローカルより古ければ一時ファイルに
 > 対して `KeryxDatabase.Schema.migrate` でローカルのスキーマまで引き上げてからマージする。これにより、
-> 新しい列を参照するマージ文が古いクラウドに対して `no such column` で失敗しない。現状は単一バージョン（1）の
-> ため、この引き上げ分岐（`migrateCloudIfOlder`）は対象範囲が空で発火しない。
+> 新しい列を参照するマージ文が古いクラウドに対して `no such column` で失敗しない。バージョン 2 では、
+> この引き上げ分岐（`migrateCloudIfOlder`）がバージョン 1 のクラウド DB に対して発火し、ダウンロードした
+> コピーへ `1.sqm` を適用してから記事マージが `deleted_at` を参照できるようにする。
 
 ## FTS5 の扱い
 
@@ -108,8 +109,8 @@
   （許容。記事はなお旧トークンでヒットするので検索が 0 件に退行しない）。
 - **healing 用の全再構築（`rebuildIndex()` = `'rebuild'`）**:
   `main.kt` の日次アイドル pass（`maybeRebuildFtsIndex`、`local_settings.lastFtsRebuiltAt` の 24h ゲート +
-  `ActivityCenter` アイドル）でのみ実行。増分で古くなった既存行を作り直し、キャッシュ削除で残った索引エントリを
-  一掃する。`'rebuild'` は単一文で原子的（読み手は再構築前後どちらかを見るだけ）＋ `busy_timeout` で待つため、
+  `ActivityCenter` アイドル）でのみ実行。増分投入以降に本文が更新されて古くなった既存行を作り直す。
+  `'rebuild'` は単一文で原子的（読み手は再構築前後どちらかを見るだけ）＋ `busy_timeout` で待つため、
   実行中の検索も 0 件にならない。
 
 起動時に `FtsManager.ensureIndexed()`（初回作成 + 未索引行の増分投入）を呼ぶのは従来どおり。
@@ -171,5 +172,7 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
 
 ## 同期対象の記事範囲
 
-キャッシュ保持期間内の記事のみを対象とする（保持期間超過分は起動時のキャッシュ削除で除外され、
-結果的にアップロード対象から外れる）。
+起動時のキャッシュ削除は保持期間超過の記事を物理削除せず**論理削除**（`deleted_at` / `deleted_updated_at`
+を刻む）する。トゥームストーンはアップロードされマージ（`deleted_updated_at` の後勝ち）で伝播するため、
+削除を取りこぼしたデバイスも記事を再追加せず収束する。行の物理回収はまだ行わない（古いトゥームストーンの
+物理GCは将来対応）ので、それまで論理削除済み記事もアップロードのスナップショットに含まれ続ける。
