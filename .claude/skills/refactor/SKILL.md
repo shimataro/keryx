@@ -57,17 +57,24 @@ Pick the items that genuinely apply; don't churn code that is already clean.
 **Performance / algorithmic optimization is NOT applied here.** Refactoring is
 behavior-preserving by definition; speed / memory / algorithm / data-structure
 optimization is a separate discipline that needs benchmarks, its own tests, and
-a risk review.
+a risk review — that is the **`perf-tune` skill** (`/perf-tune`), which this
+skill hands its performance findings off to.
 
 - **Allowed:** incidental, obviously-safe, behavior-preserving micro-efficiencies
-  that fall out of a structural refactor (reuse an existing map lookup instead of
-  a linear scan, hoist a loop invariant, drop a redundant recomputation) — only
-  when observable results are identical and the code is not on a protected hot
-  path.
-- **Not applied:** any change to algorithmic complexity, data structures, or the
-  constrained hot paths (FTS `indexMissing()` / `'rebuild'`, `DatabaseMerger`
-  connection, incremental indexing). **Surface these as report-only
-  recommendations** (see `## How to report`) for a separate deliberate task.
+  that fall out of a structural refactor — **only those that leave asymptotic
+  complexity unchanged**: a constant-factor tidy-up, never a better algorithm or
+  data structure. Examples: dropping a redundant recomputation of the same pure
+  value within one scope, collapsing two adjacent passes over the same collection
+  into one. Only when observable results are identical and the code is not on a
+  protected hot path.
+- **Not applied:** any change to algorithmic complexity or data structures —
+  **including replacing a linear scan with a map/set lookup, and hoisting a
+  loop-invariant computation out of a loop** — or any change to the constrained
+  hot paths (FTS `indexMissing()` / `'rebuild'`, `DatabaseMerger` connection,
+  incremental indexing). These belong to `perf-tune`, whose before/after
+  measurement gate applies to **every** candidate, including Green-tier ones.
+  **Surface them as report-only recommendations** (see `## How to report`) for a
+  separate `/perf-tune` run.
 
 ## Do NOT touch (invariants)
 
@@ -200,5 +207,6 @@ English Conventional Commits message (`refactor(scope): …`) per `.claude/CLAUD
 - A **"Performance opportunities (report-only, not applied)"** list — each item:
   location + the suspected speed/memory win + why it was left out
   (behavior-affecting / needs a benchmark / on a protected hot path). This is the
-  hand-off for a separate deliberate optimization task.
+  hand-off to the **`perf-tune` skill** — it feeds that skill's Step 3 candidate
+  inventory, but each item there still has to be measured before it is acted on.
 - The ready-to-use `refactor(...)` commit message.
