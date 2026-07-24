@@ -226,10 +226,15 @@ headroom:
     single-threaded **on purpose, for serialization** — never widen those.
 15. **Lock hold time.** Axis-1 #1 is the known instance of CPU work inside a
     transaction; look for others.
-16. **Concurrency hazard audit — Red.** Look for a new code path that bypasses
-    `dbWriteDispatcher` / `SettingsRepository.writeDispatcher`'s serialization,
-    or a `Flow` that assumes a single collector (e.g. `SharingStarted`
-    replay/state semantics) being collected from more than one place. A latent
+16. **Concurrency hazard audit — Red.** Look for a new code path that bypasses a
+    serialization boundary — `HomeViewModel.dbWriteDispatcher` (serializes the
+    article read/star **DB** writes) or `SettingsRepository.writeDispatcher`
+    (serializes the coalesced `local_settings.json` **file** write, **not** DB
+    writes: `setGlobal` writes `global_settings` directly on the caller's
+    thread, so a concurrent global-settings write is exactly the kind of
+    unserialized path this audit should catch) — or a `Flow` that assumes a
+    single collector (e.g. `SharingStarted` replay/state semantics) being
+    collected from more than one place. A latent
     race is a correctness risk regardless of whether it has caused a visible
     bug yet, so treat any finding as **Red tier** — gate it individually even
     when no speed win is claimed.
