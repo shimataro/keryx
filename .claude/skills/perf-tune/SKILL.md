@@ -43,6 +43,11 @@ measurement method (see Step 2); one candidate can span several axes.
    optimistically.
 3. **Concurrency & scheduling** — stop blocking the UI thread and the DB write
    lock, overlap sequential IO, move blocking work to the right dispatcher.
+   This axis also covers **auditing for concurrency hazards** — a shared
+   mutable resource touched from more than one dispatcher/coroutine without the
+   serialization the surrounding code assumes. Finding one is a correctness
+   risk, not a speed one, so it is tiered and gated like any other candidate
+   (see Optimization targets #16 and the Step 2 measurement note below).
 
 Always label which axis a change belongs to. An axis-2 change is **not** a
 speed-up and must never be reported as one.
@@ -143,7 +148,7 @@ Tier every candidate; the tier decides the gate.
 | --- | --- | --- |
 | **Green** | Local, behavior-preserving, integrity-irrelevant (narrowing a projection, hoisting a loop invariant, moving CPU work out of a transaction) | Covered by the single Step 4 approval |
 | **Yellow** | Semantics must be *proven* equal (batching an N+1, changing concurrency, changing dispatchers, reworking Flow operators, adding a progress indicator) | Step 4 approval **plus** a test and a measurement |
-| **Red** | PRAGMA / `.sq` schema / migrations / merge / FTS / sync / OAuth paths / any **new** optimistic display | **Individually approved, one at a time**, with the integrity and sync-compatibility impact spelled out first |
+| **Red** | PRAGMA / `.sq` schema / migrations / merge / FTS / sync / OAuth paths / any **new** optimistic display / a **latent concurrency hazard** found by the #16 audit (a serialization-boundary bypass, Red even when no speed win is claimed — distinct from the Yellow row's *deliberate* concurrency/dispatcher change) | **Individually approved, one at a time**, with the integrity and sync-compatibility impact spelled out first |
 
 ## Optimization targets
 
@@ -221,6 +226,18 @@ headroom:
     single-threaded **on purpose, for serialization** — never widen those.
 15. **Lock hold time.** Axis-1 #1 is the known instance of CPU work inside a
     transaction; look for others.
+16. **Concurrency hazard audit — Red.** Look for a new code path that bypasses a
+    serialization boundary — `HomeViewModel.dbWriteDispatcher` (serializes the
+    article read/star **DB** writes) or `SettingsRepository.writeDispatcher`
+    (serializes the coalesced `local_settings.json` **file** write, **not** DB
+    writes: `setGlobal` writes `global_settings` directly on the caller's
+    thread, so a concurrent global-settings write is exactly the kind of
+    unserialized path this audit should catch) — or a `Flow` that assumes a
+    single collector (e.g. `SharingStarted` replay/state semantics) being
+    collected from more than one place. A latent
+    race is a correctness risk regardless of whether it has caused a visible
+    bug yet, so treat any finding as **Red tier** — gate it individually even
+    when no speed win is claimed.
 
 > `SettingsRepository`'s `local_settings.json` write is **already** coalesced
 > (`DROP_OLDEST`) and serialized on a single thread. Do not re-propose work that
@@ -293,10 +310,18 @@ Each axis has its own method.
   out of a transaction (#15), the measurement is **transaction / lock hold duration**
   before and after — not total elapsed time, which barely moves, and not a call
   count, which does not move at all.
+- **Concurrency hazard candidates (#16)** — there is nothing to time: the
+  "measurement" is a **regression test that deterministically exercises the
+  concurrent path**, fails before the fix (reproduces the race under a test
+  dispatcher / controlled interleaving) and passes after. A candidate without
+  a reproducing test is not proposed as fixed, only as a Red-tier finding for
+  approval.
 
 **Measurement code is never committed** — do not grow permanent instrumentation
 hooks in production code. Every candidate must carry axis-appropriate before/after
-evidence — a timed before/after or milestone timestamps; an `EXPLAIN` diff may
+evidence — a timed before/after, milestone timestamps, or (for a #16 concurrency
+hazard, where there is nothing to time) a deterministic controlled-interleaving
+regression test that fails before the fix and passes after; an `EXPLAIN` diff may
 support an SQL candidate but must be paired with a repeatable query-execution
 measurement. A candidate without one is not proposed.
 
