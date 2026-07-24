@@ -61,7 +61,11 @@ Pick the items that genuinely apply; don't churn code that is already clean.
   SQLDelight-derived snake_case properties, Compose Resource keys, or Koin/DI
   qualifiers. Also covers a file/class living in a package that doesn't match
   its layer per `docs/app-architecture.md`'s directory structure — move it and
-  update imports.
+  update imports, **only when the move stays behavior- and API-compatible**
+  (references are internal and compiler-checked, and no serialized identity or
+  DI/reflection lookup depends on the package). A move that would change a
+  publicly-referenced or serialized identifier is surfaced report-only (`## How
+  to report`), not applied.
 - **Magic numbers / literals** → named constants in `core/Constants.kt` where a
   name adds clarity. Don't over-abstract one-off literals.
 - **Deep nesting / complex conditionals** → guard clauses, early return, `when`,
@@ -77,7 +81,13 @@ Pick the items that genuinely apply; don't churn code that is already clean.
   present (or the reverse), a non-exhaustive `when` over a sealed type papered
   over with an `else` branch, or a case that chooses `Result` vs. exception
   contrary to `docs/error-design.md`'s table. Tighten to match the documented
-  contract — never change the `Result`/`KeryxException` taxonomy itself. **DB
+  contract — never change the `Result`/`KeryxException` taxonomy itself — but
+  **only when the tightening is observably behavior-preserving** and keeps a
+  public signature callers depend on intact. If aligning to the documented
+  contract would change observable behavior (e.g. a method that currently throws
+  would now return `Result`, or a public signature's nullability flips), that is
+  a behavior change (`## Do NOT touch` #1) — surface it report-only (`## How to
+  report`) for separate approval, don't apply it inline. **DB
   schema ambiguity is out of scope here**: the meaning of a column is owned by
   `docs/db-schema.md`, not fixed by refactoring code around it.
 - **Error handling / logging consistency** → a DataSource path that leaks a raw
