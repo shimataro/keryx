@@ -68,7 +68,7 @@ Index maintenance is two-tier:
 
 - **Hot path (after feed refresh / sync merge)**: `FtsManager.indexMissing()` incrementally indexes only unindexed new articles (O(new rows), does not wipe index). Full rebuild (`'rebuild'`) is O(total indexed text) and heavy, and could reject running searches, so it is not used on hot paths. Indexes of existing articles with updated body text remain stale until the next rebuild (acceptable; they still match old tokens so searches do not regress to zero results).
 - **Healing full rebuild (`rebuildIndex()` = `'rebuild'`)**:
-  Executed only in the daily idle pass in `main.kt` (`maybeRebuildFtsIndex`, gated by `local_settings.lastFtsRebuiltAt` 24h gate + `ActivityCenter` idle). Rebuilds stale existing rows and sweeps entries left by cache-cleanup deletions. `'rebuild'` is a single atomic statement (readers see only before or after) + `busy_timeout` wait, so running searches do not regress to zero results either.
+  Executed only in the daily idle pass in `main.kt` (`maybeRebuildFtsIndex`, gated by `local_settings.lastFtsRebuiltAt` 24h gate + `ActivityCenter` idle). Rebuilds stale existing rows (body text updated since incremental indexing). `'rebuild'` is a single atomic statement (readers see only before or after) + `busy_timeout` wait, so running searches do not regress to zero results either.
 
 On startup, `FtsManager.ensureIndexed()` (initial creation + unindexed row incremental insert) is called as before.
 

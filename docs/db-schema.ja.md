@@ -126,7 +126,7 @@ INSERT INTO articles_fts(articles_fts) VALUES('rebuild');
 DROP して行う。[sync-architecture.ja.md](sync-architecture.ja.md) の「FTS5 の扱い」）。フィード更新・
 同期マージの後は `FtsManager.indexMissing()` で**未索引の新記事だけを増分投入**する（全 `'rebuild'` は毎回だと
 重くスケールしないため使わない）。全再構築は日次アイドル pass（`local_settings.lastFtsRebuiltAt`
-の 24h ゲート）でのみ行い、増分で古くなった既存行の作り直しとキャッシュ削除で残った索引エントリの一掃を担う。
+の 24h ゲート）でのみ行い、増分投入以降に本文が更新されて古くなった既存行の作り直しを担う。
 **起動時に `FtsManager.ensureIndexed()` を呼び、テーブルが無ければ作成し、索引に未登録の記事があれば増分投入する**。
 
 ## local_settings.json（keryx.db 外・非同期）

@@ -109,8 +109,8 @@
   （許容。記事はなお旧トークンでヒットするので検索が 0 件に退行しない）。
 - **healing 用の全再構築（`rebuildIndex()` = `'rebuild'`）**:
   `main.kt` の日次アイドル pass（`maybeRebuildFtsIndex`、`local_settings.lastFtsRebuiltAt` の 24h ゲート +
-  `ActivityCenter` アイドル）でのみ実行。増分で古くなった既存行を作り直し、キャッシュ削除で残った索引エントリを
-  一掃する。`'rebuild'` は単一文で原子的（読み手は再構築前後どちらかを見るだけ）＋ `busy_timeout` で待つため、
+  `ActivityCenter` アイドル）でのみ実行。増分投入以降に本文が更新されて古くなった既存行を作り直す。
+  `'rebuild'` は単一文で原子的（読み手は再構築前後どちらかを見るだけ）＋ `busy_timeout` で待つため、
   実行中の検索も 0 件にならない。
 
 起動時に `FtsManager.ensureIndexed()`（初回作成 + 未索引行の増分投入）を呼ぶのは従来どおり。
