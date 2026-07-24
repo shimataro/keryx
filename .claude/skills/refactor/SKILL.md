@@ -32,16 +32,36 @@ Pick the items that genuinely apply; don't churn code that is already clean.
   **reuse what exists** instead of reinventing: `Result` extensions
   (`fold` / `onOk` / `onErr` / `map`), `IdGenerator`, `ReorderUtil`,
   `DateTimeParser`, `ErrorMessages`, `NotificationMessages`, `core/Constants.kt`.
-- **Oversized files / functions / large `@Composable`s** → split into cohesive
-  smaller units. Natural candidates: `ui/home/FeedListPane.kt`,
+- **Oversized files / functions / large `@Composable`s, and mixed
+  responsibilities** → split into cohesive smaller units. A unit doing more
+  than one job (e.g. a ViewModel that also formats display strings, a
+  Repository method that both fetches and persists unrelated state) is a split
+  candidate even if it isn't long. Natural candidates: `ui/home/FeedListPane.kt`,
   `ui/settings/SettingsDialog.kt`, `desktopMain/main.kt`,
   `ui/common/KeryxDialogs.desktop.kt`, `ui/home/HomeViewModel.kt` (examples, not
   a mandate — split only where it improves clarity).
+- **Ambiguous ownership** → logic sitting in the wrong layer relative to
+  `docs/app-architecture.md`'s layer-responsibility table — e.g. a ViewModel
+  carrying multi-step DB/business logic that belongs in a Repository, or two
+  Repositories independently mutating the same table/state. Relocate to the
+  owning layer without changing behavior.
+- **Dependency direction** → UI (`ui/`) calling `data/` directly instead of
+  going through a Repository, or platform-specific types (`java.io`,
+  `java.sql`, `java.awt`, Ktor CIO engine types) leaking into `commonMain`
+  outside an `expect` declaration. Realign to the layered / `expect`-`actual`
+  shape (constraints #4, #6) — never introduce a new layer or pattern to do so.
+- **Over/under abstraction** → an interface with exactly one implementation and
+  no test-seam or multiplatform reason to exist → inline it. Several
+  near-identical concrete classes that differ only in a parameter → collapse
+  into one — but never by introducing new architecture (constraint #6).
 - **Dead / unused code** → unused private declarations, parameters, imports,
   unreachable branches. Lean on compiler warnings from a build.
-- **Naming clarity** → intention-revealing English names, **local/private
-  only**. Do **not** rename public/serialized identifiers, SQLDelight-derived
-  snake_case properties, Compose Resource keys, or Koin/DI qualifiers.
+- **Naming clarity and file placement** → intention-revealing English names,
+  **local/private only**. Do **not** rename public/serialized identifiers,
+  SQLDelight-derived snake_case properties, Compose Resource keys, or Koin/DI
+  qualifiers. Also covers a file/class living in a package that doesn't match
+  its layer per `docs/app-architecture.md`'s directory structure — move it and
+  update imports.
 - **Magic numbers / literals** → named constants in `core/Constants.kt` where a
   name adds clarity. Don't over-abstract one-off literals.
 - **Deep nesting / complex conditionals** → guard clauses, early return, `when`,
@@ -53,6 +73,24 @@ Pick the items that genuinely apply; don't churn code that is already clean.
 - **Comment / KDoc hygiene** → drop stale/redundant comments; ensure English
   (constraint #9). **Keep** the "why" comments that document the FTS / merge /
   `expect`-`actual` invariants — those are load-bearing.
+- **Type / contract clarity** → a nullable used where the value is always
+  present (or the reverse), a non-exhaustive `when` over a sealed type papered
+  over with an `else` branch, or a case that chooses `Result` vs. exception
+  contrary to `docs/error-design.md`'s table. Tighten to match the documented
+  contract — never change the `Result`/`KeryxException` taxonomy itself. **DB
+  schema ambiguity is out of scope here**: the meaning of a column is owned by
+  `docs/db-schema.md`, not fixed by refactoring code around it.
+- **Error handling / logging consistency** → a DataSource path that leaks a raw
+  exception instead of converting it to a `KeryxException` subclass, a
+  `Result`/exception choice that contradicts `docs/error-design.md`, or a
+  non-English log/exception message (constraint #9). Align to the existing
+  pattern — don't invent a new one.
+- **Config / environment-difference complexity** → duplicated or diverging
+  logic across an `expect`/`actual` pair that could be shared as a common
+  helper called from each `actual`, or an environment check (e.g. `isMacOs`)
+  repeated at multiple call sites that could read from one already-established
+  source. Simplify without collapsing the platform boundary itself
+  (constraint #4).
 
 **Performance / algorithmic optimization is NOT applied here.** Refactoring is
 behavior-preserving by definition; speed / memory / algorithm / data-structure
@@ -168,6 +206,13 @@ existing assertion still holds; (b) **new coverage** for a newly extracted seam
 (constraint #7). Delegate the writing to the **`test-writer` agent** if useful.
 Follow `docs/testing.md` conventions.
 
+Test debt spotted during Step 2 — logic in `domain/`/`data/`/a ViewModel with no
+corresponding test, or a fragile pattern (a wall-clock assertion, `runTest`
+mixed with real IO/`HttpTimeout` per `docs/testing.md`'s known gotchas) — is
+**not** fixed inline beyond the two kinds above. Surface it as **report-only**
+(see `## How to report`), the same hand-off shape as the performance list
+below.
+
 ### Step 6 — Doc consistency check (targeted, auto-fix)
 
 Refactoring doesn't change behavior, so user-facing docs stay put — but the
@@ -209,4 +254,8 @@ English Conventional Commits message (`refactor(scope): …`) per `.claude/CLAUD
   (behavior-affecting / needs a benchmark / on a protected hot path). This is the
   hand-off to the **`perf-tune` skill** — it feeds that skill's Step 3 candidate
   inventory, but each item there still has to be measured before it is acted on.
+- A **"Test debt (report-only, not applied)"** list — each item: location +
+  whether it's a coverage gap or a fragile pattern + why it wasn't fixed inline
+  (broader than the newly-extracted-seam / test-only-tidying allowance in
+  Step 5). Hand off to the **`test-writer` agent** or a dedicated pass.
 - The ready-to-use `refactor(...)` commit message.

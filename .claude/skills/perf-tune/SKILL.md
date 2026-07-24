@@ -43,6 +43,11 @@ measurement method (see Step 2); one candidate can span several axes.
    optimistically.
 3. **Concurrency & scheduling** — stop blocking the UI thread and the DB write
    lock, overlap sequential IO, move blocking work to the right dispatcher.
+   This axis also covers **auditing for concurrency hazards** — a shared
+   mutable resource touched from more than one dispatcher/coroutine without the
+   serialization the surrounding code assumes. Finding one is a correctness
+   risk, not a speed one, so it is tiered and gated like any other candidate
+   (see Optimization targets #16 and the Step 2 measurement note below).
 
 Always label which axis a change belongs to. An axis-2 change is **not** a
 speed-up and must never be reported as one.
@@ -221,6 +226,13 @@ headroom:
     single-threaded **on purpose, for serialization** — never widen those.
 15. **Lock hold time.** Axis-1 #1 is the known instance of CPU work inside a
     transaction; look for others.
+16. **Concurrency hazard audit — Red.** Look for a new code path that bypasses
+    `dbWriteDispatcher` / `SettingsRepository.writeDispatcher`'s serialization,
+    or a `Flow` that assumes a single collector (e.g. `SharingStarted`
+    replay/state semantics) being collected from more than one place. A latent
+    race is a correctness risk regardless of whether it has caused a visible
+    bug yet, so treat any finding as **Red tier** — gate it individually even
+    when no speed win is claimed.
 
 > `SettingsRepository`'s `local_settings.json` write is **already** coalesced
 > (`DROP_OLDEST`) and serialized on a single thread. Do not re-propose work that
@@ -293,6 +305,12 @@ Each axis has its own method.
   out of a transaction (#15), the measurement is **transaction / lock hold duration**
   before and after — not total elapsed time, which barely moves, and not a call
   count, which does not move at all.
+- **Concurrency hazard candidates (#16)** — there is nothing to time: the
+  "measurement" is a **regression test that deterministically exercises the
+  concurrent path**, fails before the fix (reproduces the race under a test
+  dispatcher / controlled interleaving) and passes after. A candidate without
+  a reproducing test is not proposed as fixed, only as a Red-tier finding for
+  approval.
 
 **Measurement code is never committed** — do not grow permanent instrumentation
 hooks in production code. Every candidate must carry axis-appropriate before/after
