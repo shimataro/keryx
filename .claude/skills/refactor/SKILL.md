@@ -178,6 +178,15 @@ and constraint-adjacent risks. Group findings into small, **independent** batche
 by the target categories above, and **prioritize** (highest clarity gain / lowest
 risk first).
 
+In the same pass, also **inventory test debt** — this is **report-only, never a
+batch to apply** (what test debt is and how it's emitted is defined in Step 5 and
+`## How to report`): (a) **coverage gaps** — in-scope `domain/` / `data/` /
+ViewModel logic with no corresponding test; (b) **fragile patterns** — a
+wall-clock assertion, or `runTest` mixed with real IO / `HttpTimeout` per
+`docs/testing.md`'s known gotchas. Record each item for the Step 5 hand-off. If
+the pass finds none, note **None** explicitly, so an empty result reads as
+deliberate rather than a forgotten check.
+
 ### Step 3 — Confirm scope (the single gate)
 
 Present the prioritized batch list and use **`AskUserQuestion`** once to
@@ -216,7 +225,7 @@ existing assertion still holds; (b) **new coverage** for a newly extracted seam
 (constraint #7). Delegate the writing to the **`test-writer` agent** if useful.
 Follow `docs/testing.md` conventions.
 
-Test debt spotted during Step 2 — logic in `domain/`/`data/`/a ViewModel with no
+Test debt inventoried in Step 2 — logic in `domain/`/`data/`/a ViewModel with no
 corresponding test, or a fragile pattern (a wall-clock assertion, `runTest`
 mixed with real IO/`HttpTimeout` per `docs/testing.md`'s known gotchas) — is
 **not** fixed inline beyond the two kinds above. Surface it as **report-only**
@@ -264,8 +273,10 @@ English Conventional Commits message (`refactor(scope): …`) per `.claude/CLAUD
   (behavior-affecting / needs a benchmark / on a protected hot path). This is the
   hand-off to the **`perf-tune` skill** — it feeds that skill's Step 3 candidate
   inventory, but each item there still has to be measured before it is acted on.
+  Reads **None** when the Step 2 pass found no such opportunity.
 - A **"Test debt (report-only, not applied)"** list — each item: location +
   whether it's a coverage gap or a fragile pattern + why it wasn't fixed inline
   (broader than the newly-extracted-seam / test-only-tidying allowance in
-  Step 5). Hand off to the **`test-writer` agent** or a dedicated pass.
+  Step 5). Hand off to the **`test-writer` agent** or a dedicated pass. Reads
+  **None** when the Step 2 inventory found no test debt.
 - The ready-to-use `refactor(...)` commit message.
