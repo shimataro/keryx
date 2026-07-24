@@ -255,20 +255,30 @@ Each axis has its own method.
   and quotable as evidence. Where the CLI is unavailable, use a throwaway JDBC
   connection.
 - **Axis 1, CPU / memory** — write disposable seeding code under the scratch
-  directory and time it. Call counts (e.g. how many `Ksoup.parse` calls N articles
-  cost) can also be established by reading the code, which is evidence enough for
-  a hoist.
+  directory and time the operation before and after. Where wall-clock timing is too
+  noisy to resolve the change (an allocation-only win, say), a local in-process
+  measurement written into that same disposable code is an acceptable substitute —
+  this never means adding a profiler dependency or a telemetry service (see the
+  security invariant above). **Call counts are candidate evidence only** (e.g. how
+  many `Ksoup.parse` calls N articles cost): reading the code establishes how often
+  something runs, never whether CPU, memory, or allocation cost improved, so a count
+  ranks a candidate in Step 3 but is never the before/after evidence. For work moved
+  *out of* a transaction, the count is identical on both sides — measure it as
+  lock hold time (axis 3 below).
 - **Axis 2, perceived speed** — measure **milestone timestamps**, not total
   duration: window shown, first non-empty list paint, first moment the UI accepts
   input. Add temporary timestamps via the existing `core/Log` and read them from a
   manual launch. Report as "time until the user first sees something", never as
   "N seconds faster".
 - **Axis 3** — total elapsed time before/after the serial→parallel switch, plus
-  confirmation (via a test) that DB writes remained serialized.
+  confirmation (via a test) that DB writes remained serialized. For moving CPU work
+  out of a transaction (#15), the measurement is **transaction / lock hold duration**
+  before and after — not total elapsed time, which barely moves, and not a call
+  count, which does not move at all.
 
 **Measurement code is never committed** — do not grow permanent instrumentation
-hooks in production code. Every candidate must carry a measurement, an `EXPLAIN`
-output, or a quantified call count. A candidate without one is not proposed.
+hooks in production code. Every candidate must carry a timed before/after, an
+`EXPLAIN` diff, or milestone timestamps. A candidate without one is not proposed.
 
 ### Step 3 — Inventory and tier the candidates
 
