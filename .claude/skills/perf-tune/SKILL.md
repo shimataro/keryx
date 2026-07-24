@@ -248,12 +248,19 @@ tests.
 
 Each axis has its own method.
 
-- **Axis 1, SQL — `EXPLAIN QUERY PLAN` first.** Run it against a copy of the DB
-  (or a throwaway seeded one) in the scratch directory with `sqlite3` (present at
-  `/usr/bin/sqlite3` on macOS), and record whether the plan shows `SCAN`,
-  `SEARCH ... USING INDEX`, or `USE TEMP B-TREE`. It is deterministic, noise-free,
-  and quotable as evidence. Where the CLI is unavailable, use a throwaway JDBC
-  connection.
+- **Axis 1, SQL — `EXPLAIN QUERY PLAN` first, then time it.** Run it against a
+  copy of the DB (or a throwaway seeded one) in the scratch directory with
+  `sqlite3` (present at `/usr/bin/sqlite3` on macOS), and record whether the plan
+  shows `SCAN`, `SEARCH ... USING INDEX`, or `USE TEMP B-TREE`. The plan is
+  deterministic and noise-free — a good **diagnostic signal** — but it is a
+  *strategy*, not a *cost*: a flip to `USING INDEX` does not by itself prove less
+  execution time, CPU, or work, and an added index amplifies every write on the
+  `articles` insert / feed-refresh hot path, so a read-side plan win can regress
+  the write side. **Pair the plan diff with a repeatable query-execution
+  measurement** — the same seeded workload timed before and after with the same
+  sampling discipline as the CPU/memory axis below (warm-up, several samples,
+  median plus spread) — before proposing an SQL candidate. Where the CLI is
+  unavailable, use a throwaway JDBC connection.
 - **Axis 1, CPU / memory** — write disposable seeding code under the scratch
   directory and run the **same seeded workload** before and after, with warm-up
   runs to let the JIT settle, several repeated samples, and a reported **median
@@ -288,8 +295,10 @@ Each axis has its own method.
   count, which does not move at all.
 
 **Measurement code is never committed** — do not grow permanent instrumentation
-hooks in production code. Every candidate must carry a timed before/after, an
-`EXPLAIN` diff, or milestone timestamps. A candidate without one is not proposed.
+hooks in production code. Every candidate must carry axis-appropriate before/after
+evidence — a timed before/after or milestone timestamps; an `EXPLAIN` diff may
+support an SQL candidate but must be paired with a repeatable query-execution
+measurement. A candidate without one is not proposed.
 
 ### Step 3 — Inventory and tier the candidates
 
@@ -362,8 +371,9 @@ Then output an English Conventional Commits message (`perf(scope): …`) per
 
 ## How to report
 
-- One entry per applied change: **axis** → location → **before/after measurement,
-  `EXPLAIN` diff, or milestone timestamps** → why the semantics are identical →
+- One entry per applied change: **axis** → location → **before/after measurement
+  or milestone timestamps** (an SQL entry gives the execution measurement *and* its
+  `EXPLAIN` diff, not the plan diff alone) → why the semantics are identical →
   tier.
 - For axis-2 changes, state explicitly that **total time is unchanged** — never
   let a perceived-speed improvement read as a speed-up.
