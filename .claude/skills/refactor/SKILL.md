@@ -61,14 +61,20 @@ a risk review — that is the **`perf-tune` skill** (`/perf-tune`), which this
 skill hands its performance findings off to.
 
 - **Allowed:** incidental, obviously-safe, behavior-preserving micro-efficiencies
-  that fall out of a structural refactor (reuse an existing map lookup instead of
-  a linear scan, hoist a loop invariant, drop a redundant recomputation) — only
-  when observable results are identical and the code is not on a protected hot
-  path.
-- **Not applied:** any change to algorithmic complexity, data structures, or the
-  constrained hot paths (FTS `indexMissing()` / `'rebuild'`, `DatabaseMerger`
-  connection, incremental indexing). **Surface these as report-only
-  recommendations** (see `## How to report`) for a separate `/perf-tune` run.
+  that fall out of a structural refactor — **only those that leave asymptotic
+  complexity unchanged**: a constant-factor tidy-up, never a better algorithm or
+  data structure. Examples: dropping a redundant recomputation of the same pure
+  value within one scope, collapsing two adjacent passes over the same collection
+  into one. Only when observable results are identical and the code is not on a
+  protected hot path.
+- **Not applied:** any change to algorithmic complexity or data structures —
+  **including replacing a linear scan with a map/set lookup, and hoisting a
+  loop-invariant computation out of a loop** — or any change to the constrained
+  hot paths (FTS `indexMissing()` / `'rebuild'`, `DatabaseMerger` connection,
+  incremental indexing). These belong to `perf-tune`, whose before/after
+  measurement gate applies to **every** candidate, including Green-tier ones.
+  **Surface them as report-only recommendations** (see `## How to report`) for a
+  separate `/perf-tune` run.
 
 ## Do NOT touch (invariants)
 
