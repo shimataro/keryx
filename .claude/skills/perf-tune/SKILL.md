@@ -258,11 +258,14 @@ Each axis has its own method.
   directory and run the **same seeded workload** before and after, with warm-up
   runs to let the JIT settle, several repeated samples, and a reported **median
   plus spread** — a single before/after timing lets JIT / GC / scheduler noise
-  pass the gate. Wall-clock time only measures CPU work; when the claimed win is
-  allocation or memory rather than CPU time, measure it **resource-specifically**
-  with an explicit allocation/heap delta in that same disposable code (e.g.
-  `System.gc()` + `Runtime.totalMemory() - Runtime.freeMemory()` sampled before and
-  after, or an allocation counter) — never an unspecified local measurement —
+  pass the gate. Wall-clock time measures **elapsed** time, not CPU work — and
+  neither reflects memory or allocation; when the claimed win is allocation or
+  memory rather than speed, measure it **resource-specifically** with an explicit
+  allocation/heap delta in that same disposable code (e.g. `System.gc()` +
+  `Runtime.totalMemory() - Runtime.freeMemory()` sampled before and after — an
+  **approximate retained-heap proxy, not a precise allocation count** — or a real
+  allocation counter such as `ThreadMXBean.getThreadAllocatedBytes()`) — never an
+  unspecified local measurement —
   this never means adding a profiler dependency or a telemetry service (see the
   security invariant above). **Call counts are candidate evidence only** (e.g. how
   many `Ksoup.parse` calls N articles cost): reading the code establishes how often
