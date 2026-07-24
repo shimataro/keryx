@@ -255,9 +255,14 @@ Each axis has its own method.
   and quotable as evidence. Where the CLI is unavailable, use a throwaway JDBC
   connection.
 - **Axis 1, CPU / memory** — write disposable seeding code under the scratch
-  directory and time the operation before and after. Where wall-clock timing is too
-  noisy to resolve the change (an allocation-only win, say), a local in-process
-  measurement written into that same disposable code is an acceptable substitute —
+  directory and run the **same seeded workload** before and after, with warm-up
+  runs to let the JIT settle, several repeated samples, and a reported **median
+  plus spread** — a single before/after timing lets JIT / GC / scheduler noise
+  pass the gate. Wall-clock time only measures CPU work; when the claimed win is
+  allocation or memory rather than CPU time, measure it **resource-specifically**
+  with an explicit allocation/heap delta in that same disposable code (e.g.
+  `System.gc()` + `Runtime.totalMemory() - Runtime.freeMemory()` sampled before and
+  after, or an allocation counter) — never an unspecified local measurement —
   this never means adding a profiler dependency or a telemetry service (see the
   security invariant above). **Call counts are candidate evidence only** (e.g. how
   many `Ksoup.parse` calls N articles cost): reading the code establishes how often
