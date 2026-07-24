@@ -148,7 +148,7 @@ Tier every candidate; the tier decides the gate.
 | --- | --- | --- |
 | **Green** | Local, behavior-preserving, integrity-irrelevant (narrowing a projection, hoisting a loop invariant, moving CPU work out of a transaction) | Covered by the single Step 4 approval |
 | **Yellow** | Semantics must be *proven* equal (batching an N+1, changing concurrency, changing dispatchers, reworking Flow operators, adding a progress indicator) | Step 4 approval **plus** a test and a measurement |
-| **Red** | PRAGMA / `.sq` schema / migrations / merge / FTS / sync / OAuth paths / any **new** optimistic display | **Individually approved, one at a time**, with the integrity and sync-compatibility impact spelled out first |
+| **Red** | PRAGMA / `.sq` schema / migrations / merge / FTS / sync / OAuth paths / any **new** optimistic display / a **latent concurrency hazard** found by the #16 audit (a serialization-boundary bypass, Red even when no speed win is claimed — distinct from the Yellow row's *deliberate* concurrency/dispatcher change) | **Individually approved, one at a time**, with the integrity and sync-compatibility impact spelled out first |
 
 ## Optimization targets
 
@@ -319,7 +319,9 @@ Each axis has its own method.
 
 **Measurement code is never committed** — do not grow permanent instrumentation
 hooks in production code. Every candidate must carry axis-appropriate before/after
-evidence — a timed before/after or milestone timestamps; an `EXPLAIN` diff may
+evidence — a timed before/after, milestone timestamps, or (for a #16 concurrency
+hazard, where there is nothing to time) a deterministic controlled-interleaving
+regression test that fails before the fix and passes after; an `EXPLAIN` diff may
 support an SQL candidate but must be paired with a repeatable query-execution
 measurement. A candidate without one is not proposed.
 
