@@ -200,8 +200,13 @@ fun ArticleDetailPane(
 }
 
 /**
- * Renders article HTML via the OS-native WebView engine (WebView2/WKWebView/WebKitGTK).
- * See plan doc html-webview-os-wobbly-hammock.md for the rationale and known limitations.
+ * Displays an article's HTML content in a native web view.
+ *
+ * @param articleId The identifier of the article being displayed.
+ * @param title The article title.
+ * @param meta Metadata displayed with the article.
+ * @param body The article HTML content.
+ * @param mutedColor The color used for muted article text.
  */
 @Composable
 private fun ArticleWebView(articleId: String, title: String, meta: String, body: String, mutedColor: Color) {

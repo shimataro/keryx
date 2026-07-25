@@ -63,9 +63,11 @@ private val DarkColors = darkColorScheme(
 )
 
 /**
- * Resolves the effective dark flag from a `themeMode` string ("light"/"dark"/"system") plus the
- * OS dark-mode signal. Single source of truth shared by [KeryxTheme] and the native-window
- * background pre-fill (see [keryxSurfaceColor]).
+ * Determines whether dark theme colors should be used for the selected theme mode.
+ *
+ * @param themeMode The theme mode, such as `"light"` or `"dark"`; other values follow the system setting.
+ * @param systemDark Whether the system is using dark mode.
+ * @return `true` if dark theme colors should be used, `false` otherwise.
  */
 fun resolveDarkTheme(themeMode: String, systemDark: Boolean): Boolean = when (themeMode) {
     "light" -> false
@@ -186,8 +188,11 @@ private fun typographyWithFontFamily(family: FontFamily): Typography {
 }
 
 /**
- * App theme. [themeMode] is "light" | "dark" | "system"; "system" consults the
- * OS. [fontScale] scales all text (mapped onto [LocalDensity]).
+ * Applies the Keryx color scheme, shapes, typography, and interaction styling.
+ *
+ * @param themeMode Selects light, dark, or system-based appearance.
+ * @param fontScale Scales text within the range from 0.8 to 1.6.
+ * @param content The composable content displayed within the theme.
  */
 @Composable
 fun KeryxTheme(

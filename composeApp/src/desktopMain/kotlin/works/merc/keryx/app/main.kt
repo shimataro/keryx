@@ -114,6 +114,12 @@ private const val LOG_TAG = "Main"
 
 private val activationRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
+/**
+ * Starts the Keryx desktop application and coordinates its initialization, single-instance behavior,
+ * native integrations, background tasks, and main window.
+ *
+ * @param args Command-line arguments, including an optional `keryx://` callback URI.
+ */
 @OptIn(FlowPreview::class, ExperimentalComposeUiApi::class)
 fun main(args: Array<String>) {
     // If the OS launched us with a custom-scheme redirect URI (Windows/Linux),
