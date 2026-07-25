@@ -516,6 +516,10 @@ class HomeViewModel(
      * keystrokes from re-clearing the selection.
      */
     fun setSearchQuery(query: String) {
+        // Start a fresh browsing context when the text actually changes (already in Search scope).
+        if (query != _searchQuery.value) {
+            _pinnedReadArticles.value = emptyMap()
+        }
         _searchQuery.value = query
         if (query.isNotEmpty() && _filter.value != ArticleFilter.Search) {
             selectFilter(ArticleFilter.Search)

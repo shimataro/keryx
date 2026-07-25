@@ -778,6 +778,35 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun changingSearchQueryClearsPinnedReadArticles() = runTest {
+        db.insertFeed("f1")
+        // a1 matches both queries, a2 only "Kotlin", a3 only "Java".
+        db.insertArticle("a1", "f1", title = "Kotlin and Java", content = "kotlin java", isRead = 0L)
+        db.insertArticle("a2", "f1", title = "Kotlin Only", content = "kotlin", isRead = 0L)
+        db.insertArticle("a3", "f1", title = "Java Only", content = "java", isRead = 0L)
+        ftsManager(driver).ensureIndexed()
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.setSearchQuery("Kotlin")
+        vm.setUnreadOnly(true)
+        advanceForSearchDebounce()
+        assertEquals(setOf("a1", "a2"), vm.searchResults.value.map { it.article.id }.toSet())
+
+        val article1 = db.articlesQueries.getById("a1").executeAsOne()
+        vm.selectArticle(article1)
+        testScheduler.advanceUntilIdle()
+
+        // a1 is read but pinned, so it stays visible under unread-only.
+        assertEquals(setOf("a1", "a2"), vm.searchResults.value.map { it.article.id }.toSet())
+
+        // Change query: pins are cleared immediately. After the new search, a1 is read and unpinned,
+        // so even though it also matches "Java" it must not appear under unread-only.
+        vm.setSearchQuery("Java")
+        advanceForSearchDebounce()
+        assertEquals(listOf("a3"), vm.searchResults.value.map { it.article.id })
+    }
+
+    @Test
     fun markAllReadInSearchScopeMarksOnlyUnreadMatchesAndKeepsSelectedOnePinned() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
