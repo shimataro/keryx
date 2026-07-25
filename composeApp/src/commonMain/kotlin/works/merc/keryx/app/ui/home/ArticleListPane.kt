@@ -147,6 +147,7 @@ fun ArticleListPane(
         listState = listState,
         onActivated = onActivated,
         notifVm = notifVm,
+        unreadOnlyEnabled = isUnreadOnlyEnabled(filter),
     )
 }
 
@@ -248,6 +249,9 @@ private fun SearchListPane(
     }
 }
 
+/** Whether the "unread only" toggle should be enabled for the given article filter. */
+internal fun isUnreadOnlyEnabled(filter: ArticleFilter): Boolean = filter != ArticleFilter.Starred
+
 /**
  * The top button row shared by the normal article list ([ArticleListPaneContent]) and the search
  * scope ([SearchListPane]): unread-only toggle, notifications bell, sort, mark-all-read. When
@@ -262,6 +266,7 @@ internal fun ArticleListTopBar(
     onToggleSort: () -> Unit,
     onMarkAllRead: () -> Unit,
     sortEnabled: Boolean = true,
+    unreadOnlyEnabled: Boolean = true,
     notifVm: NotificationCenterViewModel? = null,
 ) {
     WindowDragArea(Modifier.fillMaxWidth()) {
@@ -273,6 +278,7 @@ internal fun ArticleListTopBar(
             label = stringResource(Res.string.home_unread_only),
             checked = unreadOnly,
             onCheckedChange = { onToggleUnreadOnly() },
+            enabled = unreadOnlyEnabled,
         )
         Spacer(Modifier.weight(1f))
         ToolbarIconGroup {
@@ -319,6 +325,7 @@ internal fun ArticleListPaneContent(
     focused: Boolean = true,
     onActivated: () -> Unit = {},
     notifVm: NotificationCenterViewModel? = null,
+    unreadOnlyEnabled: Boolean = true,
 ) {
     LaunchedEffect(selected?.id, articles.isNotEmpty()) {
         val index = articles.indexOfFirst { it.id == selected?.id }
@@ -356,6 +363,7 @@ internal fun ArticleListPaneContent(
             onToggleSort = onToggleSort,
             onMarkAllRead = onMarkAllRead,
             sortEnabled = true,
+            unreadOnlyEnabled = unreadOnlyEnabled,
             notifVm = notifVm,
         )
 
