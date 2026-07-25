@@ -99,26 +99,16 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
 
 ## Critical constraints — DO NOT violate without explicit user approval
 
-1. **`articles_fts` is never part of the SQLDelight-managed schema.** It is
-   created/maintained at runtime via `FtsManager` (raw SQL on the driver). Do not
-   add it to a `.sq` file. The **live table is never dropped**: the sync flow
-   excludes it from the uploaded file by building a `VACUUM INTO` snapshot copy
-   (`platform/DatabaseSnapshot`) and dropping it there, so a concurrent search
-   never hits `no such table`. Hot paths (feed refresh, sync merge) index new
-   rows incrementally via `FtsManager.indexMissing()` — never a full `'rebuild'`,
-   which is O(all indexed text) and would block/zero-out concurrent searches. The
-   whole index is only rebuilt in the rare healing pass: a once-per-24h idle pass
-   in `main.kt` (`maybeRebuildFtsIndex`, gated on `lastFtsRebuiltAt` +
-   `ActivityCenter` idle), which re-indexes content that incremental indexing
-   left stale. On startup, `FtsManager.ensureIndexed()`
-   creates the table on first run and backfills any missing rows. `busy_timeout`
-   (set in `DatabaseDriverFactory`) lets a search wait out, rather than error on,
-   the brief write lock of an incremental insert or a rebuild.
+1. **`articles_fts` is runtime-only (`FtsManager`, raw SQL) — never in a `.sq`
+   file, and the live table is never DROPped.** Hot paths index incrementally
+   (`indexMissing()`), never a full `'rebuild'`; the upload excludes it via a
+   `VACUUM INTO` snapshot copy so concurrent searches never hit `no such table`.
+   Full mechanism (daily rebuild heal, `ensureIndexed`, `busy_timeout`) →
+   `.claude/rules/fts-index.md` (auto-loads when you touch FTS / sync / driver code).
 2. **The ATTACH-DATABASE merge runs through `platform/DatabaseMerger`, NOT the
-   SQLDelight driver.** SQLDelight's JVM `JdbcSqliteDriver` opens a fresh
-   connection per statement for file DBs, so an `ATTACH` on one call is invisible
-   to the merge statements on the next. `DatabaseMerger` does the whole
-   attach → version-check → merge → detach on a single dedicated JDBC connection.
+   SQLDelight driver** (the JVM `JdbcSqliteDriver` opens a fresh connection per
+   statement, so an `ATTACH` wouldn't survive to the next merge statement).
+   Details → `.claude/rules/sync-merge.md`.
 3. **No hardcoded user-facing strings.** All UI text goes through Compose
    Multiplatform resources (`composeResources/values/strings.xml`). Japanese is
    the only shipped locale for now, but the mechanism must be used for every
