@@ -209,7 +209,7 @@ class HomeViewModelTest {
         )
         return HomeViewModel(
             feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
-            syncRepository, cloudSession, activityCenter, Dispatchers.Unconfined,
+            syncRepository, cloudSession, activityCenter, clock, Dispatchers.Unconfined,
             // dbWriteDispatcher: Unconfined so read/star writes run inline for deterministic assertions.
             Dispatchers.Unconfined,
         ).also { createdViewModels += it }
@@ -524,7 +524,7 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun markAllReadDelegatesToRepositoryAndClearsPins() = runTest {
+    fun markAllReadDelegatesToRepositoryAndPinsVisibleUnread() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L)
         db.insertArticle("a2", "f1", isRead = 0L)
@@ -538,6 +538,9 @@ class HomeViewModelTest {
 
         assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
         assertEquals(1L, db.articlesQueries.getById("a2").executeAsOne().is_read)
+        // Both visible unread articles are pinned in their read state (no effect on list when
+        // unread-only is off, but they survive a later switch to unread-only until filter change).
+        assertEquals(listOf("a2", "a1"), vm.articles.value.map { it.id })
     }
 
     @Test
@@ -559,8 +562,9 @@ class HomeViewModelTest {
 
         assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
         assertEquals(1L, db.articlesQueries.getById("a2").executeAsOne().is_read)
-        // a1 was selected, so it stays visible (pinned) even though it's now read; a2 is not pinned and drops out.
-        assertEquals(listOf("a1"), vm.articles.value.map { it.id })
+        // Both a1 and a2 were visible unread articles, so both are pinned in their read state
+        // and remain visible under unread-only until the filter is switched.
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
         assertEquals(1L, vm.selectedArticle.value?.is_read)
     }
 
@@ -797,9 +801,9 @@ class HomeViewModelTest {
         assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
         assertEquals(1L, db.articlesQueries.getById("a2").executeAsOne().is_read)
         assertEquals(1L, db.articlesQueries.getById("a3").executeAsOne().is_read)
-        // a2/a3 are now read and not pinned, so they drop out of the unread-only view; a1 stays
-        // because it was selected (pinned).
-        assertEquals(listOf("a1"), vm.searchResults.value.map { it.article.id })
+        // All three were visible unread matches, so all are pinned in their read state and remain
+        // visible under unread-only until the filter or query changes.
+        assertEquals(listOf("a1", "a2", "a3"), vm.searchResults.value.map { it.article.id })
     }
 
     @Test

@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MAX_WIDTH
 import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.ArticleFilter
+import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.DiscoveredFeedLink
 import works.merc.keryx.app.core.FEED_LIST_PANE_MAX_WIDTH
 import works.merc.keryx.app.core.FEED_LIST_PANE_MIN_WIDTH
@@ -78,6 +79,7 @@ class HomeViewModel(
     private val syncRepository: SyncRepository,
     private val cloudSession: CloudSession,
     private val activityCenter: ActivityCenter,
+    private val clock: Clock,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     // Imperative read/star DB writes run here instead of the UI thread. Single-threaded so writes
     // stay serialized (one writer, as they were on the UI thread) — the JVM SQLite driver opens a
@@ -437,15 +439,23 @@ class HomeViewModel(
         // Starred's markAllAsRead is a no-op (you don't "read" the starred view), so mark-all-read
         // must not force the selected article read there; every other scope does mark it read.
         val marksSelectedRead = filter != ArticleFilter.Starred
-        // Optimistic selected/pinned update (no DB read-back): keep only the selected article pinned
-        // (in its resulting read styling) so it stays visible after the list collapses to read.
+        // Optimistic update: pin every currently-visible unread article in its read state so the list
+        // doesn't collapse the instant the user presses "mark all read" under unread-only.
+        // All pins are cleared on filter switch / refresh, so articles disappear naturally later.
         val selected = _selectedArticle.value
-        if (selected != null) {
-            val updatedSelected = if (marksSelectedRead) selected.copy(is_read = 1L) else selected
-            _pinnedReadArticles.value = mapOf(selected.id to updatedSelected)
-            _selectedArticle.value = updatedSelected
+        if (marksSelectedRead) {
+            val nowRead = clock.nowMillis()
+            val visibleUnread = currentArticles().filter { it.is_read == 0L }
+            val pins = visibleUnread.associate { it.id to it.copy(is_read = 1L, read_at = nowRead) }.toMutableMap()
+            if (selected != null) {
+                val updatedSelected = selected.copy(is_read = 1L, read_at = nowRead)
+                pins[selected.id] = updatedSelected
+                _selectedArticle.value = updatedSelected
+            }
+            _pinnedReadArticles.value = pins
         } else {
-            _pinnedReadArticles.value = emptyMap()
+            // Starred: markAllAsRead is a no-op, don't alter read state.
+            _pinnedReadArticles.value = if (selected != null) mapOf(selected.id to selected) else emptyMap()
         }
         viewModelScope.launch(dbWriteDispatcher) {
             if (filter == ArticleFilter.Search) {
