@@ -9,7 +9,9 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.FeedTimeoutException
 import works.merc.keryx.app.core.Result
@@ -433,6 +435,40 @@ class FeedRepositoryTest {
             val byUrl = results.entries.associate { (id, r) -> db.feedsQueries.getById(id).executeAsOne().url to r }
             assertIs<Result.Ok<Int>>(byUrl.getValue("https://ex.com/feed1"))
             assertIs<Result.Err>(byUrl.getValue("https://ex.com/feed2"))
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun refreshAllFetchesFeedsConcurrentlyAndAppliesEveryWrite(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val n = 6 // stays within the internal fetch-concurrency bound so all can overlap
+            val setupRepo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            for (i in 1..n) setupRepo.subscribeFeed("https://ex.com/feed$i")
+
+            // Each fetch records how many were in flight simultaneously (proving phase 1 runs
+            // concurrently, not sequentially) and returns a NEW article (g2) for its feed.
+            val inFlight = java.util.concurrent.atomic.AtomicInteger(0)
+            val maxInFlight = java.util.concurrent.atomic.AtomicInteger(0)
+            val concurrentFetcher = fetcherWith {
+                val cur = inFlight.incrementAndGet()
+                maxInFlight.getAndUpdate { m -> if (cur > m) cur else m }
+                delay(30) // hold the fetch open so sibling fetches overlap
+                inFlight.decrementAndGet()
+                respond(RSS_WITH_NEW_SEARCHABLE_ARTICLE, HttpStatusCode.OK)
+            }
+            val repo = newRepo(db, driver, concurrentFetcher)
+
+            val results = withTimeout(10_000) { repo.refreshAll() }
+
+            assertEquals(n, results.size)
+            assertTrue(results.values.all { it is Result.Ok }, "all feeds should refresh Ok: $results")
+            assertTrue(maxInFlight.get() >= 2, "fetches did not overlap; max in-flight=${maxInFlight.get()}")
+            // Every feed's serially-applied write landed: each feed now holds its 2nd article (g2) too,
+            // so nothing was lost when the concurrent fetches funneled into the sequential write phase.
+            assertEquals(2 * n, db.articlesQueries.watchAll().executeAsList().size)
         } finally {
             driver.close()
         }

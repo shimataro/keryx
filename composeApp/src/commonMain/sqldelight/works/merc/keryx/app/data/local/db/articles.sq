@@ -70,8 +70,19 @@ ORDER BY a.published_at DESC, a.created_at DESC, a.id DESC;
 getById:
 SELECT * FROM articles WHERE id = ?;
 
+-- Batched by-id fetch (callers chunk the id list to stay under SQLite's bound-parameter limit).
+-- Used by search() to load all FTS hits in one query per chunk instead of one getById per hit.
+getByIds:
+SELECT * FROM articles WHERE id IN ?;
+
 getByFeedAndGuid:
 SELECT * FROM articles WHERE feed_id = ? AND guid = ?;
+
+-- All guids for a feed (including tombstoned rows, matching getByFeedAndGuid's lack of a
+-- deleted_at filter). Used by upsertParsed to compute the new-article count with a single
+-- query instead of one existence SELECT per parsed article.
+getGuidsByFeed:
+SELECT guid FROM articles WHERE feed_id = ?;
 
 watchUnreadCount:
 SELECT COUNT(*) FROM articles a
@@ -124,6 +135,11 @@ ON CONFLICT(feed_id, guid) DO UPDATE SET
 
 updateReadStatus:
 UPDATE articles SET is_read = ?, read_at = ?, updated_at = ? WHERE id = ?;
+
+-- Marks a batch of articles read in one statement (callers chunk the id list to stay under
+-- SQLite's bound-parameter limit). Used by markArticlesAsRead instead of a per-id UPDATE loop.
+updateReadStatusByIds:
+UPDATE articles SET is_read = 1, read_at = ?, updated_at = ? WHERE id IN ?;
 
 updateStarStatus:
 UPDATE articles SET is_starred = ?, starred_at = ?, updated_at = ? WHERE id = ?;

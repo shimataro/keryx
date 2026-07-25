@@ -4,7 +4,12 @@ import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Clock
@@ -16,6 +21,12 @@ import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.data.remote.FetchedFeed
+
+/**
+ * Max feeds fetched concurrently in [FeedRepository.refreshAll]'s network phase. Bounded so a large
+ * subscription list doesn't open an unbounded number of sockets at once; DB writes stay serial.
+ */
+private const val REFRESH_FETCH_CONCURRENCY = 6
 
 /**
  * Feed subscription lifecycle and refresh. Orchestrates [FeedFetcher] +
@@ -140,17 +151,42 @@ class FeedRepository(
         return outcome.result
     }
 
-    /** Outcome of [refreshFeedArticles]: the article-count result, plus whether any articles were fetched. */
+    /** Outcome of [applyFetch]: the article-count result, plus whether any articles were fetched. */
     private data class RefreshOutcome(val result: Result<Int>, val hadArticles: Boolean)
 
     /**
-     * Refreshes a feed's metadata and articles.
+     * A feed's network fetch result, gathered off the DB write path so [refreshAll] can fetch many
+     * feeds concurrently before applying their writes serially. [resolvedFavicon] is the favicon URL
+     * resolved during the fetch (only attempted when the feed had none), or null.
+     */
+    private data class FeedFetchPhase(val fetch: Result<FetchedFeed>, val resolvedFavicon: String?)
+
+    /**
+     * Network phase: fetch the feed and, if it has no favicon yet, resolve one. Does NO DB writes,
+     * so it is safe to run for many feeds concurrently.
+     */
+    private suspend fun fetchFeed(feed: Feeds): FeedFetchPhase {
+        val fetch = feedFetcher.fetch(feed.url, feed.etag, feed.last_modified)
+        val favicon = if (fetch is Result.Ok && feed.favicon_url.isNullOrEmpty()) {
+            faviconResolver.resolve(fetch.value.siteUrl ?: feed.site_url, feed.url)
+        } else {
+            null
+        }
+        return FeedFetchPhase(fetch, favicon)
+    }
+
+    /**
+     * Write phase: apply a feed's fetched metadata and articles to the DB and emit its
+     * notifications. Callers invoke this serially (the JVM SQLite driver opens a fresh connection
+     * per statement, so concurrent writes could contend). Applies the feed-health rules (error
+     * counting, 410 Gone notification, 301/308 URL update).
      *
-     * @param feed The feed to refresh.
+     * @param feed The feed being refreshed.
+     * @param phase The network result gathered by [fetchFeed].
      * @return The article upsert result and whether the fetched feed contained articles.
      */
-    private suspend fun refreshFeedArticles(feed: Feeds): RefreshOutcome {
-        val fetched = when (val r = feedFetcher.fetch(feed.url, feed.etag, feed.last_modified)) {
+    private suspend fun applyFetch(feed: Feeds, phase: FeedFetchPhase): RefreshOutcome {
+        val fetched = when (val r = phase.fetch) {
             is Result.Ok -> r.value
             is Result.Err -> {
                 val ex = r.exception
@@ -167,7 +203,7 @@ class FeedRepository(
         feeds.resetErrorCount(clock.nowMillis(), feed.id)
 
         if (feed.favicon_url.isNullOrEmpty()) {
-            faviconResolver.resolve(fetched.siteUrl ?: feed.site_url, feed.url)?.let {
+            phase.resolvedFavicon?.let {
                 feeds.updateFaviconUrl(it, clock.nowMillis(), feed.id)
             }
         }
@@ -204,11 +240,26 @@ class FeedRepository(
         return RefreshOutcome(Result.Ok(newCount), fetched.articles.isNotEmpty())
     }
 
+    /** Refreshes a single feed: fetch (network) then apply (DB), one after the other. */
+    private suspend fun refreshFeedArticles(feed: Feeds): RefreshOutcome = applyFetch(feed, fetchFeed(feed))
+
     suspend fun refreshAll(): Map<String, Result<Int>> {
+        val feedList = feeds.watchAll().executeAsList()
+        // Phase 1: fetch every feed's network data concurrently (bounded by a semaphore), with NO
+        // DB writes — this is where the wall-clock win comes from vs. the old sequential loop.
+        val semaphore = Semaphore(REFRESH_FETCH_CONCURRENCY)
+        val phases = coroutineScope {
+            feedList.map { feed ->
+                async(dispatcher) { feed to semaphore.withPermit { fetchFeed(feed) } }
+            }.awaitAll()
+        }
+        // Phase 2: apply DB writes + notifications serially, in the original feed order, so writes
+        // stay single-threaded. Each feed's upsertParsed still notifies watchAll, so articles from
+        // earlier feeds appear incrementally as the loop advances.
         val result = LinkedHashMap<String, Result<Int>>()
         var anyHadArticles = false
-        for (feed in feeds.watchAll().executeAsList()) {
-            val outcome = refreshFeedArticles(feed)
+        for ((feed, phase) in phases) {
+            val outcome = applyFetch(feed, phase)
             result[feed.id] = outcome.result
             if (outcome.hadArticles) anyHadArticles = true
         }

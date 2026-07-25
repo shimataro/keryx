@@ -46,6 +46,11 @@ Launch with `./gradlew :composeApp:run` and visually verify 3-pane UI, theme swi
 - Drop a feed onto another folder at any position (line position); folder move and positioning are applied simultaneously.
 - "Move to folder" dialog moves the feed to the end of the destination group.
 
+The parallel feed refresh (concurrent fetch + serialized writes, `FeedRepository.refreshAll`) can't be auto-tested for its concurrency behavior, so with a multi-feed subscription visually confirm:
+
+- "Refresh all" over many feeds: articles still appear incrementally (feed by feed) rather than all at once at the end, and the final list order is stable.
+- Feed error / 301·308 URL-change / 410 Gone notifications still fire, and missing favicons still fill in after a refresh.
+
 Dialog auto-sizing (`DialogWindow` OS window behavior) cannot be auto-tested, so visually confirm:
 
 - In feed addition, entering a URL for an HTML page with multiple feed links → on confirmation, **the dialog expands to show candidate list (checkboxes)**. Editing the URL shrinks it again. No shaking or flickering during input→candidate transition.

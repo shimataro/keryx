@@ -17,6 +17,12 @@ import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.data.remote.ParsedArticle
 
 /**
+ * Max ids bound into a single `id IN (...)` query. SQLite's default bound-parameter limit is 999;
+ * 900 leaves headroom. Large id lists (search hits, mark-as-read snapshots) are chunked to this size.
+ */
+private const val ID_FETCH_CHUNK = 900
+
+/**
  * A full-text search result: the matched article plus FTS5 highlight markup for its title (matched
  * terms wrapped in [FtsSearch.MARK_START]/[FtsSearch.MARK_END]). The UI renders the markup as
  * highlighted spans (bold + marker background).
@@ -102,9 +108,11 @@ class ArticleRepository(
     fun markArticlesAsRead(ids: List<String>) {
         if (ids.isEmpty()) return
         val now = clock.nowMillis()
+        // One `id IN (...)` UPDATE per chunk instead of a per-id UPDATE, kept inside a single
+        // transaction so the batch stays atomic (chunked only to stay under the bound-parameter limit).
         db.transaction {
-            for (id in ids) {
-                articles.updateReadStatus(is_read = 1L, read_at = now, updated_at = now, id = id)
+            for (chunk in ids.chunked(ID_FETCH_CHUNK)) {
+                articles.updateReadStatusByIds(read_at = now, updated_at = now, id = chunk)
             }
         }
         syncScheduler.scheduleSync()
@@ -124,10 +132,18 @@ class ArticleRepository(
 
     fun search(query: String): List<ArticleSearchResult> =
         try {
-            ftsSearch.search(query).mapNotNull { hit ->
-                articles.getById(hit.id).executeAsOneOrNull()?.let {
-                    ArticleSearchResult(article = it, titleMarked = hit.titleMarked)
-                }
+            val hits = ftsSearch.search(query)
+            // Load all hit rows with one `id IN (...)` query per chunk (chunked to stay under
+            // SQLite's bound-parameter limit) instead of one getById per hit. Iterating `hits`
+            // preserves rank order regardless of fetch/map order; mapNotNull drops ids whose row
+            // is gone, exactly as the previous per-hit getByFeedAndGuid-style lookup did.
+            val byId = hits.asSequence()
+                .map { it.id }
+                .chunked(ID_FETCH_CHUNK)
+                .flatMap { articles.getByIds(it).executeAsList().asSequence() }
+                .associateBy { it.id }
+            hits.mapNotNull { hit ->
+                byId[hit.id]?.let { ArticleSearchResult(article = it, titleMarked = hit.titleMarked) }
             }
         } catch (_: Exception) {
             // `articles_fts` is raw SQL outside SQLDelight and is briefly DROPped during a sync's
@@ -146,21 +162,31 @@ class ArticleRepository(
      */
     fun upsertParsed(feedId: String, parsed: List<ParsedArticle>): Int {
         if (parsed.isEmpty()) return 0
-        var newCount = 0
         val now = clock.nowMillis()
+        // Precompute everything CPU-heavy OUTSIDE the write transaction so HTML stripping (a full
+        // Ksoup DOM parse) and UUIDv5 hashing don't hold the SQLite write lock. The existence check
+        // is collapsed from one SELECT per article to a single guid fetch: seed a set with the
+        // feed's existing guids, then add each parsed guid — add() returns false when the guid was
+        // already present (existing row, or an intra-batch duplicate), so newCount counts each new
+        // article exactly once, matching the previous in-transaction re-read semantics.
+        val seenGuids = HashSet(articles.getGuidsByFeed(feedId).executeAsList())
+        var newCount = 0
+        val prepared = parsed.map { p ->
+            if (seenGuids.add(p.guid)) newCount++
+            // search_text is the FTS body target: strip HTML so tag names/attributes don't match.
+            // content/summary keep their raw HTML for reader rendering.
+            val searchText = (p.content ?: p.summary)?.let { HtmlText.toPlainText(it) } ?: ""
+            // id is a deterministic UUIDv5 of (feed_id, guid) so the same article gets the SAME id on
+            // every device — required for the sync merge (which matches articles by id) to propagate
+            // read/star state cross-device. On re-fetch, ON CONFLICT(feed_id, guid) keeps the existing
+            // row's id/created_at and preserves is_read/is_starred/read_at/starred_at.
+            PreparedInsert(id = IdGenerator.articleId(feedId, p.guid), parsed = p, searchText = searchText)
+        }
         db.transaction {
-            for (p in parsed) {
-                val exists = articles.getByFeedAndGuid(feedId, p.guid).executeAsOneOrNull() != null
-                if (!exists) newCount++
-                // search_text is the FTS body target: strip HTML so tag names/attributes
-                // don't match. content/summary keep their raw HTML for reader rendering.
-                val searchText = (p.content ?: p.summary)?.let { HtmlText.toPlainText(it) } ?: ""
-                // id is a deterministic UUIDv5 of (feed_id, guid) so the same article gets the SAME
-                // id on every device — required for the sync merge (which matches articles by id) to
-                // propagate read/star state cross-device. On re-fetch, ON CONFLICT(feed_id, guid)
-                // keeps the existing row's id/created_at and preserves is_read/is_starred/read_at/starred_at.
+            for (pi in prepared) {
+                val p = pi.parsed
                 articles.insert(
-                    id = IdGenerator.articleId(feedId, p.guid),
+                    id = pi.id,
                     feed_id = feedId,
                     guid = p.guid,
                     url = p.url ?: "",
@@ -175,7 +201,7 @@ class ArticleRepository(
                     is_starred = 0L,
                     starred_at = null,
                     cached_at = now,
-                    search_text = searchText,
+                    search_text = pi.searchText,
                     updated_at = now,
                     created_at = now,
                 )
@@ -183,6 +209,9 @@ class ArticleRepository(
         }
         return newCount
     }
+
+    /** A parsed article with its FTS body text and deterministic id precomputed off the write path. */
+    private data class PreparedInsert(val id: String, val parsed: ParsedArticle, val searchText: String)
 
     /**
      * Soft-deletes articles older than the specified retention period.
