@@ -88,8 +88,8 @@ gh api repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}
      ```bash
      gh api repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments
      ```
-  2. If the response contains any comments, the review has actionable line-level feedback; continue processing.
-  3. If the response is empty, output that the review is an approval with no actionable feedback and stop.
+  2. If the response is empty, output that the review is an approval with no actionable feedback and stop.
+  3. If comments exist, retain them as `associated_comments`. Preserve each comment's `id`, `body`, `path`, `line`/`original_line`, `start_line`/`original_start_line`, `side`/`start_side`, `diff_hunk`, and `commit_id`. These comments are the primary review feedback and must be passed through Steps 4 and 5.
 - **Verify the review belongs to the requested PR.** Extract `pull_request_url` and confirm it matches `https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}`.  
   If it does **not** match, output:
   ```text
@@ -125,6 +125,9 @@ PR review summaries do not use `in_reply_to_id`, so build context from chronolog
    - Whether a previous review already covered the same points.
    - Whether the author has already responded or pushed back.
    - Whether the target review is a follow-up that narrows or shifts earlier requests.
+- **If this review has `associated_comments` from Step 3** (APPROVED with empty body but line comments exist):
+  1. For each associated comment, apply the `review_comment` thread-context gathering (as described in the `review_comment` section above): fetch all PR comments, build the reply graph via `in_reply_to_id`, locate the thread containing the comment's `id`, and collect the full thread (ancestors and descendants) in chronological order.
+  2. Include all gathered thread conversations in the evaluation context. The evaluation must consider the specific bodies, file paths, and line ranges of the associated comments, not only the overall review chronology.
 
 ### Step 5 — Gather code context
 
@@ -163,6 +166,9 @@ There is no single `path` or `line`. Gather broader context from the PR:
    gh api repos/{owner}/{repo}/pulls/{pull_number} --jq '.head.sha'
    ```
    If the head has advanced, briefly check whether the issues noted in the review have already been addressed in a later commit. If so, note this in the evaluation reasoning.
+- **If this review has `associated_comments` from Step 3**:
+  1. For each unique file path referenced in the associated comments, apply the `review_comment` code-context gathering (as described in the `review_comment` section above): load the file at `commit_id`, fetch the commit diff for that file, and check whether the current PR head has already fixed the issue noted in the comment.
+  2. The evaluation must specifically assess the code at the line ranges indicated by the associated comments, using the same accuracy, relevance, and constructiveness criteria applied to direct `review_comment` evaluations.
 
 ### Step 6 — Evaluate validity
 Analyze the review comment or review summary against the code and project conventions. Consider:
