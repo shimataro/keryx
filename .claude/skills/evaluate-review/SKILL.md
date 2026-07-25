@@ -46,7 +46,34 @@ Parse the URL. It must match one of the following patterns:
   ```
   and stop.
 
-### Step 3 — Fetch the comment or review
+### Step 3 — Verify branch alignment
+1. Fetch the PR's head branch name via GitHub API:
+   ```bash
+   gh api repos/{owner}/{repo}/pulls/{pull_number} --jq '.head.ref'
+   ```
+   - If this command fails (e.g., network error, bad credentials), output a warning and proceed to Step 4.
+2. Get the current local branch:
+   ```bash
+   git branch --show-current
+   ```
+   - If the current directory is not a git repository, output a warning and proceed to Step 4.
+3. Compare the two branch names.
+   - **If they match**, proceed to Step 4.
+   - **If they differ**:
+     1. Output a warning message indicating the mismatch (e.g., `PR branch: feat/foo, Current branch: feat/bar`).
+     2. Check for uncommitted changes (`git status --porcelain`). If dirty, note that changes will be stashed before switching and restored afterward.
+     3. Prompt the user via `AskUserQuestion` with options:
+        - **Switch to PR branch** (Recommended)
+        - **Stay on current branch**
+        - **Cancel evaluation**
+     4. If the user chooses **Switch**:
+        - If the branch does not exist locally, run `git fetch origin <pr_branch>` followed by `git switch <pr_branch>`.
+        - If the working tree is dirty, run `git stash push -m "evaluate-review auto-stash"`, then `git switch <pr_branch>`, then `git stash pop`.
+        - After switching, proceed to Step 4.
+     5. If the user chooses **Stay**, proceed to Step 4 with the warning still displayed.
+     6. If the user chooses **Cancel**, stop immediately.
+
+### Step 4 — Fetch the comment or review
 Branch the next steps based on `comment_type`.
 
 #### If `review_comment` (line-level comment)
@@ -103,7 +130,7 @@ gh api repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}
   ```
   and stop immediately.
 
-### Step 4 — Gather thread context
+### Step 5 — Gather thread context
 A review comment or review is often part of a longer conversation. Reconstruct the surrounding discussion so the evaluation accounts for prior clarification or rebuttal.
 
 #### If `review_comment`
@@ -129,15 +156,15 @@ PR review summaries do not use `in_reply_to_id`, so build context from chronolog
    - Whether a previous review already covered the same points.
    - Whether the author has already responded or pushed back.
    - Whether the target review is a follow-up that narrows or shifts earlier requests.
-- **If this review has `associated_comments` from Step 3**:
+- **If this review has `associated_comments` from Step 4**:
   1. Fetch **all** review comments on the PR once and build the reply graph using the `in_reply_to_id` field.
   2. For each associated comment, resolve its thread against the pre-built graph: locate the thread containing the comment's `id`, then collect the full thread (ancestors and descendants) in chronological order.
   3. Include all gathered thread conversations in the evaluation context. The evaluation must consider the specific bodies, file paths, and line ranges of the associated comments, not only the overall review chronology.
 
-### Step 5 — Gather code context
+### Step 6 — Gather code context
 
 #### If `review_comment`
-1. Use the `commit_id` extracted in Step 3 to load the code exactly as it existed when the comment was left.
+1. Use the `commit_id` extracted in Step 4 to load the code exactly as it existed when the comment was left.
 2. If the reviewed file exists in the local working tree **and matches `commit_id`**, read it for full context.
 3. Otherwise, fetch the file content at `commit_id`:
    ```bash
@@ -148,7 +175,7 @@ PR review summaries do not use `in_reply_to_id`, so build context from chronolog
    ```bash
    gh api repos/{owner}/{repo}/commits/{commit_id} --jq '.files[] | select(.filename == "{path}") | .patch'
    ```
-   (The `diff_hunk` from Step 3 already provides the immediate surrounding context.)
+   (The `diff_hunk` from Step 4 already provides the immediate surrounding context.)
 5. **Separately**, fetch the current PR head SHA and compare it to `commit_id`:
    ```bash
    gh api repos/{owner}/{repo}/pulls/{pull_number} --jq '.head.sha'
@@ -171,11 +198,11 @@ There is no single `path` or `line`. Gather broader context from the PR:
    gh api repos/{owner}/{repo}/pulls/{pull_number} --jq '.head.sha'
    ```
    If the head has advanced, briefly check whether the issues noted in the review have already been addressed in a later commit. If so, note this in the evaluation reasoning.
-- **If this review has `associated_comments` from Step 3**:
+- **If this review has `associated_comments` from Step 4**:
   1. For each associated comment, apply the `review_comment` code-context gathering (as described in the `review_comment` section above): load the file at **that comment's own `commit_id`**, fetch the commit diff for that file at that same SHA, and check whether the current PR head has already fixed the issue noted in that comment. If multiple associated comments reference the same file path but different commits, process each comment separately.
   2. The evaluation must specifically assess the code at the line ranges indicated by the associated comments, using the same accuracy, relevance, and constructiveness criteria applied to direct `review_comment` evaluations.
 
-### Step 6 — Evaluate validity
+### Step 7 — Evaluate validity
 Analyze the review comment or review summary against the code and project conventions. Consider:
 
 1. **Accuracy** — Is the factual claim correct? (e.g., a reported bug must actually exist)
@@ -203,7 +230,7 @@ Output the evaluation in this exact format:
 [Your analysis. Cite specific lines or docs where applicable.]
 ```
 
-### Step 7 — Create implementation plan (only if valid)
+### Step 8 — Create implementation plan (only if valid)
 If the evaluation is **Valid** or **Partially Valid** **and** the comment/review calls for code changes, proceed:
 
 1. Call `EnterPlanMode`.
