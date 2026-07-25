@@ -147,6 +147,7 @@ fun ArticleListPane(
         listState = listState,
         onActivated = onActivated,
         notifVm = notifVm,
+        unreadOnlyEnabled = filter != ArticleFilter.Starred,
     )
 }
 
@@ -262,6 +263,7 @@ internal fun ArticleListTopBar(
     onToggleSort: () -> Unit,
     onMarkAllRead: () -> Unit,
     sortEnabled: Boolean = true,
+    unreadOnlyEnabled: Boolean = true,
     notifVm: NotificationCenterViewModel? = null,
 ) {
     WindowDragArea(Modifier.fillMaxWidth()) {
@@ -273,6 +275,7 @@ internal fun ArticleListTopBar(
             label = stringResource(Res.string.home_unread_only),
             checked = unreadOnly,
             onCheckedChange = { onToggleUnreadOnly() },
+            enabled = unreadOnlyEnabled,
         )
         Spacer(Modifier.weight(1f))
         ToolbarIconGroup {
@@ -319,6 +322,7 @@ internal fun ArticleListPaneContent(
     focused: Boolean = true,
     onActivated: () -> Unit = {},
     notifVm: NotificationCenterViewModel? = null,
+    unreadOnlyEnabled: Boolean = true,
 ) {
     LaunchedEffect(selected?.id, articles.isNotEmpty()) {
         val index = articles.indexOfFirst { it.id == selected?.id }
@@ -356,6 +360,7 @@ internal fun ArticleListPaneContent(
             onToggleSort = onToggleSort,
             onMarkAllRead = onMarkAllRead,
             sortEnabled = true,
+            unreadOnlyEnabled = unreadOnlyEnabled,
             notifVm = notifVm,
         )
 

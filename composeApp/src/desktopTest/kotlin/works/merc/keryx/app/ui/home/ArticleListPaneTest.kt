@@ -13,6 +13,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performMouseInput
@@ -277,6 +278,52 @@ class ArticleListPaneTest {
         waitForIdle()
 
         assertEquals(1, toggleSortCount)
+    }
+
+    @Test
+    fun articleListTopBarUnreadOnlyDisabledWhenStarredFilterDoesNotInvokeCallback() = runDesktopComposeUiTest {
+        var toggleUnreadCount = 0
+
+        setContent {
+            ArticleListTopBar(
+                unreadOnly = false,
+                onToggleUnreadOnly = { toggleUnreadCount++ },
+                newestFirst = true,
+                onToggleSort = {},
+                onMarkAllRead = {},
+                unreadOnlyEnabled = false,
+            )
+        }
+        waitForIdle()
+
+        onNodeWithText("未読のみ").assertIsNotEnabled()
+        onNodeWithText("未読のみ").performClick()
+        waitForIdle()
+
+        assertEquals(0, toggleUnreadCount)
+    }
+
+    @Test
+    fun articleListTopBarUnreadOnlyEnabledInNormalModeInvokesCallback() = runDesktopComposeUiTest {
+        var toggleUnreadCount = 0
+
+        setContent {
+            ArticleListTopBar(
+                unreadOnly = false,
+                onToggleUnreadOnly = { toggleUnreadCount++ },
+                newestFirst = true,
+                onToggleSort = {},
+                onMarkAllRead = {},
+                unreadOnlyEnabled = true,
+            )
+        }
+        waitForIdle()
+
+        onNodeWithText("未読のみ").assertIsEnabled()
+        onNodeWithText("未読のみ").performClick()
+        waitForIdle()
+
+        assertEquals(1, toggleUnreadCount)
     }
 }
 
