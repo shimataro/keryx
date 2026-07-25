@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.lifecycle.viewModelScope
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -22,6 +23,40 @@ import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.Articles
+import app.cash.sqldelight.db.SqlDriver
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.client.plugins.HttpTimeout
+import io.ktor.http.HttpStatusCode
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.data.cloud.DropboxAuthManager
+import works.merc.keryx.app.data.cloud.OAuthTokens
+import works.merc.keryx.app.data.cloud.TokenStorage
+import works.merc.keryx.app.data.local.FtsManager
+import works.merc.keryx.app.data.local.FtsSearch
+import works.merc.keryx.app.data.local.LocalSettingsStore
+import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.data.remote.FaviconResolver
+import works.merc.keryx.app.data.remote.FeedFetcher
+import works.merc.keryx.app.domain.ActivityCenter
+import works.merc.keryx.app.domain.ArticleRepository
+import works.merc.keryx.app.domain.FeedRepository
+import works.merc.keryx.app.domain.FolderRepository
+import works.merc.keryx.app.domain.NotificationCenter
+import works.merc.keryx.app.domain.NotificationMessages
+import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.domain.SyncRepository
+import works.merc.keryx.app.domain.SyncScheduler
+import works.merc.keryx.app.domain.TagRepository
+import works.merc.keryx.app.inMemoryDb
+import works.merc.keryx.app.platform.AppDirs
+import works.merc.keryx.app.platform.FileIO
+import works.merc.keryx.app.singleProviderCloudSession
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -357,6 +392,111 @@ class ArticleListPaneTest {
     fun unreadOnlyIsEnabledForSearchFilter() {
         assertTrue(isUnreadOnlyEnabled(ArticleFilter.Search))
     }
+
+    @Test
+    fun articleListPaneUnreadOnlyDisabledForStarredFilter() {
+        val (driver, db) = inMemoryDb()
+        val vm = newMinimalViewModel(driver, db)
+        try {
+            runDesktopComposeUiTest {
+                setContent {
+                    ArticleListPane(vm = vm, focused = true, onActivated = {})
+                }
+                waitForIdle()
+
+                vm.selectFilter(ArticleFilter.Starred)
+                waitForIdle()
+                onNodeWithText("未読のみ").assertIsNotEnabled()
+
+                vm.selectFilter(ArticleFilter.All)
+                waitForIdle()
+                onNodeWithText("未読のみ").assertIsEnabled()
+            }
+        } finally {
+            vm.viewModelScope.cancel()
+            driver.close()
+        }
+    }
+}
+
+private class ArticleListPaneTestNotificationMessages : NotificationMessages {
+    override suspend fun feedGone(feedTitle: String): String = "gone:$feedTitle"
+    override suspend fun feedUrlChanged(feedTitle: String): String = "urlChanged:$feedTitle"
+    override suspend fun newArticles(count: Int): String = "new:$count"
+    override suspend fun syncFailed(exception: works.merc.keryx.app.core.KeryxException): String = "syncFailed:${exception::class.simpleName}"
+}
+
+private class ArticleListPaneTestTokenStorage : TokenStorage {
+    private var stored: OAuthTokens? = null
+    override fun save(tokens: OAuthTokens) { stored = tokens }
+    override fun load(): OAuthTokens? = stored
+    override fun clear() { stored = null }
+}
+
+private fun failingFetcher(): FeedFetcher {
+    val client = HttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }) {
+        followRedirects = false
+        expectSuccess = false
+        install(HttpTimeout)
+    }
+    return FeedFetcher(client)
+}
+
+private fun missingFaviconResolver(): FaviconResolver {
+    val client = HttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }) {
+        followRedirects = false
+        expectSuccess = false
+        install(HttpTimeout)
+    }
+    return FaviconResolver(client)
+}
+
+private fun newMinimalViewModel(
+    driver: SqlDriver,
+    db: KeryxDatabase,
+    syncScheduler: SyncScheduler = SyncScheduler {},
+    clock: Clock = Clock { 0L },
+    appKey: String = "",
+    activityCenter: ActivityCenter = ActivityCenter(),
+): HomeViewModel {
+    val dir = FileIO.join(AppDirs.tempDir(), "article-list-pane-test")
+    val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
+    val feedRepository = FeedRepository(
+        db, failingFetcher(), missingFaviconResolver(), articleRepository, FtsManager(driver).also { it.ensureIndexed() }, syncScheduler,
+        NotificationCenter(), ArticleListPaneTestNotificationMessages(), clock, Dispatchers.Unconfined,
+    )
+    val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
+    val folderRepository = FolderRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
+    val settingsRepository = SettingsRepository(
+        db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined
+    )
+    val syncRepository = SyncRepository(
+        driver = driver,
+        db = db,
+        ftsManager = FtsManager(driver),
+        cloudProvider = { null },
+        clock = clock,
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+        activityCenter = activityCenter,
+        notificationCenter = NotificationCenter(),
+        notificationMessages = ArticleListPaneTestNotificationMessages(),
+        localDbPath = "unused",
+        tempDir = "unused",
+    )
+    val tokenStorage = ArticleListPaneTestTokenStorage()
+    val authClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.OK) }) { expectSuccess = false }
+    val authManager = DropboxAuthManager(authClient, clock = clock)
+    val cloudSession = singleProviderCloudSession(
+        client = authClient,
+        tokenStorage = tokenStorage,
+        authManager = authManager,
+        clientId = appKey,
+        clock = clock,
+    )
+    return HomeViewModel(
+        feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
+        syncRepository, cloudSession, activityCenter, Dispatchers.Unconfined, Dispatchers.Unconfined,
+    )
 }
 
 private fun article(id: String, publishedAt: Long = 0L): Articles = Articles(
