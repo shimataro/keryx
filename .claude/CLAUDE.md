@@ -63,6 +63,18 @@ message in English for the resulting diff (`git diff`). Do not commit unless
 asked. Follow the repo's Conventional Commits style (`fix(scope): ...`,
 `docs(scope): ...`, etc.).
 
+## Bug fixes
+
+When fixing a bug, prefer the **root-cause fix over the smallest diff**. A change
+that resolves the underlying cause is preferred over a small change that only
+papers over the symptom (a stopgap / workaround) — do not optimize for minimal
+change at the expense of actually fixing the problem. If only a workaround is
+feasible (the root cause is external, or a proper fix is genuinely out of scope),
+say so explicitly and note what the real fix would be, rather than presenting the
+workaround as a complete fix. (This concerns *bug fixing*; behavior-preserving
+refactors and perf work still follow the small, independently-revertible-batch
+discipline of the `refactor` / `perf-tune` skills.)
+
 ## Architecture
 
 Layered: UI (Compose) → ViewModel (androidx.lifecycle + Koin) → Repository → DataSource (SQLDelight / Ktor)
