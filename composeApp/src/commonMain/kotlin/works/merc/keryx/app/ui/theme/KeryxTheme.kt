@@ -63,6 +63,24 @@ private val DarkColors = darkColorScheme(
 )
 
 /**
+ * Resolves the effective dark flag from a `themeMode` string ("light"/"dark"/"system") plus the
+ * OS dark-mode signal. Single source of truth shared by [KeryxTheme] and the native-window
+ * background pre-fill (see [keryxSurfaceColor]).
+ */
+fun resolveDarkTheme(themeMode: String, systemDark: Boolean): Boolean = when (themeMode) {
+    "light" -> false
+    "dark" -> true
+    else -> systemDark
+}
+
+/**
+ * The `surface` color for a resolved dark/light flag. Used to pre-fill the native window /
+ * WebView background so a dark-mode launch doesn't flash a light frame before Compose paints
+ * its first (already-dark) frame.
+ */
+fun keryxSurfaceColor(dark: Boolean): Color = if (dark) DarkColors.surface else LightColors.surface
+
+/**
  * Tighter corner radii than M3's default scale — reads less "rounded pill" and more native/dense.
  */
 private val KeryxShapes = Shapes(
@@ -177,11 +195,7 @@ fun KeryxTheme(
     fontScale: Float = 1f,
     content: @Composable () -> Unit,
 ) {
-    val dark = when (themeMode) {
-        "light" -> false
-        "dark" -> true
-        else -> isSystemInDarkTheme()
-    }
+    val dark = resolveDarkTheme(themeMode, isSystemInDarkTheme())
     val density = LocalDensity.current
     val nativeFontFamily = remember { appFontFamily() }
     val typography = remember(nativeFontFamily) {

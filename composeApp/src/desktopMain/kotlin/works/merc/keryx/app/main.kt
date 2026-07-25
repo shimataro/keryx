@@ -1,5 +1,6 @@
 package works.merc.keryx.app
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.window.WindowDraggableArea
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -16,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.LocalWindowExceptionHandlerFactory
@@ -89,6 +91,8 @@ import works.merc.keryx.app.ui.AppMenuBar
 import works.merc.keryx.app.ui.home.HomeViewModel
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
+import works.merc.keryx.app.ui.theme.keryxSurfaceColor
+import works.merc.keryx.app.ui.theme.resolveDarkTheme
 import java.awt.Desktop
 import java.awt.Dimension
 import java.awt.Frame
@@ -380,11 +384,24 @@ fun main(args: Array<String>) {
             visible = windowVisible,
             icon = windowBadgedPainter ?: painterResource(Res.drawable.tray_icon),
         ) {
+            // The resolved theme's surface color, used just below to pre-fill the native window
+            // background. Resolved from the startup theme snapshot (enough for the launch flash;
+            // runtime theme switches are covered by Compose's own full-window Surface fill).
+            val windowSurface = keryxSurfaceColor(resolveDarkTheme(saved.themeMode, isSystemInDarkTheme()))
+
             // Run synchronously during composition (not via LaunchedEffect, which is
             // dispatched as a coroutine after composition commits) so the chrome switch
             // happens as early as possible, minimizing the standard-title-bar flash.
             remember {
                 window.minimumSize = Dimension(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
+                // Paint the native window/content-pane with the theme surface so a dark-mode
+                // launch doesn't flash the platform-default (light) background in the gap between
+                // the window becoming visible and Compose's first (already-dark) frame. Which of
+                // the two actually fills the visible pixels is platform/timing dependent, so set
+                // both (an opaque dark fill is harmless on either).
+                val nativeSurface = java.awt.Color(windowSurface.toArgb())
+                window.background = nativeSurface
+                window.contentPane.background = nativeSurface
                 if (isMacOs) {
                     // Measure the OS's actual title bar height *before* switching to
                     // the transparent/merged style, since fullWindowContent changes
