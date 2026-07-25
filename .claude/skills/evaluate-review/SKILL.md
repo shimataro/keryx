@@ -83,12 +83,12 @@ gh api repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}
   - `commit_id` — commit SHA at which the review was submitted
   - `user` — reviewer login
   - `submitted_at` — ISO-8601 timestamp
-- If `state` is `APPROVED` and `body` is null or empty:
+- If `body` is null or empty:
   1. Fetch the review's associated line comments:
      ```bash
-     gh api repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments
+     gh api --paginate repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments
      ```
-  2. If the response is empty, output that the review is an approval with no actionable feedback and stop.
+  2. If the response is empty, output that the review has no actionable feedback and stop.
   3. If comments exist, retain them as `associated_comments`. Preserve each comment's `id`, `body`, `path`, `line`/`original_line`, `start_line`/`original_start_line`, `side`/`start_side`, `diff_hunk`, and `commit_id`. These comments are the primary review feedback and must be passed through Steps 4 and 5.
 - **Verify the review belongs to the requested PR.** Extract `pull_request_url` and confirm it matches `https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}`.  
   If it does **not** match, output:
