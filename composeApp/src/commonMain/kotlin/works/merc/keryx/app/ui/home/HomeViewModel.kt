@@ -434,6 +434,12 @@ class HomeViewModel(
         viewModelScope.launch(dbWriteDispatcher) { articleRepository.setStarred(article.id, starred = starred) }
     }
 
+    /**
+     * Marks applicable articles as read for the current filter.
+     *
+     * The starred filter preserves article read states, while other filters optimistically
+     * retain currently visible articles with updated read timestamps until the data refreshes.
+     */
     fun markAllRead() {
         val filter = _filter.value
         // Starred's markAllAsRead is a no-op (you don't "read" the starred view), so mark-all-read
@@ -510,10 +516,11 @@ class HomeViewModel(
     // --- Search controls ---
 
     /**
-     * Updates the search query and, on the first non-empty keystroke, switches the article list to
-     * the Search scope. The query is intentionally retained when the user navigates to another scope
-     * so returning to Search re-shows the same results. [selectFilter]'s equality guard keeps later
-     * keystrokes from re-clearing the selection.
+     * Updates the search query and switches to the Search filter when the query is non-empty.
+     *
+     * Clears pinned read-state when the query changes.
+     *
+     * @param query The new search query.
      */
     fun setSearchQuery(query: String) {
         // Start a fresh browsing context when the text actually changes (already in Search scope).
