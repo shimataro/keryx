@@ -167,7 +167,7 @@ There is no single `path` or `line`. Gather broader context from the PR:
    ```
    If the head has advanced, briefly check whether the issues noted in the review have already been addressed in a later commit. If so, note this in the evaluation reasoning.
 - **If this review has `associated_comments` from Step 3**:
-  1. For each unique file path referenced in the associated comments, apply the `review_comment` code-context gathering (as described in the `review_comment` section above): load the file at `commit_id`, fetch the commit diff for that file, and check whether the current PR head has already fixed the issue noted in the comment.
+  1. For each associated comment, apply the `review_comment` code-context gathering (as described in the `review_comment` section above): load the file at **that comment's own `commit_id`**, fetch the commit diff for that file at that same SHA, and check whether the current PR head has already fixed the issue noted in that comment. If multiple associated comments reference the same file path but different commits, process each comment separately.
   2. The evaluation must specifically assess the code at the line ranges indicated by the associated comments, using the same accuracy, relevance, and constructiveness criteria applied to direct `review_comment` evaluations.
 
 ### Step 6 — Evaluate validity
