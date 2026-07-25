@@ -244,17 +244,6 @@ private fun ArticleWebView(articleId: String, title: String, meta: String, body:
     val navigator = rememberWebViewNavigator(scope, interceptor)
     val webViewState = rememberWebViewStateWithHTMLData(data = wrappedHtml)
 
-    // Paint the native panel's initial surface with the theme's surface color instead of the
-    // engine's opaque-white "about:blank": the library's factory reads these at panel-creation
-    // time, so set them here (before the WebView below creates the panel) rather than after.
-    // Keyed on webViewState so it runs once per panel — the library recreates the native panel on
-    // a backgroundColor change (400ms debounce), which keying on the theme surface would trigger.
-    remember(webViewState) {
-        webViewState.webSettings.backgroundColor = surface
-        webViewState.webSettings.desktopWebSettings.transparent = false
-        Unit
-    }
-
     // Workaround: this (beta) library's rememberWebViewStateWithHTMLData doesn't reliably
     // navigate past its initial "about:blank" on desktop — confirmed during the spike. Push
     // the HTML manually once the WebView reports it's idle.
