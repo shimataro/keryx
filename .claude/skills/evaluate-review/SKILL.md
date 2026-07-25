@@ -126,8 +126,9 @@ PR review summaries do not use `in_reply_to_id`, so build context from chronolog
    - Whether the author has already responded or pushed back.
    - Whether the target review is a follow-up that narrows or shifts earlier requests.
 - **If this review has `associated_comments` from Step 3** (APPROVED with empty body but line comments exist):
-  1. For each associated comment, apply the `review_comment` thread-context gathering (as described in the `review_comment` section above): fetch all PR comments, build the reply graph via `in_reply_to_id`, locate the thread containing the comment's `id`, and collect the full thread (ancestors and descendants) in chronological order.
-  2. Include all gathered thread conversations in the evaluation context. The evaluation must consider the specific bodies, file paths, and line ranges of the associated comments, not only the overall review chronology.
+  1. Fetch **all** review comments on the PR once and build the reply graph using the `in_reply_to_id` field.
+  2. For each associated comment, resolve its thread against the pre-built graph: locate the thread containing the comment's `id`, then collect the full thread (ancestors and descendants) in chronological order.
+  3. Include all gathered thread conversations in the evaluation context. The evaluation must consider the specific bodies, file paths, and line ranges of the associated comments, not only the overall review chronology.
 
 ### Step 5 — Gather code context
 
