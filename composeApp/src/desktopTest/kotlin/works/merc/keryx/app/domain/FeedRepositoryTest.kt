@@ -475,6 +475,53 @@ class FeedRepositoryTest {
     }
 
     @Test
+    fun refreshAllDoesNotRevertConcurrentUnsubscribe(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }).subscribeFeed(url)
+            val id = db.feedsQueries.getByUrl(url).executeAsOne().id
+
+            // Simulate the user unsubscribing this feed *during* refreshAll's concurrent fetch phase,
+            // before any DB write is applied. Deterministic: phase 1 (all fetches) fully completes
+            // before phase 2 (serial applies) begins, so the soft-delete is already committed when
+            // applyFetch runs against the pre-unsubscribe snapshot.
+            val fetcher = fetcherWith {
+                db.feedsQueries.softDelete(1L, 1L, 1L, id)
+                respond(RSS_WITH_NEW_SEARCHABLE_ARTICLE, HttpStatusCode.OK)
+            }
+            newRepo(db, driver, fetcher).refreshAll()
+
+            // The refresh must not resurrect the just-unsubscribed feed.
+            assertNotNull(db.feedsQueries.getById(id).executeAsOneOrNull()?.deleted_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun refreshAllDoesNotRevertConcurrentReorder(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }).subscribeFeed(url)
+            val id = db.feedsQueries.getByUrl(url).executeAsOne().id
+
+            // Simulate the user reordering this feed during the concurrent fetch phase (see above).
+            val fetcher = fetcherWith {
+                db.feedsQueries.updateSortOrder(99L, 1L, 1L, id)
+                respond(RSS_WITH_NEW_SEARCHABLE_ARTICLE, HttpStatusCode.OK)
+            }
+            newRepo(db, driver, fetcher).refreshAll()
+
+            // The refresh must not revert the concurrent reorder.
+            assertEquals(99L, db.feedsQueries.getById(id).executeAsOne().sort_order)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun moveFeedSetsFolderIdAndSchedulesSync(): Unit = runBlocking {
         val (driver, db) = inMemoryDb()
         try {

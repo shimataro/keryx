@@ -84,6 +84,13 @@ UPDATE feeds SET favicon_url = ?, updated_at = ? WHERE id = ?;
 updateCacheHeaders:
 UPDATE feeds SET etag = ?, last_modified = ?, updated_at = ? WHERE id = ?;
 
+-- Refresh path: update only the content columns a feed refresh owns. Deliberately does NOT touch
+-- deleted_at / sort_order / custom_title / folder_id / favicon_url (favicon has its own
+-- updateFaviconUrl), so a concurrent unsubscribe / reorder / rename can't be reverted by a refresh
+-- that started from a now-stale snapshot.
+updateContent:
+UPDATE feeds SET site_url = ?, title = ?, description = ?, updated_at = ? WHERE id = ?;
+
 updateUrl:
 UPDATE feeds SET url = ?, updated_at = ? WHERE id = ?;
 

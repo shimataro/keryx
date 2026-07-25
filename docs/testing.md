@@ -46,7 +46,7 @@ Launch with `./gradlew :composeApp:run` and visually verify 3-pane UI, theme swi
 - Drop a feed onto another folder at any position (line position); folder move and positioning are applied simultaneously.
 - "Move to folder" dialog moves the feed to the end of the destination group.
 
-The parallel feed refresh (concurrent fetch + serialized writes, `FeedRepository.refreshAll`) can't be auto-tested for its concurrency behavior, so with a multi-feed subscription visually confirm:
+The parallel feed refresh's core concurrency (overlapping fetches + complete per-feed writes) is covered automatically by `refreshAllFetchesFeedsConcurrentlyAndAppliesEveryWrite`, and the no-revert guarantee by `refreshAllDoesNotRevertConcurrentUnsubscribe` / `refreshAllDoesNotRevertConcurrentReorder`. The genuinely visual / end-to-end parts still need eyeballs, so with a multi-feed subscription visually confirm:
 
 - "Refresh all" over many feeds: articles still appear incrementally (feed by feed) rather than all at once at the end, and the final list order is stable.
 - Feed error / 301·308 URL-change / 410 Gone notifications still fire, and missing favicons still fill in after a refresh.

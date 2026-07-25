@@ -85,8 +85,11 @@ App Key 空チェックで即エラーになる分岐のみ `OAuthConnectFlowTes
   反映されること。
 - 「フォルダーへ移動」ダイアログでの移動が、移動先グループの末尾に追加されること。
 
-並行フィード更新（並行取得＋直列書き込み、`FeedRepository.refreshAll`）の並行動作は自動テスト
-できないため、複数フィードを購読した状態で以下を目視確認する:
+並行フィード更新（並行取得＋直列書き込み、`FeedRepository.refreshAll`）の中核となる並行動作
+（取得のオーバーラップとフィードごとの書き込み完全性）は `refreshAllFetchesFeedsConcurrentlyAndAppliesEveryWrite` が、
+編集の巻き戻しが起きないことは `refreshAllDoesNotRevertConcurrentUnsubscribe` /
+`refreshAllDoesNotRevertConcurrentReorder` が自動テストで担保している。目視が必要な UI / エンドツーエンドの
+部分のみ、複数フィードを購読した状態で以下を目視確認する:
 
 - 多数のフィードで「すべて更新」した際、記事が最後に一括ではなくフィード単位で逐次表示され、
   最終的なリスト順序が安定していること。

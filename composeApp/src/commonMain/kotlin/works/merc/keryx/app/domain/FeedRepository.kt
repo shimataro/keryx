@@ -211,22 +211,17 @@ class FeedRepository(
         feeds.updateCacheHeaders(fetched.etag, fetched.lastModified, clock.nowMillis(), feed.id)
 
         if (fetched.title != null || fetched.description != null) {
-            feeds.upsert(
-                id = feed.id,
-                url = feed.url,
+            // Refresh only writes the content columns it owns. It must NOT touch deleted_at /
+            // sort_order / custom_title / favicon_url: refreshAll fetches from a snapshot that can be
+            // stale for the whole concurrent-fetch phase, so writing those back would revert a
+            // concurrent unsubscribe / reorder / rename (and resurrect a just-deleted feed). Those
+            // fields are handled by their own dedicated statements or left to the user's edits.
+            feeds.updateContent(
                 site_url = fetched.siteUrl ?: feed.site_url,
                 title = fetched.title ?: feed.title,
                 description = fetched.description ?: feed.description,
-                favicon_url = feed.favicon_url,
-                etag = fetched.etag,
-                last_modified = fetched.lastModified,
-                error_count = 0,
-                last_error = null,
-                custom_title = feed.custom_title,
-                deleted_at = feed.deleted_at,
                 updated_at = clock.nowMillis(),
-                created_at = feed.created_at,
-                sort_order = feed.sort_order,
+                id = feed.id,
             )
         }
 
