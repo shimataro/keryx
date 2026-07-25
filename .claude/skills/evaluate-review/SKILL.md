@@ -22,7 +22,12 @@ Examples:
 ### Step 1 — Validate presence of argument
 Check whether a URL argument was passed to the skill.
 
-- **If missing**: output the Usage section above and stop immediately.
+- **If missing**: prompt the user to provide a GitHub PR review URL. Ask:
+  ```text
+  Please provide a GitHub PR review URL.
+  Usage: /evaluate-review <github-pr-review-url>
+  ```
+  Wait for the user to respond with a URL, then use that URL and proceed to Step 2.
 - **If present**: proceed to Step 2.
 
 ### Step 2 — Validate URL format
