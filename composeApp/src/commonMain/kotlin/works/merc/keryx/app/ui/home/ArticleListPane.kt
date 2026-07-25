@@ -147,7 +147,7 @@ fun ArticleListPane(
         listState = listState,
         onActivated = onActivated,
         notifVm = notifVm,
-        unreadOnlyEnabled = filter != ArticleFilter.Starred,
+        unreadOnlyEnabled = isUnreadOnlyEnabled(filter),
     )
 }
 
@@ -248,6 +248,9 @@ private fun SearchListPane(
         }
     }
 }
+
+/** Whether the "unread only" toggle should be enabled for the given article filter. */
+internal fun isUnreadOnlyEnabled(filter: ArticleFilter): Boolean = filter != ArticleFilter.Starred
 
 /**
  * The top button row shared by the normal article list ([ArticleListPaneContent]) and the search

@@ -20,9 +20,11 @@ import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.rightClick
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
+import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.Articles
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
@@ -281,7 +283,7 @@ class ArticleListPaneTest {
     }
 
     @Test
-    fun articleListTopBarUnreadOnlyDisabledWhenStarredFilterDoesNotInvokeCallback() = runDesktopComposeUiTest {
+    fun articleListTopBarUnreadOnlyDisabledDoesNotInvokeCallback() = runDesktopComposeUiTest {
         var toggleUnreadCount = 0
 
         setContent {
@@ -304,7 +306,7 @@ class ArticleListPaneTest {
     }
 
     @Test
-    fun articleListTopBarUnreadOnlyEnabledInNormalModeInvokesCallback() = runDesktopComposeUiTest {
+    fun articleListTopBarUnreadOnlyEnabledInvokesCallback() = runDesktopComposeUiTest {
         var toggleUnreadCount = 0
 
         setContent {
@@ -324,6 +326,36 @@ class ArticleListPaneTest {
         waitForIdle()
 
         assertEquals(1, toggleUnreadCount)
+    }
+
+    @Test
+    fun unreadOnlyIsEnabledForAllFilter() {
+        assertTrue(isUnreadOnlyEnabled(ArticleFilter.All))
+    }
+
+    @Test
+    fun unreadOnlyIsDisabledForStarredFilter() {
+        assertFalse(isUnreadOnlyEnabled(ArticleFilter.Starred))
+    }
+
+    @Test
+    fun unreadOnlyIsEnabledForFeedFilter() {
+        assertTrue(isUnreadOnlyEnabled(ArticleFilter.Feed("f1")))
+    }
+
+    @Test
+    fun unreadOnlyIsEnabledForTagFilter() {
+        assertTrue(isUnreadOnlyEnabled(ArticleFilter.Tag("t1")))
+    }
+
+    @Test
+    fun unreadOnlyIsEnabledForFolderFilter() {
+        assertTrue(isUnreadOnlyEnabled(ArticleFilter.Folder("folder1")))
+    }
+
+    @Test
+    fun unreadOnlyIsEnabledForSearchFilter() {
+        assertTrue(isUnreadOnlyEnabled(ArticleFilter.Search))
     }
 }
 
