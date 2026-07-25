@@ -490,7 +490,8 @@ class FeedRepositoryTest {
                 db.feedsQueries.softDelete(1L, 1L, 1L, id)
                 respond(RSS_WITH_NEW_SEARCHABLE_ARTICLE, HttpStatusCode.OK)
             }
-            newRepo(db, driver, fetcher).refreshAll()
+            val results = newRepo(db, driver, fetcher).refreshAll()
+            assertIs<Result.Ok<Int>>(results.getValue(id))
 
             // The refresh must not resurrect the just-unsubscribed feed.
             assertNotNull(db.feedsQueries.getById(id).executeAsOneOrNull()?.deleted_at)
@@ -512,7 +513,8 @@ class FeedRepositoryTest {
                 db.feedsQueries.updateSortOrder(99L, 1L, 1L, id)
                 respond(RSS_WITH_NEW_SEARCHABLE_ARTICLE, HttpStatusCode.OK)
             }
-            newRepo(db, driver, fetcher).refreshAll()
+            val results = newRepo(db, driver, fetcher).refreshAll()
+            assertIs<Result.Ok<Int>>(results.getValue(id))
 
             // The refresh must not revert the concurrent reorder.
             assertEquals(99L, db.feedsQueries.getById(id).executeAsOne().sort_order)
