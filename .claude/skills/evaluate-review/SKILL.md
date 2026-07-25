@@ -149,9 +149,9 @@ PR review summaries do not use `in_reply_to_id`, so build context from chronolog
 
 #### If `pr_review`
 There is no single `path` or `line`. Gather broader context from the PR:
-1. Fetch all files changed at `commit_id`:
+1. Fetch all files changed in the PR:
    ```bash
-   gh api repos/{owner}/{repo}/commits/{commit_id} --jq '.files[] | {filename, status, patch}'
+   gh api --paginate repos/{owner}/{repo}/pulls/{pull_number}/files --jq '.[] | {filename, status, patch}'
    ```
 2. If the review body explicitly names specific files or functions, also fetch the content of those files at `commit_id`:
    ```bash
