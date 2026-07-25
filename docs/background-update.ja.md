@@ -35,6 +35,13 @@ while (true) {
 `FeedFetcher` は `If-None-Match`（ETag）/ `If-Modified-Since`（Last-Modified）を送り、304 なら
 新着なしとして空を返す。更新後の ETag / Last-Modified は `feeds` テーブルに保存する。
 
+`FeedRepository.refreshAll` は各フィードのネットワーク取得を**並行**（同時取得数を
+`REFRESH_FETCH_CONCURRENCY` で上限）で行い、その後で各フィードの DB 書き込みをフィード順に
+**直列**で適用する。そのため購読数が多くても、更新にかかる時間は「全取得の合計」ではなく
+「最も遅い取得」程度で済む。DB 書き込みは単一スレッドのまま（JVM の SQLite ドライバは文ごとに
+新しいコネクションを開くため、並行書き込みは競合しうる）で、各フィードの記事は従来どおり
+1 フィードずつコミットされるため、更新の進行に合わせてリストに逐次表示される。
+
 ## 起動時タスク（`runStartupTasks`）
 
 1. キャッシュ削除（前回から 24 時間以上経過時）。

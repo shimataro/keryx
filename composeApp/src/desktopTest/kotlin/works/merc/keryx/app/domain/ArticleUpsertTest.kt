@@ -6,6 +6,7 @@ import works.merc.keryx.app.data.remote.ParsedArticle
 import works.merc.keryx.app.ftsManager
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
+import works.merc.keryx.app.stampArticleDeleted
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
@@ -96,6 +97,69 @@ class ArticleUpsertTest {
             assertContains(FtsSearch(driver).search("Kotlin").map { it.id }, a.id)
             assertTrue(FtsSearch(driver).search("div").isEmpty())
             assertTrue(FtsSearch(driver).search("class").isEmpty())
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun duplicateGuidWithinOneBatchIsCountedOnce() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L })
+            db.insertFeed("f1")
+            // Same guid twice in one batch: the second collides on UNIQUE(feed_id, guid), so only one
+            // row exists and it must be counted new exactly once (matching the previous behavior, where
+            // the in-transaction re-read saw the first insert before checking the second).
+            val count = repo.upsertParsed(
+                "f1",
+                listOf(
+                    ParsedArticle(guid = "g1", title = "A", content = "one"),
+                    ParsedArticle(guid = "g1", title = "A again", content = "two"),
+                ),
+            )
+            assertEquals(1, count)
+            assertEquals(1L, db.articlesQueries.countArticles().executeAsOne())
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun mixedBatchCountsOnlyPreviouslyUnseenGuids() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L })
+            db.insertFeed("f1")
+            assertEquals(1, repo.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", title = "A"))))
+            // g1 already stored; g2 and g3 are new -> exactly 2 counted new.
+            val count = repo.upsertParsed(
+                "f1",
+                listOf(
+                    ParsedArticle(guid = "g1", title = "A2"),
+                    ParsedArticle(guid = "g2", title = "B"),
+                    ParsedArticle(guid = "g3", title = "C"),
+                ),
+            )
+            assertEquals(2, count)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun reupsertOfSoftDeletedGuidIsNotCountedAsNew() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L })
+            db.insertFeed("f1")
+            repo.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", title = "A")))
+            val id = db.articlesQueries.getByFeedAndGuid("f1", "g1").executeAsOne().id
+            driver.stampArticleDeleted(id, deletedAt = 1000L)
+            // The row still exists (tombstoned); its guid is already known, so a re-upsert is not
+            // "new" — matching the pre-change getByFeedAndGuid existence check, which had no
+            // deleted_at filter (getGuidsByFeed likewise includes tombstoned rows).
+            assertEquals(0, repo.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", title = "A2"))))
         } finally {
             driver.close()
         }

@@ -390,6 +390,33 @@ class ArticleRepositoryTest {
     }
 
     @Test
+    fun markArticlesAsReadMarksEveryIdAcrossTheChunkBoundary() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            val n = 1000 // exceeds the 900 id-chunk size, so the batched update spans two chunks
+            db.transaction { for (i in 0 until n) db.insertArticle("a$i", "f1") }
+            db.insertArticle("keepUnread", "f1")
+            val scheduler = CountingSyncScheduler()
+            val repo = newRepo(db, driver, syncScheduler = scheduler)
+
+            repo.markArticlesAsRead((0 until n).map { "a$it" })
+
+            // Every requested id is read, including ids on both sides of the chunk boundary...
+            assertEquals(1L, db.articlesQueries.getById("a0").executeAsOne().is_read)
+            assertEquals(1L, db.articlesQueries.getById("a899").executeAsOne().is_read)
+            assertEquals(1L, db.articlesQueries.getById("a900").executeAsOne().is_read)
+            assertEquals(1L, db.articlesQueries.getById("a999").executeAsOne().is_read)
+            // ...and only those: the unlisted article stays unread, sync scheduled once for the batch.
+            assertEquals(0L, db.articlesQueries.getById("keepUnread").executeAsOne().is_read)
+            assertEquals(1L, db.articlesQueries.watchUnreadCount().executeAsOne())
+            assertEquals(1, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun searchReturnsMatchingArticlesAfterRebuild() {
         val (driver, db) = inMemoryDb()
         try {
@@ -426,6 +453,56 @@ class ArticleRepositoryTest {
             )
             val marked = result.titleMarked.substringAfter(FtsSearch.MARK_START).substringBefore(FtsSearch.MARK_END)
             assertTrue(marked.lowercase().contains("kotlin"), "titleMarked=${result.titleMarked}")
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun searchPreservesFtsRankOrderAndMarkupFromFtsSearch() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertArticle("a1", "f1", title = "Kotlin basics", content = "kotlin kotlin kotlin coroutines")
+            db.insertArticle("a2", "f1", title = "Kotlin advanced", content = "kotlin flows")
+            db.insertArticle("a3", "f1", title = "Kotlin Multiplatform", content = "kotlin desktop and mobile kotlin")
+            db.insertArticle("a4", "f1", title = "Unrelated", content = "nothing here")
+            ftsManager(driver).ensureIndexed()
+
+            val repo = newRepo(db, driver)
+            val fromFts = FtsSearch(driver).search("kotlin")
+            val results = repo.search("kotlin")
+
+            // The repository must return exactly FtsSearch's hits, in the same rank order, with the
+            // same title markup — only the full row is additionally attached (batched fetch must not
+            // change order or drop the markup).
+            assertEquals(fromFts.map { it.id }, results.map { it.article.id })
+            assertEquals(fromFts.map { it.titleMarked }, results.map { it.titleMarked })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun searchReturnsAllHitsAcrossTheIdChunkBoundary() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            // More hits than the id-fetch chunk size (900), so the batched by-id fetch spans several
+            // chunks; every hit must still come back, in rank order.
+            db.transaction {
+                for (i in 0 until 1000) {
+                    db.insertArticle("a$i", "f1", content = "kotlin document $i")
+                }
+            }
+            ftsManager(driver).ensureIndexed()
+
+            val repo = newRepo(db, driver)
+            val fromFts = FtsSearch(driver).search("kotlin")
+            val results = repo.search("kotlin")
+
+            assertEquals(1000, results.size)
+            assertEquals(fromFts.map { it.id }, results.map { it.article.id })
         } finally {
             driver.close()
         }
