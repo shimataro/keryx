@@ -83,7 +83,13 @@ gh api repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}
   - `commit_id` — commit SHA at which the review was submitted
   - `user` — reviewer login
   - `submitted_at` — ISO-8601 timestamp
-- If `state` is `APPROVED` and `body` is null or empty, output that the review is an approval with no actionable feedback and stop.
+- If `state` is `APPROVED` and `body` is null or empty:
+  1. Fetch the review's associated line comments:
+     ```bash
+     gh api repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments
+     ```
+  2. If the response contains any comments, the review has actionable line-level feedback; continue processing.
+  3. If the response is empty, output that the review is an approval with no actionable feedback and stop.
 - **Verify the review belongs to the requested PR.** Extract `pull_request_url` and confirm it matches `https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}`.  
   If it does **not** match, output:
   ```text
