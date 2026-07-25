@@ -11,6 +11,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -64,17 +65,18 @@ fun <T> SegmentedControl(options: List<Pair<T, String>>, selected: T, onSelect: 
  * on/off controls (e.g. `ArticleListPane`'s "unread only" toggle).
  */
 @Composable
-fun ToggleChip(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+fun ToggleChip(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit, enabled: Boolean = true) {
     val shape: Shape = MaterialTheme.shapes.extraSmall
     Row(
         Modifier
+            .alpha(if (enabled) 1f else 0.38f)
             .clip(shape)
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
             .background(
                 if (checked) MaterialTheme.colorScheme.primary else Color.Transparent,
                 shape,
             )
-            .toggleable(value = checked, onValueChange = onCheckedChange, role = Role.Checkbox)
+            .toggleable(value = checked, enabled = enabled, onValueChange = onCheckedChange, role = Role.Checkbox)
             .padding(horizontal = 12.dp, vertical = 6.dp),
     ) {
         Text(
