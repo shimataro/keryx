@@ -10,7 +10,7 @@ A lightweight, simple RSS reader that provides the same feed subscription experi
 
 - Simple, stylish, high-speed UI/UX
 - Local-first (no account required, data stays on the device)
-- Cross-device sync via cloud storage (Dropbox)
+- Cross-device sync via cloud storage (Dropbox / Google Drive / OneDrive)
 
 ## 2. Supported Platforms
 
@@ -26,7 +26,7 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
 
 ## 4. Sync Method
 
-- No account registration in Keryx. The user's own cloud storage (Dropbox / Google Drive) is used as the sync bus. Only one active connection is allowed at a time; the user selects and switches providers (no simultaneous connections).
+- No account registration in Keryx. The user's own cloud storage (Dropbox / Google Drive / OneDrive) is used as the sync bus. Only one active connection is allowed at a time; the user selects and switches providers (no simultaneous connections).
 - The sync file is a raw SQLite upload of `keryx.db`.
 - Sync targets: subscription list, read state, stars, tag structure, global settings.
 - Non-sync targets: device-local settings, cloud authentication info.
@@ -48,7 +48,7 @@ Details are in [sync-architecture.md](sync-architecture.md).
 
 ## 6. Setup Flow
 
-On first launch, choose local-only / cloud sync (Dropbox / Google Drive). When cloud is selected, after OAuth authentication, if existing data exists in the cloud it is automatically merged (imported) during the initial sync.
+On first launch, choose local-only / cloud sync (Dropbox / Google Drive / OneDrive). When cloud is selected, after OAuth authentication, if existing data exists in the cloud it is automatically merged (imported) during the initial sync.
 
 ## 7. Basic Features
 
@@ -95,7 +95,7 @@ Material 3 base + custom theme (teal). Light / dark / system support. 3-pane lay
 | HTTP | Ktor client (CIO) |
 | RSS/HTML/XML parsing | ksoup |
 | Serialization / datetime | kotlinx-serialization / kotlinx-datetime |
-| Cloud sync | Ktor + Dropbox / Google Drive REST API (OAuth PKCE + refresh token) |
+| Cloud sync | Ktor + Dropbox / Google Drive / OneDrive (Microsoft Graph) REST API (OAuth PKCE + refresh token) |
 | i18n | Compose Resources |
 | Testing | kotlin-test + kotlinx-coroutines-test + Ktor MockEngine |
 | Build | Gradle 9.6 (Kotlin 2.4 / Compose 1.11 / JDK 25 toolchain) |

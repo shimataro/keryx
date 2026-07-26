@@ -17,6 +17,8 @@ import works.merc.keryx.app.data.cloud.FileTokenStorage
 import works.merc.keryx.app.data.cloud.GoogleDriveAuthManager
 import works.merc.keryx.app.data.cloud.GoogleDriveStorage
 import works.merc.keryx.app.data.cloud.KeyringTokenStorage
+import works.merc.keryx.app.data.cloud.OneDriveAuthManager
+import works.merc.keryx.app.data.cloud.OneDriveStorage
 import works.merc.keryx.app.data.cloud.SecurityCliTokenStorage
 import works.merc.keryx.app.data.cloud.TokenStorage
 import works.merc.keryx.app.domain.CloudSession
@@ -93,10 +95,26 @@ actual val platformModule: Module = module {
             createStorage = { tokenProvider -> GoogleDriveStorage(client, tokenProvider) },
         )
 
+        // OneDrive: custom URI scheme (keryx://), shared with Dropbox and disambiguated by `state`.
+        // Microsoft Identity platform is a PKCE public client, so no client secret is needed.
+        val oneDriveAuth: CloudAuthManager = OneDriveAuthManager(client)
+        val oneDriveProvider = CloudSession.Provider(
+            clientId = BuildConfig.ONEDRIVE_CLIENT_ID,
+            tokenStorage = providerTokenStorage(CloudStorageType.ONEDRIVE, isMacOs),
+            authManager = oneDriveAuth,
+            connectFlow = OAuthConnectFlow(
+                authManager = oneDriveAuth,
+                clientId = BuildConfig.ONEDRIVE_CLIENT_ID,
+                transport = CustomUriRedirectTransport(callbackFlow),
+            ),
+            createStorage = { tokenProvider -> OneDriveStorage(client, tokenProvider) },
+        )
+
         CloudSession(
             providers = mapOf(
                 CloudStorageType.DROPBOX to dropboxProvider,
                 CloudStorageType.GOOGLE_DRIVE to driveProvider,
+                CloudStorageType.ONEDRIVE to oneDriveProvider,
             ),
             selectedType = {
                 CloudStorageType.fromId(get<SettingsRepository>().getLocalSettings().cloudStorageType)

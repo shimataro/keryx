@@ -10,7 +10,7 @@
 
 ## 特徴
 
-- **マルチデバイス同期**: クラウドストレージ経由（Dropbox / Google Drive）
+- **マルチデバイス同期**: クラウドストレージ経由（Dropbox / Google Drive / OneDrive）
 - **ローカルファースト**: 中央サーバーなし、同期機能を使わなければローカルで完全に動作
 - **高速なローカル全文検索**: 記事本文・タイトルを対象に、キーワードで瞬時に検索
 - **タグ・フォルダーによるフィード整理**: タグは横断的に複数付与、フォルダーは階層的に分類
@@ -39,7 +39,7 @@
   - [ ] iOS
   - [ ] iPadOS
 - 対応クラウドストレージ追加
-  - [ ] [OneDrive](https://onedrive.live.com/)
+  - [x] [OneDrive](https://onedrive.live.com/)
   - [ ] [NextCloud](https://nextcloud.com/)
 - 多言語対応
   - [ ] 英語
