@@ -17,12 +17,14 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
+import works.merc.keryx.app.core.Log
 import java.awt.Component
 import javax.swing.JCheckBoxMenuItem
 import javax.swing.JMenu
 import javax.swing.JMenuItem
 import javax.swing.JPopupMenu
 import javax.swing.SwingUtilities
+import javax.swing.Timer
 
 /**
  * The native menu widgets backing one [nativeContextMenu] call site, hiding which toolkit drew
@@ -38,6 +40,7 @@ private interface NativePopupHandle {
 
     fun detach(window: NativeWindowHandle?)
 
+    /** Shows the menu. May display on a later EDT turn rather than before returning. */
     fun show(invoker: Component, x: Int, y: Int)
 }
 
@@ -179,7 +182,17 @@ private class SwingPopupHandle(
     override fun detach(window: NativeWindowHandle?) = Unit
 
     override fun show(invoker: Component, x: Int, y: Int) {
-        popupMenu.show(invoker, x, y)
+        // Deferred rather than shown inline. Compose Desktop dispatches input on the EDT, so
+        // showing from here would map the menu in the middle of the press being dispatched, and
+        // Swing's MenuSelectionManager then reads the rest of that gesture (the release, and the
+        // pointer grab Compose still holds) as a click outside the menu — closing it again within
+        // the same event burst, so nothing ever appears. Letting the press finish first avoids
+        // that. AwtPopupHandle needs none of this: its menu is a native NSMenu/Win32 menu that
+        // runs its own modal event loop, and it is shown inline exactly as it always was.
+        SwingUtilities.invokeLater {
+            popupMenu.show(invoker, x, y)
+            debugLogPopup(popupMenu, invoker, x, y)
+        }
     }
 }
 
@@ -189,7 +202,46 @@ private class SwingPopupHandle(
  * interop limitation that makes every dialog in this app a separate window (see `KeryxDialogs`).
  */
 private fun forceHeavyweight(popup: JPopupMenu) {
-    popup.isLightWeightPopupEnabled = false
+    popup.isLightWeightPopupEnabled = !lightweightPopups
+}
+
+// ---------------------------------------------------------------------------
+// TEMPORARY: switches for diagnosing "the context menu does not appear" on Linux desktops,
+// forwarded from Gradle -P properties (see composeApp/build.gradle.kts). Remove all of this,
+// and the debugLog calls, once the cause is confirmed.
+// ---------------------------------------------------------------------------
+
+/** `-Pkeryx.menu.backend=awt` falls back to the AWT popup that macOS/Windows use. */
+private val forceAwtBackend: Boolean = System.getProperty("keryx.menu.backend") == "awt"
+
+/** `-Pkeryx.menu.lightweight=true` undoes [forceHeavyweight], for isolating popup-window issues. */
+private val lightweightPopups: Boolean = System.getProperty("keryx.menu.lightweight") == "true"
+
+/** `-Pkeryx.debug.menu=true` logs what the popup did after it was asked to show. */
+private val debugMenu: Boolean = System.getProperty("keryx.debug.menu") == "true"
+
+private const val MENU_LOG_TAG = "NativeMenu"
+
+/**
+ * Reports whether the popup actually made it onto the screen, right after the show and again
+ * once the gesture is fully over — which distinguishes "never mapped" from "mapped then closed
+ * again" from "mapped off-screen".
+ */
+private fun debugLogPopup(popup: JPopupMenu, invoker: Component, x: Int, y: Int) {
+    if (!debugMenu) return
+    fun describe(phase: String) {
+        val location = runCatching { popup.locationOnScreen.let { "${it.x},${it.y}" } }
+            .getOrElse { "n/a (${it::class.simpleName})" }
+        Log.info(
+            MENU_LOG_TAG,
+            "$phase: visible=${popup.isVisible} showing=${popup.isShowing} " +
+                "size=${popup.size.width}x${popup.size.height} onScreen=$location " +
+                "items=${popup.componentCount} lightweight=${popup.isLightWeightPopupEnabled} " +
+                "requested=$x,$y invoker=${invoker.width}x${invoker.height}",
+        )
+    }
+    describe("immediately after show")
+    Timer(300) { describe("300ms after show") }.apply { isRepeats = false }.start()
 }
 
 /**
@@ -225,7 +277,8 @@ actual fun Modifier.nativeContextMenu(
     val handle = remember(menuShape(items())) {
         val snapshot = items()
         val provider = { currentItems() }
-        if (isLinux) SwingPopupHandle(snapshot, provider) else AwtPopupHandle(snapshot, provider)
+        if (isLinux && !forceAwtBackend) SwingPopupHandle(snapshot, provider)
+        else AwtPopupHandle(snapshot, provider)
     }
 
     LaunchedEffect(items()) { handle.sync(items()) }
@@ -255,14 +308,9 @@ actual fun Modifier.nativeContextMenu(
                             val localPosition = event.changes.first().position
                             val x = ((elementPosition.x + localPosition.x) / density.density).toInt()
                             val y = ((elementPosition.y + localPosition.y) / density.density).toInt()
-                            val invoker = win.contentPane
-                            // Swing requires this on the EDT; Compose Desktop already dispatches
-                            // composition and input there, so this is normally a direct call.
-                            if (SwingUtilities.isEventDispatchThread()) {
-                                handle.show(invoker, x, y)
-                            } else {
-                                SwingUtilities.invokeLater { handle.show(invoker, x, y) }
-                            }
+                            // Whether this is synchronous is the backend's call — see
+                            // SwingPopupHandle.show.
+                            handle.show(win.contentPane, x, y)
                         }
                     }
                 }

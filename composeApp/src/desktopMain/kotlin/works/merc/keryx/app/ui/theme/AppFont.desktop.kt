@@ -7,6 +7,7 @@ import org.jetbrains.skia.FontStyle
 import works.merc.keryx.app.platform.isLinux
 import works.merc.keryx.app.platform.isMacOs
 import java.awt.Toolkit
+import javax.swing.UIManager
 
 /**
  * Pango style/variant/weight/stretch keywords that may trail the family list in a font
@@ -50,12 +51,23 @@ internal fun pangoFontFamilyName(description: String): String? {
 }
 
 /**
- * The UI font the running Linux desktop is configured to use. GTK-based desktops (GNOME, XFCE,
- * Cinnamon, MATE — including under XWayland) publish it through XSettings, which AWT surfaces as
- * a desktop property. This beats guessing from a candidate list because it is the font the user
- * actually sees everywhere else.
+ * The family the installed Look & Feel resolved as the desktop's UI font. On Linux that's FlatLaf
+ * (see [installLookAndFeel]), which already reads whichever source the running desktop uses —
+ * XSettings on GNOME-like desktops, `kdeglobals` on KDE. Taking its answer keeps the Compose text
+ * and the Swing surfaces (menu bar, context menus, dialog buttons) on the same family instead of
+ * each resolving one independently, which on KDE meant Compose never saw the configured font at
+ * all: the GTK desktop property below is a GNOME thing and is absent there.
  */
-private fun linuxDesktopFontName(): String? =
+private fun lookAndFeelFontName(): String? =
+    runCatching { UIManager.getFont("defaultFont")?.family }.getOrNull()
+
+/**
+ * The UI font the running Linux desktop is configured to use, read straight from XSettings. Only
+ * reached when [lookAndFeelFontName] came up empty (FlatLaf not installed, or an older version
+ * that doesn't publish `defaultFont`), and only meaningful on GTK-based desktops (GNOME, XFCE,
+ * Cinnamon, MATE — including under XWayland).
+ */
+private fun gtkDesktopFontName(): String? =
     runCatching { Toolkit.getDefaultToolkit().getDesktopProperty("gnome.Gtk/FontName") as? String }
         .getOrNull()
         ?.let(::pangoFontFamilyName)
@@ -68,9 +80,10 @@ private fun linuxDesktopFontName(): String? =
  */
 private fun candidateFontNames(): List<String> = when {
     isMacOs -> listOf("SF Pro Text", "SF Pro Display", "Helvetica Neue")
-    // No single "native" font across Linux distributions, so ask the desktop first and fall back
-    // to the common defaults (GNOME 48+, older GNOME, Ubuntu, then generic) only if it won't say.
-    isLinux -> listOfNotNull(linuxDesktopFontName()) +
+    // No single "native" font across Linux distributions, so ask the Look & Feel (which knows the
+    // running desktop's own convention), then XSettings, and fall back to the common defaults
+    // (GNOME 48+, older GNOME, Ubuntu, then generic) only if neither will say.
+    isLinux -> listOfNotNull(lookAndFeelFontName(), gtkDesktopFontName()) +
         listOf("Adwaita Sans", "Cantarell", "Ubuntu", "Noto Sans", "DejaVu Sans")
     // Windows. Anything else simply won't resolve these and falls through to FontFamily.Default.
     else -> listOf("Segoe UI Variable", "Segoe UI")
