@@ -10,7 +10,7 @@ import androidx.compose.ui.window.MenuBar
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import works.merc.keryx.app.core.ArticleFilter
-import works.merc.keryx.app.isMacOs
+import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.menu_article

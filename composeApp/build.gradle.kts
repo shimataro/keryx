@@ -189,6 +189,7 @@ kotlin {
             dependencies {
                 implementation(compose.desktop.currentOs)
                 implementation(libs.kotlinx.coroutines.swing)
+                implementation(libs.flatlaf)
 
                 implementation(libs.sqldelight.driver.jdbc.sqlite)
                 implementation(libs.sqlite.jdbc)

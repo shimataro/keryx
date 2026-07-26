@@ -4,6 +4,61 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.platform.Typeface
 import org.jetbrains.skia.FontMgr
 import org.jetbrains.skia.FontStyle
+import works.merc.keryx.app.platform.isLinux
+import works.merc.keryx.app.platform.isMacOs
+import java.awt.Toolkit
+
+/**
+ * Pango style/variant/weight/stretch keywords that may trail the family list in a font
+ * description. Only used to strip a suffix, so a family whose name merely contains one of these
+ * words (e.g. "Book Antiqua") keeps it — stripping stops at the first non-keyword token.
+ */
+private val PANGO_STYLE_KEYWORDS = setOf(
+    // style
+    "normal", "oblique", "italic",
+    // weight
+    "thin", "ultra-light", "extra-light", "light", "semi-light", "demi-light", "book",
+    "regular", "medium", "semi-bold", "demi-bold", "bold", "ultra-bold", "extra-bold",
+    "heavy", "black", "ultra-heavy", "extra-black",
+    // stretch
+    "ultra-condensed", "extra-condensed", "condensed", "semi-condensed",
+    "semi-expanded", "expanded", "extra-expanded", "ultra-expanded",
+    // variant
+    "small-caps", "all-small-caps", "petite-caps", "all-petite-caps", "unicase", "title-caps",
+)
+
+/**
+ * Extracts the font family from a Pango font description of the form
+ * `[FAMILY-LIST] [STYLE-OPTIONS] [SIZE]`, which is what GTK-based desktops report as their
+ * configured UI font (e.g. `"Cantarell 11"`, `"Noto Sans Bold 10"`).
+ *
+ * Returns the first family of the list, or `null` if [description] carries no family at all.
+ */
+internal fun pangoFontFamilyName(description: String): String? {
+    var tokens = description.trim().split(' ', '\t').filter { it.isNotEmpty() }
+    // A trailing size, in points ("11", "11.5") or pixels ("12px").
+    if (tokens.isNotEmpty() && tokens.last().removeSuffix("px").toDoubleOrNull() != null) {
+        tokens = tokens.dropLast(1)
+    }
+    while (tokens.isNotEmpty() && tokens.last().lowercase() in PANGO_STYLE_KEYWORDS) {
+        tokens = tokens.dropLast(1)
+    }
+    return tokens.joinToString(" ")
+        .substringBefore(',')
+        .trim()
+        .takeIf { it.isNotEmpty() }
+}
+
+/**
+ * The UI font the running Linux desktop is configured to use. GTK-based desktops (GNOME, XFCE,
+ * Cinnamon, MATE — including under XWayland) publish it through XSettings, which AWT surfaces as
+ * a desktop property. This beats guessing from a candidate list because it is the font the user
+ * actually sees everywhere else.
+ */
+private fun linuxDesktopFontName(): String? =
+    runCatching { Toolkit.getDefaultToolkit().getDesktopProperty("gnome.Gtk/FontName") as? String }
+        .getOrNull()
+        ?.let(::pangoFontFamilyName)
 
 /**
  * Candidate OS-native UI font family names, tried in order via Skia's [FontMgr]. The first name
@@ -11,14 +66,14 @@ import org.jetbrains.skia.FontStyle
  * We don't bundle font files — these OS UI fonts (SF Pro, Segoe UI) are not redistributable —
  * we're only referencing whatever's already installed.
  */
-private fun candidateFontNames(): List<String> {
-    val osName = System.getProperty("os.name").lowercase()
-    return when {
-        osName.contains("mac") -> listOf("SF Pro Text", "SF Pro Display", "Helvetica Neue")
-        osName.contains("win") -> listOf("Segoe UI Variable", "Segoe UI")
-        // No single "native" font across Linux distributions — leave FontFamily.Default alone.
-        else -> emptyList()
-    }
+private fun candidateFontNames(): List<String> = when {
+    isMacOs -> listOf("SF Pro Text", "SF Pro Display", "Helvetica Neue")
+    // No single "native" font across Linux distributions, so ask the desktop first and fall back
+    // to the common defaults (GNOME 48+, older GNOME, Ubuntu, then generic) only if it won't say.
+    isLinux -> listOfNotNull(linuxDesktopFontName()) +
+        listOf("Adwaita Sans", "Cantarell", "Ubuntu", "Noto Sans", "DejaVu Sans")
+    // Windows. Anything else simply won't resolve these and falls through to FontFamily.Default.
+    else -> listOf("Segoe UI Variable", "Segoe UI")
 }
 
 actual fun appFontFamily(): FontFamily? {

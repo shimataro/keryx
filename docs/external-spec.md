@@ -80,6 +80,17 @@ On first launch, choose local-only / cloud sync (Dropbox / Google Drive / OneDri
 Material 3 base + custom theme (teal). Light / dark / system support. 3-pane layout
 (feed list / article list / article detail) + keyboard navigation.
 
+The surfaces that are not drawn by Compose — the application menu bar, context menus, and the
+dialog button row — are real Swing/AWT widgets, so they follow the platform's Look & Feel.
+macOS and Windows use the system one; Linux uses FlatLaf tinted to the app's own teal theme,
+because Java's Linux system L&F is a GTK2-era emulation that looks dated next to a modern
+desktop. Light / dark follows the in-app theme setting without a restart. Context menus are
+`java.awt.PopupMenu` (a genuine `NSMenu` / Win32 menu) on macOS / Windows and
+`javax.swing.JPopupMenu` on Linux, where AWT's popup ignores the Look & Feel entirely. The UI
+font is the OS's own: SF Pro on macOS, Segoe UI on Windows, and on Linux the desktop's
+configured font (read from XSettings) falling back to Adwaita Sans / Cantarell / Ubuntu /
+Noto Sans / DejaVu Sans.
+
 ## 10. Privacy & Security
 
 - No data sent to external servers, no account registration required, HTTPS only.

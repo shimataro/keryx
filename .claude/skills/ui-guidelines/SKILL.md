@@ -140,33 +140,79 @@ only to the pane that sits in the window's top-left corner — currently
   network fetch via the app's existing `HttpClient`, SVG decoding support,
   and an on-disk cache under `AppDirs.cacheDir()`.
 
-## Overflow / context menus
+## Context menus
 
-Feed and tag row "..." menus use a real OS-native context menu, not Material3's
+Right-click menus use a real OS-native menu, not Material3's
 `DropdownMenu`/`DropdownMenuItem` — a Compose-drawn popup never actually looks
-native no matter how it's styled. Use
-[`NativeOverflowMenu`](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/platform/NativeMenu.kt)
-(`platform/NativeMenu.kt`, desktop `actual` in `NativeMenu.desktop.kt`) for any
-new "..." / overflow menu:
+native no matter how it's styled. Attach
+[`Modifier.nativeContextMenu`](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/platform/NativeMenu.kt)
+(`platform/NativeMenu.kt`, desktop `actual` in `NativeMenu.desktop.kt`) to the
+row or pane the menu belongs to:
 
 ```kotlin
-NativeOverflowMenu(
-    items = listOf(
-        NativeMenuItem(stringResource(Res.string.some_action)) { onSomeAction() },
-    ),
-    tooltip = stringResource(Res.string.common_more_options),
+Modifier.nativeContextMenu(
+    items = {
+        listOf(
+            NativeMenuItem(someActionLabel) { onSomeAction() },
+            NativeCheckMenuItem(tagLabel, checked = isAttached) { onToggleTag() },
+            NativeSubMenu(moveLabel, items = folders.map { NativeCheckMenuItem(...) { ... } }),
+        )
+    },
+    onOpen = { if (!selected) onClick() },
 )
 ```
 
-- The desktop `actual` renders via `java.awt.PopupMenu`/`MenuItem` (the same
-  approach `main.kt`'s `MacTray` uses for the tray icon), so it gets the OS's
-  actual Look & Feel instead of an approximation.
-- `items` is expected to have a **stable size** per call site (e.g. always 2 for
-  a tag row, always 4 for a feed row) — the `PopupMenu`/`MenuItem`s are created
-  once and reused, with labels/click targets updated reactively. It isn't meant
-  for menus whose item count changes at runtime.
+- Entry types: `NativeMenuItem` (plain action), `NativeCheckMenuItem` (action
+  with an on/off state) and `NativeSubMenu` (nested). Use
+  `NativeCheckMenuItem` for anything the user toggles — never mark the state in
+  the label text yourself; the platform draws its own checkmark.
+- `onOpen` fires just before the menu shows; call sites typically use it to
+  select the right-clicked row. An **empty** `items` list shows no menu and
+  makes `onOpen` the only effect — that's how a pane background moves focus on
+  right-click without selecting anything.
+- The menu's **shape** (the kind of each entry, plus each submenu's child
+  count) is expected to be stable per call site across ordinary
+  recompositions. It may still change when the underlying data does (a folder
+  is added), which rebuilds the native widgets; labels and checked states are
+  synced on every change without a rebuild.
 - Do not reach for `androidx.compose.material3.DropdownMenu` for this kind of
   menu going forward.
+
+### Backends
+
+The desktop `actual` has two, chosen by platform — see the Look & Feel section
+below. macOS/Windows use `java.awt.PopupMenu`, which AWT maps onto a genuine
+`NSMenu`/Win32 menu. Linux uses `javax.swing.JPopupMenu`, because AWT's
+`PopupMenu` there is a heavyweight XAWT widget that ignores the Swing Look &
+Feel entirely and keeps a Motif-era appearance no matter how the app is themed.
+Swing popups are forced heavyweight (`isLightWeightPopupEnabled = false`) so
+they get their own window and paint *above* the article reader's native WebView
+rather than behind it.
+
+## Swing Look & Feel (the non-Compose surfaces)
+
+A few surfaces are drawn by Swing, not Compose: the application menu bar
+(Compose's `MenuBar` is a real `JMenuBar` underneath), context menus, and the
+dialog button row. Which Look & Feel they get is decided once in
+[`ui/theme/DesktopLookAndFeel.kt`](../../../composeApp/src/desktopMain/kotlin/works/merc/keryx/app/ui/theme/DesktopLookAndFeel.kt):
+
+- **macOS / Windows** — the system L&F (`UIManager.getSystemLookAndFeelClassName()`).
+  Aqua and the Windows L&F already render these natively.
+- **Linux** — FlatLaf, tinted to this app's own theme. The system L&F there is
+  Java's GTK2-era emulation, which looks dated next to a modern GTK/Qt desktop.
+
+Two FlatLaf keys carry the whole tint: `@accentColor` (from `keryxAccentColor`)
+and `@background` (from `keryxSurfaceColor`). FlatLaf derives the rest —
+menu-item selection, checkmarks, focus rings, the default button, menu bar and
+popup backgrounds and their borders. **Don't add per-widget color overrides**;
+adjust the two source colors in `KeryxTheme.kt` instead. Corner radii are
+deliberately not overridden either — FlatLaf's `Button.arc = 6` already matches
+`KeryxShapes.small`.
+
+Light/dark follows the in-app theme at runtime (an effect in `main.kt` calls
+`updateLookAndFeel`, which re-runs setup and `FlatLaf.updateUI()`), so a theme
+change applies without a restart. Anything platform-conditional here keys off
+`platform/DesktopOs.kt`'s `isMacOs`/`isLinux` — don't re-derive `os.name`.
 
 ## Text input dialogs
 
@@ -210,17 +256,26 @@ for `OutlinedTextField`/`TextField`/`BasicTextField` directly at a call site —
 
 ## Native-feel restyle (flat press feedback, icon set, popovers)
 
-The app intentionally does not embed AWT/Swing widgets via `SwingPanel` (e.g.
-for `Switch`/dropdowns) — JetBrains Compose Multiplatform has unresolved
+The app does not embed AWT/Swing widgets via `SwingPanel` for ordinary controls
+(e.g. `Switch`/dropdowns) — JetBrains Compose Multiplatform has unresolved
 z-order/overdraw/crash bugs for `SwingPanel` inside scrollable containers, and
 every candidate control here lives inside one (`SettingsScreen`'s
 `verticalScroll` `Column`, `FeedListPane`/`ArticleListPane`'s `LazyColumn`).
-The one existing native-widget exception, `platform/NativeMenu.kt`
-(`NativeOverflowMenu`, see above), works around this by calling
-`java.awt.PopupMenu.show()` on demand instead of embedding a persistent
-Compose-tree node — don't extend that pattern to other controls. Instead, the
-native *feel* comes entirely from Compose-side theme/shape/indication/icon
-choices:
+
+Three native-widget exceptions exist, all outside scrollable containers, and
+**none of them is a pattern to extend**:
+
+- `platform/NativeMenu.kt` — shows a menu on demand rather than embedding a
+  persistent Compose-tree node (see above).
+- `ui/common/KeryxDialogs.desktop.kt` — the dialog button row (`JButton`s in a
+  `SwingPanel`), so confirm/cancel get the platform's real buttons.
+- `ui/home/ArticleDetailPane.kt` — the reader `WebView`, a heavyweight AWT
+  panel wrapping an OS browser view. This is also *why* every dialog is a
+  separate `DialogWindow`: a heavyweight panel always paints over in-window
+  Compose `Popup`s.
+
+For everything else the native *feel* comes entirely from Compose-side
+theme/shape/indication/icon choices:
 
 - **Flat press feedback, no ripple**: `KeryxTheme.kt` provides a custom
   `IndicationNodeFactory` (`FlatIndication`) via

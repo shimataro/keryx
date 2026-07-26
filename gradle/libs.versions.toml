@@ -16,6 +16,7 @@ javakeyring = "1.0.4"
 jna = "5.19.1"
 composewebview = "1.0.0-beta-02"
 slf4j = "2.0.18"
+flatlaf = "3.7.2"
 
 # material3 is versioned independently from the Compose Multiplatform plugin
 # (compose-multiplatform). When bumping compose-multiplatform, verify/update
@@ -75,6 +76,9 @@ lifecycle-runtime-compose = { module = "org.jetbrains.androidx.lifecycle:lifecyc
 
 # --- Desktop-only ---
 javakeyring = { module = "com.github.javakeyring:java-keyring", version.ref = "javakeyring" }
+# Modern Swing Look & Feel. Only installed on Linux (see ui/theme/DesktopLookAndFeel.kt) —
+# macOS keeps Aqua and Windows keeps its system L&F, both of which already look native.
+flatlaf = { module = "com.formdev:flatlaf", version.ref = "flatlaf" }
 jna-jpms = { module = "net.java.dev.jna:jna-jpms", version.ref = "jna" }
 jna-platform-jpms = { module = "net.java.dev.jna:jna-platform-jpms", version.ref = "jna" }
 
