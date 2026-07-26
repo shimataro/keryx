@@ -32,6 +32,16 @@ googledrive.client.id=
 # Google's token endpoint requires secret even though the flow uses PKCE.
 googledrive.client.secret=
 
+# OneDrive (Microsoft Identity platform) OAuth Client ID, from an Azure
+# "Mobile and desktop applications" app registration (public client).
+#   Gradle property: -PoneDriveClientId=...
+#   Environment variable: ONEDRIVE_CLIENT_ID
+#   Default: (empty)
+# Leave empty (or omit) to disable OneDrive sync — the OneDrive option is then
+# hidden from the Setup / Settings screens. No client secret is required (PKCE
+# public client). See docs/build.md for how to obtain a Client ID.
+onedrive.client.id=
+
 # GitHub "owner/repo" slug the update checker polls (releases/latest API).
 #   Gradle property: -PupdateRepo=...
 #   Environment variable: UPDATE_REPO

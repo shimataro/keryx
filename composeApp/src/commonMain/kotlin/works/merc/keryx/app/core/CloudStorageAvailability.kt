@@ -10,6 +10,7 @@ package works.merc.keryx.app.core
 enum class CloudStorageType(val id: String) {
     DROPBOX("dropbox"),
     GOOGLE_DRIVE("google_drive"),
+    ONEDRIVE("onedrive"),
     ;
 
     companion object {
@@ -28,5 +29,6 @@ enum class CloudStorageType(val id: String) {
 expect object CloudStorageAvailability {
     val dropboxAvailable: Boolean
     val googleDriveAvailable: Boolean
+    val oneDriveAvailable: Boolean
     val available: List<CloudStorageType>
 }

@@ -67,6 +67,18 @@ Below is how to obtain API keys for each service.
 The redirect after OAuth2 cannot be arbitrarily determined like Dropbox, so it is received via loopback at `http://127.0.0.1:<port>` (the app temporarily sets up an HTTP server with `LoopbackRedirectTransport` to receive it).
 The flow uses PKCE (`code_verifier`), but **a client secret is also required separately** — unlike iOS/Android, Google's "Desktop app" OAuth client is not treated as a full public client, and Google's token endpoint rejects token exchange / refresh without `client_secret` with `invalid_request: client_secret is missing` (regardless of PKCE). The scope requested is `drive.appdata` only (an app-specific hidden folder in the user's Drive). During development, set the OAuth consent screen to "Testing" and register test users.
 
+### OneDrive
+
+1. Register an app in the [Azure Portal](https://portal.azure.com) → "Microsoft Entra ID" → "App registrations" → "New registration"
+   - "Supported account types": choose "Accounts in any organizational directory and personal Microsoft accounts" (this maps to the `common` tenant the app uses).
+2. In "Authentication" → "Add a platform" → **"Mobile and desktop applications"**:
+   - Under "Custom redirect URIs" add `keryx://oauth2/callback`.
+   - Set "Allow public client flows" to **Yes** (OneDrive is a PKCE public client — no client secret).
+3. In "API permissions" → "Add a permission" → "Microsoft Graph" → "Delegated permissions", add **`Files.ReadWrite.AppFolder`** (access is limited to the app's hidden folder, not arbitrary files). `offline_access` is requested at runtime for a refresh token.
+4. Copy the "Application (client) ID" from "Overview" into `local.properties` (copy of [local.properties.example](../local.properties.example)) as `onedrive.client.id`.
+
+OneDrive reuses the same custom URI scheme as Dropbox (`keryx://oauth2/callback`, disambiguated by `state`), so no additional OS registration is needed. **No client secret is required** (unlike Google, Microsoft treats a "Mobile and desktop applications" registration as a full public client with PKCE). The sync DB is stored in OneDrive's hidden app folder (`/me/drive/special/approot`). As with Dropbox, macOS routes `keryx://` to the packaged app, so `./gradlew :composeApp:run` cannot complete linking — build `Keryx.app` with `createDistributable` to test it on macOS.
+
 ## Packaging
 
 Created under [`composeApp/build/compose/binaries/main`](./composeApp/build/compose/binaries/main).
@@ -131,9 +143,9 @@ Finder shows are all `0.1.1`. Only `CFBundleVersion` keeps the `1.0.0` placehold
 identifier that never surfaces. The intermediate artifact is named `Keryx-1.0.0.dmg`, but the workflow's rename
 step derives the final asset name from the tag, so the attached file is still `Keryx-0.1.1-macos-arm64.dmg`.
 
-Set `DROPBOX_APP_KEY` / `GOOGLE_DRIVE_CLIENT_ID` / `GOOGLE_DRIVE_CLIENT_SECRET` as **repository secrets**. If they
-are unset the build still succeeds, but the released app has the corresponding cloud integration hidden entirely
-(see `CloudStorageAvailability`).
+Set `DROPBOX_APP_KEY` / `GOOGLE_DRIVE_CLIENT_ID` / `GOOGLE_DRIVE_CLIENT_SECRET` / `ONEDRIVE_CLIENT_ID` as
+**repository secrets**. If they are unset the build still succeeds, but the released app has the corresponding
+cloud integration hidden entirely (see `CloudStorageAvailability`).
 
 > **The released DMG is unsigned** (ad-hoc). Users will be blocked by Gatekeeper and must right-click → Open, or
 > clear the quarantine attribute. See "Signing & Notarization" below for what lifting this requires.

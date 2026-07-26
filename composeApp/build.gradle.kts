@@ -39,6 +39,15 @@ val resolvedGoogleDriveClientSecret: String =
         ?: localProperties.getProperty("googledrive.client.secret")
         ?: ""
 
+// --- Resolve ONEDRIVE_CLIENT_ID: -PoneDriveClientId > env var > local.properties > empty ---
+// An empty id hides the OneDrive option from the UI entirely (see CloudStorageAvailability).
+// OneDrive is a PKCE public client (native/desktop), so no client secret is required.
+val resolvedOneDriveClientId: String =
+    (project.findProperty("oneDriveClientId") as String?)
+        ?: System.getenv("ONEDRIVE_CLIENT_ID")
+        ?: localProperties.getProperty("onedrive.client.id")
+        ?: ""
+
 // --- Resolve UPDATE_REPO: -PupdateRepo > env var > local.properties > default ---
 // GitHub "owner/repo" slug the update checker polls via the public releases/latest API.
 // Unlike the three secrets above, an empty value here is not a meaningful "disabled" state —
@@ -81,6 +90,9 @@ abstract class GenerateBuildConfigTask : DefaultTask() {
     abstract val googleDriveClientSecret: Property<String>
 
     @get:Input
+    abstract val oneDriveClientId: Property<String>
+
+    @get:Input
     abstract val versionName: Property<String>
 
     @get:Input
@@ -102,6 +114,7 @@ abstract class GenerateBuildConfigTask : DefaultTask() {
             |    const val DROPBOX_APP_KEY: String = "${dropboxAppKey.get()}"
             |    const val GOOGLE_DRIVE_CLIENT_ID: String = "${googleDriveClientId.get()}"
             |    const val GOOGLE_DRIVE_CLIENT_SECRET: String = "${googleDriveClientSecret.get()}"
+            |    const val ONEDRIVE_CLIENT_ID: String = "${oneDriveClientId.get()}"
             |    const val VERSION: String = "${versionName.get()}"
             |    const val UPDATE_REPO: String = "${updateRepo.get()}"
             |}
@@ -115,6 +128,7 @@ val generateBuildConfig = tasks.register<GenerateBuildConfigTask>("generateBuild
     dropboxAppKey.set(resolvedDropboxAppKey)
     googleDriveClientId.set(resolvedGoogleDriveClientId)
     googleDriveClientSecret.set(resolvedGoogleDriveClientSecret)
+    oneDriveClientId.set(resolvedOneDriveClientId)
     versionName.set(appVersion)
     updateRepo.set(resolvedUpdateRepo)
     outputDir.set(generatedBuildConfigDir)

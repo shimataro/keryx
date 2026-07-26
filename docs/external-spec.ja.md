@@ -10,7 +10,7 @@
 
 - シンプル・スタイリッシュ・高速な UI/UX
 - ローカルファースト（アカウント不要、データは手元に）
-- クラウドストレージ（Dropbox）経由でのデバイス間同期
+- クラウドストレージ（Dropbox / Google Drive / OneDrive）経由でのデバイス間同期
 
 ## 2. 対応プラットフォーム
 
@@ -26,7 +26,7 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
 
 ## 4. 同期方式
 
-- Keryx へのアカウント登録なし。ユーザー自身のクラウドストレージ（Dropbox / Google Drive）を同期バスとして
+- Keryx へのアカウント登録なし。ユーザー自身のクラウドストレージ（Dropbox / Google Drive / OneDrive）を同期バスとして
   利用する。有効な接続は常に 1 つで、どのプロバイダーを使うかはユーザーが選択・切替する（同時接続はしない）。
 - 同期ファイルは SQLite（`keryx.db`）をそのままアップロードする。
 - 同期対象: 購読リスト・既読状態・スター・タグ構造・グローバル設定。
@@ -49,7 +49,7 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
 
 ## 6. セットアップフロー
 
-初回起動でローカルのみ / クラウド同期（Dropbox・Google Drive）を選択する。クラウド選択時は OAuth 認証後、
+初回起動でローカルのみ / クラウド同期（Dropbox・Google Drive・OneDrive）を選択する。クラウド選択時は OAuth 認証後、
 クラウドに既存データがあれば初回同期で自動的にマージ（インポート）される。
 
 ## 7. 基本機能
@@ -101,7 +101,7 @@ Material 3 ベース + カスタムテーマ（teal）。ライト/ダーク/シ
 | HTTP | Ktor client（CIO） |
 | RSS/HTML/XML パース | ksoup |
 | シリアライズ / 日時 | kotlinx-serialization / kotlinx-datetime |
-| クラウド同期 | Ktor + Dropbox / Google Drive REST API（OAuth PKCE + リフレッシュトークン） |
+| クラウド同期 | Ktor + Dropbox / Google Drive / OneDrive（Microsoft Graph）REST API（OAuth PKCE + リフレッシュトークン） |
 | i18n | Compose Resources |
 | テスト | kotlin-test + kotlinx-coroutines-test + Ktor MockEngine |
 | ビルド | Gradle 9.6（Kotlin 2.4 / Compose 1.11 / JDK 25 toolchain） |

@@ -69,6 +69,18 @@ Gradle のカスタムタスク（`generateBuildConfig`）で実現している�
 ※フローはPKCE（`code_verifier`）を使うが、**クライアントシークレットは別途必要**。
 ※開発中は公開ステータスを「テスト」にしてテストユーザーを登録すれば事足りる。
 
+### OneDrive
+
+1. [Azure Portal](https://portal.azure.com) →「Microsoft Entra ID」→「アプリの登録」→「新規登録」でアプリを登録
+   - 「サポートされているアカウントの種類」は「任意の組織ディレクトリ内のアカウントと個人用 Microsoft アカウント」を選ぶ（アプリが使う `common` テナントに対応）。
+2. 「認証」→「プラットフォームを追加」→ **「モバイル アプリケーションとデスクトップ アプリケーション」**:
+   - 「カスタム リダイレクト URI」に `keryx://oauth2/callback` を追加する。
+   - 「パブリック クライアント フローを許可する」を **はい** にする（OneDrive は PKCE パブリッククライアントで、クライアントシークレットは不要）。
+3. 「API のアクセス許可」→「アクセス許可の追加」→「Microsoft Graph」→「委任されたアクセス許可」で **`Files.ReadWrite.AppFolder`** を追加する（ドライブ内の任意のファイルではなく、アプリ専用フォルダーへのみアクセスを許可する）。リフレッシュトークン用の `offline_access` は実行時に要求する。
+4. 「概要」の「アプリケーション (クライアント) ID」を `local.properties` の `onedrive.client.id` に指定する。
+
+OneDrive は Dropbox と同じカスタム URI スキーム（`keryx://oauth2/callback`、`state` で識別）を再利用するため、追加の OS 登録は不要。**クライアントシークレットは不要**（Google と異なり、Microsoft は「モバイル/デスクトップ」登録を PKCE の完全なパブリッククライアントとして扱う）。同期 DB は OneDrive のアプリ専用フォルダー（`/me/drive/special/approot`）に保存される。Dropbox 同様、macOS では `keryx://` がパッケージ済みアプリへルーティングされるため `./gradlew :composeApp:run` では連携が完了しない。macOS で検証するには `createDistributable` で `Keryx.app` をビルドして起動する。
+
 ## パッケージング
 
 [`composeApp/build/compose/binaries/main`](./composeApp/build/compose/binaries/main)以下に作成される
@@ -139,7 +151,7 @@ UI に一切現れない内部的なビルド識別子。中間成果物は `Ker
 ワークフローの rename ステップがタグから最終的なアセット名を決めるため、添付されるファイルは
 `Keryx-0.1.1-macos-arm64.dmg` になる。
 
-`DROPBOX_APP_KEY` / `GOOGLE_DRIVE_CLIENT_ID` / `GOOGLE_DRIVE_CLIENT_SECRET` は
+`DROPBOX_APP_KEY` / `GOOGLE_DRIVE_CLIENT_ID` / `GOOGLE_DRIVE_CLIENT_SECRET` / `ONEDRIVE_CLIENT_ID` は
 **リポジトリの Secrets** に設定する。未設定でもビルドは成功するが、リリースされたアプリでは
 該当するクラウド連携が完全に非表示になる（`CloudStorageAvailability` 参照）。
 

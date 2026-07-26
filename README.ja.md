@@ -39,7 +39,7 @@
   - [ ] iOS
   - [ ] iPadOS
 - 対応クラウドストレージ追加
-  - [ ] [OneDrive](https://onedrive.live.com/)
+  - [x] [OneDrive](https://onedrive.live.com/)
   - [ ] [NextCloud](https://nextcloud.com/)
 - 多言語対応
   - [ ] 英語

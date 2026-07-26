@@ -39,6 +39,7 @@ import works.merc.keryx.app.resources.common_abort
 import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.resources.dropbox
 import works.merc.keryx.app.resources.google_drive
+import works.merc.keryx.app.resources.onedrive
 import works.merc.keryx.app.resources.settings_cloud_abort_connect_confirm_body
 import works.merc.keryx.app.resources.settings_cloud_abort_connect_confirm_title
 import works.merc.keryx.app.resources.settings_cloud_disconnect_confirm_body
@@ -55,6 +56,8 @@ import works.merc.keryx.app.resources.settings_dropbox_connect
 import works.merc.keryx.app.resources.settings_dropbox_disconnect
 import works.merc.keryx.app.resources.settings_google_drive_connect
 import works.merc.keryx.app.resources.settings_google_drive_disconnect
+import works.merc.keryx.app.resources.settings_onedrive_connect
+import works.merc.keryx.app.resources.settings_onedrive_disconnect
 import works.merc.keryx.app.resources.settings_last_synced
 import works.merc.keryx.app.resources.setup_auth_failed
 
@@ -173,6 +176,7 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
 private fun CloudStorageType.brandIcon(): DrawableResource = when (this) {
     CloudStorageType.DROPBOX -> Res.drawable.dropbox
     CloudStorageType.GOOGLE_DRIVE -> Res.drawable.google_drive
+    CloudStorageType.ONEDRIVE -> Res.drawable.onedrive
 }
 
 /**
@@ -183,6 +187,7 @@ private fun CloudStorageType.brandIcon(): DrawableResource = when (this) {
 private fun CloudStorageType.brandLabel(): String = when (this) {
     CloudStorageType.DROPBOX -> "Dropbox"
     CloudStorageType.GOOGLE_DRIVE -> "Google Drive"
+    CloudStorageType.ONEDRIVE -> "OneDrive"
 }
 
 /**
@@ -193,6 +198,7 @@ private fun CloudStorageType.brandLabel(): String = when (this) {
 private fun CloudStorageType.connectLabel(): StringResource = when (this) {
     CloudStorageType.DROPBOX -> Res.string.settings_dropbox_connect
     CloudStorageType.GOOGLE_DRIVE -> Res.string.settings_google_drive_connect
+    CloudStorageType.ONEDRIVE -> Res.string.settings_onedrive_connect
 }
 
 /**
@@ -203,6 +209,7 @@ private fun CloudStorageType.connectLabel(): StringResource = when (this) {
 private fun CloudStorageType.disconnectLabel(): StringResource = when (this) {
     CloudStorageType.DROPBOX -> Res.string.settings_dropbox_disconnect
     CloudStorageType.GOOGLE_DRIVE -> Res.string.settings_google_drive_disconnect
+    CloudStorageType.ONEDRIVE -> Res.string.settings_onedrive_disconnect
 }
 
 /**

@@ -62,6 +62,20 @@ const val GOOGLE_REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke"
 /** Google Drive "application data" hidden folder scope — the closest analog to Dropbox's app folder. */
 const val GOOGLE_DRIVE_APPDATA_SCOPE = "https://www.googleapis.com/auth/drive.appdata"
 
+// --- OneDrive (Microsoft Identity platform / Graph) endpoints ---
+// `common` tenant accepts both personal Microsoft accounts and work/school accounts.
+const val ONEDRIVE_AUTHORIZE_ENDPOINT = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
+const val ONEDRIVE_TOKEN_ENDPOINT = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+const val ONEDRIVE_GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+
+/**
+ * OneDrive scopes. `Files.ReadWrite.AppFolder` grants access only to the app's hidden special
+ * folder (`/me/drive/special/approot`) — the analog of Dropbox's app folder / Drive's appDataFolder.
+ * `offline_access` is required to receive a refresh token. Microsoft has no standard OAuth token
+ * revocation endpoint, so there is no revoke constant.
+ */
+const val ONEDRIVE_SCOPES = "Files.ReadWrite.AppFolder offline_access"
+
 // --- OAuth connect flow ---
 /** Custom URI redirect for providers that accept an arbitrary scheme (Dropbox). Google uses loopback. */
 const val OAUTH_CUSTOM_URI_REDIRECT = "keryx://oauth2/callback"

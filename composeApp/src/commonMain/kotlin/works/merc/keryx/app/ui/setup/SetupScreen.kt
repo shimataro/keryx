@@ -45,6 +45,7 @@ import works.merc.keryx.app.resources.common_abort
 import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.resources.dropbox
 import works.merc.keryx.app.resources.google_drive
+import works.merc.keryx.app.resources.onedrive
 import works.merc.keryx.app.resources.setup_abort_connect_confirm_body
 import works.merc.keryx.app.resources.setup_abort_connect_confirm_title
 import works.merc.keryx.app.resources.setup_auth_failed
@@ -54,6 +55,8 @@ import works.merc.keryx.app.resources.setup_dropbox
 import works.merc.keryx.app.resources.setup_dropbox_desc
 import works.merc.keryx.app.resources.setup_google_drive
 import works.merc.keryx.app.resources.setup_google_drive_desc
+import works.merc.keryx.app.resources.setup_onedrive
+import works.merc.keryx.app.resources.setup_onedrive_desc
 import works.merc.keryx.app.resources.setup_local_desc
 import works.merc.keryx.app.resources.setup_local_only
 import works.merc.keryx.app.resources.setup_title
@@ -70,6 +73,8 @@ private fun CloudStorageType.setupOption(): CloudSetupOption = when (this) {
         CloudSetupOption(Res.string.setup_dropbox, Res.string.setup_dropbox_desc, Res.drawable.dropbox)
     CloudStorageType.GOOGLE_DRIVE ->
         CloudSetupOption(Res.string.setup_google_drive, Res.string.setup_google_drive_desc, Res.drawable.google_drive)
+    CloudStorageType.ONEDRIVE ->
+        CloudSetupOption(Res.string.setup_onedrive, Res.string.setup_onedrive_desc, Res.drawable.onedrive)
 }
 
 @Composable

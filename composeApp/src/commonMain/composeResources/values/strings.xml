@@ -28,6 +28,8 @@
     <string name="setup_dropbox_wip">Dropbox 連携は準備中です</string>
     <string name="setup_google_drive">Google Drive で同期する</string>
     <string name="setup_google_drive_desc">複数デバイスで購読・既読を共有します</string>
+    <string name="setup_onedrive">OneDrive で同期する</string>
+    <string name="setup_onedrive_desc">複数デバイスで購読・既読を共有します</string>
     <string name="setup_connecting">クラウドストレージに接続中...</string>
     <string name="setup_abort_connect_confirm_title">接続を中止しますか？</string>
     <string name="setup_abort_connect_confirm_body">まだ何も保存されていません。</string>
@@ -160,6 +162,8 @@
     <string name="settings_dropbox_connect">連携する</string>
     <string name="settings_google_drive_connect">連携する</string>
     <string name="settings_google_drive_disconnect">連携を解除</string>
+    <string name="settings_onedrive_connect">連携する</string>
+    <string name="settings_onedrive_disconnect">連携を解除</string>
     <string name="settings_cloud_disconnect_confirm_title">%1$sとの連携を解除しますか？</string>
     <string name="settings_cloud_disconnect_confirm_body">ローカルのデータはそのまま残ります。</string>
     <string name="settings_cloud_abort_connect_confirm_title">%1$sへの接続を中止しますか？</string>

@@ -39,7 +39,7 @@ Currently available for Windows, macOS, and Linux. Native apps for Android, iOS,
   - [ ] iOS
   - [ ] iPadOS
 - Additional cloud storage support
-  - [ ] [OneDrive](https://onedrive.live.com/)
+  - [x] [OneDrive](https://onedrive.live.com/)
   - [ ] [NextCloud](https://nextcloud.com/)
 - Multilingual UI
   - [ ] English

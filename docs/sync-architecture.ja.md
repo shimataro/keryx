@@ -2,7 +2,7 @@
 
 [English](sync-architecture.md)
 
-対象: クラウドストレージ同期。実装は `domain/SyncRepository.kt`, `domain/MergeSql.kt`, `platform/DatabaseMerger`, `platform/DatabaseSnapshot`。
+対象: クラウドストレージ同期（Dropbox / Google Drive / OneDrive）。実装は `domain/SyncRepository.kt`, `domain/MergeSql.kt`, `platform/DatabaseMerger`, `platform/DatabaseSnapshot`。
 
 ## 設計方針
 
@@ -120,19 +120,19 @@
 OAuth 2.0 authorization-code-with-PKCE のオーケストレーション（PKCE 生成・認可 URL 構築・ブラウザー起動・
 state 検証・コード交換）はプロバイダー共通の `OAuthConnectFlow`（desktop）に集約する。プロバイダー差は
 **リダイレクトの受け取り方（`OAuthRedirectTransport`）とエンドポイント/スコープ（`CloudAuthManager` 実装）**
-だけで、`DropboxAuthManager` / `GoogleDriveAuthManager` が `CloudAuthManager` を実装する。いずれも
-オフラインアクセス（Dropbox: `token_access_type=offline`、Google: `access_type=offline` + `prompt=consent`）を
+だけで、`DropboxAuthManager` / `GoogleDriveAuthManager` / `OneDriveAuthManager` が `CloudAuthManager` を実装する。いずれも
+オフラインアクセス（Dropbox: `token_access_type=offline`、Google: `access_type=offline` + `prompt=consent`、OneDrive: `offline_access` スコープ）を
 指定し**リフレッシュトークンを取得・保存**する。
 
-リダイレクト受信の 2 方式:
+リダイレクト受信方式はプロバイダーごとに選ぶ（設計方針 `.claude/rules/cloud-oauth-transport.md` 参照——両方使える場合はカスタム URI スキームを優先）:
 
-- **Dropbox — カスタム URI スキーム**（`CustomUriRedirectTransport`）: リダイレクト URI は
-  `keryx://oauth2/callback`。認可 URL は既定ブラウザーで開き、OS が URL を実行中インスタンスへ配送する
-  （`main.kt` が `parseOAuthUri` して共有 `MutableSharedFlow<OAuthCallbackParams>` に流す）。
+- **Dropbox / OneDrive — カスタム URI スキーム**（`CustomUriRedirectTransport`）: リダイレクト URI は
+  `keryx://oauth2/callback`。両プロバイダーで共有し `state` で識別する。認可 URL は既定ブラウザーで開き、OS が URL を実行中インスタンスへ配送する
+  （`main.kt` が `parseOAuthUri` して共有 `MutableSharedFlow<OAuthCallbackParams>` に流す）。OneDrive は Microsoft Identity platform（`common` テナント）と Microsoft Graph を使い、Google と違い**クライアントシークレット不要の PKCE パブリッククライアント**。同期 DB はアプリ専用フォルダー（`/me/drive/special/approot`、スコープ `Files.ReadWrite.AppFolder`）に保存する。Microsoft には標準のトークン失効エンドポイントが無いため `OneDriveAuthManager.revoke` は no-op で、連携解除はローカルトークンの破棄のみ。楽観的排他は DriveItem の `eTag` を `rev` として使い `If-Match` で送る（412→衝突）。`create` は `@microsoft.graph.conflictBehavior=fail`（409→衝突）。
 - **Google Drive — ループバック**（`LoopbackRedirectTransport`）: Google の「デスクトップアプリ」クライアントは
   任意のカスタムスキームを許可せず、`http://127.0.0.1:<ポート>` のループバックのみを受け付ける。一時 HTTP
   サーバー（`com.sun.net.httpserver`。`jdk.httpserver` モジュール同梱済み）を立ててリダイレクトを受け、
-  受信後に停止する。OS 側のスキーム登録は不要（`keryx://` の登録は Dropbox 用のまま）。**Dropbox とは異なり
+  受信後に停止する。OS 側のスキーム登録は不要（`keryx://` の登録は Dropbox / OneDrive 用のまま）。**Dropbox とは異なり
   クライアントシークレット（`GOOGLE_DRIVE_CLIENT_SECRET`）もトークン交換・リフレッシュ両方に送る**——PKCE を
   使っていても、「デスクトップアプリ」タイプの Google OAuth クライアントは iOS/Android と違い完全な public
   client 扱いされず、省略すると Google のトークンエンドポイントが `invalid_request: client_secret is missing`
