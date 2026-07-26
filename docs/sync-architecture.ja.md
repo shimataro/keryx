@@ -138,11 +138,22 @@ state 検証・コード交換）はプロバイダー共通の `OAuthConnectFlo
   client 扱いされず、省略すると Google のトークンエンドポイントが `invalid_request: client_secret is missing`
   で拒否する（詳細は [build.ja.md](build.ja.md)）。
 
-> **macOS の注意（Dropbox / OneDrive）**: `keryx://` は OS（LaunchServices）がパッケージ版 `Keryx.app`（Info.plist の
-> `CFBundleURLTypes`）にルーティングするため、`./gradlew :composeApp:run` で起動したインスタンスには
-> リダイレクトが届かず**連携が完了しない**。macOS で Dropbox / OneDrive 連携を行う/確認する場合は
-> `createDistributable` でビルドした `Keryx.app` を起動する（詳細は [setup.ja.md](setup.ja.md)）。
-> Windows/Linux は URL がコマンドライン引数で渡り single-instance 経由で実行中インスタンスへ転送される。
+OS へのスキーム登録方法はプラットフォームごとに異なる。macOS はパッケージング時に Info.plist
+（`CFBundleURLTypes`）で宣言する。Windows / Linux は起動時に `registerCustomUriScheme()` が登録し、
+Windows は `HKEY_CLASSES_ROOT\keryx` を、Linux は `LinuxUriSchemeRegistrar` がユーザーレベルの
+`.desktop`（`~/.local/share/applications/keryx-url-handler.desktop`）と `~/.config/mimeapps.list` の
+関連付けを書き出す。Linux の `.desktop` は `Exec` 行が `%u` で終わっている必要がある——これが無いと
+Desktop Entry 仕様上 URI がプロセスに渡らず、ブラウザーはスキームを解決できずに「不明なプロトコル」
+エラーを出す。いずれも OS が URL をコマンドライン引数としてアプリを起動し、`main.kt` が
+single-instance 経由で実行中インスタンスへ転送する。
+
+> **注意（カスタム URI プロバイダーは全デスクトップ OS 共通）**: `./gradlew :composeApp:run` では
+> Dropbox / OneDrive 連携を完了できない。macOS では `keryx://` を LaunchServices がパッケージ版
+> `Keryx.app` にルーティングするため、`gradlew run` のインスタンスにはリダイレクトが届かない。
+> Windows / Linux では、起動時の登録がパッケージ版ランチャーからの起動でない限り意図的に何もしない
+> （`packagedLauncherPath()`）——JDK の `java` バイナリを `keryx://` のハンドラーとして登録すると
+> Gradle 実行終了後も残ってしまうため。連携を行う/確認する場合は `createDistributable` でビルドした
+> アプリを起動する（詳細は [setup.ja.md](setup.ja.md)）。
 > Google Drive はループバック受信のため、この制約はなく `gradlew run` でも連携を完了できる。
 
 ### トークン保存先

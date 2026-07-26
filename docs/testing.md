@@ -32,7 +32,7 @@ Test both success (`Result.Ok`) and failure (`Result.Err`) branches; on failure,
 ./gradlew :composeApp:desktopTest
 ```
 
-The suite covers parser, fetcher redirect/304/404/410/timeout/discovery, OPML, Dropbox storage/auth, PKCE, OAuth loopback server, merge (last-write-wins / OR merge / collision guard / FK guard), schema, local settings, article upsert, URL resolver, datetime parser, Result, Repository layer (Article/Feed/Tag/Settings), CloudSession, NotificationCenter, IdGenerator, SyncRepository, ViewModel layer (Home/Settings/Setup/NotificationCenter), ArticleWebViewHtml (extractLinks/wrapArticleHtml), FTS (FtsManager/FtsSearch, including `indexMissing` incremental insert / non-destructive behavior, `rebuildIndex` requiring table existence, sync upload excluding `articles_fts` via `VACUUM INTO` snapshot while preserving `user_version`), etc. `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` failures specifically indicate regression in DB schema / merge SQL / sync orchestration and require extra attention.
+The suite covers parser, fetcher redirect/304/404/410/timeout/discovery, OPML, Dropbox storage/auth, PKCE, OAuth loopback server, merge (last-write-wins / OR merge / collision guard / FK guard), schema, local settings, article upsert, URL resolver, datetime parser, Result, Repository layer (Article/Feed/Tag/Settings), CloudSession, NotificationCenter, IdGenerator, SyncRepository, ViewModel layer (Home/Settings/Setup/NotificationCenter), ArticleWebViewHtml (extractLinks/wrapArticleHtml), custom URI scheme registration (`UriSchemeRegistration`'s per-OS dispatch and packaged-launcher gate, `LinuxUriSchemeRegistrar`'s desktop-entry generation including the `%u` field code, non-destructive `mimeapps.list` merge, and idempotency), FTS (FtsManager/FtsSearch, including `indexMissing` incremental insert / non-destructive behavior, `rebuildIndex` requiring table existence, sync upload excluding `articles_fts` via `VACUUM INTO` snapshot while preserving `user_version`), etc. `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` failures specifically indicate regression in DB schema / merge SQL / sync orchestration and require extra attention.
 
 Known uncovered areas: `SettingsViewModel.exportOpml`/`importOpml` (no test seam for `FilePicker` native dialog), the browser-launch → callback-wait → code-exchange portion of `OAuthConnectFlow.connect()` (depends on actual `BrowserOpener`/`OAuthLoopbackServer` I/O and cannot be mocked without a seam; only the immediate-error branch for empty App Key is covered in `OAuthConnectFlowTest`), `DatabaseDriverFactory.desktop.kt` (directly references `AppDirs.appDataDir()` and cannot be substituted with a test directory), `FeedDragAndDrop.desktop.kt` (`DragAndDropTransferable` is a library internal type that cannot be extracted from test code, and `draggedFeedId()`/`draggedFolderId()`/`positionYInRoot()` cannot be called without an actual AWT `DropTargetDragEvent`/`DropTargetDropEvent`). For the same reason, actual feed/folder reordering/move gestures themselves (`FeedListPane.kt`'s `FeedRow`/`FolderGroupHeader`/`NoFolderHeader` `dragAndDropSource`/`dragAndDropTarget`) are also untestable. The reordering calculation logic itself (`ReorderUtil.reorderIds`) and its consumers `FeedRepository.moveFeed`/`FolderRepository.reorderFolders` are tested normally.
 
@@ -65,3 +65,13 @@ Dock/taskbar icons (`Taskbar` / Cocoa activation policy native path) cannot be a
 - (macOS) On restart-while-running (double-launch activation), Dock icon remains the brand icon.
 - Repeated hide/restore with unread > 0 preserves the badge.
 - No regression on Windows/Linux taskbar icon/unread overlay.
+
+The `keryx://` scheme registration writes real files into the user's home and depends on the desktop environment, so
+the end-to-end path can only be confirmed on a Linux machine (the unit tests cover the file contents and the merge, not
+the OS routing). Install a packaged build (`./gradlew :composeApp:packageDeb` → `sudo dpkg -i`) and confirm:
+
+- `xdg-mime query default x-scheme-handler/keryx` returns `keryx-url-handler.desktop`.
+- With Keryx running, `xdg-open 'keryx://oauth2/callback?code=test&state=test'` brings the window to the front.
+- Dropbox and OneDrive linking both complete through the browser round trip.
+- `./gradlew :composeApp:run` does **not** create `~/.local/share/applications/keryx-url-handler.desktop`.
+- Unrelated entries in `~/.config/mimeapps.list` survive the registration untouched.

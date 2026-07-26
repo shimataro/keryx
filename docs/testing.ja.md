@@ -54,7 +54,7 @@
 OPML、Dropbox ストレージ/認証、PKCE、OAuth ループバックサーバ、マージ（後勝ち・OR マージ・衝突ガード・
 FK ガード）、スキーマ、ローカル設定、記事 upsert、URL リゾルバ、日時パーサ、Result、Repository 層
 （Article/Feed/Tag/Settings）、CloudSession、NotificationCenter、IdGenerator、SyncRepository、
-ViewModel 層（Home/Settings/Setup/NotificationCenter）、ArticleWebViewHtml（extractLinks/wrapArticleHtml）、FTS（FtsManager/FtsSearch。
+ViewModel 層（Home/Settings/Setup/NotificationCenter）、ArticleWebViewHtml（extractLinks/wrapArticleHtml）、カスタム URI スキーム登録（`UriSchemeRegistration` の OS 別ディスパッチとパッケージ版ランチャー判定、`LinuxUriSchemeRegistrar` の `.desktop` 生成——`%u` フィールドコードを含む——、`mimeapps.list` の非破壊マージ、冪等性）、FTS（FtsManager/FtsSearch。
 `indexMissing` の増分投入・非破壊、`rebuildIndex` がテーブル存在を前提とすること、同期アップロードが
 `VACUUM INTO` スナップショットで `articles_fts` を除外し `user_version` を保全することを含む）などを網羅する。
 `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` の失敗は DB スキーマ・
@@ -120,3 +120,15 @@ Dock/タスクバーのアイコン（`Taskbar` / Cocoa activation policy のネ
   こと。
 - 未読 > 0 の状態で hide/restore を繰り返してもバッジが保たれること。
 - Windows/Linux でタスクバーのアイコン/未読オーバーレイに退行が無いこと。
+
+`keryx://` のスキーム登録はユーザーのホーム配下に実ファイルを書き、デスクトップ環境に依存するため、
+エンドツーエンドの確認は Linux 実機でしかできない（ユニットテストが担保するのはファイル内容とマージであって、
+OS 側のルーティングではない）。パッケージ版をインストールし
+（`./gradlew :composeApp:packageDeb` → `sudo dpkg -i`）、以下を確認する:
+
+- `xdg-mime query default x-scheme-handler/keryx` が `keryx-url-handler.desktop` を返すこと。
+- Keryx 起動中に `xdg-open 'keryx://oauth2/callback?code=test&state=test'` でウィンドウが前面に来ること。
+- Dropbox / OneDrive 連携がどちらもブラウザー往復で完走すること。
+- `./gradlew :composeApp:run` では `~/.local/share/applications/keryx-url-handler.desktop` が
+  **作られない**こと。
+- `~/.config/mimeapps.list` の無関係なエントリが登録後もそのまま残っていること。

@@ -104,7 +104,14 @@ App icons are at `composeApp/icons/{keryx.icns, keryx.ico, keryx.png}`. Tray ico
 `composeApp/src/commonMain/composeResources/drawable/tray_icon*.png`. These are generated from shared artwork via
 `design/icons/make_desktop_icons.sh` (it is preferable to commit generated files).
 
-> **macOS Dropbox linking confirmation**: The custom URI `keryx://` is routed by macOS LaunchServices to the packaged app, so `./gradlew :composeApp:run` cannot complete the link. To verify linking behavior, build with `createDistributable` and launch `Keryx.app` (see [setup.md](setup.md) "Common Issues" for details).
+The `keryx://` custom URI scheme is **not** registered by the deb/rpm package. jpackage only emits a `.desktop` file when
+given a shortcut or a file association, and its template's `Exec` line has no `%u`, so the URI would never reach the
+process. Instead the app registers itself on first launch (`LinuxUriSchemeRegistrar`), writing
+`~/.local/share/applications/keryx-url-handler.desktop` and an association in `~/.config/mimeapps.list`. This also covers
+`createDistributable` app images and tarball installs. Both files live in the user's home and are **not removed when the
+package is uninstalled** — harmless (`NoDisplay=true`, nothing else handles `keryx://`), but there is no uninstall hook.
+
+> **Custom-URI linking confirmation**: `./gradlew :composeApp:run` cannot complete Dropbox / OneDrive linking on any desktop OS — macOS routes `keryx://` to the packaged app, and the Windows/Linux startup registration deliberately skips non-packaged launchers. To verify linking behavior, build with `createDistributable` and launch the packaged app (see [setup.md](setup.md) "Common Issues" for details).
 
 ## Release (CD)
 

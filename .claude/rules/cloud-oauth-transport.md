@@ -18,17 +18,24 @@ schemes (e.g. Google's "Desktop app" clients accept only `http://127.0.0.1` loop
 
 ## Why
 
-- Reuses the already-registered shared `keryx://oauth2/callback` scheme (OS-registered on all
-  three desktop platforms, routed by `main.kt`); concurrent flows are disambiguated by `state`,
-  so **no new plist / registry / scheme registration is needed**.
+- Reuses the shared `keryx://oauth2/callback` scheme, which is already registered on all three
+  desktop platforms and routed by `main.kt`; concurrent flows are disambiguated by `state`, so
+  **no new plist / registry / desktop-entry registration is needed**.
 - Consistent with the Dropbox provider; avoids spinning up a loopback HTTP server.
+
+How the scheme gets registered differs per platform: macOS declares it in Info.plist
+(`CFBundleURLTypes`) at packaging time, while Windows and Linux register it at startup from
+`registerCustomUriScheme()` — the registry on Windows, a user-level `.desktop` entry plus a
+`mimeapps.list` association on Linux (`LinuxUriSchemeRegistrar`).
 
 ## Accepted tradeoff
 
-On macOS, LaunchServices routes `keryx://` to the packaged `Keryx.app`, so
-`./gradlew :composeApp:run` cannot complete linking for a custom-URI provider — use
-`./gradlew :composeApp:createDistributable` and launch `Keryx.app` to verify. This is the same
-known constraint already documented for Dropbox and is accepted.
+A custom-URI provider cannot be linked from `./gradlew :composeApp:run` on **any** desktop OS —
+use `./gradlew :composeApp:createDistributable` and launch the packaged app to verify. On macOS
+LaunchServices routes `keryx://` to the packaged `Keryx.app`; on Windows and Linux the runtime
+registration deliberately no-ops unless the process is a packaged launcher, since registering the
+JDK's own `java` binary as the handler would outlive the Gradle run. This is the same known
+constraint already documented for Dropbox and is accepted.
 
 ## Current wiring (as of the OneDrive addition)
 

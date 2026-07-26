@@ -239,8 +239,8 @@ fun main(args: Array<String>) {
         }
     }.onFailure { Log.warn(LOG_TAG, "Could not install the Preferences menu handler", it) }
 
-    // Register custom URI scheme handler (macOS). Windows/Linux receive the URI
-    // via command-line arguments forwarded through SingleInstanceCoordinator.
+    // Install the in-process URI handler (macOS). Windows/Linux receive the URI as a
+    // command-line argument instead, forwarded through SingleInstanceCoordinator.
     runCatching {
         if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.APP_OPEN_URI)) {
             Desktop.getDesktop().setOpenURIHandler { event ->
@@ -254,10 +254,9 @@ fun main(args: Array<String>) {
         }
     }.onFailure { Log.warn(LOG_TAG, "Could not install URI handler", it) }
 
-    // Register custom URI scheme on Windows so the OS knows how to handle keryx:// URIs.
-    if (System.getProperty("os.name").lowercase().contains("win")) {
-        registerWindowsUriScheme()
-    }
+    // Tell the OS how to handle keryx:// URIs (Windows registry / Linux .desktop + mimeapps.list).
+    // macOS declares the scheme in Info.plist at packaging time, so it needs nothing here.
+    registerCustomUriScheme()
 
     application {
         var windowVisible by remember { mutableStateOf(!saved.startMinimized) }
@@ -754,15 +753,4 @@ private suspend fun warnIfAppTranslocated(koin: org.koin.core.Koin) {
             timestampMillis = SystemClock.nowMillis(),
         ),
     )
-}
-
-/** Registers the keryx:// URL scheme in the Windows registry so browsers can redirect back to the app. */
-private fun registerWindowsUriScheme() {
-    val currentExe = ProcessHandle.current().info().command().orElse("keryx.exe")
-    runCatching {
-        val reg = "reg.exe"
-        ProcessBuilder(reg, "add", "HKEY_CLASSES_ROOT\\keryx", "/ve", "/d", "URL:keryx Protocol", "/f").start().waitFor()
-        ProcessBuilder(reg, "add", "HKEY_CLASSES_ROOT\\keryx", "/v", "URL Protocol", "/d", "", "/f").start().waitFor()
-        ProcessBuilder(reg, "add", "HKEY_CLASSES_ROOT\\keryx\\shell\\open\\command", "/ve", "/d", "\"$currentExe\" \"%1\"", "/f").start().waitFor()
-    }.onFailure { Log.warn(LOG_TAG, "Could not register Windows URI scheme", it) }
 }

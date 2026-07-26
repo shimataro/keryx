@@ -107,9 +107,18 @@ OneDrive は Dropbox と同じカスタム URI スキーム（`keryx://oauth2/ca
 `design/icons/make_desktop_icons.sh` で共有アートワークから生成する
 （生成済みファイルはコミットしておくのが望ましい）。
 
-> **macOS の Dropbox 連携確認**: `keryx://` のカスタム URI はパッケージ版アプリにルーティングされるため、
-> `./gradlew :composeApp:run` では連携が完了しない。連携の動作確認は `createDistributable` でビルドした
-> `Keryx.app` を起動して行う（詳細は [setup.ja.md](setup.ja.md) の「よくある問題」）。
+`keryx://` のカスタム URI スキームは deb/rpm パッケージでは**登録されない**。jpackage はショートカットか
+ファイル関連付けを指定しない限り `.desktop` を生成せず、そのテンプレートの `Exec` 行には `%u` が付かないため、
+URI がプロセスに届かないからである。代わりにアプリが初回起動時に自身を登録し（`LinuxUriSchemeRegistrar`）、
+`~/.local/share/applications/keryx-url-handler.desktop` と `~/.config/mimeapps.list` の関連付けを書き出す。
+これにより `createDistributable` の app image や tarball 配置もカバーされる。この 2 ファイルはユーザーの
+ホーム配下にあり、**パッケージをアンインストールしても削除されない**（`NoDisplay=true` で `keryx://` を扱う
+他アプリも無いため実害は無いが、アンインストールフックが無い）。
+
+> **カスタム URI 連携の確認**: `./gradlew :composeApp:run` ではどのデスクトップ OS でも Dropbox / OneDrive
+> 連携が完了しない（macOS は `keryx://` がパッケージ版アプリにルーティングされ、Windows / Linux は起動時の
+> 登録がパッケージ版ランチャー以外を意図的にスキップするため）。連携の動作確認は `createDistributable` で
+> ビルドしたアプリを起動して行う（詳細は [setup.ja.md](setup.ja.md) の「よくある問題」）。
 
 ## リリース（CD）
 
