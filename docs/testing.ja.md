@@ -120,3 +120,5 @@ Dock/タスクバーのアイコン（`Taskbar` / Cocoa activation policy のネ
   こと。
 - 未読 > 0 の状態で hide/restore を繰り返してもバッジが保たれること。
 - Windows/Linux でタスクバーのアイコン/未読オーバーレイに退行が無いこと。
+- （Windows/Linux）トレイアイコンが macOS と同じ白グリフ + 黒フチ（`tray_icon_outlined.png`、全プラット
+  フォーム共通）で表示され、暗いパネル/タスクバーでも判別できること。未読 > 0 で赤ドットが乗ること。

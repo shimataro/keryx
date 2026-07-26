@@ -84,7 +84,7 @@ import works.merc.keryx.app.resources.notification_app_translocated
 import works.merc.keryx.app.resources.tray_hide
 import works.merc.keryx.app.resources.tray_icon
 import works.merc.keryx.app.resources.update_available_notification
-import works.merc.keryx.app.resources.tray_icon_macos
+import works.merc.keryx.app.resources.tray_icon_outlined
 import works.merc.keryx.app.resources.tray_quit
 import works.merc.keryx.app.resources.tray_show
 import works.merc.keryx.app.ui.AppMenuBar
@@ -308,14 +308,13 @@ fun main(args: Array<String>) {
         }
 
         val trayState = rememberTrayState()
-        val trayIconResource = if (isMacOs) Res.drawable.tray_icon_macos else Res.drawable.tray_icon
-        val trayBaseImage = rememberDrawableImage(trayIconResource)
+        // The tray uses the outlined (white glyph + black halo) variant on every OS: it
+        // stays legible on a light or dark menu bar / panel / taskbar without any theme
+        // detection. The window's own title-bar/taskbar icon keeps the full-color glyph.
+        val trayBaseImage = rememberDrawableImage(Res.drawable.tray_icon_outlined)
         val trayBadgedImage = remember(trayBaseImage, unreadCount) { trayBaseImage?.let { drawUnreadDot(it, unreadCount) } }
 
-        // Window always uses the non-mac tray_icon regardless of platform (existing
-        // behavior). Reuse trayBaseImage when it's the same resource to avoid loading
-        // tray_icon twice; on macOS the tray uses tray_icon_macos, so it's loaded separately.
-        val windowBaseImage = if (trayIconResource == Res.drawable.tray_icon) trayBaseImage else rememberDrawableImage(Res.drawable.tray_icon)
+        val windowBaseImage = rememberDrawableImage(Res.drawable.tray_icon)
         val windowBadgedImage = remember(windowBaseImage, unreadCount) { windowBaseImage?.let { drawUnreadBadge(it, unreadCount) } }
         val windowBadgedPainter = remember(windowBadgedImage) { windowBadgedImage?.let { BitmapPainter(it.toComposeImageBitmap()) } }
 

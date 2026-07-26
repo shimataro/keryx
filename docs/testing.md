@@ -65,3 +65,5 @@ Dock/taskbar icons (`Taskbar` / Cocoa activation policy native path) cannot be a
 - (macOS) On restart-while-running (double-launch activation), Dock icon remains the brand icon.
 - Repeated hide/restore with unread > 0 preserves the badge.
 - No regression on Windows/Linux taskbar icon/unread overlay.
+- (Windows/Linux) The tray icon is the same white glyph + black outline as macOS (`tray_icon_outlined.png`, shared by
+  all platforms) and stays distinguishable on a dark panel / taskbar. With unread > 0 the red dot is drawn on it.

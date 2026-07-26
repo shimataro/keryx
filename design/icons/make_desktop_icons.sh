@@ -73,22 +73,25 @@ if command -v magick >/dev/null; then
 fi
 
 # --- Tray icons (Compose resources) ---
+
+# Full-color glyph, used for the window's own title-bar/taskbar icon (main.kt).
+# Not used by the tray on any platform - see tray_icon_outlined.png below.
 rsvg-convert -w 64 -h 64 "$SVG_DIR/tray_icon.svg" -o "$DRAWABLE/tray_icon.png"
 
-# macOS tray icon: derived from the shared black silhouette by adding a white
-# fill + black outline, so a single asset stays legible on both light and dark
-# menu bars without any OS theme detection. (AWT's apple.awt.enableTemplateImages
-# was tried first but doesn't reliably reflect the real OS appearance on this
-# JDK - see plan history.) Requires ImageMagick (magick).
+# Tray icon for every platform: derived from the shared black silhouette by adding
+# a white fill + black outline, so a single asset stays legible on both light and
+# dark menu bars / panels / taskbars without any OS theme detection. (AWT's
+# apple.awt.enableTemplateImages was tried first but doesn't reliably reflect the
+# real OS appearance on this JDK - see plan history.) Requires ImageMagick (magick).
 if command -v magick >/dev/null; then
   TRAY_WORK="$(mktemp -d)"
-  TRAY_SRC="$TRAY_WORK/tray_icon_macos_template.png"
-  rsvg-convert -w 64 -h 64 "$SVG_DIR/tray_icon_macos_template.svg" -o "$TRAY_SRC"
+  TRAY_SRC="$TRAY_WORK/tray_icon_outlined_template.png"
+  rsvg-convert -w 64 -h 64 "$SVG_DIR/tray_icon_outlined_template.svg" -o "$TRAY_SRC"
   magick "$TRAY_SRC" -alpha extract -morphology Dilate Disk:3.5 "$TRAY_WORK/outline_mask.png"
   magick "$TRAY_WORK/outline_mask.png" -background black -alpha shape "$TRAY_WORK/outline.png"
   magick "$TRAY_SRC" -fill white -colorize 100 "$TRAY_WORK/fill.png"
   magick "$TRAY_WORK/outline.png" "$TRAY_WORK/fill.png" -gravity center -composite \
-    -type TrueColorAlpha -define png:color-type=6 "$DRAWABLE/tray_icon_macos.png"
+    -type TrueColorAlpha -define png:color-type=6 "$DRAWABLE/tray_icon_outlined.png"
   rm -rf "$TRAY_WORK"
 fi
 
