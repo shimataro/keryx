@@ -63,6 +63,26 @@ private val DarkColors = darkColorScheme(
 )
 
 /**
+ * Determines whether dark theme colors should be used for the selected theme mode.
+ *
+ * @param themeMode The theme mode, such as `"light"` or `"dark"`; other values follow the system setting.
+ * @param systemDark Whether the system is using dark mode.
+ * @return `true` if dark theme colors should be used, `false` otherwise.
+ */
+fun resolveDarkTheme(themeMode: String, systemDark: Boolean): Boolean = when (themeMode) {
+    "light" -> false
+    "dark" -> true
+    else -> systemDark
+}
+
+/**
+ * The `surface` color for a resolved dark/light flag. Used to pre-fill the native window /
+ * WebView background so a dark-mode launch doesn't flash a light frame before Compose paints
+ * its first (already-dark) frame.
+ */
+fun keryxSurfaceColor(dark: Boolean): Color = if (dark) DarkColors.surface else LightColors.surface
+
+/**
  * Tighter corner radii than M3's default scale — reads less "rounded pill" and more native/dense.
  */
 private val KeryxShapes = Shapes(
@@ -168,8 +188,11 @@ private fun typographyWithFontFamily(family: FontFamily): Typography {
 }
 
 /**
- * App theme. [themeMode] is "light" | "dark" | "system"; "system" consults the
- * OS. [fontScale] scales all text (mapped onto [LocalDensity]).
+ * Applies the Keryx color scheme, shapes, typography, and interaction styling.
+ *
+ * @param themeMode Selects light, dark, or system-based appearance.
+ * @param fontScale Scales text within the range from 0.8 to 1.6.
+ * @param content The composable content displayed within the theme.
  */
 @Composable
 fun KeryxTheme(
@@ -177,11 +200,7 @@ fun KeryxTheme(
     fontScale: Float = 1f,
     content: @Composable () -> Unit,
 ) {
-    val dark = when (themeMode) {
-        "light" -> false
-        "dark" -> true
-        else -> isSystemInDarkTheme()
-    }
+    val dark = resolveDarkTheme(themeMode, isSystemInDarkTheme())
     val density = LocalDensity.current
     val nativeFontFamily = remember { appFontFamily() }
     val typography = remember(nativeFontFamily) {

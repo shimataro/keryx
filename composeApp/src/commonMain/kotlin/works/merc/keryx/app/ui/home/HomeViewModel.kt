@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MAX_WIDTH
 import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.ArticleFilter
+import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.DiscoveredFeedLink
 import works.merc.keryx.app.core.FEED_LIST_PANE_MAX_WIDTH
 import works.merc.keryx.app.core.FEED_LIST_PANE_MIN_WIDTH
@@ -78,6 +79,7 @@ class HomeViewModel(
     private val syncRepository: SyncRepository,
     private val cloudSession: CloudSession,
     private val activityCenter: ActivityCenter,
+    private val clock: Clock,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     // Imperative read/star DB writes run here instead of the UI thread. Single-threaded so writes
     // stay serialized (one writer, as they were on the UI thread) — the JVM SQLite driver opens a
@@ -432,27 +434,49 @@ class HomeViewModel(
         viewModelScope.launch(dbWriteDispatcher) { articleRepository.setStarred(article.id, starred = starred) }
     }
 
+    /**
+     * Marks applicable articles as read for the current filter.
+     *
+     * The starred filter preserves article read states, while other filters optimistically
+     * retain currently visible articles with updated read timestamps until the data refreshes.
+     */
     fun markAllRead() {
         val filter = _filter.value
         // Starred's markAllAsRead is a no-op (you don't "read" the starred view), so mark-all-read
         // must not force the selected article read there; every other scope does mark it read.
         val marksSelectedRead = filter != ArticleFilter.Starred
-        // Optimistic selected/pinned update (no DB read-back): keep only the selected article pinned
-        // (in its resulting read styling) so it stays visible after the list collapses to read.
+        // Optimistic update: pin every currently-visible unread article in its read state so the list
+        // doesn't collapse the instant the user presses "mark all read" under unread-only.
+        // All pins are cleared on filter switch / refresh, so articles disappear naturally later.
         val selected = _selectedArticle.value
-        if (selected != null) {
-            val updatedSelected = if (marksSelectedRead) selected.copy(is_read = 1L) else selected
-            _pinnedReadArticles.value = mapOf(selected.id to updatedSelected)
-            _selectedArticle.value = updatedSelected
+        if (marksSelectedRead) {
+            val nowRead = clock.nowMillis()
+            val visibleUnread = currentArticles().filter { it.is_read == 0L }
+            val pins = _pinnedReadArticles.value.toMutableMap()
+            visibleUnread.forEach { article ->
+                pins[article.id] = article.copy(is_read = 1L, read_at = nowRead)
+            }
+            if (selected != null) {
+                val updatedSelected = selected.copy(is_read = 1L, read_at = nowRead)
+                pins[selected.id] = updatedSelected
+                _selectedArticle.value = updatedSelected
+            }
+            _pinnedReadArticles.value = pins
         } else {
-            _pinnedReadArticles.value = emptyMap()
+            // Starred: markAllAsRead is a no-op, don't alter read state.
+            _pinnedReadArticles.value = if (selected != null) mapOf(selected.id to selected) else emptyMap()
         }
+        val idsToMark = if (filter == ArticleFilter.Search) {
+            _rawSearchResults.value.results
+                .filter { it.article.is_read == 0L }
+                .map { it.article.id }
+        } else {
+            emptyList()
+        }
+
         viewModelScope.launch(dbWriteDispatcher) {
             if (filter == ArticleFilter.Search) {
-                // Read off _rawSearchResults (pre-unread-filter) so "mark all read" targets every
-                // currently-matching unread article regardless of the unread-only toggle's state —
-                // mirroring markAllAsRead()'s non-search behavior, which also ignores that toggle.
-                val ids = _rawSearchResults.value.results.filter { it.article.is_read == 0L }.map { it.article.id }
+                val ids = idsToMark
                 if (ids.isNotEmpty()) {
                     articleRepository.markArticlesAsRead(ids)
                     // Re-run search only after the write lands so the freshly-read state shows up.
@@ -500,12 +524,17 @@ class HomeViewModel(
     // --- Search controls ---
 
     /**
-     * Updates the search query and, on the first non-empty keystroke, switches the article list to
-     * the Search scope. The query is intentionally retained when the user navigates to another scope
-     * so returning to Search re-shows the same results. [selectFilter]'s equality guard keeps later
-     * keystrokes from re-clearing the selection.
+     * Updates the search query and switches to the Search filter when the query is non-empty.
+     *
+     * Clears pinned read-state when the query changes.
+     *
+     * @param query The new search query.
      */
     fun setSearchQuery(query: String) {
+        // Start a fresh browsing context when the text actually changes (already in Search scope).
+        if (query != _searchQuery.value) {
+            _pinnedReadArticles.value = emptyMap()
+        }
         _searchQuery.value = query
         if (query.isNotEmpty() && _filter.value != ArticleFilter.Search) {
             selectFilter(ArticleFilter.Search)

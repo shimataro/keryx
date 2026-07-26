@@ -495,7 +495,7 @@ private fun newMinimalViewModel(
     )
     return HomeViewModel(
         feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
-        syncRepository, cloudSession, activityCenter, Dispatchers.Unconfined, Dispatchers.Unconfined,
+        syncRepository, cloudSession, activityCenter, clock, Dispatchers.Unconfined, Dispatchers.Unconfined,
     )
 }
 
