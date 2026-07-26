@@ -115,7 +115,7 @@ class OneDriveStorageTest {
         assertIs<Result.Ok<Unit>>(r)
         assertEquals(1, history.size)
         assertEquals("PUT", history[0].method.value)
-        assertTrue(history[0].url.toString().contains(":/content") || history[0].url.toString().contains("content"))
+        assertTrue(history[0].url.toString().contains(":/content"))
         assertEquals("etag1", history[0].headers["If-Match"])
         verify()
     }

@@ -138,9 +138,9 @@ state 検証・コード交換）はプロバイダー共通の `OAuthConnectFlo
   client 扱いされず、省略すると Google のトークンエンドポイントが `invalid_request: client_secret is missing`
   で拒否する（詳細は [build.ja.md](build.ja.md)）。
 
-> **macOS の注意（Dropbox のみ）**: `keryx://` は OS（LaunchServices）がパッケージ版 `Keryx.app`（Info.plist の
+> **macOS の注意（Dropbox / OneDrive）**: `keryx://` は OS（LaunchServices）がパッケージ版 `Keryx.app`（Info.plist の
 > `CFBundleURLTypes`）にルーティングするため、`./gradlew :composeApp:run` で起動したインスタンスには
-> リダイレクトが届かず**連携が完了しない**。macOS で Dropbox 連携を行う/確認する場合は
+> リダイレクトが届かず**連携が完了しない**。macOS で Dropbox / OneDrive 連携を行う/確認する場合は
 > `createDistributable` でビルドした `Keryx.app` を起動する（詳細は [setup.ja.md](setup.ja.md)）。
 > Windows/Linux は URL がコマンドライン引数で渡り single-instance 経由で実行中インスタンスへ転送される。
 > Google Drive はループバック受信のため、この制約はなく `gradlew run` でも連携を完了できる。
