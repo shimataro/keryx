@@ -452,7 +452,10 @@ class HomeViewModel(
         if (marksSelectedRead) {
             val nowRead = clock.nowMillis()
             val visibleUnread = currentArticles().filter { it.is_read == 0L }
-            val pins = visibleUnread.associate { it.id to it.copy(is_read = 1L, read_at = nowRead) }.toMutableMap()
+            val pins = _pinnedReadArticles.value.toMutableMap()
+            visibleUnread.forEach { article ->
+                pins[article.id] = article.copy(is_read = 1L, read_at = nowRead)
+            }
             if (selected != null) {
                 val updatedSelected = selected.copy(is_read = 1L, read_at = nowRead)
                 pins[selected.id] = updatedSelected
@@ -463,12 +466,17 @@ class HomeViewModel(
             // Starred: markAllAsRead is a no-op, don't alter read state.
             _pinnedReadArticles.value = if (selected != null) mapOf(selected.id to selected) else emptyMap()
         }
+        val idsToMark = if (filter == ArticleFilter.Search) {
+            _rawSearchResults.value.results
+                .filter { it.article.is_read == 0L }
+                .map { it.article.id }
+        } else {
+            emptyList()
+        }
+
         viewModelScope.launch(dbWriteDispatcher) {
             if (filter == ArticleFilter.Search) {
-                // Read off _rawSearchResults (pre-unread-filter) so "mark all read" targets every
-                // currently-matching unread article regardless of the unread-only toggle's state —
-                // mirroring markAllAsRead()'s non-search behavior, which also ignores that toggle.
-                val ids = _rawSearchResults.value.results.filter { it.article.is_read == 0L }.map { it.article.id }
+                val ids = idsToMark
                 if (ids.isNotEmpty()) {
                     articleRepository.markArticlesAsRead(ids)
                     // Re-run search only after the write lands so the freshly-read state shows up.

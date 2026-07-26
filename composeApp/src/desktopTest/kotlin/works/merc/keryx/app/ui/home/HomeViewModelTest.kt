@@ -531,6 +531,7 @@ class HomeViewModelTest {
         val vm = newViewModel()
         subscribeAll(vm)
         vm.selectFilter(ArticleFilter.All)
+        vm.setUnreadOnly(true)
         testScheduler.advanceUntilIdle()
 
         vm.markAllRead()
@@ -538,8 +539,8 @@ class HomeViewModelTest {
 
         assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
         assertEquals(1L, db.articlesQueries.getById("a2").executeAsOne().is_read)
-        // Both visible unread articles are pinned in their read state (no effect on list when
-        // unread-only is off, but they survive a later switch to unread-only until filter change).
+        // Both visible unread articles are pinned in their read state and remain visible
+        // under unread-only until the filter is switched.
         assertEquals(listOf("a2", "a1"), vm.articles.value.map { it.id })
     }
 
