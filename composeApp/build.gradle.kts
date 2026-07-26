@@ -241,6 +241,7 @@ compose.desktop {
         // macOS: without this, native AWT dialogs (FileDialog) ignore the OS dark mode setting.
         jvmArgs("-Dapple.awt.application.appearance=system")
         jvmArgs("-Dapple.awt.application.name=Keryx")
+        jvmArgs("--enable-native-access=ALL-UNNAMED")
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb, TargetFormat.Rpm)
@@ -307,14 +308,18 @@ fun restoreMacOsShortVersion(infoPlist: java.io.File, version: String) {
     if (patched != content) infoPlist.writeText(patched)
 }
 
-// Silences the sqlite-jdbc restricted-method (System::load) warning when running via JavaExec.
-// The `run` task is registered lazily by the Compose/KMP desktop plugins, so it isn't visible
-// to tasks.named(...) until after project evaluation.
-afterEvaluate {
-    tasks.named<JavaExec>("run") {
-        jvmArgs("--enable-native-access=ALL-UNNAMED")
-    }
+// Silences the sqlite-jdbc restricted-method (System::load) warning on JDK 22+.
+// Covers JavaExec tasks (run) and Test tasks (desktopTest/commonTest).
+tasks.withType<JavaExec>().configureEach {
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+}
+tasks.withType<Test>().configureEach {
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+}
 
+// The `run` task is registered lazily by the Compose/KMP desktop plugins, so other
+// run-specific configuration is deferred until after project evaluation.
+afterEvaluate {
     // 0.x only: jpackage would not accept the real version, so it is written back here. This
     // breaks the ad-hoc bundle seal, which is acceptable while the app is effectively unsigned
     // (see docs/build.md). A major version of 1 or higher needs no post-processing at all and
