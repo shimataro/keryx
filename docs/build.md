@@ -70,7 +70,7 @@ The flow uses PKCE (`code_verifier`), but **a client secret is also required sep
 ### OneDrive
 
 1. Register an app in the [Azure Portal](https://portal.azure.com) → "Microsoft Entra ID" → "App registrations" → "New registration"
-   - "Supported account types": choose "Accounts in any organizational directory and personal Microsoft accounts" (this maps to the `common` tenant the app uses).
+   - "Supported account types": choose "Personal Microsoft accounts only".
 2. In "Authentication" → "Add a platform" → **"Mobile and desktop applications"**:
    - Under "Custom redirect URIs" add `keryx://oauth2/callback`.
    - Set "Allow public client flows" to **Yes** (OneDrive is a PKCE public client — no client secret).
