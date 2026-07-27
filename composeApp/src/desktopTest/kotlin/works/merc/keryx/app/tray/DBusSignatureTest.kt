@@ -177,6 +177,24 @@ class DBusSignatureTest {
     }
 
     @Test
+    fun `dbusmenu declares ItemsPropertiesUpdated with the updated and removed payloads`() {
+        // A wildcard type argument marshals to the malformed `a` without throwing (dbus-java's
+        // Marshalling has no WildcardType branch), so pin the element signatures explicitly.
+        val xml = introspect(dbusMenu())
+        assertContains(xml, """<signal name="ItemsPropertiesUpdated">""")
+
+        val signal = xml
+            .substringAfter("""<signal name="ItemsPropertiesUpdated">""")
+            .substringBefore("</signal>")
+
+        assertEquals(
+            listOf("a(ia{sv})", "a(ias)"),
+            Regex("""type="([^"]*)" direction="out"""").findAll(signal).map { it.groupValues[1] }.toList(),
+            "ItemsPropertiesUpdated(a(ia{sv}), a(ias))",
+        )
+    }
+
+    @Test
     fun `dbusmenu properties use the types the spec requires`() {
         val properties = dbusMenu().GetAll(DBUSMENU_INTERFACE)
 
