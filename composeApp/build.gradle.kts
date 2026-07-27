@@ -281,6 +281,7 @@ compose.desktop {
 
             macOS {
                 bundleID = "works.merc.keryx"
+                appCategory = "public.app-category.news"
                 iconFile.set(project.file("icons/keryx.icns"))
                 // Overridden only for macOS — deb/rpm/msi accept a 0.x version, jpackage's macOS
                 // path does not. See macOsPackageVersion above.
@@ -312,6 +313,7 @@ compose.desktop {
             }
             linux {
                 iconFile.set(project.file("icons/keryx.png"))
+                menuGroup = "Network;News;Feed;"
                 // The keryx:// scheme is not registered here. jpackage only emits a .desktop file
                 // when given a shortcut or a file association, and its template's Exec line has no
                 // %u — so the URI would never reach the process. LinuxUriSchemeRegistrar writes a
