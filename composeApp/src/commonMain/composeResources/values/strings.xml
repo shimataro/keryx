@@ -230,6 +230,7 @@
     <string name="menu_view_unread_only">未読のみ表示</string>
     <string name="menu_view_toggle_sort">表示順を切り替え</string>
     <string name="menu_view_mark_all_read">すべて既読にする</string>
+    <string name="menu_view_show_menu_bar">メニューバーを表示</string>
     <string name="menu_article">記事</string>
     <string name="menu_article_toggle_read">既読/未読を切り替え</string>
     <string name="menu_article_toggle_star">スター</string>

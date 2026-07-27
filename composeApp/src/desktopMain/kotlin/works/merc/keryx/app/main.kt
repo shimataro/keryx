@@ -82,9 +82,10 @@ import works.merc.keryx.app.resources.app_icon
 import works.merc.keryx.app.resources.notification_app_translocated
 import works.merc.keryx.app.resources.tray_icon
 import works.merc.keryx.app.resources.update_available_notification
+import works.merc.keryx.app.appmenu.AppMenuBarHost
+import works.merc.keryx.app.appmenu.AppMenuConnection
 import works.merc.keryx.app.tray.KeryxTray
 import works.merc.keryx.app.tray.SniConnection
-import works.merc.keryx.app.ui.AppMenuBar
 import works.merc.keryx.app.ui.home.HomeViewModel
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
@@ -260,6 +261,18 @@ fun main(args: Array<String>) {
         Runtime.getRuntime().addShutdownHook(Thread { runCatching { sniConnection.close() } })
     }
 
+    // Linux/KDE Global Menu: if the com.canonical.AppMenu.Registrar is present, export the app menu
+    // over D-Bus so it can appear in the top-panel "Application Menu Bar" widget or titlebar button.
+    // null (every non-KDE environment) leaves the in-window menu bar behaving exactly as before.
+    // Independent of the tray (own connection, own lifecycle).
+    val appMenuConnection = if (isLinux) AppMenuConnection.tryCreate() else null
+    val resolvedAppMenuXid = java.util.concurrent.atomic.AtomicReference<Long?>(null)
+    if (appMenuConnection != null) {
+        Runtime.getRuntime().addShutdownHook(
+            Thread { runCatching { appMenuConnection.close(resolvedAppMenuXid.get()) } },
+        )
+    }
+
     application {
         var windowVisible by remember { mutableStateOf(!saved.startMinimized) }
         val windowState = remember {
@@ -394,9 +407,16 @@ fun main(args: Array<String>) {
                     .collect { dark -> withContext(Dispatchers.Swing) { updateLookAndFeel(dark) } }
             }
 
-            // Application menu bar (macOS: system menu bar; Windows/Linux: in-window). Closing the
-            // window hides to the tray, matching onCloseRequest.
-            AppMenuBar(onCloseWindow = { windowVisible = false }, onQuit = ::exitApplication)
+            // Application menu bar (macOS: system menu bar; Windows/Linux: in-window). On KDE with a
+            // Global Menu registrar, AppMenuBarHost also exports it over D-Bus and hides the in-window
+            // bar once registered. Closing the window hides to the tray, matching onCloseRequest.
+            AppMenuBarHost(
+                appMenuConnection = appMenuConnection,
+                windowVisible = windowVisible,
+                onCloseWindow = { windowVisible = false },
+                onQuit = ::exitApplication,
+                resolvedXid = resolvedAppMenuXid,
+            )
 
             // A second launch signals this instance (via SingleInstanceCoordinator's
             // loopback socket) instead of opening its own window. Bring this window
