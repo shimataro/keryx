@@ -28,7 +28,7 @@ private var installedDark: Boolean? = null
  * Corner radii are deliberately not overridden: FlatLaf's own `Button.arc = 6` already matches
  * this app's `KeryxShapes.small`.
  */
-private fun keryxFlatLafDefaults(dark: Boolean): Map<String, String> = mapOf(
+internal fun keryxFlatLafDefaults(dark: Boolean): Map<String, String> = mapOf(
     "@accentColor" to keryxAccentColor(dark).toHexString(),
     "@background" to keryxSurfaceColor(dark).toHexString(),
 )
@@ -50,16 +50,35 @@ internal fun installLookAndFeel(dark: Boolean) {
     if (!isLinux) {
         // Without a system L&F, javax.swing.JButton (KeryxAlertDialog's native button row)
         // renders with Swing's generic cross-platform look instead of the OS-native one.
-        runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
-            .onFailure { Log.warn(LOG_TAG, "Could not set the system look and feel", it) }
+        installSystemLookAndFeel()
+        logInstalledLookAndFeel()
         return
     }
-    runCatching { setupFlatLaf(dark) }
-        .onFailure {
-            Log.warn(LOG_TAG, "Could not set up FlatLaf; falling back to the system look and feel", it)
-            runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
-                .onFailure { fallback -> Log.warn(LOG_TAG, "Could not set the system look and feel", fallback) }
-        }
+    // setupFlatLaf reports failure by returning false, so this must be checked rather than
+    // relying on an exception — FlatLaf.setup() catches its own and never throws.
+    val installed = runCatching { setupFlatLaf(dark) }
+        .onFailure { Log.warn(LOG_TAG, "Could not set up FlatLaf", it) }
+        .getOrDefault(false)
+    if (!installed) {
+        Log.warn(LOG_TAG, "FlatLaf did not install; falling back to the system look and feel")
+        installSystemLookAndFeel()
+    }
+    logInstalledLookAndFeel()
+}
+
+private fun installSystemLookAndFeel() {
+    runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
+        .onFailure { Log.warn(LOG_TAG, "Could not set the system look and feel", it) }
+}
+
+/**
+ * Records which Look & Feel is actually in force. Kept unconditional rather than behind a debug
+ * flag: it only fires when the L&F changes, and a silent fall back to Swing's cross-platform
+ * default is otherwise invisible — the app just quietly looks like a 1990s Java application.
+ */
+private fun logInstalledLookAndFeel() {
+    val laf = UIManager.getLookAndFeel()
+    Log.info(LOG_TAG, "Look and feel in use: ${laf?.name} (${laf?.javaClass?.name})")
 }
 
 /**
@@ -71,16 +90,27 @@ internal fun installLookAndFeel(dark: Boolean) {
  */
 internal fun updateLookAndFeel(dark: Boolean) {
     if (!isLinux || installedDark == dark) return
-    runCatching {
-        setupFlatLaf(dark)
-        FlatLaf.updateUI()
-    }.onFailure { Log.warn(LOG_TAG, "Could not update the look and feel for a theme change", it) }
+    val updated = runCatching {
+        setupFlatLaf(dark).also { if (it) FlatLaf.updateUI() }
+    }
+        .onFailure { Log.warn(LOG_TAG, "Could not update the look and feel for a theme change", it) }
+        .getOrDefault(false)
+    if (!updated) return
+    logInstalledLookAndFeel()
 }
 
-private fun setupFlatLaf(dark: Boolean) {
+/**
+ * @return whether FlatLaf actually became the installed Look & Feel. [installedDark] is only
+ * recorded on success, so a failed attempt leaves [updateLookAndFeel] free to retry on the next
+ * theme change rather than latching the app to whatever it fell back to.
+ */
+private fun setupFlatLaf(dark: Boolean): Boolean {
     // Extra defaults are only read while a look and feel is being set up, so they have to be
     // handed over before each setup() call rather than once at startup.
     FlatLaf.setGlobalExtraDefaults(keryxFlatLafDefaults(dark))
-    if (dark) FlatDarkLaf.setup() else FlatLightLaf.setup()
-    installedDark = dark
+    // setup() swallows any failure and reports it by returning false, so the result carries the
+    // only signal there is. FlatLaf's own explanation goes to java.util.logging, not here.
+    val ok = if (dark) FlatDarkLaf.setup() else FlatLightLaf.setup()
+    if (ok) installedDark = dark
+    return ok
 }

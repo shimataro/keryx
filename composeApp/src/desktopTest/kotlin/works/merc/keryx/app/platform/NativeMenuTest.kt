@@ -1,7 +1,11 @@
 package works.merc.keryx.app.platform
 
+import java.awt.Color
 import javax.swing.JCheckBoxMenuItem
 import javax.swing.JMenu
+import javax.swing.SwingUtilities
+import javax.swing.UIManager
+import javax.swing.plaf.ColorUIResource
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -79,6 +83,27 @@ class NativeMenuTest {
         val second = assertIs<JCheckBoxMenuItem>(handle.popupMenu.getComponent(1))
         assertTrue(first.isSelected)
         assertFalse(second.isSelected)
+    }
+
+    /**
+     * The popup belongs to no window's component tree, so `FlatLaf.updateUI()` cannot reach it —
+     * re-applying the UI at show time is the only thing keeping it on the current Look & Feel.
+     */
+    @Test
+    fun reapplyingTheUiPicksUpALookAndFeelChange() {
+        val key = "PopupMenu.background"
+        val original = UIManager.get(key)
+        try {
+            UIManager.put(key, ColorUIResource(Color(1, 2, 3)))
+            val handle = handleOf(NativeMenuItem("Refresh") {})
+            UIManager.put(key, ColorUIResource(Color(4, 5, 6)))
+
+            SwingUtilities.updateComponentTreeUI(handle.popupMenu)
+
+            assertEquals(Color(4, 5, 6).rgb, handle.popupMenu.background.rgb)
+        } finally {
+            UIManager.put(key, original)
+        }
     }
 
     @Test

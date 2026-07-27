@@ -24,7 +24,7 @@ import javax.swing.JMenu
 import javax.swing.JMenuItem
 import javax.swing.JPopupMenu
 import javax.swing.SwingUtilities
-import javax.swing.Timer
+import javax.swing.UIManager
 
 /**
  * The native menu widgets backing one [nativeContextMenu] call site, hiding which toolkit drew
@@ -197,8 +197,16 @@ internal class SwingPopupHandle(
         // asked for it. AwtPopupHandle needs neither — its menu is a native NSMenu/Win32 menu
         // with its own modal event loop — so it stays inline exactly as it always was.
         SwingUtilities.invokeLater {
+            debugLogPopup(popupMenu, invoker, x, y, phase = "before re-apply")
+            // Re-apply the current Look & Feel. This popup belongs to no window's component tree,
+            // so FlatLaf.updateUI() — which walks Window.getWindows() — structurally cannot reach
+            // it, and it would otherwise keep whatever L&F was in force when it was built. That
+            // matters both for an in-app theme change and for the case where the L&F is installed
+            // later than the popup. Submenus come along: updateComponentTreeUI recurses through
+            // JMenu.getMenuComponents(), and JMenu.updateUI() re-applies its own popup's UI.
+            SwingUtilities.updateComponentTreeUI(popupMenu)
             popupMenu.show(invoker, x, y)
-            debugLogPopup(popupMenu, invoker, x, y)
+            debugLogPopup(popupMenu, invoker, x, y, phase = "after show")
         }
     }
 }
@@ -209,44 +217,39 @@ internal class SwingPopupHandle(
  * interop limitation that makes every dialog in this app a separate window (see `KeryxDialogs`).
  */
 private fun forceHeavyweight(popup: JPopupMenu) {
-    popup.isLightWeightPopupEnabled = lightweightPopups
+    // Only load-bearing on the fallback path. Under FlatLaf this is already guaranteed: with
+    // Popup.dropShadowPainted on (its default), FlatPopupFactory forces heavy weight for every
+    // popup on Linux, overriding this hint either way.
+    popup.isLightWeightPopupEnabled = false
 }
 
 // ---------------------------------------------------------------------------
-// TEMPORARY: switches left over from diagnosing "the context menu does not appear" on Linux.
-// The empty-menu cause is fixed and covered by NativeMenuTest; these two remain only until the
-// heavyweight popup's z-order against the article WebView has been confirmed on a real Linux
-// desktop. Remove them, and the debugLogPopup calls, once that check passes.
+// TEMPORARY: diagnostics for the Linux context menu, enabled with -Pkeryx.debug.menu=true.
+// Remove once the menu is confirmed rendering with FlatLaf on a real Linux desktop.
 // ---------------------------------------------------------------------------
 
-/** `-Pkeryx.menu.lightweight=true` undoes [forceHeavyweight], for isolating popup-window issues. */
-private val lightweightPopups: Boolean = System.getProperty("keryx.menu.lightweight") == "true"
-
-/** `-Pkeryx.debug.menu=true` logs what the popup did after it was asked to show. */
+/** `-Pkeryx.debug.menu=true` reports which Look & Feel the popup is actually being drawn with. */
 private val debugMenu: Boolean = System.getProperty("keryx.debug.menu") == "true"
 
 private const val MENU_LOG_TAG = "NativeMenu"
 
 /**
- * Reports whether the popup actually made it onto the screen, right after the show and again
- * once the gesture is fully over — which distinguishes "never mapped" from "mapped then closed
- * again" from "mapped off-screen".
+ * Reports what the popup is and how it is styled. Logged both before the Look & Feel is re-applied
+ * and after the popup is shown: if the L&F is FlatLaf at startup but the popup reports Metal here,
+ * something replaced it later; if both say Metal, it never installed in the first place.
  */
-private fun debugLogPopup(popup: JPopupMenu, invoker: Component, x: Int, y: Int) {
+private fun debugLogPopup(popup: JPopupMenu, invoker: Component, x: Int, y: Int, phase: String) {
     if (!debugMenu) return
-    fun describe(phase: String) {
-        val location = runCatching { popup.locationOnScreen.let { "${it.x},${it.y}" } }
-            .getOrElse { "n/a (${it::class.simpleName})" }
-        Log.info(
-            MENU_LOG_TAG,
-            "$phase: visible=${popup.isVisible} showing=${popup.isShowing} " +
-                "size=${popup.size.width}x${popup.size.height} onScreen=$location " +
-                "items=${popup.componentCount} lightweight=${popup.isLightWeightPopupEnabled} " +
-                "requested=$x,$y invoker=${invoker.width}x${invoker.height}",
-        )
-    }
-    describe("immediately after show")
-    Timer(300) { describe("300ms after show") }.apply { isRepeats = false }.start()
+    val location = runCatching { popup.locationOnScreen.let { "${it.x},${it.y}" } }
+        .getOrElse { "n/a (${it::class.simpleName})" }
+    Log.info(
+        MENU_LOG_TAG,
+        "$phase: laf=${UIManager.getLookAndFeel()?.name} popupUi=${popup.ui?.javaClass?.simpleName} " +
+            "background=${popup.background} visible=${popup.isVisible} showing=${popup.isShowing} " +
+            "size=${popup.size.width}x${popup.size.height} onScreen=$location " +
+            "items=${popup.componentCount} lightweight=${popup.isLightWeightPopupEnabled} " +
+            "requested=$x,$y invoker=${invoker.width}x${invoker.height}",
+    )
 }
 
 /**
