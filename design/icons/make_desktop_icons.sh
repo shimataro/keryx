@@ -74,13 +74,16 @@ fi
 
 # --- Tray icons (Compose resources) ---
 
-# Full-color glyph, used for the window's own title-bar/taskbar icon (main.kt).
-# Not used by the tray on any platform - see tray_icon_outlined.png below.
+# Full-color glyph. Used for the window's own title-bar/taskbar icon, and as the tray icon
+# wherever the outlined variant below doesn't work: the Windows notification area (full-color
+# brand icons are the convention there, and at 16px the outline washes out on a light taskbar)
+# and the Linux AWT fallback (which paints an opaque white box behind the icon).
 rsvg-convert -w 64 -h 64 "$SVG_DIR/tray_icon.svg" -o "$DRAWABLE/tray_icon.png"
 
-# Tray icon for every platform: derived from the shared black silhouette by adding
-# a white fill + black outline, so a single asset stays legible on both light and
-# dark menu bars / panels / taskbars without any OS theme detection. (AWT's
+# Tray icon for the macOS menu bar and the Linux StatusNotifierItem panel - the two paths that
+# composite it with real alpha at 22px or more. Derived from the shared black silhouette by
+# adding a white fill + black outline, so a single asset stays legible on both light and
+# dark menu bars / panels without any OS theme detection. (AWT's
 # apple.awt.enableTemplateImages was tried first but doesn't reliably reflect the
 # real OS appearance on this JDK - see plan history.) Requires ImageMagick (magick).
 if command -v magick >/dev/null; then

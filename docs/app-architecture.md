@@ -91,6 +91,10 @@ well-known name `org.kde.StatusNotifierItem-<pid>-1`):
   A label change bumps a revision and emits `LayoutUpdated`; `AboutToShow` compares the desired labels
   against what `GetLayout` last served, so a dropped signal still heals.
 
+The icon asset follows the same split as the branch: the outlined glyph (`tray_icon_outlined.png`) on the two
+paths that composite it with real alpha at 22px or more, and the full-colour one (`tray_icon.png`) on the Windows
+notification area and the Linux AWT fallback, where the icon is small, never tinted, or drawn over an opaque box.
+
 Neither exported object holds the connection — signal emission is injected as a callback — so both are
 unit-testable without a bus. Desktop notifications go through `org.freedesktop.Notifications` on the same
 connection (`LinuxNotifier`), replacing the AWT balloon; note its `image-data` hint wants **RGBA**, not

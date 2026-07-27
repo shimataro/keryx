@@ -17,6 +17,7 @@ import works.merc.keryx.app.isMacOs
 import works.merc.keryx.app.rememberDrawableImage
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.tray_hide
+import works.merc.keryx.app.resources.tray_icon
 import works.merc.keryx.app.resources.tray_icon_outlined
 import works.merc.keryx.app.resources.tray_quit
 import works.merc.keryx.app.resources.tray_show
@@ -30,6 +31,9 @@ import java.awt.image.BufferedImage
  * - Linux uses [LinuxTray] whenever [sniConnection] is non-null, because AWT's X11 tray cannot
  *   draw a transparent icon (see the KDoc there).
  * - Everything else - and Linux without a StatusNotifierWatcher - uses Compose's own `Tray()`.
+ *
+ * The icon asset follows the same split: the outlined glyph where the icon is composited with
+ * real alpha at a reasonable size (macOS, Linux SNI), the full-colour one everywhere else.
  */
 @Composable
 internal fun ApplicationScope.KeryxTray(
@@ -42,10 +46,18 @@ internal fun ApplicationScope.KeryxTray(
     newArticleNotifications: SharedFlow<String>,
 ) {
     val trayState = rememberTrayState()
-    // The tray uses the outlined (white glyph + black halo) variant on every OS: it
-    // stays legible on a light or dark menu bar / panel / taskbar without any theme
-    // detection. The window's own title-bar/taskbar icon keeps the full-color glyph.
-    val trayBaseImage = rememberDrawableImage(Res.drawable.tray_icon_outlined)
+    // The outlined (white glyph + black halo) variant is only used where the icon is
+    // composited with real alpha at >= 22px: the macOS menu bar and the Linux SNI panel.
+    // There it stays legible on a light or dark background without any theme detection.
+    //
+    // Windows' notification area shows full-colour brand icons by convention and never tints
+    // them, and at its 100%-DPI size of 16px the halo antialiases to grey while the white fill
+    // disappears on a light taskbar. The Linux AWT fallback needs the full-colour glyph for a
+    // different reason: XTrayIconPeer paints an opaque (white) box behind the icon, so a white
+    // glyph is invisible on it.
+    val trayIconResource =
+        if (isMacOs || sniConnection != null) Res.drawable.tray_icon_outlined else Res.drawable.tray_icon
+    val trayBaseImage = rememberDrawableImage(trayIconResource)
 
     val tooltip = if (unreadCount > 0) "Keryx ($unreadCount)" else "Keryx"
     val showLabel = stringResource(Res.string.tray_show)

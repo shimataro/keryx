@@ -129,9 +129,15 @@ Dock/タスクバーのアイコン（`Taskbar` / Cocoa activation policy のネ
   こと。
 - 未読 > 0 の状態で hide/restore を繰り返してもバッジが保たれること。
 - Windows/Linux でタスクバーのアイコン/未読オーバーレイに退行が無いこと。
-- （Windows/Linux）トレイアイコンが macOS と同じ白グリフ + 黒フチ（`tray_icon_outlined.png`、全プラット
-  フォーム共通）で表示され、暗いパネル/タスクバーでも判別できること。未読 > 0 で赤ドットが乗ること。
-  Linux ではホストが居れば D-Bus StatusNotifierItem 経路を通る。AWT の記述はフォールバック時のみ該当。
+- トレイアイコンのアセットは描画のされ方で決まる。macOS と SNI ホストのある Linux は白グリフ + 黒フチ
+  （`tray_icon_outlined.png`。透過が効き 22px 以上で描かれる前提）。Windows の通知領域と Linux の AWT
+  フォールバックはフルカラー（`tray_icon.png`。Windows は 16px でティントもせず、AWT フォールバックは
+  アイコンの背後に不透明な白い箱を描くため）。未読 > 0 でどちらにも赤ドットが乗ること。各プラット
+  フォームで確認する:
+  - （Windows）**ライト**タスクバーでもダークでもはっきり読めること。outlined が白飛びするのは
+    ライトテーマなので、そちらが確認の要。
+  - （Linux・SNI ホスト無し）AWT が描く白い箱の中でフルカラーのグリフが判別できること。
+  - （macOS / SNI ホストのある Linux）従来どおり outlined で、明暗どちらの背景でも判別できること。
 
 Linux の SNI トレイは自動テスト不可のため、KDE Plasma セッションで以下を確認する（間違えやすい順）。
 

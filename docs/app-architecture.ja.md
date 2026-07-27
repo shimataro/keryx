@@ -104,6 +104,10 @@ SNI ならパネルへ生の ARGB ピクセルを渡せる。
   ラベル変更時に revision を上げて `LayoutUpdated` を発火し、`AboutToShow` は現在のラベルと
   `GetLayout` が最後に返した内容を比較するため、シグナルが落ちても復旧する。
 
+アイコンのアセットも同じ分岐に従う。透過が効いて 22px 以上で合成される 2 経路は outlined
+（`tray_icon_outlined.png`）、Windows の通知領域と Linux の AWT フォールバックはフルカラー
+（`tray_icon.png`）。後者はアイコンが小さく、ティントもされず、不透明な箱の上に描かれるため。
+
 どちらの export オブジェクトも接続を保持せず、シグナル発火はコールバックとして注入するため、バス無しで
 単体テストできる。デスクトップ通知は同じ接続上の `org.freedesktop.Notifications`（`LinuxNotifier`）で
 AWT のバルーンを置き換える。その `image-data` ヒントは SNI ピクスマップのビッグエンディアン ARGB32 とは

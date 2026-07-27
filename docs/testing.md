@@ -65,10 +65,15 @@ Dock/taskbar icons (`Taskbar` / Cocoa activation policy native path) cannot be a
 - (macOS) On restart-while-running (double-launch activation), Dock icon remains the brand icon.
 - Repeated hide/restore with unread > 0 preserves the badge.
 - No regression on Windows/Linux taskbar icon/unread overlay.
-- (Windows/Linux) The tray icon is the same white glyph + black outline as macOS (`tray_icon_outlined.png`, shared by
-  all platforms) and stays distinguishable on a dark panel / taskbar. With unread > 0 the red dot is drawn on it.
-  On Linux this goes through the D-Bus StatusNotifierItem path whenever a host is running; the AWT description
-  applies only to the fallback.
+- The tray icon asset depends on how the platform draws it. macOS and Linux-with-an-SNI-host get the white glyph +
+  black outline (`tray_icon_outlined.png`), which needs real alpha and at least ~22px. The Windows notification area
+  and the Linux AWT fallback get the full-colour glyph (`tray_icon.png`), because Windows renders at 16px and never
+  tints tray icons, and the AWT fallback paints an opaque white box behind the icon. With unread > 0 the red dot is
+  drawn on either. Confirm each on its own platform:
+  - (Windows) The icon reads clearly on a **light** taskbar as well as a dark one — the light theme is where an
+    outlined glyph would wash out, so it is the case worth checking.
+  - (Linux, no SNI host) The full-colour glyph is legible inside the white box AWT draws around it.
+  - (macOS / Linux with an SNI host) Still the outlined glyph, legible on both light and dark backgrounds.
 
 The Linux SNI tray cannot be auto-tested at all, so on a KDE Plasma session confirm (roughly in order of how
 likely each is to be wrong):

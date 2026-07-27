@@ -101,7 +101,9 @@ Only the platform matching the execution platform can be built (cross-compilatio
 ```
 
 App icons are at `composeApp/icons/{keryx.icns, keryx.ico, keryx.png}`. Tray icons are at
-`composeApp/src/commonMain/composeResources/drawable/tray_icon*.png`. These are generated from shared artwork via
+`composeApp/src/commonMain/composeResources/drawable/tray_icon*.png` — `tray_icon_outlined.png` (white glyph +
+black outline) for the macOS menu bar and the Linux SNI panel, `tray_icon.png` (full colour) for the Windows
+notification area, the Linux AWT fallback and the window's own title-bar icon. These are generated from shared artwork via
 `design/icons/make_desktop_icons.sh` (it is preferable to commit generated files).
 
 > **macOS Dropbox linking confirmation**: The custom URI `keryx://` is routed by macOS LaunchServices to the packaged app, so `./gradlew :composeApp:run` cannot complete the link. To verify linking behavior, build with `createDistributable` and launch `Keryx.app` (see [setup.md](setup.md) "Common Issues" for details).
