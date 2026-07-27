@@ -3,10 +3,12 @@ package works.merc.keryx.app
 import java.io.File
 import java.io.IOException
 import kotlin.io.path.createTempDirectory
+import kotlin.system.measureTimeMillis
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -239,5 +241,20 @@ class LinuxUriSchemeRegistrarTest {
         val merged = mimeAppsList.readText()
         assertTrue(merged.contains("text/html=firefox.desktop\n"), merged)
         assertTrue(merged.contains("x-scheme-handler/keryx=keryx-url-handler.desktop\n"), merged)
+    }
+
+    // --- runProcessWithTimeout ------------------------------------------------------------
+
+    @Test
+    fun runProcessWithTimeoutAbortsAHungProcess() {
+        val elapsed = measureTimeMillis {
+            assertFailsWith<IOException> { runProcessWithTimeout(listOf("sleep", "5"), timeoutMillis = 200) }
+        }
+        assertTrue(elapsed < 4_000, "expected the timeout to abort quickly, took ${elapsed}ms")
+    }
+
+    @Test
+    fun runProcessWithTimeoutReturnsNormallyForAFastProcess() {
+        runProcessWithTimeout(listOf("echo", "hi"), timeoutMillis = 5_000)
     }
 }

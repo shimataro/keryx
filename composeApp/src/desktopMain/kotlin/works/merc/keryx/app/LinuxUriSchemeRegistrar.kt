@@ -3,9 +3,12 @@ package works.merc.keryx.app
 import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.OAUTH_CUSTOM_URI_REDIRECT
+import works.merc.keryx.app.core.UPDATE_DESKTOP_DATABASE_TIMEOUT_MS
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.TimeUnit
 
 private const val LOG_TAG = "UriScheme"
 
@@ -29,6 +32,15 @@ internal fun xdgDir(envName: String, homeRelativeFallback: String): File =
     System.getenv(envName)?.takeIf { it.isNotBlank() }?.let { File(it) }
         ?: File(System.getProperty("user.home"), homeRelativeFallback)
 
+/** Runs [command], aborting and throwing [IOException] if it outlives [timeoutMillis]. */
+internal fun runProcessWithTimeout(command: List<String>, timeoutMillis: Long) {
+    val proc = ProcessBuilder(command).start()
+    if (!proc.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)) {
+        proc.destroyForcibly()
+        throw IOException("${command.first()} timed out")
+    }
+}
+
 /**
  * Teaches the desktop environment to route `keryx://` URIs to the app, which is what makes the
  * OAuth callback reach [main] as an argv entry on Linux (macOS uses Info.plist, Windows the
@@ -48,7 +60,7 @@ internal class LinuxUriSchemeRegistrar(
     private val applicationsDir: File = xdgDir("XDG_DATA_HOME", ".local/share").resolve("applications"),
     private val mimeAppsList: File = xdgDir("XDG_CONFIG_HOME", ".config").resolve("mimeapps.list"),
     private val refreshDesktopDatabase: (File) -> Unit = { dir ->
-        ProcessBuilder("update-desktop-database", dir.path).start().waitFor()
+        runProcessWithTimeout(listOf("update-desktop-database", dir.path), UPDATE_DESKTOP_DATABASE_TIMEOUT_MS)
     },
 ) {
     /** Returns true when the handler is registered; already being up to date counts as success. */
