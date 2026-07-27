@@ -19,6 +19,28 @@ private const val LOG_TAG = "DesktopLookAndFeel"
  */
 private var installedDark: Boolean? = null
 
+/** Whether [updateLookAndFeel] has applied a Look & Feel since the process started. */
+private var appliedSinceStartup = false
+
+/**
+ * Whether [updateLookAndFeel] should go through with applying the Look & Feel.
+ *
+ * The first application after startup always goes through, even when [installLookAndFeel] already
+ * installed this very theme. Installing a Look & Feel before the UI exists turns out not to be
+ * enough on Linux: unless a `FlatLaf.updateUI()` pass runs once the components are up, they render
+ * with Swing's cross-platform default instead. That was observable as "restarting on a fixed light
+ * or dark theme looks like a 1990s Java app, but following the system theme looks right" — the
+ * system case is simply the one where the startup guess (light) differed from the resolved theme,
+ * so the update was not skipped and repaired everything on its way through.
+ *
+ * After that, only real theme changes are worth the work.
+ */
+internal fun shouldApplyLookAndFeel(
+    installedDark: Boolean?,
+    appliedSinceStartup: Boolean,
+    dark: Boolean,
+): Boolean = !appliedSinceStartup || installedDark != dark
+
 /**
  * Keryx-specific FlatLaf defaults, applied on every setup. Only two keys are needed: FlatLaf
  * derives the rest from them — `@accentColor` drives menu-item selection
@@ -82,20 +104,25 @@ private fun logInstalledLookAndFeel() {
 }
 
 /**
- * Switches the installed Look & Feel between light and dark to follow an in-app theme change, and
- * restyles every already-open window (`FlatLaf.updateUI` walks `Window.getWindows()`, so the
- * separate `DialogWindow`s this app uses for dialogs are covered too).
+ * Applies the Look & Feel for the resolved theme and restyles every already-open window
+ * (`FlatLaf.updateUI` walks `Window.getWindows()`, so the separate `DialogWindow`s this app uses
+ * for dialogs are covered too).
+ *
+ * Called once when the window first composes and again on every in-app theme change. The first
+ * call is what makes the UI actually render with FlatLaf rather than Swing's default — see
+ * [shouldApplyLookAndFeel] — so it runs even when the theme has not changed.
  *
  * No-op off Linux, where the system L&F handles its own appearance. Must be called on the EDT.
  */
 internal fun updateLookAndFeel(dark: Boolean) {
-    if (!isLinux || installedDark == dark) return
+    if (!isLinux || !shouldApplyLookAndFeel(installedDark, appliedSinceStartup, dark)) return
     val updated = runCatching {
         setupFlatLaf(dark).also { if (it) FlatLaf.updateUI() }
     }
         .onFailure { Log.warn(LOG_TAG, "Could not update the look and feel for a theme change", it) }
         .getOrDefault(false)
     if (!updated) return
+    appliedSinceStartup = true
     logInstalledLookAndFeel()
 }
 

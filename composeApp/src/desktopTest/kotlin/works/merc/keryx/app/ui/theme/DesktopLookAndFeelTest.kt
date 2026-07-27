@@ -8,6 +8,7 @@ import javax.swing.UIManager
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -48,6 +49,34 @@ class DesktopLookAndFeelTest {
 
         assertTrue(FlatLightLaf.setup(), "FlatLightLaf.setup() returned false with the Keryx defaults")
         assertTrue(UIManager.getLookAndFeel() is FlatLightLaf, "FlatLightLaf was not the installed look and feel")
+    }
+
+    /**
+     * The case the startup repair exists for: the theme resolved at startup and the first value
+     * the window reports agree, so a plain "did it change?" check would skip the only pass that
+     * makes the components render with FlatLaf at all.
+     */
+    @Test
+    fun firstApplicationAfterStartupGoesThroughEvenWhenTheThemeMatches() {
+        assertTrue(shouldApplyLookAndFeel(installedDark = true, appliedSinceStartup = false, dark = true))
+        assertTrue(shouldApplyLookAndFeel(installedDark = false, appliedSinceStartup = false, dark = false))
+    }
+
+    @Test
+    fun firstApplicationGoesThroughWhenNothingWasInstalledAtStartup() {
+        assertTrue(shouldApplyLookAndFeel(installedDark = null, appliedSinceStartup = false, dark = true))
+    }
+
+    @Test
+    fun laterApplicationsAreSkippedWhenTheThemeIsUnchanged() {
+        assertFalse(shouldApplyLookAndFeel(installedDark = true, appliedSinceStartup = true, dark = true))
+        assertFalse(shouldApplyLookAndFeel(installedDark = false, appliedSinceStartup = true, dark = false))
+    }
+
+    @Test
+    fun laterApplicationsGoThroughWhenTheThemeChanges() {
+        assertTrue(shouldApplyLookAndFeel(installedDark = false, appliedSinceStartup = true, dark = true))
+        assertTrue(shouldApplyLookAndFeel(installedDark = true, appliedSinceStartup = true, dark = false))
     }
 
     @Test
