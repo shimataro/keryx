@@ -65,4 +65,37 @@ class AppFontTest {
         assertNull(pangoFontFamilyName("11"))
         assertNull(pangoFontFamilyName("Bold 11"))
     }
+
+    @Test
+    fun stripsStretchKeywordsBeforeSize() {
+        assertEquals("Noto Sans", pangoFontFamilyName("Noto Sans Semi-Expanded 10"))
+        assertEquals("Ubuntu", pangoFontFamilyName("Ubuntu Ultra-Condensed"))
+    }
+
+    @Test
+    fun stripsVariantKeywordsBeforeSize() {
+        assertEquals("Cantarell", pangoFontFamilyName("Cantarell Small-Caps 11"))
+        assertEquals("Cantarell", pangoFontFamilyName("Cantarell All-Petite-Caps"))
+    }
+
+    @Test
+    fun stripsMultipleTrailingKeywordsInSequence() {
+        // style + weight + stretch, all before the size - each is stripped in turn.
+        assertEquals("Noto Sans", pangoFontFamilyName("Noto Sans Italic Semi-Bold Condensed 10"))
+    }
+
+    /**
+     * Documents an actual limitation rather than desired behavior: the pixel-size suffix check
+     * only recognizes a lowercase "px" (`removeSuffix("px")`), so an unusual uppercase report is
+     * treated as part of the family instead of being stripped as a size.
+     */
+    @Test
+    fun pixelSizeSuffixMatchingIsCaseSensitive() {
+        assertEquals("Cantarell 12PX", pangoFontFamilyName("Cantarell 12PX"))
+    }
+
+    @Test
+    fun takesFirstFamilyWhenTheListHasNoSizeOrStyle() {
+        assertEquals("DejaVu Sans", pangoFontFamilyName("DejaVu Sans, Cantarell"))
+    }
 }

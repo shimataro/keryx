@@ -8,7 +8,9 @@ import javax.swing.UIManager
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 /**
@@ -90,5 +92,38 @@ class DesktopLookAndFeelTest {
                 )
             }
         }
+    }
+
+    /**
+     * FlatLaf derives everything else (menu-item selection, checkmarks, focus rings, the default
+     * button, menu bar/popup backgrounds) from exactly these two keys — see
+     * `keryxFlatLafDefaults`'s doc. An extra or missing key would be silently dropped/ignored by
+     * FlatLaf's properties parser rather than failing, so the key set has to be asserted exactly.
+     */
+    @Test
+    fun defaultsExposeExactlyAccentAndBackgroundKeys() {
+        assertEquals(setOf("@accentColor", "@background"), keryxFlatLafDefaults(dark = true).keys)
+        assertEquals(setOf("@accentColor", "@background"), keryxFlatLafDefaults(dark = false).keys)
+    }
+
+    @Test
+    fun defaultsDifferBetweenDarkAndLight() {
+        val dark = keryxFlatLafDefaults(dark = true)
+        val light = keryxFlatLafDefaults(dark = false)
+
+        assertNotEquals(dark.getValue("@accentColor"), light.getValue("@accentColor"))
+        assertNotEquals(dark.getValue("@background"), light.getValue("@background"))
+    }
+
+    /**
+     * `installedDark == null` (nothing installed yet) must go through even when
+     * `appliedSinceStartup` is already `true` — a state that shouldn't normally occur, but the
+     * "did the theme change?" comparison (`installedDark != dark`) has to hold regardless, since
+     * a `null` can never equal either boolean.
+     */
+    @Test
+    fun goesThroughWhenNothingWasInstalledEvenIfTheAppliedFlagIsAlreadySet() {
+        assertTrue(shouldApplyLookAndFeel(installedDark = null, appliedSinceStartup = true, dark = true))
+        assertTrue(shouldApplyLookAndFeel(installedDark = null, appliedSinceStartup = true, dark = false))
     }
 }

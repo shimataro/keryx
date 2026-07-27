@@ -120,4 +120,100 @@ class NativeMenuTest {
 
         assertEquals("fresh", clicked)
     }
+
+    @Test
+    fun clickingASubMenuChildInvokesTheLatestEntryForThatSlot() {
+        var clicked: String? = null
+        var entries = listOf<NativeMenuEntry>(
+            NativeSubMenu("Move to folder", listOf(NativeMenuItem("stale") { clicked = "stale" })),
+        )
+        val handle = SwingPopupHandle(entries) { entries }
+        entries = listOf(NativeSubMenu("Move to folder", listOf(NativeMenuItem("fresh") { clicked = "fresh" })))
+
+        val submenu = assertIs<JMenu>(handle.popupMenu.getComponent(0))
+        submenu.getItem(0).doClick()
+
+        assertEquals("fresh", clicked)
+    }
+
+    @Test
+    fun emptyItemListBuildsAnEmptyMenu() {
+        // nativeContextMenu treats an empty items() list as "no menu, onOpen only" — showing it
+        // must not throw, and it must contribute no widgets.
+        val handle = handleOf()
+
+        assertEquals(0, handle.popupMenu.componentCount)
+    }
+
+    @Test
+    fun rootPopupIsForcedHeavyweightSoItPaintsAboveTheWebView() {
+        val handle = handleOf(NativeMenuItem("Refresh") {})
+
+        assertFalse(handle.popupMenu.isLightWeightPopupEnabled)
+    }
+
+    @Test
+    fun subMenuPopupIsAlsoForcedHeavyweight() {
+        val handle = handleOf(NativeSubMenu("Move to folder", listOf(NativeMenuItem("News") {})))
+
+        val submenu = assertIs<JMenu>(handle.popupMenu.getComponent(0))
+        assertFalse(submenu.popupMenu.isLightWeightPopupEnabled)
+    }
+
+    @Test
+    fun checkEntriesInsideASubMenuBecomeCheckboxItemsAndFollowTheCheckedState() {
+        val entries = listOf<NativeMenuEntry>(
+            NativeSubMenu(
+                "Tags",
+                listOf(
+                    NativeCheckMenuItem("Tech", checked = true) {},
+                    NativeCheckMenuItem("Design", checked = false) {},
+                ),
+            ),
+        )
+        val handle = SwingPopupHandle(entries) { entries }
+
+        handle.sync(entries)
+
+        val submenu = assertIs<JMenu>(handle.popupMenu.getComponent(0))
+        val first = assertIs<JCheckBoxMenuItem>(submenu.getItem(0))
+        val second = assertIs<JCheckBoxMenuItem>(submenu.getItem(1))
+        assertTrue(first.isSelected)
+        assertFalse(second.isSelected)
+    }
+
+    @Test
+    fun syncTogglesACheckedSubMenuChildIndependentlyOfItsSiblings() {
+        var checked = false
+        val entries = listOf<NativeMenuEntry>(
+            NativeSubMenu(
+                "Move to folder",
+                listOf(
+                    NativeCheckMenuItem("No folder", checked = true) {},
+                    NativeCheckMenuItem("News", checked = false) { checked = true },
+                ),
+            ),
+        )
+        val handle = SwingPopupHandle(entries) { entries }
+        val submenu = assertIs<JMenu>(handle.popupMenu.getComponent(0))
+        val noFolder = assertIs<JCheckBoxMenuItem>(submenu.getItem(0))
+        val news = assertIs<JCheckBoxMenuItem>(submenu.getItem(1))
+
+        // Simulate the underlying data changing (the feed moved into "News") and the resulting
+        // resync — only the affected child's checked state should flip.
+        val updated = listOf<NativeMenuEntry>(
+            NativeSubMenu(
+                "Move to folder",
+                listOf(
+                    NativeCheckMenuItem("No folder", checked = false) {},
+                    NativeCheckMenuItem("News", checked = true) { checked = true },
+                ),
+            ),
+        )
+        handle.sync(updated)
+
+        assertFalse(noFolder.isSelected)
+        assertTrue(news.isSelected)
+        assertFalse(checked, "sync should only relabel/recheck widgets, not invoke onClick")
+    }
 }
