@@ -45,7 +45,20 @@ internal class SniConnection private constructor(
      */
     val reregisterRequests: SharedFlow<Unit> = _reregisterRequests
 
-    private var nameOwnerHandler: AutoCloseable? = null
+    /**
+     * Watches for the StatusNotifierWatcher reappearing. Installed once, for the connection's own
+     * lifetime, so no later call mutates it across the IO and composition threads. A failure here
+     * only costs restart recovery, so it must not abort [announce].
+     */
+    private val nameOwnerHandler: AutoCloseable? = runCatching {
+        connection.addSigHandler(DBus.NameOwnerChanged::class.java) { signal ->
+            if (signal.name == WATCHER_BUS && signal.newOwner.isNotEmpty()) {
+                // Never call back into the bus from a signal thread: publish the request and
+                // let LinuxTray re-announce from a coroutine instead.
+                _reregisterRequests.tryEmit(Unit)
+            }
+        }
+    }.onFailure { Log.warn(LOG_TAG, "Could not watch for $WATCHER_BUS restarts", it) }.getOrNull()
 
     /**
      * Exports the status notifier item and its menu on the connection.
@@ -59,28 +72,19 @@ internal class SniConnection private constructor(
     }
 
     /**
-     * Registers the status notifier item with the watcher and monitors watcher restarts for re-registration.
+     * Registers the status notifier item with the watcher.
+     *
+     * Safe to call again whenever [reregisterRequests] fires - the watcher treats a repeat
+     * registration of the same name as a no-op.
      */
     fun announce() {
-        if (nameOwnerHandler == null) {
-            nameOwnerHandler = connection.addSigHandler(DBus.NameOwnerChanged::class.java) { signal ->
-                if (signal.name == WATCHER_BUS && signal.newOwner.isNotEmpty()) {
-                    // Never call back into the bus from a signal thread: publish the request and
-                    // let LinuxTray re-announce from a coroutine instead.
-                    _reregisterRequests.tryEmit(Unit)
-                }
-            }
-        }
         val watcher = connection.getRemoteObject(WATCHER_BUS, WATCHER_PATH, StatusNotifierWatcher::class.java)
         watcher.RegisterStatusNotifierItem(busName)
         Log.info(LOG_TAG, "Registered $busName with the StatusNotifierWatcher")
     }
 
-    /** Undoes [exportObjects] and [announce], keeping the connection itself open. */
+    /** Undoes [exportObjects], keeping the connection itself open. */
     fun detach() {
-        runCatching { nameOwnerHandler?.close() }
-            .onFailure { Log.warn(LOG_TAG, "Could not remove the NameOwnerChanged handler", it) }
-        nameOwnerHandler = null
         runCatching { connection.unExportObject(MENU_PATH) }
             .onFailure { Log.warn(LOG_TAG, "Could not unexport the dbusmenu object", it) }
         runCatching { connection.unExportObject(ITEM_PATH) }
@@ -114,6 +118,8 @@ internal class SniConnection private constructor(
      * Releases the owned bus name and disconnects from the session bus.
      */
     fun close() {
+        runCatching { nameOwnerHandler?.close() }
+            .onFailure { Log.warn(LOG_TAG, "Could not remove the NameOwnerChanged handler", it) }
         runCatching { connection.releaseBusName(busName) }
             .onFailure { Log.warn(LOG_TAG, "Could not release $busName", it) }
         runCatching { connection.disconnect() }
@@ -181,8 +187,9 @@ internal class SniConnection private constructor(
                     Log.warn(LOG_TAG, "$NOTIFICATIONS_BUS is not available; desktop notifications will be skipped")
                 }
 
+                val created = SniConnection(connection, busName, notificationsAvailable)
                 handedOver = true
-                return SniConnection(connection, busName, notificationsAvailable)
+                return created
             } finally {
                 if (!handedOver) {
                     runCatching { connection.disconnect() }
