@@ -28,12 +28,17 @@ import androidx.compose.ui.window.application
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.swing.Swing
+import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.painterResource
 import org.koin.core.context.startKoin
@@ -67,6 +72,9 @@ import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.domain.UpdateStatus
 import works.merc.keryx.app.domain.shouldCheckForUpdate
 import works.merc.keryx.app.platform.AppDirs
+import works.merc.keryx.app.platform.isLinux
+import works.merc.keryx.app.platform.isMacOs
+import works.merc.keryx.app.platform.isWindows
 import works.merc.keryx.app.platform.LocalNativeWindow
 import works.merc.keryx.app.platform.LocalWindowDragArea
 import works.merc.keryx.app.platform.WindowChrome
@@ -81,8 +89,10 @@ import works.merc.keryx.app.ui.AppMenuBar
 import works.merc.keryx.app.ui.home.HomeViewModel
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
+import works.merc.keryx.app.ui.theme.installLookAndFeel
 import works.merc.keryx.app.ui.theme.keryxSurfaceColor
 import works.merc.keryx.app.ui.theme.resolveDarkTheme
+import works.merc.keryx.app.ui.theme.updateLookAndFeel
 import java.awt.Desktop
 import java.awt.Dimension
 import java.awt.Frame
@@ -90,7 +100,6 @@ import java.awt.Image
 import java.awt.Taskbar
 import java.io.File
 import javax.swing.SwingUtilities
-import javax.swing.UIManager
 
 private const val LOG_TAG = "Main"
 
@@ -161,13 +170,14 @@ fun main(args: Array<String>) {
 
     // Both still before any AWT/Compose initialization (SingleInstanceCoordinator/Koin/settings
     // loading above don't touch AWT) — kept together since it's unconfirmed whether
-    // setLookAndFeel itself begins toolkit init, which would make setting the appearance
+    // installLookAndFeel itself begins toolkit init, which would make setting the appearance
     // property afterwards too late.
     //
-    // Without setLookAndFeel, javax.swing.JButton (KeryxAlertDialog's native button row) renders
-    // with Swing's generic cross-platform look instead of the OS-native one.
-    runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
-        .onFailure { Log.warn(LOG_TAG, "Could not set the system look and feel", it) }
+    // "system" can't be resolved to dark/light here — isSystemInDarkTheme() is a Compose API and
+    // Compose hasn't started yet — so assume light and let the effect inside the window (which
+    // does have it) correct the choice. No Swing surface exists before Compose's first
+    // composition: the menu bar is created inside it, and menus/dialog buttons are on demand.
+    installLookAndFeel(resolveDarkTheme(saved.themeMode, systemDark = false))
     // Without this, Aqua's Swing L&F always paints light-mode colors regardless of the OS's
     // actual Dark Mode setting (JDK-8235363), which looks mismatched against this app's own dark
     // theme. Follow the app's own theme choice rather than a static "system" value so Swing's
@@ -370,6 +380,20 @@ fun main(args: Array<String>) {
                     window.rootPane.putClientProperty("apple.awt.windowTitleVisible", false)
                 }
                 Unit
+            }
+
+            // Keep the Swing look and feel (menu bar, context menus, dialog buttons) on the same
+            // light/dark side as the Compose UI. Unlike `saved`, this follows the live setting, so
+            // an in-app theme change applies without a restart (Linux only — see
+            // updateLookAndFeel). Collected inside the effect rather than via collectAsState so a
+            // theme-unrelated local-settings write (pane widths change on every drag frame) can't
+            // recompose the window content.
+            val systemDark = isSystemInDarkTheme()
+            LaunchedEffect(systemDark) {
+                settingsRepository.localSettings
+                    .map { resolveDarkTheme(it.themeMode, systemDark) }
+                    .distinctUntilChanged()
+                    .collect { dark -> withContext(Dispatchers.Swing) { updateLookAndFeel(dark) } }
             }
 
             // Application menu bar (macOS: system menu bar; Windows/Linux: in-window). Closing the

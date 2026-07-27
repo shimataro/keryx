@@ -27,7 +27,7 @@ import works.merc.keryx.app.domain.LoopbackRedirectTransport
 import works.merc.keryx.app.domain.OAuthCallbackParams
 import works.merc.keryx.app.domain.OAuthConnectFlow
 import works.merc.keryx.app.domain.SettingsRepository
-import works.merc.keryx.app.isMacOs
+import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.oauth_loopback_success
 

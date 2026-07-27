@@ -83,6 +83,14 @@ fun resolveDarkTheme(themeMode: String, systemDark: Boolean): Boolean = when (th
 fun keryxSurfaceColor(dark: Boolean): Color = if (dark) DarkColors.surface else LightColors.surface
 
 /**
+ * The `primary` (brand teal) color for a resolved dark/light flag. Used to tint the platform's
+ * native widget styling — on Linux the remaining Swing surfaces (menu bar, context menus, dialog
+ * buttons) are themed from this so they read as part of the same app rather than as generic
+ * Swing chrome. See `ui/theme/DesktopLookAndFeel.kt`.
+ */
+fun keryxAccentColor(dark: Boolean): Color = if (dark) DarkColors.primary else LightColors.primary
+
+/**
  * Tighter corner radii than M3's default scale — reads less "rounded pill" and more native/dense.
  */
 private val KeryxShapes = Shapes(

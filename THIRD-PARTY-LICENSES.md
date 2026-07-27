@@ -26,5 +26,6 @@ its respective license.
 | JNA | Apache-2.0 / LGPL-2.1 | <https://github.com/java-native-access/jna> |
 | dbus-java | MIT | <https://github.com/hypfvieh/dbus-java> |
 | Compose WebView | Apache-2.0 | <https://github.com/kdroidFilter/ComposeNativeWebView> |
+| FlatLaf | Apache-2.0 | <https://github.com/JFormDesigner/FlatLaf> |
 | Material Icons | Apache-2.0 | <https://github.com/google/material-design-icons> |
 | SLF4J | MIT | <https://github.com/qos-ch/slf4j> |

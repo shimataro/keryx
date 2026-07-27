@@ -7,6 +7,7 @@ import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.ExperimentalResourceApi
 import org.jetbrains.compose.resources.getDrawableResourceBytes
 import org.jetbrains.compose.resources.getSystemResourceEnvironment
+import works.merc.keryx.app.platform.isMacOs
 import java.awt.Color
 import java.awt.Font
 import java.awt.Graphics2D

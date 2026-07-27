@@ -13,7 +13,7 @@ import androidx.compose.ui.window.rememberTrayState
 import kotlinx.coroutines.flow.SharedFlow
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.drawUnreadDot
-import works.merc.keryx.app.isMacOs
+import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.rememberDrawableImage
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.tray_hide
