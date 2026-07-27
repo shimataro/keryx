@@ -54,7 +54,7 @@
 OPML、Dropbox ストレージ/認証、PKCE、OAuth ループバックサーバ、マージ（後勝ち・OR マージ・衝突ガード・
 FK ガード）、スキーマ、ローカル設定、記事 upsert、URL リゾルバ、日時パーサ、Result、Repository 層
 （Article/Feed/Tag/Settings）、CloudSession、NotificationCenter、IdGenerator、SyncRepository、
-ViewModel 層（Home/Settings/Setup/NotificationCenter）、ArticleWebViewHtml（extractLinks/wrapArticleHtml）、AppFont（Linux の UI フォント用 Pango フォント記述のパース）、FTS（FtsManager/FtsSearch。
+ViewModel 層（Home/Settings/Setup/NotificationCenter）、ArticleWebViewHtml（extractLinks/wrapArticleHtml）、AppFont（Linux の UI フォント用 Pango フォント記述のパース）、FTS（FtsManager/FtsSearch、
 `indexMissing` の増分投入・非破壊、`rebuildIndex` がテーブル存在を前提とすること、同期アップロードが
 `VACUUM INTO` スナップショットで `articles_fts` を除外し `user_version` を保全することを含む）、
 Linux の SNI トレイ（`TrayPixmapTest`＝ビッグエンディアン ARGB32 / RGBA エンコーダーとアルファ保全、
