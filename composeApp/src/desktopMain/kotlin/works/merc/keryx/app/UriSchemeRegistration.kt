@@ -17,7 +17,12 @@ internal enum class UriSchemeRegistration {
     LINUX,
 }
 
-/** Pure OS dispatch, kept separate from [registerCustomUriScheme] so it can be unit-tested. */
+/**
+ * Determines the URI scheme registration mechanism for an operating system name.
+ *
+ * @param osName The operating system name to classify.
+ * @return The registration mechanism associated with the operating system.
+ */
 internal fun uriSchemeRegistrationFor(osName: String): UriSchemeRegistration {
     val os = osName.lowercase()
     return when {
@@ -32,17 +37,11 @@ internal fun uriSchemeRegistrationFor(osName: String): UriSchemeRegistration {
 private val JVM_LAUNCHER_NAMES = setOf("java", "javaw", "java.exe", "javaw.exe")
 
 /**
- * Absolute path of the packaged app launcher, or null when the current process is not one.
+ * Resolves the packaged application launcher path.
  *
- * `jpackage` launchers set `jpackage.app-path` to their own path, which is both the value we
- * want and a positive signal that we are running from a packaged app. It is not part of the
- * documented jpackage contract, so we fall back to the process command — for a jpackage
- * app-image that is still the launcher itself (it loads libjvm in-process rather than forking
- * `java`).
- *
- * Returns null under `./gradlew :composeApp:run`, where the process command is the JDK's own
- * `java` binary. Registering that as the `keryx://` handler would outlive the Gradle run and
- * leave the OS handing OAuth callbacks to a bare JVM.
+ * @param appPathProperty The packaged launcher path reported by `jpackage`.
+ * @param processCommand The current process executable path used as a fallback.
+ * @return The launcher path, or `null` when the process is unavailable or uses a plain JVM launcher.
  */
 internal fun packagedLauncherPath(
     appPathProperty: String? = System.getProperty("jpackage.app-path"),
@@ -74,13 +73,9 @@ internal fun registerCustomUriScheme() {
 }
 
 /**
- * Registers the keryx:// URL scheme in the Windows registry so browsers can redirect back to the
- * app. Written under `HKEY_CURRENT_USER\Software\Classes` rather than `HKEY_CLASSES_ROOT`:
- * creating a *new* key through the `HKEY_CLASSES_ROOT` merged view is always routed to
- * `HKEY_LOCAL_MACHINE\Software\Classes`, which requires admin privileges a normal launch never
- * has — the per-user hive is writable by a standard user with no elevation. Each `reg.exe` call is
- * bounded by [REG_EXE_TIMEOUT_MS] so a hung process can't hang app startup (this runs synchronously
- * before the window is created).
+ * Registers the `keryx://` URL scheme for the current Windows user.
+ *
+ * @param launcherPath The path to the packaged application launcher.
  */
 internal fun registerWindowsUriScheme(
     launcherPath: String,

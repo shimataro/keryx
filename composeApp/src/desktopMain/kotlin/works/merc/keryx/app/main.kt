@@ -598,10 +598,8 @@ private suspend fun checkForUpdateAndNotify(koin: org.koin.core.Koin) {
 }
 
 /**
- * macOS App Translocation guard. An unsigned/quarantined Keryx.app launched from a DMG or the
- * Downloads folder runs from a randomized read-only path, which breaks keryx:// routing and makes
- * Dropbox OAuth linking silently time out. Warn the user (notification center) to move the app into
- * /Applications, which clears quarantine and stops translocation. See [isTranslocatedPath].
+ * Warns the user when the application is running from a translocated path that may prevent
+ * `keryx://` OAuth callbacks from reaching the application.
  */
 private suspend fun warnIfAppTranslocated(koin: org.koin.core.Koin) {
     val exePath = currentExecutablePath()

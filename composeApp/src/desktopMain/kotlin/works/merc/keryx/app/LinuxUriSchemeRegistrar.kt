@@ -27,7 +27,13 @@ internal const val URI_HANDLER_DESKTOP_FILE = "keryx-url-handler.desktop"
 private const val DEFAULT_APPLICATIONS = "Default Applications"
 private const val ADDED_ASSOCIATIONS = "Added Associations"
 
-/** `$envName` when set, else `$HOME/$homeRelativeFallback` — the XDG base-directory convention. */
+/**
+         * Selects an XDG base directory from an environment variable or a user-home fallback.
+         *
+         * @param envName The environment variable containing the directory path.
+         * @param homeRelativeFallback The path relative to the user's home directory when the environment variable is unset or blank.
+         * @return The selected base directory.
+         */
 internal fun xdgDir(envName: String, homeRelativeFallback: String): File =
     System.getenv(envName)?.takeIf { it.isNotBlank() }?.let { File(it) }
         ?: File(System.getProperty("user.home"), homeRelativeFallback)
@@ -64,7 +70,11 @@ internal class LinuxUriSchemeRegistrar(
         runProcessWithTimeout(listOf("update-desktop-database", dir.path), UPDATE_DESKTOP_DATABASE_TIMEOUT_MS)
     },
 ) {
-    /** Returns true when the handler is registered; already being up to date counts as success. */
+    /**
+     * Registers the Linux handler for the custom URI scheme.
+     *
+     * @return `true` if registration succeeds or is already up to date, `false` if registration fails.
+     */
     fun register(): Boolean = runCatching {
         val desktopFile = File(applicationsDir, URI_HANDLER_DESKTOP_FILE)
         val entry = desktopEntryContent(launcherPath)
@@ -99,12 +109,19 @@ internal class LinuxUriSchemeRegistrar(
         false
     }
 
-    private fun readOrNull(file: File): String? = file.takeIf { it.isFile }?.readText()
+    /**
+ * Reads the contents of a regular file when it exists.
+ *
+ * @param file The file to read.
+ * @return The file contents, or `null` when the path is not a regular file.
+ */
+private fun readOrNull(file: File): String? = file.takeIf { it.isFile }?.readText()
 
     /**
-     * Writes via a temp file and an atomic rename. `mimeapps.list` is shared with other
-     * applications and the desktop environment, so a concurrent reader must never observe a
-     * half-written file. Mirrors how `SingleInstanceCoordinator` publishes `keryx.port`.
+     * Atomically replaces the target file with the specified content.
+     *
+     * @param target The file to replace.
+     * @param content The content to write.
      */
     private fun writeAtomically(target: File, content: String) {
         val parent = target.parentFile
@@ -121,16 +138,11 @@ internal class LinuxUriSchemeRegistrar(
 }
 
 /**
- * The `.desktop` entry that registers the app as the `keryx://` handler.
- *
- * `NoDisplay=true` keeps it out of the application menu — it exists purely to own the scheme, and
- * hiding it means it can never show up as a duplicate next to a packaged menu entry.
- * `StartupNotify=false` stops the desktop environment from showing a "launch failed" cursor for a
- * process that hands the URI to the running instance and exits immediately.
- *
- * `Name` is the product name ([APP_NAME]), not user-facing copy, so it does not belong in
- * `strings.xml`.
- */
+     * Generates the desktop entry used to handle the custom URI scheme.
+     *
+     * @param launcherPath The executable path used to launch the application.
+     * @return The formatted desktop entry content.
+     */
 internal fun desktopEntryContent(launcherPath: String): String =
     """
     [Desktop Entry]
@@ -144,11 +156,10 @@ internal fun desktopEntryContent(launcherPath: String): String =
     """.trimIndent() + "\n"
 
 /**
- * Quotes a launcher path for an `Exec=` line. The desktop entry spec applies two layers of
- * escaping: reserved characters inside a quoted argument are backslash-escaped (and a literal
- * `%` is doubled so it is not read as a field code), then backslashes in the resulting value are
- * doubled again by the general value-escaping rule. Paths containing spaces — an app image built
- * under a user directory, say — are the case that matters in practice.
+ * Escapes and quotes a launcher path for use as an `Exec=` value in a desktop entry.
+ *
+ * @param path The launcher path to escape.
+ * @return The quoted, desktop-entry-escaped launcher path.
  */
 internal fun escapeDesktopExecPath(path: String): String {
     val quoted = buildString {
@@ -166,16 +177,15 @@ internal fun escapeDesktopExecPath(path: String): String {
 }
 
 /**
- * Returns [existing] with [mimeType] associated to [desktopFileName], or [existing] unchanged when
- * the association is already in place — which is what makes registration idempotent.
+ * Merges the custom URI scheme association into a `mimeapps.list` document.
  *
- * `mimeapps.list` belongs to the user and to every other application on the system, so every line
- * this does not own — comments, blank lines, other MIME types, other sections, the presence or
- * absence of a trailing newline — is preserved exactly.
+ * Updates the default application association and adds the desktop file to the added
+ * associations, while preserving unrelated content and the original trailing-newline state.
  *
- * `[Default Applications]` is the entry that actually resolves the scheme; an existing value is
- * replaced because no other application can meaningfully claim `keryx://`. `[Added Associations]`
- * is a belt-and-braces addition for environments where `mimeinfo.cache` is never generated.
+ * @param existing The current `mimeapps.list` content, or `null` if the file does not exist.
+ * @param desktopFileName The desktop file to associate with the MIME type.
+ * @param mimeType The MIME type representing the custom URI scheme.
+ * @return The merged `mimeapps.list` content.
  */
 internal fun mergeMimeAppsList(existing: String?, desktopFileName: String, mimeType: String): String {
     val endsWithNewline = existing.isNullOrEmpty() || existing.endsWith("\n")
