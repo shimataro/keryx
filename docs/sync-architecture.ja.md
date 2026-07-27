@@ -141,8 +141,9 @@ state 検証・コード交換）はプロバイダー共通の `OAuthConnectFlo
 OS へのスキーム登録方法はプラットフォームごとに異なる。macOS はパッケージング時に Info.plist
 （`CFBundleURLTypes`）で宣言する。Windows / Linux は起動時に `registerCustomUriScheme()` が登録し、
 Windows は `HKEY_CURRENT_USER\Software\Classes\keryx`（ユーザー単位のハイブなので管理者権限は不要）を、Linux は `LinuxUriSchemeRegistrar` がユーザーレベルの
-`.desktop`（`~/.local/share/applications/keryx-url-handler.desktop`）と `~/.config/mimeapps.list` の
-関連付けを書き出す。Linux の `.desktop` は `Exec` 行が `%u` で終わっている必要がある——これが無いと
+`.desktop`（`$XDG_DATA_HOME/applications/keryx-url-handler.desktop`、既定
+`~/.local/share/applications/keryx-url-handler.desktop`）と `$XDG_CONFIG_HOME/mimeapps.list`
+（既定 `~/.config/mimeapps.list`）の関連付けを書き出す。Linux の `.desktop` は `Exec` 行が `%u` で終わっている必要がある——これが無いと
 Desktop Entry 仕様上 URI がプロセスに渡らず、ブラウザーはスキームを解決できずに「不明なプロトコル」
 エラーを出す。いずれも OS が URL をコマンドライン引数としてアプリを起動し、`main.kt` が
 single-instance 経由で実行中インスタンスへ転送する。

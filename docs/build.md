@@ -109,7 +109,8 @@ notification area, the Linux AWT fallback and the window's own title-bar icon. T
 The `keryx://` custom URI scheme is **not** registered by the deb/rpm package. jpackage only emits a `.desktop` file when
 given a shortcut or a file association, and its template's `Exec` line has no `%u`, so the URI would never reach the
 process. Instead the app registers itself on first launch (`LinuxUriSchemeRegistrar`), writing
-`~/.local/share/applications/keryx-url-handler.desktop` and an association in `~/.config/mimeapps.list`. This also covers
+`$XDG_DATA_HOME/applications/keryx-url-handler.desktop` (default `~/.local/share/applications`) and an
+association in `$XDG_CONFIG_HOME/mimeapps.list` (default `~/.config/mimeapps.list`). This also covers
 `createDistributable` app images and tarball installs. Both files live in the user's home and are **not removed when the
 package is uninstalled** — harmless (`NoDisplay=true`, nothing else handles `keryx://`), but there is no uninstall hook.
 

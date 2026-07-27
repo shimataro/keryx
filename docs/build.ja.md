@@ -112,7 +112,8 @@ Windows の通知領域・Linux の AWT フォールバック・ウィンドウ�
 `keryx://` のカスタム URI スキームは deb/rpm パッケージでは**登録されない**。jpackage はショートカットか
 ファイル関連付けを指定しない限り `.desktop` を生成せず、そのテンプレートの `Exec` 行には `%u` が付かないため、
 URI がプロセスに届かないからである。代わりにアプリが初回起動時に自身を登録し（`LinuxUriSchemeRegistrar`）、
-`~/.local/share/applications/keryx-url-handler.desktop` と `~/.config/mimeapps.list` の関連付けを書き出す。
+`$XDG_DATA_HOME/applications/keryx-url-handler.desktop`（既定 `~/.local/share/applications`）と
+`$XDG_CONFIG_HOME/mimeapps.list`（既定 `~/.config/mimeapps.list`）の関連付けを書き出す。
 これにより `createDistributable` の app image や tarball 配置もカバーされる。この 2 ファイルはユーザーの
 ホーム配下にあり、**パッケージをアンインストールしても削除されない**（`NoDisplay=true` で `keryx://` を扱う
 他アプリも無いため実害は無いが、アンインストールフックが無い）。

@@ -52,7 +52,8 @@ cp local.properties.example local.properties   # 任意: Dropbox App Key を設�
   `gradlew run` でも連携できる。
 - **（Linux）ブラウザーが `keryx://` で「不明なプロトコル」エラーを出す**: スキームがデスクトップ
   環境に登録されていない。パッケージ版は初回起動時に登録し、
-  `~/.local/share/applications/keryx-url-handler.desktop` と `~/.config/mimeapps.list` の関連付けを
+  `$XDG_DATA_HOME/applications/keryx-url-handler.desktop`（既定 `~/.local/share/applications/keryx-url-handler.desktop`）と
+  `$XDG_CONFIG_HOME/mimeapps.list`（既定 `~/.config/mimeapps.list`）の関連付けを
   書き出す。確認は `xdg-mime query default x-scheme-handler/keryx`（`keryx-url-handler.desktop` が
   返れば OK）。Keryx 起動中に
   `xdg-open 'keryx://oauth2/callback?code=test&state=test'` を実行してウィンドウが前面に来れば

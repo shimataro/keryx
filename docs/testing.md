@@ -120,5 +120,7 @@ the OS routing). Install a packaged build (`./gradlew :composeApp:packageDeb` â†
 - `xdg-mime query default x-scheme-handler/keryx` returns `keryx-url-handler.desktop`.
 - With Keryx running, `xdg-open 'keryx://oauth2/callback?code=test&state=test'` brings the window to the front.
 - Dropbox and OneDrive linking both complete through the browser round trip.
-- `./gradlew :composeApp:run` does **not** create `~/.local/share/applications/keryx-url-handler.desktop`.
-- Unrelated entries in `~/.config/mimeapps.list` survive the registration untouched.
+- `./gradlew :composeApp:run` does **not** create `$XDG_DATA_HOME/applications/keryx-url-handler.desktop`
+  (default `~/.local/share/applications/keryx-url-handler.desktop`).
+- Unrelated entries in `$XDG_CONFIG_HOME/mimeapps.list` (default `~/.config/mimeapps.list`) survive the
+  registration untouched.

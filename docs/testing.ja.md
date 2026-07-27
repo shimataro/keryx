@@ -184,6 +184,7 @@ OS 側のルーティングではない）。パッケージ版をインスト�
 - `xdg-mime query default x-scheme-handler/keryx` が `keryx-url-handler.desktop` を返すこと。
 - Keryx 起動中に `xdg-open 'keryx://oauth2/callback?code=test&state=test'` でウィンドウが前面に来ること。
 - Dropbox / OneDrive 連携がどちらもブラウザー往復で完走すること。
-- `./gradlew :composeApp:run` では `~/.local/share/applications/keryx-url-handler.desktop` が
-  **作られない**こと。
-- `~/.config/mimeapps.list` の無関係なエントリが登録後もそのまま残っていること。
+- `./gradlew :composeApp:run` では `$XDG_DATA_HOME/applications/keryx-url-handler.desktop`
+  （既定 `~/.local/share/applications/keryx-url-handler.desktop`）が**作られない**こと。
+- `$XDG_CONFIG_HOME/mimeapps.list`（既定 `~/.config/mimeapps.list`）の無関係なエントリが登録後も
+  そのまま残っていること。
