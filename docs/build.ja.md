@@ -109,6 +109,15 @@ Windows の通知領域・Linux の AWT フォールバック・ウィンドウ�
 `design/icons/make_desktop_icons.sh` で共有アートワークから生成する
 （生成済みファイルはコミットしておくのが望ましい）。
 
+アプリのストア/メニューカテゴリーは `nativeDistributions` 内でプラットフォームごとに設定している。
+macOS は `appCategory = "public.app-category.news"`（`LSApplicationCategoryType`）を使う
+（Apple の App Store 分類には単純な「インターネット」に相当する項目が無いため）。Linux は
+`menuGroup = "Network;News;Feed;"` を使い、これは生成される `.desktop` ファイルの `Categories=`
+にそのまま書き込まれる — `Network` が freedesktop.org のデスクトップメニュー仕様における該当メイン
+カテゴリーで、`News` と `Feed` はそれに対応する登録済みの追加カテゴリー。Windows / jpackage には
+カテゴリーの概念自体が無い（`menuGroup` はスタートメニューのフォルダ名でしかない）ため、
+Windows 側は何も設定していない。
+
 `keryx://` のカスタム URI スキームは deb/rpm パッケージでは**登録されない**。jpackage はショートカットか
 ファイル関連付けを指定しない限り `.desktop` を生成せず、そのテンプレートの `Exec` 行には `%u` が付かないため、
 URI がプロセスに届かないからである。代わりにアプリが初回起動時に自身を登録し（`LinuxUriSchemeRegistrar`）、

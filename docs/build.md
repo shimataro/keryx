@@ -106,6 +106,14 @@ black outline) for the macOS menu bar and the Linux SNI panel, `tray_icon.png` (
 notification area, the Linux AWT fallback and the window's own title-bar icon. These are generated from shared artwork via
 `design/icons/make_desktop_icons.sh` (it is preferable to commit generated files).
 
+The app's store/menu category is set per platform in `nativeDistributions`: macOS uses
+`appCategory = "public.app-category.news"` (`LSApplicationCategoryType`) since Apple's App Store
+taxonomy has no plain "Internet" category; Linux uses `menuGroup = "Network;News;Feed;"`, written
+verbatim into the generated `.desktop` file's `Categories=` field — `Network` is the relevant main
+category in the freedesktop.org Desktop Menu Specification, with `News` and `Feed` as matching
+registered additional categories. Windows/jpackage has no category concept (its `menuGroup` is only
+the Start Menu folder name), so nothing is set there.
+
 The `keryx://` custom URI scheme is **not** registered by the deb/rpm package. jpackage only emits a `.desktop` file when
 given a shortcut or a file association, and its template's `Exec` line has no `%u`, so the URI would never reach the
 process. Instead the app registers itself on first launch (`LinuxUriSchemeRegistrar`), writing
