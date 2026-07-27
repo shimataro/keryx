@@ -31,7 +31,7 @@ import javax.swing.Timer
  * them. Two implementations exist because no single one looks native everywhere: see
  * [AwtPopupHandle] and [SwingPopupHandle].
  */
-private interface NativePopupHandle {
+internal interface NativePopupHandle {
     /** Pushes the current [items] labels and checked states onto the already-built widgets. */
     fun sync(items: List<NativeMenuEntry>)
 
@@ -69,7 +69,10 @@ private class AwtPopupHandle(
     items: List<NativeMenuEntry>,
     currentItems: () -> List<NativeMenuEntry>,
 ) : NativePopupHandle {
-    private val components: List<java.awt.MenuItem> = items.mapIndexed { index, entry ->
+    // Not named `components`: see the note on SwingPopupHandle.menuItems. AWT's PopupMenu is not
+    // a Container so it wouldn't actually collide here, but keeping the two backends symmetric
+    // stops the name from being "tidied" back later.
+    private val menuItems: List<java.awt.MenuItem> = items.mapIndexed { index, entry ->
         when (entry) {
             is NativeMenuLeaf ->
                 java.awt.MenuItem().apply {
@@ -88,11 +91,11 @@ private class AwtPopupHandle(
         }
     }
 
-    private val popupMenu = java.awt.PopupMenu().apply { components.forEach { add(it) } }
+    private val popupMenu = java.awt.PopupMenu().apply { menuItems.forEach { add(it) } }
 
     override fun sync(items: List<NativeMenuEntry>) {
         items.forEachIndexed { index, entry ->
-            val component = components.getOrNull(index) ?: return@forEachIndexed
+            val component = menuItems.getOrNull(index) ?: return@forEachIndexed
             component.label = awtLabel(entry)
             if (entry is NativeSubMenu && component is java.awt.Menu) {
                 entry.items.forEachIndexed { childIndex, child ->
@@ -122,11 +125,17 @@ private class AwtPopupHandle(
  * matter how the rest of the app is themed; a `JPopupMenu` picks up FlatLaf (see
  * `ui/theme/DesktopLookAndFeel.kt`) and matches the Compose UI around it.
  */
-private class SwingPopupHandle(
+internal class SwingPopupHandle(
     items: List<NativeMenuEntry>,
     currentItems: () -> List<NativeMenuEntry>,
 ) : NativePopupHandle {
-    private val components: List<JMenuItem> = items.mapIndexed { index, entry ->
+    // Deliberately NOT named `components`. Inside the `apply` below the implicit receiver is the
+    // JPopupMenu, which extends Container and therefore exposes a synthetic `components` property
+    // (Container.getComponents()). That receiver wins name resolution over a field of this class,
+    // so a field called `components` would silently resolve to the popup's own — empty — child
+    // array, adding nothing and leaving a menu that shows as a 0x0 nothing. AWT's PopupMenu is
+    // not a Container, which is why only the Swing backend was ever affected.
+    private val menuItems: List<JMenuItem> = items.mapIndexed { index, entry ->
         when (entry) {
             is NativeMenuLeaf ->
                 swingLeaf(entry) { leafAt(currentItems(), index, childIndex = null)?.onClick?.invoke() }
@@ -143,14 +152,15 @@ private class SwingPopupHandle(
         }
     }
 
-    private val popupMenu = JPopupMenu().apply {
+    /** Internal rather than private so tests can check what actually ended up in the menu. */
+    internal val popupMenu = JPopupMenu().apply {
         forceHeavyweight(this)
-        components.forEach { add(it) }
+        menuItems.forEach { add(it) }
     }
 
     override fun sync(items: List<NativeMenuEntry>) {
         items.forEachIndexed { index, entry ->
-            val component = components.getOrNull(index) ?: return@forEachIndexed
+            val component = menuItems.getOrNull(index) ?: return@forEachIndexed
             syncLeaf(component, entry)
             if (entry is NativeSubMenu && component is JMenu) {
                 entry.items.forEachIndexed { childIndex, child ->
@@ -182,13 +192,10 @@ private class SwingPopupHandle(
     override fun detach(window: NativeWindowHandle?) = Unit
 
     override fun show(invoker: Component, x: Int, y: Int) {
-        // Deferred rather than shown inline. Compose Desktop dispatches input on the EDT, so
-        // showing from here would map the menu in the middle of the press being dispatched, and
-        // Swing's MenuSelectionManager then reads the rest of that gesture (the release, and the
-        // pointer grab Compose still holds) as a click outside the menu — closing it again within
-        // the same event burst, so nothing ever appears. Letting the press finish first avoids
-        // that. AwtPopupHandle needs none of this: its menu is a native NSMenu/Win32 menu that
-        // runs its own modal event loop, and it is shown inline exactly as it always was.
+        // Deferred rather than shown inline: Swing requires show() on the EDT, and this keeps the
+        // menu from being mapped in the middle of Compose Desktop dispatching the press that
+        // asked for it. AwtPopupHandle needs neither — its menu is a native NSMenu/Win32 menu
+        // with its own modal event loop — so it stays inline exactly as it always was.
         SwingUtilities.invokeLater {
             popupMenu.show(invoker, x, y)
             debugLogPopup(popupMenu, invoker, x, y)
@@ -202,17 +209,15 @@ private class SwingPopupHandle(
  * interop limitation that makes every dialog in this app a separate window (see `KeryxDialogs`).
  */
 private fun forceHeavyweight(popup: JPopupMenu) {
-    popup.isLightWeightPopupEnabled = !lightweightPopups
+    popup.isLightWeightPopupEnabled = lightweightPopups
 }
 
 // ---------------------------------------------------------------------------
-// TEMPORARY: switches for diagnosing "the context menu does not appear" on Linux desktops,
-// forwarded from Gradle -P properties (see composeApp/build.gradle.kts). Remove all of this,
-// and the debugLog calls, once the cause is confirmed.
+// TEMPORARY: switches left over from diagnosing "the context menu does not appear" on Linux.
+// The empty-menu cause is fixed and covered by NativeMenuTest; these two remain only until the
+// heavyweight popup's z-order against the article WebView has been confirmed on a real Linux
+// desktop. Remove them, and the debugLogPopup calls, once that check passes.
 // ---------------------------------------------------------------------------
-
-/** `-Pkeryx.menu.backend=awt` falls back to the AWT popup that macOS/Windows use. */
-private val forceAwtBackend: Boolean = System.getProperty("keryx.menu.backend") == "awt"
 
 /** `-Pkeryx.menu.lightweight=true` undoes [forceHeavyweight], for isolating popup-window issues. */
 private val lightweightPopups: Boolean = System.getProperty("keryx.menu.lightweight") == "true"
@@ -277,8 +282,7 @@ actual fun Modifier.nativeContextMenu(
     val handle = remember(menuShape(items())) {
         val snapshot = items()
         val provider = { currentItems() }
-        if (isLinux && !forceAwtBackend) SwingPopupHandle(snapshot, provider)
-        else AwtPopupHandle(snapshot, provider)
+        if (isLinux) SwingPopupHandle(snapshot, provider) else AwtPopupHandle(snapshot, provider)
     }
 
     LaunchedEffect(items()) { handle.sync(items()) }

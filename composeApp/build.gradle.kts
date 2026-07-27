@@ -262,8 +262,8 @@ compose.desktop {
         // to the running app, e.g. `./gradlew :composeApp:run -Pkeryx.debug.menu=true`.
         // Gradle properties rather than environment variables because JavaExec inherits the
         // long-lived Gradle daemon's environment, not the invoking shell's. Remove once the
-        // "context menu does not appear on Linux" cause is confirmed.
-        listOf("keryx.menu.backend", "keryx.menu.lightweight", "keryx.debug.menu").forEach { key ->
+        // heavyweight popup's z-order against the article WebView is confirmed on Linux.
+        listOf("keryx.menu.lightweight", "keryx.debug.menu").forEach { key ->
             (project.findProperty(key) as String?)?.let { jvmArgs("-D$key=$it") }
         }
 
