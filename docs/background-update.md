@@ -18,7 +18,7 @@ below is abridged — per-cycle error handling and the separately-scheduled upda
 ```kotlin
 while (true) {
     val minutes = settings.refreshIntervalMinutes
-    delay(if (minutes <= 0) 60_000 else minutes * 60_000)  // "Manual only" (minutes <= 0) wakes every minute
+    delay(if (minutes <= 0) 60_000L else minutes * 60_000L)  // "Manual only" (minutes <= 0) wakes every minute
     if (minutes > 0) {
         refreshFeedsAndNotify()   // Refresh all feeds (ETag / Last-Modified differential fetch), then
                                   // NewArticleNotifier.notifyBackground(newArticles(newCount)) when

@@ -18,7 +18,7 @@
 ```kotlin
 while (true) {
     val minutes = settings.refreshIntervalMinutes
-    delay(if (minutes <= 0) 60_000 else minutes * 60_000)  // 「手動のみ」（minutes <= 0）は 1 分ごとに起床
+    delay(if (minutes <= 0) 60_000L else minutes * 60_000L)  // 「手動のみ」（minutes <= 0）は 1 分ごとに起床
     if (minutes > 0) {
         refreshFeedsAndNotify()   // 全フィード更新（ETag / Last-Modified 差分取得）→ 新着があり通知が
                                   // 有効なら NewArticleNotifier.notifyBackground(newArticles(newCount))
