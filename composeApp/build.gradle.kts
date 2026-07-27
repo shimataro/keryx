@@ -312,6 +312,11 @@ compose.desktop {
             }
             linux {
                 iconFile.set(project.file("icons/keryx.png"))
+                // The keryx:// scheme is not registered here. jpackage only emits a .desktop file
+                // when given a shortcut or a file association, and its template's Exec line has no
+                // %u — so the URI would never reach the process. LinuxUriSchemeRegistrar writes a
+                // user-level .desktop entry at startup instead, which also covers app-image and
+                // tarball installs.
             }
         }
     }
@@ -357,20 +362,6 @@ afterEvaluate {
                 file("build/compose/binaries/main/app/Keryx.app/Contents/Info.plist"),
                 appVersion,
             )
-        }
-    }
-
-    // Inject MimeType for custom URI scheme support on Linux
-    tasks.findByName("packageDeb")?.doLast {
-        val desktopFile = fileTree("build/compose/binaries/main/deb").matching {
-            include("**/*.desktop")
-        }.firstOrNull()
-        desktopFile?.let { file ->
-            var content = file.readText()
-            if (!content.contains("MimeType")) {
-                content = content.trimEnd() + "\nMimeType=x-scheme-handler/keryx;\n"
-                file.writeText(content)
-            }
         }
     }
 

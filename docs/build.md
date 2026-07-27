@@ -106,7 +106,19 @@ black outline) for the macOS menu bar and the Linux SNI panel, `tray_icon.png` (
 notification area, the Linux AWT fallback and the window's own title-bar icon. These are generated from shared artwork via
 `design/icons/make_desktop_icons.sh` (it is preferable to commit generated files).
 
-> **macOS Dropbox linking confirmation**: The custom URI `keryx://` is routed by macOS LaunchServices to the packaged app, so `./gradlew :composeApp:run` cannot complete the link. To verify linking behavior, build with `createDistributable` and launch `Keryx.app` (see [setup.md](setup.md) "Common Issues" for details).
+The `keryx://` custom URI scheme is **not** registered by the deb/rpm package. jpackage only emits a `.desktop` file when
+given a shortcut or a file association, and its template's `Exec` line has no `%u`, so the URI would never reach the
+process. Instead the app registers itself on first launch (`LinuxUriSchemeRegistrar`), writing
+`$XDG_DATA_HOME/applications/keryx-url-handler.desktop` (default `~/.local/share/applications`) and an
+association in `$XDG_CONFIG_HOME/mimeapps.list` (default `~/.config/mimeapps.list`). This also covers
+`createDistributable` app images and tarball installs. Both files live in the user's home and are **not removed when the
+package is uninstalled**, and there is no uninstall hook to clean them up. This is not harmless: the surviving
+`[Default Applications]` entry in `mimeapps.list` keeps pointing `keryx://` at a launcher path that no longer exists,
+so `xdg-open` (or a browser resolving the scheme) can fail until the two are removed manually — delete
+`keryx-url-handler.desktop` from the applications directory and drop the `x-scheme-handler/keryx` line(s) from
+`mimeapps.list`.
+
+> **Custom-URI linking confirmation**: `./gradlew :composeApp:run` cannot complete Dropbox / OneDrive linking on any desktop OS — macOS routes `keryx://` to the packaged app, and the Windows/Linux startup registration deliberately skips non-packaged launchers. To verify linking behavior, build with `createDistributable` and launch the packaged app (see [setup.md](setup.md) "Common Issues" for details).
 
 ## Release (CD)
 

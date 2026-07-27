@@ -74,7 +74,6 @@ import works.merc.keryx.app.domain.shouldCheckForUpdate
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.isLinux
 import works.merc.keryx.app.platform.isMacOs
-import works.merc.keryx.app.platform.isWindows
 import works.merc.keryx.app.platform.LocalNativeWindow
 import works.merc.keryx.app.platform.LocalWindowDragArea
 import works.merc.keryx.app.platform.WindowChrome
@@ -232,8 +231,8 @@ fun main(args: Array<String>) {
         }
     }.onFailure { Log.warn(LOG_TAG, "Could not install the Preferences menu handler", it) }
 
-    // Register custom URI scheme handler (macOS). Windows/Linux receive the URI
-    // via command-line arguments forwarded through SingleInstanceCoordinator.
+    // Install the in-process URI handler (macOS). Windows/Linux receive the URI as a
+    // command-line argument instead, forwarded through SingleInstanceCoordinator.
     runCatching {
         if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.APP_OPEN_URI)) {
             Desktop.getDesktop().setOpenURIHandler { event ->
@@ -247,10 +246,9 @@ fun main(args: Array<String>) {
         }
     }.onFailure { Log.warn(LOG_TAG, "Could not install URI handler", it) }
 
-    // Register custom URI scheme on Windows so the OS knows how to handle keryx:// URIs.
-    if (isWindows) {
-        registerWindowsUriScheme()
-    }
+    // Tell the OS how to handle keryx:// URIs (Windows registry / Linux .desktop + mimeapps.list).
+    // macOS declares the scheme in Info.plist at packaging time, so it needs nothing here.
+    registerCustomUriScheme()
 
     // Linux: java.awt.SystemTray cannot draw a transparent icon on X11 (XTrayIconPeer fills the
     // canvas with the component background before drawing, and XSystemTrayPeer never adopts the
@@ -600,10 +598,8 @@ private suspend fun checkForUpdateAndNotify(koin: org.koin.core.Koin) {
 }
 
 /**
- * macOS App Translocation guard. An unsigned/quarantined Keryx.app launched from a DMG or the
- * Downloads folder runs from a randomized read-only path, which breaks keryx:// routing and makes
- * Dropbox OAuth linking silently time out. Warn the user (notification center) to move the app into
- * /Applications, which clears quarantine and stops translocation. See [isTranslocatedPath].
+ * Warns the user when the application is running from a translocated path that may prevent
+ * `keryx://` OAuth callbacks from reaching the application.
  */
 private suspend fun warnIfAppTranslocated(koin: org.koin.core.Koin) {
     val exePath = currentExecutablePath()
@@ -617,15 +613,4 @@ private suspend fun warnIfAppTranslocated(koin: org.koin.core.Koin) {
             timestampMillis = SystemClock.nowMillis(),
         ),
     )
-}
-
-/** Registers the keryx:// URL scheme in the Windows registry so browsers can redirect back to the app. */
-private fun registerWindowsUriScheme() {
-    val currentExe = ProcessHandle.current().info().command().orElse("keryx.exe")
-    runCatching {
-        val reg = "reg.exe"
-        ProcessBuilder(reg, "add", "HKEY_CLASSES_ROOT\\keryx", "/ve", "/d", "URL:keryx Protocol", "/f").start().waitFor()
-        ProcessBuilder(reg, "add", "HKEY_CLASSES_ROOT\\keryx", "/v", "URL Protocol", "/d", "", "/f").start().waitFor()
-        ProcessBuilder(reg, "add", "HKEY_CLASSES_ROOT\\keryx\\shell\\open\\command", "/ve", "/d", "\"$currentExe\" \"%1\"", "/f").start().waitFor()
-    }.onFailure { Log.warn(LOG_TAG, "Could not register Windows URI scheme", it) }
 }

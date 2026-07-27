@@ -109,9 +109,22 @@ Windows の通知領域・Linux の AWT フォールバック・ウィンドウ�
 `design/icons/make_desktop_icons.sh` で共有アートワークから生成する
 （生成済みファイルはコミットしておくのが望ましい）。
 
-> **macOS の Dropbox 連携確認**: `keryx://` のカスタム URI はパッケージ版アプリにルーティングされるため、
-> `./gradlew :composeApp:run` では連携が完了しない。連携の動作確認は `createDistributable` でビルドした
-> `Keryx.app` を起動して行う（詳細は [setup.ja.md](setup.ja.md) の「よくある問題」）。
+`keryx://` のカスタム URI スキームは deb/rpm パッケージでは**登録されない**。jpackage はショートカットか
+ファイル関連付けを指定しない限り `.desktop` を生成せず、そのテンプレートの `Exec` 行には `%u` が付かないため、
+URI がプロセスに届かないからである。代わりにアプリが初回起動時に自身を登録し（`LinuxUriSchemeRegistrar`）、
+`$XDG_DATA_HOME/applications/keryx-url-handler.desktop`（既定 `~/.local/share/applications`）と
+`$XDG_CONFIG_HOME/mimeapps.list`（既定 `~/.config/mimeapps.list`）の関連付けを書き出す。
+これにより `createDistributable` の app image や tarball 配置もカバーされる。この 2 ファイルはユーザーの
+ホーム配下にあり、**パッケージをアンインストールしても削除されず**、アンインストールフックも無い。実害が無い
+わけではない：`mimeapps.list` に残った `[Default Applications]` の関連付けは、もう存在しないランチャーの
+パスを `keryx://` の既定ハンドラーとして指し続けるため、除去するまで `xdg-open`（やブラウザーのスキーム解決）
+が失敗しうる。除去は手動で行う必要があり、アプリケーションディレクトリの `keryx-url-handler.desktop` を削除し、
+`mimeapps.list` から `x-scheme-handler/keryx` の行を取り除く。
+
+> **カスタム URI 連携の確認**: `./gradlew :composeApp:run` ではどのデスクトップ OS でも Dropbox / OneDrive
+> 連携が完了しない（macOS は `keryx://` がパッケージ版アプリにルーティングされ、Windows / Linux は起動時の
+> 登録がパッケージ版ランチャー以外を意図的にスキップするため）。連携の動作確認は `createDistributable` で
+> ビルドしたアプリを起動して行う（詳細は [setup.ja.md](setup.ja.md) の「よくある問題」）。
 
 ## リリース（CD）
 
