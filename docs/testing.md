@@ -97,8 +97,8 @@ likely each is to be wrong):
   If a bad entry is picked, trim `SNI_ICON_SIZES`.
 - Package with `./gradlew :composeApp:createDistributable` and launch `build/compose/binaries/main/app/Keryx/bin/Keryx`
   — a missing jlink module (`jdk.security.auth`) only shows up there, never under `run`.
-- Left click toggles the window (this depends on `ItemIsMenu = false`; if the menu opens instead, that property is wrong).
-- Right click shows the menu with the correct labels, and the Show/Hide label flips after toggling the window
+- Left-click toggles the window (this depends on `ItemIsMenu = false`; if the menu opens instead, that property is wrong).
+- Right-click shows the menu with the correct labels, and the Show/Hide label flips after toggling the window
   *without* reopening the menu (exercises `AboutToShow` + `LayoutUpdated`).
 - The unread dot appears/disappears live (`NewIcon` reaches the host).
 - After `systemctl --user restart plasma-plasmashell` the icon comes back without restarting Keryx.

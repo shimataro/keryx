@@ -96,8 +96,8 @@ FlatLaf を使う（Java の Linux 向けシステム L&F は GTK2 世代のエ�
 コンテキストメニューは macOS / Windows では `java.awt.PopupMenu`（本物の `NSMenu` /
 Win32 メニュー）、Linux では `javax.swing.JPopupMenu`（AWT のポップアップは Look & Feel を
 完全に無視するため）。UI フォントは OS 標準で、macOS は SF Pro、Windows は Segoe UI、
-Linux はデスクトップの設定フォント（XSettings から取得）、取得できなければ
-Adwaita Sans / Cantarell / Ubuntu / Noto Sans / DejaVu Sans の順にフォールバックする。
+Linux は Look & Feel が解決したフォント、次にデスクトップの設定フォント（XSettings から取得）、
+取得できなければ Adwaita Sans / Cantarell / Ubuntu / Noto Sans / DejaVu Sans の順にフォールバックする。
 
 ## 10. プライバシー・セキュリティ
 

@@ -90,9 +90,9 @@ because Java's Linux system L&F is a GTK2-era emulation that looks dated next to
 desktop. Light / dark follows the in-app theme setting without a restart. Context menus are
 `java.awt.PopupMenu` (a genuine `NSMenu` / Win32 menu) on macOS / Windows and
 `javax.swing.JPopupMenu` on Linux, where AWT's popup ignores the Look & Feel entirely. The UI
-font is the OS's own: SF Pro on macOS, Segoe UI on Windows, and on Linux the desktop's
-configured font (read from XSettings) falling back to Adwaita Sans / Cantarell / Ubuntu /
-Noto Sans / DejaVu Sans.
+font is the OS's own: SF Pro on macOS, Segoe UI on Windows, and on Linux the font resolved by
+the Look & Feel, then the desktop's configured font from XSettings, falling back to Adwaita Sans /
+Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
 
 ## 10. Privacy & Security
 
