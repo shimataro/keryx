@@ -137,6 +137,22 @@ in order of how likely each is to be wrong):
   and on Windows/macOS (the whole path is `isLinux`-gated; macOS keeps its screen-menu-bar behavior unchanged).
 - Quit Keryx: the Global Menu entry disappears immediately (no stale/frozen last-known menu for a dead process).
 
+`AppMenuConnection` speaks the plain `com.canonical.AppMenu.Registrar` interface with no KDE-specific
+assumption, so it is expected to work identically wherever else that interface is implemented — notably
+`vala-panel-appmenu` (the Global Menu applet for `vala-panel`/`xfce4-panel`/`mate-panel`, paired with the
+`appmenu-gtk-module`/`unity-gtk-module` client-side GTK module). On an XFCE/MATE/Budgie session with
+`vala-panel-appmenu` and `appmenu-gtk-module`/`unity-gtk-module` installed and the panel applet added, confirm:
+
+- The menu appears in the panel applet the same way it does in KDE's Global Menu widget.
+- Dynamic state (enabled/disabled items, the "Unread only" checkbox) and every click action match the
+  in-window menu exactly.
+- **Ctrl+M** and the exported **"Show Menu Bar" checkbox** both recover the in-window bar.
+- With the applet/module not installed, Keryx falls back to the in-window menu bar exactly as on any DE
+  without a registrar (`AppMenuConnection.tryCreate()` returns `null`) — note that some distributions ship
+  `vala-panel-appmenu` without its registrar actually owning the bus name (a known packaging issue, e.g.
+  [Debian #930572](https://bugs.debian.org/930572)); that is an environment issue on the registrar side, not
+  something Keryx's client-side code can detect or work around.
+
 The `keryx://` scheme registration writes real files into the user's home and depends on the desktop environment, so
 the end-to-end path can only be confirmed on a Linux machine (the unit tests cover the file contents and the merge, not
 the OS routing). Install a packaged build (`./gradlew :composeApp:packageDeb` → `sudo dpkg -i`), launch it
