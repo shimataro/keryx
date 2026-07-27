@@ -12,16 +12,19 @@
 
 ## デスクトップ実装（`desktopMain/main.kt`）
 
-`main()` でアプリスコープのコルーチンを起動し、`refreshIntervalMinutes` の間隔でループする。
+`main()` でアプリスコープのコルーチンを起動し、`refreshIntervalMinutes` の間隔でループする。以下は
+要約で、各周回のエラー処理と、独立した間隔で走るアップデート確認は省略している。
 
 ```kotlin
 while (true) {
     val minutes = settings.refreshIntervalMinutes
-    if (minutes <= 0) { delay(60_000); continue }   // 「手動のみ」は 1 分ごとに設定変更を確認
-    delay(minutes * 60_000)
-    refreshAll()                                     // 全フィード更新（ETag / Last-Modified 差分取得）
-    if (newCount > 0 && notificationEnabled) tray.notify(newArticles(newCount))
-    sync()                                           // クラウド同期
+    delay(if (minutes <= 0) 60_000 else minutes * 60_000)  // 「手動のみ」（minutes <= 0）は 1 分ごとに起床
+    if (minutes > 0) {
+        refreshFeedsAndNotify()   // 全フィード更新（ETag / Last-Modified 差分取得）→ 新着があり通知が
+                                  // 有効なら NewArticleNotifier.notifyBackground(newArticles(newCount))
+        sync()                    // クラウド同期
+    }
+    maybeRebuildFtsIndex()        // FTS 全再構築の日次 heal（後述）
 }
 ```
 
