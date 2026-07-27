@@ -64,7 +64,7 @@ import androidx.compose.ui.window.WindowDecoration
 import androidx.compose.ui.window.WindowPosition
 import org.koin.compose.koinInject
 import works.merc.keryx.app.domain.SettingsRepository
-import works.merc.keryx.app.isMacOs
+import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.LocalNativeWindow
 import works.merc.keryx.app.ui.theme.KeryxTheme
 import java.awt.FlowLayout
@@ -535,7 +535,11 @@ private fun NativeButtonRow(
                 // usually dark — leaving the text hard to read against the accent color. White
                 // is safe here regardless of which of macOS's system accent colors the user has
                 // chosen, since Apple's own prominent buttons use white text with all of them.
-                foreground = java.awt.Color.WHITE
+                //
+                // macOS only: FlatLaf (Linux) picks a readable foreground itself — its light
+                // theme leaves the default button on a neutral background with an accent border
+                // and dark text, so forcing white here would make the label near-invisible.
+                if (isMacOs) foreground = java.awt.Color.WHITE
                 addActionListener { currentOnConfirm() }
             }
             JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {

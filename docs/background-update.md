@@ -12,22 +12,30 @@
 
 ## Desktop Implementation (`desktopMain/main.kt`)
 
-`main()` launches an app-scope coroutine that loops at `refreshIntervalMinutes` intervals.
+`main()` launches an app-scope coroutine that loops at `refreshIntervalMinutes` intervals. The sketch
+below is abridged — per-cycle error handling and the separately-scheduled update check are omitted.
 
 ```kotlin
 while (true) {
     val minutes = settings.refreshIntervalMinutes
-    if (minutes <= 0) { delay(60_000); continue }   // "Manual only" polls for setting changes every minute
-    delay(minutes * 60_000)
-    refreshAll()                                     // Refresh all feeds (ETag / Last-Modified differential fetch)
-    if (newCount > 0 && notificationEnabled) tray.notify(newArticles(newCount))
-    sync()                                           // Cloud sync
+    delay(if (minutes <= 0) 60_000L else minutes * 60_000L)  // "Manual only" (minutes <= 0) wakes every minute
+    if (minutes > 0) {
+        refreshFeedsAndNotify()   // Refresh all feeds (ETag / Last-Modified differential fetch), then
+                                  // NewArticleNotifier.notifyBackground(newArticles(newCount)) when
+                                  // new articles arrived and notifications are enabled
+        sync()                    // Cloud sync
+    }
+    maybeRebuildFtsIndex()        // Daily idle FTS rebuild heal (see below)
 }
 ```
 
 - The interval setting is re-read every loop, so changes take effect from the next cycle (no explicit rescheduling needed).
 - Errors during update do not crash the app; they are recorded in the notification center (handled inside `FeedRepository.refreshFeed`).
-- New-article notifications are issued via `TrayState.sendNotification` (`TrayState` can only be created inside Compose `application {}` scope, so a `MutableSharedFlow` bridges it).
+- New-article notifications reach the OS through one of three platform paths, all fed by the same
+  `NewArticleNotifier.trayEvents` flow (`TrayState` can only be created inside Compose's `application {}`
+  scope, so a `MutableSharedFlow` bridges it): macOS uses `TrayIcon.displayMessage`, Linux with a
+  StatusNotifierItem host uses `org.freedesktop.Notifications.Notify`, and Windows (plus Linux without
+  an SNI host) uses `TrayState.sendNotification`. See "Desktop Tray" in [app-architecture.md](app-architecture.md).
 
 ## Feed Update Efficiency
 

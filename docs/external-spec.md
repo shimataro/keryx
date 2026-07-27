@@ -57,7 +57,10 @@ On first launch, choose local-only / cloud sync (Dropbox / Google Drive / OneDri
 - Article list / article view (reader view). **Articles are marked as read the instant they are selected**. An action to mark as unread is available.
 - Stars (persistent), open in external browser
 - Local full-text search with SQLite FTS5 (trigram, 3+ characters)
-- Desktop notifications, task tray residence (close minimizes to tray), notification center
+- Desktop notifications, task tray residence (close minimizes to tray), notification center.
+  On Linux the tray uses the D-Bus `org.kde.StatusNotifierItem` + `com.canonical.dbusmenu` protocols
+  and notifications use `org.freedesktop.Notifications`, falling back to the AWT system tray when no
+  StatusNotifierItem host is running.
 
 ### Behavior on Feed URL Change / Disappearance
 
@@ -79,6 +82,17 @@ On first launch, choose local-only / cloud sync (Dropbox / Google Drive / OneDri
 
 Material 3 base + custom theme (teal). Light / dark / system support. 3-pane layout
 (feed list / article list / article detail) + keyboard navigation.
+
+The surfaces that are not drawn by Compose — the application menu bar, context menus, and the
+dialog button row — are real Swing/AWT widgets, so they follow the platform's Look & Feel.
+macOS and Windows use the system one; Linux uses FlatLaf tinted to the app's own teal theme,
+because Java's Linux system L&F is a GTK2-era emulation that looks dated next to a modern
+desktop. Light / dark follows the in-app theme setting without a restart. Context menus are
+`java.awt.PopupMenu` (a genuine `NSMenu` / Win32 menu) on macOS / Windows and
+`javax.swing.JPopupMenu` on Linux, where AWT's popup ignores the Look & Feel entirely. The UI
+font is the OS's own: SF Pro on macOS, Segoe UI on Windows, and on Linux the font resolved by
+the Look & Feel, then the desktop's configured font from XSettings, falling back to Adwaita Sans /
+Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
 
 ## 10. Privacy & Security
 

@@ -42,4 +42,26 @@ class KeryxThemeTest {
         assertEquals(keryxSurfaceColor(dark = true), keryxSurfaceColor(dark = true))
         assertEquals(keryxSurfaceColor(dark = false), keryxSurfaceColor(dark = false))
     }
+
+    @Test
+    fun keryxAccentColorDiffersBetweenDarkAndLight() {
+        // Dark mode uses the lighter teal (TealLight) for contrast against a dark surface; light
+        // mode uses the plain brand teal. They must resolve to distinct colors.
+        assertNotEquals(keryxAccentColor(dark = true), keryxAccentColor(dark = false))
+    }
+
+    @Test
+    fun keryxAccentColorIsStableForSameFlag() {
+        assertEquals(keryxAccentColor(dark = true), keryxAccentColor(dark = true))
+        assertEquals(keryxAccentColor(dark = false), keryxAccentColor(dark = false))
+    }
+
+    @Test
+    fun keryxAccentColorIsNotTheSameAsKeryxSurfaceColor() {
+        // FlatLaf's @accentColor and @background keys (see DesktopLookAndFeel.kt) must come from
+        // two visually distinct sources, or the Linux Look & Feel would render with no contrast
+        // between its accent (selection/checkmarks/focus rings) and its background.
+        assertNotEquals(keryxAccentColor(dark = true), keryxSurfaceColor(dark = true))
+        assertNotEquals(keryxAccentColor(dark = false), keryxSurfaceColor(dark = false))
+    }
 }

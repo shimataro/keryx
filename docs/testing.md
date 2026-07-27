@@ -32,9 +32,9 @@ Test both success (`Result.Ok`) and failure (`Result.Err`) branches; on failure,
 ./gradlew :composeApp:desktopTest
 ```
 
-The suite covers parser, fetcher redirect/304/404/410/timeout/discovery, OPML, Dropbox storage/auth, PKCE, OAuth loopback server, merge (last-write-wins / OR merge / collision guard / FK guard), schema, local settings, article upsert, URL resolver, datetime parser, Result, Repository layer (Article/Feed/Tag/Settings), CloudSession, NotificationCenter, IdGenerator, SyncRepository, ViewModel layer (Home/Settings/Setup/NotificationCenter), ArticleWebViewHtml (extractLinks/wrapArticleHtml), custom URI scheme registration (`UriSchemeRegistration`'s per-OS dispatch and packaged-launcher gate, `LinuxUriSchemeRegistrar`'s desktop-entry generation including the `%u` field code, non-destructive `mimeapps.list` merge, and idempotency), FTS (FtsManager/FtsSearch, including `indexMissing` incremental insert / non-destructive behavior, `rebuildIndex` requiring table existence, sync upload excluding `articles_fts` via `VACUUM INTO` snapshot while preserving `user_version`), etc. `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` failures specifically indicate regression in DB schema / merge SQL / sync orchestration and require extra attention.
+The suite covers parser, fetcher redirect/304/404/410/timeout/discovery, OPML, Dropbox storage/auth, PKCE, OAuth loopback server, merge (last-write-wins / OR merge / collision guard / FK guard), schema, local settings, article upsert, URL resolver, datetime parser, Result, Repository layer (Article/Feed/Tag/Settings), CloudSession, NotificationCenter, IdGenerator, SyncRepository, ViewModel layer (Home/Settings/Setup/NotificationCenter), ArticleWebViewHtml (extractLinks/wrapArticleHtml), AppFont (Pango font-description parsing for the Linux UI font), custom URI scheme registration (`UriSchemeRegistration`'s per-OS dispatch and packaged-launcher gate, `LinuxUriSchemeRegistrar`'s desktop-entry generation including the `%u` field code, non-destructive `mimeapps.list` merge, and idempotency), FTS (FtsManager/FtsSearch, including `indexMissing` incremental insert / non-destructive behavior, `rebuildIndex` requiring table existence, sync upload excluding `articles_fts` via `VACUUM INTO` snapshot while preserving `user_version`), the Linux SNI tray (`TrayPixmapTest` for the big-endian ARGB32 / RGBA encoders and alpha preservation, `TrayMenuModelTest` for the dbusmenu layout, `TrayMenuRevisionTest` for revision / `AboutToShow` / event dispatch, `DBusSignatureTest` for the exported D-Bus signatures), etc. `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` failures specifically indicate regression in DB schema / merge SQL / sync orchestration and require extra attention.
 
-Known uncovered areas: `SettingsViewModel.exportOpml`/`importOpml` (no test seam for `FilePicker` native dialog), the browser-launch → callback-wait → code-exchange portion of `OAuthConnectFlow.connect()` (depends on actual `BrowserOpener`/`OAuthLoopbackServer` I/O and cannot be mocked without a seam; only the immediate-error branch for empty App Key is covered in `OAuthConnectFlowTest`), `DatabaseDriverFactory.desktop.kt` (directly references `AppDirs.appDataDir()` and cannot be substituted with a test directory), `FeedDragAndDrop.desktop.kt` (`DragAndDropTransferable` is a library internal type that cannot be extracted from test code, and `draggedFeedId()`/`draggedFolderId()`/`positionYInRoot()` cannot be called without an actual AWT `DropTargetDragEvent`/`DropTargetDropEvent`). For the same reason, actual feed/folder reordering/move gestures themselves (`FeedListPane.kt`'s `FeedRow`/`FolderGroupHeader`/`NoFolderHeader` `dragAndDropSource`/`dragAndDropTarget`) are also untestable. The reordering calculation logic itself (`ReorderUtil.reorderIds`) and its consumers `FeedRepository.moveFeed`/`FolderRepository.reorderFolders` are tested normally.
+Known uncovered areas: `SettingsViewModel.exportOpml`/`importOpml` (no test seam for `FilePicker` native dialog), the browser-launch → callback-wait → code-exchange portion of `OAuthConnectFlow.connect()` (depends on actual `BrowserOpener`/`OAuthLoopbackServer` I/O and cannot be mocked without a seam; only the immediate-error branch for empty App Key is covered in `OAuthConnectFlowTest`), `DatabaseDriverFactory.desktop.kt` (directly references `AppDirs.appDataDir()` and cannot be substituted with a test directory), `FeedDragAndDrop.desktop.kt` (`DragAndDropTransferable` is a library internal type that cannot be extracted from test code, and `draggedFeedId()`/`draggedFolderId()`/`positionYInRoot()` cannot be called without an actual AWT `DropTargetDragEvent`/`DropTargetDropEvent`). For the same reason, actual feed/folder reordering/move gestures themselves (`FeedListPane.kt`'s `FeedRow`/`FolderGroupHeader`/`NoFolderHeader` `dragAndDropSource`/`dragAndDropTarget`) are also untestable. The reordering calculation logic itself (`ReorderUtil.reorderIds`) and its consumers `FeedRepository.moveFeed`/`FolderRepository.reorderFolders` are tested normally. On the Linux SNI tray, `SniConnection` (connecting, claiming the bus name, exporting, registering, re-registering, closing) needs a live session bus and a running `org.kde.StatusNotifierWatcher`, which CI runners do not have; likewise the actual delivery of `NewIcon`/`NewToolTip`/`LayoutUpdated` (the *decision* to emit them is covered), the `NameOwnerChanged` re-registration path, host-initiated `Activate`/`Event` arriving through dbus-java's worker threads, `LinuxNotifier.notify` reaching a real daemon, and the `LinuxTray` composable wiring. Whether the icon actually renders transparently on a panel is inherently a visual check.
 
 ## Manual Confirmation (UI)
 
@@ -51,6 +51,21 @@ The parallel feed refresh's core concurrency (overlapping fetches + complete per
 - "Refresh all" over many feeds: articles still appear incrementally (feed by feed) rather than all at once at the end, and the final list order is stable.
 - Feed error / 301·308 URL-change / 410 Gone notifications still fire, and missing favicons still fill in after a refresh.
 
+Native context menus (`nativeContextMenu`, backed by a real `JPopupMenu` on Linux and
+`java.awt.PopupMenu` on macOS/Windows — not a Compose-drawn popup) cannot be exercised by Compose
+UI tests, so visually confirm:
+
+- Right-clicking a feed row, a folder header, and an article row shows the native menu with the
+  correct actions.
+- The feed row's "Tags" submenu shows a checkmark on every currently attached tag, and its
+  "Move to folder" submenu shows a checkmark on the feed's current folder; toggling either updates
+  the checkmark immediately.
+- Opening any of these menus while the article reader's WebView is visible renders the menu above
+  the WebView, not behind it.
+- (Linux) After switching the in-app theme (light ↔ dark) with no restart: the menu bar and an
+  open dialog's button row restyle immediately, and a context menu opened afterward picks up the
+  new theme.
+
 Dialog auto-sizing (`DialogWindow` OS window behavior) cannot be auto-tested, so visually confirm:
 
 - In feed addition, entering a URL for an HTML page with multiple feed links → on confirmation, **the dialog expands to show candidate list (checkboxes)**. Editing the URL shrinks it again. No shaking or flickering during input→candidate transition.
@@ -65,6 +80,38 @@ Dock/taskbar icons (`Taskbar` / Cocoa activation policy native path) cannot be a
 - (macOS) On restart-while-running (double-launch activation), Dock icon remains the brand icon.
 - Repeated hide/restore with unread > 0 preserves the badge.
 - No regression on Windows/Linux taskbar icon/unread overlay.
+
+- The tray icon asset depends on how the platform draws it. macOS and Linux-with-an-SNI-host get the white glyph +
+  black outline (`tray_icon_outlined.png`), which needs real alpha and at least ~22px. The Windows notification area
+  and the Linux AWT fallback get the full-colour glyph (`tray_icon.png`), because Windows renders at 16px and never
+  tints tray icons, and the AWT fallback paints an opaque white box behind the icon. With unread > 0 the red dot is
+  drawn on either. Confirm each on its own platform:
+  - (Windows) The icon reads clearly on a **light** taskbar as well as a dark one — the light theme is where an
+    outlined glyph would wash out, so it is the case worth checking.
+  - (Linux, no SNI host) The full-colour glyph is legible inside the white box AWT draws around it.
+  - (macOS / Linux with an SNI host) Still the outlined glyph, legible on both light and dark backgrounds.
+
+The Linux SNI tray cannot be auto-tested at all, so on a KDE Plasma session confirm (roughly in order of how
+likely each is to be wrong):
+
+- The icon is **not** inside a white box at 22px and 24px, on both a light and a dark panel, and at 2x panel scaling.
+  If a bad entry is picked, trim `SNI_ICON_SIZES`.
+- Package with `./gradlew :composeApp:createDistributable` and launch `build/compose/binaries/main/app/Keryx/bin/Keryx`
+  — a missing jlink module (`jdk.security.auth`) only shows up there, never under `run`.
+- Left-click toggles the window (this depends on `ItemIsMenu = false`; if the menu opens instead, that property is wrong).
+- Right-click shows the menu with the correct labels, and the Show/Hide label flips after toggling the window
+  *without* reopening the menu (exercises `AboutToShow` + `LayoutUpdated`).
+- The unread dot appears/disappears live (`NewIcon` reaches the host).
+- After `systemctl --user restart plasma-plasmashell` the icon comes back without restarting Keryx.
+- A background refresh raises a desktop notification with the app icon.
+- On GNOME without the AppIndicator extension it silently falls back to the AWT tray (no crash, no stack trace), and
+  launching without `DBUS_SESSION_BUS_ADDRESS` neither hangs nor throws.
+- Same behaviour on a Plasma Wayland session.
+- Scrolling over the icon logs no errors in `journalctl --user -f`.
+- Quitting from the menu leaves nothing behind in `busctl --user list | grep StatusNotifierItem`.
+- `GetGroupProperties`/`AboutToShowGroup`/`EventGroup` behave (their `ai` / `a(isvu)` inputs are deserialized by
+  dbus-java; `DBusSignatureTest` only proves the declared signature). If they misbehave, switch those parameters to
+  `IntArray` / `Array<DBusMenuEventEntry>`.
 
 The `keryx://` scheme registration writes real files into the user's home and depends on the desktop environment, so
 the end-to-end path can only be confirmed on a Linux machine (the unit tests cover the file contents and the merge, not

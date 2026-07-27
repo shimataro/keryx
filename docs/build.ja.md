@@ -103,7 +103,9 @@ OneDrive は Dropbox と同じカスタム URI スキーム（`keryx://oauth2/ca
 ```
 
 アプリアイコンは `composeApp/icons/{keryx.icns, keryx.ico, keryx.png}`。トレイアイコンは
-`composeApp/src/commonMain/composeResources/drawable/tray_icon*.png`。これらは
+`composeApp/src/commonMain/composeResources/drawable/tray_icon*.png`。`tray_icon_outlined.png`
+（白グリフ + 黒フチ）は macOS のメニューバーと Linux の SNI パネル用、`tray_icon.png`（フルカラー）は
+Windows の通知領域・Linux の AWT フォールバック・ウィンドウ自身のタイトルバーアイコン用。これらは
 `design/icons/make_desktop_icons.sh` で共有アートワークから生成する
 （生成済みファイルはコミットしておくのが望ましい）。
 
@@ -213,3 +215,13 @@ Developer ID 署名は hardened runtime を付与するため要件を満たす�
 - 構成キャッシュ（configuration cache）は `gradle.properties` で無効化している
   （`generateBuildConfig` タスクが config-cache 安全でないため）。安全性を確認せずに再有効化しないこと。
 - `-Xexpect-actual-classes` を付与して expect/actual クラスの Beta 警告を抑制している。
+- `nativeDistributions.modules` に **`jdk.security.auth`** を含めている。dbus-java の SASL EXTERNAL
+  認証が非 Windows 環境で `com.sun.security.auth.module.UnixSystem` を使うため。外すと jlink イメージ
+  自体は作れてしまうが、パッケージした `.deb`/`.rpm` だけが `NoClassDefFoundError` で落ちる
+  （`./gradlew run` はフル JDK なので気づけない）。したがって **Linux のパッケージ検証は `run` ではなく
+  `createDistributable` で生成した `bin/Keryx` を起動して行うこと**。これはトレイだけでなく
+  java-keyring の Secret Service 経路にも効く。
+- dbus-java（MIT）は全プラットフォームに同梱されるが、実行時に触るのは Linux のみ（トレイ + 通知）。
+  バージョンは java-keyring が推移的に持ち込む版に固定している。`de.swiesend:secret-service` が
+  `org.freedesktop.dbus.errors.Error` を参照しており、dbus-java 5 でこのクラスが移動したため、
+  上げると Linux のキーリングが壊れる。

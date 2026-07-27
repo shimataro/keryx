@@ -60,7 +60,10 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
 - 記事一覧・記事ビュー（リーダービュー）。**記事を選択した瞬間に既読**。未読に戻す操作あり。
 - スター（永続）、外部ブラウザーで開く
 - SQLite FTS5（trigram）によるローカル全文検索（3 文字以上）
-- デスクトップ通知・タスクトレイ常駐（閉じるとトレイに収納）・通知センター
+- デスクトップ通知・タスクトレイ常駐（閉じるとトレイに収納）・通知センター。
+  Linux ではトレイに D-Bus の `org.kde.StatusNotifierItem` + `com.canonical.dbusmenu`、通知に
+  `org.freedesktop.Notifications` を使い、StatusNotifierItem ホストが居ない環境では AWT の
+  システムトレイにフォールバックする。
 
 ### フィード URL 変更・消滅時の挙動
 
@@ -84,6 +87,17 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
 
 Material 3 ベース + カスタムテーマ（teal）。ライト/ダーク/システム対応。3ペインレイアウト
 （フィード一覧・記事一覧・記事詳細）+ キーボードナビゲーション。
+
+Compose が描画していない面 — アプリケーションメニューバー・コンテキストメニュー・ダイアログの
+ボタン列 — は実際の Swing/AWT ウィジェットなので、プラットフォームの Look & Feel に従う。
+macOS と Windows はシステム標準を使い、Linux は Keryx 自身の teal テーマに合わせて配色した
+FlatLaf を使う（Java の Linux 向けシステム L&F は GTK2 世代のエミュレーションで、現代の
+デスクトップでは古く見えるため）。ライト/ダークはアプリのテーマ設定に再起動なしで追従する。
+コンテキストメニューは macOS / Windows では `java.awt.PopupMenu`（本物の `NSMenu` /
+Win32 メニュー）、Linux では `javax.swing.JPopupMenu`（AWT のポップアップは Look & Feel を
+完全に無視するため）。UI フォントは OS 標準で、macOS は SF Pro、Windows は Segoe UI、
+Linux は Look & Feel が解決したフォント、次にデスクトップの設定フォント（XSettings から取得）、
+取得できなければ Adwaita Sans / Cantarell / Ubuntu / Noto Sans / DejaVu Sans の順にフォールバックする。
 
 ## 10. プライバシー・セキュリティ
 

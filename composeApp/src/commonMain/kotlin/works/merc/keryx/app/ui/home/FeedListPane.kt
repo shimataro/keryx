@@ -61,6 +61,7 @@ import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
+import works.merc.keryx.app.platform.NativeCheckMenuItem
 import works.merc.keryx.app.platform.NativeMenuItem
 import works.merc.keryx.app.platform.NativeSubMenu
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
@@ -847,8 +848,6 @@ private fun NoFolderHeader(
     }
 }
 
-private fun withCheckmark(label: String, checked: Boolean): String = if (checked) "✓ $label" else label
-
 /**
  * Displays a feed entry with its title, unread count, actions, and drag-and-drop support.
  *
@@ -949,7 +948,7 @@ private fun FeedRow(
                             NativeSubMenu(
                                 label = assignTagsLabel,
                                 items = tags.map { tag ->
-                                    NativeMenuItem(withCheckmark(tag.name, tag.id in attachedTagIds)) {
+                                    NativeCheckMenuItem(tag.name, checked = tag.id in attachedTagIds) {
                                         onToggleFeedTag(tag.id, tag.id !in attachedTagIds)
                                     }
                                 },
@@ -958,13 +957,13 @@ private fun FeedRow(
                                 label = moveToFolderLabel,
                                 items = buildList {
                                     add(
-                                        NativeMenuItem(withCheckmark(noFolderLabel, feed.folder_id == null)) {
+                                        NativeCheckMenuItem(noFolderLabel, checked = feed.folder_id == null) {
                                             onMoveFeedToFolder(null)
                                         },
                                     )
                                     folders.forEach { folder ->
                                         add(
-                                            NativeMenuItem(withCheckmark(folder.name, feed.folder_id == folder.id)) {
+                                            NativeCheckMenuItem(folder.name, checked = feed.folder_id == folder.id) {
                                                 onMoveFeedToFolder(folder.id)
                                             },
                                         )
