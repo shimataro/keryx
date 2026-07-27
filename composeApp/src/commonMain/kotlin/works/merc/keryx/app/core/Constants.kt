@@ -96,3 +96,10 @@ const val KEYCHAIN_COMMAND_TIMEOUT_MS = 15_000L
  * app startup (registration runs synchronously before the window is created).
  */
 const val UPDATE_DESKTOP_DATABASE_TIMEOUT_MS = 5_000L
+
+// --- Windows URI scheme registration ---
+/**
+ * Bounds a single `reg.exe` invocation so a stuck/slow process can't hang app startup
+ * (registerWindowsUriScheme runs three of these synchronously before the window is created).
+ */
+const val REG_EXE_TIMEOUT_MS = 5_000L

@@ -255,6 +255,6 @@ class LinuxUriSchemeRegistrarTest {
 
     @Test
     fun runProcessWithTimeoutReturnsNormallyForAFastProcess() {
-        runProcessWithTimeout(listOf("echo", "hi"), timeoutMillis = 5_000)
+        assertEquals(0, runProcessWithTimeout(listOf("echo", "hi"), timeoutMillis = 5_000))
     }
 }

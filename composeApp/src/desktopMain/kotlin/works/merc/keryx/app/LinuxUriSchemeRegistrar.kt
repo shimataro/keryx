@@ -32,13 +32,14 @@ internal fun xdgDir(envName: String, homeRelativeFallback: String): File =
     System.getenv(envName)?.takeIf { it.isNotBlank() }?.let { File(it) }
         ?: File(System.getProperty("user.home"), homeRelativeFallback)
 
-/** Runs [command], aborting and throwing [IOException] if it outlives [timeoutMillis]. */
-internal fun runProcessWithTimeout(command: List<String>, timeoutMillis: Long) {
+/** Runs [command], aborting and throwing [IOException] if it outlives [timeoutMillis]. Returns the exit code otherwise. */
+internal fun runProcessWithTimeout(command: List<String>, timeoutMillis: Long): Int {
     val proc = ProcessBuilder(command).start()
     if (!proc.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)) {
         proc.destroyForcibly()
         throw IOException("${command.first()} timed out")
     }
+    return proc.exitValue()
 }
 
 /**

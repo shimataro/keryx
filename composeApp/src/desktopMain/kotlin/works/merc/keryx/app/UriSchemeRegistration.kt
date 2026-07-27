@@ -1,6 +1,7 @@
 package works.merc.keryx.app
 
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.REG_EXE_TIMEOUT_MS
 
 private const val LOG_TAG = "UriScheme"
 
@@ -77,11 +78,13 @@ internal fun registerCustomUriScheme() {
  * app. Written under `HKEY_CURRENT_USER\Software\Classes` rather than `HKEY_CLASSES_ROOT`:
  * creating a *new* key through the `HKEY_CLASSES_ROOT` merged view is always routed to
  * `HKEY_LOCAL_MACHINE\Software\Classes`, which requires admin privileges a normal launch never
- * has — the per-user hive is writable by a standard user with no elevation.
+ * has — the per-user hive is writable by a standard user with no elevation. Each `reg.exe` call is
+ * bounded by [REG_EXE_TIMEOUT_MS] so a hung process can't hang app startup (this runs synchronously
+ * before the window is created).
  */
 internal fun registerWindowsUriScheme(
     launcherPath: String,
-    runCommand: (List<String>) -> Int = { args -> ProcessBuilder(args).start().waitFor() },
+    runCommand: (List<String>) -> Int = { args -> runProcessWithTimeout(args, REG_EXE_TIMEOUT_MS) },
 ) {
     val reg = "reg.exe"
     val commands = listOf(
