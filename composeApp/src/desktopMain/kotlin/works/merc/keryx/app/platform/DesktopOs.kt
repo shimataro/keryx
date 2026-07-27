@@ -9,6 +9,12 @@ private val osName = System.getProperty("os.name").lowercase()
 internal val isMacOs = osName.contains("mac")
 
 /**
+ * Whether this desktop JVM is running on Windows. Gates the integrations the OS only offers there
+ * (registering the `keryx://` URI scheme in the registry).
+ */
+internal val isWindows = osName.contains("win")
+
+/**
  * Whether this desktop JVM is running on Linux. Gates the look-and-feel substitutions that only
  * Linux needs: AWT's heavyweight `PopupMenu` and Java's GTK2-era Swing Look & Feel both look
  * dated against a modern GTK/Qt desktop, whereas macOS (Aqua / NSMenu) and Windows (Win32 menus)

@@ -26,7 +26,8 @@ composeApp/src/
     ui/           theme/, navigation/, setup/, home/（3ペイン + 検索 + 通知センター）, article/, settings/, i18n/
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq（7 テーブル）
   commonMain/composeResources/  values/strings.xml, drawable/
-  desktopMain/kotlin/…/  main.kt + 各 expect の actual（DatabaseDriverFactory, AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, Pkce, PlatformModule）+ OAuthConnectFlow, OAuthRedirectTransport（CustomUri/Loopback）, OAuthUriParser, SingleInstanceCoordinator, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）, DesktopOs（isMacOs/isLinux）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf）
+  desktopMain/kotlin/…/  main.kt + 各 expect の actual（DatabaseDriverFactory, AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, Pkce, PlatformModule）+ OAuthConnectFlow, OAuthRedirectTransport（CustomUri/Loopback）, OAuthUriParser, SingleInstanceCoordinator, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）, DesktopOs（isMacOs/isWindows/isLinux）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf）
+    tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray + StatusNotifierItem/dbusmenu の D-Bus オブジェクト
   commonTest/ + desktopTest/
 ```
 
@@ -76,6 +77,49 @@ ATTACH DATABASE マージは**専用の JDBC コネクション 1 本**で行う
 `appModule`（commonMain）にリポジトリ・サービス・ViewModel を登録。`platformModule`（desktop）に
 HttpClient・TokenStorage・CloudSession・CloudConnectFlow を登録。ViewModel は単一ウィンドウの
 デスクトップアプリのためアプリスコープの `single` として登録し、`koinInject()` で取得する。
+
+### デスクトップトレイ（プラットフォーム分岐）
+
+`tray/KeryxTray.kt` が 3 実装のいずれかを選ぶ。
+
+| プラットフォーム | 実装 | 理由 |
+| --- | --- | --- |
+| macOS | `MacTray`（生の AWT `TrayIcon`） | Compose の `Tray()` は `TrayIcon.setPopupMenu()` を使い、macOS では左右どちらのクリックでもメニューが開いてしまうため。 |
+| Linux（SNI ホストあり） | `LinuxTray`（D-Bus StatusNotifierItem） | AWT は X11 で透過トレイアイコンを描画できないため（下記）。 |
+| Windows / Linux（SNI ホスト無し） | Compose `Tray()` | そのままで問題ない。 |
+
+**Linux で SNI が必要な理由**: `sun.awt.X11.XTrayIconPeer.IconCanvas.paint()` はアイコン描画の *前* に
+24x24 のキャンバス全面をコンポーネント背景色で塗り潰し、さらに `sun.awt.X11.XSystemTrayPeer` は
+トレイマネージャーの `_NET_SYSTEM_TRAY_VISUAL` を読まないため XEmbed ウィンドウにアルファチャンネルが
+存在しない。したがって PNG の中身に関わらず AWT のトレイアイコンは必ず不透明（白）の四角の中に描画される。
+SNI ならパネルへ生の ARGB ピクセルを渡せる。
+
+専用のセッションバス接続（`SniConnection`、`withShared(false)`、well-known 名
+`org.kde.StatusNotifierItem-<pid>-1`）に 2 つのオブジェクトを export する。
+
+- `/StatusNotifierItem` — `SniStatusNotifierItem`（`org.kde.StatusNotifierItem`）。`IconPixmap` は
+  バッジ付きグリフをビッグエンディアン ARGB32（`TrayPixmap.kt`）で複数サイズ提供する。`ItemIsMenu = false`
+  にすることで、左クリックがメニューではなく `Activate` に届く。
+- `/StatusNotifierItem/menu` — `SniDBusMenu`（`com.canonical.dbusmenu`。表示/非表示 + 終了）。
+  ラベル変更時に revision を上げて `LayoutUpdated` を発火し、`AboutToShow` は現在のラベルと
+  `GetLayout` が最後に返した内容を比較するため、シグナルが落ちても復旧する。
+
+アイコンのアセットも同じ分岐に従う。透過が効いて 22px 以上で合成される 2 経路は outlined
+（`tray_icon_outlined.png`）、Windows の通知領域と Linux の AWT フォールバックはフルカラー
+（`tray_icon.png`）。後者はアイコンが小さく、ティントもされず、不透明な箱の上に描かれるため。
+
+どちらの export オブジェクトも接続を保持せず、シグナル発火はコールバックとして注入するため、バス無しで
+単体テストできる。デスクトップ通知は同じ接続上の `org.freedesktop.Notifications`（`LinuxNotifier`）で
+AWT のバルーンを置き換える。その `image-data` ヒントは SNI ピクスマップのビッグエンディアン ARGB32 とは
+異なり **RGBA** である点に注意。
+
+検出は `main.kt` の `application {}` より前に行う（セッションバスが無応答でも起動が止まらないよう
+タイムアウト付き）。セッションバスや `StatusNotifierWatcher` が無ければ `null` となり、AWT
+フォールバックが選ばれる。起動 *後* にウォッチャーが現れた場合は再起動まで AWT 経路のままだが、
+一度確立した後のウォッチャー再起動は `NameOwnerChanged` で復帰する。
+
+これら一式は `expect`/`actual` ではなく `desktopMain` に置く。`main.kt` からしか到達せず、ViewModel や
+Repository は触れず、Linux のパネルプロトコルにモバイル側の対応物が無いため。
 
 ## ドメインモデルの方針
 

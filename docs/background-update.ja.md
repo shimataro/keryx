@@ -12,23 +12,30 @@
 
 ## デスクトップ実装（`desktopMain/main.kt`）
 
-`main()` でアプリスコープのコルーチンを起動し、`refreshIntervalMinutes` の間隔でループする。
+`main()` でアプリスコープのコルーチンを起動し、`refreshIntervalMinutes` の間隔でループする。以下は
+要約で、各周回のエラー処理と、独立した間隔で走るアップデート確認は省略している。
 
 ```kotlin
 while (true) {
     val minutes = settings.refreshIntervalMinutes
-    if (minutes <= 0) { delay(60_000); continue }   // 「手動のみ」は 1 分ごとに設定変更を確認
-    delay(minutes * 60_000)
-    refreshAll()                                     // 全フィード更新（ETag / Last-Modified 差分取得）
-    if (newCount > 0 && notificationEnabled) tray.notify(newArticles(newCount))
-    sync()                                           // クラウド同期
+    delay(if (minutes <= 0) 60_000L else minutes * 60_000L)  // 「手動のみ」（minutes <= 0）は 1 分ごとに起床
+    if (minutes > 0) {
+        refreshFeedsAndNotify()   // 全フィード更新（ETag / Last-Modified 差分取得）→ 新着があり通知が
+                                  // 有効なら NewArticleNotifier.notifyBackground(newArticles(newCount))
+        sync()                    // クラウド同期
+    }
+    maybeRebuildFtsIndex()        // FTS 全再構築の日次 heal（後述）
 }
 ```
 
 - 設定間隔は毎ループ読み直すため、設定変更は次サイクルから反映される（明示的な再スケジュール不要）。
 - 更新中のエラーはクラッシュさせず、通知センターに記録する（`FeedRepository.refreshFeed` 内で処理）。
-- 新着通知はトレイの `TrayState.sendNotification` で発行する（`TrayState` は Compose の
-  `application {}` スコープ内でしか作れないため、`MutableSharedFlow` で橋渡しする）。
+- 新着通知は同じ `NewArticleNotifier.trayEvents` を入力として、プラットフォームごとに 3 経路で OS へ渡す
+  （`TrayState` は Compose の `application {}` スコープ内でしか作れないため、`MutableSharedFlow` で
+  橋渡しする）。macOS は `TrayIcon.displayMessage`、StatusNotifierItem ホストがある Linux は
+  `org.freedesktop.Notifications.Notify`、Windows（および SNI ホストの無い Linux）は
+  `TrayState.sendNotification`。詳細は [app-architecture.ja.md](app-architecture.ja.md) の
+  「デスクトップトレイ」を参照。
 
 ## フィード更新の効率化
 

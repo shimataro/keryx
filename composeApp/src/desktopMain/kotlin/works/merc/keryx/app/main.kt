@@ -4,13 +4,11 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.window.WindowDraggableArea
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -21,16 +19,12 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.LocalWindowExceptionHandlerFactory
-import androidx.compose.ui.window.Notification
-import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowExceptionHandler
 import androidx.compose.ui.window.WindowExceptionHandlerFactory
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
-import androidx.compose.ui.window.isTraySupported
-import androidx.compose.ui.window.rememberTrayState
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -38,7 +32,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -48,7 +41,6 @@ import kotlinx.coroutines.swing.Swing
 import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.painterResource
-import org.jetbrains.compose.resources.stringResource
 import org.koin.core.context.startKoin
 import org.koin.mp.KoinPlatform
 import works.merc.keryx.app.core.AppNotification
@@ -80,19 +72,19 @@ import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.domain.UpdateStatus
 import works.merc.keryx.app.domain.shouldCheckForUpdate
 import works.merc.keryx.app.platform.AppDirs
+import works.merc.keryx.app.platform.isLinux
 import works.merc.keryx.app.platform.isMacOs
+import works.merc.keryx.app.platform.isWindows
 import works.merc.keryx.app.platform.LocalNativeWindow
 import works.merc.keryx.app.platform.LocalWindowDragArea
 import works.merc.keryx.app.platform.WindowChrome
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.app_icon
 import works.merc.keryx.app.resources.notification_app_translocated
-import works.merc.keryx.app.resources.tray_hide
 import works.merc.keryx.app.resources.tray_icon
 import works.merc.keryx.app.resources.update_available_notification
-import works.merc.keryx.app.resources.tray_icon_macos
-import works.merc.keryx.app.resources.tray_quit
-import works.merc.keryx.app.resources.tray_show
+import works.merc.keryx.app.tray.KeryxTray
+import works.merc.keryx.app.tray.SniConnection
 import works.merc.keryx.app.ui.AppMenuBar
 import works.merc.keryx.app.ui.home.HomeViewModel
 import works.merc.keryx.app.ui.menu.MenuCommand
@@ -105,13 +97,7 @@ import java.awt.Desktop
 import java.awt.Dimension
 import java.awt.Frame
 import java.awt.Image
-import java.awt.MenuItem
-import java.awt.PopupMenu
-import java.awt.SystemTray
 import java.awt.Taskbar
-import java.awt.TrayIcon
-import java.awt.event.MouseAdapter
-import java.awt.event.MouseEvent
 import java.io.File
 import javax.swing.SwingUtilities
 
@@ -221,8 +207,9 @@ fun main(args: Array<String>) {
 
     appScope.launch { runStartupTasks(koin) }
 
-    // Bridges background "new articles" counts to the tray (TrayState only exists
-    // inside the application {} scope) and to the in-app UI (HomeViewModel).
+    // Bridges background "new articles" counts to the OS (KeryxTray picks the per-platform
+    // sink: TrayIcon.displayMessage, org.freedesktop.Notifications, or TrayState, which only
+    // exists inside the application {} scope) and to the in-app UI (HomeViewModel).
     val newArticleNotifier = koin.get<NewArticleNotifier>()
     val newArticleNotifications = newArticleNotifier.trayEvents
     appScope.launch { backgroundUpdateLoop(koin) }
@@ -261,8 +248,18 @@ fun main(args: Array<String>) {
     }.onFailure { Log.warn(LOG_TAG, "Could not install URI handler", it) }
 
     // Register custom URI scheme on Windows so the OS knows how to handle keryx:// URIs.
-    if (System.getProperty("os.name").lowercase().contains("win")) {
+    if (isWindows) {
         registerWindowsUriScheme()
+    }
+
+    // Linux: java.awt.SystemTray cannot draw a transparent icon on X11 (XTrayIconPeer fills the
+    // canvas with the component background before drawing, and XSystemTrayPeer never adopts the
+    // tray manager's ARGB visual), so the icon always ends up inside a white box. Use the native
+    // StatusNotifierItem protocol when a host is available; null falls back to the AWT tray.
+    // Resolved here, before the window exists, so the tray is up even with startMinimized.
+    val sniConnection = if (isLinux) SniConnection.tryCreate() else null
+    if (sniConnection != null) {
+        Runtime.getRuntime().addShutdownHook(Thread { runCatching { sniConnection.close() } })
     }
 
     application {
@@ -313,62 +310,19 @@ fun main(args: Array<String>) {
             }
         }
 
-        val trayState = rememberTrayState()
-        val trayIconResource = if (isMacOs) Res.drawable.tray_icon_macos else Res.drawable.tray_icon
-        val trayBaseImage = rememberDrawableImage(trayIconResource)
-        val trayBadgedImage = remember(trayBaseImage, unreadCount) { trayBaseImage?.let { drawUnreadDot(it, unreadCount) } }
-
-        // Window always uses the non-mac tray_icon regardless of platform (existing
-        // behavior). Reuse trayBaseImage when it's the same resource to avoid loading
-        // tray_icon twice; on macOS the tray uses tray_icon_macos, so it's loaded separately.
-        val windowBaseImage = if (trayIconResource == Res.drawable.tray_icon) trayBaseImage else rememberDrawableImage(Res.drawable.tray_icon)
+        val windowBaseImage = rememberDrawableImage(Res.drawable.tray_icon)
         val windowBadgedImage = remember(windowBaseImage, unreadCount) { windowBaseImage?.let { drawUnreadBadge(it, unreadCount) } }
         val windowBadgedPainter = remember(windowBadgedImage) { windowBadgedImage?.let { BitmapPainter(it.toComposeImageBitmap()) } }
 
-        if (!isMacOs) {
-            // On macOS, MacTray below consumes newArticleNotifications directly since
-            // Tray()'s own composable body (the only place that turns a queued
-            // TrayState notification into an actual TrayIcon.displayMessage call) is
-            // not part of the composition there.
-            LaunchedEffect(Unit) {
-                newArticleNotifications.collect { message ->
-                    trayState.sendNotification(Notification("Keryx", message))
-                }
-            }
-        }
-
-        if (isTraySupported) {
-            if (isMacOs) {
-                MacTray(
-                    image = trayBadgedImage,
-                    tooltip = if (unreadCount > 0) "Keryx ($unreadCount)" else "Keryx",
-                    showLabel = stringResource(Res.string.tray_show),
-                    hideLabel = stringResource(Res.string.tray_hide),
-                    quitLabel = stringResource(Res.string.tray_quit),
-                    windowVisible = windowVisible,
-                    onToggle = { windowVisible = !windowVisible },
-                    onQuit = ::exitApplication,
-                    newArticleNotifications = newArticleNotifications,
-                )
-            } else {
-                val trayBadgedPainter = remember(trayBadgedImage) { trayBadgedImage?.let { BitmapPainter(it.toComposeImageBitmap()) } }
-                trayBadgedPainter?.let { painter ->
-                    Tray(
-                        icon = painter,
-                        state = trayState,
-                        tooltip = if (unreadCount > 0) "Keryx ($unreadCount)" else "Keryx",
-                        onAction = { windowVisible = !windowVisible },
-                        menu = {
-                            Item(
-                                if (windowVisible) stringResource(Res.string.tray_hide) else stringResource(Res.string.tray_show),
-                                onClick = { windowVisible = !windowVisible },
-                            )
-                            Item(stringResource(Res.string.tray_quit), onClick = ::exitApplication)
-                        },
-                    )
-                }
-            }
-        }
+        KeryxTray(
+            sniConnection = sniConnection,
+            notificationIcon = dockBaseImage,
+            unreadCount = unreadCount,
+            windowVisible = windowVisible,
+            onToggle = { windowVisible = !windowVisible },
+            onQuit = ::exitApplication,
+            newArticleNotifications = newArticleNotifications,
+        )
 
         // Log any exception surfaced during composition/rendering before the default
         // handler runs; otherwise EDT crashes never reach keryx.N.log (background paths
@@ -524,126 +478,15 @@ fun main(args: Array<String>) {
 }
 
 /**
- * Re-applies the branded (badged) Dock icon on the EDT. Switching the macOS activation policy back
- * to Regular recreates the Dock tile from scratch and discards any runtime `taskbar.iconImage`
- * override, so this must run again after every hide→restore cycle. No-op when the branded image
- * isn't ready yet or the platform lacks `ICON_IMAGE` support (e.g. Windows, which uses the
- * `setWindowIconBadge` overlay path in the badge effect instead).
+ * Applies the provided image as the taskbar or Dock icon when supported.
+ *
+ * @param image The icon image to apply, or `null` if no image is available.
  */
 private fun applyBrandedDockIcon(image: Image?) {
     if (image == null || !Taskbar.isTaskbarSupported()) return
     val taskbar = Taskbar.getTaskbar()
     if (taskbar.isSupported(Taskbar.Feature.ICON_IMAGE)) {
         taskbar.iconImage = image
-    }
-}
-
-/**
- * macOS-only replacement for the Compose `Tray()` composable.
- *
- * `Tray()` wires the icon's popup menu via `TrayIcon.setPopupMenu()`, which on
- * macOS shows the popup on *any* click (left or right) - a long-standing
- * AWT/macOS limitation (Compose upstream has an unresolved TODO for this). To
- * get "right-click = menu, left-click = toggle", this bypasses `setPopupMenu`
- * and drives a raw `TrayIcon`/`PopupMenu` pair with a manual `MouseListener`.
- */
-@Composable
-private fun MacTray(
-    image: Image?,
-    tooltip: String,
-    showLabel: String,
-    hideLabel: String,
-    quitLabel: String,
-    windowVisible: Boolean,
-    onToggle: () -> Unit,
-    onQuit: () -> Unit,
-    newArticleNotifications: SharedFlow<String>,
-) {
-    val image = image ?: return
-
-    val currentOnToggle by rememberUpdatedState(onToggle)
-    val currentOnQuit by rememberUpdatedState(onQuit)
-
-    // TrayIcon isn't a java.awt.Component, so PopupMenu.show(...) needs some
-    // origin Component. This Frame exists only to host the PopupMenu and is
-    // 0x0 so it's never visually noticeable. It must still be isVisible=true,
-    // since PopupMenu.show() requires origin.isShowing() to be true, and
-    // pack() alone (creating a peer without showing it) isn't enough.
-    val dummyFrame = remember {
-        Frame().apply {
-            isUndecorated = true
-            setSize(0, 0)
-            location = java.awt.Point(0, 0)
-            setFocusableWindowState(false)
-            isVisible = true
-        }
-    }
-    val toggleItem = remember { MenuItem() }
-    val quitItem = remember { MenuItem() }
-    val popupMenu = remember {
-        PopupMenu().apply {
-            add(toggleItem)
-            add(quitItem)
-        }
-    }
-    DisposableEffect(dummyFrame, popupMenu) {
-        dummyFrame.add(popupMenu)
-        onDispose { dummyFrame.dispose() }
-    }
-
-    val trayIcon = remember { TrayIcon(image).apply { isImageAutoSize = true } }
-    LaunchedEffect(trayIcon, image) {
-        trayIcon.image = image
-    }
-    DisposableEffect(trayIcon, popupMenu) {
-        val listener = object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) {
-                when (e.button) {
-                    MouseEvent.BUTTON1 -> currentOnToggle()
-                    MouseEvent.BUTTON3 -> {
-                        // TrayIcon's MouseEvent x/y are already screen-absolute
-                        // coordinates. Translate them into dummyFrame's local
-                        // coordinate space (rather than assuming the frame
-                        // stays exactly at (0,0)) so the menu opens at the
-                        // click location instead of wherever the frame is.
-                        val origin = dummyFrame.locationOnScreen
-                        popupMenu.show(dummyFrame, e.xOnScreen - origin.x, e.yOnScreen - origin.y)
-                    }
-                }
-            }
-        }
-        trayIcon.addMouseListener(listener)
-        val systemTray = SystemTray.getSystemTray()
-        systemTray.add(trayIcon)
-        onDispose {
-            trayIcon.removeMouseListener(listener)
-            systemTray.remove(trayIcon)
-        }
-    }
-
-    LaunchedEffect(toggleItem) {
-        toggleItem.addActionListener { currentOnToggle() }
-    }
-    LaunchedEffect(quitItem) {
-        quitItem.addActionListener { currentOnQuit() }
-    }
-    LaunchedEffect(trayIcon, tooltip) {
-        trayIcon.toolTip = tooltip
-    }
-    LaunchedEffect(toggleItem, windowVisible, showLabel, hideLabel) {
-        toggleItem.label = if (windowVisible) hideLabel else showLabel
-    }
-    LaunchedEffect(quitItem, quitLabel) {
-        quitItem.label = quitLabel
-    }
-
-    // Tray()'s own composable body is what turns a queued TrayState notification
-    // into an actual TrayIcon.displayMessage(...) call; since MacTray replaces
-    // Tray() entirely on macOS, it must consume newArticleNotifications itself.
-    LaunchedEffect(trayIcon) {
-        newArticleNotifications.collect { message ->
-            trayIcon.displayMessage("Keryx", message, TrayIcon.MessageType.NONE)
-        }
     }
 }
 
