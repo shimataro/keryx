@@ -6,13 +6,20 @@ import org.freedesktop.dbus.errors.PropertyReadOnly
 import org.freedesktop.dbus.interfaces.Properties
 import org.freedesktop.dbus.types.UInt32
 import org.freedesktop.dbus.types.Variant
-import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 /** The interface name the menu's properties live under. */
 internal const val DBUSMENU_INTERFACE = "com.canonical.dbusmenu"
 
 private val MENU_KNOWN_IDS = setOf(MENU_ROOT_ID, MENU_TOGGLE_ID, MENU_QUIT_ID)
+
+/**
+ * A revision and the labels that revision describes, held together so a worker thread reading
+ * both always sees a consistent pair. Two separate atomics would let a concurrent
+ * [SniDBusMenu.updateState] stamp the previous layout with the new revision, which a
+ * revision-tracking host (libdbusmenu-glib) reads as "already applied" and never refetches.
+ */
+private data class MenuRevision(val revision: Int, val state: TrayMenuState)
 
 /**
  * The `/StatusNotifierItem/menu` object exported on the session bus.
@@ -23,7 +30,8 @@ private val MENU_KNOWN_IDS = setOf(MENU_ROOT_ID, MENU_TOGGLE_ID, MENU_QUIT_ID)
  *
  * Thread ownership:
  * - `desired` is written only from the UI thread (via [updateState]) and read from dbus-java
- *   worker threads.
+ *   worker threads. It carries the revision alongside the labels, so `GetLayout` cannot serve a
+ *   revision that disagrees with the layout it returns.
  * - `lastServed` is both written and read only from dbus-java worker threads (`GetLayout` and
  *   `AboutToShow`).
  */
@@ -33,9 +41,8 @@ internal class SniDBusMenu(
     private val onLayoutUpdated: (revision: Int) -> Unit,
 ) : DBusMenu, Properties {
 
-    private val desired = AtomicReference(initialState)
+    private val desired = AtomicReference(MenuRevision(revision = 1, state = initialState))
     private val lastServed = AtomicReference<TrayMenuState?>(null)
-    private val revision = AtomicInteger(1)
 
     private val _toggleRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val toggleRequests: SharedFlow<Unit> = _toggleRequests
@@ -51,7 +58,7 @@ internal class SniDBusMenu(
 override fun getObjectPath(): String = objectPath
 
     /** The revision the host would currently be told about. Exposed for tests. */
-    val currentRevision: Int get() = revision.get()
+    val currentRevision: Int get() = desired.get().revision
 
     /**
      * Updates the menu state and notifies listeners when it changes.
@@ -59,10 +66,13 @@ override fun getObjectPath(): String = objectPath
      * @param state The new menu state.
      */
     fun updateState(state: TrayMenuState) {
-        val previous = desired.getAndSet(state)
-        if (previous != state) {
-            onLayoutUpdated(revision.incrementAndGet())
-        }
+        // Single writer (the UI thread), so get-then-set needs no CAS; readers only ever see a
+        // whole MenuRevision.
+        val previous = desired.get()
+        if (previous.state == state) return
+        val next = MenuRevision(previous.revision + 1, state)
+        desired.set(next)
+        onLayoutUpdated(next.revision)
     }
 
     /**
@@ -78,11 +88,11 @@ override fun getObjectPath(): String = objectPath
         recursionDepth: Int,
         propertyNames: List<String>,
     ): MenuLayoutReply {
-        val state = desired.get()
-        lastServed.set(state)
+        val snapshot = desired.get()
+        lastServed.set(snapshot.state)
         return GetLayoutResult(
-            UInt32(revision.get().toLong()),
-            buildMenuLayout(parentId, recursionDepth, propertyNames, state),
+            UInt32(snapshot.revision.toLong()),
+            buildMenuLayout(parentId, recursionDepth, propertyNames, snapshot.state),
         )
     }
 
@@ -97,7 +107,7 @@ override fun getObjectPath(): String = objectPath
         ids: List<Int>,
         propertyNames: List<String>,
     ): List<DBusMenuItemProperties> {
-        val state = desired.get()
+        val state = desired.get().state
         return ids.map { DBusMenuItemProperties(it, menuItemProperties(it, state, propertyNames)) }
     }
 
@@ -109,7 +119,7 @@ override fun getObjectPath(): String = objectPath
          * @return The property's value, or an empty string variant when the property is unavailable.
          */
         override fun GetProperty(id: Int, name: String): Variant<*> =
-        menuItemProperties(id, desired.get(), listOf(name))[name] ?: Variant("")
+        menuItemProperties(id, desired.get().state, listOf(name))[name] ?: Variant("")
 
     /**
      * Handles a DBus menu event for the specified menu item.
@@ -137,7 +147,7 @@ override fun getObjectPath(): String = objectPath
  *
  * @return `true` if the current state differs from the last served state, `false` otherwise.
  */
-    override fun AboutToShow(id: Int): Boolean = desired.get() != lastServed.get()
+    override fun AboutToShow(id: Int): Boolean = desired.get().state != lastServed.get()
 
     /**
      * Determines which requested menu items require updates and identifies unknown item IDs.

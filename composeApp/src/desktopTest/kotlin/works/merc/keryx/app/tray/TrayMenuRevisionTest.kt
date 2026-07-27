@@ -7,6 +7,8 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.freedesktop.dbus.types.UInt32
 import org.freedesktop.dbus.types.Variant
+import java.util.concurrent.ConcurrentLinkedQueue
+import kotlin.concurrent.thread
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -83,6 +85,31 @@ class TrayMenuRevisionTest {
         assertEquals(menu.currentRevision, reply.revision.toInt())
         val toggle = reply.layout.children.first().value as DBusMenuLayoutItem
         assertEquals("非表示", toggle.properties.getValue("label").value)
+    }
+
+    @Test
+    fun `a layout reply never stamps one revision's labels with another revision`() {
+        // Built locally with a no-op callback: the shared `emitted` list is not thread-safe.
+        val states = listOf(hidden, shown)
+        val menu = SniDBusMenu(SniConnection.MENU_PATH, states[0], onLayoutUpdated = {})
+        val mismatches = ConcurrentLinkedQueue<String>()
+
+        // The menu starts at revision 1 with states[0] and the writer's first call passes
+        // states[1], so revision R always describes states[(R - 1) % 2].
+        val writer = thread { repeat(20_000) { i -> menu.updateState(states[(i + 1) % 2]) } }
+        repeat(20_000) {
+            val reply = menu.fetchLayout()
+            val revision = reply.revision.toInt()
+            val toggle = reply.layout.children.first().value as DBusMenuLayoutItem
+            val expected = states[(revision - 1) % 2].toggleLabel
+            val actual = toggle.properties.getValue("label").value
+            if (expected != actual) {
+                mismatches += "revision $revision served '$actual', expected '$expected'"
+            }
+        }
+        writer.join()
+
+        assertTrue(mismatches.isEmpty(), mismatches.firstOrNull().orEmpty())
     }
 
     @Test
