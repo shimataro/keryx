@@ -137,6 +137,7 @@ fun FrameWindowScope.AppMenuBar(
                 )
                 Item(
                     stringResource(Res.string.menu_file_quit),
+                    shortcut = mod(Key.Q),
                     onClick = onQuit,
                 )
             }
