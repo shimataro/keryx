@@ -48,8 +48,10 @@ internal class SniConnection private constructor(
     private var nameOwnerHandler: AutoCloseable? = null
 
     /**
-     * Publishes both objects on the connection. Purely local bookkeeping in dbus-java, so this
-     * is safe to call from the EDT; the blocking part is [announce].
+     * Exports the status notifier item and its menu on the connection.
+     *
+     * @param item The status notifier item to export.
+     * @param menu The D-Bus menu to export.
      */
     fun exportObjects(item: SniStatusNotifierItem, menu: SniDBusMenu) {
         connection.exportObject(ITEM_PATH, item)
@@ -57,10 +59,7 @@ internal class SniConnection private constructor(
     }
 
     /**
-     * Subscribes to watcher restarts (once) and (re-)announces the item to the watcher.
-     *
-     * Blocking - both `AddMatch` and `RegisterStatusNotifierItem` are round trips - so keep it
-     * off the EDT.
+     * Registers the status notifier item with the watcher and monitors watcher restarts for re-registration.
      */
     fun announce() {
         if (nameOwnerHandler == null) {
@@ -89,9 +88,9 @@ internal class SniConnection private constructor(
     }
 
     /**
-     * Queues the signal produced by [signal] for delivery. Appending to the outgoing queue does
-     * not block, so this is safe to call from the EDT. The factory runs inside the guard because
-     * `DBusSignal`'s constructor can throw too.
+     * Sends a D-Bus signal produced by [signal].
+     *
+     * @param signal Factory for the signal to send.
      */
     fun emit(signal: () -> DBusSignal) {
         runCatching { connection.sendMessage(signal()) }
@@ -111,6 +110,9 @@ internal class SniConnection private constructor(
             .getOrNull()
     }
 
+    /**
+     * Releases the owned bus name and disconnects from the session bus.
+     */
     fun close() {
         runCatching { connection.releaseBusName(busName) }
             .onFailure { Log.warn(LOG_TAG, "Could not release $busName", it) }
@@ -155,6 +157,11 @@ internal class SniConnection private constructor(
             }
         }
 
+        /**
+         * Opens and validates a dedicated session-bus connection for the status notifier.
+         *
+         * @return A configured connection, or `null` when the status notifier watcher is unavailable or setup fails.
+         */
         private fun open(): SniConnection? {
             // withShared(false) is required: the default is a process-wide refcounted
             // connection, and we own a well-known name and export objects on this one.

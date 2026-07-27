@@ -23,6 +23,12 @@ internal class LinuxNotifier(
 ) {
     private val imageData = icon?.let { toNotificationImageData(scaleToSquare(it, NOTIFICATION_ICON_SIZE)) }
 
+    /**
+     * Delivers a desktop notification with the specified summary and body.
+     *
+     * @param summary The notification summary.
+     * @param body The notification body.
+     */
     fun notify(summary: String, body: String) {
         val notifications = connection.notifications() ?: return
         val hints: Map<String, Variant<*>> = imageData

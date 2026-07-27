@@ -39,6 +39,12 @@ internal fun menuItemProperties(
     return all.filterKeys { it in propertyNames }
 }
 
+/**
+ * Creates the standard properties for a leaf menu item.
+ *
+ * @param label The label displayed for the menu item.
+ * @return A map containing the item's type, escaped label, enabled state, and visibility.
+ */
 private fun leafProperties(label: String): Map<String, Variant<*>> = mapOf(
     "type" to Variant("standard"),
     "label" to Variant(escapeMenuLabel(label)),
@@ -47,11 +53,16 @@ private fun leafProperties(label: String): Map<String, Variant<*>> = mapOf(
 )
 
 /**
- * Builds the reply of `GetLayout(parentId, recursionDepth, propertyNames)`.
+ * Builds a menu layout item for the requested node.
  *
- * [recursionDepth] follows the dbusmenu spec: `-1` means unlimited, `0` means the requested
- * node without its children, and anything higher limits the depth (our tree is only two
- * levels, so `>= 1` behaves like unlimited).
+ * Child items are included when [recursionDepth] is not zero; for this two-level menu,
+ * `-1` and positive values include the root's immediate children.
+ *
+ * @param parentId The ID of the menu node to build.
+ * @param recursionDepth The requested child recursion depth.
+ * @param propertyNames The property names to include, or an empty list for all properties.
+ * @param state The current menu labels.
+ * @return The menu layout item for [parentId].
  */
 internal fun buildMenuLayout(
     parentId: Int,

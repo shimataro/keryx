@@ -18,17 +18,12 @@ import java.awt.image.BufferedImage
 private const val LOG_TAG = "LinuxTray"
 
 /**
- * The Linux tray, backed by the D-Bus StatusNotifierItem protocol instead of
- * `java.awt.SystemTray`.
+ * Creates and manages a Linux system tray entry using the D-Bus StatusNotifierItem protocol.
  *
- * AWT's X11 tray cannot render a transparent icon at all:
- * `sun.awt.X11.XTrayIconPeer.IconCanvas.paint` fills the canvas with the component background
- * before drawing, and `sun.awt.X11.XSystemTrayPeer` never adopts the tray manager's
- * `_NET_SYSTEM_TRAY_VISUAL`, so the embedded window has no alpha channel. The icon therefore
- * always appears inside an opaque (white) box. SNI hands the panel raw ARGB pixels instead.
+ * Registers the tray item and menu, updates their state from the provided values, and routes
+ * tray actions and new article notifications to the supplied callbacks and notification flow.
  *
- * [connection] is created before the window (see `main.kt`) and is non-null only when a
- * StatusNotifierWatcher was actually present; otherwise `KeryxTray` falls back to AWT.
+ * @param connection The D-Bus connection used to export and announce the tray objects.
  */
 @Composable
 internal fun LinuxTray(
@@ -115,6 +110,11 @@ internal fun LinuxTray(
     }
 }
 
+/**
+ * Announces the tray objects to the StatusNotifierWatcher.
+ *
+ * @param connection The SNI connection used for registration.
+ */
 private suspend fun announce(connection: SniConnection) {
     withContext(Dispatchers.IO) {
         runCatching { connection.announce() }

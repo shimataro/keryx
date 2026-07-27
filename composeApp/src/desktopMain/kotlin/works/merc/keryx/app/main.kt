@@ -454,11 +454,9 @@ fun main(args: Array<String>) {
 }
 
 /**
- * Re-applies the branded (badged) Dock icon on the EDT. Switching the macOS activation policy back
- * to Regular recreates the Dock tile from scratch and discards any runtime `taskbar.iconImage`
- * override, so this must run again after every hide→restore cycle. No-op when the branded image
- * isn't ready yet or the platform lacks `ICON_IMAGE` support (e.g. Windows, which uses the
- * `setWindowIconBadge` overlay path in the badge effect instead).
+ * Applies the provided image as the taskbar or Dock icon when supported.
+ *
+ * @param image The icon image to apply, or `null` if no image is available.
  */
 private fun applyBrandedDockIcon(image: Image?) {
     if (image == null || !Taskbar.isTaskbarSupported()) return

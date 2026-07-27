@@ -12,29 +12,27 @@ import java.awt.image.BufferedImage
 internal val SNI_ICON_SIZES = intArrayOf(22, 24, 32, 48, 64)
 
 /**
- * The well-known bus name of our status notifier item.
+ * Builds the well-known D-Bus name for a status notifier item.
  *
- * The trailing number is the item's index *within the process*; Keryx only ever publishes
- * one, so it is always 1. A D-Bus well-known name is released when its connection dies, and
- * `SingleInstanceCoordinator` already guarantees a single Keryx process, so no collision
- * retry is needed - a failing `RequestName` simply falls back to the AWT tray.
+ * @param pid The process identifier used in the bus name.
+ * @return The status notifier item's well-known D-Bus name.
  */
 internal fun sniBusName(pid: Long): String = "org.kde.StatusNotifierItem-$pid-1"
 
 /**
- * Whether the tray glyph carries the unread dot. `drawUnreadDot` renders no digits, so the
- * dot looks identical for every positive count - this boolean is the only input that can
- * change the rendered tray icon, and therefore the only thing worth emitting `NewIcon` for.
+ * Determines whether the tray icon should display an unread indicator.
+ *
+ * @param count The number of unread items.
+ * @return `true` if the unread indicator should be shown, `false` otherwise.
  */
 internal fun hasUnreadDot(count: Long): Boolean = unreadBadgeLabel(count) != null
 
 /**
- * Scales [source] onto a fresh [size]x[size] `TYPE_INT_ARGB` canvas, preserving alpha.
+ * Scales an image to a square canvas while preserving transparent areas.
  *
- * Deliberately does **not** fill the canvas first: it starts fully transparent and must stay
- * that way. Painting a background before the icon is precisely the AWT bug this whole code
- * path exists to avoid (`sun.awt.X11.XTrayIconPeer.IconCanvas.paint` fills with the component
- * background, which is why the AWT tray icon shows up inside a white box on X11).
+ * @param source The image to scale.
+ * @param size The width and height of the resulting image.
+ * @return A square ARGB image with the scaled source image.
  */
 internal fun scaleToSquare(source: BufferedImage, size: Int): BufferedImage {
     val scaled = BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB)
@@ -67,15 +65,20 @@ internal fun toSniPixmap(image: BufferedImage): SniPixmap {
     return SniPixmap(width, height, data)
 }
 
-/** The whole `IconPixmap` payload: one entry per size in [sizes]. */
+/**
+     * Creates SNI icon pixmaps for the requested square sizes.
+     *
+     * @param sizes The square icon sizes to generate.
+     * @return One pixmap for each requested size, in the same order.
+     */
 internal fun toSniPixmaps(image: BufferedImage, sizes: IntArray = SNI_ICON_SIZES): List<SniPixmap> =
     sizes.map { toSniPixmap(scaleToSquare(image, it)) }
 
 /**
- * Encodes [image] for the `image-data` hint of `org.freedesktop.Notifications.Notify`.
+ * Encodes [image] as RGBA pixel data for the freedesktop notification `image-data` hint.
  *
- * The freedesktop notification spec wants **RGBA, row-major** here - a different byte order
- * from [toSniPixmap]'s big-endian ARGB32. Keep the two apart.
+ * @param image The image to encode.
+ * @return The encoded image data with its dimensions and pixel format metadata.
  */
 internal fun toNotificationImageData(image: BufferedImage): NotificationImageData {
     val width = image.width

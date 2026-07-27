@@ -43,14 +43,20 @@ internal class SniDBusMenu(
     private val _quitRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val quitRequests: SharedFlow<Unit> = _quitRequests
 
-    override fun getObjectPath(): String = objectPath
+    /**
+ * Provides the D-Bus object path for this menu.
+ *
+ * @return The menu's D-Bus object path.
+ */
+override fun getObjectPath(): String = objectPath
 
     /** The revision the host would currently be told about. Exposed for tests. */
     val currentRevision: Int get() = revision.get()
 
     /**
-     * Publishes new menu labels. Bumps the revision and emits `LayoutUpdated` only when the
-     * labels actually changed, so a recomposition that leaves them alone costs nothing.
+     * Updates the menu state and notifies listeners when it changes.
+     *
+     * @param state The new menu state.
      */
     fun updateState(state: TrayMenuState) {
         val previous = desired.getAndSet(state)
@@ -59,6 +65,14 @@ internal class SniDBusMenu(
         }
     }
 
+    /**
+     * Retrieves the menu layout for the requested parent and recursion depth.
+     *
+     * @param parentId The ID of the parent menu item.
+     * @param recursionDepth The maximum depth of menu items to include.
+     * @param propertyNames The properties to include for each menu item.
+     * @return The current menu revision and requested menu layout.
+     */
     override fun GetLayout(
         parentId: Int,
         recursionDepth: Int,
@@ -72,6 +86,13 @@ internal class SniDBusMenu(
         )
     }
 
+    /**
+     * Retrieves the requested properties for each menu item ID.
+     *
+     * @param ids The menu item IDs whose properties are requested.
+     * @param propertyNames The property names to retrieve for each menu item.
+     * @return The requested properties grouped by menu item ID.
+     */
     override fun GetGroupProperties(
         ids: List<Int>,
         propertyNames: List<String>,
@@ -80,25 +101,50 @@ internal class SniDBusMenu(
         return ids.map { DBusMenuItemProperties(it, menuItemProperties(it, state, propertyNames)) }
     }
 
-    override fun GetProperty(id: Int, name: String): Variant<*> =
+    /**
+         * Retrieves a menu item property.
+         *
+         * @param id The menu item identifier.
+         * @param name The property name.
+         * @return The property's value, or an empty string variant when the property is unavailable.
+         */
+        override fun GetProperty(id: Int, name: String): Variant<*> =
         menuItemProperties(id, desired.get(), listOf(name))[name] ?: Variant("")
 
+    /**
+     * Handles a DBus menu event for the specified menu item.
+     *
+     * @param id The menu item identifier.
+     * @param eventId The event name.
+     * @param data The event payload.
+     * @param timestamp The event timestamp.
+     */
     override fun Event(id: Int, eventId: String, data: Variant<*>, timestamp: UInt32) {
         handleEvent(id, eventId)
     }
 
-    override fun EventGroup(events: List<DBusMenuEventEntry>): List<Int> =
+    /**
+         * Handles a group of menu events and returns the IDs of events that were not recognized.
+         *
+         * @param events The menu events to process.
+         * @return The IDs of events that were not handled.
+         */
+        override fun EventGroup(events: List<DBusMenuEventEntry>): List<Int> =
         events.filterNot { handleEvent(it.id, it.eventId) }.map { it.id }
 
     /**
-     * `true` when the layout the host last fetched no longer matches the current labels.
-     *
-     * Answering unconditionally `true` makes some hosts loop AboutToShow -> GetLayout ->
-     * AboutToShow; answering unconditionally `false` leaves a stale label behind whenever a
-     * `LayoutUpdated` signal is missed. Comparing against what was actually served avoids both.
-     */
+ * Determines whether the menu state has changed since the last layout was served.
+ *
+ * @return `true` if the current state differs from the last served state, `false` otherwise.
+ */
     override fun AboutToShow(id: Int): Boolean = desired.get() != lastServed.get()
 
+    /**
+     * Determines which requested menu items require updates and identifies unknown item IDs.
+     *
+     * @param ids The menu item IDs to evaluate.
+     * @return The known IDs requiring updates and the requested IDs that are not recognized.
+     */
     override fun AboutToShowGroup(ids: List<Int>): AboutToShowGroupReply {
         val stale = AboutToShow(MENU_ROOT_ID)
         val known = ids.filter { it in MENU_KNOWN_IDS }
@@ -108,6 +154,12 @@ internal class SniDBusMenu(
         )
     }
 
+    /**
+     * Retrieves the read-only properties exposed by the DBus menu interface.
+     *
+     * @param interfaceName The DBus interface whose properties are requested.
+     * @return A map of interface properties, or an empty map for an unsupported interface.
+     */
     override fun GetAll(interfaceName: String): Map<String, Variant<*>> {
         if (interfaceName != DBUSMENU_INTERFACE) return emptyMap()
         return mapOf(
@@ -118,15 +170,36 @@ internal class SniDBusMenu(
         )
     }
 
-    @Suppress("UNCHECKED_CAST")
+    /**
+         * Retrieves a property value for the specified DBus interface.
+         *
+         * @param interfaceName The DBus interface containing the property.
+         * @param propertyName The name of the property to retrieve.
+         * @return The property's value.
+         */
+        @Suppress("UNCHECKED_CAST")
     override fun <A : Any?> Get(interfaceName: String, propertyName: String): A =
         GetAll(interfaceName)[propertyName] as A
 
+    /**
+     * Rejects attempts to modify a read-only DBus property.
+     *
+     * @param interfaceName The DBus interface containing the property.
+     * @param propertyName The name of the property being modified.
+     * @param value The requested property value.
+     * @throws PropertyReadOnly Always, because DBus menu properties cannot be modified.
+     */
     override fun <A : Any?> Set(interfaceName: String, propertyName: String, value: A) {
         throw PropertyReadOnly("$interfaceName.$propertyName is read-only")
     }
 
-    /** Returns whether [id] is a menu node we know about. */
+    /**
+     * Handles an event for a recognized menu node.
+     *
+     * @param id The menu node receiving the event.
+     * @param eventId The event identifier.
+     * @return `true` if the menu node is recognized, `false` otherwise.
+     */
     private fun handleEvent(id: Int, eventId: String): Boolean {
         if (id !in MENU_KNOWN_IDS) return false
         if (eventId == "clicked") {

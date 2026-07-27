@@ -35,6 +35,17 @@ import java.awt.image.BufferedImage
  * The icon asset follows the same split: the outlined glyph where the icon is composited with
  * real alpha at a reasonable size (macOS, Linux SNI), the full-colour one everywhere else.
  */
+/**
+ * Configures the platform-specific system tray, including its icon, actions, unread badge, and notifications.
+ *
+ * @param sniConnection The Linux Status Notifier Item connection, when available.
+ * @param notificationIcon The icon used for Linux SNI notifications.
+ * @param unreadCount The number of unread articles displayed in the tray.
+ * @param windowVisible Whether the application window is currently visible.
+ * @param onToggle Invoked to show or hide the application window.
+ * @param onQuit Invoked to quit the application.
+ * @param newArticleNotifications Source of new-article notification messages.
+ */
 @Composable
 internal fun ApplicationScope.KeryxTray(
     sniConnection: SniConnection?,
