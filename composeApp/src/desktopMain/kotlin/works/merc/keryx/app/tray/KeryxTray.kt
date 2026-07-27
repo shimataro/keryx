@@ -56,7 +56,6 @@ internal fun ApplicationScope.KeryxTray(
     onQuit: () -> Unit,
     newArticleNotifications: SharedFlow<String>,
 ) {
-    val trayState = rememberTrayState()
     // The outlined (white glyph + black halo) variant is only used where the icon is
     // composited with real alpha at >= 22px: the macOS menu bar and the Linux SNI panel.
     // There it stays legible on a light or dark background without any theme detection.
@@ -75,17 +74,6 @@ internal fun ApplicationScope.KeryxTray(
     val hideLabel = stringResource(Res.string.tray_hide)
     val quitLabel = stringResource(Res.string.tray_quit)
     val toggleLabel = if (windowVisible) hideLabel else showLabel
-
-    if (!isMacOs && sniConnection == null) {
-        // MacTray and LinuxTray consume newArticleNotifications themselves; only Compose's
-        // Tray() turns a queued TrayState notification into an actual OS notification, and
-        // its composable body is the only place that happens.
-        LaunchedEffect(Unit) {
-            newArticleNotifications.collect { message ->
-                trayState.sendNotification(Notification("Keryx", message))
-            }
-        }
-    }
 
     when {
         isMacOs -> {
@@ -123,6 +111,7 @@ internal fun ApplicationScope.KeryxTray(
         }
 
         isTraySupported -> {
+            val trayState = rememberTrayState()
             val trayBadgedImage = remember(trayBaseImage, unreadCount) {
                 trayBaseImage?.let { drawUnreadDot(it, unreadCount) }
             }
@@ -140,6 +129,16 @@ internal fun ApplicationScope.KeryxTray(
                         Item(quitLabel, onClick = onQuit)
                     },
                 )
+                // MacTray and LinuxTray consume newArticleNotifications themselves. Compose's
+                // Tray() is the only thing that turns a queued TrayState notification into an
+                // actual OS notification, and TrayState's channel is RENDEZVOUS - anything sent
+                // while no Tray() is composed is dropped. Collecting here keeps the subscription
+                // alive exactly as long as the sink is.
+                LaunchedEffect(Unit) {
+                    newArticleNotifications.collect { message ->
+                        trayState.sendNotification(Notification("Keryx", message))
+                    }
+                }
             }
         }
     }
