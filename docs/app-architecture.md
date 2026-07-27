@@ -26,7 +26,8 @@ composeApp/src/
     ui/           theme/, navigation/, setup/, home/ (3-pane + search + notification center), article/, settings/, i18n/
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq (7 tables)
   commonMain/composeResources/  values/strings.xml, drawable/
-  desktopMain/kotlin/…/  main.kt + actual implementations of each expect (DatabaseDriverFactory, AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, Pkce, PlatformModule) + OAuthConnectFlow, OAuthRedirectTransport (CustomUri/Loopback), OAuthUriParser, SingleInstanceCoordinator, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage)
+  desktopMain/kotlin/…/  main.kt + actual implementations of each expect (DatabaseDriverFactory, AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, Pkce, PlatformModule) + OAuthConnectFlow, OAuthRedirectTransport (CustomUri/Loopback), OAuthUriParser, SingleInstanceCoordinator, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage), HostOs
+    tray/      KeryxTray (platform branch), MacTray, LinuxTray + the StatusNotifierItem/dbusmenu D-Bus objects
   commonTest/ + desktopTest/
 ```
 
@@ -63,6 +64,46 @@ ATTACH DATABASE merge runs through `platform/DatabaseMerger`, NOT the SQLDelight
 ### Provider / DI (Koin)
 
 `appModule` (`commonMain`) registers repositories, services, and ViewModels. `platformModule` (`desktop`) registers HttpClient, TokenStorage, CloudSession, and CloudConnectFlow. ViewModels are registered as app-scope `single` for a single-window desktop app and obtained via `koinInject()`.
+
+### Desktop Tray (platform branch)
+
+`tray/KeryxTray.kt` picks one of three implementations:
+
+| Platform | Implementation | Why |
+| --- | --- | --- |
+| macOS | `MacTray` (raw AWT `TrayIcon`) | Compose's `Tray()` wires the menu through `TrayIcon.setPopupMenu()`, which opens it on *any* click on macOS. |
+| Linux (SNI host present) | `LinuxTray` (D-Bus StatusNotifierItem) | AWT cannot draw a transparent tray icon on X11 — see below. |
+| Windows / Linux (no SNI host) | Compose `Tray()` | Works as-is. |
+
+**Why Linux needs SNI.** `sun.awt.X11.XTrayIconPeer.IconCanvas.paint()` fills the whole 24x24 canvas
+with the component background *before* drawing the icon, and `sun.awt.X11.XSystemTrayPeer` never reads
+the tray manager's `_NET_SYSTEM_TRAY_VISUAL`, so the XEmbed window has no alpha channel at all. An AWT
+tray icon therefore always appears inside an opaque (white) box, whatever the PNG contains. SNI hands
+the panel raw ARGB pixels instead.
+
+Two objects are exported on a dedicated session-bus connection (`SniConnection`, `withShared(false)`,
+well-known name `org.kde.StatusNotifierItem-<pid>-1`):
+
+- `/StatusNotifierItem` — `SniStatusNotifierItem`, serving `org.kde.StatusNotifierItem`. `IconPixmap`
+  carries the badged glyph as big-endian ARGB32 (`TrayPixmap.kt`) at several sizes; `ItemIsMenu = false`
+  so a primary click reaches `Activate` instead of opening the menu.
+- `/StatusNotifierItem/menu` — `SniDBusMenu`, serving `com.canonical.dbusmenu` (Show/Hide + Quit).
+  A label change bumps a revision and emits `LayoutUpdated`; `AboutToShow` compares the desired labels
+  against what `GetLayout` last served, so a dropped signal still heals.
+
+Neither exported object holds the connection — signal emission is injected as a callback — so both are
+unit-testable without a bus. Desktop notifications go through `org.freedesktop.Notifications` on the same
+connection (`LinuxNotifier`), replacing the AWT balloon; note its `image-data` hint wants **RGBA**, not
+the SNI pixmaps' big-endian ARGB32.
+
+Detection happens in `main.kt` before `application {}` (bounded by a timeout so an unresponsive session
+bus cannot stop startup) and yields `null` when there is no session bus or no `StatusNotifierWatcher`,
+which is what selects the AWT fallback. If the watcher only appears *after* launch, Keryx stays on the
+AWT path until restart; a watcher that restarts later is handled via `NameOwnerChanged`.
+
+All of this lives in `desktopMain` rather than behind an `expect`/`actual` pair: it is reachable only
+from `main.kt`, no ViewModel or Repository touches it, and a Linux panel protocol has no mobile
+counterpart.
 
 ## Domain Model Policy
 

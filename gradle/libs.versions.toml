@@ -16,6 +16,13 @@ javakeyring = "1.0.4"
 jna = "5.19.1"
 composewebview = "1.0.0-beta-02"
 slf4j = "2.0.18"
+# Pinned to the version java-keyring already brings in transitively
+# (java-keyring -> de.swiesend:secret-service -> dbus-java-core). secret-service 1.8.1
+# does `instanceof org.freedesktop.dbus.errors.Error`, and dbus-java 5.x moved that class
+# to org.freedesktop.dbus.messages.Error - upgrading would break the Linux Secret Service
+# keyring (i.e. cloud token storage) with a NoClassDefFoundError. Revisit when java-keyring
+# moves to a secret-service release built against dbus-java 5.
+dbusjava = "4.2.1"
 
 # material3 is versioned independently from the Compose Multiplatform plugin
 # (compose-multiplatform). When bumping compose-multiplatform, verify/update
@@ -77,6 +84,14 @@ lifecycle-runtime-compose = { module = "org.jetbrains.androidx.lifecycle:lifecyc
 javakeyring = { module = "com.github.javakeyring:java-keyring", version.ref = "javakeyring" }
 jna-jpms = { module = "net.java.dev.jna:jna-jpms", version.ref = "jna" }
 jna-platform-jpms = { module = "net.java.dev.jna:jna-platform-jpms", version.ref = "jna" }
+
+# --- D-Bus (Linux StatusNotifierItem tray + desktop notifications) ---
+# Already on the runtime classpath transitively via java-keyring; declared explicitly here
+# because the tray now uses it directly. Shipped on every platform but only touched at
+# runtime on Linux. The native-unixsocket transport is pure NIO
+# (java.net.UnixDomainSocketAddress), so it needs no JNI.
+dbus-java-core = { module = "com.github.hypfvieh:dbus-java-core", version.ref = "dbusjava" }
+dbus-java-transport-unixsocket = { module = "com.github.hypfvieh:dbus-java-transport-native-unixsocket", version.ref = "dbusjava" }
 
 # --- WebView (spike: OS-native WebView for article content view) ---
 composewebview = { module = "io.github.kdroidfilter:composewebview", version.ref = "composewebview" }

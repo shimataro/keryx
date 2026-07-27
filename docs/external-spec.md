@@ -57,7 +57,10 @@ On first launch, choose local-only / cloud sync (Dropbox / Google Drive / OneDri
 - Article list / article view (reader view). **Articles are marked as read the instant they are selected**. An action to mark as unread is available.
 - Stars (persistent), open in external browser
 - Local full-text search with SQLite FTS5 (trigram, 3+ characters)
-- Desktop notifications, task tray residence (close minimizes to tray), notification center
+- Desktop notifications, task tray residence (close minimizes to tray), notification center.
+  On Linux the tray uses the D-Bus `org.kde.StatusNotifierItem` + `com.canonical.dbusmenu` protocols
+  and notifications use `org.freedesktop.Notifications`, falling back to the AWT system tray when no
+  StatusNotifierItem host is running.
 
 ### Behavior on Feed URL Change / Disappearance
 

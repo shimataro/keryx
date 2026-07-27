@@ -27,8 +27,12 @@ while (true) {
 
 - 設定間隔は毎ループ読み直すため、設定変更は次サイクルから反映される（明示的な再スケジュール不要）。
 - 更新中のエラーはクラッシュさせず、通知センターに記録する（`FeedRepository.refreshFeed` 内で処理）。
-- 新着通知はトレイの `TrayState.sendNotification` で発行する（`TrayState` は Compose の
-  `application {}` スコープ内でしか作れないため、`MutableSharedFlow` で橋渡しする）。
+- 新着通知は同じ `NewArticleNotifier.trayEvents` を入力として、プラットフォームごとに 3 経路で OS へ渡す
+  （`TrayState` は Compose の `application {}` スコープ内でしか作れないため、`MutableSharedFlow` で
+  橋渡しする）。macOS は `TrayIcon.displayMessage`、StatusNotifierItem ホストがある Linux は
+  `org.freedesktop.Notifications.Notify`、Windows（および SNI ホストの無い Linux）は
+  `TrayState.sendNotification`。詳細は [app-architecture.ja.md](app-architecture.ja.md) の
+  「デスクトップトレイ」を参照。
 
 ## フィード更新の効率化
 

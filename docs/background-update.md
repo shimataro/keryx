@@ -27,7 +27,11 @@ while (true) {
 
 - The interval setting is re-read every loop, so changes take effect from the next cycle (no explicit rescheduling needed).
 - Errors during update do not crash the app; they are recorded in the notification center (handled inside `FeedRepository.refreshFeed`).
-- New-article notifications are issued via `TrayState.sendNotification` (`TrayState` can only be created inside Compose `application {}` scope, so a `MutableSharedFlow` bridges it).
+- New-article notifications reach the OS through one of three platform paths, all fed by the same
+  `NewArticleNotifier.trayEvents` flow (`TrayState` can only be created inside Compose's `application {}`
+  scope, so a `MutableSharedFlow` bridges it): macOS uses `TrayIcon.displayMessage`, Linux with a
+  StatusNotifierItem host uses `org.freedesktop.Notifications.Notify`, and Windows (plus Linux without
+  an SNI host) uses `TrayState.sendNotification`. See "Desktop Tray" in [app-architecture.md](app-architecture.md).
 
 ## Feed Update Efficiency
 

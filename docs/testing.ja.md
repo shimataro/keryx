@@ -56,7 +56,10 @@ FK ガード）、スキーマ、ローカル設定、記事 upsert、URL リゾ
 （Article/Feed/Tag/Settings）、CloudSession、NotificationCenter、IdGenerator、SyncRepository、
 ViewModel 層（Home/Settings/Setup/NotificationCenter）、ArticleWebViewHtml（extractLinks/wrapArticleHtml）、FTS（FtsManager/FtsSearch。
 `indexMissing` の増分投入・非破壊、`rebuildIndex` がテーブル存在を前提とすること、同期アップロードが
-`VACUUM INTO` スナップショットで `articles_fts` を除外し `user_version` を保全することを含む）などを網羅する。
+`VACUUM INTO` スナップショットで `articles_fts` を除外し `user_version` を保全することを含む）、
+Linux の SNI トレイ（`TrayPixmapTest`＝ビッグエンディアン ARGB32 / RGBA エンコーダーとアルファ保全、
+`TrayMenuModelTest`＝dbusmenu レイアウト、`TrayMenuRevisionTest`＝revision / `AboutToShow` /
+イベントディスパッチ、`DBusSignatureTest`＝export した D-Bus シグネチャ）などを網羅する。
 `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` の失敗は DB スキーマ・
 マージ SQL・同期オーケストレーションの退行を意味するので特に注意する。
 
@@ -72,6 +75,12 @@ App Key 空チェックで即エラーになる分岐のみ `OAuthConnectFlowTes
 （`FeedListPane.kt` の `FeedRow`/`FolderGroupHeader`/`NoFolderHeader` の `dragAndDropSource`/
 `dragAndDropTarget`）もテスト不可。並び替えの計算ロジック自体（`ReorderUtil.reorderIds`）と、それを使う
 `FeedRepository.moveFeed`/`FolderRepository.reorderFolders` の DB 反映は通常どおりテストする。
+Linux の SNI トレイでは `SniConnection`（接続・バス名取得・export・登録・再登録・close）が
+実セッションバスと稼働中の `org.kde.StatusNotifierWatcher` を必要とするため CI では不可。同様に
+`NewIcon`/`NewToolTip`/`LayoutUpdated` の実配送（*発火の判断* はカバー済み）、`NameOwnerChanged` からの
+再登録経路、ホスト起点の `Activate`/`Event` が dbus-java のワーカースレッド経由で届くこと、
+`LinuxNotifier.notify` の実デーモンへの配送、`LinuxTray` コンポーザブルの結線もテスト不可。
+パネル上で実際に透過して見えるかは本質的に目視確認になる。
 
 ## 手動確認（UI）
 
@@ -122,3 +131,26 @@ Dock/タスクバーのアイコン（`Taskbar` / Cocoa activation policy のネ
 - Windows/Linux でタスクバーのアイコン/未読オーバーレイに退行が無いこと。
 - （Windows/Linux）トレイアイコンが macOS と同じ白グリフ + 黒フチ（`tray_icon_outlined.png`、全プラット
   フォーム共通）で表示され、暗いパネル/タスクバーでも判別できること。未読 > 0 で赤ドットが乗ること。
+  Linux ではホストが居れば D-Bus StatusNotifierItem 経路を通る。AWT の記述はフォールバック時のみ該当。
+
+Linux の SNI トレイは自動テスト不可のため、KDE Plasma セッションで以下を確認する（間違えやすい順）。
+
+- 22px / 24px、明パネル・暗パネル、2x スケーリングで**白い四角の中に描画されない**こと。
+  不適切なサイズが選ばれる場合は `SNI_ICON_SIZES` を絞る。
+- `./gradlew :composeApp:createDistributable` でパッケージし、
+  `build/compose/binaries/main/app/Keryx/bin/Keryx` を起動して確認する。jlink モジュール欠落
+  （`jdk.security.auth`）はここでしか露見せず、`run` では検出できない。
+- 左クリックでウィンドウがトグルすること（`ItemIsMenu = false` 依存。メニューが開くならプロパティが誤り）。
+- 右クリックでメニューが正しい文言で出て、ウィンドウをトグルした後にメニューを開き直さずに
+  表示/非表示ラベルが反転すること（`AboutToShow` + `LayoutUpdated` の確認）。
+- 未読ドットが即時に出入りすること（`NewIcon` がホストに届いている）。
+- `systemctl --user restart plasma-plasmashell` の後、Keryx を再起動せずアイコンが復帰すること。
+- バックグラウンド更新でアプリアイコン付きのデスクトップ通知が出ること。
+- AppIndicator 拡張なしの GNOME で AWT 経路に静かにフォールバックすること（クラッシュ・スタックトレース
+  無し）。`DBUS_SESSION_BUS_ADDRESS` 無しの起動でハングも例外も起きないこと。
+- Plasma Wayland セッションでも同じ挙動であること。
+- アイコン上でホイールを回しても `journalctl --user -f` にエラーが出ないこと。
+- メニューから終了した後、`busctl --user list | grep StatusNotifierItem` に残骸が無いこと。
+- `GetGroupProperties`/`AboutToShowGroup`/`EventGroup` が正しく動くこと（`ai` / `a(isvu)` 入力の
+  デシリアライズは dbus-java 任せで、`DBusSignatureTest` は宣言シグネチャしか保証しない）。おかしい場合は
+  引数を `IntArray` / `Array<DBusMenuEventEntry>` に変える。

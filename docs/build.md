@@ -189,3 +189,13 @@ No special entitlements are required for Keychain access (just ensure `get-task-
 
 - Configuration cache is disabled in `gradle.properties` (the `generateBuildConfig` task is not config-cache-safe). Do not re-enable without verifying safety.
 - `-Xexpect-actual-classes` is passed to suppress the Beta warning for expect/actual classes.
+- `nativeDistributions.modules` includes **`jdk.security.auth`** because dbus-java's SASL EXTERNAL
+  authentication resolves the uid through `com.sun.security.auth.module.UnixSystem` on every
+  non-Windows host. Leave it out and the jlink image still builds, but the packaged `.deb`/`.rpm`
+  dies with `NoClassDefFoundError` while `./gradlew run` (full JDK) keeps working - so **verify Linux
+  packaging with `createDistributable` and by launching the produced `bin/Keryx`, not with `run`**.
+  This affects the java-keyring Secret Service path too, not just the tray.
+- dbus-java (MIT) is shipped on every platform but only touched at runtime on Linux (tray +
+  notifications). Its version is pinned to the one java-keyring already brings in transitively:
+  `de.swiesend:secret-service` still references `org.freedesktop.dbus.errors.Error`, which dbus-java 5
+  moved, so upgrading would break the Linux keyring.

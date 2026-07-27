@@ -208,6 +208,13 @@ kotlin {
                 implementation(libs.jna.platform.jpms)
 
                 implementation(libs.slf4j.simple)
+
+                // Linux tray (StatusNotifierItem) + desktop notifications. Added
+                // unconditionally so the cross-platform CI matrix resolves the same
+                // graph everywhere; nothing touches D-Bus until SniConnection is built,
+                // which only happens on Linux.
+                implementation(libs.dbus.java.core)
+                implementation(libs.dbus.java.transport.unixsocket)
             }
         }
 
@@ -264,8 +271,12 @@ compose.desktop {
             description = "Local-first, cross-platform RSS reader"
             vendor = "Keryx"
             // java.sql: sqlite-jdbc, java.naming: keyring, java.desktop: AWT tray,
-            // jdk.httpserver: OAuth loopback callback server.
-            modules("java.sql", "java.naming", "java.desktop", "jdk.httpserver")
+            // jdk.httpserver: OAuth loopback callback server,
+            // jdk.security.auth: dbus-java's SASL EXTERNAL auth resolves the uid through
+            //   com.sun.security.auth.module.UnixSystem on every non-Windows host. Without
+            //   it the jlink image builds fine but the packaged .deb/.rpm dies with
+            //   NoClassDefFoundError, while `./gradlew run` (full JDK) works.
+            modules("java.sql", "java.naming", "java.desktop", "jdk.httpserver", "jdk.security.auth")
 
             macOS {
                 bundleID = "works.merc.keryx"
