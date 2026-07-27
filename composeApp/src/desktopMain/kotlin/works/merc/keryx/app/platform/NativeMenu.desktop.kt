@@ -17,14 +17,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
-import works.merc.keryx.app.core.Log
 import java.awt.Component
 import javax.swing.JCheckBoxMenuItem
 import javax.swing.JMenu
 import javax.swing.JMenuItem
 import javax.swing.JPopupMenu
 import javax.swing.SwingUtilities
-import javax.swing.UIManager
 
 /**
  * The native menu widgets backing one [nativeContextMenu] call site, hiding which toolkit drew
@@ -197,7 +195,6 @@ internal class SwingPopupHandle(
         // asked for it. AwtPopupHandle needs neither — its menu is a native NSMenu/Win32 menu
         // with its own modal event loop — so it stays inline exactly as it always was.
         SwingUtilities.invokeLater {
-            debugLogPopup(popupMenu, invoker, x, y, phase = "before re-apply")
             // Re-apply the current Look & Feel. This popup belongs to no window's component tree,
             // so FlatLaf.updateUI() — which walks Window.getWindows() — structurally cannot reach
             // it, and it would otherwise keep whatever L&F was in force when it was built. That
@@ -206,7 +203,6 @@ internal class SwingPopupHandle(
             // JMenu.getMenuComponents(), and JMenu.updateUI() re-applies its own popup's UI.
             SwingUtilities.updateComponentTreeUI(popupMenu)
             popupMenu.show(invoker, x, y)
-            debugLogPopup(popupMenu, invoker, x, y, phase = "after show")
         }
     }
 }
@@ -221,35 +217,6 @@ private fun forceHeavyweight(popup: JPopupMenu) {
     // Popup.dropShadowPainted on (its default), FlatPopupFactory forces heavy weight for every
     // popup on Linux, overriding this hint either way.
     popup.isLightWeightPopupEnabled = false
-}
-
-// ---------------------------------------------------------------------------
-// TEMPORARY: diagnostics for the Linux context menu, enabled with -Pkeryx.debug.menu=true.
-// Remove once the menu is confirmed rendering with FlatLaf on a real Linux desktop.
-// ---------------------------------------------------------------------------
-
-/** `-Pkeryx.debug.menu=true` reports which Look & Feel the popup is actually being drawn with. */
-private val debugMenu: Boolean = System.getProperty("keryx.debug.menu") == "true"
-
-private const val MENU_LOG_TAG = "NativeMenu"
-
-/**
- * Reports what the popup is and how it is styled. Logged both before the Look & Feel is re-applied
- * and after the popup is shown: if the L&F is FlatLaf at startup but the popup reports Metal here,
- * something replaced it later; if both say Metal, it never installed in the first place.
- */
-private fun debugLogPopup(popup: JPopupMenu, invoker: Component, x: Int, y: Int, phase: String) {
-    if (!debugMenu) return
-    val location = runCatching { popup.locationOnScreen.let { "${it.x},${it.y}" } }
-        .getOrElse { "n/a (${it::class.simpleName})" }
-    Log.info(
-        MENU_LOG_TAG,
-        "$phase: laf=${UIManager.getLookAndFeel()?.name} popupUi=${popup.ui?.javaClass?.simpleName} " +
-            "background=${popup.background} visible=${popup.isVisible} showing=${popup.isShowing} " +
-            "size=${popup.size.width}x${popup.size.height} onScreen=$location " +
-            "items=${popup.componentCount} lightweight=${popup.isLightWeightPopupEnabled} " +
-            "requested=$x,$y invoker=${invoker.width}x${invoker.height}",
-    )
 }
 
 /**

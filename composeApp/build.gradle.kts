@@ -258,15 +258,6 @@ compose.desktop {
         jvmArgs("-Dapple.awt.application.name=Keryx")
         jvmArgs("--enable-native-access=ALL-UNNAMED")
 
-        // TEMPORARY: forwards the context-menu diagnostic switches (see NativeMenu.desktop.kt)
-        // to the running app, e.g. `./gradlew :composeApp:run -Pkeryx.debug.menu=true`.
-        // Gradle properties rather than environment variables because JavaExec inherits the
-        // long-lived Gradle daemon's environment, not the invoking shell's. Remove once the
-        // Linux context menu is confirmed rendering with FlatLaf.
-        listOf("keryx.debug.menu").forEach { key ->
-            (project.findProperty(key) as String?)?.let { jvmArgs("-D$key=$it") }
-        }
-
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "Keryx"
