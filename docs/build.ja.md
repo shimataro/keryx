@@ -115,8 +115,11 @@ URI がプロセスに届かないからである。代わりにアプリが初�
 `$XDG_DATA_HOME/applications/keryx-url-handler.desktop`（既定 `~/.local/share/applications`）と
 `$XDG_CONFIG_HOME/mimeapps.list`（既定 `~/.config/mimeapps.list`）の関連付けを書き出す。
 これにより `createDistributable` の app image や tarball 配置もカバーされる。この 2 ファイルはユーザーの
-ホーム配下にあり、**パッケージをアンインストールしても削除されない**（`NoDisplay=true` で `keryx://` を扱う
-他アプリも無いため実害は無いが、アンインストールフックが無い）。
+ホーム配下にあり、**パッケージをアンインストールしても削除されず**、アンインストールフックも無い。実害が無い
+わけではない：`mimeapps.list` に残った `[Default Applications]` の関連付けは、もう存在しないランチャーの
+パスを `keryx://` の既定ハンドラーとして指し続けるため、除去するまで `xdg-open`（やブラウザーのスキーム解決）
+が失敗しうる。除去は手動で行う必要があり、アプリケーションディレクトリの `keryx-url-handler.desktop` を削除し、
+`mimeapps.list` から `x-scheme-handler/keryx` の行を取り除く。
 
 > **カスタム URI 連携の確認**: `./gradlew :composeApp:run` ではどのデスクトップ OS でも Dropbox / OneDrive
 > 連携が完了しない（macOS は `keryx://` がパッケージ版アプリにルーティングされ、Windows / Linux は起動時の

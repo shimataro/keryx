@@ -112,7 +112,11 @@ process. Instead the app registers itself on first launch (`LinuxUriSchemeRegist
 `$XDG_DATA_HOME/applications/keryx-url-handler.desktop` (default `~/.local/share/applications`) and an
 association in `$XDG_CONFIG_HOME/mimeapps.list` (default `~/.config/mimeapps.list`). This also covers
 `createDistributable` app images and tarball installs. Both files live in the user's home and are **not removed when the
-package is uninstalled** — harmless (`NoDisplay=true`, nothing else handles `keryx://`), but there is no uninstall hook.
+package is uninstalled**, and there is no uninstall hook to clean them up. This is not harmless: the surviving
+`[Default Applications]` entry in `mimeapps.list` keeps pointing `keryx://` at a launcher path that no longer exists,
+so `xdg-open` (or a browser resolving the scheme) can fail until the two are removed manually — delete
+`keryx-url-handler.desktop` from the applications directory and drop the `x-scheme-handler/keryx` line(s) from
+`mimeapps.list`.
 
 > **Custom-URI linking confirmation**: `./gradlew :composeApp:run` cannot complete Dropbox / OneDrive linking on any desktop OS — macOS routes `keryx://` to the packaged app, and the Windows/Linux startup registration deliberately skips non-packaged launchers. To verify linking behavior, build with `createDistributable` and launch the packaged app (see [setup.md](setup.md) "Common Issues" for details).
 

@@ -58,5 +58,8 @@ cp local.properties.example local.properties   # 任意: Dropbox App Key を設�
   返れば OK）。Keryx 起動中に
   `xdg-open 'keryx://oauth2/callback?code=test&state=test'` を実行してウィンドウが前面に来れば
   エンドツーエンドで動いている。なおこの 2 ファイルはユーザーのホーム配下にあり、**deb/rpm を
-  アンインストールしても削除されない**（`NoDisplay=true` で `keryx://` を扱う他アプリも無いため
-  実害は無いが、アンインストールフックが無く除去できない）。
+  アンインストールしても削除されず**、アンインストールフックも無いため除去できない。実害が無いわけではない：
+  `mimeapps.list` に残った `[Default Applications]` の関連付けは、もう存在しないランチャーのパスを
+  `keryx://` の既定ハンドラーとして指し続けるため、除去するまで `xdg-open`（やブラウザーのスキーム解決）が
+  失敗しうる。除去は手動で行う必要があり、アプリケーションディレクトリの `keryx-url-handler.desktop` を
+  削除し、`mimeapps.list` から `x-scheme-handler/keryx` の行を取り除く。
