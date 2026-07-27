@@ -51,6 +51,21 @@ The parallel feed refresh's core concurrency (overlapping fetches + complete per
 - "Refresh all" over many feeds: articles still appear incrementally (feed by feed) rather than all at once at the end, and the final list order is stable.
 - Feed error / 301·308 URL-change / 410 Gone notifications still fire, and missing favicons still fill in after a refresh.
 
+Native context menus (`nativeContextMenu`, backed by a real `JPopupMenu` on Linux and
+`java.awt.PopupMenu` on macOS/Windows — not a Compose-drawn popup) cannot be exercised by Compose
+UI tests, so visually confirm:
+
+- Right-clicking a feed row, a folder header, and an article row shows the native menu with the
+  correct actions.
+- The feed row's "Tags" submenu shows a checkmark on every currently attached tag, and its
+  "Move to folder" submenu shows a checkmark on the feed's current folder; toggling either updates
+  the checkmark immediately.
+- Opening any of these menus while the article reader's WebView is visible renders the menu above
+  the WebView, not behind it.
+- (Linux) After switching the in-app theme (light ↔ dark) with no restart: the menu bar and an
+  open dialog's button row restyle immediately, and a context menu opened afterward picks up the
+  new theme.
+
 Dialog auto-sizing (`DialogWindow` OS window behavior) cannot be auto-tested, so visually confirm:
 
 - In feed addition, entering a URL for an HTML page with multiple feed links → on confirmation, **the dialog expands to show candidate list (checkboxes)**. Editing the URL shrinks it again. No shaking or flickering during input→candidate transition.
