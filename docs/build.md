@@ -101,7 +101,9 @@ Only the platform matching the execution platform can be built (cross-compilatio
 ```
 
 App icons are at `composeApp/icons/{keryx.icns, keryx.ico, keryx.png}`. Tray icons are at
-`composeApp/src/commonMain/composeResources/drawable/tray_icon*.png`. These are generated from shared artwork via
+`composeApp/src/commonMain/composeResources/drawable/tray_icon*.png` — `tray_icon_outlined.png` (white glyph +
+black outline) for the macOS menu bar and the Linux SNI panel, `tray_icon.png` (full colour) for the Windows
+notification area, the Linux AWT fallback and the window's own title-bar icon. These are generated from shared artwork via
 `design/icons/make_desktop_icons.sh` (it is preferable to commit generated files).
 
 > **macOS Dropbox linking confirmation**: The custom URI `keryx://` is routed by macOS LaunchServices to the packaged app, so `./gradlew :composeApp:run` cannot complete the link. To verify linking behavior, build with `createDistributable` and launch `Keryx.app` (see [setup.md](setup.md) "Common Issues" for details).
@@ -189,3 +191,13 @@ No special entitlements are required for Keychain access (just ensure `get-task-
 
 - Configuration cache is disabled in `gradle.properties` (the `generateBuildConfig` task is not config-cache-safe). Do not re-enable without verifying safety.
 - `-Xexpect-actual-classes` is passed to suppress the Beta warning for expect/actual classes.
+- `nativeDistributions.modules` includes **`jdk.security.auth`** because dbus-java's SASL EXTERNAL
+  authentication resolves the uid through `com.sun.security.auth.module.UnixSystem` on every
+  non-Windows host. Leave it out and the jlink image still builds, but the packaged `.deb`/`.rpm`
+  dies with `NoClassDefFoundError` while `./gradlew run` (full JDK) keeps working - so **verify Linux
+  packaging with `createDistributable` and by launching the produced `bin/Keryx`, not with `run`**.
+  This affects the java-keyring Secret Service path too, not just the tray.
+- dbus-java (MIT) is shipped on every platform but only touched at runtime on Linux (tray +
+  notifications). Its version is pinned to the one java-keyring already brings in transitively:
+  `de.swiesend:secret-service` still references `org.freedesktop.dbus.errors.Error`, which dbus-java 5
+  moved, so upgrading would break the Linux keyring.
