@@ -115,7 +115,8 @@ likely each is to be wrong):
 
 The `keryx://` scheme registration writes real files into the user's home and depends on the desktop environment, so
 the end-to-end path can only be confirmed on a Linux machine (the unit tests cover the file contents and the merge, not
-the OS routing). Install a packaged build (`./gradlew :composeApp:packageDeb` → `sudo dpkg -i`) and confirm:
+the OS routing). Install a packaged build (`./gradlew :composeApp:packageDeb` → `sudo dpkg -i`), launch it
+once so startup registers the scheme, and confirm:
 
 - `xdg-mime query default x-scheme-handler/keryx` returns `keryx-url-handler.desktop`.
 - With Keryx running, `xdg-open 'keryx://oauth2/callback?code=test&state=test'` brings the window to the front.

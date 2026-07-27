@@ -179,7 +179,8 @@ Linux の SNI トレイは自動テスト不可のため、KDE Plasma セッシ�
 `keryx://` のスキーム登録はユーザーのホーム配下に実ファイルを書き、デスクトップ環境に依存するため、
 エンドツーエンドの確認は Linux 実機でしかできない（ユニットテストが担保するのはファイル内容とマージであって、
 OS 側のルーティングではない）。パッケージ版をインストールし
-（`./gradlew :composeApp:packageDeb` → `sudo dpkg -i`）、以下を確認する:
+（`./gradlew :composeApp:packageDeb` → `sudo dpkg -i`）、一度起動してスキーム登録を
+走らせたうえで、以下を確認する:
 
 - `xdg-mime query default x-scheme-handler/keryx` が `keryx-url-handler.desktop` を返すこと。
 - Keryx 起動中に `xdg-open 'keryx://oauth2/callback?code=test&state=test'` でウィンドウが前面に来ること。
