@@ -3,6 +3,7 @@ package works.merc.keryx.app
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class UriSchemeRegistrationTest {
     @Test
@@ -59,5 +60,37 @@ class UriSchemeRegistrationTest {
     fun noLauncherPathAtAll() {
         assertNull(packagedLauncherPath(null, null))
         assertNull(packagedLauncherPath(null, ""))
+    }
+
+    @Test
+    fun windowsRegistrationWritesUnderTheCurrentUserHive() {
+        val recordedCommands = mutableListOf<List<String>>()
+        registerWindowsUriScheme(launcherPath = "C:\\Program Files\\Keryx\\Keryx.exe") { command ->
+            recordedCommands.add(command)
+            0
+        }
+
+        assertEquals(3, recordedCommands.size)
+        for (command in recordedCommands) {
+            assertTrue(command.any { it.contains("HKEY_CURRENT_USER\\Software\\Classes\\keryx") })
+            assertTrue(command.none { it.contains("HKEY_CLASSES_ROOT") })
+        }
+        assertTrue(
+            recordedCommands.any { it.contains("HKEY_CURRENT_USER\\Software\\Classes\\keryx\\shell\\open\\command") },
+        )
+        assertTrue(
+            recordedCommands.any { command -> command.any { it == "\"C:\\Program Files\\Keryx\\Keryx.exe\" \"%1\"" } },
+        )
+    }
+
+    @Test
+    fun windowsRegistrationSurvivesANonZeroExitCode() {
+        // A failed reg.exe must not throw — it's swallowed and logged, not fatal to startup.
+        var callCount = 0
+        registerWindowsUriScheme(launcherPath = "C:\\Program Files\\Keryx\\Keryx.exe") {
+            callCount++
+            5
+        }
+        assertEquals(3, callCount)
     }
 }

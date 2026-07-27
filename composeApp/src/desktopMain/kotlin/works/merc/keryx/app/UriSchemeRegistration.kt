@@ -9,7 +9,7 @@ internal enum class UriSchemeRegistration {
     /** macOS — declared in Info.plist (`CFBundleURLTypes`) at packaging time; nothing to do at runtime. */
     NONE,
 
-    /** Windows — `HKEY_CLASSES_ROOT\keryx` registry keys written at startup. */
+    /** Windows — `HKEY_CURRENT_USER\Software\Classes\keryx` registry keys written at startup. */
     WINDOWS,
 
     /** Linux — a user-level `.desktop` entry plus a `mimeapps.list` association written at startup. */
@@ -72,12 +72,38 @@ internal fun registerCustomUriScheme() {
     }
 }
 
-/** Registers the keryx:// URL scheme in the Windows registry so browsers can redirect back to the app. */
-private fun registerWindowsUriScheme(launcherPath: String) {
-    runCatching {
-        val reg = "reg.exe"
-        ProcessBuilder(reg, "add", "HKEY_CLASSES_ROOT\\keryx", "/ve", "/d", "URL:keryx Protocol", "/f").start().waitFor()
-        ProcessBuilder(reg, "add", "HKEY_CLASSES_ROOT\\keryx", "/v", "URL Protocol", "/d", "", "/f").start().waitFor()
-        ProcessBuilder(reg, "add", "HKEY_CLASSES_ROOT\\keryx\\shell\\open\\command", "/ve", "/d", "\"$launcherPath\" \"%1\"", "/f").start().waitFor()
-    }.onFailure { Log.warn(LOG_TAG, "Could not register Windows URI scheme", it) }
+/**
+ * Registers the keryx:// URL scheme in the Windows registry so browsers can redirect back to the
+ * app. Written under `HKEY_CURRENT_USER\Software\Classes` rather than `HKEY_CLASSES_ROOT`:
+ * creating a *new* key through the `HKEY_CLASSES_ROOT` merged view is always routed to
+ * `HKEY_LOCAL_MACHINE\Software\Classes`, which requires admin privileges a normal launch never
+ * has — the per-user hive is writable by a standard user with no elevation.
+ */
+internal fun registerWindowsUriScheme(
+    launcherPath: String,
+    runCommand: (List<String>) -> Int = { args -> ProcessBuilder(args).start().waitFor() },
+) {
+    val reg = "reg.exe"
+    val commands = listOf(
+        listOf(reg, "add", "HKEY_CURRENT_USER\\Software\\Classes\\keryx", "/ve", "/d", "URL:keryx Protocol", "/f"),
+        listOf(reg, "add", "HKEY_CURRENT_USER\\Software\\Classes\\keryx", "/v", "URL Protocol", "/d", "", "/f"),
+        listOf(
+            reg,
+            "add",
+            "HKEY_CURRENT_USER\\Software\\Classes\\keryx\\shell\\open\\command",
+            "/ve",
+            "/d",
+            "\"$launcherPath\" \"%1\"",
+            "/f",
+        ),
+    )
+    for (command in commands) {
+        runCatching { runCommand(command) }
+            .onSuccess { exitCode ->
+                if (exitCode != 0) {
+                    Log.warn(LOG_TAG, "reg.exe exited with $exitCode for: ${command.joinToString(" ")}")
+                }
+            }
+            .onFailure { Log.warn(LOG_TAG, "Could not register Windows URI scheme", it) }
+    }
 }
