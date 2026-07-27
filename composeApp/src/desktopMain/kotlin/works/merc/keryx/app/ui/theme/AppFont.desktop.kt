@@ -16,7 +16,7 @@ import javax.swing.UIManager
  */
 private val PANGO_STYLE_KEYWORDS = setOf(
     // style
-    "normal", "oblique", "italic",
+    "normal", "roman", "oblique", "italic",
     // weight
     "thin", "ultra-light", "extra-light", "light", "semi-light", "demi-light", "book",
     "regular", "medium", "semi-bold", "demi-bold", "bold", "ultra-bold", "extra-bold",
@@ -37,6 +37,10 @@ private val PANGO_STYLE_KEYWORDS = setOf(
  */
 internal fun pangoFontFamilyName(description: String): String? {
     var tokens = description.trim().split(' ', '\t').filter { it.isNotEmpty() }
+    // Trailing font-variation ("@wght=200,wdth=100") and OpenType-feature ("#tnum=1") tokens.
+    while (tokens.isNotEmpty() && (tokens.last().startsWith('@') || tokens.last().startsWith('#'))) {
+        tokens = tokens.dropLast(1)
+    }
     // A trailing size, in points ("11", "11.5") or pixels ("12px").
     if (tokens.isNotEmpty() && tokens.last().removeSuffix("px").toDoubleOrNull() != null) {
         tokens = tokens.dropLast(1)

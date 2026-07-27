@@ -23,6 +23,13 @@ class AppFontTest {
         assertEquals("Noto Sans", pangoFontFamilyName("Noto Sans Bold 10"))
         assertEquals("DejaVu Sans", pangoFontFamilyName("DejaVu Sans Condensed Italic 9"))
         assertEquals("Cantarell", pangoFontFamilyName("Cantarell Semi-Bold"))
+        assertEquals("Cantarell", pangoFontFamilyName("Cantarell Roman 11"))
+    }
+
+    @Test
+    fun stripsTrailingVariationsAndFeatures() {
+        assertEquals("Cantarell", pangoFontFamilyName("Cantarell 11 @wght=200 #tnum=1"))
+        assertEquals("Cantarell", pangoFontFamilyName("Cantarell Italic Light 15 @wght=200 #tnum=1"))
     }
 
     @Test
