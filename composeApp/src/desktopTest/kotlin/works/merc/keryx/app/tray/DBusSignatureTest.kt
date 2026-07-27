@@ -1,9 +1,12 @@
 package works.merc.keryx.app.tray
 
 import org.freedesktop.dbus.Marshalling
+import org.freedesktop.dbus.errors.UnknownProperty
 import org.freedesktop.dbus.messages.ExportedObject
+import org.freedesktop.dbus.types.Variant
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
@@ -96,6 +99,33 @@ class DBusSignatureTest {
         assertTrue(statusNotifierItem().GetAll("org.example.Other").isEmpty())
     }
 
+    @Test
+    fun `status notifier item serves a known property through Get`() {
+        val item = statusNotifierItem()
+
+        // Compare the unwrapped values: Variant.equals ignores the signature.
+        assertEquals(
+            item.GetAll(SNI_INTERFACE).getValue("Id").value,
+            item.Get<Variant<*>>(SNI_INTERFACE, "Id").value,
+        )
+    }
+
+    @Test
+    fun `status notifier item rejects an unknown property`() {
+        // A null return cannot be marshalled: dbus-java would answer the host's probe with an
+        // NPE-derived error instead of an unknown-property one.
+        assertFailsWith<UnknownProperty> {
+            statusNotifierItem().Get<Variant<*>>(SNI_INTERFACE, "XAyatanaLabel")
+        }
+    }
+
+    @Test
+    fun `status notifier item rejects a property on a foreign interface`() {
+        assertFailsWith<UnknownProperty> {
+            statusNotifierItem().Get<Variant<*>>("org.example.Other", "Category")
+        }
+    }
+
     // --- com.canonical.dbusmenu ---
 
     @Test
@@ -155,6 +185,13 @@ class DBusSignatureTest {
         assertEquals("s", properties.getValue("TextDirection").sig)
         assertEquals("s", properties.getValue("Status").sig)
         assertEquals("as", properties.getValue("IconThemePath").sig)
+    }
+
+    @Test
+    fun `dbusmenu rejects an unknown property`() {
+        assertFailsWith<UnknownProperty> {
+            dbusMenu().Get<Variant<*>>(DBUSMENU_INTERFACE, "NoSuchProperty")
+        }
     }
 
     // --- struct / method type mapping ---
