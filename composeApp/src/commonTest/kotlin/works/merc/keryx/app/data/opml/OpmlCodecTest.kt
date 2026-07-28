@@ -42,6 +42,21 @@ class OpmlCodecTest {
     }
 
     @Test
+    fun importFallsBackToTextWhenTitleIsEmpty() {
+        val xml = """
+            <opml version="2.0"><body>
+              <outline title="" text="Tech">
+                <outline type="rss" text="A" xmlUrl="https://a.com/feed"/>
+              </outline>
+            </body></opml>
+        """.trimIndent()
+
+        val feeds = OpmlCodec.import(xml)
+
+        assertEquals("Tech", feeds.single().folderName)
+    }
+
+    @Test
     fun importCollapsesNestedFoldersToTheInnermostName() {
         // Keryx feeds belong to at most one folder, so the innermost wrapper wins.
         val xml = """

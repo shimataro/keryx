@@ -46,7 +46,8 @@ object OpmlCodec {
                     walk(child, folderName)
                     continue
                 }
-                val name = (child.attrCI("title") ?: child.attrCI("text"))?.trim()?.takeIf { it.isNotEmpty() }
+                val name = child.attrCI("title")?.trim()?.takeIf { it.isNotEmpty() }
+                    ?: child.attrCI("text")?.trim()?.takeIf { it.isNotEmpty() }
                 val url = child.attrCI("xmlUrl")?.trim()?.takeIf { it.isNotEmpty() }
                 if (url == null) {
                     walk(child, name ?: folderName)
