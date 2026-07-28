@@ -18,6 +18,9 @@ private const val LOG_TAG = "X11WindowId"
  * A thin JNA X11 wrapper (style of `MacActivationPolicy`): it walks the root window's
  * `_NET_CLIENT_LIST` and matches each window's `_NET_WM_PID` against our own PID, rather than
  * reflecting into `sun.awt.X11` internals or the deprecated-for-removal `Component.getPeer()`.
+ * Every top-level window this process owns (the main frame, but also any Compose `DialogWindow`)
+ * shares that same PID, so a PID match alone doesn't identify the main frame; windows carrying a
+ * `WM_TRANSIENT_FOR` property (i.e. owned by another window, like a dialog) are excluded.
  *
  * Blocking (issues synchronous X requests) — callers must dispatch it off the UI thread. Every
  * native call degrades to `null` on failure (no X server, missing property, a non-X11 session): a
@@ -39,7 +42,8 @@ internal object X11WindowId {
             val pidAtom = x11.XInternAtom(display, "_NET_WM_PID", false)
             val ownPid = ProcessHandle.current().pid()
             windowList(x11, display, root, clientListAtom)
-                .firstOrNull { window -> cardinal(x11, display, window, pidAtom) == ownPid }
+                .filter { window -> cardinal(x11, display, window, pidAtom) == ownPid }
+                .firstOrNull { window -> !isTransient(x11, display, window) }
                 ?.toLong()
         } finally {
             x11.XCloseDisplay(display)
@@ -74,6 +78,19 @@ internal object X11WindowId {
         } finally {
             x11.XFree(data.pointer)
         }
+    }
+
+    /**
+     * Whether [window] carries a `WM_TRANSIENT_FOR` property (i.e. is owned by another window,
+     * like a dialog) — a real top-level application frame has no owner and therefore no such
+     * property. Used to exclude our own dialogs from XID resolution: every top-level window this
+     * process owns shares the same `_NET_WM_PID`, so a PID match alone can't tell the main frame
+     * from a `DialogWindow` that happens to be mapped at the same time.
+     */
+    private fun isTransient(x11: X11, display: X11.Display, window: X11.Window): Boolean {
+        val data = property(x11, display, window, X11.XA_WM_TRANSIENT_FOR, X11.XA_WINDOW, 1) ?: return false
+        x11.XFree(data.pointer)
+        return true
     }
 
     /** Reads a window property of [reqType], returning the data pointer + item count, or `null`. */
