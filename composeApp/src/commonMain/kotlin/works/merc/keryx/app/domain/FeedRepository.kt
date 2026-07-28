@@ -51,7 +51,12 @@ class FeedRepository(
 
     fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
 
-    fun getAllFeeds(): List<Feeds> = feeds.watchAll().executeAsList()
+    /**
+ * Retrieves all feeds currently stored in the database.
+ *
+ * @return The stored feed records.
+ */
+fun getAllFeeds(): List<Feeds> = feeds.watchAll().executeAsList()
 
     /**
      * The feed subscribed at exactly [url], including a soft-deleted one. Note that
@@ -59,8 +64,20 @@ class FeedRepository(
      */
     fun getFeedByUrl(url: String): Feeds? = feeds.getByUrl(url).executeAsOneOrNull()
 
-    suspend fun previewFeed(url: String): Result<FetchedFeed> = feedFetcher.fetch(url)
+    /**
+ * Fetches feed data for preview without subscribing to the feed.
+ *
+ * @param url The feed URL to fetch.
+ * @return The fetched feed data or the fetch error.
+ */
+suspend fun previewFeed(url: String): Result<FetchedFeed> = feedFetcher.fetch(url)
 
+    /**
+     * Subscribes to a feed, storing its metadata and articles locally.
+     *
+     * @param url The feed URL to fetch and subscribe to.
+     * @return A successful result containing the subscribed feed, or the fetch error.
+     */
     suspend fun subscribeFeed(url: String): Result<Feeds> {
         val fetched = when (val r = feedFetcher.fetch(url)) {
             is Result.Ok -> r.value
@@ -112,6 +129,11 @@ class FeedRepository(
         return Result.Ok(feeds.getById(feedId).executeAsOne())
     }
 
+    /**
+     * Unsubscribes from a feed by marking it as deleted.
+     *
+     * @param id The ID of the feed to unsubscribe from.
+     */
     fun unsubscribeFeed(id: String) {
         val now = clock.nowMillis()
         feeds.softDelete(now, now, now, id)

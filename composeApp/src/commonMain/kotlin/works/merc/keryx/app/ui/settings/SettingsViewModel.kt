@@ -261,7 +261,7 @@ class SettingsViewModel(
     }
 
     /**
-     * Exports all subscribed feeds to an OPML file selected by the user.
+     * Exports subscribed feeds, including their folders and tags, to an OPML file selected by the user.
      *
      * Updates the OPML result to indicate whether the export completed or was canceled.
      */
@@ -284,11 +284,9 @@ class SettingsViewModel(
     }
 
     /**
-     * Serializes the current subscriptions to an OPML document: grouped by folder in the app's own
-     * display order (folders first in their sort order, feeds in their sort order within each group,
-     * unfoldered feeds last), each feed annotated with its tags. Empty folders are skipped — there is
-     * nothing to export for them. Split out from [exportOpml] so it is testable without the native
-     * save dialog.
+     * Builds an OPML document containing the current subscriptions, organized by folder and annotated with tags.
+     *
+     * @return The serialized OPML document.
      */
     internal fun buildOpmlDocument(): String {
         val feeds = feedRepository.getAllFeeds()
@@ -311,6 +309,9 @@ class SettingsViewModel(
         return OpmlCodec.export(groups)
     }
 
+    /**
+     * Imports feeds, folders, and tags from a selected OPML or XML file.
+     */
     fun importOpml() {
         if (importingOpml || exportingOpml) return
         viewModelScope.launch {
@@ -333,9 +334,10 @@ class SettingsViewModel(
     }
 
     /**
-     * Subscribes every feed in [xml] and makes each one's folder and tag set match the file exactly
-     * — a re-import restores the file's structure rather than merging additively into whatever the
-     * feed already had. Split out from [importOpml] so it is testable without the native open dialog.
+     * Imports feeds from an OPML document and synchronizes their folders and tags.
+     *
+     * @param xml The OPML document to import.
+     * @return The number of feeds added and the number of subscriptions that failed.
      */
     internal suspend fun applyOpmlDocument(xml: String): OpmlResult.Imported {
         // Each distinct folder / tag name is resolved once per import run, not once per feed:
@@ -373,6 +375,9 @@ class SettingsViewModel(
         return OpmlResult.Imported(added, failed)
     }
 
+    /**
+     * Clears the latest OPML import or export result.
+     */
     fun clearOpmlResult() {
         opmlResult = null
     }

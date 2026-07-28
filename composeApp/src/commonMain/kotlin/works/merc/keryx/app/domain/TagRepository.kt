@@ -31,15 +31,32 @@ class TagRepository(
     fun watchTagIdsForFeed(feedId: String): Flow<List<String>> =
         feedTags.watchTagIdsForFeed(feedId).asFlow().mapToList(dispatcher)
 
-    fun getTagById(id: String): Tags? = tags.getById(id).executeAsOneOrNull()
+    /**
+ * Retrieves a tag by its identifier.
+ *
+ * @param id The tag identifier.
+ * @return The matching tag, or `null` if no tag exists with the identifier.
+ */
+fun getTagById(id: String): Tags? = tags.getById(id).executeAsOneOrNull()
 
     /** All live tags in display order — the synchronous counterpart of [watchAllTags]. */
     fun getAllTags(): List<Tags> = tags.watchAll().executeAsList()
 
-    /** feedId -> set of attached tagIds — the synchronous counterpart of [watchFeedTagMap]. */
+    /**
+         * Retrieves the active tag assignments grouped by feed.
+         *
+         * @return A map from each feed ID to its attached tag IDs.
+         */
     fun getFeedTagMap(): Map<String, Set<String>> =
         feedTags.watchAllActive().executeAsList().groupBy({ it.feed_id }, { it.tag_id }).mapValues { it.value.toSet() }
 
+    /**
+     * Creates or reactivates a tag with the specified name and color.
+     *
+     * @param name The tag name.
+     * @param color The tag color, or `null` to preserve an existing color or leave a new tag uncolored.
+     * @return The tag ID.
+     */
     fun createTag(name: String, color: String? = null): String {
         val now = clock.nowMillis()
         val existing = tags.getByName(name).executeAsOneOrNull()

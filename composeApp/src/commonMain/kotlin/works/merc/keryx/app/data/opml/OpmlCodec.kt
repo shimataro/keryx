@@ -28,17 +28,25 @@ object OpmlCodec {
     )
 
     /**
-     * Collects every `<outline>` that carries an `xmlUrl`, recording the enclosing folder outline's
-     * name and the `category` tags. An `<outline>` without an `xmlUrl` is a folder wrapper: its
-     * `title`/`text` becomes the folder name for its descendants. Keryx feeds belong to at most one
-     * folder, so a folder nested inside a folder simply replaces the outer name. Feeds are
-     * deduplicated by URL, keeping the first occurrence.
+     * Imports feeds from an OPML document, preserving folder names and category tags.
+     *
+     * Feeds are deduplicated by XML URL, keeping the first occurrence. Nested folders replace
+     * their parent folder for descendant feeds.
+     *
+     * @param xml The OPML document to import.
+     * @return The imported feeds, or an empty list if parsing fails.
      */
     fun import(xml: String): List<ImportedFeed> = runCatching {
         val doc = Ksoup.parse(html = xml, parser = Parser.xmlParser())
         val seen = mutableSetOf<String>()
         val imported = mutableListOf<ImportedFeed>()
 
+        /**
+         * Traverses descendant outlines, importing unique feeds and preserving their folder context.
+         *
+         * @param element The element whose descendants are traversed.
+         * @param folderName The current folder name assigned to discovered feeds.
+         */
         fun walk(element: Element, folderName: String?) {
             for (child in element.children()) {
                 if (!child.tagName().equals("outline", ignoreCase = true)) {
@@ -105,6 +113,12 @@ object OpmlCodec {
     private fun parseCategories(category: String?): List<String> =
         category?.split(',')?.mapNotNull { it.trim().takeIf { t -> t.isNotEmpty() } }.orEmpty()
 
+    /**
+     * Retrieves an attribute value using a case-insensitive attribute name.
+     *
+     * @param name The attribute name to find.
+     * @return The first matching attribute value, or `null` if no matching attribute exists.
+     */
     private fun Element.attrCI(name: String): String? {
         for (attr in attributes()) {
             if (attr.key.equals(name, ignoreCase = true)) return attr.value
