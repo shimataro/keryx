@@ -545,7 +545,7 @@ class HomeViewModel(
 
     suspend fun previewFeed(url: String): Result<FetchedFeed> = feedRepository.previewFeed(url)
 
-    suspend fun subscribeFeed(url: String): Result<Unit> = feedRepository.subscribeFeed(url)
+    suspend fun subscribeFeed(url: String): Result<Feeds> = feedRepository.subscribeFeed(url)
 
     /**
      * Previews [rawUrl] and maps the outcome for the add-feed dialog. Handles scheme resolution

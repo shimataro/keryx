@@ -61,7 +61,7 @@ class FeedRepository(
 
     suspend fun previewFeed(url: String): Result<FetchedFeed> = feedFetcher.fetch(url)
 
-    suspend fun subscribeFeed(url: String): Result<Unit> {
+    suspend fun subscribeFeed(url: String): Result<Feeds> {
         val fetched = when (val r = feedFetcher.fetch(url)) {
             is Result.Ok -> r.value
             is Result.Err -> return r
@@ -109,7 +109,7 @@ class FeedRepository(
         articleRepository.upsertParsed(feedId, fetched.articles)
         if (fetched.articles.isNotEmpty()) ftsManager.indexMissing()
         syncScheduler.scheduleSync()
-        return Result.Ok(Unit)
+        return Result.Ok(feeds.getById(feedId).executeAsOne())
     }
 
     fun unsubscribeFeed(id: String) {

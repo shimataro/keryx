@@ -350,25 +350,22 @@ class SettingsViewModel(
         var added = 0
         var failed = 0
         for (entry in OpmlCodec.import(xml)) {
-            when (feedRepository.subscribeFeed(entry.xmlUrl)) {
+            when (val subscribed = feedRepository.subscribeFeed(entry.xmlUrl)) {
                 is Result.Ok -> {
                     added++
-                    // Null only when subscription followed a redirect (the stored url is then the
-                    // redirect target): the feed is subscribed, it just misses this file's structure.
-                    feedRepository.getFeedByUrl(entry.xmlUrl)?.let { feed ->
-                        val folderId = entry.folderName?.let { name ->
-                            folderIdByName.getOrPut(name) { folderRepository.createFolder(name) }
-                        }
-                        // Guarded so a re-import that changes nothing writes nothing.
-                        if (feed.folder_id != folderId) feedRepository.moveFeed(feed.id, folderId)
-
-                        val newTagIds = entry.tags
-                            .map { name -> tagIdByName.getOrPut(name) { tagRepository.createTag(name) } }
-                            .toSet()
-                        val currentTagIds = previousFeedTagMap[feed.id].orEmpty()
-                        (currentTagIds - newTagIds).forEach { tagRepository.setFeedTag(feed.id, it, false) }
-                        (newTagIds - currentTagIds).forEach { tagRepository.setFeedTag(feed.id, it, true) }
+                    val feed = subscribed.value
+                    val folderId = entry.folderName?.let { name ->
+                        folderIdByName.getOrPut(name) { folderRepository.createFolder(name) }
                     }
+                    // Guarded so a re-import that changes nothing writes nothing.
+                    if (feed.folder_id != folderId) feedRepository.moveFeed(feed.id, folderId)
+
+                    val newTagIds = entry.tags
+                        .map { name -> tagIdByName.getOrPut(name) { tagRepository.createTag(name) } }
+                        .toSet()
+                    val currentTagIds = previousFeedTagMap[feed.id].orEmpty()
+                    (currentTagIds - newTagIds).forEach { tagRepository.setFeedTag(feed.id, it, false) }
+                    (newTagIds - currentTagIds).forEach { tagRepository.setFeedTag(feed.id, it, true) }
                 }
                 is Result.Err -> failed++
             }

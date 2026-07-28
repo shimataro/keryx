@@ -6,7 +6,9 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -135,6 +137,24 @@ class SettingsViewModelTest {
     /** A [FeedFetcher] that answers every request with a minimal valid RSS document. */
     private fun rssFetcher(): FeedFetcher {
         val client = HttpClient(MockEngine { respond(RSS, HttpStatusCode.OK) }) {
+            followRedirects = false
+            expectSuccess = false
+            install(HttpTimeout)
+        }
+        return FeedFetcher(client)
+    }
+
+    /** A [FeedFetcher] that permanently redirects [from] to [to], then answers with a minimal RSS document. */
+    private fun redirectingFetcher(from: String, to: String): FeedFetcher {
+        val client = HttpClient(
+            MockEngine { request ->
+                if (request.url.toString() == from) {
+                    respond("", HttpStatusCode.MovedPermanently, headersOf(HttpHeaders.Location, to))
+                } else {
+                    respond(RSS, HttpStatusCode.OK)
+                }
+            },
+        ) {
             followRedirects = false
             expectSuccess = false
             install(HttpTimeout)
@@ -612,6 +632,26 @@ class SettingsViewModelTest {
         assertEquals(1, result.added)
         assertNull(db.feedsQueries.getById(feedId).executeAsOne().folder_id)
         assertEquals(setOf("news"), tagNamesOf(feedId))
+    }
+
+    @Test
+    fun applyOpmlDocumentAppliesFolderAndTagsEvenWhenSubscribeFollowsARedirect(): Unit = runBlocking {
+        val vm = newViewModel(feedFetcher = redirectingFetcher("https://old.com/feed", "https://new.com/feed"))
+        val xml = """
+            <opml version="2.0"><body>
+              <outline text="Tech">
+                <outline type="rss" text="A" xmlUrl="https://old.com/feed" category="kotlin"/>
+              </outline>
+            </body></opml>
+        """.trimIndent()
+
+        val result = vm.applyOpmlDocument(xml)
+
+        assertEquals(1, result.added)
+        val feed = db.feedsQueries.getByUrl("https://new.com/feed").executeAsOne()
+        assertEquals(setOf("Tech"), db.foldersQueries.watchAll().executeAsList().map { it.name }.toSet())
+        assertNotNull(feed.folder_id)
+        assertEquals(setOf("kotlin"), tagNamesOf(feed.id))
     }
 
     /** The names of the tags currently attached to [feedId]. */
