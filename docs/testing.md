@@ -140,10 +140,13 @@ in order of how likely each is to be wrong):
 - Quit Keryx: the Global Menu entry disappears immediately (no stale/frozen last-known menu for a dead process).
 
 `AppMenuConnection` speaks the plain `com.canonical.AppMenu.Registrar` interface with no KDE-specific
-assumption, so it is expected to work identically wherever else that interface is implemented — notably
+assumption, so it is expected to work identically wherever else that interface is implemented and an
+X11 window ID is available (registration resolves the window's XID the same way as the KDE path above,
+so a pure-Wayland session with no XWayland falls back to the in-window bar here too) — notably
 `vala-panel-appmenu` (the Global Menu applet for `vala-panel`/`xfce4-panel`/`mate-panel`, paired with the
-`appmenu-gtk-module`/`unity-gtk-module` client-side GTK module). On an XFCE/MATE/Budgie session with
-`vala-panel-appmenu` and `appmenu-gtk-module`/`unity-gtk-module` installed and the panel applet added, confirm:
+`appmenu-gtk-module`/`unity-gtk-module` client-side GTK module). On an XFCE/MATE/Budgie X11/XWayland
+session with `vala-panel-appmenu` and `appmenu-gtk-module`/`unity-gtk-module` installed and the panel
+applet added, confirm:
 
 - The menu appears in the panel applet the same way it does in KDE's Global Menu widget.
 - Dynamic state (enabled/disabled items, the "Unread only" checkbox) and every click action match the
