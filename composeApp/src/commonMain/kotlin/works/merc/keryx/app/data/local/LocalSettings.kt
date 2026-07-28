@@ -36,4 +36,11 @@ data class LocalSettings(
     val lastUpdateCheckAt: Long? = null,
     /** Last time the full FTS index was rebuilt (healing pass); gates the once-per-24h auto rebuild. */
     val lastFtsRebuiltAt: Long? = null,
+    /**
+     * In-window application menu bar visibility (Linux KDE Global Menu). `null` = auto-decide
+     * (shown until this app's `RegisterWindow` succeeds, then hidden); `true`/`false` = explicit
+     * user override set via Ctrl+M or the exported "Show Menu Bar" checkbox. Has no effect where no
+     * `com.canonical.AppMenu.Registrar` is present (macOS/Windows/non-KDE Linux), where the bar always shows.
+     */
+    val appMenuBarVisible: Boolean? = null,
 )

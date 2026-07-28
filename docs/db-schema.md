@@ -119,6 +119,7 @@ Setup completion = file exists.
 | `lastFtsRebuiltAt` | int\|null | null (24h gate for FTS full rebuild. Updated by daily heal) |
 | `windowWidth` / `windowHeight` | number\|null | null |
 | `feedListPaneWidth` / `articleListPaneWidth` | number | 260 / 360 |
+| `appMenuBarVisible` | boolean\|null | null (Linux KDE Global Menu: null=auto (shown until `RegisterWindow` succeeds, then hidden); true/false=explicit override via Ctrl+M / the exported "Show Menu Bar" checkbox. No effect where no `com.canonical.AppMenu.Registrar` is present) |
 
 ## Cache Cleanup
 
