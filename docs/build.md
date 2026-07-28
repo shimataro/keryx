@@ -68,6 +68,14 @@ Below is how to obtain API keys for each service.
 The redirect after OAuth2 cannot be arbitrarily determined like Dropbox, so it is received via loopback at `http://127.0.0.1:<port>` (the app temporarily sets up an HTTP server with `LoopbackRedirectTransport` to receive it).
 The flow uses PKCE (`code_verifier`), but **a client secret is also required separately** — unlike iOS/Android, Google's "Desktop app" OAuth client is not treated as a full public client, and Google's token endpoint rejects token exchange / refresh without `client_secret` with `invalid_request: client_secret is missing` (regardless of PKCE). The scope requested is `drive.appdata` only (an app-specific hidden folder in the user's Drive). During development, set the publishing status to "Testing" on the "Audience" tab and register test users.
 
+> **Testing status expires refresh tokens after 7 days.** While the OAuth consent screen's
+> publishing status stays "Testing", Google issues refresh tokens that expire 7 days after
+> being granted, so a Google Drive sync connection needs to be re-linked roughly weekly (the
+> app surfaces this as a `CloudAuthException` notification-center entry, not a silent
+> failure). For long-running use, move the publishing status to "In production" on the
+> "Audience" tab — `drive.appdata` is a non-sensitive scope, so this only requires Google's
+> basic app verification, not the full restricted-scope review.
+
 ### OneDrive
 
 1. Register an app in the [Azure Portal](https://portal.azure.com) → "Microsoft Entra ID" → "App registrations" → "New registration"
