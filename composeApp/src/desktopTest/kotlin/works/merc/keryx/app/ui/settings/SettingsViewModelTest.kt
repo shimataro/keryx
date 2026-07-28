@@ -383,7 +383,7 @@ class SettingsViewModelTest {
         assertEquals(CloudStorageType.DROPBOX, vm.connectedType)
 
         vm.switchTo(CloudStorageType.GOOGLE_DRIVE)
-        awaitTrue { vm.connectedType == CloudStorageType.GOOGLE_DRIVE }
+        awaitTrue { vm.connectingType == null }
 
         assertEquals(CloudStorageType.GOOGLE_DRIVE, vm.connectedType)
         assertNull(vm.connectingType)
