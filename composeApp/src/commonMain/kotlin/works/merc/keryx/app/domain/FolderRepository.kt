@@ -21,8 +21,27 @@ class FolderRepository(
 
     fun watchAllFolders(): Flow<List<Folders>> = folders.watchAll().asFlow().mapToList(dispatcher)
 
-    fun getFolderById(id: String): Folders? = folders.getById(id).executeAsOneOrNull()
+    /**
+ * Retrieves a folder by its identifier.
+ *
+ * @param id The folder identifier.
+ * @return The matching folder, or `null` if no folder exists with the identifier.
+ */
+fun getFolderById(id: String): Folders? = folders.getById(id).executeAsOneOrNull()
 
+    /**
+ * Retrieves all live folders in display order.
+ *
+ * @return The live folders ordered for display.
+ */
+    fun getAllFolders(): List<Folders> = folders.watchAll().executeAsList()
+
+    /**
+     * Creates a folder or reactivates an existing folder with the same name.
+     *
+     * @param name The folder name.
+     * @return The folder ID.
+     */
     fun createFolder(name: String): String {
         val now = clock.nowMillis()
         val existing = folders.getByName(name).executeAsOneOrNull()

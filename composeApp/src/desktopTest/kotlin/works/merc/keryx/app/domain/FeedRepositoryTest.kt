@@ -17,6 +17,7 @@ import works.merc.keryx.app.core.FeedTimeoutException
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
+import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.inMemoryDb
@@ -105,8 +106,9 @@ class FeedRepositoryTest {
 
             val result = repo.subscribeFeed("https://ex.com/feed")
 
-            assertIs<Result.Ok<Unit>>(result)
+            assertIs<Result.Ok<Feeds>>(result)
             val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+            assertEquals(feed, result.value)
             assertEquals("Feed", feed.title)
             assertEquals("etag-1", feed.etag)
             assertEquals(1, db.articlesQueries.watchAll().executeAsList().size)
@@ -126,8 +128,11 @@ class FeedRepositoryTest {
             val (driver, db) = inMemoryDb()
             try {
                 val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
-                assertIs<Result.Ok<Unit>>(repo.subscribeFeed("https://ex.com/feed"))
-                return db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne().id
+                val result = repo.subscribeFeed("https://ex.com/feed")
+                assertIs<Result.Ok<Feeds>>(result)
+                val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+                assertEquals(feed, result.value)
+                return feed.id
             } finally {
                 driver.close()
             }
@@ -162,7 +167,10 @@ class FeedRepositoryTest {
             val fetcher = fetcherWith { respond(RSS_WITH_SEARCHABLE_ARTICLE, HttpStatusCode.OK) }
             val repo = newRepo(db, driver, fetcher)
 
-            assertIs<Result.Ok<Unit>>(repo.subscribeFeed("https://ex.com/feed"))
+            val result = repo.subscribeFeed("https://ex.com/feed")
+            assertIs<Result.Ok<Feeds>>(result)
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+            assertEquals(feed, result.value)
             val article = db.articlesQueries.watchAll().executeAsList().single()
 
             // Regression test: before the fix, the FTS index was never rebuilt after
@@ -183,19 +191,23 @@ class FeedRepositoryTest {
             val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
             val repo = newRepo(db, driver, fetcher)
 
-            assertIs<Result.Ok<Unit>>(repo.subscribeFeed("https://ex.com/feed"))
+            val result = repo.subscribeFeed("https://ex.com/feed")
+            assertIs<Result.Ok<Feeds>>(result)
             val original = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+            assertEquals(original, result.value)
 
             repo.unsubscribeFeed(original.id)
             val afterUnsubscribe = db.feedsQueries.getById(original.id).executeAsOne()
             assertNotNull(afterUnsubscribe.deleted_at)
             assertTrue(db.feedsQueries.watchAll().executeAsList().isEmpty())
 
-            assertIs<Result.Ok<Unit>>(repo.subscribeFeed("https://ex.com/feed"))
+            val result2 = repo.subscribeFeed("https://ex.com/feed")
+            assertIs<Result.Ok<Feeds>>(result2)
 
             val all = db.feedsQueries.getAllIncludingDeleted().executeAsList()
             assertEquals(1, all.size, "resubscribing to the same URL must not create a duplicate row")
             val resubscribed = all.single()
+            assertEquals(resubscribed, result2.value)
             assertEquals(original.id, resubscribed.id)
             assertNull(resubscribed.deleted_at)
         } finally {
@@ -620,6 +632,23 @@ class FeedRepositoryTest {
             val ordered = db.feedsQueries.getByFolder("d1").executeAsList()
             assertEquals(listOf("f1", "moving", "f2"), ordered.map { it.id })
             assertEquals("d1", db.feedsQueries.getById("moving").executeAsOne().folder_id)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun getFeedByUrlReturnsTheMatchingFeedIncludingASoftDeletedOneAndNullOtherwise() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1", url = "https://a.com/feed")
+            db.insertFeed("f2", url = "https://b.com/feed", deletedAt = 20L)
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+
+            assertEquals("f1", repo.getFeedByUrl("https://a.com/feed")?.id)
+            // getByUrl deliberately ignores deleted_at — importOpml resolves unsubscribed feeds too.
+            assertNotNull(repo.getFeedByUrl("https://b.com/feed")?.deleted_at)
+            assertNull(repo.getFeedByUrl("https://missing.com/feed"))
         } finally {
             driver.close()
         }
