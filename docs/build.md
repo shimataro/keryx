@@ -73,8 +73,10 @@ The flow uses PKCE (`code_verifier`), but **a client secret is also required sep
 > being granted, so a Google Drive sync connection needs to be re-linked roughly weekly (the
 > app surfaces this as a `CloudAuthException` notification-center entry, not a silent
 > failure). For long-running use, move the publishing status to "In production" on the
-> "Audience" tab — `drive.appdata` is a non-sensitive scope, so this only requires Google's
-> basic app verification, not the full restricted-scope review.
+> "Audience" tab — `drive.appdata` is a non-sensitive scope, so publishing does not require
+> Google's sensitive/restricted-scope verification at all; only the optional, lighter-weight
+> "brand verification" is needed if you want the app name and logo shown on the consent
+> screen instead of Google's default unverified-app presentation.
 
 ### OneDrive
 
