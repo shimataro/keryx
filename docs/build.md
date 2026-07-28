@@ -55,17 +55,28 @@ Below is how to obtain API keys for each service.
 2. Navigate to "APIs & Services" → "Library" and find the "Google Drive API"
    - Enter "drive" in the search box, or narrow down from "Storage" in the sidebar
    - Click "Enable"
-3. Navigate to "APIs & Services" → "OAuth consent screen", then click "Data Access"
+3. Navigate to "Google Auth Platform" → "Data Access" (this replaced the old "OAuth consent screen" page)
    - Click "Add or remove scopes"
    - Check `.../auth/drive.appdata` for "Google Drive API"
+   - Click "Update" to confirm the selection, then click "Save" on the Data Access page to persist it
    - This grants access only to the app-specific folder, not arbitrary files in the drive.
-4. Navigate to "APIs & Services" → "Credentials" and create an **"OAuth 2.0 Client ID"**
-   - "Create credentials" → "OAuth client ID" at the top
+4. Navigate to "Google Auth Platform" → "Clients" and create a client
+   - "Create client" at the top
    - Application type: "Desktop app"
    - Specify the "Client ID" and "Client Secret" shown on the same page in `local.properties` (copy of [local.properties.example](../local.properties.example))
 
 The redirect after OAuth2 cannot be arbitrarily determined like Dropbox, so it is received via loopback at `http://127.0.0.1:<port>` (the app temporarily sets up an HTTP server with `LoopbackRedirectTransport` to receive it).
-The flow uses PKCE (`code_verifier`), but **a client secret is also required separately** — unlike iOS/Android, Google's "Desktop app" OAuth client is not treated as a full public client, and Google's token endpoint rejects token exchange / refresh without `client_secret` with `invalid_request: client_secret is missing` (regardless of PKCE). The scope requested is `drive.appdata` only (an app-specific hidden folder in the user's Drive). During development, set the OAuth consent screen to "Testing" and register test users.
+The flow uses PKCE (`code_verifier`), but **a client secret is also required separately** — unlike iOS/Android, Google's "Desktop app" OAuth client is not treated as a full public client, and Google's token endpoint rejects token exchange / refresh without `client_secret` with `invalid_request: client_secret is missing` (regardless of PKCE). The scope requested is `drive.appdata` only (an app-specific hidden folder in the user's Drive). During development, set the publishing status to "Testing" on the "Audience" tab and register test users.
+
+> **Testing status expires refresh tokens after 7 days.** While the OAuth consent screen's
+> publishing status stays "Testing", Google issues refresh tokens that expire 7 days after
+> being granted, so a Google Drive sync connection needs to be re-linked roughly weekly (the
+> app surfaces this as a `CloudAuthException` notification-center entry, not a silent
+> failure). For long-running use, move the publishing status to "In production" on the
+> "Audience" tab — `drive.appdata` is a non-sensitive scope, so publishing does not require
+> Google's sensitive/restricted-scope verification at all; only the optional, lighter-weight
+> "brand verification" is needed if you want the app name and logo shown on the consent
+> screen instead of Google's default unverified-app presentation.
 
 ### OneDrive
 
