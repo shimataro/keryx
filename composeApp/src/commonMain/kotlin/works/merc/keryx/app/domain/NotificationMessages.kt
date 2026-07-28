@@ -14,4 +14,7 @@ interface NotificationMessages {
 
     /** Localized message for a failed cloud sync, keyed off the concrete [exception]. */
     suspend fun syncFailed(exception: KeryxException): String
+
+    /** Localized message summarizing an OPML import (e.g. opened via a file association). */
+    suspend fun opmlImported(added: Int, failed: Int): String
 }

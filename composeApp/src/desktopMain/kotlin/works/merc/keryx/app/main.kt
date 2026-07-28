@@ -72,6 +72,7 @@ import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.domain.UpdateStatus
 import works.merc.keryx.app.domain.shouldCheckForUpdate
 import works.merc.keryx.app.platform.AppDirs
+import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.platform.isLinux
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.LocalNativeWindow
@@ -108,13 +109,14 @@ private val activationRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1
  * Starts the Keryx desktop application and coordinates its initialization, single-instance behavior,
  * native integrations, background tasks, and main window.
  *
- * @param args Command-line arguments, including an optional `keryx://` callback URI.
+ * @param args Command-line arguments, including an optional `keryx://` callback URI or an `.opml`
+ * file path.
  */
 @OptIn(FlowPreview::class, ExperimentalComposeUiApi::class)
 fun main(args: Array<String>) {
-    // If the OS launched us with a custom-scheme redirect URI (Windows/Linux),
-    // capture it before single-instance coordination.
-    val incomingUri = args.firstOrNull { it.startsWith("keryx://") }
+    // If the OS launched us with a custom-scheme redirect URI or an .opml file path
+    // (Windows/Linux), capture it before single-instance coordination.
+    val incomingArg = args.firstOrNull { classifyLaunchArg(it) != null }
     // Must be set before any AWT/Compose initialization, otherwise macOS falls back to the main class name.
     System.setProperty("apple.awt.application.name", "Keryx")
     // Render the application menu bar (AppMenuBar) in the macOS system menu bar rather than inside the
@@ -126,11 +128,12 @@ fun main(args: Array<String>) {
 
     val singleInstanceCoordinator = SingleInstanceCoordinator(File(AppDirs.appDataDir()))
     if (!singleInstanceCoordinator.tryAcquireLock()) {
-        // Another instance is already running. On macOS the OAuth redirect URI is delivered via an
-        // Apple event (setOpenURIHandler), not argv, so incomingUri is null here and only a plain
-        // activation is forwarded — see the diagnostic note in docs/sync-architecture.md.
-        Log.info(LOG_TAG, "Single-instance lock held by another instance; forwarding activation (hasUri=${incomingUri != null}) and exiting")
-        singleInstanceCoordinator.signalRunningInstance(incomingUri)
+        // Another instance is already running. On macOS the OAuth redirect URI and an opened .opml
+        // file are both delivered via an Apple Event (setOpenURIHandler / setOpenFileHandler), not
+        // argv, so incomingArg is null here and only a plain activation is forwarded — see the
+        // diagnostic note in docs/sync-architecture.md.
+        Log.info(LOG_TAG, "Single-instance lock held by another instance; forwarding activation (hasArg=${incomingArg != null}) and exiting")
+        singleInstanceCoordinator.signalRunningInstance(incomingArg)
         return
     }
     Log.info(LOG_TAG, "Acquired single-instance lock; running as primary instance from ${currentExecutablePath()}")
@@ -140,17 +143,36 @@ fun main(args: Array<String>) {
     startKoin { modules(appModule, platformModule) }
     val koin = KoinPlatform.getKoin()
 
-    // Register activation listener now that Koin is ready so we can emit
-    // incoming URIs into the shared callback flow.
+    // Register activation listener now that Koin is ready so we can emit incoming URIs into the
+    // shared callback flow. dispatchOpmlFile resolves its own CoroutineScope/repository/notification
+    // dependencies via koin.get<>() rather than capturing appScope, which is declared further down
+    // (after this point) and would not be in scope here.
     val callbackFlow = koin.get<MutableSharedFlow<OAuthCallbackParams>>()
-    singleInstanceCoordinator.startActivationListener { uri ->
-        if (!uri.isNullOrBlank()) {
-            // Do not log the URI itself — it carries the OAuth authorization code.
-            Log.info(LOG_TAG, "OAuth callback URI received via single-instance activation")
-            runCatching { callbackFlow.tryEmit(parseOAuthUri(uri)) }
+    fun dispatchOAuthCallback(uri: String) {
+        // Do not log the URI itself — it carries the OAuth authorization code.
+        Log.info(LOG_TAG, "OAuth callback URI received")
+        runCatching { callbackFlow.tryEmit(parseOAuthUri(uri)) }
+    }
+    fun dispatchOpmlFile(path: String) {
+        koin.get<CoroutineScope>().launch { handleOpenedOpmlFile(koin, path) }
+    }
+    fun dispatchLaunchArg(arg: String) {
+        when (val launchArg = classifyLaunchArg(arg)) {
+            is LaunchArg.OAuthCallback -> dispatchOAuthCallback(launchArg.uri)
+            is LaunchArg.OpmlFile -> dispatchOpmlFile(launchArg.path)
+            null -> Unit
         }
+    }
+    singleInstanceCoordinator.startActivationListener { uri ->
+        if (!uri.isNullOrBlank()) dispatchLaunchArg(uri)
         activationRequests.tryEmit(Unit)
     }
+    // startActivationListener only fires for a *second* launch forwarding to this one — the
+    // primary instance's own launch args need dispatching separately. This matters mainly for an
+    // .opml file-association cold start on Windows/Linux: unlike the OAuth callback (which only
+    // ever arrives while Keryx is already running), double-clicking a file when Keryx isn't running
+    // yet is the primary way this feature gets used.
+    incomingArg?.let { dispatchLaunchArg(it) }
 
     configureImageLoader(koin.get<HttpClient>(), AppDirs.cacheDir())
 
@@ -237,18 +259,28 @@ fun main(args: Array<String>) {
         if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.APP_OPEN_URI)) {
             Desktop.getDesktop().setOpenURIHandler { event ->
                 val uri = event.uri.toString()
-                if (uri.startsWith("keryx://")) {
-                    // Do not log the URI itself — it carries the OAuth authorization code.
-                    Log.info(LOG_TAG, "OAuth callback URI received via macOS setOpenURIHandler")
-                    runCatching { callbackFlow.tryEmit(parseOAuthUri(uri)) }
-                }
+                if (uri.startsWith("keryx://")) dispatchOAuthCallback(uri)
             }
         }
     }.onFailure { Log.warn(LOG_TAG, "Could not install URI handler", it) }
 
-    // Tell the OS how to handle keryx:// URIs (Windows registry / Linux .desktop + mimeapps.list).
-    // macOS declares the scheme in Info.plist at packaging time, so it needs nothing here.
-    registerCustomUriScheme()
+    // Install the in-process file-open handler (macOS). A double-clicked / "Open With"-launched
+    // .opml file arrives here via an Apple Event whether or not Keryx was already running — unlike
+    // Windows/Linux, which only ever deliver it as argv on a genuinely new process (see the
+    // single-instance dispatch above).
+    runCatching {
+        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.APP_OPEN_FILE)) {
+            Desktop.getDesktop().setOpenFileHandler { event ->
+                event.files
+                    .filter { it.name.endsWith(".opml", ignoreCase = true) }
+                    .forEach { file -> dispatchOpmlFile(file.absolutePath) }
+            }
+        }
+    }.onFailure { Log.warn(LOG_TAG, "Could not install the .opml file-open handler", it) }
+
+    // Tell the OS how to handle keryx:// URIs and .opml files (Windows registry / Linux .desktop +
+    // mimeapps.list). macOS declares both in Info.plist at packaging time, so it needs nothing here.
+    registerFileAssociations()
 
     // Linux: java.awt.SystemTray cannot draw a transparent icon on X11 (XTrayIconPeer fills the
     // canvas with the component background before drawing, and XSystemTrayPeer never adopts the
@@ -595,6 +627,31 @@ private suspend fun checkForUpdateAndNotify(koin: org.koin.core.Koin) {
             ),
         )
     }
+}
+
+/**
+ * Reads an OPML file opened via a file association (double-click / "Open With" on an `.opml`
+ * file), subscribes to every feed it lists, and surfaces the result via the notification center.
+ * No dialog is shown for this — [activationRequests] brings the window to front and the new feeds
+ * appear live in the (already-visible) feed list, matching the "restrained notification" treatment
+ * error-design.md already prescribes for background-originated events.
+ */
+private suspend fun handleOpenedOpmlFile(koin: org.koin.core.Koin, path: String) {
+    val xml = FileIO.readText(path) ?: run {
+        Log.warn(LOG_TAG, "Could not read the opened OPML file")
+        return
+    }
+    val outcome = koin.get<FeedRepository>().importOpml(xml)
+    val message = koin.get<NotificationMessages>().opmlImported(outcome.added, outcome.failed)
+    koin.get<NotificationCenter>().add(
+        AppNotification(
+            id = IdGenerator.newId(),
+            level = AppNotificationLevel.INFO,
+            message = message,
+            timestampMillis = SystemClock.nowMillis(),
+        ),
+    )
+    activationRequests.tryEmit(Unit)
 }
 
 /**

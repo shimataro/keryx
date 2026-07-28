@@ -48,7 +48,7 @@ class LinuxUriSchemeRegistrarTest {
 
     @Test
     fun desktopEntryDeclaresTheSchemeHandler() {
-        val entry = desktopEntryContent(LAUNCHER)
+        val entry = desktopEntryContent(LAUNCHER, CUSTOM_URI_MIME_TYPE, "%u")
         assertTrue(entry.startsWith("[Desktop Entry]\n"), entry)
         assertTrue(entry.contains("\nType=Application\n"), entry)
         assertTrue(entry.contains("\nName=Keryx\n"), entry)
@@ -62,7 +62,7 @@ class LinuxUriSchemeRegistrarTest {
     fun execPassesTheUriAsAnArgument() {
         // Without the %u field code the desktop entry spec does not hand the URI to the process,
         // so main()'s argv scan never sees the OAuth callback. This is the whole point of the file.
-        assertTrue(desktopEntryContent(LAUNCHER).contains("\nExec=\"$LAUNCHER\" %u\n"))
+        assertTrue(desktopEntryContent(LAUNCHER, CUSTOM_URI_MIME_TYPE, "%u").contains("\nExec=\"$LAUNCHER\" %u\n"))
     }
 
     @Test
@@ -192,7 +192,7 @@ class LinuxUriSchemeRegistrarTest {
     fun registerWritesBothFilesAndRefreshesTheDesktopDatabase() {
         assertTrue(registrar().register())
 
-        assertEquals(desktopEntryContent(LAUNCHER), desktopFile().readText())
+        assertEquals(desktopEntryContent(LAUNCHER, CUSTOM_URI_MIME_TYPE, "%u"), desktopFile().readText())
         assertTrue(
             mimeAppsList.readText().contains("x-scheme-handler/keryx=keryx-url-handler.desktop\n"),
             mimeAppsList.readText(),
@@ -217,7 +217,7 @@ class LinuxUriSchemeRegistrarTest {
 
         assertTrue(registrar.register())
 
-        assertEquals(desktopEntryContent(LAUNCHER), desktopFile().readText())
+        assertEquals(desktopEntryContent(LAUNCHER, CUSTOM_URI_MIME_TYPE, "%u"), desktopFile().readText())
         assertTrue(mimeAppsList.readText().contains("keryx-url-handler.desktop"))
     }
 
@@ -227,7 +227,7 @@ class LinuxUriSchemeRegistrarTest {
 
         assertTrue(registrar(launcherPath = LAUNCHER).register())
 
-        assertEquals(desktopEntryContent(LAUNCHER), desktopFile().readText())
+        assertEquals(desktopEntryContent(LAUNCHER, CUSTOM_URI_MIME_TYPE, "%u"), desktopFile().readText())
         assertEquals(2, refreshes.size)
     }
 

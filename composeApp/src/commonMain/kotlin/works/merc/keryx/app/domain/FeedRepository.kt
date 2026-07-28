@@ -16,6 +16,7 @@ import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.FeedNotFoundException
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.FtsManager
+import works.merc.keryx.app.data.opml.OpmlCodec
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.data.remote.FaviconResolver
@@ -27,6 +28,9 @@ import works.merc.keryx.app.data.remote.FetchedFeed
  * subscription list doesn't open an unbounded number of sockets at once; DB writes stay serial.
  */
 private const val REFRESH_FETCH_CONCURRENCY = 6
+
+/** Result of [FeedRepository.importOpml]: how many listed feeds subscribed successfully vs. failed. */
+data class OpmlImportOutcome(val added: Int, val failed: Int)
 
 /**
  * Feed subscription lifecycle and refresh. Orchestrates [FeedFetcher] +
@@ -104,6 +108,24 @@ class FeedRepository(
         if (fetched.articles.isNotEmpty()) ftsManager.indexMissing()
         syncScheduler.scheduleSync()
         return Result.Ok(Unit)
+    }
+
+    /**
+     * Parses an OPML document and subscribes to every feed it lists.
+     *
+     * @param xml The OPML document contents.
+     * @return The number of feeds successfully subscribed vs. failed.
+     */
+    suspend fun importOpml(xml: String): OpmlImportOutcome {
+        var added = 0
+        var failed = 0
+        for (entry in OpmlCodec.import(xml)) {
+            when (subscribeFeed(entry.xmlUrl)) {
+                is Result.Ok -> added++
+                is Result.Err -> failed++
+            }
+        }
+        return OpmlImportOutcome(added, failed)
     }
 
     fun unsubscribeFeed(id: String) {

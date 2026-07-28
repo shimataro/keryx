@@ -299,15 +299,8 @@ class SettingsViewModel(
                     opmlResult = OpmlResult.Cancelled
                     return@launch
                 }
-                var added = 0
-                var failed = 0
-                for (entry in OpmlCodec.import(xml)) {
-                    when (feedRepository.subscribeFeed(entry.xmlUrl)) {
-                        is Result.Ok -> added++
-                        is Result.Err -> failed++
-                    }
-                }
-                opmlResult = OpmlResult.Imported(added, failed)
+                val outcome = feedRepository.importOpml(xml)
+                opmlResult = OpmlResult.Imported(outcome.added, outcome.failed)
             } finally {
                 importingOpml = false
             }

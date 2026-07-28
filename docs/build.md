@@ -128,6 +128,33 @@ so `xdg-open` (or a browser resolving the scheme) can fail until the two are rem
 
 > **Custom-URI linking confirmation**: `./gradlew :composeApp:run` cannot complete Dropbox / OneDrive linking on any desktop OS — macOS routes `keryx://` to the packaged app, and the Windows/Linux startup registration deliberately skips non-packaged launchers. To verify linking behavior, build with `createDistributable` and launch the packaged app (see [setup.md](setup.md) "Common Issues" for details).
 
+### `.opml` file association
+
+Double-clicking (or "Open With Keryx" on) an `.opml` file launches Keryx and imports its
+subscriptions (`FeedRepository.importOpml`, surfaced via the notification center — see
+[app-architecture.md](app-architecture.md)). Registration mirrors the `keryx://` scheme above,
+per platform:
+
+- **macOS**: declared at build time via `CFBundleDocumentTypes` + a custom
+  `UTExportedTypeDeclarations` UTI (`works.merc.keryx.opml`, since macOS has no built-in system UTI
+  for OPML) in the same `infoPlist { extraKeysRawXml }` block as `CFBundleURLTypes`. `LSHandlerRank`
+  is `Default` (not `Alternate`) so a plain double-click launches Keryx directly rather than only
+  adding it to the "Open With" submenu.
+- **Windows**: registered at startup (`registerWindowsOpmlAssociation`) under a dedicated
+  `Keryx.opml` ProgID (`HKEY_CURRENT_USER\Software\Classes\.opml` → `Keryx.opml` →
+  `shell\open\command`), the same per-user, no-admin-needed mechanism as the URI scheme.
+- **Linux**: registered at startup (`LinuxOpmlAssociationRegistrar`), writing a *second* user-level
+  `.desktop` entry (`keryx-opml-handler.desktop`, `Exec=... %f` — a bare local path, not a URI) plus
+  a shared-mime-info package XML at `$XDG_DATA_HOME/mime/packages/keryx-opml.xml` mapping the
+  `*.opml` glob to `application/x-opml+xml`, since that MIME type isn't guaranteed to be predefined
+  by the distro's own `shared-mime-info` package. Same gate as the URI scheme: only registers from a
+  packaged launcher, so `./gradlew :composeApp:run` never creates these files either. Like the
+  `keryx://` scheme's `keryx-url-handler.desktop` and `mimeapps.list` entry, all of these files live
+  in the user's home and are **not removed when the package is uninstalled** — the same
+  leftover-association risk applies (a stale entry pointing at a removed launcher), with the same
+  manual cleanup: delete `keryx-opml-handler.desktop` and `keryx-opml.xml`, and drop the
+  `application/x-opml+xml` line(s) from `mimeapps.list`.
+
 ## Release (CD)
 
 `.github/workflows/release.yml` builds the package and attaches it to the GitHub Release.

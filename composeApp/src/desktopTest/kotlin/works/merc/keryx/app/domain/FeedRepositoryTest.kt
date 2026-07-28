@@ -47,12 +47,22 @@ private const val RSS_WITH_NEW_SEARCHABLE_ARTICLE = """<?xml version="1.0"?><rss
 <item><title>Serialization Deep Dive</title><link>https://ex.com/2</link><guid>g2</guid></item>
 </channel></rss>"""
 
+/** An OPML document listing one feed that fetches fine and one whose URL always 410s. */
+private const val OPML_ONE_OK_ONE_GONE = """<?xml version="1.0"?>
+<opml version="2.0">
+<body>
+<outline text="Feed" xmlUrl="https://ex.com/feed"/>
+<outline text="Gone" xmlUrl="https://ex.com/gone"/>
+</body>
+</opml>"""
+
 /** A [NotificationMessages] fake returning canned, recognizable strings. */
 private class FakeNotificationMessages : NotificationMessages {
     override suspend fun feedGone(feedTitle: String): String = "gone:$feedTitle"
     override suspend fun feedUrlChanged(feedTitle: String): String = "urlChanged:$feedTitle"
     override suspend fun newArticles(count: Int): String = "new:$count"
     override suspend fun syncFailed(exception: works.merc.keryx.app.core.KeryxException): String = "syncFailed:${exception::class.simpleName}"
+    override suspend fun opmlImported(added: Int, failed: Int): String = "opmlImported:$added/$failed"
 }
 
 class FeedRepositoryTest {
@@ -665,6 +675,43 @@ class FeedRepositoryTest {
             assertEquals("d1", resubscribed.folder_id)
             val ordered = db.feedsQueries.getByFolder("d1").executeAsList()
             assertEquals(listOf("other", feed.id), ordered.map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun importOpmlSubscribesToEveryListedFeedAndCountsSuccessesAndFailures(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val fetcher = fetcherWith { request ->
+                if (request.url.toString().endsWith("/gone")) {
+                    respond("", HttpStatusCode.Gone)
+                } else {
+                    respond(RSS, HttpStatusCode.OK)
+                }
+            }
+            val repo = newRepo(db, driver, fetcher)
+
+            val outcome = repo.importOpml(OPML_ONE_OK_ONE_GONE)
+
+            assertEquals(OpmlImportOutcome(added = 1, failed = 1), outcome)
+            assertEquals(listOf("https://ex.com/feed"), db.feedsQueries.getAllIncludingDeleted().executeAsList().map { it.url })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun importOpmlOnUnparseableXmlSubscribesToNothing(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+
+            val outcome = repo.importOpml("not opml at all")
+
+            assertEquals(OpmlImportOutcome(added = 0, failed = 0), outcome)
+            assertTrue(db.feedsQueries.getAllIncludingDeleted().executeAsList().isEmpty())
         } finally {
             driver.close()
         }
