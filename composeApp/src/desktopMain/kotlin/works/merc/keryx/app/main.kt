@@ -103,7 +103,12 @@ import javax.swing.SwingUtilities
 
 private const val LOG_TAG = "Main"
 
-private val activationRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+// replay = 1 (not extraBufferCapacity): on a cold .opml launch, incomingArg is dispatched — and can
+// finish importing and tryEmit here — before Compose mounts the window and the LaunchedEffect below
+// starts collecting. With replay = 0, a value emitted with no active subscriber is simply dropped
+// (see kotlinx.coroutines SharedFlow docs), which would leave the window hidden if startMinimized is
+// set. replay = 1 guarantees the first subscriber still receives it regardless of ordering.
+private val activationRequests = MutableSharedFlow<Unit>(replay = 1)
 
 /**
  * Starts the Keryx desktop application and coordinates its initialization, single-instance behavior,
