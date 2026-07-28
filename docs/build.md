@@ -141,40 +141,60 @@ so `xdg-open` (or a browser resolving the scheme) can fail until the two are rem
 
 ## Release (CD)
 
-`.github/workflows/release.yml` builds the package and attaches it to the GitHub Release.
-**macOS only for now** (cross-compilation is not supported, so each additional platform needs its own runner).
+`.github/workflows/release.yml` builds the packages and attaches them to the GitHub Release.
+**macOS and Linux (x86_64) for now** (cross-compilation is not supported, so each additional
+platform needs its own runner — Windows is not yet automated).
 
 Flow:
 
-1. Publish a GitHub Release with a `vMAJOR.MINOR.PATCH` tag (e.g. `v0.1.0`).
+1. Publish a GitHub Release with a `vMAJOR.MINOR.PATCH` tag, optionally with a SemVer-style
+   pre-release suffix (e.g. `v0.1.0`, `v1.2.0-beta.1`).
 2. The workflow triggers on `release: published`, strips the leading `v`, and passes the result as `-PappVersion`.
-3. `:composeApp:packageDmg` runs, and the DMG is attached to the Release as `Keryx-<version>-macos-arm64.dmg`.
+3. Two independent jobs run in parallel: `:composeApp:packageDmg` (macOS runner), attached as
+   `Keryx-<version>-macos-arm64.dmg`; and `:composeApp:packageDeb :composeApp:packageRpm` (Linux
+   runner, after installing `fakeroot`/`rpm` for jpackage), attached as
+   `Keryx-<version>-linux-x86_64.deb` and `Keryx-<version>-linux-x86_64.rpm`.
 
 The **tag is the single source of truth for the version**. `appVersion` in `composeApp/build.gradle.kts` resolves
-`-PappVersion` > `APP_VERSION` env var > the literal in the file, so the tag drives both `BuildConfig.VERSION`
-(shown in the About screen) and the native-distribution `packageVersion` — they cannot disagree. Local builds fall
-through to the literal, so nothing changes for day-to-day development. A tag that does not yield a
-jpackage-compatible version (`MAJOR[.MINOR[.PATCH]]`) fails the workflow early with an explicit message.
+`-PappVersion` > `APP_VERSION` env var > the literal in the file, and drives `BuildConfig.VERSION` (shown in the
+About screen, and used by the update checker) as the full tag, pre-release suffix included.
+`composeApp/build.gradle.kts` separately derives `appPackageVersion` from it by stripping any pre-release suffix,
+and that drives the native-distribution `packageVersion` for every target — jpackage's packaging metadata
+(CFBundleVersion, RPM `%version`, MSI `ProductVersion`) must stay purely numeric `MAJOR.MINOR.PATCH` and cannot
+carry a pre-release suffix. For a plain (non-prerelease) tag the two are identical, so nothing changes; local
+builds fall through to the same `"0.0.0"` literal for both. A tag that does not yield a jpackage-compatible
+`MAJOR.MINOR.PATCH[-<pre-release>]` version fails the workflow early with an explicit message.
 
 `macos-latest` runners are arm64, hence the architecture in the artifact name — it leaves room for an x86_64 or
 universal build alongside it later.
 
-### 0.x versions on macOS
+### 0.x versions and pre-release tags on macOS
 
 jpackage refuses a macOS `--app-version` whose first component is `0` (it enforces the CFBundleVersion rule that
 versions start at 1), and it fails `createDistributable` — not just the DMG step — so a `0.x` release would
-otherwise be impossible to package at all. jpackage has no separate `--mac-app-version` input, and the Compose
-plugin's own validation does not cover this, so it cannot be configured away.
+otherwise be impossible to package at all. jpackage also requires the packaging version to be purely numeric
+(`MAJOR.MINOR.PATCH`), so a pre-release-suffixed tag like `1.2.0-beta.1` can't be handed to it either — the same
+restriction applies to RPM's `%version` field and MSI's `ProductVersion` on the other two platforms. jpackage has
+no separate `--mac-app-version` input, and the Compose plugin's own validation covers neither case, so neither
+can be configured away.
 
-`composeApp/build.gradle.kts` works around it: when the major version is `0`, macOS is packaged under the
-placeholder `1.0.0` (`macOsPackageVersion`, applied via `macOS { packageVersion }` only — deb/rpm/msi accept `0.x`
-and are left alone), and `restoreMacOsShortVersion` rewrites `CFBundleShortVersionString` back to the real version
-in `createDistributable`'s `doLast`. A major version of 1 or higher is passed through untouched.
+`composeApp/build.gradle.kts` works around both with `appPackageVersion` (`appVersion` with any pre-release
+suffix stripped, see above), which feeds the shared `packageVersion` for deb/rpm/msi, and its macOS-only
+derivative `macOsPackageVersion`: when `appPackageVersion`'s major component is `0`, macOS is additionally
+packaged under the placeholder `1.0.0` (applied via `macOS { packageVersion }` only — deb/rpm/msi accept `0.x`
+and are left alone). A major version of 1 or higher is passed through untouched. Whenever the packaged
+`macOsPackageVersion` ends up different from the true `appVersion` — the 0.x placeholder, a stripped pre-release
+suffix, or both at once — `restoreMacOsShortVersion` rewrites `CFBundleShortVersionString` back to the real
+version in `createDistributable`'s `doLast`; when they already match (a plain, non-prerelease, major-1-or-higher
+tag) it is a no-op.
 
 The net effect for `0.1.1`: the tag, `BuildConfig.VERSION` (About screen), the update checker, and the version
 Finder shows are all `0.1.1`. Only `CFBundleVersion` keeps the `1.0.0` placeholder, which is an internal build
 identifier that never surfaces. The intermediate artifact is named `Keryx-1.0.0.dmg`, but the workflow's rename
-step derives the final asset name from the tag, so the attached file is still `Keryx-0.1.1-macos-arm64.dmg`.
+step derives the final asset name from the tag, so the attached file is still `Keryx-0.1.1-macos-arm64.dmg`. For a
+pre-release tag such as `1.2.0-beta.1`, the same split applies to the numeric metadata: `BuildConfig.VERSION`,
+Finder's displayed version, and the release asset name are all `1.2.0-beta.1`, while `CFBundleVersion` / RPM
+`%version` / MSI `ProductVersion` are all the stripped `1.2.0`.
 
 Set `DROPBOX_APP_KEY` / `GOOGLE_DRIVE_CLIENT_ID` / `GOOGLE_DRIVE_CLIENT_SECRET` / `ONEDRIVE_CLIENT_ID` as
 **repository secrets**. If they are unset the build still succeeds, but the released app has the corresponding
