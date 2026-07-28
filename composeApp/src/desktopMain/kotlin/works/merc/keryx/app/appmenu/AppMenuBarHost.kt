@@ -63,6 +63,7 @@ internal fun FrameWindowScope.AppMenuBarHost(
     val savedPreference = remember { settingsRepository.getLocalSettings().appMenuBarVisible }
     var menuBarVisible by remember { mutableStateOf(savedPreference ?: true) }
     var registered by remember { mutableStateOf(false) }
+    var exported by remember { mutableStateOf(false) }
 
     // Latest tree, shared by the D-Bus exporter and the shortcut dispatcher. AtomicReference because
     // the dispatcher reads it from the AWT event thread.
@@ -89,14 +90,17 @@ internal fun FrameWindowScope.AppMenuBarHost(
 
     // Export the menu object for the connection's lifetime.
     DisposableEffect(appMenuConnection, exporter) {
-        runCatching { appMenuConnection.exportObject(exporter) }
+        exported = runCatching { appMenuConnection.exportObject(exporter) }
             .onFailure { Log.warn(LOG_TAG, "Could not export the dbusmenu object", it) }
+            .isSuccess
         onDispose { appMenuConnection.detach() }
     }
 
     // Resolve the XID once the window is actually shown, then register. Guarded so it runs once.
-    LaunchedEffect(appMenuConnection, windowVisible) {
-        if (!windowVisible || registered) return@LaunchedEffect
+    // Skips entirely if the export above failed — registering with the registrar while pointing it
+    // at a nonexistent dbusmenu object would leave the user with no menu at all.
+    LaunchedEffect(appMenuConnection, windowVisible, exported) {
+        if (!windowVisible || registered || !exported) return@LaunchedEffect
         val xid = withContext(Dispatchers.IO) { resolveXidWithRetry() }
         if (xid == null) {
             Log.warn(LOG_TAG, "Could not resolve the window XID; keeping the in-window menu bar")
