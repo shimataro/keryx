@@ -60,9 +60,26 @@ class FeedRepository(
     suspend fun previewFeed(url: String): Result<FetchedFeed> = feedFetcher.fetch(url)
 
     suspend fun subscribeFeed(url: String): Result<Unit> {
+        val outcome = subscribeFeedWrite(url)
+        if (outcome.hadArticles) ftsManager.indexMissing()
+        return outcome.result
+    }
+
+    /** Outcome of [subscribeFeedWrite]: the subscribe result, plus whether the feed had articles. */
+    private data class SubscribeOutcome(val result: Result<Unit>, val hadArticles: Boolean)
+
+    /**
+     * Network fetch + DB write for [subscribeFeed], without indexing the result — callers decide
+     * when to call [FtsManager.indexMissing] (immediately for a single subscribe, batched once after
+     * the loop for [importOpml]). Mirrors [applyFetch]'s [RefreshOutcome] split for the same reason:
+     * [FtsManager.indexMissing]'s `NOT IN` scan is `O(articles table size)` per call, so a large OPML
+     * import must not repeat it once per feed. `syncScheduler.scheduleSync()` stays here, called once
+     * per feed like [applyFetch] does, since it is cheap and debounced.
+     */
+    private suspend fun subscribeFeedWrite(url: String): SubscribeOutcome {
         val fetched = when (val r = feedFetcher.fetch(url)) {
             is Result.Ok -> r.value
-            is Result.Err -> return r
+            is Result.Err -> return SubscribeOutcome(r, hadArticles = false)
         }
         val effectiveUrl = fetched.redirectUrl ?: url
         val existing = feeds.getByUrl(effectiveUrl).executeAsOneOrNull()
@@ -105,13 +122,13 @@ class FeedRepository(
         // last-wins timestamp so it propagates over another device's refresh on the next sync.
         if (existing?.deleted_at != null) feeds.stampResubscribed(now, feedId)
         articleRepository.upsertParsed(feedId, fetched.articles)
-        if (fetched.articles.isNotEmpty()) ftsManager.indexMissing()
         syncScheduler.scheduleSync()
-        return Result.Ok(Unit)
+        return SubscribeOutcome(Result.Ok(Unit), hadArticles = fetched.articles.isNotEmpty())
     }
 
     /**
-     * Parses an OPML document and subscribes to every feed it lists.
+     * Parses an OPML document and subscribes to every feed it lists. Indexes new articles for
+     * search once after the whole loop, rather than once per feed (see [subscribeFeedWrite]).
      *
      * @param xml The OPML document contents.
      * @return The number of feeds successfully subscribed vs. failed.
@@ -119,12 +136,18 @@ class FeedRepository(
     suspend fun importOpml(xml: String): OpmlImportOutcome {
         var added = 0
         var failed = 0
+        var anyHadArticles = false
         for (entry in OpmlCodec.import(xml)) {
-            when (subscribeFeed(entry.xmlUrl)) {
-                is Result.Ok -> added++
+            val outcome = subscribeFeedWrite(entry.xmlUrl)
+            when (outcome.result) {
+                is Result.Ok -> {
+                    added++
+                    if (outcome.hadArticles) anyHadArticles = true
+                }
                 is Result.Err -> failed++
             }
         }
+        if (anyHadArticles) ftsManager.indexMissing()
         return OpmlImportOutcome(added, failed)
     }
 

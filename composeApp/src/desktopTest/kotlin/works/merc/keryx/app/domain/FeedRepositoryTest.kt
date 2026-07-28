@@ -56,6 +56,21 @@ private const val OPML_ONE_OK_ONE_GONE = """<?xml version="1.0"?>
 </body>
 </opml>"""
 
+/** A second, distinctively-titled article for a different feed URL than [RSS_WITH_SEARCHABLE_ARTICLE]. */
+private const val RSS_WITH_ANOTHER_SEARCHABLE_ARTICLE = """<?xml version="1.0"?><rss version="2.0"><channel>
+<title>Feed B</title><link>https://ex.com</link>
+<item><title>Compose Rendering Pipeline</title><link>https://ex.com/b1</link><guid>gb1</guid></item>
+</channel></rss>"""
+
+/** An OPML document listing two feeds, each with one distinctively-titled searchable article. */
+private const val OPML_TWO_SEARCHABLE_FEEDS = """<?xml version="1.0"?>
+<opml version="2.0">
+<body>
+<outline text="Feed A" xmlUrl="https://ex.com/feed-a"/>
+<outline text="Feed B" xmlUrl="https://ex.com/feed-b"/>
+</body>
+</opml>"""
+
 /** A [NotificationMessages] fake returning canned, recognizable strings. */
 private class FakeNotificationMessages : NotificationMessages {
     override suspend fun feedGone(feedTitle: String): String = "gone:$feedTitle"
@@ -697,6 +712,33 @@ class FeedRepositoryTest {
 
             assertEquals(OpmlImportOutcome(added = 1, failed = 1), outcome)
             assertEquals(listOf("https://ex.com/feed"), db.feedsQueries.getAllIncludingDeleted().executeAsList().map { it.url })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun importOpmlMakesEveryImportedFeedsArticlesSearchable(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val fetcher = fetcherWith { request ->
+                if (request.url.toString().endsWith("/feed-b")) {
+                    respond(RSS_WITH_ANOTHER_SEARCHABLE_ARTICLE, HttpStatusCode.OK)
+                } else {
+                    respond(RSS_WITH_SEARCHABLE_ARTICLE, HttpStatusCode.OK)
+                }
+            }
+            val repo = newRepo(db, driver, fetcher)
+
+            val outcome = repo.importOpml(OPML_TWO_SEARCHABLE_FEEDS)
+            assertEquals(OpmlImportOutcome(added = 2, failed = 0), outcome)
+
+            // Regression test: importOpml defers FTS indexing to run once after the whole loop
+            // (instead of once per feed) — this must still leave every imported feed's articles
+            // searchable, not just the last one indexed.
+            val searchRepo = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L }, Dispatchers.Unconfined)
+            assertEquals(listOf("Kotlin Multiplatform News"), searchRepo.search("Kotlin").map { it.article.title })
+            assertEquals(listOf("Compose Rendering Pipeline"), searchRepo.search("Compose").map { it.article.title })
         } finally {
             driver.close()
         }
