@@ -7,6 +7,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 private const val LAUNCHER = "/opt/keryx/bin/Keryx"
@@ -94,10 +95,10 @@ class LinuxOpmlAssociationRegistrarTest {
     }
 
     @Test
-    fun registerSucceedsWhenUpdateMimeDatabaseIsMissing() {
+    fun registerFailsWhenUpdateMimeDatabaseIsMissing() {
         val registrar = registrar(refreshMime = { throw IOException("update-mime-database not found") })
 
-        assertTrue(registrar.register())
+        assertFalse(registrar.register())
 
         assertEquals(opmlMimePackageContent(), mimePackageFile().readText())
     }

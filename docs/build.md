@@ -153,7 +153,9 @@ per platform:
   in the user's home and are **not removed when the package is uninstalled** — the same
   leftover-association risk applies (a stale entry pointing at a removed launcher), with the same
   manual cleanup: delete `keryx-opml-handler.desktop` and `keryx-opml.xml`, and drop the
-  `application/x-opml+xml` line(s) from `mimeapps.list`.
+  `application/x-opml+xml` line(s) from `mimeapps.list`. Also rerun `update-mime-database` against
+  `$XDG_DATA_HOME/mime` (default `~/.local/share/mime`) afterward — deleting `keryx-opml.xml` alone
+  leaves the compiled MIME cache pointing at the removed type until the database is rebuilt.
 
 ## Release (CD)
 

@@ -78,12 +78,13 @@ internal class LinuxOpmlAssociationRegistrar(
         }
 
         if (mimeDatabaseChanged) {
-            // Best-effort only, same reasoning as the desktop-database refresh below: a missing
-            // shared-mime-info install would only make discovery slower, not broken, since the
-            // package file itself is already in place.
-            runCatching { refreshMimeDatabase(mimePackagesDir.parentFile) }.onFailure {
-                Log.info(LOG_TAG, "Could not refresh the MIME database; the package file itself is still in place")
-            }
+            // Not best-effort, unlike the desktop-database refresh below: application/x-opml+xml is a
+            // custom MIME type the OS doesn't already know, and file-type lookup only consults the
+            // compiled shared-mime-info cache (globs2, etc.) that this command rebuilds — never the raw
+            // package XML directly. If it never succeeds, the *.opml mapping never reaches the cache and
+            // the whole association silently never matches, so a failure here must abort registration
+            // (propagates to the outer runCatching below) rather than being swallowed.
+            refreshMimeDatabase(mimePackagesDir.parentFile)
         }
         if (changed) {
             // Best-effort only — see the equivalent comment in LinuxUriSchemeRegistrar.register().
