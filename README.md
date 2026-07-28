@@ -21,7 +21,7 @@ A local-first, cross-platform RSS reader
 
 ## Supported Platforms
 
-Currently available for Windows, macOS, and Linux. Native apps for Android, iOS, iPadOS, and macOS are planned for the future.
+Currently available for macOS and Linux. Windows, and native apps for Android, iOS, iPadOS, and macOS, are planned for the future.
 
 ## Development Documentation
 
@@ -33,8 +33,8 @@ Currently available for Windows, macOS, and Linux. Native apps for Android, iOS,
 
 - Additional platform support
   - [ ] Windows
-  - [ ] Linux ( `.deb` )
-  - [ ] Linux ( `.rpm` )
+  - [x] Linux ( `.deb` )
+  - [x] Linux ( `.rpm` )
   - [ ] Android
   - [ ] iOS
   - [ ] iPadOS

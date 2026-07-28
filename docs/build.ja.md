@@ -147,13 +147,17 @@ URI がプロセスに届かないからである。代わりにアプリが初�
 ## リリース（CD）
 
 `.github/workflows/release.yml` がパッケージをビルドし、GitHub Release に添付する。
-**現状は macOS のみ**（クロスコンパイル非対応のため、プラットフォームを増やすにはランナーを追加する）。
+**現状は macOS と Linux (x86_64)**（クロスコンパイル非対応のため、プラットフォームを増やすには
+ランナーを追加する必要がある。Windows は未対応）。
 
 フロー:
 
 1. `vMAJOR.MINOR.PATCH` 形式のタグ（例: `v0.1.0`）で GitHub Release を公開する。
 2. `release: published` で起動し、先頭の `v` を除去して `-PappVersion` に渡す。
-3. `:composeApp:packageDmg` を実行し、DMG を `Keryx-<version>-macos-arm64.dmg` として Release に添付する。
+3. 2つの独立したジョブが並行して実行される: macOS ランナーで `:composeApp:packageDmg` を実行し
+   `Keryx-<version>-macos-arm64.dmg` として添付、Linux ランナーで（jpackage 用に `fakeroot`/`rpm`
+   をインストールした上で）`:composeApp:packageDeb :composeApp:packageRpm` を実行し
+   `Keryx-<version>-linux-x86_64.deb` と `Keryx-<version>-linux-x86_64.rpm` として添付する。
 
 **バージョンはタグを正とする**。`composeApp/build.gradle.kts` の `appVersion` は
 `-PappVersion` > 環境変数 `APP_VERSION` > ファイル内のリテラル、の順に解決するため、タグが

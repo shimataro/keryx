@@ -141,14 +141,18 @@ so `xdg-open` (or a browser resolving the scheme) can fail until the two are rem
 
 ## Release (CD)
 
-`.github/workflows/release.yml` builds the package and attaches it to the GitHub Release.
-**macOS only for now** (cross-compilation is not supported, so each additional platform needs its own runner).
+`.github/workflows/release.yml` builds the packages and attaches them to the GitHub Release.
+**macOS and Linux (x86_64) for now** (cross-compilation is not supported, so each additional
+platform needs its own runner — Windows is not yet automated).
 
 Flow:
 
 1. Publish a GitHub Release with a `vMAJOR.MINOR.PATCH` tag (e.g. `v0.1.0`).
 2. The workflow triggers on `release: published`, strips the leading `v`, and passes the result as `-PappVersion`.
-3. `:composeApp:packageDmg` runs, and the DMG is attached to the Release as `Keryx-<version>-macos-arm64.dmg`.
+3. Two independent jobs run in parallel: `:composeApp:packageDmg` (macOS runner), attached as
+   `Keryx-<version>-macos-arm64.dmg`; and `:composeApp:packageDeb :composeApp:packageRpm` (Linux
+   runner, after installing `fakeroot`/`rpm` for jpackage), attached as
+   `Keryx-<version>-linux-x86_64.deb` and `Keryx-<version>-linux-x86_64.rpm`.
 
 The **tag is the single source of truth for the version**. `appVersion` in `composeApp/build.gradle.kts` resolves
 `-PappVersion` > `APP_VERSION` env var > the literal in the file, so the tag drives both `BuildConfig.VERSION`

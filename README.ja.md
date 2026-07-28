@@ -21,7 +21,7 @@
 
 ## 対応プラットフォーム
 
-現在 Windows / macOS / Linux に対応。Android・iOS/iPadOS/macOS のネイティブアプリは今後対応予定。
+現在 macOS / Linux に対応。Windows、および Android・iOS/iPadOS/macOS のネイティブアプリは今後対応予定。
 
 ## 開発用ドキュメント
 
@@ -33,8 +33,8 @@
 
 - 対応プラットフォーム追加
   - [ ] Windows
-  - [ ] Linux ( `.deb` )
-  - [ ] Linux ( `.rpm` )
+  - [x] Linux ( `.deb` )
+  - [x] Linux ( `.rpm` )
   - [ ] Android
   - [ ] iOS
   - [ ] iPadOS
