@@ -626,6 +626,23 @@ class FeedRepositoryTest {
     }
 
     @Test
+    fun getFeedByUrlReturnsTheMatchingFeedIncludingASoftDeletedOneAndNullOtherwise() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1", url = "https://a.com/feed")
+            db.insertFeed("f2", url = "https://b.com/feed", deletedAt = 20L)
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+
+            assertEquals("f1", repo.getFeedByUrl("https://a.com/feed")?.id)
+            // getByUrl deliberately ignores deleted_at — importOpml resolves unsubscribed feeds too.
+            assertNotNull(repo.getFeedByUrl("https://b.com/feed")?.deleted_at)
+            assertNull(repo.getFeedByUrl("https://missing.com/feed"))
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun subscribeFeedNewFeedIsAppendedToEndOfNoFolderGroup(): Unit = runBlocking {
         val (driver, db) = inMemoryDb()
         try {

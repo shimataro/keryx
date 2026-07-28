@@ -53,6 +53,12 @@ class FeedRepository(
 
     fun getAllFeeds(): List<Feeds> = feeds.watchAll().executeAsList()
 
+    /**
+     * The feed subscribed at exactly [url], including a soft-deleted one. Note that
+     * [subscribeFeed] stores the redirect-resolved URL, so a lookup by the pre-redirect URL misses.
+     */
+    fun getFeedByUrl(url: String): Feeds? = feeds.getByUrl(url).executeAsOneOrNull()
+
     suspend fun previewFeed(url: String): Result<FetchedFeed> = feedFetcher.fetch(url)
 
     suspend fun subscribeFeed(url: String): Result<Unit> {

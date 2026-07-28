@@ -24,8 +24,10 @@ import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.domain.FeedRepository
+import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
+import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.domain.UpdateStatus
 import works.merc.keryx.app.platform.FileIO
@@ -35,6 +37,7 @@ import works.merc.keryx.app.resources.settings_export_opml
 import works.merc.keryx.app.resources.settings_import_opml
 
 import works.merc.keryx.app.ui.home.formatTimestamp
+import works.merc.keryx.app.ui.home.groupFeedsByFolder
 
 /** A transient result of an OPML operation, surfaced inline near the action. */
 sealed interface OpmlResult {
@@ -48,6 +51,8 @@ class SettingsViewModel(
     private val cloudSession: CloudSession,
     private val syncRepository: SyncRepository,
     private val feedRepository: FeedRepository,
+    private val folderRepository: FolderRepository,
+    private val tagRepository: TagRepository,
     private val updateChecker: UpdateChecker,
     private val activityCenter: ActivityCenter,
     // Token store / sync touch the OS Keychain (macOS shells out to `security`, which may
@@ -270,19 +275,40 @@ class SettingsViewModel(
                     opmlResult = OpmlResult.Cancelled
                     return@launch
                 }
-                val feeds = feedRepository.getAllFeeds().map {
-                    OpmlCodec.ExportFeed(
-                        title = it.displayTitle(),
-                        xmlUrl = it.url,
-                        htmlUrl = it.site_url,
-                    )
-                }
-                FileIO.writeText(path, OpmlCodec.export(feeds))
+                FileIO.writeText(path, buildOpmlDocument())
                 opmlResult = OpmlResult.Exported
             } finally {
                 exportingOpml = false
             }
         }
+    }
+
+    /**
+     * Serializes the current subscriptions to an OPML document: grouped by folder in the app's own
+     * display order (folders first in their sort order, feeds in their sort order within each group,
+     * unfoldered feeds last), each feed annotated with its tags. Empty folders are skipped — there is
+     * nothing to export for them. Split out from [exportOpml] so it is testable without the native
+     * save dialog.
+     */
+    internal fun buildOpmlDocument(): String {
+        val feeds = feedRepository.getAllFeeds()
+        val folders = folderRepository.getAllFolders()
+        val allTags = tagRepository.getAllTags() // already in display order
+        val feedTagMap = tagRepository.getFeedTagMap()
+        val groups = groupFeedsByFolder(feeds, folders)
+            .map { (folder, groupFeeds) ->
+                folder?.name to groupFeeds.map { feed ->
+                    val tagIds = feedTagMap[feed.id].orEmpty()
+                    OpmlCodec.ExportFeed(
+                        title = feed.displayTitle(),
+                        xmlUrl = feed.url,
+                        htmlUrl = feed.site_url,
+                        tags = allTags.filter { it.id in tagIds }.map { it.name },
+                    )
+                }
+            }
+            .filter { (_, groupFeeds) -> groupFeeds.isNotEmpty() }
+        return OpmlCodec.export(groups)
     }
 
     fun importOpml() {
@@ -299,19 +325,55 @@ class SettingsViewModel(
                     opmlResult = OpmlResult.Cancelled
                     return@launch
                 }
-                var added = 0
-                var failed = 0
-                for (entry in OpmlCodec.import(xml)) {
-                    when (feedRepository.subscribeFeed(entry.xmlUrl)) {
-                        is Result.Ok -> added++
-                        is Result.Err -> failed++
-                    }
-                }
-                opmlResult = OpmlResult.Imported(added, failed)
+                opmlResult = applyOpmlDocument(xml)
             } finally {
                 importingOpml = false
             }
         }
+    }
+
+    /**
+     * Subscribes every feed in [xml] and makes each one's folder and tag set match the file exactly
+     * — a re-import restores the file's structure rather than merging additively into whatever the
+     * feed already had. Split out from [importOpml] so it is testable without the native open dialog.
+     */
+    internal suspend fun applyOpmlDocument(xml: String): OpmlResult.Imported {
+        // Each distinct folder / tag name is resolved once per import run, not once per feed:
+        // FolderRepository.createFolder re-appends an already-active folder to the end of the folder
+        // sort order and bumps its updated_at on every call, so calling it per feed would reshuffle
+        // folder order and emit needless sync writes.
+        val folderIdByName = mutableMapOf<String, String>()
+        val tagIdByName = mutableMapOf<String, String>()
+        // Snapshot of the pre-import attachments, so each feed's tag diff below is computed against
+        // the state before this run started changing things.
+        val previousFeedTagMap = tagRepository.getFeedTagMap()
+        var added = 0
+        var failed = 0
+        for (entry in OpmlCodec.import(xml)) {
+            when (feedRepository.subscribeFeed(entry.xmlUrl)) {
+                is Result.Ok -> {
+                    added++
+                    // Null only when subscription followed a redirect (the stored url is then the
+                    // redirect target): the feed is subscribed, it just misses this file's structure.
+                    feedRepository.getFeedByUrl(entry.xmlUrl)?.let { feed ->
+                        val folderId = entry.folderName?.let { name ->
+                            folderIdByName.getOrPut(name) { folderRepository.createFolder(name) }
+                        }
+                        // Guarded so a re-import that changes nothing writes nothing.
+                        if (feed.folder_id != folderId) feedRepository.moveFeed(feed.id, folderId)
+
+                        val newTagIds = entry.tags
+                            .map { name -> tagIdByName.getOrPut(name) { tagRepository.createTag(name) } }
+                            .toSet()
+                        val currentTagIds = previousFeedTagMap[feed.id].orEmpty()
+                        (currentTagIds - newTagIds).forEach { tagRepository.setFeedTag(feed.id, it, false) }
+                        (newTagIds - currentTagIds).forEach { tagRepository.setFeedTag(feed.id, it, true) }
+                    }
+                }
+                is Result.Err -> failed++
+            }
+        }
+        return OpmlResult.Imported(added, failed)
     }
 
     fun clearOpmlResult() {

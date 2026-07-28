@@ -32,6 +32,7 @@ import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.data.opml.OpmlCodec
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.domain.ActivityCenter
@@ -39,14 +40,20 @@ import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.CloudConnectFlow
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.FeedRepository
+import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.NotificationMessages
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
+import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.domain.UpdateStatus
 import works.merc.keryx.app.inMemoryDb
+import works.merc.keryx.app.insertFeed
+import works.merc.keryx.app.insertFeedTag
+import works.merc.keryx.app.insertFolder
+import works.merc.keryx.app.insertTag
 import works.merc.keryx.app.multiProviderCloudSession
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
@@ -62,6 +69,12 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+
+/** A minimal valid RSS document, for the OPML import tests' `subscribeFeed` calls. */
+private const val RSS = """<?xml version="1.0"?><rss version="2.0"><channel>
+<title>Feed</title><link>https://ex.com</link>
+<item><title>Post</title><link>https://ex.com/1</link><guid>g1</guid></item>
+</channel></rss>"""
 
 /** A [NotificationMessages] fake (unused by SettingsViewModel tests but needed to build a [FeedRepository]). */
 private class SettingsViewModelTestNotificationMessages : NotificationMessages {
@@ -119,6 +132,16 @@ class SettingsViewModelTest {
         return FaviconResolver(client)
     }
 
+    /** A [FeedFetcher] that answers every request with a minimal valid RSS document. */
+    private fun rssFetcher(): FeedFetcher {
+        val client = HttpClient(MockEngine { respond(RSS, HttpStatusCode.OK) }) {
+            followRedirects = false
+            expectSuccess = false
+            install(HttpTimeout)
+        }
+        return FeedFetcher(client)
+    }
+
     /** An [HttpClient] that answers every request (e.g. revoke) with 200 OK — for auth managers. */
     private fun okAuthClient(): HttpClient =
         HttpClient(MockEngine { respond("{}", HttpStatusCode.OK) }) { expectSuccess = false }
@@ -136,6 +159,8 @@ class SettingsViewModelTest {
         tokenStorage: TokenStorage = FakeTokenStorage(),
         clock: Clock = Clock { 0L },
         updateChecker: UpdateChecker = updateCheckerReturning("1.0.0"),
+        // Only the OPML import tests need subscribeFeed to actually succeed.
+        feedFetcher: FeedFetcher = failingFetcher(),
         connectFlow: CloudConnectFlow? = null,
         // Lets a test supply a pre-built (e.g. multi-provider) session instead of the single-Dropbox
         // one built below, for scenarios like switchTo() that need >1 provider registered at once.
@@ -146,10 +171,14 @@ class SettingsViewModelTest {
     ): SettingsViewModel {
         val syncScheduler = SyncScheduler {}
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
+        // Mirror startup: ensureIndexed() creates articles_fts so subscribeFeed's indexMissing() works.
+        val ftsManager = FtsManager(driver).also { it.ensureIndexed() }
         val feedRepository = FeedRepository(
-            db, failingFetcher(), missingFaviconResolver(), articleRepository, FtsManager(driver), syncScheduler,
+            db, feedFetcher, missingFaviconResolver(), articleRepository, ftsManager, syncScheduler,
             NotificationCenter(), SettingsViewModelTestNotificationMessages(), clock, Dispatchers.Unconfined,
         )
+        val folderRepository = FolderRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
+        val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
         // Unconfined write dispatcher so saveLocalSettings persists inline (localSettingsRoundTripsThroughStore
         // reads it back via store.load()).
         val settingsRepository =
@@ -179,8 +208,8 @@ class SettingsViewModelTest {
             )
         }
         return SettingsViewModel(
-            settingsRepository, session, syncRepository, feedRepository, updateChecker, activityCenter,
-            Dispatchers.Unconfined,
+            settingsRepository, session, syncRepository, feedRepository, folderRepository, tagRepository,
+            updateChecker, activityCenter, Dispatchers.Unconfined,
         ).also { createdViewModels += it }
     }
 
@@ -485,6 +514,112 @@ class SettingsViewModelTest {
         assertFalse(vm.checkingForUpdate)
         // Manual checks are deliberately excluded from the automatic schedule (see SettingsViewModel).
         assertNull(vm.localSettings.value.lastUpdateCheckAt)
+    }
+
+    @Test
+    fun buildOpmlDocumentGroupsFeedsByFolderInDisplayOrderAndAnnotatesTags() {
+        db.insertFolder("d1", "Tech", sortOrder = 0L)
+        db.insertFolder("d2", "News", sortOrder = 1L)
+        db.insertFolder("d3", "Empty", sortOrder = 2L)
+        db.insertFeed("f1", url = "https://a.com/feed", folderId = "d1", sortOrder = 0L)
+        db.insertFeed("f2", url = "https://b.com/feed", folderId = "d1", sortOrder = 1L)
+        db.insertFeed("f3", url = "https://c.com/feed", folderId = "d2", sortOrder = 0L)
+        db.insertFeed("f4", url = "https://d.com/feed", sortOrder = 0L) // unfoldered
+        db.insertTag("t1", "kotlin", sortOrder = 0L)
+        db.insertTag("t2", "daily", sortOrder = 1L)
+        db.insertFeedTag("f1", "t2")
+        db.insertFeedTag("f1", "t1")
+        val vm = newViewModel()
+
+        val xml = vm.buildOpmlDocument()
+
+        assertTrue(xml.contains("""<outline text="Tech">"""))
+        // Tags follow the tags' own display (sort_order) order, not attachment order.
+        assertTrue(xml.contains("""category="kotlin,daily""""))
+        // An empty folder has nothing to export, so it is skipped entirely.
+        assertFalse(xml.contains("Empty"))
+
+        val reimported = OpmlCodec.import(xml)
+        // Folders first in folder sort order, feeds in their sort order within each, unfoldered last.
+        assertEquals(
+            listOf("https://a.com/feed", "https://b.com/feed", "https://c.com/feed", "https://d.com/feed"),
+            reimported.map { it.xmlUrl },
+        )
+        assertEquals(listOf("Tech", "Tech", "News", null), reimported.map { it.folderName })
+        assertEquals(listOf("kotlin", "daily"), reimported[0].tags)
+        assertTrue(reimported.drop(1).all { it.tags.isEmpty() })
+    }
+
+    // Note: this test deliberately avoids `runTest`'s virtual scheduler — subscribeFeed performs
+    // (mocked) HTTP calls with HttpTimeout installed, which runTest's virtual time can trip into a
+    // false timeout (see docs/testing.md).
+    @Test
+    fun applyOpmlDocumentRecreatesFoldersAndTagsFromNestedOpml(): Unit = runBlocking {
+        val vm = newViewModel(feedFetcher = rssFetcher())
+        val xml = """
+            <opml version="2.0"><body>
+              <outline text="Tech">
+                <outline type="rss" text="A" xmlUrl="https://a.com/feed" category="kotlin,news"/>
+                <outline type="rss" text="B" xmlUrl="https://b.com/feed"/>
+              </outline>
+              <outline type="rss" text="C" xmlUrl="https://c.com/feed" category="kotlin"/>
+            </body></opml>
+        """.trimIndent()
+
+        val result = vm.applyOpmlDocument(xml)
+
+        assertEquals(3, result.added)
+        assertEquals(0, result.failed)
+        val folders = db.foldersQueries.watchAll().executeAsList()
+        assertEquals(listOf("Tech"), folders.map { it.name })
+        val a = db.feedsQueries.getByUrl("https://a.com/feed").executeAsOne()
+        val b = db.feedsQueries.getByUrl("https://b.com/feed").executeAsOne()
+        val c = db.feedsQueries.getByUrl("https://c.com/feed").executeAsOne()
+        assertEquals(folders.single().id, a.folder_id)
+        assertEquals(folders.single().id, b.folder_id)
+        assertNull(c.folder_id)
+        // "kotlin" is shared by two feeds but resolved to a single tag row.
+        assertEquals(setOf("kotlin", "news"), db.tagsQueries.watchAll().executeAsList().map { it.name }.toSet())
+        assertEquals(setOf("kotlin", "news"), tagNamesOf(a.id))
+        assertEquals(emptySet(), tagNamesOf(b.id))
+        assertEquals(setOf("kotlin"), tagNamesOf(c.id))
+    }
+
+    // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
+    // applyOpmlDocumentRecreatesFoldersAndTagsFromNestedOpml above.
+    @Test
+    fun applyOpmlDocumentOverwritesAnAlreadySubscribedFeedsFolderAndTagsToMatchTheFile(): Unit = runBlocking {
+        val vm = newViewModel(feedFetcher = rssFetcher())
+        val first = """
+            <opml version="2.0"><body>
+              <outline text="Tech">
+                <outline type="rss" text="A" xmlUrl="https://a.com/feed" category="kotlin,news"/>
+              </outline>
+            </body></opml>
+        """.trimIndent()
+        vm.applyOpmlDocument(first)
+        val feedId = db.feedsQueries.getByUrl("https://a.com/feed").executeAsOne().id
+        assertNotNull(db.feedsQueries.getById(feedId).executeAsOne().folder_id)
+
+        // Re-import with the feed moved out of its folder and only one of the two tags kept.
+        val second = """
+            <opml version="2.0"><body>
+              <outline type="rss" text="A" xmlUrl="https://a.com/feed" category="news"/>
+            </body></opml>
+        """.trimIndent()
+        val result = vm.applyOpmlDocument(second)
+
+        assertEquals(1, result.added)
+        assertNull(db.feedsQueries.getById(feedId).executeAsOne().folder_id)
+        assertEquals(setOf("news"), tagNamesOf(feedId))
+    }
+
+    /** The names of the tags currently attached to [feedId]. */
+    private fun tagNamesOf(feedId: String): Set<String> {
+        val namesById = db.tagsQueries.watchAll().executeAsList().associate { it.id to it.name }
+        return db.feed_tagsQueries.watchTagIdsForFeed(feedId).executeAsList()
+            .mapNotNull { namesById[it] }
+            .toSet()
     }
 
     /** Polls with real wall-clock waits (for coroutines that hop onto a real, non-virtual dispatcher). */

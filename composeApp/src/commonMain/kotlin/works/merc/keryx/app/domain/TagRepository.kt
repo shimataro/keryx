@@ -33,6 +33,13 @@ class TagRepository(
 
     fun getTagById(id: String): Tags? = tags.getById(id).executeAsOneOrNull()
 
+    /** All live tags in display order — the synchronous counterpart of [watchAllTags]. */
+    fun getAllTags(): List<Tags> = tags.watchAll().executeAsList()
+
+    /** feedId -> set of attached tagIds — the synchronous counterpart of [watchFeedTagMap]. */
+    fun getFeedTagMap(): Map<String, Set<String>> =
+        feedTags.watchAllActive().executeAsList().groupBy({ it.feed_id }, { it.tag_id }).mapValues { it.value.toSet() }
+
     fun createTag(name: String, color: String? = null): String {
         val now = clock.nowMillis()
         val existing = tags.getByName(name).executeAsOneOrNull()

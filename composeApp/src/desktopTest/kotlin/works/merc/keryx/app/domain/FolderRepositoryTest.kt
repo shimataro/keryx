@@ -306,6 +306,23 @@ class FolderRepositoryTest {
     }
 
     @Test
+    fun getAllFoldersReturnsLiveFoldersInDisplayOrderExcludingSoftDeletedOnes() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Second", sortOrder = 1L)
+            db.insertFolder("d2", "First", sortOrder = 0L)
+            db.insertFolder("d3", "Deleted", sortOrder = 2L, deletedAt = 1L)
+            val repo = newRepo(db)
+
+            val folders = repo.getAllFolders()
+
+            assertEquals(listOf("First", "Second"), folders.map { it.name })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun watchAllFoldersExcludesSoftDeletedFolders() = runTest {
         val (driver, db) = inMemoryDb()
         try {

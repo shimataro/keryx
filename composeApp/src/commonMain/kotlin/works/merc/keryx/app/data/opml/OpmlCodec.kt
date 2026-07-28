@@ -7,41 +7,102 @@ import com.fleeksoft.ksoup.parser.Parser
 /** Imports/exports OPML 2.0 subscription lists. */
 object OpmlCodec {
 
-    /** A feed to export. */
-    data class ExportFeed(val title: String, val xmlUrl: String, val htmlUrl: String?)
+    /**
+     * A feed to export. [tags] are written to the OPML 2.0 `category` attribute as a comma-separated
+     * list — a tag name that itself contains a comma therefore does not round-trip losslessly, which
+     * is the same informal convention other readers use.
+     */
+    data class ExportFeed(
+        val title: String,
+        val xmlUrl: String,
+        val htmlUrl: String?,
+        val tags: List<String> = emptyList(),
+    )
 
-    /** An imported subscription. */
-    data class ImportedFeed(val xmlUrl: String, val title: String?)
+    /** An imported subscription. [folderName] is the enclosing folder outline's name, if any. */
+    data class ImportedFeed(
+        val xmlUrl: String,
+        val title: String?,
+        val folderName: String? = null,
+        val tags: List<String> = emptyList(),
+    )
 
-    /** Collects every `<outline>` that carries an `xmlUrl` (nested folders included). */
+    /**
+     * Collects every `<outline>` that carries an `xmlUrl`, recording the enclosing folder outline's
+     * name and the `category` tags. An `<outline>` without an `xmlUrl` is a folder wrapper: its
+     * `title`/`text` becomes the folder name for its descendants. Keryx feeds belong to at most one
+     * folder, so a folder nested inside a folder simply replaces the outer name. Feeds are
+     * deduplicated by URL, keeping the first occurrence.
+     */
     fun import(xml: String): List<ImportedFeed> = runCatching {
         val doc = Ksoup.parse(html = xml, parser = Parser.xmlParser())
         val seen = mutableSetOf<String>()
-        doc.getElementsByTag("outline").mapNotNull { outline ->
-            val url = outline.attrCI("xmlUrl")?.trim()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
-            if (!seen.add(url)) return@mapNotNull null
-            val title = (outline.attrCI("title") ?: outline.attrCI("text"))?.trim()?.takeIf { it.isNotEmpty() }
-            ImportedFeed(url, title)
+        val imported = mutableListOf<ImportedFeed>()
+
+        fun walk(element: Element, folderName: String?) {
+            for (child in element.children()) {
+                if (!child.tagName().equals("outline", ignoreCase = true)) {
+                    // A structural wrapper (<opml>, <body>, …): transparent, keeps the folder context.
+                    walk(child, folderName)
+                    continue
+                }
+                val name = (child.attrCI("title") ?: child.attrCI("text"))?.trim()?.takeIf { it.isNotEmpty() }
+                val url = child.attrCI("xmlUrl")?.trim()?.takeIf { it.isNotEmpty() }
+                if (url == null) {
+                    walk(child, name ?: folderName)
+                    continue
+                }
+                if (seen.add(url)) {
+                    imported += ImportedFeed(url, name, folderName, parseCategories(child.attrCI("category")))
+                }
+                // A feed outline may still nest further feeds; they stay in the same folder.
+                walk(child, folderName)
+            }
         }
+
+        walk(doc, null)
+        imported
     }.getOrDefault(emptyList())
 
-    fun export(feeds: List<ExportFeed>, title: String = "Keryx Subscriptions"): String = buildString {
+    /**
+     * Serializes [groups] — each `(folderName, feeds)`, in the order they should appear — to an OPML
+     * document. A non-null folder name wraps its feeds in a folder `<outline>`; a null one emits
+     * them at the top level. Grouping and ordering are the caller's concern.
+     */
+    fun export(groups: List<Pair<String?, List<ExportFeed>>>, title: String = "Keryx Subscriptions"): String = buildString {
         append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
         append("<opml version=\"2.0\">\n")
         append("  <head>\n    <title>").append(escape(title)).append("</title>\n  </head>\n")
         append("  <body>\n")
-        for (f in feeds) {
-            append("    <outline type=\"rss\"")
-            append(" text=\"").append(escape(f.title)).append('"')
-            append(" title=\"").append(escape(f.title)).append('"')
-            append(" xmlUrl=\"").append(escape(f.xmlUrl)).append('"')
-            if (!f.htmlUrl.isNullOrBlank()) {
-                append(" htmlUrl=\"").append(escape(f.htmlUrl)).append('"')
+        for ((folderName, feeds) in groups) {
+            if (folderName == null) {
+                for (f in feeds) appendFeedOutline(f, indent = "    ")
+            } else {
+                append("    <outline text=\"").append(escape(folderName)).append("\">\n")
+                for (f in feeds) appendFeedOutline(f, indent = "      ")
+                append("    </outline>\n")
             }
-            append("/>\n")
         }
         append("  </body>\n</opml>\n")
     }
+
+    private fun StringBuilder.appendFeedOutline(feed: ExportFeed, indent: String) {
+        append(indent).append("<outline type=\"rss\"")
+        append(" text=\"").append(escape(feed.title)).append('"')
+        append(" title=\"").append(escape(feed.title)).append('"')
+        append(" xmlUrl=\"").append(escape(feed.xmlUrl)).append('"')
+        if (!feed.htmlUrl.isNullOrBlank()) {
+            append(" htmlUrl=\"").append(escape(feed.htmlUrl)).append('"')
+        }
+        if (feed.tags.isNotEmpty()) {
+            append(" category=\"").append(escape(feed.tags.joinToString(","))).append('"')
+        }
+        append("/>\n")
+    }
+
+    /** Splits a `category` attribute on `,`, trimming and dropping empty entries. */
+    private fun parseCategories(category: String?): List<String> =
+        category?.split(',')?.mapNotNull { it.trim().takeIf { t -> t.isNotEmpty() } }.orEmpty()
 
     private fun Element.attrCI(name: String): String? {
         for (attr in attributes()) {

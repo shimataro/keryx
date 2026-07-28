@@ -23,6 +23,9 @@ class FolderRepository(
 
     fun getFolderById(id: String): Folders? = folders.getById(id).executeAsOneOrNull()
 
+    /** All live folders in display order — the synchronous counterpart of [watchAllFolders]. */
+    fun getAllFolders(): List<Folders> = folders.watchAll().executeAsList()
+
     fun createFolder(name: String): String {
         val now = clock.nowMillis()
         val existing = folders.getByName(name).executeAsOneOrNull()
