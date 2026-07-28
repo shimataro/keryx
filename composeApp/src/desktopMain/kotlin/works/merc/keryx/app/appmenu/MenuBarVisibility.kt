@@ -5,7 +5,9 @@ import works.merc.keryx.app.ui.menu.AppMenuNode
 import works.merc.keryx.app.ui.menu.AppMenuRoot
 import works.merc.keryx.app.ui.menu.AppMenuShortcut
 import java.awt.KeyEventDispatcher
+import java.awt.Window
 import java.awt.event.KeyEvent
+import javax.swing.SwingUtilities
 
 /**
  * State + AWT plumbing for the in-window menu bar's visibility under the KDE Global Menu.
@@ -93,12 +95,19 @@ internal fun AppMenuNode.invokeAction() {
  * A global key dispatcher that fires menu accelerators while the in-window bar is hidden. Reads the
  * **latest** tree via [currentTree] (rebuilt on every recomposition), so enabled/checked state is
  * always current.
+ *
+ * `KeyboardFocusManager` dispatchers see key events for every window in the process, but the native
+ * accelerators this replaces only fire while the app's main frame itself has focus (not a `Dialog`).
+ * [acceptsWindow] restores that scoping — the caller passes a predicate identifying the main frame so
+ * shortcuts don't fire e.g. while the Settings or Add Feed dialog has focus.
  */
 internal class MenuShortcutDispatcher(
     private val currentTree: () -> AppMenuRoot?,
+    private val acceptsWindow: (Window?) -> Boolean = { true },
 ) : KeyEventDispatcher {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.id != KeyEvent.KEY_PRESSED) return false
+        if (!acceptsWindow(SwingUtilities.getWindowAncestor(event.component))) return false
         val tree = currentTree() ?: return false
         val modifiers = event.modifiersEx
         // Alt is never part of a shipped shortcut; bail so Alt combos reach the app normally.

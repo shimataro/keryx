@@ -10,17 +10,22 @@ import works.merc.keryx.app.ui.menu.MenuBarToggle
 import works.merc.keryx.app.ui.menu.buildAppMenuTree
 import works.merc.keryx.app.ui.menu.computeMenuUiState
 import works.merc.keryx.app.ui.navigation.Screen
+import java.awt.Frame
+import java.awt.Panel
+import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
  * Covers the pure parts of [MenuBarVisibility]: the AWT key-code mapping, the shortcut → node
- * matcher the [MenuShortcutDispatcher] delegates to, action invocation, and the `local_settings.json`
- * visibility persistence round-trip. The actual `KeyboardFocusManager` installation is not testable.
+ * matcher the [MenuShortcutDispatcher] delegates to, action invocation, [MenuShortcutDispatcher]'s
+ * window-scoping via `dispatchKeyEvent` called directly, and the `local_settings.json` visibility
+ * persistence round-trip. The actual `KeyboardFocusManager` registration is not testable.
  */
 class MenuBarVisibilityTest {
 
@@ -125,6 +130,54 @@ class MenuBarVisibilityTest {
         assertTrue(enabled.isEnabled())
         assertTrue(!disabled.isEnabled())
         assertTrue(AppMenuNode.Separator.isEnabled())
+    }
+
+    // --- dispatcher window scoping ---
+
+    private fun ctrlKeyEvent(source: java.awt.Component, keyCode: Int) = KeyEvent(
+        source,
+        KeyEvent.KEY_PRESSED,
+        System.currentTimeMillis(),
+        InputEvent.CTRL_DOWN_MASK,
+        keyCode,
+        KeyEvent.CHAR_UNDEFINED,
+    )
+
+    @Test
+    fun `dispatchKeyEvent rejects an event whose window is not the accepted one`() {
+        val mainFrame = Frame()
+        val otherDialog = java.awt.Dialog(mainFrame)
+        val otherComponent = Panel().also { otherDialog.add(it) }
+        val dispatcher = MenuShortcutDispatcher(currentTree = { tree() }, acceptsWindow = { it === mainFrame })
+
+        val handled = dispatcher.dispatchKeyEvent(ctrlKeyEvent(otherComponent, KeyEvent.VK_N))
+
+        assertFalse(handled)
+        assertFalse(addFeedCalled)
+    }
+
+    @Test
+    fun `dispatchKeyEvent still matches an event from the accepted window`() {
+        val mainFrame = Frame()
+        val mainComponent = Panel().also { mainFrame.add(it) }
+        val dispatcher = MenuShortcutDispatcher(currentTree = { tree() }, acceptsWindow = { it === mainFrame })
+
+        val handled = dispatcher.dispatchKeyEvent(ctrlKeyEvent(mainComponent, KeyEvent.VK_N))
+
+        assertTrue(handled)
+        assertTrue(addFeedCalled)
+    }
+
+    @Test
+    fun `dispatchKeyEvent accepts any window by default`() {
+        val someFrame = Frame()
+        val component = Panel().also { someFrame.add(it) }
+        val dispatcher = MenuShortcutDispatcher(currentTree = { tree() })
+
+        val handled = dispatcher.dispatchKeyEvent(ctrlKeyEvent(component, KeyEvent.VK_N))
+
+        assertTrue(handled)
+        assertTrue(addFeedCalled)
     }
 
     // --- persistence round-trip ---

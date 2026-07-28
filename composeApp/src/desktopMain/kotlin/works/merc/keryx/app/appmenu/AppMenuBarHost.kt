@@ -137,7 +137,10 @@ internal fun FrameWindowScope.AppMenuBarHost(
         if (menuBarVisible) {
             onDispose { }
         } else {
-            val dispatcher = MenuShortcutDispatcher { treeRef.get() }
+            val dispatcher = MenuShortcutDispatcher(
+                currentTree = { treeRef.get() },
+                acceptsWindow = { it === window },
+            )
             val focusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager()
             focusManager.addKeyEventDispatcher(dispatcher)
             onDispose { focusManager.removeKeyEventDispatcher(dispatcher) }
