@@ -20,8 +20,9 @@ jobs:
           ref: ${{ github.event.release.tag_name }}
 
       # The tag is the single source of truth for the released version: `v0.1.0` -> `0.1.0`.
-      # jpackage rejects anything that isn't MAJOR[.MINOR[.PATCH]], so reject a malformed tag
-      # here rather than letting the packaging step fail with a cryptic message.
+      # An optional SemVer-style pre-release suffix (`-beta.1`, `-rc.2`, ...) is accepted here for
+      # BuildConfig.VERSION / display purposes, but composeApp/build.gradle.kts strips it before
+      # the numeric-only value reaches jpackage's packageVersion (MAJOR.MINOR.PATCH required).
       - name: Resolve version from tag
         id: version
         env:
@@ -29,7 +30,7 @@ jobs:
         run: |
           tag="$RELEASE_TAG"
           version="${tag#v}"
-          if ! [[ "$version" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]; then
             echo "::error::Tag '$tag' does not yield a jpackage-compatible version (got '$version')."
             exit 1
           fi
@@ -89,8 +90,9 @@ jobs:
           ref: ${{ github.event.release.tag_name }}
 
       # The tag is the single source of truth for the released version: `v0.1.0` -> `0.1.0`.
-      # jpackage rejects anything that isn't MAJOR[.MINOR[.PATCH]], so reject a malformed tag
-      # here rather than letting the packaging step fail with a cryptic message.
+      # An optional SemVer-style pre-release suffix (`-beta.1`, `-rc.2`, ...) is accepted here for
+      # BuildConfig.VERSION / display purposes, but composeApp/build.gradle.kts strips it before
+      # the numeric-only value reaches jpackage's packageVersion (MAJOR.MINOR.PATCH required).
       - name: Resolve version from tag
         id: version
         env:
@@ -98,7 +100,7 @@ jobs:
         run: |
           tag="$RELEASE_TAG"
           version="${tag#v}"
-          if ! [[ "$version" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]; then
             echo "::error::Tag '$tag' does not yield a jpackage-compatible version (got '$version')."
             exit 1
           fi
