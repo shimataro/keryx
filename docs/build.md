@@ -58,6 +58,7 @@ Below is how to obtain API keys for each service.
 3. Navigate to "Google Auth Platform" → "Data Access" (this replaced the old "OAuth consent screen" page)
    - Click "Add or remove scopes"
    - Check `.../auth/drive.appdata` for "Google Drive API"
+   - Click "Update" to confirm the selection, then click "Save" on the Data Access page to persist it
    - This grants access only to the app-specific folder, not arbitrary files in the drive.
 4. Navigate to "Google Auth Platform" → "Clients" and create a client
    - "Create client" at the top
