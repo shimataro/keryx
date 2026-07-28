@@ -152,7 +152,7 @@ URI がプロセスに届かないからである。代わりにアプリが初�
 
 フロー:
 
-1. `vMAJOR.MINOR.PATCH` 形式のタグ（例: `v0.1.0`）で GitHub Release を公開する。
+1. `vMAJOR[.MINOR[.PATCH]]` 形式のタグ（例: `v0.1.0`）で GitHub Release を公開する。
 2. `release: published` で起動し、先頭の `v` を除去して `-PappVersion` に渡す。
 3. 2つの独立したジョブが並行して実行される: macOS ランナーで `:composeApp:packageDmg` を実行し
    `Keryx-<version>-macos-arm64.dmg` として添付、Linux ランナーで（jpackage 用に `fakeroot`/`rpm`

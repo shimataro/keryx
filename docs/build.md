@@ -147,7 +147,7 @@ platform needs its own runner — Windows is not yet automated).
 
 Flow:
 
-1. Publish a GitHub Release with a `vMAJOR.MINOR.PATCH` tag (e.g. `v0.1.0`).
+1. Publish a GitHub Release with a `vMAJOR[.MINOR[.PATCH]]` tag (e.g. `v0.1.0`).
 2. The workflow triggers on `release: published`, strips the leading `v`, and passes the result as `-PappVersion`.
 3. Two independent jobs run in parallel: `:composeApp:packageDmg` (macOS runner), attached as
    `Keryx-<version>-macos-arm64.dmg`; and `:composeApp:packageDeb :composeApp:packageRpm` (Linux
