@@ -24,8 +24,10 @@ jobs:
       # here rather than letting the packaging step fail with a cryptic message.
       - name: Resolve version from tag
         id: version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          tag='${{ github.event.release.tag_name }}'
+          tag="$RELEASE_TAG"
           version="${tag#v}"
           if ! [[ "$version" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
             echo "::error::Tag '$tag' does not yield a jpackage-compatible version (got '$version')."
@@ -68,9 +70,10 @@ jobs:
           echo "path=$dest" >> "$GITHUB_OUTPUT"
 
       - name: Attach to release
-        run: gh release upload '${{ github.event.release.tag_name }}' '${{ steps.artifact.outputs.path }}' --clobber
+        run: gh release upload "$RELEASE_TAG" '${{ steps.artifact.outputs.path }}' --clobber
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
 
   package-linux:
     name: Package (Linux x86_64)
@@ -90,8 +93,10 @@ jobs:
       # here rather than letting the packaging step fail with a cryptic message.
       - name: Resolve version from tag
         id: version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          tag='${{ github.event.release.tag_name }}'
+          tag="$RELEASE_TAG"
           version="${tag#v}"
           if ! [[ "$version" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
             echo "::error::Tag '$tag' does not yield a jpackage-compatible version (got '$version')."
@@ -146,9 +151,10 @@ jobs:
           echo "paths=$deb_dest $rpm_dest" >> "$GITHUB_OUTPUT"
 
       - name: Attach to release
-        run: gh release upload '${{ github.event.release.tag_name }}' ${{ steps.artifact.outputs.paths }} --clobber
+        run: gh release upload "$RELEASE_TAG" ${{ steps.artifact.outputs.paths }} --clobber
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
 
   deploy-pages:
     name: Update "https://keryx.merc.works" (trigger Cloudflare Pages deploy hook)
