@@ -123,7 +123,9 @@ in order of how likely each is to be wrong):
   **"Show Menu Bar" checkbox** both bring the in-window bar back, and the choice persists across restart. Shortcuts
   fire **exactly once** (not twice) in both states — bar visible (native accelerator) and hidden
   (`MenuShortcutDispatcher`) — a mishandled handoff between the two could double-fire an action like Add Feed.
-- Add the "Application Menu Bar" panel widget: File/View/Article/Feed/Help appear there with correct labels.
+- Add the "Application Menu Bar" panel widget: File/View/Article/Feed/Help appear there with correct labels,
+  and items with a shortcut (Add Feed, Close Window, Settings, Quit, Refresh All, Show Menu Bar) show the
+  matching accelerator hint (e.g. "Ctrl+N").
 - Enable the titlebar "Application Menu" button instead: same check.
 - Dynamic state (enabled/disabled items, the "Unread only" checkbox check state) and every click action match the
   in-window menu exactly.

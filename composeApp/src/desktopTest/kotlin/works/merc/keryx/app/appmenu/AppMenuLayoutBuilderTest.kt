@@ -3,8 +3,10 @@ package works.merc.keryx.app.appmenu
 import works.merc.keryx.app.tray.DBusMenuLayoutItem
 import works.merc.keryx.app.ui.menu.AppMenuNode
 import works.merc.keryx.app.ui.menu.AppMenuRoot
+import works.merc.keryx.app.ui.menu.AppMenuShortcut
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -141,6 +143,31 @@ class AppMenuLayoutBuilderTest {
     fun `known ids cover every node including the root separators and menus`() {
         val layout = buildAppMenuLayout(sampleRoot())
         assertEquals(setOf(0, 1, 2, 3, 4, 5, 6), layout.knownIds)
+    }
+
+    @Test
+    fun `an item with a shortcut reports its dbusmenu shortcut property`() {
+        val root = AppMenuRoot(
+            listOf(
+                AppMenuNode.Menu(
+                    "File",
+                    listOf(AppMenuNode.Item("Add Feed", enabled = true, shortcut = AppMenuShortcut.AddFeed, onClick = {})),
+                ),
+            ),
+        )
+        val layout = buildAppMenuLayout(root)
+        val addFeed = layout.buildItem(parentId = 2, recursionDepth = 0, propertyNames = emptyList())
+
+        assertEquals(listOf(listOf("Control", "N")), addFeed.prop("shortcut"))
+        assertEquals("aas", addFeed.properties["shortcut"]?.sig)
+    }
+
+    @Test
+    fun `an item without a shortcut has no shortcut property`() {
+        val layout = buildAppMenuLayout(sampleRoot())
+        val add = layout.buildItem(parentId = 2, recursionDepth = 0, propertyNames = emptyList())
+        assertNull(add.prop("shortcut"))
+        assertTrue("shortcut" !in add.properties.keys)
     }
 
     @Test

@@ -150,6 +150,19 @@ internal fun FrameWindowScope.AppMenuBarHost(
             exporter.updateState(tree)
         },
     )
+
+    // Compose's own MenuBar composable calls ComposeWindow.setJMenuBar(...) on both mount and
+    // dispose (confirmed by decompiling androidx.compose.ui.window's desktop implementation) but
+    // never calls revalidate()/repaint() itself — a known Swing gap (JRootPane.setJMenuBar only
+    // touches the layered pane's component list). Without this, toggling menuBarVisible either
+    // leaves a stale, input-dead rendering of the previous menu bar (hiding) or silently attaches
+    // a new one with no visible change (showing again via Ctrl+M / the checkbox). LaunchedEffect
+    // runs after Compose has applied the composition (including the child MenuBar's own
+    // mount/dispose effect), so the JMenuBar change has already landed by the time this runs.
+    LaunchedEffect(menuBarVisible) {
+        window.revalidate()
+        window.repaint()
+    }
 }
 
 /**

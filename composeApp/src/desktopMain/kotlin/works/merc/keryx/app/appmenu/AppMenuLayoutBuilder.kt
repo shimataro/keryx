@@ -5,6 +5,7 @@ import works.merc.keryx.app.tray.DBusMenuLayoutItem
 import works.merc.keryx.app.tray.escapeMenuLabel
 import works.merc.keryx.app.ui.menu.AppMenuNode
 import works.merc.keryx.app.ui.menu.AppMenuRoot
+import works.merc.keryx.app.ui.menu.AppMenuShortcut
 
 /** The dbusmenu root id is always 0 per the spec. */
 internal const val APPMENU_ROOT_ID = 0
@@ -109,22 +110,48 @@ private fun propertiesFor(node: AppMenuNode): Map<String, Variant<*>> = when (no
         "visible" to Variant(true),
         "children-display" to Variant("submenu"),
     )
-    is AppMenuNode.Item -> mapOf(
-        "type" to Variant("standard"),
-        "label" to Variant(escapeMenuLabel(node.label)),
-        "enabled" to Variant(node.enabled),
-        "visible" to Variant(true),
-    )
-    is AppMenuNode.CheckboxItem -> mapOf(
-        "type" to Variant("standard"),
-        "label" to Variant(escapeMenuLabel(node.label)),
-        "enabled" to Variant(node.enabled),
-        "visible" to Variant(true),
-        "toggle-type" to Variant("checkmark"),
-        "toggle-state" to Variant(if (node.checked) 1 else 0),
-    )
+    is AppMenuNode.Item -> buildMap {
+        put("type", Variant("standard"))
+        put("label", Variant(escapeMenuLabel(node.label)))
+        put("enabled", Variant(node.enabled))
+        put("visible", Variant(true))
+        node.shortcut?.let { put("shortcut", it.toDbusmenuShortcut()) }
+    }
+    is AppMenuNode.CheckboxItem -> buildMap {
+        put("type", Variant("standard"))
+        put("label", Variant(escapeMenuLabel(node.label)))
+        put("enabled", Variant(node.enabled))
+        put("visible", Variant(true))
+        put("toggle-type", Variant("checkmark"))
+        put("toggle-state", Variant(if (node.checked) 1 else 0))
+        node.shortcut?.let { put("shortcut", it.toDbusmenuShortcut()) }
+    }
     AppMenuNode.Separator -> mapOf(
         "type" to Variant("separator"),
         "visible" to Variant(true),
     )
+}
+
+/** The AWT virtual-key name dbusmenu hosts expect for a [AppMenuShortcut]'s key. */
+private fun AppMenuShortcut.dbusmenuKeyName(): String = when (this) {
+    AppMenuShortcut.AddFeed -> "N"
+    AppMenuShortcut.CloseWindow -> "W"
+    AppMenuShortcut.Settings -> ","
+    AppMenuShortcut.Quit -> "Q"
+    AppMenuShortcut.RefreshAll -> "R"
+    AppMenuShortcut.ShowMenuBar -> "M"
+}
+
+/**
+ * The dbusmenu `"shortcut"` property value for this accelerator: an array of one array of
+ * modifier/key name strings (spec type `aas`), e.g. `[["Control", "N"]]`. This is what hosts like
+ * KDE's Global Menu use to render the accelerator hint next to a label.
+ */
+private fun AppMenuShortcut.toDbusmenuShortcut(): Variant<*> {
+    val combo = buildList {
+        if (ctrl) add("Control")
+        if (meta) add("Super")
+        add(dbusmenuKeyName())
+    }
+    return Variant(listOf(combo), "aas")
 }
