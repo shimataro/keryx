@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.settings
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,6 +32,9 @@ import works.merc.keryx.app.resources.settings_updates
  * @param onDismiss Called when the dialog should be dismissed.
  * @param initialTabId The tab shown when the dialog opens. Defaults to the first tab; a notification's
  *   `ShowSettingsTab` action opens the dialog directly on the tab where the problem is fixable.
+ * @param tabRequestToken Bumped by the caller on every fresh explicit navigation request (a
+ *   notification action or the "Open Settings" menu command), so the dialog jumps to [initialTabId]
+ *   even if it's already open on that same tab id and the user has since switched tabs manually.
  */
 /**
  * Displays the tabbed settings dialog.
@@ -39,10 +43,10 @@ import works.merc.keryx.app.resources.settings_updates
  * @param initialTabId The identifier of the tab initially selected.
  */
 @Composable
-fun SettingsDialog(onDismiss: () -> Unit, initialTabId: String = "general") {
+fun SettingsDialog(onDismiss: () -> Unit, initialTabId: String = "general", tabRequestToken: Int = 0) {
     val vm = koinInject<SettingsViewModel>()
 
-    var selectedTabId by remember(initialTabId) { mutableStateOf(initialTabId) }
+    var selectedTabId by rememberSelectedTabId(initialTabId, tabRequestToken)
 
     // The cloud-sync tab exists only when at least one cloud provider was configured at build time
     // (mirrors the old section-level hiding). availableCloudTypes is stable across the dialog's life.
@@ -72,3 +76,10 @@ fun SettingsDialog(onDismiss: () -> Unit, initialTabId: String = "general") {
         }
     }
 }
+
+/** Re-initializes to [initialTabId] whenever [tabRequestToken] changes — a fresh explicit
+ *  navigation request should always land on the requested tab, even if it's the same tab id
+ *  the dialog is already showing (see App.kt's ShowSettingsTab / OpenSettings handling). */
+@Composable
+internal fun rememberSelectedTabId(initialTabId: String, tabRequestToken: Int): MutableState<String> =
+    remember(tabRequestToken) { mutableStateOf(initialTabId) }

@@ -50,6 +50,10 @@ fun App() {
         // Which tab the settings dialog opens on. Normally "general"; a notification's
         // ShowSettingsTab action points it at the tab where that problem is fixable.
         var settingsInitialTab by remember { mutableStateOf("general") }
+        // Bumped on every explicit tab-navigation request so the dialog re-navigates even when
+        // settingsInitialTab is reassigned the same value it already holds (see SettingsDialog's
+        // rememberSelectedTabId, which keys off this instead of the tab id's value).
+        var settingsTabRequestToken by remember { mutableStateOf(0) }
 
         // A notification's "open this settings tab" action is resolved here, because the settings
         // dialog lives in this composition (HomeScreen resolves the actions targeting its own panes).
@@ -58,6 +62,7 @@ fun App() {
             val action = notifVm.pendingAction?.action
             if (action is AppNotificationAction.ShowSettingsTab) {
                 settingsInitialTab = action.tabId
+                settingsTabRequestToken++
                 showSettings = true
                 notifVm.clearPendingAction()
             }
@@ -73,6 +78,7 @@ fun App() {
                         if (navigator.current == Screen.Home) {
                             // Opened by the user, not by a notification: always start on the first tab.
                             settingsInitialTab = "general"
+                            settingsTabRequestToken++
                             showSettings = true
                         }
                     else -> {}
@@ -87,7 +93,11 @@ fun App() {
             }
             if (showAbout) AboutDialog(onDismiss = { showAbout = false })
             if (showSettings) {
-                SettingsDialog(onDismiss = { showSettings = false }, initialTabId = settingsInitialTab)
+                SettingsDialog(
+                    onDismiss = { showSettings = false },
+                    initialTabId = settingsInitialTab,
+                    tabRequestToken = settingsTabRequestToken,
+                )
             }
         }
     }
