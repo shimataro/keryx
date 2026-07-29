@@ -97,6 +97,13 @@ UPDATE feeds SET url = ?, updated_at = ? WHERE id = ?;
 incrementErrorCount:
 UPDATE feeds SET error_count = error_count + 1, last_error = ?, updated_at = ? WHERE id = ?;
 
+-- 410 Gone: records the reason only, deliberately leaving error_count alone (a permanent
+-- disappearance is not a retry candidate, so it must not feed the retry-threshold semantics).
+-- last_error carries the FEED_ERROR_REASON_GONE marker, which is what the feed list uses to flag
+-- the feed. Cleared again by resetErrorCount once the feed fetches successfully.
+markGone:
+UPDATE feeds SET last_error = ?, updated_at = ? WHERE id = ?;
+
 resetErrorCount:
 UPDATE feeds SET error_count = 0, last_error = NULL, updated_at = ? WHERE id = ?;
 

@@ -27,6 +27,8 @@ import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SYNC_STATE_LAST_SYNCED_AT
+import works.merc.keryx.app.data.cloud.CloudFile
+import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.data.cloud.TokenStorage
@@ -79,6 +81,17 @@ private const val RSS = """<?xml version="1.0"?><rss version="2.0"><channel>
 </channel></rss>"""
 
 /** A [NotificationMessages] fake (unused by SettingsViewModel tests but needed to build a [FeedRepository]). */
+/** A [CloudStorage] whose every operation fails with an auth error, to drive a sync failure. */
+private class AlwaysFailingCloudStorage : CloudStorage {
+    private fun <T> fail(): Result<T> = Result.Err(CloudAuthException("no token"))
+    override suspend fun authenticate(): Result<Unit> = fail()
+    override suspend fun download(path: String): Result<CloudFile> = fail()
+    override suspend fun upload(path: String, data: ByteArray, expectedRev: String?): Result<Unit> = fail()
+    override suspend fun create(path: String, data: ByteArray): Result<Unit> = fail()
+    override suspend fun delete(path: String): Result<Unit> = fail()
+    override suspend fun exists(path: String): Result<Boolean> = fail()
+}
+
 private class SettingsViewModelTestNotificationMessages : NotificationMessages {
     override suspend fun feedGone(feedTitle: String): String = "gone:$feedTitle"
     override suspend fun feedUrlChanged(feedTitle: String): String = "urlChanged:$feedTitle"
@@ -99,6 +112,13 @@ class SettingsViewModelTest {
     // surfacing (flakily, on another test) as kotlinx.coroutines.test.UncaughtExceptionsBeforeTest.
     private val createdViewModels = mutableListOf<SettingsViewModel>()
 
+    /** The SyncRepository handed to the most recently built ViewModel, so a test can drive it. */
+    private lateinit var createdSyncRepository: SyncRepository
+
+    // Every SyncRepository built by newViewModel() gets its own scope for scheduleSync(); track
+    // them all (not just the latest) so tearDown() can cancel every one, same as createdViewModels.
+    private val createdSyncScopes = mutableListOf<CoroutineScope>()
+
     @BeforeTest
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
@@ -111,6 +131,8 @@ class SettingsViewModelTest {
     fun tearDown() {
         createdViewModels.forEach { it.viewModelScope.cancel() }
         createdViewModels.clear()
+        createdSyncScopes.forEach { it.cancel() }
+        createdSyncScopes.clear()
         Dispatchers.resetMain()
         driver.close()
         FileIO.delete(FileIO.join(dir, "local_settings.json"))
@@ -188,6 +210,9 @@ class SettingsViewModelTest {
         // Shared with the SyncRepository built below so a test can drive activityCenter.trackSync {}
         // to simulate a sync completing and assert the ViewModel reacts to it.
         activityCenter: ActivityCenter = ActivityCenter(),
+        // Backs the SyncRepository built below. Default: local-only (every sync is a no-op success);
+        // a test can supply a failing storage to exercise the sync-error state.
+        syncCloudProvider: () -> CloudStorage? = { null },
     ): SettingsViewModel {
         val syncScheduler = SyncScheduler {}
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
@@ -203,13 +228,15 @@ class SettingsViewModelTest {
         // reads it back via store.load()).
         val settingsRepository =
             SettingsRepository(db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined)
+        val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        createdSyncScopes += syncScope
         val syncRepository = SyncRepository(
             driver = driver,
             db = db,
             ftsManager = FtsManager(driver),
-            cloudProvider = { null },
+            cloudProvider = syncCloudProvider,
             clock = clock,
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            scope = syncScope,
             activityCenter = activityCenter,
             notificationCenter = NotificationCenter(),
             notificationMessages = SettingsViewModelTestNotificationMessages(),
@@ -227,6 +254,7 @@ class SettingsViewModelTest {
                 connectFlow = connectFlow ?: FakeCloudConnectFlow(connectResult),
             )
         }
+        createdSyncRepository = syncRepository
         return SettingsViewModel(
             settingsRepository, session, syncRepository, feedRepository, folderRepository, tagRepository,
             updateChecker, activityCenter, Dispatchers.Unconfined,
@@ -517,6 +545,75 @@ class SettingsViewModelTest {
     }
 
     // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
+    // disconnectClearsConnectedTypeAndCloudStorageType above.
+    @Test
+    fun disconnectClearsLastSyncErrorText() {
+        val tokenStorage = FakeTokenStorage()
+        tokenStorage.save(OAuthTokens("AT"))
+        val cloud = AlwaysFailingCloudStorage()
+        val vm = newViewModel(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
+        runBlocking { createdSyncRepository.sync() }
+        awaitTrue { vm.lastSyncErrorText == "syncFailed:CloudAuthException" }
+
+        vm.disconnect()
+        awaitTrue { vm.connectedType == null }
+
+        assertNull(vm.lastSyncErrorText)
+    }
+
+    // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
+    // disconnectClearsConnectedTypeAndCloudStorageType above — switchTo's disconnect(oldType) call
+    // performs a real (mocked) HTTP revoke whose completion is dispatched on a real thread outside
+    // the TestCoroutineScheduler, so we poll with real wall-clock waits instead.
+    @Test
+    fun switchToClearsLastSyncErrorTextFromOldProvider() {
+        val dropboxTokenStorage = FakeTokenStorage(OAuthTokens("AT"))
+        val googleDriveTokenStorage = FakeTokenStorage()
+        val session = multiProviderCloudSession(
+            client = okAuthClient(),
+            dropboxTokenStorage = dropboxTokenStorage,
+            googleDriveTokenStorage = googleDriveTokenStorage,
+            // Blocks indefinitely on OAuth, so the new provider's own connect/sync never runs —
+            // isolating the fix (clearing on disconnect) from a later successful sync also clearing it.
+            googleDriveConnectFlow = SuspendingCloudConnectFlow(),
+        )
+        val cloud = AlwaysFailingCloudStorage()
+        val vm = newViewModel(cloudSession = session, syncCloudProvider = { cloud })
+        runBlocking { createdSyncRepository.sync() }
+        awaitTrue { vm.lastSyncErrorText == "syncFailed:CloudAuthException" }
+
+        vm.switchTo(CloudStorageType.GOOGLE_DRIVE)
+        // connectingType flips to GOOGLE_DRIVE synchronously at the top of switchTo(), before the old
+        // provider is even disconnected — wait for canCancelConnect instead, which only becomes true
+        // once connect(newType) is underway (i.e. after clearLastSyncError() has already run).
+        awaitTrue { vm.canCancelConnect }
+
+        assertNull(vm.lastSyncErrorText)
+    }
+
+    // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
+    // disconnectClearsConnectedTypeAndCloudStorageType above.
+    @Test
+    fun lastSyncErrorTextMirrorsSyncRepositoryLastSyncError() {
+        // The cloud-sync tab shows this as the reason the connected provider isn't syncing, so it has
+        // to track SyncRepository.lastSyncError in both directions.
+        val tokenStorage = FakeTokenStorage()
+        tokenStorage.save(OAuthTokens("AT"))
+        val cloud = AlwaysFailingCloudStorage()
+        var failing = true
+        val vm = newViewModel(tokenStorage = tokenStorage, syncCloudProvider = { if (failing) cloud else null })
+        assertNull(vm.lastSyncErrorText)
+
+        runBlocking { createdSyncRepository.sync() }
+        awaitTrue { vm.lastSyncErrorText == "syncFailed:CloudAuthException" }
+
+        // Local-only from here on, so the next sync is a success and must clear the reason.
+        failing = false
+        runBlocking { createdSyncRepository.sync() }
+        awaitTrue { vm.lastSyncErrorText == null }
+    }
+
+    // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
     // disconnectClearsConnectedTypeAndCloudStorageType above — UpdateChecker makes a real
     // (mocked) HTTP call whose completion is dispatched on a real thread outside the
     // TestCoroutineScheduler, so we poll with real wall-clock waits instead.
@@ -534,6 +631,30 @@ class SettingsViewModelTest {
         assertFalse(vm.checkingForUpdate)
         // Manual checks are deliberately excluded from the automatic schedule (see SettingsViewModel).
         assertNull(vm.localSettings.value.lastUpdateCheckAt)
+    }
+
+    @Test
+    fun checkForUpdateIgnoresOverlappingCallsWhileOneIsInFlight() {
+        var requestCount = 0
+        val client = HttpClient(
+            MockEngine {
+                requestCount++
+                delay(50)
+                respond(
+                    """{"tag_name":"2.0.0","html_url":"https://ex.com/releases/2.0.0","prerelease":false,"draft":false}""",
+                    HttpStatusCode.OK,
+                )
+            },
+        ) { expectSuccess = false }
+        val vm = newViewModel(updateChecker = UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo"))
+
+        vm.checkForUpdate()
+        awaitTrue { vm.checkingForUpdate }
+        vm.checkForUpdate() // ignored: a check is already in flight
+
+        awaitTrue { vm.updateCheckResult != null }
+        assertEquals(1, requestCount)
+        assertFalse(vm.checkingForUpdate)
     }
 
     @Test

@@ -65,6 +65,11 @@ import works.merc.keryx.app.resources.setup_auth_failed
 /**
  * Renders cloud storage connection settings and handles provider connection actions.
  */
+/**
+ * Displays cloud provider connection controls and confirmation dialogs.
+ *
+ * @param vm The view model supplying cloud provider state and handling user actions.
+ */
 @Composable
 internal fun CloudSyncTabContent(vm: SettingsViewModel) {
     // Confirmation-dialog triggers for the two disruptive cloud-storage actions (disconnect an
@@ -100,6 +105,9 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                     idleEnabled = vm.connectingType == null && !vm.resetting,
                     failed = vm.connectFailedType == type,
                     lastSyncedAtText = if (connected == type) vm.lastSyncedAtText else null,
+                    // Only meaningful for the connected provider: it's why its background syncs
+                    // are currently failing (an expired token, a transient outage, bad cloud data).
+                    lastSyncErrorText = if (connected == type) vm.lastSyncErrorText else null,
                     resetting = vm.resetting,
                     // No provider connected yet: a fresh connect is low-risk, so do it directly. A
                     // different provider connected: confirm the switch first.
@@ -213,9 +221,10 @@ private fun CloudStorageType.disconnectLabel(): StringResource = when (this) {
 }
 
 /**
- * Displays a cloud provider with its connection status, available actions, sync information, and
- * authentication errors.
+ * Displays a cloud provider's connection state, available actions, and synchronization details.
  *
+ * @param lastSyncedAtText Formatted time of the provider's most recent synchronization, or null.
+ * @param lastSyncErrorText Localized explanation of the provider's current synchronization failure, or null.
  * @param onSelect Invoked to select or connect the provider.
  * @param onCancel Invoked to abort an in-progress connection.
  * @param onDisconnect Invoked to disconnect the provider.
@@ -230,6 +239,7 @@ private fun CloudProviderRow(
     idleEnabled: Boolean,
     failed: Boolean,
     lastSyncedAtText: String? = null,
+    lastSyncErrorText: String? = null,
     resetting: Boolean = false,
     onSelect: () -> Unit,
     onCancel: () -> Unit,
@@ -329,9 +339,13 @@ private fun CloudProviderRow(
                 modifier = Modifier.padding(start = 28.dp, top = 2.dp),
             )
         }
-        if (failed) {
+        // An in-progress sync failure (already localized per exception type) takes precedence: it
+        // describes the live state of a working connection, whereas `failed` only reports that the
+        // last connect attempt didn't complete.
+        val errorText = lastSyncErrorText ?: stringResource(Res.string.setup_auth_failed).takeIf { failed }
+        errorText?.let {
             Text(
-                stringResource(Res.string.setup_auth_failed),
+                it,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(start = 28.dp, bottom = 4.dp),

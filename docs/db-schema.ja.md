@@ -38,6 +38,7 @@
   既存行は据え置き（新規のみ決定的）。
 - `deleted_at` で論理削除。再購読時に NULL へ戻す。
 - `error_count` が定数 `FEED_TIMEOUT_RETRY_COUNT` に達したらエラー扱い。
+- `last_error` の用途は 2 つ: 直前の取得失敗の生のエラーテキストと、410 Gone のフィードに対する固定の内部マーカー `FEED_ERROR_REASON_GONE`（`"gone"`、`feeds.markGone` が書き込む）。410 は恒久的でリトライ対象ではないため意図的に `error_count` を増やさないので、このマーカーがフィード消失の唯一の目印であり、フィード一覧の目印（専用のローカライズ済みツールチップ付き。カラムの値そのものはユーザーに表示しない）の判定に使われる。次回の取得成功時に `resetErrorCount` がクリアする。
 - `folder_id` はフィードが属するフォルダー（1フィード = 最大1フォルダー）。タグ（`feed_tags`、多対多）とは
   独立した分類軸。`feeds.upsert`（購読・リフレッシュ用）はこの列に一切触れない設計にしており、
   フォルダー割り当ての変更は `feeds.updateFolder` / `updateFolderAndSortOrder` 経由でのみ行う（購読・

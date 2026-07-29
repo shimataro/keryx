@@ -11,8 +11,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import works.merc.keryx.app.core.AppNotification
+import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.FEED_ERROR_REASON_GONE
 import works.merc.keryx.app.core.FeedNotFoundException
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.FtsManager
@@ -204,14 +206,11 @@ suspend fun previewFeed(url: String): Result<FetchedFeed> = feedFetcher.fetch(ur
     }
 
     /**
-     * Write phase: apply a feed's fetched metadata and articles to the DB and emit its
-     * notifications. Callers invoke this serially (the JVM SQLite driver opens a fresh connection
-     * per statement, so concurrent writes could contend). Applies the feed-health rules (error
-     * counting, 410 Gone notification, 301/308 URL update).
+     * Applies fetched feed data, updates its articles, and emits relevant notifications.
      *
      * @param feed The feed being refreshed.
-     * @param phase The network result gathered by [fetchFeed].
-     * @return The article upsert result and whether the fetched feed contained articles.
+     * @param phase The fetched feed data and any resolved favicon.
+     * @return The article update result and whether the fetch contained articles.
      */
     private suspend fun applyFetch(feed: Feeds, phase: FeedFetchPhase): RefreshOutcome {
         val fetched = when (val r = phase.fetch) {
@@ -222,7 +221,15 @@ suspend fun previewFeed(url: String): Result<FetchedFeed> = feedFetcher.fetch(ur
                     feeds.incrementErrorCount(ex.messageText, clock.nowMillis(), feed.id)
                 }
                 if (ex is FeedNotFoundException && ex.isGone) {
-                    notify(messages.feedGone(feed.displayTitle()), AppNotificationLevel.WARNING)
+                    // error_count stays untouched (410 is permanent, not a retry candidate), so record
+                    // the reason in last_error instead — that's what keeps the feed list flagged after
+                    // the notification is dismissed. Cleared by resetErrorCount if the feed comes back.
+                    feeds.markGone(FEED_ERROR_REASON_GONE, clock.nowMillis(), feed.id)
+                    notify(
+                        messages.feedGone(feed.displayTitle()),
+                        AppNotificationLevel.WARNING,
+                        action = AppNotificationAction.ShowFeedDetail(feed.id),
+                    )
                 }
                 return RefreshOutcome(r, hadArticles = false)
             }
@@ -255,7 +262,11 @@ suspend fun previewFeed(url: String): Result<FetchedFeed> = feedFetcher.fetch(ur
 
         if (fetched.redirectUrl != null && fetched.redirectUrl != feed.url) {
             feeds.updateUrl(fetched.redirectUrl, clock.nowMillis(), feed.id)
-            notify(messages.feedUrlChanged(feed.displayTitle()), AppNotificationLevel.WARNING)
+            notify(
+                messages.feedUrlChanged(feed.displayTitle()),
+                AppNotificationLevel.WARNING,
+                action = AppNotificationAction.ShowFeedDetail(feed.id),
+            )
         }
 
         val newCount = articleRepository.upsertParsed(feed.id, fetched.articles)
@@ -308,14 +319,16 @@ suspend fun previewFeed(url: String): Result<FetchedFeed> = feedFetcher.fetch(ur
      *
      * @param message The notification message.
      * @param level The notification severity level.
+     * @param action The next action offered when the user acts on the notification.
      */
-    private suspend fun notify(message: String, level: AppNotificationLevel) {
+    private suspend fun notify(message: String, level: AppNotificationLevel, action: AppNotificationAction? = null) {
         notificationCenter.add(
             AppNotification(
                 id = IdGenerator.newId(),
                 level = level,
                 message = message,
                 timestampMillis = clock.nowMillis(),
+                action = action,
             ),
         )
     }

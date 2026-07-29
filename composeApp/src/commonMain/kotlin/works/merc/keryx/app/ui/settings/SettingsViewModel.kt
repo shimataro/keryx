@@ -111,12 +111,23 @@ class SettingsViewModel(
     var lastSyncedAtText by mutableStateOf<String?>(null)
         private set
 
+    /**
+     * Why the last sync failed, or null when sync is healthy. Mirrors [SyncRepository.lastSyncError],
+     * so the cloud-sync tab shows the current reason even after the notification was dismissed.
+     * Distinct from [connectFailedType], which only covers a failed connect (OAuth) flow.
+     */
+    var lastSyncErrorText by mutableStateOf<String?>(null)
+        private set
+
     /** Set by [checkForUpdate]. Does not affect the automatic update-check schedule. */
     var updateCheckResult by mutableStateOf<UpdateStatus?>(null)
         private set
 
     init {
         refreshLastSyncedAt()
+        viewModelScope.launch {
+            syncRepository.lastSyncError.collect { lastSyncErrorText = it }
+        }
         viewModelScope.launch {
             // Skip the initial replay (current state at VM creation) — already handled by the
             // explicit call above. Only react to genuine sync completions afterward, covering
@@ -152,6 +163,7 @@ class SettingsViewModel(
      * never perturbs it.
      */
     fun checkForUpdate() {
+        if (checkingForUpdate) return
         viewModelScope.launch {
             checkingForUpdate = true
             updateCheckResult = updateChecker.check()
@@ -220,6 +232,9 @@ class SettingsViewModel(
         val type = connectedType ?: return
         viewModelScope.launch {
             withContext(dispatcher) { cloudSession.disconnect(type) }
+            // Clear before exposing the disconnect, so a subsequent connect (to this or another
+            // provider) never inherits this provider's stale failure reason.
+            syncRepository.clearLastSyncError()
             update { it.copy(cloudStorageType = null) }
             connectedType = null
             lastSyncedAtText = null
@@ -249,6 +264,9 @@ class SettingsViewModel(
         viewModelScope.launch {
             connectingType = newType
             withContext(dispatcher) { cloudSession.disconnect(oldType) }
+            // Clear before connecting the new provider, so it never inherits the old provider's
+            // stale failure reason.
+            syncRepository.clearLastSyncError()
             update { it.copy(cloudStorageType = null) }
             connectedType = null
             lastSyncedAtText = null

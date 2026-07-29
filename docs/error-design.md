@@ -46,10 +46,19 @@ Helper extensions: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `
 ## Notification Center (`domain/NotificationCenter`)
 
 - The notification center (history, manually dismissed) is the primary channel. Previous transient toasts have been replaced with more macOS-native inline expressions (copy shows a ✓ near the action source, OPML shows result text near the button, subscription shows the list appearance + in-dialog display), so in-app snackbars have been abolished.
-- History is kept only for the session (not persisted to DB). In addition to errors and warnings, `INFO` (new articles from background updates) is also recorded.
-- Bell icon with badge (count). Background-update warnings and new articles are recorded only in the notification center (because there is no UI context). New articles are recorded only for background updates; manual updates are shown via list / unread badge updates.
+- History is kept only for the session (not persisted to DB). Only things worth looking back at are recorded: errors and warnings, plus `INFO` for a new app version. **New articles are NOT recorded in the notification center** — `NewArticleNotifier` only feeds the OS notification (tray), because their arrival is already durably visible in the article list and the unread badges. A manual refresh is likewise shown only via list / unread badge updates.
+- Bell icon with badge (count). Background-update warnings are recorded only in the notification center (because there is no UI context).
+- **Every notification kept in the bell carries a next action** (`AppNotificationAction`). Clicking the row runs it; only `ResetCloudData` is excluded from row-clicking (destructive) and keeps its own inline confirm button. A clickable row signals itself the same way the settings screen's `LinkRow` does (primary color + underline on hover).
 
-`AppNotification(id, level: INFO|WARNING|ERROR, message, timestampMillis)`.
+| Next action | Source | Behavior |
+| --- | --- | --- |
+| `OpenUrl(url)` | New-version notification | Opens the release page in the external browser |
+| `ShowFeedDetail(feedId)` | Feed gone (410) / URL changed (301/308) | Selects that feed in the feed list (same as clicking it there) |
+| `ShowSettingsTab(tabId)` | Sync errors (`SchemaVersionException` → `updates`, everything else → `cloud_sync`) | Opens the settings dialog on that tab. The `cloud_sync` tab shows `SyncRepository.lastSyncError` as the failure reason; the `updates` tab auto-checks for an update when opened |
+| `ShowInfoDialog(detail)` | macOS translocated warning | Shows an explanatory dialog (cause + fix) without navigating |
+| `ResetCloudData` | `CloudDataIncompatibleException` | Dedicated inline button → confirmation dialog → cloud data reset |
+
+`AppNotification(id, level: INFO|WARNING|ERROR, message, timestampMillis, action)`.
 When emitting notifications from the Repository, text is localized via `NotificationMessages` (`getString`-based, Fake in tests) (hardcoding is prohibited).
 
 ## Error Severity and Notification Destinations (excerpt)

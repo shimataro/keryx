@@ -54,12 +54,26 @@ sealed class KeryxException(message: String) : Exception(message)
 - 通知センター（履歴・手動で消す）を主とする。かつての一時トーストは macOS ネイティブ寄りの
   インライン表現（コピーは操作元の✓、OPML はボタン近くの結果テキスト、購読は一覧出現＋ダイアログ内表示）へ
   置き換えたため、アプリ内スナックバーは廃止した。
-- 履歴はセッション中のみ保持（DB 保存なし）。エラー・警告に加え、`INFO`（バックグラウンド更新の新着記事）も
-  記録する。
-- ベルアイコンにバッジ（件数）。バックグラウンド更新中の警告・新着は通知センターにのみ記録する
-  （UI コンテキストが無いため）。新着記事は背景更新のみ記録し、手動更新は一覧・未読バッジの更新で示す。
+- 履歴はセッション中のみ保持（DB 保存なし）。記録するのは「後から見返す価値がある内容」に限る:
+  エラー・警告に加え、`INFO` は新バージョンの通知のみ。**新着記事は通知センターには記録しない**
+  （`NewArticleNotifier` は OS 通知（トレイ）にのみ流す）——記事一覧と未読バッジという永続的な手段で
+  既に把握できるため。手動更新も同様に、一覧・未読バッジの更新で示す。
+- ベルアイコンにバッジ（件数）。バックグラウンド更新中の警告は UI コンテキストが無いため
+  通知センターにのみ記録する。
+- **ベルに残るすべての通知はネクストアクションを持つ**（`AppNotificationAction`）。行をクリックすると
+  そのアクションが実行され、`ResetCloudData` だけは破壊的操作のため行クリックではなく専用の
+  インライン確認ボタンを持つ。クリック可能な行は、設定画面の `LinkRow` と同じ見た目
+  （primary 色 + hover 時に下線）でそれを示す。
 
-`AppNotification(id, level: INFO|WARNING|ERROR, message, timestampMillis)`。
+| ネクストアクション | 発生源 | 挙動 |
+| --- | --- | --- |
+| `OpenUrl(url)` | 新バージョン通知 | リリースページを外部ブラウザで開く |
+| `ShowFeedDetail(feedId)` | フィード消失(410) / URL 変更(301/308) | フィード一覧で該当フィードを選択（一覧をクリックしたときと同じ） |
+| `ShowSettingsTab(tabId)` | 同期エラー（`SchemaVersionException` は `updates`、その他は `cloud_sync`） | 設定ダイアログを該当タブで開く。`cloud_sync` タブは `SyncRepository.lastSyncError` を失敗理由として表示し、`updates` タブは開いた時点で自動的に更新確認を行う |
+| `ShowInfoDialog(detail)` | macOS の translocated 警告 | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
+| `ResetCloudData` | `CloudDataIncompatibleException` | 専用のインラインボタン → 確認ダイアログ → クラウドデータのリセット |
+
+`AppNotification(id, level: INFO|WARNING|ERROR, message, timestampMillis, action)`。
 Repository から通知を出す際、文言は `NotificationMessages`（`getString` ベース、テストでは Fake）で
 ローカライズする（ベタ書き禁止）。
 

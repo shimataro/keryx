@@ -89,6 +89,7 @@
     <string name="home_refresh">更新</string>
     <string name="home_refreshing">新着を確認中…</string>
     <string name="home_feed_error">フィードのエラー</string>
+    <string name="home_feed_gone">フィードが見つかりません（削除された可能性があります）</string>
     <string name="home_feed_error_count">%1$d 回連続でエラーが発生しています</string>
     <string name="home_feed_error_refresh_now">今すぐ更新</string>
     <string name="home_mark_all_read">すべて既読にする</string>
@@ -210,6 +211,7 @@
     <string name="feed_url_changed">「%1$s」の URL が変更されました</string>
     <string name="update_available_notification">新しいバージョン %1$s が利用可能です</string>
     <string name="notification_app_translocated">Keryx が一時的な場所で実行されています。Dropbox 連携などが失敗する場合は、Keryx を「アプリケーション」フォルダへ移動してから起動し直してください。</string>
+    <string name="notification_app_translocated_detail">macOS は、ディスクイメージ（DMG）や「ダウンロード」フォルダから直接起動されたアプリを、App Translocation という仕組みによって毎回ランダムな一時的な場所にコピーして実行します。\n\nこのとき Keryx の実体のパスが変わるため、OS が keryx:// のリンクを Keryx に届けられず、Dropbox や OneDrive の連携（OAuth 認証）が完了しないことがあります。\n\n対処方法: Keryx.app を「アプリケーション」フォルダにコピーし、コピーしたものから起動し直してください。</string>
 
     <!-- tray -->
     <string name="tray_show">表示</string>
@@ -252,6 +254,7 @@
     <string name="notification_level_error">エラー</string>
     <string name="notification_level_warning">警告</string>
     <string name="notification_level_info">情報</string>
+    <string name="notification_detail_title">詳細</string>
 
     <!-- errors -->
     <string name="error_feed_timeout">フィードの取得がタイムアウトしました</string>

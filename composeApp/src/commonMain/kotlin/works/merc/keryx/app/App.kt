@@ -11,8 +11,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import org.koin.compose.koinInject
+import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.ui.home.HomeScreen
+import works.merc.keryx.app.ui.home.NotificationCenterViewModel
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
 import works.merc.keryx.app.ui.navigation.Screen
@@ -22,6 +24,12 @@ import works.merc.keryx.app.ui.settings.SettingsDialog
 import works.merc.keryx.app.ui.setup.SetupScreen
 import works.merc.keryx.app.ui.theme.KeryxTheme
 
+/**
+ * Renders the application UI, including setup or home content and modeless About and Settings dialogs.
+ *
+ * The initial screen is selected based on whether setup is complete. Settings can open on a specified
+ * tab when requested by a notification.
+ */
 @Composable
 fun App() {
     val settingsRepository = koinInject<SettingsRepository>()
@@ -39,6 +47,27 @@ fun App() {
         // Both dialogs are modeless windows shown over Home, tracked by boolean state here.
         var showAbout by remember { mutableStateOf(false) }
         var showSettings by remember { mutableStateOf(false) }
+        // Which tab the settings dialog opens on. Normally "general"; a notification's
+        // ShowSettingsTab action points it at the tab where that problem is fixable.
+        var settingsInitialTab by remember { mutableStateOf("general") }
+        // Bumped on every explicit tab-navigation request so the dialog re-navigates even when
+        // settingsInitialTab is reassigned the same value it already holds (see SettingsDialog's
+        // rememberSelectedTabId, which keys off this instead of the tab id's value).
+        var settingsTabRequestToken by remember { mutableStateOf(0) }
+
+        // A notification's "open this settings tab" action is resolved here, because the settings
+        // dialog lives in this composition (HomeScreen resolves the actions targeting its own panes).
+        val notifVm = koinInject<NotificationCenterViewModel>()
+        LaunchedEffect(notifVm.pendingAction) {
+            val action = notifVm.pendingAction?.action
+            if (action is AppNotificationAction.ShowSettingsTab) {
+                settingsInitialTab = action.tabId
+                settingsTabRequestToken++
+                showSettings = true
+                notifVm.clearPendingAction()
+            }
+        }
+
         LaunchedEffect(Unit) {
             menuController.commands.collect { command ->
                 when (command) {
@@ -46,7 +75,12 @@ fun App() {
                     // Home-gated, matching the menu item's enabled state; the native macOS
                     // "Settings…" item is always enabled but is a no-op away from Home.
                     MenuCommand.OpenSettings ->
-                        if (navigator.current == Screen.Home) showSettings = true
+                        if (navigator.current == Screen.Home) {
+                            // Opened by the user, not by a notification: always start on the first tab.
+                            settingsInitialTab = "general"
+                            settingsTabRequestToken++
+                            showSettings = true
+                        }
                     else -> {}
                 }
             }
@@ -58,7 +92,13 @@ fun App() {
                 Screen.Home -> HomeScreen()
             }
             if (showAbout) AboutDialog(onDismiss = { showAbout = false })
-            if (showSettings) SettingsDialog(onDismiss = { showSettings = false })
+            if (showSettings) {
+                SettingsDialog(
+                    onDismiss = { showSettings = false },
+                    initialTabId = settingsInitialTab,
+                    tabRequestToken = settingsTabRequestToken,
+                )
+            }
         }
     }
 }

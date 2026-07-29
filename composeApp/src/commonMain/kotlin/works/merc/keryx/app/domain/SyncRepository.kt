@@ -4,6 +4,8 @@ import app.cash.sqldelight.db.SqlDriver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -57,7 +59,26 @@ class SyncRepository(
 
     private val mutex = Mutex()
     private var debounceJob: Job? = null
+    private val _lastSyncError = MutableStateFlow<String?>(null)
 
+    /**
+     * Why the last sync failed, or null when it succeeded (or none has run yet) — the same localized
+     * text as the notification-center entry, kept as state so the cloud-sync settings tab can show
+     * "why sync is broken right now" even after that notification was dismissed.
+     */
+    val lastSyncError: StateFlow<String?> = _lastSyncError
+
+    /**
+     * Clears the mirrored sync-failure reason, e.g. when the connection that produced it is being
+     * torn down so a subsequently-connected provider does not inherit it.
+     */
+    fun clearLastSyncError() {
+        _lastSyncError.value = null
+    }
+
+    /**
+     * Schedules a debounced cloud synchronization.
+     */
     override fun scheduleSync() {
         if (cloudProvider() == null) return
         debounceJob?.cancel()
@@ -74,10 +95,10 @@ class SyncRepository(
     }
 
     /**
-     * Discards the cloud sync data and re-uploads this device's local DB fresh: deletes the cloud
-     * file, then [createFresh]. Recovery path for a corrupt / incompatible cloud DB. Runs the whole
-     * delete-then-create under a single lock (calling [sync] here would deadlock — the mutex is not
-     * reentrant).
+     * Replaces the cloud database with a fresh snapshot of the local database.
+     *
+     * @return A successful result when the cloud database is recreated; otherwise, the deletion or
+     * creation failure.
      */
     suspend fun resetCloudData(): Result<Unit> {
         val cloud = cloudProvider() ?: return Result.Ok(Unit)
@@ -98,34 +119,56 @@ class SyncRepository(
     }
 
     /**
-     * Publishes a notification for sync failures that require user attention.
+     * Publishes a notification for sync failures that require user attention, and mirrors the same
+     * failure into [lastSyncError] so the settings screen can show why sync is currently broken even
+     * after the notification is dismissed.
      *
-     * Sync conflicts are excluded because they are handled internally. Cloud data incompatibility
-     * failures include an action to reset the cloud data.
+     * Sync conflicts are excluded because they are handled internally (and so leave [lastSyncError]
+     * as it was — they are not a user-visible failure either way).
      *
      * @param result The outcome of the sync operation.
      */
     private suspend fun emitErrorNotification(result: Result<Unit>) {
         if (result is Result.Err && result.exception !is SyncConflictException) {
-            // A corrupt/incompatible cloud DB is only fixable by resetting it, so offer that as an
-            // inline action. Other errors (auth, transient) carry no action.
-            val action = if (result.exception is CloudDataIncompatibleException) {
-                AppNotificationAction.RESET_CLOUD_DATA
-            } else {
-                null
-            }
+            val message = notificationMessages.syncFailed(result.exception)
+            _lastSyncError.value = message
             notificationCenter.addCoalescing(
                 AppNotification(
                     id = IdGenerator.newId(),
                     level = AppNotificationLevel.ERROR,
-                    message = notificationMessages.syncFailed(result.exception),
+                    message = message,
                     timestampMillis = clock.nowMillis(),
-                    action = action,
+                    action = nextActionFor(result.exception),
                 ),
             )
+        } else if (result is Result.Ok) {
+            // Sync works again — drop the stale reason (a SyncConflictException, handled internally,
+            // deliberately falls through both branches and changes nothing).
+            _lastSyncError.value = null
         }
     }
 
+    /**
+     * Selects the user action associated with a sync failure.
+     *
+     * @return The action for resolving the failure.
+     */
+    private fun nextActionFor(exception: KeryxException): AppNotificationAction = when (exception) {
+        is CloudDataIncompatibleException -> AppNotificationAction.ResetCloudData
+        // Tab ids as declared in ui/settings/SettingsDialog.kt.
+        is SchemaVersionException -> AppNotificationAction.ShowSettingsTab("updates")
+        else -> AppNotificationAction.ShowSettingsTab("cloud_sync")
+    }
+
+    /**
+     * Synchronizes the local database with the cloud database.
+     *
+     * Creates the cloud database when it does not exist, or merges and uploads changes
+     * using revision checks to handle concurrent updates.
+     *
+     * @return A successful result when synchronization completes, or an error result
+     * when synchronization fails.
+     */
     private suspend fun syncLocked(): Result<Unit> {
         val cloud = cloudProvider() ?: run {
             Log.info(TAG, "Sync skipped: no cloud provider connected")

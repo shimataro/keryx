@@ -102,7 +102,7 @@ class NotificationCenterTest {
         center.addCoalescing(
             AppNotification(
                 "d", AppNotificationLevel.ERROR, message = "auth", timestampMillis = 0L,
-                action = AppNotificationAction.RESET_CLOUD_DATA,
+                action = AppNotificationAction.ResetCloudData,
             ),
         )
 

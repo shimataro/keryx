@@ -44,6 +44,7 @@ import org.jetbrains.compose.resources.painterResource
 import org.koin.core.context.startKoin
 import org.koin.mp.KoinPlatform
 import works.merc.keryx.app.core.AppNotification
+import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.SystemClock
@@ -80,6 +81,7 @@ import works.merc.keryx.app.platform.WindowChrome
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.app_icon
 import works.merc.keryx.app.resources.notification_app_translocated
+import works.merc.keryx.app.resources.notification_app_translocated_detail
 import works.merc.keryx.app.resources.tray_icon
 import works.merc.keryx.app.resources.update_available_notification
 import works.merc.keryx.app.appmenu.AppMenuBarHost
@@ -612,6 +614,9 @@ private suspend fun checkForUpdateAndNotify(koin: org.koin.core.Koin) {
                 level = AppNotificationLevel.INFO,
                 message = message,
                 timestampMillis = SystemClock.nowMillis(),
+                // Acting on the notification goes straight to the release page — the only useful
+                // next step for "a new version exists".
+                action = AppNotificationAction.OpenUrl(status.url),
             ),
         )
     }
@@ -631,6 +636,11 @@ private suspend fun warnIfAppTranslocated(koin: org.koin.core.Koin) {
             level = AppNotificationLevel.WARNING,
             message = getString(Res.string.notification_app_translocated),
             timestampMillis = SystemClock.nowMillis(),
+            // Nothing to navigate to — the useful next step is understanding the cause and the fix,
+            // so acting on it opens an explanatory dialog in place.
+            action = AppNotificationAction.ShowInfoDialog(
+                getString(Res.string.notification_app_translocated_detail),
+            ),
         ),
     )
 }

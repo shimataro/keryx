@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.settings
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,12 +30,21 @@ import works.merc.keryx.app.resources.settings_updates
  * Displays the application settings in a tabbed dialog.
  *
  * @param onDismiss Called when the dialog should be dismissed.
+ * @param initialTabId The tab shown when the dialog opens. Defaults to the first tab; a notification's
+ *   `ShowSettingsTab` action opens the dialog directly on the tab where the problem is fixable.
+ * @param tabRequestToken Bumped by the caller on every fresh explicit navigation request (a
+ *   notification action or the "Open Settings" menu command), so the dialog jumps to [initialTabId]
+ *   even if it's already open on that same tab id and the user has since switched tabs manually.
+ */
+/**
+ * Displays the tabbed settings dialog.
+ *
+ * @param onDismiss Called when the dialog should be dismissed.
+ * @param initialTabId The identifier of the tab initially selected.
  */
 @Composable
-fun SettingsDialog(onDismiss: () -> Unit) {
+fun SettingsDialog(onDismiss: () -> Unit, initialTabId: String = "general", tabRequestToken: Int = 0) {
     val vm = koinInject<SettingsViewModel>()
-
-    var selectedTabId by remember { mutableStateOf("general") }
 
     // The cloud-sync tab exists only when at least one cloud provider was configured at build time
     // (mirrors the old section-level hiding). availableCloudTypes is stable across the dialog's life.
@@ -47,6 +57,8 @@ fun SettingsDialog(onDismiss: () -> Unit) {
         add(KeryxDialogTab("data", stringResource(Res.string.settings_tab_data), KeryxIcons.Storage))
         add(KeryxDialogTab("updates", stringResource(Res.string.settings_updates), KeryxIcons.Update))
     }
+
+    var selectedTabId by rememberSelectedTabId(initialTabId, tabRequestToken, tabs)
 
     KeryxTabDialog(
         onDismissRequest = onDismiss,
@@ -64,3 +76,19 @@ fun SettingsDialog(onDismiss: () -> Unit) {
         }
     }
 }
+
+/** Re-initializes to [initialTabId] whenever [tabRequestToken] changes — a fresh explicit
+ *  navigation request should always land on the requested tab, even if it's the same tab id
+ *  the dialog is already showing (see App.kt's ShowSettingsTab / OpenSettings handling).
+ *  Falls back to the first entry of [tabs] when [initialTabId] doesn't match any of them (e.g. a
+ *  `ShowSettingsTab("cloud_sync")` notification surviving into a build with no cloud provider
+ *  configured), so the dialog never opens on a tab id that isn't actually rendered. */
+@Composable
+internal fun rememberSelectedTabId(
+    initialTabId: String,
+    tabRequestToken: Int,
+    tabs: List<KeryxDialogTab>,
+): MutableState<String> =
+    remember(tabRequestToken) {
+        mutableStateOf(if (tabs.any { it.id == initialTabId }) initialTabId else tabs.first().id)
+    }
