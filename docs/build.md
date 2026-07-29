@@ -209,6 +209,16 @@ Currently, packaged artifacts are **ad-hoc signed** (effectively unsigned). This
 
 - Distribution to other Macs (getting past Gatekeeper).
 - Removing Keychain access permission dialogs on macOS (a stable signing identity fixes the ACL).
+- **OS notifications actually working at all.** `MacUserNotifications.kt`'s
+  `UNUserNotificationCenter` bridge (used for the new-article tray notification) currently gets
+  `requestAuthorizationWithOptions:` resolved to `denied` immediately, with no permission dialog
+  ever shown, regardless of what's toggled in System Settings → Notifications — confirmed via
+  `codesign -dvvv` that the ad-hoc-signed build has `TeamIdentifier=not set`. This matches a known
+  constraint: `UNUserNotificationCenter` requires a real Apple code-signing identity (a Team ID) to
+  establish trust before it will prompt at all. AWT's legacy `TrayIcon.displayMessage` (backed by
+  the deprecated `NSUserNotificationCenter`) is separately confirmed non-functional on this JDK/macOS
+  combination too, so **OS notifications on macOS do not work at all until Developer ID signing is
+  in place** — this should be re-verified once signing is configured.
 
 > **Signing while still on a 0.x version needs care.** jpackage signs the `.app`, so anything that edits
 > `Info.plist` *afterwards* breaks the bundle seal. The custom URI scheme no longer does this — it goes through
