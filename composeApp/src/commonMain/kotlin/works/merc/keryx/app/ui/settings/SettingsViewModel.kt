@@ -163,6 +163,7 @@ class SettingsViewModel(
      * never perturbs it.
      */
     fun checkForUpdate() {
+        if (checkingForUpdate) return
         viewModelScope.launch {
             checkingForUpdate = true
             updateCheckResult = updateChecker.check()

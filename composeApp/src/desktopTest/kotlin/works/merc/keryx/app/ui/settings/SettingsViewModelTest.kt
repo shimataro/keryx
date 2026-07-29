@@ -626,6 +626,30 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun checkForUpdateIgnoresOverlappingCallsWhileOneIsInFlight() {
+        var requestCount = 0
+        val client = HttpClient(
+            MockEngine {
+                requestCount++
+                delay(50)
+                respond(
+                    """{"tag_name":"2.0.0","html_url":"https://ex.com/releases/2.0.0","prerelease":false,"draft":false}""",
+                    HttpStatusCode.OK,
+                )
+            },
+        ) { expectSuccess = false }
+        val vm = newViewModel(updateChecker = UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo"))
+
+        vm.checkForUpdate()
+        awaitTrue { vm.checkingForUpdate }
+        vm.checkForUpdate() // ignored: a check is already in flight
+
+        awaitTrue { vm.updateCheckResult != null }
+        assertEquals(1, requestCount)
+        assertFalse(vm.checkingForUpdate)
+    }
+
+    @Test
     fun buildOpmlDocumentGroupsFeedsByFolderInDisplayOrderAndAnnotatesTags() {
         db.insertFolder("d1", "Tech", sortOrder = 0L)
         db.insertFolder("d2", "News", sortOrder = 1L)
