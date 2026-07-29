@@ -630,7 +630,11 @@ class SettingsViewModelTest {
         assertNull(vm.updateCheckResult)
 
         vm.checkForUpdate()
-        awaitTrue { vm.updateCheckResult != null }
+        // Await checkingForUpdate becoming false too, not just updateCheckResult: both are written
+        // sequentially in the same coroutine after the suspend point, on whatever thread the mocked
+        // HTTP call resumes on — observing the first write gives no happens-before guarantee for the
+        // second (see disconnectClearsLastSyncErrorText for the same class of race).
+        awaitTrue { vm.updateCheckResult != null && !vm.checkingForUpdate }
 
         val result = vm.updateCheckResult
         assertIs<UpdateStatus.Available>(result)
@@ -659,7 +663,8 @@ class SettingsViewModelTest {
         awaitTrue { vm.checkingForUpdate }
         vm.checkForUpdate() // ignored: a check is already in flight
 
-        awaitTrue { vm.updateCheckResult != null }
+        // Same race guard as checkForUpdateSurfacesAvailableResultWithoutTouchingLastUpdateCheckAt.
+        awaitTrue { vm.updateCheckResult != null && !vm.checkingForUpdate }
         assertEquals(1, requestCount)
         assertFalse(vm.checkingForUpdate)
     }
