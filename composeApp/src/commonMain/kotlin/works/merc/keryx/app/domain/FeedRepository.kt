@@ -206,14 +206,11 @@ suspend fun previewFeed(url: String): Result<FetchedFeed> = feedFetcher.fetch(ur
     }
 
     /**
-     * Write phase: apply a feed's fetched metadata and articles to the DB and emit its
-     * notifications. Callers invoke this serially (the JVM SQLite driver opens a fresh connection
-     * per statement, so concurrent writes could contend). Applies the feed-health rules (error
-     * counting, 410 Gone notification, 301/308 URL update).
+     * Applies fetched feed data, updates its articles, and emits relevant notifications.
      *
      * @param feed The feed being refreshed.
-     * @param phase The network result gathered by [fetchFeed].
-     * @return The article upsert result and whether the fetched feed contained articles.
+     * @param phase The fetched feed data and any resolved favicon.
+     * @return The article update result and whether the fetch contained articles.
      */
     private suspend fun applyFetch(feed: Feeds, phase: FeedFetchPhase): RefreshOutcome {
         val fetched = when (val r = phase.fetch) {

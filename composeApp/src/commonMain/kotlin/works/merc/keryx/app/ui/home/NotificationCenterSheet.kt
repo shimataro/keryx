@@ -61,6 +61,11 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  *
  * @param onNavigated Called after any row action, so the caller can close the popover.
  */
+/**
+ * Displays a popover containing the current notifications and controls for dismissing them.
+ *
+ * @param onNavigated Called after a notification action completes navigation.
+ */
 @Composable
 fun NotificationCenterSheet(vm: NotificationCenterViewModel, onNavigated: () -> Unit = {}) {
     val items by vm.items.collectAsStateSafe(emptyList())
@@ -105,13 +110,11 @@ fun NotificationCenterSheet(vm: NotificationCenterViewModel, onNavigated: () -> 
 }
 
 /**
- * One notification: level icon, message, and the dismiss button. Clicking the row runs the
- * notification's next action, except for the destructive reset-cloud-data one, which stays behind
- * its own inline button.
+ * Displays a notification with its level indicator, message, optional action, and dismiss control.
  *
- * @param onRequestHostAction Hands the notification to the host screen (`HomeScreen` / `App`) to
- *   resolve — used for every action that outlives this popover.
- * @param onNavigated Called after a row action, so the caller can close the popover.
+ * @param onDismiss Dismisses the notification.
+ * @param onRequestHostAction Requests handling of a notification action by the host screen.
+ * @param onNavigated Called after a row action completes.
  */
 @Composable
 private fun NotificationRow(

@@ -84,6 +84,12 @@ import works.merc.keryx.app.ui.menu.MenuController
 
 enum class HomePane { FeedList, ArticleList, ArticleDetail }
 
+/**
+ * Renders the home screen with feed, article list, and article detail panes.
+ *
+ * Handles pane focus, keyboard shortcuts, feed selection, article actions, feed subscriptions,
+ * menu commands, and pending notification actions.
+ */
 @Composable
 fun HomeScreen() {
     val vm = koinInject<HomeViewModel>()

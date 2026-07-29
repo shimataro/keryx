@@ -18,6 +18,11 @@ class NewArticleNotifier {
     private val _trayEvents = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val trayEvents: SharedFlow<String> = _trayEvents
 
+    /**
+     * Publishes a message for display through the OS tray event stream.
+     *
+     * @param message The message to publish.
+     */
     fun notifyBackground(message: String) {
         _trayEvents.tryEmit(message)
     }

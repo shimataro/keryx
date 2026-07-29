@@ -68,6 +68,9 @@ class SyncRepository(
      */
     val lastSyncError: StateFlow<String?> = _lastSyncError
 
+    /**
+     * Schedules a debounced cloud synchronization.
+     */
     override fun scheduleSync() {
         if (cloudProvider() == null) return
         debounceJob?.cancel()
@@ -84,10 +87,10 @@ class SyncRepository(
     }
 
     /**
-     * Discards the cloud sync data and re-uploads this device's local DB fresh: deletes the cloud
-     * file, then [createFresh]. Recovery path for a corrupt / incompatible cloud DB. Runs the whole
-     * delete-then-create under a single lock (calling [sync] here would deadlock — the mutex is not
-     * reentrant).
+     * Replaces the cloud database with a fresh snapshot of the local database.
+     *
+     * @return A successful result when the cloud database is recreated; otherwise, the deletion or
+     * creation failure.
      */
     suspend fun resetCloudData(): Result<Unit> {
         val cloud = cloudProvider() ?: return Result.Ok(Unit)
@@ -138,15 +141,9 @@ class SyncRepository(
     }
 
     /**
-     * The "next action" offered on a sync-failure notification: where the user can actually do
-     * something about it.
+     * Selects the user action associated with a sync failure.
      *
-     * - A corrupt / incompatible cloud DB is only fixable by discarding it, so it keeps its dedicated
-     *   destructive inline button.
-     * - An out-of-date app (cloud schema is newer) is fixed by updating, so point at the updates tab.
-     * - Everything else (auth expired, transient storage/network failure, app bug) is actionable on
-     *   the cloud-sync tab: reconnect / disconnect / reset all live there, and that tab also shows
-     *   [lastSyncError] as the detail.
+     * @return The action for resolving the failure.
      */
     private fun nextActionFor(exception: KeryxException): AppNotificationAction = when (exception) {
         is CloudDataIncompatibleException -> AppNotificationAction.ResetCloudData
@@ -155,6 +152,15 @@ class SyncRepository(
         else -> AppNotificationAction.ShowSettingsTab("cloud_sync")
     }
 
+    /**
+     * Synchronizes the local database with the cloud database.
+     *
+     * Creates the cloud database when it does not exist, or merges and uploads changes
+     * using revision checks to handle concurrent updates.
+     *
+     * @return A successful result when synchronization completes, or an error result
+     * when synchronization fails.
+     */
     private suspend fun syncLocked(): Result<Unit> {
         val cloud = cloudProvider() ?: run {
             Log.info(TAG, "Sync skipped: no cloud provider connected")

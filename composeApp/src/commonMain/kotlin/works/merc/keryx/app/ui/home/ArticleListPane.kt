@@ -404,7 +404,9 @@ internal fun ArticleListPaneContent(
     }
 }
 
-/** The notifications bell + badge and its popup sheet, shared by the article list and search panes. */
+/**
+ * Displays the notifications button, unread notification count, and notification popup.
+ */
 @Composable
 private fun NotificationsBell(notifVm: NotificationCenterViewModel) {
     val notifications by notifVm.items.collectAsStateSafe(emptyList())

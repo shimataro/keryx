@@ -65,6 +65,11 @@ import works.merc.keryx.app.resources.setup_auth_failed
 /**
  * Renders cloud storage connection settings and handles provider connection actions.
  */
+/**
+ * Displays cloud provider connection controls and confirmation dialogs.
+ *
+ * @param vm The view model supplying cloud provider state and handling user actions.
+ */
 @Composable
 internal fun CloudSyncTabContent(vm: SettingsViewModel) {
     // Confirmation-dialog triggers for the two disruptive cloud-storage actions (disconnect an
@@ -216,14 +221,14 @@ private fun CloudStorageType.disconnectLabel(): StringResource = when (this) {
 }
 
 /**
- * Displays a cloud provider with its connection status, available actions, sync information, and
- * authentication errors.
+ * Displays a cloud provider's connection state, available actions, and synchronization details.
  *
+ * @param lastSyncedAtText Formatted time of the provider's most recent synchronization, or null.
+ * @param lastSyncErrorText Localized explanation of the provider's current synchronization failure, or null.
  * @param onSelect Invoked to select or connect the provider.
  * @param onCancel Invoked to abort an in-progress connection.
  * @param onDisconnect Invoked to disconnect the provider.
  * @param onResetCloudData Invoked to reset the provider's cloud data.
- * @param lastSyncErrorText Why this (connected) provider's syncs are currently failing, or null.
  */
 @Composable
 private fun CloudProviderRow(

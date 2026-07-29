@@ -32,6 +32,12 @@ import works.merc.keryx.app.resources.settings_updates
  * @param initialTabId The tab shown when the dialog opens. Defaults to the first tab; a notification's
  *   `ShowSettingsTab` action opens the dialog directly on the tab where the problem is fixable.
  */
+/**
+ * Displays the tabbed settings dialog.
+ *
+ * @param onDismiss Called when the dialog should be dismissed.
+ * @param initialTabId The identifier of the tab initially selected.
+ */
 @Composable
 fun SettingsDialog(onDismiss: () -> Unit, initialTabId: String = "general") {
     val vm = koinInject<SettingsViewModel>()

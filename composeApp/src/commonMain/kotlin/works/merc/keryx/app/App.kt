@@ -24,6 +24,12 @@ import works.merc.keryx.app.ui.settings.SettingsDialog
 import works.merc.keryx.app.ui.setup.SetupScreen
 import works.merc.keryx.app.ui.theme.KeryxTheme
 
+/**
+ * Renders the application UI, including setup or home content and modeless About and Settings dialogs.
+ *
+ * The initial screen is selected based on whether setup is complete. Settings can open on a specified
+ * tab when requested by a notification.
+ */
 @Composable
 fun App() {
     val settingsRepository = koinInject<SettingsRepository>()

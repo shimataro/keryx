@@ -857,13 +857,14 @@ private fun NoFolderHeader(
 }
 
 /**
- * Displays a feed entry with its title, unread count, actions, and drag-and-drop support.
+ * Displays a feed row with selection styling, feed actions, unread count, and drag-and-drop support.
  *
- * @param feed The feed to display.
- * @param count The number of unread articles in the feed.
- * @param indented Whether to apply folder-level indentation.
- * @param nextFeedId The ID of the feed that follows this row, or `null` when this is the last feed.
- * @param folderId The ID of the containing folder, or `null` for feeds without a folder.
+ * @param feed The feed represented by the row.
+ * @param count The number of unread articles.
+ * @param indented Whether to indent the row within a folder.
+ * @param nextFeedId The ID of the following feed, or `null` when this is the last feed.
+ * @param folderId The containing folder's ID, or `null` for feeds without a folder.
+ * @param folderBelowBoundary The drop boundary used when a folder is dragged below this row.
  */
 @Composable
 private fun FeedRow(
@@ -1014,12 +1015,9 @@ private fun FeedRow(
 }
 
 /**
- * The feed row's error marker. A purely decorative (non-clickable) icon, so the tooltip is attached
- * with a bare [TooltipBox] rather than by turning it into a button.
+ * Displays an error indicator for a feed, with an explanatory tooltip when the feed is gone.
  *
- * @param gone True when the feed responded 410 Gone — the one case that needs explaining, since
- *   "the feed no longer exists" isn't obvious from a generic error icon. Takes precedence when a
- *   stale consecutive-error count is also present.
+ * @param gone Whether the feed responded with HTTP 410 Gone.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
