@@ -36,6 +36,19 @@ import javax.swing.SwingUtilities
  * @param hideLabel Label for hiding the window.
  * @param newArticleNotifications Notifications displayed through the tray icon.
  */
+/**
+ * Displays the application tray icon and handles its menu actions and notifications on macOS.
+ *
+ * @param image The tray icon image; when `null`, no tray UI is displayed.
+ * @param tooltip The tray icon tooltip.
+ * @param showLabel The menu label used when the window is hidden.
+ * @param hideLabel The menu label used when the window is visible.
+ * @param quitLabel The menu label for quitting the application.
+ * @param windowVisible Whether the application window is currently visible.
+ * @param onToggle Called when the tray icon or toggle menu item is activated.
+ * @param onQuit Called when the quit menu item is activated.
+ * @param newArticleNotifications Notifications to display as macOS user notifications.
+ */
 @Composable
 internal fun MacTray(
     image: Image?,

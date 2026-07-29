@@ -28,8 +28,11 @@ class NewArticleNotifier {
     }
 
     /**
-     * Sums the new-article counts from a [FeedRepository.refreshAll] result and, if any were
-     * fetched and notifications are enabled, publishes a tray notification via [notify].
+     * Publishes a tray notification when newly fetched articles are available and notifications are enabled.
+     *
+     * @param results The article counts grouped by source; unavailable counts are treated as zero.
+     * @param notificationEnabled Whether tray notifications are enabled.
+     * @param messages Messages used to format the new-articles notification.
      */
     suspend fun notifyIfEnabled(
         results: Map<String, Result<Int>>,

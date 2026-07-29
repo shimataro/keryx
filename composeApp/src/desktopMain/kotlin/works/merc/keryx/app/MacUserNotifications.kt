@@ -82,7 +82,13 @@ internal object MacUserNotifications {
 
     // Not private: JNA's Structure/Callback machinery reflects into these types' @JvmField members,
     // and a private *enclosing* class blocks that reflective access regardless of the field's own
-    // modifier (Structure.getFieldValue() throws IllegalAccessException otherwise).
+    /**
+         * Handles completion of a notification authorization request.
+         *
+         * @param blockLiteral The native block instance associated with the callback.
+         * @param granted A nonzero value if authorization was granted.
+         * @param error The native error object, or `null` when no error is available.
+         */
     fun interface AuthorizationCompletionBlock : Callback {
         fun invoke(blockLiteral: Pointer?, granted: Byte, error: Pointer?)
     }
@@ -109,9 +115,9 @@ internal object MacUserNotifications {
     private val liveCallbacks = mutableListOf<Callback>()
 
     /**
-     * Requests notification authorization. Safe to call on every launch: if the user already
-     * answered in a previous session, this resolves immediately without re-prompting. Best-effort —
-     * the result is only logged, nothing else consumes it.
+     * Requests authorization for alert and sound notifications.
+     *
+     * The authorization result is logged and not otherwise exposed.
      */
     fun requestAuthorization() {
         val callback = AuthorizationCompletionBlock { _, granted, _ ->
@@ -139,10 +145,10 @@ internal object MacUserNotifications {
     }
 
     /**
-     * Posts a best-effort notification. No authorization-status check beforehand: if not
-     * authorized, this silently no-ops (matching the failure mode of the previous
-     * `TrayIcon.displayMessage`-based approach) — a cached "was authorized" flag would be
-     * unreliable anyway, since the user can revoke permission at any time with no callback to us.
+     * Posts a macOS user notification with the specified title and body.
+     *
+     * @param title The notification title.
+     * @param body The notification body.
      */
     fun post(title: String, body: String) {
         val content = msgSendId_id.invokePointer(arrayOf(unMutableNotificationContentClass, allocSel))
@@ -167,6 +173,12 @@ internal object MacUserNotifications {
         msgSendVoid_id.invoke(Void.TYPE, arrayOf(content, releaseSel))
     }
 
+    /**
+     * Creates an `NSString` from a UTF-8 encoded Kotlin string.
+     *
+     * @param value The string to convert.
+     * @return A pointer to the resulting native `NSString`.
+     */
     private fun nsString(value: String): Pointer {
         val bytes = value.toByteArray(Charsets.UTF_8)
         val memory = Memory((bytes.size + 1).toLong())

@@ -618,6 +618,9 @@ suspend fun subscribeFeed(url: String): Result<Feeds> = feedRepository.subscribe
         }
     }
 
+    /**
+     * Refreshes all feeds, notifies about newly available articles when enabled, and synchronizes data.
+     */
     fun refreshAll() {
         if (activityCenter.feedRefreshing.value) return
         _pinnedReadArticles.value = emptyMap()
