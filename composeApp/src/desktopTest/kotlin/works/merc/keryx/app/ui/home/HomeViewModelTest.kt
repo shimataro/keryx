@@ -574,6 +574,48 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun refreshAllKeepsSelectedArticlePinnedAndVisibleUnderUnreadOnly() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        val article1 = db.articlesQueries.getById("a1").executeAsOne()
+        vm.selectArticle(article1)
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+
+        vm.refreshAll()
+        testScheduler.advanceUntilIdle()
+
+        // a1 was selected (now read) and must stay pinned/visible; a2 is still unread on its own.
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+    }
+
+    @Test
+    fun syncKeepsSelectedArticlePinnedAndVisibleUnderUnreadOnly() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        val article1 = db.articlesQueries.getById("a1").executeAsOne()
+        vm.selectArticle(article1)
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+
+        vm.sync()
+        testScheduler.advanceUntilIdle()
+
+        // a1 was selected (now read) and must stay pinned/visible; a2 is still unread on its own.
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+    }
+
+    @Test
     fun markAllReadOnStarredFilterDoesNotForceSelectedArticleReadState() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L, isStarred = 1L)

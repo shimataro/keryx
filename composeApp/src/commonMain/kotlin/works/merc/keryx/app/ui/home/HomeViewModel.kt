@@ -495,16 +495,21 @@ class HomeViewModel(
     fun setUnreadOnly(value: Boolean) {
         _unreadOnly.value = value
         if (value) {
-            val selected = _selectedArticle.value
-            _pinnedReadArticles.value = if (selected != null && selected.is_read == 1L) {
-                mapOf(selected.id to selected)
-            } else {
-                emptyMap()
-            }
+            _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         }
         settingsRepository.saveLocalSettings(
             settingsRepository.getLocalSettings().copy(lastUnreadOnly = value),
         )
+    }
+
+    /**
+     * Pinned-read map keeping only the currently selected article (if already read). Used
+     * wherever an external data change (refresh, sync, unread-only toggle) would otherwise wipe
+     * pins that other in-view articles no longer need, but the selected one should survive.
+     */
+    private fun pinnedReadArticlesKeepingSelected(): Map<String, Articles> {
+        val selected = _selectedArticle.value
+        return if (selected != null && selected.is_read == 1L) mapOf(selected.id to selected) else emptyMap()
     }
 
     fun toggleSort() {
@@ -623,7 +628,7 @@ suspend fun subscribeFeed(url: String): Result<Feeds> = feedRepository.subscribe
      */
     fun refreshAll() {
         if (activityCenter.feedRefreshing.value) return
-        _pinnedReadArticles.value = emptyMap()
+        _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         viewModelScope.launch {
             val results = activityCenter.trackFeedRefresh { feedRepository.refreshAll() }
             newArticleNotifier.notifyIfEnabled(
@@ -634,7 +639,7 @@ suspend fun subscribeFeed(url: String): Result<Feeds> = feedRepository.subscribe
     }
 
     fun sync() {
-        _pinnedReadArticles.value = emptyMap()
+        _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         viewModelScope.launch { syncRepository.sync() }
     }
 
