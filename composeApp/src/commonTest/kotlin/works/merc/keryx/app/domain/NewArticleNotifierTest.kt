@@ -4,8 +4,20 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import works.merc.keryx.app.core.FeedTimeoutException
+import works.merc.keryx.app.core.KeryxException
+import works.merc.keryx.app.core.Result
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+/** A [NotificationMessages] fake returning a canned string keyed off the summed count. */
+private class NewArticleNotifierTestNotificationMessages : NotificationMessages {
+    override suspend fun feedGone(feedTitle: String): String = "gone:$feedTitle"
+    override suspend fun feedUrlChanged(feedTitle: String): String = "urlChanged:$feedTitle"
+    override suspend fun newArticles(count: Int): String = "new:$count"
+    override suspend fun syncFailed(exception: KeryxException): String = "syncFailed:${exception::class.simpleName}"
+}
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class NewArticleNotifierTest {
@@ -16,16 +28,71 @@ class NewArticleNotifierTest {
      * has no [NotificationCenter] dependency to write to at all — so this asserts what remains.
      */
     @Test
-    fun notifyBackgroundEmitsTrayEventOnly() = runTest {
+    fun notifyEmitsTrayEventOnly() = runTest {
         val notifier = NewArticleNotifier()
         val tray = mutableListOf<String>()
         val job = launch { notifier.trayEvents.collect { tray.add(it) } }
         runCurrent()
 
-        notifier.notifyBackground("3 new articles available")
+        notifier.notify("3 new articles available")
         runCurrent()
 
         assertEquals(listOf("3 new articles available"), tray)
+
+        job.cancel()
+    }
+
+    @Test
+    fun notifyIfEnabledEmitsWhenSummedCountIsPositiveAndNotificationsEnabled() = runTest {
+        val notifier = NewArticleNotifier()
+        val tray = mutableListOf<String>()
+        val job = launch { notifier.trayEvents.collect { tray.add(it) } }
+        runCurrent()
+
+        val results = mapOf(
+            "f1" to Result.Ok(2),
+            "f2" to Result.Ok(3),
+        )
+        notifier.notifyIfEnabled(results, notificationEnabled = true, messages = NewArticleNotifierTestNotificationMessages())
+        runCurrent()
+
+        assertEquals(listOf("new:5"), tray)
+
+        job.cancel()
+    }
+
+    @Test
+    fun notifyIfEnabledDoesNotEmitWhenSummedCountIsZero() = runTest {
+        val notifier = NewArticleNotifier()
+        val tray = mutableListOf<String>()
+        val job = launch { notifier.trayEvents.collect { tray.add(it) } }
+        runCurrent()
+
+        // A mix of a zero-count success and a failure: both contribute nothing to the sum.
+        val results = mapOf(
+            "f1" to Result.Ok(0),
+            "f2" to Result.Err(FeedTimeoutException()),
+        )
+        notifier.notifyIfEnabled(results, notificationEnabled = true, messages = NewArticleNotifierTestNotificationMessages())
+        runCurrent()
+
+        assertTrue(tray.isEmpty())
+
+        job.cancel()
+    }
+
+    @Test
+    fun notifyIfEnabledDoesNotEmitWhenNotificationsDisabled() = runTest {
+        val notifier = NewArticleNotifier()
+        val tray = mutableListOf<String>()
+        val job = launch { notifier.trayEvents.collect { tray.add(it) } }
+        runCurrent()
+
+        val results = mapOf("f1" to Result.Ok(4))
+        notifier.notifyIfEnabled(results, notificationEnabled = false, messages = NewArticleNotifierTestNotificationMessages())
+        runCurrent()
+
+        assertTrue(tray.isEmpty())
 
         job.cancel()
     }

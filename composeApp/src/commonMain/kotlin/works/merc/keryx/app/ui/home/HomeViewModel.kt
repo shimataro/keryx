@@ -52,6 +52,8 @@ import works.merc.keryx.app.domain.ArticleSearchResult
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
+import works.merc.keryx.app.domain.NewArticleNotifier
+import works.merc.keryx.app.domain.NotificationMessages
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
@@ -80,6 +82,8 @@ class HomeViewModel(
     private val cloudSession: CloudSession,
     private val activityCenter: ActivityCenter,
     private val clock: Clock,
+    private val newArticleNotifier: NewArticleNotifier,
+    private val notificationMessages: NotificationMessages,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     // Imperative read/star DB writes run here instead of the UI thread. Single-threaded so writes
     // stay serialized (one writer, as they were on the UI thread) — the JVM SQLite driver opens a
@@ -618,7 +622,10 @@ suspend fun subscribeFeed(url: String): Result<Feeds> = feedRepository.subscribe
         if (activityCenter.feedRefreshing.value) return
         _pinnedReadArticles.value = emptyMap()
         viewModelScope.launch {
-            activityCenter.trackFeedRefresh { feedRepository.refreshAll() }
+            val results = activityCenter.trackFeedRefresh { feedRepository.refreshAll() }
+            newArticleNotifier.notifyIfEnabled(
+                results, settingsRepository.getLocalSettings().notificationEnabled, notificationMessages,
+            )
             syncRepository.sync()
         }
     }
