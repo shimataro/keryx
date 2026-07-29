@@ -100,6 +100,9 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                     idleEnabled = vm.connectingType == null && !vm.resetting,
                     failed = vm.connectFailedType == type,
                     lastSyncedAtText = if (connected == type) vm.lastSyncedAtText else null,
+                    // Only meaningful for the connected provider: it's why its background syncs
+                    // are currently failing (an expired token, a transient outage, bad cloud data).
+                    lastSyncErrorText = if (connected == type) vm.lastSyncErrorText else null,
                     resetting = vm.resetting,
                     // No provider connected yet: a fresh connect is low-risk, so do it directly. A
                     // different provider connected: confirm the switch first.
@@ -220,6 +223,7 @@ private fun CloudStorageType.disconnectLabel(): StringResource = when (this) {
  * @param onCancel Invoked to abort an in-progress connection.
  * @param onDisconnect Invoked to disconnect the provider.
  * @param onResetCloudData Invoked to reset the provider's cloud data.
+ * @param lastSyncErrorText Why this (connected) provider's syncs are currently failing, or null.
  */
 @Composable
 private fun CloudProviderRow(
@@ -230,6 +234,7 @@ private fun CloudProviderRow(
     idleEnabled: Boolean,
     failed: Boolean,
     lastSyncedAtText: String? = null,
+    lastSyncErrorText: String? = null,
     resetting: Boolean = false,
     onSelect: () -> Unit,
     onCancel: () -> Unit,
@@ -329,9 +334,13 @@ private fun CloudProviderRow(
                 modifier = Modifier.padding(start = 28.dp, top = 2.dp),
             )
         }
-        if (failed) {
+        // An in-progress sync failure (already localized per exception type) takes precedence: it
+        // describes the live state of a working connection, whereas `failed` only reports that the
+        // last connect attempt didn't complete.
+        val errorText = lastSyncErrorText ?: stringResource(Res.string.setup_auth_failed).takeIf { failed }
+        errorText?.let {
             Text(
-                stringResource(Res.string.setup_auth_failed),
+                it,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(start = 28.dp, bottom = 4.dp),

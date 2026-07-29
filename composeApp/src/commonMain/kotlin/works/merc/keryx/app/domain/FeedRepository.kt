@@ -11,8 +11,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import works.merc.keryx.app.core.AppNotification
+import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.FEED_ERROR_REASON_GONE
 import works.merc.keryx.app.core.FeedNotFoundException
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.FtsManager
@@ -222,7 +224,15 @@ suspend fun previewFeed(url: String): Result<FetchedFeed> = feedFetcher.fetch(ur
                     feeds.incrementErrorCount(ex.messageText, clock.nowMillis(), feed.id)
                 }
                 if (ex is FeedNotFoundException && ex.isGone) {
-                    notify(messages.feedGone(feed.displayTitle()), AppNotificationLevel.WARNING)
+                    // error_count stays untouched (410 is permanent, not a retry candidate), so record
+                    // the reason in last_error instead — that's what keeps the feed list flagged after
+                    // the notification is dismissed. Cleared by resetErrorCount if the feed comes back.
+                    feeds.markGone(FEED_ERROR_REASON_GONE, clock.nowMillis(), feed.id)
+                    notify(
+                        messages.feedGone(feed.displayTitle()),
+                        AppNotificationLevel.WARNING,
+                        action = AppNotificationAction.ShowFeedDetail(feed.id),
+                    )
                 }
                 return RefreshOutcome(r, hadArticles = false)
             }
@@ -255,7 +265,11 @@ suspend fun previewFeed(url: String): Result<FetchedFeed> = feedFetcher.fetch(ur
 
         if (fetched.redirectUrl != null && fetched.redirectUrl != feed.url) {
             feeds.updateUrl(fetched.redirectUrl, clock.nowMillis(), feed.id)
-            notify(messages.feedUrlChanged(feed.displayTitle()), AppNotificationLevel.WARNING)
+            notify(
+                messages.feedUrlChanged(feed.displayTitle()),
+                AppNotificationLevel.WARNING,
+                action = AppNotificationAction.ShowFeedDetail(feed.id),
+            )
         }
 
         val newCount = articleRepository.upsertParsed(feed.id, fetched.articles)
@@ -308,14 +322,16 @@ suspend fun previewFeed(url: String): Result<FetchedFeed> = feedFetcher.fetch(ur
      *
      * @param message The notification message.
      * @param level The notification severity level.
+     * @param action The next action offered when the user acts on the notification.
      */
-    private suspend fun notify(message: String, level: AppNotificationLevel) {
+    private suspend fun notify(message: String, level: AppNotificationLevel, action: AppNotificationAction? = null) {
         notificationCenter.add(
             AppNotification(
                 id = IdGenerator.newId(),
                 level = level,
                 message = message,
                 timestampMillis = clock.nowMillis(),
+                action = action,
             ),
         )
     }

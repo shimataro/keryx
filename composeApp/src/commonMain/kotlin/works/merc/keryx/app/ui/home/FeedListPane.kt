@@ -22,10 +22,15 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -55,6 +60,7 @@ import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import works.merc.keryx.app.core.ArticleFilter
+import works.merc.keryx.app.core.FEED_ERROR_REASON_GONE
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
@@ -89,6 +95,7 @@ import works.merc.keryx.app.resources.home_edit_folder
 import works.merc.keryx.app.resources.home_edit_folder_menu
 import works.merc.keryx.app.resources.home_edit_tag
 import works.merc.keryx.app.resources.home_edit_tag_menu
+import works.merc.keryx.app.resources.home_feed_gone
 import works.merc.keryx.app.resources.home_folders
 import works.merc.keryx.app.resources.home_move_to_folder
 import works.merc.keryx.app.resources.home_new_folder_hint
@@ -110,6 +117,7 @@ import works.merc.keryx.app.resources.home_tags
 import works.merc.keryx.app.resources.home_unsubscribe_body
 import works.merc.keryx.app.resources.home_unsubscribe_menu
 import works.merc.keryx.app.resources.home_unsubscribe_title
+import works.merc.keryx.app.ui.common.FlatTooltipContent
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
@@ -989,13 +997,12 @@ private fun FeedRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (feed.error_count > 0) {
-                KeryxIcon(
-                    KeryxIcons.ErrorFilled,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(16.dp),
-                )
+            // A 410-Gone feed deliberately keeps error_count at 0 (it is permanent, not a retry
+            // candidate), so it is recognized by its last_error marker instead — otherwise a
+            // disappeared feed would look completely normal here once its notification is dismissed.
+            val gone = feed.last_error == FEED_ERROR_REASON_GONE
+            if (feed.error_count > 0 || gone) {
+                FeedErrorIndicator(gone)
                 Spacer(Modifier.width(4.dp))
             }
             if (count > 0) CountBadge(count, selected, focused)
@@ -1003,5 +1010,37 @@ private fun FeedRow(
         if (nextFeedId == null) {
             InsertionLine(indented, visible = activeBoundaryState.value == belowBoundary)
         }
+    }
+}
+
+/**
+ * The feed row's error marker. A purely decorative (non-clickable) icon, so the tooltip is attached
+ * with a bare [TooltipBox] rather than by turning it into a button.
+ *
+ * @param gone True when the feed responded 410 Gone — the one case that needs explaining, since
+ *   "the feed no longer exists" isn't obvious from a generic error icon. Takes precedence when a
+ *   stale consecutive-error count is also present.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FeedErrorIndicator(gone: Boolean) {
+    val icon = @Composable {
+        KeryxIcon(
+            KeryxIcons.ErrorFilled,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.error,
+            modifier = Modifier.size(16.dp),
+        )
+    }
+    if (!gone) {
+        icon()
+        return
+    }
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { FlatTooltipContent(stringResource(Res.string.home_feed_gone)) },
+        state = rememberTooltipState(),
+    ) {
+        icon()
     }
 }

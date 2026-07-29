@@ -400,6 +400,8 @@ class SyncRepositoryTest {
         assertEquals(1, notes.size)
         assertEquals(AppNotificationLevel.ERROR, notes.first().level)
         assertEquals("syncFailed:SchemaVersionException", notes.first().message)
+        // The app is out of date; the fix lives on the updates tab.
+        assertEquals(AppNotificationAction.ShowSettingsTab("updates"), notes.first().action)
     }
 
     @Test
@@ -421,7 +423,7 @@ class SyncRepositoryTest {
         assertEquals(1, notes.size)
         assertEquals(AppNotificationLevel.ERROR, notes.first().level)
         assertEquals("syncFailed:CloudDataIncompatibleException", notes.first().message)
-        assertEquals(AppNotificationAction.RESET_CLOUD_DATA, notes.first().action)
+        assertEquals(AppNotificationAction.ResetCloudData, notes.first().action)
     }
 
     @Test
@@ -444,7 +446,7 @@ class SyncRepositoryTest {
     fun mergeFailureWithCompatibleSchemaIsReportedAsStorageException() = runTest {
         // The cloud DB has a valid schema, but a local table is missing, forcing a structural
         // merge failure. Because the cloud DB itself is schema-compatible, this is an app bug
-        // (not incompatible data) and must NOT offer the destructive RESET_CLOUD_DATA action.
+        // (not incompatible data) and must NOT offer the destructive reset-cloud-data action.
         val cloud = FakeCloudStorage()
         cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1")
         // Remove a local table so merge fails structurally while the cloud DB is valid.
@@ -462,8 +464,9 @@ class SyncRepositoryTest {
         assertEquals(1, notes.size)
         assertEquals(AppNotificationLevel.ERROR, notes.first().level)
         assertEquals("syncFailed:CloudStorageException", notes.first().message)
-        // A transient / app-bug error must not offer the reset-cloud-data action.
-        assertNull(notes.first().action)
+        // A transient / app-bug error must not offer the destructive reset; it points at the
+        // cloud-sync tab (reconnect / disconnect / reset all live there) instead.
+        assertEquals(AppNotificationAction.ShowSettingsTab("cloud_sync"), notes.first().action)
     }
 
     @Test
@@ -478,8 +481,41 @@ class SyncRepositoryTest {
         assertEquals(1, notes.size)
         assertEquals(AppNotificationLevel.ERROR, notes.first().level)
         assertEquals("syncFailed:CloudAuthException", notes.first().message)
-        // A non-recoverable-by-reset error carries no action button.
-        assertNull(notes.first().action)
+        // Re-authorizing is done on the cloud-sync tab, so that's where acting on it leads.
+        assertEquals(AppNotificationAction.ShowSettingsTab("cloud_sync"), notes.first().action)
+    }
+
+    @Test
+    fun lastSyncErrorIsSetOnFailureAndClearedOnSuccess() = runTest {
+        // The cloud-sync settings tab reads this to show why sync is currently broken, so it must
+        // outlive the (dismissible) notification and go away once sync works again.
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1")
+        cloud.queueDownload(Result.Err(CloudAuthException("no token")))
+        val repo = newRepo(cloud)
+
+        assertNull(repo.lastSyncError.value)
+
+        assertIs<Result.Err>(repo.sync())
+        assertEquals("syncFailed:CloudAuthException", repo.lastSyncError.value)
+
+        assertIs<Result.Ok<Unit>>(repo.sync())
+        assertNull(repo.lastSyncError.value)
+    }
+
+    @Test
+    fun lastSyncErrorIsLeftAloneByAnInternallyHandledConflict() = runTest {
+        // A rev conflict is retried internally and raises no notification, so it must not overwrite
+        // (or clear) the reason shown in the settings tab either. Here every retry conflicts, so the
+        // run ends as a CloudStorageException — the reason the user should see.
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1")
+        repeat(SYNC_MAX_RETRY) { cloud.queueUpload(Result.Err(SyncConflictException())) }
+        val repo = newRepo(cloud)
+
+        assertIs<Result.Err>(repo.sync())
+
+        assertEquals("syncFailed:CloudStorageException", repo.lastSyncError.value)
     }
 
     @Test

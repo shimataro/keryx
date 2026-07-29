@@ -4,6 +4,8 @@ import app.cash.sqldelight.db.SqlDriver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -57,6 +59,14 @@ class SyncRepository(
 
     private val mutex = Mutex()
     private var debounceJob: Job? = null
+    private val _lastSyncError = MutableStateFlow<String?>(null)
+
+    /**
+     * Why the last sync failed, or null when it succeeded (or none has run yet) — the same localized
+     * text as the notification-center entry, kept as state so the cloud-sync settings tab can show
+     * "why sync is broken right now" even after that notification was dismissed.
+     */
+    val lastSyncError: StateFlow<String?> = _lastSyncError
 
     override fun scheduleSync() {
         if (cloudProvider() == null) return
@@ -98,32 +108,51 @@ class SyncRepository(
     }
 
     /**
-     * Publishes a notification for sync failures that require user attention.
+     * Publishes a notification for sync failures that require user attention, and mirrors the same
+     * failure into [lastSyncError] so the settings screen can show why sync is currently broken even
+     * after the notification is dismissed.
      *
-     * Sync conflicts are excluded because they are handled internally. Cloud data incompatibility
-     * failures include an action to reset the cloud data.
+     * Sync conflicts are excluded because they are handled internally (and so leave [lastSyncError]
+     * as it was — they are not a user-visible failure either way).
      *
      * @param result The outcome of the sync operation.
      */
     private suspend fun emitErrorNotification(result: Result<Unit>) {
         if (result is Result.Err && result.exception !is SyncConflictException) {
-            // A corrupt/incompatible cloud DB is only fixable by resetting it, so offer that as an
-            // inline action. Other errors (auth, transient) carry no action.
-            val action = if (result.exception is CloudDataIncompatibleException) {
-                AppNotificationAction.RESET_CLOUD_DATA
-            } else {
-                null
-            }
+            val message = notificationMessages.syncFailed(result.exception)
+            _lastSyncError.value = message
             notificationCenter.addCoalescing(
                 AppNotification(
                     id = IdGenerator.newId(),
                     level = AppNotificationLevel.ERROR,
-                    message = notificationMessages.syncFailed(result.exception),
+                    message = message,
                     timestampMillis = clock.nowMillis(),
-                    action = action,
+                    action = nextActionFor(result.exception),
                 ),
             )
+        } else if (result is Result.Ok) {
+            // Sync works again — drop the stale reason (a SyncConflictException, handled internally,
+            // deliberately falls through both branches and changes nothing).
+            _lastSyncError.value = null
         }
+    }
+
+    /**
+     * The "next action" offered on a sync-failure notification: where the user can actually do
+     * something about it.
+     *
+     * - A corrupt / incompatible cloud DB is only fixable by discarding it, so it keeps its dedicated
+     *   destructive inline button.
+     * - An out-of-date app (cloud schema is newer) is fixed by updating, so point at the updates tab.
+     * - Everything else (auth expired, transient storage/network failure, app bug) is actionable on
+     *   the cloud-sync tab: reconnect / disconnect / reset all live there, and that tab also shows
+     *   [lastSyncError] as the detail.
+     */
+    private fun nextActionFor(exception: KeryxException): AppNotificationAction = when (exception) {
+        is CloudDataIncompatibleException -> AppNotificationAction.ResetCloudData
+        // Tab ids as declared in ui/settings/SettingsDialog.kt.
+        is SchemaVersionException -> AppNotificationAction.ShowSettingsTab("updates")
+        else -> AppNotificationAction.ShowSettingsTab("cloud_sync")
     }
 
     private suspend fun syncLocked(): Result<Unit> {

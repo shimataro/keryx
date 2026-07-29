@@ -12,7 +12,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.FEED_ERROR_REASON_GONE
 import works.merc.keryx.app.core.FeedTimeoutException
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.FtsManager
@@ -332,9 +334,37 @@ class FeedRepositoryTest {
             val notifications = notificationCenter.items.value
             assertEquals(1, notifications.size)
             assertTrue(notifications.single().message.startsWith("gone:"))
+            // Acting on the warning jumps to the feed in the sidebar.
+            assertEquals(AppNotificationAction.ShowFeedDetail(feed.id), notifications.single().action)
 
             val after = db.feedsQueries.getById(feed.id).executeAsOne()
             assertEquals(0, after.error_count, "FeedNotFoundException is explicitly excluded from error-count increments")
+            // ...so last_error carries the Gone marker instead — the only thing that lets the feed
+            // list keep flagging the feed after the notification is dismissed.
+            assertEquals(FEED_ERROR_REASON_GONE, after.last_error)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun goneMarkerIsClearedWhenTheFeedComesBack(): Unit = runBlocking {
+        // The Gone marker is a live state, not a permanent brand: a feed that starts answering again
+        // must lose its feed-list flag, via the existing resetErrorCount on the success path.
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            repo.subscribeFeed("https://ex.com/feed")
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+
+            val goneRepo = newRepo(db, driver, fetcherWith { respond("", HttpStatusCode.Gone) })
+            assertIs<Result.Err>(goneRepo.refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne()))
+            assertEquals(FEED_ERROR_REASON_GONE, db.feedsQueries.getById(feed.id).executeAsOne().last_error)
+
+            val backRepo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            assertIs<Result.Ok<Int>>(backRepo.refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne()))
+
+            assertNull(db.feedsQueries.getById(feed.id).executeAsOne().last_error)
         } finally {
             driver.close()
         }
@@ -418,6 +448,7 @@ class FeedRepositoryTest {
             val notifications = notificationCenter.items.value
             assertEquals(1, notifications.size)
             assertTrue(notifications.single().message.startsWith("urlChanged:"))
+            assertEquals(AppNotificationAction.ShowFeedDetail(feed.id), notifications.single().action)
         } finally {
             driver.close()
         }

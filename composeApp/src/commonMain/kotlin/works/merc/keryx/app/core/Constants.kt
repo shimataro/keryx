@@ -25,6 +25,15 @@ const val SETTING_ARTICLE_LIST_DEFAULT_UNREAD_ONLY = "article_list_default_unrea
 
 const val CACHE_RETENTION_DAYS_DEFAULT = 30
 
+// --- Feed health ---
+/**
+ * Internal marker written to `feeds.last_error` when a feed responds 410 Gone. A fixed sentinel (not
+ * a user-facing message and not a raw exception text) so the UI can recognize the state and render
+ * its own localized wording. 410 deliberately does not bump `error_count` (it is permanent, not a
+ * retry candidate), so this column is the only signal a feed is gone.
+ */
+const val FEED_ERROR_REASON_GONE = "gone"
+
 // --- Full-text search ---
 /** Minimum search term length. The trigram tokenizer doesn't index terms under 3 characters, so shorter terms are excluded from search. */
 const val SEARCH_MIN_TERM_LENGTH = 3

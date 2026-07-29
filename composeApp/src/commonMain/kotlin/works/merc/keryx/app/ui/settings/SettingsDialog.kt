@@ -29,12 +29,14 @@ import works.merc.keryx.app.resources.settings_updates
  * Displays the application settings in a tabbed dialog.
  *
  * @param onDismiss Called when the dialog should be dismissed.
+ * @param initialTabId The tab shown when the dialog opens. Defaults to the first tab; a notification's
+ *   `ShowSettingsTab` action opens the dialog directly on the tab where the problem is fixable.
  */
 @Composable
-fun SettingsDialog(onDismiss: () -> Unit) {
+fun SettingsDialog(onDismiss: () -> Unit, initialTabId: String = "general") {
     val vm = koinInject<SettingsViewModel>()
 
-    var selectedTabId by remember { mutableStateOf("general") }
+    var selectedTabId by remember(initialTabId) { mutableStateOf(initialTabId) }
 
     // The cloud-sync tab exists only when at least one cloud provider was configured at build time
     // (mirrors the old section-level hiding). availableCloudTypes is stable across the dialog's life.

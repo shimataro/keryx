@@ -441,7 +441,9 @@ private fun NotificationsBell(notifVm: NotificationCenterViewModel) {
                 onDismissRequest = { showNotifications = false },
                 properties = PopupProperties(focusable = true, dismissOnClickOutside = true),
             ) {
-                NotificationCenterSheet(notifVm)
+                // Close the popover once a notification's action leads somewhere, so the destination
+                // (feed list selection / settings dialog / explanation dialog) is actually visible.
+                NotificationCenterSheet(notifVm, onNavigated = { showNotifications = false })
             }
         }
     }

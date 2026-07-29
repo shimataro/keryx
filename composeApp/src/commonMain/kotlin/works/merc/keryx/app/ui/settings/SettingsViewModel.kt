@@ -111,12 +111,23 @@ class SettingsViewModel(
     var lastSyncedAtText by mutableStateOf<String?>(null)
         private set
 
+    /**
+     * Why the last sync failed, or null when sync is healthy. Mirrors [SyncRepository.lastSyncError],
+     * so the cloud-sync tab shows the current reason even after the notification was dismissed.
+     * Distinct from [connectFailedType], which only covers a failed connect (OAuth) flow.
+     */
+    var lastSyncErrorText by mutableStateOf<String?>(null)
+        private set
+
     /** Set by [checkForUpdate]. Does not affect the automatic update-check schedule. */
     var updateCheckResult by mutableStateOf<UpdateStatus?>(null)
         private set
 
     init {
         refreshLastSyncedAt()
+        viewModelScope.launch {
+            syncRepository.lastSyncError.collect { lastSyncErrorText = it }
+        }
         viewModelScope.launch {
             // Skip the initial replay (current state at VM creation) — already handled by the
             // explicit call above. Only react to genuine sync completions afterward, covering

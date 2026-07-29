@@ -12,6 +12,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -44,6 +45,12 @@ import works.merc.keryx.app.resources.settings_update_open_release_page
 @Composable
 internal fun UpdatesTabContent(vm: SettingsViewModel) {
     val settings by vm.localSettings.collectAsState()
+    // Opening the tab already means "I want to know if there's an update", so run the check the user
+    // would otherwise have to trigger by hand — no result yet means nothing at all would be shown.
+    // Equivalent to one press of "check now", so it never perturbs the automatic check schedule.
+    LaunchedEffect(Unit) {
+        if (vm.updateCheckResult == null) vm.checkForUpdate()
+    }
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         Text(
             stringResource(Res.string.settings_update_check_interval),
