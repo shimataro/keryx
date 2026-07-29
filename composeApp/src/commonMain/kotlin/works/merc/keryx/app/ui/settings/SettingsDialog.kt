@@ -46,8 +46,6 @@ import works.merc.keryx.app.resources.settings_updates
 fun SettingsDialog(onDismiss: () -> Unit, initialTabId: String = "general", tabRequestToken: Int = 0) {
     val vm = koinInject<SettingsViewModel>()
 
-    var selectedTabId by rememberSelectedTabId(initialTabId, tabRequestToken)
-
     // The cloud-sync tab exists only when at least one cloud provider was configured at build time
     // (mirrors the old section-level hiding). availableCloudTypes is stable across the dialog's life.
     val tabs = buildList {
@@ -59,6 +57,8 @@ fun SettingsDialog(onDismiss: () -> Unit, initialTabId: String = "general", tabR
         add(KeryxDialogTab("data", stringResource(Res.string.settings_tab_data), KeryxIcons.Storage))
         add(KeryxDialogTab("updates", stringResource(Res.string.settings_updates), KeryxIcons.Update))
     }
+
+    var selectedTabId by rememberSelectedTabId(initialTabId, tabRequestToken, tabs)
 
     KeryxTabDialog(
         onDismissRequest = onDismiss,
@@ -79,7 +79,16 @@ fun SettingsDialog(onDismiss: () -> Unit, initialTabId: String = "general", tabR
 
 /** Re-initializes to [initialTabId] whenever [tabRequestToken] changes — a fresh explicit
  *  navigation request should always land on the requested tab, even if it's the same tab id
- *  the dialog is already showing (see App.kt's ShowSettingsTab / OpenSettings handling). */
+ *  the dialog is already showing (see App.kt's ShowSettingsTab / OpenSettings handling).
+ *  Falls back to the first entry of [tabs] when [initialTabId] doesn't match any of them (e.g. a
+ *  `ShowSettingsTab("cloud_sync")` notification surviving into a build with no cloud provider
+ *  configured), so the dialog never opens on a tab id that isn't actually rendered. */
 @Composable
-internal fun rememberSelectedTabId(initialTabId: String, tabRequestToken: Int): MutableState<String> =
-    remember(tabRequestToken) { mutableStateOf(initialTabId) }
+internal fun rememberSelectedTabId(
+    initialTabId: String,
+    tabRequestToken: Int,
+    tabs: List<KeryxDialogTab>,
+): MutableState<String> =
+    remember(tabRequestToken) {
+        mutableStateOf(if (tabs.any { it.id == initialTabId }) initialTabId else tabs.first().id)
+    }

@@ -8,16 +8,32 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import works.merc.keryx.app.ui.common.KeryxDialogTab
+import works.merc.keryx.app.ui.common.KeryxIcons
 
 @OptIn(ExperimentalTestApi::class)
 class SettingsDialogTabStateTest {
+
+    private val tabsWithCloudSync = listOf(
+        KeryxDialogTab("general", "General", KeryxIcons.Tune),
+        KeryxDialogTab("cloud_sync", "Cloud Sync", KeryxIcons.Cloud),
+    )
+
+    private val tabsWithoutCloudSync = listOf(
+        KeryxDialogTab("general", "General", KeryxIcons.Tune),
+        KeryxDialogTab("data", "Data", KeryxIcons.Storage),
+    )
 
     @Test
     fun initializesToInitialTabId() = runDesktopComposeUiTest {
         lateinit var selectedTabIdState: MutableState<String>
 
         setContent {
-            selectedTabIdState = rememberSelectedTabId(initialTabId = "cloud_sync", tabRequestToken = 0)
+            selectedTabIdState = rememberSelectedTabId(
+                initialTabId = "cloud_sync",
+                tabRequestToken = 0,
+                tabs = tabsWithCloudSync,
+            )
         }
         waitForIdle()
 
@@ -29,7 +45,11 @@ class SettingsDialogTabStateTest {
         lateinit var selectedTabIdState: MutableState<String>
 
         setContent {
-            selectedTabIdState = rememberSelectedTabId(initialTabId = "cloud_sync", tabRequestToken = 0)
+            selectedTabIdState = rememberSelectedTabId(
+                initialTabId = "cloud_sync",
+                tabRequestToken = 0,
+                tabs = tabsWithCloudSync,
+            )
         }
         waitForIdle()
 
@@ -46,7 +66,7 @@ class SettingsDialogTabStateTest {
         lateinit var selectedTabIdState: MutableState<String>
 
         setContent {
-            selectedTabIdState = rememberSelectedTabId(initialTabId, tabRequestToken)
+            selectedTabIdState = rememberSelectedTabId(initialTabId, tabRequestToken, tabsWithCloudSync)
         }
         waitForIdle()
         assertEquals("cloud_sync", selectedTabIdState.value)
@@ -62,5 +82,47 @@ class SettingsDialogTabStateTest {
         waitForIdle()
 
         assertEquals("cloud_sync", selectedTabIdState.value)
+    }
+
+    @Test
+    fun fallsBackToFirstTabWhenInitialTabIdIsNotInTabs() = runDesktopComposeUiTest {
+        lateinit var selectedTabIdState: MutableState<String>
+
+        setContent {
+            selectedTabIdState = rememberSelectedTabId(
+                initialTabId = "cloud_sync",
+                tabRequestToken = 0,
+                tabs = tabsWithoutCloudSync,
+            )
+        }
+        waitForIdle()
+
+        assertEquals("general", selectedTabIdState.value)
+    }
+
+    @Test
+    fun requestTokenBumpFallsBackWhenTabBecameUnavailable() = runDesktopComposeUiTest {
+        var tabRequestToken by mutableStateOf(0)
+        lateinit var selectedTabIdState: MutableState<String>
+
+        setContent {
+            selectedTabIdState = rememberSelectedTabId(
+                initialTabId = "cloud_sync",
+                tabRequestToken = tabRequestToken,
+                tabs = tabsWithoutCloudSync,
+            )
+        }
+        waitForIdle()
+        assertEquals("general", selectedTabIdState.value)
+
+        selectedTabIdState.value = "data"
+        waitForIdle()
+        assertEquals("data", selectedTabIdState.value)
+
+        // A fresh request re-targets "cloud_sync" again, but it's still unavailable.
+        tabRequestToken++
+        waitForIdle()
+
+        assertEquals("general", selectedTabIdState.value)
     }
 }
