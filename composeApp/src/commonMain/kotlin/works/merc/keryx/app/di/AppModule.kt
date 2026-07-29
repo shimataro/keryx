@@ -87,7 +87,7 @@ val appModule: Module = module {
 
     // ViewModels are app-scoped for this single-window desktop app.
     single { NotificationCenterViewModel(get()) }
-    single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     single { SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get()) }
     single { SetupViewModel(get(), get(), get()) }
 }

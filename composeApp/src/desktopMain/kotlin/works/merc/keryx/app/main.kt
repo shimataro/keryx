@@ -52,7 +52,6 @@ import works.merc.keryx.app.core.WINDOW_DEFAULT_HEIGHT
 import works.merc.keryx.app.core.WINDOW_DEFAULT_WIDTH
 import works.merc.keryx.app.core.WINDOW_MIN_HEIGHT
 import works.merc.keryx.app.core.WINDOW_MIN_WIDTH
-import works.merc.keryx.app.core.valueOrNull
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.di.appModule
 import works.merc.keryx.app.di.configureImageLoader
@@ -562,10 +561,9 @@ private fun maybeRebuildFtsIndex(koin: org.koin.core.Koin) {
 private suspend fun refreshFeedsAndNotify(koin: org.koin.core.Koin) {
     val settingsRepository = koin.get<SettingsRepository>()
     val results = koin.get<ActivityCenter>().trackFeedRefresh { koin.get<FeedRepository>().refreshAll() }
-    val newCount = results.values.sumOf { it.valueOrNull ?: 0 }
-    if (newCount > 0 && settingsRepository.getLocalSettings().notificationEnabled) {
-        koin.get<NewArticleNotifier>().notifyBackground(koin.get<NotificationMessages>().newArticles(newCount))
-    }
+    koin.get<NewArticleNotifier>().notifyIfEnabled(
+        results, settingsRepository.getLocalSettings().notificationEnabled, koin.get<NotificationMessages>(),
+    )
 }
 
 /**

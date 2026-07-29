@@ -42,6 +42,7 @@ import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
+import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.NotificationMessages
 import works.merc.keryx.app.domain.SettingsRepository
@@ -171,6 +172,7 @@ class HomeViewModelTest {
         appKey: String = "",
         feedFetcher: FeedFetcher = failingFetcher(),
         activityCenter: ActivityCenter = ActivityCenter(),
+        newArticleNotifier: NewArticleNotifier = NewArticleNotifier(),
     ): HomeViewModel {
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the subscribe/refresh path's indexMissing() works.
@@ -209,7 +211,9 @@ class HomeViewModelTest {
         )
         return HomeViewModel(
             feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
-            syncRepository, cloudSession, activityCenter, clock, Dispatchers.Unconfined,
+            syncRepository, cloudSession, activityCenter, clock,
+            newArticleNotifier, HomeViewModelTestNotificationMessages(),
+            Dispatchers.Unconfined,
             // dbWriteDispatcher: Unconfined so read/star writes run inline for deterministic assertions.
             Dispatchers.Unconfined,
         ).also { createdViewModels += it }
@@ -951,6 +955,47 @@ class HomeViewModelTest {
         vm.refreshAll()
         testScheduler.advanceUntilIdle()
         // No exception thrown; reaching here is the assertion.
+    }
+
+    @Test
+    fun refreshAllRaisesTrayNotificationWhenNewArticlesArrive() = runTest {
+        db.insertFeed("f1")
+        val notifier = NewArticleNotifier()
+        val tray = mutableListOf<String>()
+        // Plain launch (not backgroundScope): a SharedFlow needs an actively-collecting subscriber
+        // to observe an emission at all (unlike a StateFlow's cached .value, which subscribeAll's
+        // helpers rely on elsewhere in this file), and this scope's advanceUntilIdle() below reliably
+        // pumps it, matching NewArticleNotifierTest's established pattern.
+        val trayJob = launch { notifier.trayEvents.collect { tray.add(it) } }
+        // Explicit Unconfined-on-testScheduler ActivityCenter (mirrors feedRefreshingReflectsActivityCenter):
+        // the default ActivityCenter() runs its stateIn on a real Dispatchers.Default scope, which
+        // would mix real and virtual time here and make the poll below unreliable.
+        val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+        val activityCenter = ActivityCenter(activityScope)
+        val vm = newViewModel(
+            feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) },
+            newArticleNotifier = notifier,
+            activityCenter = activityCenter,
+        )
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        vm.refreshAll()
+        // The feed fetch/parse work hops onto Ktor's real MockEngine dispatcher (not the virtual
+        // test scheduler), so a single advanceUntilIdle() can race it (see docs/testing.md on
+        // mixing runTest with Ktor MockEngine). Poll with short real sleeps until it lands.
+        var waited = 0
+        while (tray.isEmpty() && waited < 5_000) {
+            testScheduler.advanceUntilIdle()
+            Thread.sleep(50)
+            waited += 50
+        }
+
+        // The single fetched article (guid g1) is reported via the fake NotificationMessages
+        // as "new:1"; this proves manual refresh now reaches the tray, not just the background loop.
+        assertEquals(listOf("new:1"), tray)
+        trayJob.cancel()
+        activityScope.cancel()
     }
 
     @Test

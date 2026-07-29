@@ -47,6 +47,7 @@ import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
+import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.NotificationMessages
 import works.merc.keryx.app.domain.SettingsRepository
@@ -495,7 +496,8 @@ private fun newMinimalViewModel(
     )
     return HomeViewModel(
         feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
-        syncRepository, cloudSession, activityCenter, clock, Dispatchers.Unconfined, Dispatchers.Unconfined,
+        syncRepository, cloudSession, activityCenter, clock, NewArticleNotifier(), ArticleListPaneTestNotificationMessages(),
+        Dispatchers.Unconfined, Dispatchers.Unconfined,
     )
 }
 
