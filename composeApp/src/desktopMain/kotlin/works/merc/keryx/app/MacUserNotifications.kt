@@ -110,9 +110,10 @@ internal object MacUserNotifications {
         override fun getFieldOrder(): List<String> = listOf("isa", "flags", "reserved", "invoke", "descriptor")
     }
 
-    // Kept alive for the process lifetime: this callback (and the block literal/descriptor memory
-    // built from it) must never be GC'd, since the OS invokes the block at an unknown future time.
-    private val liveCallbacks = mutableListOf<Callback>()
+    // Kept alive for the process lifetime: the callback trampoline and the block literal/descriptor
+    // Structures built from it must never be GC'd, since the OS invokes the block at an unknown
+    // future time and a collected Structure's auto-allocated native memory can be freed under it.
+    private val liveNativeObjects = mutableListOf<Any>()
 
     /**
      * Requests authorization for alert and sound notifications.
@@ -123,7 +124,6 @@ internal object MacUserNotifications {
         val callback = AuthorizationCompletionBlock { _, granted, _ ->
             Log.info(LOG_TAG, "Notification authorization granted=${granted.toInt() != 0}")
         }
-        liveCallbacks += callback
 
         val descriptor = BlockDescriptor()
         val literal = AuthorizationBlockLiteral()
@@ -136,6 +136,10 @@ internal object MacUserNotifications {
         literal.invoke = callback
         literal.descriptor = descriptor.pointer
         literal.write()
+
+        liveNativeObjects += callback
+        liveNativeObjects += descriptor
+        liveNativeObjects += literal
 
         val options = UN_AUTHORIZATION_OPTION_ALERT or UN_AUTHORIZATION_OPTION_SOUND
         msgSendVoid_id_long_ptr.invoke(
