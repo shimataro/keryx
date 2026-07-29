@@ -1025,7 +1025,7 @@ private fun FeedErrorIndicator(gone: Boolean) {
     val icon = @Composable {
         KeryxIcon(
             KeryxIcons.ErrorFilled,
-            contentDescription = null,
+            contentDescription = if (gone) stringResource(Res.string.home_feed_gone) else null,
             tint = MaterialTheme.colorScheme.error,
             modifier = Modifier.size(16.dp),
         )
