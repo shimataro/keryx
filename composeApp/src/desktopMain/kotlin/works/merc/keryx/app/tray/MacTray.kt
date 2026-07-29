@@ -7,7 +7,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import kotlinx.coroutines.flow.SharedFlow
-import works.merc.keryx.app.MacUserNotifications
 import java.awt.Frame
 import java.awt.Image
 import java.awt.MenuItem
@@ -16,7 +15,6 @@ import java.awt.SystemTray
 import java.awt.TrayIcon
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
-import javax.swing.SwingUtilities
 
 /**
  * macOS-only replacement for the Compose `Tray()` composable.
@@ -139,17 +137,12 @@ internal fun MacTray(
         quitItem.label = quitLabel
     }
 
-    // Tray()'s own composable body is what turns a queued TrayState notification into an actual
-    // OS notification; since MacTray replaces Tray() entirely on macOS, it must consume
-    // newArticleNotifications itself. Posted via MacUserNotifications (UNUserNotificationCenter),
-    // not TrayIcon.displayMessage — the latter (backed by the deprecated NSUserNotificationCenter
-    // AWT peer) was confirmed to never actually display a banner on this JDK/macOS combination.
-    // Dispatched via invokeLater so the underlying raw objc_msgSend calls run on the AWT Event
-    // Dispatch Thread, which (for a Cocoa-backed AWT app) is the thread with an ambient
-    // autorelease pool — the same reason MacActivationPolicy calls are dispatched this way.
+    // Tray()'s own composable body is what turns a queued TrayState notification
+    // into an actual TrayIcon.displayMessage(...) call; since MacTray replaces
+    // Tray() entirely on macOS, it must consume newArticleNotifications itself.
     LaunchedEffect(trayIcon) {
         newArticleNotifications.collect { message ->
-            SwingUtilities.invokeLater { MacUserNotifications.post("Keryx", message) }
+            trayIcon.displayMessage("Keryx", message, TrayIcon.MessageType.NONE)
         }
     }
 }

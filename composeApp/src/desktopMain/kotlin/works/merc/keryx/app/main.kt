@@ -275,18 +275,6 @@ fun main(args: Array<String>) {
     }
 
     application {
-        // Request OS notification authorization once at startup (macOS). Safe to call on every
-        // launch: an already-answered session resolves immediately without re-prompting. Placed
-        // here (inside application{}, not earlier in main()) so the request runs once a real
-        // window/run loop context exists — calling it before any window exists risked the system
-        // silently failing to present its permission prompt.
-        LaunchedEffect(Unit) {
-            if (isMacOs) {
-                runCatching { MacUserNotifications.requestAuthorization() }
-                    .onFailure { Log.warn(LOG_TAG, "Could not request notification authorization", it) }
-            }
-        }
-
         var windowVisible by remember { mutableStateOf(!saved.startMinimized) }
         val windowState = remember {
             WindowState(
