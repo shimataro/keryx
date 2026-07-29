@@ -4,15 +4,13 @@ enum class AppNotificationLevel { INFO, WARNING, ERROR }
 
 /**
  * The "next action" a notification offers when the user acts on it (session-only, resolved by the
- * UI). Every notification kept in the notification center carries one, so acting on a notification
- * always leads somewhere useful.
+ * UI). `action` is nullable — `null` means the notification row has no next action.
  *
  * Two families:
- * - Self-contained in the bell popover: [OpenUrl] (hands off to the external browser),
- *   [ShowInfoDialog] (an explanatory dialog shown in place).
+ * - Self-contained in the bell popover: [OpenUrl] (hands off to the external browser).
  * - Needs another screen's state changed, so the host (`HomeScreen` / `App`) resolves it through
  *   `NotificationCenterViewModel.pendingAction`: [ShowFeedDetail], [ShowSettingsTab],
- *   [ResetCloudData].
+ *   [ShowInfoDialog], [ResetCloudData].
  */
 sealed interface AppNotificationAction {
     /** Destructive recovery for an unusable cloud DB — offered as a dedicated inline button. */
