@@ -115,6 +115,10 @@ class SettingsViewModelTest {
     /** The SyncRepository handed to the most recently built ViewModel, so a test can drive it. */
     private lateinit var createdSyncRepository: SyncRepository
 
+    // Every SyncRepository built by newViewModel() gets its own scope for scheduleSync(); track
+    // them all (not just the latest) so tearDown() can cancel every one, same as createdViewModels.
+    private val createdSyncScopes = mutableListOf<CoroutineScope>()
+
     @BeforeTest
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
@@ -127,6 +131,8 @@ class SettingsViewModelTest {
     fun tearDown() {
         createdViewModels.forEach { it.viewModelScope.cancel() }
         createdViewModels.clear()
+        createdSyncScopes.forEach { it.cancel() }
+        createdSyncScopes.clear()
         Dispatchers.resetMain()
         driver.close()
         FileIO.delete(FileIO.join(dir, "local_settings.json"))
@@ -222,13 +228,15 @@ class SettingsViewModelTest {
         // reads it back via store.load()).
         val settingsRepository =
             SettingsRepository(db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined)
+        val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        createdSyncScopes += syncScope
         val syncRepository = SyncRepository(
             driver = driver,
             db = db,
             ftsManager = FtsManager(driver),
             cloudProvider = syncCloudProvider,
             clock = clock,
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            scope = syncScope,
             activityCenter = activityCenter,
             notificationCenter = NotificationCenter(),
             notificationMessages = SettingsViewModelTestNotificationMessages(),
