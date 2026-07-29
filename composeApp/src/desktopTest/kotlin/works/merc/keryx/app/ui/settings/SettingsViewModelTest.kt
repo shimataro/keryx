@@ -556,7 +556,11 @@ class SettingsViewModelTest {
         awaitTrue { vm.lastSyncErrorText == "syncFailed:CloudAuthException" }
 
         vm.disconnect()
-        awaitTrue { vm.connectedType == null }
+        // Await the actual condition being asserted, not just connectedType: lastSyncErrorText is
+        // updated by an independent collector coroutine (init block) reacting to
+        // clearLastSyncError()'s StateFlow write, so polling connectedType alone gives no
+        // happens-before guarantee for it.
+        awaitTrue { vm.connectedType == null && vm.lastSyncErrorText == null }
 
         assertNull(vm.lastSyncErrorText)
     }
@@ -585,8 +589,11 @@ class SettingsViewModelTest {
         vm.switchTo(CloudStorageType.GOOGLE_DRIVE)
         // connectingType flips to GOOGLE_DRIVE synchronously at the top of switchTo(), before the old
         // provider is even disconnected — wait for canCancelConnect instead, which only becomes true
-        // once connect(newType) is underway (i.e. after clearLastSyncError() has already run).
-        awaitTrue { vm.canCancelConnect }
+        // once connect(newType) is underway (i.e. after clearLastSyncError() has already run). Also
+        // await lastSyncErrorText directly: it's updated by an independent collector coroutine
+        // reacting to clearLastSyncError()'s StateFlow write, so canCancelConnect alone gives no
+        // happens-before guarantee for it (see disconnectClearsLastSyncErrorText for the same race).
+        awaitTrue { vm.canCancelConnect && vm.lastSyncErrorText == null }
 
         assertNull(vm.lastSyncErrorText)
     }
