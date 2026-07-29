@@ -69,6 +69,14 @@ class SyncRepository(
     val lastSyncError: StateFlow<String?> = _lastSyncError
 
     /**
+     * Clears the mirrored sync-failure reason, e.g. when the connection that produced it is being
+     * torn down so a subsequently-connected provider does not inherit it.
+     */
+    fun clearLastSyncError() {
+        _lastSyncError.value = null
+    }
+
+    /**
      * Schedules a debounced cloud synchronization.
      */
     override fun scheduleSync() {

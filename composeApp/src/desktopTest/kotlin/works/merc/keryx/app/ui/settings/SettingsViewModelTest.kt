@@ -539,6 +539,53 @@ class SettingsViewModelTest {
     // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
     // disconnectClearsConnectedTypeAndCloudStorageType above.
     @Test
+    fun disconnectClearsLastSyncErrorText() {
+        val tokenStorage = FakeTokenStorage()
+        tokenStorage.save(OAuthTokens("AT"))
+        val cloud = AlwaysFailingCloudStorage()
+        val vm = newViewModel(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
+        runBlocking { createdSyncRepository.sync() }
+        awaitTrue { vm.lastSyncErrorText == "syncFailed:CloudAuthException" }
+
+        vm.disconnect()
+        awaitTrue { vm.connectedType == null }
+
+        assertNull(vm.lastSyncErrorText)
+    }
+
+    // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
+    // disconnectClearsConnectedTypeAndCloudStorageType above — switchTo's disconnect(oldType) call
+    // performs a real (mocked) HTTP revoke whose completion is dispatched on a real thread outside
+    // the TestCoroutineScheduler, so we poll with real wall-clock waits instead.
+    @Test
+    fun switchToClearsLastSyncErrorTextFromOldProvider() {
+        val dropboxTokenStorage = FakeTokenStorage(OAuthTokens("AT"))
+        val googleDriveTokenStorage = FakeTokenStorage()
+        val session = multiProviderCloudSession(
+            client = okAuthClient(),
+            dropboxTokenStorage = dropboxTokenStorage,
+            googleDriveTokenStorage = googleDriveTokenStorage,
+            // Blocks indefinitely on OAuth, so the new provider's own connect/sync never runs —
+            // isolating the fix (clearing on disconnect) from a later successful sync also clearing it.
+            googleDriveConnectFlow = SuspendingCloudConnectFlow(),
+        )
+        val cloud = AlwaysFailingCloudStorage()
+        val vm = newViewModel(cloudSession = session, syncCloudProvider = { cloud })
+        runBlocking { createdSyncRepository.sync() }
+        awaitTrue { vm.lastSyncErrorText == "syncFailed:CloudAuthException" }
+
+        vm.switchTo(CloudStorageType.GOOGLE_DRIVE)
+        // connectingType flips to GOOGLE_DRIVE synchronously at the top of switchTo(), before the old
+        // provider is even disconnected — wait for canCancelConnect instead, which only becomes true
+        // once connect(newType) is underway (i.e. after clearLastSyncError() has already run).
+        awaitTrue { vm.canCancelConnect }
+
+        assertNull(vm.lastSyncErrorText)
+    }
+
+    // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
+    // disconnectClearsConnectedTypeAndCloudStorageType above.
+    @Test
     fun lastSyncErrorTextMirrorsSyncRepositoryLastSyncError() {
         // The cloud-sync tab shows this as the reason the connected provider isn't syncing, so it has
         // to track SyncRepository.lastSyncError in both directions.

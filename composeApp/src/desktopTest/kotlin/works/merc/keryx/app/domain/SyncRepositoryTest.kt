@@ -504,6 +504,23 @@ class SyncRepositoryTest {
     }
 
     @Test
+    fun clearLastSyncErrorResetsToNull() = runTest {
+        // Used when the connection that produced the error is torn down, so a subsequently-connected
+        // provider does not inherit it (see SettingsViewModel.disconnect()/switchTo()).
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1")
+        cloud.queueDownload(Result.Err(CloudAuthException("no token")))
+        val repo = newRepo(cloud)
+
+        assertIs<Result.Err>(repo.sync())
+        assertEquals("syncFailed:CloudAuthException", repo.lastSyncError.value)
+
+        repo.clearLastSyncError()
+
+        assertNull(repo.lastSyncError.value)
+    }
+
+    @Test
     fun lastSyncErrorIsLeftAloneByAnInternallyHandledConflict() = runTest {
         // A rev conflict is retried internally and raises no notification, so it must not overwrite
         // (or clear) the reason shown in the settings tab either. Here every retry conflicts, so the
