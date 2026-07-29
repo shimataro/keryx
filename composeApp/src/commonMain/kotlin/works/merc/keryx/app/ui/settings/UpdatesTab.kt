@@ -56,7 +56,7 @@ internal fun UpdatesTabContent(vm: SettingsViewModel) {
     // would otherwise have to trigger by hand — no result yet means nothing at all would be shown.
     // Equivalent to one press of "check now", so it never perturbs the automatic check schedule.
     LaunchedEffect(Unit) {
-        if (vm.updateCheckResult == null) vm.checkForUpdate()
+        if (vm.updateCheckResult == null && !vm.checkingForUpdate) vm.checkForUpdate()
     }
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         Text(
