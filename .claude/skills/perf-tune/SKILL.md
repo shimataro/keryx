@@ -216,9 +216,10 @@ headroom:
 
 ### Axis 3 — concurrency & scheduling
 
-13. **Sequential IO.** `FeedRepository.refreshAll` is fully sequential network IO.
-    If parallelized, **DB writes must stay serialized** — the JVM driver opens
-    a fresh connection per statement, so concurrent writes hit `SQLITE_BUSY`.
+13. **Sequential IO.** `FeedRepository.refreshAll` fetches feed data concurrently
+    (bounded semaphore) but applies DB writes serially — **DB writes must stay
+    serialized** — the JVM driver opens a fresh connection per statement, so
+    concurrent writes hit `SQLITE_BUSY`.
 14. **Dispatchers.** `Dispatchers.IO` is unused across the codebase; blocking JDBC
     and file IO run on `Dispatchers.Default` (bounded by CPU count). But
     `HomeViewModel.dbWriteDispatcher` and `SettingsRepository.writeDispatcher` are

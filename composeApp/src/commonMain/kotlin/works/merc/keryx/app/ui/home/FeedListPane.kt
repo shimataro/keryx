@@ -289,7 +289,7 @@ fun FeedListPane(
                                     firstFeedId = feedsInFolder.firstOrNull()?.id,
                                     activeBoundaryState = activeBoundaryState,
                                     onBoundaryChange = onBoundaryChange,
-                                    onDrop = { feedId, insertBeforeId -> vm.moveFeed(feedId, null, insertBeforeId) },
+                                    onDropFeed = { feedId, insertBeforeId -> vm.moveFeed(feedId, null, insertBeforeId) },
                                 )
                             }
                         }

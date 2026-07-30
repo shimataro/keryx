@@ -49,6 +49,7 @@ import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_copy_url
 import works.merc.keryx.app.resources.article_mark_as_unread
 import works.merc.keryx.app.resources.article_no_content
+import works.merc.keryx.app.resources.article_no_title
 import works.merc.keryx.app.resources.article_open_in_browser
 import works.merc.keryx.app.resources.article_star
 import works.merc.keryx.app.resources.article_unstar
@@ -161,7 +162,7 @@ fun ArticleDetailPane(
         }
         }
 
-        val title = current.title.ifBlank { "(no title)" }
+        val title = current.title.ifBlank { stringResource(Res.string.article_no_title) }
         val meta = listOfNotNull(current.author, formatTimestamp(current.published_at).ifBlank { null })
             .joinToString(" · ")
 

@@ -49,6 +49,7 @@ import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_copy_url
 import works.merc.keryx.app.resources.article_mark_as_read
 import works.merc.keryx.app.resources.article_mark_as_unread
+import works.merc.keryx.app.resources.article_no_title
 import works.merc.keryx.app.resources.article_open_in_browser
 import works.merc.keryx.app.resources.article_star
 import works.merc.keryx.app.resources.article_unstar
@@ -172,6 +173,7 @@ internal fun ArticleRow(
     )
     val copyUrlLabel = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.article_copy_url), "C")
     val openInBrowserLabel = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.article_open_in_browser), "O")
+    val noTitleFallback = stringResource(Res.string.article_no_title)
     Row(
         Modifier.testTag("article-${article.id}")
             .fillMaxWidth()
@@ -230,7 +232,7 @@ internal fun ArticleRow(
         val selectionContentColor = selectionContentColorOrNull(selected, focused)
         Column(Modifier.weight(1f)) {
             Text(
-                titleOverride ?: AnnotatedString(article.title.ifBlank { "(no title)" }),
+                titleOverride ?: AnnotatedString(article.title.ifBlank { noTitleFallback }),
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = if (unread) FontWeight.Bold else FontWeight.Normal,
                 color = selectionContentColor?.let { if (unread) it else it.copy(alpha = 0.85f) }

@@ -31,7 +31,6 @@ import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.FEED_LIST_PANE_MAX_WIDTH
 import works.merc.keryx.app.core.FEED_LIST_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.MAX_REMEMBERED_SCROLL_POSITIONS
-import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.searchTerms
 import works.merc.keryx.app.core.decodeArticleFilter
 import works.merc.keryx.app.core.encode
@@ -41,7 +40,6 @@ import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
-import works.merc.keryx.app.data.remote.FetchedFeed
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.ArticleSearchResult
@@ -566,23 +564,6 @@ class HomeViewModel(
             selectFilter(ArticleFilter.Search)
         }
     }
-
-    /**
- * Retrieves feed metadata for the specified URL.
- *
- * @param url The feed URL to preview.
- * @return The result of fetching the feed metadata.
- */
-
-    suspend fun previewFeed(url: String): Result<FetchedFeed> = feedRepository.previewFeed(url)
-
-    /**
-     * Subscribes to a feed using the specified URL.
-     *
-     * @param url The URL of the feed to subscribe to.
-     * @return The subscription result containing the subscribed feed on success.
-     */
-    suspend fun subscribeFeed(url: String): Result<Feeds> = feedRepository.subscribeFeed(url)
 
     private val addFeedPreviewResolver = AddFeedPreviewResolver(feedRepository)
 

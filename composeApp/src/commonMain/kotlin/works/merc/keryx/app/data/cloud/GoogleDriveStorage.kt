@@ -12,6 +12,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.client.statement.readRawBytes
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
@@ -135,38 +136,51 @@ class GoogleDriveStorage(
     /**
      * Reconciles duplicate files created concurrently by retaining the file with the lowest ID.
      *
+     * A listing that shows only the file we just created is not proof no one else is racing —
+     * Drive's list index is not guaranteed to already reflect a just-completed create from a
+     * concurrently racing device — so a solitary result is re-checked once more before being
+     * trusted, shrinking (not fully closing) the false-winner window.
+     *
      * @param token The Google Drive access token.
      * @param name The file name shared by the concurrent creations.
      * @param createdId The ID of the file created by the current operation.
      * @return `Result.Ok` if the current file is retained and duplicates are deleted; a conflict error if another file wins.
      */
     private suspend fun resolveCreateRace(token: String, name: String, createdId: String): Result<Unit> {
-        val listResult = listFilesByName(token, name)
-        if (listResult is Result.Err) return listResult
-        val files = (listResult as Result.Ok).value
-        val winner = files.minByOrNull { it.id }
-        if (winner == null) {
-            return Result.Err(CloudStorageException("Created file disappeared immediately"))
-        }
-        if (winner.id != createdId) {
-            // Lost the race — delete the file we just created so it does not linger as an orphan
-            // (the winner may have listed before ours became visible and so never sees it to clean
-            // up). Best-effort: a failed cleanup must not mask the conflict signal, and a
-            // double-delete with the winner is safe (404 == Ok). The sync flow will then download
-            // the winner's file and retry.
-            deleteById(token, createdId)
-            return Result.Err(SyncConflictException())
-        }
-        // We are the winner — safely delete every duplicate.
-        for (file in files) {
-            if (file.id != winner.id) {
-                when (val del = deleteById(token, file.id)) {
-                    is Result.Err -> return del
-                    is Result.Ok -> Unit
+        var rechecked = false
+        while (true) {
+            val listResult = listFilesByName(token, name)
+            if (listResult is Result.Err) return listResult
+            val files = (listResult as Result.Ok).value
+            val winner = files.minByOrNull { it.id }
+            if (winner == null) {
+                return Result.Err(CloudStorageException("Created file disappeared immediately"))
+            }
+            if (winner.id != createdId) {
+                // Lost the race — delete the file we just created so it does not linger as an orphan
+                // (the winner may have listed before ours became visible and so never sees it to clean
+                // up). Best-effort: a failed cleanup must not mask the conflict signal, and a
+                // double-delete with the winner is safe (404 == Ok). The sync flow will then download
+                // the winner's file and retry.
+                deleteById(token, createdId)
+                return Result.Err(SyncConflictException())
+            }
+            if (files.size == 1 && !rechecked) {
+                rechecked = true
+                delay(RACE_RECHECK_DELAY_MS)
+                continue
+            }
+            // We are the winner — safely delete every duplicate.
+            for (file in files) {
+                if (file.id != winner.id) {
+                    when (val del = deleteById(token, file.id)) {
+                        is Result.Err -> return del
+                        is Result.Ok -> Unit
+                    }
                 }
             }
+            return Result.Ok(Unit)
         }
-        return Result.Ok(Unit)
     }
 
     /**
@@ -325,5 +339,10 @@ private fun mapError(status: Int, body: String): Result.Err = cloudStorageError(
 
     private companion object {
         const val APP_DATA_FOLDER = "appDataFolder"
+
+        /** Grace period before trusting a post-create listing that shows no duplicates — Drive's
+         *  list index is not guaranteed to already reflect a just-completed create from a
+         *  concurrently racing device. */
+        const val RACE_RECHECK_DELAY_MS = 1_000L
     }
 }

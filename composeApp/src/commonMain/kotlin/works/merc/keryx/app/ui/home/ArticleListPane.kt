@@ -160,8 +160,7 @@ private fun SearchListPane(
     LaunchedEffect(selected?.id, results) {
         val index = results.indexOfFirst { it.article.id == selected?.id }
         if (index !in results.indices) return@LaunchedEffect
-        val itemInfo = listState.layoutInfo.visibleItemsInfo.find { it.index == index }
-        if (itemInfo == null) listState.animateScrollToItem(index)
+        listState.scrollToIndexIfNeeded(index)
     }
 
     Column(

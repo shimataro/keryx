@@ -58,6 +58,7 @@ import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_assign_tags
 import works.merc.keryx.app.resources.home_delete_folder_menu
 import works.merc.keryx.app.resources.home_edit_folder_menu
+import works.merc.keryx.app.resources.home_feed_error
 import works.merc.keryx.app.resources.home_feed_gone
 import works.merc.keryx.app.resources.home_move_to_folder
 import works.merc.keryx.app.resources.home_no_folder
@@ -272,7 +273,7 @@ internal fun NoFolderHeader(
     firstFeedId: String?,
     activeBoundaryState: State<DropBoundary?>,
     onBoundaryChange: (DropBoundary?) -> Unit,
-    onDrop: (feedId: String, insertBeforeId: String?) -> Unit,
+    onDropFeed: (feedId: String, insertBeforeId: String?) -> Unit,
 ) {
     val isEmpty = firstFeedId == null
     val feedZoneBoundary = if (isEmpty) DropBoundary.AppendFeeds(null) else firstFeedId.let(DropBoundary::BeforeFeed)
@@ -302,7 +303,7 @@ internal fun NoFolderHeader(
                         override fun onDrop(event: DragAndDropEvent): Boolean {
                             onBoundaryChange(null)
                             val feedId = event.draggedFeedId() ?: return false
-                            onDrop(feedId, if (isEmpty) null else firstFeedId)
+                            onDropFeed(feedId, if (isEmpty) null else firstFeedId)
                             return true
                         }
                     }
@@ -505,7 +506,7 @@ private fun FeedErrorIndicator(gone: Boolean) {
     val icon = @Composable {
         KeryxIcon(
             KeryxIcons.ErrorFilled,
-            contentDescription = if (gone) stringResource(Res.string.home_feed_gone) else null,
+            contentDescription = stringResource(if (gone) Res.string.home_feed_gone else Res.string.home_feed_error),
             tint = MaterialTheme.colorScheme.error,
             modifier = Modifier.size(16.dp),
         )
