@@ -350,6 +350,13 @@ class HomeViewModel(
                     settingsRepository.getLocalSettings().copy(feedListPaneWidth = feed, articleListPaneWidth = article),
                 )
             }.launchIn(viewModelScope)
+
+        // Any write to `articles` can be a sync merge propagating a soft-delete tombstone for an
+        // article currently pinned here; revalidate the pins so a deleted one can't stay visible.
+        articleChangeSignal
+            .onEach { reconcilePinnedReadArticles() }
+            .flowOn(dispatcher)
+            .launchIn(viewModelScope)
     }
 
     fun setFeedListPaneWidth(width: Double) {
@@ -510,6 +517,19 @@ class HomeViewModel(
     private fun pinnedReadArticlesKeepingSelected(): Map<String, Articles> {
         val selected = _selectedArticle.value
         return if (selected != null && selected.is_read == 1L) mapOf(selected.id to selected) else emptyMap()
+    }
+
+    /**
+     * Drops any pinned entry whose backing row has since been soft-deleted (e.g. a tombstone
+     * propagated by a sync merge while the article was pinned), so the `articles` merge step
+     * (which re-adds a pinned id missing from the filtered repository result) can never
+     * resurrect deleted content into the visible list.
+     */
+    private fun reconcilePinnedReadArticles() {
+        val pinned = _pinnedReadArticles.value
+        if (pinned.isEmpty()) return
+        val alive = pinned.filterValues { articleRepository.getArticleById(it.id)?.deleted_at == null }
+        if (alive.size != pinned.size) _pinnedReadArticles.value = alive
     }
 
     fun toggleSort() {

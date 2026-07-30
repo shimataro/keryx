@@ -54,6 +54,7 @@ import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertTag
+import works.merc.keryx.app.stampArticleDeleted
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
 import kotlin.random.Random
@@ -613,6 +614,29 @@ class HomeViewModelTest {
 
         // a1 was selected (now read) and must stay pinned/visible; a2 is still unread on its own.
         assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+    }
+
+    @Test
+    fun pinnedArticleSoftDeletedByAnotherDeviceIsDroppedFromPinsReactively() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        val article1 = db.articlesQueries.getById("a1").executeAsOne()
+        vm.selectArticle(article1)
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+
+        // Simulate another device's sync propagating a soft-delete tombstone for the pinned article.
+        driver.stampArticleDeleted("a1", deletedAt = 100L)
+        val article2 = db.articlesQueries.getById("a2").executeAsOne()
+        vm.toggleStar(article2) // ordinary write to `articles` -> ticks articleChangeSignal
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf("a2"), vm.articles.value.map { it.id })
     }
 
     @Test
