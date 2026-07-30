@@ -42,6 +42,7 @@ import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
+import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.NotificationMessages
 import works.merc.keryx.app.domain.SettingsRepository
@@ -53,6 +54,7 @@ import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertTag
+import works.merc.keryx.app.stampArticleDeleted
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
 import kotlin.random.Random
@@ -172,6 +174,7 @@ class HomeViewModelTest {
         appKey: String = "",
         feedFetcher: FeedFetcher = failingFetcher(),
         activityCenter: ActivityCenter = ActivityCenter(),
+        newArticleNotifier: NewArticleNotifier = NewArticleNotifier(),
     ): HomeViewModel {
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the subscribe/refresh path's indexMissing() works.
@@ -210,7 +213,9 @@ class HomeViewModelTest {
         )
         return HomeViewModel(
             feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
-            syncRepository, cloudSession, activityCenter, clock, Dispatchers.Unconfined,
+            syncRepository, cloudSession, activityCenter, clock,
+            newArticleNotifier, HomeViewModelTestNotificationMessages(),
+            Dispatchers.Unconfined,
             // dbWriteDispatcher: Unconfined so read/star writes run inline for deterministic assertions.
             Dispatchers.Unconfined,
         ).also { createdViewModels += it }
@@ -264,18 +269,21 @@ class HomeViewModelTest {
         // Unconfined scope so the ActivityCenter's stateIn reflects counter changes inline.
         val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val activityCenter = ActivityCenter(activityScope)
-        val vm = newViewModel(activityCenter = activityCenter)
-        assertFalse(vm.feedRefreshing.value)
+        try {
+            val vm = newViewModel(activityCenter = activityCenter)
+            assertFalse(vm.feedRefreshing.value)
 
-        // Hold a refresh open on the injected ActivityCenter; the VM must expose the same state.
-        val gate = CompletableDeferred<Unit>()
-        val job = activityScope.launch { activityCenter.trackFeedRefresh { gate.await() } }
-        assertTrue(vm.feedRefreshing.value)
+            // Hold a refresh open on the injected ActivityCenter; the VM must expose the same state.
+            val gate = CompletableDeferred<Unit>()
+            val job = activityScope.launch { activityCenter.trackFeedRefresh { gate.await() } }
+            assertTrue(vm.feedRefreshing.value)
 
-        gate.complete(Unit)
-        job.join()
-        assertFalse(vm.feedRefreshing.value)
-        activityScope.cancel()
+            gate.complete(Unit)
+            job.join()
+            assertFalse(vm.feedRefreshing.value)
+        } finally {
+            activityScope.cancel()
+        }
     }
 
     @Test
@@ -283,25 +291,28 @@ class HomeViewModelTest {
         db.insertFeed("f1")
         val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val activityCenter = ActivityCenter(activityScope)
-        val vm = newViewModel(activityCenter = activityCenter)
-        subscribeAll(vm)
-        testScheduler.advanceUntilIdle()
+        try {
+            val vm = newViewModel(activityCenter = activityCenter)
+            subscribeAll(vm)
+            testScheduler.advanceUntilIdle()
 
-        // Simulate an in-flight refresh (e.g. the background loop) holding the indicator on.
-        val gate = CompletableDeferred<Unit>()
-        val job = activityScope.launch { activityCenter.trackFeedRefresh { gate.await() } }
-        assertTrue(vm.feedRefreshing.value)
+            // Simulate an in-flight refresh (e.g. the background loop) holding the indicator on.
+            val gate = CompletableDeferred<Unit>()
+            val job = activityScope.launch { activityCenter.trackFeedRefresh { gate.await() } }
+            assertTrue(vm.feedRefreshing.value)
 
-        // A manual refresh while busy must be a no-op (guard) and must not throw or clear state early.
-        vm.refreshAll()
-        testScheduler.advanceUntilIdle()
-        assertTrue(vm.feedRefreshing.value)
+            // A manual refresh while busy must be a no-op (guard) and must not throw or clear state early.
+            vm.refreshAll()
+            testScheduler.advanceUntilIdle()
+            assertTrue(vm.feedRefreshing.value)
 
-        gate.complete(Unit)
-        job.join()
-        testScheduler.advanceUntilIdle()
-        assertFalse(vm.feedRefreshing.value)
-        activityScope.cancel()
+            gate.complete(Unit)
+            job.join()
+            testScheduler.advanceUntilIdle()
+            assertFalse(vm.feedRefreshing.value)
+        } finally {
+            activityScope.cancel()
+        }
     }
 
     @Test
@@ -546,6 +557,29 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun setUnreadOnlyIsANoOpWhenTheValueAlreadyMatches() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L)
+        db.insertArticle("a2", "f1", isRead = 0L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+
+        vm.markAllRead()
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a2", "a1"), vm.articles.value.map { it.id })
+
+        // A redundant call with the already-current value must not re-derive the pin map from
+        // scratch (which would keep only the selected article and drop markAllRead()'s pins).
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf("a2", "a1"), vm.articles.value.map { it.id })
+    }
+
+    @Test
     fun markAllReadKeepsSelectedArticlePinnedAndVisibleUnderUnreadOnly() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
@@ -568,6 +602,151 @@ class HomeViewModelTest {
         // and remain visible under unread-only until the filter is switched.
         assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
         assertEquals(1L, vm.selectedArticle.value?.is_read)
+    }
+
+    @Test
+    fun refreshAllKeepsSelectedArticlePinnedAndVisibleUnderUnreadOnly() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        val article1 = db.articlesQueries.getById("a1").executeAsOne()
+        vm.selectArticle(article1)
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+
+        vm.refreshAll()
+        testScheduler.advanceUntilIdle()
+
+        // a1 was selected (now read) and must stay pinned/visible; a2 is still unread on its own.
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+    }
+
+    @Test
+    fun syncKeepsSelectedArticlePinnedAndVisibleUnderUnreadOnly() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        val article1 = db.articlesQueries.getById("a1").executeAsOne()
+        vm.selectArticle(article1)
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+
+        vm.sync()
+        testScheduler.advanceUntilIdle()
+
+        // a1 was selected (now read) and must stay pinned/visible; a2 is still unread on its own.
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+    }
+
+    @Test
+    fun refreshAllDropsStaleSelectionPinnedBeforeCompletionWhenSelectionChangesMidFlight() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        // Gate the feed fetch open with a CompletableDeferred so refreshAll() genuinely suspends
+        // mid-flight, giving us a window to change the selection before it completes.
+        val gate = CompletableDeferred<Unit>()
+        // Unconfined-on-testScheduler ActivityCenter (mirrors feedRefreshingReflectsActivityCenter):
+        // the default ActivityCenter() runs its stateIn on a real Dispatchers.Default scope, which
+        // would mix real and virtual time here and make the poll below unreliable.
+        val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+        val activityCenter = ActivityCenter(activityScope)
+        try {
+            val vm = newViewModel(
+                feedFetcher = fetcherWith { gate.await(); respond("", HttpStatusCode.NotFound) },
+                activityCenter = activityCenter,
+            )
+            subscribeAll(vm)
+            vm.selectFilter(ArticleFilter.All)
+            testScheduler.advanceUntilIdle()
+            val article1 = db.articlesQueries.getById("a1").executeAsOne()
+            vm.selectArticle(article1)
+            vm.setUnreadOnly(true)
+            testScheduler.advanceUntilIdle()
+
+            vm.refreshAll()
+            // viewModelScope.launch{} bodies are only queued, not run inline; runCurrent() starts the
+            // coroutine so it reaches (and suspends on) the gate before we proceed.
+            testScheduler.runCurrent()
+            assertTrue(activityCenter.feedRefreshing.value)
+            // The refresh is genuinely in flight here — simulate the user moving on to a2 before it completes.
+            val article2 = db.articlesQueries.getById("a2").executeAsOne()
+            vm.selectArticle(article2)
+            gate.complete(Unit)
+
+            // The fetch resumes off the virtual scheduler (real MockEngine dispatch, see docs/testing.md),
+            // so poll with short real sleeps until refreshAll settles (mirrors
+            // refreshAllRaisesTrayNotificationWhenNewArticlesArrive's established pattern).
+            var waited = 0
+            while (activityCenter.feedRefreshing.value && waited < 5_000) {
+                testScheduler.advanceUntilIdle()
+                Thread.sleep(50)
+                waited += 50
+            }
+            testScheduler.advanceUntilIdle()
+
+            // Only a2 (the current selection) should remain pinned; a1 must not survive the refresh.
+            assertEquals(listOf("a2"), vm.articles.value.map { it.id })
+        } finally {
+            activityScope.cancel()
+        }
+    }
+
+    @Test
+    fun syncDropsStaleSelectionPinnedBeforeCompletionWhenSelectionChangesMidFlight() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        val article1 = db.articlesQueries.getById("a1").executeAsOne()
+        vm.selectArticle(article1)
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+
+        vm.sync()
+        // viewModelScope.launch{} for sync() is only queued at this point (cloudProvider() == null
+        // makes the actual sync a fast no-op once it runs, but it hasn't run yet) — selecting a2
+        // now reproduces a selection change made while sync is still in flight.
+        val article2 = db.articlesQueries.getById("a2").executeAsOne()
+        vm.selectArticle(article2)
+        testScheduler.advanceUntilIdle()
+
+        // Only a2 (the current selection) should remain pinned; a1 must not survive the sync.
+        assertEquals(listOf("a2"), vm.articles.value.map { it.id })
+    }
+
+    @Test
+    fun pinnedArticleSoftDeletedByAnotherDeviceIsDroppedFromPinsReactively() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        val article1 = db.articlesQueries.getById("a1").executeAsOne()
+        vm.selectArticle(article1)
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+
+        // Simulate another device's sync propagating a soft-delete tombstone for the pinned article.
+        driver.stampArticleDeleted("a1", deletedAt = 100L)
+        val article2 = db.articlesQueries.getById("a2").executeAsOne()
+        vm.toggleStar(article2) // ordinary write to `articles` -> ticks articleChangeSignal
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf("a2"), vm.articles.value.map { it.id })
     }
 
     @Test
@@ -952,6 +1131,50 @@ class HomeViewModelTest {
         vm.refreshAll()
         testScheduler.advanceUntilIdle()
         // No exception thrown; reaching here is the assertion.
+    }
+
+    @Test
+    fun refreshAllRaisesTrayNotificationWhenNewArticlesArrive() = runTest {
+        db.insertFeed("f1")
+        val notifier = NewArticleNotifier()
+        val tray = mutableListOf<String>()
+        // Plain launch (not backgroundScope): a SharedFlow needs an actively-collecting subscriber
+        // to observe an emission at all (unlike a StateFlow's cached .value, which subscribeAll's
+        // helpers rely on elsewhere in this file), and this scope's advanceUntilIdle() below reliably
+        // pumps it, matching NewArticleNotifierTest's established pattern.
+        val trayJob = launch { notifier.trayEvents.collect { tray.add(it) } }
+        // Explicit Unconfined-on-testScheduler ActivityCenter (mirrors feedRefreshingReflectsActivityCenter):
+        // the default ActivityCenter() runs its stateIn on a real Dispatchers.Default scope, which
+        // would mix real and virtual time here and make the poll below unreliable.
+        val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+        val activityCenter = ActivityCenter(activityScope)
+        try {
+            val vm = newViewModel(
+                feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) },
+                newArticleNotifier = notifier,
+                activityCenter = activityCenter,
+            )
+            subscribeAll(vm)
+            testScheduler.advanceUntilIdle()
+
+            vm.refreshAll()
+            // The feed fetch/parse work hops onto Ktor's real MockEngine dispatcher (not the virtual
+            // test scheduler), so a single advanceUntilIdle() can race it (see docs/testing.md on
+            // mixing runTest with Ktor MockEngine). Poll with short real sleeps until it lands.
+            var waited = 0
+            while (tray.isEmpty() && waited < 5_000) {
+                testScheduler.advanceUntilIdle()
+                Thread.sleep(50)
+                waited += 50
+            }
+
+            // The single fetched article (guid g1) is reported via the fake NotificationMessages
+            // as "new:1"; this proves manual refresh now reaches the tray, not just the background loop.
+            assertEquals(listOf("new:1"), tray)
+            trayJob.cancel()
+        } finally {
+            activityScope.cancel()
+        }
     }
 
     @Test

@@ -1,12 +1,13 @@
 package works.merc.keryx.app.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyShortcut
 import androidx.compose.ui.window.FrameWindowScope
 import androidx.compose.ui.window.MenuBar
+import androidx.compose.ui.window.MenuScope
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import works.merc.keryx.app.core.ArticleFilter
@@ -38,13 +39,20 @@ import works.merc.keryx.app.resources.menu_settings
 import works.merc.keryx.app.resources.menu_view
 import works.merc.keryx.app.resources.menu_view_mark_all_read
 import works.merc.keryx.app.resources.menu_view_search
+import works.merc.keryx.app.resources.menu_view_show_menu_bar
 import works.merc.keryx.app.resources.menu_view_toggle_sort
 import works.merc.keryx.app.resources.menu_view_unread_only
 import works.merc.keryx.app.ui.home.HomeViewModel
+import works.merc.keryx.app.ui.menu.AppMenuActions
+import works.merc.keryx.app.ui.menu.AppMenuLabels
+import works.merc.keryx.app.ui.menu.AppMenuNode
+import works.merc.keryx.app.ui.menu.AppMenuRoot
+import works.merc.keryx.app.ui.menu.AppMenuShortcut
+import works.merc.keryx.app.ui.menu.MenuBarToggle
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
+import works.merc.keryx.app.ui.menu.buildAppMenuTree
 import works.merc.keryx.app.ui.menu.computeMenuUiState
-import works.merc.keryx.app.ui.navigation.Screen
 import works.merc.keryx.app.ui.settings.PROJECT_URL
 import works.merc.keryx.app.ui.settings.SettingsViewModel
 
@@ -54,17 +62,29 @@ import works.merc.keryx.app.ui.settings.SettingsViewModel
  * [computeMenuUiState]; clicks dispatch either to a ViewModel directly (state-carrying singletons)
  * or through [MenuController] for actions whose state lives inside a screen's composition.
  *
+ * The whole menu is modelled once as an [AppMenuRoot] (see `AppMenuTree`) and then interpreted into
+ * the Compose `MenuBar` DSL. The same tree is pushed to [onTreeChanged] on every recomposition so a
+ * D-Bus exporter (KDE Global Menu, `AppMenuBarHost`) can mirror it — the two surfaces are guaranteed
+ * to agree because they read the same model.
+ *
  * On macOS, Settings, About and Quit are provided by the native app (Keryx) menu — via
  * `Desktop.setPreferencesHandler` / `setAboutHandler` and AWT's default Quit — so they are omitted
  * from this menu bar to avoid duplication.
  *
  * @param onCloseWindow hides the window to the tray (same as the window's close button).
  * @param onQuit terminates the application (used only off macOS).
+ * @param menuBarToggle when non-null, adds a "Show Menu Bar" checkbox to the View menu (KDE only).
+ * @param renderMenuBar when `false`, the tree is still computed and pushed to [onTreeChanged] but the
+ *   in-window `MenuBar` is not rendered (the KDE Global Menu is showing it instead).
+ * @param onTreeChanged invoked with the freshly built tree on every recomposition.
  */
 @Composable
-fun FrameWindowScope.AppMenuBar(
+internal fun FrameWindowScope.AppMenuBar(
     onCloseWindow: () -> Unit,
     onQuit: () -> Unit,
+    menuBarToggle: MenuBarToggle? = null,
+    renderMenuBar: Boolean = true,
+    onTreeChanged: (AppMenuRoot) -> Unit = {},
 ) {
     val menuController = koinInject<MenuController>()
     val homeVm = koinInject<HomeViewModel>()
@@ -88,141 +108,99 @@ fun FrameWindowScope.AppMenuBar(
         unreadOnly = unreadOnly,
     )
 
-    // ⌘ on macOS, Ctrl elsewhere.
-    fun mod(key: Key) = KeyShortcut(key, meta = isMacOs, ctrl = !isMacOs)
+    val websiteUrl = stringResource(Res.string.website_url)
+    val labels = AppMenuLabels(
+        fileMenu = stringResource(Res.string.menu_file),
+        addFeed = stringResource(Res.string.menu_file_add_feed),
+        addFolder = stringResource(Res.string.menu_file_add_folder),
+        addTag = stringResource(Res.string.menu_file_add_tag),
+        importOpml = stringResource(Res.string.menu_file_import_opml),
+        exportOpml = stringResource(Res.string.menu_file_export_opml),
+        closeWindow = stringResource(Res.string.menu_file_close_window),
+        settings = stringResource(Res.string.menu_settings),
+        quit = stringResource(Res.string.menu_file_quit),
+        viewMenu = stringResource(Res.string.menu_view),
+        search = stringResource(Res.string.menu_view_search),
+        unreadOnly = stringResource(Res.string.menu_view_unread_only),
+        toggleSort = stringResource(Res.string.menu_view_toggle_sort),
+        markAllRead = stringResource(Res.string.menu_view_mark_all_read),
+        showMenuBar = stringResource(Res.string.menu_view_show_menu_bar),
+        articleMenu = stringResource(Res.string.menu_article),
+        toggleRead = stringResource(Res.string.menu_article_toggle_read),
+        toggleStar = stringResource(Res.string.menu_article_toggle_star),
+        openInBrowser = stringResource(Res.string.menu_article_open_in_browser),
+        copyUrl = stringResource(Res.string.menu_article_copy_url),
+        feedMenu = stringResource(Res.string.menu_feed),
+        refreshAll = stringResource(Res.string.menu_feed_refresh_all),
+        syncNow = stringResource(Res.string.menu_feed_sync_now),
+        helpMenu = stringResource(Res.string.menu_help),
+        website = stringResource(Res.string.menu_help_website),
+        projectPage = stringResource(Res.string.menu_help_project_page),
+        about = stringResource(Res.string.menu_help_about),
+    )
 
-    MenuBar {
-        Menu(stringResource(Res.string.menu_file)) {
-            Item(
-                stringResource(Res.string.menu_file_add_feed),
-                shortcut = mod(Key.N),
-                enabled = ui.addItemsEnabled,
-                onClick = { menuController.send(MenuCommand.AddFeed) },
-            )
-            Item(
-                stringResource(Res.string.menu_file_add_folder),
-                enabled = ui.addItemsEnabled,
-                onClick = { menuController.send(MenuCommand.AddFolder) },
-            )
-            Item(
-                stringResource(Res.string.menu_file_add_tag),
-                enabled = ui.addItemsEnabled,
-                onClick = { menuController.send(MenuCommand.AddTag) },
-            )
-            Separator()
-            Item(
-                stringResource(Res.string.menu_file_import_opml),
-                enabled = ui.opmlEnabled,
-                onClick = { settingsVm.importOpml() },
-            )
-            Item(
-                stringResource(Res.string.menu_file_export_opml),
-                enabled = ui.opmlEnabled,
-                onClick = { settingsVm.exportOpml() },
-            )
-            Separator()
-            Item(
-                stringResource(Res.string.menu_file_close_window),
-                shortcut = mod(Key.W),
-                onClick = onCloseWindow,
-            )
-            // On macOS, Settings and Quit live in the native app menu (see main.kt).
-            if (!isMacOs) {
-                Separator()
-                Item(
-                    stringResource(Res.string.menu_settings),
-                    shortcut = mod(Key.Comma),
-                    enabled = ui.openSettingsEnabled,
-                    onClick = { menuController.send(MenuCommand.OpenSettings) },
-                )
-                Item(
-                    stringResource(Res.string.menu_file_quit),
-                    shortcut = mod(Key.Q),
-                    onClick = onQuit,
-                )
-            }
-        }
+    val actions = AppMenuActions(
+        addFeed = { menuController.send(MenuCommand.AddFeed) },
+        addFolder = { menuController.send(MenuCommand.AddFolder) },
+        addTag = { menuController.send(MenuCommand.AddTag) },
+        importOpml = { settingsVm.importOpml() },
+        exportOpml = { settingsVm.exportOpml() },
+        closeWindow = onCloseWindow,
+        openSettings = { menuController.send(MenuCommand.OpenSettings) },
+        quit = onQuit,
+        focusSearch = { menuController.send(MenuCommand.FocusSearch) },
+        setUnreadOnly = { homeVm.setUnreadOnly(it) },
+        toggleSort = { homeVm.toggleSort() },
+        markAllRead = { homeVm.markAllRead() },
+        toggleRead = { selected?.let { homeVm.toggleRead(it) } },
+        toggleStar = { selected?.let { homeVm.toggleStar(it) } },
+        openInBrowser = { menuController.send(MenuCommand.OpenInBrowser) },
+        copyUrl = { menuController.send(MenuCommand.CopyUrl) },
+        refreshAll = { homeVm.refreshAll() },
+        sync = { homeVm.sync() },
+        openWebsite = { BrowserOpener.open(websiteUrl) },
+        openProjectPage = { BrowserOpener.open(PROJECT_URL) },
+        about = { menuController.send(MenuCommand.About) },
+    )
 
-        Menu(stringResource(Res.string.menu_view)) {
-            Item(
-                stringResource(Res.string.menu_view_search),
-                enabled = ui.searchEnabled,
-                onClick = { menuController.send(MenuCommand.FocusSearch) },
-            )
-            CheckboxItem(
-                stringResource(Res.string.menu_view_unread_only),
-                checked = ui.unreadOnlyChecked,
-                enabled = ui.searchEnabled,
-                onCheckedChange = { homeVm.setUnreadOnly(it) },
-            )
-            Item(
-                stringResource(Res.string.menu_view_toggle_sort),
-                enabled = ui.toggleSortEnabled,
-                onClick = { homeVm.toggleSort() },
-            )
-            Separator()
-            Item(
-                stringResource(Res.string.menu_view_mark_all_read),
-                enabled = ui.markAllReadEnabled,
-                onClick = { homeVm.markAllRead() },
-            )
-        }
+    val tree = buildAppMenuTree(ui, labels, actions, menuBarToggle)
 
-        Menu(stringResource(Res.string.menu_article)) {
-            Item(
-                stringResource(Res.string.menu_article_toggle_read),
-                enabled = ui.articleActionsEnabled,
-                onClick = { selected?.let { homeVm.toggleRead(it) } },
-            )
-            Item(
-                stringResource(Res.string.menu_article_toggle_star),
-                enabled = ui.articleActionsEnabled,
-                onClick = { selected?.let { homeVm.toggleStar(it) } },
-            )
-            Separator()
-            Item(
-                stringResource(Res.string.menu_article_open_in_browser),
-                enabled = ui.urlActionsEnabled,
-                onClick = { menuController.send(MenuCommand.OpenInBrowser) },
-            )
-            Item(
-                stringResource(Res.string.menu_article_copy_url),
-                enabled = ui.urlActionsEnabled,
-                onClick = { menuController.send(MenuCommand.CopyUrl) },
-            )
-        }
+    // Publish the tree to any D-Bus exporter on every (re)composition; harmless (a no-op default)
+    // when there is no registrar.
+    SideEffect { onTreeChanged(tree) }
 
-        Menu(stringResource(Res.string.menu_feed)) {
-            Item(
-                stringResource(Res.string.menu_feed_refresh_all),
-                shortcut = mod(Key.R),
-                enabled = ui.refreshAllEnabled,
-                onClick = { homeVm.refreshAll() },
-            )
-            Item(
-                stringResource(Res.string.menu_feed_sync_now),
-                enabled = ui.syncEnabled,
-                onClick = { homeVm.sync() },
-            )
-        }
-
-        Menu(stringResource(Res.string.menu_help)) {
-            val websiteUrl = stringResource(Res.string.website_url)
-            Item(
-                stringResource(Res.string.menu_help_website),
-                onClick = { BrowserOpener.open(websiteUrl) },
-            )
-            Item(
-                stringResource(Res.string.menu_help_project_page),
-                onClick = { BrowserOpener.open(PROJECT_URL) },
-            )
-            // On macOS, About lives in the native app menu (see main.kt).
-            if (!isMacOs) {
-                Item(
-                    stringResource(Res.string.menu_help_about),
-                    onClick = { menuController.send(MenuCommand.About) },
-                )
+    if (renderMenuBar) {
+        MenuBar {
+            tree.menus.forEach { menu ->
+                Menu(menu.label) { renderNodes(menu.items) }
             }
         }
     }
 }
+
+/** Interprets [AppMenuNode]s into the Compose `MenuBar` DSL. Recurses through nested submenus. */
+@Composable
+private fun MenuScope.renderNodes(nodes: List<AppMenuNode>) {
+    nodes.forEach { node ->
+        when (node) {
+            is AppMenuNode.Menu -> Menu(node.label) { renderNodes(node.items) }
+            is AppMenuNode.Item -> Item(
+                text = node.label,
+                shortcut = node.shortcut?.toKeyShortcut(),
+                enabled = node.enabled,
+                onClick = node.onClick,
+            )
+            is AppMenuNode.CheckboxItem -> CheckboxItem(
+                text = node.label,
+                checked = node.checked,
+                shortcut = node.shortcut?.toKeyShortcut(),
+                enabled = node.enabled,
+                onCheckedChange = node.onCheckedChange,
+            )
+            AppMenuNode.Separator -> Separator()
+        }
+    }
+}
+
+/** ⌘ on macOS, Ctrl elsewhere — the platform "mod" every shipped menu accelerator uses. */
+private fun AppMenuShortcut.toKeyShortcut(): KeyShortcut = KeyShortcut(key, meta = isMacOs, ctrl = !isMacOs)

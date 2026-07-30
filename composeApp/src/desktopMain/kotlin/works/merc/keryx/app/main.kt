@@ -44,6 +44,7 @@ import org.jetbrains.compose.resources.painterResource
 import org.koin.core.context.startKoin
 import org.koin.mp.KoinPlatform
 import works.merc.keryx.app.core.AppNotification
+import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.SystemClock
@@ -51,7 +52,6 @@ import works.merc.keryx.app.core.WINDOW_DEFAULT_HEIGHT
 import works.merc.keryx.app.core.WINDOW_DEFAULT_WIDTH
 import works.merc.keryx.app.core.WINDOW_MIN_HEIGHT
 import works.merc.keryx.app.core.WINDOW_MIN_WIDTH
-import works.merc.keryx.app.core.valueOrNull
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.di.appModule
 import works.merc.keryx.app.di.configureImageLoader
@@ -65,6 +65,7 @@ import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.NotificationMessages
 import works.merc.keryx.app.domain.OAuthCallbackParams
+import works.merc.keryx.app.domain.OpmlImporter
 import works.merc.keryx.app.domain.parseOAuthUri
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
@@ -81,11 +82,13 @@ import works.merc.keryx.app.platform.WindowChrome
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.app_icon
 import works.merc.keryx.app.resources.notification_app_translocated
+import works.merc.keryx.app.resources.notification_app_translocated_detail
 import works.merc.keryx.app.resources.tray_icon
 import works.merc.keryx.app.resources.update_available_notification
+import works.merc.keryx.app.appmenu.AppMenuBarHost
+import works.merc.keryx.app.appmenu.AppMenuConnection
 import works.merc.keryx.app.tray.KeryxTray
 import works.merc.keryx.app.tray.SniConnection
-import works.merc.keryx.app.ui.AppMenuBar
 import works.merc.keryx.app.ui.home.HomeViewModel
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
@@ -297,6 +300,18 @@ fun main(args: Array<String>) {
         Runtime.getRuntime().addShutdownHook(Thread { runCatching { sniConnection.close() } })
     }
 
+    // Linux/KDE Global Menu: if the com.canonical.AppMenu.Registrar is present, export the app menu
+    // over D-Bus so it can appear in the top-panel "Application Menu Bar" widget or titlebar button.
+    // null (every non-KDE environment) leaves the in-window menu bar behaving exactly as before.
+    // Independent of the tray (own connection, own lifecycle).
+    val appMenuConnection = if (isLinux) AppMenuConnection.tryCreate() else null
+    val resolvedAppMenuXid = java.util.concurrent.atomic.AtomicReference<Long?>(null)
+    if (appMenuConnection != null) {
+        Runtime.getRuntime().addShutdownHook(
+            Thread { runCatching { appMenuConnection.close(resolvedAppMenuXid.get()) } },
+        )
+    }
+
     application {
         var windowVisible by remember { mutableStateOf(!saved.startMinimized) }
         val windowState = remember {
@@ -431,9 +446,16 @@ fun main(args: Array<String>) {
                     .collect { dark -> withContext(Dispatchers.Swing) { updateLookAndFeel(dark) } }
             }
 
-            // Application menu bar (macOS: system menu bar; Windows/Linux: in-window). Closing the
-            // window hides to the tray, matching onCloseRequest.
-            AppMenuBar(onCloseWindow = { windowVisible = false }, onQuit = ::exitApplication)
+            // Application menu bar (macOS: system menu bar; Windows/Linux: in-window). On KDE with a
+            // Global Menu registrar, AppMenuBarHost also exports it over D-Bus and hides the in-window
+            // bar once registered. Closing the window hides to the tray, matching onCloseRequest.
+            AppMenuBarHost(
+                appMenuConnection = appMenuConnection,
+                windowVisible = windowVisible,
+                onCloseWindow = { windowVisible = false },
+                onQuit = ::exitApplication,
+                resolvedXid = resolvedAppMenuXid,
+            )
 
             // A second launch signals this instance (via SingleInstanceCoordinator's
             // loopback socket) instead of opening its own window. Bring this window
@@ -577,10 +599,9 @@ private fun maybeRebuildFtsIndex(koin: org.koin.core.Koin) {
 private suspend fun refreshFeedsAndNotify(koin: org.koin.core.Koin) {
     val settingsRepository = koin.get<SettingsRepository>()
     val results = koin.get<ActivityCenter>().trackFeedRefresh { koin.get<FeedRepository>().refreshAll() }
-    val newCount = results.values.sumOf { it.valueOrNull ?: 0 }
-    if (newCount > 0 && settingsRepository.getLocalSettings().notificationEnabled) {
-        koin.get<NewArticleNotifier>().notifyBackground(koin.get<NotificationMessages>().newArticles(newCount))
-    }
+    koin.get<NewArticleNotifier>().notifyIfEnabled(
+        results, settingsRepository.getLocalSettings().notificationEnabled, koin.get<NotificationMessages>(),
+    )
 }
 
 /**
@@ -629,6 +650,9 @@ private suspend fun checkForUpdateAndNotify(koin: org.koin.core.Koin) {
                 level = AppNotificationLevel.INFO,
                 message = message,
                 timestampMillis = SystemClock.nowMillis(),
+                // Acting on the notification goes straight to the release page — the only useful
+                // next step for "a new version exists".
+                action = AppNotificationAction.OpenUrl(status.url),
             ),
         )
     }
@@ -646,7 +670,7 @@ private suspend fun handleOpenedOpmlFile(koin: org.koin.core.Koin, path: String)
         Log.warn(LOG_TAG, "Could not read the opened OPML file")
         return
     }
-    val outcome = koin.get<FeedRepository>().importOpml(xml)
+    val outcome = koin.get<OpmlImporter>().import(xml)
     val message = koin.get<NotificationMessages>().opmlImported(outcome.added, outcome.failed)
     koin.get<NotificationCenter>().add(
         AppNotification(
@@ -673,6 +697,11 @@ private suspend fun warnIfAppTranslocated(koin: org.koin.core.Koin) {
             level = AppNotificationLevel.WARNING,
             message = getString(Res.string.notification_app_translocated),
             timestampMillis = SystemClock.nowMillis(),
+            // Nothing to navigate to — the useful next step is understanding the cause and the fix,
+            // so acting on it opens an explanatory dialog in place.
+            action = AppNotificationAction.ShowInfoDialog(
+                getString(Res.string.notification_app_translocated_detail),
+            ),
         ),
     )
 }

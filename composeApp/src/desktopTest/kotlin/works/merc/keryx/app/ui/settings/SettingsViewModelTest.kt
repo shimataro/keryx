@@ -25,6 +25,8 @@ import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SYNC_STATE_LAST_SYNCED_AT
+import works.merc.keryx.app.data.cloud.CloudFile
+import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.data.cloud.TokenStorage
@@ -32,6 +34,7 @@ import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.data.opml.OpmlCodec
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.domain.ActivityCenter
@@ -39,14 +42,21 @@ import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.CloudConnectFlow
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.FeedRepository
+import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.NotificationMessages
+import works.merc.keryx.app.domain.OpmlImporter
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
+import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.domain.UpdateStatus
 import works.merc.keryx.app.inMemoryDb
+import works.merc.keryx.app.insertFeed
+import works.merc.keryx.app.insertFeedTag
+import works.merc.keryx.app.insertFolder
+import works.merc.keryx.app.insertTag
 import works.merc.keryx.app.multiProviderCloudSession
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
@@ -64,6 +74,17 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** A [NotificationMessages] fake (unused by SettingsViewModel tests but needed to build a [FeedRepository]). */
+/** A [CloudStorage] whose every operation fails with an auth error, to drive a sync failure. */
+private class AlwaysFailingCloudStorage : CloudStorage {
+    private fun <T> fail(): Result<T> = Result.Err(CloudAuthException("no token"))
+    override suspend fun authenticate(): Result<Unit> = fail()
+    override suspend fun download(path: String): Result<CloudFile> = fail()
+    override suspend fun upload(path: String, data: ByteArray, expectedRev: String?): Result<Unit> = fail()
+    override suspend fun create(path: String, data: ByteArray): Result<Unit> = fail()
+    override suspend fun delete(path: String): Result<Unit> = fail()
+    override suspend fun exists(path: String): Result<Boolean> = fail()
+}
+
 private class SettingsViewModelTestNotificationMessages : NotificationMessages {
     override suspend fun feedGone(feedTitle: String): String = "gone:$feedTitle"
     override suspend fun feedUrlChanged(feedTitle: String): String = "urlChanged:$feedTitle"
@@ -85,6 +106,13 @@ class SettingsViewModelTest {
     // surfacing (flakily, on another test) as kotlinx.coroutines.test.UncaughtExceptionsBeforeTest.
     private val createdViewModels = mutableListOf<SettingsViewModel>()
 
+    /** The SyncRepository handed to the most recently built ViewModel, so a test can drive it. */
+    private lateinit var createdSyncRepository: SyncRepository
+
+    // Every SyncRepository built by newViewModel() gets its own scope for scheduleSync(); track
+    // them all (not just the latest) so tearDown() can cancel every one, same as createdViewModels.
+    private val createdSyncScopes = mutableListOf<CoroutineScope>()
+
     @BeforeTest
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
@@ -97,6 +125,8 @@ class SettingsViewModelTest {
     fun tearDown() {
         createdViewModels.forEach { it.viewModelScope.cancel() }
         createdViewModels.clear()
+        createdSyncScopes.forEach { it.cancel() }
+        createdSyncScopes.clear()
         Dispatchers.resetMain()
         driver.close()
         FileIO.delete(FileIO.join(dir, "local_settings.json"))
@@ -137,6 +167,8 @@ class SettingsViewModelTest {
         tokenStorage: TokenStorage = FakeTokenStorage(),
         clock: Clock = Clock { 0L },
         updateChecker: UpdateChecker = updateCheckerReturning("1.0.0"),
+        // Only the OPML import tests need subscribeFeed to actually succeed.
+        feedFetcher: FeedFetcher = failingFetcher(),
         connectFlow: CloudConnectFlow? = null,
         // Lets a test supply a pre-built (e.g. multi-provider) session instead of the single-Dropbox
         // one built below, for scenarios like switchTo() that need >1 provider registered at once.
@@ -144,24 +176,34 @@ class SettingsViewModelTest {
         // Shared with the SyncRepository built below so a test can drive activityCenter.trackSync {}
         // to simulate a sync completing and assert the ViewModel reacts to it.
         activityCenter: ActivityCenter = ActivityCenter(),
+        // Backs the SyncRepository built below. Default: local-only (every sync is a no-op success);
+        // a test can supply a failing storage to exercise the sync-error state.
+        syncCloudProvider: () -> CloudStorage? = { null },
     ): SettingsViewModel {
         val syncScheduler = SyncScheduler {}
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
+        // Mirror startup: ensureIndexed() creates articles_fts so subscribeFeed's indexMissing() works.
+        val ftsManager = FtsManager(driver).also { it.ensureIndexed() }
         val feedRepository = FeedRepository(
-            db, failingFetcher(), missingFaviconResolver(), articleRepository, FtsManager(driver), syncScheduler,
+            db, feedFetcher, missingFaviconResolver(), articleRepository, ftsManager, syncScheduler,
             NotificationCenter(), SettingsViewModelTestNotificationMessages(), clock, Dispatchers.Unconfined,
         )
+        val folderRepository = FolderRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
+        val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
+        val opmlImporter = OpmlImporter(feedRepository, folderRepository, tagRepository)
         // Unconfined write dispatcher so saveLocalSettings persists inline (localSettingsRoundTripsThroughStore
         // reads it back via store.load()).
         val settingsRepository =
             SettingsRepository(db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined)
+        val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        createdSyncScopes += syncScope
         val syncRepository = SyncRepository(
             driver = driver,
             db = db,
             ftsManager = FtsManager(driver),
-            cloudProvider = { null },
+            cloudProvider = syncCloudProvider,
             clock = clock,
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            scope = syncScope,
             activityCenter = activityCenter,
             notificationCenter = NotificationCenter(),
             notificationMessages = SettingsViewModelTestNotificationMessages(),
@@ -179,9 +221,10 @@ class SettingsViewModelTest {
                 connectFlow = connectFlow ?: FakeCloudConnectFlow(connectResult),
             )
         }
+        createdSyncRepository = syncRepository
         return SettingsViewModel(
-            settingsRepository, session, syncRepository, feedRepository, updateChecker, activityCenter,
-            Dispatchers.Unconfined,
+            settingsRepository, session, syncRepository, feedRepository, folderRepository, tagRepository,
+            opmlImporter, updateChecker, activityCenter, Dispatchers.Unconfined,
         ).also { createdViewModels += it }
     }
 
@@ -469,6 +512,82 @@ class SettingsViewModelTest {
     }
 
     // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
+    // disconnectClearsConnectedTypeAndCloudStorageType above.
+    @Test
+    fun disconnectClearsLastSyncErrorText() {
+        val tokenStorage = FakeTokenStorage()
+        tokenStorage.save(OAuthTokens("AT"))
+        val cloud = AlwaysFailingCloudStorage()
+        val vm = newViewModel(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
+        runBlocking { createdSyncRepository.sync() }
+        awaitTrue { vm.lastSyncErrorText == "syncFailed:CloudAuthException" }
+
+        vm.disconnect()
+        // Await the actual condition being asserted, not just connectedType: lastSyncErrorText is
+        // updated by an independent collector coroutine (init block) reacting to
+        // clearLastSyncError()'s StateFlow write, so polling connectedType alone gives no
+        // happens-before guarantee for it.
+        awaitTrue { vm.connectedType == null && vm.lastSyncErrorText == null }
+
+        assertNull(vm.lastSyncErrorText)
+    }
+
+    // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
+    // disconnectClearsConnectedTypeAndCloudStorageType above — switchTo's disconnect(oldType) call
+    // performs a real (mocked) HTTP revoke whose completion is dispatched on a real thread outside
+    // the TestCoroutineScheduler, so we poll with real wall-clock waits instead.
+    @Test
+    fun switchToClearsLastSyncErrorTextFromOldProvider() {
+        val dropboxTokenStorage = FakeTokenStorage(OAuthTokens("AT"))
+        val googleDriveTokenStorage = FakeTokenStorage()
+        val session = multiProviderCloudSession(
+            client = okAuthClient(),
+            dropboxTokenStorage = dropboxTokenStorage,
+            googleDriveTokenStorage = googleDriveTokenStorage,
+            // Blocks indefinitely on OAuth, so the new provider's own connect/sync never runs —
+            // isolating the fix (clearing on disconnect) from a later successful sync also clearing it.
+            googleDriveConnectFlow = SuspendingCloudConnectFlow(),
+        )
+        val cloud = AlwaysFailingCloudStorage()
+        val vm = newViewModel(cloudSession = session, syncCloudProvider = { cloud })
+        runBlocking { createdSyncRepository.sync() }
+        awaitTrue { vm.lastSyncErrorText == "syncFailed:CloudAuthException" }
+
+        vm.switchTo(CloudStorageType.GOOGLE_DRIVE)
+        // connectingType flips to GOOGLE_DRIVE synchronously at the top of switchTo(), before the old
+        // provider is even disconnected — wait for canCancelConnect instead, which only becomes true
+        // once connect(newType) is underway (i.e. after clearLastSyncError() has already run). Also
+        // await lastSyncErrorText directly: it's updated by an independent collector coroutine
+        // reacting to clearLastSyncError()'s StateFlow write, so canCancelConnect alone gives no
+        // happens-before guarantee for it (see disconnectClearsLastSyncErrorText for the same race).
+        awaitTrue { vm.canCancelConnect && vm.lastSyncErrorText == null }
+
+        assertNull(vm.lastSyncErrorText)
+    }
+
+    // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
+    // disconnectClearsConnectedTypeAndCloudStorageType above.
+    @Test
+    fun lastSyncErrorTextMirrorsSyncRepositoryLastSyncError() {
+        // The cloud-sync tab shows this as the reason the connected provider isn't syncing, so it has
+        // to track SyncRepository.lastSyncError in both directions.
+        val tokenStorage = FakeTokenStorage()
+        tokenStorage.save(OAuthTokens("AT"))
+        val cloud = AlwaysFailingCloudStorage()
+        var failing = true
+        val vm = newViewModel(tokenStorage = tokenStorage, syncCloudProvider = { if (failing) cloud else null })
+        assertNull(vm.lastSyncErrorText)
+
+        runBlocking { createdSyncRepository.sync() }
+        awaitTrue { vm.lastSyncErrorText == "syncFailed:CloudAuthException" }
+
+        // Local-only from here on, so the next sync is a success and must clear the reason.
+        failing = false
+        runBlocking { createdSyncRepository.sync() }
+        awaitTrue { vm.lastSyncErrorText == null }
+    }
+
+    // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
     // disconnectClearsConnectedTypeAndCloudStorageType above — UpdateChecker makes a real
     // (mocked) HTTP call whose completion is dispatched on a real thread outside the
     // TestCoroutineScheduler, so we poll with real wall-clock waits instead.
@@ -478,7 +597,11 @@ class SettingsViewModelTest {
         assertNull(vm.updateCheckResult)
 
         vm.checkForUpdate()
-        awaitTrue { vm.updateCheckResult != null }
+        // Await checkingForUpdate becoming false too, not just updateCheckResult: both are written
+        // sequentially in the same coroutine after the suspend point, on whatever thread the mocked
+        // HTTP call resumes on — observing the first write gives no happens-before guarantee for the
+        // second (see disconnectClearsLastSyncErrorText for the same class of race).
+        awaitTrue { vm.updateCheckResult != null && !vm.checkingForUpdate }
 
         val result = vm.updateCheckResult
         assertIs<UpdateStatus.Available>(result)
@@ -486,6 +609,65 @@ class SettingsViewModelTest {
         assertFalse(vm.checkingForUpdate)
         // Manual checks are deliberately excluded from the automatic schedule (see SettingsViewModel).
         assertNull(vm.localSettings.value.lastUpdateCheckAt)
+    }
+
+    @Test
+    fun checkForUpdateIgnoresOverlappingCallsWhileOneIsInFlight() {
+        var requestCount = 0
+        val client = HttpClient(
+            MockEngine {
+                requestCount++
+                delay(50)
+                respond(
+                    """{"tag_name":"2.0.0","html_url":"https://ex.com/releases/2.0.0","prerelease":false,"draft":false}""",
+                    HttpStatusCode.OK,
+                )
+            },
+        ) { expectSuccess = false }
+        val vm = newViewModel(updateChecker = UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo"))
+
+        vm.checkForUpdate()
+        awaitTrue { vm.checkingForUpdate }
+        vm.checkForUpdate() // ignored: a check is already in flight
+
+        // Same race guard as checkForUpdateSurfacesAvailableResultWithoutTouchingLastUpdateCheckAt.
+        awaitTrue { vm.updateCheckResult != null && !vm.checkingForUpdate }
+        assertEquals(1, requestCount)
+        assertFalse(vm.checkingForUpdate)
+    }
+
+    @Test
+    fun buildOpmlDocumentGroupsFeedsByFolderInDisplayOrderAndAnnotatesTags() {
+        db.insertFolder("d1", "Tech", sortOrder = 0L)
+        db.insertFolder("d2", "News", sortOrder = 1L)
+        db.insertFolder("d3", "Empty", sortOrder = 2L)
+        db.insertFeed("f1", url = "https://a.com/feed", folderId = "d1", sortOrder = 0L)
+        db.insertFeed("f2", url = "https://b.com/feed", folderId = "d1", sortOrder = 1L)
+        db.insertFeed("f3", url = "https://c.com/feed", folderId = "d2", sortOrder = 0L)
+        db.insertFeed("f4", url = "https://d.com/feed", sortOrder = 0L) // unfoldered
+        db.insertTag("t1", "kotlin", sortOrder = 0L)
+        db.insertTag("t2", "daily", sortOrder = 1L)
+        db.insertFeedTag("f1", "t2")
+        db.insertFeedTag("f1", "t1")
+        val vm = newViewModel()
+
+        val xml = vm.buildOpmlDocument()
+
+        assertTrue(xml.contains("""<outline text="Tech">"""))
+        // Tags follow the tags' own display (sort_order) order, not attachment order.
+        assertTrue(xml.contains("""category="kotlin,daily""""))
+        // An empty folder has nothing to export, so it is skipped entirely.
+        assertFalse(xml.contains("Empty"))
+
+        val reimported = OpmlCodec.import(xml)
+        // Folders first in folder sort order, feeds in their sort order within each, unfoldered last.
+        assertEquals(
+            listOf("https://a.com/feed", "https://b.com/feed", "https://c.com/feed", "https://d.com/feed"),
+            reimported.map { it.xmlUrl },
+        )
+        assertEquals(listOf("Tech", "Tech", "News", null), reimported.map { it.folderName })
+        assertEquals(listOf("kotlin", "daily"), reimported[0].tags)
+        assertTrue(reimported.drop(1).all { it.tags.isEmpty() })
     }
 
     /** Polls with real wall-clock waits (for coroutines that hop onto a real, non-virtual dispatcher). */

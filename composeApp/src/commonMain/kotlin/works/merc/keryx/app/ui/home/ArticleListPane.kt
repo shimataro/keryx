@@ -404,7 +404,9 @@ internal fun ArticleListPaneContent(
     }
 }
 
-/** The notifications bell + badge and its popup sheet, shared by the article list and search panes. */
+/**
+ * Displays the notifications button, unread notification count, and notification popup.
+ */
 @Composable
 private fun NotificationsBell(notifVm: NotificationCenterViewModel) {
     val notifications by notifVm.items.collectAsStateSafe(emptyList())
@@ -441,7 +443,9 @@ private fun NotificationsBell(notifVm: NotificationCenterViewModel) {
                 onDismissRequest = { showNotifications = false },
                 properties = PopupProperties(focusable = true, dismissOnClickOutside = true),
             ) {
-                NotificationCenterSheet(notifVm)
+                // Close the popover once a notification's action leads somewhere, so the destination
+                // (feed list selection / settings dialog / explanation dialog) is actually visible.
+                NotificationCenterSheet(notifVm, onNavigated = { showNotifications = false })
             }
         }
     }

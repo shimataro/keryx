@@ -12,11 +12,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.FEED_ERROR_REASON_GONE
 import works.merc.keryx.app.core.FeedTimeoutException
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
+import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.inMemoryDb
@@ -46,30 +49,6 @@ private const val RSS_WITH_NEW_SEARCHABLE_ARTICLE = """<?xml version="1.0"?><rss
 <item><title>Post</title><link>https://ex.com/1</link><guid>g1</guid></item>
 <item><title>Serialization Deep Dive</title><link>https://ex.com/2</link><guid>g2</guid></item>
 </channel></rss>"""
-
-/** An OPML document listing one feed that fetches fine and one whose URL always 410s. */
-private const val OPML_ONE_OK_ONE_GONE = """<?xml version="1.0"?>
-<opml version="2.0">
-<body>
-<outline text="Feed" xmlUrl="https://ex.com/feed"/>
-<outline text="Gone" xmlUrl="https://ex.com/gone"/>
-</body>
-</opml>"""
-
-/** A second, distinctively-titled article for a different feed URL than [RSS_WITH_SEARCHABLE_ARTICLE]. */
-private const val RSS_WITH_ANOTHER_SEARCHABLE_ARTICLE = """<?xml version="1.0"?><rss version="2.0"><channel>
-<title>Feed B</title><link>https://ex.com</link>
-<item><title>Compose Rendering Pipeline</title><link>https://ex.com/b1</link><guid>gb1</guid></item>
-</channel></rss>"""
-
-/** An OPML document listing two feeds, each with one distinctively-titled searchable article. */
-private const val OPML_TWO_SEARCHABLE_FEEDS = """<?xml version="1.0"?>
-<opml version="2.0">
-<body>
-<outline text="Feed A" xmlUrl="https://ex.com/feed-a"/>
-<outline text="Feed B" xmlUrl="https://ex.com/feed-b"/>
-</body>
-</opml>"""
 
 /** A [NotificationMessages] fake returning canned, recognizable strings. */
 private class FakeNotificationMessages : NotificationMessages {
@@ -130,8 +109,9 @@ class FeedRepositoryTest {
 
             val result = repo.subscribeFeed("https://ex.com/feed")
 
-            assertIs<Result.Ok<Unit>>(result)
+            assertIs<Result.Ok<Feeds>>(result)
             val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+            assertEquals(feed, result.value)
             assertEquals("Feed", feed.title)
             assertEquals("etag-1", feed.etag)
             assertEquals(1, db.articlesQueries.watchAll().executeAsList().size)
@@ -151,8 +131,11 @@ class FeedRepositoryTest {
             val (driver, db) = inMemoryDb()
             try {
                 val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
-                assertIs<Result.Ok<Unit>>(repo.subscribeFeed("https://ex.com/feed"))
-                return db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne().id
+                val result = repo.subscribeFeed("https://ex.com/feed")
+                assertIs<Result.Ok<Feeds>>(result)
+                val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+                assertEquals(feed, result.value)
+                return feed.id
             } finally {
                 driver.close()
             }
@@ -187,7 +170,10 @@ class FeedRepositoryTest {
             val fetcher = fetcherWith { respond(RSS_WITH_SEARCHABLE_ARTICLE, HttpStatusCode.OK) }
             val repo = newRepo(db, driver, fetcher)
 
-            assertIs<Result.Ok<Unit>>(repo.subscribeFeed("https://ex.com/feed"))
+            val result = repo.subscribeFeed("https://ex.com/feed")
+            assertIs<Result.Ok<Feeds>>(result)
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+            assertEquals(feed, result.value)
             val article = db.articlesQueries.watchAll().executeAsList().single()
 
             // Regression test: before the fix, the FTS index was never rebuilt after
@@ -208,19 +194,23 @@ class FeedRepositoryTest {
             val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
             val repo = newRepo(db, driver, fetcher)
 
-            assertIs<Result.Ok<Unit>>(repo.subscribeFeed("https://ex.com/feed"))
+            val result = repo.subscribeFeed("https://ex.com/feed")
+            assertIs<Result.Ok<Feeds>>(result)
             val original = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+            assertEquals(original, result.value)
 
             repo.unsubscribeFeed(original.id)
             val afterUnsubscribe = db.feedsQueries.getById(original.id).executeAsOne()
             assertNotNull(afterUnsubscribe.deleted_at)
             assertTrue(db.feedsQueries.watchAll().executeAsList().isEmpty())
 
-            assertIs<Result.Ok<Unit>>(repo.subscribeFeed("https://ex.com/feed"))
+            val result2 = repo.subscribeFeed("https://ex.com/feed")
+            assertIs<Result.Ok<Feeds>>(result2)
 
             val all = db.feedsQueries.getAllIncludingDeleted().executeAsList()
             assertEquals(1, all.size, "resubscribing to the same URL must not create a duplicate row")
             val resubscribed = all.single()
+            assertEquals(resubscribed, result2.value)
             assertEquals(original.id, resubscribed.id)
             assertNull(resubscribed.deleted_at)
         } finally {
@@ -345,9 +335,37 @@ class FeedRepositoryTest {
             val notifications = notificationCenter.items.value
             assertEquals(1, notifications.size)
             assertTrue(notifications.single().message.startsWith("gone:"))
+            // Acting on the warning jumps to the feed in the sidebar.
+            assertEquals(AppNotificationAction.ShowFeedDetail(feed.id), notifications.single().action)
 
             val after = db.feedsQueries.getById(feed.id).executeAsOne()
             assertEquals(0, after.error_count, "FeedNotFoundException is explicitly excluded from error-count increments")
+            // ...so last_error carries the Gone marker instead — the only thing that lets the feed
+            // list keep flagging the feed after the notification is dismissed.
+            assertEquals(FEED_ERROR_REASON_GONE, after.last_error)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun goneMarkerIsClearedWhenTheFeedComesBack(): Unit = runBlocking {
+        // The Gone marker is a live state, not a permanent brand: a feed that starts answering again
+        // must lose its feed-list flag, via the existing resetErrorCount on the success path.
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            repo.subscribeFeed("https://ex.com/feed")
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+
+            val goneRepo = newRepo(db, driver, fetcherWith { respond("", HttpStatusCode.Gone) })
+            assertIs<Result.Err>(goneRepo.refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne()))
+            assertEquals(FEED_ERROR_REASON_GONE, db.feedsQueries.getById(feed.id).executeAsOne().last_error)
+
+            val backRepo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            assertIs<Result.Ok<Int>>(backRepo.refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne()))
+
+            assertNull(db.feedsQueries.getById(feed.id).executeAsOne().last_error)
         } finally {
             driver.close()
         }
@@ -431,6 +449,7 @@ class FeedRepositoryTest {
             val notifications = notificationCenter.items.value
             assertEquals(1, notifications.size)
             assertTrue(notifications.single().message.startsWith("urlChanged:"))
+            assertEquals(AppNotificationAction.ShowFeedDetail(feed.id), notifications.single().action)
         } finally {
             driver.close()
         }
@@ -651,6 +670,23 @@ class FeedRepositoryTest {
     }
 
     @Test
+    fun getFeedByUrlReturnsTheMatchingFeedIncludingASoftDeletedOneAndNullOtherwise() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1", url = "https://a.com/feed")
+            db.insertFeed("f2", url = "https://b.com/feed", deletedAt = 20L)
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+
+            assertEquals("f1", repo.getFeedByUrl("https://a.com/feed")?.id)
+            // getByUrl deliberately ignores deleted_at — importOpml resolves unsubscribed feeds too.
+            assertNotNull(repo.getFeedByUrl("https://b.com/feed")?.deleted_at)
+            assertNull(repo.getFeedByUrl("https://missing.com/feed"))
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun subscribeFeedNewFeedIsAppendedToEndOfNoFolderGroup(): Unit = runBlocking {
         val (driver, db) = inMemoryDb()
         try {
@@ -690,70 +726,6 @@ class FeedRepositoryTest {
             assertEquals("d1", resubscribed.folder_id)
             val ordered = db.feedsQueries.getByFolder("d1").executeAsList()
             assertEquals(listOf("other", feed.id), ordered.map { it.id })
-        } finally {
-            driver.close()
-        }
-    }
-
-    @Test
-    fun importOpmlSubscribesToEveryListedFeedAndCountsSuccessesAndFailures(): Unit = runBlocking {
-        val (driver, db) = inMemoryDb()
-        try {
-            val fetcher = fetcherWith { request ->
-                if (request.url.toString().endsWith("/gone")) {
-                    respond("", HttpStatusCode.Gone)
-                } else {
-                    respond(RSS, HttpStatusCode.OK)
-                }
-            }
-            val repo = newRepo(db, driver, fetcher)
-
-            val outcome = repo.importOpml(OPML_ONE_OK_ONE_GONE)
-
-            assertEquals(OpmlImportOutcome(added = 1, failed = 1), outcome)
-            assertEquals(listOf("https://ex.com/feed"), db.feedsQueries.getAllIncludingDeleted().executeAsList().map { it.url })
-        } finally {
-            driver.close()
-        }
-    }
-
-    @Test
-    fun importOpmlMakesEveryImportedFeedsArticlesSearchable(): Unit = runBlocking {
-        val (driver, db) = inMemoryDb()
-        try {
-            val fetcher = fetcherWith { request ->
-                if (request.url.toString().endsWith("/feed-b")) {
-                    respond(RSS_WITH_ANOTHER_SEARCHABLE_ARTICLE, HttpStatusCode.OK)
-                } else {
-                    respond(RSS_WITH_SEARCHABLE_ARTICLE, HttpStatusCode.OK)
-                }
-            }
-            val repo = newRepo(db, driver, fetcher)
-
-            val outcome = repo.importOpml(OPML_TWO_SEARCHABLE_FEEDS)
-            assertEquals(OpmlImportOutcome(added = 2, failed = 0), outcome)
-
-            // Regression test: importOpml defers FTS indexing to run once after the whole loop
-            // (instead of once per feed) — this must still leave every imported feed's articles
-            // searchable, not just the last one indexed.
-            val searchRepo = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L }, Dispatchers.Unconfined)
-            assertEquals(listOf("Kotlin Multiplatform News"), searchRepo.search("Kotlin").map { it.article.title })
-            assertEquals(listOf("Compose Rendering Pipeline"), searchRepo.search("Compose").map { it.article.title })
-        } finally {
-            driver.close()
-        }
-    }
-
-    @Test
-    fun importOpmlOnUnparseableXmlSubscribesToNothing(): Unit = runBlocking {
-        val (driver, db) = inMemoryDb()
-        try {
-            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
-
-            val outcome = repo.importOpml("not opml at all")
-
-            assertEquals(OpmlImportOutcome(added = 0, failed = 0), outcome)
-            assertTrue(db.feedsQueries.getAllIncludingDeleted().executeAsList().isEmpty())
         } finally {
             driver.close()
         }

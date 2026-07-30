@@ -69,13 +69,21 @@ val appVersion: String =
         ?: System.getenv("APP_VERSION")
         ?: "0.0.0"
 
+// jpackage's packaging metadata (CFBundleVersion, RPM %version, MSI ProductVersion) must stay
+// purely numeric MAJOR.MINOR.PATCH — unlike BuildConfig.VERSION, it cannot carry a SemVer
+// pre-release suffix (`-beta.1`, `-rc.2`, ...). Stripped from appVersion by dropping everything
+// from the first `-` onward; a plain (non-prerelease) appVersion — including the local-dev
+// "0.0.0" default — has nothing to strip, so packaging is unaffected for ordinary builds.
+val appPackageVersion: String = appVersion.substringBefore('-')
+
 // jpackage rejects a macOS app-version whose first component is 0 (it enforces the CFBundleVersion
 // rule that versions start at 1), which would otherwise make 0.x impossible to release at all —
 // it fails createDistributable, not just the DMG step. So a 0.x build is packaged under this
 // placeholder and the real, user-visible version is written back into Info.plist afterwards
-// (see restoreMacOsShortVersion). Versions >= 1 are passed through untouched.
-val isZeroMajorVersion = appVersion.substringBefore('.').toIntOrNull() == 0
-val macOsPackageVersion = if (isZeroMajorVersion) "1.0.0" else appVersion
+// (see restoreMacOsShortVersion). Versions >= 1 are passed through untouched. Uses
+// appPackageVersion (not appVersion) since that is already the numeric-only value jpackage needs.
+val isZeroMajorVersion = appPackageVersion.substringBefore('.').toIntOrNull() == 0
+val macOsPackageVersion = if (isZeroMajorVersion) "1.0.0" else appPackageVersion
 
 val generatedBuildConfigDir = layout.buildDirectory.dir("generated/buildConfig/kotlin")
 
@@ -268,7 +276,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "Keryx"
-            packageVersion = appVersion
+            packageVersion = appPackageVersion
             description = "Local-first, cross-platform RSS reader"
             vendor = "Keryx"
             // java.sql: sqlite-jdbc, java.naming: keyring, java.desktop: AWT tray,
@@ -364,9 +372,10 @@ compose.resources {
 }
 
 /**
- * Restores the user-visible version that [macOsPackageVersion] had to replace to get past
- * jpackage's "app-version cannot start with 0" check. CFBundleVersion deliberately keeps the
- * placeholder: it is an internal build identifier that never surfaces in Finder or the UI.
+ * Restores the user-visible version that [macOsPackageVersion] had to replace — either jpackage's
+ * "app-version cannot start with 0" check, a stripped SemVer pre-release suffix (see
+ * [appPackageVersion]), or both. CFBundleVersion deliberately keeps the packaged value: it is an
+ * internal build identifier that never surfaces in Finder or the UI.
  */
 fun restoreMacOsShortVersion(infoPlist: java.io.File, version: String) {
     if (!infoPlist.exists()) return
@@ -388,13 +397,14 @@ tasks.withType<Test>().configureEach {
 // The `run` task is registered lazily by the Compose/KMP desktop plugins, so other
 // run-specific configuration is deferred until after project evaluation.
 afterEvaluate {
-    // 0.x only: jpackage would not accept the real version, so it is written back here. This
-    // breaks the ad-hoc bundle seal, which is acceptable while the app is effectively unsigned
-    // (see docs/build.md). A major version of 1 or higher needs no post-processing at all and
-    // keeps a valid signature. packageDmg depends on createDistributable, so patching here also
-    // reaches the app bundle inside the DMG.
+    // Needed whenever what actually got packaged (macOsPackageVersion) differs from the real,
+    // full appVersion: the 0.x-major placeholder, a stripped pre-release suffix, or both at once.
+    // This breaks the ad-hoc bundle seal, which is acceptable while the app is effectively
+    // unsigned (see docs/build.md). A plain (non-prerelease), major-1-or-higher version needs no
+    // post-processing at all and keeps a valid signature. packageDmg depends on
+    // createDistributable, so patching here also reaches the app bundle inside the DMG.
     tasks.findByName("createDistributable")?.doLast {
-        if (isZeroMajorVersion) {
+        if (macOsPackageVersion != appVersion) {
             restoreMacOsShortVersion(
                 file("build/compose/binaries/main/app/Keryx.app/Contents/Info.plist"),
                 appVersion,

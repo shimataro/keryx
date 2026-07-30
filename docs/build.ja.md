@@ -147,42 +147,61 @@ URI がプロセスに届かないからである。代わりにアプリが初�
 ## リリース（CD）
 
 `.github/workflows/release.yml` がパッケージをビルドし、GitHub Release に添付する。
-**現状は macOS のみ**（クロスコンパイル非対応のため、プラットフォームを増やすにはランナーを追加する）。
+**現状は macOS と Linux (x86_64)**（クロスコンパイル非対応のため、プラットフォームを増やすには
+ランナーを追加する必要がある。Windows は未対応）。
 
 フロー:
 
-1. `vMAJOR.MINOR.PATCH` 形式のタグ（例: `v0.1.0`）で GitHub Release を公開する。
+1. `vMAJOR.MINOR.PATCH` 形式のタグ（例: `v0.1.0`）で GitHub Release を公開する。SemVer 風の
+   プレリリース接尾辞を任意で付けられる（例: `v1.2.0-beta.1`）。
 2. `release: published` で起動し、先頭の `v` を除去して `-PappVersion` に渡す。
-3. `:composeApp:packageDmg` を実行し、DMG を `Keryx-<version>-macos-arm64.dmg` として Release に添付する。
+3. 2つの独立したジョブが並行して実行される: macOS ランナーで `:composeApp:packageDmg` を実行し
+   `Keryx-<version>-macos-arm64.dmg` として添付、Linux ランナーで（jpackage 用に `fakeroot`/`rpm`
+   をインストールした上で）`:composeApp:packageDeb :composeApp:packageRpm` を実行し
+   `Keryx-<version>-linux-x86_64.deb` と `Keryx-<version>-linux-x86_64.rpm` として添付する。
 
 **バージョンはタグを正とする**。`composeApp/build.gradle.kts` の `appVersion` は
-`-PappVersion` > 環境変数 `APP_VERSION` > ファイル内のリテラル、の順に解決するため、タグが
-`BuildConfig.VERSION`（About 画面に表示）と `packageVersion` の両方を決め、両者が食い違うことがない。
-ローカルビルドはリテラルにフォールバックするので、普段の開発手順は変わらない。jpackage が受け付けない
-形式（`MAJOR[.MINOR[.PATCH]]` 以外）のタグは、ワークフロー冒頭で明示的なメッセージとともに失敗させる。
+`-PappVersion` > 環境変数 `APP_VERSION` > ファイル内のリテラル、の順に解決し、`BuildConfig.VERSION`
+（About 画面表示・更新チェックで使用）を決める — プレリリース接尾辞を含む完全なタグそのもの。
+`composeApp/build.gradle.kts` は別途、プレリリース接尾辞を除去した `appPackageVersion` を導出し、
+これがすべてのネイティブターゲット向けの `packageVersion` を決める。jpackage のパッケージ用メタデータ
+（CFBundleVersion・RPM の `%version`・MSI の `ProductVersion`）は数値のみの `MAJOR.MINOR.PATCH` でなければ
+ならず、プレリリース接尾辞を含められないためである。プレリリースを伴わない通常のタグでは両者は一致するため、
+何も変わらない。ローカルビルドは両方とも同じリテラル `"0.0.0"` にフォールバックする。jpackage が受け付けない
+形式（`MAJOR.MINOR.PATCH[-<pre-release>]` 以外）のタグは、ワークフロー冒頭で明示的なメッセージとともに失敗させる。
 
 `macos-latest` ランナーは arm64 のため、成果物名にアーキテクチャを含めている
 （将来 x86_64 版やユニバーサル版を併置できるようにするため）。
 
-### macOS における 0.x バージョン
+### macOS における 0.x バージョンとプレリリースタグ
 
 jpackage は macOS 向けの `--app-version` の先頭要素が `0` のものを受け付けない
 （バージョンは 1 から始まるという CFBundleVersion の規則を強制するため）。しかも失敗するのは
 DMG 生成ではなく **`createDistributable`** なので、そのままでは `0.x` は一切パッケージできない。
-jpackage に `--mac-app-version` のような別入力は無く、Compose プラグイン側の検証もこの制約を
-カバーしていないため、設定で回避することはできない。
+jpackage はパッケージ用バージョンが数値のみ（`MAJOR.MINOR.PATCH`）であることも要求するため、
+`1.2.0-beta.1` のようなプレリリース接尾辞付きタグもそのままでは渡せない — 同じ制約は
+他の 2 プラットフォームの RPM の `%version` フィールドと MSI の `ProductVersion` にも当てはまる。
+jpackage に `--mac-app-version` のような別入力は無く、Compose プラグイン側の検証もどちらの
+制約もカバーしていないため、設定で回避することはできない。
 
-`composeApp/build.gradle.kts` で以下のように回避している。メジャーバージョンが `0` のときは
-プレースホルダ `1.0.0` でパッケージし（`macOsPackageVersion`。`macOS { packageVersion }` でのみ
-上書きする。deb / rpm / msi は `0.x` を受け付けるので手を触れない）、`createDistributable` の
-`doLast` で `restoreMacOsShortVersion` が `CFBundleShortVersionString` を実バージョンに書き戻す。
-メジャーが 1 以上の場合は素通しで何もしない。
+`composeApp/build.gradle.kts` は両方を `appPackageVersion`（前述の、プレリリース接尾辞を除いた
+`appVersion`）で回避している。これが deb / rpm / msi 共通の `packageVersion` に渡り、macOS 専用の
+派生値 `macOsPackageVersion` にもなる: `appPackageVersion` のメジャーが `0` のときは、macOS だけ
+さらにプレースホルダ `1.0.0` でパッケージする（`macOS { packageVersion }` でのみ上書きする。
+deb / rpm / msi は `0.x` を受け付けるので手を触れない）。メジャーが 1 以上の場合は素通しで何もしない。
+パッケージされた `macOsPackageVersion` が実際の `appVersion` と食い違う場合 — 0.x のプレースホルダ、
+プレリリース接尾辞の除去、あるいはその両方 — は常に、`createDistributable` の `doLast` で
+`restoreMacOsShortVersion` が `CFBundleShortVersionString` を実バージョンに書き戻す。両者が
+一致する場合（プレリリースを伴わない、メジャー 1 以上の通常のタグ）は何もしない。
 
 `0.1.1` での結果: タグ・`BuildConfig.VERSION`（About 画面）・更新チェック・Finder の表示が
 すべて `0.1.1` で揃う。プレースホルダ `1.0.0` が残るのは `CFBundleVersion` だけで、これは
 UI に一切現れない内部的なビルド識別子。中間成果物は `Keryx-1.0.0.dmg` という名前になるが、
 ワークフローの rename ステップがタグから最終的なアセット名を決めるため、添付されるファイルは
-`Keryx-0.1.1-macos-arm64.dmg` になる。
+`Keryx-0.1.1-macos-arm64.dmg` になる。`1.2.0-beta.1` のようなプレリリースタグでも同じ分離が
+数値メタデータに適用される: `BuildConfig.VERSION`・Finder の表示バージョン・リリースアセット名は
+すべて `1.2.0-beta.1` になり、`CFBundleVersion` / RPM の `%version` / MSI の `ProductVersion` は
+除去済みの `1.2.0` になる。
 
 `DROPBOX_APP_KEY` / `GOOGLE_DRIVE_CLIENT_ID` / `GOOGLE_DRIVE_CLIENT_SECRET` / `ONEDRIVE_CLIENT_ID` は
 **リポジトリの Secrets** に設定する。未設定でもビルドは成功するが、リリースされたアプリでは

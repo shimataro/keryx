@@ -24,8 +24,11 @@ import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.domain.FeedRepository
+import works.merc.keryx.app.domain.FolderRepository
+import works.merc.keryx.app.domain.OpmlImporter
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
+import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.domain.UpdateStatus
 import works.merc.keryx.app.platform.FileIO
@@ -35,6 +38,7 @@ import works.merc.keryx.app.resources.settings_export_opml
 import works.merc.keryx.app.resources.settings_import_opml
 
 import works.merc.keryx.app.ui.home.formatTimestamp
+import works.merc.keryx.app.ui.home.groupFeedsByFolder
 
 /** A transient result of an OPML operation, surfaced inline near the action. */
 sealed interface OpmlResult {
@@ -48,6 +52,9 @@ class SettingsViewModel(
     private val cloudSession: CloudSession,
     private val syncRepository: SyncRepository,
     private val feedRepository: FeedRepository,
+    private val folderRepository: FolderRepository,
+    private val tagRepository: TagRepository,
+    private val opmlImporter: OpmlImporter,
     private val updateChecker: UpdateChecker,
     private val activityCenter: ActivityCenter,
     // Token store / sync touch the OS Keychain (macOS shells out to `security`, which may
@@ -106,12 +113,23 @@ class SettingsViewModel(
     var lastSyncedAtText by mutableStateOf<String?>(null)
         private set
 
+    /**
+     * Why the last sync failed, or null when sync is healthy. Mirrors [SyncRepository.lastSyncError],
+     * so the cloud-sync tab shows the current reason even after the notification was dismissed.
+     * Distinct from [connectFailedType], which only covers a failed connect (OAuth) flow.
+     */
+    var lastSyncErrorText by mutableStateOf<String?>(null)
+        private set
+
     /** Set by [checkForUpdate]. Does not affect the automatic update-check schedule. */
     var updateCheckResult by mutableStateOf<UpdateStatus?>(null)
         private set
 
     init {
         refreshLastSyncedAt()
+        viewModelScope.launch {
+            syncRepository.lastSyncError.collect { lastSyncErrorText = it }
+        }
         viewModelScope.launch {
             // Skip the initial replay (current state at VM creation) — already handled by the
             // explicit call above. Only react to genuine sync completions afterward, covering
@@ -147,6 +165,7 @@ class SettingsViewModel(
      * never perturbs it.
      */
     fun checkForUpdate() {
+        if (checkingForUpdate) return
         viewModelScope.launch {
             checkingForUpdate = true
             updateCheckResult = updateChecker.check()
@@ -215,6 +234,9 @@ class SettingsViewModel(
         val type = connectedType ?: return
         viewModelScope.launch {
             withContext(dispatcher) { cloudSession.disconnect(type) }
+            // Clear before exposing the disconnect, so a subsequent connect (to this or another
+            // provider) never inherits this provider's stale failure reason.
+            syncRepository.clearLastSyncError()
             update { it.copy(cloudStorageType = null) }
             connectedType = null
             lastSyncedAtText = null
@@ -244,6 +266,9 @@ class SettingsViewModel(
         viewModelScope.launch {
             connectingType = newType
             withContext(dispatcher) { cloudSession.disconnect(oldType) }
+            // Clear before connecting the new provider, so it never inherits the old provider's
+            // stale failure reason.
+            syncRepository.clearLastSyncError()
             update { it.copy(cloudStorageType = null) }
             connectedType = null
             lastSyncedAtText = null
@@ -256,7 +281,7 @@ class SettingsViewModel(
     }
 
     /**
-     * Exports all subscribed feeds to an OPML file selected by the user.
+     * Exports subscribed feeds, including their folders and tags, to an OPML file selected by the user.
      *
      * Updates the OPML result to indicate whether the export completed or was canceled.
      */
@@ -270,14 +295,7 @@ class SettingsViewModel(
                     opmlResult = OpmlResult.Cancelled
                     return@launch
                 }
-                val feeds = feedRepository.getAllFeeds().map {
-                    OpmlCodec.ExportFeed(
-                        title = it.displayTitle(),
-                        xmlUrl = it.url,
-                        htmlUrl = it.site_url,
-                    )
-                }
-                FileIO.writeText(path, OpmlCodec.export(feeds))
+                FileIO.writeText(path, buildOpmlDocument())
                 opmlResult = OpmlResult.Exported
             } finally {
                 exportingOpml = false
@@ -285,6 +303,35 @@ class SettingsViewModel(
         }
     }
 
+    /**
+     * Builds an OPML document containing the current subscriptions, organized by folder and annotated with tags.
+     *
+     * @return The serialized OPML document.
+     */
+    internal fun buildOpmlDocument(): String {
+        val feeds = feedRepository.getAllFeeds()
+        val folders = folderRepository.getAllFolders()
+        val allTags = tagRepository.getAllTags() // already in display order
+        val feedTagMap = tagRepository.getFeedTagMap()
+        val groups = groupFeedsByFolder(feeds, folders)
+            .map { (folder, groupFeeds) ->
+                folder?.name to groupFeeds.map { feed ->
+                    val tagIds = feedTagMap[feed.id].orEmpty()
+                    OpmlCodec.ExportFeed(
+                        title = feed.displayTitle(),
+                        xmlUrl = feed.url,
+                        htmlUrl = feed.site_url,
+                        tags = allTags.filter { it.id in tagIds }.map { it.name },
+                    )
+                }
+            }
+            .filter { (_, groupFeeds) -> groupFeeds.isNotEmpty() }
+        return OpmlCodec.export(groups)
+    }
+
+    /**
+     * Imports feeds, folders, and tags from a selected OPML or XML file.
+     */
     fun importOpml() {
         if (importingOpml || exportingOpml) return
         viewModelScope.launch {
@@ -299,7 +346,7 @@ class SettingsViewModel(
                     opmlResult = OpmlResult.Cancelled
                     return@launch
                 }
-                val outcome = feedRepository.importOpml(xml)
+                val outcome = opmlImporter.import(xml)
                 opmlResult = OpmlResult.Imported(outcome.added, outcome.failed)
             } finally {
                 importingOpml = false
@@ -307,6 +354,9 @@ class SettingsViewModel(
         }
     }
 
+    /**
+     * Clears the latest OPML import or export result.
+     */
     fun clearOpmlResult() {
         opmlResult = null
     }

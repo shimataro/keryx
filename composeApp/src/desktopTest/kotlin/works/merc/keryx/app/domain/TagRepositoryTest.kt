@@ -249,6 +249,46 @@ class TagRepositoryTest {
     }
 
     @Test
+    fun getAllTagsReturnsLiveTagsInDisplayOrderExcludingSoftDeletedOnes() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertTag("t1", "Second", sortOrder = 1L)
+            db.insertTag("t2", "First", sortOrder = 0L)
+            db.insertTag("t3", "Deleted", sortOrder = 2L, deletedAt = 1L)
+            val repo = newRepo(db)
+
+            val tags = repo.getAllTags()
+
+            assertEquals(listOf("First", "Second"), tags.map { it.name })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun getFeedTagMapGroupsAttachedTagIdsByFeedIgnoringDetachedLinks() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertFeed("f2")
+            db.insertFeed("f3")
+            db.insertTag("t1", "Kotlin")
+            db.insertTag("t2", "News")
+            db.insertFeedTag("f1", "t1")
+            db.insertFeedTag("f1", "t2")
+            db.insertFeedTag("f2", "t1")
+            db.insertFeedTag("f3", "t1", deletedAt = 5L) // detached
+            val repo = newRepo(db)
+
+            val map = repo.getFeedTagMap()
+
+            assertEquals(mapOf("f1" to setOf("t1", "t2"), "f2" to setOf("t1")), map)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun watchAllTagsExcludesSoftDeletedTags() = runTest {
         val (driver, db) = inMemoryDb()
         try {

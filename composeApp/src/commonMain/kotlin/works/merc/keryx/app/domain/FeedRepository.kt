@@ -11,12 +11,13 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import works.merc.keryx.app.core.AppNotification
+import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.FEED_ERROR_REASON_GONE
 import works.merc.keryx.app.core.FeedNotFoundException
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.FtsManager
-import works.merc.keryx.app.data.opml.OpmlCodec
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.data.remote.FaviconResolver
@@ -28,9 +29,6 @@ import works.merc.keryx.app.data.remote.FetchedFeed
  * subscription list doesn't open an unbounded number of sockets at once; DB writes stay serial.
  */
 private const val REFRESH_FETCH_CONCURRENCY = 6
-
-/** Result of [FeedRepository.importOpml]: how many listed feeds subscribed successfully vs. failed. */
-data class OpmlImportOutcome(val added: Int, val failed: Int)
 
 /**
  * Feed subscription lifecycle and refresh. Orchestrates [FeedFetcher] +
@@ -55,28 +53,51 @@ class FeedRepository(
 
     fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
 
-    fun getAllFeeds(): List<Feeds> = feeds.watchAll().executeAsList()
+    /**
+ * Retrieves all feeds currently stored in the database.
+ *
+ * @return The stored feed records.
+ */
+fun getAllFeeds(): List<Feeds> = feeds.watchAll().executeAsList()
 
+    /**
+     * The feed subscribed at exactly [url], including a soft-deleted one. Note that
+     * [subscribeFeed] stores the redirect-resolved URL, so a lookup by the pre-redirect URL misses.
+     */
+    fun getFeedByUrl(url: String): Feeds? = feeds.getByUrl(url).executeAsOneOrNull()
+
+    /**
+     * Fetches feed data for preview without subscribing to the feed.
+     *
+     * @param url The feed URL to fetch.
+     * @return The fetched feed data or the fetch error.
+     */
     suspend fun previewFeed(url: String): Result<FetchedFeed> = feedFetcher.fetch(url)
 
-    suspend fun subscribeFeed(url: String): Result<Unit> {
+    /**
+     * Subscribes to a feed, storing its metadata and articles locally.
+     *
+     * @param url The feed URL to fetch and subscribe to.
+     * @return A successful result containing the subscribed feed, or the fetch error.
+     */
+    suspend fun subscribeFeed(url: String): Result<Feeds> {
         val outcome = subscribeFeedWrite(url)
         if (outcome.hadArticles) ftsManager.indexMissing()
         return outcome.result
     }
 
     /** Outcome of [subscribeFeedWrite]: the subscribe result, plus whether the feed had articles. */
-    private data class SubscribeOutcome(val result: Result<Unit>, val hadArticles: Boolean)
+    internal data class SubscribeOutcome(val result: Result<Feeds>, val hadArticles: Boolean)
 
     /**
      * Network fetch + DB write for [subscribeFeed], without indexing the result — callers decide
      * when to call [FtsManager.indexMissing] (immediately for a single subscribe, batched once after
-     * the loop for [importOpml]). Mirrors [applyFetch]'s [RefreshOutcome] split for the same reason:
+     * the loop by [OpmlImporter]). Mirrors [applyFetch]'s [RefreshOutcome] split for the same reason:
      * [FtsManager.indexMissing]'s `NOT IN` scan is `O(articles table size)` per call, so a large OPML
      * import must not repeat it once per feed. `syncScheduler.scheduleSync()` stays here, called once
      * per feed like [applyFetch] does, since it is cheap and debounced.
      */
-    private suspend fun subscribeFeedWrite(url: String): SubscribeOutcome {
+    internal suspend fun subscribeFeedWrite(url: String): SubscribeOutcome {
         val fetched = when (val r = feedFetcher.fetch(url)) {
             is Result.Ok -> r.value
             is Result.Err -> return SubscribeOutcome(r, hadArticles = false)
@@ -123,34 +144,20 @@ class FeedRepository(
         if (existing?.deleted_at != null) feeds.stampResubscribed(now, feedId)
         articleRepository.upsertParsed(feedId, fetched.articles)
         syncScheduler.scheduleSync()
-        return SubscribeOutcome(Result.Ok(Unit), hadArticles = fetched.articles.isNotEmpty())
+        return SubscribeOutcome(
+            Result.Ok(feeds.getById(feedId).executeAsOne()),
+            hadArticles = fetched.articles.isNotEmpty(),
+        )
     }
+
+    /** Indexes any articles fetched during an OPML import loop. Called once by [OpmlImporter]. */
+    internal fun indexImportedArticles() = ftsManager.indexMissing()
 
     /**
-     * Parses an OPML document and subscribes to every feed it lists. Indexes new articles for
-     * search once after the whole loop, rather than once per feed (see [subscribeFeedWrite]).
+     * Unsubscribes from a feed by marking it as deleted.
      *
-     * @param xml The OPML document contents.
-     * @return The number of feeds successfully subscribed vs. failed.
+     * @param id The ID of the feed to unsubscribe from.
      */
-    suspend fun importOpml(xml: String): OpmlImportOutcome {
-        var added = 0
-        var failed = 0
-        var anyHadArticles = false
-        for (entry in OpmlCodec.import(xml)) {
-            val outcome = subscribeFeedWrite(entry.xmlUrl)
-            when (outcome.result) {
-                is Result.Ok -> {
-                    added++
-                    if (outcome.hadArticles) anyHadArticles = true
-                }
-                is Result.Err -> failed++
-            }
-        }
-        if (anyHadArticles) ftsManager.indexMissing()
-        return OpmlImportOutcome(added, failed)
-    }
-
     fun unsubscribeFeed(id: String) {
         val now = clock.nowMillis()
         feeds.softDelete(now, now, now, id)
@@ -221,14 +228,11 @@ class FeedRepository(
     }
 
     /**
-     * Write phase: apply a feed's fetched metadata and articles to the DB and emit its
-     * notifications. Callers invoke this serially (the JVM SQLite driver opens a fresh connection
-     * per statement, so concurrent writes could contend). Applies the feed-health rules (error
-     * counting, 410 Gone notification, 301/308 URL update).
+     * Applies fetched feed data, updates its articles, and emits relevant notifications.
      *
      * @param feed The feed being refreshed.
-     * @param phase The network result gathered by [fetchFeed].
-     * @return The article upsert result and whether the fetched feed contained articles.
+     * @param phase The fetched feed data and any resolved favicon.
+     * @return The article update result and whether the fetch contained articles.
      */
     private suspend fun applyFetch(feed: Feeds, phase: FeedFetchPhase): RefreshOutcome {
         val fetched = when (val r = phase.fetch) {
@@ -239,7 +243,15 @@ class FeedRepository(
                     feeds.incrementErrorCount(ex.messageText, clock.nowMillis(), feed.id)
                 }
                 if (ex is FeedNotFoundException && ex.isGone) {
-                    notify(messages.feedGone(feed.displayTitle()), AppNotificationLevel.WARNING)
+                    // error_count stays untouched (410 is permanent, not a retry candidate), so record
+                    // the reason in last_error instead — that's what keeps the feed list flagged after
+                    // the notification is dismissed. Cleared by resetErrorCount if the feed comes back.
+                    feeds.markGone(FEED_ERROR_REASON_GONE, clock.nowMillis(), feed.id)
+                    notify(
+                        messages.feedGone(feed.displayTitle()),
+                        AppNotificationLevel.WARNING,
+                        action = AppNotificationAction.ShowFeedDetail(feed.id),
+                    )
                 }
                 return RefreshOutcome(r, hadArticles = false)
             }
@@ -272,7 +284,11 @@ class FeedRepository(
 
         if (fetched.redirectUrl != null && fetched.redirectUrl != feed.url) {
             feeds.updateUrl(fetched.redirectUrl, clock.nowMillis(), feed.id)
-            notify(messages.feedUrlChanged(feed.displayTitle()), AppNotificationLevel.WARNING)
+            notify(
+                messages.feedUrlChanged(feed.displayTitle()),
+                AppNotificationLevel.WARNING,
+                action = AppNotificationAction.ShowFeedDetail(feed.id),
+            )
         }
 
         val newCount = articleRepository.upsertParsed(feed.id, fetched.articles)
@@ -325,14 +341,16 @@ class FeedRepository(
      *
      * @param message The notification message.
      * @param level The notification severity level.
+     * @param action The next action offered when the user acts on the notification.
      */
-    private suspend fun notify(message: String, level: AppNotificationLevel) {
+    private suspend fun notify(message: String, level: AppNotificationLevel, action: AppNotificationAction? = null) {
         notificationCenter.add(
             AppNotification(
                 id = IdGenerator.newId(),
                 level = level,
                 message = message,
                 timestampMillis = clock.nowMillis(),
+                action = action,
             ),
         )
     }
