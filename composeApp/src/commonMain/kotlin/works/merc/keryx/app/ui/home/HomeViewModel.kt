@@ -350,6 +350,13 @@ class HomeViewModel(
                     settingsRepository.getLocalSettings().copy(feedListPaneWidth = feed, articleListPaneWidth = article),
                 )
             }.launchIn(viewModelScope)
+
+        // Any write to `articles` can be a sync merge propagating a soft-delete tombstone for an
+        // article currently pinned here; revalidate the pins so a deleted one can't stay visible.
+        articleChangeSignal
+            .onEach { reconcilePinnedReadArticles() }
+            .flowOn(dispatcher)
+            .launchIn(viewModelScope)
     }
 
     fun setFeedListPaneWidth(width: Double) {
@@ -493,18 +500,37 @@ class HomeViewModel(
     }
 
     fun setUnreadOnly(value: Boolean) {
-        _unreadOnly.value = value
+        if (value == _unreadOnly.value) return
         if (value) {
-            val selected = _selectedArticle.value
-            _pinnedReadArticles.value = if (selected != null && selected.is_read == 1L) {
-                mapOf(selected.id to selected)
-            } else {
-                emptyMap()
-            }
+            _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         }
+        _unreadOnly.value = value
         settingsRepository.saveLocalSettings(
             settingsRepository.getLocalSettings().copy(lastUnreadOnly = value),
         )
+    }
+
+    /**
+     * Pinned-read map keeping only the currently selected article (if already read). Used
+     * wherever an external data change (refresh, sync, unread-only toggle) would otherwise wipe
+     * pins that other in-view articles no longer need, but the selected one should survive.
+     */
+    private fun pinnedReadArticlesKeepingSelected(): Map<String, Articles> {
+        val selected = _selectedArticle.value
+        return if (selected != null && selected.is_read == 1L) mapOf(selected.id to selected) else emptyMap()
+    }
+
+    /**
+     * Drops any pinned entry whose backing row has since been soft-deleted (e.g. a tombstone
+     * propagated by a sync merge while the article was pinned), so the `articles` merge step
+     * (which re-adds a pinned id missing from the filtered repository result) can never
+     * resurrect deleted content into the visible list.
+     */
+    private fun reconcilePinnedReadArticles() {
+        _pinnedReadArticles.update { pinned ->
+            if (pinned.isEmpty()) return@update pinned
+            pinned.filterValues { articleRepository.getArticleById(it.id)?.deleted_at == null }
+        }
     }
 
     fun toggleSort() {
@@ -623,19 +649,25 @@ suspend fun subscribeFeed(url: String): Result<Feeds> = feedRepository.subscribe
      */
     fun refreshAll() {
         if (activityCenter.feedRefreshing.value) return
-        _pinnedReadArticles.value = emptyMap()
+        _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         viewModelScope.launch {
             val results = activityCenter.trackFeedRefresh { feedRepository.refreshAll() }
             newArticleNotifier.notifyIfEnabled(
                 results, settingsRepository.getLocalSettings().notificationEnabled, notificationMessages,
             )
             syncRepository.sync()
+            // Re-trim using the selection as it stands now: it may have changed since the snapshot
+            // above was taken, and the stale pre-refresh selection must not outlive it.
+            _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         }
     }
 
     fun sync() {
-        _pinnedReadArticles.value = emptyMap()
-        viewModelScope.launch { syncRepository.sync() }
+        _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
+        viewModelScope.launch {
+            syncRepository.sync()
+            _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
+        }
     }
 
     /** Discards the cloud sync data and re-uploads local fresh (recovery for a corrupt/incompatible
