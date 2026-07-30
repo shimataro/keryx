@@ -527,10 +527,10 @@ class HomeViewModel(
      * resurrect deleted content into the visible list.
      */
     private fun reconcilePinnedReadArticles() {
-        val pinned = _pinnedReadArticles.value
-        if (pinned.isEmpty()) return
-        val alive = pinned.filterValues { articleRepository.getArticleById(it.id)?.deleted_at == null }
-        if (alive.size != pinned.size) _pinnedReadArticles.value = alive
+        _pinnedReadArticles.update { pinned ->
+            if (pinned.isEmpty()) return@update pinned
+            pinned.filterValues { articleRepository.getArticleById(it.id)?.deleted_at == null }
+        }
     }
 
     fun toggleSort() {
