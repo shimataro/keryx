@@ -500,10 +500,11 @@ class HomeViewModel(
     }
 
     fun setUnreadOnly(value: Boolean) {
-        _unreadOnly.value = value
+        if (value == _unreadOnly.value) return
         if (value) {
             _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         }
+        _unreadOnly.value = value
         settingsRepository.saveLocalSettings(
             settingsRepository.getLocalSettings().copy(lastUnreadOnly = value),
         )

@@ -550,6 +550,29 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun setUnreadOnlyIsANoOpWhenTheValueAlreadyMatches() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L)
+        db.insertArticle("a2", "f1", isRead = 0L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+
+        vm.markAllRead()
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a2", "a1"), vm.articles.value.map { it.id })
+
+        // A redundant call with the already-current value must not re-derive the pin map from
+        // scratch (which would keep only the selected article and drop markAllRead()'s pins).
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf("a2", "a1"), vm.articles.value.map { it.id })
+    }
+
+    @Test
     fun markAllReadKeepsSelectedArticlePinnedAndVisibleUnderUnreadOnly() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
