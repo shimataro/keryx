@@ -146,11 +146,20 @@ subscriptions (`FeedRepository.importOpml`, surfaced via the notification center
 [app-architecture.md](app-architecture.md)). Registration mirrors the `keryx://` scheme above,
 per platform:
 
-- **macOS**: declared at build time via `CFBundleDocumentTypes` + a custom
-  `UTExportedTypeDeclarations` UTI (`works.merc.keryx.opml`, since macOS has no built-in system UTI
-  for OPML) in the same `infoPlist { extraKeysRawXml }` block as `CFBundleURLTypes`. `LSHandlerRank`
-  is `Default` (not `Alternate`) so a plain double-click launches Keryx directly rather than only
-  adding it to the "Open With" submenu.
+- **macOS**: declared at build time via `CFBundleDocumentTypes` in the same
+  `infoPlist { extraKeysRawXml }` block as `CFBundleURLTypes`. `LSHandlerRank` is `Default` (not
+  `Alternate`) so a plain double-click launches Keryx directly rather than only adding it to the
+  "Open With" submenu. macOS has no single built-in system UTI for OPML, and the third-party feed
+  reader ecosystem never converged on one either — NetNewsWire uses `org.opml.opml` (the closest
+  thing to a de facto standard, since OPML itself predates Apple's UTI system), Reeder uses
+  `com.reederapp.opml`, and Overcast uses `unofficial.opml`. An earlier version of this app instead
+  exported its own UTI (`works.merc.keryx.opml`), but that made Keryx invisible in Finder's "Open
+  With" menu on any Mac where another app had already claimed the `.opml` extension for one of these
+  other identifiers — the file resolves to whichever UTI is already bound to that extension, and a
+  competing export doesn't win that binding. `LSItemContentTypes` therefore lists all three known
+  identifiers, declared via `UTImportedTypeDeclarations` (Keryx is a consumer of these identifiers,
+  not their owner) rather than `UTExportedTypeDeclarations`, so Keryx is offered as a handler
+  whichever one (if any) is already bound to `.opml` on the user's machine.
 - **Windows**: registered at startup (`registerWindowsOpmlAssociation`) under a dedicated
   `Keryx.opml` ProgID (`HKEY_CURRENT_USER\Software\Classes\.opml` → `Keryx.opml` →
   `shell\open\command`), the same per-user, no-admin-needed mechanism as the URI scheme.
