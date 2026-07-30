@@ -10,6 +10,22 @@ private const val LOG_TAG = "OpmlAssociation"
 internal const val OPML_MIME_TYPE = "application/x-opml+xml"
 
 /**
+ * No MIME type for OPML is defined in the base shared-mime-info database, and the third-party
+ * feed-reader ecosystem never converged on one — this string is the other candidate seen in the
+ * wild besides [OPML_MIME_TYPE] (the overly generic `application/xml`/`text/xml` are deliberately
+ * not included here, since claiming those would make Keryx an "Open With" candidate for any XML
+ * file, not just OPML ones) — the same underlying situation as the competing macOS UTIs (see the
+ * `.opml` section in `docs/build.md`). Listed only in [OPML_DESKTOP_MIME_TYPES] (not given its own
+ * glob in [opmlMimePackageContent]) so Keryx becomes an eligible opener if another already-installed
+ * reader's shared-mime-info package has already bound `.opml` to it, without Keryx itself
+ * introducing a second, conflicting glob-to-type mapping for `.opml`.
+ */
+internal const val OPML_MIME_TYPE_ALT = "text/x-opml"
+
+/** MIME types Keryx declares itself able to open, in the `.desktop` entry's `MimeType=` list. */
+internal val OPML_DESKTOP_MIME_TYPES = listOf(OPML_MIME_TYPE, OPML_MIME_TYPE_ALT)
+
+/**
  * Deliberately not the name a deb/rpm menu entry would use — same reasoning as
  * [URI_HANDLER_DESKTOP_FILE]: sharing a name with a packaged entry would leave this user-level copy
  * behind (pointing at a removed binary) after an uninstall.
@@ -25,11 +41,13 @@ internal const val OPML_MIME_PACKAGE_FILE = "keryx-opml.xml"
  * [classifyLaunchArg] / `main.kt`).
  *
  * Three files are written, all under the user's own home rather than system-wide (no root needed):
- * a `.desktop` entry declaring `MimeType=application/x-opml+xml;` with an `Exec` line ending in
- * `%f` (a bare local path, not a URI — matches how [classifyLaunchArg] expects to receive it); a
- * shared-mime-info package XML mapping the `*.opml` glob to that MIME type (not guaranteed to be
- * predefined by the distro's own `shared-mime-info` package, unlike common formats); and a
- * `mimeapps.list` association naming that desktop entry as the (default) handler.
+ * a `.desktop` entry declaring `MimeType=` with both [OPML_DESKTOP_MIME_TYPES] and an `Exec` line
+ * ending in `%f` (a bare local path, not a URI — matches how [classifyLaunchArg] expects to
+ * receive it); a shared-mime-info package XML mapping the `*.opml` glob to [OPML_MIME_TYPE] only
+ * (not guaranteed to be predefined by the distro's own `shared-mime-info` package, unlike common
+ * formats — see [OPML_MIME_TYPE_ALT] for why the second MIME type isn't also given a glob here);
+ * and a `mimeapps.list` association naming that desktop entry as the (default) handler for each of
+ * [OPML_DESKTOP_MIME_TYPES].
  *
  * All of [applicationsDir], [mimeAppsList], [mimePackagesDir], [refreshDesktopDatabase] and
  * [refreshMimeDatabase] are injectable so tests never touch the real user's configuration.
@@ -53,7 +71,7 @@ internal class LinuxOpmlAssociationRegistrar(
      */
     fun register(): Boolean = runCatching {
         val desktopFile = File(applicationsDir, OPML_HANDLER_DESKTOP_FILE)
-        val entry = desktopEntryContent(launcherPath, OPML_MIME_TYPE, "%f")
+        val entry = desktopEntryContent(launcherPath, OPML_DESKTOP_MIME_TYPES.joinToString(";"), "%f")
         var changed = false
 
         if (readOrNull(desktopFile) != entry) {
@@ -71,7 +89,10 @@ internal class LinuxOpmlAssociationRegistrar(
         }
 
         val existingAssociations = readOrNull(mimeAppsList)
-        val mergedAssociations = mergeMimeAppsList(existingAssociations, OPML_HANDLER_DESKTOP_FILE, OPML_MIME_TYPE)
+        var mergedAssociations = existingAssociations.orEmpty()
+        for (mimeType in OPML_DESKTOP_MIME_TYPES) {
+            mergedAssociations = mergeMimeAppsList(mergedAssociations, OPML_HANDLER_DESKTOP_FILE, mimeType)
+        }
         if (mergedAssociations != existingAssociations) {
             writeAtomically(mimeAppsList, mergedAssociations)
             changed = true

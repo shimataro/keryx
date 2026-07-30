@@ -49,9 +49,9 @@ class LinuxOpmlAssociationRegistrarTest {
     // --- .desktop entry -----------------------------------------------------------------
 
     @Test
-    fun desktopEntryDeclaresTheOpmlMimeTypeAndHandsOverABarePath() {
-        val entry = desktopEntryContent(LAUNCHER, OPML_MIME_TYPE, "%f")
-        assertTrue(entry.contains("\nMimeType=application/x-opml+xml;\n"), entry)
+    fun desktopEntryDeclaresBothOpmlMimeTypesAndHandsOverABarePath() {
+        val entry = desktopEntryContent(LAUNCHER, OPML_DESKTOP_MIME_TYPES.joinToString(";"), "%f")
+        assertTrue(entry.contains("\nMimeType=application/x-opml+xml;text/x-opml;\n"), entry)
         // %f (not %u) since the file manager invokes this with a plain filesystem path, matching
         // what classifyLaunchArg expects — no file:// URI form to strip.
         assertTrue(entry.contains("\nExec=\"$LAUNCHER\" %f\n"), entry)
@@ -60,10 +60,15 @@ class LinuxOpmlAssociationRegistrarTest {
     // --- shared-mime-info package ---------------------------------------------------------
 
     @Test
-    fun mimePackageMapsTheOpmlGlobToTheMimeType() {
+    fun mimePackageMapsTheOpmlGlobToOnlyThePrimaryMimeType() {
         val content = opmlMimePackageContent()
         assertTrue(content.contains("type=\"application/x-opml+xml\""), content)
         assertTrue(content.contains("<glob pattern=\"*.opml\"/>"), content)
+        // The alternate MIME type is only ever declared as an additional openable type (see
+        // desktopEntryDeclaresBothOpmlMimeTypesAndHandsOverABarePath) — it must never also claim
+        // the *.opml glob here, or Keryx's own package would ambiguously bind the same glob to two
+        // different types.
+        assertFalse(content.contains(OPML_MIME_TYPE_ALT), content)
     }
 
     // --- register() ---------------------------------------------------------------------
@@ -72,12 +77,14 @@ class LinuxOpmlAssociationRegistrarTest {
     fun registerWritesAllThreeFilesAndRefreshesBothDatabases() {
         assertTrue(registrar().register())
 
-        assertEquals(desktopEntryContent(LAUNCHER, OPML_MIME_TYPE, "%f"), desktopFile().readText())
-        assertEquals(opmlMimePackageContent(), mimePackageFile().readText())
-        assertTrue(
-            mimeAppsList.readText().contains("application/x-opml+xml=keryx-opml-handler.desktop\n"),
-            mimeAppsList.readText(),
+        assertEquals(
+            desktopEntryContent(LAUNCHER, OPML_DESKTOP_MIME_TYPES.joinToString(";"), "%f"),
+            desktopFile().readText(),
         )
+        assertEquals(opmlMimePackageContent(), mimePackageFile().readText())
+        val associations = mimeAppsList.readText()
+        assertTrue(associations.contains("application/x-opml+xml=keryx-opml-handler.desktop\n"), associations)
+        assertTrue(associations.contains("text/x-opml=keryx-opml-handler.desktop\n"), associations)
         assertEquals(listOf(applicationsDir), desktopRefreshes)
         assertEquals(listOf(mimePackagesDir.parentFile), mimeRefreshes)
     }
@@ -113,6 +120,7 @@ class LinuxOpmlAssociationRegistrarTest {
         val merged = mimeAppsList.readText()
         assertTrue(merged.contains("text/html=firefox.desktop\n"), merged)
         assertTrue(merged.contains("application/x-opml+xml=keryx-opml-handler.desktop\n"), merged)
+        assertTrue(merged.contains("text/x-opml=keryx-opml-handler.desktop\n"), merged)
     }
 
     @Test

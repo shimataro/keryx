@@ -167,15 +167,21 @@ per platform:
   `.desktop` entry (`keryx-opml-handler.desktop`, `Exec=... %f` — a bare local path, not a URI) plus
   a shared-mime-info package XML at `$XDG_DATA_HOME/mime/packages/keryx-opml.xml` mapping the
   `*.opml` glob to `application/x-opml+xml`, since that MIME type isn't guaranteed to be predefined
-  by the distro's own `shared-mime-info` package. Same gate as the URI scheme: only registers from a
-  packaged launcher, so `./gradlew :composeApp:run` never creates these files either. Like the
-  `keryx://` scheme's `keryx-url-handler.desktop` and `mimeapps.list` entry, all of these files live
-  in the user's home and are **not removed when the package is uninstalled** — the same
-  leftover-association risk applies (a stale entry pointing at a removed launcher), with the same
-  manual cleanup: delete `keryx-opml-handler.desktop` and `keryx-opml.xml`, and drop the
-  `application/x-opml+xml` line(s) from `mimeapps.list`. Also rerun `update-mime-database` against
-  `$XDG_DATA_HOME/mime` (default `~/.local/share/mime`) afterward — deleting `keryx-opml.xml` alone
-  leaves the compiled MIME cache pointing at the removed type until the database is rebuilt.
+  by the distro's own `shared-mime-info` package. As on macOS, no single OPML MIME type is
+  standardized across Linux feed readers either, so the `.desktop` entry's `MimeType=` also lists
+  the other candidate seen in the wild, `text/x-opml` (`OPML_MIME_TYPE_ALT`) — but only there, not
+  in Keryx's own shared-mime-info package, so Keryx becomes an eligible opener if another
+  already-installed reader's package has bound `.opml` to that type instead, without Keryx itself
+  asserting a second, conflicting glob mapping for `.opml`. Same gate as the URI scheme: only
+  registers from a packaged launcher, so `./gradlew :composeApp:run` never creates these files
+  either. Like the `keryx://` scheme's `keryx-url-handler.desktop` and `mimeapps.list` entry, all of
+  these files live in the user's home and are **not removed when the package is uninstalled** — the
+  same leftover-association risk applies (a stale entry pointing at a removed launcher), with the
+  same manual cleanup: delete `keryx-opml-handler.desktop` and `keryx-opml.xml`, and drop the
+  `application/x-opml+xml` and `text/x-opml` line(s) from `mimeapps.list`. Also rerun
+  `update-mime-database` against `$XDG_DATA_HOME/mime` (default `~/.local/share/mime`) afterward —
+  deleting `keryx-opml.xml` alone leaves the compiled MIME cache pointing at the removed type until
+  the database is rebuilt.
 
 ## Release (CD)
 
