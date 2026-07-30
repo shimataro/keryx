@@ -359,6 +359,12 @@ verify → commit with no further per-comment approval. If the user cancels, ski
 entirely (commit nothing, note "Cancelled by user" in the closing summary) and, for a multi-URL
 run, continue to the next URL at Step 2.
 
+Before the loop, check `git status --porcelain`. If the working tree is dirty with changes
+unrelated to this run, warn and skip this URL entirely (commit nothing, note "Working tree not
+clean" in the closing summary) rather than making any Case B edits — a failed-verification
+revert (step 3 below) must never be able to destroy pre-existing uncommitted work in the same
+file. For a multi-URL run this only skips the current URL; continue to the next one at Step 2.
+
 For each comment in `associated_comments`, in order:
 
 1. Using that comment's own thread context (Step 5) and code context (Step 6), run the
@@ -374,13 +380,17 @@ For each comment in `associated_comments`, in order:
    adding/updating tests where constraint #7 applies). Then run `./gradlew build` (or the
    narrowest relevant test target, e.g. `:composeApp:desktopTest --tests "..."`, when that is
    clearly sufficient to cover the change) to verify before committing.
-   - If verification fails: do not commit. Fix or revert the change, note the failure (with
-     the reason) for the closing summary, and move on to the next comment.
-4. On success, stage only the files touched by this fix and create **exactly one commit**
-   with a **single-line** commit message only (no body, no trailer), in the repo's
-   Conventional Commits style, e.g. `fix(sync): correct rev comparison for Google Drive`.
-   Never batch multiple comments into one commit, and never amend a commit made earlier in
-   this same run.
+   - If verification fails: confirm via `git status`/`git diff` that only this comment's
+     intended changes are present before reverting, so a revert cannot destroy pre-existing
+     work in the same file; then do not commit. Note the failure (with the reason) for the
+     closing summary, and move on to the next comment.
+4. On success, review `git status --porcelain` / `git diff` and stage **only the files, and
+   only the hunks, touched by this fix** — verify the staged diff contains nothing beyond this
+   comment's change before committing, so unrelated pre-existing edits or residue from a prior
+   comment's failed attempt never ride along. Create **exactly one commit** with a
+   **single-line** commit message only (no body, no trailer), in the repo's Conventional
+   Commits style, e.g. `fix(sync): correct rev comparison for Google Drive`. Never batch
+   multiple comments into one commit, and never amend a commit made earlier in this same run.
 5. Continue to the next comment regardless of the previous comment's outcome.
 
 After every associated comment has been processed, if the review's own `body` text raises
