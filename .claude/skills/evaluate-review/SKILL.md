@@ -220,10 +220,14 @@ PR review summaries do not use `in_reply_to_id`, so build context from chronolog
    ```
 
    **URL-encode the `{path}` segment** before interpolation (e.g. space → `%20`, `#` → `%23`, `?` → `%3F`) while preserving `/` between directory components. Decode the `content` field from base64 if necessary.
-4. Fetch the diff for that commit to understand the change being reviewed:
+4. Fetch the diff for that commit to understand the change being reviewed. **Never interpolate
+   the review-provided `{path}` into a jq filter string or an unquoted shell token** — a path
+   containing a quote or backtick could otherwise break the jq expression or the constructed
+   shell command. Bind it through a quoted shell variable and jq's `--arg` instead:
 
    ```bash
-   gh api repos/{owner}/{repo}/commits/{commit_id} --jq '.files[] | select(.filename == "{path}") | .patch'
+   path='{path}'
+   gh api repos/{owner}/{repo}/commits/{commit_id} | jq --arg path "$path" '.files[] | select(.filename == $path) | .patch'
    ```
 
    (The `diff_hunk` from Step 4 already provides the immediate surrounding context.)
