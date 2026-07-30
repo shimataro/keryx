@@ -107,7 +107,21 @@ class LinuxOpmlAssociationRegistrarTest {
 
         assertFalse(registrar.register())
 
+        // The package file must be rolled back, not left believing the mapping is installed while
+        // the compiled cache never actually got rebuilt.
+        assertFalse(mimePackageFile().exists())
+    }
+
+    @Test
+    fun registerRetriesMimeDatabaseRefreshAfterAPriorFailure() {
+        val failing = registrar(refreshMime = { throw IOException("update-mime-database not found") })
+        assertFalse(failing.register())
+        assertFalse(mimePackageFile().exists())
+
+        assertTrue(registrar().register())
+
         assertEquals(opmlMimePackageContent(), mimePackageFile().readText())
+        assertEquals(1, mimeRefreshes.size, "the retry must actually invoke the refresh, not skip it as unchanged")
     }
 
     @Test

@@ -104,8 +104,13 @@ internal class LinuxOpmlAssociationRegistrar(
             // compiled shared-mime-info cache (globs2, etc.) that this command rebuilds — never the raw
             // package XML directly. If it never succeeds, the *.opml mapping never reaches the cache and
             // the whole association silently never matches, so a failure here must abort registration
-            // (propagates to the outer runCatching below) rather than being swallowed.
-            refreshMimeDatabase(mimePackagesDir.parentFile)
+            // (propagates to the outer runCatching below) rather than being swallowed. The package file
+            // is also rolled back on failure, since otherwise a later register() call would see its
+            // content already matching, skip the refresh as "unchanged", and report success while the
+            // cache is still stale.
+            runCatching { refreshMimeDatabase(mimePackagesDir.parentFile) }
+                .onFailure { mimePackageFile.delete() }
+                .getOrThrow()
         }
         if (changed) {
             // Best-effort only — see the equivalent comment in LinuxUriSchemeRegistrar.register().
