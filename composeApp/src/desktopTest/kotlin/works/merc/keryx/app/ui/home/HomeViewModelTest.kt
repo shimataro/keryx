@@ -687,6 +687,7 @@ class HomeViewModelTest {
 
         // Only a2 (the current selection) should remain pinned; a1 must not survive the refresh.
         assertEquals(listOf("a2"), vm.articles.value.map { it.id })
+        activityScope.cancel()
     }
 
     @Test
