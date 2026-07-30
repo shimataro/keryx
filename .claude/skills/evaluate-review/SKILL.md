@@ -63,7 +63,9 @@ Parse the URL. It must match one of the following patterns:
   The provided URL does not appear to be a GitHub PR review comment or review link.
   ```
 
-  and stop.
+  Mark this URL as `Invalid` for the closing summary and stop only *this* URL's processing. If
+  more URLs remain (Step 1), continue to the next one at Step 2; only halt the whole run if this
+  was the sole/last URL.
 
 ### Step 3 — Verify branch alignment
 
