@@ -106,6 +106,13 @@ class GoogleDriveStorage(
         }
     }
 
+    /**
+     * Creates a new file without overwriting an existing file.
+     *
+     * @param path The sync path identifying the file.
+     * @param data The file contents.
+     * @return `Ok` when the file is created successfully, or an error if the file already exists or creation fails.
+     */
     override suspend fun create(path: String, data: ByteArray): Result<Unit> = withToken { token ->
         val name = fileName(path)
         // Best-effort create-only: Drive has no atomic create-if-absent, so we check first and
@@ -126,10 +133,12 @@ class GoogleDriveStorage(
     }
 
     /**
-     * Resolves a concurrent-create race after [create] wins its own upload: re-lists files named
-     * [name] and keeps only the lowest file id (deterministic across every racing device). If
-     * [createdId] isn't the winner, deletes it and reports a conflict so the caller falls back to
-     * the merge path; if it is, deletes every other duplicate.
+     * Reconciles duplicate files created concurrently by retaining the file with the lowest ID.
+     *
+     * @param token The Google Drive access token.
+     * @param name The file name shared by the concurrent creations.
+     * @param createdId The ID of the file created by the current operation.
+     * @return `Result.Ok` if the current file is retained and duplicates are deleted; a conflict error if another file wins.
      */
     private suspend fun resolveCreateRace(token: String, name: String, createdId: String): Result<Unit> {
         val listResult = listFilesByName(token, name)
@@ -160,6 +169,12 @@ class GoogleDriveStorage(
         return Result.Ok(Unit)
     }
 
+    /**
+     * Deletes all matching files for the specified path.
+     *
+     * @param path The sync path identifying the files to delete.
+     * @return `Result.Ok` when all matching files are deleted or none exist; otherwise, the first deletion or lookup error.
+     */
     override suspend fun delete(path: String): Result<Unit> = withToken { token ->
         val name = fileName(path)
         val listResult = listFilesByName(token, name)
@@ -280,6 +295,12 @@ class GoogleDriveStorage(
         return okOrError(response)
     }
 
+    /**
+     * Converts an HTTP response into a successful or mapped error result.
+     *
+     * @param response The HTTP response to evaluate.
+     * @return `Result.Ok` for a successful status, or a mapped error result otherwise.
+     */
     private suspend fun okOrError(response: HttpResponse): Result<Unit> = when {
         response.status.value in 200..299 -> Result.Ok(Unit)
         else -> mapError(response.status.value, response.bodyAsText())
@@ -288,7 +309,14 @@ class GoogleDriveStorage(
     private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> =
         withCloudToken(accessTokenProvider, "Google Drive", block)
 
-    private fun mapError(status: Int, body: String): Result.Err = cloudStorageError("Google Drive", status, body)
+    /**
+ * Maps a Google Drive HTTP response to a cloud storage error.
+ *
+ * @param status The HTTP response status code.
+ * @param body The response body.
+ * @return The corresponding cloud storage error result.
+ */
+private fun mapError(status: Int, body: String): Result.Err = cloudStorageError("Google Drive", status, body)
 
     /** Drive files are named, not path-addressed: use the basename of the sync path. */
     private fun fileName(path: String): String = path.substringAfterLast('/')

@@ -22,6 +22,13 @@ import works.merc.keryx.app.resources.settings_import_failed
 import works.merc.keryx.app.resources.settings_import_success
 
 /** The "N imported" text, with a " / N failed" suffix appended when [failed] is non-zero. */
+/**
+ * Builds the localized result message for an OPML import.
+ *
+ * @param added The number of successfully imported items.
+ * @param failed The number of items that failed to import.
+ * @return The localized import result message.
+ */
 internal suspend fun opmlImportedText(added: Int, failed: Int): String {
     val addedText = getString(Res.string.settings_import_success, added)
     return if (failed > 0) "$addedText / ${getString(Res.string.settings_import_failed, failed)}" else addedText
@@ -29,7 +36,13 @@ internal suspend fun opmlImportedText(added: Int, failed: Int): String {
 
 /** [NotificationMessages] backed by Compose string resources (system-locale aware). */
 class ComposeNotificationMessages : NotificationMessages {
-    override suspend fun feedGone(feedTitle: String): String =
+    /**
+         * Creates a notification message for a feed that is no longer available.
+         *
+         * @param feedTitle The title of the unavailable feed.
+         * @return The localized feed-unavailable message.
+         */
+        override suspend fun feedGone(feedTitle: String): String =
         getString(Res.string.feed_gone_message, feedTitle)
 
     override suspend fun feedUrlChanged(feedTitle: String): String =
@@ -38,6 +51,12 @@ class ComposeNotificationMessages : NotificationMessages {
     override suspend fun newArticles(count: Int): String =
         getString(Res.string.feed_new_articles, count)
 
+    /**
+     * Provides a localized message describing a synchronization failure.
+     *
+     * @param exception The exception that identifies the synchronization failure.
+     * @return The localized synchronization error message.
+     */
     override suspend fun syncFailed(exception: KeryxException): String = getString(
         when (exception) {
             is CloudAuthException -> Res.string.error_cloud_auth

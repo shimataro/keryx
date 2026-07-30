@@ -69,6 +69,14 @@ class CloudSession(
         provider.tokenStorage.clear()
     }
 
+    /**
+     * Provides a current access token for the specified provider.
+     *
+     * Refreshes expired tokens when a refresh token is available and persists the refreshed tokens.
+     *
+     * @param provider The provider whose stored credentials supply the access token.
+     * @return A valid access token, the existing token when it cannot be refreshed, or `null` when no token is stored or refreshing fails.
+     */
     private suspend fun validAccessToken(provider: Provider): String? {
         val tokens = provider.tokenStorage.load() ?: return null
         if (!tokens.isExpired(clock.nowMillis())) return tokens.accessToken

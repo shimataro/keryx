@@ -19,12 +19,21 @@ class FolderRepository(
 ) {
     private val folders get() = db.foldersQueries
 
-    fun watchAllFolders(): Flow<List<Folders>> = folders.watchAll().asFlow().mapToList(dispatcher)
+    /**
+ * Observes all folders and emits the current folder list whenever it changes.
+ *
+ * @return A flow containing the current list of folders.
+ */
+fun watchAllFolders(): Flow<List<Folders>> = folders.watchAll().asFlow().mapToList(dispatcher)
 
     /** The folder with [id], or `null` if none exists. */
     fun getFolderById(id: String): Folders? = folders.getById(id).executeAsOneOrNull()
 
-    /** All live folders in display order. */
+    /**
+ * Retrieves all active folders in display order.
+ *
+ * @return The active folders in display order.
+ */
     fun getAllFolders(): List<Folders> = folders.watchAll().executeAsList()
 
     /**
@@ -59,9 +68,10 @@ class FolderRepository(
     }
 
     /**
-     * Reorders folders: moves [draggedFolderId] directly before [targetFolderId] (or to the end
-     * if null). Only folders whose `sort_order` actually changes are written, to avoid bumping
-     * `updated_at` on unrelated folders (see [FeedRepository.moveFeed] for the same rationale).
+     * Moves a folder directly before the target folder, or to the end when no target is provided.
+     *
+     * @param draggedFolderId The ID of the folder to move.
+     * @param targetFolderId The ID of the folder to place the dragged folder before, or `null` to place it at the end.
      */
     fun reorderFolders(draggedFolderId: String, targetFolderId: String?) {
         val current = folders.watchAll().executeAsList()
@@ -77,8 +87,9 @@ class FolderRepository(
     }
 
     /**
-     * Soft-deletes the folder and moves its feeds into the "no folder" group (see
-     * [FeedRepository.moveFeedsOutOfFolder]).
+     * Soft-deletes the folder and moves its feeds to the no-folder group.
+     *
+     * @param id The identifier of the folder to delete.
      */
     fun deleteFolder(id: String) {
         val now = clock.nowMillis()

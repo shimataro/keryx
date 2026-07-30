@@ -82,6 +82,13 @@ class DropboxAuthManager(
         Result.Err(CloudAuthException(e.message ?: "Revoke failed"))
     }
 
+    /**
+     * Requests OAuth tokens using the supplied form parameters.
+     *
+     * @param form The form parameters for the token request.
+     * @param keepRefreshToken The refresh token to retain in the result, if applicable.
+     * @return The result of the OAuth token request.
+     */
     private suspend fun tokenRequest(
         form: io.ktor.http.Parameters,
         keepRefreshToken: String? = null,

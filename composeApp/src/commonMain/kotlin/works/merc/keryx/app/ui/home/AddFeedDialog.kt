@@ -62,6 +62,14 @@ import works.merc.keryx.app.ui.i18n.userMessage
 
 internal enum class AddFeedPhase { Previewing, Subscribing }
 
+/**
+ * Displays a dialog for previewing a feed URL, selecting discovered feeds, and subscribing to feeds.
+ *
+ * @param vm The view model used to resolve previews and subscribe to feeds.
+ * @param feeds The feeds used to determine whether the entered URL is already subscribed.
+ * @param onDismiss Called when the dialog is dismissed.
+ * @param onSubscribed Called after all requested feeds are subscribed successfully.
+ */
 @Composable
 internal fun AddFeedDialog(
     vm: HomeViewModel,
@@ -178,9 +186,21 @@ internal fun AddFeedDialog(
 }
 
 /**
- * Stateless body of [AddFeedDialog] (the `text` slot). Split out so it can be rendered directly in a
- * Compose UI test without the surrounding [KeryxAlertDialog]/OS-window wrapper. Renders the URL
- * field plus, depending on [preview], either the single-feed summary or the multi-candidate picker.
+ * Renders the URL input, feed preview, candidate selection, and operation feedback for the add-feed dialog.
+ *
+ * @param url The current feed URL input.
+ * @param onUrlChange Updates the feed URL input.
+ * @param alreadySubscribed Whether the entered URL is already subscribed.
+ * @param phase The current preview or subscription phase.
+ * @param preview The resolved feed preview, if available.
+ * @param selectedCandidates The URLs selected from a multiple-feed preview.
+ * @param onToggleCandidate Updates the selection state of a candidate URL.
+ * @param onSelectAll Selects all discovered feed candidates.
+ * @param onClearAll Clears all selected feed candidates.
+ * @param errorException The error to display, if an operation failed.
+ * @param partialResult The number of successful and failed subscriptions, if the result was partial.
+ * @param onSubmit Submits the current URL or selected feeds.
+ * @param modifier The modifier applied to the content layout.
  */
 @Composable
 internal fun AddFeedDialogContent(
@@ -273,6 +293,15 @@ internal fun AddFeedDialogContent(
     }
 }
 
+/**
+ * Displays discovered feed links with controls for selecting individual or all candidates.
+ *
+ * @param candidates The feed links available for selection.
+ * @param selectedCandidates The URLs of the currently selected feed links.
+ * @param onToggleCandidate Updates the selection state of a feed link.
+ * @param onSelectAll Selects all available feed links.
+ * @param onClearAll Clears the current feed link selection.
+ */
 @Composable
 private fun CandidateSelection(
     candidates: List<DiscoveredFeedLink>,

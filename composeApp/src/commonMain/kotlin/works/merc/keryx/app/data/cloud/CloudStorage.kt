@@ -10,9 +10,12 @@ import works.merc.keryx.app.core.Result
 class CloudFile(val data: ByteArray, val rev: String)
 
 /**
- * Runs [block] with a valid access token from [accessTokenProvider], converting a missing token or
- * any thrown exception into the appropriate [CloudStorage] error. Shared by every [CloudStorage]
- * implementation's `withToken`; [providerName] only affects the wording of the two fallback messages.
+ * Executes [block] with an access token and maps authentication or storage failures to [Result.Err].
+ *
+ * @param providerName The cloud provider name used in authentication and storage error messages.
+ * @param block The operation to execute with the access token.
+ * @return The result produced by [block], or an error when authentication or execution fails.
+ * @throws CancellationException If the coroutine is cancelled while executing the operation.
  */
 internal suspend fun <T> withCloudToken(
     accessTokenProvider: suspend () -> String?,

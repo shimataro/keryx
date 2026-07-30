@@ -281,6 +281,18 @@ internal fun ArticleListTopBar(
     }
 }
 
+/**
+ * Renders the article list with filtering controls, selection state, and article actions.
+ *
+ * @param articles The articles to display.
+ * @param feedTitles Display titles keyed by feed identifier.
+ * @param feedFavicons Favicon URLs keyed by feed identifier.
+ * @param selected The currently selected article, if any.
+ * @param unreadOnly Whether only unread articles are shown.
+ * @param newestFirst Whether articles are sorted newest first.
+ * @param focused Whether the list is focused.
+ * @param unreadOnlyEnabled Whether the unread-only toggle is enabled.
+ */
 @Composable
 internal fun ArticleListPaneContent(
     articles: List<Articles>,

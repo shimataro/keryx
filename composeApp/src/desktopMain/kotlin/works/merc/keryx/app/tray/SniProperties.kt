@@ -17,7 +17,15 @@ import org.freedesktop.dbus.types.Variant
  * error behaviour cannot drift apart.
  */
 @Suppress("UNCHECKED_CAST")
-internal fun <A> Map<String, Variant<*>>.propertyOrThrow(interfaceName: String, propertyName: String): A =
+/**
+     * Retrieves a D-Bus property value or reports that the property is unavailable.
+     *
+     * @param interfaceName The D-Bus interface containing the property.
+     * @param propertyName The name of the property to retrieve.
+     * @return The property value cast to the requested type.
+     * @throws UnknownProperty If the property is unavailable.
+     */
+    internal fun <A> Map<String, Variant<*>>.propertyOrThrow(interfaceName: String, propertyName: String): A =
     (this[propertyName] ?: throw UnknownProperty("$interfaceName.$propertyName is not available")) as A
 
 /**
@@ -34,9 +42,24 @@ internal fun <A> Map<String, Variant<*>>.propertyOrThrow(interfaceName: String, 
  */
 @DBusInterfaceName("org.freedesktop.DBus.Properties")
 internal interface ReadOnlyDBusProperties : Properties {
-    override fun <A : Any?> Get(interfaceName: String, propertyName: String): A =
+    /**
+         * Retrieves a property value from the specified interface.
+         *
+         * @param interfaceName The D-Bus interface containing the property.
+         * @param propertyName The name of the property to retrieve.
+         * @return The property's value.
+         */
+        override fun <A : Any?> Get(interfaceName: String, propertyName: String): A =
         GetAll(interfaceName).propertyOrThrow(interfaceName, propertyName)
 
+    /**
+     * Rejects attempts to modify a read-only D-Bus property.
+     *
+     * @param interfaceName The D-Bus interface containing the property.
+     * @param propertyName The property to modify.
+     * @param value The requested property value.
+     * @throws PropertyReadOnly Always, because the property is read-only.
+     */
     override fun <A : Any?> Set(interfaceName: String, propertyName: String, value: A) {
         throw PropertyReadOnly("$interfaceName.$propertyName is read-only")
     }

@@ -40,6 +40,21 @@ import androidx.compose.ui.unit.dp
  * `confirmButton`/`dismissButton` composable slots so the buttons can be rendered as real native
  * Swing buttons; when [dismissText] is non-null, clicking it always just calls [onDismissRequest].
  */
+/**
+ * Displays an alert dialog in a separate native window.
+ *
+ * @param onDismissRequest Called when the dialog should be dismissed.
+ * @param confirmText The label for the confirm action.
+ * @param onConfirm Called when the confirm action is selected.
+ * @param confirmEnabled Whether the confirm action is enabled.
+ * @param dismissText The label for the optional dismiss action.
+ * @param title The optional native window title.
+ * @param titleAction Optional content displayed next to the title.
+ * @param text Optional content displayed in the dialog body.
+ * @param containerColor The dialog container color.
+ * @param tonalElevation The dialog container's tonal elevation.
+ * @param modal Whether the dialog blocks interaction with its owner window.
+ */
 @Composable
 expect fun KeryxAlertDialog(
     onDismissRequest: () -> Unit,

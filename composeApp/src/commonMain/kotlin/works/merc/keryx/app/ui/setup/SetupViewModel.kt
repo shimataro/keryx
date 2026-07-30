@@ -47,6 +47,12 @@ class SetupViewModel(
         }
     }
 
+    /**
+     * Connects to the selected cloud storage provider and synchronizes its data.
+     *
+     * @param type The cloud storage provider to connect to.
+     * @param onDone Called after the connection succeeds and synchronization completes.
+     */
     fun connect(type: CloudStorageType, onDone: () -> Unit) {
         viewModelScope.launch {
             phase = SetupPhase.CONNECTING

@@ -120,6 +120,25 @@ private fun InsertionLine(indented: Boolean, visible: Boolean) {
     )
 }
 
+/**
+ * Renders a folder header with selection styling, folder actions, and drag-and-drop targets.
+ *
+ * @param folder The folder represented by the header.
+ * @param count The number of feeds in the folder.
+ * @param collapsed Whether the folder's feed list is collapsed.
+ * @param selected Whether the folder is selected.
+ * @param focused Whether the folder has focus.
+ * @param firstFeedId The first feed in the folder, or `null` when the folder is empty.
+ * @param nextFolderId The folder following this folder, or `null` when it is last.
+ * @param activeBoundaryState The currently highlighted insertion boundary.
+ * @param onBoundaryChange Updates the highlighted insertion boundary.
+ * @param onToggleCollapse Toggles the folder's collapsed state.
+ * @param onClick Handles selection of the folder.
+ * @param onEdit Opens folder editing.
+ * @param onDelete Deletes the folder.
+ * @param onDropFeed Handles dropping a feed into this folder.
+ * @param onReorderFolder Handles repositioning a folder.
+ */
 @Composable
 internal fun FolderGroupHeader(
     folder: Folders,
@@ -275,6 +294,11 @@ internal fun NoFolderHeader(
                             if (activeBoundaryState.value == feedZoneBoundary) onBoundaryChange(null)
                         }
 
+                        /**
+                         * Handles a feed dropped into this feed group.
+                         *
+                         * @return `true` if a feed was dropped successfully, `false` otherwise.
+                         */
                         override fun onDrop(event: DragAndDropEvent): Boolean {
                             onBoundaryChange(null)
                             val feedId = event.draggedFeedId() ?: return false
@@ -307,7 +331,7 @@ internal fun NoFolderHeader(
  * @param indented Whether to indent the row within a folder.
  * @param nextFeedId The ID of the following feed, or `null` when this is the last feed.
  * @param folderId The containing folder's ID, or `null` for feeds without a folder.
- * @param folderBelowBoundary The drop boundary used when a folder is dragged below this row.
+ * @param folderBelowBoundary The insertion boundary used when a folder is dragged below this row.
  */
 @Composable
 internal fun FeedRow(
@@ -358,6 +382,9 @@ internal fun FeedRow(
                             }
                         }
 
+                        /**
+                         * Clears the active insertion boundary when a drag leaves this feed row's drop targets.
+                         */
                         override fun onExited(event: DragAndDropEvent) {
                             val boundary = activeBoundaryState.value
                             if (boundary == DropBoundary.BeforeFeed(feed.id) ||
@@ -368,6 +395,11 @@ internal fun FeedRow(
                             }
                         }
 
+                        /**
+                         * Handles dropping a feed or folder on this row and requests the corresponding reorder.
+                         *
+                         * @return `true` when the drop is handled, `false` when no supported drop target is available.
+                         */
                         override fun onDrop(event: DragAndDropEvent): Boolean {
                             onBoundaryChange(null)
                             event.draggedFeedId()?.let { draggedFeedId ->
@@ -463,6 +495,11 @@ internal fun FeedRow(
  * @param gone Whether the feed responded with HTTP 410 Gone.
  */
 @OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Displays a feed error indicator, with explanatory tooltip content for feeds that are gone.
+ *
+ * @param gone Whether the feed returned HTTP 410 Gone.
+ */
 @Composable
 private fun FeedErrorIndicator(gone: Boolean) {
     val icon = @Composable {

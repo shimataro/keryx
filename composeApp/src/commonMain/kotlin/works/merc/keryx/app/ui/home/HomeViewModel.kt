@@ -567,7 +567,12 @@ class HomeViewModel(
         }
     }
 
-    // --- Feed actions ---
+    /**
+ * Retrieves feed metadata for the specified URL.
+ *
+ * @param url The feed URL to preview.
+ * @return The result of fetching the feed metadata.
+ */
 
     suspend fun previewFeed(url: String): Result<FetchedFeed> = feedRepository.previewFeed(url)
 
@@ -587,6 +592,11 @@ class HomeViewModel(
     /** @see AddFeedPreviewResolver.subscribeFeeds */
     suspend fun subscribeFeeds(urls: List<String>): SubscribeOutcome = addFeedPreviewResolver.subscribeFeeds(urls)
 
+    /**
+     * Unsubscribes from a feed and switches to the all-articles filter if it is selected.
+     *
+     * @param id The identifier of the feed to unsubscribe from.
+     */
     fun unsubscribeFeed(id: String) {
         feedRepository.unsubscribeFeed(id)
         if (_filter.value == ArticleFilter.Feed(id)) selectFilter(ArticleFilter.All)
@@ -684,7 +694,13 @@ class HomeViewModel(
     fun moveFeed(feedId: String, folderId: String?, targetFeedId: String? = null) =
         feedRepository.moveFeed(feedId, folderId, targetFeedId)
 
-    fun reorderFolders(draggedFolderId: String, targetFolderId: String?) =
+    /**
+         * Reorders a folder relative to the specified target folder.
+         *
+         * @param draggedFolderId The identifier of the folder being moved.
+         * @param targetFolderId The identifier of the folder to move before, or `null` to move to the end.
+         */
+        fun reorderFolders(draggedFolderId: String, targetFolderId: String?) =
         folderRepository.reorderFolders(draggedFolderId, targetFolderId)
 }
 

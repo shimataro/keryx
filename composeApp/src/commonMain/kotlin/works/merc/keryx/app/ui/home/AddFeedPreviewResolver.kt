@@ -23,10 +23,12 @@ sealed interface AddFeedPreview {
 data class SubscribeOutcome(val successCount: Int, val failCount: Int, val firstError: KeryxException?)
 
 /**
- * Whether the add-feed dialog's subscribe action should be enabled for the current [preview] and
- * [selectedCandidates]. A single result is always subscribable; a multi-candidate result requires
- * at least one selection (so subscribing with nothing selected can't fall back to re-previewing).
- */
+     * Determines whether the add-feed dialog can enable the subscribe action.
+     *
+     * @param preview The current feed preview state.
+     * @param selectedCandidates The feed URLs selected from a multiple-feed preview.
+     * @return `true` if subscription is available for the preview, `false` otherwise.
+     */
 fun addFeedCanSubscribe(preview: AddFeedPreview?, selectedCandidates: Set<String>): Boolean =
     when (preview) {
         is AddFeedPreview.Single -> true

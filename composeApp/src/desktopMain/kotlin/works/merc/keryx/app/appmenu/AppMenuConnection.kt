@@ -116,12 +116,10 @@ internal class AppMenuConnection private constructor(
         private val DEFAULT_TIMEOUT = 2.seconds
 
         /**
-         * Opens a session-bus connection if a `com.canonical.AppMenu.Registrar` owner is present,
-         * or returns `null` otherwise (every non-KDE environment).
+         * Creates an AppMenu connection when the KDE Global Menu registrar is available.
          *
-         * Bounded by [timeout] because this runs before the window is shown: an unresponsive
-         * session bus must not stop Keryx from starting. A connection that lands after the deadline
-         * is closed rather than leaked (matching `SniConnection.tryCreate`).
+         * @param timeout The maximum time allowed to establish the connection.
+         * @return The connection, or `null` if the registrar is unavailable or the timeout expires.
          */
         fun tryCreate(timeout: Duration = DEFAULT_TIMEOUT): AppMenuConnection? = openDBusConnectionWithTimeout(
             logTag = LOG_TAG,
@@ -132,6 +130,11 @@ internal class AppMenuConnection private constructor(
             open = ::open,
         )
 
+        /**
+         * Opens a session-bus connection when the Global Menu registrar is available.
+         *
+         * @return A configured connection, or `null` when the registrar is unavailable.
+         */
         private fun open(): AppMenuConnection? {
             // withShared(false): we export an object on this one, so it must not be the process-wide
             // refcounted connection.

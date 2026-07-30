@@ -25,7 +25,14 @@ data class OAuthTokens(
     /** Unix ms when the access token expires; null if unknown. */
     val expiresAtMillis: Long? = null,
 ) {
-    fun isExpired(nowMillis: Long, skewMillis: Long = 60_000): Boolean =
+    /**
+         * Determines whether the token has expired, accounting for the configured clock skew.
+         *
+         * @param nowMillis The current Unix time in milliseconds.
+         * @param skewMillis The time interval in milliseconds used to account for clock skew.
+         * @return `true` if an expiration time is set and the current time is at or after the adjusted expiration time, `false` otherwise.
+         */
+        fun isExpired(nowMillis: Long, skewMillis: Long = 60_000): Boolean =
         expiresAtMillis != null && nowMillis >= expiresAtMillis - skewMillis
 }
 
@@ -37,11 +44,13 @@ private data class OAuthTokenResponseDto(
 )
 
 /**
- * Submits [form] to [tokenEndpoint] and decodes the response into [OAuthTokens], shared by every
- * [CloudAuthManager]'s token exchange/refresh. [keepRefreshToken] carries the prior refresh token
- * forward when the response omits one (a refresh response often doesn't return a new one).
- * [onFailure] is an optional hook for provider-specific failure logging (only Google logs the
- * response body on a non-2xx status; Dropbox/OneDrive don't read the body in that case at all).
+ * Exchanges an OAuth form request for token data.
+ *
+ * @param tokenEndpoint The token endpoint URL.
+ * @param form The form parameters submitted to the endpoint.
+ * @param keepRefreshToken The refresh token to retain when the response omits one.
+ * @param onFailure An optional callback invoked for non-2xx responses with the status code and body.
+ * @return A successful result containing the tokens, or an error result when the request or response fails.
  */
 internal suspend fun requestOAuthTokens(
     client: HttpClient,

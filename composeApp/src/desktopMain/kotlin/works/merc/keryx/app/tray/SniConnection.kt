@@ -136,12 +136,10 @@ internal class SniConnection private constructor(
         private val DEFAULT_TIMEOUT = 2.seconds
 
         /**
-         * Opens a session-bus connection and claims our well-known name, or returns `null` if
-         * the native tray isn't usable here.
+         * Attempts to create a session-bus connection for the native tray.
          *
-         * Bounded by [timeout] because this runs before the window is shown: an unresponsive
-         * session bus must not stop Keryx from starting. A connection that lands after the
-         * deadline is closed rather than leaked.
+         * @param timeout The maximum time allowed for connection setup.
+         * @return A configured connection, or `null` when the native tray is unavailable or setup fails.
          */
         fun tryCreate(timeout: Duration = DEFAULT_TIMEOUT): SniConnection? = openDBusConnectionWithTimeout(
             logTag = LOG_TAG,

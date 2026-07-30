@@ -61,6 +61,11 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
 /**
  * Displays the notifications button, unread notification count, and notification popup.
  */
+/**
+ * Displays the notifications button and opens the notification center popup when selected.
+ *
+ * @param notifVm The view model providing notification items and handling notification actions.
+ */
 @Composable
 internal fun NotificationsBell(notifVm: NotificationCenterViewModel) {
     val notifications by notifVm.items.collectAsStateSafe(emptyList())
@@ -108,12 +113,9 @@ internal fun NotificationsBell(notifVm: NotificationCenterViewModel) {
 internal data class ArticleRowMetrics(val rowHeight: Dp, val faviconSize: Dp)
 
 /**
- * Row height and favicon size, computed once from typography/density only — never from
- * per-article content. `Modifier.height(IntrinsicSize.Min)` + `fillMaxHeight(fraction)` used to
- * derive these per-row, but Compose's intrinsic-measurement pass gives the weighted title/metadata
- * `Column` a different width than the real pass, so the row height (and hence favicon size) could
- * drift a few px depending on title length/starred state. Deriving it purely from typography line
- * heights makes it identical for every row while still scaling with the font-size setting.
+ * Computes consistent article-row dimensions from the current typography and density.
+ *
+ * @return The row height and favicon size for article rows.
  */
 @Composable
 internal fun rememberArticleRowMetrics(): ArticleRowMetrics {
@@ -128,6 +130,19 @@ internal fun rememberArticleRowMetrics(): ArticleRowMetrics {
     }
 }
 
+/**
+ * Renders an article row with selection styling, read and starred indicators,
+ * article metadata, and context-menu actions.
+ *
+ * @param article The article to display.
+ * @param feedTitle The title of the article's feed.
+ * @param feedFavicon The feed favicon URL, if available.
+ * @param selected Whether the row is selected.
+ * @param focused Whether the row has focus.
+ * @param rowHeight The minimum height of the row.
+ * @param faviconSize The favicon display size.
+ * @param titleOverride An optional title to display instead of the article title.
+ */
 @Composable
 internal fun ArticleRow(
     article: Articles,

@@ -77,6 +77,13 @@ class OneDriveAuthManager(
      */
     override suspend fun revoke(accessToken: String): Result<Unit> = Result.Ok(Unit)
 
+    /**
+     * Requests OAuth tokens using the supplied form parameters.
+     *
+     * @param form The parameters for the token request.
+     * @param keepRefreshToken The refresh token to preserve in the result, if provided.
+     * @return The resulting OAuth tokens or a request failure.
+     */
     private suspend fun tokenRequest(
         form: io.ktor.http.Parameters,
         keepRefreshToken: String? = null,

@@ -127,6 +127,12 @@ class OneDriveStorage(
         }
     }
 
+    /**
+     * Determines whether an item exists at the specified path.
+     *
+     * @param path The path of the item within the app folder.
+     * @return `true` if the item exists, `false` if it is not found.
+     */
     override suspend fun exists(path: String): Result<Boolean> = withToken { token ->
         val response = client.get(itemUrl(path)) { header("Authorization", "Bearer $token") }
         when {
@@ -136,10 +142,23 @@ class OneDriveStorage(
         }
     }
 
-    private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> =
+    /**
+         * Executes an operation with an available OneDrive access token.
+         *
+         * @param block The operation to execute with the access token.
+         * @return The result produced by the operation.
+         */
+        private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> =
         withCloudToken(accessTokenProvider, "OneDrive", block)
 
-    private fun mapError(status: Int, body: String): Result.Err = cloudStorageError("OneDrive", status, body)
+    /**
+ * Converts a OneDrive response error into a storage error result.
+ *
+ * @param status The HTTP response status code.
+ * @param body The response body containing error details.
+ * @return An error result describing the OneDrive failure.
+ */
+private fun mapError(status: Int, body: String): Result.Err = cloudStorageError("OneDrive", status, body)
 
     /** Graph app-folder items are path-addressed by name: use the basename of the sync path. */
     private fun fileName(path: String): String = path.substringAfterLast('/')

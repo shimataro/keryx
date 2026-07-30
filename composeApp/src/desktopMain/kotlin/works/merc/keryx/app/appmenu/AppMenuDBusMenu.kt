@@ -111,6 +111,12 @@ internal class AppMenuDBusMenu(
         )
     }
 
+    /**
+     * Retrieves all properties exposed for the requested D-Bus menu interface.
+     *
+     * @param interfaceName The D-Bus interface whose properties are requested.
+     * @return The interface properties, or an empty map when the interface is unsupported.
+     */
     override fun GetAll(interfaceName: String): Map<String, Variant<*>> {
         if (interfaceName != DBUSMENU_INTERFACE) return emptyMap()
         return mapOf(

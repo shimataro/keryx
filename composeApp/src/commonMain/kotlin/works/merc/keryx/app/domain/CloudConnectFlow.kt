@@ -15,17 +15,21 @@ import works.merc.keryx.app.data.cloud.OAuthTokens
  * per-provider implementation.
  */
 interface CloudConnectFlow {
-    suspend fun connect(): Result<OAuthTokens>
+    /**
+ * Runs the cloud provider's interactive OAuth connection flow.
+ *
+ * @return The issued OAuth tokens wrapped in a result.
+ */
+suspend fun connect(): Result<OAuthTokens>
 }
 
 /**
- * Runs [flow]'s interruptible OAuth-authorization wait as a cancellable child job of this scope,
- * reporting it via [onJobChange] (so a `cancelConnect()` elsewhere can interrupt it) and
- * [onCanCancelChange] (so the UI can offer a cancel action only while the wait is outstanding).
- * Cancelling a child never propagates to the parent (structured concurrency), so callers can run
- * their success tail after a genuine [Result.Ok] without it being interrupted by that cancellation.
- * Returns `null` when the wait was cancelled — callers should treat that as a no-op, same as before
- * this was shared between the setup and settings cloud-connect screens' view models.
+ * Runs the cloud connection flow and reports its active job and cancellation availability.
+ *
+ * @param flow The cloud connection flow to run.
+ * @param onJobChange Called with the active job, or `null` after completion or cancellation.
+ * @param onCanCancelChange Called with `true` while cancellation is available and `false` afterward.
+ * @return The OAuth tokens result, or `null` if the connection is cancelled.
  */
 internal suspend fun CoroutineScope.awaitCancellableConnect(
     flow: CloudConnectFlow,

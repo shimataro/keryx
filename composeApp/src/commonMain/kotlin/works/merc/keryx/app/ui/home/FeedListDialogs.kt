@@ -39,6 +39,12 @@ import works.merc.keryx.app.ui.common.KeryxAlertDialog
  * and confirm-unsubscribe. Split out of `FeedListPane` — each `on*Change` callback mirrors the
  * `var x by remember { mutableStateOf(...) }` state it replaces there, so behavior is unchanged.
  */
+/**
+ * Displays modal dialogs for managing feed-list tags, folders, and feeds.
+ *
+ * @param tags The tags used for duplicate-name validation.
+ * @param folders The folders used for duplicate-name validation.
+ */
 @Composable
 internal fun FeedListDialogs(
     vm: HomeViewModel,

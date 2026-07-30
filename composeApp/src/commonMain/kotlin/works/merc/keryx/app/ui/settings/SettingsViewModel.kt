@@ -182,6 +182,11 @@ class SettingsViewModel(
         cacheRetentionDays = days
     }
 
+    /**
+     * Connects to the selected cloud storage provider and starts synchronization after successful authorization.
+     *
+     * @param type The cloud storage provider to connect to.
+     */
     fun connect(type: CloudStorageType) {
         viewModelScope.launch {
             connectingType = type

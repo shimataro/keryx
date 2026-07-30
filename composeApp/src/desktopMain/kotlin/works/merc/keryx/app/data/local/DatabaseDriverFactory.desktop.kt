@@ -10,6 +10,11 @@ import java.io.File
 import java.util.Properties
 
 actual class DatabaseDriverFactory {
+    /**
+     * Creates and configures the SQLite database driver.
+     *
+     * @return The configured and migrated SQLDelight database driver.
+     */
     actual fun create(): SqlDriver {
         val dbFile = File(AppDirs.appDataDir(), DB_FILE_NAME)
         // busy_timeout goes through connection properties, not a one-off PRAGMA: this JVM driver opens

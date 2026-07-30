@@ -12,6 +12,11 @@ import java.io.File
 actual object AppDirs {
     private val home = System.getProperty("user.home")
 
+    /**
+     * Resolves the platform-specific application data directory.
+     *
+     * @return The absolute path of the application data directory.
+     */
     actual fun appDataDir(): String = ensure(
         when {
             isMacOs -> File(home, "Library/Application Support/$APP_NAME")
@@ -20,6 +25,11 @@ actual object AppDirs {
         },
     )
 
+    /**
+     * Resolves the application cache directory for the current desktop platform.
+     *
+     * @return The absolute path of the application cache directory.
+     */
     actual fun cacheDir(): String = ensure(
         when {
             isMacOs -> File(home, "Library/Caches/$APP_NAME")

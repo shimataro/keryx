@@ -51,7 +51,13 @@ class FeedRepository(
 
     fun watchAllFeeds(): Flow<List<Feeds>> = feeds.watchAll().asFlow().mapToList(dispatcher)
 
-    fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
+    /**
+ * Retrieves a feed by its identifier.
+ *
+ * @param id The feed identifier.
+ * @return The matching feed, or `null` if no feed exists with the identifier.
+ */
+fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
 
     /** All feeds currently stored in the database. */
     fun getAllFeeds(): List<Feeds> = feeds.watchAll().executeAsList()
@@ -168,12 +174,11 @@ class FeedRepository(
     }
 
     /**
-     * Moves [feedId] into the [folderId] group (null = "no folder"), positioned directly before
-     * [targetFeedId] within that group (or at the end if [targetFeedId] is null). Used for both
-     * cross-folder moves and same-folder reordering — they're the same operation. Feeds other than
-     * [feedId] are only written when their `sort_order` actually changes, so an unrelated feed's
-     * `updated_at` isn't bumped (which would otherwise risk clobbering an unrelated edit made on
-     * another device during the next sync merge).
+     * Moves a feed to a folder and positions it before the specified target feed.
+     *
+     * @param feedId The ID of the feed to move.
+     * @param folderId The destination folder ID, or `null` for no folder.
+     * @param targetFeedId The ID of the feed to place the moved feed before, or `null` to place it last.
      */
     fun moveFeed(feedId: String, folderId: String?, targetFeedId: String? = null) {
         val current = feeds.getByFolder(folderId).executeAsList()
@@ -193,13 +198,10 @@ class FeedRepository(
     }
 
     /**
-     * Moves every feed currently in [folderId] into the "no folder" group, preserving their
-     * relative order and appending them to the end of that group. Used by
-     * [FolderRepository.deleteFolder] when the folder itself is removed — unlike [moveFeed], every
-     * row here genuinely changes `folder_id`, so writing every one of them is not the "unrelated
-     * updated_at bump" [moveFeed] otherwise avoids. Runs its own [db] transaction, which nests
-     * safely inside the caller's. [now] defaults to the current time, but [deleteFolder] passes its
-     * own timestamp so the folder's own deletion and its feeds' moves share one instant.
+     * Moves all feeds in a folder into the ungrouped feed list while preserving their relative order.
+     *
+     * @param folderId The ID of the folder whose feeds should be moved.
+     * @param now The timestamp to apply to the moved feeds.
      */
     fun moveFeedsOutOfFolder(folderId: String, now: Long = clock.nowMillis()) {
         db.transaction {
@@ -211,7 +213,12 @@ class FeedRepository(
         }
     }
 
-    /** Refreshes one feed. Returns the count of new articles, or an error. */
+    /**
+     * Refreshes a feed and indexes any newly fetched articles.
+     *
+     * @param feed The feed to refresh.
+     * @return The number of new articles, or the refresh error.
+     */
     suspend fun refreshFeed(feed: Feeds): Result<Int> {
         val outcome = refreshFeedArticles(feed)
         if (outcome.hadArticles) ftsManager.indexMissing()
@@ -314,6 +321,14 @@ class FeedRepository(
     /** Refreshes a single feed: fetch (network) then apply (DB), one after the other. */
     private suspend fun refreshFeedArticles(feed: Feeds): RefreshOutcome = applyFetch(feed, fetchFeed(feed))
 
+    /**
+     * Refreshes all feeds and collects the article-count result for each feed.
+     *
+     * Network fetching is performed concurrently with bounded concurrency, while database updates
+     * are applied in the original feed order.
+     *
+     * @return A map from feed ID to the result containing the number of newly processed articles.
+     */
     suspend fun refreshAll(): Map<String, Result<Int>> {
         val feedList = feeds.watchAll().executeAsList()
         // Phase 1: fetch every feed's network data concurrently (bounded by a semaphore), with NO

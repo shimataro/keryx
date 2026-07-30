@@ -4,6 +4,11 @@ import java.awt.Desktop
 import java.net.URI
 
 actual object BrowserOpener {
+    /**
+     * Opens the specified URL using the platform's default browser.
+     *
+     * @param url The URL to open.
+     */
     actual fun open(url: String) {
         runCatching {
             if (Desktop.isDesktopSupported() &&

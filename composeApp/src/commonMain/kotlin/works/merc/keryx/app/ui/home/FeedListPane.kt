@@ -87,6 +87,16 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  * @param onAddFeedClick Called when the add-feed action is selected.
  * @param onSearchFieldFocusChange Called when the search field focus changes.
  */
+/**
+ * Displays the feed sidebar with filters, folders, feeds, tags, search, and management actions.
+ *
+ * @param vm The view model providing sidebar state and feed, folder, and tag operations.
+ * @param focused Whether the sidebar currently has focus.
+ * @param onActivated Called when the sidebar is activated.
+ * @param modifier Modifier applied to the sidebar.
+ * @param onAddFeedClick Called when the add-feed action is selected.
+ * @param onSearchFieldFocusChange Called when the search field focus changes.
+ */
 @Composable
 fun FeedListPane(
     vm: HomeViewModel,
@@ -418,6 +428,16 @@ fun FeedListPane(
     )
 }
 
+/**
+ * Renders a clickable sidebar row with an icon, label, optional count badge, and selection styling.
+ *
+ * @param icon The icon displayed in the row.
+ * @param label The row label.
+ * @param count The optional count shown when greater than zero.
+ * @param selected Whether the row is selected.
+ * @param focused Whether the sidebar is focused.
+ * @param onClick The action invoked when the row is clicked.
+ */
 @Composable
 private fun SidebarRow(
     icon: @Composable () -> Unit,

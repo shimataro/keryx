@@ -92,6 +92,13 @@ class GoogleDriveAuthManager(
         Result.Err(CloudAuthException(e.message ?: "Revoke failed"))
     }
 
+    /**
+     * Requests OAuth tokens from Google using the provided form parameters.
+     *
+     * @param form The form parameters for the token request.
+     * @param keepRefreshToken The refresh token to preserve when the response omits one.
+     * @return The resulting OAuth tokens or an authentication error.
+     */
     private suspend fun tokenRequest(
         form: io.ktor.http.Parameters,
         keepRefreshToken: String? = null,

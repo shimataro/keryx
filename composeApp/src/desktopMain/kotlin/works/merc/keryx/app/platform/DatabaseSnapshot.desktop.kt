@@ -5,6 +5,12 @@ import java.io.File
 import java.sql.DriverManager
 
 actual object DatabaseSnapshot {
+    /**
+     * Creates a consistent SQLite database snapshot for upload and removes the derived full-text index.
+     *
+     * @param localDbPath Path to the live SQLite database.
+     * @param destPath Path where the snapshot should be written.
+     */
     actual fun exportForUpload(localDbPath: String, destPath: String) {
         // VACUUM INTO refuses to write to an existing file.
         File(destPath).delete()

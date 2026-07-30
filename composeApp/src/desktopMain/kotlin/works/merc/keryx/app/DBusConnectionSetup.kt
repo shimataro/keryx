@@ -11,12 +11,12 @@ internal const val DBUS_BUS = "org.freedesktop.DBus"
 internal const val DBUS_PATH = "/org/freedesktop/DBus"
 
 /**
- * Opens a session-bus connection via [open] on a background thread, waiting up to [timeout] before
- * giving up — this runs before the window is shown (from `tray/SniConnection` and
- * `appmenu/AppMenuConnection`), so an unresponsive session bus must not stop Keryx from starting. A
- * connection that lands after the deadline is closed via [onLateClose] rather than leaked.
- * [component] names what's being set up, for the shared log wording; [timeoutMessage] is the tail of
- * the timeout-specific log line (what happens instead, e.g. "falling back to the AWT tray").
+ * Attempts to open a D-Bus connection within the specified timeout.
+ *
+ * @param timeoutMessage Message describing the fallback action when the timeout expires.
+ * @param onLateClose Handles a connection that completes after the timeout.
+ * @param open Creates the connection.
+ * @return The opened connection, or `null` if setup fails or exceeds the timeout.
  */
 internal fun <T> openDBusConnectionWithTimeout(
     logTag: String,

@@ -262,6 +262,15 @@ private fun resolvePosition(cursor: Point?, owner: Window?, screenBounds: Rectan
  * theme values from the caller.
  */
 @OptIn(ExperimentalComposeUiApi::class)
+/**
+ * Displays dialog content in a native desktop window with content-driven sizing and positioning.
+ *
+ * @param title The native window title.
+ * @param onDismissRequest Invoked when the dialog is closed or the Escape key is pressed.
+ * @param modal Whether the dialog blocks interaction with its owner window.
+ * @param initialWidth The initial and maximum content width.
+ * @param content The composable content displayed in the dialog.
+ */
 @Composable
 private fun DesktopModalWindow(
     title: String?,
@@ -566,6 +575,21 @@ private fun NativeButtonRow(
     )
 }
 
+/**
+ * Displays an alert dialog with optional title, content, and dismiss action.
+ *
+ * @param onDismissRequest Called when the dialog should be dismissed.
+ * @param confirmText Label for the confirmation button.
+ * @param onConfirm Called when the confirmation button is selected.
+ * @param confirmEnabled Whether the confirmation button is enabled.
+ * @param dismissText Label for the optional dismiss button, or `null` to hide it.
+ * @param title Optional dialog title.
+ * @param titleAction Optional action displayed alongside the title.
+ * @param text Optional composable dialog content.
+ * @param containerColor Background color of the dialog.
+ * @param tonalElevation Elevation applied to the dialog surface.
+ * @param modal Whether the dialog blocks interaction with its owner window.
+ */
 @Composable
 actual fun KeryxAlertDialog(
     onDismissRequest: () -> Unit,
@@ -661,6 +685,14 @@ actual fun KeryxAlertDialog(
     }
 }
 
+/**
+ * Displays a modeless dialog with tab navigation and content for the selected tab.
+ *
+ * @param tabs The tabs available for selection.
+ * @param selectedTabId The identifier of the selected tab.
+ * @param onSelectTab Called with the identifier of the tab selected by the user.
+ * @param content Composable content rendered for the selected tab.
+ */
 @Composable
 actual fun KeryxTabDialog(
     onDismissRequest: () -> Unit,

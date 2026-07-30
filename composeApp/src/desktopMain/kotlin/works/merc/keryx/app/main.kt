@@ -549,8 +549,9 @@ private fun applyBrandedDockIcon(image: Image?) {
 }
 
 /**
- * Cache cleanup (once per 24h) + Dropbox sync if connected + an unconditional feed
- * refresh/new-article check + an unconditional update check.
+ * Runs startup maintenance, synchronization, feed refresh, update checks, and FTS index recovery.
+ *
+ * @throws CancellationException If the startup task is cancelled.
  */
 private suspend fun runStartupTasks(koin: org.koin.core.Koin) {
     runCatching {
@@ -574,11 +575,7 @@ private suspend fun runStartupTasks(koin: org.koin.core.Koin) {
 }
 
 /**
- * Once-per-24h healing rebuild of the full FTS index, run only while the app is idle (no sync / feed
- * refresh in flight) so it never competes with a foreground operation — with `busy_timeout` set, a
- * concurrent search waits rather than erroring anyway. Re-indexes content that incremental indexing
- * ([FtsManager.indexMissing]) left stale and sweeps entries left by cache-cleanup deletions. A cheap
- * no-op until 24h elapse. Shared by [runStartupTasks] and [backgroundUpdateLoop].
+ * Rebuilds the full FTS index when the application is idle and at least 24 hours have passed since the previous rebuild.
  */
 private fun maybeRebuildFtsIndex(koin: org.koin.core.Koin) {
     val activityCenter = koin.get<ActivityCenter>()
