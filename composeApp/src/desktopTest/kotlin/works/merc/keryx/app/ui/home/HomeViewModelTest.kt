@@ -640,6 +640,82 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun refreshAllDropsStaleSelectionPinnedBeforeCompletionWhenSelectionChangesMidFlight() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        // Gate the feed fetch open with a CompletableDeferred so refreshAll() genuinely suspends
+        // mid-flight, giving us a window to change the selection before it completes.
+        val gate = CompletableDeferred<Unit>()
+        // Unconfined-on-testScheduler ActivityCenter (mirrors feedRefreshingReflectsActivityCenter):
+        // the default ActivityCenter() runs its stateIn on a real Dispatchers.Default scope, which
+        // would mix real and virtual time here and make the poll below unreliable.
+        val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+        val activityCenter = ActivityCenter(activityScope)
+        val vm = newViewModel(
+            feedFetcher = fetcherWith { gate.await(); respond("", HttpStatusCode.NotFound) },
+            activityCenter = activityCenter,
+        )
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        val article1 = db.articlesQueries.getById("a1").executeAsOne()
+        vm.selectArticle(article1)
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+
+        vm.refreshAll()
+        // viewModelScope.launch{} bodies are only queued, not run inline; runCurrent() starts the
+        // coroutine so it reaches (and suspends on) the gate before we proceed.
+        testScheduler.runCurrent()
+        assertTrue(activityCenter.feedRefreshing.value)
+        // The refresh is genuinely in flight here — simulate the user moving on to a2 before it completes.
+        val article2 = db.articlesQueries.getById("a2").executeAsOne()
+        vm.selectArticle(article2)
+        gate.complete(Unit)
+
+        // The fetch resumes off the virtual scheduler (real MockEngine dispatch, see docs/testing.md),
+        // so poll with short real sleeps until refreshAll settles (mirrors
+        // refreshAllRaisesTrayNotificationWhenNewArticlesArrive's established pattern).
+        var waited = 0
+        while (activityCenter.feedRefreshing.value && waited < 5_000) {
+            testScheduler.advanceUntilIdle()
+            Thread.sleep(50)
+            waited += 50
+        }
+        testScheduler.advanceUntilIdle()
+
+        // Only a2 (the current selection) should remain pinned; a1 must not survive the refresh.
+        assertEquals(listOf("a2"), vm.articles.value.map { it.id })
+    }
+
+    @Test
+    fun syncDropsStaleSelectionPinnedBeforeCompletionWhenSelectionChangesMidFlight() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        val article1 = db.articlesQueries.getById("a1").executeAsOne()
+        vm.selectArticle(article1)
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+
+        vm.sync()
+        // viewModelScope.launch{} for sync() is only queued at this point (cloudProvider() == null
+        // makes the actual sync a fast no-op once it runs, but it hasn't run yet) — selecting a2
+        // now reproduces a selection change made while sync is still in flight.
+        val article2 = db.articlesQueries.getById("a2").executeAsOne()
+        vm.selectArticle(article2)
+        testScheduler.advanceUntilIdle()
+
+        // Only a2 (the current selection) should remain pinned; a1 must not survive the sync.
+        assertEquals(listOf("a2"), vm.articles.value.map { it.id })
+    }
+
+    @Test
     fun pinnedArticleSoftDeletedByAnotherDeviceIsDroppedFromPinsReactively() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)

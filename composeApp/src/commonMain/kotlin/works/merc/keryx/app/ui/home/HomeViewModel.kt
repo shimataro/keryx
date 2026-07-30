@@ -656,12 +656,18 @@ suspend fun subscribeFeed(url: String): Result<Feeds> = feedRepository.subscribe
                 results, settingsRepository.getLocalSettings().notificationEnabled, notificationMessages,
             )
             syncRepository.sync()
+            // Re-trim using the selection as it stands now: it may have changed since the snapshot
+            // above was taken, and the stale pre-refresh selection must not outlive it.
+            _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         }
     }
 
     fun sync() {
         _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
-        viewModelScope.launch { syncRepository.sync() }
+        viewModelScope.launch {
+            syncRepository.sync()
+            _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
+        }
     }
 
     /** Discards the cloud sync data and re-uploads local fresh (recovery for a corrupt/incompatible
