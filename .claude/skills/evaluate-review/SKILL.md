@@ -1,18 +1,19 @@
 ---
 name: evaluate-review
-description: Evaluate a GitHub PR review comment or review summary for technical validity. For a discussion (line) comment or a PR review with no associated comments, create an implementation plan for user approval; for a PR review with associated discussion comments, automatically fix and commit each one independently. Invoke with /evaluate-review <url>.
+description: Evaluate a GitHub PR review comment or review summary for technical validity. For a discussion (line) comment or a PR review with no associated comments, create an implementation plan for user approval; for a PR review with associated discussion comments, automatically fix and commit each one independently. Accepts multiple URLs, processed one at a time in the order given. Invoke with /evaluate-review <url> [<url> ...].
 ---
 
 Evaluate a GitHub pull-request review comment or review summary for technical validity, then act
 on it. A `discussion_r` comment, or a `pullrequestreview` with no associated line comments,
 produces an implementation plan for the user to approve and commit themselves. A
 `pullrequestreview` that has associated discussion comments is instead fixed and committed
-automatically, one commit per comment — see Step 8.
+automatically, one commit per comment — see Step 8. When multiple URLs are given, each one runs
+through this whole flow independently, strictly in the order the URLs were given — see Step 1.
 
 ## Usage
 
 ```text
-/evaluate-review <github-pr-review-url>
+/evaluate-review <github-pr-review-url> [<github-pr-review-url> ...]
 ```
 
 Examples:
@@ -20,15 +21,16 @@ Examples:
 ```text
 /evaluate-review https://github.com/shimataro/keryx/pull/3#discussion_r3618156689
 /evaluate-review https://github.com/shimataro/keryx/pull/3#pullrequestreview-2183723456
+/evaluate-review https://github.com/shimataro/keryx/pull/3#discussion_r3618156689 https://github.com/shimataro/keryx/pull/3#pullrequestreview-2183723456
 ```
 
 ## Steps
 
-### Step 1 — Validate presence of argument
+### Step 1 — Validate presence of argument(s)
 
-Check whether a URL argument was passed to the skill.
+Check whether one or more URL arguments (space-separated) were passed to the skill.
 
-- **If missing**: prompt the user to provide a GitHub PR review URL. Ask:
+- **If none**: prompt the user to provide a GitHub PR review URL. Ask:
 
   ```text
   Please provide a GitHub PR review URL.
@@ -36,7 +38,13 @@ Check whether a URL argument was passed to the skill.
   ```
 
   Wait for the user to respond with a URL, then use that URL and proceed to Step 2.
-- **If present**: proceed to Step 2.
+- **If one or more**: treat each URL as a separate item and run it through Steps 2–8 as its own
+  independent pass — its own branch check, fetch, evaluation, and Step 8 action (including
+  waiting out `EnterPlanMode`/`ExitPlanMode` approval where Case A applies). Process the items
+  **one at a time, strictly in the order the URLs were given** — never reorder, batch, or run
+  two items concurrently. Fully finish one URL's Step 8 action before starting the next URL at
+  Step 2. If **only one** URL was given, proceed exactly as before (no cross-URL summary at the
+  end of Step 8).
 
 ### Step 2 — Validate URL format
 
@@ -366,3 +374,11 @@ portion via Case A instead (Plan Mode — not auto-committed).
 Finally, output a short summary listing, for each associated comment (file:line or comment
 URL), its verdict and outcome: `Committed <sha>` / `Skipped: <reason>` / `Verification
 failed: <reason>`.
+
+#### Multiple top-level URLs
+
+If Step 1 received more than one URL, after the **last** one finishes its Step 8 action (Case A
+or Case B, whichever applied to it), output one final cross-URL summary — in the same order the
+URLs were given — listing each URL and its overall outcome (e.g. `Plan submitted for approval`,
+`Committed <sha>` / `N commits`, `No implementation plan needed`, `Invalid`). This is in addition
+to, not a replacement for, each URL's own Step 7 evaluation and Step 8 output.
