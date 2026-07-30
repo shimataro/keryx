@@ -93,4 +93,40 @@ class UriSchemeRegistrationTest {
         }
         assertEquals(3, callCount)
     }
+
+    @Test
+    fun windowsOpmlAssociationWritesUnderTheCurrentUserHiveViaADedicatedProgId() {
+        val recordedCommands = mutableListOf<List<String>>()
+        registerWindowsOpmlAssociation(launcherPath = "C:\\Program Files\\Keryx\\Keryx.exe") { command ->
+            recordedCommands.add(command)
+            0
+        }
+
+        assertEquals(3, recordedCommands.size)
+        for (command in recordedCommands) {
+            assertTrue(command.none { it.contains("HKEY_CLASSES_ROOT") })
+        }
+        assertTrue(
+            recordedCommands.any { it.contains("HKEY_CURRENT_USER\\Software\\Classes\\.opml") },
+        )
+        assertTrue(
+            recordedCommands.any { command -> command.any { it == "Keryx.opml" } },
+        )
+        assertTrue(
+            recordedCommands.any { it.contains("HKEY_CURRENT_USER\\Software\\Classes\\Keryx.opml\\shell\\open\\command") },
+        )
+        assertTrue(
+            recordedCommands.any { command -> command.any { it == "\"C:\\Program Files\\Keryx\\Keryx.exe\" \"%1\"" } },
+        )
+    }
+
+    @Test
+    fun windowsOpmlAssociationSurvivesANonZeroExitCode() {
+        var callCount = 0
+        registerWindowsOpmlAssociation(launcherPath = "C:\\Program Files\\Keryx\\Keryx.exe") {
+            callCount++
+            5
+        }
+        assertEquals(3, callCount)
+    }
 }

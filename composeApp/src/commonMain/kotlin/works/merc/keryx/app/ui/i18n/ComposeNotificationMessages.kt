@@ -18,6 +18,8 @@ import works.merc.keryx.app.resources.error_sync_conflict
 import works.merc.keryx.app.resources.feed_gone_message
 import works.merc.keryx.app.resources.feed_new_articles
 import works.merc.keryx.app.resources.feed_url_changed
+import works.merc.keryx.app.resources.settings_import_failed
+import works.merc.keryx.app.resources.settings_import_success
 
 /** [NotificationMessages] backed by Compose string resources (system-locale aware). */
 class ComposeNotificationMessages : NotificationMessages {
@@ -40,4 +42,9 @@ class ComposeNotificationMessages : NotificationMessages {
             else -> Res.string.error_generic
         },
     )
+
+    override suspend fun opmlImported(added: Int, failed: Int): String {
+        val addedText = getString(Res.string.settings_import_success, added)
+        return if (failed > 0) "$addedText / ${getString(Res.string.settings_import_failed, failed)}" else addedText
+    }
 }

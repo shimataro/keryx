@@ -17,6 +17,7 @@ private class NewArticleNotifierTestNotificationMessages : NotificationMessages 
     override suspend fun feedUrlChanged(feedTitle: String): String = "urlChanged:$feedTitle"
     override suspend fun newArticles(count: Int): String = "new:$count"
     override suspend fun syncFailed(exception: KeryxException): String = "syncFailed:${exception::class.simpleName}"
+    override suspend fun opmlImported(added: Int, failed: Int): String = "opmlImported:$added/$failed"
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)

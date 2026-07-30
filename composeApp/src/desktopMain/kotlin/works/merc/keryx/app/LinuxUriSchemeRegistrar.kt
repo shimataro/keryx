@@ -77,7 +77,7 @@ internal class LinuxUriSchemeRegistrar(
      */
     fun register(): Boolean = runCatching {
         val desktopFile = File(applicationsDir, URI_HANDLER_DESKTOP_FILE)
-        val entry = desktopEntryContent(launcherPath)
+        val entry = desktopEntryContent(launcherPath, CUSTOM_URI_MIME_TYPE, "%u")
         var changed = false
 
         if (readOrNull(desktopFile) != entry) {
@@ -108,51 +108,54 @@ internal class LinuxUriSchemeRegistrar(
         Log.warn(LOG_TAG, "Could not register the Linux keryx:// URI scheme", it)
         false
     }
+}
 
-    /**
+/**
  * Reads the contents of a regular file when it exists.
  *
  * @param file The file to read.
  * @return The file contents, or `null` when the path is not a regular file.
  */
-private fun readOrNull(file: File): String? = file.takeIf { it.isFile }?.readText()
+internal fun readOrNull(file: File): String? = file.takeIf { it.isFile }?.readText()
 
-    /**
-     * Atomically replaces the target file with the specified content.
-     *
-     * @param target The file to replace.
-     * @param content The content to write.
-     */
-    private fun writeAtomically(target: File, content: String) {
-        val parent = target.parentFile
-        parent?.mkdirs()
-        val tmp = File(parent, "${target.name}.tmp")
-        tmp.writeText(content)
-        Files.move(
-            tmp.toPath(),
-            target.toPath(),
-            StandardCopyOption.ATOMIC_MOVE,
-            StandardCopyOption.REPLACE_EXISTING,
-        )
-    }
+/**
+ * Atomically replaces the target file with the specified content.
+ *
+ * @param target The file to replace.
+ * @param content The content to write.
+ */
+internal fun writeAtomically(target: File, content: String) {
+    val parent = target.parentFile
+    parent?.mkdirs()
+    val tmp = File(parent, "${target.name}.tmp")
+    tmp.writeText(content)
+    Files.move(
+        tmp.toPath(),
+        target.toPath(),
+        StandardCopyOption.ATOMIC_MOVE,
+        StandardCopyOption.REPLACE_EXISTING,
+    )
 }
 
 /**
-     * Generates the desktop entry used to handle the custom URI scheme.
-     *
-     * @param launcherPath The executable path used to launch the application.
-     * @return The formatted desktop entry content.
-     */
-internal fun desktopEntryContent(launcherPath: String): String =
+ * Generates a desktop entry that hands a launched file or URI to [launcherPath] via [execFieldCode]
+ * (`%u` for a URI, `%f` for a bare local path), declaring itself the handler for [mimeType].
+ *
+ * @param launcherPath The executable path used to launch the application.
+ * @param mimeType The MIME type this entry declares itself the handler for.
+ * @param execFieldCode The desktop-entry `Exec=` field code appended after the launcher path.
+ * @return The formatted desktop entry content.
+ */
+internal fun desktopEntryContent(launcherPath: String, mimeType: String, execFieldCode: String): String =
     """
     [Desktop Entry]
     Type=Application
     Name=$APP_NAME
-    Exec=${escapeDesktopExecPath(launcherPath)} %u
+    Exec=${escapeDesktopExecPath(launcherPath)} $execFieldCode
     Terminal=false
     NoDisplay=true
     StartupNotify=false
-    MimeType=$CUSTOM_URI_MIME_TYPE;
+    MimeType=$mimeType;
     """.trimIndent() + "\n"
 
 /**

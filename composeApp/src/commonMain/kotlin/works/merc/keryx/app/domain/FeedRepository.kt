@@ -67,12 +67,12 @@ fun getAllFeeds(): List<Feeds> = feeds.watchAll().executeAsList()
     fun getFeedByUrl(url: String): Feeds? = feeds.getByUrl(url).executeAsOneOrNull()
 
     /**
- * Fetches feed data for preview without subscribing to the feed.
- *
- * @param url The feed URL to fetch.
- * @return The fetched feed data or the fetch error.
- */
-suspend fun previewFeed(url: String): Result<FetchedFeed> = feedFetcher.fetch(url)
+     * Fetches feed data for preview without subscribing to the feed.
+     *
+     * @param url The feed URL to fetch.
+     * @return The fetched feed data or the fetch error.
+     */
+    suspend fun previewFeed(url: String): Result<FetchedFeed> = feedFetcher.fetch(url)
 
     /**
      * Subscribes to a feed, storing its metadata and articles locally.
@@ -81,9 +81,26 @@ suspend fun previewFeed(url: String): Result<FetchedFeed> = feedFetcher.fetch(ur
      * @return A successful result containing the subscribed feed, or the fetch error.
      */
     suspend fun subscribeFeed(url: String): Result<Feeds> {
+        val outcome = subscribeFeedWrite(url)
+        if (outcome.hadArticles) ftsManager.indexMissing()
+        return outcome.result
+    }
+
+    /** Outcome of [subscribeFeedWrite]: the subscribe result, plus whether the feed had articles. */
+    internal data class SubscribeOutcome(val result: Result<Feeds>, val hadArticles: Boolean)
+
+    /**
+     * Network fetch + DB write for [subscribeFeed], without indexing the result — callers decide
+     * when to call [FtsManager.indexMissing] (immediately for a single subscribe, batched once after
+     * the loop by [OpmlImporter]). Mirrors [applyFetch]'s [RefreshOutcome] split for the same reason:
+     * [FtsManager.indexMissing]'s `NOT IN` scan is `O(articles table size)` per call, so a large OPML
+     * import must not repeat it once per feed. `syncScheduler.scheduleSync()` stays here, called once
+     * per feed like [applyFetch] does, since it is cheap and debounced.
+     */
+    internal suspend fun subscribeFeedWrite(url: String): SubscribeOutcome {
         val fetched = when (val r = feedFetcher.fetch(url)) {
             is Result.Ok -> r.value
-            is Result.Err -> return r
+            is Result.Err -> return SubscribeOutcome(r, hadArticles = false)
         }
         val effectiveUrl = fetched.redirectUrl ?: url
         val existing = feeds.getByUrl(effectiveUrl).executeAsOneOrNull()
@@ -126,10 +143,15 @@ suspend fun previewFeed(url: String): Result<FetchedFeed> = feedFetcher.fetch(ur
         // last-wins timestamp so it propagates over another device's refresh on the next sync.
         if (existing?.deleted_at != null) feeds.stampResubscribed(now, feedId)
         articleRepository.upsertParsed(feedId, fetched.articles)
-        if (fetched.articles.isNotEmpty()) ftsManager.indexMissing()
         syncScheduler.scheduleSync()
-        return Result.Ok(feeds.getById(feedId).executeAsOne())
+        return SubscribeOutcome(
+            Result.Ok(feeds.getById(feedId).executeAsOne()),
+            hadArticles = fetched.articles.isNotEmpty(),
+        )
     }
+
+    /** Indexes any articles fetched during an OPML import loop. Called once by [OpmlImporter]. */
+    internal fun indexImportedArticles() = ftsManager.indexMissing()
 
     /**
      * Unsubscribes from a feed by marking it as deleted.

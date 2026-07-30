@@ -55,20 +55,29 @@ internal fun packagedLauncherPath(
 }
 
 /**
- * Registers the `keryx://` URL scheme with the OS so browsers can redirect the OAuth callback
- * back to the app. macOS needs nothing here (Info.plist covers it); the other two platforms
- * only get registered when running from a packaged launcher — see [packagedLauncherPath].
+ * Registers the `keryx://` URL scheme (so browsers can redirect the OAuth callback back to the
+ * app) and the `.opml` file association (so a file manager can launch the app to import a
+ * double-clicked file) with the OS. macOS needs nothing here for either — both are declared in
+ * Info.plist instead. The other two platforms only get registered when running from a packaged
+ * launcher — see [packagedLauncherPath] — and both registrations share that one resolution rather
+ * than each re-deriving (and re-logging) it separately.
  */
-internal fun registerCustomUriScheme() {
+internal fun registerFileAssociations() {
     val launcherPath = packagedLauncherPath()
     if (launcherPath == null) {
-        Log.info(LOG_TAG, "Not running from a packaged launcher; skipping keryx:// scheme registration")
+        Log.info(LOG_TAG, "Not running from a packaged launcher; skipping keryx:// scheme and .opml association registration")
         return
     }
     when (uriSchemeRegistrationFor(System.getProperty("os.name") ?: "")) {
         UriSchemeRegistration.NONE -> Unit
-        UriSchemeRegistration.WINDOWS -> registerWindowsUriScheme(launcherPath)
-        UriSchemeRegistration.LINUX -> LinuxUriSchemeRegistrar(launcherPath).register()
+        UriSchemeRegistration.WINDOWS -> {
+            registerWindowsUriScheme(launcherPath)
+            registerWindowsOpmlAssociation(launcherPath)
+        }
+        UriSchemeRegistration.LINUX -> {
+            LinuxUriSchemeRegistrar(launcherPath).register()
+            LinuxOpmlAssociationRegistrar(launcherPath).register()
+        }
     }
 }
 
@@ -103,5 +112,42 @@ internal fun registerWindowsUriScheme(
                 }
             }
             .onFailure { Log.warn(LOG_TAG, "Could not register Windows URI scheme", it) }
+    }
+}
+
+/**
+ * Registers Keryx as the `.opml` file association for the current Windows user, via a dedicated
+ * `Keryx.opml` ProgID (rather than writing directly under `.opml`, which would collide with any
+ * other app's own ProgID for the same extension).
+ *
+ * @param launcherPath The path to the packaged application launcher.
+ */
+internal fun registerWindowsOpmlAssociation(
+    launcherPath: String,
+    runCommand: (List<String>) -> Int = { args -> runProcessWithTimeout(args, REG_EXE_TIMEOUT_MS) },
+) {
+    val reg = "reg.exe"
+    val progId = "Keryx.opml"
+    val commands = listOf(
+        listOf(reg, "add", "HKEY_CURRENT_USER\\Software\\Classes\\.opml", "/ve", "/d", progId, "/f"),
+        listOf(reg, "add", "HKEY_CURRENT_USER\\Software\\Classes\\$progId", "/ve", "/d", "OPML Document", "/f"),
+        listOf(
+            reg,
+            "add",
+            "HKEY_CURRENT_USER\\Software\\Classes\\$progId\\shell\\open\\command",
+            "/ve",
+            "/d",
+            "\"$launcherPath\" \"%1\"",
+            "/f",
+        ),
+    )
+    for (command in commands) {
+        runCatching { runCommand(command) }
+            .onSuccess { exitCode ->
+                if (exitCode != 0) {
+                    Log.warn(LOG_TAG, "reg.exe exited with $exitCode for: ${command.joinToString(" ")}")
+                }
+            }
+            .onFailure { Log.warn(LOG_TAG, "Could not register Windows .opml association", it) }
     }
 }

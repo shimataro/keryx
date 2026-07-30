@@ -139,6 +139,50 @@ so `xdg-open` (or a browser resolving the scheme) can fail until the two are rem
 
 > **Custom-URI linking confirmation**: `./gradlew :composeApp:run` cannot complete Dropbox / OneDrive linking on any desktop OS — macOS routes `keryx://` to the packaged app, and the Windows/Linux startup registration deliberately skips non-packaged launchers. To verify linking behavior, build with `createDistributable` and launch the packaged app (see [setup.md](setup.md) "Common Issues" for details).
 
+### `.opml` file association
+
+Double-clicking (or "Open With Keryx" on) an `.opml` file launches Keryx and imports its
+subscriptions (`FeedRepository.importOpml`, surfaced via the notification center — see
+[app-architecture.md](app-architecture.md)). Registration mirrors the `keryx://` scheme above,
+per platform:
+
+- **macOS**: declared at build time via `CFBundleDocumentTypes` in the same
+  `infoPlist { extraKeysRawXml }` block as `CFBundleURLTypes`. `LSHandlerRank` is `Default` (not
+  `Alternate`) so a plain double-click launches Keryx directly rather than only adding it to the
+  "Open With" submenu. macOS has no single built-in system UTI for OPML, and the third-party feed
+  reader ecosystem never converged on one either — NetNewsWire uses `org.opml.opml` (the closest
+  thing to a de facto standard, since OPML itself predates Apple's UTI system), Reeder uses
+  `com.reederapp.opml`, and Overcast uses `unofficial.opml`. An earlier version of this app instead
+  exported its own UTI (`works.merc.keryx.opml`), but that made Keryx invisible in Finder's "Open
+  With" menu on any Mac where another app had already claimed the `.opml` extension for one of these
+  other identifiers — the file resolves to whichever UTI is already bound to that extension, and a
+  competing export doesn't win that binding. `LSItemContentTypes` therefore lists all three known
+  identifiers, declared via `UTImportedTypeDeclarations` (Keryx is a consumer of these identifiers,
+  not their owner) rather than `UTExportedTypeDeclarations`, so Keryx is offered as a handler
+  whichever one (if any) is already bound to `.opml` on the user's machine.
+- **Windows**: registered at startup (`registerWindowsOpmlAssociation`) under a dedicated
+  `Keryx.opml` ProgID (`HKEY_CURRENT_USER\Software\Classes\.opml` → `Keryx.opml` →
+  `shell\open\command`), the same per-user, no-admin-needed mechanism as the URI scheme.
+- **Linux**: registered at startup (`LinuxOpmlAssociationRegistrar`), writing a *second* user-level
+  `.desktop` entry (`keryx-opml-handler.desktop`, `Exec=... %f` — a bare local path, not a URI) plus
+  a shared-mime-info package XML at `$XDG_DATA_HOME/mime/packages/keryx-opml.xml` mapping the
+  `*.opml` glob to `application/x-opml+xml`, since that MIME type isn't guaranteed to be predefined
+  by the distro's own `shared-mime-info` package. As on macOS, no single OPML MIME type is
+  standardized across Linux feed readers either, so the `.desktop` entry's `MimeType=` also lists
+  the other candidate seen in the wild, `text/x-opml` (`OPML_MIME_TYPE_ALT`) — but only there, not
+  in Keryx's own shared-mime-info package, so Keryx becomes an eligible opener if another
+  already-installed reader's package has bound `.opml` to that type instead, without Keryx itself
+  asserting a second, conflicting glob mapping for `.opml`. Same gate as the URI scheme: only
+  registers from a packaged launcher, so `./gradlew :composeApp:run` never creates these files
+  either. Like the `keryx://` scheme's `keryx-url-handler.desktop` and `mimeapps.list` entry, all of
+  these files live in the user's home and are **not removed when the package is uninstalled** — the
+  same leftover-association risk applies (a stale entry pointing at a removed launcher), with the
+  same manual cleanup: delete `keryx-opml-handler.desktop` and `keryx-opml.xml`, and drop the
+  `application/x-opml+xml` and `text/x-opml` line(s) from `mimeapps.list`. Also rerun
+  `update-mime-database` against `$XDG_DATA_HOME/mime` (default `~/.local/share/mime`) afterward —
+  deleting `keryx-opml.xml` alone leaves the compiled MIME cache pointing at the removed type until
+  the database is rebuilt.
+
 ## Release (CD)
 
 `.github/workflows/release.yml` builds the packages and attaches them to the GitHub Release.

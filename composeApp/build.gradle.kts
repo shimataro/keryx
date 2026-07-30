@@ -311,6 +311,77 @@ compose.desktop {
                                 </array>
                             </dict>
                         </array>
+                        <key>CFBundleDocumentTypes</key>
+                        <array>
+                            <dict>
+                                <key>CFBundleTypeName</key>
+                                <string>OPML Document</string>
+                                <key>CFBundleTypeRole</key>
+                                <string>Viewer</string>
+                                <key>LSHandlerRank</key>
+                                <string>Default</string>
+                                <key>LSItemContentTypes</key>
+                                <array>
+                                    <string>org.opml.opml</string>
+                                    <string>com.reederapp.opml</string>
+                                    <string>unofficial.opml</string>
+                                </array>
+                            </dict>
+                        </array>
+                        <key>UTImportedTypeDeclarations</key>
+                        <array>
+                            <dict>
+                                <key>UTTypeIdentifier</key>
+                                <string>org.opml.opml</string>
+                                <key>UTTypeDescription</key>
+                                <string>OPML Document</string>
+                                <key>UTTypeConformsTo</key>
+                                <array>
+                                    <string>public.xml</string>
+                                </array>
+                                <key>UTTypeTagSpecification</key>
+                                <dict>
+                                    <key>public.filename-extension</key>
+                                    <array>
+                                        <string>opml</string>
+                                    </array>
+                                </dict>
+                            </dict>
+                            <dict>
+                                <key>UTTypeIdentifier</key>
+                                <string>com.reederapp.opml</string>
+                                <key>UTTypeDescription</key>
+                                <string>OPML Document</string>
+                                <key>UTTypeConformsTo</key>
+                                <array>
+                                    <string>public.xml</string>
+                                </array>
+                                <key>UTTypeTagSpecification</key>
+                                <dict>
+                                    <key>public.filename-extension</key>
+                                    <array>
+                                        <string>opml</string>
+                                    </array>
+                                </dict>
+                            </dict>
+                            <dict>
+                                <key>UTTypeIdentifier</key>
+                                <string>unofficial.opml</string>
+                                <key>UTTypeDescription</key>
+                                <string>OPML Document</string>
+                                <key>UTTypeConformsTo</key>
+                                <array>
+                                    <string>public.xml</string>
+                                </array>
+                                <key>UTTypeTagSpecification</key>
+                                <dict>
+                                    <key>public.filename-extension</key>
+                                    <array>
+                                        <string>opml</string>
+                                    </array>
+                                </dict>
+                            </dict>
+                        </array>
                     """.trimIndent()
                 }
             }

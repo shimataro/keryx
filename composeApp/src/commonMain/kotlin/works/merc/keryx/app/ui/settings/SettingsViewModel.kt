@@ -25,6 +25,7 @@ import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
+import works.merc.keryx.app.domain.OpmlImporter
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
@@ -53,6 +54,7 @@ class SettingsViewModel(
     private val feedRepository: FeedRepository,
     private val folderRepository: FolderRepository,
     private val tagRepository: TagRepository,
+    private val opmlImporter: OpmlImporter,
     private val updateChecker: UpdateChecker,
     private val activityCenter: ActivityCenter,
     // Token store / sync touch the OS Keychain (macOS shells out to `security`, which may
@@ -344,53 +346,12 @@ class SettingsViewModel(
                     opmlResult = OpmlResult.Cancelled
                     return@launch
                 }
-                opmlResult = applyOpmlDocument(xml)
+                val outcome = opmlImporter.import(xml)
+                opmlResult = OpmlResult.Imported(outcome.added, outcome.failed)
             } finally {
                 importingOpml = false
             }
         }
-    }
-
-    /**
-     * Imports feeds from an OPML document and synchronizes their folders and tags.
-     *
-     * @param xml The OPML document to import.
-     * @return The number of feeds added and the number of subscriptions that failed.
-     */
-    internal suspend fun applyOpmlDocument(xml: String): OpmlResult.Imported {
-        // Each distinct folder / tag name is resolved once per import run, not once per feed:
-        // FolderRepository.createFolder re-appends an already-active folder to the end of the folder
-        // sort order and bumps its updated_at on every call, so calling it per feed would reshuffle
-        // folder order and emit needless sync writes.
-        val folderIdByName = mutableMapOf<String, String>()
-        val tagIdByName = mutableMapOf<String, String>()
-        // Snapshot of the pre-import attachments, so each feed's tag diff below is computed against
-        // the state before this run started changing things.
-        val previousFeedTagMap = tagRepository.getFeedTagMap()
-        var added = 0
-        var failed = 0
-        for (entry in OpmlCodec.import(xml)) {
-            when (val subscribed = feedRepository.subscribeFeed(entry.xmlUrl)) {
-                is Result.Ok -> {
-                    added++
-                    val feed = subscribed.value
-                    val folderId = entry.folderName?.let { name ->
-                        folderIdByName.getOrPut(name) { folderRepository.createFolder(name) }
-                    }
-                    // Guarded so a re-import that changes nothing writes nothing.
-                    if (feed.folder_id != folderId) feedRepository.moveFeed(feed.id, folderId)
-
-                    val newTagIds = entry.tags
-                        .map { name -> tagIdByName.getOrPut(name) { tagRepository.createTag(name) } }
-                        .toSet()
-                    val currentTagIds = previousFeedTagMap[feed.id].orEmpty()
-                    (currentTagIds - newTagIds).forEach { tagRepository.setFeedTag(feed.id, it, false) }
-                    (newTagIds - currentTagIds).forEach { tagRepository.setFeedTag(feed.id, it, true) }
-                }
-                is Result.Err -> failed++
-            }
-        }
-        return OpmlResult.Imported(added, failed)
     }
 
     /**
