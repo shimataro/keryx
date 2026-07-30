@@ -2,6 +2,7 @@ package works.merc.keryx.app
 
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.REG_EXE_TIMEOUT_MS
+import works.merc.keryx.app.platform.osName
 
 private const val LOG_TAG = "UriScheme"
 
@@ -68,7 +69,7 @@ internal fun registerFileAssociations() {
         Log.info(LOG_TAG, "Not running from a packaged launcher; skipping keryx:// scheme and .opml association registration")
         return
     }
-    when (uriSchemeRegistrationFor(System.getProperty("os.name") ?: "")) {
+    when (uriSchemeRegistrationFor(osName)) {
         UriSchemeRegistration.NONE -> Unit
         UriSchemeRegistration.WINDOWS -> {
             registerWindowsUriScheme(launcherPath)

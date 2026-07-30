@@ -10,7 +10,6 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.client.statement.readRawBytes
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
-import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -137,24 +136,10 @@ class OneDriveStorage(
         }
     }
 
-    private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> {
-        val token = accessTokenProvider()
-            ?: return Result.Err(CloudAuthException("Not connected to OneDrive"))
-        return try {
-            block(token)
-        } catch (e: CancellationException) {
-            // Never swallow coroutine cancellation (e.g. a debounced sync superseded by a newer
-            // one) — rethrow so it unwinds silently instead of being mis-logged as a sync error.
-            throw e
-        } catch (e: Throwable) {
-            Result.Err(CloudStorageException(e.message ?: "OneDrive request failed"))
-        }
-    }
+    private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> =
+        withCloudToken(accessTokenProvider, "OneDrive", block)
 
-    private fun mapError(status: Int, body: String): Result.Err = when (status) {
-        401, 403 -> Result.Err(CloudAuthException("Authentication failed"))
-        else -> Result.Err(CloudStorageException("OneDrive error (HTTP $status): ${body.take(200)}"))
-    }
+    private fun mapError(status: Int, body: String): Result.Err = cloudStorageError("OneDrive", status, body)
 
     /** Graph app-folder items are path-addressed by name: use the basename of the sync path. */
     private fun fileName(path: String): String = path.substringAfterLast('/')

@@ -1,5 +1,7 @@
 package works.merc.keryx.app.ui.home
 
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
@@ -166,6 +168,29 @@ fun markedToAnnotatedString(marked: String): AnnotatedString = buildAnnotatedStr
             FtsSearch.MARK_START -> if (!marking) { pushStyle(SearchHighlightSpanStyle); marking = true }
             FtsSearch.MARK_END -> if (marking) { pop(); marking = false }
             else -> append(ch)
+        }
+    }
+}
+
+/**
+ * Scrolls [index] into view: jumps directly there if it isn't currently rendered, otherwise nudges
+ * just enough to bring it fully within the viewport when it's only partially visible at an edge.
+ */
+suspend fun LazyListState.scrollToIndexIfNeeded(index: Int) {
+    val info = layoutInfo
+    val itemInfo = info.visibleItemsInfo.find { it.index == index }
+
+    if (itemInfo == null) {
+        animateScrollToItem(index)
+    } else {
+        val viewportStart = info.viewportStartOffset
+        val viewportEnd = info.viewportEndOffset
+        val itemStart = itemInfo.offset
+        val itemEnd = itemInfo.offset + itemInfo.size
+
+        when {
+            itemStart < viewportStart -> animateScrollBy((itemStart - viewportStart).toFloat())
+            itemEnd > viewportEnd -> animateScrollBy((itemEnd - viewportEnd).toFloat())
         }
     }
 }

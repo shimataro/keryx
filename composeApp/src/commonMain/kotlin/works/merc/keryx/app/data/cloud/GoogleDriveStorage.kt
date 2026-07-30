@@ -12,7 +12,6 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.client.statement.readRawBytes
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
-import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
@@ -121,37 +120,44 @@ class GoogleDriveStorage(
         } else {
             when (val created = createFile(token, name, data)) {
                 is Result.Err -> created
-                is Result.Ok -> {
-                    val createdId = created.value
-                    val listResult = listFilesByName(token, name)
-                    if (listResult is Result.Err) return@withToken listResult
-                    val files = (listResult as Result.Ok).value
-                    val winner = files.minByOrNull { it.id }
-                    if (winner == null) {
-                        return@withToken Result.Err(CloudStorageException("Created file disappeared immediately"))
-                    }
-                    if (winner.id != createdId) {
-                        // Lost the race — delete the file we just created so it does not linger as
-                        // an orphan (the winner may have listed before ours became visible and so
-                        // never sees it to clean up). Best-effort: a failed cleanup must not mask the
-                        // conflict signal, and a double-delete with the winner is safe (404 == Ok).
-                        // The sync flow will then download the winner's file and retry.
-                        deleteById(token, createdId)
-                        return@withToken Result.Err(SyncConflictException())
-                    }
-                    // We are the winner — safely delete every duplicate.
-                    for (file in files) {
-                        if (file.id != winner.id) {
-                            when (val del = deleteById(token, file.id)) {
-                                is Result.Err -> return@withToken del
-                                is Result.Ok -> Unit
-                            }
-                        }
-                    }
-                    Result.Ok(Unit)
+                is Result.Ok -> resolveCreateRace(token, name, created.value)
+            }
+        }
+    }
+
+    /**
+     * Resolves a concurrent-create race after [create] wins its own upload: re-lists files named
+     * [name] and keeps only the lowest file id (deterministic across every racing device). If
+     * [createdId] isn't the winner, deletes it and reports a conflict so the caller falls back to
+     * the merge path; if it is, deletes every other duplicate.
+     */
+    private suspend fun resolveCreateRace(token: String, name: String, createdId: String): Result<Unit> {
+        val listResult = listFilesByName(token, name)
+        if (listResult is Result.Err) return listResult
+        val files = (listResult as Result.Ok).value
+        val winner = files.minByOrNull { it.id }
+        if (winner == null) {
+            return Result.Err(CloudStorageException("Created file disappeared immediately"))
+        }
+        if (winner.id != createdId) {
+            // Lost the race — delete the file we just created so it does not linger as an orphan
+            // (the winner may have listed before ours became visible and so never sees it to clean
+            // up). Best-effort: a failed cleanup must not mask the conflict signal, and a
+            // double-delete with the winner is safe (404 == Ok). The sync flow will then download
+            // the winner's file and retry.
+            deleteById(token, createdId)
+            return Result.Err(SyncConflictException())
+        }
+        // We are the winner — safely delete every duplicate.
+        for (file in files) {
+            if (file.id != winner.id) {
+                when (val del = deleteById(token, file.id)) {
+                    is Result.Err -> return del
+                    is Result.Ok -> Unit
                 }
             }
         }
+        return Result.Ok(Unit)
     }
 
     override suspend fun delete(path: String): Result<Unit> = withToken { token ->
@@ -279,24 +285,10 @@ class GoogleDriveStorage(
         else -> mapError(response.status.value, response.bodyAsText())
     }
 
-    private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> {
-        val token = accessTokenProvider()
-            ?: return Result.Err(CloudAuthException("Not connected to Google Drive"))
-        return try {
-            block(token)
-        } catch (e: CancellationException) {
-            // Never swallow coroutine cancellation (e.g. a debounced sync superseded by a newer
-            // one) — rethrow so it unwinds silently instead of being mis-logged as a sync error.
-            throw e
-        } catch (e: Throwable) {
-            Result.Err(CloudStorageException(e.message ?: "Google Drive request failed"))
-        }
-    }
+    private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> =
+        withCloudToken(accessTokenProvider, "Google Drive", block)
 
-    private fun mapError(status: Int, body: String): Result.Err = when (status) {
-        401, 403 -> Result.Err(CloudAuthException("Authentication failed"))
-        else -> Result.Err(CloudStorageException("Google Drive error (HTTP $status): ${body.take(200)}"))
-    }
+    private fun mapError(status: Int, body: String): Result.Err = cloudStorageError("Google Drive", status, body)
 
     /** Drive files are named, not path-addressed: use the basename of the sync path. */
     private fun fileName(path: String): String = path.substringAfterLast('/')

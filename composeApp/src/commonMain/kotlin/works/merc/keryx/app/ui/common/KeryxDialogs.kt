@@ -55,16 +55,6 @@ expect fun KeryxAlertDialog(
     modal: Boolean = true,
 )
 
-/**
- * Drop-in replacement for `androidx.compose.ui.window.Dialog` that renders in a real, separate OS
- * window (`DialogWindow`) instead of a Compose `Popup`. See [KeryxAlertDialog] for why.
- */
-@Composable
-expect fun KeryxDialog(
-    onDismissRequest: () -> Unit,
-    content: @Composable () -> Unit,
-)
-
 /** One tab in a [KeryxTabDialog]: a stable [id] used for selection/dispatch, a localized [label]
  * (shown under the icon and, on macOS, mirrored as the window title), and an [icon]. */
 data class KeryxDialogTab(val id: String, val label: String, val icon: DrawableResource)
@@ -74,7 +64,7 @@ data class KeryxDialogTab(val id: String, val label: String, val icon: DrawableR
  * Compose `Popup`) with a macOS System-Preferences-style tab switcher: an icon+label toolbar tab
  * bar at the top, the selected tab's label mirrored as the window title (next to the traffic
  * lights on macOS), and a fixed-size content area below that top-aligns whichever tab's content is
- * requested. Unlike [KeryxAlertDialog]/[KeryxDialog], this window does not block its owner — the
+ * requested. Unlike [KeryxAlertDialog], this window does not block its owner — the
  * main window stays interactive while it is open (matching the real macOS System Settings window).
  *
  * Has no button row: the caller's content applies its changes immediately. The window is closed via

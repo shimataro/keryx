@@ -8,17 +8,15 @@ import org.freedesktop.dbus.connections.impl.DBusConnectionBuilder
 import org.freedesktop.dbus.interfaces.DBus
 import org.freedesktop.dbus.messages.DBusSignal
 import org.freedesktop.dbus.types.UInt32
+import works.merc.keryx.app.DBUS_BUS
+import works.merc.keryx.app.DBUS_PATH
 import works.merc.keryx.app.core.Log
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
+import works.merc.keryx.app.openDBusConnectionWithTimeout
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 private const val LOG_TAG = "AppMenuConnection"
 
-private const val DBUS_BUS = "org.freedesktop.DBus"
-private const val DBUS_PATH = "/org/freedesktop/DBus"
 private const val REGISTRAR_BUS = "com.canonical.AppMenu.Registrar"
 private const val REGISTRAR_PATH = "/com/canonical/AppMenu/Registrar"
 
@@ -125,23 +123,14 @@ internal class AppMenuConnection private constructor(
          * session bus must not stop Keryx from starting. A connection that lands after the deadline
          * is closed rather than leaked (matching `SniConnection.tryCreate`).
          */
-        fun tryCreate(timeout: Duration = DEFAULT_TIMEOUT): AppMenuConnection? {
-            val pending = CompletableFuture.supplyAsync {
-                runCatching { open() }
-                    .onFailure { Log.warn(LOG_TAG, "Could not set up the AppMenu connection", it) }
-                    .getOrNull()
-            }
-            return try {
-                pending.get(timeout.inWholeMilliseconds, TimeUnit.MILLISECONDS)
-            } catch (_: TimeoutException) {
-                Log.warn(LOG_TAG, "Session bus did not answer within $timeout; skipping the Global Menu")
-                pending.thenAccept { late -> late?.close(null) }
-                null
-            } catch (e: Exception) {
-                Log.warn(LOG_TAG, "Could not set up the AppMenu connection", e)
-                null
-            }
-        }
+        fun tryCreate(timeout: Duration = DEFAULT_TIMEOUT): AppMenuConnection? = openDBusConnectionWithTimeout(
+            logTag = LOG_TAG,
+            component = "AppMenu connection",
+            timeout = timeout,
+            timeoutMessage = "skipping the Global Menu",
+            onLateClose = { it.close(null) },
+            open = ::open,
+        )
 
         private fun open(): AppMenuConnection? {
             // withShared(false): we export an object on this one, so it must not be the process-wide

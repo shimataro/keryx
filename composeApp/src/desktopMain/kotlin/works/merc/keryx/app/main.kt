@@ -47,6 +47,7 @@ import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.MILLIS_PER_DAY
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.core.WINDOW_DEFAULT_HEIGHT
 import works.merc.keryx.app.core.WINDOW_DEFAULT_WIDTH
@@ -558,8 +559,7 @@ private suspend fun runStartupTasks(koin: org.koin.core.Koin) {
         val settings = settingsRepository.getLocalSettings()
         val now = SystemClock.nowMillis()
         val last = settings.lastCacheCleanupAt
-        val dayMillis = 24L * 60 * 60 * 1000
-        if (last == null || now - last >= dayMillis) {
+        if (last == null || now - last >= MILLIS_PER_DAY) {
             val days = settingsRepository.getCacheRetentionDays()
             koin.get<ArticleRepository>().deleteExpiredArticles(days)
             settingsRepository.saveLocalSettings(settings.copy(lastCacheCleanupAt = now))
@@ -586,8 +586,7 @@ private fun maybeRebuildFtsIndex(koin: org.koin.core.Koin) {
     val settingsRepository = koin.get<SettingsRepository>()
     val now = SystemClock.nowMillis()
     val last = settingsRepository.getLocalSettings().lastFtsRebuiltAt
-    val dayMillis = 24L * 60 * 60 * 1000
-    if (last != null && now - last < dayMillis) return
+    if (last != null && now - last < MILLIS_PER_DAY) return
     koin.get<FtsManager>().rebuildIndex()
     settingsRepository.saveLocalSettings(settingsRepository.getLocalSettings().copy(lastFtsRebuiltAt = now))
 }

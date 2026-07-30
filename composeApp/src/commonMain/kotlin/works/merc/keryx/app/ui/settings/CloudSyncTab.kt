@@ -61,12 +61,8 @@ import works.merc.keryx.app.resources.settings_onedrive_disconnect
 import works.merc.keryx.app.resources.settings_last_synced
 import works.merc.keryx.app.resources.setup_auth_failed
 
-/** クラウド同期: provider connect/disconnect/switch, with the three confirmation dialogs. */
 /**
- * Renders cloud storage connection settings and handles provider connection actions.
- */
-/**
- * Displays cloud provider connection controls and confirmation dialogs.
+ * Cloud sync tab: provider connect/disconnect/switch, with the three confirmation dialogs.
  *
  * @param vm The view model supplying cloud provider state and handling user actions.
  */

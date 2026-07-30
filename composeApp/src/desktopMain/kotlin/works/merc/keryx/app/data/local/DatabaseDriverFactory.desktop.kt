@@ -3,6 +3,7 @@ package works.merc.keryx.app.data.local
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import works.merc.keryx.app.core.DB_FILE_NAME
+import works.merc.keryx.app.core.SQLITE_BUSY_TIMEOUT_MS
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.platform.AppDirs
 import java.io.File
@@ -15,7 +16,7 @@ actual class DatabaseDriverFactory {
         // a fresh connection per statement for file DBs, so it must apply to every connection. It lets
         // a search wait out (rather than error on SQLITE_BUSY -> zero hits) the brief write lock held
         // by an incremental FTS insert or the rare full index rebuild on another connection.
-        val props = Properties().apply { setProperty("busy_timeout", "5000") }
+        val props = Properties().apply { setProperty("busy_timeout", SQLITE_BUSY_TIMEOUT_MS.toString()) }
         val driver = JdbcSqliteDriver("jdbc:sqlite:${dbFile.absolutePath}", props)
         // Foreign keys are off by default in SQLite; the schema declares them.
         driver.execute(null, "PRAGMA foreign_keys=ON;", 0)

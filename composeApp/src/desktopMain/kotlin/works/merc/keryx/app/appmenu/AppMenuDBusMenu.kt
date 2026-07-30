@@ -2,9 +2,6 @@ package works.merc.keryx.app.appmenu
 
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
-import org.freedesktop.dbus.errors.PropertyReadOnly
-import org.freedesktop.dbus.errors.UnknownProperty
-import org.freedesktop.dbus.interfaces.Properties
 import org.freedesktop.dbus.types.UInt32
 import org.freedesktop.dbus.types.Variant
 import works.merc.keryx.app.tray.AboutToShowGroupReply
@@ -15,7 +12,7 @@ import works.merc.keryx.app.tray.DBusMenuEventEntry
 import works.merc.keryx.app.tray.DBusMenuItemProperties
 import works.merc.keryx.app.tray.GetLayoutResult
 import works.merc.keryx.app.tray.MenuLayoutReply
-import works.merc.keryx.app.tray.propertyOrThrow
+import works.merc.keryx.app.tray.ReadOnlyDBusProperties
 import works.merc.keryx.app.ui.menu.AppMenuNode
 import works.merc.keryx.app.ui.menu.AppMenuRoot
 import java.util.concurrent.atomic.AtomicReference
@@ -40,7 +37,7 @@ import java.util.concurrent.atomic.AtomicReference
 internal class AppMenuDBusMenu(
     private val objectPath: String,
     private val onLayoutUpdated: (revision: Int) -> Unit,
-) : DBusMenu, Properties {
+) : DBusMenu, ReadOnlyDBusProperties {
 
     private class Revision(val revision: Int, val layout: AppMenuLayout)
 
@@ -122,13 +119,6 @@ internal class AppMenuDBusMenu(
             "Status" to Variant("normal"),
             "IconThemePath" to Variant(emptyList<String>(), "as"),
         )
-    }
-
-    override fun <A : Any?> Get(interfaceName: String, propertyName: String): A =
-        GetAll(interfaceName).propertyOrThrow(interfaceName, propertyName)
-
-    override fun <A : Any?> Set(interfaceName: String, propertyName: String, value: A) {
-        throw PropertyReadOnly("$interfaceName.$propertyName is read-only")
     }
 
     /**

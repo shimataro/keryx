@@ -1,6 +1,7 @@
 package works.merc.keryx.app.platform
 
-private val osName = System.getProperty("os.name").lowercase()
+/** The lowercased `os.name` system property, shared so every OS-name-derived check reads it once. */
+internal val osName = System.getProperty("os.name").lowercase()
 
 /**
  * Whether this desktop JVM is running on macOS. Gates the platform integrations that only exist

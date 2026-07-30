@@ -132,16 +132,6 @@ private fun propertiesFor(node: AppMenuNode): Map<String, Variant<*>> = when (no
     )
 }
 
-/** The AWT virtual-key name dbusmenu hosts expect for a [AppMenuShortcut]'s key. */
-private fun AppMenuShortcut.dbusmenuKeyName(): String = when (this) {
-    AppMenuShortcut.AddFeed -> "N"
-    AppMenuShortcut.CloseWindow -> "W"
-    AppMenuShortcut.Settings -> ","
-    AppMenuShortcut.Quit -> "Q"
-    AppMenuShortcut.RefreshAll -> "R"
-    AppMenuShortcut.ShowMenuBar -> "M"
-}
-
 /**
  * The dbusmenu `"shortcut"` property value for this accelerator: an array of one array of
  * modifier/key name strings (spec type `aas`), e.g. `[["Control", "N"]]`. This is what hosts like
@@ -151,7 +141,7 @@ private fun AppMenuShortcut.toDbusmenuShortcut(): Variant<*> {
     val combo = buildList {
         if (ctrl) add("Control")
         if (meta) add("Super")
-        add(dbusmenuKeyName())
+        add(dbusmenuKeyName)
     }
     return Variant(listOf(combo), "aas")
 }

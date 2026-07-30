@@ -19,14 +19,24 @@ import works.merc.keryx.app.platform.isMacOs
  * The modifier + key of a menu accelerator. Every shipped shortcut is a plain "mod" shortcut
  * (Ctrl elsewhere, ⌘ on macOS), so [ctrl] defaults to `true`; the in-window renderer applies the
  * platform modifier while the Linux [MenuShortcutDispatcher] matches [ctrl]/[meta] directly.
+ *
+ * [dbusmenuKeyName] is the AWT virtual-key *name* the `com.canonical.dbusmenu` host expects for
+ * this key — plain strings, so it lives here alongside [key] rather than in `appmenu/`. The AWT
+ * virtual-key *code* ([java.awt.event.KeyEvent] `VK_*`) is deliberately **not** a property here —
+ * see `appmenu/MenuBarVisibility.kt`'s `awtKeyCode()` — so this model stays AWT-free.
  */
-internal enum class AppMenuShortcut(val key: Key, val ctrl: Boolean = true, val meta: Boolean = false) {
-    AddFeed(Key.N),
-    CloseWindow(Key.W),
-    Settings(Key.Comma),
-    Quit(Key.Q),
-    RefreshAll(Key.R),
-    ShowMenuBar(Key.M),
+internal enum class AppMenuShortcut(
+    val key: Key,
+    val dbusmenuKeyName: String,
+    val ctrl: Boolean = true,
+    val meta: Boolean = false,
+) {
+    AddFeed(Key.N, "N"),
+    CloseWindow(Key.W, "W"),
+    Settings(Key.Comma, ","),
+    Quit(Key.Q, "Q"),
+    RefreshAll(Key.R, "R"),
+    ShowMenuBar(Key.M, "M"),
 }
 
 /** A node in the application menu tree. */

@@ -13,10 +13,9 @@ actual object BrowserOpener {
                 return
             }
         }
-        val os = System.getProperty("os.name").lowercase()
         val cmd = when {
-            os.contains("mac") -> arrayOf("open", url)
-            os.contains("win") -> arrayOf("rundll32", "url.dll,FileProtocolHandler", url)
+            isMacOs -> arrayOf("open", url)
+            isWindows -> arrayOf("rundll32", "url.dll,FileProtocolHandler", url)
             else -> arrayOf("xdg-open", url)
         }
         runCatching { ProcessBuilder(*cmd).start() }

@@ -53,12 +53,8 @@ class FeedRepository(
 
     fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
 
-    /**
- * Retrieves all feeds currently stored in the database.
- *
- * @return The stored feed records.
- */
-fun getAllFeeds(): List<Feeds> = feeds.watchAll().executeAsList()
+    /** All feeds currently stored in the database. */
+    fun getAllFeeds(): List<Feeds> = feeds.watchAll().executeAsList()
 
     /**
      * The feed subscribed at exactly [url], including a soft-deleted one. Note that
@@ -196,6 +192,25 @@ fun getAllFeeds(): List<Feeds> = feeds.watchAll().executeAsList()
         syncScheduler.scheduleSync()
     }
 
+    /**
+     * Moves every feed currently in [folderId] into the "no folder" group, preserving their
+     * relative order and appending them to the end of that group. Used by
+     * [FolderRepository.deleteFolder] when the folder itself is removed — unlike [moveFeed], every
+     * row here genuinely changes `folder_id`, so writing every one of them is not the "unrelated
+     * updated_at bump" [moveFeed] otherwise avoids. Runs its own [db] transaction, which nests
+     * safely inside the caller's. [now] defaults to the current time, but [deleteFolder] passes its
+     * own timestamp so the folder's own deletion and its feeds' moves share one instant.
+     */
+    fun moveFeedsOutOfFolder(folderId: String, now: Long = clock.nowMillis()) {
+        db.transaction {
+            var next = feeds.nextSortOrderInGroup(null).executeAsOne()
+            for (feed in feeds.getByFolder(folderId).executeAsList()) {
+                feeds.updateFolderAndSortOrder(null, next, now, now, now, feed.id)
+                next++
+            }
+        }
+    }
+
     /** Refreshes one feed. Returns the count of new articles, or an error. */
     suspend fun refreshFeed(feed: Feeds): Result<Int> {
         val outcome = refreshFeedArticles(feed)
@@ -321,19 +336,6 @@ fun getAllFeeds(): List<Feeds> = feeds.watchAll().executeAsList()
         }
         if (anyHadArticles) ftsManager.indexMissing()
         return result
-    }
-
-    /**
-     * Fills in favicons for feeds that lack one. An empty-string favicon is a
-     * sentinel meaning "already checked, none found" and is skipped.
-     */
-    suspend fun backfillMissingFavicons() {
-        for (feed in feeds.watchAll().executeAsList()) {
-            if (feed.favicon_url == "") continue
-            if (feed.favicon_url != null && faviconResolver.isReachable(feed.favicon_url)) continue
-            val url = faviconResolver.resolve(feed.site_url, feed.url)
-            feeds.updateFaviconUrl(url ?: "", clock.nowMillis(), feed.id)
-        }
     }
 
     /**

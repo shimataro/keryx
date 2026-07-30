@@ -130,7 +130,7 @@ private val KERYX_ALERT_DIALOG_WIDTH = 400.dp
  * *incoming* max-width constraint, so if the window starts narrower than `x`, the content measures
  * (and gets stuck) at that narrower width forever: `onSizeChanged` only re-fires when the measured
  * size changes, and content laid out inside an already-too-narrow window keeps reporting that same
- * narrow size on every subsequent pass. [KeryxAlertDialog]/[KeryxDialog] rely on the default
+ * narrow size on every subsequent pass. [KeryxAlertDialog] relies on the default
  * ([KERYX_ALERT_DIALOG_WIDTH]); [KeryxTabDialog] passes its own wider fixed width explicitly so it
  * doesn't inherit — and get stuck at — the alert dialog's narrower one. Height is a rough
  * placeholder that auto-fit immediately corrects (no equivalent trap — see `requiredHeightIn` below).
@@ -453,7 +453,7 @@ private fun DesktopModalWindow(
 
     if (modal) {
         // Non-experimental overload: DocumentModal — blocks the owner window until dismissed. Used
-        // by KeryxAlertDialog/KeryxDialog (confirmations, prompts) that must be answered first.
+        // by KeryxAlertDialog (confirmations, prompts) that must be answered first.
         DialogWindow(
             onCloseRequest = onDismissRequest,
             state = dialogState,
@@ -658,16 +658,6 @@ actual fun KeryxAlertDialog(
                 }
             }
         }
-    }
-}
-
-@Composable
-actual fun KeryxDialog(
-    onDismissRequest: () -> Unit,
-    content: @Composable () -> Unit,
-) {
-    DesktopModalWindow(title = null, onDismissRequest = onDismissRequest) {
-        content()
     }
 }
 

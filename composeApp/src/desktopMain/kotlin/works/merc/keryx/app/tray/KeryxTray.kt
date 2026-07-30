@@ -24,7 +24,8 @@ import works.merc.keryx.app.resources.tray_show
 import java.awt.image.BufferedImage
 
 /**
- * The application's system-tray icon, dispatching to the per-platform implementation.
+ * The application's system-tray icon, dispatching to the per-platform implementation, and
+ * configuring its icon, actions, unread badge, and notifications.
  *
  * - macOS uses [MacTray] (a raw AWT `TrayIcon`, so a left click toggles the window instead of
  *   opening the menu).
@@ -34,9 +35,6 @@ import java.awt.image.BufferedImage
  *
  * The icon asset follows the same split: the outlined glyph where the icon is composited with
  * real alpha at a reasonable size (macOS, Linux SNI), the full-colour one everywhere else.
- */
-/**
- * Configures the platform-specific system tray, including its icon, actions, unread badge, and notifications.
  *
  * @param sniConnection The Linux Status Notifier Item connection, when available.
  * @param notificationIcon The icon used for Linux SNI notifications.

@@ -83,8 +83,8 @@ val appModule: Module = module {
     single { SettingsRepository(get(), get(), get(), get()) }
     single { ArticleRepository(get(), get(), get(), get()) }
     single { TagRepository(get(), get(), get()) }
-    single { FolderRepository(get(), get(), get()) }
     single { FeedRepository(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { FolderRepository(get(), get(), get(), get()) }
     single { OpmlImporter(get(), get(), get()) }
 
     // ViewModels are app-scoped for this single-window desktop app.

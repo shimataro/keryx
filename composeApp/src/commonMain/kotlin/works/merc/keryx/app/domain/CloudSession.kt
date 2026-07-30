@@ -2,7 +2,7 @@ package works.merc.keryx.app.domain
 
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudStorageType
-import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.core.fold
 import works.merc.keryx.app.data.cloud.CloudAuthManager
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.cloud.OAuthTokens
@@ -73,12 +73,12 @@ class CloudSession(
         val tokens = provider.tokenStorage.load() ?: return null
         if (!tokens.isExpired(clock.nowMillis())) return tokens.accessToken
         val refreshToken = tokens.refreshToken ?: return tokens.accessToken
-        return when (val r = provider.authManager.refresh(provider.clientId, refreshToken)) {
-            is Result.Ok -> {
-                provider.tokenStorage.save(r.value)
-                r.value.accessToken
-            }
-            is Result.Err -> null
-        }
+        return provider.authManager.refresh(provider.clientId, refreshToken).fold(
+            ok = { refreshed ->
+                provider.tokenStorage.save(refreshed)
+                refreshed.accessToken
+            },
+            err = { null },
+        )
     }
 }

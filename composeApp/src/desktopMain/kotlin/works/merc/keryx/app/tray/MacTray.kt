@@ -24,18 +24,6 @@ import java.awt.event.MouseEvent
  * AWT/macOS limitation (Compose upstream has an unresolved TODO for this). To
  * get "right-click = menu, left-click = toggle", this bypasses `setPopupMenu`
  * and drives a raw `TrayIcon`/`PopupMenu` pair with a manual `MouseListener`.
- */
-/**
- * Manages the macOS system tray icon, menu actions, and article notifications.
- *
- * @param image The tray icon image, or `null` to leave the tray uninitialized.
- * @param windowVisible Whether the application window is currently visible.
- * @param showLabel Label for showing the window.
- * @param hideLabel Label for hiding the window.
- * @param newArticleNotifications Notifications displayed through the tray icon.
- */
-/**
- * Displays the application tray icon and handles its menu actions and notifications on macOS.
  *
  * @param image The tray icon image; when `null`, no tray UI is displayed.
  * @param tooltip The tray icon tooltip.

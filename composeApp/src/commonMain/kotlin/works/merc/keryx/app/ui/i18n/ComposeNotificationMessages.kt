@@ -21,6 +21,12 @@ import works.merc.keryx.app.resources.feed_url_changed
 import works.merc.keryx.app.resources.settings_import_failed
 import works.merc.keryx.app.resources.settings_import_success
 
+/** The "N imported" text, with a " / N failed" suffix appended when [failed] is non-zero. */
+internal suspend fun opmlImportedText(added: Int, failed: Int): String {
+    val addedText = getString(Res.string.settings_import_success, added)
+    return if (failed > 0) "$addedText / ${getString(Res.string.settings_import_failed, failed)}" else addedText
+}
+
 /** [NotificationMessages] backed by Compose string resources (system-locale aware). */
 class ComposeNotificationMessages : NotificationMessages {
     override suspend fun feedGone(feedTitle: String): String =
@@ -43,8 +49,5 @@ class ComposeNotificationMessages : NotificationMessages {
         },
     )
 
-    override suspend fun opmlImported(added: Int, failed: Int): String {
-        val addedText = getString(Res.string.settings_import_success, added)
-        return if (failed > 0) "$addedText / ${getString(Res.string.settings_import_failed, failed)}" else addedText
-    }
+    override suspend fun opmlImported(added: Int, failed: Int): String = opmlImportedText(added, failed)
 }
