@@ -670,7 +670,11 @@ private suspend fun handleOpenedOpmlFile(koin: org.koin.core.Koin, path: String)
         Log.warn(LOG_TAG, "Could not read the opened OPML file")
         return
     }
-    val outcome = koin.get<OpmlImporter>().import(xml)
+    val outcome = runCatching { koin.get<OpmlImporter>().import(xml) }
+        .getOrElse {
+            Log.warn(LOG_TAG, "Failed to import the opened OPML file", it)
+            return
+        }
     val message = koin.get<NotificationMessages>().opmlImported(outcome.added, outcome.failed)
     koin.get<NotificationCenter>().add(
         AppNotification(

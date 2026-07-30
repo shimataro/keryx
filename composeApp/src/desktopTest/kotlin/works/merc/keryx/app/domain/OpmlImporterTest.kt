@@ -8,8 +8,12 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
@@ -161,6 +165,69 @@ class OpmlImporterTest {
 
             assertEquals(OpmlImportOutcome(added = 1, failed = 1), outcome)
             assertEquals(listOf("https://ex.com/feed"), db.feedsQueries.getAllIncludingDeleted().executeAsList().map { it.url })
+        } finally {
+            driver.close()
+        }
+    }
+
+    // MockEngine dispatches its HTTP calls off the calling coroutine's thread, so a plain
+    // yield() on the test thread cannot reliably observe whether import B has been let past the
+    // mutex — B may already be progressing on another thread. Instead, B's fetch handler signals
+    // a bStarted deferred the instant it runs, and the test asserts that signal does NOT arrive
+    // within a generous bounded wait while A still holds the lock, then DOES arrive once A
+    // releases it — a direct, dispatcher-agnostic observation of mutual exclusion.
+    @Test
+    fun concurrentImportsSharingAFolderNameSerializeAndDoNotThrow(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val aStarted = CompletableDeferred<Unit>()
+            val releaseA = CompletableDeferred<Unit>()
+            val bStarted = CompletableDeferred<Unit>()
+            // Feed A's fetch parks mid-request until the test releases it; feed B's fetch signals
+            // bStarted the instant it runs and resolves immediately, so if OpmlImporter.import()
+            // were NOT serialized, B would be free to start (and finish) its own run — including
+            // creating the "Tech" folder — while A is still stuck.
+            val fetcher = fetcherWith { request ->
+                when {
+                    request.url.toString().endsWith("/a") -> {
+                        aStarted.complete(Unit)
+                        releaseA.await()
+                    }
+                    request.url.toString().endsWith("/b") -> bStarted.complete(Unit)
+                }
+                respond(RSS, HttpStatusCode.OK)
+            }
+            val importer = newImporter(db, driver, fetcher)
+            val xmlA = """
+                <opml version="2.0"><body>
+                  <outline text="Tech"><outline type="rss" text="A" xmlUrl="https://ex.com/a"/></outline>
+                </body></opml>
+            """.trimIndent()
+            val xmlB = """
+                <opml version="2.0"><body>
+                  <outline text="Tech"><outline type="rss" text="B" xmlUrl="https://ex.com/b"/></outline>
+                </body></opml>
+            """.trimIndent()
+
+            val jobA = async { importer.import(xmlA) }
+            aStarted.await() // Import A now holds the mutex, parked mid-fetch for /a.
+            val jobB = async { importer.import(xmlB) }
+
+            // B should be blocked acquiring the mutex, so its fetch must not start within a
+            // generous window while A is still parked.
+            assertNull(withTimeoutOrNull(200) { bStarted.await() })
+
+            releaseA.complete(Unit)
+            val resultA = jobA.await()
+            // Now that A has released the mutex, B must be able to proceed.
+            withTimeout(1000) { bStarted.await() }
+            val resultB = jobB.await()
+
+            assertEquals(OpmlImportOutcome(added = 1, failed = 0), resultA)
+            assertEquals(OpmlImportOutcome(added = 1, failed = 0), resultB)
+            // Exactly one "Tech" folder despite two concurrent runs both resolving that name — the
+            // pre-fix race could throw a UNIQUE constraint violation here instead.
+            assertEquals(listOf("Tech"), db.foldersQueries.watchAll().executeAsList().map { it.name })
         } finally {
             driver.close()
         }
