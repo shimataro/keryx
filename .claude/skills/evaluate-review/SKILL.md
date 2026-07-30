@@ -350,6 +350,15 @@ feature branch before making any commits. Step 3's branch-alignment check alread
 unlikely in practice (the PR's head branch is normally already a feature branch), but guard
 for it anyway.
 
+**One-time run confirmation**: before touching any comment, ask the user via `AskUserQuestion`
+to confirm the whole Case B run once — e.g. "About to independently evaluate and, for each valid
+finding, auto-fix and commit N comment(s) from this review — proceed?" (Proceed / Cancel this
+URL). This satisfies the repo's "don't commit unless asked" convention while preserving Case B's
+per-comment efficiency: once confirmed, every comment below still proceeds straight to fix →
+verify → commit with no further per-comment approval. If the user cancels, skip this URL
+entirely (commit nothing, note "Cancelled by user" in the closing summary) and, for a multi-URL
+run, continue to the next URL at Step 2.
+
 For each comment in `associated_comments`, in order:
 
 1. Using that comment's own thread context (Step 5) and code context (Step 6), run the
@@ -358,8 +367,9 @@ For each comment in `associated_comments`, in order:
 2. If **Invalid**, or valid but no code change is required: skip this comment — implement
    nothing, commit nothing. Note it (with the reason) for the closing summary.
 3. If **Valid** or **Partially Valid**: explore the codebase as needed to understand the
-   surrounding architecture (no `EnterPlanMode`/`ExitPlanMode` in this case — there is no
-   interactive approval gate), then implement the fix for this comment only, following the
+   surrounding architecture (no `EnterPlanMode`/`ExitPlanMode`, and no further interactive
+   approval per comment — the one-time run confirmation above already covers the whole run),
+   then implement the fix for this comment only, following the
    repo's standing constraints (`.claude/CLAUDE.md`, `docs/testing.md` — including
    adding/updating tests where constraint #7 applies). Then run `./gradlew build` (or the
    narrowest relevant test target, e.g. `:composeApp:desktopTest --tests "..."`, when that is
