@@ -315,9 +315,7 @@ class HomeViewModel(
         _collapsedFolderIds.value = _collapsedFolderIds.value.let {
             if (folderId in it) it - folderId else it + folderId
         }
-        settingsRepository.saveLocalSettings(
-            settingsRepository.getLocalSettings().copy(collapsedFolderIds = _collapsedFolderIds.value),
-        )
+        settingsRepository.mutateLocalSettings { it.copy(collapsedFolderIds = _collapsedFolderIds.value) }
     }
 
     // --- Article scroll position memory ---
@@ -335,9 +333,7 @@ class HomeViewModel(
                 _scrollPositions.value.filter { it.articleId != articleId }
             ).take(MAX_REMEMBERED_SCROLL_POSITIONS)
         _scrollPositions.value = updated
-        settingsRepository.saveLocalSettings(
-            settingsRepository.getLocalSettings().copy(recentArticleScrollPositions = updated),
-        )
+        settingsRepository.mutateLocalSettings { it.copy(recentArticleScrollPositions = updated) }
     }
 
     init {
@@ -356,9 +352,7 @@ class HomeViewModel(
         combine(_feedListPaneWidth, _articleListPaneWidth) { feed, article -> feed to article }
             .debounce(500)
             .onEach { (feed, article) ->
-                settingsRepository.saveLocalSettings(
-                    settingsRepository.getLocalSettings().copy(feedListPaneWidth = feed, articleListPaneWidth = article),
-                )
+                settingsRepository.mutateLocalSettings { it.copy(feedListPaneWidth = feed, articleListPaneWidth = article) }
             }.launchIn(viewModelScope)
 
         // Any write to `articles` can be a sync merge propagating a soft-delete tombstone for an
@@ -384,9 +378,7 @@ class HomeViewModel(
         _filter.value = filter
         _selectedArticle.value = null
         _pinnedReadArticles.value = emptyMap()
-        settingsRepository.saveLocalSettings(
-            settingsRepository.getLocalSettings().copy(lastFilter = filter.encode(), lastArticleId = null),
-        )
+        settingsRepository.mutateLocalSettings { it.copy(lastFilter = filter.encode(), lastArticleId = null) }
     }
 
     fun selectArticle(article: Articles) {
@@ -395,9 +387,7 @@ class HomeViewModel(
         }
         // Optimistic: show it read immediately; persist off the UI thread.
         _selectedArticle.value = article.copy(is_read = 1L)
-        settingsRepository.saveLocalSettings(
-            settingsRepository.getLocalSettings().copy(lastArticleId = article.id),
-        )
+        settingsRepository.mutateLocalSettings { it.copy(lastArticleId = article.id) }
         viewModelScope.launch(dbWriteDispatcher) { articleRepository.markAsRead(article.id) }
     }
 
@@ -515,9 +505,7 @@ class HomeViewModel(
             _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         }
         _unreadOnly.value = value
-        settingsRepository.saveLocalSettings(
-            settingsRepository.getLocalSettings().copy(lastUnreadOnly = value),
-        )
+        settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnly = value) }
     }
 
     /**
@@ -551,9 +539,7 @@ class HomeViewModel(
 
     fun toggleSort() {
         _newestFirst.value = !_newestFirst.value
-        settingsRepository.saveLocalSettings(
-            settingsRepository.getLocalSettings().copy(lastNewestFirst = _newestFirst.value),
-        )
+        settingsRepository.mutateLocalSettings { it.copy(lastNewestFirst = _newestFirst.value) }
     }
 
     fun getInitialFocusedPane(): HomePane =
@@ -562,9 +548,7 @@ class HomeViewModel(
             ?: HomePane.ArticleList
 
     fun setFocusedPane(pane: HomePane) {
-        settingsRepository.saveLocalSettings(
-            settingsRepository.getLocalSettings().copy(lastFocusedPane = pane.name),
-        )
+        settingsRepository.mutateLocalSettings { it.copy(lastFocusedPane = pane.name) }
     }
 
     // --- Search controls ---
@@ -717,9 +701,7 @@ class HomeViewModel(
         folderRepository.deleteFolder(id)
         if (_filter.value == ArticleFilter.Folder(id)) selectFilter(ArticleFilter.All)
         _collapsedFolderIds.value = _collapsedFolderIds.value - id
-        settingsRepository.saveLocalSettings(
-            settingsRepository.getLocalSettings().copy(collapsedFolderIds = _collapsedFolderIds.value),
-        )
+        settingsRepository.mutateLocalSettings { it.copy(collapsedFolderIds = _collapsedFolderIds.value) }
     }
 
     fun moveFeed(feedId: String, folderId: String?, targetFeedId: String? = null) =

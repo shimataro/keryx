@@ -326,13 +326,12 @@ fun main(args: Array<String>) {
         // Persist window size (debounced).
         LaunchedEffect(windowState) {
             snapshotFlow { windowState.size }.debounce(500).collect { size ->
-                val current = settingsRepository.getLocalSettings()
-                settingsRepository.saveLocalSettings(
-                    current.copy(
+                settingsRepository.mutateLocalSettings {
+                    it.copy(
                         windowWidth = size.width.value.toDouble(),
                         windowHeight = size.height.value.toDouble(),
-                    ),
-                )
+                    )
+                }
             }
         }
 
@@ -563,7 +562,7 @@ private suspend fun runStartupTasks(koin: org.koin.core.Koin) {
         if (last == null || now - last >= MILLIS_PER_DAY) {
             val days = settingsRepository.getCacheRetentionDays()
             koin.get<ArticleRepository>().deleteExpiredArticles(days)
-            settingsRepository.saveLocalSettings(settings.copy(lastCacheCleanupAt = now))
+            settingsRepository.mutateLocalSettings { it.copy(lastCacheCleanupAt = now) }
         }
         if (koin.get<CloudSession>().isConnected()) {
             koin.get<SyncRepository>().sync()
@@ -585,7 +584,7 @@ private fun maybeRebuildFtsIndex(koin: org.koin.core.Koin) {
     val last = settingsRepository.getLocalSettings().lastFtsRebuiltAt
     if (last != null && now - last < MILLIS_PER_DAY) return
     koin.get<FtsManager>().rebuildIndex()
-    settingsRepository.saveLocalSettings(settingsRepository.getLocalSettings().copy(lastFtsRebuiltAt = now))
+    settingsRepository.mutateLocalSettings { it.copy(lastFtsRebuiltAt = now) }
 }
 
 /**
@@ -635,9 +634,7 @@ private suspend fun backgroundUpdateLoop(koin: org.koin.core.Koin) {
 private suspend fun checkForUpdateAndNotify(koin: org.koin.core.Koin) {
     val settingsRepository = koin.get<SettingsRepository>()
     val status = koin.get<UpdateChecker>().check()
-    settingsRepository.saveLocalSettings(
-        settingsRepository.getLocalSettings().copy(lastUpdateCheckAt = SystemClock.nowMillis()),
-    )
+    settingsRepository.mutateLocalSettings { it.copy(lastUpdateCheckAt = SystemClock.nowMillis()) }
     if (status is UpdateStatus.Available) {
         val message = getString(Res.string.update_available_notification, status.version)
         koin.get<NotificationCenter>().add(

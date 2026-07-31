@@ -13,6 +13,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -101,12 +102,31 @@ class SettingsRepository(
     fun getLocalSettings(): LocalSettings = _localSettings.value
 
     /**
-     * Updates the in-memory settings immediately and schedules an off-thread, coalesced disk write.
+     * Replaces the in-memory settings wholesale and schedules an off-thread, coalesced disk write.
      * The disk write may lag the return; call [flush] when the value must be on disk before the
      * process can exit (see [flush]'s call sites: the JVM shutdown hook and setup completion).
+     *
+     * Only for writing a settings object that was not derived from the current one. To change some
+     * fields and keep the rest, use [mutateLocalSettings] — see there for why.
      */
     fun saveLocalSettings(settings: LocalSettings) {
         _localSettings.value = settings
+        saveSignals.trySend(Unit)
+    }
+
+    /**
+     * Applies [transform] to the current settings atomically, then schedules the same coalesced disk
+     * write as [saveLocalSettings].
+     *
+     * This is the safe way to change individual fields. Reading with [getLocalSettings], copying, and
+     * passing the result to [saveLocalSettings] is a read-modify-write, and these settings are written
+     * from both the UI thread (theme, pane widths, selection, sort) and background coroutines (cache
+     * cleanup, the FTS rebuild gate, the update check) — so two writers each holding a stale snapshot
+     * silently drop each other's field. Losing `lastFtsRebuiltAt` is the worst case: its 24h gate
+     * never advances, so the full O(all indexed text) FTS rebuild re-runs every background cycle.
+     */
+    fun mutateLocalSettings(transform: (LocalSettings) -> LocalSettings) {
+        _localSettings.update(transform)
         saveSignals.trySend(Unit)
     }
 

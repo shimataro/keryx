@@ -37,9 +37,7 @@ class SetupViewModel(
 
     fun chooseLocalOnly(onDone: () -> Unit) {
         viewModelScope.launch {
-            settingsRepository.saveLocalSettings(
-                settingsRepository.getLocalSettings().copy(cloudStorageType = null),
-            )
+            settingsRepository.mutateLocalSettings { it.copy(cloudStorageType = null) }
             // Setup completion = local_settings.json exists, so make it durable before we navigate
             // away (survives an immediate quit before the coalesced write would have flushed).
             settingsRepository.flush()
@@ -72,9 +70,7 @@ class SetupViewModel(
             when (result) {
                 is Result.Ok -> {
                     cloudSession.saveTokens(type, result.value)
-                    settingsRepository.saveLocalSettings(
-                        settingsRepository.getLocalSettings().copy(cloudStorageType = type.id),
-                    )
+                    settingsRepository.mutateLocalSettings { it.copy(cloudStorageType = type.id) }
                     settingsRepository.flush()
                     // Merge whatever already exists in the cloud (imports on first sync).
                     syncRepository.sync()

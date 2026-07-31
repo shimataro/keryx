@@ -83,7 +83,7 @@ internal fun FrameWindowScope.AppMenuBarHost(
     fun setMenuBarVisible(visible: Boolean) {
         menuBarVisible = visible
         // Persist the explicit choice so it survives restart (see LocalSettings.appMenuBarVisible).
-        settingsRepository.saveLocalSettings(settingsRepository.getLocalSettings().withMenuBarVisible(visible))
+        settingsRepository.mutateLocalSettings { it.withMenuBarVisible(visible) }
     }
 
     val menuBarToggle = MenuBarToggle(visible = menuBarVisible, onToggle = ::setMenuBarVisible)
