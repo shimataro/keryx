@@ -75,17 +75,27 @@ private fun LetterAvatar(title: String) {
 }
 
 /**
- * Displays a count badge using a color appropriate for the current selection and focus state.
+ * Displays a count badge using a color appropriate for the current selection, focus, drag-source,
+ * and drop-target state.
  *
  * @param count The count to display.
  * @param selected Whether the badge is selected.
  * @param focused Whether the badge is focused.
+ * @param isDropTarget Whether the row is an active drag-and-drop target.
+ * @param isDragSource Whether the row is the source of the currently dragged feed.
  */
 @Composable
-internal fun CountBadge(count: Long, selected: Boolean, focused: Boolean) {
+internal fun CountBadge(
+    count: Long,
+    selected: Boolean,
+    focused: Boolean,
+    isDropTarget: Boolean = false,
+    isDragSource: Boolean = false,
+) {
     Text(
         count.toString(),
         style = MaterialTheme.typography.labelSmall,
-        color = selectionContentColorOrNull(selected, focused) ?: MaterialTheme.colorScheme.onSurfaceVariant,
+        color = dropTargetContentColorOrNull(isDropTarget, selected, focused, isDragSource)
+            ?: MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
