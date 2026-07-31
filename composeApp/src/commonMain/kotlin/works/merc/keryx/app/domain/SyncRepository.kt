@@ -272,7 +272,7 @@ class SyncRepository(
     }
 
     /** Writes the downloaded cloud DB to a temp file and merges it into the local DB. */
-    private fun mergeCloud(data: ByteArray): Result<Unit> {
+    private suspend fun mergeCloud(data: ByteArray): Result<Unit> {
         val tempPath = FileIO.join(tempDir, "cloud_keryx.db")
         try {
             FileIO.writeBytes(tempPath, data)

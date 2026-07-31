@@ -2,6 +2,7 @@ package works.merc.keryx.app
 
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import kotlinx.coroutines.runBlocking
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import java.io.File
@@ -68,6 +69,14 @@ fun fileDb(): Triple<File, SqlDriver, KeryxDatabase> {
 
 /** A ready FtsManager bound to the given test driver. */
 fun ftsManager(driver: SqlDriver): FtsManager = FtsManager(driver)
+
+/**
+ * An [FtsManager] whose index has already been created and backfilled, for the many tests whose
+ * bodies are not suspend. Mirrors what `main.kt` does at startup, where the index-writer mutex
+ * `ensureIndexed` takes is likewise uncontended.
+ */
+fun ftsManagerIndexed(driver: SqlDriver): FtsManager =
+    FtsManager(driver).also { manager -> runBlocking { manager.ensureIndexed() } }
 
 /**
  * Inserts a feed (satisfies the articles → feeds FK). If [folderId] is non-null, callers must

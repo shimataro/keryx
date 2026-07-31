@@ -25,6 +25,7 @@ import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFolder
+import works.merc.keryx.app.ftsManagerIndexed
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -92,7 +93,7 @@ class FeedRepositoryTest {
     ): FeedRepository {
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the refresh path's indexMissing() works.
-        val ftsManager = FtsManager(driver).also { it.ensureIndexed() }
+        val ftsManager = ftsManagerIndexed(driver)
         return FeedRepository(
             db, feedFetcher, faviconResolver, articleRepository, ftsManager, syncScheduler,
             notificationCenter, messages, clock, Dispatchers.Unconfined,

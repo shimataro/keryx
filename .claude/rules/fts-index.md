@@ -27,5 +27,14 @@ run and backfills any missing rows. `busy_timeout` (set in
 `DatabaseDriverFactory`) lets a search wait out, rather than error on, the brief
 write lock of an incremental insert or a rebuild.
 
+`indexMissing()` and `rebuildIndex()` are **mutually exclusive** — `FtsManager`
+serializes the two writers behind an internal mutex, which is why both are
+`suspend`. The daily pass's idle gate is a lock-free `ActivityCenter` check, so
+without the mutex a refresh starting just after it passes would overlap the
+rebuild. Searches are deliberately *not* serialized (they rely on `'rebuild'`
+being a single atomic statement plus the `busy_timeout` wait), and
+`ensureIndexed()` is called from a `runBlocking` at startup, where the mutex is
+uncontended.
+
 See also: `docs/sync-architecture.md` ("FTS5 handling") and `docs/db-schema.md`
 (`articles_fts` section).

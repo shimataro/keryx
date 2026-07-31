@@ -153,7 +153,7 @@ fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
     }
 
     /** Indexes any articles fetched during an OPML import loop. Called once by [OpmlImporter]. */
-    internal fun indexImportedArticles() = ftsManager.indexMissing()
+    internal suspend fun indexImportedArticles() = ftsManager.indexMissing()
 
     /**
      * Unsubscribes from a feed by marking it as deleted.

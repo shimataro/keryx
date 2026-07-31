@@ -186,8 +186,10 @@ fun main(args: Array<String>) {
     configureImageLoader(koin.get<HttpClient>(), AppDirs.cacheDir())
 
     // Startup recovery: recreate articles_fts if a previous sync dropped it, and backfill any
-    // articles missing from the index (e.g. fetched before the FTS index existed).
-    koin.get<FtsManager>().ensureIndexed()
+    // articles missing from the index (e.g. fetched before the FTS index existed). Blocking here is
+    // deliberate (the window must not open on an absent index) and the index-writer mutex it now
+    // takes is uncontended this early — no refresh, sync or rebuild has been started yet.
+    runBlocking { koin.get<FtsManager>().ensureIndexed() }
 
     val settingsRepository = koin.get<SettingsRepository>()
     // Local settings are persisted off-thread and coalesced (see SettingsRepository), so a change
@@ -576,7 +578,7 @@ private suspend fun runStartupTasks(koin: org.koin.core.Koin) {
 /**
  * Rebuilds the full FTS index when the application is idle and at least 24 hours have passed since the previous rebuild.
  */
-private fun maybeRebuildFtsIndex(koin: org.koin.core.Koin) {
+private suspend fun maybeRebuildFtsIndex(koin: org.koin.core.Koin) {
     val activityCenter = koin.get<ActivityCenter>()
     if (activityCenter.syncing.value || activityCenter.feedRefreshing.value) return
     val settingsRepository = koin.get<SettingsRepository>()

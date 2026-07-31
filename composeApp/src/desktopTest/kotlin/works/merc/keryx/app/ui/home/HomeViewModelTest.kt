@@ -52,6 +52,7 @@ import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.CountingSqlDriver
 import works.merc.keryx.app.ftsManager
+import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFolder
@@ -196,7 +197,7 @@ class HomeViewModelTest {
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the subscribe/refresh path's indexMissing() works.
         val feedRepository = FeedRepository(
-            db, feedFetcher, missingFaviconResolver(), articleRepository, FtsManager(driver).also { it.ensureIndexed() }, syncScheduler,
+            db, feedFetcher, missingFaviconResolver(), articleRepository, ftsManagerIndexed(driver), syncScheduler,
             NotificationCenter(), HomeViewModelTestNotificationMessages(), clock, Dispatchers.Unconfined,
         )
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
@@ -1004,7 +1005,7 @@ class HomeViewModelTest {
     fun searchingIsTrueWhileDebouncedResultsAreStillPendingThenFalse() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         backgroundScope.launch { vm.searching.collect {} }
@@ -1030,7 +1031,7 @@ class HomeViewModelTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
         db.insertArticle("a2", "f1", title = "Kotlin Two", content = "kotlin content", isRead = 1L)
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.setSearchQuery("Kotlin")
@@ -1050,7 +1051,7 @@ class HomeViewModelTest {
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
         db.insertArticle("a2", "f1", title = "Kotlin Two", content = "kotlin content", isRead = 1L)
         db.insertArticle("a3", "f1", title = "Kotlin Three", content = "kotlin content", isRead = 0L)
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.setSearchQuery("Kotlin")
@@ -1076,7 +1077,7 @@ class HomeViewModelTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
         db.insertArticle("a2", "f1", title = "Kotlin Two", content = "kotlin content", isRead = 0L)
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.setSearchQuery("Kotlin")
@@ -1100,7 +1101,7 @@ class HomeViewModelTest {
         db.insertArticle("a1", "f1", title = "Kotlin and Java", content = "kotlin java", isRead = 0L)
         db.insertArticle("a2", "f1", title = "Kotlin Only", content = "kotlin", isRead = 0L)
         db.insertArticle("a3", "f1", title = "Java Only", content = "java", isRead = 0L)
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.setSearchQuery("Kotlin")
@@ -1128,7 +1129,7 @@ class HomeViewModelTest {
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
         db.insertArticle("a2", "f1", title = "Kotlin Two", content = "kotlin content", isRead = 0L)
         db.insertArticle("a3", "f1", title = "Kotlin Three", content = "kotlin content", isRead = 0L)
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.setSearchQuery("Kotlin")
@@ -1156,7 +1157,7 @@ class HomeViewModelTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
         db.insertArticle("other", "f1", title = "Something else", content = "unrelated content", isRead = 0L)
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.setSearchQuery("Kotlin")
@@ -1177,7 +1178,7 @@ class HomeViewModelTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Zzz Kotlin", content = "kotlin kotlin kotlin filler padding words")
         db.insertArticle("a2", "f1", title = "Kotlin", content = "kotlin")
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.setSearchQuery("Kotlin")
@@ -1197,7 +1198,7 @@ class HomeViewModelTest {
     fun toggleReadInSearchUpdatesSearchResults() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.setSearchQuery("Kotlin")
@@ -1215,7 +1216,7 @@ class HomeViewModelTest {
     fun toggleStarInSearchUpdatesSearchResults() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content")
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.setSearchQuery("Kotlin")
@@ -1233,7 +1234,7 @@ class HomeViewModelTest {
     fun starAfterReadInSearchKeepsStarVisible() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.setSearchQuery("Kotlin")

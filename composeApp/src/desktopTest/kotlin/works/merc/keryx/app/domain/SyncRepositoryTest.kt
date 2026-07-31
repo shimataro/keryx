@@ -11,6 +11,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.CLOUD_DB_PATH
@@ -145,7 +146,7 @@ class SyncRepositoryTest {
         localDb = db
         localDb.insertFeed("f1", now = 0)
         ftsManager = FtsManager(localDriver)
-        ftsManager.ensureIndexed()
+        runBlocking { ftsManager.ensureIndexed() }
         tempDir = Files.createTempDirectory("keryx-sync-test").toFile()
         notificationCenter = NotificationCenter()
     }
