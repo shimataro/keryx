@@ -1,9 +1,16 @@
 package works.merc.keryx.app.platform
 
+import works.merc.keryx.app.core.SQLITE_BUSY_TIMEOUT_MS
 import java.io.File
 import java.sql.DriverManager
 
 actual object DatabaseSnapshot {
+    /**
+     * Creates a consistent SQLite database snapshot for upload and removes the derived full-text index.
+     *
+     * @param localDbPath Path to the live SQLite database.
+     * @param destPath Path where the snapshot should be written.
+     */
     actual fun exportForUpload(localDbPath: String, destPath: String) {
         // VACUUM INTO refuses to write to an existing file.
         File(destPath).delete()
@@ -14,7 +21,7 @@ actual object DatabaseSnapshot {
         // on) a mark-as-read write mid-commit (those run outside the sync mutex).
         DriverManager.getConnection("jdbc:sqlite:$localDbPath").use { conn ->
             conn.createStatement().use { st ->
-                st.execute("PRAGMA busy_timeout=5000")
+                st.execute("PRAGMA busy_timeout=$SQLITE_BUSY_TIMEOUT_MS")
                 st.execute("VACUUM INTO '${destPath.replace("'", "''")}'")
             }
         }

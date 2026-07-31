@@ -10,22 +10,29 @@ import java.io.File
  * - Linux:   $XDG_DATA_HOME/Keryx (~/.local/share/Keryx), $XDG_CACHE_HOME/Keryx
  */
 actual object AppDirs {
-    private val osName = System.getProperty("os.name").lowercase()
-    private val isMac = osName.contains("mac")
-    private val isWindows = osName.contains("win")
     private val home = System.getProperty("user.home")
 
+    /**
+     * Resolves the platform-specific application data directory.
+     *
+     * @return The absolute path of the application data directory.
+     */
     actual fun appDataDir(): String = ensure(
         when {
-            isMac -> File(home, "Library/Application Support/$APP_NAME")
+            isMacOs -> File(home, "Library/Application Support/$APP_NAME")
             isWindows -> File(env("APPDATA") ?: "$home\\AppData\\Roaming", APP_NAME)
             else -> File(env("XDG_DATA_HOME") ?: "$home/.local/share", APP_NAME)
         },
     )
 
+    /**
+     * Resolves the application cache directory for the current desktop platform.
+     *
+     * @return The absolute path of the application cache directory.
+     */
     actual fun cacheDir(): String = ensure(
         when {
-            isMac -> File(home, "Library/Caches/$APP_NAME")
+            isMacOs -> File(home, "Library/Caches/$APP_NAME")
             isWindows -> File(env("LOCALAPPDATA") ?: "$home\\AppData\\Local", "$APP_NAME\\Cache")
             else -> File(env("XDG_CACHE_HOME") ?: "$home/.cache", APP_NAME)
         },

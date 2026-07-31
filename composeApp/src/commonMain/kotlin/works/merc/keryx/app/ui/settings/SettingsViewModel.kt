@@ -5,11 +5,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -22,6 +20,7 @@ import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.opml.OpmlCodec
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.CloudSession
+import works.merc.keryx.app.domain.awaitCancellableConnect
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
@@ -183,6 +182,11 @@ class SettingsViewModel(
         cacheRetentionDays = days
     }
 
+    /**
+     * Connects to the selected cloud storage provider and starts synchronization after successful authorization.
+     *
+     * @param type The cloud storage provider to connect to.
+     */
     fun connect(type: CloudStorageType) {
         viewModelScope.launch {
             connectingType = type
@@ -193,21 +197,13 @@ class SettingsViewModel(
                 connectingType = null
                 return@launch
             }
-            // Run only the interruptible OAuth-authorization wait as a child job. Cancelling a
-            // child does not propagate up to the parent (structured concurrency), so the success
-            // tail (saveTokens -> update settings -> sync) runs to completion once authorization
-            // resolves — never leaving durable tokens/settings behind a cancelled UI.
-            val waitJob = async { flow.connect() }
-            authorizationJob = waitJob
-            canCancelConnect = true
-            val result = try {
-                waitJob.await()
-            } catch (e: CancellationException) {
+            val result = awaitCancellableConnect(
+                flow,
+                onJobChange = { authorizationJob = it },
+                onCanCancelChange = { canCancelConnect = it },
+            ) ?: run {
                 connectingType = null
                 return@launch
-            } finally {
-                authorizationJob = null
-                canCancelConnect = false
             }
             when (result) {
                 is Result.Ok -> {

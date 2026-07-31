@@ -1,16 +1,10 @@
 package works.merc.keryx.app.data.cloud
 
 import io.ktor.client.HttpClient
-import io.ktor.client.request.forms.submitForm
-import io.ktor.client.statement.bodyAsText
 import io.ktor.http.URLBuilder
 import io.ktor.http.parameters
-import kotlinx.coroutines.CancellationException
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import works.merc.keryx.app.core.Clock
-import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.ONEDRIVE_AUTHORIZE_ENDPOINT
 import works.merc.keryx.app.core.ONEDRIVE_SCOPES
 import works.merc.keryx.app.core.ONEDRIVE_TOKEN_ENDPOINT
@@ -83,38 +77,15 @@ class OneDriveAuthManager(
      */
     override suspend fun revoke(accessToken: String): Result<Unit> = Result.Ok(Unit)
 
+    /**
+     * Requests OAuth tokens using the supplied form parameters.
+     *
+     * @param form The parameters for the token request.
+     * @param keepRefreshToken The refresh token to preserve in the result, if provided.
+     * @return The resulting OAuth tokens or a request failure.
+     */
     private suspend fun tokenRequest(
         form: io.ktor.http.Parameters,
         keepRefreshToken: String? = null,
-    ): Result<OAuthTokens> = try {
-        val response = client.submitForm(ONEDRIVE_TOKEN_ENDPOINT, form)
-        if (response.status.value !in 200..299) {
-            Result.Err(CloudAuthException("Token request failed (HTTP ${response.status.value})"))
-        } else {
-            val dto = json.decodeFromString<TokenResponse>(response.bodyAsText())
-            val access = dto.accessToken
-            if (access == null) {
-                Result.Err(CloudAuthException("Token response had no access_token"))
-            } else {
-                Result.Ok(
-                    OAuthTokens(
-                        accessToken = access,
-                        refreshToken = dto.refreshToken ?: keepRefreshToken,
-                        expiresAtMillis = dto.expiresInSeconds?.let { clock.nowMillis() + it * 1000L },
-                    ),
-                )
-            }
-        }
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Throwable) {
-        Result.Err(CloudAuthException(e.message ?: "Token request failed"))
-    }
-
-    @Serializable
-    private data class TokenResponse(
-        @SerialName("access_token") val accessToken: String? = null,
-        @SerialName("refresh_token") val refreshToken: String? = null,
-        @SerialName("expires_in") val expiresInSeconds: Long? = null,
-    )
+    ): Result<OAuthTokens> = requestOAuthTokens(client, json, clock, ONEDRIVE_TOKEN_ENDPOINT, form, keepRefreshToken)
 }

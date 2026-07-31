@@ -183,7 +183,7 @@ class HomeViewModelTest {
             NotificationCenter(), HomeViewModelTestNotificationMessages(), clock, Dispatchers.Unconfined,
         )
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
-        val folderRepository = FolderRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
+        val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
         // Unconfined write dispatcher so saveLocalSettings persists inline (store.load() assertions
         // in these tests are synchronous).
         val settingsRepository =

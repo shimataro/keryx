@@ -468,7 +468,7 @@ private fun newMinimalViewModel(
         NotificationCenter(), ArticleListPaneTestNotificationMessages(), clock, Dispatchers.Unconfined,
     )
     val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
-    val folderRepository = FolderRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
+    val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
     val settingsRepository = SettingsRepository(
         db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined
     )

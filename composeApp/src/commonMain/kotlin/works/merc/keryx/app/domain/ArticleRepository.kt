@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.map
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.HtmlText
+import works.merc.keryx.app.core.MILLIS_PER_DAY
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.data.local.db.KeryxDatabase
@@ -221,7 +222,7 @@ class ArticleRepository(
     fun deleteExpiredArticles(retentionDays: Int?) {
         if (retentionDays == null) return
         val now = clock.nowMillis()
-        val cutoff = now - retentionDays.toLong() * 24 * 60 * 60 * 1000
+        val cutoff = now - retentionDays.toLong() * MILLIS_PER_DAY
         // Soft-delete (not physical DELETE) so the deletion propagates via the sync merge
         // instead of being resurrected from the cloud on the next sync.
         articles.softDeleteExpired(

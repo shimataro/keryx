@@ -3,9 +3,6 @@ package works.merc.keryx.app.tray
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import org.freedesktop.dbus.DBusPath
-import org.freedesktop.dbus.errors.PropertyReadOnly
-import org.freedesktop.dbus.errors.UnknownProperty
-import org.freedesktop.dbus.interfaces.Properties
 import org.freedesktop.dbus.types.Variant
 import works.merc.keryx.app.core.Log
 import java.util.concurrent.atomic.AtomicReference
@@ -32,7 +29,7 @@ internal class SniStatusNotifierItem(
     private val menuPath: String,
     private val onNewIcon: () -> Unit,
     private val onNewToolTip: () -> Unit,
-) : StatusNotifierItem, Properties {
+) : StatusNotifierItem, ReadOnlyDBusProperties {
 
     private val _activations = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
@@ -131,26 +128,4 @@ override fun getObjectPath(): String = objectPath
         )
     }
 
-    /**
-     * Retrieves a property value from the specified StatusNotifierItem interface.
-     *
-     * @param interfaceName The DBus interface containing the property.
-     * @param propertyName The name of the property to retrieve.
-     * @return The property value cast to the requested type.
-     * @throws UnknownProperty If the interface or the property is not served here.
-     */
-    override fun <A : Any?> Get(interfaceName: String, propertyName: String): A =
-        GetAll(interfaceName).propertyOrThrow(interfaceName, propertyName)
-
-    /**
-     * Rejects attempts to modify a StatusNotifierItem property.
-     *
-     * @param interfaceName The DBus interface containing the property.
-     * @param propertyName The property being modified.
-     * @param value The requested property value.
-     * @throws PropertyReadOnly Always, because the property is read-only.
-     */
-    override fun <A : Any?> Set(interfaceName: String, propertyName: String, value: A) {
-        throw PropertyReadOnly("$interfaceName.$propertyName is read-only")
-    }
 }

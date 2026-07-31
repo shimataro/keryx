@@ -48,6 +48,11 @@ internal fun runProcessWithTimeout(command: List<String>, timeoutMillis: Long): 
     return proc.exitValue()
 }
 
+/** Default `update-desktop-database` refresh, shared by [LinuxUriSchemeRegistrar] and [LinuxOpmlAssociationRegistrar]. */
+internal fun defaultRefreshDesktopDatabase(): (File) -> Unit = { dir ->
+    runProcessWithTimeout(listOf("update-desktop-database", dir.path), UPDATE_DESKTOP_DATABASE_TIMEOUT_MS)
+}
+
 /**
  * Teaches the desktop environment to route `keryx://` URIs to the app, which is what makes the
  * OAuth callback reach [main] as an argv entry on Linux (macOS uses Info.plist, Windows the
@@ -66,9 +71,7 @@ internal class LinuxUriSchemeRegistrar(
     private val launcherPath: String,
     private val applicationsDir: File = xdgDir("XDG_DATA_HOME", ".local/share").resolve("applications"),
     private val mimeAppsList: File = xdgDir("XDG_CONFIG_HOME", ".config").resolve("mimeapps.list"),
-    private val refreshDesktopDatabase: (File) -> Unit = { dir ->
-        runProcessWithTimeout(listOf("update-desktop-database", dir.path), UPDATE_DESKTOP_DATABASE_TIMEOUT_MS)
-    },
+    private val refreshDesktopDatabase: (File) -> Unit = defaultRefreshDesktopDatabase(),
 ) {
     /**
      * Registers the Linux handler for the custom URI scheme.

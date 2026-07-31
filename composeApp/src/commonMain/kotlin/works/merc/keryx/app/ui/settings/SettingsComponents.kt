@@ -42,9 +42,6 @@ import works.merc.keryx.app.ui.common.FlatTooltipContent
  * Ties a row's label and its trailing control (e.g. a switch pinned to the far edge by
  * `weight(1f)`) together as one visible unit instead of floating disconnected across the dialog's
  * fixed 640dp width.
- */
-/**
- * Groups settings content in a full-width, styled card.
  *
  * @param content The composable content displayed inside the card.
  */
@@ -85,13 +82,16 @@ internal fun Section(title: String, content: @Composable () -> Unit) {
  * A tappable text row that opens [url] in the external browser (rendered in the theme's primary
  * color). On hover it underlines, switches to a hand cursor, and shows the destination [url] in a
  * tooltip, so it reads clearly as a link.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-/**
- * Displays a clickable link that opens an external URL.
  *
  * @param label The text displayed for the link.
  * @param url The external URL to open and display in the tooltip.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Displays a clickable link with hover styling and a URL tooltip.
+ *
+ * @param label The text displayed for the link.
+ * @param url The URL opened when the link is clicked and shown in the tooltip.
  */
 @Composable
 internal fun LinkRow(label: String, url: String) {

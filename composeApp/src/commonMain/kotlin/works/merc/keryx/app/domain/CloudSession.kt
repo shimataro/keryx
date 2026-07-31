@@ -2,7 +2,7 @@ package works.merc.keryx.app.domain
 
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudStorageType
-import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.core.fold
 import works.merc.keryx.app.data.cloud.CloudAuthManager
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.cloud.OAuthTokens
@@ -69,16 +69,24 @@ class CloudSession(
         provider.tokenStorage.clear()
     }
 
+    /**
+     * Provides a current access token for the specified provider.
+     *
+     * Refreshes expired tokens when a refresh token is available and persists the refreshed tokens.
+     *
+     * @param provider The provider whose stored credentials supply the access token.
+     * @return A valid access token, the existing token when it cannot be refreshed, or `null` when no token is stored or refreshing fails.
+     */
     private suspend fun validAccessToken(provider: Provider): String? {
         val tokens = provider.tokenStorage.load() ?: return null
         if (!tokens.isExpired(clock.nowMillis())) return tokens.accessToken
         val refreshToken = tokens.refreshToken ?: return tokens.accessToken
-        return when (val r = provider.authManager.refresh(provider.clientId, refreshToken)) {
-            is Result.Ok -> {
-                provider.tokenStorage.save(r.value)
-                r.value.accessToken
-            }
-            is Result.Err -> null
-        }
+        return provider.authManager.refresh(provider.clientId, refreshToken).fold(
+            ok = { refreshed ->
+                provider.tokenStorage.save(refreshed)
+                refreshed.accessToken
+            },
+            err = { null },
+        )
     }
 }

@@ -2,6 +2,7 @@ package works.merc.keryx.app
 
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.REG_EXE_TIMEOUT_MS
+import works.merc.keryx.app.platform.osName
 
 private const val LOG_TAG = "UriScheme"
 
@@ -55,12 +56,8 @@ internal fun packagedLauncherPath(
 }
 
 /**
- * Registers the `keryx://` URL scheme (so browsers can redirect the OAuth callback back to the
- * app) and the `.opml` file association (so a file manager can launch the app to import a
- * double-clicked file) with the OS. macOS needs nothing here for either — both are declared in
- * Info.plist instead. The other two platforms only get registered when running from a packaged
- * launcher — see [packagedLauncherPath] — and both registrations share that one resolution rather
- * than each re-deriving (and re-logging) it separately.
+ * Registers the `keryx://` URI scheme and `.opml` file association when running from a packaged
+ * launcher.
  */
 internal fun registerFileAssociations() {
     val launcherPath = packagedLauncherPath()
@@ -68,7 +65,7 @@ internal fun registerFileAssociations() {
         Log.info(LOG_TAG, "Not running from a packaged launcher; skipping keryx:// scheme and .opml association registration")
         return
     }
-    when (uriSchemeRegistrationFor(System.getProperty("os.name") ?: "")) {
+    when (uriSchemeRegistrationFor(osName)) {
         UriSchemeRegistration.NONE -> Unit
         UriSchemeRegistration.WINDOWS -> {
             registerWindowsUriScheme(launcherPath)

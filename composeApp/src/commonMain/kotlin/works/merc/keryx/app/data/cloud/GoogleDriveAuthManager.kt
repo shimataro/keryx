@@ -2,13 +2,11 @@ package works.merc.keryx.app.data.cloud
 
 import io.ktor.client.HttpClient
 import io.ktor.client.request.forms.submitForm
-import io.ktor.client.statement.bodyAsText
 import io.ktor.http.URLBuilder
 import io.ktor.http.parameters
 import kotlinx.coroutines.CancellationException
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import works.merc.keryx.app.core.CLOUD_ERROR_BODY_PREVIEW_LENGTH
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.GOOGLE_AUTHORIZE_ENDPOINT
@@ -94,42 +92,19 @@ class GoogleDriveAuthManager(
         Result.Err(CloudAuthException(e.message ?: "Revoke failed"))
     }
 
+    /**
+     * Requests OAuth tokens from Google using the provided form parameters.
+     *
+     * @param form The form parameters for the token request.
+     * @param keepRefreshToken The refresh token to preserve when the response omits one.
+     * @return The resulting OAuth tokens or an authentication error.
+     */
     private suspend fun tokenRequest(
         form: io.ktor.http.Parameters,
         keepRefreshToken: String? = null,
-    ): Result<OAuthTokens> = try {
-        val response = client.submitForm(GOOGLE_TOKEN_ENDPOINT, form)
-        if (response.status.value !in 200..299) {
-            val body = response.bodyAsText()
-            Log.warn(TAG, "Google token request failed (HTTP ${response.status.value}): ${body.take(200)}")
-            Result.Err(CloudAuthException("Token request failed (HTTP ${response.status.value})"))
-        } else {
-            val dto = json.decodeFromString<TokenResponse>(response.bodyAsText())
-            val access = dto.accessToken
-            if (access == null) {
-                Result.Err(CloudAuthException("Token response had no access_token"))
-            } else {
-                Result.Ok(
-                    OAuthTokens(
-                        accessToken = access,
-                        refreshToken = dto.refreshToken ?: keepRefreshToken,
-                        expiresAtMillis = dto.expiresInSeconds?.let { clock.nowMillis() + it * 1000L },
-                    ),
-                )
-            }
-        }
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Throwable) {
-        Result.Err(CloudAuthException(e.message ?: "Token request failed"))
+    ): Result<OAuthTokens> = requestOAuthTokens(client, json, clock, GOOGLE_TOKEN_ENDPOINT, form, keepRefreshToken) { status, body ->
+        Log.warn(TAG, "Google token request failed (HTTP $status): ${body.take(CLOUD_ERROR_BODY_PREVIEW_LENGTH)}")
     }
-
-    @Serializable
-    private data class TokenResponse(
-        @SerialName("access_token") val accessToken: String? = null,
-        @SerialName("refresh_token") val refreshToken: String? = null,
-        @SerialName("expires_in") val expiresInSeconds: Long? = null,
-    )
 
     private companion object {
         const val TAG = "GoogleDriveAuth"

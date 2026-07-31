@@ -47,6 +47,7 @@ import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.MILLIS_PER_DAY
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.core.WINDOW_DEFAULT_HEIGHT
 import works.merc.keryx.app.core.WINDOW_DEFAULT_WIDTH
@@ -548,8 +549,9 @@ private fun applyBrandedDockIcon(image: Image?) {
 }
 
 /**
- * Cache cleanup (once per 24h) + Dropbox sync if connected + an unconditional feed
- * refresh/new-article check + an unconditional update check.
+ * Runs startup maintenance, synchronization, feed refresh, update checks, and FTS index recovery.
+ *
+ * @throws CancellationException If the startup task is cancelled.
  */
 private suspend fun runStartupTasks(koin: org.koin.core.Koin) {
     runCatching {
@@ -558,8 +560,7 @@ private suspend fun runStartupTasks(koin: org.koin.core.Koin) {
         val settings = settingsRepository.getLocalSettings()
         val now = SystemClock.nowMillis()
         val last = settings.lastCacheCleanupAt
-        val dayMillis = 24L * 60 * 60 * 1000
-        if (last == null || now - last >= dayMillis) {
+        if (last == null || now - last >= MILLIS_PER_DAY) {
             val days = settingsRepository.getCacheRetentionDays()
             koin.get<ArticleRepository>().deleteExpiredArticles(days)
             settingsRepository.saveLocalSettings(settings.copy(lastCacheCleanupAt = now))
@@ -574,11 +575,7 @@ private suspend fun runStartupTasks(koin: org.koin.core.Koin) {
 }
 
 /**
- * Once-per-24h healing rebuild of the full FTS index, run only while the app is idle (no sync / feed
- * refresh in flight) so it never competes with a foreground operation — with `busy_timeout` set, a
- * concurrent search waits rather than erroring anyway. Re-indexes content that incremental indexing
- * ([FtsManager.indexMissing]) left stale and sweeps entries left by cache-cleanup deletions. A cheap
- * no-op until 24h elapse. Shared by [runStartupTasks] and [backgroundUpdateLoop].
+ * Rebuilds the full FTS index when the application is idle and at least 24 hours have passed since the previous rebuild.
  */
 private fun maybeRebuildFtsIndex(koin: org.koin.core.Koin) {
     val activityCenter = koin.get<ActivityCenter>()
@@ -586,8 +583,7 @@ private fun maybeRebuildFtsIndex(koin: org.koin.core.Koin) {
     val settingsRepository = koin.get<SettingsRepository>()
     val now = SystemClock.nowMillis()
     val last = settingsRepository.getLocalSettings().lastFtsRebuiltAt
-    val dayMillis = 24L * 60 * 60 * 1000
-    if (last != null && now - last < dayMillis) return
+    if (last != null && now - last < MILLIS_PER_DAY) return
     koin.get<FtsManager>().rebuildIndex()
     settingsRepository.saveLocalSettings(settingsRepository.getLocalSettings().copy(lastFtsRebuiltAt = now))
 }

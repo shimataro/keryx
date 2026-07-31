@@ -1,6 +1,16 @@
 package works.merc.keryx.app.data.cloud
 
+import io.ktor.client.HttpClient
+import io.ktor.client.request.forms.submitForm
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.Parameters
+import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.CloudAuthException
+import works.merc.keryx.app.core.Result
 
 /**
  * OAuth 2.0 tokens for a cloud storage provider (Dropbox, Google Drive, …). We
@@ -15,6 +25,63 @@ data class OAuthTokens(
     /** Unix ms when the access token expires; null if unknown. */
     val expiresAtMillis: Long? = null,
 ) {
-    fun isExpired(nowMillis: Long, skewMillis: Long = 60_000): Boolean =
+    /**
+         * Determines whether the token has expired, accounting for the configured clock skew.
+         *
+         * @param nowMillis The current Unix time in milliseconds.
+         * @param skewMillis The time interval in milliseconds used to account for clock skew.
+         * @return `true` if an expiration time is set and the current time is at or after the adjusted expiration time, `false` otherwise.
+         */
+        fun isExpired(nowMillis: Long, skewMillis: Long = 60_000): Boolean =
         expiresAtMillis != null && nowMillis >= expiresAtMillis - skewMillis
+}
+
+@Serializable
+private data class OAuthTokenResponseDto(
+    @SerialName("access_token") val accessToken: String? = null,
+    @SerialName("refresh_token") val refreshToken: String? = null,
+    @SerialName("expires_in") val expiresInSeconds: Long? = null,
+)
+
+/**
+ * Exchanges an OAuth form request for token data.
+ *
+ * @param tokenEndpoint The token endpoint URL.
+ * @param form The form parameters submitted to the endpoint.
+ * @param keepRefreshToken The refresh token to retain when the response omits one.
+ * @param onFailure An optional callback invoked for non-2xx responses with the status code and body.
+ * @return A successful result containing the tokens, or an error result when the request or response fails.
+ */
+internal suspend fun requestOAuthTokens(
+    client: HttpClient,
+    json: Json,
+    clock: Clock,
+    tokenEndpoint: String,
+    form: Parameters,
+    keepRefreshToken: String? = null,
+    onFailure: ((status: Int, body: String) -> Unit)? = null,
+): Result<OAuthTokens> = try {
+    val response = client.submitForm(tokenEndpoint, form)
+    if (response.status.value !in 200..299) {
+        onFailure?.invoke(response.status.value, response.bodyAsText())
+        Result.Err(CloudAuthException("Token request failed (HTTP ${response.status.value})"))
+    } else {
+        val dto = json.decodeFromString<OAuthTokenResponseDto>(response.bodyAsText())
+        val access = dto.accessToken
+        if (access == null) {
+            Result.Err(CloudAuthException("Token response had no access_token"))
+        } else {
+            Result.Ok(
+                OAuthTokens(
+                    accessToken = access,
+                    refreshToken = dto.refreshToken ?: keepRefreshToken,
+                    expiresAtMillis = dto.expiresInSeconds?.let { clock.nowMillis() + it * 1000L },
+                ),
+            )
+        }
+    }
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Throwable) {
+    Result.Err(CloudAuthException(e.message ?: "Token request failed"))
 }

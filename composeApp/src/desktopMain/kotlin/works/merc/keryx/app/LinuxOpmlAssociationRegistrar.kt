@@ -57,9 +57,7 @@ internal class LinuxOpmlAssociationRegistrar(
     private val applicationsDir: File = xdgDir("XDG_DATA_HOME", ".local/share").resolve("applications"),
     private val mimeAppsList: File = xdgDir("XDG_CONFIG_HOME", ".config").resolve("mimeapps.list"),
     private val mimePackagesDir: File = xdgDir("XDG_DATA_HOME", ".local/share").resolve("mime/packages"),
-    private val refreshDesktopDatabase: (File) -> Unit = { dir ->
-        runProcessWithTimeout(listOf("update-desktop-database", dir.path), UPDATE_DESKTOP_DATABASE_TIMEOUT_MS)
-    },
+    private val refreshDesktopDatabase: (File) -> Unit = defaultRefreshDesktopDatabase(),
     private val refreshMimeDatabase: (File) -> Unit = { mimeDir ->
         runProcessWithTimeout(listOf("update-mime-database", mimeDir.path), UPDATE_DESKTOP_DATABASE_TIMEOUT_MS)
     },

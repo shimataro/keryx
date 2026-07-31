@@ -2,9 +2,6 @@ package works.merc.keryx.app.tray
 
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
-import org.freedesktop.dbus.errors.PropertyReadOnly
-import org.freedesktop.dbus.errors.UnknownProperty
-import org.freedesktop.dbus.interfaces.Properties
 import org.freedesktop.dbus.types.UInt32
 import org.freedesktop.dbus.types.Variant
 import java.util.concurrent.atomic.AtomicReference
@@ -40,7 +37,7 @@ internal class SniDBusMenu(
     private val objectPath: String,
     initialState: TrayMenuState,
     private val onLayoutUpdated: (revision: Int) -> Unit,
-) : DBusMenu, Properties {
+) : DBusMenu, ReadOnlyDBusProperties {
 
     private val desired = AtomicReference(MenuRevision(revision = 1, state = initialState))
     private val lastServed = AtomicReference<TrayMenuState?>(null)
@@ -179,29 +176,6 @@ override fun getObjectPath(): String = objectPath
             "Status" to Variant("normal"),
             "IconThemePath" to Variant(emptyList<String>(), "as"),
         )
-    }
-
-    /**
-     * Retrieves a property value for the specified DBus interface.
-     *
-     * @param interfaceName The DBus interface containing the property.
-     * @param propertyName The name of the property to retrieve.
-     * @return The property's value.
-     * @throws UnknownProperty If the interface or the property is not served here.
-     */
-    override fun <A : Any?> Get(interfaceName: String, propertyName: String): A =
-        GetAll(interfaceName).propertyOrThrow(interfaceName, propertyName)
-
-    /**
-     * Rejects attempts to modify a read-only DBus property.
-     *
-     * @param interfaceName The DBus interface containing the property.
-     * @param propertyName The name of the property being modified.
-     * @param value The requested property value.
-     * @throws PropertyReadOnly Always, because DBus menu properties cannot be modified.
-     */
-    override fun <A : Any?> Set(interfaceName: String, propertyName: String, value: A) {
-        throw PropertyReadOnly("$interfaceName.$propertyName is read-only")
     }
 
     /**

@@ -28,24 +28,29 @@ class TagRepository(
             rows.groupBy({ it.feed_id }, { it.tag_id }).mapValues { it.value.toSet() }
         }
 
-    fun watchTagIdsForFeed(feedId: String): Flow<List<String>> =
+    /**
+         * Watches the active tag IDs assigned to a feed.
+         *
+         * @param feedId The ID of the feed.
+         * @return A flow emitting the feed's active tag IDs.
+         */
+        fun watchTagIdsForFeed(feedId: String): Flow<List<String>> =
         feedTags.watchTagIdsForFeed(feedId).asFlow().mapToList(dispatcher)
 
-    /**
- * Retrieves a tag by its identifier.
- *
- * @param id The tag identifier.
- * @return The matching tag, or `null` if no tag exists with the identifier.
- */
-fun getTagById(id: String): Tags? = tags.getById(id).executeAsOneOrNull()
+    /** The tag with [id], or `null` if none exists. */
+    fun getTagById(id: String): Tags? = tags.getById(id).executeAsOneOrNull()
 
-    /** All live tags in display order — the synchronous counterpart of [watchAllTags]. */
+    /**
+ * Retrieves all active tags in display order.
+ *
+ * @return The active tags.
+ */
     fun getAllTags(): List<Tags> = tags.watchAll().executeAsList()
 
     /**
-         * Retrieves the active tag assignments grouped by feed.
+         * Retrieves active tag assignments grouped by feed.
          *
-         * @return A map from each feed ID to its attached tag IDs.
+         * @return A map from feed IDs to their associated tag IDs.
          */
     fun getFeedTagMap(): Map<String, Set<String>> =
         feedTags.watchAllActive().executeAsList().groupBy({ it.feed_id }, { it.tag_id }).mapValues { it.value.toSet() }

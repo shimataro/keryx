@@ -12,27 +12,27 @@ import works.merc.keryx.app.data.local.db.KeryxDatabase
 /** Folders for organizing feeds (1 feed = at most 1 folder). Soft-deleted (deleted_at). */
 class FolderRepository(
     private val db: KeryxDatabase,
+    private val feedRepository: FeedRepository,
     private val syncScheduler: SyncScheduler,
     private val clock: Clock,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
     private val folders get() = db.foldersQueries
-    private val feeds get() = db.feedsQueries
-
-    fun watchAllFolders(): Flow<List<Folders>> = folders.watchAll().asFlow().mapToList(dispatcher)
 
     /**
- * Retrieves a folder by its identifier.
+ * Observes all folders and emits the current folder list whenever it changes.
  *
- * @param id The folder identifier.
- * @return The matching folder, or `null` if no folder exists with the identifier.
+ * @return A flow containing the current list of folders.
  */
-fun getFolderById(id: String): Folders? = folders.getById(id).executeAsOneOrNull()
+fun watchAllFolders(): Flow<List<Folders>> = folders.watchAll().asFlow().mapToList(dispatcher)
+
+    /** The folder with [id], or `null` if none exists. */
+    fun getFolderById(id: String): Folders? = folders.getById(id).executeAsOneOrNull()
 
     /**
- * Retrieves all live folders in display order.
+ * Retrieves all active folders in display order.
  *
- * @return The live folders ordered for display.
+ * @return The active folders in display order.
  */
     fun getAllFolders(): List<Folders> = folders.watchAll().executeAsList()
 
@@ -68,9 +68,10 @@ fun getFolderById(id: String): Folders? = folders.getById(id).executeAsOneOrNull
     }
 
     /**
-     * Reorders folders: moves [draggedFolderId] directly before [targetFolderId] (or to the end
-     * if null). Only folders whose `sort_order` actually changes are written, to avoid bumping
-     * `updated_at` on unrelated folders (see [FeedRepository.moveFeed] for the same rationale).
+     * Moves a folder directly before the target folder, or to the end when no target is provided.
+     *
+     * @param draggedFolderId The ID of the folder to move.
+     * @param targetFolderId The ID of the folder to place the dragged folder before, or `null` to place it at the end.
      */
     fun reorderFolders(draggedFolderId: String, targetFolderId: String?) {
         val current = folders.watchAll().executeAsList()
@@ -86,19 +87,14 @@ fun getFolderById(id: String): Folders? = folders.getById(id).executeAsOneOrNull
     }
 
     /**
-     * Soft-deletes the folder and moves its feeds into the "no folder" group, preserving their
-     * relative order and appending them to the end of that group (all rows here genuinely change
-     * `folder_id`, so writing every one of them is not the "unrelated updated_at bump" this
-     * feature otherwise avoids).
+     * Soft-deletes the folder and moves its feeds to the no-folder group.
+     *
+     * @param id The identifier of the folder to delete.
      */
     fun deleteFolder(id: String) {
         val now = clock.nowMillis()
         db.transaction {
-            var next = feeds.nextSortOrderInGroup(null).executeAsOne()
-            for (feed in feeds.getByFolder(id).executeAsList()) {
-                feeds.updateFolderAndSortOrder(null, next, now, now, now, feed.id)
-                next++
-            }
+            feedRepository.moveFeedsOutOfFolder(id, now)
             folders.softDelete(now, now, id)
         }
         syncScheduler.scheduleSync()

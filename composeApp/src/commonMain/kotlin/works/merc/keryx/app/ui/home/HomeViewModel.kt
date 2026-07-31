@@ -28,24 +28,18 @@ import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MAX_WIDTH
 import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
-import works.merc.keryx.app.core.DiscoveredFeedLink
 import works.merc.keryx.app.core.FEED_LIST_PANE_MAX_WIDTH
 import works.merc.keryx.app.core.FEED_LIST_PANE_MIN_WIDTH
-import works.merc.keryx.app.core.FeedDiscoveryException
-import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.core.MAX_REMEMBERED_SCROLL_POSITIONS
-import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.searchTerms
 import works.merc.keryx.app.core.decodeArticleFilter
 import works.merc.keryx.app.core.encode
 import works.merc.keryx.app.core.valueOrNull
-import works.merc.keryx.app.data.remote.UrlResolver
 import works.merc.keryx.app.data.local.ArticleScrollPosition
 import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
-import works.merc.keryx.app.data.remote.FetchedFeed
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.ArticleSearchResult
@@ -571,60 +565,19 @@ class HomeViewModel(
         }
     }
 
-    // --- Feed actions ---
+    private val addFeedPreviewResolver = AddFeedPreviewResolver(feedRepository)
 
-    suspend fun previewFeed(url: String): Result<FetchedFeed> = feedRepository.previewFeed(url)
+    /** @see AddFeedPreviewResolver.resolvePreview */
+    suspend fun resolvePreview(rawUrl: String): AddFeedPreview = addFeedPreviewResolver.resolvePreview(rawUrl)
 
-    /**
- * Subscribes to a feed using the specified URL.
- *
- * @param url The URL of the feed to subscribe to.
- * @return The subscription result containing the subscribed feed on success.
- */
-suspend fun subscribeFeed(url: String): Result<Feeds> = feedRepository.subscribeFeed(url)
+    /** @see AddFeedPreviewResolver.subscribeFeeds */
+    suspend fun subscribeFeeds(urls: List<String>): SubscribeOutcome = addFeedPreviewResolver.subscribeFeeds(urls)
 
     /**
-     * Previews [rawUrl] and maps the outcome for the add-feed dialog. Handles scheme resolution
-     * (prepending `https://`, then retrying with `http://` when the user typed no scheme and the
-     * https attempt failed for a non-discovery reason) and turns a [FeedDiscoveryException] into a
-     * list of candidate feed links. The returned [AddFeedPreview.Single.resolvedUrl] is the actual
-     * URL that resolved, so the dialog can both display it and subscribe with it.
+     * Unsubscribes from a feed and switches to the all-articles filter if it is selected.
+     *
+     * @param id The identifier of the feed to unsubscribe from.
      */
-    suspend fun resolvePreview(rawUrl: String): AddFeedPreview {
-        val trimmed = rawUrl.trim()
-        val hadScheme = UrlResolver.hasScheme(trimmed)
-        var attemptUrl = UrlResolver.withDefaultScheme(trimmed)
-        var result = feedRepository.previewFeed(attemptUrl)
-        if (!hadScheme && result is Result.Err && result.exception !is FeedDiscoveryException) {
-            val httpUrl = "http://$trimmed"
-            val httpResult = feedRepository.previewFeed(httpUrl)
-            result = httpResult
-            if (httpResult is Result.Ok) attemptUrl = httpUrl
-        }
-        return when (val r = result) {
-            is Result.Ok -> AddFeedPreview.Single(
-                resolvedUrl = attemptUrl,
-                title = r.value.title ?: attemptUrl,
-                articleCount = r.value.articles.size,
-            )
-            is Result.Err -> when (val ex = r.exception) {
-                is FeedDiscoveryException -> AddFeedPreview.Multiple(ex.candidates)
-                else -> AddFeedPreview.Failed(ex)
-            }
-        }
-    }
-
-    /** Subscribes to every URL in [urls], returning the success/failure tally and the first error. */
-    suspend fun subscribeFeeds(urls: List<String>): SubscribeOutcome {
-        val results = urls.map { feedRepository.subscribeFeed(it) }
-        val successCount = results.count { it is Result.Ok }
-        return SubscribeOutcome(
-            successCount = successCount,
-            failCount = results.size - successCount,
-            firstError = results.filterIsInstance<Result.Err>().firstOrNull()?.exception,
-        )
-    }
-
     fun unsubscribeFeed(id: String) {
         feedRepository.unsubscribeFeed(id)
         if (_filter.value == ArticleFilter.Feed(id)) selectFilter(ArticleFilter.All)
@@ -722,33 +675,13 @@ suspend fun subscribeFeed(url: String): Result<Feeds> = feedRepository.subscribe
     fun moveFeed(feedId: String, folderId: String?, targetFeedId: String? = null) =
         feedRepository.moveFeed(feedId, folderId, targetFeedId)
 
-    fun reorderFolders(draggedFolderId: String, targetFolderId: String?) =
+    /**
+         * Reorders a folder relative to the specified target folder.
+         *
+         * @param draggedFolderId The identifier of the folder being moved.
+         * @param targetFolderId The identifier of the folder to move before, or `null` to move to the end.
+         */
+        fun reorderFolders(draggedFolderId: String, targetFolderId: String?) =
         folderRepository.reorderFolders(draggedFolderId, targetFolderId)
 }
 
-/** Outcome of [HomeViewModel.resolvePreview] for the add-feed dialog. */
-sealed interface AddFeedPreview {
-    /** A single feed resolved directly. [title] falls back to [resolvedUrl] when the feed is untitled. */
-    data class Single(val resolvedUrl: String, val title: String, val articleCount: Int) : AddFeedPreview
-
-    /** The URL pointed at an HTML page advertising multiple feeds; the user picks which to subscribe. */
-    data class Multiple(val candidates: List<DiscoveredFeedLink>) : AddFeedPreview
-
-    /** Preview failed for a non-discovery reason. */
-    data class Failed(val exception: KeryxException) : AddFeedPreview
-}
-
-/** Tally returned by [HomeViewModel.subscribeFeeds]. */
-data class SubscribeOutcome(val successCount: Int, val failCount: Int, val firstError: KeryxException?)
-
-/**
- * Whether the add-feed dialog's subscribe action should be enabled for the current [preview] and
- * [selectedCandidates]. A single result is always subscribable; a multi-candidate result requires
- * at least one selection (so subscribing with nothing selected can't fall back to re-previewing).
- */
-fun addFeedCanSubscribe(preview: AddFeedPreview?, selectedCandidates: Set<String>): Boolean =
-    when (preview) {
-        is AddFeedPreview.Single -> true
-        is AddFeedPreview.Multiple -> selectedCandidates.isNotEmpty()
-        else -> false
-    }

@@ -7,6 +7,17 @@ const val APP_NAME = "Keryx"
 const val DB_FILE_NAME = "keryx.db"
 const val LOCAL_SETTINGS_FILE_NAME = "local_settings.json"
 
+/**
+ * SQLite `busy_timeout`, applied everywhere the DB is opened (main driver, `DatabaseMerger`'s ATTACH
+ * connection, `DatabaseSnapshot`'s `VACUUM INTO`). Lets a reader/writer wait out — rather than error
+ * on `SQLITE_BUSY` against — the brief write lock held by an incremental FTS insert, a full index
+ * rebuild, or a sync merge on another connection.
+ */
+const val SQLITE_BUSY_TIMEOUT_MS = 5_000L
+
+// --- Time ---
+const val MILLIS_PER_DAY = 24 * 60 * 60 * 1000L
+
 /** Cloud file path/name for the synced DB (leading slash for Dropbox; the basename for Google Drive). */
 const val CLOUD_DB_PATH = "/keryx.db"
 
@@ -17,6 +28,9 @@ const val SYNC_DEBOUNCE_MS = 5_000L
 const val CONNECTION_TIMEOUT_MS = 10_000L
 const val READ_TIMEOUT_SECONDS_DEFAULT = 30
 const val MAX_REDIRECTS = 5 // redirect loop guard
+
+/** How much of a cloud-storage HTTP error body to keep in a log/exception message. */
+const val CLOUD_ERROR_BODY_PREVIEW_LENGTH = 200
 
 // --- global_settings keys ---
 const val SETTING_READ_TIMEOUT_SECONDS = "read_timeout_seconds"

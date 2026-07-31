@@ -246,21 +246,66 @@ class GoogleDriveStorageTest {
 
     @Test
     fun createNewFileSucceeds() = runTest {
+        // A solitary post-create listing is re-checked once more before being trusted, so a
+        // successful create sees the "no duplicates" listing twice.
         val (s, history, verify) = storage(
             "tok",
             { respond(notFound, HttpStatusCode.OK) },
             { respond("""{"id":"F1","version":"r1"}""", HttpStatusCode.OK) },
             { respond("""{"files":[{"id":"F1","version":"r1"}]}""", HttpStatusCode.OK) },
+            { respond("""{"files":[{"id":"F1","version":"r1"}]}""", HttpStatusCode.OK) },
         )
         val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
         assertIs<Result.Ok<Unit>>(r)
-        assertEquals(3, history.size)
+        assertEquals(4, history.size)
         assertEquals("GET", history[0].method.value)
         assertEquals("/drive/v3/files", history[0].url.encodedPath)
         assertEquals("POST", history[1].method.value)
         assertEquals("/upload/drive/v3/files", history[1].url.encodedPath)
         assertEquals("GET", history[2].method.value)
         assertEquals("/drive/v3/files", history[2].url.encodedPath)
+        assertEquals("GET", history[3].method.value)
+        assertEquals("/drive/v3/files", history[3].url.encodedPath)
+        verify()
+    }
+
+    @Test
+    fun createRecheckConfirmsSoleWinner() = runTest {
+        // Same shape as createNewFileSucceeds, but asserting explicitly that exactly one recheck
+        // happens (no third listing) once the recheck also comes back solitary.
+        val (s, history, verify) = storage(
+            "tok",
+            { respond(notFound, HttpStatusCode.OK) },
+            { respond("""{"id":"F1","version":"r1"}""", HttpStatusCode.OK) },
+            { respond("""{"files":[{"id":"F1","version":"r1"}]}""", HttpStatusCode.OK) },
+            { respond("""{"files":[{"id":"F1","version":"r1"}]}""", HttpStatusCode.OK) },
+        )
+        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        assertIs<Result.Ok<Unit>>(r)
+        // 1 findFile (create-only check) + 1 create + exactly 2 post-create listings.
+        assertEquals(4, history.size)
+        verify()
+    }
+
+    @Test
+    fun createRecheckDetectsLateArrivingDuplicate() = runTest {
+        // The first post-create listing is solitary (Drive's index hasn't caught up with a
+        // concurrently racing device yet); the recheck reveals a lower-id duplicate, so this
+        // device must recognize it lost the race and clean up its own file.
+        val (s, history, verify) = storage(
+            "tok",
+            { respond(notFound, HttpStatusCode.OK) },
+            { respond("""{"id":"F2","version":"r2"}""", HttpStatusCode.OK) },
+            { respond("""{"files":[{"id":"F2","version":"r2"}]}""", HttpStatusCode.OK) },
+            { respond("""{"files":[{"id":"F1","version":"r1"},{"id":"F2","version":"r2"}]}""", HttpStatusCode.OK) },
+            { respond("", HttpStatusCode.NoContent) },
+        )
+        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        assertIs<Result.Err>(r)
+        assertIs<SyncConflictException>(r.exception)
+        assertEquals(5, history.size)
+        assertEquals("DELETE", history[4].method.value)
+        assertEquals("/drive/v3/files/F2", history[4].url.encodedPath)
         verify()
     }
 

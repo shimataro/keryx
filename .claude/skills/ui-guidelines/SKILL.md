@@ -112,7 +112,7 @@ only to the pane that sits in the window's top-left corner — currently
 ## Article card style
 
 `ArticleRow` in
-[ArticleListPane.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/ArticleListPane.kt):
+[ArticleRowComponents.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/ArticleRowComponents.kt):
 
 - Row height and favicon size are computed once per pane (not per row) via
   `rememberArticleRowMetrics()`, from typography `lineHeight`s and density/fontScale
@@ -219,7 +219,7 @@ change applies without a restart. Anything platform-conditional here keys off
 `TextPromptDialog` in
 [TextPromptDialog.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/TextPromptDialog.kt)
 (shared by the add/edit tag and rename feed dialogs) and the add-feed dialog in
-[HomeScreen.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/HomeScreen.kt)
+[AddFeedDialog.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/AddFeedDialog.kt)
 follow this pattern for single-field dialogs. **The field itself is
 [`KeryxTextField`](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/common/KeryxTextField.kt),
 not M3's `OutlinedTextField`** — an `expect`/`actual` drop-in (desktop `actual`:
@@ -383,7 +383,7 @@ theme/shape/indication/icon choices:
     hand-computed focused/unfocused-pane dimming → native `List` row selection already dims the same way.
   - `SettingsScreen`'s `SwitchRow` — now uses `FlatSwitch` (`ui/common/FlatToggles.kt`), consistent with
     the app's other flat controls → SwiftUI's native `Toggle` on a future SwiftUI port.
-  - The drag-and-drop insertion-line system in `FeedListPane.kt` (`InsertionLine`, `DropBoundary`,
+  - The drag-and-drop insertion-line system in `FeedListDragAndDrop.kt` (`InsertionLine`, `DropBoundary`,
     `RowHalf`, `resolveHalf`) — hand-computed row-half hit-testing and a manually drawn insertion line
     (explicitly modeled on macOS Notes' reorder UI) → SwiftUI `List`'s native `.onMove`/`.onInsert`
     reordering, which draws insertion indicators and row-shift animation for free.
@@ -420,7 +420,7 @@ theme/shape/indication/icon choices:
   that demands full attention and blocks the rest of the UI (confirmations,
   text-prompt forms, the add-feed flow) stays an `AlertDialog`/`Dialog`
   — see `TextPromptDialog`, the various `AlertDialog` usages
-  in `FeedListPane.kt`. (Search is neither — it's an inline field in
+  in `FeedListDialogs.kt`. (Search is neither — it's an inline field in
   `ArticleListPane`, see the Flat surface / migration notes above.) Don't reach for `Popup` for anything that should block
   interaction with the rest of the window, and don't reach for `Dialog` for
   something that's meant to feel like a lightweight, dismissable overlay.

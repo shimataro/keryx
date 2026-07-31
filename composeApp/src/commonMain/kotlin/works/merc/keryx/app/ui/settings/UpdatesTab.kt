@@ -36,14 +36,8 @@ import works.merc.keryx.app.resources.settings_update_check_up_to_date
 import works.merc.keryx.app.resources.settings_update_check_weekly
 import works.merc.keryx.app.resources.settings_update_open_release_page
 
-/** アップデート: update-check interval / check now / result. */
 /**
- * Displays update-check settings and the current update status.
- *
- * @param vm The view model that provides update settings and actions.
- */
-/**
- * Renders update-check settings and the latest update status.
+ * Updates tab: update-check interval / check now / result.
  *
  * An update check is started when the content opens if no result is available.
  *

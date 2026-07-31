@@ -8,7 +8,6 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.client.statement.readRawBytes
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
-import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -130,6 +129,12 @@ class DropboxStorage(
         }
     }
 
+    /**
+     * Deletes a file or folder, treating an already-absent path as a successful deletion.
+     *
+     * @param path The Dropbox path to delete.
+     * @return A result indicating whether the deletion succeeded.
+     */
     override suspend fun delete(path: String): Result<Unit> = withToken { token ->
         val response = client.post("$apiBase/2/files/delete_v2") {
             header("Authorization", "Bearer $token")
@@ -148,22 +153,21 @@ class DropboxStorage(
         }
     }
 
-    private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> {
-        val token = accessTokenProvider()
-            ?: return Result.Err(CloudAuthException("Not connected to Dropbox"))
-        return try {
-            block(token)
-        } catch (e: CancellationException) {
-            // Never swallow coroutine cancellation (e.g. a debounced sync superseded by a newer
-            // one) — rethrow so it unwinds silently instead of being mis-logged as a sync error.
-            throw e
-        } catch (e: Throwable) {
-            Result.Err(CloudStorageException(e.message ?: "Dropbox request failed"))
-        }
-    }
+    /**
+         * Executes an operation with a valid Dropbox access token.
+         *
+         * @param block The operation to execute with the access token.
+         * @return The result produced by the operation.
+         */
+        private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> =
+        withCloudToken(accessTokenProvider, "Dropbox", block)
 
-    private fun mapError(status: Int, body: String): Result.Err = when (status) {
-        401, 403 -> Result.Err(CloudAuthException("Authentication failed"))
-        else -> Result.Err(CloudStorageException("Dropbox error (HTTP $status): ${body.take(200)}"))
-    }
+    /**
+ * Converts a Dropbox API failure response into a storage error result.
+ *
+ * @param status The HTTP status code returned by Dropbox.
+ * @param body The response body containing error details.
+ * @return An error result representing the Dropbox failure.
+ */
+private fun mapError(status: Int, body: String): Result.Err = cloudStorageError("Dropbox", status, body)
 }

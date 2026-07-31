@@ -6,17 +6,15 @@ import org.freedesktop.dbus.connections.impl.DBusConnection
 import org.freedesktop.dbus.connections.impl.DBusConnectionBuilder
 import org.freedesktop.dbus.interfaces.DBus
 import org.freedesktop.dbus.messages.DBusSignal
+import works.merc.keryx.app.DBUS_BUS
+import works.merc.keryx.app.DBUS_PATH
 import works.merc.keryx.app.core.Log
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
+import works.merc.keryx.app.openDBusConnectionWithTimeout
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 private const val LOG_TAG = "SniConnection"
 
-private const val DBUS_BUS = "org.freedesktop.DBus"
-private const val DBUS_PATH = "/org/freedesktop/DBus"
 private const val WATCHER_BUS = "org.kde.StatusNotifierWatcher"
 private const val WATCHER_PATH = "/StatusNotifierWatcher"
 private const val NOTIFICATIONS_BUS = "org.freedesktop.Notifications"
@@ -138,30 +136,19 @@ internal class SniConnection private constructor(
         private val DEFAULT_TIMEOUT = 2.seconds
 
         /**
-         * Opens a session-bus connection and claims our well-known name, or returns `null` if
-         * the native tray isn't usable here.
+         * Attempts to create a session-bus connection for the native tray.
          *
-         * Bounded by [timeout] because this runs before the window is shown: an unresponsive
-         * session bus must not stop Keryx from starting. A connection that lands after the
-         * deadline is closed rather than leaked.
+         * @param timeout The maximum time allowed for connection setup.
+         * @return A configured connection, or `null` when the native tray is unavailable or setup fails.
          */
-        fun tryCreate(timeout: Duration = DEFAULT_TIMEOUT): SniConnection? {
-            val pending = CompletableFuture.supplyAsync {
-                runCatching { open() }
-                    .onFailure { Log.warn(LOG_TAG, "Could not set up the StatusNotifierItem tray", it) }
-                    .getOrNull()
-            }
-            return try {
-                pending.get(timeout.inWholeMilliseconds, TimeUnit.MILLISECONDS)
-            } catch (_: TimeoutException) {
-                Log.warn(LOG_TAG, "Session bus did not answer within $timeout; falling back to the AWT tray")
-                pending.thenAccept { late -> late?.close() }
-                null
-            } catch (e: Exception) {
-                Log.warn(LOG_TAG, "Could not set up the StatusNotifierItem tray", e)
-                null
-            }
-        }
+        fun tryCreate(timeout: Duration = DEFAULT_TIMEOUT): SniConnection? = openDBusConnectionWithTimeout(
+            logTag = LOG_TAG,
+            component = "StatusNotifierItem tray",
+            timeout = timeout,
+            timeoutMessage = "falling back to the AWT tray",
+            onLateClose = { it.close() },
+            open = ::open,
+        )
 
         /**
          * Opens and validates a dedicated session-bus connection for the status notifier.

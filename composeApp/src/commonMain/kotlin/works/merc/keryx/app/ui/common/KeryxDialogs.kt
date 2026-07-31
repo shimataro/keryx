@@ -40,6 +40,21 @@ import androidx.compose.ui.unit.dp
  * `confirmButton`/`dismissButton` composable slots so the buttons can be rendered as real native
  * Swing buttons; when [dismissText] is non-null, clicking it always just calls [onDismissRequest].
  */
+/**
+ * Displays an alert dialog in a separate native window.
+ *
+ * @param onDismissRequest Called when the dialog should be dismissed.
+ * @param confirmText The label for the confirm action.
+ * @param onConfirm Called when the confirm action is selected.
+ * @param confirmEnabled Whether the confirm action is enabled.
+ * @param dismissText The label for the optional dismiss action.
+ * @param title The optional native window title.
+ * @param titleAction Optional content displayed next to the title.
+ * @param text Optional content displayed in the dialog body.
+ * @param containerColor The dialog container color.
+ * @param tonalElevation The dialog container's tonal elevation.
+ * @param modal Whether the dialog blocks interaction with its owner window.
+ */
 @Composable
 expect fun KeryxAlertDialog(
     onDismissRequest: () -> Unit,
@@ -55,16 +70,6 @@ expect fun KeryxAlertDialog(
     modal: Boolean = true,
 )
 
-/**
- * Drop-in replacement for `androidx.compose.ui.window.Dialog` that renders in a real, separate OS
- * window (`DialogWindow`) instead of a Compose `Popup`. See [KeryxAlertDialog] for why.
- */
-@Composable
-expect fun KeryxDialog(
-    onDismissRequest: () -> Unit,
-    content: @Composable () -> Unit,
-)
-
 /** One tab in a [KeryxTabDialog]: a stable [id] used for selection/dispatch, a localized [label]
  * (shown under the icon and, on macOS, mirrored as the window title), and an [icon]. */
 data class KeryxDialogTab(val id: String, val label: String, val icon: DrawableResource)
@@ -74,7 +79,7 @@ data class KeryxDialogTab(val id: String, val label: String, val icon: DrawableR
  * Compose `Popup`) with a macOS System-Preferences-style tab switcher: an icon+label toolbar tab
  * bar at the top, the selected tab's label mirrored as the window title (next to the traffic
  * lights on macOS), and a fixed-size content area below that top-aligns whichever tab's content is
- * requested. Unlike [KeryxAlertDialog]/[KeryxDialog], this window does not block its owner — the
+ * requested. Unlike [KeryxAlertDialog], this window does not block its owner — the
  * main window stays interactive while it is open (matching the real macOS System Settings window).
  *
  * Has no button row: the caller's content applies its changes immediately. The window is closed via

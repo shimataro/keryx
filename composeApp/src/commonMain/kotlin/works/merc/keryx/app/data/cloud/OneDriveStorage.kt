@@ -10,7 +10,6 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.client.statement.readRawBytes
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
-import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -128,6 +127,12 @@ class OneDriveStorage(
         }
     }
 
+    /**
+     * Determines whether an item exists at the specified path.
+     *
+     * @param path The path of the item within the app folder.
+     * @return `true` if the item exists, `false` if it is not found.
+     */
     override suspend fun exists(path: String): Result<Boolean> = withToken { token ->
         val response = client.get(itemUrl(path)) { header("Authorization", "Bearer $token") }
         when {
@@ -137,24 +142,23 @@ class OneDriveStorage(
         }
     }
 
-    private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> {
-        val token = accessTokenProvider()
-            ?: return Result.Err(CloudAuthException("Not connected to OneDrive"))
-        return try {
-            block(token)
-        } catch (e: CancellationException) {
-            // Never swallow coroutine cancellation (e.g. a debounced sync superseded by a newer
-            // one) — rethrow so it unwinds silently instead of being mis-logged as a sync error.
-            throw e
-        } catch (e: Throwable) {
-            Result.Err(CloudStorageException(e.message ?: "OneDrive request failed"))
-        }
-    }
+    /**
+         * Executes an operation with an available OneDrive access token.
+         *
+         * @param block The operation to execute with the access token.
+         * @return The result produced by the operation.
+         */
+        private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> =
+        withCloudToken(accessTokenProvider, "OneDrive", block)
 
-    private fun mapError(status: Int, body: String): Result.Err = when (status) {
-        401, 403 -> Result.Err(CloudAuthException("Authentication failed"))
-        else -> Result.Err(CloudStorageException("OneDrive error (HTTP $status): ${body.take(200)}"))
-    }
+    /**
+ * Converts a OneDrive response error into a storage error result.
+ *
+ * @param status The HTTP response status code.
+ * @param body The response body containing error details.
+ * @return An error result describing the OneDrive failure.
+ */
+private fun mapError(status: Int, body: String): Result.Err = cloudStorageError("OneDrive", status, body)
 
     /** Graph app-folder items are path-addressed by name: use the basename of the sync path. */
     private fun fileName(path: String): String = path.substringAfterLast('/')

@@ -5,9 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.core.CloudStorageType
@@ -15,6 +13,7 @@ import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
+import works.merc.keryx.app.domain.awaitCancellableConnect
 
 enum class SetupPhase { IDLE, CONNECTING, ERROR }
 
@@ -48,6 +47,12 @@ class SetupViewModel(
         }
     }
 
+    /**
+     * Connects to the selected cloud storage provider and synchronizes its data.
+     *
+     * @param type The cloud storage provider to connect to.
+     * @param onDone Called after the connection succeeds and synchronization completes.
+     */
     fun connect(type: CloudStorageType, onDone: () -> Unit) {
         viewModelScope.launch {
             phase = SetupPhase.CONNECTING
@@ -56,21 +61,13 @@ class SetupViewModel(
                 phase = SetupPhase.ERROR
                 return@launch
             }
-            // Run only the interruptible OAuth-authorization wait as a child job. Cancelling a
-            // child does not propagate up to the parent (structured concurrency), so the success
-            // tail (saveTokens -> saveLocalSettings -> flush -> sync) runs to completion once
-            // authorization resolves — never leaving durable tokens/settings behind a cancelled UI.
-            val waitJob = async { flow.connect() }
-            authorizationJob = waitJob
-            canCancelConnect = true
-            val result = try {
-                waitJob.await()
-            } catch (e: CancellationException) {
+            val result = awaitCancellableConnect(
+                flow,
+                onJobChange = { authorizationJob = it },
+                onCanCancelChange = { canCancelConnect = it },
+            ) ?: run {
                 phase = SetupPhase.IDLE
                 return@launch
-            } finally {
-                authorizationJob = null
-                canCancelConnect = false
             }
             when (result) {
                 is Result.Ok -> {

@@ -25,9 +25,6 @@ import works.merc.keryx.app.resources.settings_updates
  * [SettingsViewModel]) is unchanged and applies immediately. Each tab's content lives in its own
  * file (`GeneralTab` / `NotificationsTab` / `CloudSyncTab` / `DataTab` / `UpdatesTab`), with shared
  * building blocks in `SettingsComponents`.
- */
-/**
- * Displays the application settings in a tabbed dialog.
  *
  * @param onDismiss Called when the dialog should be dismissed.
  * @param initialTabId The tab shown when the dialog opens. Defaults to the first tab; a notification's
@@ -40,7 +37,8 @@ import works.merc.keryx.app.resources.settings_updates
  * Displays the tabbed settings dialog.
  *
  * @param onDismiss Called when the dialog should be dismissed.
- * @param initialTabId The identifier of the tab initially selected.
+ * @param initialTabId ID of the tab to select initially, or the first available tab if it is unavailable.
+ * @param tabRequestToken Changes to force selection of `initialTabId` to be reapplied.
  */
 @Composable
 fun SettingsDialog(onDismiss: () -> Unit, initialTabId: String = "general", tabRequestToken: Int = 0) {

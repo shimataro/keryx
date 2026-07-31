@@ -5,9 +5,10 @@ import com.fleeksoft.ksoup.Ksoup
 /** HTML → plain-text extraction for search indexing. */
 object HtmlText {
     /**
- * Converts HTML content to plain text for search indexing.
+ * Converts HTML content to visible plain text.
  *
- * @return The visible text with HTML tags and attributes removed and whitespace normalized.
+ * @param html The HTML content to convert.
+ * @return The visible text with tags and attributes removed and whitespace normalized.
  */
     fun toPlainText(html: String): String = Ksoup.parse(html).text()
 }

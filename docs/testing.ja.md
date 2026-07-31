@@ -72,7 +72,7 @@ App Key 空チェックで即エラーになる分岐のみ `OAuthConnectFlowTes
 ライブラリ内部型でありテストコードから中身を取り出せない上、`draggedFeedId()`/`draggedFolderId()`/
 `positionYInRoot()` は実際の AWT `DropTargetDragEvent`/`DropTargetDropEvent` が無いと呼び出せずシームが
 無い）。同じ理由で、フィード/フォルダーの並び替え・移動（ドラッグ&ドロップ）の実際のジェスチャー自体
-（`FeedListPane.kt` の `FeedRow`/`FolderGroupHeader`/`NoFolderHeader` の `dragAndDropSource`/
+（`FeedListDragAndDrop.kt` の `FeedRow`/`FolderGroupHeader`/`NoFolderHeader` の `dragAndDropSource`/
 `dragAndDropTarget`）もテスト不可。並び替えの計算ロジック自体（`ReorderUtil.reorderIds`）と、それを使う
 `FeedRepository.moveFeed`/`FolderRepository.reorderFolders` の DB 反映は通常どおりテストする。
 Linux の SNI トレイでは `SniConnection`（接続・バス名取得・export・登録・再登録・close）が

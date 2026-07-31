@@ -27,6 +27,7 @@ import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.SegmentedControl
+import works.merc.keryx.app.ui.i18n.opmlImportedText
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.settings_cache
 import works.merc.keryx.app.resources.settings_data_management
@@ -35,9 +36,7 @@ import works.merc.keryx.app.resources.settings_days7
 import works.merc.keryx.app.resources.settings_days90
 import works.merc.keryx.app.resources.settings_export_opml
 import works.merc.keryx.app.resources.settings_export_success
-import works.merc.keryx.app.resources.settings_import_failed
 import works.merc.keryx.app.resources.settings_import_opml
-import works.merc.keryx.app.resources.settings_import_success
 import works.merc.keryx.app.resources.settings_read_timeout
 import works.merc.keryx.app.resources.settings_seconds10
 import works.merc.keryx.app.resources.settings_seconds30
@@ -60,10 +59,7 @@ internal fun DataTabContent(vm: SettingsViewModel) {
     LaunchedEffect(vm.opmlResult) {
         opmlStatus = when (val r = vm.opmlResult) {
             is OpmlResult.Exported -> getString(Res.string.settings_export_success)
-            is OpmlResult.Imported -> {
-                val added = getString(Res.string.settings_import_success, r.added)
-                if (r.failed > 0) "$added / ${getString(Res.string.settings_import_failed, r.failed)}" else added
-            }
+            is OpmlResult.Imported -> opmlImportedText(r.added, r.failed)
             OpmlResult.Cancelled, null -> opmlStatus
         }
         vm.clearOpmlResult()

@@ -51,14 +51,16 @@ class FeedRepository(
 
     fun watchAllFeeds(): Flow<List<Feeds>> = feeds.watchAll().asFlow().mapToList(dispatcher)
 
-    fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
-
     /**
- * Retrieves all feeds currently stored in the database.
+ * Retrieves a feed by its identifier.
  *
- * @return The stored feed records.
+ * @param id The feed identifier.
+ * @return The matching feed, or `null` if no feed exists with the identifier.
  */
-fun getAllFeeds(): List<Feeds> = feeds.watchAll().executeAsList()
+fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
+
+    /** All feeds currently stored in the database. */
+    fun getAllFeeds(): List<Feeds> = feeds.watchAll().executeAsList()
 
     /**
      * The feed subscribed at exactly [url], including a soft-deleted one. Note that
@@ -172,12 +174,11 @@ fun getAllFeeds(): List<Feeds> = feeds.watchAll().executeAsList()
     }
 
     /**
-     * Moves [feedId] into the [folderId] group (null = "no folder"), positioned directly before
-     * [targetFeedId] within that group (or at the end if [targetFeedId] is null). Used for both
-     * cross-folder moves and same-folder reordering — they're the same operation. Feeds other than
-     * [feedId] are only written when their `sort_order` actually changes, so an unrelated feed's
-     * `updated_at` isn't bumped (which would otherwise risk clobbering an unrelated edit made on
-     * another device during the next sync merge).
+     * Moves a feed to a folder and positions it before the specified target feed.
+     *
+     * @param feedId The ID of the feed to move.
+     * @param folderId The destination folder ID, or `null` for no folder.
+     * @param targetFeedId The ID of the feed to place the moved feed before, or `null` to place it last.
      */
     fun moveFeed(feedId: String, folderId: String?, targetFeedId: String? = null) {
         val current = feeds.getByFolder(folderId).executeAsList()
@@ -196,7 +197,28 @@ fun getAllFeeds(): List<Feeds> = feeds.watchAll().executeAsList()
         syncScheduler.scheduleSync()
     }
 
-    /** Refreshes one feed. Returns the count of new articles, or an error. */
+    /**
+     * Moves all feeds in a folder into the ungrouped feed list while preserving their relative order.
+     *
+     * @param folderId The ID of the folder whose feeds should be moved.
+     * @param now The timestamp to apply to the moved feeds.
+     */
+    fun moveFeedsOutOfFolder(folderId: String, now: Long = clock.nowMillis()) {
+        db.transaction {
+            var next = feeds.nextSortOrderInGroup(null).executeAsOne()
+            for (feed in feeds.getByFolder(folderId).executeAsList()) {
+                feeds.updateFolderAndSortOrder(null, next, now, now, now, feed.id)
+                next++
+            }
+        }
+    }
+
+    /**
+     * Refreshes a feed and indexes any newly fetched articles.
+     *
+     * @param feed The feed to refresh.
+     * @return The number of new articles, or the refresh error.
+     */
     suspend fun refreshFeed(feed: Feeds): Result<Int> {
         val outcome = refreshFeedArticles(feed)
         if (outcome.hadArticles) ftsManager.indexMissing()
@@ -299,6 +321,14 @@ fun getAllFeeds(): List<Feeds> = feeds.watchAll().executeAsList()
     /** Refreshes a single feed: fetch (network) then apply (DB), one after the other. */
     private suspend fun refreshFeedArticles(feed: Feeds): RefreshOutcome = applyFetch(feed, fetchFeed(feed))
 
+    /**
+     * Refreshes all feeds and collects the article-count result for each feed.
+     *
+     * Network fetching is performed concurrently with bounded concurrency, while database updates
+     * are applied in the original feed order.
+     *
+     * @return A map from feed ID to the result containing the number of newly processed articles.
+     */
     suspend fun refreshAll(): Map<String, Result<Int>> {
         val feedList = feeds.watchAll().executeAsList()
         // Phase 1: fetch every feed's network data concurrently (bounded by a semaphore), with NO
@@ -321,19 +351,6 @@ fun getAllFeeds(): List<Feeds> = feeds.watchAll().executeAsList()
         }
         if (anyHadArticles) ftsManager.indexMissing()
         return result
-    }
-
-    /**
-     * Fills in favicons for feeds that lack one. An empty-string favicon is a
-     * sentinel meaning "already checked, none found" and is skipped.
-     */
-    suspend fun backfillMissingFavicons() {
-        for (feed in feeds.watchAll().executeAsList()) {
-            if (feed.favicon_url == "") continue
-            if (feed.favicon_url != null && faviconResolver.isReachable(feed.favicon_url)) continue
-            val url = faviconResolver.resolve(feed.site_url, feed.url)
-            feeds.updateFaviconUrl(url ?: "", clock.nowMillis(), feed.id)
-        }
     }
 
     /**

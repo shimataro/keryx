@@ -1,12 +1,22 @@
 package works.merc.keryx.app.platform
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import works.merc.keryx.app.core.SQLITE_BUSY_TIMEOUT_MS
 import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import java.sql.DriverManager
 import java.util.Properties
 
 actual object DatabaseMerger {
+    /**
+     * Merges cloud database changes into a local SQLite database.
+     *
+     * @param localDbPath The path to the local database.
+     * @param cloudDbPath The path to the cloud database.
+     * @param localSchemaVersion The schema version supported by the local database.
+     * @param mergeStatements SQL statements to apply during the merge.
+     * @throws SchemaVersionException If the cloud database schema is newer than the local schema.
+     */
     actual fun merge(
         localDbPath: String,
         cloudDbPath: String,
@@ -22,7 +32,7 @@ actual object DatabaseMerger {
             connection.autoCommit = true
             connection.createStatement().use { st ->
                 st.execute("PRAGMA foreign_keys=ON")
-                st.execute("PRAGMA busy_timeout=5000")
+                st.execute("PRAGMA busy_timeout=$SQLITE_BUSY_TIMEOUT_MS")
                 // ATTACH must run outside a transaction.
                 st.execute("ATTACH DATABASE '${cloudDbPath.replace("'", "''")}' AS cloud")
             }
