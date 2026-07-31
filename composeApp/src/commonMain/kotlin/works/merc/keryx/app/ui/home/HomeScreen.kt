@@ -22,6 +22,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
@@ -79,6 +80,12 @@ fun HomeScreen() {
     // True while the sidebar search field holds focus, so the root keyboard shortcuts step aside and
     // let typed letters/arrows reach the field (they'd otherwise be swallowed by homeKeyboardShortcuts).
     var searchFieldFocused by remember { mutableStateOf(false) }
+    // Arrow keys only actually reach a pane when this window has real OS focus (not a modal dialog,
+    // Settings/About, or another application) and the search field isn't the one consuming them —
+    // panes must render their selection dimmed in every other case, not just when focus moved to a
+    // different pane within this window.
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    val keyboardNavActive = windowFocused && !searchFieldFocused
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboard.current
     val density = LocalDensity.current
@@ -194,7 +201,7 @@ fun HomeScreen() {
                 Row(Modifier.fillMaxSize()) {
                     FeedListPane(
                         vm,
-                        focused = focusedPane == HomePane.FeedList,
+                        focused = focusedPane == HomePane.FeedList && keyboardNavActive,
                         onActivated = { setFocusedPane(HomePane.FeedList) },
                         modifier = Modifier.width(displayedFeedWidth),
                         onAddFeedClick = { showAddFeed = true },
@@ -205,7 +212,7 @@ fun HomeScreen() {
                     })
                     ArticleListPane(
                         vm,
-                        focused = focusedPane == HomePane.ArticleList,
+                        focused = focusedPane == HomePane.ArticleList && keyboardNavActive,
                         onActivated = { setFocusedPane(HomePane.ArticleList) },
                         modifier = Modifier.width(displayedArticleWidth),
                         notifVm = notifVm,
