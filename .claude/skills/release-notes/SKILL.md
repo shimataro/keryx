@@ -35,13 +35,21 @@ or repository, stop and explain why.
 2. Find the latest tag on the current branch:
 
    ```bash
-   git describe --tags --abbrev=0
+   git describe --tags --match 'v*' --abbrev=0
    ```
 
    - If no tag exists, output exactly:
 
      ```text
      No tags found on this branch.
+     ```
+
+     and stop.
+   - Validate the tag against `^v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$`. If it does not match, output
+     exactly (substituting the actual tag for `<tag>`):
+
+     ```text
+     Latest tag <tag> is not a valid version tag.
      ```
 
      and stop.
@@ -66,8 +74,10 @@ Collect the following data. Use it to understand what actually changed, not just
 to repeat commit messages.
 
 1. **Latest tag** (already obtained): e.g. `v0.1.0`.
-2. **Base version** derived from the tag by stripping the leading `v`:
-   e.g. `0.1.0`.
+2. **Base version**: the tag's numeric `MAJOR.MINOR.PATCH`, stripping the leading `v` and any
+   `-prerelease` suffix. E.g. `v0.1.0` → `0.1.0`; `v0.2.0-rc.1` → `0.2.0`. Major/minor/patch
+   arithmetic always increments from this numeric base, regardless of whether the latest tag
+   itself carried a pre-release suffix.
 3. **Commit log** (subjects and bodies):
 
    ```bash
@@ -80,16 +90,17 @@ to repeat commit messages.
    git diff --stat <tag>..HEAD
    ```
 
-5. **Key diffs for analysis** (limit to relevant paths; skip if the output is
-   huge and only use the stat instead):
+5. **Key diffs for analysis**: inspect the diff for every path listed in the diff statistics
+   above (step 4), not just specific extensions or directories — release-note categorization and
+   version-bump analysis need visibility into every changed file, not only Kotlin/SQL/docs/CI.
 
    ```bash
-   git diff <tag>..HEAD -- '*.kt'
-   git diff <tag>..HEAD -- '*.sq' '*.sqm'
-   git diff <tag>..HEAD -- '*.gradle.kts' 'gradle/libs.versions.toml'
-   git diff <tag>..HEAD -- 'docs/*.md'
-   git diff <tag>..HEAD -- '.github/workflows/*.yml'
+   git diff <tag>..HEAD -- '<path>'
    ```
+
+   Run this for each changed path. If the total diff is too large to read in full, fall back to
+   the `--stat` summary for the less-central files and prioritize reading the files most likely to
+   drive release-note content in full.
 
 6. **Remote URL** for PR/compare links (optional):
 
@@ -97,10 +108,12 @@ to repeat commit messages.
    git remote get-url origin
    ```
 
-   - Convert SSH URLs (`git@github.com:owner/repo.git`) to
-     `https://github.com/owner/repo`.
-   - If the remote URL cannot be determined, generate links without a base URL
-     or omit them.
+   - Normalize to `https://github.com/owner/repo`: convert an SSH remote
+     (`git@github.com:owner/repo.git`) to HTTPS, and strip a trailing `.git` from either an SSH or
+     an already-HTTPS remote.
+   - If the remote URL cannot be determined, no repo links are available for the rest of this
+     skill: omit the `[#N](...)` Markdown link form (keep plain `(#N)` text instead) and omit the
+     final **Full Changelog** line entirely.
 
 ## Analyze the changes
 
@@ -136,9 +149,10 @@ latest tag. Use [Semantic Versioning](https://semver.org/) reasoning:
 - **Pre-release** — `alpha`, `beta`, `rc`, etc., for testing before a stable
   release.
 
-Calculate the concrete version string each level would produce from the
-latest tag. Major/minor/patch are independent version-number arithmetic
-(increment the relevant segment, reset lower segments). Pre-release is not
+Calculate the concrete version string each level would produce from the Base
+Version (see above — the latest tag's own pre-release suffix, if any, is not
+part of this arithmetic). Major/minor/patch are independent version-number
+arithmetic (increment the relevant segment, reset lower segments). Pre-release is not
 a fourth independent path — it is always a suffix on top of whichever base
 bump (major/minor/patch) it precedes. For example, from `v0.1.0`, with
 pre-release shown paired with the minor bump:
@@ -161,9 +175,11 @@ plausible for this diff, and drop any that are clearly wrong for it:
   improvements, docs, build/CI) with no breaking changes and no deliberate
   move out of `0.x`.
 - Include **pre-release** only when a testing/staging build genuinely makes
-  sense before the stable release; it is not an always-present option, and
-  it always pairs with one of the surviving major/minor/patch candidates as
-  its base rather than standing on its own.
+  sense before the stable release; it is not an always-present option. When
+  included, present it as its own option labeled with the specific base it
+  pairs with — e.g. "Pre-release (minor)" — rather than a bare "Pre-release",
+  using whichever surviving major/minor/patch candidate is the most
+  recommended base for this diff.
 
 Order the surviving candidates from most to least recommended based on the
 actual analyzed changes, and mark the top one "(Recommended)" — do not assume
@@ -172,15 +188,15 @@ most 4 options, present at most the top 4 surviving candidates in that order.
 
 ## Resolve the chosen version
 
-- If the user selected **Pre-release**, ask for the suffix:
+- If the user selected the **Pre-release (\<base\>)** option, ask for the suffix:
   - Offer `alpha.1`, `beta.1`, `rc.1`, or a custom input.
-  - Combine it with the base bump. For example, minor + `alpha.1` →
-    `v0.2.0-alpha.1`.
+  - Append it to the base already captured in the option label. For example,
+    selecting "Pre-release (minor)" then `alpha.1` → `v0.2.0-alpha.1`.
 - If the user selected **Other**, accept their input with or without a leading
   `v`.
 - Normalize the final version to the tag form `vMAJOR.MINOR.PATCH[-prerelease]`.
-- Perform a light validation: it must match `v?\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?`.
-  If invalid, ask again.
+- Validate it against the same anchored pattern used in the tag-selection step:
+  `^v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$`. If invalid, ask again.
 
 ## Generate final release notes
 
@@ -215,7 +231,7 @@ Structure:
 
 - Description of other change. (#N)
 
-**Full Changelog**: https://github.com/owner/repo/compare/<previous-tag>...<new-version>
+**Full Changelog**: <normalized-repo-url>/compare/<previous-tag>...<new-version>
 ```
 
 Rules:
@@ -223,6 +239,8 @@ Rules:
 - Omit empty sections.
 - Keep bullet points concise and user-oriented.
 - Convert `#N` references to Markdown links when the remote URL is known.
+- Omit the **Full Changelog** line entirely if the remote URL could not be determined (see
+  "Remote URL" above); otherwise substitute the normalized repo URL for `<normalized-repo-url>`.
 - Output the final Markdown inside a fenced code block so it is easy to copy.
 - Do not add any extra commentary outside the code block except a brief
   introduction such as "Here are the release notes for \<new-version\>."
