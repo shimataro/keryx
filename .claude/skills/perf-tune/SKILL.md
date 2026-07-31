@@ -268,6 +268,10 @@ of test identities (class + method) from
 If the baseline is **red**, stop and report — never optimize on top of failing
 tests.
 
+Also capture the branch's current commit as `BASE_SHA` (`git rev-parse
+HEAD`) — Step 8 needs it to review the accumulated per-item commits, since
+by then the working tree itself will be clean.
+
 ### Step 2 — Measure (never guess)
 
 Each axis has its own method.
@@ -424,10 +428,13 @@ CLAUDE.md "Documentation").
 
 ### Step 8 — Constraint review + closing summary
 
-Optionally run the **`reviewer` agent** over the accumulated diff (`git diff`).
-Each item already committed itself independently in Step 5, so there is no
-aggregate commit message to produce here — finish by outputting the closing
-summary (see `## How to report`).
+Optionally run the **`reviewer` agent** over the accumulated changes
+(`git diff "$BASE_SHA" HEAD`, using the `BASE_SHA` captured in Step 1) to
+catch any architecture/constraint violation across everything just applied —
+by this point every item has already committed itself independently in
+Step 5, so a plain `git diff` against a clean working tree would show
+nothing. There is no aggregate commit message to produce here — finish by
+outputting the closing summary (see `## How to report`).
 
 ## How to report
 
