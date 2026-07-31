@@ -224,6 +224,11 @@ internal fun FolderGroupHeader(
                 }
             }
 
+            override fun onEnded(event: DragAndDropEvent) {
+                onDraggedFeedIdChange(null)
+                onBoundaryChange(null)
+            }
+
             override fun onDrop(event: DragAndDropEvent): Boolean {
                 onDraggedFeedIdChange(null)
                 onBoundaryChange(null)
@@ -336,6 +341,11 @@ internal fun NoFolderHeader(
                             if (activeBoundaryState.value == feedZoneBoundary) onBoundaryChange(null)
                         }
 
+                        override fun onEnded(event: DragAndDropEvent) {
+                            onDraggedFeedIdChange(null)
+                            onBoundaryChange(null)
+                        }
+
                         /**
                          * Handles a feed dropped into this feed group.
                          *
@@ -440,6 +450,11 @@ internal fun FeedRow(
                             ) {
                                 onBoundaryChange(null)
                             }
+                        }
+
+                        override fun onEnded(event: DragAndDropEvent) {
+                            onDraggedFeedIdChange(null)
+                            onBoundaryChange(null)
                         }
 
                         /**
