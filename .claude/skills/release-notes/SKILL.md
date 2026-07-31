@@ -45,7 +45,9 @@ or repository, stop and explain why.
      ```
 
      and stop.
-   - Validate the tag against `^v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$`. If it does not match, output
+   - Validate the tag against
+     `^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-(0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?$`.
+     If it does not match, output
      exactly (substituting the actual tag for `<tag>`):
 
      ```text
@@ -196,7 +198,8 @@ most 4 options, present at most the top 4 surviving candidates in that order.
   `v`.
 - Normalize the final version to the tag form `vMAJOR.MINOR.PATCH[-prerelease]`.
 - Validate it against the same anchored pattern used in the tag-selection step:
-  `^v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$`. If invalid, ask again.
+  `^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-(0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?$`.
+  If invalid, ask again.
 
 ## Generate final release notes
 
