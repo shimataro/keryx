@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -156,17 +157,36 @@ fun FeedListPane(
     var confirmingUnsubscribeFeed by remember { mutableStateOf<Feeds?>(null) }
     val activeBoundaryState = remember { mutableStateOf<DropBoundary?>(null) }
     var activeBoundary by activeBoundaryState
-    val boundaryClearScope = rememberCoroutineScope()
+    var draggedFeedId by remember { mutableStateOf<String?>(null) }
+    val draggedFeedFolderId by remember {
+        derivedStateOf {
+            draggedFeedId?.let { id -> feeds.find { it.id == id }?.folder_id }
+        }
+    }
+    val dragAndDropScope = rememberCoroutineScope()
     var pendingBoundaryClearJob by remember { mutableStateOf<Job?>(null) }
+    var pendingDragSourceClearJob by remember { mutableStateOf<Job?>(null) }
     val onBoundaryChange: (DropBoundary?) -> Unit = { boundary ->
         pendingBoundaryClearJob?.cancel()
         if (boundary != null) {
             pendingBoundaryClearJob = null
             activeBoundary = boundary
         } else {
-            pendingBoundaryClearJob = boundaryClearScope.launch {
+            pendingBoundaryClearJob = dragAndDropScope.launch {
                 delay(BOUNDARY_CLEAR_DEBOUNCE_MS)
                 activeBoundary = null
+            }
+        }
+    }
+    val onDraggedFeedIdChange: (String?) -> Unit = { feedId ->
+        pendingDragSourceClearJob?.cancel()
+        if (feedId != null) {
+            pendingDragSourceClearJob = null
+            draggedFeedId = feedId
+        } else {
+            pendingDragSourceClearJob = dragAndDropScope.launch {
+                delay(BOUNDARY_CLEAR_DEBOUNCE_MS)
+                draggedFeedId = null
             }
         }
     }
@@ -299,6 +319,7 @@ fun FeedListPane(
                                     firstFeedId = feedsInFolder.firstOrNull()?.id,
                                     activeBoundaryState = activeBoundaryState,
                                     onBoundaryChange = onBoundaryChange,
+                                    onDraggedFeedIdChange = onDraggedFeedIdChange,
                                     onDropFeed = { feedId, insertBeforeId -> vm.moveFeed(feedId, null, insertBeforeId) },
                                 )
                             }
@@ -315,6 +336,7 @@ fun FeedListPane(
                                 folderBelowBoundary = null,
                                 activeBoundaryState = activeBoundaryState,
                                 onBoundaryChange = onBoundaryChange,
+                                onDraggedFeedIdChange = onDraggedFeedIdChange,
                                 onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id)); onActivated() },
                                 onRename = { renamingFeed = feed },
                                 onRefresh = { vm.refreshFeed(feed) },
@@ -343,12 +365,14 @@ fun FeedListPane(
                                 feedIdsInFolder = feedsInFolder.mapTo(mutableSetOf()) { it.id },
                                 activeBoundaryState = activeBoundaryState,
                                 onBoundaryChange = onBoundaryChange,
+                                onDraggedFeedIdChange = onDraggedFeedIdChange,
                                 onToggleCollapse = { vm.toggleFolderCollapsed(folder.id) },
                                 onClick = { vm.selectFilter(ArticleFilter.Folder(folder.id)); onActivated() },
                                 onEdit = { editingFolder = folder },
                                 onDelete = { confirmingDeleteFolder = folder },
                                 onDropFeed = { feedId, insertBeforeId -> vm.moveFeed(feedId, folder.id, insertBeforeId) },
                                 onReorderFolder = { draggedFolderId, insertBeforeId -> vm.reorderFolders(draggedFolderId, insertBeforeId) },
+                                isDragSource = folder.id == draggedFeedFolderId,
                             )
                         }
                         if (!collapsed) {
@@ -364,6 +388,7 @@ fun FeedListPane(
                                     folderBelowBoundary = nextFolderId?.let(DropBoundary::BeforeFolder) ?: DropBoundary.AppendFolders,
                                     activeBoundaryState = activeBoundaryState,
                                     onBoundaryChange = onBoundaryChange,
+                                    onDraggedFeedIdChange = onDraggedFeedIdChange,
                                     onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id)); onActivated() },
                                     onRename = { renamingFeed = feed },
                                     onRefresh = { vm.refreshFeed(feed) },

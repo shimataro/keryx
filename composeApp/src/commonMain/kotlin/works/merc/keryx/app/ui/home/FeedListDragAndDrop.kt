@@ -69,10 +69,34 @@ import works.merc.keryx.app.ui.common.FlatTooltipContent
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 
-/** Background for a folder-drop row: highlighted while a feed is being dragged over it. */
+/** Background for a folder-drop row: highlighted while a feed is being dragged over it.
+ * When the folder is the drag source, its selection highlight is suppressed so the destination
+ * folder reads as the active target. */
 @Composable
-private fun dropTargetBackground(isDropTarget: Boolean, selected: Boolean, focused: Boolean): Color =
-    if (isDropTarget) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else selectionBackground(selected, focused)
+private fun dropTargetBackground(
+    isDropTarget: Boolean,
+    selected: Boolean,
+    focused: Boolean,
+    isDragSource: Boolean = false,
+): Color = when {
+    isDropTarget -> MaterialTheme.colorScheme.secondaryContainer
+    isDragSource -> Color.Transparent
+    else -> selectionBackground(selected, focused)
+}
+
+/** Content color paired with [dropTargetBackground]. */
+@Composable
+internal fun dropTargetContentColorOrNull(
+    isDropTarget: Boolean,
+    selected: Boolean,
+    focused: Boolean,
+    isDragSource: Boolean = false,
+): Color? = when {
+    isDropTarget -> MaterialTheme.colorScheme.onSecondaryContainer
+    isDragSource -> null
+    selected && focused -> MaterialTheme.colorScheme.onPrimary
+    else -> null
+}
 
 /** Which half of a row/header a drag is currently hovering over, used to render an insertion line
  * exactly at the boundary the drop would land on. */
@@ -133,6 +157,8 @@ private fun InsertionLine(indented: Boolean, visible: Boolean) {
  * @param nextFolderId The folder following this folder, or `null` when it is last.
  * @param activeBoundaryState The currently highlighted insertion boundary.
  * @param onBoundaryChange Updates the highlighted insertion boundary.
+ * @param onDraggedFeedIdChange Reports the feed id currently being dragged, or `null` when the drag ends.
+ * @param isDragSource Whether the folder currently contains the feed being dragged.
  * @param onToggleCollapse Toggles the folder's collapsed state.
  * @param onClick Handles selection of the folder.
  * @param onEdit Opens folder editing.
@@ -152,12 +178,14 @@ internal fun FolderGroupHeader(
     feedIdsInFolder: Set<String>,
     activeBoundaryState: State<DropBoundary?>,
     onBoundaryChange: (DropBoundary?) -> Unit,
+    onDraggedFeedIdChange: (String?) -> Unit,
     onToggleCollapse: () -> Unit,
     onClick: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onDropFeed: (feedId: String, insertBeforeId: String?) -> Unit,
     onReorderFolder: (draggedFolderId: String, insertBeforeId: String?) -> Unit,
+    isDragSource: Boolean = false,
 ) {
     var coordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     val editFolderLabel = stringResource(Res.string.home_edit_folder_menu)
@@ -174,6 +202,7 @@ internal fun FolderGroupHeader(
     val target = remember(folder.id, feedZoneBoundary, belowFolderBoundary) {
         object : DragAndDropTarget {
             override fun onMoved(event: DragAndDropEvent) {
+                onDraggedFeedIdChange(event.draggedFeedId())
                 when {
                     event.draggedFeedId() != null -> onBoundaryChange(feedZoneBoundary)
                     event.draggedFolderId() == folder.id -> Unit
@@ -185,6 +214,7 @@ internal fun FolderGroupHeader(
             }
 
             override fun onExited(event: DragAndDropEvent) {
+                onDraggedFeedIdChange(null)
                 val boundary = activeBoundaryState.value
                 if (boundary == DropBoundary.BeforeFolder(folder.id) ||
                     boundary == belowFolderBoundary ||
@@ -194,7 +224,13 @@ internal fun FolderGroupHeader(
                 }
             }
 
+            override fun onEnded(event: DragAndDropEvent) {
+                onDraggedFeedIdChange(null)
+                onBoundaryChange(null)
+            }
+
             override fun onDrop(event: DragAndDropEvent): Boolean {
+                onDraggedFeedIdChange(null)
                 onBoundaryChange(null)
                 event.draggedFeedId()?.let { feedId ->
                     onDropFeed(feedId, if (isEmpty) null else firstFeedId)
@@ -220,7 +256,7 @@ internal fun FolderGroupHeader(
             Modifier.fillMaxWidth()
                 .padding(start = 8.dp, top = 2.dp, end = 8.dp, bottom = 2.dp)
                 .clip(MaterialTheme.shapes.small)
-                .background(dropTargetBackground(isFeedDragHighlight, selected, focused))
+                .background(dropTargetBackground(isFeedDragHighlight, selected, focused, isDragSource))
                 .dragAndDropSource { folderDragTransferData(folder.id) }
                 .nativeContextMenu(
                     items = {
@@ -234,7 +270,12 @@ internal fun FolderGroupHeader(
                 .padding(end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CompositionLocalProvider(LocalContentColor provides (selectionContentColorOrNull(selected, focused) ?: LocalContentColor.current)) {
+            CompositionLocalProvider(
+                LocalContentColor provides (
+                    dropTargetContentColorOrNull(isFeedDragHighlight, selected, focused, isDragSource)
+                        ?: LocalContentColor.current
+                    ),
+            ) {
                 KeryxIcon(
                     if (collapsed) KeryxIcons.ChevronRight else KeryxIcons.ExpandMore,
                     contentDescription = null,
@@ -248,14 +289,15 @@ internal fun FolderGroupHeader(
                     KeryxIcon(
                         KeryxIcons.Folder,
                         contentDescription = null,
-                        tint = selectionContentColorOrNull(selected, focused) ?: MaterialTheme.colorScheme.primary,
+                        tint = dropTargetContentColorOrNull(isFeedDragHighlight, selected, focused, isDragSource)
+                            ?: MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(18.dp),
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(folder.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            if (count > 0) CountBadge(count, selected, focused)
+            if (count > 0) CountBadge(count, selected, focused, isFeedDragHighlight, isDragSource)
         }
         if (collapsed || isEmpty) {
             InsertionLine(indented = true, visible = activeBoundaryState.value == feedZoneBoundary)
@@ -273,6 +315,7 @@ internal fun NoFolderHeader(
     firstFeedId: String?,
     activeBoundaryState: State<DropBoundary?>,
     onBoundaryChange: (DropBoundary?) -> Unit,
+    onDraggedFeedIdChange: (String?) -> Unit,
     onDropFeed: (feedId: String, insertBeforeId: String?) -> Unit,
 ) {
     val isEmpty = firstFeedId == null
@@ -284,15 +327,23 @@ internal fun NoFolderHeader(
                 target = remember(feedZoneBoundary) {
                     object : DragAndDropTarget {
                         override fun onEntered(event: DragAndDropEvent) {
+                            onDraggedFeedIdChange(event.draggedFeedId())
                             if (event.draggedFeedId() != null) onBoundaryChange(feedZoneBoundary)
                         }
 
                         override fun onMoved(event: DragAndDropEvent) {
+                            onDraggedFeedIdChange(event.draggedFeedId())
                             if (event.draggedFeedId() != null) onBoundaryChange(feedZoneBoundary)
                         }
 
                         override fun onExited(event: DragAndDropEvent) {
+                            onDraggedFeedIdChange(null)
                             if (activeBoundaryState.value == feedZoneBoundary) onBoundaryChange(null)
+                        }
+
+                        override fun onEnded(event: DragAndDropEvent) {
+                            onDraggedFeedIdChange(null)
+                            onBoundaryChange(null)
                         }
 
                         /**
@@ -301,6 +352,7 @@ internal fun NoFolderHeader(
                          * @return `true` if a feed was dropped successfully, `false` otherwise.
                          */
                         override fun onDrop(event: DragAndDropEvent): Boolean {
+                            onDraggedFeedIdChange(null)
                             onBoundaryChange(null)
                             val feedId = event.draggedFeedId() ?: return false
                             onDropFeed(feedId, if (isEmpty) null else firstFeedId)
@@ -333,6 +385,7 @@ internal fun NoFolderHeader(
  * @param nextFeedId The ID of the following feed, or `null` when this is the last feed.
  * @param folderId The containing folder's ID, or `null` for feeds without a folder.
  * @param folderBelowBoundary The insertion boundary used when a folder is dragged below this row.
+ * @param onDraggedFeedIdChange Reports the feed id currently being dragged, or `null` when the drag ends.
  */
 @Composable
 internal fun FeedRow(
@@ -346,6 +399,7 @@ internal fun FeedRow(
     folderBelowBoundary: DropBoundary?,
     activeBoundaryState: State<DropBoundary?>,
     onBoundaryChange: (DropBoundary?) -> Unit,
+    onDraggedFeedIdChange: (String?) -> Unit,
     onClick: () -> Unit,
     onRename: () -> Unit,
     onRefresh: () -> Unit,
@@ -375,6 +429,7 @@ internal fun FeedRow(
                 target = remember(feed.id, belowBoundary, folderBelowBoundary) {
                     object : DragAndDropTarget {
                         override fun onMoved(event: DragAndDropEvent) {
+                            onDraggedFeedIdChange(event.draggedFeedId())
                             if (event.draggedFeedId() != null) {
                                 val half = resolveHalf(event, coordinates)
                                 onBoundaryChange(if (half == RowHalf.TOP) DropBoundary.BeforeFeed(feed.id) else belowBoundary)
@@ -387,6 +442,7 @@ internal fun FeedRow(
                          * Clears the active insertion boundary when a drag leaves this feed row's drop targets.
                          */
                         override fun onExited(event: DragAndDropEvent) {
+                            onDraggedFeedIdChange(null)
                             val boundary = activeBoundaryState.value
                             if (boundary == DropBoundary.BeforeFeed(feed.id) ||
                                 boundary == belowBoundary ||
@@ -396,12 +452,18 @@ internal fun FeedRow(
                             }
                         }
 
+                        override fun onEnded(event: DragAndDropEvent) {
+                            onDraggedFeedIdChange(null)
+                            onBoundaryChange(null)
+                        }
+
                         /**
                          * Handles dropping a feed or folder on this row and requests the corresponding reorder.
                          *
                          * @return `true` when the drop is handled, `false` when no supported drop target is available.
                          */
                         override fun onDrop(event: DragAndDropEvent): Boolean {
+                            onDraggedFeedIdChange(null)
                             onBoundaryChange(null)
                             event.draggedFeedId()?.let { draggedFeedId ->
                                 val half = resolveHalf(event, coordinates)
