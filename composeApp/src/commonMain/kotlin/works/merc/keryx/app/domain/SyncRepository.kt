@@ -1,6 +1,7 @@
 package works.merc.keryx.app.domain
 
 import app.cash.sqldelight.db.SqlDriver
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -80,7 +81,16 @@ class SyncRepository(
                 while (withTimeoutOrNull(SYNC_DEBOUNCE_MS) { syncSignals.receive() } != null) {
                     // Another scheduleSync() landed inside the window; restart it.
                 }
-                sync()
+                // This is the *only* consumer, so a throw escaping here would end debounced syncing
+                // for the rest of the process while scheduleSync() kept succeeding into a channel
+                // nobody reads. sync() is not exception-proof (a bare SQLDelight write in
+                // setSyncState, resource loading in emitErrorNotification), which is why its other
+                // call sites in main.kt guard the same way.
+                runCatching { sync() }
+                    .onFailure { e ->
+                        if (e is CancellationException) throw e
+                        Log.error(TAG, "Debounced sync failed", e)
+                    }
             }
         }
     }
@@ -299,6 +309,12 @@ class SyncRepository(
                 Log.warn(TAG, "Cloud DB merge aborted: ${e.message}")
             }
             return Result.Err(e)
+        } catch (e: CancellationException) {
+            // `indexMissing()` suspends on the FTS index-writer mutex inside this `try`, so the
+            // catch-all below would otherwise turn a cancellation into a "merge failed" result —
+            // and swallow it after the merge had already committed, skipping the notifyListeners
+            // that surfaces those writes to the SQLDelight query flows.
+            throw e
         } catch (e: Throwable) {
             val msg = e.message ?: ""
             // Distinguish a permanently-unusable cloud DB (corrupt file or incompatible/foreign
