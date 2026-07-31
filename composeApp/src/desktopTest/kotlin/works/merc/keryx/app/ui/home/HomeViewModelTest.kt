@@ -9,6 +9,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -187,6 +188,10 @@ class HomeViewModelTest {
         activityCenter: ActivityCenter = ActivityCenter(),
         newArticleNotifier: NewArticleNotifier = NewArticleNotifier(),
         tokenStorage: HomeViewModelTestTokenStorage = HomeViewModelTestTokenStorage(),
+        // Unconfined by default so flows and dispatched work settle inline for simple assertions.
+        // Pass a queuing dispatcher to reproduce production, where refreshAll()/sync() are launched
+        // on Dispatchers.Default and therefore do not run inline on the caller.
+        dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
     ): HomeViewModel {
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the subscribe/refresh path's indexMissing() works.
@@ -226,7 +231,7 @@ class HomeViewModelTest {
             feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
             syncRepository, cloudSession, activityCenter, clock,
             newArticleNotifier, HomeViewModelTestNotificationMessages(),
-            Dispatchers.Unconfined,
+            dispatcher,
             // dbWriteDispatcher: Unconfined so read/star writes run inline for deterministic assertions.
             Dispatchers.Unconfined,
         ).also { createdViewModels += it }
@@ -716,7 +721,10 @@ class HomeViewModelTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
         db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
-        val vm = newViewModel()
+        // A queuing dispatcher, as in production (sync() is launched on Dispatchers.Default, which
+        // does not run inline on the caller) — that is what leaves a window to change the selection
+        // while the sync is still in flight.
+        val vm = newViewModel(dispatcher = StandardTestDispatcher(testScheduler))
         subscribeAll(vm)
         vm.selectFilter(ArticleFilter.All)
         testScheduler.advanceUntilIdle()
@@ -726,9 +734,9 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
 
         vm.sync()
-        // viewModelScope.launch{} for sync() is only queued at this point (cloudProvider() == null
-        // makes the actual sync a fast no-op once it runs, but it hasn't run yet) — selecting a2
-        // now reproduces a selection change made while sync is still in flight.
+        // The sync body is only queued at this point (cloudProvider() == null makes the actual sync
+        // a fast no-op once it runs, but it hasn't run yet) — selecting a2 now reproduces a
+        // selection change made while sync is still in flight.
         val article2 = db.articlesQueries.getById("a2").executeAsOne()
         vm.selectArticle(article2)
         testScheduler.advanceUntilIdle()

@@ -86,8 +86,9 @@ class HomeViewModel(
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     // Imperative read/star DB writes run here instead of the UI thread. Single-threaded so writes
     // stay serialized (one writer, as they were on the UI thread) — the JVM SQLite driver opens a
-    // fresh connection per statement with no busy_timeout, so concurrent writes could hit
-    // SQLITE_BUSY. UI state is updated optimistically before the write is dispatched.
+    // fresh connection per statement, so concurrent writes would contend for the write lock and
+    // only avoid SQLITE_BUSY by burning the busy_timeout DatabaseDriverFactory sets. UI state is
+    // updated optimistically before the write is dispatched.
     private val dbWriteDispatcher: CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1),
 ) : ViewModel() {
 
@@ -613,7 +614,7 @@ class HomeViewModel(
     val syncing: StateFlow<Boolean> = activityCenter.syncing
 
     fun refreshFeed(feed: Feeds) {
-        viewModelScope.launch {
+        viewModelScope.launch(dispatcher) {
             activityCenter.trackFeedRefresh { feedRepository.refreshFeed(feed) }
         }
     }
@@ -624,7 +625,13 @@ class HomeViewModel(
     fun refreshAll() {
         if (activityCenter.feedRefreshing.value) return
         _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
-        viewModelScope.launch {
+        // Off the UI thread: this body is a full feed refresh (fetch, parse, per-feed DB writes,
+        // FTS indexing) followed by a sync (whole-DB write, ATTACH merge, VACUUM INTO, whole-DB
+        // read). `viewModelScope` is Dispatchers.Main.immediate, so a launch naming no dispatcher
+        // ran all of that inline on the AWT EDT. Mirrors what SettingsViewModel already does for
+        // its own equivalent calls. Feed writes stay serialized: refreshAll() applies them in one
+        // sequential loop internally, and Main was never serialized against dbWriteDispatcher.
+        viewModelScope.launch(dispatcher) {
             val results = activityCenter.trackFeedRefresh { feedRepository.refreshAll() }
             newArticleNotifier.notifyIfEnabled(
                 results, settingsRepository.getLocalSettings().notificationEnabled, notificationMessages,
@@ -638,7 +645,9 @@ class HomeViewModel(
 
     fun sync() {
         _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
-        viewModelScope.launch {
+        // Off the UI thread — see refreshAll(): a sync writes the downloaded cloud DB to disk,
+        // runs the ATTACH merge, VACUUM INTOs a snapshot and reads it all back.
+        viewModelScope.launch(dispatcher) {
             syncRepository.sync()
             _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         }
@@ -647,7 +656,7 @@ class HomeViewModel(
     /** Discards the cloud sync data and re-uploads local fresh (recovery for a corrupt/incompatible
      *  cloud DB). Errors surface via the notification center from [SyncRepository]. */
     fun resetCloudData() {
-        viewModelScope.launch { syncRepository.resetCloudData() }
+        viewModelScope.launch(dispatcher) { syncRepository.resetCloudData() }
     }
 
     /**
