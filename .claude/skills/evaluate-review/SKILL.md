@@ -306,6 +306,33 @@ Output the evaluation in this exact format:
 Branch on `comment_type` and, for `pr_review`, on whether `associated_comments` (gathered in
 Step 4) is non-empty, into one of two cases below (Case A / Case B).
 
+**Common rule — reviewer-facing reply for "no change needed" outcomes**: whenever a comment or
+review (or, in Case B, an individual associated comment) is judged **Invalid**, or **Valid**/
+**Partially Valid** but requiring no code change, in addition to whatever else this step
+specifies, output a suggested reply comment for the reviewer as a fenced ```markdown``` code
+block so the user can copy it directly into GitHub — this skill never posts it automatically.
+Compose it from the Step 7 **Reasoning**, rewritten as plain, polite prose suitable for a public
+PR reply (do not surface internal labels like "Confidence: Low" verbatim). Cover: (1) a brief
+nod to what the comment/review pointed out, (2) why no change is being made, and (3) — when the
+verdict is **Partially Valid** — which part is being left as-is versus already covered elsewhere.
+Match the language of the reviewer's own text: identify the natural language the original `body`
+is written in, and write the reply in that same language — this is not limited to specific languages; a comment in English, Japanese, French, or any other language gets a reply in that language.
+English and Japanese are simply the two most common cases in this repo (examples of each below).
+If the body mixes languages or its language cannot be confidently identified (e.g. it's too short
+or is mostly code with little natural-language text), fall back to English.
+
+For example, in English:
+
+```markdown
+Thanks for the review. After checking, I've concluded no change is needed here because 〈reason〉.
+```
+
+or in Japanese:
+
+```markdown
+ご指摘ありがとうございます。確認した結果、〈理由〉のため、現状のコードに変更は不要と判断しました。
+```
+
 #### Case A — `review_comment`, or `pr_review` with no `associated_comments`
 
 This case is unchanged from before: it always ends in a plan awaiting user approval, and
@@ -337,6 +364,8 @@ If the review is **Invalid** or no code change is required, state clearly:
 ```text
 No implementation plan is needed.
 ```
+
+Then output the reviewer-facing reply per the Common rule above.
 
 #### Case B — `pr_review` with one or more `associated_comments` (automatic fix & commit)
 
@@ -376,7 +405,8 @@ For each comment in `associated_comments`, in order:
    not a per-comment approval gate: the one-time run confirmation above already authorizes
    proceeding, so continue immediately to step 2 or 3 below without waiting for a reply.
 2. If **Invalid**, or valid but no code change is required: skip this comment — implement
-   nothing, commit nothing. Note it (with the reason) for the closing summary.
+   nothing, commit nothing. Output the reviewer-facing reply for this comment per the Common
+   rule above. Note it (with the reason) for the closing summary.
 3. If **Valid** or **Partially Valid**: explore the codebase as needed to understand the
    surrounding architecture (no `EnterPlanMode`/`ExitPlanMode`, and no further interactive
    approval per comment — the one-time run confirmation above already covers the whole run),
