@@ -176,8 +176,14 @@ class HomeViewModel(
         }
             .flatMapLatest { (f, unread, newest, pinned) ->
                 articleRepository.watchArticles(f).map { list ->
-                    val existingIds = list.mapTo(HashSet(list.size)) { it.id }
-                    val extra = pinned.values.filter { it.id !in existingIds }
+                    // Nothing pinned is the common case, and then the id set has no reader — skip
+                    // building it rather than hashing every article's id on every emission.
+                    val extra = if (pinned.isEmpty()) {
+                        emptyList()
+                    } else {
+                        val existingIds = list.mapTo(HashSet(list.size)) { it.id }
+                        pinned.values.filter { it.id !in existingIds }
+                    }
                     val merged = if (extra.isEmpty()) list else (list + extra).sortedWith(
                         compareByDescending<Articles> { it.published_at ?: 0L }
                             .thenByDescending { it.created_at }
@@ -188,7 +194,9 @@ class HomeViewModel(
                     } else {
                         merged
                     }
-                    if (newest) filtered else filtered.reversed()
+                    // asReversed() is a view, not a second full copy: `filtered` is freshly derived
+                    // per emission and never mutated afterwards, so it reads identically.
+                    if (newest) filtered else filtered.asReversed()
                 }
             }
             .flowOn(dispatcher)

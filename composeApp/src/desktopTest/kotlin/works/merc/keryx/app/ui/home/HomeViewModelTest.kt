@@ -790,6 +790,47 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun toggleSortReversesTheArticleListOrder() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 3L, createdAt = 3L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a3", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a1", "a2", "a3"), vm.articles.value.map { it.id })
+
+        vm.toggleSort()
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a3", "a2", "a1"), vm.articles.value.map { it.id })
+
+        vm.toggleSort()
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a1", "a2", "a3"), vm.articles.value.map { it.id })
+    }
+
+    @Test
+    fun oldestFirstOrderHoldsWithAPinnedArticleMergedIn() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 3L, createdAt = 3L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a3", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        vm.setUnreadOnly(true)
+        vm.toggleSort()
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a3", "a2", "a1"), vm.articles.value.map { it.id })
+
+        // Selecting a2 marks it read; it stays pinned and keeps its oldest-first position.
+        vm.selectArticle(db.articlesQueries.getById("a2").executeAsOne())
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a3", "a2", "a1"), vm.articles.value.map { it.id })
+    }
+
+    @Test
     fun searchFilterEncodeDecodeRoundTrips() {
         assertEquals("search", ArticleFilter.Search.encode())
         assertEquals(ArticleFilter.Search, decodeArticleFilter("search"))
