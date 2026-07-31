@@ -92,17 +92,20 @@ to repeat commit messages.
    git diff --stat <tag>..HEAD
    ```
 
-5. **Key diffs for analysis**: inspect the diff for every path listed in the diff statistics
-   above (step 4), not just specific extensions or directories — release-note categorization and
-   version-bump analysis need visibility into every changed file, not only Kotlin/SQL/docs/CI.
+5. **Key diffs for analysis**: read the complete diff for the whole range — every changed path
+   listed in step 4 is covered, not just specific extensions or directories, since release-note
+   categorization and version-bump analysis need visibility into every changed file, not only
+   Kotlin/SQL/docs/CI.
 
    ```bash
-   git diff <tag>..HEAD -- '<path>'
+   git diff <tag>..HEAD
    ```
 
-   Run this for each changed path. If the total diff is too large to read in full, fall back to
-   the `--stat` summary for the less-central files and prioritize reading the files most likely to
-   drive release-note content in full.
+   Never re-embed a changed path into a shell command string to inspect it individually — a
+   filename can contain characters (quotes, backticks, `$(...)`) that get reinterpreted as shell
+   syntax, which would violate the read-only safety rule above. If the full diff is too large to
+   read at once, fall back to the `--stat` summary (step 4) for the less-central files and
+   prioritize reading the files most likely to drive release-note content in full.
 
 6. **Remote URL** for PR/compare links (optional):
 
