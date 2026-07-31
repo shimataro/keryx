@@ -35,6 +35,11 @@ class SetupViewModel(
     var canCancelConnect by mutableStateOf(false)
         private set
 
+    /**
+     * Selects local-only storage and completes setup after persisting the setting.
+     *
+     * @param onDone Invoked after the updated setting has been flushed to durable storage.
+     */
     fun chooseLocalOnly(onDone: () -> Unit) {
         viewModelScope.launch {
             settingsRepository.mutateLocalSettings { it.copy(cloudStorageType = null) }

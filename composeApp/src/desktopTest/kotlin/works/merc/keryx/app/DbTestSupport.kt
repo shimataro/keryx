@@ -34,6 +34,9 @@ class CountingSqlDriver(private val delegate: SqlDriver) : SqlDriver {
         return delegate.executeQuery(identifier, sql, mapper, parameters, binders)
     }
 
+    /**
+     * Executes a SQL statement using the delegated driver.
+     */
     override fun execute(
         identifier: Int?,
         sql: String,
@@ -41,13 +44,35 @@ class CountingSqlDriver(private val delegate: SqlDriver) : SqlDriver {
         binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
     ) = delegate.execute(identifier, sql, parameters, binders)
 
-    override fun newTransaction() = delegate.newTransaction()
+    /**
+ * Starts a new database transaction.
+ *
+ * @return The new database transaction.
+ */
+override fun newTransaction() = delegate.newTransaction()
     override fun currentTransaction() = delegate.currentTransaction()
-    override fun addListener(vararg queryKeys: String, listener: app.cash.sqldelight.Query.Listener) =
+    /**
+         * Registers a listener for changes to the specified query keys.
+         *
+         * @param queryKeys The query keys whose changes trigger the listener.
+         * @param listener The listener to register.
+         */
+        override fun addListener(vararg queryKeys: String, listener: app.cash.sqldelight.Query.Listener) =
         delegate.addListener(queryKeys = queryKeys, listener = listener)
-    override fun removeListener(vararg queryKeys: String, listener: app.cash.sqldelight.Query.Listener) =
+    /**
+         * Removes a listener from the specified query keys.
+         *
+         * @param queryKeys The query keys associated with the listener.
+         * @param listener The listener to remove.
+         */
+        override fun removeListener(vararg queryKeys: String, listener: app.cash.sqldelight.Query.Listener) =
         delegate.removeListener(queryKeys = queryKeys, listener = listener)
-    override fun notifyListeners(vararg queryKeys: String) = delegate.notifyListeners(queryKeys = queryKeys)
+    /**
+ * Notifies registered listeners for the specified query keys.
+ *
+ * @param queryKeys The query keys associated with the changed data.
+ */
+override fun notifyListeners(vararg queryKeys: String) = delegate.notifyListeners(queryKeys = queryKeys)
     override fun close() = delegate.close()
 }
 
@@ -67,14 +92,19 @@ fun fileDb(): Triple<File, SqlDriver, KeryxDatabase> {
     return Triple(file, driver, KeryxDatabase(driver))
 }
 
-/** A ready FtsManager bound to the given test driver. */
+/**
+ * Creates an FtsManager for the supplied SQL driver.
+ *
+ * @return The configured FtsManager.
+ */
 fun ftsManager(driver: SqlDriver): FtsManager = FtsManager(driver)
 
 /**
- * An [FtsManager] whose index has already been created and backfilled, for the many tests whose
- * bodies are not suspend. Mirrors what `main.kt` does at startup, where the index-writer mutex
- * `ensureIndexed` takes is likewise uncontended.
- */
+     * Creates an [FtsManager] with its search index created and backfilled.
+     *
+     * @param driver The SQL driver used by the manager.
+     * @return An [FtsManager] with an initialized search index.
+     */
 fun ftsManagerIndexed(driver: SqlDriver): FtsManager =
     FtsManager(driver).also { manager -> runBlocking { manager.ensureIndexed() } }
 

@@ -118,6 +118,11 @@ class SyncRepository(
         syncSignals.trySend(Unit)
     }
 
+    /**
+     * Synchronizes the local database with the cloud provider.
+     *
+     * @return The synchronization result.
+     */
     suspend fun sync(): Result<Unit> {
         val result = activityCenter.trackSync { mutex.withLock { syncLocked() } }
         emitErrorNotification(result)
@@ -263,9 +268,10 @@ class SyncRepository(
     }
 
     /**
-     * First-ever upload: creates the cloud file with a create-only write (never an unconditional
-     * overwrite). Returns [SyncConflictException] if the file already exists, so the caller can fall
-     * back to the merge path rather than destroy the existing data.
+     * Creates the initial cloud database without overwriting an existing file.
+     *
+     * @return A successful result when the database is created, or an error result when creation fails,
+     * including a conflict if the cloud file already exists.
      */
     private suspend fun createFresh(cloud: CloudStorage): Result<Unit> {
         val bytes = when (val b = snapshotBytesForUpload()) {
@@ -281,7 +287,13 @@ class SyncRepository(
         }
     }
 
-    /** Writes the downloaded cloud DB to a temp file and merges it into the local DB. */
+    /**
+     * Merges downloaded cloud database data into the local database and updates affected search and query listeners.
+     *
+     * @param data The downloaded cloud database contents.
+     * @return A successful result when the merge completes, or an error describing why it failed.
+     * @throws CancellationException If the coroutine is cancelled during the merge.
+     */
     private suspend fun mergeCloud(data: ByteArray): Result<Unit> {
         val tempPath = FileIO.join(tempDir, "cloud_keryx.db")
         try {

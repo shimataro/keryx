@@ -95,12 +95,7 @@ class FtsManager(private val driver: SqlDriver) {
     }
 
     /**
-     * Rebuilds the whole index from `articles` (the `'rebuild'` command deletes all index content and
-     * repopulates it in a single atomic statement — a concurrent reader never sees a half-built index,
-     * and with `busy_timeout` set it waits rather than erroring). Used only for the rare healing passes
-     * (the daily idle pass); the table is assumed to already exist (created once at startup
-     * by [ensureIndexed], and never dropped from the live DB). Also sweeps stale entries left by
-     * cache-cleanup article deletions.
+     * Rebuilds the full-text index from the current articles, including removing entries for deleted articles.
      */
     suspend fun rebuildIndex(): Unit = indexWriteMutex.withLock {
         driver.execute(null, "INSERT INTO articles_fts(articles_fts) VALUES('rebuild');", 0)

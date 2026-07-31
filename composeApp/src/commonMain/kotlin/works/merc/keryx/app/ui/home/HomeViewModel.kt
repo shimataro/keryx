@@ -312,6 +312,11 @@ class HomeViewModel(
     )
     val collapsedFolderIds: StateFlow<Set<String>> = _collapsedFolderIds.asStateFlow()
 
+    /**
+     * Toggles whether a folder is collapsed and persists the updated state.
+     *
+     * @param folderId The identifier of the folder to toggle.
+     */
     fun toggleFolderCollapsed(folderId: String) {
         _collapsedFolderIds.value = _collapsedFolderIds.value.let {
             if (folderId in it) it - folderId else it + folderId
@@ -328,6 +333,12 @@ class HomeViewModel(
     fun getScrollPosition(articleId: String): Int =
         _scrollPositions.value.firstOrNull { it.articleId == articleId }?.scrollOffset ?: 0
 
+    /**
+     * Saves the scroll offset for an article and retains only the most recent remembered positions.
+     *
+     * @param articleId The identifier of the article.
+     * @param offset The article's scroll offset.
+     */
     fun saveScrollPosition(articleId: String, offset: Int) {
         val updated = (
             listOf(ArticleScrollPosition(articleId, offset)) +
@@ -372,7 +383,11 @@ class HomeViewModel(
         _articleListPaneWidth.value = width.coerceIn(ARTICLE_LIST_PANE_MIN_WIDTH.toDouble(), ARTICLE_LIST_PANE_MAX_WIDTH.toDouble())
     }
 
-    // --- Selection / navigation ---
+    /**
+     * Selects the active article filter and clears the current article selection and pinned read articles.
+     *
+     * @param filter The article filter to select.
+     */
 
     fun selectFilter(filter: ArticleFilter) {
         if (filter == _filter.value) return
@@ -382,6 +397,11 @@ class HomeViewModel(
         settingsRepository.mutateLocalSettings { it.copy(lastFilter = filter.encode(), lastArticleId = null) }
     }
 
+    /**
+     * Selects an article and marks it as read.
+     *
+     * @param article The article to select.
+     */
     fun selectArticle(article: Articles) {
         if (article.is_read == 0L) {
             _pinnedReadArticles.update { it + (article.id to article.copy(is_read = 1L)) }
@@ -500,6 +520,11 @@ class HomeViewModel(
         }
     }
 
+    /**
+     * Enables or disables filtering the article list to unread articles.
+     *
+     * @param value Whether to show only unread articles.
+     */
     fun setUnreadOnly(value: Boolean) {
         if (value == _unreadOnly.value) return
         if (value) {
@@ -510,9 +535,9 @@ class HomeViewModel(
     }
 
     /**
-     * Pinned-read map keeping only the currently selected article (if already read). Used
-     * wherever an external data change (refresh, sync, unread-only toggle) would otherwise wipe
-     * pins that other in-view articles no longer need, but the selected one should survive.
+     * Preserves the selected read article for continued display when it remains available.
+     *
+     * @return A map containing the selected article if it is read and not deleted; an empty map otherwise.
      */
     private fun pinnedReadArticlesKeepingSelected(): Map<String, Articles> {
         val selected = _selectedArticle.value
@@ -538,16 +563,29 @@ class HomeViewModel(
         }
     }
 
+    /**
+     * Toggles the article sort order and persists the updated preference.
+     */
     fun toggleSort() {
         _newestFirst.value = !_newestFirst.value
         settingsRepository.mutateLocalSettings { it.copy(lastNewestFirst = _newestFirst.value) }
     }
 
-    fun getInitialFocusedPane(): HomePane =
+    /**
+             * Retrieves the last focused home pane from local settings.
+             *
+             * @return The previously focused pane, or [HomePane.ArticleList] when no valid saved pane exists.
+             */
+            fun getInitialFocusedPane(): HomePane =
         settingsRepository.getLocalSettings().lastFocusedPane
             ?.let { raw -> HomePane.entries.firstOrNull { it.name == raw } }
             ?: HomePane.ArticleList
 
+    /**
+     * Sets the pane that should receive focus.
+     *
+     * @param pane The pane to focus.
+     */
     fun setFocusedPane(pane: HomePane) {
         settingsRepository.mutateLocalSettings { it.copy(lastFocusedPane = pane.name) }
     }
@@ -598,6 +636,11 @@ class HomeViewModel(
     /** True while a cloud sync (manual, debounced, or background) is in flight. */
     val syncing: StateFlow<Boolean> = activityCenter.syncing
 
+    /**
+     * Refreshes the specified feed.
+     *
+     * @param feed The feed to refresh.
+     */
     fun refreshFeed(feed: Feeds) {
         viewModelScope.launch {
             withContext(dispatcher) { activityCenter.trackFeedRefresh { feedRepository.refreshFeed(feed) } }
@@ -632,6 +675,9 @@ class HomeViewModel(
         }
     }
 
+    /**
+     * Synchronizes local data with the cloud.
+     */
     fun sync() {
         _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         // IO off the UI thread — see refreshAll(): a sync writes the downloaded cloud DB to disk,
@@ -706,6 +752,11 @@ class HomeViewModel(
         folderRepository.updateFolder(id, name.trim())
     }
 
+    /**
+     * Deletes a folder and removes it from the collapsed-folder state.
+     *
+     * @param id The identifier of the folder to delete.
+     */
     fun deleteFolder(id: String) {
         folderRepository.deleteFolder(id)
         if (_filter.value == ArticleFilter.Folder(id)) selectFilter(ArticleFilter.All)
@@ -713,7 +764,14 @@ class HomeViewModel(
         settingsRepository.mutateLocalSettings { it.copy(collapsedFolderIds = _collapsedFolderIds.value) }
     }
 
-    fun moveFeed(feedId: String, folderId: String?, targetFeedId: String? = null) =
+    /**
+         * Moves a feed into a folder and optionally positions it relative to another feed.
+         *
+         * @param feedId The identifier of the feed to move.
+         * @param folderId The destination folder identifier, or `null` to remove the feed from a folder.
+         * @param targetFeedId The identifier of the feed to position the moved feed relative to, or `null` to use the default position.
+         */
+        fun moveFeed(feedId: String, folderId: String?, targetFeedId: String? = null) =
         feedRepository.moveFeed(feedId, folderId, targetFeedId)
 
     /**

@@ -97,7 +97,11 @@ class SettingsRepository(
         syncScheduler.scheduleSync()
     }
 
-    // --- Device-local settings (not synced) ---
+    /**
+ * Gets the current device-local settings.
+ *
+ * @return The current local settings.
+ */
 
     fun getLocalSettings(): LocalSettings = _localSettings.value
 
@@ -115,15 +119,9 @@ class SettingsRepository(
     }
 
     /**
-     * Applies [transform] to the current settings atomically, then schedules the same coalesced disk
-     * write as [saveLocalSettings].
+     * Updates local settings using the current value and schedules persistence.
      *
-     * This is the safe way to change individual fields. Reading with [getLocalSettings], copying, and
-     * passing the result to [saveLocalSettings] is a read-modify-write, and these settings are written
-     * from both the UI thread (theme, pane widths, selection, sort) and background coroutines (cache
-     * cleanup, the FTS rebuild gate, the update check) — so two writers each holding a stale snapshot
-     * silently drop each other's field. Losing `lastFtsRebuiltAt` is the worst case: its 24h gate
-     * never advances, so the full O(all indexed text) FTS rebuild re-runs every background cycle.
+     * @param transform The function that produces the updated settings.
      */
     fun mutateLocalSettings(transform: (LocalSettings) -> LocalSettings) {
         _localSettings.update(transform)

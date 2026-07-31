@@ -631,9 +631,9 @@ private suspend fun backgroundUpdateLoop(koin: org.koin.core.Koin) {
 }
 
 /**
- * Runs [UpdateChecker.check] and records [LocalSettings.lastUpdateCheckAt]. This is the only
- * place that writes that timestamp — the Settings screen's manual "check for update" button calls
- * [UpdateChecker.check] directly instead, so it never perturbs the automatic schedule.
+ * Checks for an available application update and notifies the user when one is found.
+ *
+ * @param koin The dependency injection container used to resolve update and notification services.
  */
 private suspend fun checkForUpdateAndNotify(koin: org.koin.core.Koin) {
     val settingsRepository = koin.get<SettingsRepository>()
