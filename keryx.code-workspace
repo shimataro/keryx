@@ -7,6 +7,9 @@
 	"settings": {
 		"claudeCode.respectGitIgnore": true,
 		"claudeCode.initialPermissionMode": "plan",
+    "markdownlint.config": {
+      "MD024": false,
+    },
 	},
 	"extensions": {
 		"recommendations": [
