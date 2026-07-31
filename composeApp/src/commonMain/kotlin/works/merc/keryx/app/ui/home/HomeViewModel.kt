@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MAX_WIDTH
 import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.ArticleFilter
@@ -598,8 +599,8 @@ class HomeViewModel(
     val syncing: StateFlow<Boolean> = activityCenter.syncing
 
     fun refreshFeed(feed: Feeds) {
-        viewModelScope.launch(dispatcher) {
-            activityCenter.trackFeedRefresh { feedRepository.refreshFeed(feed) }
+        viewModelScope.launch {
+            withContext(dispatcher) { activityCenter.trackFeedRefresh { feedRepository.refreshFeed(feed) } }
         }
     }
 
@@ -609,18 +610,22 @@ class HomeViewModel(
     fun refreshAll() {
         if (activityCenter.feedRefreshing.value) return
         _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
-        // Off the UI thread: this body is a full feed refresh (fetch, parse, per-feed DB writes,
-        // FTS indexing) followed by a sync (whole-DB write, ATTACH merge, VACUUM INTO, whole-DB
-        // read). `viewModelScope` is Dispatchers.Main.immediate, so a launch naming no dispatcher
-        // ran all of that inline on the AWT EDT. Mirrors what SettingsViewModel already does for
-        // its own equivalent calls. Feed writes stay serialized: refreshAll() applies them in one
-        // sequential loop internally, and Main was never serialized against dbWriteDispatcher.
-        viewModelScope.launch(dispatcher) {
-            val results = activityCenter.trackFeedRefresh { feedRepository.refreshAll() }
+        // The heavy work goes off the UI thread: a full feed refresh (fetch, parse, per-feed DB
+        // writes, FTS indexing) followed by a sync (whole-DB write, ATTACH merge, VACUUM INTO,
+        // whole-DB read). `viewModelScope` is Dispatchers.Main.immediate, so a launch naming no
+        // dispatcher ran all of that inline on the AWT EDT. Only the IO is moved — the coroutine
+        // itself stays on Main so the state writes below remain confined there, as they were, rather
+        // than racing the UI's own writes to the same flows. Mirrors what SettingsViewModel already
+        // does for its equivalent calls. Feed writes stay serialized either way: refreshAll()
+        // applies them in one sequential loop internally.
+        viewModelScope.launch {
+            val results = withContext(dispatcher) {
+                activityCenter.trackFeedRefresh { feedRepository.refreshAll() }
+            }
             newArticleNotifier.notifyIfEnabled(
                 results, settingsRepository.getLocalSettings().notificationEnabled, notificationMessages,
             )
-            syncRepository.sync()
+            withContext(dispatcher) { syncRepository.sync() }
             // Re-trim using the selection as it stands now: it may have changed since the snapshot
             // above was taken, and the stale pre-refresh selection must not outlive it.
             _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
@@ -629,10 +634,10 @@ class HomeViewModel(
 
     fun sync() {
         _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
-        // Off the UI thread — see refreshAll(): a sync writes the downloaded cloud DB to disk,
+        // IO off the UI thread — see refreshAll(): a sync writes the downloaded cloud DB to disk,
         // runs the ATTACH merge, VACUUM INTOs a snapshot and reads it all back.
-        viewModelScope.launch(dispatcher) {
-            syncRepository.sync()
+        viewModelScope.launch {
+            withContext(dispatcher) { syncRepository.sync() }
             _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         }
     }
@@ -640,7 +645,7 @@ class HomeViewModel(
     /** Discards the cloud sync data and re-uploads local fresh (recovery for a corrupt/incompatible
      *  cloud DB). Errors surface via the notification center from [SyncRepository]. */
     fun resetCloudData() {
-        viewModelScope.launch(dispatcher) { syncRepository.resetCloudData() }
+        viewModelScope.launch { withContext(dispatcher) { syncRepository.resetCloudData() } }
     }
 
     /**
@@ -651,9 +656,13 @@ class HomeViewModel(
      * Service / Credential Manager round trip (Linux / Windows) — or, on the first macOS call, a
      * `security` subprocess spawn — on the UI thread on *every* recomposition of the feed list and
      * the menu bar. Re-evaluated only when the selected provider changes, which is the only thing
-     * that can change the answer: every connect / disconnect path writes `cloudStorageType`
+     * that can change it deliberately: every connect / disconnect path writes `cloudStorageType`
      * (SettingsViewModel, SetupViewModel). Gating on that one field matters — `localSettings` itself
      * is rewritten by unrelated state such as pane widths, which change on every drag frame.
+     *
+     * The trade-off versus the getter this replaced: if the OS secret store is unreadable at seed
+     * time but becomes readable later, this stays `false` until the provider selection changes again,
+     * where the getter would have healed on the next recomposition.
      */
     val cloudConnected: StateFlow<Boolean> =
         settingsRepository.localSettings
