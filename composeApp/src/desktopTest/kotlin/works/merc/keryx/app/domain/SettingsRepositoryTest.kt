@@ -216,4 +216,45 @@ class SettingsRepositoryTest {
             driver.close()
         }
     }
+
+    /**
+     * Local settings are written from both the UI thread (theme, pane widths, selection) and
+     * background coroutines (cache cleanup, the FTS rebuild gate, the update check), so two writers
+     * can each hold a snapshot taken before the other's write. This stages that interleaving
+     * deterministically and pins why [SettingsRepository.mutateLocalSettings] exists: it must apply
+     * its transform to the value as it stands, not to a snapshot captured earlier.
+     */
+    @Test
+    fun mutateLocalSettingsAppliesToTheCurrentValueSoConcurrentFieldWritesSurvive() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db)
+
+            // The hazard, staged: a UI writer reads the settings, a background coroutine records the
+            // FTS rebuild time, and only then does the UI writer save its own copy of the snapshot.
+            val staleSnapshot = repo.getLocalSettings()
+            assertNull(staleSnapshot.lastFtsRebuiltAt)
+            repo.mutateLocalSettings { it.copy(lastFtsRebuiltAt = 111L) }
+            repo.saveLocalSettings(staleSnapshot.copy(lastArticleId = "a1"))
+            assertNull(
+                repo.getLocalSettings().lastFtsRebuiltAt,
+                "a whole-snapshot save drops a field written after the snapshot was taken — the " +
+                    "reason production code must not read-copy-write these settings",
+            )
+
+            // The same interleaving through mutateLocalSettings keeps both fields.
+            repo.mutateLocalSettings { it.copy(lastFtsRebuiltAt = 222L) }
+            repo.mutateLocalSettings { it.copy(lastArticleId = "a2") }
+
+            val result = repo.getLocalSettings()
+            assertEquals("a2", result.lastArticleId, "the UI writer's field must be applied")
+            assertEquals(
+                222L,
+                result.lastFtsRebuiltAt,
+                "the background writer's field must survive a UI write that raced it",
+            )
+        } finally {
+            driver.close()
+        }
+    }
 }

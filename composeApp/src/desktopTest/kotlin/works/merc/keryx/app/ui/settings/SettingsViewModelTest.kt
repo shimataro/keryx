@@ -62,6 +62,7 @@ import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.singleProviderCloudSession
 import works.merc.keryx.app.ui.home.formatTimestamp
+import works.merc.keryx.app.ftsManagerIndexed
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -183,7 +184,7 @@ class SettingsViewModelTest {
         val syncScheduler = SyncScheduler {}
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so subscribeFeed's indexMissing() works.
-        val ftsManager = FtsManager(driver).also { it.ensureIndexed() }
+        val ftsManager = ftsManagerIndexed(driver)
         val feedRepository = FeedRepository(
             db, feedFetcher, missingFaviconResolver(), articleRepository, ftsManager, syncScheduler,
             NotificationCenter(), SettingsViewModelTestNotificationMessages(), clock, Dispatchers.Unconfined,

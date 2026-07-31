@@ -13,6 +13,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -96,17 +97,34 @@ class SettingsRepository(
         syncScheduler.scheduleSync()
     }
 
-    // --- Device-local settings (not synced) ---
+    /**
+ * Gets the current device-local settings.
+ *
+ * @return The current local settings.
+ */
 
     fun getLocalSettings(): LocalSettings = _localSettings.value
 
     /**
-     * Updates the in-memory settings immediately and schedules an off-thread, coalesced disk write.
+     * Replaces the in-memory settings wholesale and schedules an off-thread, coalesced disk write.
      * The disk write may lag the return; call [flush] when the value must be on disk before the
      * process can exit (see [flush]'s call sites: the JVM shutdown hook and setup completion).
+     *
+     * Only for writing a settings object that was not derived from the current one. To change some
+     * fields and keep the rest, use [mutateLocalSettings] — see there for why.
      */
     fun saveLocalSettings(settings: LocalSettings) {
         _localSettings.value = settings
+        saveSignals.trySend(Unit)
+    }
+
+    /**
+     * Updates local settings using the current value and schedules persistence.
+     *
+     * @param transform The function that produces the updated settings.
+     */
+    fun mutateLocalSettings(transform: (LocalSettings) -> LocalSettings) {
+        _localSettings.update(transform)
         saveSignals.trySend(Unit)
     }
 

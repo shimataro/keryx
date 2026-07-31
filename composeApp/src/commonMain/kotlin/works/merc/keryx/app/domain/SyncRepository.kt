@@ -1,14 +1,15 @@
 package works.merc.keryx.app.domain
 
 import app.cash.sqldelight.db.SqlDriver
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
@@ -58,8 +59,41 @@ class SyncRepository(
 ) : SyncScheduler {
 
     private val mutex = Mutex()
-    private var debounceJob: Job? = null
     private val _lastSyncError = MutableStateFlow<String?>(null)
+
+    /**
+     * Debounce signals, coalesced. [scheduleSync] is called from the UI thread (tag / folder / feed
+     * edits), from `HomeViewModel`'s single-threaded write dispatcher (every mark-as-read / star) and
+     * from `Dispatchers.Default` (once per feed in a refresh). Cancelling and reassigning a shared
+     * `Job` field from three dispatchers can drop a reference, leaving a pending debounce that
+     * nothing can cancel — so a write burst fires duplicate full
+     * download → merge → `VACUUM INTO` → upload cycles. (Integrity is never at risk: [sync] holds
+     * [mutex] and the upload is rev-checked. The cost is the duplicated work.) A conflated channel
+     * with the single consumer below keeps the same trailing-debounce semantics with no shared
+     * mutable state, mirroring how `SettingsRepository` coalesces its own disk write.
+     */
+    private val syncSignals = Channel<Unit>(capacity = Channel.CONFLATED)
+
+    init {
+        scope.launch {
+            for (signal in syncSignals) {
+                // Re-arm as long as calls keep arriving, so the window is measured from the last one.
+                while (withTimeoutOrNull(SYNC_DEBOUNCE_MS) { syncSignals.receive() } != null) {
+                    // Another scheduleSync() landed inside the window; restart it.
+                }
+                // This is the *only* consumer, so a throw escaping here would end debounced syncing
+                // for the rest of the process while scheduleSync() kept succeeding into a channel
+                // nobody reads. sync() is not exception-proof (a bare SQLDelight write in
+                // setSyncState, resource loading in emitErrorNotification), which is why its other
+                // call sites in main.kt guard the same way.
+                runCatching { sync() }
+                    .onFailure { e ->
+                        if (e is CancellationException) throw e
+                        Log.error(TAG, "Debounced sync failed", e)
+                    }
+            }
+        }
+    }
 
     /**
      * Why the last sync failed, or null when it succeeded (or none has run yet) — the same localized
@@ -81,13 +115,14 @@ class SyncRepository(
      */
     override fun scheduleSync() {
         if (cloudProvider() == null) return
-        debounceJob?.cancel()
-        debounceJob = scope.launch {
-            delay(SYNC_DEBOUNCE_MS)
-            sync()
-        }
+        syncSignals.trySend(Unit)
     }
 
+    /**
+     * Synchronizes the local database with the cloud provider.
+     *
+     * @return The synchronization result.
+     */
     suspend fun sync(): Result<Unit> {
         val result = activityCenter.trackSync { mutex.withLock { syncLocked() } }
         emitErrorNotification(result)
@@ -233,9 +268,10 @@ class SyncRepository(
     }
 
     /**
-     * First-ever upload: creates the cloud file with a create-only write (never an unconditional
-     * overwrite). Returns [SyncConflictException] if the file already exists, so the caller can fall
-     * back to the merge path rather than destroy the existing data.
+     * Creates the initial cloud database without overwriting an existing file.
+     *
+     * @return A successful result when the database is created, or an error result when creation fails,
+     * including a conflict if the cloud file already exists.
      */
     private suspend fun createFresh(cloud: CloudStorage): Result<Unit> {
         val bytes = when (val b = snapshotBytesForUpload()) {
@@ -251,8 +287,14 @@ class SyncRepository(
         }
     }
 
-    /** Writes the downloaded cloud DB to a temp file and merges it into the local DB. */
-    private fun mergeCloud(data: ByteArray): Result<Unit> {
+    /**
+     * Merges downloaded cloud database data into the local database and updates affected search and query listeners.
+     *
+     * @param data The downloaded cloud database contents.
+     * @return A successful result when the merge completes, or an error describing why it failed.
+     * @throws CancellationException If the coroutine is cancelled during the merge.
+     */
+    private suspend fun mergeCloud(data: ByteArray): Result<Unit> {
         val tempPath = FileIO.join(tempDir, "cloud_keryx.db")
         try {
             FileIO.writeBytes(tempPath, data)
@@ -279,6 +321,12 @@ class SyncRepository(
                 Log.warn(TAG, "Cloud DB merge aborted: ${e.message}")
             }
             return Result.Err(e)
+        } catch (e: CancellationException) {
+            // `indexMissing()` suspends on the FTS index-writer mutex inside this `try`, so the
+            // catch-all below would otherwise turn a cancellation into a "merge failed" result —
+            // and swallow it after the merge had already committed, skipping the notifyListeners
+            // that surfaces those writes to the SQLDelight query flows.
+            throw e
         } catch (e: Throwable) {
             val msg = e.message ?: ""
             // Distinguish a permanently-unusable cloud DB (corrupt file or incompatible/foreign

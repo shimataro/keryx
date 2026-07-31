@@ -70,7 +70,17 @@ Index maintenance is two-tier:
 - **Healing full rebuild (`rebuildIndex()` = `'rebuild'`)**:
   Executed only in the daily idle pass in `main.kt` (`maybeRebuildFtsIndex`, gated by `local_settings.lastFtsRebuiltAt` 24h gate + `ActivityCenter` idle). Rebuilds stale existing rows (body text updated since incremental indexing). `'rebuild'` is a single atomic statement (readers see only before or after) + `busy_timeout` wait, so running searches do not regress to zero results either.
 
-On startup, `FtsManager.ensureIndexed()` (initial creation + unindexed row incremental insert) is called as before.
+The two index writers are **mutually exclusive**: `FtsManager` serializes `indexMissing()` and
+`rebuildIndex()` behind an internal mutex (both are therefore `suspend`). The daily pass's idle gate is a
+lock-free `ActivityCenter` check, so a refresh starting just after it passes would otherwise overlap the
+rebuild — always wasted work (a rebuild subsumes an incremental insert), and on a corpus whose rebuild
+outlasts `busy_timeout`, a raw `SQLiteException` no caller catches. Searches are deliberately **not**
+serialized: they still rely on `'rebuild'` being a single atomic statement plus the `busy_timeout` wait.
+
+On startup, `FtsManager.ensureIndexed()` (initial creation + unindexed row incremental insert) is called as
+before, from a `runBlocking` in `main.kt` — the window must not open on an absent index. The writer mutex
+is coroutine-based and, that early, can only be held briefly by an `.opml` import dispatched moments
+before, so blocking the main thread on it cannot deadlock.
 
 ## Cloud Authentication (OAuth PKCE + Offline Access)
 

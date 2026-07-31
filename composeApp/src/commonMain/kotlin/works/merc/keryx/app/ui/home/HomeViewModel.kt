@@ -6,6 +6,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.launchIn
@@ -24,6 +26,7 @@ import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MAX_WIDTH
 import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.ArticleFilter
@@ -52,11 +55,14 @@ import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
 
-private data class ArticlesQueryParams(
+/**
+ * A repository article list tagged with the filter that produced it, so the display transform can
+ * apply filter-dependent rules (e.g. the starred exemption) against the right filter even though
+ * it no longer runs inside the `flatMapLatest` that switched to that filter.
+ */
+private data class FilteredArticles(
     val filter: ArticleFilter,
-    val unreadOnly: Boolean,
-    val newestFirst: Boolean,
-    val pinnedReadArticles: Map<String, Articles>,
+    val articles: List<Articles>,
 )
 
 /** Debounced FTS results tagged with the query that produced them (see [HomeViewModel.searching]). */
@@ -81,8 +87,9 @@ class HomeViewModel(
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     // Imperative read/star DB writes run here instead of the UI thread. Single-threaded so writes
     // stay serialized (one writer, as they were on the UI thread) — the JVM SQLite driver opens a
-    // fresh connection per statement with no busy_timeout, so concurrent writes could hit
-    // SQLITE_BUSY. UI state is updated optimistically before the write is dispatched.
+    // fresh connection per statement, so concurrent writes would contend for the write lock and
+    // only avoid SQLITE_BUSY by burning the busy_timeout DatabaseDriverFactory sets. UI state is
+    // updated optimistically before the write is dispatched.
     private val dbWriteDispatcher: CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1),
 ) : ViewModel() {
 
@@ -170,27 +177,37 @@ class HomeViewModel(
     // so the list doesn't shift under the user while reading down an unread list.
     private val _pinnedReadArticles = MutableStateFlow<Map<String, Articles>>(emptyMap())
 
+    // Only the filter keys the DB query: switching filters must switch queries, but the unread-only,
+    // sort and pinned inputs are pure display transforms over whatever that query returned. Keeping
+    // them in the flatMapLatest key made every article selection (which pins the article it marks
+    // read) cancel and re-execute the whole unbounded list query.
+    private val filteredArticles: Flow<FilteredArticles> =
+        _filter.flatMapLatest { f -> articleRepository.watchArticles(f).map { FilteredArticles(f, it) } }
+
     val articles: StateFlow<List<Articles>> =
-        combine(_filter, _unreadOnly, _newestFirst, _pinnedReadArticles) { f, unread, newest, pinned ->
-            ArticlesQueryParams(f, unread, newest, pinned)
-        }
-            .flatMapLatest { (f, unread, newest, pinned) ->
-                articleRepository.watchArticles(f).map { list ->
-                    val existingIds = list.mapTo(HashSet(list.size)) { it.id }
-                    val extra = pinned.values.filter { it.id !in existingIds }
-                    val merged = if (extra.isEmpty()) list else (list + extra).sortedWith(
-                        compareByDescending<Articles> { it.published_at ?: 0L }
-                            .thenByDescending { it.created_at }
-                            .thenByDescending { it.id }
-                    )
-                    val filtered = if (unread && f != ArticleFilter.Starred) {
-                        merged.filter { it.is_read == 0L || it.id in pinned }
-                    } else {
-                        merged
-                    }
-                    if (newest) filtered else filtered.reversed()
-                }
+        combine(filteredArticles, _unreadOnly, _newestFirst, _pinnedReadArticles) { (f, list), unread, newest, pinned ->
+            // Nothing pinned is the common case, and then the id set has no reader — skip
+            // building it rather than hashing every article's id on every emission.
+            val extra = if (pinned.isEmpty()) {
+                emptyList()
+            } else {
+                val existingIds = list.mapTo(HashSet(list.size)) { it.id }
+                pinned.values.filter { it.id !in existingIds }
             }
+            val merged = if (extra.isEmpty()) list else (list + extra).sortedWith(
+                compareByDescending<Articles> { it.published_at ?: 0L }
+                    .thenByDescending { it.created_at }
+                    .thenByDescending { it.id }
+            )
+            val filtered = if (unread && f != ArticleFilter.Starred) {
+                merged.filter { it.is_read == 0L || it.id in pinned }
+            } else {
+                merged
+            }
+            // asReversed() is a view, not a second full copy: `filtered` is freshly derived
+            // per emission and never mutated afterwards, so it reads identically.
+            if (newest) filtered else filtered.asReversed()
+        }
             .flowOn(dispatcher)
             .stateIn(viewModelScope, started, emptyList())
 
@@ -295,13 +312,16 @@ class HomeViewModel(
     )
     val collapsedFolderIds: StateFlow<Set<String>> = _collapsedFolderIds.asStateFlow()
 
+    /**
+     * Toggles whether a folder is collapsed and persists the updated state.
+     *
+     * @param folderId The identifier of the folder to toggle.
+     */
     fun toggleFolderCollapsed(folderId: String) {
         _collapsedFolderIds.value = _collapsedFolderIds.value.let {
             if (folderId in it) it - folderId else it + folderId
         }
-        settingsRepository.saveLocalSettings(
-            settingsRepository.getLocalSettings().copy(collapsedFolderIds = _collapsedFolderIds.value),
-        )
+        settingsRepository.mutateLocalSettings { it.copy(collapsedFolderIds = _collapsedFolderIds.value) }
     }
 
     // --- Article scroll position memory ---
@@ -313,15 +333,19 @@ class HomeViewModel(
     fun getScrollPosition(articleId: String): Int =
         _scrollPositions.value.firstOrNull { it.articleId == articleId }?.scrollOffset ?: 0
 
+    /**
+     * Saves the scroll offset for an article and retains only the most recent remembered positions.
+     *
+     * @param articleId The identifier of the article.
+     * @param offset The article's scroll offset.
+     */
     fun saveScrollPosition(articleId: String, offset: Int) {
         val updated = (
             listOf(ArticleScrollPosition(articleId, offset)) +
                 _scrollPositions.value.filter { it.articleId != articleId }
             ).take(MAX_REMEMBERED_SCROLL_POSITIONS)
         _scrollPositions.value = updated
-        settingsRepository.saveLocalSettings(
-            settingsRepository.getLocalSettings().copy(recentArticleScrollPositions = updated),
-        )
+        settingsRepository.mutateLocalSettings { it.copy(recentArticleScrollPositions = updated) }
     }
 
     init {
@@ -340,9 +364,7 @@ class HomeViewModel(
         combine(_feedListPaneWidth, _articleListPaneWidth) { feed, article -> feed to article }
             .debounce(500)
             .onEach { (feed, article) ->
-                settingsRepository.saveLocalSettings(
-                    settingsRepository.getLocalSettings().copy(feedListPaneWidth = feed, articleListPaneWidth = article),
-                )
+                settingsRepository.mutateLocalSettings { it.copy(feedListPaneWidth = feed, articleListPaneWidth = article) }
             }.launchIn(viewModelScope)
 
         // Any write to `articles` can be a sync merge propagating a soft-delete tombstone for an
@@ -361,27 +383,32 @@ class HomeViewModel(
         _articleListPaneWidth.value = width.coerceIn(ARTICLE_LIST_PANE_MIN_WIDTH.toDouble(), ARTICLE_LIST_PANE_MAX_WIDTH.toDouble())
     }
 
-    // --- Selection / navigation ---
+    /**
+     * Selects the active article filter and clears the current article selection and pinned read articles.
+     *
+     * @param filter The article filter to select.
+     */
 
     fun selectFilter(filter: ArticleFilter) {
         if (filter == _filter.value) return
         _filter.value = filter
         _selectedArticle.value = null
         _pinnedReadArticles.value = emptyMap()
-        settingsRepository.saveLocalSettings(
-            settingsRepository.getLocalSettings().copy(lastFilter = filter.encode(), lastArticleId = null),
-        )
+        settingsRepository.mutateLocalSettings { it.copy(lastFilter = filter.encode(), lastArticleId = null) }
     }
 
+    /**
+     * Selects an article and marks it as read.
+     *
+     * @param article The article to select.
+     */
     fun selectArticle(article: Articles) {
         if (article.is_read == 0L) {
             _pinnedReadArticles.update { it + (article.id to article.copy(is_read = 1L)) }
         }
         // Optimistic: show it read immediately; persist off the UI thread.
         _selectedArticle.value = article.copy(is_read = 1L)
-        settingsRepository.saveLocalSettings(
-            settingsRepository.getLocalSettings().copy(lastArticleId = article.id),
-        )
+        settingsRepository.mutateLocalSettings { it.copy(lastArticleId = article.id) }
         viewModelScope.launch(dbWriteDispatcher) { articleRepository.markAsRead(article.id) }
     }
 
@@ -493,25 +520,34 @@ class HomeViewModel(
         }
     }
 
+    /**
+     * Enables or disables filtering the article list to unread articles.
+     *
+     * @param value Whether to show only unread articles.
+     */
     fun setUnreadOnly(value: Boolean) {
         if (value == _unreadOnly.value) return
         if (value) {
             _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         }
         _unreadOnly.value = value
-        settingsRepository.saveLocalSettings(
-            settingsRepository.getLocalSettings().copy(lastUnreadOnly = value),
-        )
+        settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnly = value) }
     }
 
     /**
-     * Pinned-read map keeping only the currently selected article (if already read). Used
-     * wherever an external data change (refresh, sync, unread-only toggle) would otherwise wipe
-     * pins that other in-view articles no longer need, but the selected one should survive.
+     * Preserves the selected read article for continued display when it remains available.
+     *
+     * @return A map containing the selected article if it is read and not deleted; an empty map otherwise.
      */
     private fun pinnedReadArticlesKeepingSelected(): Map<String, Articles> {
         val selected = _selectedArticle.value
-        return if (selected != null && selected.is_read == 1L) mapOf(selected.id to selected) else emptyMap()
+        if (selected == null || selected.is_read != 1L) return emptyMap()
+        // The selected row may have been tombstoned by a sync merge that landed while it was
+        // selected. Re-pinning it would put deleted content back into the visible list, because the
+        // `articles` merge step re-adds any pinned id missing from the repository result — the same
+        // reason [reconcilePinnedReadArticles] exists, and the same check it applies.
+        if (articleRepository.getArticleById(selected.id)?.deleted_at != null) return emptyMap()
+        return mapOf(selected.id to selected)
     }
 
     /**
@@ -527,22 +563,31 @@ class HomeViewModel(
         }
     }
 
+    /**
+     * Toggles the article sort order and persists the updated preference.
+     */
     fun toggleSort() {
         _newestFirst.value = !_newestFirst.value
-        settingsRepository.saveLocalSettings(
-            settingsRepository.getLocalSettings().copy(lastNewestFirst = _newestFirst.value),
-        )
+        settingsRepository.mutateLocalSettings { it.copy(lastNewestFirst = _newestFirst.value) }
     }
 
-    fun getInitialFocusedPane(): HomePane =
+    /**
+             * Retrieves the last focused home pane from local settings.
+             *
+             * @return The previously focused pane, or [HomePane.ArticleList] when no valid saved pane exists.
+             */
+            fun getInitialFocusedPane(): HomePane =
         settingsRepository.getLocalSettings().lastFocusedPane
             ?.let { raw -> HomePane.entries.firstOrNull { it.name == raw } }
             ?: HomePane.ArticleList
 
+    /**
+     * Sets the pane that should receive focus.
+     *
+     * @param pane The pane to focus.
+     */
     fun setFocusedPane(pane: HomePane) {
-        settingsRepository.saveLocalSettings(
-            settingsRepository.getLocalSettings().copy(lastFocusedPane = pane.name),
-        )
+        settingsRepository.mutateLocalSettings { it.copy(lastFocusedPane = pane.name) }
     }
 
     // --- Search controls ---
@@ -591,9 +636,14 @@ class HomeViewModel(
     /** True while a cloud sync (manual, debounced, or background) is in flight. */
     val syncing: StateFlow<Boolean> = activityCenter.syncing
 
+    /**
+     * Refreshes the specified feed.
+     *
+     * @param feed The feed to refresh.
+     */
     fun refreshFeed(feed: Feeds) {
         viewModelScope.launch {
-            activityCenter.trackFeedRefresh { feedRepository.refreshFeed(feed) }
+            withContext(dispatcher) { activityCenter.trackFeedRefresh { feedRepository.refreshFeed(feed) } }
         }
     }
 
@@ -603,22 +653,37 @@ class HomeViewModel(
     fun refreshAll() {
         if (activityCenter.feedRefreshing.value) return
         _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
+        // The heavy work goes off the UI thread: a full feed refresh (fetch, parse, per-feed DB
+        // writes, FTS indexing) followed by a sync (whole-DB write, ATTACH merge, VACUUM INTO,
+        // whole-DB read). `viewModelScope` is Dispatchers.Main.immediate, so a launch naming no
+        // dispatcher ran all of that inline on the AWT EDT. Only the IO is moved — the coroutine
+        // itself stays on Main so the state writes below remain confined there, as they were, rather
+        // than racing the UI's own writes to the same flows. Mirrors what SettingsViewModel already
+        // does for its equivalent calls. Feed writes stay serialized either way: refreshAll()
+        // applies them in one sequential loop internally.
         viewModelScope.launch {
-            val results = activityCenter.trackFeedRefresh { feedRepository.refreshAll() }
+            val results = withContext(dispatcher) {
+                activityCenter.trackFeedRefresh { feedRepository.refreshAll() }
+            }
             newArticleNotifier.notifyIfEnabled(
                 results, settingsRepository.getLocalSettings().notificationEnabled, notificationMessages,
             )
-            syncRepository.sync()
+            withContext(dispatcher) { syncRepository.sync() }
             // Re-trim using the selection as it stands now: it may have changed since the snapshot
             // above was taken, and the stale pre-refresh selection must not outlive it.
             _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         }
     }
 
+    /**
+     * Synchronizes local data with the cloud.
+     */
     fun sync() {
         _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
+        // IO off the UI thread — see refreshAll(): a sync writes the downloaded cloud DB to disk,
+        // runs the ATTACH merge, VACUUM INTOs a snapshot and reads it all back.
         viewModelScope.launch {
-            syncRepository.sync()
+            withContext(dispatcher) { syncRepository.sync() }
             _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         }
     }
@@ -626,10 +691,34 @@ class HomeViewModel(
     /** Discards the cloud sync data and re-uploads local fresh (recovery for a corrupt/incompatible
      *  cloud DB). Errors surface via the notification center from [SyncRepository]. */
     fun resetCloudData() {
-        viewModelScope.launch { syncRepository.resetCloudData() }
+        viewModelScope.launch { withContext(dispatcher) { syncRepository.resetCloudData() } }
     }
 
-    val cloudConnected: Boolean get() = cloudSession.isConnected()
+    /**
+     * Whether a cloud provider is selected, configured and holds tokens.
+     *
+     * A StateFlow rather than a getter because `CloudSession.isConnected()` reaches the OS secret
+     * store, and this is read straight from composition: as a getter it ran an uncached Secret
+     * Service / Credential Manager round trip (Linux / Windows) — or, on the first macOS call, a
+     * `security` subprocess spawn — on the UI thread on *every* recomposition of the feed list and
+     * the menu bar. Re-evaluated only when the selected provider changes, which is the only thing
+     * that can change it deliberately: every connect / disconnect path writes `cloudStorageType`
+     * (SettingsViewModel, SetupViewModel). Gating on that one field matters — `localSettings` itself
+     * is rewritten by unrelated state such as pane widths, which change on every drag frame.
+     *
+     * The trade-off versus the getter this replaced: if the OS secret store is unreadable at seed
+     * time but becomes readable later, this stays `false` until the provider selection changes again,
+     * where the getter would have healed on the next recomposition.
+     */
+    val cloudConnected: StateFlow<Boolean> =
+        settingsRepository.localSettings
+            .map { it.cloudStorageType }
+            .distinctUntilChanged()
+            .map { cloudSession.isConnected() }
+            .flowOn(dispatcher)
+            // Seeded synchronously so the first frame already has the real value instead of
+            // flashing the sync action off and back on.
+            .stateIn(viewModelScope, started, cloudSession.isConnected())
 
     // --- Tag actions ---
 
@@ -663,16 +752,26 @@ class HomeViewModel(
         folderRepository.updateFolder(id, name.trim())
     }
 
+    /**
+     * Deletes a folder and removes it from the collapsed-folder state.
+     *
+     * @param id The identifier of the folder to delete.
+     */
     fun deleteFolder(id: String) {
         folderRepository.deleteFolder(id)
         if (_filter.value == ArticleFilter.Folder(id)) selectFilter(ArticleFilter.All)
         _collapsedFolderIds.value = _collapsedFolderIds.value - id
-        settingsRepository.saveLocalSettings(
-            settingsRepository.getLocalSettings().copy(collapsedFolderIds = _collapsedFolderIds.value),
-        )
+        settingsRepository.mutateLocalSettings { it.copy(collapsedFolderIds = _collapsedFolderIds.value) }
     }
 
-    fun moveFeed(feedId: String, folderId: String?, targetFeedId: String? = null) =
+    /**
+         * Moves a feed into a folder and optionally positions it relative to another feed.
+         *
+         * @param feedId The identifier of the feed to move.
+         * @param folderId The destination folder identifier, or `null` to remove the feed from a folder.
+         * @param targetFeedId The identifier of the feed to position the moved feed relative to, or `null` to use the default position.
+         */
+        fun moveFeed(feedId: String, folderId: String?, targetFeedId: String? = null) =
         feedRepository.moveFeed(feedId, folderId, targetFeedId)
 
     /**

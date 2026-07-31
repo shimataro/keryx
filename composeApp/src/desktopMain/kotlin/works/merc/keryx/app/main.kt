@@ -186,8 +186,12 @@ fun main(args: Array<String>) {
     configureImageLoader(koin.get<HttpClient>(), AppDirs.cacheDir())
 
     // Startup recovery: recreate articles_fts if a previous sync dropped it, and backfill any
-    // articles missing from the index (e.g. fetched before the FTS index existed).
-    koin.get<FtsManager>().ensureIndexed()
+    // articles missing from the index (e.g. fetched before the FTS index existed). Blocking here is
+    // deliberate: the window must not open on an absent index. The index-writer mutex it takes is
+    // effectively free — only an .opml import dispatched just above could hold it, for one INSERT —
+    // and it is coroutine-based on the app scope's Dispatchers.Default, so waiting on the main
+    // thread cannot deadlock it.
+    runBlocking { koin.get<FtsManager>().ensureIndexed() }
 
     val settingsRepository = koin.get<SettingsRepository>()
     // Local settings are persisted off-thread and coalesced (see SettingsRepository), so a change
@@ -326,13 +330,12 @@ fun main(args: Array<String>) {
         // Persist window size (debounced).
         LaunchedEffect(windowState) {
             snapshotFlow { windowState.size }.debounce(500).collect { size ->
-                val current = settingsRepository.getLocalSettings()
-                settingsRepository.saveLocalSettings(
-                    current.copy(
+                settingsRepository.mutateLocalSettings {
+                    it.copy(
                         windowWidth = size.width.value.toDouble(),
                         windowHeight = size.height.value.toDouble(),
-                    ),
-                )
+                    )
+                }
             }
         }
 
@@ -563,7 +566,7 @@ private suspend fun runStartupTasks(koin: org.koin.core.Koin) {
         if (last == null || now - last >= MILLIS_PER_DAY) {
             val days = settingsRepository.getCacheRetentionDays()
             koin.get<ArticleRepository>().deleteExpiredArticles(days)
-            settingsRepository.saveLocalSettings(settings.copy(lastCacheCleanupAt = now))
+            settingsRepository.mutateLocalSettings { it.copy(lastCacheCleanupAt = now) }
         }
         if (koin.get<CloudSession>().isConnected()) {
             koin.get<SyncRepository>().sync()
@@ -577,7 +580,7 @@ private suspend fun runStartupTasks(koin: org.koin.core.Koin) {
 /**
  * Rebuilds the full FTS index when the application is idle and at least 24 hours have passed since the previous rebuild.
  */
-private fun maybeRebuildFtsIndex(koin: org.koin.core.Koin) {
+private suspend fun maybeRebuildFtsIndex(koin: org.koin.core.Koin) {
     val activityCenter = koin.get<ActivityCenter>()
     if (activityCenter.syncing.value || activityCenter.feedRefreshing.value) return
     val settingsRepository = koin.get<SettingsRepository>()
@@ -585,7 +588,7 @@ private fun maybeRebuildFtsIndex(koin: org.koin.core.Koin) {
     val last = settingsRepository.getLocalSettings().lastFtsRebuiltAt
     if (last != null && now - last < MILLIS_PER_DAY) return
     koin.get<FtsManager>().rebuildIndex()
-    settingsRepository.saveLocalSettings(settingsRepository.getLocalSettings().copy(lastFtsRebuiltAt = now))
+    settingsRepository.mutateLocalSettings { it.copy(lastFtsRebuiltAt = now) }
 }
 
 /**
@@ -628,16 +631,14 @@ private suspend fun backgroundUpdateLoop(koin: org.koin.core.Koin) {
 }
 
 /**
- * Runs [UpdateChecker.check] and records [LocalSettings.lastUpdateCheckAt]. This is the only
- * place that writes that timestamp — the Settings screen's manual "check for update" button calls
- * [UpdateChecker.check] directly instead, so it never perturbs the automatic schedule.
+ * Checks for an available application update and notifies the user when one is found.
+ *
+ * @param koin The dependency injection container used to resolve update and notification services.
  */
 private suspend fun checkForUpdateAndNotify(koin: org.koin.core.Koin) {
     val settingsRepository = koin.get<SettingsRepository>()
     val status = koin.get<UpdateChecker>().check()
-    settingsRepository.saveLocalSettings(
-        settingsRepository.getLocalSettings().copy(lastUpdateCheckAt = SystemClock.nowMillis()),
-    )
+    settingsRepository.mutateLocalSettings { it.copy(lastUpdateCheckAt = SystemClock.nowMillis()) }
     if (status is UpdateStatus.Available) {
         val message = getString(Res.string.update_available_notification, status.version)
         koin.get<NotificationCenter>().add(

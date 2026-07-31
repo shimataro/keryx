@@ -113,7 +113,17 @@
   `'rebuild'` は単一文で原子的（読み手は再構築前後どちらかを見るだけ）＋ `busy_timeout` で待つため、
   実行中の検索も 0 件にならない。
 
-起動時に `FtsManager.ensureIndexed()`（初回作成 + 未索引行の増分投入）を呼ぶのは従来どおり。
+2 つの索引ライタは**相互排他**とする: `FtsManager` は `indexMissing()` と `rebuildIndex()` を内部の
+mutex で直列化する（このため両者は `suspend`）。日次 pass のアイドル判定は `ActivityCenter` のロックなしの
+参照なので、その直後に始まったフィード更新は検知されず rebuild と重なり得る。重なりは常に無駄な作業
+（rebuild は増分投入を包含する）であり、rebuild が `busy_timeout` を超えて書き込みロックを保持する規模では、
+どの呼び出し元も catch しない生の `SQLiteException` になる。検索は**意図的に直列化しない**: 従来どおり
+`'rebuild'` が単一のアトミックな文であることと `busy_timeout` の待機に依存する。
+
+起動時に `FtsManager.ensureIndexed()`（初回作成 + 未索引行の増分投入）を呼ぶのは従来どおりだが、`main.kt` の
+`runBlocking` から呼ぶ（索引不在のままウィンドウを開かせないため）。ライタ mutex はコルーチンベースで、この
+時点では直前にディスパッチされた `.opml` インポートが短時間だけ保持し得るのみなので、メインスレッドで待って
+もデッドロックしない。
 
 ## クラウド認証（OAuth PKCE + オフラインアクセス）
 

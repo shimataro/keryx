@@ -8,6 +8,7 @@ import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.ftsManager
+import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
@@ -423,7 +424,7 @@ class ArticleRepositoryTest {
             db.insertFeed("f1")
             db.insertArticle("a1", "f1", title = "Kotlin Multiplatform", content = "cross platform apps")
             db.insertArticle("a2", "f1", title = "Unrelated", content = "some other content")
-            ftsManager(driver).ensureIndexed()
+            ftsManagerIndexed(driver)
 
             val repo = newRepo(db, driver)
             val results = repo.search("Kotlin")
@@ -440,7 +441,7 @@ class ArticleRepositoryTest {
         try {
             db.insertFeed("f1")
             db.insertArticle("a1", "f1", title = "Kotlin Multiplatform", content = "cross platform apps")
-            ftsManager(driver).ensureIndexed()
+            ftsManagerIndexed(driver)
 
             val repo = newRepo(db, driver)
             val result = repo.search("Kotlin").single()
@@ -467,7 +468,7 @@ class ArticleRepositoryTest {
             db.insertArticle("a2", "f1", title = "Kotlin advanced", content = "kotlin flows")
             db.insertArticle("a3", "f1", title = "Kotlin Multiplatform", content = "kotlin desktop and mobile kotlin")
             db.insertArticle("a4", "f1", title = "Unrelated", content = "nothing here")
-            ftsManager(driver).ensureIndexed()
+            ftsManagerIndexed(driver)
 
             val repo = newRepo(db, driver)
             val fromFts = FtsSearch(driver).search("kotlin")
@@ -495,7 +496,7 @@ class ArticleRepositoryTest {
                     db.insertArticle("a$i", "f1", content = "kotlin document $i")
                 }
             }
-            ftsManager(driver).ensureIndexed()
+            ftsManagerIndexed(driver)
 
             val repo = newRepo(db, driver)
             val fromFts = FtsSearch(driver).search("kotlin")

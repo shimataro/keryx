@@ -58,6 +58,7 @@ import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.singleProviderCloudSession
+import works.merc.keryx.app.ftsManagerIndexed
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -464,7 +465,7 @@ private fun newMinimalViewModel(
     val dir = FileIO.join(AppDirs.tempDir(), "article-list-pane-test")
     val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
     val feedRepository = FeedRepository(
-        db, failingFetcher(), missingFaviconResolver(), articleRepository, FtsManager(driver).also { it.ensureIndexed() }, syncScheduler,
+        db, failingFetcher(), missingFaviconResolver(), articleRepository, ftsManagerIndexed(driver), syncScheduler,
         NotificationCenter(), ArticleListPaneTestNotificationMessages(), clock, Dispatchers.Unconfined,
     )
     val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)

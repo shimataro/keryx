@@ -4,6 +4,7 @@ import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.remote.ParsedArticle
 import works.merc.keryx.app.ftsManager
+import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.stampArticleDeleted
@@ -92,7 +93,7 @@ class ArticleUpsertTest {
             assertFalse(a.search_text.contains("div"))
             assertFalse(a.search_text.contains("class"))
 
-            ftsManager(driver).ensureIndexed()
+            ftsManagerIndexed(driver)
             // The visible word is searchable; the HTML tag name / attribute is not.
             assertContains(FtsSearch(driver).search("Kotlin").map { it.id }, a.id)
             assertTrue(FtsSearch(driver).search("div").isEmpty())

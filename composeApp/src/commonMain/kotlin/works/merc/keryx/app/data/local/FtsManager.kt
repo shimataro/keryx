@@ -2,6 +2,8 @@ package works.merc.keryx.app.data.local
 
 import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlDriver
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Manages the `articles_fts` FTS5 virtual table with raw SQL, deliberately
@@ -17,11 +19,25 @@ import app.cash.sqldelight.db.SqlDriver
 class FtsManager(private val driver: SqlDriver) {
 
     /**
+     * Serializes the two index writers against each other. Without it, the daily idle
+     * [rebuildIndex] can start moments before a user-triggered refresh's [indexMissing] — the idle
+     * gate in `main.kt` is a lock-free check of `ActivityCenter`, so a refresh beginning just after
+     * it passes is not seen. That overlap is always wasted work (a rebuild subsumes an incremental
+     * insert) and, on a corpus whose rebuild holds the write lock longer than `busy_timeout`, the
+     * loser throws a raw `SQLiteException` that no caller catches.
+     *
+     * This is mutual exclusion between *writers only*. Searches are deliberately not serialized
+     * here: they rely on `'rebuild'` being a single atomic statement plus `busy_timeout`, so a
+     * reader waits rather than erroring and never observes a half-built index.
+     */
+    private val indexWriteMutex = Mutex()
+
+    /**
      * Startup: create the table on first run, then index any articles not yet in the index. This
      * backfills rows that were never indexed — e.g. articles fetched before the FTS feature existed,
      * or feeds whose refresh returned no new articles. Idempotent and cheap when nothing is missing.
      */
-    fun ensureIndexed() {
+    suspend fun ensureIndexed() {
         createTable() // create on first run (IF NOT EXISTS otherwise)
         indexMissing()
     }
@@ -38,7 +54,7 @@ class FtsManager(private val driver: SqlDriver) {
      * [rebuildIndex] (the daily healing pass). This is the accepted "temporarily stale"
      * trade-off; the row still matches its previous tokens, so search never regresses to zero hits.
      */
-    fun indexMissing() {
+    suspend fun indexMissing(): Unit = indexWriteMutex.withLock {
         driver.execute(
             null,
             """
@@ -79,14 +95,9 @@ class FtsManager(private val driver: SqlDriver) {
     }
 
     /**
-     * Rebuilds the whole index from `articles` (the `'rebuild'` command deletes all index content and
-     * repopulates it in a single atomic statement — a concurrent reader never sees a half-built index,
-     * and with `busy_timeout` set it waits rather than erroring). Used only for the rare healing passes
-     * (the daily idle pass); the table is assumed to already exist (created once at startup
-     * by [ensureIndexed], and never dropped from the live DB). Also sweeps stale entries left by
-     * cache-cleanup article deletions.
+     * Rebuilds the full-text index from the current articles, including removing entries for deleted articles.
      */
-    fun rebuildIndex() {
+    suspend fun rebuildIndex(): Unit = indexWriteMutex.withLock {
         driver.execute(null, "INSERT INTO articles_fts(articles_fts) VALUES('rebuild');", 0)
     }
 }

@@ -92,12 +92,10 @@ fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
     internal data class SubscribeOutcome(val result: Result<Feeds>, val hadArticles: Boolean)
 
     /**
-     * Network fetch + DB write for [subscribeFeed], without indexing the result — callers decide
-     * when to call [FtsManager.indexMissing] (immediately for a single subscribe, batched once after
-     * the loop by [OpmlImporter]). Mirrors [applyFetch]'s [RefreshOutcome] split for the same reason:
-     * [FtsManager.indexMissing]'s `NOT IN` scan is `O(articles table size)` per call, so a large OPML
-     * import must not repeat it once per feed. `syncScheduler.scheduleSync()` stays here, called once
-     * per feed like [applyFetch] does, since it is cheap and debounced.
+     * Fetches a feed and persists its metadata and articles without indexing them.
+     *
+     * @param url The URL of the feed to subscribe to.
+     * @return The subscription result, including the stored feed or fetch error and whether articles were fetched.
      */
     internal suspend fun subscribeFeedWrite(url: String): SubscribeOutcome {
         val fetched = when (val r = feedFetcher.fetch(url)) {
@@ -153,7 +151,7 @@ fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
     }
 
     /** Indexes any articles fetched during an OPML import loop. Called once by [OpmlImporter]. */
-    internal fun indexImportedArticles() = ftsManager.indexMissing()
+    internal suspend fun indexImportedArticles() = ftsManager.indexMissing()
 
     /**
      * Unsubscribes from a feed by marking it as deleted.

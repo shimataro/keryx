@@ -49,7 +49,9 @@ import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.domain.TagRepository
+import works.merc.keryx.app.CountingSqlDriver
 import works.merc.keryx.app.ftsManager
+import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFolder
@@ -80,11 +82,20 @@ private class HomeViewModelTestNotificationMessages : NotificationMessages {
 /** In-memory [TokenStorage] fake (never actually used since appKey is empty in these tests). */
 private class HomeViewModelTestTokenStorage : TokenStorage {
     private var stored: OAuthTokens? = null
+
+    /** How often the secret store was read — see `cloudConnectedDoesNotReadTokenStorageWhenObserved`. */
+    var loadCount = 0
+        private set
+
     override fun save(tokens: OAuthTokens) {
         stored = tokens
     }
 
-    override fun load(): OAuthTokens? = stored
+    override fun load(): OAuthTokens? {
+        loadCount++
+        return stored
+    }
+
     override fun clear() {
         stored = null
     }
@@ -112,7 +123,7 @@ private fun KeryxDatabase.insertArticle(
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class HomeViewModelTest {
 
-    private lateinit var driver: SqlDriver
+    private lateinit var driver: CountingSqlDriver
     private lateinit var db: KeryxDatabase
     private val dir = FileIO.join(AppDirs.tempDir(), "home-vm-test-${Random.nextInt()}")
 
@@ -125,9 +136,10 @@ class HomeViewModelTest {
     @BeforeTest
     fun setUp() {
         Dispatchers.setMain(StandardTestDispatcher())
-        val (d, database) = inMemoryDb()
-        driver = d
-        db = database
+        val (d, _) = inMemoryDb()
+        // Wrapped so a test can assert which actions re-execute the article-list query.
+        driver = CountingSqlDriver(d)
+        db = KeryxDatabase(driver)
     }
 
     @AfterTest
@@ -175,11 +187,12 @@ class HomeViewModelTest {
         feedFetcher: FeedFetcher = failingFetcher(),
         activityCenter: ActivityCenter = ActivityCenter(),
         newArticleNotifier: NewArticleNotifier = NewArticleNotifier(),
+        tokenStorage: HomeViewModelTestTokenStorage = HomeViewModelTestTokenStorage(),
     ): HomeViewModel {
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the subscribe/refresh path's indexMissing() works.
         val feedRepository = FeedRepository(
-            db, feedFetcher, missingFaviconResolver(), articleRepository, FtsManager(driver).also { it.ensureIndexed() }, syncScheduler,
+            db, feedFetcher, missingFaviconResolver(), articleRepository, ftsManagerIndexed(driver), syncScheduler,
             NotificationCenter(), HomeViewModelTestNotificationMessages(), clock, Dispatchers.Unconfined,
         )
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
@@ -201,7 +214,6 @@ class HomeViewModelTest {
             localDbPath = "unused",
             tempDir = "unused",
         )
-        val tokenStorage = HomeViewModelTestTokenStorage()
         val authClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.OK) }) { expectSuccess = false }
         val authManager = DropboxAuthManager(authClient, clock = clock)
         val cloudSession = singleProviderCloudSession(
@@ -749,6 +761,35 @@ class HomeViewModelTest {
         assertEquals(listOf("a2"), vm.articles.value.map { it.id })
     }
 
+    /**
+     * A sync that tombstones the *selected* article must not leave it in the visible list. The
+     * trailing re-pin that `sync()` / `refreshAll()` perform (to keep the selection visible across
+     * a refresh) must not resurrect a row that no longer exists, which is the same invariant
+     * [pinnedArticleSoftDeletedByAnotherDeviceIsDroppedFromPinsReactively] covers for the
+     * reactive reconcile path.
+     */
+    @Test
+    fun syncDoesNotResurrectTheSelectedArticleAfterItIsTombstoned() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne())
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+
+        // Another device's sync propagates a soft-delete tombstone for the selected article.
+        driver.stampArticleDeleted("a1", deletedAt = 100L)
+        vm.sync()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf("a2"), vm.articles.value.map { it.id })
+    }
+
     @Test
     fun markAllReadOnStarredFilterDoesNotForceSelectedArticleReadState() = runTest {
         db.insertFeed("f1")
@@ -787,6 +828,93 @@ class HomeViewModelTest {
         assertFalse(vm.newestFirst.value)
         vm.toggleSort()
         assertTrue(vm.newestFirst.value)
+    }
+
+    /**
+     * The unread-only, sort and pinned-read inputs are pure display transforms over whatever the
+     * article-list query returned, so only a filter change may re-execute that query. Guards against
+     * putting them back into the `flatMapLatest` key, which made every selection re-run the whole
+     * unbounded list query (invisible to behavioral assertions, but O(all articles) per click).
+     */
+    @Test
+    fun displayOnlyChangesDoNotReExecuteTheArticleListQuery() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+
+        val afterFilter = driver.listQueryExecutions
+        vm.setUnreadOnly(true)
+        vm.toggleSort()
+        testScheduler.advanceUntilIdle()
+        assertEquals(
+            afterFilter,
+            driver.listQueryExecutions,
+            "unread-only and sort are display transforms and must not re-query",
+        )
+
+        // Selecting marks the article read, which does legitimately notify the articles table —
+        // but exactly once, not once for the write plus once for the resulting pin.
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne())
+        testScheduler.advanceUntilIdle()
+        assertEquals(
+            afterFilter + 1,
+            driver.listQueryExecutions,
+            "a selection should re-query only for its own mark-as-read write",
+        )
+
+        // A filter change must still switch queries.
+        val beforeSwitch = driver.listQueryExecutions
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        assertTrue(
+            driver.listQueryExecutions > beforeSwitch,
+            "changing the filter must re-execute the list query",
+        )
+    }
+
+    @Test
+    fun toggleSortReversesTheArticleListOrder() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 3L, createdAt = 3L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a3", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a1", "a2", "a3"), vm.articles.value.map { it.id })
+
+        vm.toggleSort()
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a3", "a2", "a1"), vm.articles.value.map { it.id })
+
+        vm.toggleSort()
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a1", "a2", "a3"), vm.articles.value.map { it.id })
+    }
+
+    @Test
+    fun oldestFirstOrderHoldsWithAPinnedArticleMergedIn() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 3L, createdAt = 3L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a3", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        vm.setUnreadOnly(true)
+        vm.toggleSort()
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a3", "a2", "a1"), vm.articles.value.map { it.id })
+
+        // Selecting a2 marks it read; it stays pinned and keeps its oldest-first position.
+        vm.selectArticle(db.articlesQueries.getById("a2").executeAsOne())
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a3", "a2", "a1"), vm.articles.value.map { it.id })
     }
 
     @Test
@@ -869,7 +997,7 @@ class HomeViewModelTest {
     fun searchingIsTrueWhileDebouncedResultsAreStillPendingThenFalse() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         backgroundScope.launch { vm.searching.collect {} }
@@ -895,7 +1023,7 @@ class HomeViewModelTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
         db.insertArticle("a2", "f1", title = "Kotlin Two", content = "kotlin content", isRead = 1L)
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.setSearchQuery("Kotlin")
@@ -915,7 +1043,7 @@ class HomeViewModelTest {
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
         db.insertArticle("a2", "f1", title = "Kotlin Two", content = "kotlin content", isRead = 1L)
         db.insertArticle("a3", "f1", title = "Kotlin Three", content = "kotlin content", isRead = 0L)
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.setSearchQuery("Kotlin")
@@ -941,7 +1069,7 @@ class HomeViewModelTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
         db.insertArticle("a2", "f1", title = "Kotlin Two", content = "kotlin content", isRead = 0L)
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.setSearchQuery("Kotlin")
@@ -965,7 +1093,7 @@ class HomeViewModelTest {
         db.insertArticle("a1", "f1", title = "Kotlin and Java", content = "kotlin java", isRead = 0L)
         db.insertArticle("a2", "f1", title = "Kotlin Only", content = "kotlin", isRead = 0L)
         db.insertArticle("a3", "f1", title = "Java Only", content = "java", isRead = 0L)
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.setSearchQuery("Kotlin")
@@ -993,7 +1121,7 @@ class HomeViewModelTest {
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
         db.insertArticle("a2", "f1", title = "Kotlin Two", content = "kotlin content", isRead = 0L)
         db.insertArticle("a3", "f1", title = "Kotlin Three", content = "kotlin content", isRead = 0L)
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.setSearchQuery("Kotlin")
@@ -1021,7 +1149,7 @@ class HomeViewModelTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
         db.insertArticle("other", "f1", title = "Something else", content = "unrelated content", isRead = 0L)
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.setSearchQuery("Kotlin")
@@ -1042,7 +1170,7 @@ class HomeViewModelTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Zzz Kotlin", content = "kotlin kotlin kotlin filler padding words")
         db.insertArticle("a2", "f1", title = "Kotlin", content = "kotlin")
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.setSearchQuery("Kotlin")
@@ -1062,7 +1190,7 @@ class HomeViewModelTest {
     fun toggleReadInSearchUpdatesSearchResults() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.setSearchQuery("Kotlin")
@@ -1080,7 +1208,7 @@ class HomeViewModelTest {
     fun toggleStarInSearchUpdatesSearchResults() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content")
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.setSearchQuery("Kotlin")
@@ -1098,7 +1226,7 @@ class HomeViewModelTest {
     fun starAfterReadInSearchKeepsStarVisible() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
-        ftsManager(driver).ensureIndexed()
+        ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.setSearchQuery("Kotlin")
@@ -1181,7 +1309,39 @@ class HomeViewModelTest {
     fun cloudConnectedReflectsCloudSessionState() = runTest {
         val vm = newViewModel(appKey = "")
         subscribeAll(vm)
-        assertFalse(vm.cloudConnected)
+        assertFalse(vm.cloudConnected.value)
+    }
+
+    /**
+     * `cloudConnected` is read straight from composition, and answering it reaches the OS secret
+     * store (an uncached D-Bus / Credential Manager round trip on Linux and Windows). It must
+     * therefore be re-evaluated only when the selected provider changes — not per observation, and
+     * not on unrelated local-settings writes, which happen as often as every drag frame.
+     */
+    @Test
+    fun cloudConnectedDoesNotReReadTokenStorageWhenObservedOrOnUnrelatedSettingsWrites() = runTest {
+        val tokenStorage = HomeViewModelTestTokenStorage()
+        val vm = newViewModel(appKey = "app-key", tokenStorage = tokenStorage)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        val afterStartup = tokenStorage.loadCount
+        // Guard against a false pass: with a configured client id, answering the question at all
+        // must reach the secret store, so the counter has to be moving in the first place.
+        assertTrue(afterStartup > 0, "cloudConnected should consult token storage at least once")
+
+        // What recomposition does: read the value over and over.
+        repeat(50) { assertFalse(vm.cloudConnected.value) }
+        // Unrelated local-settings writes (sort, filter, pane geometry) must not re-read either.
+        vm.toggleSort()
+        vm.selectFilter(ArticleFilter.Starred)
+        vm.toggleSort()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(
+            afterStartup,
+            tokenStorage.loadCount,
+            "observing cloudConnected must not reach the secret store again",
+        )
     }
 
     @Test

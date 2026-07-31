@@ -11,6 +11,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.CLOUD_DB_PATH
@@ -145,7 +146,7 @@ class SyncRepositoryTest {
         localDb = db
         localDb.insertFeed("f1", now = 0)
         ftsManager = FtsManager(localDriver)
-        ftsManager.ensureIndexed()
+        runBlocking { ftsManager.ensureIndexed() }
         tempDir = Files.createTempDirectory("keryx-sync-test").toFile()
         notificationCenter = NotificationCenter()
     }
@@ -170,7 +171,7 @@ class SyncRepositoryTest {
             ftsManager = ftsManager,
             cloudProvider = { cloud },
             clock = Clock { clockMillis },
-            scope = this,
+            scope = backgroundScope,
             activityCenter = activityCenter,
             notificationCenter = notificationCenter,
             notificationMessages = FakeSyncNotificationMessages,
@@ -589,7 +590,7 @@ class SyncRepositoryTest {
             ftsManager = ftsManager,
             cloudProvider = { null },
             clock = Clock { 1_000L },
-            scope = this,
+            scope = backgroundScope,
             activityCenter = ActivityCenter(backgroundScope),
             notificationCenter = notificationCenter,
             notificationMessages = FakeSyncNotificationMessages,
@@ -651,6 +652,31 @@ class SyncRepositoryTest {
         advanceTimeBy(SYNC_DEBOUNCE_MS)
         runCurrent()
         assertEquals(1, cloud.existsCount)
+    }
+
+    /**
+     * A write burst — what a feed refresh produces, one `scheduleSync()` per feed, from a different
+     * dispatcher than the UI edits and mark-as-read writes that also call it — must still collapse to
+     * a single sync. The scheduler holds no cancellable `Job` field for those callers to race over.
+     */
+    @Test
+    fun scheduleSyncCollapsesAWriteBurstIntoOneSync() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = newRepo(cloud)
+
+        repeat(50) { repo.scheduleSync() }
+        runCurrent()
+        assertEquals(0, cloud.existsCount, "nothing should run before the debounce window elapses")
+
+        advanceTimeBy(SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+        assertEquals(1, cloud.existsCount, "50 scheduleSync calls must produce exactly one sync")
+
+        // And the scheduler still works after the burst has drained.
+        repo.scheduleSync()
+        advanceTimeBy(SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+        assertEquals(2, cloud.existsCount)
     }
 
     @Test

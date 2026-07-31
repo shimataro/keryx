@@ -29,20 +29,13 @@ private const val XID_RETRY_ATTEMPTS = 20
 private const val XID_RETRY_DELAY_MS = 100L
 
 /**
- * Wires the application menu bar to the KDE Global Menu, replacing the plain `AppMenuBar` call site.
+ * Integrates the application menu with KDE Global Menu when a connection is available.
  *
- * When [appMenuConnection] is `null` (macOS / Windows / non-KDE Linux) this is exactly today's
- * behavior: the in-window `AppMenuBar` renders and nothing else happens. When a registrar
- * connection exists it additionally:
- * - exports the menu tree over D-Bus (kept live even while the in-window bar is hidden),
- * - resolves this window's XID (once shown) and calls `RegisterWindow`,
- * - hides the in-window bar only after registration actually succeeds (unless the user set an
- *   explicit preference), with Ctrl+M and an in-menu "Show Menu Bar" checkbox to bring it back,
- * - installs a global shortcut dispatcher whenever the bar is hidden so Ctrl+N/W/,/Q/R keep working
- *   (mutually exclusive with the native accelerators — see [MenuShortcutDispatcher]).
+ * Without a connection, displays the in-window application menu. With a connection, exports the
+ * menu over D-Bus, registers the visible window, and manages in-window visibility and keyboard
+ * shortcuts.
  *
- * @param resolvedXid holder written with the registered XID so `main.kt`'s shutdown hook can
- *   unregister it (`AppMenuConnection.close`).
+ * @param resolvedXid Stores the registered window XID for later unregistration.
  */
 @Composable
 internal fun FrameWindowScope.AppMenuBarHost(
@@ -80,10 +73,15 @@ internal fun FrameWindowScope.AppMenuBarHost(
         )
     }
 
+    /**
+     * Sets the menu bar visibility and persists the explicit preference.
+     *
+     * @param visible Whether the menu bar should be visible.
+     */
     fun setMenuBarVisible(visible: Boolean) {
         menuBarVisible = visible
         // Persist the explicit choice so it survives restart (see LocalSettings.appMenuBarVisible).
-        settingsRepository.saveLocalSettings(settingsRepository.getLocalSettings().withMenuBarVisible(visible))
+        settingsRepository.mutateLocalSettings { it.withMenuBarVisible(visible) }
     }
 
     val menuBarToggle = MenuBarToggle(visible = menuBarVisible, onToggle = ::setMenuBarVisible)
