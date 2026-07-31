@@ -357,7 +357,9 @@ URL). This satisfies the repo's "don't commit unless asked" convention while pre
 per-comment efficiency: once confirmed, every comment below still proceeds straight to fix →
 verify → commit with no further per-comment approval. If the user cancels, skip this URL
 entirely (commit nothing, note "Cancelled by user" in the closing summary) and, for a multi-URL
-run, continue to the next URL at Step 2.
+run, continue to the next URL at Step 2. This one-time confirmation authorizes the whole run, but
+does not itself substitute for reviewing individual comments — each comment's own evaluation is
+still surfaced as it is reached (see step 1 below), just without a further approval gate.
 
 Before the loop, check `git status --porcelain`. If the working tree is dirty with changes
 unrelated to this run, warn and skip this URL entirely (commit nothing, note "Working tree not
@@ -368,8 +370,11 @@ file. For a multi-URL run this only skips the current URL; continue to the next 
 For each comment in `associated_comments`, in order:
 
 1. Using that comment's own thread context (Step 5) and code context (Step 6), run the
-   Step 7 criteria against it individually and record its own **Validity** / **Confidence** /
-   **Reasoning**.
+   Step 7 criteria against it individually, then **output its evaluation** — this comment's
+   file:line or comment URL, followed by the Step 7 **Validity** / **Confidence** /
+   **Reasoning** — to the user, **before** taking any action on it. This is informational only,
+   not a per-comment approval gate: the one-time run confirmation above already authorizes
+   proceeding, so continue immediately to step 2 or 3 below without waiting for a reply.
 2. If **Invalid**, or valid but no code change is required: skip this comment — implement
    nothing, commit nothing. Note it (with the reason) for the closing summary.
 3. If **Valid** or **Partially Valid**: explore the codebase as needed to understand the
