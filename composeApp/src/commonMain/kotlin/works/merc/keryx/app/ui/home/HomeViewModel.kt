@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.launchIn
@@ -643,7 +644,27 @@ class HomeViewModel(
         viewModelScope.launch { syncRepository.resetCloudData() }
     }
 
-    val cloudConnected: Boolean get() = cloudSession.isConnected()
+    /**
+     * Whether a cloud provider is selected, configured and holds tokens.
+     *
+     * A StateFlow rather than a getter because `CloudSession.isConnected()` reaches the OS secret
+     * store, and this is read straight from composition: as a getter it ran an uncached Secret
+     * Service / Credential Manager round trip (Linux / Windows) — or, on the first macOS call, a
+     * `security` subprocess spawn — on the UI thread on *every* recomposition of the feed list and
+     * the menu bar. Re-evaluated only when the selected provider changes, which is the only thing
+     * that can change the answer: every connect / disconnect path writes `cloudStorageType`
+     * (SettingsViewModel, SetupViewModel). Gating on that one field matters — `localSettings` itself
+     * is rewritten by unrelated state such as pane widths, which change on every drag frame.
+     */
+    val cloudConnected: StateFlow<Boolean> =
+        settingsRepository.localSettings
+            .map { it.cloudStorageType }
+            .distinctUntilChanged()
+            .map { cloudSession.isConnected() }
+            .flowOn(dispatcher)
+            // Seeded synchronously so the first frame already has the real value instead of
+            // flashing the sync action off and back on.
+            .stateIn(viewModelScope, started, cloudSession.isConnected())
 
     // --- Tag actions ---
 

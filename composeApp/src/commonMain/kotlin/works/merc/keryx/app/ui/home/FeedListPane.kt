@@ -119,6 +119,7 @@ fun FeedListPane(
     val searchUnread by vm.searchUnreadCount.collectAsStateSafe(0L)
     val filter by vm.filter.collectAsStateSafe(ArticleFilter.All)
     val searchQuery by vm.searchQuery.collectAsStateSafe("")
+    val cloudConnected by vm.cloudConnected.collectAsStateSafe(false)
     val searchFocusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) {
         vm.searchFocusRequests.collect { searchFocusRequester.requestFocus() }
@@ -197,7 +198,7 @@ fun FeedListPane(
                         KeryxIcon(KeryxIcons.Refresh, refreshTooltip)
                     }
                 }
-                if (vm.cloudConnected) {
+                if (cloudConnected) {
                     val syncing by vm.syncing.collectAsStateSafe(false)
                     val syncTooltip = stringResource(
                         if (syncing) Res.string.home_syncing else Res.string.home_sync,

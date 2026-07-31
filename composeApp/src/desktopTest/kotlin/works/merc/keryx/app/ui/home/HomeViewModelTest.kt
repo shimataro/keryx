@@ -81,11 +81,20 @@ private class HomeViewModelTestNotificationMessages : NotificationMessages {
 /** In-memory [TokenStorage] fake (never actually used since appKey is empty in these tests). */
 private class HomeViewModelTestTokenStorage : TokenStorage {
     private var stored: OAuthTokens? = null
+
+    /** How often the secret store was read — see `cloudConnectedDoesNotReadTokenStorageWhenObserved`. */
+    var loadCount = 0
+        private set
+
     override fun save(tokens: OAuthTokens) {
         stored = tokens
     }
 
-    override fun load(): OAuthTokens? = stored
+    override fun load(): OAuthTokens? {
+        loadCount++
+        return stored
+    }
+
     override fun clear() {
         stored = null
     }
@@ -177,6 +186,7 @@ class HomeViewModelTest {
         feedFetcher: FeedFetcher = failingFetcher(),
         activityCenter: ActivityCenter = ActivityCenter(),
         newArticleNotifier: NewArticleNotifier = NewArticleNotifier(),
+        tokenStorage: HomeViewModelTestTokenStorage = HomeViewModelTestTokenStorage(),
     ): HomeViewModel {
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the subscribe/refresh path's indexMissing() works.
@@ -203,7 +213,6 @@ class HomeViewModelTest {
             localDbPath = "unused",
             tempDir = "unused",
         )
-        val tokenStorage = HomeViewModelTestTokenStorage()
         val authClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.OK) }) { expectSuccess = false }
         val authManager = DropboxAuthManager(authClient, clock = clock)
         val cloudSession = singleProviderCloudSession(
@@ -1270,7 +1279,39 @@ class HomeViewModelTest {
     fun cloudConnectedReflectsCloudSessionState() = runTest {
         val vm = newViewModel(appKey = "")
         subscribeAll(vm)
-        assertFalse(vm.cloudConnected)
+        assertFalse(vm.cloudConnected.value)
+    }
+
+    /**
+     * `cloudConnected` is read straight from composition, and answering it reaches the OS secret
+     * store (an uncached D-Bus / Credential Manager round trip on Linux and Windows). It must
+     * therefore be re-evaluated only when the selected provider changes — not per observation, and
+     * not on unrelated local-settings writes, which happen as often as every drag frame.
+     */
+    @Test
+    fun cloudConnectedDoesNotReReadTokenStorageWhenObservedOrOnUnrelatedSettingsWrites() = runTest {
+        val tokenStorage = HomeViewModelTestTokenStorage()
+        val vm = newViewModel(appKey = "app-key", tokenStorage = tokenStorage)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        val afterStartup = tokenStorage.loadCount
+        // Guard against a false pass: with a configured client id, answering the question at all
+        // must reach the secret store, so the counter has to be moving in the first place.
+        assertTrue(afterStartup > 0, "cloudConnected should consult token storage at least once")
+
+        // What recomposition does: read the value over and over.
+        repeat(50) { assertFalse(vm.cloudConnected.value) }
+        // Unrelated local-settings writes (sort, filter, pane geometry) must not re-read either.
+        vm.toggleSort()
+        vm.selectFilter(ArticleFilter.Starred)
+        vm.toggleSort()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(
+            afterStartup,
+            tokenStorage.loadCount,
+            "observing cloudConnected must not reach the secret store again",
+        )
     }
 
     @Test

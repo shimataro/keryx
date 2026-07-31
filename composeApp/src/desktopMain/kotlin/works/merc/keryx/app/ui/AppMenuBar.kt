@@ -96,6 +96,7 @@ internal fun FrameWindowScope.AppMenuBar(
     val syncing by homeVm.syncing.collectAsState()
     val filter by homeVm.filter.collectAsState()
     val unreadOnly by homeVm.unreadOnly.collectAsState()
+    val cloudConnected by homeVm.cloudConnected.collectAsState()
 
     val ui = computeMenuUiState(
         screen = screen,
@@ -103,7 +104,7 @@ internal fun FrameWindowScope.AppMenuBar(
         selectedArticleHasUrl = selected?.url?.isNotBlank() == true,
         feedRefreshing = feedRefreshing,
         syncing = syncing,
-        cloudConnected = homeVm.cloudConnected,
+        cloudConnected = cloudConnected,
         filterIsSearch = filter == ArticleFilter.Search,
         unreadOnly = unreadOnly,
     )
