@@ -187,8 +187,10 @@ fun main(args: Array<String>) {
 
     // Startup recovery: recreate articles_fts if a previous sync dropped it, and backfill any
     // articles missing from the index (e.g. fetched before the FTS index existed). Blocking here is
-    // deliberate (the window must not open on an absent index) and the index-writer mutex it now
-    // takes is uncontended this early — no refresh, sync or rebuild has been started yet.
+    // deliberate: the window must not open on an absent index. The index-writer mutex it takes is
+    // effectively free — only an .opml import dispatched just above could hold it, for one INSERT —
+    // and it is coroutine-based on the app scope's Dispatchers.Default, so waiting on the main
+    // thread cannot deadlock it.
     runBlocking { koin.get<FtsManager>().ensureIndexed() }
 
     val settingsRepository = koin.get<SettingsRepository>()

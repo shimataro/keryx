@@ -78,8 +78,9 @@ outlasts `busy_timeout`, a raw `SQLiteException` no caller catches. Searches are
 serialized: they still rely on `'rebuild'` being a single atomic statement plus the `busy_timeout` wait.
 
 On startup, `FtsManager.ensureIndexed()` (initial creation + unindexed row incremental insert) is called as
-before, from a `runBlocking` in `main.kt` — the window must not open on an absent index, and the writer
-mutex is uncontended that early.
+before, from a `runBlocking` in `main.kt` — the window must not open on an absent index. The writer mutex
+is coroutine-based and, that early, can only be held briefly by an `.opml` import dispatched moments
+before, so blocking the main thread on it cannot deadlock.
 
 ## Cloud Authentication (OAuth PKCE + Offline Access)
 

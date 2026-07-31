@@ -33,8 +33,9 @@ serializes the two writers behind an internal mutex, which is why both are
 without the mutex a refresh starting just after it passes would overlap the
 rebuild. Searches are deliberately *not* serialized (they rely on `'rebuild'`
 being a single atomic statement plus the `busy_timeout` wait), and
-`ensureIndexed()` is called from a `runBlocking` at startup, where the mutex is
-uncontended.
+`ensureIndexed()` is called from a `runBlocking` at startup — the mutex is
+coroutine-based and held only briefly by an `.opml` import dispatched moments
+earlier, so blocking the main thread on it cannot deadlock.
 
 See also: `docs/sync-architecture.md` ("FTS5 handling") and `docs/db-schema.md`
 (`articles_fts` section).
