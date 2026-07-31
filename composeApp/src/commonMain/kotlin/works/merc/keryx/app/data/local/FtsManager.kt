@@ -54,7 +54,7 @@ class FtsManager(private val driver: SqlDriver) {
      * [rebuildIndex] (the daily healing pass). This is the accepted "temporarily stale"
      * trade-off; the row still matches its previous tokens, so search never regresses to zero hits.
      */
-    suspend fun indexMissing() = indexWriteMutex.withLock {
+    suspend fun indexMissing(): Unit = indexWriteMutex.withLock {
         driver.execute(
             null,
             """
@@ -102,7 +102,7 @@ class FtsManager(private val driver: SqlDriver) {
      * by [ensureIndexed], and never dropped from the live DB). Also sweeps stale entries left by
      * cache-cleanup article deletions.
      */
-    suspend fun rebuildIndex() = indexWriteMutex.withLock {
+    suspend fun rebuildIndex(): Unit = indexWriteMutex.withLock {
         driver.execute(null, "INSERT INTO articles_fts(articles_fts) VALUES('rebuild');", 0)
     }
 }
