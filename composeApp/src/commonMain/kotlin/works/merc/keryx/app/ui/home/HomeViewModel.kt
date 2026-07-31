@@ -6,6 +6,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -52,11 +53,14 @@ import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
 
-private data class ArticlesQueryParams(
+/**
+ * A repository article list tagged with the filter that produced it, so the display transform can
+ * apply filter-dependent rules (e.g. the starred exemption) against the right filter even though
+ * it no longer runs inside the `flatMapLatest` that switched to that filter.
+ */
+private data class FilteredArticles(
     val filter: ArticleFilter,
-    val unreadOnly: Boolean,
-    val newestFirst: Boolean,
-    val pinnedReadArticles: Map<String, Articles>,
+    val articles: List<Articles>,
 )
 
 /** Debounced FTS results tagged with the query that produced them (see [HomeViewModel.searching]). */
@@ -170,35 +174,37 @@ class HomeViewModel(
     // so the list doesn't shift under the user while reading down an unread list.
     private val _pinnedReadArticles = MutableStateFlow<Map<String, Articles>>(emptyMap())
 
+    // Only the filter keys the DB query: switching filters must switch queries, but the unread-only,
+    // sort and pinned inputs are pure display transforms over whatever that query returned. Keeping
+    // them in the flatMapLatest key made every article selection (which pins the article it marks
+    // read) cancel and re-execute the whole unbounded list query.
+    private val filteredArticles: Flow<FilteredArticles> =
+        _filter.flatMapLatest { f -> articleRepository.watchArticles(f).map { FilteredArticles(f, it) } }
+
     val articles: StateFlow<List<Articles>> =
-        combine(_filter, _unreadOnly, _newestFirst, _pinnedReadArticles) { f, unread, newest, pinned ->
-            ArticlesQueryParams(f, unread, newest, pinned)
-        }
-            .flatMapLatest { (f, unread, newest, pinned) ->
-                articleRepository.watchArticles(f).map { list ->
-                    // Nothing pinned is the common case, and then the id set has no reader — skip
-                    // building it rather than hashing every article's id on every emission.
-                    val extra = if (pinned.isEmpty()) {
-                        emptyList()
-                    } else {
-                        val existingIds = list.mapTo(HashSet(list.size)) { it.id }
-                        pinned.values.filter { it.id !in existingIds }
-                    }
-                    val merged = if (extra.isEmpty()) list else (list + extra).sortedWith(
-                        compareByDescending<Articles> { it.published_at ?: 0L }
-                            .thenByDescending { it.created_at }
-                            .thenByDescending { it.id }
-                    )
-                    val filtered = if (unread && f != ArticleFilter.Starred) {
-                        merged.filter { it.is_read == 0L || it.id in pinned }
-                    } else {
-                        merged
-                    }
-                    // asReversed() is a view, not a second full copy: `filtered` is freshly derived
-                    // per emission and never mutated afterwards, so it reads identically.
-                    if (newest) filtered else filtered.asReversed()
-                }
+        combine(filteredArticles, _unreadOnly, _newestFirst, _pinnedReadArticles) { (f, list), unread, newest, pinned ->
+            // Nothing pinned is the common case, and then the id set has no reader — skip
+            // building it rather than hashing every article's id on every emission.
+            val extra = if (pinned.isEmpty()) {
+                emptyList()
+            } else {
+                val existingIds = list.mapTo(HashSet(list.size)) { it.id }
+                pinned.values.filter { it.id !in existingIds }
             }
+            val merged = if (extra.isEmpty()) list else (list + extra).sortedWith(
+                compareByDescending<Articles> { it.published_at ?: 0L }
+                    .thenByDescending { it.created_at }
+                    .thenByDescending { it.id }
+            )
+            val filtered = if (unread && f != ArticleFilter.Starred) {
+                merged.filter { it.is_read == 0L || it.id in pinned }
+            } else {
+                merged
+            }
+            // asReversed() is a view, not a second full copy: `filtered` is freshly derived
+            // per emission and never mutated afterwards, so it reads identically.
+            if (newest) filtered else filtered.asReversed()
+        }
             .flowOn(dispatcher)
             .stateIn(viewModelScope, started, emptyList())
 

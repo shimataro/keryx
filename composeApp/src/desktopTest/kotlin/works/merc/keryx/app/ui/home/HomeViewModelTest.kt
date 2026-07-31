@@ -49,6 +49,7 @@ import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.domain.TagRepository
+import works.merc.keryx.app.CountingSqlDriver
 import works.merc.keryx.app.ftsManager
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
@@ -112,7 +113,7 @@ private fun KeryxDatabase.insertArticle(
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class HomeViewModelTest {
 
-    private lateinit var driver: SqlDriver
+    private lateinit var driver: CountingSqlDriver
     private lateinit var db: KeryxDatabase
     private val dir = FileIO.join(AppDirs.tempDir(), "home-vm-test-${Random.nextInt()}")
 
@@ -125,9 +126,10 @@ class HomeViewModelTest {
     @BeforeTest
     fun setUp() {
         Dispatchers.setMain(StandardTestDispatcher())
-        val (d, database) = inMemoryDb()
-        driver = d
-        db = database
+        val (d, _) = inMemoryDb()
+        // Wrapped so a test can assert which actions re-execute the article-list query.
+        driver = CountingSqlDriver(d)
+        db = KeryxDatabase(driver)
     }
 
     @AfterTest
@@ -787,6 +789,52 @@ class HomeViewModelTest {
         assertFalse(vm.newestFirst.value)
         vm.toggleSort()
         assertTrue(vm.newestFirst.value)
+    }
+
+    /**
+     * The unread-only, sort and pinned-read inputs are pure display transforms over whatever the
+     * article-list query returned, so only a filter change may re-execute that query. Guards against
+     * putting them back into the `flatMapLatest` key, which made every selection re-run the whole
+     * unbounded list query (invisible to behavioral assertions, but O(all articles) per click).
+     */
+    @Test
+    fun displayOnlyChangesDoNotReExecuteTheArticleListQuery() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+
+        val afterFilter = driver.listQueryExecutions
+        vm.setUnreadOnly(true)
+        vm.toggleSort()
+        testScheduler.advanceUntilIdle()
+        assertEquals(
+            afterFilter,
+            driver.listQueryExecutions,
+            "unread-only and sort are display transforms and must not re-query",
+        )
+
+        // Selecting marks the article read, which does legitimately notify the articles table —
+        // but exactly once, not once for the write plus once for the resulting pin.
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne())
+        testScheduler.advanceUntilIdle()
+        assertEquals(
+            afterFilter + 1,
+            driver.listQueryExecutions,
+            "a selection should re-query only for its own mark-as-read write",
+        )
+
+        // A filter change must still switch queries.
+        val beforeSwitch = driver.listQueryExecutions
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        assertTrue(
+            driver.listQueryExecutions > beforeSwitch,
+            "changing the filter must re-execute the list query",
+        )
     }
 
     @Test

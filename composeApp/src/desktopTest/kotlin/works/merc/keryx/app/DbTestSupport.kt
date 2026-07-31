@@ -6,6 +6,50 @@ import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import java.io.File
 
+/**
+ * A transparent [SqlDriver] delegate that counts how often an article-list query
+ * (`watchAll` / `watchStarred` / `watchByFeed` / `watchByTag` / `watchByFolder`) is executed, so a
+ * test can assert that a purely display-level change (sort, unread-only, selection) does not
+ * re-execute it.
+ *
+ * Identified by projecting `thumbnail_url` while ordering by `published_at DESC`: SQLDelight expands
+ * the `*` / `a.*` projections into explicit columns, so the ordering is what separates these five
+ * from the single-row `getById` / `getByIds` fetches, and the projected column is what separates them
+ * from the unread-count aggregates (which select `ft.tag_id` / `f.folder_id` and must still re-run on
+ * a read-state change) and from the FTS search, which orders by rank.
+ */
+class CountingSqlDriver(private val delegate: SqlDriver) : SqlDriver {
+    var listQueryExecutions = 0
+        private set
+
+    override fun <R> executeQuery(
+        identifier: Int?,
+        sql: String,
+        mapper: (app.cash.sqldelight.db.SqlCursor) -> app.cash.sqldelight.db.QueryResult<R>,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ): app.cash.sqldelight.db.QueryResult<R> {
+        if (sql.contains("thumbnail_url") && sql.contains("published_at DESC")) listQueryExecutions++
+        return delegate.executeQuery(identifier, sql, mapper, parameters, binders)
+    }
+
+    override fun execute(
+        identifier: Int?,
+        sql: String,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ) = delegate.execute(identifier, sql, parameters, binders)
+
+    override fun newTransaction() = delegate.newTransaction()
+    override fun currentTransaction() = delegate.currentTransaction()
+    override fun addListener(vararg queryKeys: String, listener: app.cash.sqldelight.Query.Listener) =
+        delegate.addListener(queryKeys = queryKeys, listener = listener)
+    override fun removeListener(vararg queryKeys: String, listener: app.cash.sqldelight.Query.Listener) =
+        delegate.removeListener(queryKeys = queryKeys, listener = listener)
+    override fun notifyListeners(vararg queryKeys: String) = delegate.notifyListeners(queryKeys = queryKeys)
+    override fun close() = delegate.close()
+}
+
 /** An in-memory KeryxDatabase for tests, with the schema applied. */
 fun inMemoryDb(): Pair<SqlDriver, KeryxDatabase> {
     val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
