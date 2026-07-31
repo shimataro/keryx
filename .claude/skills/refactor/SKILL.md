@@ -1,12 +1,16 @@
 ---
 name: refactor
-description: Refactor the Keryx source code for internal quality — reduce duplication, split oversized files/functions/composables, remove dead code, clarify naming, hoist magic numbers, flatten deep nesting, and modernize non-idiomatic Kotlin — behavior-preservingly, keeping the test suite green and never altering the sync/merge/FTS/error-taxonomy invariants or feature behavior. Works across the whole codebase or a single given path. Invoke explicitly with /refactor (optionally /refactor <path>), or when asked to "refactor the source code", "clean up the code", "reduce duplication", "improve code quality".
+description: Refactor the Keryx source code for internal quality — reduce duplication, split oversized files/functions/composables, remove dead code, clarify naming, hoist magic numbers, flatten deep nesting, and modernize non-idiomatic Kotlin — behavior-preservingly, keeping the test suite green and never altering the sync/merge/FTS/error-taxonomy invariants or feature behavior. Works across the whole codebase or a single given path. After a one-time scope approval, each approved batch is verified and committed independently (one commit per batch) with no further per-batch confirmation. Invoke explicitly with /refactor (optionally /refactor <path>), or when asked to "refactor the source code", "clean up the code", "reduce duplication", "improve code quality".
 ---
 
 Improve the internal quality of Keryx's source **without changing observable
 behavior**. The existing test suite is the oracle: it must stay green from the
 first step to the last. Work in small, reviewable, independently-revertible
-batches (Survey → confirm → batches). This is *refactoring*, not redesign and
+batches (Survey → confirm → batches). After the one-time scope confirmation
+(Step 3), each approved batch is applied, verified, and **committed
+independently — one commit per batch** — with no further per-batch approval,
+mirroring the `evaluate-review` skill's Case B auto-commit flow, rather than
+left for the user to commit. This is *refactoring*, not redesign and
 not optimization — if a change alters what the program does, it does not belong
 here.
 
@@ -155,8 +159,11 @@ divider policy, article card style, flat native-feel components, dialog rules).
 
 ### Step 1 — Establish a green baseline
 
-Confirm a reasonably clean working tree (`git status`), then run the tests — or
-invoke the **`build` skill**:
+Check `git status --porcelain` before anything else: if the working tree is
+dirty with changes unrelated to this run, warn and stop — proceeding would
+contaminate the baseline below and risk an unrelated file getting swept into
+(or clobbered by a revert during) a later batch's commit. Then run the tests —
+or invoke the **`build` skill**:
 
 ```bash
 ./gradlew :composeApp:desktopTest
@@ -193,6 +200,14 @@ Present the prioritized batch list and use **`AskUserQuestion`** once to
 confirm or narrow what to apply (e.g. all of it, only `domain/`, or exclude
 `ui/`). Proceed with only the approved batches.
 
+This approval is also the **one-time run confirmation**: once given, every
+approved batch below proceeds straight through apply → verify → commit (Step 4)
+with no further per-batch approval gate — the same shape as `evaluate-review`'s
+Case B. Before Step 4 makes its first commit: if the current branch is a
+version branch (`v*`), apply the repo's Branching rule (`.claude/CLAUDE.md`)
+via `AskUserQuestion` and switch to the chosen branch first — Step 1's worktree
+check already ruled out unrelated dirty changes.
+
 ### Step 4 — Apply batches (behavior-preserving, verified)
 
 For each approved batch:
@@ -207,9 +222,25 @@ For each approved batch:
    matching-or-higher count is *not* sufficient: a deleted test hidden behind a
    new one leaves the count unchanged. Only a **net addition** of tests is
    allowed, unless an approved **test-only batch (Step 5)** deliberately changed
-   the set. On red **or a missing baseline test**, fix or revert *that batch*
-   before moving on (feedback loop: change → test → fix/revert → repeat).
+   the set. On red **or a missing baseline test**, fix *that batch* (feedback
+   loop: change → test → fix → repeat); if it cannot be made green, **revert it
+   entirely** and make **no commit** for it — record the reason for the "How to
+   report" closing summary, then move on to the next batch.
 4. Never cross an invariant from `## Do NOT touch`.
+5. If this batch changed something a doc *names* (per Step 6's criteria below),
+   fix the stale doc reference now, **inside this same change set** — Step 6 is
+   applied inline here, immediately before this batch's commit, not as a
+   separate later pass.
+6. On success, review `git status --porcelain` / `git diff` and stage **only
+   the files, and only the hunks, belonging to this batch** (including any
+   doc fix from step 5) — verify the staged diff contains nothing beyond this
+   batch before committing, so an unrelated pre-existing edit or residue from
+   an earlier batch's revert never rides along. Create **exactly one commit**
+   with a **single-line** commit message only (no body, no trailer), in the
+   repo's Conventional Commits style, e.g.
+   `refactor(domain): extract shared merge-guard helper`. Never batch multiple
+   candidates into one commit, and never amend a commit made earlier in this
+   same run.
 
 Watch `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` especially — a
 failure there means a DB/merge/sync regression slipped in.
@@ -223,7 +254,9 @@ production code it verifies** (per `## Scope`): (a) **test-only tidying** — th
 same behavior-preserving cleanups you apply to production code, as long as every
 existing assertion still holds; (b) **new coverage** for a newly extracted seam
 (constraint #7). Delegate the writing to the **`test-writer` agent** if useful.
-Follow `docs/testing.md` conventions.
+Follow `docs/testing.md` conventions. Each of these is a batch like any other —
+it goes through Step 4's apply → verify → commit flow and gets its own single
+commit, independent of the production batch it accompanies.
 
 Test debt inventoried in Step 2 — logic in `domain/`/`data/`/a ViewModel with no
 corresponding test, or a fragile pattern (a wall-clock assertion, `runTest`
@@ -233,6 +266,10 @@ mixed with real IO/`HttpTimeout` per `docs/testing.md`'s known gotchas) — is
 below.
 
 ### Step 6 — Doc consistency check (targeted, auto-fix)
+
+This check is applied **inline inside Step 4's loop**, immediately before the
+commit for the batch that triggered it — not as a separate later pass — so the
+doc fix rides along in that same batch's single commit.
 
 Refactoring doesn't change behavior, so user-facing docs stay put — but the
 architecture docs name specific classes, files, and constants, which a split /
@@ -254,16 +291,19 @@ affected docs and **update the stale references in place**:
 only (see CLAUDE.md "Documentation"). This is a targeted pass, not a full
 re-read of every doc.
 
-### Step 7 — Constraint review + commit message
+### Step 7 — Constraint review + closing summary
 
 Optionally run the **`reviewer` agent** over the accumulated diff (`git diff`) to
-catch any architecture/constraint violation before finishing. Then output an
-English Conventional Commits message (`refactor(scope): …`) per `.claude/CLAUDE.md`
-"Commit messages". **Do not commit unless asked.**
+catch any architecture/constraint violation before finishing. Each batch already
+committed itself independently in Step 4, so there is no aggregate commit
+message to produce here — finish by outputting the closing summary (see
+`## How to report`).
 
 ## How to report
 
-- One line per applied batch: category → files → why behavior is preserved.
+- One line per applied batch: category → files → why behavior is preserved →
+  `Committed <sha>` with its one-line message, or `Reverted: <reason>` if it
+  could not be made green.
 - The final test result — passing count plus confirmation the Step 1 baseline
   test set is intact (e.g. "all baseline tests pass, 0 failures, N added").
 - Any doc files updated for consistency (Step 6) — which file and what drifted.
@@ -279,4 +319,3 @@ English Conventional Commits message (`refactor(scope): …`) per `.claude/CLAUD
   (broader than the newly-extracted-seam / test-only-tidying allowance in
   Step 5). Hand off to the **`test-writer` agent** or a dedicated pass. Reads
   **None** when the Step 2 inventory found no test debt.
-- The ready-to-use `refactor(...)` commit message.

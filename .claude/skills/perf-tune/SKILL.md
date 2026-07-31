@@ -1,6 +1,6 @@
 ---
 name: perf-tune
-description: Measurement-driven performance work on the Keryx source — reduce total work (CPU / SQL / IO / allocation), improve perceived speed (show what's ready, report progress, optimistic display), and fix concurrency/scheduling — while never weakening security, data integrity, or observable behavior. Invoke explicitly with /perf-tune (optionally /perf-tune <path>), or when asked to "make it faster", "optimize performance", "speed up startup", "reduce memory", or "the app feels slow".
+description: Measurement-driven performance work on the Keryx source — reduce total work (CPU / SQL / IO / allocation), improve perceived speed (show what's ready, report progress, optimistic display), and fix concurrency/scheduling — while never weakening security, data integrity, or observable behavior. After a one-time gate approval (bulk for Green/Yellow, individual for each Red), each approved item is measured, verified, and committed independently (one commit per item) with no further per-item confirmation. Invoke explicitly with /perf-tune (optionally /perf-tune <path>), or when asked to "make it faster", "optimize performance", "speed up startup", "reduce memory", or "the app feels slow".
 ---
 
 Make Keryx faster **without ever trading away durability, security, or observable
@@ -12,7 +12,11 @@ a good starting inventory, but never a substitute for measuring.
 
 Work in small, independently-revertible steps: baseline → measure → propose →
 gate → apply one at a time → re-measure. The existing test suite is the oracle
-for behavior and must stay green throughout.
+for behavior and must stay green throughout. After the Step 4 gate approval,
+each approved item is applied, re-measured, verified, and **committed
+independently — one commit per item** — with no further per-item approval,
+mirroring the `evaluate-review` skill's Case B auto-commit flow, rather than
+left for the user to commit.
 
 > Judging whether an optimization crosses a durability, sync-merge, or FTS
 > invariant is a **high-accuracy judgment**. **Run this in an opus session.**
@@ -247,8 +251,11 @@ headroom:
 
 ### Step 1 — Establish a green baseline
 
-Confirm a reasonably clean working tree (`git status`), then run the tests — or
-invoke the **`build` skill**:
+Check `git status --porcelain` before anything else: if the working tree is
+dirty with changes unrelated to this run, warn and stop — proceeding would
+contaminate the baseline below and risk an unrelated file getting swept into
+(or clobbered by a revert during) a later item's commit. Then run the tests —
+or invoke the **`build` skill**:
 
 ```bash
 ./gradlew :composeApp:desktopTest
@@ -338,6 +345,16 @@ Present the tiered, prioritized list and use **`AskUserQuestion`** once to confi
 the Green and Yellow batches. Take Red items **one at a time**, each with its
 impact stated. Proceed with only what was approved.
 
+Each of these approvals is also its item's **one-time run confirmation**: the
+bulk Green/Yellow approval covers every item in that batch, and each
+individual Red approval covers that one item — once given, the item proceeds
+straight through apply → re-measure → verify → commit (Step 5) with no further
+approval gate, the same shape as `evaluate-review`'s Case B. Before Step 5
+makes its first commit: if the current branch is a version branch (`v*`),
+apply the repo's Branching rule (`.claude/CLAUDE.md`) via `AskUserQuestion` and
+switch to the chosen branch first — Step 1's worktree check already ruled out
+unrelated dirty changes.
+
 ### Step 5 — Apply one at a time, verified
 
 For each approved item:
@@ -352,7 +369,20 @@ For each approved item:
    full** — a matching count is not sufficient, since a deleted test can hide
    behind a new one.
 4. If the improvement cannot be measured, or the suite goes red, **revert that
-   one item** and move on.
+   one item**, make **no commit** for it, and move on — record the reason for
+   the "How to report" closing summary.
+5. If this item changed something a doc *names* (per Step 7's criteria below),
+   fix the stale doc reference now, **inside this same change**, so it rides
+   along in this item's commit rather than a separate later one.
+6. On success, review `git status --porcelain` / `git diff` and stage **only
+   the files, and only the hunks, belonging to this item** (including any doc
+   fix from step 5) — verify the staged diff contains nothing beyond this item
+   before committing, so an unrelated pre-existing edit or residue from an
+   earlier item's revert never rides along. Create **exactly one commit** with
+   a **single-line** commit message only (no body, no trailer), in the repo's
+   Conventional Commits style, e.g. `perf(data): batch getByFeedAndGuid
+   lookups`. Never batch multiple items into one commit, and never amend a
+   commit made earlier in this same run.
 
 Watch `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` especially — a
 failure there means a DB/merge/sync regression slipped in.
@@ -374,6 +404,10 @@ verification list instead.
 
 ### Step 7 — Doc consistency
 
+This check is applied **inline inside Step 5's loop**, immediately before the
+commit for the item that triggered it — not as a separate later pass — so the
+doc fix rides along in that same item's single commit.
+
 Update only the docs whose stated performance characteristics actually changed.
 **`docs/` is bilingual — every page has an English `X.md` and a Japanese
 `X.ja.md`, so both must be updated together.** Likely targets:
@@ -388,18 +422,20 @@ Update only the docs whose stated performance characteristics actually changed.
 **Do not edit `README.md` or `docs/external-spec.md`** — user-facing only (see
 CLAUDE.md "Documentation").
 
-### Step 8 — Constraint review + commit message
+### Step 8 — Constraint review + closing summary
 
 Optionally run the **`reviewer` agent** over the accumulated diff (`git diff`).
-Then output an English Conventional Commits message (`perf(scope): …`) per
-`.claude/CLAUDE.md` "Commit messages". **Do not commit unless asked.**
+Each item already committed itself independently in Step 5, so there is no
+aggregate commit message to produce here — finish by outputting the closing
+summary (see `## How to report`).
 
 ## How to report
 
 - One entry per applied change: **axis** → location → **before/after measurement
   or milestone timestamps** (an SQL entry gives the execution measurement *and* its
   `EXPLAIN` diff, not the plan diff alone) → why the semantics are identical →
-  tier.
+  tier → `Committed <sha>` with its one-line message, or `Reverted: <reason>`
+  if it could not be confirmed.
 - For axis-2 changes, state explicitly that **total time is unchanged** — never
   let a perceived-speed improvement read as a speed-up.
 - The final test result, confirming the Step 1 baseline test set is intact
@@ -410,4 +446,3 @@ Then output an English Conventional Commits message (`perf(scope): …`) per
 - Anything deferred, with the reason (integrity risk / no measurable win /
   schema-compatibility cost not worth it / not worth overturning an existing
   deliberate trade).
-- The ready-to-use `perf(...)` commit message.
