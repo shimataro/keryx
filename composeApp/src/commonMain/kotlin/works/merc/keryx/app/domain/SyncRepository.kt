@@ -2,13 +2,13 @@ package works.merc.keryx.app.domain
 
 import app.cash.sqldelight.db.SqlDriver
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
@@ -58,8 +58,32 @@ class SyncRepository(
 ) : SyncScheduler {
 
     private val mutex = Mutex()
-    private var debounceJob: Job? = null
     private val _lastSyncError = MutableStateFlow<String?>(null)
+
+    /**
+     * Debounce signals, coalesced. [scheduleSync] is called from the UI thread (tag / folder / feed
+     * edits), from `HomeViewModel`'s single-threaded write dispatcher (every mark-as-read / star) and
+     * from `Dispatchers.Default` (once per feed in a refresh). Cancelling and reassigning a shared
+     * `Job` field from three dispatchers can drop a reference, leaving a pending debounce that
+     * nothing can cancel — so a write burst fires duplicate full
+     * download → merge → `VACUUM INTO` → upload cycles. (Integrity is never at risk: [sync] holds
+     * [mutex] and the upload is rev-checked. The cost is the duplicated work.) A conflated channel
+     * with the single consumer below keeps the same trailing-debounce semantics with no shared
+     * mutable state, mirroring how `SettingsRepository` coalesces its own disk write.
+     */
+    private val syncSignals = Channel<Unit>(capacity = Channel.CONFLATED)
+
+    init {
+        scope.launch {
+            for (signal in syncSignals) {
+                // Re-arm as long as calls keep arriving, so the window is measured from the last one.
+                while (withTimeoutOrNull(SYNC_DEBOUNCE_MS) { syncSignals.receive() } != null) {
+                    // Another scheduleSync() landed inside the window; restart it.
+                }
+                sync()
+            }
+        }
+    }
 
     /**
      * Why the last sync failed, or null when it succeeded (or none has run yet) — the same localized
@@ -81,11 +105,7 @@ class SyncRepository(
      */
     override fun scheduleSync() {
         if (cloudProvider() == null) return
-        debounceJob?.cancel()
-        debounceJob = scope.launch {
-            delay(SYNC_DEBOUNCE_MS)
-            sync()
-        }
+        syncSignals.trySend(Unit)
     }
 
     suspend fun sync(): Result<Unit> {
