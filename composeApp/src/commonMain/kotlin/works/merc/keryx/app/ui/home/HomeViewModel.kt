@@ -526,7 +526,13 @@ class HomeViewModel(
      */
     private fun pinnedReadArticlesKeepingSelected(): Map<String, Articles> {
         val selected = _selectedArticle.value
-        return if (selected != null && selected.is_read == 1L) mapOf(selected.id to selected) else emptyMap()
+        if (selected == null || selected.is_read != 1L) return emptyMap()
+        // The selected row may have been tombstoned by a sync merge that landed while it was
+        // selected. Re-pinning it would put deleted content back into the visible list, because the
+        // `articles` merge step re-adds any pinned id missing from the repository result — the same
+        // reason [reconcilePinnedReadArticles] exists, and the same check it applies.
+        if (articleRepository.getArticleById(selected.id)?.deleted_at != null) return emptyMap()
+        return mapOf(selected.id to selected)
     }
 
     /**

@@ -760,6 +760,35 @@ class HomeViewModelTest {
         assertEquals(listOf("a2"), vm.articles.value.map { it.id })
     }
 
+    /**
+     * A sync that tombstones the *selected* article must not leave it in the visible list. The
+     * trailing re-pin that `sync()` / `refreshAll()` perform (to keep the selection visible across
+     * a refresh) must not resurrect a row that no longer exists, which is the same invariant
+     * [pinnedArticleSoftDeletedByAnotherDeviceIsDroppedFromPinsReactively] covers for the
+     * reactive reconcile path.
+     */
+    @Test
+    fun syncDoesNotResurrectTheSelectedArticleAfterItIsTombstoned() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne())
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+
+        // Another device's sync propagates a soft-delete tombstone for the selected article.
+        driver.stampArticleDeleted("a1", deletedAt = 100L)
+        vm.sync()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf("a2"), vm.articles.value.map { it.id })
+    }
+
     @Test
     fun markAllReadOnStarredFilterDoesNotForceSelectedArticleReadState() = runTest {
         db.insertFeed("f1")
