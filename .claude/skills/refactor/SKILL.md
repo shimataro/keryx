@@ -159,8 +159,11 @@ divider policy, article card style, flat native-feel components, dialog rules).
 
 ### Step 1 — Establish a green baseline
 
-Confirm a reasonably clean working tree (`git status`), then run the tests — or
-invoke the **`build` skill**:
+Check `git status --porcelain` before anything else: if the working tree is
+dirty with changes unrelated to this run, warn and stop — proceeding would
+contaminate the baseline below and risk an unrelated file getting swept into
+(or clobbered by a revert during) a later batch's commit. Then run the tests —
+or invoke the **`build` skill**:
 
 ```bash
 ./gradlew :composeApp:desktopTest
@@ -202,10 +205,8 @@ approved batch below proceeds straight through apply → verify → commit (Step
 with no further per-batch approval gate — the same shape as `evaluate-review`'s
 Case B. Before Step 4 makes its first commit: if the current branch is a
 version branch (`v*`), apply the repo's Branching rule (`.claude/CLAUDE.md`)
-via `AskUserQuestion` and switch to the chosen branch first; and check `git
-status --porcelain` — if the working tree is dirty with changes unrelated to
-this run, warn and stop rather than risking an unrelated file getting swept
-into (or clobbered by a revert during) a batch's commit.
+via `AskUserQuestion` and switch to the chosen branch first — Step 1's worktree
+check already ruled out unrelated dirty changes.
 
 ### Step 4 — Apply batches (behavior-preserving, verified)
 
