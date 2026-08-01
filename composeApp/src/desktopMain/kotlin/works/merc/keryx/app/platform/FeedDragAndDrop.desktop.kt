@@ -53,16 +53,5 @@ actual fun DragAndDropEvent.positionYInRoot(): Float = when (val native = native
     else -> 0f
 }
 
-// Used to position a pointer-following drop-target badge (see FeedListPane.kt's TagAttachBadge).
-@OptIn(ExperimentalComposeUiApi::class)
-actual fun DragAndDropEvent.positionXInRoot(): Float = when (val native = nativeEvent) {
-    is DropTargetDragEvent -> native.location.x.toFloat() * native.dropTargetContext.component.scaleX()
-    is DropTargetDropEvent -> native.location.x.toFloat() * native.dropTargetContext.component.scaleX()
-    else -> 0f
-}
-
 private fun java.awt.Component.scaleY(): Float =
     graphicsConfiguration?.defaultTransform?.scaleY?.toFloat() ?: 1f
-
-private fun java.awt.Component.scaleX(): Float =
-    graphicsConfiguration?.defaultTransform?.scaleX?.toFloat() ?: 1f

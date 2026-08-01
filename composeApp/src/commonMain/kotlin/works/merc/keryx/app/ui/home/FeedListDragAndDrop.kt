@@ -33,12 +33,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.FEED_ERROR_REASON_GONE
 import works.merc.keryx.app.data.local.db.Feeds
@@ -146,6 +160,70 @@ private fun InsertionLine(indented: Boolean, visible: Boolean) {
 }
 
 /**
+ * Draws a legible drag decoration: an opaque rounded-rect chip (icon + title), replacing
+ * Compose's default drag-shadow snapshot. That default replays a `Picture` recorded from the
+ * row's last *normal* frame — since the row's own background is transparent whenever unselected,
+ * the resulting floating preview had no solid backing and was illegible over arbitrary content.
+ *
+ * A reactive fix (tint the row opaque only while it's the one being dragged) cannot work here:
+ * that state only becomes true *after* the OS-level drag — and its ghost image — has already
+ * started, with no recomposition window in between. `drawDragDecoration` sidesteps this because
+ * it runs synchronously, freshly, right when the drag starts (confirmed by decompiling
+ * `AwtDragAndDropManager.renderDragImage`), so everything here is drawn directly rather than
+ * captured from composition. That also means a raw `@Composable` like Coil's `AsyncImage` can't
+ * be embedded — `icon` must be a plain [Painter] resolved ahead of time.
+ */
+private fun DrawScope.drawDragPreviewChip(
+    title: String,
+    textMeasurer: TextMeasurer,
+    textStyle: TextStyle,
+    textColor: Color,
+    icon: Painter,
+    iconTint: Color,
+    backgroundColor: Color,
+    borderColor: Color,
+) {
+    val corner = CornerRadius(6.dp.toPx())
+    drawRoundRect(color = backgroundColor, cornerRadius = corner)
+    drawRoundRect(color = borderColor, cornerRadius = corner, style = Stroke(1.dp.toPx()))
+
+    val iconSize = 18.dp.toPx()
+    val padding = 8.dp.toPx()
+    translate(left = padding, top = (size.height - iconSize) / 2f) {
+        with(icon) { draw(size = Size(iconSize, iconSize), colorFilter = ColorFilter.tint(iconTint)) }
+    }
+
+    val textLeft = padding * 2 + iconSize
+    val layout = textMeasurer.measure(
+        text = title,
+        style = textStyle.copy(color = textColor),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        constraints = Constraints(maxWidth = (size.width - textLeft - padding).toInt().coerceAtLeast(0)),
+    )
+    drawText(layout, topLeft = Offset(textLeft, (size.height - layout.size.height) / 2f))
+}
+
+/**
+ * Resolves everything [drawDragPreviewChip] needs for a feed row's drag decoration (feed title +
+ * the same fallback icon [FeedAvatar][FeedListRowParts.kt] uses when a favicon isn't available),
+ * so [FeedRow] and [TagFeedRow] don't each repeat the same composition-time setup.
+ */
+@Composable
+internal fun rememberFeedDragDecoration(title: String): DrawScope.() -> Unit {
+    val textMeasurer = rememberTextMeasurer()
+    val icon = painterResource(KeryxIcons.PublicFilled)
+    val textStyle = MaterialTheme.typography.bodyLarge
+    val textColor = MaterialTheme.colorScheme.onSurface
+    val iconTint = MaterialTheme.colorScheme.onSurfaceVariant
+    val backgroundColor = MaterialTheme.colorScheme.surfaceContainerHighest
+    val borderColor = MaterialTheme.colorScheme.outlineVariant
+    return {
+        drawDragPreviewChip(title, textMeasurer, textStyle, textColor, icon, iconTint, backgroundColor, borderColor)
+    }
+}
+
+/**
  * Renders a folder header with selection styling, folder actions, and drag-and-drop targets.
  *
  * @param folder The folder represented by the header.
@@ -190,6 +268,13 @@ internal fun FolderGroupHeader(
     var coordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     val editFolderLabel = stringResource(Res.string.home_edit_folder_menu)
     val deleteFolderLabel = stringResource(Res.string.home_delete_folder_menu)
+    val dragTextMeasurer = rememberTextMeasurer()
+    val dragIcon = painterResource(KeryxIcons.Folder)
+    val dragTextStyle = MaterialTheme.typography.bodyLarge
+    val dragTextColor = MaterialTheme.colorScheme.onSurface
+    val dragIconTint = MaterialTheme.colorScheme.primary
+    val dragBackgroundColor = MaterialTheme.colorScheme.surfaceContainerHighest
+    val dragBorderColor = MaterialTheme.colorScheme.outlineVariant
     val isEmpty = firstFeedId == null
     val feedZoneBoundary = if (isEmpty) DropBoundary.AppendFeeds(folder.id) else firstFeedId.let(DropBoundary::BeforeFeed)
     val belowFolderBoundary = nextFolderId?.let(DropBoundary::BeforeFolder) ?: DropBoundary.AppendFolders
@@ -257,7 +342,20 @@ internal fun FolderGroupHeader(
                 .padding(start = 8.dp, top = 2.dp, end = 8.dp, bottom = 2.dp)
                 .clip(MaterialTheme.shapes.small)
                 .background(dropTargetBackground(isFeedDragHighlight, selected, focused, isDragSource))
-                .dragAndDropSource { folderDragTransferData(folder.id) }
+                .dragAndDropSource(
+                    drawDragDecoration = {
+                        drawDragPreviewChip(
+                            folder.name,
+                            dragTextMeasurer,
+                            dragTextStyle,
+                            dragTextColor,
+                            dragIcon,
+                            dragIconTint,
+                            dragBackgroundColor,
+                            dragBorderColor,
+                        )
+                    },
+                ) { folderDragTransferData(folder.id) }
                 .nativeContextMenu(
                     items = {
                         listOf(
@@ -419,6 +517,7 @@ internal fun FeedRow(
     val moveToFolderLabel = stringResource(Res.string.home_move_to_folder)
     val noFolderLabel = stringResource(Res.string.home_no_folder)
     val unsubscribeLabel = stringResource(Res.string.home_unsubscribe_menu)
+    val dragDecoration = rememberFeedDragDecoration(feed.displayTitle())
     val belowBoundary = nextFeedId?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(folderId)
 
     Column(
@@ -487,7 +586,7 @@ internal fun FeedRow(
                 .clip(MaterialTheme.shapes.small)
                 .background(selectionBackground(selected, focused))
                 .clickable(onClick = onClick)
-                .dragAndDropSource { feedDragTransferData(feed.id) }
+                .dragAndDropSource(drawDragDecoration = dragDecoration) { feedDragTransferData(feed.id) }
                 .nativeContextMenu(
                     items = {
                         listOf(
