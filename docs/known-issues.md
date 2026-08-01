@@ -1,0 +1,132 @@
+# Known Issues
+
+[日本語](known-issues.ja.md)
+
+Defects that are understood but deliberately not fixed, with the evidence behind that decision.
+Each entry records what was ruled out, so a later investigation doesn't repeat the same work.
+
+## Article list crashes the UI thread during heavy scroll + selection churn
+
+**Status**: not fixed — upstream Compose defect, waiting on a library update.
+
+### Symptom
+
+While the article list (middle pane) is being scrolled, the AWT event thread dies with:
+
+```text
+java.lang.IllegalArgumentException: onReuse is only expected on attached node
+    at androidx.compose.ui.node.LayoutNode.onReuse(LayoutNode.kt:2262)
+    at androidx.compose.runtime.Applier.reuse(Applier.kt:185)
+    ...
+    at androidx.compose.ui.layout.LayoutNodeSubcompositionsState.subcompose(SubcomposeLayout.kt:719)
+    at androidx.compose.foundation.lazy.LazyListMeasureKt.measureLazyList-pIk1_oM(LazyListMeasure.kt:179)
+    at androidx.compose.foundation.lazy.LazyListState.onScroll$foundation(LazyListState.kt:549)
+```
+
+The same exception is logged three times (captured in composition → `SEVERE [Main] Uncaught
+exception in window` → `Exception in thread "AWT-EventQueue-0"`); it is the *first* error, not a
+knock-on failure from an earlier one.
+
+After it fires the window stops responding. **No data is lost** — the crash is confined to the UI
+layer and never reaches the DB write path. Recovery is restarting the app.
+
+### What triggers it
+
+`LazyColumn` recycles the composition of rows that scroll out of view. The crash needs **two**
+things at once:
+
+1. The article list's scroll-into-view effect running — `ArticleListPaneContent`'s
+   `LaunchedEffect(selected?.id, …)` → `scrollToIndexIfNeeded` (`ui/home/HomeCommon.kt`). Only a
+   change of the *selected article's id* re-keys it.
+2. A row with enough layout nodes. `ArticleRow`'s current structure is past the threshold.
+
+Measured with an automated harness (see below), the crash needs the selection change and the wheel
+event to alternate **15 or more times**. It is sharply deterministic around that point:
+
+| Interleaved selection changes | Reproduced |
+| --- | --- |
+| 14 | 0 / 5 |
+| 15 | 5 / 5 |
+| 20, 60 | 5 / 5 |
+
+In terms of real gestures, that means one of:
+
+- **Holding ↓ / ↑ / J / K** (the OS key auto-repeat fires ~25–30 times a second, so 15 repeats is
+  roughly half a second) while the wheel or trackpad is also scrolling.
+- Pressing those keys **while macOS inertial scrolling is still running** — a flick keeps emitting
+  wheel events for over a second after the fingers lift, so the two overlap without the user doing
+  anything deliberately simultaneous. This is the most likely way it is hit in practice.
+- Clicking through articles very rapidly while scrolling. A click on a row that is only
+  *partially* visible at a viewport edge also scrolls (`scrollToIndexIfNeeded` is a no-op only when
+  the row is fully in view); right-click counts too, since it selects the row as well.
+
+### What does *not* trigger it
+
+Verified not to reproduce, so "it crashed while I left it alone" is not this bug:
+
+- A **single** selection change, even with the wheel turned during its scroll animation (0 / 5).
+- The list going from empty to non-empty — startup restore, or a refresh landing with unread-only
+  on (0 / 5).
+- Background feed refresh, cloud sync, cache cleanup, read/unread and star toggles, and
+  "mark all read". None of these change the selected article's *id*, so the effect never re-keys.
+
+### Cause
+
+An internal invariant violation inside Compose's own lazy-list item recycling: the `LayoutNode`
+pulled from the reuse pool has already been detached when `onReuse()` asserts it is attached. No
+misuse of the Compose API was found on the app side — a programmatic scroll concurrent with a user
+scroll is legitimate and should not corrupt the reuse pool.
+
+The bug is **latent and sensitive to the number of layout nodes per row**, not to anything specific
+the row does. This was established by taking the article card's *previous* metadata line (a single
+joined `Text`) and wrapping it in the same extra `Row`/`Spacer` nesting the current one uses: that
+alone reproduces the crash. So the metadata-line change that preceded the first report did not
+introduce the defect — it only pushed the row past the threshold that exposes it.
+
+Upstream reports of the same assertion:
+[compose-multiplatform#3977](https://github.com/JetBrains/compose-multiplatform/issues/3977),
+[issuetracker 303256075](https://issuetracker.google.com/issues/303256075).
+
+### Ruled out
+
+Each of these was tested against the deterministic repro and made no difference:
+
+- The pane's `VerticalScrollbarIfNeeded` sharing the `LazyListState`.
+- `Modifier.nativeContextMenu` on the row (its per-row `remember` / effects / `pointerInput`).
+- Coil's `AsyncImage` — never composes in the repro, since no favicon is set.
+- `stringResource` lookups in the row.
+- Compose version skew: `runtime` / `foundation` / `ui` all resolve to a single version, and the
+  `org.jetbrains.compose.*` and `androidx.compose.*` desktop artifacts on the classpath are empty
+  alias jars, so there is no duplicate-class conflict. The `compose-material3` pin is also not a
+  factor — that version *is* the newest stable (1.10 and 1.11 only ever shipped alphas).
+
+### Workarounds that did not work
+
+Listed so they are not tried again:
+
+- Replacing the animated scroll (`animateScrollToItem` / `animateScrollBy`) with the instant
+  `scrollToItem` / `scrollBy`.
+- Waiting for `isScrollInProgress` to clear before scrolling into view.
+- Both of the above combined.
+- `requestScrollToItem`, which defers the scroll to the next measure pass.
+- Upgrading to Compose Multiplatform **1.12.0-beta03** (confirmed to actually resolve in the
+  dependency graph; still reproduces 5 / 5).
+
+The only thing that prevents it is removing the scroll-into-view behaviour entirely, which would
+mean the selected article can sit off-screen during keyboard navigation. That is a worse trade than
+the crash's low frequency, so it was not taken.
+
+### Re-checking after a library update
+
+A disabled regression harness is kept at
+`composeApp/src/desktopTest/kotlin/works/merc/keryx/app/ui/home/ArticleReuseCrashRepro.kt`. It
+drives the same desktop code path as a real wheel scroll, so it needs no manual interaction.
+
+Remove its `@Ignore` and run it a few times:
+
+```bash
+./gradlew :composeApp:desktopTest --tests '*ArticleReuseCrashRepro*' --rerun-tasks
+```
+
+If it passes repeatedly, the upstream fix has landed: delete this entry and either keep the test as
+a normal regression test or drop it. If it still fails, restore the `@Ignore`.

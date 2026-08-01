@@ -28,6 +28,11 @@ Test both success (`Result.Ok`) and failure (`Result.Err`) branches; on failure,
 
 ## Execution
 
+One test is `@Ignore`d on purpose: `ArticleReuseCrashRepro` reproduces an outstanding Compose
+defect that is deliberately not fixed, so it would fail every run. See
+[known-issues.md](known-issues.md) — including how to re-enable it to check whether a Compose
+upgrade has fixed the bug.
+
 ```bash
 ./gradlew :composeApp:desktopTest
 ```

@@ -46,6 +46,10 @@
 
 ## 実行
 
+1 件だけ意図的に `@Ignore` しているテストがある。`ArticleReuseCrashRepro` は、意図的に修正して
+いない Compose 側の不具合を再現するもので、有効にすると毎回失敗するため。詳細と、Compose 更新後に
+修正されたかを確認する手順は [known-issues.ja.md](known-issues.ja.md) を参照。
+
 ```bash
 ./gradlew :composeApp:desktopTest
 ```
