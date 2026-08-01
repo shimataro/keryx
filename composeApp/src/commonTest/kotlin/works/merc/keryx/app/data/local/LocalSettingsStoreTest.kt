@@ -54,6 +54,32 @@ class LocalSettingsStoreTest {
     }
 
     @Test
+    fun expandedTagIdsDefaultsToEmptySet() {
+        assertEquals(emptySet(), store.load().expandedTagIds)
+    }
+
+    @Test
+    fun expandedTagIdsRoundTrips() {
+        store.save(LocalSettings(expandedTagIds = setOf("t1", "t2")))
+        assertEquals(setOf("t1", "t2"), store.load().expandedTagIds)
+    }
+
+    @Test
+    fun loadingOldSettingsFileWithoutExpandedTagIdsKeyStillWorks() {
+        // Simulates a `local_settings.json` written before `expandedTagIds` existed.
+        FileIO.writeText(
+            FileIO.join(dir, "local_settings.json"),
+            """{"themeMode":"dark","collapsedFolderIds":["d1"]}""",
+        )
+
+        val s = store.load()
+
+        assertEquals("dark", s.themeMode)
+        assertEquals(setOf("d1"), s.collapsedFolderIds)
+        assertEquals(emptySet(), s.expandedTagIds)
+    }
+
+    @Test
     fun lastFtsRebuiltAtRoundTrips() {
         assertEquals(null, store.load().lastFtsRebuiltAt)
         store.save(LocalSettings(lastFtsRebuiltAt = 1_700_000_000_000L))

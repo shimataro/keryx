@@ -248,6 +248,86 @@ class HomeCommonTest {
         assertEquals(2, feedListItemIndex(ArticleFilter.Folder("d1"), feeds, folders, emptyList(), setOf("d1")))
     }
 
+    // --- feedsForTag ---
+
+    @Test
+    fun feedsForTagIsEmptyWhenNoFeedCarriesTheTag() {
+        val feeds = listOf(feed("f1"), feed("f2"))
+
+        assertEquals(emptyList(), feedsForTag(feeds, emptyMap(), "t1"))
+    }
+
+    @Test
+    fun feedsForTagPreservesInputFeedOrder() {
+        val feeds = listOf(feed("f3"), feed("f1"), feed("f2"))
+        val feedTagMap = mapOf("f1" to setOf("t1"), "f2" to setOf("t1"), "f3" to setOf("t1"))
+
+        assertEquals(listOf("f3", "f1", "f2"), feedsForTag(feeds, feedTagMap, "t1").map { it.id })
+    }
+
+    @Test
+    fun feedsForTagIgnoresOtherTagsAttachments() {
+        val feeds = listOf(feed("f1"), feed("f2"), feed("f3"))
+        val feedTagMap = mapOf(
+            "f1" to setOf("t1", "t2"),
+            "f2" to setOf("t2"),
+            // f3 has no entry at all.
+        )
+
+        assertEquals(listOf("f1"), feedsForTag(feeds, feedTagMap, "t1").map { it.id })
+        assertEquals(listOf("f1", "f2"), feedsForTag(feeds, feedTagMap, "t2").map { it.id })
+    }
+
+    // --- feedListItemIndex, expanded tags ---
+
+    @Test
+    fun feedListItemIndexIgnoresTagFeedRowsWhenNoTagIsExpanded() {
+        val tags = listOf(tag("t1"), tag("t2"))
+        val feeds = listOf(feed("f1"), feed("f2"))
+        val feedTagMap = mapOf("f1" to setOf("t1"), "f2" to setOf("t1"))
+
+        // 0: sidebar rows, 1: "Folders" header, 2: f1, 3: f2, 4: divider, 5: "Tags" header
+        assertEquals(6, feedListItemIndex(ArticleFilter.Tag("t1"), feeds, emptyList(), tags, emptySet(), feedTagMap, emptySet()))
+        assertEquals(7, feedListItemIndex(ArticleFilter.Tag("t2"), feeds, emptyList(), tags, emptySet(), feedTagMap, emptySet()))
+    }
+
+    @Test
+    fun feedListItemIndexShiftsLaterTagsByAnExpandedTagsFeedRows() {
+        val tags = listOf(tag("t1"), tag("t2"), tag("t3"))
+        val feeds = listOf(feed("f1"), feed("f2"), feed("f3"))
+        val feedTagMap = mapOf("f1" to setOf("t1"), "f2" to setOf("t1"), "f3" to setOf("t2"))
+
+        // 0: sidebar rows, 1: "Folders" header, 2-4: f1..f3, 5: divider, 6: "Tags" header,
+        // 7: tag t1, 8: f1 (under t1), 9: f2 (under t1), 10: tag t2, 11: f3 (under t2), 12: tag t3
+        val expanded = setOf("t1", "t2")
+        assertEquals(7, feedListItemIndex(ArticleFilter.Tag("t1"), feeds, emptyList(), tags, emptySet(), feedTagMap, expanded))
+        assertEquals(10, feedListItemIndex(ArticleFilter.Tag("t2"), feeds, emptyList(), tags, emptySet(), feedTagMap, expanded))
+        assertEquals(12, feedListItemIndex(ArticleFilter.Tag("t3"), feeds, emptyList(), tags, emptySet(), feedTagMap, expanded))
+    }
+
+    @Test
+    fun feedListItemIndexResolvesFeedToItsFolderRowNotItsTagNestedRow() {
+        // A feed nested under an expanded tag is a duplicate view; the primary row under its
+        // folder group is what a selection scrolls to.
+        val tags = listOf(tag("t1"))
+        val feeds = listOf(feed("f1"))
+        val feedTagMap = mapOf("f1" to setOf("t1"))
+
+        assertEquals(
+            2,
+            feedListItemIndex(ArticleFilter.Feed("f1"), feeds, emptyList(), tags, emptySet(), feedTagMap, setOf("t1")),
+        )
+    }
+
+    @Test
+    fun feedListItemIndexDefaultsToNoExpandedTagsWhenTagArgumentsAreOmitted() {
+        val tags = listOf(tag("t1"), tag("t2"))
+        val feeds = listOf(feed("f1"))
+
+        assertEquals(5, feedListItemIndex(ArticleFilter.Tag("t1"), feeds, emptyList(), tags, emptySet()))
+        assertEquals(6, feedListItemIndex(ArticleFilter.Tag("t2"), feeds, emptyList(), tags, emptySet()))
+    }
+
     @Test
     fun feedListItemIndexReturnsNullForNonexistentIds() {
         val folders = listOf(folder("d1"))
