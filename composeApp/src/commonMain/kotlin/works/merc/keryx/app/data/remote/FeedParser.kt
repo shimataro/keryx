@@ -6,7 +6,7 @@ import com.fleeksoft.ksoup.parser.Parser
 import works.merc.keryx.app.core.DateTimeParser
 
 /**
- * Parses RSS 2.0 (incl. RSS 1.0 / RDF) and Atom 1.0 into [FetchedFeed]. Uses a
+ * Parses RSS 2.0 (incl. RSS 1.0 / RDF) and Atom 1.0 / 0.3 into [FetchedFeed]. Uses a
  * lenient DOM (ksoup XML parser) and direct-child lookups so channel-level
  * fields never accidentally pick up an item's title/link.
  */
@@ -60,12 +60,16 @@ object FeedParser {
                 summary = entry.childText("summary"),
                 content = entry.childText("content") ?: entry.childText("summary"),
                 author = entry.directChild("author")?.childText("name"),
-                publishedAtMillis = DateTimeParser.parseToEpochMillis(entry.childText("updated", "published")),
+                // Publication date first, falling back to the modification date. Atom 1.0 uses
+                // published/updated; Atom 0.3 (still emitted by e.g. livedoor Blog) uses issued/modified.
+                publishedAtMillis = DateTimeParser.parseToEpochMillis(
+                    entry.childText("published", "issued", "updated", "modified"),
+                ),
             )
         }
         return FetchedFeed(
             title = feed?.childText("title"),
-            description = feed?.childText("subtitle"),
+            description = feed?.childText("subtitle", "tagline"),
             siteUrl = atomLink(feed),
             articles = articles,
         )
@@ -92,8 +96,11 @@ object FeedParser {
         return null
     }
 
+    /** Finds the first direct child matching [tags], in argument order (earlier tags win). */
     private fun Element.directChild(vararg tags: String): Element? =
-        children().firstOrNull { child -> tags.any { child.tagName().equals(it, ignoreCase = true) } }
+        tags.firstNotNullOfOrNull { tag ->
+            children().firstOrNull { it.tagName().equals(tag, ignoreCase = true) }
+        }
 
     private fun Element.childText(vararg tags: String): String? {
         val el = directChild(*tags) ?: return null
