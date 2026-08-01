@@ -2,6 +2,8 @@ package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.draganddrop.dragAndDropSource
+import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,10 +35,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draganddrop.DragAndDropEvent
+import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
@@ -48,12 +53,15 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
+import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
 import works.merc.keryx.app.platform.NativeMenuItem
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.platform.WindowChrome
 import works.merc.keryx.app.platform.WindowDragArea
+import works.merc.keryx.app.platform.draggedFeedId
+import works.merc.keryx.app.platform.feedDragTransferData
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_add_feed
@@ -65,6 +73,7 @@ import works.merc.keryx.app.resources.home_edit_tag_menu
 import works.merc.keryx.app.resources.home_folders
 import works.merc.keryx.app.resources.home_refresh
 import works.merc.keryx.app.resources.home_refreshing
+import works.merc.keryx.app.resources.home_remove_feed_from_tag_menu
 import works.merc.keryx.app.resources.home_search
 import works.merc.keryx.app.resources.home_search_clear
 import works.merc.keryx.app.resources.home_search_placeholder
@@ -124,6 +133,7 @@ fun FeedListPane(
     val unreadByTag by vm.unreadByTag.collectAsStateSafe(emptyMap())
     val unreadByFolder by vm.unreadByFolder.collectAsStateSafe(emptyMap())
     val collapsedFolderIds by vm.collapsedFolderIds.collectAsStateSafe(emptySet())
+    val expandedTagIds by vm.expandedTagIds.collectAsStateSafe(emptySet())
     val totalUnread by vm.totalUnread.collectAsStateSafe(0L)
     val starredUnread by vm.starredUnreadCount.collectAsStateSafe(0L)
     val searchUnread by vm.searchUnreadCount.collectAsStateSafe(0L)
@@ -194,7 +204,8 @@ fun FeedListPane(
     val listState = rememberLazyListState()
 
     LaunchedEffect(filter, feeds.isNotEmpty(), tags.isNotEmpty(), folders.isNotEmpty()) {
-        val index = feedListItemIndex(filter, feeds, folders, tags, collapsedFolderIds) ?: return@LaunchedEffect
+        val index = feedListItemIndex(filter, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
+            ?: return@LaunchedEffect
         listState.scrollToIndexIfNeeded(index)
     }
 
@@ -424,16 +435,35 @@ fun FeedListPane(
                         }
                     }
                 }
-                items(tags, key = { "tag-${it.id}" }) { tag ->
-                    TagRow(
-                        tag = tag,
-                        count = unreadByTag[tag.id] ?: 0L,
-                        selected = filter == ArticleFilter.Tag(tag.id),
-                        focused = focused,
-                        onClick = { vm.selectFilter(ArticleFilter.Tag(tag.id)); onActivated() },
-                        onEdit = { editingTag = tag },
-                        onDelete = { confirmingDeleteTag = tag },
-                    )
+                tags.forEach { tag ->
+                    item(key = "tag-${tag.id}") {
+                        TagRow(
+                            tag = tag,
+                            count = unreadByTag[tag.id] ?: 0L,
+                            expanded = tag.id in expandedTagIds,
+                            selected = filter == ArticleFilter.Tag(tag.id),
+                            focused = focused,
+                            onToggleExpanded = { vm.toggleTagExpanded(tag.id) },
+                            onClick = { vm.selectFilter(ArticleFilter.Tag(tag.id)); onActivated() },
+                            onEdit = { editingTag = tag },
+                            onDelete = { confirmingDeleteTag = tag },
+                            onAttachFeed = { feedId -> vm.setFeedTag(feedId, tag.id, true) },
+                        )
+                    }
+                    if (tag.id in expandedTagIds) {
+                        // A feed carrying several tags legitimately appears once per expanded tag (plus
+                        // once under its folder), so the key must be tag-scoped to stay unique.
+                        items(feedsForTag(feeds, feedTagMap, tag.id), key = { "tag-${tag.id}-feed-${it.id}" }) { feed ->
+                            TagFeedRow(
+                                feed = feed,
+                                count = unreadByFeed[feed.id] ?: 0L,
+                                selected = filter == ArticleFilter.Feed(feed.id),
+                                focused = focused,
+                                onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id)); onActivated() },
+                                onRemoveFromTag = { vm.setFeedTag(feed.id, tag.id, false) },
+                            )
+                        }
+                    }
                 }
             }
             VerticalScrollbarIfNeeded(listState)
@@ -500,24 +530,83 @@ private fun SidebarRow(
     }
 }
 
+/**
+ * Renders a tag row: selection/filter target, expand toggle for its attached-feed list, and a drop
+ * target that attaches a dragged feed to the tag.
+ *
+ * The drop affordance is deliberately different from a folder's: attaching a tag is additive (a feed
+ * may carry many tags) whereas dropping on a folder *moves* the feed, so this row tints itself
+ * `tertiaryContainer` — not the `secondaryContainer` of [FolderGroupHeader] — and swaps its color dot
+ * for a "+" glyph while hovered. Compose's `supportedActions` is fixed at drag start and cannot be
+ * varied per drop target, so this in-row cue is the only way to distinguish the two gestures.
+ *
+ * @param tag The tag represented by the row.
+ * @param count The number of unread articles carrying the tag.
+ * @param expanded Whether the tag's attached-feed list is shown.
+ * @param selected Whether the tag is the active filter.
+ * @param focused Whether the sidebar has focus.
+ * @param onToggleExpanded Toggles the attached-feed list.
+ * @param onClick Handles selection of the tag.
+ * @param onEdit Opens tag editing.
+ * @param onDelete Deletes the tag.
+ * @param onAttachFeed Attaches a dropped feed to this tag.
+ */
 @Composable
 private fun TagRow(
     tag: Tags,
     count: Long,
+    expanded: Boolean,
     selected: Boolean,
     focused: Boolean,
+    onToggleExpanded: () -> Unit,
     onClick: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onAttachFeed: (feedId: String) -> Unit,
 ) {
     val editLabel = stringResource(Res.string.home_edit_tag_menu)
     val deleteLabel = stringResource(Res.string.home_delete_tag_menu)
+    // A tag is an isolated attach target rather than an insertion point, so it keeps its own hover
+    // state instead of joining the shared DropBoundary system used for folder/feed reordering.
+    var isDropTarget by remember { mutableStateOf(false) }
+    val target = remember(tag.id) {
+        object : DragAndDropTarget {
+            override fun onEntered(event: DragAndDropEvent) {
+                isDropTarget = event.draggedFeedId() != null
+            }
+
+            override fun onMoved(event: DragAndDropEvent) {
+                isDropTarget = event.draggedFeedId() != null
+            }
+
+            override fun onExited(event: DragAndDropEvent) {
+                isDropTarget = false
+            }
+
+            override fun onEnded(event: DragAndDropEvent) {
+                isDropTarget = false
+            }
+
+            /**
+             * Attaches a feed dropped on this tag.
+             *
+             * @return `true` when a feed was dropped, `false` for any other payload.
+             */
+            override fun onDrop(event: DragAndDropEvent): Boolean {
+                isDropTarget = false
+                val feedId = event.draggedFeedId() ?: return false
+                onAttachFeed(feedId)
+                return true
+            }
+        }
+    }
+    val contentColor = tagDropTargetContentColorOrNull(isDropTarget, selected, focused)
     Row(
         Modifier.fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 2.dp)
             .clip(MaterialTheme.shapes.small)
-            .background(selectionBackground(selected, focused))
-            .clickable(onClick = onClick)
+            .background(tagDropTargetBackground(isDropTarget, selected, focused))
+            .dragAndDropTarget(shouldStartDragAndDrop = { true }, target = target)
             .nativeContextMenu(
                 items = {
                     listOf(
@@ -527,13 +616,94 @@ private fun TagRow(
                 },
                 onOpen = { if (!selected) onClick() },
             )
-            .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            .padding(start = 8.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(10.dp).background(colorFromHex(tag.color), CircleShape))
+        CompositionLocalProvider(LocalContentColor provides (contentColor ?: LocalContentColor.current)) {
+            KeryxIcon(
+                if (expanded) KeryxIcons.ExpandMore else KeryxIcons.ChevronRight,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp).clickable(onClick = onToggleExpanded),
+            )
+            Spacer(Modifier.width(4.dp))
+            Row(
+                Modifier.weight(1f).clickable(onClick = onClick).padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Fixed-size slot so swapping the dot for the "+" glyph never shifts the tag name.
+                Box(Modifier.size(TAG_MARKER_SIZE_DP.dp), contentAlignment = Alignment.Center) {
+                    if (isDropTarget) {
+                        KeryxIcon(
+                            KeryxIcons.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(TAG_MARKER_SIZE_DP.dp),
+                        )
+                    } else {
+                        Box(Modifier.size(10.dp).background(colorFromHex(tag.color), CircleShape))
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(tag.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        if (count > 0) CountBadge(count, selected, focused, isDropTarget)
+    }
+}
+
+/** Size of a [TagRow]'s leading marker slot, holding either the tag color dot or the drop "+" glyph. */
+private const val TAG_MARKER_SIZE_DP = 16
+
+/** Background for a [TagRow]: `tertiaryContainer` while a feed hovers it, so the additive "attach"
+ * drop reads differently from a folder's `secondaryContainer` "move" drop. */
+@Composable
+private fun tagDropTargetBackground(isDropTarget: Boolean, selected: Boolean, focused: Boolean): Color =
+    if (isDropTarget) MaterialTheme.colorScheme.tertiaryContainer else selectionBackground(selected, focused)
+
+/** Content color paired with [tagDropTargetBackground]. */
+@Composable
+private fun tagDropTargetContentColorOrNull(isDropTarget: Boolean, selected: Boolean, focused: Boolean): Color? =
+    if (isDropTarget) MaterialTheme.colorScheme.onTertiaryContainer else selectionContentColorOrNull(selected, focused)
+
+/**
+ * Renders one feed attached to an expanded tag. Unlike [FeedRow] it is not a drop target — a tag's
+ * feeds have no order (`feed_tags` carries no `sort_order`), so "before/after" is meaningless here —
+ * but it can still be dragged out onto a folder or another tag.
+ *
+ * @param feed The attached feed.
+ * @param count The number of unread articles in the feed.
+ * @param selected Whether the feed is the active filter.
+ * @param focused Whether the sidebar has focus.
+ * @param onClick Handles selection of the feed.
+ * @param onRemoveFromTag Detaches the feed from the enclosing tag.
+ */
+@Composable
+private fun TagFeedRow(
+    feed: Feeds,
+    count: Long,
+    selected: Boolean,
+    focused: Boolean,
+    onClick: () -> Unit,
+    onRemoveFromTag: () -> Unit,
+) {
+    val removeLabel = stringResource(Res.string.home_remove_feed_from_tag_menu)
+    Row(
+        Modifier.fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+            .clip(MaterialTheme.shapes.small)
+            .background(selectionBackground(selected, focused))
+            .clickable(onClick = onClick)
+            .dragAndDropSource { feedDragTransferData(feed.id) }
+            .nativeContextMenu(
+                items = { listOf(NativeMenuItem(removeLabel) { onRemoveFromTag() }) },
+                onOpen = { if (!selected) onClick() },
+            )
+            .padding(start = 36.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        FeedAvatar(feed.displayTitle(), feed.favicon_url)
         Spacer(Modifier.width(12.dp))
         CompositionLocalProvider(LocalContentColor provides (selectionContentColorOrNull(selected, focused) ?: LocalContentColor.current)) {
-            Text(tag.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(feed.displayTitle(), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (count > 0) CountBadge(count, selected, focused)
     }

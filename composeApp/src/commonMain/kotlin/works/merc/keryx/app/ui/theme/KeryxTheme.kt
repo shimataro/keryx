@@ -48,11 +48,26 @@ private val OnSecondaryContainerLight = Color(0xFF3A3D3B)
 private val SecondaryContainerDark = TealLight.copy(alpha = 0.32f).compositeOver(Color(0xFF303030))
 private val OnSecondaryContainerDark = Color(0xFFDADAD8)
 
+/**
+ * Override for tertiaryContainer/onTertiaryContainer — M3's untouched default (pale pink in
+ * light, maroon in dark) reads as an off-brand accent leaking into an otherwise teal-only app.
+ * Used for the "attach" (not "move") drop-target highlight on [TagRow], which needs a hue
+ * distinct from [SecondaryContainerLight]/[SecondaryContainerDark]'s teal tint (the folder
+ * "move" highlight) — a blue tint reads as clearly different from teal while still following the
+ * same "tint a neutral base" recipe, and the neutral "on" colors are shared with the secondary
+ * container since both tints composite to the same base luminance.
+ */
+private val Attach = Color(0xFF1E88E5)
+private val TertiaryContainerLight = Attach.copy(alpha = 0.26f).compositeOver(Color(0xFFF1F1F1))
+private val TertiaryContainerDark = Attach.copy(alpha = 0.32f).compositeOver(Color(0xFF303030))
+
 private val LightColors = lightColorScheme(
     primary = Teal,
     secondary = Teal,
     secondaryContainer = SecondaryContainerLight,
     onSecondaryContainer = OnSecondaryContainerLight,
+    tertiaryContainer = TertiaryContainerLight,
+    onTertiaryContainer = OnSecondaryContainerLight,
 )
 
 private val DarkColors = darkColorScheme(
@@ -60,6 +75,8 @@ private val DarkColors = darkColorScheme(
     secondary = TealLight,
     secondaryContainer = SecondaryContainerDark,
     onSecondaryContainer = OnSecondaryContainerDark,
+    tertiaryContainer = TertiaryContainerDark,
+    onTertiaryContainer = OnSecondaryContainerDark,
 )
 
 /**

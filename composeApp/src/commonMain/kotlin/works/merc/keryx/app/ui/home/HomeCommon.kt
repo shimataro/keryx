@@ -79,6 +79,13 @@ fun groupFeedsByFolder(feeds: List<Feeds>, folders: List<Folders>): List<Pair<Fo
         (null as Folders? to unassigned)
 }
 
+/**
+ * The feeds attached to [tagId], preserving [feeds]' order (same contract as [groupFeedsByFolder]).
+ * [feedTagMap] maps a feed id to the set of tag ids attached to it.
+ */
+fun feedsForTag(feeds: List<Feeds>, feedTagMap: Map<String, Set<String>>, tagId: String): List<Feeds> =
+    feeds.filter { tagId in (feedTagMap[it.id] ?: emptySet()) }
+
 /** Flattened feed-pane order, matching `FeedListPane`'s visual top-to-bottom order. */
 fun buildOrderedFilters(
     tags: List<Tags>,
@@ -116,6 +123,10 @@ fun nextFeedFilter(current: ArticleFilter, orderedFilters: List<ArticleFilter>, 
  * Returns null if that row is not currently rendered (e.g. a feed under a collapsed folder).
  * This mirrors FeedListPane.kt's LazyColumn item structure — if that structure changes,
  * update both together.
+ *
+ * An expanded tag contributes one extra row per attached feed. Those nested rows are only counted
+ * (so the rows *after* them keep the right index) and are never returned as a target themselves —
+ * the same feed's primary occurrence under its folder is the row a selection scrolls to.
  */
 fun feedListItemIndex(
     filter: ArticleFilter,
@@ -123,6 +134,8 @@ fun feedListItemIndex(
     folders: List<Folders>,
     tags: List<Tags>,
     collapsedFolderIds: Set<String>,
+    feedTagMap: Map<String, Set<String>> = emptyMap(),
+    expandedTagIds: Set<String> = emptySet(),
 ): Int? {
     // All, Starred and Search all live in the single first LazyColumn item (index 0).
     if (filter is ArticleFilter.Starred || filter is ArticleFilter.All || filter is ArticleFilter.Search) return 0
@@ -148,8 +161,12 @@ fun feedListItemIndex(
     }
     index++ // divider
     index++ // "Tags" header
-    tags.forEachIndexed { i, tag ->
-        if (filter is ArticleFilter.Tag && filter.tagId == tag.id) return index + i
+    for (tag in tags) {
+        if (filter is ArticleFilter.Tag && filter.tagId == tag.id) return index
+        index++ // TagRow
+        if (tag.id in expandedTagIds) {
+            index += feedsForTag(feeds, feedTagMap, tag.id).size
+        }
     }
     return null
 }

@@ -70,6 +70,7 @@
     <string name="home_edit_tag">タグを編集</string>
     <string name="home_delete_tag_menu">削除</string>
     <string name="home_assign_tags">タグを設定</string>
+    <string name="home_remove_feed_from_tag_menu">タグから外す</string>
     <string name="home_folders">フォルダー</string>
     <string name="home_add_folder">フォルダーを追加</string>
     <string name="home_new_folder_hint">フォルダー名を入力</string>

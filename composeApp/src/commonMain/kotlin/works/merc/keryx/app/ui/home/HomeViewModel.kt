@@ -324,6 +324,23 @@ class HomeViewModel(
         settingsRepository.mutateLocalSettings { it.copy(collapsedFolderIds = _collapsedFolderIds.value) }
     }
 
+    private val _expandedTagIds = MutableStateFlow(
+        settingsRepository.getLocalSettings().expandedTagIds,
+    )
+    val expandedTagIds: StateFlow<Set<String>> = _expandedTagIds.asStateFlow()
+
+    /**
+     * Toggles whether a tag's attached-feed list is expanded and persists the updated state.
+     *
+     * @param tagId The identifier of the tag to toggle.
+     */
+    fun toggleTagExpanded(tagId: String) {
+        _expandedTagIds.value = _expandedTagIds.value.let {
+            if (tagId in it) it - tagId else it + tagId
+        }
+        settingsRepository.mutateLocalSettings { it.copy(expandedTagIds = _expandedTagIds.value) }
+    }
+
     // --- Article scroll position memory ---
 
     private val _scrollPositions = MutableStateFlow(
@@ -732,9 +749,16 @@ class HomeViewModel(
         tagRepository.updateTag(id, name.trim(), color)
     }
 
+    /**
+     * Deletes a tag and removes it from the expanded-tag state.
+     *
+     * @param id The identifier of the tag to delete.
+     */
     fun deleteTag(id: String) {
         tagRepository.deleteTag(id)
         if (_filter.value == ArticleFilter.Tag(id)) selectFilter(ArticleFilter.All)
+        _expandedTagIds.value = _expandedTagIds.value - id
+        settingsRepository.mutateLocalSettings { it.copy(expandedTagIds = _expandedTagIds.value) }
     }
 
     fun setFeedTag(feedId: String, tagId: String, attached: Boolean) =

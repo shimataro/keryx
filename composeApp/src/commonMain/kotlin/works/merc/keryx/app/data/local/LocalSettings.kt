@@ -25,6 +25,12 @@ data class LocalSettings(
     val feedListPaneWidth: Double = FEED_LIST_PANE_WIDTH_DEFAULT.toDouble(),
     val articleListPaneWidth: Double = ARTICLE_LIST_PANE_WIDTH_DEFAULT.toDouble(),
     val collapsedFolderIds: Set<String> = emptySet(),
+    /**
+     * Tags whose attached-feed list is expanded in the sidebar. Tags default to *collapsed*
+     * (the opposite of folders, which default to expanded and track the collapsed ones instead),
+     * so the sidebar stays as short as it was before this list existed.
+     */
+    val expandedTagIds: Set<String> = emptySet(),
     val lastFilter: String? = null,
     val lastArticleId: String? = null,
     val recentArticleScrollPositions: List<ArticleScrollPosition> = emptyList(),
