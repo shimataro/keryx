@@ -744,6 +744,15 @@ class HomeViewModel(
         return tagRepository.createTag(name.trim(), color)
     }
 
+    /**
+     * Updates a tag with the specified name and color.
+     *
+     * Blank names are ignored.
+     *
+     * @param id The identifier of the tag to update.
+     * @param name The tag's new name.
+     * @param color The tag's new color, or `null` to remove the color.
+     */
     fun updateTag(id: String, name: String, color: String?) {
         if (name.isBlank()) return
         tagRepository.updateTag(id, name.trim(), color)
@@ -761,7 +770,14 @@ class HomeViewModel(
         settingsRepository.mutateLocalSettings { it.copy(expandedTagIds = _expandedTagIds.value) }
     }
 
-    fun setFeedTag(feedId: String, tagId: String, attached: Boolean) =
+    /**
+         * Updates whether a feed is associated with a tag.
+         *
+         * @param feedId The ID of the feed.
+         * @param tagId The ID of the tag.
+         * @param attached Whether the tag should be associated with the feed.
+         */
+        fun setFeedTag(feedId: String, tagId: String, attached: Boolean) =
         tagRepository.setFeedTag(feedId, tagId, attached)
 
     // --- Folder actions ---

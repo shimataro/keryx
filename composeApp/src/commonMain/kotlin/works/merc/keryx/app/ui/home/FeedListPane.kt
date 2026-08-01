@@ -116,6 +116,16 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  * @param onAddFeedClick Called when the add-feed action is selected.
  * @param onSearchFieldFocusChange Called when the search field focus changes.
  */
+/**
+ * Renders the feed navigation pane with filters, folders, tags, search, synchronization controls, and feed management actions.
+ *
+ * @param vm The view model that provides feed state and handles navigation and management operations.
+ * @param focused Whether the pane currently has focus.
+ * @param onActivated Called when the pane becomes active.
+ * @param modifier Modifier applied to the pane.
+ * @param onAddFeedClick Called when the user requests to add a feed.
+ * @param onSearchFieldFocusChange Called when the search field focus changes.
+ */
 @Composable
 fun FeedListPane(
     vm: HomeViewModel,
@@ -531,25 +541,18 @@ private fun SidebarRow(
 }
 
 /**
- * Renders a tag row: selection/filter target, expand toggle for its attached-feed list, and a drop
- * target that attaches a dragged feed to the tag.
- *
- * The drop affordance is deliberately different from a folder's: attaching a tag is additive (a feed
- * may carry many tags) whereas dropping on a folder *moves* the feed, so this row tints itself
- * `tertiaryContainer` — not the `secondaryContainer` of [FolderGroupHeader] — and swaps its color dot
- * for a "+" glyph while hovered. Compose's `supportedActions` is fixed at drag start and cannot be
- * varied per drop target, so this in-row cue is the only way to distinguish the two gestures.
+ * Renders a tag filter row with expansion, selection, editing, deletion, and feed attachment support.
  *
  * @param tag The tag represented by the row.
- * @param count The number of unread articles carrying the tag.
- * @param expanded Whether the tag's attached-feed list is shown.
+ * @param count The number of unread articles associated with the tag.
+ * @param expanded Whether attached feeds are displayed.
  * @param selected Whether the tag is the active filter.
- * @param focused Whether the sidebar has focus.
+ * @param focused Whether the sidebar currently has focus.
  * @param onToggleExpanded Toggles the attached-feed list.
- * @param onClick Handles selection of the tag.
+ * @param onClick Selects the tag.
  * @param onEdit Opens tag editing.
  * @param onDelete Deletes the tag.
- * @param onAttachFeed Attaches a dropped feed to this tag.
+ * @param onAttachFeed Attaches a dropped feed to the tag.
  */
 @Composable
 private fun TagRow(
@@ -571,6 +574,11 @@ private fun TagRow(
     var isDropTarget by remember { mutableStateOf(false) }
     val target = remember(tag.id) {
         object : DragAndDropTarget {
+            /**
+             * Updates the drop-target state when a drag enters the target area.
+             *
+             * @param event The drag-and-drop event containing the dragged item.
+             */
             override fun onEntered(event: DragAndDropEvent) {
                 isDropTarget = event.draggedFeedId() != null
             }
@@ -588,9 +596,9 @@ private fun TagRow(
             }
 
             /**
-             * Attaches a feed dropped on this tag.
+             * Attaches the dropped feed to this tag.
              *
-             * @return `true` when a feed was dropped, `false` for any other payload.
+             * @return `true` if the dropped payload contains a feed, `false` otherwise.
              */
             override fun onDrop(event: DragAndDropEvent): Boolean {
                 isDropTarget = false
@@ -665,16 +673,14 @@ private fun tagDropTargetContentColorOrNull(isDropTarget: Boolean, selected: Boo
     if (isDropTarget) MaterialTheme.colorScheme.onTertiaryContainer else selectionContentColorOrNull(selected, focused)
 
 /**
- * Renders one feed attached to an expanded tag. Unlike [FeedRow] it is not a drop target — a tag's
- * feeds have no order (`feed_tags` carries no `sort_order`), so "before/after" is meaningless here —
- * but it can still be dragged out onto a folder or another tag.
+ * Renders a feed attached to an expanded tag.
  *
  * @param feed The attached feed.
  * @param count The number of unread articles in the feed.
  * @param selected Whether the feed is the active filter.
  * @param focused Whether the sidebar has focus.
- * @param onClick Handles selection of the feed.
- * @param onRemoveFromTag Detaches the feed from the enclosing tag.
+ * @param onClick Handles feed selection.
+ * @param onRemoveFromTag Detaches the feed from the tag.
  */
 @Composable
 private fun TagFeedRow(

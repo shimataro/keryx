@@ -80,13 +80,28 @@ fun groupFeedsByFolder(feeds: List<Feeds>, folders: List<Folders>): List<Pair<Fo
 }
 
 /**
- * The feeds attached to [tagId], preserving [feeds]' order (same contract as [groupFeedsByFolder]).
- * [feedTagMap] maps a feed id to the set of tag ids attached to it.
- */
+     * Selects feeds associated with the specified tag while preserving their input order.
+     *
+     * @param feeds The feeds to filter.
+     * @param feedTagMap A mapping from feed IDs to their associated tag IDs.
+     * @param tagId The tag ID to match.
+     * @return The feeds associated with [tagId].
+     */
 fun feedsForTag(feeds: List<Feeds>, feedTagMap: Map<String, Set<String>>, tagId: String): List<Feeds> =
     feeds.filter { tagId in (feedTagMap[it.id] ?: emptySet()) }
 
-/** Flattened feed-pane order, matching `FeedListPane`'s visual top-to-bottom order. */
+/**
+         * Builds the visual filter order used by the feed pane.
+         *
+         * Collapsed folders include only their folder filter; expanded folders include their feed filters,
+         * followed by tag filters.
+         *
+         * @param tags The tags to include at the end of the order.
+         * @param folders The folders used to organize feed filters.
+         * @param feeds The feeds to include in folder or unassigned groups.
+         * @param collapsedFolderIds The IDs of folders whose feed filters should be omitted.
+         * @return The filters in visual top-to-bottom order.
+         */
 fun buildOrderedFilters(
     tags: List<Tags>,
     folders: List<Folders>,
@@ -119,14 +134,15 @@ fun nextFeedFilter(current: ArticleFilter, orderedFilters: List<ArticleFilter>, 
 }
 
 /**
- * Returns the real LazyColumn index of [filter]'s row in [FeedListPane]'s list.
- * Returns null if that row is not currently rendered (e.g. a feed under a collapsed folder).
- * This mirrors FeedListPane.kt's LazyColumn item structure — if that structure changes,
- * update both together.
+ * Finds the rendered list index for a feed, folder, or tag filter.
  *
- * An expanded tag contributes one extra row per attached feed. Those nested rows are only counted
- * (so the rows *after* them keep the right index) and are never returned as a target themselves —
- * the same feed's primary occurrence under its folder is the row a selection scrolls to.
+ * Expanded tags account for their attached feed rows when calculating subsequent indices.
+ *
+ * @param filter The filter whose list index to find.
+ * @param collapsedFolderIds Folder IDs whose feed rows are hidden.
+ * @param feedTagMap Mapping of tag IDs to associated feed IDs.
+ * @param expandedTagIds Tag IDs whose attached feed rows are rendered.
+ * @return The filter's list index, or `null` if it is not currently rendered.
  */
 fun feedListItemIndex(
     filter: ArticleFilter,
