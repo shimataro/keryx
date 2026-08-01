@@ -324,6 +324,23 @@ class HomeViewModel(
         settingsRepository.mutateLocalSettings { it.copy(collapsedFolderIds = _collapsedFolderIds.value) }
     }
 
+    private val _expandedTagIds = MutableStateFlow(
+        settingsRepository.getLocalSettings().expandedTagIds,
+    )
+    val expandedTagIds: StateFlow<Set<String>> = _expandedTagIds.asStateFlow()
+
+    /**
+     * Toggles whether a tag's attached-feed list is expanded and persists the updated state.
+     *
+     * @param tagId The identifier of the tag to toggle.
+     */
+    fun toggleTagExpanded(tagId: String) {
+        _expandedTagIds.value = _expandedTagIds.value.let {
+            if (tagId in it) it - tagId else it + tagId
+        }
+        settingsRepository.mutateLocalSettings { it.copy(expandedTagIds = _expandedTagIds.value) }
+    }
+
     // --- Article scroll position memory ---
 
     private val _scrollPositions = MutableStateFlow(
@@ -727,17 +744,40 @@ class HomeViewModel(
         return tagRepository.createTag(name.trim(), color)
     }
 
+    /**
+     * Updates a tag with the specified name and color.
+     *
+     * Blank names are ignored.
+     *
+     * @param id The identifier of the tag to update.
+     * @param name The tag's new name.
+     * @param color The tag's new color, or `null` to remove the color.
+     */
     fun updateTag(id: String, name: String, color: String?) {
         if (name.isBlank()) return
         tagRepository.updateTag(id, name.trim(), color)
     }
 
+    /**
+     * Deletes a tag and removes it from the expanded-tag state.
+     *
+     * @param id The identifier of the tag to delete.
+     */
     fun deleteTag(id: String) {
         tagRepository.deleteTag(id)
         if (_filter.value == ArticleFilter.Tag(id)) selectFilter(ArticleFilter.All)
+        _expandedTagIds.value = _expandedTagIds.value - id
+        settingsRepository.mutateLocalSettings { it.copy(expandedTagIds = _expandedTagIds.value) }
     }
 
-    fun setFeedTag(feedId: String, tagId: String, attached: Boolean) =
+    /**
+         * Updates whether a feed is associated with a tag.
+         *
+         * @param feedId The ID of the feed.
+         * @param tagId The ID of the tag.
+         * @param attached Whether the tag should be associated with the feed.
+         */
+        fun setFeedTag(feedId: String, tagId: String, attached: Boolean) =
         tagRepository.setFeedTag(feedId, tagId, attached)
 
     // --- Folder actions ---

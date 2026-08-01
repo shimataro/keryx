@@ -79,7 +79,29 @@ fun groupFeedsByFolder(feeds: List<Feeds>, folders: List<Folders>): List<Pair<Fo
         (null as Folders? to unassigned)
 }
 
-/** Flattened feed-pane order, matching `FeedListPane`'s visual top-to-bottom order. */
+/**
+     * Selects feeds associated with the specified tag while preserving their input order.
+     *
+     * @param feeds The feeds to filter.
+     * @param feedTagMap A mapping from feed IDs to their associated tag IDs.
+     * @param tagId The tag ID to match.
+     * @return The feeds associated with [tagId].
+     */
+fun feedsForTag(feeds: List<Feeds>, feedTagMap: Map<String, Set<String>>, tagId: String): List<Feeds> =
+    feeds.filter { tagId in (feedTagMap[it.id] ?: emptySet()) }
+
+/**
+         * Builds the visual filter order used by the feed pane.
+         *
+         * Collapsed folders include only their folder filter; expanded folders include their feed filters,
+         * followed by tag filters.
+         *
+         * @param tags The tags to include at the end of the order.
+         * @param folders The folders used to organize feed filters.
+         * @param feeds The feeds to include in folder or unassigned groups.
+         * @param collapsedFolderIds The IDs of folders whose feed filters should be omitted.
+         * @return The filters in visual top-to-bottom order.
+         */
 fun buildOrderedFilters(
     tags: List<Tags>,
     folders: List<Folders>,
@@ -112,10 +134,15 @@ fun nextFeedFilter(current: ArticleFilter, orderedFilters: List<ArticleFilter>, 
 }
 
 /**
- * Returns the real LazyColumn index of [filter]'s row in [FeedListPane]'s list.
- * Returns null if that row is not currently rendered (e.g. a feed under a collapsed folder).
- * This mirrors FeedListPane.kt's LazyColumn item structure — if that structure changes,
- * update both together.
+ * Finds the rendered list index for a feed, folder, or tag filter.
+ *
+ * Expanded tags account for their attached feed rows when calculating subsequent indices.
+ *
+ * @param filter The filter whose list index to find.
+ * @param collapsedFolderIds Folder IDs whose feed rows are hidden.
+ * @param feedTagMap Mapping of tag IDs to associated feed IDs.
+ * @param expandedTagIds Tag IDs whose attached feed rows are rendered.
+ * @return The filter's list index, or `null` if it is not currently rendered.
  */
 fun feedListItemIndex(
     filter: ArticleFilter,
@@ -123,6 +150,8 @@ fun feedListItemIndex(
     folders: List<Folders>,
     tags: List<Tags>,
     collapsedFolderIds: Set<String>,
+    feedTagMap: Map<String, Set<String>> = emptyMap(),
+    expandedTagIds: Set<String> = emptySet(),
 ): Int? {
     // All, Starred and Search all live in the single first LazyColumn item (index 0).
     if (filter is ArticleFilter.Starred || filter is ArticleFilter.All || filter is ArticleFilter.Search) return 0
@@ -148,8 +177,12 @@ fun feedListItemIndex(
     }
     index++ // divider
     index++ // "Tags" header
-    tags.forEachIndexed { i, tag ->
-        if (filter is ArticleFilter.Tag && filter.tagId == tag.id) return index + i
+    for (tag in tags) {
+        if (filter is ArticleFilter.Tag && filter.tagId == tag.id) return index
+        index++ // TagRow
+        if (tag.id in expandedTagIds) {
+            index += feedsForTag(feeds, feedTagMap, tag.id).size
+        }
     }
     return null
 }

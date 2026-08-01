@@ -48,11 +48,33 @@ private val OnSecondaryContainerLight = Color(0xFF3A3D3B)
 private val SecondaryContainerDark = TealLight.copy(alpha = 0.32f).compositeOver(Color(0xFF303030))
 private val OnSecondaryContainerDark = Color(0xFFDADAD8)
 
+/**
+ * Override for tertiary(Container)/onTertiary(Container) — M3's untouched defaults (pale pink in
+ * light, maroon in dark) read as an off-brand accent leaking into an otherwise teal-only app.
+ * Used for the "attach" (not "move") drop-target highlight on [TagRow], which needs a hue
+ * distinct from [SecondaryContainerLight]/[SecondaryContainerDark]'s teal tint (the folder
+ * "move" highlight) — a blue tint reads as clearly different from teal while still following the
+ * same "tint a neutral base" recipe, and the neutral "on" colors are shared with the secondary
+ * container since both tints composite to the same base luminance. [Attach]/[AttachLight] are the
+ * solid (non-alpha-composited) companions — mirroring how [Teal]/[TealLight] pair with the muted
+ * [SecondaryContainerLight]/[SecondaryContainerDark] — used where the highlight needs to read
+ * clearly on its own (e.g. [TagRow]'s drop-target border and its filled "+" marker), rather than
+ * relying on a container fill that can look close to other muted tones nearby.
+ */
+private val Attach = Color(0xFF1E88E5)
+private val AttachLight = Color(0xFF64B5F6)
+private val TertiaryContainerLight = Attach.copy(alpha = 0.26f).compositeOver(Color(0xFFF1F1F1))
+private val TertiaryContainerDark = Attach.copy(alpha = 0.32f).compositeOver(Color(0xFF303030))
+
 private val LightColors = lightColorScheme(
     primary = Teal,
     secondary = Teal,
     secondaryContainer = SecondaryContainerLight,
     onSecondaryContainer = OnSecondaryContainerLight,
+    tertiary = Attach,
+    onTertiary = Color.White,
+    tertiaryContainer = TertiaryContainerLight,
+    onTertiaryContainer = OnSecondaryContainerLight,
 )
 
 private val DarkColors = darkColorScheme(
@@ -60,6 +82,10 @@ private val DarkColors = darkColorScheme(
     secondary = TealLight,
     secondaryContainer = SecondaryContainerDark,
     onSecondaryContainer = OnSecondaryContainerDark,
+    tertiary = AttachLight,
+    onTertiary = Color.White,
+    tertiaryContainer = TertiaryContainerDark,
+    onTertiaryContainer = OnSecondaryContainerDark,
 )
 
 /**

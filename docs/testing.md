@@ -45,6 +45,20 @@ Launch with `./gradlew :composeApp:run` and visually verify 3-pane UI, theme swi
 - Reorder feeds inside the "No Folder" group.
 - Drop a feed onto another folder at any position (line position); folder move and positioning are applied simultaneously.
 - "Move to folder" dialog moves the feed to the end of the destination group.
+- Drag a feed onto a tag row: the row highlights in a *different* tone from a folder drop-target
+  (`tertiaryContainer` vs. `secondaryContainer`), gains a `tertiary`-colored border, and its color
+  dot is replaced by a filled "+" badge while hovered — distinct at a glance, including in dark
+  mode, from both the folder "move" highlight and the drag ghost's own neutral chip. Dropping
+  attaches the tag without moving the feed out of its folder. Re-dropping an
+  already-attached feed on the same tag changes nothing. Dragging over a feed listed under an
+  expanded tag, or over blank space, keeps showing the OS's own default "can't drop here" cursor.
+- Expand a tag with its chevron: its attached feeds are listed beneath it (a feed with several tags
+  appears once per expanded tag, plus once under its folder — expected, not a duplicate bug). The
+  expanded/collapsed state persists after restart, tags default to collapsed, and deleting a tag
+  leaves no stale expansion behind.
+- Right-click a feed listed under an expanded tag → "タグから外す" detaches it from that tag only
+  (its folder placement and other tags are untouched); dragging it out of the tag list onto a folder
+  or another tag still works.
 
 The parallel feed refresh's core concurrency (overlapping fetches + complete per-feed writes) is covered automatically by `refreshAllFetchesFeedsConcurrentlyAndAppliesEveryWrite`, and the no-revert guarantee by `refreshAllDoesNotRevertConcurrentUnsubscribe` / `refreshAllDoesNotRevertConcurrentReorder`. The genuinely visual / end-to-end parts still need eyeballs, so with a multi-feed subscription visually confirm:
 

@@ -1514,6 +1514,43 @@ class HomeViewModelTest {
         assertFalse("d1" in store.load().collapsedFolderIds)
     }
 
+    @Test
+    fun toggleTagExpandedPersistsToLocalSettings() = runTest {
+        db.insertTag("t1", "Kotlin")
+        // A fresh reader (not the viewmodel's own cached SettingsRepository) verifies the write
+        // actually reached disk (LocalSettingsStore.load() re-reads the file each call).
+        val store = LocalSettingsStore(dirOverride = dir)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        assertFalse("t1" in store.load().expandedTagIds)
+
+        vm.toggleTagExpanded("t1")
+
+        assertTrue("t1" in vm.expandedTagIds.value)
+        assertTrue("t1" in store.load().expandedTagIds)
+
+        vm.toggleTagExpanded("t1")
+
+        assertFalse("t1" in vm.expandedTagIds.value)
+        assertFalse("t1" in store.load().expandedTagIds)
+    }
+
+    @Test
+    fun deleteTagRemovesItFromExpandedTagIds() = runTest {
+        db.insertTag("t1", "Kotlin")
+        val store = LocalSettingsStore(dirOverride = dir)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.toggleTagExpanded("t1")
+        assertTrue("t1" in vm.expandedTagIds.value)
+
+        vm.deleteTag("t1")
+
+        assertFalse("t1" in vm.expandedTagIds.value)
+        assertFalse("t1" in store.load().expandedTagIds)
+    }
+
     // --- Article scroll position memory ---
 
     @Test
