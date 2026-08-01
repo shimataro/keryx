@@ -31,12 +31,37 @@ cp local.properties.example local.properties   # 任意: Dropbox App Key を設�
 
 開発中にデータを初期化したい場合はこのディレクトリの `keryx.db` と `local_settings.json` を削除する。
 
+## パッケージング前提条件
+
+`./gradlew build` / `:composeApp:run` は JDK 以外に何も要らない。ネイティブパッケージング系タスク
+（`createDistributable`, `packageDmg`, `packageMsi`, `packageDeb`, `packageRpm` — 詳細は
+[build.md](build.md)）は OS ごとに以下も必要。
+
+- **Linux**
+  - `fakeroot` — `packageDeb` に必要（jpackage が `.deb` 生成のために呼び出す）
+  - `rpm`（`rpmbuild` を含む） — `packageRpm` に必要
+- **macOS**
+  - Xcode Command Line Tools（`xcode-select --install`。`SetFile` 用） — `packageDmg` に必要
+    （DMG のボリュームアイコン設定。`hdiutil` 自体は OS 標準）
+- **Windows**
+  - WiX Toolset v3 / v4 / v5（`PATH` に追加） — `packageMsi` に必要
+    （jpackage の Windows インストーラー生成。CI ではまだビルドしていない。`build.md` 参照）
+
+`fakeroot`/`rpm` も WiX も `ubuntu-latest` や素の Windows 環境には既定で入っていない。リリース
+ワークフローはパッケージング直前に `apt-get` で `fakeroot rpm` をインストールしている
+（`.github/workflows/release.yml`）。
+
 ## よくある問題
 
 - **`UnsupportedClassVersionError`（実行時）**: `./gradlew` を起動した JVM が 25 未満。
   `JAVA_HOME` を JDK 25+ に設定する。
 - **ツールチェーンのダウンロードがブロックされる**:
   `-Dorg.gradle.java.installations.auto-download=true` を付ける。
+- **（Linux）ヘッドレス環境で `./gradlew build` が Compose UI テストで固まる/失敗する**:
+  `runDesktopComposeUiTest` は実際の Skia/AWT 描画を行うためディスプレイが必要。CI は仮想 X サーバー
+  （`sudo apt-get install -y xvfb` の上で
+  `xvfb-run -a --server-args="-screen 0 1920x1080x24" ./gradlew build`）で実行している。ディスプレイの
+  無い環境（SSH セッション、コンテナ等）ではローカルでも同様にする。
 - **Dropbox 連携が表示されない**: `DROPBOX_APP_KEY` が未設定（仕様どおり非表示）。`build.md` を参照。
 - **`./gradlew :composeApp:run` で Dropbox / OneDrive 連携が完了しない（全デスクトップ OS 共通）**:
   これらのリダイレクト URI はカスタムスキーム `keryx://` で、接続ボタンが disabled のまま
