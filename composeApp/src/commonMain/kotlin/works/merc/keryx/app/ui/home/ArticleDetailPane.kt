@@ -163,8 +163,7 @@ fun ArticleDetailPane(
         }
 
         val title = current.title.ifBlank { stringResource(Res.string.article_no_title) }
-        val meta = listOfNotNull(current.author, formatTimestamp(current.published_at).ifBlank { null })
-            .joinToString(" · ")
+        val meta = articleMetaText(current.author, current.published_at)
 
         if (body.isNullOrBlank()) {
             // No article body to scroll, so the reserved-height problem doesn't apply here — keep
@@ -173,13 +172,7 @@ fun ArticleDetailPane(
             Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 16.dp)) {
                 Text(title, style = MaterialTheme.typography.headlineSmall)
                 Spacer(Modifier.height(6.dp))
-                Text(
-                    meta,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                ArticleDetailMetaLine(current.author, current.published_at)
             }
             Box(Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
                 Text(stringResource(Res.string.article_no_content), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -196,6 +189,62 @@ fun ArticleDetailPane(
                     mutedColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+    }
+}
+
+/**
+ * Builds the detail header's `author · timestamp` line as a single string, for the WebView path.
+ *
+ * A non-null but blank author — possible on rows predating the parser's blank normalization, or
+ * arriving through a sync merge — is dropped rather than rendered as a leading separator.
+ *
+ * @param author The article's author, if any.
+ * @param publishedAt The article's publication time in Unix millis, if known.
+ * @return The metadata line, empty when there is nothing to show.
+ */
+internal fun articleMetaText(author: String?, publishedAt: Long?): String =
+    listOfNotNull(author?.takeIf { it.isNotBlank() }, formatTimestamp(publishedAt).ifBlank { null })
+        .joinToString(" · ")
+
+/**
+ * Renders the detail header's `author · timestamp` line.
+ *
+ * The two halves are separate [Text]s rather than one joined string: sharing a single ellipsis
+ * budget let a long author truncate the timestamp away entirely. Only the author carries the
+ * weight, so [Row] measures the timestamp at its full intrinsic width first and the author
+ * ellipsizes into what is left. Unlike the article list's row, the weight does not fill
+ * (`fill = false`), so the timestamp stays inline right after the author instead of being pinned
+ * to the trailing edge — that matches the WebView path, which renders the same line as inline
+ * flowing text. The separator travels with the timestamp so it never dangles after an ellipsized
+ * author.
+ *
+ * @param author The article's author, if any.
+ * @param publishedAt The article's publication time in Unix millis, if known.
+ */
+@Composable
+internal fun ArticleDetailMetaLine(author: String?, publishedAt: Long?, modifier: Modifier = Modifier) {
+    val authorText = author?.takeIf { it.isNotBlank() }
+    val timestamp = formatTimestamp(publishedAt)
+    val color = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(modifier.fillMaxWidth()) {
+        if (authorText != null) {
+            Text(
+                authorText,
+                style = MaterialTheme.typography.labelMedium,
+                color = color,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+        }
+        if (timestamp.isNotEmpty()) {
+            Text(
+                if (authorText == null) timestamp else " · $timestamp",
+                style = MaterialTheme.typography.labelMedium,
+                color = color,
+                maxLines = 1,
+            )
         }
     }
 }

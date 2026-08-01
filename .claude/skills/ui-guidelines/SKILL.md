@@ -130,13 +130,10 @@ only to the pane that sits in the window's top-left corner — currently
 - Title uses `minLines = 2, maxLines = 2` (matching the height computed by
   `rememberArticleRowMetrics()`); `FontWeight.Bold` + `onSurface` when unread, normal
   weight + `onSurfaceVariant` when read.
-- Metadata line uses `labelSmall` + `onSurfaceVariant.copy(alpha = 0.7f)`, laid out as a
-  `Row` of **two** `Text`s — the feed name with `Modifier.weight(1f)` + `maxLines = 1` +
-  `TextOverflow.Ellipsis`, then an 8.dp `Spacer`, then the timestamp with no weight, so
-  `Row` measures the timestamp at its full intrinsic width first and the feed name
-  ellipsizes into whatever is left. Do not merge them back into one joined `Text`: a
-  single ellipsis budget shared by both let a long feed title truncate the timestamp away
-  entirely.
+- Metadata line uses `labelSmall` + `onSurfaceVariant.copy(alpha = 0.7f)`, laid out per the
+  "Metadata lines" rule below: the feed name carries `Modifier.weight(1f)` (filling, so the
+  timestamp is pinned to the trailing edge and dates line up down the list), then an 8.dp
+  `Spacer`, then the timestamp.
 - No divider between rows (see Divider policy above).
 - Favicon loading goes through Coil3's `AsyncImage`; the `ImageLoader` is
   configured once at startup via `configureImageLoader(...)` in
@@ -144,6 +141,32 @@ only to the pane that sits in the window's top-left corner — currently
   (called from [main.kt](../../../composeApp/src/desktopMain/kotlin/works/merc/keryx/app/main.kt)):
   network fetch via the app's existing `HttpClient`, SVG decoding support,
   and an on-disk cache under `AppDirs.cacheDir()`.
+
+## Metadata lines
+
+An `A · B` metadata line (feed name · timestamp, author · timestamp) must be a `Row` of
+**two** `Text`s — never one joined string. `Row` measures its unweighted children first, so
+putting `Modifier.weight(1f)` on the **leading** half only (plus `maxLines = 1` +
+`TextOverflow.Ellipsis`) guarantees the trailing half is laid out at its full intrinsic width
+and only the leading half ellipsizes. Joining them into one `Text` makes both share a single
+ellipsis budget, and a long leading value truncates the trailing one away completely — the
+timestamp simply stops being rendered.
+
+Whether the trailing half is pinned to the edge or stays inline is the `fill` flag:
+
+| Context | Weight | Result |
+| --- | --- | --- |
+| List rows ([ArticleRowComponents.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/ArticleRowComponents.kt), `ArticleRow`) | `weight(1f)` (fill) | Timestamp pinned to the trailing edge, so dates align down the list |
+| Detail headers ([ArticleDetailPane.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/ArticleDetailPane.kt), `ArticleDetailMetaLine`) | `weight(1f, fill = false)` | Timestamp stays inline right after the leading value |
+
+The detail header is inline because the same line is also rendered by the reader's WebView
+(`.article-meta` in [ArticleWebViewHtml.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/article/ArticleWebViewHtml.kt))
+as flowing HTML text, which cannot right-align to match. That `div` deliberately has no
+`white-space`/`text-overflow`/`overflow` rules — it wraps instead of clipping, so the
+timestamp is never lost there. Do not add single-line clamping CSS to it.
+
+When the leading half is optional, the separator travels with the **trailing** `Text`
+(`" · $timestamp"`), so it can never dangle after an ellipsized or absent leading value.
 
 ## Context menus
 
