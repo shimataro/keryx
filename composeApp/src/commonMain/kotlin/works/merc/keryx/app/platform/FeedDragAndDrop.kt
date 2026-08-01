@@ -28,3 +28,10 @@ expect fun DragAndDropEvent.draggedFolderId(): String?
  */
 @OptIn(ExperimentalComposeUiApi::class)
 expect fun DragAndDropEvent.positionYInRoot(): Float
+
+/**
+ * The horizontal position of [DragAndDropEvent], in root/window coordinates. Used to position a
+ * pointer-following drop-target badge. See [positionYInRoot] for why this is platform-specific.
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+expect fun DragAndDropEvent.positionXInRoot(): Float

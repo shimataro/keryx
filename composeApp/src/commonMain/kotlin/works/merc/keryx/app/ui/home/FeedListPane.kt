@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.draganddrop.dragAndDropSource
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -41,9 +43,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -63,6 +72,8 @@ import works.merc.keryx.app.platform.WindowDragArea
 import works.merc.keryx.app.platform.draggedFeedId
 import works.merc.keryx.app.platform.feedDragTransferData
 import works.merc.keryx.app.platform.nativeContextMenu
+import works.merc.keryx.app.platform.positionXInRoot
+import works.merc.keryx.app.platform.positionYInRoot
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_add_feed
 import works.merc.keryx.app.resources.home_add_folder
@@ -211,6 +222,25 @@ fun FeedListPane(
         }
     }
 
+    // Root-coordinate pointer position while a feed is dragged over any tag row, used to render a
+    // pointer-following "+" badge (see TagAttachBadge below) — debounced the same way as
+    // activeBoundary/draggedFeedId so crossing between adjacent tag rows doesn't flicker it off.
+    var tagAttachBadgeOffset by remember { mutableStateOf<Offset?>(null) }
+    var pendingTagBadgeClearJob by remember { mutableStateOf<Job?>(null) }
+    val onTagDragPositionChange: (Offset?) -> Unit = { offset ->
+        pendingTagBadgeClearJob?.cancel()
+        if (offset != null) {
+            pendingTagBadgeClearJob = null
+            tagAttachBadgeOffset = offset
+        } else {
+            pendingTagBadgeClearJob = dragAndDropScope.launch {
+                delay(BOUNDARY_CLEAR_DEBOUNCE_MS)
+                tagAttachBadgeOffset = null
+            }
+        }
+    }
+    var listBoxCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+
     val listState = rememberLazyListState()
 
     LaunchedEffect(filter, feeds.isNotEmpty(), tags.isNotEmpty(), folders.isNotEmpty()) {
@@ -285,7 +315,7 @@ fun FeedListPane(
                 .onFocusChanged { onSearchFieldFocusChange(it.isFocused) },
         )
 
-        Box(Modifier.weight(1f)) {
+        Box(Modifier.weight(1f).onGloballyPositioned { listBoxCoordinates = it }) {
             LazyColumn(Modifier.fillMaxSize(), state = listState) {
                 item {
                     SidebarRow(
@@ -458,6 +488,7 @@ fun FeedListPane(
                             onEdit = { editingTag = tag },
                             onDelete = { confirmingDeleteTag = tag },
                             onAttachFeed = { feedId -> vm.setFeedTag(feedId, tag.id, true) },
+                            onDragPositionChange = onTagDragPositionChange,
                         )
                     }
                     if (tag.id in expandedTagIds) {
@@ -477,6 +508,16 @@ fun FeedListPane(
                 }
             }
             VerticalScrollbarIfNeeded(listState)
+            tagAttachBadgeOffset?.let { rootOffset ->
+                val density = LocalDensity.current
+                val local = listBoxCoordinates?.let { rootOffset - it.positionInRoot() } ?: rootOffset
+                val cursorGap = with(density) { 16.dp.toPx() }
+                TagAttachBadge(
+                    Modifier.offset {
+                        IntOffset((local.x + cursorGap).roundToInt(), (local.y + cursorGap).roundToInt())
+                    },
+                )
+            }
         }
     }
 
@@ -541,7 +582,17 @@ private fun SidebarRow(
 }
 
 /**
- * Renders a tag filter row with expansion, selection, editing, deletion, and feed attachment support.
+ * Renders a tag row: selection/filter target, expand toggle for its attached-feed list, and a drop
+ * target that attaches a dragged feed to the tag.
+ *
+ * The drop affordance is deliberately different from a folder's: attaching a tag is additive (a feed
+ * may carry many tags) whereas dropping on a folder *moves* the feed, so this row tints itself
+ * `tertiaryContainer` — not the `secondaryContainer` of [FolderGroupHeader] — and swaps its color dot
+ * for a "+" glyph while hovered. Compose's `supportedActions` is fixed at drag start and cannot be
+ * varied per drop target (confirmed by decompiling `AwtDragAndDropManager`: the OS cursor reflects
+ * `getDropAction()`, computed from the source's declared actions and held keyboard modifiers, never
+ * from which Compose target is hovered), so a native per-target cursor isn't possible — hence the
+ * in-row cue, plus [TagAttachBadge] following the pointer (rendered by the caller, [FeedListPane]).
  *
  * @param tag The tag represented by the row.
  * @param count The number of unread articles associated with the tag.
@@ -552,7 +603,9 @@ private fun SidebarRow(
  * @param onClick Selects the tag.
  * @param onEdit Opens tag editing.
  * @param onDelete Deletes the tag.
- * @param onAttachFeed Attaches a dropped feed to the tag.
+ * @param onAttachFeed Attaches a dropped feed to this tag.
+ * @param onDragPositionChange Reports the root-coordinate pointer position while a feed is dragged
+ * over this row, or `null` when it leaves — lifted to [FeedListPane] to position [TagAttachBadge].
  */
 @Composable
 private fun TagRow(
@@ -566,6 +619,7 @@ private fun TagRow(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onAttachFeed: (feedId: String) -> Unit,
+    onDragPositionChange: (Offset?) -> Unit,
 ) {
     val editLabel = stringResource(Res.string.home_edit_tag_menu)
     val deleteLabel = stringResource(Res.string.home_delete_tag_menu)
@@ -581,18 +635,26 @@ private fun TagRow(
              */
             override fun onEntered(event: DragAndDropEvent) {
                 isDropTarget = event.draggedFeedId() != null
+                onDragPositionChange(
+                    if (event.draggedFeedId() != null) Offset(event.positionXInRoot(), event.positionYInRoot()) else null,
+                )
             }
 
             override fun onMoved(event: DragAndDropEvent) {
                 isDropTarget = event.draggedFeedId() != null
+                onDragPositionChange(
+                    if (event.draggedFeedId() != null) Offset(event.positionXInRoot(), event.positionYInRoot()) else null,
+                )
             }
 
             override fun onExited(event: DragAndDropEvent) {
                 isDropTarget = false
+                onDragPositionChange(null)
             }
 
             override fun onEnded(event: DragAndDropEvent) {
                 isDropTarget = false
+                onDragPositionChange(null)
             }
 
             /**
@@ -602,6 +664,7 @@ private fun TagRow(
              */
             override fun onDrop(event: DragAndDropEvent): Boolean {
                 isDropTarget = false
+                onDragPositionChange(null)
                 val feedId = event.draggedFeedId() ?: return false
                 onAttachFeed(feedId)
                 return true
@@ -671,6 +734,31 @@ private fun tagDropTargetBackground(isDropTarget: Boolean, selected: Boolean, fo
 @Composable
 private fun tagDropTargetContentColorOrNull(isDropTarget: Boolean, selected: Boolean, focused: Boolean): Color? =
     if (isDropTarget) MaterialTheme.colorScheme.onTertiaryContainer else selectionContentColorOrNull(selected, focused)
+
+/**
+ * A small "+" badge that follows the pointer while a feed is dragged over a [TagRow], positioned
+ * by the caller ([FeedListPane]) near the current drag position. Reuses the same icon/colors as
+ * the row's own drop-target styling ([tagDropTargetBackground]) so it reads as the same signal —
+ * this exists because the OS cursor itself can't be customized per drop target (see [TagRow]).
+ */
+@Composable
+private fun TagAttachBadge(modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .size(24.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.tertiaryContainer)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        KeryxIcon(
+            KeryxIcons.Add,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+            modifier = Modifier.size(16.dp),
+        )
+    }
+}
 
 /**
  * Renders a feed attached to an expanded tag.
