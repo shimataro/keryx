@@ -130,8 +130,13 @@ only to the pane that sits in the window's top-left corner — currently
 - Title uses `minLines = 2, maxLines = 2` (matching the height computed by
   `rememberArticleRowMetrics()`); `FontWeight.Bold` + `onSurface` when unread, normal
   weight + `onSurfaceVariant` when read.
-- Metadata line (feed name · timestamp) uses `labelSmall` +
-  `onSurfaceVariant.copy(alpha = 0.7f)`.
+- Metadata line uses `labelSmall` + `onSurfaceVariant.copy(alpha = 0.7f)`, laid out as a
+  `Row` of **two** `Text`s — the feed name with `Modifier.weight(1f)` + `maxLines = 1` +
+  `TextOverflow.Ellipsis`, then an 8.dp `Spacer`, then the timestamp with no weight, so
+  `Row` measures the timestamp at its full intrinsic width first and the feed name
+  ellipsizes into whatever is left. Do not merge them back into one joined `Text`: a
+  single ellipsis budget shared by both let a long feed title truncate the timestamp away
+  entirely.
 - No divider between rows (see Divider policy above).
 - Favicon loading goes through Coil3's `AsyncImage`; the `ImageLoader` is
   configured once at startup via `configureImageLoader(...)` in

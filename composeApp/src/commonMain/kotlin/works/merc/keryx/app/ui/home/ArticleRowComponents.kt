@@ -242,14 +242,29 @@ internal fun ArticleRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.size(2.dp))
-            Text(
-                listOfNotNull(feedTitle.ifBlank { null }, formatTimestamp(article.published_at).ifBlank { null })
-                    .joinToString(" · "),
-                style = MaterialTheme.typography.labelSmall,
-                color = selectionContentColor?.copy(alpha = 0.7f) ?: MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            val metaColor = selectionContentColor?.copy(alpha = 0.7f)
+                ?: MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            // Feed title and timestamp are separate Texts rather than one joined string: sharing a
+            // single ellipsis budget let a long feed title truncate the timestamp away entirely.
+            // Only the title carries the weight, so Row measures the timestamp at its full intrinsic
+            // width first and the title ellipsizes into whatever is left.
+            Row(Modifier.fillMaxWidth()) {
+                Text(
+                    feedTitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = metaColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    formatTimestamp(article.published_at),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = metaColor,
+                    maxLines = 1,
+                )
+            }
         }
     }
 }
