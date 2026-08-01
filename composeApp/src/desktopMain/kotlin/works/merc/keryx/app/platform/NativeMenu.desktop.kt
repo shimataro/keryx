@@ -235,6 +235,27 @@ private fun menuShape(items: List<NativeMenuEntry>): List<String> = items.map { 
 private fun leafKind(entry: NativeMenuLeaf): String =
     if (entry is NativeCheckMenuItem) "check" else "item"
 
+/**
+ * A value-comparable description of what [items] currently *renders* — every label and check
+ * state, submenu children included.
+ *
+ * This exists to key the sync effect. The entries themselves cannot be used as a key: they are
+ * data classes carrying an `onClick` lambda, and a lambda that captures a row's own data (an
+ * `Articles` instance, which Compose does not infer as stable) is a fresh, unequal instance on
+ * every recomposition. Keying on the entry list would therefore cancel and relaunch the effect —
+ * rewriting the native menu's widgets — for every visible row on every frame while scrolling.
+ * Keying on this instead syncs exactly when the menu's visible content actually changed.
+ */
+private fun menuSignature(items: List<NativeMenuEntry>): List<String> = items.map { entry ->
+    when (entry) {
+        is NativeMenuLeaf -> leafSignature(entry)
+        is NativeSubMenu -> "sub:${entry.label}:" + entry.items.joinToString(",") { leafSignature(it) }
+    }
+}
+
+private fun leafSignature(entry: NativeMenuLeaf): String =
+    if (entry is NativeCheckMenuItem) "check:${entry.checked}:${entry.label}" else "item:${entry.label}"
+
 @Composable
 actual fun Modifier.nativeContextMenu(
     items: () -> List<NativeMenuEntry>,
@@ -246,16 +267,21 @@ actual fun Modifier.nativeContextMenu(
     val currentOnOpen by rememberUpdatedState(onOpen)
     var elementPosition by remember { mutableStateOf(Offset.Zero) }
 
+    // Evaluate the caller's lambda once per composition; both descriptors below derive from it.
+    val entries = items()
+
     // The menu's shape is assumed stable per call site across ordinary recompositions - see
     // nativeContextMenu doc. Rebuild the native widgets whenever it actually changes (e.g. a
     // folder is added/removed).
-    val handle = remember(menuShape(items())) {
-        val snapshot = items()
+    val handle = remember(menuShape(entries)) {
         val provider = { currentItems() }
-        if (isLinux) SwingPopupHandle(snapshot, provider) else AwtPopupHandle(snapshot, provider)
+        if (isLinux) SwingPopupHandle(entries, provider) else AwtPopupHandle(entries, provider)
     }
 
-    LaunchedEffect(items()) { handle.sync(items()) }
+    // Keyed on the rendered labels/check states rather than on `entries` itself — see
+    // menuSignature. `handle` is included so a rebuilt menu is relabelled even in the (unlikely)
+    // case that its shape changed without its signature changing.
+    LaunchedEffect(handle, menuSignature(entries)) { handle.sync(currentItems()) }
 
     DisposableEffect(window, handle) {
         handle.attach(window)
