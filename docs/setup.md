@@ -32,9 +32,10 @@ To reset data during development, delete `keryx.db` and `local_settings.json` in
 
 ## Packaging Prerequisites
 
-`./gradlew build` / `:composeApp:run` need nothing beyond the JDK. The native packaging tasks
-(`createDistributable`, `packageDmg`, `packageMsi`, `packageDeb`, `packageRpm` — see
-[build.md](build.md)) additionally require the following, per OS:
+`./gradlew build` / `:composeApp:run` need nothing beyond the JDK (aside from Xvfb on a headless
+Linux machine — see below). The native packaging tasks (`createDistributable`, `packageDmg`,
+`packageMsi`, `packageDeb`, `packageRpm` — see [build.md](build.md)) additionally require the
+following, per OS:
 
 - **Linux**
   - `fakeroot` — required for `packageDeb` (jpackage shells out to it to build the `.deb`)

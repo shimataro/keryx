@@ -33,9 +33,9 @@ cp local.properties.example local.properties   # 任意: Dropbox App Key を設�
 
 ## パッケージング前提条件
 
-`./gradlew build` / `:composeApp:run` は JDK 以外に何も要らない。ネイティブパッケージング系タスク
-（`createDistributable`, `packageDmg`, `packageMsi`, `packageDeb`, `packageRpm` — 詳細は
-[build.md](build.md)）は OS ごとに以下も必要。
+`./gradlew build` / `:composeApp:run` は JDK 以外に何も要らない（ヘッドレスな Linux 環境での Xvfb は
+除く — 後述）。ネイティブパッケージング系タスク（`createDistributable`, `packageDmg`, `packageMsi`,
+`packageDeb`, `packageRpm` — 詳細は [build.md](build.md)）は OS ごとに以下も必要。
 
 - **Linux**
   - `fakeroot` — `packageDeb` に必要（jpackage が `.deb` 生成のために呼び出す）
