@@ -54,11 +54,9 @@ class ArticleReuseCrashRepro {
     }
 
     /**
-     * Hammers the list and returns everything that blew up.
+     * Exercises article-list scrolling and selection changes while collecting failures.
      *
-     * The crash surfaces on the AWT event thread, where Compose's own handler may swallow it rather
-     * than letting it propagate into the test body, so an uncaught-exception handler is installed
-     * for the duration and its captures are returned alongside anything thrown inline.
+     * @return All failures captured during the test, including uncaught exceptions from the AWT event thread.
      */
     private fun runScrollHammer(): List<Throwable> {
         val captured = mutableListOf<Throwable>()
@@ -106,6 +104,13 @@ class ArticleReuseCrashRepro {
     }
 }
 
+/**
+ * Creates a deterministic synthetic article for regression-test data.
+ *
+ * @param id The article identifier.
+ * @param publishedAt The publication timestamp used to populate the article and derive its read and starred flags.
+ * @return The generated article record.
+ */
 private fun reproArticle(id: String, publishedAt: Long): Articles = Articles(
     id = id,
     feed_id = "f1",

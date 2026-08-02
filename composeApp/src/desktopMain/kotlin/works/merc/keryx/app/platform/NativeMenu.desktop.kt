@@ -220,14 +220,10 @@ private fun forceHeavyweight(popup: JPopupMenu) {
 }
 
 /**
- * A structural fingerprint of [items]: the widget kind of every entry, plus each submenu's child
- * count. The native widgets are built once per distinct shape and then only relabelled, so this
- * has to capture everything that decides which components get created — a bare item count would
- * not notice an entry changing kind.
+ * Identifies the menu structure from entry kinds and submenu contents.
  *
- * Joined strings are safe here, unlike in [menuSignature]: everything encoded comes from the
- * closed vocabulary [leafKind] returns, never from a label, so no user-supplied text can be
- * mistaken for a delimiter.
+ * @param items The menu entries to fingerprint.
+ * @return A structural fingerprint for the menu entries.
  */
 private fun menuShape(items: List<NativeMenuEntry>): List<String> = items.map { entry ->
     when (entry) {
@@ -254,22 +250,11 @@ internal data class SubMenuSignature(
 ) : MenuEntrySignature
 
 /**
- * A value-comparable description of what [items] currently *renders* — every label and check
- * state, submenu children included.
- *
- * This exists to key the sync effect. The entries themselves cannot be used as a key: they are
- * data classes carrying an `onClick` lambda, and a lambda that captures a row's own data (an
- * `Articles` instance, which Compose does not infer as stable) is a fresh, unequal instance on
- * every recomposition. Keying on the entry list would therefore cancel and relaunch the effect —
- * rewriting the native menu's widgets — for every visible row on every frame while scrolling.
- * Keying on this instead syncs exactly when the menu's visible content actually changed.
- *
- * Nested value objects rather than joined strings, because the labels are user-entered tag and
- * folder names and so can contain whatever would separate them. Encoding a child as
- * `"check:$checked:$label"` and joining with `,` is not injective: a label holding
- * `,check:false:` shifts the boundary between two children, so two genuinely different menus can
- * produce one signature — and the effect that would have relabelled the widgets never reruns.
- */
+     * Creates a value-comparable representation of the menu's rendered content.
+     *
+     * @param items The menu entries to represent.
+     * @return The labels, checked states, and submenu contents of the menu.
+     */
 internal fun menuSignature(items: List<NativeMenuEntry>): List<MenuEntrySignature> =
     items.map { entry ->
         when (entry) {
@@ -281,6 +266,13 @@ internal fun menuSignature(items: List<NativeMenuEntry>): List<MenuEntrySignatur
 private fun leafSignature(entry: NativeMenuLeaf): LeafSignature =
     LeafSignature(entry.label, (entry as? NativeCheckMenuItem)?.checked)
 
+/**
+ * Adds a native context menu that opens when the secondary mouse button is pressed.
+ *
+ * @param items Provides the current menu entries.
+ * @param onOpen Called when the context menu is requested.
+ * @return A modifier that handles native context menu interaction.
+ */
 @Composable
 actual fun Modifier.nativeContextMenu(
     items: () -> List<NativeMenuEntry>,

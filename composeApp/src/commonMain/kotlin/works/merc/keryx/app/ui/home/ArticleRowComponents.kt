@@ -132,8 +132,7 @@ internal fun rememberArticleRowMetrics(): ArticleRowMetrics {
 }
 
 /**
- * Renders an article row with selection styling, read and starred indicators,
- * article metadata, and context-menu actions.
+ * Renders an article row with selection styling, read and starred indicators, metadata, and context-menu actions.
  *
  * @param article The article to display.
  * @param feedTitle The title of the article's feed.
@@ -141,7 +140,12 @@ internal fun rememberArticleRowMetrics(): ArticleRowMetrics {
  * @param selected Whether the row is selected.
  * @param focused Whether the row has focus.
  * @param rowHeight The minimum height of the row.
- * @param faviconSize The favicon display size.
+ * @param faviconSize The display size of the feed favicon.
+ * @param onClick Called when the row is clicked or its context menu is opened.
+ * @param onToggleRead Called to toggle the article's read state.
+ * @param onToggleStar Called to toggle the article's starred state.
+ * @param onCopyUrl Called to copy the article URL.
+ * @param onOpenInBrowser Called to open the article URL in a browser.
  * @param titleOverride An optional title to display instead of the article title.
  */
 @Composable

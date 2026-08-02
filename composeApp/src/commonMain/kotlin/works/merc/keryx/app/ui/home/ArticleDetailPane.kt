@@ -65,6 +65,13 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
 /** How long the copy button shows its inline ✓ / "copied" state before reverting. */
 private const val COPIED_FEEDBACK_MS = 1500L
 
+/**
+ * Displays the selected article and provides actions for starring, marking it unread, copying its URL, and opening it in a browser.
+ *
+ * @param vm The view model supplying the selected article and handling article actions.
+ * @param onActivated Invoked when the pane is activated.
+ * @param copyPulse A counter that signals a keyboard copy action for the selected article.
+ */
 @Composable
 fun ArticleDetailPane(
     vm: HomeViewModel,
@@ -194,33 +201,26 @@ fun ArticleDetailPane(
 }
 
 /**
- * Builds the detail header's `author · timestamp` line as a single string, for the WebView path.
- *
- * A non-null but blank author — possible on rows predating the parser's blank normalization, or
- * arriving through a sync merge — is dropped rather than rendered as a leading separator.
- *
- * @param author The article's author, if any.
- * @param publishedAt The article's publication time in Unix millis, if known.
- * @return The metadata line, empty when there is nothing to show.
- */
+         * Formats the article author and publication time as a metadata line.
+         *
+         * Blank authors and unavailable publication times are omitted.
+         *
+         * @param author The article's author, if available.
+         * @param publishedAt The article's publication time in Unix milliseconds, if available.
+         * @return The formatted metadata line, or an empty string when neither value is available.
+         */
 internal fun articleMetaText(author: String?, publishedAt: Long?): String =
     listOfNotNull(author?.takeIf { it.isNotBlank() }, formatTimestamp(publishedAt).ifBlank { null })
         .joinToString(" · ")
 
 /**
- * Renders the detail header's `author · timestamp` line.
+ * Displays the article author and publication time as inline metadata.
  *
- * The two halves are separate [Text]s rather than one joined string: sharing a single ellipsis
- * budget let a long author truncate the timestamp away entirely. Only the author carries the
- * weight, so [Row] measures the timestamp at its full intrinsic width first and the author
- * ellipsizes into what is left. Unlike the article list's row, the weight does not fill
- * (`fill = false`), so the timestamp stays inline right after the author instead of being pinned
- * to the trailing edge — that matches the WebView path, which renders the same line as inline
- * flowing text. The separator travels with the timestamp so it never dangles after an ellipsized
- * author.
+ * Blank authors and unavailable publication times are omitted. Long author text is ellipsized while
+ * preserving the publication time.
  *
- * @param author The article's author, if any.
- * @param publishedAt The article's publication time in Unix millis, if known.
+ * @param author The article's author, if available.
+ * @param publishedAt The article's publication time in Unix milliseconds, if available.
  */
 @Composable
 internal fun ArticleDetailMetaLine(author: String?, publishedAt: Long?, modifier: Modifier = Modifier) {
