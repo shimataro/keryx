@@ -122,18 +122,20 @@ only to the pane that sits in the window's top-left corner — currently
   gives the weighted title/metadata `Column` a different width share than the real
   measurement pass. Do not reintroduce `IntrinsicSize.Min`/`fillMaxHeight`/`aspectRatio`
   for this row.
-- Layout, left to right: unread dot (8dp) → favicon (`Box(Modifier.size(faviconSize))`
-  with a Coil `AsyncImage` using `ContentScale.Crop` and a `primaryContainer` background
-  chip behind it so transparent-background favicons stay visible against the dark theme,
-  falling back to `Icons.Filled.Public` on load failure) → a column with the title and
-  metadata.
+- Layout, left to right: unread dot (8dp) → favicon (a Coil `AsyncImage` using
+  `ContentScale.Crop` and a `primaryContainer` background chip behind it so
+  transparent-background favicons stay visible against the dark theme, falling back to
+  `Icons.Filled.Public` on load failure, or a same-size `Spacer` placeholder when there is
+  no favicon URL yet — **not** a wrapping `Box`, see "Gaps and node count" below) → a
+  column with the title and metadata.
 - Title uses `minLines = 2, maxLines = 2` (matching the height computed by
   `rememberArticleRowMetrics()`); `FontWeight.Bold` + `onSurface` when unread, normal
   weight + `onSurfaceVariant` when read.
 - Metadata line uses `labelSmall` + `onSurfaceVariant.copy(alpha = 0.7f)`, laid out per the
   "Metadata lines" rule below: the feed name carries `Modifier.weight(1f)` (filling, so the
-  timestamp is pinned to the trailing edge and dates line up down the list), then an 8.dp
-  `Spacer`, then the timestamp.
+  timestamp is pinned to the trailing edge and dates line up down the list), then the
+  timestamp with an 8.dp leading `Modifier.padding` (not a `Spacer` — see "Gaps and node
+  count" below).
 - No divider between rows (see Divider policy above).
 - Favicon loading goes through Coil3's `AsyncImage`; the `ImageLoader` is
   configured once at startup via `configureImageLoader(...)` in
@@ -141,6 +143,23 @@ only to the pane that sits in the window's top-left corner — currently
   (called from [main.kt](../../../composeApp/src/desktopMain/kotlin/works/merc/keryx/app/main.kt)):
   network fetch via the app's existing `HttpClient`, SVG decoding support,
   and an on-disk cache under `AppDirs.cacheDir()`.
+
+## Gaps and node count
+
+`ArticleRow` sits inside the article list's `LazyColumn`, close to a known
+Compose reuse-pool crash threshold that is sensitive to how many `LayoutNode`s
+each row has (see [known-issues.md](../../../docs/known-issues.md)). A `Spacer`
+is its own composable — its own `LayoutNode` — so a fixed gap between two
+elements in this row is a leading/trailing `Modifier.padding` on one of the
+elements themselves, never a `Spacer`, wherever a `padding` addition can
+reproduce the same visual gap. `Modifier.padding` attaches to the existing
+element's `LayoutNode` rather than creating a new one, so this costs nothing
+visually while keeping the row's node count down. Do not reintroduce a
+`Spacer` here (or in any other `LazyColumn` row) for a plain fixed gap.
+
+This is a workaround for the crash above, not a general style preference — once the upstream
+fix lands and the mitigation in `ArticleRow` is reverted (see known-issues.md's re-check
+procedure), delete this section and go back to using `Spacer` normally in `LazyColumn` rows.
 
 ## Metadata lines
 

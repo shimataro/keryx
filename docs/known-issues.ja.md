@@ -85,6 +85,32 @@ Compose 自身のレイジーリスト項目再利用における内部不変条
 [compose-multiplatform#3977](https://github.com/JetBrains/compose-multiplatform/issues/3977)、
 [issuetracker 303256075](https://issuetracker.google.com/issues/303256075)。
 
+### 緩和策: 行あたりのノード数を減らす
+
+この不具合はノード数に敏感なので、`ArticleRow` の見た目を一切変えずにノード数を減らした。
+固定の隙間を作るためだけの `Spacer`（それ自体が独立した `LayoutNode` を持つコンポーザブル）
+3 個を、隣接要素への先頭/末尾 `Modifier.padding` に置き換え（モディファイアは既存の
+`LayoutNode` に付くだけで新規ノードを作らない）、favicon を包んでいた `Box` も
+`AsyncImage`/`Spacer` の直接選択に置き換えた。これにより常時ノード数は 12 から 8 まで下がり
+——これはこの不具合を最初に露出させたメタ行修正**より前**の行（9 ノード）よりも少ない。
+パターンの詳細は `ui-guidelines` スキルの「Gaps and node count」を参照。この行（および他の
+`LazyColumn` 内の行）で、単なる固定の隙間のために `Spacer` を再び使わないこと。
+
+実測した効果: 12 ノードの状態では `ArticleReuseCrashRepro` が閾値 15 回で 5/5 再現していた。
+8 ノードへの削減後は、このハーネスでは全く再現しなくなった — 元の閾値の 10 倍（150 回連続、
+3/3 で再現せず）まで確認済み。コミットしたテスト自体は 60 回（旧閾値より十分大きい）で走らせ、
+これも 0/5。
+
+**これは緩和策であり、修正ではない。** Compose 側の根本原因には一切手を付けていないため:
+
+- 「絶対に発生しない」ことの証明にはならない — 現在の行構造では、ハーネスで試した最も
+  厳しい条件でも踏まなかった、という以上の意味は持たない。
+- 将来、この行（や同じ reuse pool を共有する他の `LazyColumn` の行）に再びノードを追加する
+  変更が入れば、今回のメタ行修正のときと同じように、この余裕は再び失われうる。
+- gutter `Box`（8dp 幅の star/unread ドット用コンテナ）は**変更していない** — 削除するには
+  star アイコンと未読ドットの位置決めを `Box`/`align()` から手動オフセットに置き換える必要が
+  あり、削減できるノード数に対してリスクが見合わないと判断した。
+
 ### 調査で除外したもの
 
 いずれも決定的な再現条件に対して試し、影響が無いことを確認済み。
@@ -119,11 +145,20 @@ Compose 自身のレイジーリスト項目再利用における内部不変条
 `composeApp/src/desktopTest/kotlin/works/merc/keryx/app/ui/home/ArticleReuseCrashRepro.kt`
 に残してある。実際のホイールスクロールと同じ desktop の経路を駆動するので、手動操作は不要。
 
+**検証は現在の構成ではなく緩和策適用前の構成に対して行うこと** — 上記「実測した効果」の通り、現在の
+8 ノード構成では上流の修正状況にかかわらずこのハーネスは既に再現しなくなっているため、そのまま
+実行しても何も分からない。まず `ArticleRow`（`ArticleRowComponents.kt`）を緩和策適用前の構成に戻す
+— 現在の `Modifier.padding` に畳み込んだ隙間と `AsyncImage`/`Spacer` の分岐ではなく、`Spacer` で
+隙間を作り favicon を `Box` で包む元の形に戻す（favicon 分岐直前のインラインコメント、および
+"cut ArticleRow's LazyColumn item node count" コミットに、戻すべき差分の詳細がある）。そのうえで
 `@Ignore` を外して数回実行する。
 
 ```bash
 ./gradlew :composeApp:desktopTest --tests '*ArticleReuseCrashRepro*' --rerun-tasks
 ```
 
-繰り返し成功するようになっていれば上流で修正済み。この項目を削除し、テストは通常のリグレッション
-テストとして残すか破棄するかを判断する。まだ失敗するなら `@Ignore` を戻す。
+この緩和策適用前の構成で繰り返し成功するようになっていれば上流で修正済み。この項目を削除する
+（あるいはテストは通常のリグレッションテストとして残す）とともに、`ArticleRow` は緩和策適用前の
+構成のまま戻さず残し、`ui-guidelines` スキルの「Gaps and node count」節も削除する — この節はこの
+緩和策を説明するためだけに存在する。まだ失敗するなら、`@Ignore` と緩和策の両方を元に戻す
+（一時的な変更を取り消す）。

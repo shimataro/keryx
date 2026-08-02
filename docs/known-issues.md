@@ -87,6 +87,32 @@ Upstream reports of the same assertion:
 [compose-multiplatform#3977](https://github.com/JetBrains/compose-multiplatform/issues/3977),
 [issuetracker 303256075](https://issuetracker.google.com/issues/303256075).
 
+### Mitigation: fewer nodes per row
+
+Since the bug is node-count sensitive, `ArticleRow`'s node count was reduced without any visible
+change: three `Spacer`s (a fixed-gap composable, and therefore its own `LayoutNode`) were replaced
+with a leading/trailing `Modifier.padding` on the adjacent element instead (a modifier attaches to
+the *existing* `LayoutNode`, so it adds no node), and the favicon's wrapping `Box` was replaced
+with a direct `AsyncImage`/`Spacer` choice. This took the row from 12 always-present nodes down to
+8 — fewer than the row had *before* the metadata-line change that first exposed this bug (9 nodes).
+See "Gaps and node count" in the `ui-guidelines` skill for the pattern; do not reintroduce a
+`Spacer` for a plain fixed gap in this row (or any other `LazyColumn` row).
+
+Measured effect: at 12 nodes, `ArticleReuseCrashRepro` reproduced the crash 5/5 with the
+selection/wheel alternation threshold at 15. After the reduction to 8 nodes, it no longer
+reproduces at all in that harness, even at 10x the original threshold (150 alternations, 3/3
+clean; the committed test runs 60, comfortably above the old threshold, also 0/5).
+
+**This is a mitigation, not a fix.** It does not touch the underlying Compose defect, so:
+
+- It is not proof the crash can never happen — only that it takes more provocation than the
+  harness's most aggressive tested setting to trigger with the current row structure.
+- A future change that adds nodes back to this row (or any other `LazyColumn` row sharing the same
+  reuse pool) can reduce or remove this margin again, the same way the metadata-line change did.
+- `gutter Box` (the 8dp-wide star/unread-dot container) was **not** touched — removing it would
+  need the star icon and unread dot repositioned via manual offsets instead of `Box`/`align()`,
+  which was judged too risky for the node it would save.
+
 ### Ruled out
 
 Each of these was tested against the deterministic repro and made no difference:
@@ -122,11 +148,21 @@ A disabled regression harness is kept at
 `composeApp/src/desktopTest/kotlin/works/merc/keryx/app/ui/home/ArticleReuseCrashRepro.kt`. It
 drives the same desktop code path as a real wheel scroll, so it needs no manual interaction.
 
-Remove its `@Ignore` and run it a few times:
+**Test against the pre-mitigation structure, not the current one** — per "Measured effect" above,
+the current 8-node `ArticleRow` already passes this harness cleanly regardless of whether the
+upstream bug is fixed, so running it as-is proves nothing. First revert `ArticleRow`
+(`ArticleRowComponents.kt`) to its pre-mitigation structure: `Spacer`-separated gaps and a
+`Box`-wrapped favicon, rather than the `Modifier.padding`-folded gaps and `AsyncImage`/`Spacer`
+branch currently there (see the inline comment at the favicon branch, and the "cut ArticleRow's
+LazyColumn item node count" commit for the exact diff to reverse). Then remove `@Ignore` and run it
+a few times:
 
 ```bash
 ./gradlew :composeApp:desktopTest --tests '*ArticleReuseCrashRepro*' --rerun-tasks
 ```
 
-If it passes repeatedly, the upstream fix has landed: delete this entry and either keep the test as
-a normal regression test or drop it. If it still fails, restore the `@Ignore`.
+If it passes repeatedly at this pre-mitigation structure, the upstream fix has landed: delete this
+entry (or keep the test as a normal regression test), keep `ArticleRow` reverted to the
+pre-mitigation structure, and remove the "Gaps and node count" section from the `ui-guidelines`
+skill — it only exists to document this workaround. If it still fails, restore both the `@Ignore`
+and the node-count mitigation (revert the temporary change).
