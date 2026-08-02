@@ -98,6 +98,16 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  * @param onAddFeedClick Called when the user requests to add a feed.
  * @param onSearchFieldFocusChange Called when the search field focus changes.
  */
+/**
+ * Displays the feed navigation pane with filters, folders, tags, search, and feed management actions.
+ *
+ * @param vm The view model providing feed data and navigation actions.
+ * @param focused Whether the pane has focus.
+ * @param onActivated Called when the pane becomes active.
+ * @param modifier The modifier applied to the pane.
+ * @param onAddFeedClick Called when the add-feed action is selected.
+ * @param onSearchFieldFocusChange Called when the search field focus changes.
+ */
 @Composable
 fun FeedListPane(
     vm: HomeViewModel,
@@ -258,8 +268,14 @@ fun FeedListPane(
         )
 
         Box(Modifier.weight(1f)) {
+            // Every slot below carries an explicit key and contentType. This list interleaves
+            // several structurally different row kinds, and an unkeyed `item {}` falls back to an
+            // index-derived key — so collapsing a folder or expanding a tag shifts those indices
+            // and hands a slot that held, say, a folder header to a feed row. Keying them pins
+            // each slot to its identity, and the contentType keeps each kind in its own reuse
+            // pool so a recycled slot is only ever refilled with the same kind of row.
             LazyColumn(Modifier.fillMaxSize(), state = listState) {
-                item {
+                item(key = "sidebar", contentType = "sidebar") {
                     SidebarRow(
                         icon = { KeryxIcon(KeryxIcons.Article, null) },
                         label = stringResource(Res.string.home_all_feeds),
@@ -287,7 +303,7 @@ fun FeedListPane(
                     HorizontalDivider(Modifier.padding(vertical = 4.dp))
                 }
 
-                item {
+                item(key = "folders-header", contentType = "section-header") {
                     Row(
                         Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -307,7 +323,7 @@ fun FeedListPane(
                 groupFeedsByFolder(feeds, folders).forEach { (folder, feedsInFolder) ->
                     if (folder == null) {
                         if (folders.isNotEmpty()) {
-                            item {
+                            item(key = "no-folder-header", contentType = "folder-header") {
                                 NoFolderHeader(
                                     firstFeedId = feedsInFolder.firstOrNull()?.id,
                                     activeBoundaryState = activeBoundaryState,
@@ -317,7 +333,11 @@ fun FeedListPane(
                                 )
                             }
                         }
-                        itemsIndexed(feedsInFolder, key = { _, feed -> "feed-${feed.id}" }) { index, feed ->
+                        itemsIndexed(
+                            feedsInFolder,
+                            key = { _, feed -> "feed-${feed.id}" },
+                            contentType = { _, _ -> "feed" },
+                        ) { index, feed ->
                             FeedRow(
                                 feed = feed,
                                 count = unreadByFeed[feed.id] ?: 0L,
@@ -346,7 +366,7 @@ fun FeedListPane(
                     } else {
                         val collapsed = folder.id in collapsedFolderIds
                         val nextFolderId = folders.getOrNull(folders.indexOf(folder) + 1)?.id
-                        item {
+                        item(key = "folder-${folder.id}", contentType = "folder-header") {
                             FolderGroupHeader(
                                 folder = folder,
                                 count = unreadByFolder[folder.id] ?: 0L,
@@ -369,7 +389,11 @@ fun FeedListPane(
                             )
                         }
                         if (!collapsed) {
-                            itemsIndexed(feedsInFolder, key = { _, feed -> "feed-${feed.id}" }) { index, feed ->
+                            itemsIndexed(
+                                feedsInFolder,
+                                key = { _, feed -> "feed-${feed.id}" },
+                                contentType = { _, _ -> "feed" },
+                            ) { index, feed ->
                                 FeedRow(
                                     feed = feed,
                                     count = unreadByFeed[feed.id] ?: 0L,
@@ -399,9 +423,11 @@ fun FeedListPane(
                     }
                 }
 
-                item { HorizontalDivider(Modifier.padding(vertical = 4.dp)) }
+                item(key = "tags-divider", contentType = "divider") {
+                    HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                }
 
-                item {
+                item(key = "tags-header", contentType = "section-header") {
                     Row(
                         Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -418,7 +444,7 @@ fun FeedListPane(
                     }
                 }
                 tags.forEach { tag ->
-                    item(key = "tag-${tag.id}") {
+                    item(key = "tag-${tag.id}", contentType = "tag") {
                         TagRow(
                             tag = tag,
                             count = unreadByTag[tag.id] ?: 0L,
@@ -435,7 +461,11 @@ fun FeedListPane(
                     if (tag.id in expandedTagIds) {
                         // A feed carrying several tags legitimately appears once per expanded tag (plus
                         // once under its folder), so the key must be tag-scoped to stay unique.
-                        items(feedsForTag(feeds, feedTagMap, tag.id), key = { "tag-${tag.id}-feed-${it.id}" }) { feed ->
+                        items(
+                            feedsForTag(feeds, feedTagMap, tag.id),
+                            key = { "tag-${tag.id}-feed-${it.id}" },
+                            contentType = { "tag-feed" },
+                        ) { feed ->
                             TagFeedRow(
                                 feed = feed,
                                 count = unreadByFeed[feed.id] ?: 0L,

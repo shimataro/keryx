@@ -65,6 +65,13 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
 /** How long the copy button shows its inline ✓ / "copied" state before reverting. */
 private const val COPIED_FEEDBACK_MS = 1500L
 
+/**
+ * Displays the selected article and provides actions for starring, marking it unread, copying its URL, and opening it in a browser.
+ *
+ * @param vm The view model supplying the selected article and handling article actions.
+ * @param onActivated Invoked when the pane is activated.
+ * @param copyPulse A counter that signals a keyboard copy action for the selected article.
+ */
 @Composable
 fun ArticleDetailPane(
     vm: HomeViewModel,
@@ -163,8 +170,7 @@ fun ArticleDetailPane(
         }
 
         val title = current.title.ifBlank { stringResource(Res.string.article_no_title) }
-        val meta = listOfNotNull(current.author, formatTimestamp(current.published_at).ifBlank { null })
-            .joinToString(" · ")
+        val meta = articleMetaText(current.author, current.published_at)
 
         if (body.isNullOrBlank()) {
             // No article body to scroll, so the reserved-height problem doesn't apply here — keep
@@ -173,13 +179,7 @@ fun ArticleDetailPane(
             Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 16.dp)) {
                 Text(title, style = MaterialTheme.typography.headlineSmall)
                 Spacer(Modifier.height(6.dp))
-                Text(
-                    meta,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                ArticleDetailMetaLine(current.author, current.published_at)
             }
             Box(Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
                 Text(stringResource(Res.string.article_no_content), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -196,6 +196,55 @@ fun ArticleDetailPane(
                     mutedColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+    }
+}
+
+/**
+         * Formats the article author and publication time as a metadata line.
+         *
+         * Blank authors and unavailable publication times are omitted.
+         *
+         * @param author The article's author, if available.
+         * @param publishedAt The article's publication time in Unix milliseconds, if available.
+         * @return The formatted metadata line, or an empty string when neither value is available.
+         */
+internal fun articleMetaText(author: String?, publishedAt: Long?): String =
+    listOfNotNull(author?.takeIf { it.isNotBlank() }, formatTimestamp(publishedAt).ifBlank { null })
+        .joinToString(" · ")
+
+/**
+ * Displays the article author and publication time as inline metadata.
+ *
+ * Blank authors and unavailable publication times are omitted. Long author text is ellipsized while
+ * preserving the publication time.
+ *
+ * @param author The article's author, if available.
+ * @param publishedAt The article's publication time in Unix milliseconds, if available.
+ */
+@Composable
+internal fun ArticleDetailMetaLine(author: String?, publishedAt: Long?, modifier: Modifier = Modifier) {
+    val authorText = author?.takeIf { it.isNotBlank() }
+    val timestamp = formatTimestamp(publishedAt)
+    val color = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(modifier.fillMaxWidth()) {
+        if (authorText != null) {
+            Text(
+                authorText,
+                style = MaterialTheme.typography.labelMedium,
+                color = color,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+        }
+        if (timestamp.isNotEmpty()) {
+            Text(
+                if (authorText == null) timestamp else " · $timestamp",
+                style = MaterialTheme.typography.labelMedium,
+                color = color,
+                maxLines = 1,
+            )
         }
     }
 }

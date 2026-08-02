@@ -17,3 +17,4 @@ Design documents for Keryx.
 | [sync-architecture.md](sync-architecture.md) | Sync architecture, merge |
 | [background-update.md](background-update.md) | Background update |
 | [testing.md](testing.md) | Testing conventions |
+| [known-issues.md](known-issues.md) | Known defects that are deliberately not fixed |

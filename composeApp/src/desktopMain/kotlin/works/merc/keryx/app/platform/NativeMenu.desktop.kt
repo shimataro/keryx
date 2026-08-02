@@ -220,10 +220,10 @@ private fun forceHeavyweight(popup: JPopupMenu) {
 }
 
 /**
- * A structural fingerprint of [items]: the widget kind of every entry, plus each submenu's child
- * count. The native widgets are built once per distinct shape and then only relabelled, so this
- * has to capture everything that decides which components get created — a bare item count would
- * not notice an entry changing kind.
+ * Identifies the menu structure from entry kinds and submenu contents.
+ *
+ * @param items The menu entries to fingerprint.
+ * @return A structural fingerprint for the menu entries.
  */
 private fun menuShape(items: List<NativeMenuEntry>): List<String> = items.map { entry ->
     when (entry) {
@@ -235,6 +235,44 @@ private fun menuShape(items: List<NativeMenuEntry>): List<String> = items.map { 
 private fun leafKind(entry: NativeMenuLeaf): String =
     if (entry is NativeCheckMenuItem) "check" else "item"
 
+/** One entry of a [menuSignature]. Internal only so the tests can assert on it. */
+internal sealed interface MenuEntrySignature
+
+/**
+ * What a leaf renders. [checked] is null for a plain item, so an entry's kind and its check state
+ * are one unambiguous field rather than something encoded into text.
+ */
+internal data class LeafSignature(val label: String, val checked: Boolean?) : MenuEntrySignature
+
+internal data class SubMenuSignature(
+    val label: String,
+    val children: List<LeafSignature>,
+) : MenuEntrySignature
+
+/**
+     * Creates a value-comparable representation of the menu's rendered content.
+     *
+     * @param items The menu entries to represent.
+     * @return The labels, checked states, and submenu contents of the menu.
+     */
+internal fun menuSignature(items: List<NativeMenuEntry>): List<MenuEntrySignature> =
+    items.map { entry ->
+        when (entry) {
+            is NativeMenuLeaf -> leafSignature(entry)
+            is NativeSubMenu -> SubMenuSignature(entry.label, entry.items.map { leafSignature(it) })
+        }
+    }
+
+private fun leafSignature(entry: NativeMenuLeaf): LeafSignature =
+    LeafSignature(entry.label, (entry as? NativeCheckMenuItem)?.checked)
+
+/**
+ * Adds a native context menu that opens when the secondary mouse button is pressed.
+ *
+ * @param items Provides the current menu entries.
+ * @param onOpen Called when the context menu is requested.
+ * @return A modifier that handles native context menu interaction.
+ */
 @Composable
 actual fun Modifier.nativeContextMenu(
     items: () -> List<NativeMenuEntry>,
@@ -246,16 +284,21 @@ actual fun Modifier.nativeContextMenu(
     val currentOnOpen by rememberUpdatedState(onOpen)
     var elementPosition by remember { mutableStateOf(Offset.Zero) }
 
+    // Evaluate the caller's lambda once per composition; both descriptors below derive from it.
+    val entries = items()
+
     // The menu's shape is assumed stable per call site across ordinary recompositions - see
     // nativeContextMenu doc. Rebuild the native widgets whenever it actually changes (e.g. a
     // folder is added/removed).
-    val handle = remember(menuShape(items())) {
-        val snapshot = items()
+    val handle = remember(menuShape(entries)) {
         val provider = { currentItems() }
-        if (isLinux) SwingPopupHandle(snapshot, provider) else AwtPopupHandle(snapshot, provider)
+        if (isLinux) SwingPopupHandle(entries, provider) else AwtPopupHandle(entries, provider)
     }
 
-    LaunchedEffect(items()) { handle.sync(items()) }
+    // Keyed on the rendered labels/check states rather than on `entries` itself — see
+    // menuSignature. `handle` is included so a rebuilt menu is relabelled even in the (unlikely)
+    // case that its shape changed without its signature changing.
+    LaunchedEffect(handle, menuSignature(entries)) { handle.sync(currentItems()) }
 
     DisposableEffect(window, handle) {
         handle.attach(window)

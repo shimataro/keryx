@@ -21,6 +21,8 @@ mobile (Android/iOS) targets planned for later.
 - @../docs/build.md — Build & packaging
 - @../docs/setup.md — Development environment setup
 - @../docs/testing.md — Testing conventions
+- @../docs/known-issues.md — Known defects deliberately left unfixed (with the evidence, so
+  investigations aren't repeated)
 - UI/Compose style guidelines → the **`ui-guidelines` skill** (invoke it when
   adding/modifying Compose under `ui/`: pane tones, divider policy, article
   card style, flat native-feel components, dialog/popup conventions)

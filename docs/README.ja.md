@@ -17,3 +17,4 @@ Keryx の設計ドキュメント一覧。
 | [sync-architecture.ja.md](sync-architecture.ja.md) | 同期アーキテクチャ・マージ |
 | [background-update.ja.md](background-update.ja.md) | バックグラウンド更新 |
 | [testing.ja.md](testing.ja.md) | テスト方針 |
+| [known-issues.ja.md](known-issues.ja.md) | 意図的に修正していない既知の不具合 |

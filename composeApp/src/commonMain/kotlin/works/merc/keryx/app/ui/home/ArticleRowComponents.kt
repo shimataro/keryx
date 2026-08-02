@@ -132,8 +132,7 @@ internal fun rememberArticleRowMetrics(): ArticleRowMetrics {
 }
 
 /**
- * Renders an article row with selection styling, read and starred indicators,
- * article metadata, and context-menu actions.
+ * Renders an article row with selection styling, read and starred indicators, metadata, and context-menu actions.
  *
  * @param article The article to display.
  * @param feedTitle The title of the article's feed.
@@ -141,7 +140,12 @@ internal fun rememberArticleRowMetrics(): ArticleRowMetrics {
  * @param selected Whether the row is selected.
  * @param focused Whether the row has focus.
  * @param rowHeight The minimum height of the row.
- * @param faviconSize The favicon display size.
+ * @param faviconSize The display size of the feed favicon.
+ * @param onClick Called when the row is clicked or its context menu is opened.
+ * @param onToggleRead Called to toggle the article's read state.
+ * @param onToggleStar Called to toggle the article's starred state.
+ * @param onCopyUrl Called to copy the article URL.
+ * @param onOpenInBrowser Called to open the article URL in a browser.
  * @param titleOverride An optional title to display instead of the article title.
  */
 @Composable
@@ -242,14 +246,29 @@ internal fun ArticleRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.size(2.dp))
-            Text(
-                listOfNotNull(feedTitle.ifBlank { null }, formatTimestamp(article.published_at).ifBlank { null })
-                    .joinToString(" · "),
-                style = MaterialTheme.typography.labelSmall,
-                color = selectionContentColor?.copy(alpha = 0.7f) ?: MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            val metaColor = selectionContentColor?.copy(alpha = 0.7f)
+                ?: MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            // Feed title and timestamp are separate Texts rather than one joined string: sharing a
+            // single ellipsis budget let a long feed title truncate the timestamp away entirely.
+            // Only the title carries the weight, so Row measures the timestamp at its full intrinsic
+            // width first and the title ellipsizes into whatever is left.
+            Row(Modifier.fillMaxWidth()) {
+                Text(
+                    feedTitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = metaColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    formatTimestamp(article.published_at),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = metaColor,
+                    maxLines = 1,
+                )
+            }
         }
     }
 }

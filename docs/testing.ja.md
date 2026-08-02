@@ -46,6 +46,10 @@
 
 ## 実行
 
+1 件だけ意図的に `@Ignore` しているテストがある。`ArticleReuseCrashRepro` は、意図的に修正して
+いない Compose 側の不具合を再現するもので、有効にすると毎回失敗するため。詳細と、Compose 更新後に
+修正されたかを確認する手順は [known-issues.ja.md](known-issues.ja.md) を参照。
+
 ```bash
 ./gradlew :composeApp:desktopTest
 ```
@@ -54,7 +58,7 @@
 OPML、Dropbox ストレージ/認証、PKCE、OAuth ループバックサーバ、マージ（後勝ち・OR マージ・衝突ガード・
 FK ガード）、スキーマ、ローカル設定、記事 upsert、URL リゾルバ、日時パーサ、Result、Repository 層
 （Article/Feed/Tag/Settings）、CloudSession、NotificationCenter、IdGenerator、SyncRepository、
-ViewModel 層（Home/Settings/Setup/NotificationCenter）、ArticleWebViewHtml（extractLinks/wrapArticleHtml）、AppFont（Linux の UI フォント用 Pango フォント記述のパース）、カスタム URI スキーム登録（`UriSchemeRegistration` の OS 別ディスパッチとパッケージ版ランチャー判定、`LinuxUriSchemeRegistrar` の `.desktop` 生成——`%u` フィールドコードを含む——、`mimeapps.list` の非破壊マージ、冪等性）、FTS（FtsManager/FtsSearch、
+ViewModel 層（Home/Settings/Setup/NotificationCenter）、名前とタイムスタンプを並べるメタ行（`ArticleRowMetadataTest`：フィードタイトルが長くても省略されるのはタイトル側だけで、記事カードのタイムスタンプは幅を奪われず行の右端に揃ったまま表示される。`ArticleDetailMetaLineTest`：詳細ヘッダーの `author · タイムスタンプ` も同様に保証される——ただし右端寄せではなくインライン——、あわせて `articleMetaText` が null または空白のみの著者名を除去し先頭に区切りが残らないこと）、ArticleWebViewHtml（extractLinks/wrapArticleHtml）、AppFont（Linux の UI フォント用 Pango フォント記述のパース）、カスタム URI スキーム登録（`UriSchemeRegistration` の OS 別ディスパッチとパッケージ版ランチャー判定、`LinuxUriSchemeRegistrar` の `.desktop` 生成——`%u` フィールドコードを含む——、`mimeapps.list` の非破壊マージ、冪等性）、FTS（FtsManager/FtsSearch、
 `indexMissing` の増分投入・非破壊、`rebuildIndex` がテーブル存在を前提とすること、同期アップロードが
 `VACUUM INTO` スナップショットで `articles_fts` を除外し `user_version` を保全することを含む）、
 Linux の SNI トレイ（`TrayPixmapTest`＝ビッグエンディアン ARGB32 / RGBA エンコーダーとアルファ保全、
