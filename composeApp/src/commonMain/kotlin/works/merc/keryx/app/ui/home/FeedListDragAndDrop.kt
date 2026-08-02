@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.draganddrop.dragAndDropSource
 import androidx.compose.foundation.layout.Box
@@ -75,34 +76,41 @@ import works.merc.keryx.app.ui.common.FlatTooltipContent
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 
-/** Background for a folder-drop row: highlighted while a feed is being dragged over it.
- * When the folder is the drag source, its selection highlight is suppressed so the destination
- * folder reads as the active target. */
+/** Background for a row that may be an active drop target: [containerColor] while a feed is being
+ * dragged over it, otherwise the normal selection background. When the row is the drag source,
+ * its selection highlight is suppressed so the destination reads as the active target. */
 @Composable
-private fun dropTargetBackground(
+internal fun dropTargetBackground(
     isDropTarget: Boolean,
     selected: Boolean,
     focused: Boolean,
+    containerColor: Color,
     isDragSource: Boolean = false,
 ): Color = when {
-    isDropTarget -> MaterialTheme.colorScheme.secondaryContainer
+    isDropTarget -> containerColor
     isDragSource -> Color.Transparent
     else -> selectionBackground(selected, focused)
 }
 
-/** Content color paired with [dropTargetBackground]. */
+/** Content color paired with [dropTargetBackground] (using its matching `on<Container>` color). */
 @Composable
 internal fun dropTargetContentColorOrNull(
     isDropTarget: Boolean,
     selected: Boolean,
     focused: Boolean,
+    onContainerColor: Color,
     isDragSource: Boolean = false,
 ): Color? = when {
-    isDropTarget -> MaterialTheme.colorScheme.onSecondaryContainer
+    isDropTarget -> onContainerColor
     isDragSource -> null
-    selected && focused -> MaterialTheme.colorScheme.onPrimary
-    else -> null
+    else -> selectionContentColorOrNull(selected, focused)
 }
+
+/** Border for a row that may be an active drop target: a [color]-tinted outline while a feed is
+ * being dragged over it, no border otherwise. */
+@Composable
+internal fun dropTargetBorderModifier(isDropTarget: Boolean, color: Color): Modifier =
+    if (isDropTarget) Modifier.border(2.dp, color, MaterialTheme.shapes.small) else Modifier
 
 /** How long a dragged feed must be held over a collapsed folder header before the folder opens by
  * itself, so the feeds inside it become reachable drop targets without letting go of the drag
@@ -272,7 +280,8 @@ internal fun FolderGroupHeader(
             Modifier.fillMaxWidth()
                 .padding(start = 8.dp, top = 2.dp, end = 8.dp, bottom = 2.dp)
                 .clip(MaterialTheme.shapes.small)
-                .background(dropTargetBackground(isFeedDragHighlight, selected, focused, isDragSource))
+                .background(dropTargetBackground(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.secondaryContainer, isDragSource))
+                .then(dropTargetBorderModifier(isFeedDragHighlight, MaterialTheme.colorScheme.secondary))
                 .dragAndDropSource(
                     drawDragDecoration = {
                         drawDragPreviewChip(
@@ -301,7 +310,7 @@ internal fun FolderGroupHeader(
         ) {
             CompositionLocalProvider(
                 LocalContentColor provides (
-                    dropTargetContentColorOrNull(isFeedDragHighlight, selected, focused, isDragSource)
+                    dropTargetContentColorOrNull(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.onSecondaryContainer, isDragSource)
                         ?: LocalContentColor.current
                     ),
             ) {
@@ -318,7 +327,7 @@ internal fun FolderGroupHeader(
                     KeryxIcon(
                         KeryxIcons.Folder,
                         contentDescription = null,
-                        tint = dropTargetContentColorOrNull(isFeedDragHighlight, selected, focused, isDragSource)
+                        tint = dropTargetContentColorOrNull(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.onSecondaryContainer, isDragSource)
                             ?: MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(18.dp),
                     )
@@ -354,7 +363,15 @@ internal fun NoFolderHeader(
             modifier = Modifier.fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 2.dp)
                 .clip(MaterialTheme.shapes.small)
-                .background(dropTargetBackground(activeBoundaryState.value == feedZoneBoundary, selected = false, focused = false))
+                .background(
+                    dropTargetBackground(
+                        activeBoundaryState.value == feedZoneBoundary,
+                        selected = false,
+                        focused = false,
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    ),
+                )
+                .then(dropTargetBorderModifier(activeBoundaryState.value == feedZoneBoundary, MaterialTheme.colorScheme.secondary))
                 .padding(start = 8.dp, top = 8.dp, bottom = 4.dp),
         )
         if (isEmpty) InsertionLine(indented = false, visible = activeBoundaryState.value == feedZoneBoundary)

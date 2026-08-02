@@ -1,7 +1,6 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.draganddrop.dragAndDropSource
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
@@ -727,9 +726,10 @@ private fun SidebarRow(
  * drop target — see `FeedListPane`'s outer `Box`).
  *
  * The drop affordance is deliberately different from a folder's: attaching a tag is additive (a feed
- * may carry many tags) whereas dropping on a folder *moves* the feed, so this row tints itself
- * `tertiaryContainer` — not the `secondaryContainer` of [FolderGroupHeader] — gains a `tertiary`
- * border, and swaps its color dot for a filled "+" badge while hovered. Compose's
+ * may carry many tags) whereas dropping on a folder *moves* the feed, so this row tints itself and
+ * its border `tertiary`/`tertiaryContainer` — not the `secondary`/`secondaryContainer` of
+ * [FolderGroupHeader] — and additionally swaps its color dot for a filled "+" badge while hovered
+ * (a folder gets no such badge, since a move has no equivalent "adding" semantics). Compose's
  * `supportedActions` is fixed at drag start and cannot be varied per drop target (confirmed by
  * decompiling `AwtDragAndDropManager`: the OS cursor reflects `getDropAction()`, computed from the
  * source's declared actions and held keyboard modifiers, never from which Compose target is
@@ -762,13 +762,13 @@ private fun TagRow(
 ) {
     val editLabel = stringResource(Res.string.home_edit_tag_menu)
     val deleteLabel = stringResource(Res.string.home_delete_tag_menu)
-    val contentColor = tagDropTargetContentColorOrNull(isDropTarget, selected, focused)
+    val contentColor = dropTargetContentColorOrNull(isDropTarget, selected, focused, MaterialTheme.colorScheme.onTertiaryContainer)
     Row(
         Modifier.fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 2.dp)
             .clip(MaterialTheme.shapes.small)
-            .background(tagDropTargetBackground(isDropTarget, selected, focused))
-            .then(if (isDropTarget) Modifier.border(2.dp, MaterialTheme.colorScheme.tertiary, MaterialTheme.shapes.small) else Modifier)
+            .background(dropTargetBackground(isDropTarget, selected, focused, MaterialTheme.colorScheme.tertiaryContainer))
+            .then(dropTargetBorderModifier(isDropTarget, MaterialTheme.colorScheme.tertiary))
             .nativeContextMenu(
                 items = {
                     listOf(
@@ -814,23 +814,12 @@ private fun TagRow(
                 Text(tag.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        if (count > 0) CountBadge(count, selected, focused, isDropTarget)
+        if (count > 0) CountBadge(count, selected, focused, isDropTarget, onContainerColor = MaterialTheme.colorScheme.onTertiaryContainer)
     }
 }
 
 /** Size of a [TagRow]'s leading marker slot, holding either the tag color dot or the drop "+" glyph. */
 private const val TAG_MARKER_SIZE_DP = 16
-
-/** Background for a [TagRow]: `tertiaryContainer` while a feed hovers it, so the additive "attach"
- * drop reads differently from a folder's `secondaryContainer` "move" drop. */
-@Composable
-private fun tagDropTargetBackground(isDropTarget: Boolean, selected: Boolean, focused: Boolean): Color =
-    if (isDropTarget) MaterialTheme.colorScheme.tertiaryContainer else selectionBackground(selected, focused)
-
-/** Content color paired with [tagDropTargetBackground]. */
-@Composable
-private fun tagDropTargetContentColorOrNull(isDropTarget: Boolean, selected: Boolean, focused: Boolean): Color? =
-    if (isDropTarget) MaterialTheme.colorScheme.onTertiaryContainer else selectionContentColorOrNull(selected, focused)
 
 /**
  * Renders a feed attached to an expanded tag.

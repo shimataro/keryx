@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.layout.ContentScale
@@ -83,6 +84,8 @@ private fun LetterAvatar(title: String) {
  * @param focused Whether the badge is focused.
  * @param isDropTarget Whether the row is an active drag-and-drop target.
  * @param isDragSource Whether the row is the source of the currently dragged feed.
+ * @param onContainerColor The `on<Container>` color to use while [isDropTarget], matching the
+ * row's own drop-target container color (e.g. `onSecondaryContainer` for a folder, `onTertiaryContainer` for a tag).
  */
 @Composable
 internal fun CountBadge(
@@ -91,11 +94,12 @@ internal fun CountBadge(
     focused: Boolean,
     isDropTarget: Boolean = false,
     isDragSource: Boolean = false,
+    onContainerColor: Color = MaterialTheme.colorScheme.onSecondaryContainer,
 ) {
     Text(
         count.toString(),
         style = MaterialTheme.typography.labelSmall,
-        color = dropTargetContentColorOrNull(isDropTarget, selected, focused, isDragSource)
+        color = dropTargetContentColorOrNull(isDropTarget, selected, focused, onContainerColor, isDragSource)
             ?: MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
