@@ -155,10 +155,12 @@ URI がプロセスに届かないからである。代わりにアプリが初�
 1. `vMAJOR.MINOR.PATCH` 形式のタグ（例: `v0.1.0`）で GitHub Release を公開する。SemVer 風の
    プレリリース接尾辞を任意で付けられる（例: `v1.2.0-beta.1`）。
 2. `release: published` で起動し、先頭の `v` を除去して `-PappVersion` に渡す。
-3. 2つの独立したジョブが並行して実行される: macOS ランナーで `:composeApp:packageDmg` を実行し
-   `Keryx-<version>-macos-arm64.dmg` として添付、Linux ランナーで（jpackage 用に `fakeroot`/`rpm`
-   をインストールした上で）`:composeApp:packageDeb :composeApp:packageRpm` を実行し
-   `Keryx-<version>-linux-x86_64.deb` と `Keryx-<version>-linux-x86_64.rpm` として添付する。
+3. 2つの独立したジョブが並行して実行される:
+
+   - macOS ランナーで `:composeApp:packageDmg` を実行し、`Keryx-<version>-macos-arm64.dmg` に加えて **`Keryx-<version>-macos-arm64.zip`** としても添付する。
+   - Linux ランナーで（jpackage 用に `fakeroot`/`rpm` をインストールした上で）`:composeApp:packageDeb :composeApp:packageRpm` を実行し、`Keryx-<version>-linux-x86_64.deb` と `Keryx-<version>-linux-x86_64.rpm` に加えて **`Keryx-<version>-linux-x86_64.zip`** としても添付する。
+
+   `.zip` ファイルは `:composeApp:createDistributable` が出力する、インストーラ不要のアプリバンドル／イメージを圧縮したものである。パッケージを経由せずに使いたいユーザー向け。
 
 **バージョンはタグを正とする**。`composeApp/build.gradle.kts` の `appVersion` は
 `-PappVersion` > 環境変数 `APP_VERSION` > ファイル内のリテラル、の順に解決し、`BuildConfig.VERSION`
