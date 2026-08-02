@@ -250,3 +250,36 @@ Rules:
 - Output the final Markdown inside a fenced code block so it is easy to copy.
 - Do not add any extra commentary outside the code block except a brief
   introduction such as "Here are the release notes for \<new-version\>."
+
+### Open GitHub release page
+
+After outputting the release-notes code block, also output a URL that opens
+GitHub's "New release" page with the same information pre-filled.
+
+1. Determine whether this release is a pre-release:
+   - The major version is `0` (for example, `v0.x.x`), **or**
+   - the version string contains a `-` pre-release suffix (for example,
+     `v1.2.3-alpha.1`).
+2. Build the URL with the fixed base
+   `https://github.com/shimataro/keryx/releases/new` and these query parameters:
+   - `tag`: the normalized new version tag (for example, `v1.2.3-alpha.1`).
+   - `target`: the current branch name obtained in the preconditions step.
+   - `title`: `<version> released` (for example, `v1.2.3-alpha.1 released`).
+   - `body`: the Markdown release notes generated above, URL-encoded.
+   - `prerelease`: append `prerelease=true` only when this release is a
+     pre-release; otherwise omit this query parameter entirely.
+3. URL-escape all dynamic values appropriately (spaces as `%20`, line breaks as
+   `%0A`, `#` as `%23`, etc.).
+
+Output the final URL in its own fenced code block, preceded by a short sentence
+such as:
+
+```text
+Open the following URL to create the release on GitHub:
+```
+
+Example for a pre-release:
+
+```text
+https://github.com/shimataro/keryx/releases/new?tag=v1.2.3-alpha.1&target=v1&title=v1.2.3-alpha.1%20released&body=%3Crelease%20notes%20of%20v1.2.3-alpha.1%3E&prerelease=true
+```
