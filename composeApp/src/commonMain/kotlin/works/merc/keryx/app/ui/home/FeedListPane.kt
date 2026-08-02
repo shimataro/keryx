@@ -227,7 +227,7 @@ fun FeedListPane(
 
     val autoScrollEdgeZonePx = with(LocalDensity.current) { AUTO_SCROLL_EDGE_ZONE_DP.dp.toPx() }
     val autoScrollMaxSpeedPxPerSec = with(LocalDensity.current) { AUTO_SCROLL_MAX_SPEED_DP_PER_SEC.dp.toPx() }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(autoScrollEdgeZonePx, autoScrollMaxSpeedPxPerSec) {
         snapshotFlow { dragPointerYState.value != null }.collectLatest { dragging ->
             if (!dragging) return@collectLatest
             while (true) {
@@ -328,7 +328,7 @@ fun FeedListPane(
                 // per-row target.
                 .dragAndDropTarget(
                     shouldStartDragAndDrop = { true },
-                    target = remember {
+                    target = remember(vm) {
                         fun hitRow(event: DragAndDropEvent): Pair<FeedListRowBand, RowHalf>? {
                             val localY = event.positionYInRoot() - viewportTopState.value
                             val bands = listState.layoutInfo.visibleItemsInfo.map {

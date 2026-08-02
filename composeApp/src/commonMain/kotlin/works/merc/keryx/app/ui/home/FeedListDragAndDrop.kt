@@ -25,9 +25,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,9 +46,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.FEED_ERROR_REASON_GONE
@@ -264,18 +260,10 @@ internal fun FolderGroupHeader(
     // same persisted toggle as a click, so the folder deliberately stays open afterwards. Driven
     // purely by activeBoundaryState (fed by the centralized drop target in FeedListPane), so this
     // needs no drag target of its own.
-    val autoExpandScope = rememberCoroutineScope()
-    var pendingAutoExpandJob by remember { mutableStateOf<Job?>(null) }
     LaunchedEffect(isFeedDragHighlight, collapsed) {
-        pendingAutoExpandJob?.cancel()
-        pendingAutoExpandJob = if (isFeedDragHighlight && collapsed) {
-            autoExpandScope.launch {
-                delay(FOLDER_AUTO_EXPAND_DELAY_MS)
-                onToggleCollapse()
-            }
-        } else {
-            null
-        }
+        if (!isFeedDragHighlight || !collapsed) return@LaunchedEffect
+        delay(FOLDER_AUTO_EXPAND_DELAY_MS)
+        onToggleCollapse()
     }
 
     Column(Modifier.fillMaxWidth()) {
