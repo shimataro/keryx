@@ -90,7 +90,7 @@ object DateTimeParser {
      */
     private fun withNumericZone(s: String): String {
         val zone = s.substringAfterLast(' ', "")
-        val offset = NORTH_AMERICAN_ZONES[zone] ?: return s
+        val offset = NORTH_AMERICAN_ZONES[zone.uppercase()] ?: return s
         return s.dropLast(zone.length) + offset
     }
 }

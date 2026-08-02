@@ -59,6 +59,8 @@ class DateTimeParserTest {
         // RFC 822 section 5.1 zone abbreviations, which RFC_1123 alone does not accept.
         assertEquals(1033563600000L, DateTimeParser.parseToEpochMillis("Wed, 02 Oct 2002 08:00:00 EST"))
         assertEquals(1033570800000L, DateTimeParser.parseToEpochMillis("Wed, 02 Oct 2002 08:00:00 PDT"))
+        // Zone abbreviations are matched case-insensitively.
+        assertEquals(1033563600000L, DateTimeParser.parseToEpochMillis("Wed, 02 Oct 2002 08:00:00 est"))
     }
 
     @Test
