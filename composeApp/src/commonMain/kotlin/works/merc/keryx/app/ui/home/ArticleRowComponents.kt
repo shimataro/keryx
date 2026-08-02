@@ -220,21 +220,28 @@ internal fun ArticleRow(
                 )
             }
         }
-        Spacer(Modifier.width(6.dp))
-        Box(Modifier.size(faviconSize)) {
-            if (!feedFavicon.isNullOrBlank()) {
-                AsyncImage(
-                    model = feedFavicon,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    error = painterResource(KeryxIcons.PublicFilled),
-                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(4.dp)),
-                )
-            }
+        // TEMPORARY WORKAROUND, not the preferred structure: padding here (and on the Column/Row
+        // below) folds gaps that used to be self-documenting Spacer siblings into the padding of
+        // an unrelated element, and duplicates the 6dp gap across the AsyncImage/Spacer branches
+        // below. This row is close to a LazyColumn reuse-pool crash threshold that scales with
+        // per-item LayoutNode count (see docs/known-issues.md), so it trades that readability for
+        // fewer nodes. Once the upstream Compose bug is fixed (docs/known-issues.md "Re-checking
+        // after a library update"), revert this whole ArticleRow body to Spacer-separated gaps
+        // and a Box-wrapped favicon — see the "cut ArticleRow's LazyColumn item node count" commit
+        // for the pre-mitigation structure to restore.
+        if (!feedFavicon.isNullOrBlank()) {
+            AsyncImage(
+                model = feedFavicon,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                error = painterResource(KeryxIcons.PublicFilled),
+                modifier = Modifier.padding(start = 6.dp).size(faviconSize).clip(RoundedCornerShape(4.dp)),
+            )
+        } else {
+            Spacer(Modifier.padding(start = 6.dp).size(faviconSize))
         }
-        Spacer(Modifier.width(10.dp))
         val selectionContentColor = selectionContentColorOrNull(selected, focused)
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.padding(start = 10.dp).weight(1f)) {
             Text(
                 titleOverride ?: AnnotatedString(article.title.ifBlank { noTitleFallback }),
                 style = MaterialTheme.typography.bodyMedium,
@@ -245,14 +252,13 @@ internal fun ArticleRow(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.size(2.dp))
             val metaColor = selectionContentColor?.copy(alpha = 0.7f)
                 ?: MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             // Feed title and timestamp are separate Texts rather than one joined string: sharing a
             // single ellipsis budget let a long feed title truncate the timestamp away entirely.
             // Only the title carries the weight, so Row measures the timestamp at its full intrinsic
             // width first and the title ellipsizes into whatever is left.
-            Row(Modifier.fillMaxWidth()) {
+            Row(Modifier.padding(top = 2.dp).fillMaxWidth()) {
                 Text(
                     feedTitle,
                     style = MaterialTheme.typography.labelSmall,
@@ -261,12 +267,12 @@ internal fun ArticleRow(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.width(8.dp))
                 Text(
                     formatTimestamp(article.published_at),
                     style = MaterialTheme.typography.labelSmall,
                     color = metaColor,
                     maxLines = 1,
+                    modifier = Modifier.padding(start = 8.dp),
                 )
             }
         }
