@@ -145,17 +145,20 @@ Compose 自身のレイジーリスト項目再利用における内部不変条
 `composeApp/src/desktopTest/kotlin/works/merc/keryx/app/ui/home/ArticleReuseCrashRepro.kt`
 に残してある。実際のホイールスクロールと同じ desktop の経路を駆動するので、手動操作は不要。
 
+**検証は現在の構成ではなく緩和策適用前の構成に対して行うこと** — 上記「実測した効果」の通り、現在の
+8 ノード構成では上流の修正状況にかかわらずこのハーネスは既に再現しなくなっているため、そのまま
+実行しても何も分からない。まず `ArticleRow`（`ArticleRowComponents.kt`）を緩和策適用前の構成に戻す
+— 現在の `Modifier.padding` に畳み込んだ隙間と `AsyncImage`/`Spacer` の分岐ではなく、`Spacer` で
+隙間を作り favicon を `Box` で包む元の形に戻す（favicon 分岐直前のインラインコメント、および
+"cut ArticleRow's LazyColumn item node count" コミットに、戻すべき差分の詳細がある）。そのうえで
 `@Ignore` を外して数回実行する。
 
 ```bash
 ./gradlew :composeApp:desktopTest --tests '*ArticleReuseCrashRepro*' --rerun-tasks
 ```
 
-繰り返し成功するようになっていれば上流で修正済み。この項目の削除・テストの扱い（通常の
-リグレッションテストとして残すか破棄するか）に加えて、**`ArticleRow`（`ArticleRowComponents.kt`）の
-ノード数削減の緩和策を、修正前の構成に戻す**こと — 現在の `Modifier.padding` に畳み込んだ隙間と
-`AsyncImage`/`Spacer` の分岐ではなく、`Spacer` で隙間を作り favicon を `Box` で包む元の形に戻す
-（favicon 分岐直前のインラインコメント、および "cut ArticleRow's LazyColumn item node count"
-コミットに、戻すべき差分の詳細がある）。あわせて `ui-guidelines` スキルの「Gaps and node count」
-節もこの時点で削除する — この節はこの緩和策を説明するためだけに存在する。まだ失敗するなら
-`@Ignore` を戻し、緩和策はそのまま残す。
+この緩和策適用前の構成で繰り返し成功するようになっていれば上流で修正済み。この項目を削除する
+（あるいはテストは通常のリグレッションテストとして残す）とともに、`ArticleRow` は緩和策適用前の
+構成のまま戻さず残し、`ui-guidelines` スキルの「Gaps and node count」節も削除する — この節はこの
+緩和策を説明するためだけに存在する。まだ失敗するなら、`@Ignore` と緩和策の両方を元に戻す
+（一時的な変更を取り消す）。
