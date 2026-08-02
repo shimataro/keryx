@@ -194,10 +194,12 @@ Flow:
 1. Publish a GitHub Release with a `vMAJOR.MINOR.PATCH` tag, optionally with a SemVer-style
    pre-release suffix (e.g. `v0.1.0`, `v1.2.0-beta.1`).
 2. The workflow triggers on `release: published`, strips the leading `v`, and passes the result as `-PappVersion`.
-3. Two independent jobs run in parallel: `:composeApp:packageDmg` (macOS runner), attached as
-   `Keryx-<version>-macos-arm64.dmg`; and `:composeApp:packageDeb :composeApp:packageRpm` (Linux
-   runner, after installing `fakeroot`/`rpm` for jpackage), attached as
-   `Keryx-<version>-linux-x86_64.deb` and `Keryx-<version>-linux-x86_64.rpm`.
+3. Two independent jobs run in parallel:
+
+   - `:composeApp:packageDmg` (macOS runner), attached as `Keryx-<version>-macos-arm64.dmg` **and `Keryx-<version>-macos-arm64.zip`**.
+   - `:composeApp:packageDeb :composeApp:packageRpm` (Linux runner, after installing `fakeroot`/`rpm` for jpackage), attached as `Keryx-<version>-linux-x86_64.deb`, `Keryx-<version>-linux-x86_64.rpm` **and `Keryx-<version>-linux-x86_64.zip`**.
+
+   The `.zip` files are archives of the non-packaged app bundle/image produced by `:composeApp:createDistributable`, for users who prefer not to use an installer package.
 
 The **tag is the single source of truth for the version**. `appVersion` in `composeApp/build.gradle.kts` resolves
 `-PappVersion` > `APP_VERSION` env var > the literal in the file, and drives `BuildConfig.VERSION` (shown in the
