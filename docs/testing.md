@@ -48,15 +48,19 @@ Launch with `./gradlew :composeApp:run` and visually verify 3-pane UI, theme swi
 - Drag folders to reorder; order persists after app restart.
 - Drag feeds inside a folder to reorder; order persists after restart.
 - Reorder feeds inside the "No Folder" group.
-- Drop a feed onto another folder at any position (line position); folder move and positioning are applied simultaneously.
+- Drop a feed onto another folder (and onto the "No Folder" group) at any position (line position):
+  the header tints `secondaryContainer` and gains a `secondary`-colored (green) border while hovered,
+  folder move and positioning are applied simultaneously, and no "+" badge appears (a move has no
+  "adding" semantics).
 - "Move to folder" dialog moves the feed to the end of the destination group.
 - Drag a feed onto a tag row: the row highlights in a *different* tone from a folder drop-target
-  (`tertiaryContainer` vs. `secondaryContainer`), gains a `tertiary`-colored border, and its color
-  dot is replaced by a filled "+" badge while hovered — distinct at a glance, including in dark
-  mode, from both the folder "move" highlight and the drag ghost's own neutral chip. Dropping
-  attaches the tag without moving the feed out of its folder. Re-dropping an
-  already-attached feed on the same tag changes nothing. Dragging over a feed listed under an
-  expanded tag, or over blank space, keeps showing the OS's own default "can't drop here" cursor.
+  (`tertiaryContainer` vs. `secondaryContainer`), gains a `tertiary`-colored (blue) border — vs. the
+  folder's `secondary`-colored (green) border — and its color dot is replaced by a filled "+" badge
+  while hovered — distinct at a glance, including in dark mode, from both the folder "move" highlight
+  and the drag ghost's own neutral chip. Dropping attaches the tag without moving the feed out of its
+  folder. Re-dropping an already-attached feed on the same tag changes nothing. Dragging over a feed
+  listed under an expanded tag, or over blank space, keeps showing the OS's own default "can't drop
+  here" cursor.
 - Expand a tag with its chevron: its attached feeds are listed beneath it (a feed with several tags
   appears once per expanded tag, plus once under its folder — expected, not a duplicate bug). The
   expanded/collapsed state persists after restart, tags default to collapsed, and deleting a tag
