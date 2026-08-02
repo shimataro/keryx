@@ -69,6 +69,16 @@ Launch with `./gradlew :composeApp:run` and visually verify 3-pane UI, theme swi
   direction, faster the closer the pointer is to the edge, stops in the middle dead zone, and stops
   at either end of the list without error. The drop lands where the insertion line says it will
   after the auto-scroll. The pane's own scrollbar and the drag ghost keep behaving normally.
+  Specifically confirm the scroll stays smooth (no stutter or stop-start) while crossing the
+  "Folders"/"Tags" section headers, the divider above "Tags", and the top sidebar rows — not just
+  while scrolling through folder/feed rows.
+- **Drop onto a row revealed only by auto-scroll, without leaving the window**: start dragging a feed
+  from well above the tags section, hold near the bottom edge until a tag scrolls into view, then drop
+  directly on it — the tag highlights and the drop succeeds on the first try. Repeat dropping into a
+  folder that was off-screen at drag-start. (This is the scenario the pane's single centralized drop
+  target exists for — earlier per-row targets could only accept a drop from a row that already existed
+  when the drag began, so anything auto-scroll revealed afterward silently rejected drops until the
+  drag left and re-entered the window.)
 - Hold a dragged feed over a *collapsed* folder's header for about a second: the folder expands by
   itself (Finder/Explorer-style spring loading), its feeds become drop targets, and the folder
   **stays** expanded after the drop — the same persisted state as a click on its chevron. Merely
