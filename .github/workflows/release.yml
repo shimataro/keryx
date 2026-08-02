@@ -70,8 +70,14 @@ jobs:
           mv "$src" "$dest"
           echo "path=$dest" >> "$GITHUB_OUTPUT"
 
+      - name: Zip non-packaged app bundle
+        run: |
+          src="composeApp/build/compose/binaries/main/app/Keryx.app"
+          dest="Keryx-${{ steps.version.outputs.version }}-macos-arm64.zip"
+          (cd "$(dirname "$src")" && zip -r "$OLDPWD/$dest" "$(basename "$src")")
+
       - name: Attach to release
-        run: gh release upload "$RELEASE_TAG" '${{ steps.artifact.outputs.path }}' --clobber
+        run: gh release upload "$RELEASE_TAG" '${{ steps.artifact.outputs.path }}' 'Keryx-${{ steps.version.outputs.version }}-macos-arm64.zip' --clobber
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
@@ -152,8 +158,14 @@ jobs:
           mv "$rpm_src" "$rpm_dest"
           echo "paths=$deb_dest $rpm_dest" >> "$GITHUB_OUTPUT"
 
+      - name: Zip non-packaged app image
+        run: |
+          src="composeApp/build/compose/binaries/main/app/Keryx"
+          dest="Keryx-${{ steps.version.outputs.version }}-linux-x86_64.zip"
+          (cd "$(dirname "$src")" && zip -r "$OLDPWD/$dest" "$(basename "$src")")
+
       - name: Attach to release
-        run: gh release upload "$RELEASE_TAG" ${{ steps.artifact.outputs.paths }} --clobber
+        run: gh release upload "$RELEASE_TAG" ${{ steps.artifact.outputs.paths }} 'Keryx-${{ steps.version.outputs.version }}-linux-x86_64.zip' --clobber
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
