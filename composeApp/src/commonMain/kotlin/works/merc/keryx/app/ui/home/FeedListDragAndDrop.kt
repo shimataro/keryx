@@ -351,10 +351,16 @@ internal fun FolderGroupHeader(
 @Composable
 internal fun NoFolderHeader(
     firstFeedId: String?,
+    feedIdsInNoFolder: Set<String>,
     activeBoundaryState: State<DropBoundary?>,
 ) {
     val isEmpty = firstFeedId == null
     val feedZoneBoundary = if (isEmpty) DropBoundary.AppendFeeds(null) else firstFeedId.let(DropBoundary::BeforeFeed)
+    val isFeedDragHighlight = when (val boundary = activeBoundaryState.value) {
+        is DropBoundary.BeforeFeed -> boundary.feedId in feedIdsInNoFolder
+        is DropBoundary.AppendFeeds -> boundary.folderId == null
+        else -> false
+    }
     Column(Modifier.fillMaxWidth()) {
         Text(
             stringResource(Res.string.home_no_folder),
@@ -365,13 +371,13 @@ internal fun NoFolderHeader(
                 .clip(MaterialTheme.shapes.small)
                 .background(
                     dropTargetBackground(
-                        activeBoundaryState.value == feedZoneBoundary,
+                        isFeedDragHighlight,
                         selected = false,
                         focused = false,
                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
                     ),
                 )
-                .then(dropTargetBorderModifier(activeBoundaryState.value == feedZoneBoundary, MaterialTheme.colorScheme.secondary))
+                .then(dropTargetBorderModifier(isFeedDragHighlight, MaterialTheme.colorScheme.secondary))
                 .padding(start = 8.dp, top = 8.dp, bottom = 4.dp),
         )
         if (isEmpty) InsertionLine(indented = false, visible = activeBoundaryState.value == feedZoneBoundary)

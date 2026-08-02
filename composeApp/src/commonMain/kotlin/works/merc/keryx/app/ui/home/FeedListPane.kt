@@ -521,6 +521,7 @@ fun FeedListPane(
                             item(key = "no-folder-header", contentType = "folder-header") {
                                 NoFolderHeader(
                                     firstFeedId = feedsInFolder.firstOrNull()?.id,
+                                    feedIdsInNoFolder = feedsInFolder.mapTo(mutableSetOf()) { it.id },
                                     activeBoundaryState = activeBoundaryState,
                                 )
                             }
