@@ -235,10 +235,14 @@ internal fun ArticleRow(
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 error = painterResource(KeryxIcons.PublicFilled),
-                modifier = Modifier.padding(start = 6.dp).size(faviconSize).clip(RoundedCornerShape(4.dp)),
+                modifier = Modifier.padding(start = 6.dp).size(faviconSize).clip(RoundedCornerShape(4.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer),
             )
         } else {
-            Spacer(Modifier.padding(start = 6.dp).size(faviconSize))
+            Spacer(
+                Modifier.padding(start = 6.dp).size(faviconSize).clip(RoundedCornerShape(4.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+            )
         }
         val selectionContentColor = selectionContentColorOrNull(selected, focused)
         Column(Modifier.padding(start = 10.dp).weight(1f)) {
