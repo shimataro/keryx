@@ -228,7 +228,7 @@ internal fun ArticleRow(
         // fewer nodes. Once the upstream Compose bug is fixed (docs/known-issues.md "Re-checking
         // after a library update"), revert this whole ArticleRow body to Spacer-separated gaps
         // and a Box-wrapped favicon — see the "cut ArticleRow's LazyColumn item node count" commit
-        // for the pre-mitigation structure to restore.
+        // (582f0a8) for the pre-mitigation structure to restore.
         if (!feedFavicon.isNullOrBlank()) {
             AsyncImage(
                 model = feedFavicon,
