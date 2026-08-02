@@ -68,7 +68,9 @@ Launch with `./gradlew :composeApp:run` and visually verify 3-pane UI, theme swi
   folder) near the top and the bottom edge of the feed list: the list auto-scrolls in that
   direction, faster the closer the pointer is to the edge, stops in the middle dead zone, and stops
   at either end of the list without error. The drop lands where the insertion line says it will
-  after the auto-scroll. The pane's own scrollbar and the drag ghost keep behaving normally.
+  after the auto-scroll, and the list stops scrolling the instant the drag is dropped or released —
+  it must not keep drifting for a further fraction of a second. The pane's own scrollbar and the
+  drag ghost keep behaving normally.
   Specifically confirm the scroll stays smooth (no stutter or stop-start) while crossing the
   "Folders"/"Tags" section headers, the divider above "Tags", and the top sidebar rows — not just
   while scrolling through folder/feed rows.

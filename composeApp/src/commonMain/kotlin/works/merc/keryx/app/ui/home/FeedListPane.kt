@@ -345,6 +345,20 @@ fun FeedListPane(
                             hoveredAttachTagId = null
                         }
 
+                        // onEnded/onDrop each fire exactly once, unambiguously ending the whole
+                        // drag gesture, so there's no reason to let the auto-scroll loop coast on
+                        // the debounced pointer value there like clearDragState() does for onExited
+                        // (onExited fires on this Box's own bounds and can be transient — see the
+                        // grace-period rationale on DRAG_POINTER_Y_CLEAR_DEBOUNCE_MS above).
+                        fun clearDragStateImmediately() {
+                            pendingDragPointerYClearJob?.cancel()
+                            pendingDragPointerYClearJob = null
+                            dragPointerYState.value = null
+                            draggedFeedId = null
+                            activeBoundary = null
+                            hoveredAttachTagId = null
+                        }
+
                         fun handleMoved(event: DragAndDropEvent) {
                             onDragPointerYChange(event.positionYInRoot())
                             draggedFeedId = event.draggedFeedId()
@@ -391,12 +405,12 @@ fun FeedListPane(
                             override fun onEntered(event: DragAndDropEvent) = handleMoved(event)
                             override fun onMoved(event: DragAndDropEvent) = handleMoved(event)
                             override fun onExited(event: DragAndDropEvent) = clearDragState()
-                            override fun onEnded(event: DragAndDropEvent) = clearDragState()
+                            override fun onEnded(event: DragAndDropEvent) = clearDragStateImmediately()
 
                             override fun onDrop(event: DragAndDropEvent): Boolean {
                                 val dropIndex = dropIndexState.value
                                 val hitResult = hitRow(event)
-                                clearDragState()
+                                clearDragStateImmediately()
                                 val (band, half) = hitResult ?: return false
                                 val rowKey = parseFeedListRowKey(band.key)
                                 val feedId = event.draggedFeedId()
