@@ -338,7 +338,84 @@ class HomeCommonTest {
         assertNull(feedListItemIndex(ArticleFilter.Tag("gone"), feeds, folders, tags, emptySet()))
         assertNull(feedListItemIndex(ArticleFilter.Folder("gone"), feeds, folders, tags, emptySet()))
     }
+
+    // --- autoScrollVelocityPxPerSec ---
+
+    @Test
+    fun autoScrollVelocityIsZeroBetweenTheTwoEdgeZones() {
+        // Viewport 0..1000 with 100px edge zones: everything in 100..900 is the dead zone.
+        assertEquals(0f, autoScrollVelocity(pointerY = 500f))
+        assertEquals(0f, autoScrollVelocity(pointerY = 100f))
+        assertEquals(0f, autoScrollVelocity(pointerY = 900f))
+    }
+
+    @Test
+    fun autoScrollVelocityRampsTowardTheListStartInsideTheTopEdgeZone() {
+        // Negative = scroll back toward the start of the list, matching LazyListState.scrollBy.
+        assertEquals(-450f, autoScrollVelocity(pointerY = 50f))
+        assertEquals(-90f, autoScrollVelocity(pointerY = 90f))
+    }
+
+    @Test
+    fun autoScrollVelocityRampsTowardTheListEndInsideTheBottomEdgeZone() {
+        assertEquals(450f, autoScrollVelocity(pointerY = 950f))
+        assertEquals(90f, autoScrollVelocity(pointerY = 910f))
+    }
+
+    @Test
+    fun autoScrollVelocityIsFullSpeedAtTheViewportEdges() {
+        assertEquals(-900f, autoScrollVelocity(pointerY = 0f))
+        assertEquals(900f, autoScrollVelocity(pointerY = 1000f))
+    }
+
+    @Test
+    fun autoScrollVelocityStaysAtFullSpeedOutsideTheViewport() {
+        assertEquals(-900f, autoScrollVelocity(pointerY = -300f))
+        assertEquals(900f, autoScrollVelocity(pointerY = 1300f))
+    }
+
+    @Test
+    fun autoScrollVelocityHalvesTheEdgeZonesWhenTheViewportIsTooShortForBoth() {
+        // Viewport 0..60 with a 100px edge zone: each zone shrinks to 30px instead of overlapping,
+        // so the midpoint stays a dead zone and each half still ramps to full speed at its edge.
+        fun velocity(pointerY: Float) = autoScrollVelocityPxPerSec(
+            pointerY = pointerY,
+            viewportTop = 0f,
+            viewportBottom = 60f,
+            edgeZonePx = 100f,
+            maxSpeedPxPerSec = 900f,
+        )
+
+        assertEquals(0f, velocity(30f))
+        assertEquals(-900f, velocity(0f))
+        assertEquals(900f, velocity(60f))
+        assertEquals(-450f, velocity(15f))
+        assertEquals(450f, velocity(45f))
+    }
+
+    @Test
+    fun autoScrollVelocityIsZeroForADegenerateViewport() {
+        assertEquals(
+            0f,
+            autoScrollVelocityPxPerSec(
+                pointerY = 0f,
+                viewportTop = 100f,
+                viewportBottom = 100f,
+                edgeZonePx = 50f,
+                maxSpeedPxPerSec = 900f,
+            ),
+        )
+    }
 }
+
+/** [autoScrollVelocityPxPerSec] over a 0..1000 viewport with 100px edge zones and 900px/s max. */
+private fun autoScrollVelocity(pointerY: Float): Float = autoScrollVelocityPxPerSec(
+    pointerY = pointerY,
+    viewportTop = 0f,
+    viewportBottom = 1000f,
+    edgeZonePx = 100f,
+    maxSpeedPxPerSec = 900f,
+)
 
 private fun tag(id: String): Tags = Tags(
     id = id,

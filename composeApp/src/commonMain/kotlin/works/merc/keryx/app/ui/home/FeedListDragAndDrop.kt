@@ -23,10 +23,12 @@ import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,6 +54,9 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.FEED_ERROR_REASON_GONE
@@ -120,6 +125,12 @@ private enum class RowHalf { TOP, BOTTOM }
  * matched" hit-test gap while crossing between adjacent rows/headers doesn't flicker the
  * indicator/highlight off before the next row's `onMoved` sets it again. */
 internal const val BOUNDARY_CLEAR_DEBOUNCE_MS = 50L
+
+/** How long a dragged feed must be held over a collapsed folder header before the folder opens by
+ * itself, so the feeds inside it become reachable drop targets without letting go of the drag
+ * (the spring-loaded folder of Finder / Explorer). Long enough not to fire while merely passing
+ * over the header on the way somewhere else. */
+private const val FOLDER_AUTO_EXPAND_DELAY_MS = 700L
 
 /**
  * A single drop-and-reorder insertion point, shared (lifted) across all rows/headers in the pane
@@ -236,6 +247,7 @@ internal fun rememberFeedDragDecoration(title: String): DrawScope.() -> Unit {
  * @param activeBoundaryState The currently highlighted insertion boundary.
  * @param onBoundaryChange Updates the highlighted insertion boundary.
  * @param onDraggedFeedIdChange Reports the feed id currently being dragged, or `null` when the drag ends.
+ * @param onDragPointerYChange Reports the drag pointer's root-relative Y, or `null` when the drag leaves/ends.
  * @param isDragSource Whether the folder currently contains the feed being dragged.
  * @param onToggleCollapse Toggles the folder's collapsed state.
  * @param onClick Handles selection of the folder.
@@ -257,6 +269,7 @@ internal fun FolderGroupHeader(
     activeBoundaryState: State<DropBoundary?>,
     onBoundaryChange: (DropBoundary?) -> Unit,
     onDraggedFeedIdChange: (String?) -> Unit,
+    onDragPointerYChange: (Float?) -> Unit,
     onToggleCollapse: () -> Unit,
     onClick: () -> Unit,
     onEdit: () -> Unit,
@@ -284,9 +297,31 @@ internal fun FolderGroupHeader(
         else -> false
     }
 
+    // Spring-loaded folder: holding a dragged feed over a collapsed header opens it after a short
+    // pause, so its feeds become reachable drop targets mid-drag. The expansion runs through the
+    // same persisted toggle as a click, so the folder deliberately stays open afterwards.
+    val autoExpandScope = rememberCoroutineScope()
+    var pendingAutoExpandJob by remember { mutableStateOf<Job?>(null) }
+    val cancelAutoExpand: () -> Unit = {
+        pendingAutoExpandJob?.cancel()
+        pendingAutoExpandJob = null
+    }
+    LaunchedEffect(isFeedDragHighlight, collapsed) {
+        pendingAutoExpandJob?.cancel()
+        pendingAutoExpandJob = if (isFeedDragHighlight && collapsed) {
+            autoExpandScope.launch {
+                delay(FOLDER_AUTO_EXPAND_DELAY_MS)
+                onToggleCollapse()
+            }
+        } else {
+            null
+        }
+    }
+
     val target = remember(folder.id, feedZoneBoundary, belowFolderBoundary) {
         object : DragAndDropTarget {
             override fun onMoved(event: DragAndDropEvent) {
+                onDragPointerYChange(event.positionYInRoot())
                 onDraggedFeedIdChange(event.draggedFeedId())
                 when {
                     event.draggedFeedId() != null -> onBoundaryChange(feedZoneBoundary)
@@ -299,7 +334,9 @@ internal fun FolderGroupHeader(
             }
 
             override fun onExited(event: DragAndDropEvent) {
+                onDragPointerYChange(null)
                 onDraggedFeedIdChange(null)
+                cancelAutoExpand()
                 val boundary = activeBoundaryState.value
                 if (boundary == DropBoundary.BeforeFolder(folder.id) ||
                     boundary == belowFolderBoundary ||
@@ -310,13 +347,17 @@ internal fun FolderGroupHeader(
             }
 
             override fun onEnded(event: DragAndDropEvent) {
+                onDragPointerYChange(null)
                 onDraggedFeedIdChange(null)
                 onBoundaryChange(null)
+                cancelAutoExpand()
             }
 
             override fun onDrop(event: DragAndDropEvent): Boolean {
+                onDragPointerYChange(null)
                 onDraggedFeedIdChange(null)
                 onBoundaryChange(null)
+                cancelAutoExpand()
                 event.draggedFeedId()?.let { feedId ->
                     onDropFeed(feedId, if (isEmpty) null else firstFeedId)
                     return true
@@ -414,6 +455,7 @@ internal fun NoFolderHeader(
     activeBoundaryState: State<DropBoundary?>,
     onBoundaryChange: (DropBoundary?) -> Unit,
     onDraggedFeedIdChange: (String?) -> Unit,
+    onDragPointerYChange: (Float?) -> Unit,
     onDropFeed: (feedId: String, insertBeforeId: String?) -> Unit,
 ) {
     val isEmpty = firstFeedId == null
@@ -425,21 +467,25 @@ internal fun NoFolderHeader(
                 target = remember(feedZoneBoundary) {
                     object : DragAndDropTarget {
                         override fun onEntered(event: DragAndDropEvent) {
+                            onDragPointerYChange(event.positionYInRoot())
                             onDraggedFeedIdChange(event.draggedFeedId())
                             if (event.draggedFeedId() != null) onBoundaryChange(feedZoneBoundary)
                         }
 
                         override fun onMoved(event: DragAndDropEvent) {
+                            onDragPointerYChange(event.positionYInRoot())
                             onDraggedFeedIdChange(event.draggedFeedId())
                             if (event.draggedFeedId() != null) onBoundaryChange(feedZoneBoundary)
                         }
 
                         override fun onExited(event: DragAndDropEvent) {
+                            onDragPointerYChange(null)
                             onDraggedFeedIdChange(null)
                             if (activeBoundaryState.value == feedZoneBoundary) onBoundaryChange(null)
                         }
 
                         override fun onEnded(event: DragAndDropEvent) {
+                            onDragPointerYChange(null)
                             onDraggedFeedIdChange(null)
                             onBoundaryChange(null)
                         }
@@ -450,6 +496,7 @@ internal fun NoFolderHeader(
                          * @return `true` if a feed was dropped successfully, `false` otherwise.
                          */
                         override fun onDrop(event: DragAndDropEvent): Boolean {
+                            onDragPointerYChange(null)
                             onDraggedFeedIdChange(null)
                             onBoundaryChange(null)
                             val feedId = event.draggedFeedId() ?: return false
@@ -484,6 +531,7 @@ internal fun NoFolderHeader(
  * @param folderId The containing folder's ID, or `null` for feeds without a folder.
  * @param folderBelowBoundary The insertion boundary used when a folder is dragged below this row.
  * @param onDraggedFeedIdChange Reports the feed id currently being dragged, or `null` when the drag ends.
+ * @param onDragPointerYChange Reports the drag pointer's root-relative Y, or `null` when the drag leaves/ends.
  */
 @Composable
 internal fun FeedRow(
@@ -498,6 +546,7 @@ internal fun FeedRow(
     activeBoundaryState: State<DropBoundary?>,
     onBoundaryChange: (DropBoundary?) -> Unit,
     onDraggedFeedIdChange: (String?) -> Unit,
+    onDragPointerYChange: (Float?) -> Unit,
     onClick: () -> Unit,
     onRename: () -> Unit,
     onRefresh: () -> Unit,
@@ -528,6 +577,7 @@ internal fun FeedRow(
                 target = remember(feed.id, belowBoundary, folderBelowBoundary) {
                     object : DragAndDropTarget {
                         override fun onMoved(event: DragAndDropEvent) {
+                            onDragPointerYChange(event.positionYInRoot())
                             onDraggedFeedIdChange(event.draggedFeedId())
                             if (event.draggedFeedId() != null) {
                                 val half = resolveHalf(event, coordinates)
@@ -541,6 +591,7 @@ internal fun FeedRow(
                          * Clears the active insertion boundary when a drag leaves this feed row's drop targets.
                          */
                         override fun onExited(event: DragAndDropEvent) {
+                            onDragPointerYChange(null)
                             onDraggedFeedIdChange(null)
                             val boundary = activeBoundaryState.value
                             if (boundary == DropBoundary.BeforeFeed(feed.id) ||
@@ -552,6 +603,7 @@ internal fun FeedRow(
                         }
 
                         override fun onEnded(event: DragAndDropEvent) {
+                            onDragPointerYChange(null)
                             onDraggedFeedIdChange(null)
                             onBoundaryChange(null)
                         }
@@ -562,6 +614,7 @@ internal fun FeedRow(
                          * @return `true` when the drop is handled, `false` when no supported drop target is available.
                          */
                         override fun onDrop(event: DragAndDropEvent): Boolean {
+                            onDragPointerYChange(null)
                             onDraggedFeedIdChange(null)
                             onBoundaryChange(null)
                             event.draggedFeedId()?.let { draggedFeedId ->

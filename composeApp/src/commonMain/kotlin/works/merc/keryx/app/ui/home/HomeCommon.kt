@@ -228,6 +228,38 @@ suspend fun LazyListState.scrollToIndexIfNeeded(index: Int) {
     }
 }
 
+/**
+ * Auto-scroll speed for a drag hovering near a scrollable list's edge, in pixels per second.
+ *
+ * The sign matches [LazyListState.scrollBy]'s: negative scrolls back toward the start of the list
+ * (pointer near [viewportTop]), positive scrolls on toward its end (pointer near [viewportBottom]).
+ * Returns 0 in the dead zone between the two edge zones. Inside an edge zone the speed ramps
+ * linearly from 0 at the zone's inner boundary ([edgeZonePx] in from the edge) to
+ * [maxSpeedPxPerSec] at the edge itself, and stays at [maxSpeedPxPerSec] for a [pointerY] outside
+ * the viewport entirely.
+ *
+ * A viewport shorter than `2 * edgeZonePx` shrinks both zones to half its height rather than
+ * letting them overlap, so every position still resolves to exactly one zone (or the dead zone).
+ */
+fun autoScrollVelocityPxPerSec(
+    pointerY: Float,
+    viewportTop: Float,
+    viewportBottom: Float,
+    edgeZonePx: Float,
+    maxSpeedPxPerSec: Float,
+): Float {
+    val height = viewportBottom - viewportTop
+    if (height <= 0f || edgeZonePx <= 0f) return 0f
+    val zone = edgeZonePx.coerceAtMost(height / 2f)
+    val distanceFromTop = pointerY - viewportTop
+    val distanceFromBottom = viewportBottom - pointerY
+    return when {
+        distanceFromTop < zone -> -maxSpeedPxPerSec * ((zone - distanceFromTop) / zone).coerceIn(0f, 1f)
+        distanceFromBottom < zone -> maxSpeedPxPerSec * ((zone - distanceFromBottom) / zone).coerceIn(0f, 1f)
+        else -> 0f
+    }
+}
+
 /** Formats an epoch-millis timestamp as `yyyy-MM-dd HH:mm` in local time. */
 @OptIn(ExperimentalTime::class)
 fun formatTimestamp(epochMillis: Long?): String {
