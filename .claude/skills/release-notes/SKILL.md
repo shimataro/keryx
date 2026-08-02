@@ -266,7 +266,7 @@ GitHub's "New release" page with the same information pre-filled.
    - `target`: the current branch name obtained in the preconditions step.
    - `title`: `<version> released` (for example, `v1.2.3-alpha.1 released`).
    - `body`: the Markdown release notes generated above, URL-encoded.
-   - `prerelease`: append `prerelease=true` only when this release is a
+   - `prerelease`: append `prerelease=1` only when this release is a
      pre-release; otherwise omit this query parameter entirely.
 3. URL-escape all dynamic values appropriately (spaces as `%20`, line breaks as
    `%0A`, `#` as `%23`, etc.).
@@ -281,5 +281,5 @@ Open the following URL to create the release on GitHub:
 Example for a pre-release:
 
 ```text
-https://github.com/shimataro/keryx/releases/new?tag=v1.2.3-alpha.1&target=v1&title=v1.2.3-alpha.1%20released&body=%3Crelease%20notes%20of%20v1.2.3-alpha.1%3E&prerelease=true
+https://github.com/shimataro/keryx/releases/new?tag=v1.2.3-alpha.1&target=v1&title=v1.2.3-alpha.1%20released&body=%3Crelease%20notes%20of%20v1.2.3-alpha.1%3E&prerelease=1
 ```
