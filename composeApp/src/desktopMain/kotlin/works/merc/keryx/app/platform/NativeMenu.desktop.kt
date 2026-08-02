@@ -224,6 +224,10 @@ private fun forceHeavyweight(popup: JPopupMenu) {
  * count. The native widgets are built once per distinct shape and then only relabelled, so this
  * has to capture everything that decides which components get created — a bare item count would
  * not notice an entry changing kind.
+ *
+ * Joined strings are safe here, unlike in [menuSignature]: everything encoded comes from the
+ * closed vocabulary [leafKind] returns, never from a label, so no user-supplied text can be
+ * mistaken for a delimiter.
  */
 private fun menuShape(items: List<NativeMenuEntry>): List<String> = items.map { entry ->
     when (entry) {
@@ -235,6 +239,20 @@ private fun menuShape(items: List<NativeMenuEntry>): List<String> = items.map { 
 private fun leafKind(entry: NativeMenuLeaf): String =
     if (entry is NativeCheckMenuItem) "check" else "item"
 
+/** One entry of a [menuSignature]. Internal only so the tests can assert on it. */
+internal sealed interface MenuEntrySignature
+
+/**
+ * What a leaf renders. [checked] is null for a plain item, so an entry's kind and its check state
+ * are one unambiguous field rather than something encoded into text.
+ */
+internal data class LeafSignature(val label: String, val checked: Boolean?) : MenuEntrySignature
+
+internal data class SubMenuSignature(
+    val label: String,
+    val children: List<LeafSignature>,
+) : MenuEntrySignature
+
 /**
  * A value-comparable description of what [items] currently *renders* — every label and check
  * state, submenu children included.
@@ -245,16 +263,23 @@ private fun leafKind(entry: NativeMenuLeaf): String =
  * every recomposition. Keying on the entry list would therefore cancel and relaunch the effect —
  * rewriting the native menu's widgets — for every visible row on every frame while scrolling.
  * Keying on this instead syncs exactly when the menu's visible content actually changed.
+ *
+ * Nested value objects rather than joined strings, because the labels are user-entered tag and
+ * folder names and so can contain whatever would separate them. Encoding a child as
+ * `"check:$checked:$label"` and joining with `,` is not injective: a label holding
+ * `,check:false:` shifts the boundary between two children, so two genuinely different menus can
+ * produce one signature — and the effect that would have relabelled the widgets never reruns.
  */
-private fun menuSignature(items: List<NativeMenuEntry>): List<String> = items.map { entry ->
-    when (entry) {
-        is NativeMenuLeaf -> leafSignature(entry)
-        is NativeSubMenu -> "sub:${entry.label}:" + entry.items.joinToString(",") { leafSignature(it) }
+internal fun menuSignature(items: List<NativeMenuEntry>): List<MenuEntrySignature> =
+    items.map { entry ->
+        when (entry) {
+            is NativeMenuLeaf -> leafSignature(entry)
+            is NativeSubMenu -> SubMenuSignature(entry.label, entry.items.map { leafSignature(it) })
+        }
     }
-}
 
-private fun leafSignature(entry: NativeMenuLeaf): String =
-    if (entry is NativeCheckMenuItem) "check:${entry.checked}:${entry.label}" else "item:${entry.label}"
+private fun leafSignature(entry: NativeMenuLeaf): LeafSignature =
+    LeafSignature(entry.label, (entry as? NativeCheckMenuItem)?.checked)
 
 @Composable
 actual fun Modifier.nativeContextMenu(
