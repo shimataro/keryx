@@ -64,6 +64,28 @@ Launch with `./gradlew :composeApp:run` and visually verify 3-pane UI, theme swi
 - Right-click a feed listed under an expanded tag → "タグから外す" detaches it from that tag only
   (its folder placement and other tags are untouched); dragging it out of the tag list onto a folder
   or another tag still works.
+- With a subscription list long enough to scroll, hold a dragged feed (and separately, a dragged
+  folder) near the top and the bottom edge of the feed list: the list auto-scrolls in that
+  direction, faster the closer the pointer is to the edge, stops in the middle dead zone, and stops
+  at either end of the list without error. The drop lands where the insertion line says it will
+  after the auto-scroll, and the list stops scrolling the instant the drag is dropped or released —
+  it must not keep drifting for a further fraction of a second. The pane's own scrollbar and the
+  drag ghost keep behaving normally.
+  Specifically confirm the scroll stays smooth (no stutter or stop-start) while crossing the
+  "Folders"/"Tags" section headers, the divider above "Tags", and the top sidebar rows — not just
+  while scrolling through folder/feed rows.
+- **Drop onto a row revealed only by auto-scroll, without leaving the window**: start dragging a feed
+  from well above the tags section, hold near the bottom edge until a tag scrolls into view, then drop
+  directly on it — the tag highlights and the drop succeeds on the first try. Repeat dropping into a
+  folder that was off-screen at drag-start. (This is the scenario the pane's single centralized drop
+  target exists for — earlier per-row targets could only accept a drop from a row that already existed
+  when the drag began, so anything auto-scroll revealed afterward silently rejected drops until the
+  drag left and re-entered the window.)
+- Hold a dragged feed over a *collapsed* folder's header for about a second: the folder expands by
+  itself (Finder/Explorer-style spring loading), its feeds become drop targets, and the folder
+  **stays** expanded after the drop — the same persisted state as a click on its chevron. Merely
+  passing over the header on the way elsewhere does not expand it, and dragging a *folder* over
+  another collapsed folder's header (a reorder gesture) never expands it either.
 
 The parallel feed refresh's core concurrency (overlapping fetches + complete per-feed writes) is covered automatically by `refreshAllFetchesFeedsConcurrentlyAndAppliesEveryWrite`, and the no-revert guarantee by `refreshAllDoesNotRevertConcurrentUnsubscribe` / `refreshAllDoesNotRevertConcurrentReorder`. The genuinely visual / end-to-end parts still need eyeballs, so with a multi-feed subscription visually confirm:
 

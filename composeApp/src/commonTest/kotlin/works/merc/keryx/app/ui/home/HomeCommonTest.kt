@@ -338,7 +338,232 @@ class HomeCommonTest {
         assertNull(feedListItemIndex(ArticleFilter.Tag("gone"), feeds, folders, tags, emptySet()))
         assertNull(feedListItemIndex(ArticleFilter.Folder("gone"), feeds, folders, tags, emptySet()))
     }
+
+    // --- autoScrollVelocityPxPerSec ---
+
+    @Test
+    fun autoScrollVelocityIsZeroBetweenTheTwoEdgeZones() {
+        // Viewport 0..1000 with 100px edge zones: everything in 100..900 is the dead zone.
+        assertEquals(0f, autoScrollVelocity(pointerY = 500f))
+        assertEquals(0f, autoScrollVelocity(pointerY = 100f))
+        assertEquals(0f, autoScrollVelocity(pointerY = 900f))
+    }
+
+    @Test
+    fun autoScrollVelocityRampsTowardTheListStartInsideTheTopEdgeZone() {
+        // Negative = scroll back toward the start of the list, matching LazyListState.scrollBy.
+        assertEquals(-450f, autoScrollVelocity(pointerY = 50f))
+        assertEquals(-90f, autoScrollVelocity(pointerY = 90f))
+    }
+
+    @Test
+    fun autoScrollVelocityRampsTowardTheListEndInsideTheBottomEdgeZone() {
+        assertEquals(450f, autoScrollVelocity(pointerY = 950f))
+        assertEquals(90f, autoScrollVelocity(pointerY = 910f))
+    }
+
+    @Test
+    fun autoScrollVelocityIsFullSpeedAtTheViewportEdges() {
+        assertEquals(-900f, autoScrollVelocity(pointerY = 0f))
+        assertEquals(900f, autoScrollVelocity(pointerY = 1000f))
+    }
+
+    @Test
+    fun autoScrollVelocityStaysAtFullSpeedOutsideTheViewport() {
+        assertEquals(-900f, autoScrollVelocity(pointerY = -300f))
+        assertEquals(900f, autoScrollVelocity(pointerY = 1300f))
+    }
+
+    @Test
+    fun autoScrollVelocityHalvesTheEdgeZonesWhenTheViewportIsTooShortForBoth() {
+        // Viewport 0..60 with a 100px edge zone: each zone shrinks to 30px instead of overlapping,
+        // so the midpoint stays a dead zone and each half still ramps to full speed at its edge.
+        fun velocity(pointerY: Float) = autoScrollVelocityPxPerSec(
+            pointerY = pointerY,
+            viewportTop = 0f,
+            viewportBottom = 60f,
+            edgeZonePx = 100f,
+            maxSpeedPxPerSec = 900f,
+        )
+
+        assertEquals(0f, velocity(30f))
+        assertEquals(-900f, velocity(0f))
+        assertEquals(900f, velocity(60f))
+        assertEquals(-450f, velocity(15f))
+        assertEquals(450f, velocity(45f))
+    }
+
+    @Test
+    fun autoScrollVelocityIsZeroForADegenerateViewport() {
+        assertEquals(
+            0f,
+            autoScrollVelocityPxPerSec(
+                pointerY = 0f,
+                viewportTop = 100f,
+                viewportBottom = 100f,
+                edgeZonePx = 50f,
+                maxSpeedPxPerSec = 900f,
+            ),
+        )
+    }
+
+    // --- buildFeedListDropIndex ---
+
+    @Test
+    fun buildFeedListDropIndexMapsFeedsToTheirOwningFolderAndNextSibling() {
+        val folders = listOf(folder("d1"), folder("d2"))
+        val feeds = listOf(
+            feed("f1", folderId = "d1"),
+            feed("f2", folderId = "d1"),
+            feed("f3", folderId = "d2"),
+            feed("f4"),
+        )
+
+        val index = buildFeedListDropIndex(feeds, folders)
+
+        assertEquals("d1", index.folderIdOfFeed["f1"])
+        assertEquals("d1", index.folderIdOfFeed["f2"])
+        assertEquals("d2", index.folderIdOfFeed["f3"])
+        assertNull(index.folderIdOfFeed["f4"])
+        assertEquals("f2", index.nextFeedInGroup["f1"])
+        assertNull(index.nextFeedInGroup["f2"])
+        assertNull(index.nextFeedInGroup["f3"])
+        assertNull(index.nextFeedInGroup["f4"])
+    }
+
+    @Test
+    fun buildFeedListDropIndexTracksFirstFeedPerGroupIncludingEmptyOnes() {
+        val folders = listOf(folder("d1"), folder("d2"))
+        val feeds = listOf(feed("f1", folderId = "d1"), feed("f2"))
+
+        val index = buildFeedListDropIndex(feeds, folders)
+
+        assertEquals("f1", index.firstFeedIdOfGroup["d1"])
+        assertNull(index.firstFeedIdOfGroup["d2"])
+        assertEquals("f2", index.firstFeedIdOfGroup[null])
+    }
+
+    @Test
+    fun buildFeedListDropIndexTracksNextFolderInOrder() {
+        val folders = listOf(folder("d1"), folder("d2"), folder("d3"))
+
+        val index = buildFeedListDropIndex(emptyList(), folders)
+
+        assertEquals("d2", index.nextFolderId["d1"])
+        assertEquals("d3", index.nextFolderId["d2"])
+        assertNull(index.nextFolderId["d3"])
+    }
+
+    @Test
+    fun feedZoneBoundaryForPointsAtTheFirstFeedWhenGroupIsNonEmpty() {
+        val index = buildFeedListDropIndex(listOf(feed("f1", folderId = "d1")), listOf(folder("d1")))
+
+        assertEquals(DropBoundary.BeforeFeed("f1"), index.feedZoneBoundaryFor("d1"))
+    }
+
+    @Test
+    fun feedZoneBoundaryForFallsBackToAppendFeedsWhenGroupIsEmpty() {
+        val index = buildFeedListDropIndex(emptyList(), listOf(folder("d1")))
+
+        assertEquals(DropBoundary.AppendFeeds("d1"), index.feedZoneBoundaryFor("d1"))
+        assertEquals(DropBoundary.AppendFeeds(null), index.feedZoneBoundaryFor(null))
+    }
+
+    @Test
+    fun belowBoundaryForFeedPointsAtTheNextFeedOrFallsBackToAppendFeeds() {
+        val folders = listOf(folder("d1"))
+        val feeds = listOf(feed("f1", folderId = "d1"), feed("f2", folderId = "d1"))
+        val index = buildFeedListDropIndex(feeds, folders)
+
+        assertEquals(DropBoundary.BeforeFeed("f2"), index.belowBoundaryForFeed("f1"))
+        assertEquals(DropBoundary.AppendFeeds("d1"), index.belowBoundaryForFeed("f2"))
+    }
+
+    @Test
+    fun belowBoundaryForFolderPointsAtTheNextFolderOrFallsBackToAppendFolders() {
+        val index = buildFeedListDropIndex(emptyList(), listOf(folder("d1"), folder("d2")))
+
+        assertEquals(DropBoundary.BeforeFolder("d2"), index.belowBoundaryForFolder("d1"))
+        assertEquals(DropBoundary.AppendFolders, index.belowBoundaryForFolder("d2"))
+    }
+
+    // --- parseFeedListRowKey ---
+
+    @Test
+    fun parseFeedListRowKeyRecognizesFolderFeedTagAndNoFolderHeaderKeys() {
+        assertEquals(FeedListRowKey.Folder("d1"), parseFeedListRowKey("folder-d1"))
+        assertEquals(FeedListRowKey.Feed("f1"), parseFeedListRowKey("feed-f1"))
+        assertEquals(FeedListRowKey.Tag("t1"), parseFeedListRowKey("tag-t1"))
+        assertEquals(FeedListRowKey.NoFolderHeader, parseFeedListRowKey("no-folder-header"))
+    }
+
+    @Test
+    fun parseFeedListRowKeyDoesNotMistakeATagFeedRowForItsTagsOwnRow() {
+        assertEquals(FeedListRowKey.Other, parseFeedListRowKey("tag-t1-feed-f1"))
+    }
+
+    @Test
+    fun parseFeedListRowKeyTreatsUngroupedAndNonStringKeysAsOther() {
+        assertEquals(FeedListRowKey.Other, parseFeedListRowKey("sidebar"))
+        assertEquals(FeedListRowKey.Other, parseFeedListRowKey("folders-header"))
+        assertEquals(FeedListRowKey.Other, parseFeedListRowKey("tags-divider"))
+        assertEquals(FeedListRowKey.Other, parseFeedListRowKey("tags-header"))
+        assertEquals(FeedListRowKey.Other, parseFeedListRowKey(null))
+        assertEquals(FeedListRowKey.Other, parseFeedListRowKey(42))
+    }
+
+    @Test
+    fun parseFeedListRowKeyHandlesIdsContainingDashes() {
+        // Real ids are UUIDs, which contain dashes themselves — the prefix must only be stripped
+        // once, not confused by dashes inside the id.
+        assertEquals(FeedListRowKey.Folder("aaaa-bbbb-cccc"), parseFeedListRowKey("folder-aaaa-bbbb-cccc"))
+        assertEquals(FeedListRowKey.Feed("aaaa-bbbb-cccc"), parseFeedListRowKey("feed-aaaa-bbbb-cccc"))
+    }
+
+    // --- resolveHitBand / resolveRowHalf ---
+
+    @Test
+    fun resolveHitBandFindsTheBandContainingLocalY() {
+        val bands = listOf(
+            FeedListRowBand("a", offsetPx = 0, sizePx = 40),
+            FeedListRowBand("b", offsetPx = 40, sizePx = 40),
+            FeedListRowBand("c", offsetPx = 80, sizePx = 40),
+        )
+
+        assertEquals("a", resolveHitBand(0f, bands)?.key)
+        assertEquals("a", resolveHitBand(39f, bands)?.key)
+        assertEquals("b", resolveHitBand(40f, bands)?.key)
+        assertEquals("c", resolveHitBand(119f, bands)?.key)
+    }
+
+    @Test
+    fun resolveHitBandReturnsNullOutsideEveryBandOrWhenBandsIsEmpty() {
+        val bands = listOf(FeedListRowBand("a", offsetPx = 0, sizePx = 40))
+
+        assertNull(resolveHitBand(-1f, bands))
+        assertNull(resolveHitBand(40f, bands))
+        assertNull(resolveHitBand(0f, emptyList()))
+    }
+
+    @Test
+    fun resolveRowHalfSplitsABandAtItsMidpoint() {
+        val band = FeedListRowBand("a", offsetPx = 100, sizePx = 40)
+
+        assertEquals(RowHalf.TOP, resolveRowHalf(100f, band))
+        assertEquals(RowHalf.TOP, resolveRowHalf(119f, band))
+        assertEquals(RowHalf.BOTTOM, resolveRowHalf(120f, band))
+        assertEquals(RowHalf.BOTTOM, resolveRowHalf(139f, band))
+    }
 }
+
+/** [autoScrollVelocityPxPerSec] over a 0..1000 viewport with 100px edge zones and 900px/s max. */
+private fun autoScrollVelocity(pointerY: Float): Float = autoScrollVelocityPxPerSec(
+    pointerY = pointerY,
+    viewportTop = 0f,
+    viewportBottom = 1000f,
+    edgeZonePx = 100f,
+    maxSpeedPxPerSec = 900f,
+)
 
 private fun tag(id: String): Tags = Tags(
     id = id,

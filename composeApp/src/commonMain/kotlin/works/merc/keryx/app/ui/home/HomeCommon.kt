@@ -228,6 +228,130 @@ suspend fun LazyListState.scrollToIndexIfNeeded(index: Int) {
     }
 }
 
+/**
+ * Auto-scroll speed for a drag hovering near a scrollable list's edge, in pixels per second.
+ *
+ * The sign matches [LazyListState.scrollBy]'s: negative scrolls back toward the start of the list
+ * (pointer near [viewportTop]), positive scrolls on toward its end (pointer near [viewportBottom]).
+ * Returns 0 in the dead zone between the two edge zones. Inside an edge zone the speed ramps
+ * linearly from 0 at the zone's inner boundary ([edgeZonePx] in from the edge) to
+ * [maxSpeedPxPerSec] at the edge itself, and stays at [maxSpeedPxPerSec] for a [pointerY] outside
+ * the viewport entirely.
+ *
+ * A viewport shorter than `2 * edgeZonePx` shrinks both zones to half its height rather than
+ * letting them overlap, so every position still resolves to exactly one zone (or the dead zone).
+ */
+fun autoScrollVelocityPxPerSec(
+    pointerY: Float,
+    viewportTop: Float,
+    viewportBottom: Float,
+    edgeZonePx: Float,
+    maxSpeedPxPerSec: Float,
+): Float {
+    val height = viewportBottom - viewportTop
+    if (height <= 0f || edgeZonePx <= 0f) return 0f
+    val zone = edgeZonePx.coerceAtMost(height / 2f)
+    val distanceFromTop = pointerY - viewportTop
+    val distanceFromBottom = viewportBottom - pointerY
+    return when {
+        distanceFromTop < zone -> -maxSpeedPxPerSec * ((zone - distanceFromTop) / zone).coerceIn(0f, 1f)
+        distanceFromBottom < zone -> maxSpeedPxPerSec * ((zone - distanceFromBottom) / zone).coerceIn(0f, 1f)
+        else -> 0f
+    }
+}
+
+/**
+ * Precomputed lookup tables for resolving feed/folder drag-and-drop insertion points by id, built
+ * once per [feeds]/[folders] change (see [buildFeedListDropIndex]) rather than re-deriving grouping
+ * ad hoc for every drag event.
+ */
+internal data class FeedListDropIndex(
+    val folderIdOfFeed: Map<String, String?>,
+    val nextFeedInGroup: Map<String, String?>,
+    val firstFeedIdOfGroup: Map<String?, String?>,
+    val nextFolderId: Map<String, String?>,
+) {
+    /** Where a feed dropped into [folderId] (or the unassigned group when `null`) would land. */
+    fun feedZoneBoundaryFor(folderId: String?): DropBoundary =
+        firstFeedIdOfGroup[folderId]?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(folderId)
+
+    /** Where a feed dropped just below [feedId], within its own group, would land. */
+    fun belowBoundaryForFeed(feedId: String): DropBoundary =
+        nextFeedInGroup[feedId]?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(folderIdOfFeed[feedId])
+
+    /** Where a folder dropped just below [folderId] would land. */
+    fun belowBoundaryForFolder(folderId: String): DropBoundary =
+        nextFolderId[folderId]?.let(DropBoundary::BeforeFolder) ?: DropBoundary.AppendFolders
+}
+
+/** Builds a [FeedListDropIndex] from [feeds]/[folders], reusing [groupFeedsByFolder]'s grouping. */
+internal fun buildFeedListDropIndex(feeds: List<Feeds>, folders: List<Folders>): FeedListDropIndex {
+    val folderIdOfFeed = mutableMapOf<String, String?>()
+    val nextFeedInGroup = mutableMapOf<String, String?>()
+    val firstFeedIdOfGroup = mutableMapOf<String?, String?>()
+    for ((folder, feedsInGroup) in groupFeedsByFolder(feeds, folders)) {
+        val groupKey = folder?.id
+        firstFeedIdOfGroup[groupKey] = feedsInGroup.firstOrNull()?.id
+        feedsInGroup.forEachIndexed { index, feed ->
+            folderIdOfFeed[feed.id] = groupKey
+            nextFeedInGroup[feed.id] = feedsInGroup.getOrNull(index + 1)?.id
+        }
+    }
+    val nextFolderId = folders.indices.associate { i -> folders[i].id to folders.getOrNull(i + 1)?.id }
+    return FeedListDropIndex(folderIdOfFeed, nextFeedInGroup, firstFeedIdOfGroup, nextFolderId)
+}
+
+/** Parsed identity of a feed-list `LazyColumn` row, derived from its `key`. */
+internal sealed interface FeedListRowKey {
+    data class Folder(val folderId: String) : FeedListRowKey
+    data class Feed(val feedId: String) : FeedListRowKey
+    data class Tag(val tagId: String) : FeedListRowKey
+    data object NoFolderHeader : FeedListRowKey
+    data object Other : FeedListRowKey
+}
+
+private const val FOLDER_KEY_PREFIX = "folder-"
+private const val FEED_KEY_PREFIX = "feed-"
+private const val TAG_KEY_PREFIX = "tag-"
+private const val NO_FOLDER_HEADER_KEY = "no-folder-header"
+
+/**
+ * Parses a feed-list `LazyColumn` item's `key` (as assigned in `FeedListPane.kt`) into its row
+ * identity. A tag-attached-feed row's key (`"tag-$tagId-feed-$feedId"`) must not be mistaken for its
+ * tag's own row key (`"tag-$tagId"`), hence the `"-feed-"` exclusion below.
+ */
+internal fun parseFeedListRowKey(key: Any?): FeedListRowKey {
+    val stringKey = key as? String ?: return FeedListRowKey.Other
+    return when {
+        stringKey == NO_FOLDER_HEADER_KEY -> FeedListRowKey.NoFolderHeader
+        stringKey.startsWith(FOLDER_KEY_PREFIX) -> FeedListRowKey.Folder(stringKey.removePrefix(FOLDER_KEY_PREFIX))
+        stringKey.startsWith(FEED_KEY_PREFIX) -> FeedListRowKey.Feed(stringKey.removePrefix(FEED_KEY_PREFIX))
+        stringKey.startsWith(TAG_KEY_PREFIX) && "-feed-" !in stringKey ->
+            FeedListRowKey.Tag(stringKey.removePrefix(TAG_KEY_PREFIX))
+        else -> FeedListRowKey.Other
+    }
+}
+
+/**
+ * A `LazyColumn` item's key and vertical bounds, in the same "distance from the viewport's leading
+ * edge" space as `LazyListItemInfo.offset`/`.size` — deliberately decoupled from that real Compose
+ * Foundation type so hit-testing stays trivially unit-testable.
+ */
+internal data class FeedListRowBand(val key: Any?, val offsetPx: Int, val sizePx: Int)
+
+/** The [FeedListRowBand] in [bands] containing [localY] (already `pointerY - viewportTop`), or `null`
+ * if none does (e.g. [localY] falls outside every band, or [bands] is empty). */
+internal fun resolveHitBand(localY: Float, bands: List<FeedListRowBand>): FeedListRowBand? =
+    bands.find { localY >= it.offsetPx && localY < it.offsetPx + it.sizePx }
+
+/** Which half of a matched row/header a drag is currently hovering over, used to decide whether an
+ * insertion point lands before or after it. */
+internal enum class RowHalf { TOP, BOTTOM }
+
+/** Resolves which half of [band] [localY] falls in. */
+internal fun resolveRowHalf(localY: Float, band: FeedListRowBand): RowHalf =
+    if (localY - band.offsetPx < band.sizePx / 2f) RowHalf.TOP else RowHalf.BOTTOM
+
 /** Formats an epoch-millis timestamp as `yyyy-MM-dd HH:mm` in local time. */
 @OptIn(ExperimentalTime::class)
 fun formatTimestamp(epochMillis: Long?): String {
