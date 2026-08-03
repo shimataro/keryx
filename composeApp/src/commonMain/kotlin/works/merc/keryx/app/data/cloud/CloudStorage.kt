@@ -1,10 +1,13 @@
 package works.merc.keryx.app.data.cloud
 
+import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.CancellationException
 import works.merc.keryx.app.core.CLOUD_ERROR_BODY_PREVIEW_LENGTH
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.core.SyncConflictException
 
 /** A downloaded cloud file plus its revision (used for optimistic-concurrency upload). */
 class CloudFile(val data: ByteArray, val rev: String)
@@ -38,6 +41,16 @@ internal suspend fun <T> withCloudToken(
 internal fun cloudStorageError(providerName: String, status: Int, body: String): Result.Err = when (status) {
     401, 403 -> Result.Err(CloudAuthException("Authentication failed"))
     else -> Result.Err(CloudStorageException("$providerName error (HTTP $status): ${body.take(CLOUD_ERROR_BODY_PREVIEW_LENGTH)}"))
+}
+
+/**
+ * Maps an upload/create response to [Result.Ok] on success, [SyncConflictException] when the
+ * status matches [conflictStatus] (another device won the race), or [cloudStorageError] otherwise.
+ */
+internal suspend fun HttpResponse.okOrConflictOr(providerName: String, conflictStatus: Int): Result<Unit> = when {
+    status.value in 200..299 -> Result.Ok(Unit)
+    status.value == conflictStatus -> Result.Err(SyncConflictException())
+    else -> cloudStorageError(providerName, status.value, bodyAsText())
 }
 
 /**

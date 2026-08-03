@@ -15,7 +15,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.Result
-import works.merc.keryx.app.core.SyncConflictException
 
 /**
  * [CloudStorage] backed by the Dropbox v2 REST API. [accessTokenProvider]
@@ -76,12 +75,8 @@ class DropboxStorage(
             contentType(ContentType.Application.OctetStream)
             setBody(data)
         }
-        when {
-            response.status.value in 200..299 -> Result.Ok(Unit)
-            // A rev-guarded update that loses the race returns 409 (conflict).
-            response.status.value == 409 -> Result.Err(SyncConflictException())
-            else -> mapError(response.status.value, response.bodyAsText())
-        }
+        // A rev-guarded update that loses the race returns 409 (conflict).
+        response.okOrConflictOr("Dropbox", conflictStatus = 409)
     }
 
     override suspend fun create(path: String, data: ByteArray): Result<Unit> = withToken { token ->
@@ -100,11 +95,7 @@ class DropboxStorage(
             contentType(ContentType.Application.OctetStream)
             setBody(data)
         }
-        when {
-            response.status.value in 200..299 -> Result.Ok(Unit)
-            response.status.value == 409 -> Result.Err(SyncConflictException())
-            else -> mapError(response.status.value, response.bodyAsText())
-        }
+        response.okOrConflictOr("Dropbox", conflictStatus = 409)
     }
 
     override suspend fun exists(path: String): Result<Boolean> = withToken { token ->

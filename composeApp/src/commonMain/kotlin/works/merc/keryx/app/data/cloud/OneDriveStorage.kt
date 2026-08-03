@@ -16,7 +16,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.ONEDRIVE_GRAPH_BASE
 import works.merc.keryx.app.core.Result
-import works.merc.keryx.app.core.SyncConflictException
 
 /**
  * [CloudStorage] backed by the Microsoft Graph API, storing the sync DB in
@@ -89,12 +88,8 @@ class OneDriveStorage(
             contentType(ContentType.Application.OctetStream)
             setBody(data)
         }
-        when {
-            response.status.value in 200..299 -> Result.Ok(Unit)
-            // If-Match no longer matches — another device wrote first.
-            response.status.value == 412 -> Result.Err(SyncConflictException())
-            else -> mapError(response.status.value, response.bodyAsText())
-        }
+        // If-Match no longer matches — another device wrote first.
+        response.okOrConflictOr("OneDrive", conflictStatus = 412)
     }
 
     override suspend fun create(path: String, data: ByteArray): Result<Unit> = withToken { token ->
@@ -107,11 +102,7 @@ class OneDriveStorage(
             contentType(ContentType.Application.OctetStream)
             setBody(data)
         }
-        when {
-            response.status.value in 200..299 -> Result.Ok(Unit)
-            response.status.value == 409 -> Result.Err(SyncConflictException())
-            else -> mapError(response.status.value, response.bodyAsText())
-        }
+        response.okOrConflictOr("OneDrive", conflictStatus = 409)
     }
 
     override suspend fun delete(path: String): Result<Unit> = withToken { token ->
