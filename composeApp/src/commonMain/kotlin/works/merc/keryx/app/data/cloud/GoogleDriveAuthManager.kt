@@ -66,6 +66,13 @@ class GoogleDriveAuthManager(
         },
     )
 
+    /**
+     * Refreshes OAuth tokens using an existing refresh token.
+     *
+     * @param clientId The OAuth client identifier.
+     * @param refreshToken The refresh token used to request new tokens.
+     * @return The refreshed OAuth tokens, preserving the supplied refresh token when the response omits one.
+     */
     override suspend fun refresh(clientId: String, refreshToken: String): Result<OAuthTokens> = tokenRequest(
         parameters {
             append("grant_type", "refresh_token")
@@ -76,7 +83,12 @@ class GoogleDriveAuthManager(
         keepRefreshToken = refreshToken,
     )
 
-    // Google's revoke endpoint takes the token as a form parameter (not a Bearer header).
+    /**
+     * Revokes the specified Google OAuth access token.
+     *
+     * @param accessToken The access token to revoke.
+     * @return A successful result if the token is revoked; otherwise, a failed result.
+     */
     override suspend fun revoke(accessToken: String): Result<Unit> = revokeOAuthToken {
         client.submitForm(GOOGLE_REVOKE_ENDPOINT, parameters { append("token", accessToken) })
     }

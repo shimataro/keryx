@@ -56,6 +56,13 @@ class DropboxAuthManager(
         },
     )
 
+    /**
+     * Refreshes OAuth tokens using an existing refresh token.
+     *
+     * @param clientId The Dropbox application client ID.
+     * @param refreshToken The refresh token used to obtain new tokens.
+     * @return The refreshed OAuth tokens, preserving the supplied refresh token.
+     */
     override suspend fun refresh(clientId: String, refreshToken: String): Result<OAuthTokens> = tokenRequest(
         parameters {
             append("grant_type", "refresh_token")
@@ -65,6 +72,12 @@ class DropboxAuthManager(
         keepRefreshToken = refreshToken,
     )
 
+    /**
+     * Revokes a Dropbox access token.
+     *
+     * @param accessToken The access token to revoke.
+     * @return The result of the revocation request.
+     */
     override suspend fun revoke(accessToken: String): Result<Unit> = revokeOAuthToken {
         client.post(DROPBOX_REVOKE_ENDPOINT) {
             header("Authorization", "Bearer $accessToken")

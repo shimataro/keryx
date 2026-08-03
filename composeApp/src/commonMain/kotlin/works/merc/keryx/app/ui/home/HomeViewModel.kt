@@ -346,7 +346,13 @@ class HomeViewModel(
 
     private val scrollPositionStore = ArticleScrollPositionStore(settingsRepository)
 
-    fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPosition(articleId)
+    /**
+ * Gets the saved scroll position for an article.
+ *
+ * @param articleId The identifier of the article.
+ * @return The saved scroll offset, or the default position when none is stored.
+ */
+fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPosition(articleId)
 
     /**
      * Saves the scroll offset for an article and retains only the most recent remembered positions.
@@ -572,7 +578,7 @@ class HomeViewModel(
     }
 
     /**
-     * Toggles the article sort order and persists the updated preference.
+     * Toggles between newest-first and oldest-first article ordering.
      */
     fun toggleSort() {
         _newestFirst.value = !_newestFirst.value
@@ -750,7 +756,7 @@ class HomeViewModel(
     }
 
     /**
-     * Deletes a tag and removes it from the expanded-tag state.
+     * Deletes a tag and resets the active filter if it references the deleted tag.
      *
      * @param id The identifier of the tag to delete.
      */

@@ -30,6 +30,11 @@ class DropboxStorage(
     private val apiBase = "https://api.dropboxapi.com"
     private val contentBase = "https://content.dropboxapi.com"
 
+    /**
+     * Authenticates the configured Dropbox account.
+     *
+     * @return A successful result when authentication succeeds, or a mapped storage error otherwise.
+     */
     override suspend fun authenticate(): Result<Unit> = withToken { token ->
         val response = client.post("$apiBase/2/users/get_current_account") {
             header("Authorization", "Bearer $token")
@@ -37,6 +42,12 @@ class DropboxStorage(
         if (response.status.value in 200..299) Result.Ok(Unit) else mapError(response.status.value, response.bodyAsText())
     }
 
+    /**
+     * Downloads a file and its Dropbox revision metadata.
+     *
+     * @param path The path of the file to download.
+     * @return A result containing the file data and revision, or a storage error.
+     */
     override suspend fun download(path: String): Result<CloudFile> = withToken { token ->
         val response = client.post("$contentBase/2/files/download") {
             header("Authorization", "Bearer $token")
@@ -53,6 +64,14 @@ class DropboxStorage(
         Result.Ok(CloudFile(response.readRawBytes(), rev))
     }
 
+    /**
+     * Uploads file data to Dropbox, optionally requiring a specific revision.
+     *
+     * @param path The Dropbox path for the file.
+     * @param data The file contents.
+     * @param expectedRev The revision that must currently exist for the update to succeed, or `null` to overwrite.
+     * @return A successful result, a conflict result when the expected revision is stale, or a mapped failure.
+     */
     override suspend fun upload(
         path: String,
         data: ByteArray,
@@ -79,6 +98,13 @@ class DropboxStorage(
         response.okOrConflictOr("Dropbox", conflictStatus = 409)
     }
 
+    /**
+     * Creates a new file at the specified path without overwriting an existing file.
+     *
+     * @param path The Dropbox path where the file will be created.
+     * @param data The file contents.
+     * @return A successful result when the file is created, or an error result for failures including an existing file conflict.
+     */
     override suspend fun create(path: String, data: ByteArray): Result<Unit> = withToken { token ->
         // WriteMode "add" is create-only: if the file already exists Dropbox returns 409
         // (with autorename=false it does not silently create a copy), which we surface as a
@@ -98,6 +124,12 @@ class DropboxStorage(
         response.okOrConflictOr("Dropbox", conflictStatus = 409)
     }
 
+    /**
+     * Determines whether a file exists at the specified path.
+     *
+     * @param path The Dropbox path to check.
+     * @return `true` if the file exists, `false` if the path is not found, or an error result for other failures.
+     */
     override suspend fun exists(path: String): Result<Boolean> = withToken { token ->
         val response = client.post("$apiBase/2/files/get_metadata") {
             header("Authorization", "Bearer $token")

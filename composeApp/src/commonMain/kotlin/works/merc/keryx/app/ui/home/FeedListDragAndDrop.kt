@@ -113,8 +113,12 @@ internal fun dropTargetContentColorOrNull(
     else -> selectionContentColorOrNull(selected, focused)
 }
 
-/** Border for a row that may be an active drop target: a [color]-tinted outline while a feed is
- * being dragged over it, no border otherwise. */
+/**
+     * Adds a colored outline when the row is an active drop target.
+     *
+     * @param isDropTarget Whether the row is currently an active drop target.
+     * @param color The outline color.
+     */
 @Composable
 internal fun dropTargetBorderModifier(isDropTarget: Boolean, color: Color): Modifier =
     if (isDropTarget) Modifier.border(2.dp, color, MaterialTheme.shapes.small) else Modifier
@@ -146,6 +150,12 @@ internal fun rememberFeedListDragAndDropTarget(
     onDragPointerYChange: (Float?) -> Unit,
     clearDragPointerYImmediately: () -> Unit,
 ): DragAndDropTarget = remember(vm) {
+    /**
+     * Determines which visible feed-list row and row half contain the drag position.
+     *
+     * @param event The drag-and-drop event containing the pointer position.
+     * @return The matched row band and its upper or lower half, or `null` when the position is outside all visible rows.
+     */
     fun hitRow(event: DragAndDropEvent): Pair<FeedListRowBand, RowHalf>? {
         val localY = event.positionYInRoot() - viewportTopState.value
         val bands = listState.layoutInfo.visibleItemsInfo.map {
@@ -155,6 +165,9 @@ internal fun rememberFeedListDragAndDropTarget(
         return band to resolveRowHalf(localY, band)
     }
 
+    /**
+     * Clears the current drag-and-drop state.
+     */
     fun clearDragState() {
         onDragPointerYChange(null)
         draggedFeedIdState.value = null
@@ -166,7 +179,9 @@ internal fun rememberFeedListDragAndDropTarget(
     // drag gesture, so there's no reason to let the auto-scroll loop coast on
     // the debounced pointer value there like clearDragState() does for onExited
     // (onExited fires on this Box's own bounds and can be transient — see the
-    // grace-period rationale on DRAG_POINTER_Y_CLEAR_DEBOUNCE_MS above).
+    /**
+     * Clears the active drag pointer position, dragged item, insertion boundary, and hovered tag.
+     */
     fun clearDragStateImmediately() {
         clearDragPointerYImmediately()
         draggedFeedIdState.value = null
@@ -174,6 +189,11 @@ internal fun rememberFeedListDragAndDropTarget(
         hoveredAttachTagIdState.value = null
     }
 
+    /**
+     * Updates the active drag-and-drop target based on the pointer position.
+     *
+     * Clears the active boundary and tag target when the pointer is outside a valid row.
+     */
     fun handleMoved(event: DragAndDropEvent) {
         onDragPointerYChange(event.positionYInRoot())
         draggedFeedIdState.value = event.draggedFeedId()
@@ -217,11 +237,29 @@ internal fun rememberFeedListDragAndDropTarget(
     }
 
     object : DragAndDropTarget {
-        override fun onEntered(event: DragAndDropEvent) = handleMoved(event)
-        override fun onMoved(event: DragAndDropEvent) = handleMoved(event)
-        override fun onExited(event: DragAndDropEvent) = clearDragState()
-        override fun onEnded(event: DragAndDropEvent) = clearDragStateImmediately()
+        /**
+ * Handles a drag entering the feed list.
+ */
+override fun onEntered(event: DragAndDropEvent) = handleMoved(event)
+        /**
+ * Updates drag-and-drop state when the dragged item moves.
+ */
+override fun onMoved(event: DragAndDropEvent) = handleMoved(event)
+        /**
+ * Clears the active drag-and-drop state when the pointer exits the target.
+ */
+override fun onExited(event: DragAndDropEvent) = clearDragState()
+        /**
+ * Clears drag-and-drop state when the drag operation ends.
+ */
+override fun onEnded(event: DragAndDropEvent) = clearDragStateImmediately()
 
+        /**
+         * Applies a feed or folder drop to the corresponding list location.
+         *
+         * @param event The drag-and-drop event containing the dragged item and drop position.
+         * @return `true` if the drop is valid and applied, `false` otherwise.
+         */
         override fun onDrop(event: DragAndDropEvent): Boolean {
             val dropIndex = dropIndexState.value
             val hitResult = hitRow(event)

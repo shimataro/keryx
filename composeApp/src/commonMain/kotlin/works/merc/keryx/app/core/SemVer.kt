@@ -7,7 +7,12 @@ package works.merc.keryx.app.core
  * "not newer" (returns false) rather than throwing — a malformed remote tag should never be
  * reported as an available update.
  */
-internal fun isNewer(remote: String, local: String): Boolean =
+/**
+     * Determines whether the remote version is newer than the local version.
+     *
+     * @return `true` if the remote version compares greater than the local version, `false` otherwise.
+     */
+    internal fun isNewer(remote: String, local: String): Boolean =
     compareVersions(remote, local)?.let { it > 0 } ?: false
 
 /**
@@ -21,11 +26,11 @@ private fun parseCore(version: String): List<Int>? {
 }
 
 /**
- * Total ordering over release version strings for candidate selection. Unlike [isNewer] (a strict
- * boolean that returns `false` for both "equal" and "unparseable"), this distinguishes those cases:
- * two equal versions compare `0`, and an unparseable or absent version ranks *strictly below* any
- * parseable one. Without this consistency, a malformed tag preceding a valid release could stay
- * selected by `maxWithOrNull` and mask a genuine update.
+ * Orders release versions for candidate selection.
+ *
+ * @param a The first nullable version to compare.
+ * @param b The second nullable version to compare.
+ * @return A negative value if `a` ranks lower than `b`, zero if they rank equally, or a positive value if `a` ranks higher than `b`.
  */
 internal fun compareReleaseVersions(a: String?, b: String?): Int {
     val aOk = a != null && parseCore(a) != null
@@ -39,10 +44,15 @@ internal fun compareReleaseVersions(a: String?, b: String?): Int {
 }
 
 /**
- * Three-way SemVer comparison of two version strings (leading `v` already stripped by the caller).
- * Returns a negative/zero/positive Int like [Comparator], or `null` when either core has a
- * non-numeric segment (undeterminable → callers treat as "not newer"). Build metadata (`+...`) is
- * stripped and ignored for precedence per SemVer §10.
+ * Compares two version strings according to SemVer precedence.
+ *
+ * Build metadata is ignored, missing core components are treated as zero, and prerelease
+ * versions rank below corresponding stable versions.
+ *
+ * @param a The first version string.
+ * @param b The second version string.
+ * @return A negative, zero, or positive value indicating the ordering, or `null` if either
+ * version contains an invalid core component.
  */
 private fun compareVersions(a: String, b: String): Int? {
     // SemVer §10: build metadata is ignored for precedence. Strip it first — it may follow either
@@ -93,9 +103,10 @@ private fun comparePrerelease(a: String, b: String): Int {
 }
 
 /**
- * True when [version]'s major component is 0 (i.e. below 1.0.0). Unparseable or null versions
- * return false so an undeterminable version is never treated as pre-stable (safe: excluded from
- * pre-release eligibility rather than wrongly included).
- */
+     * Determines whether a version has a numeric major component below 1.
+     *
+     * @param version The version to evaluate.
+     * @return `true` if the major component is below 1, `false` for null or unparseable versions.
+     */
 internal fun isBelowStable(version: String?): Boolean =
     (version?.substringBefore('.')?.toIntOrNull() ?: return false) < 1

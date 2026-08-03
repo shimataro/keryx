@@ -62,6 +62,12 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  * @param vm The view model providing notifications and handling notification actions.
  * @param onNavigated Called after any row action, so the caller can close the popover.
  */
+/**
+ * Displays the notification center sheet with available notifications and dismissal controls.
+ *
+ * @param vm The view model that provides notifications and handles dismissal and action requests.
+ * @param onNavigated Called after any notification row action is handled.
+ */
 @Composable
 fun NotificationCenterSheet(vm: NotificationCenterViewModel, onNavigated: () -> Unit = {}) {
     val items by vm.items.collectAsStateSafe(emptyList())

@@ -14,7 +14,13 @@ class ArticleScrollPositionStore(private val settingsRepository: SettingsReposit
         settingsRepository.getLocalSettings().recentArticleScrollPositions,
     )
 
-    fun getScrollPosition(articleId: String): Int =
+    /**
+         * Retrieves the remembered scroll offset for an article.
+         *
+         * @param articleId The identifier of the article.
+         * @return The remembered scroll offset, or `0` if no position is stored.
+         */
+        fun getScrollPosition(articleId: String): Int =
         _scrollPositions.value.firstOrNull { it.articleId == articleId }?.scrollOffset ?: 0
 
     /**

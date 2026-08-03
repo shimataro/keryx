@@ -38,6 +38,11 @@ class OneDriveStorage(
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) : CloudStorage {
 
+    /**
+     * Verifies access to the OneDrive app folder.
+     *
+     * @return A successful result when access is authorized or the app folder has not been provisioned; otherwise, a mapped storage error.
+     */
     override suspend fun authenticate(): Result<Unit> = withToken { token ->
         val response = client.get(appRootUrl) { header("Authorization", "Bearer $token") }
         when (response.status.value) {
@@ -77,6 +82,14 @@ class OneDriveStorage(
         Result.Ok(CloudFile(content.readRawBytes(), eTag))
     }
 
+    /**
+     * Uploads file content to OneDrive, optionally requiring a matching revision.
+     *
+     * @param path The path of the file to upload.
+     * @param data The file content.
+     * @param expectedRev The required current revision, or `null` to upload without revision checking.
+     * @return A result indicating whether the upload succeeded or encountered a revision conflict.
+     */
     override suspend fun upload(
         path: String,
         data: ByteArray,
@@ -92,6 +105,13 @@ class OneDriveStorage(
         response.okOrConflictOr("OneDrive", conflictStatus = 412)
     }
 
+    /**
+     * Creates a file at the specified path without overwriting an existing file.
+     *
+     * @param path The file path within the OneDrive app folder.
+     * @param data The file content.
+     * @return A successful result when the file is created, or a conflict result when a file already exists.
+     */
     override suspend fun create(path: String, data: ByteArray): Result<Unit> = withToken { token ->
         // conflictBehavior=fail is Graph's native create-only: an existing file yields 409
         // instead of being overwritten, which we surface as a conflict so the caller falls back
@@ -105,6 +125,14 @@ class OneDriveStorage(
         response.okOrConflictOr("OneDrive", conflictStatus = 409)
     }
 
+    /**
+     * Deletes the file at the specified path.
+     *
+     * Treats an already absent file as a successful deletion.
+     *
+     * @param path The path of the file to delete.
+     * @return A successful result when the file is deleted or already absent; otherwise, the mapped storage error.
+     */
     override suspend fun delete(path: String): Result<Unit> = withToken { token ->
         val response = client.delete(itemUrl(path)) { header("Authorization", "Bearer $token") }
         when {

@@ -22,7 +22,11 @@ class TagRepository(
 
     fun watchAllTags(): Flow<List<Tags>> = tags.watchAll().asFlow().mapToList(dispatcher)
 
-    /** feedId -> set of attached tagIds. */
+    /**
+         * Observes active feed-to-tag assignments grouped by feed.
+         *
+         * @return A flow emitting a map from feed IDs to their attached tag IDs.
+         */
     fun watchFeedTagMap(): Flow<Map<String, Set<String>>> =
         feedTags.watchAllActive().asFlow().mapToList(dispatcher).map { rows ->
             rows.groupBy({ it.feed_id }, { it.tag_id }).mapValues { it.value.toSet() }

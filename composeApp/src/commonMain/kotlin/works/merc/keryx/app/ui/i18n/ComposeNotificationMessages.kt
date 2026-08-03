@@ -45,7 +45,13 @@ class ComposeNotificationMessages : NotificationMessages {
     override suspend fun feedGone(feedTitle: String): String =
         getString(Res.string.feed_gone_message, feedTitle)
 
-    override suspend fun feedUrlChanged(feedTitle: String): String =
+    /**
+         * Creates a localized message indicating that a feed URL has changed.
+         *
+         * @param feedTitle The title of the feed whose URL changed.
+         * @return The localized feed URL change message.
+         */
+        override suspend fun feedUrlChanged(feedTitle: String): String =
         getString(Res.string.feed_url_changed, feedTitle)
 
     override suspend fun newArticles(count: Int): String =

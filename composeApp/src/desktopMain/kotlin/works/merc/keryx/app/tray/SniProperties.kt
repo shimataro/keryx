@@ -22,7 +22,15 @@ import org.freedesktop.dbus.types.Variant
  * @throws UnknownProperty If the property is unavailable.
  */
 @Suppress("UNCHECKED_CAST")
-internal fun <A> Map<String, Variant<*>>.propertyOrThrow(interfaceName: String, propertyName: String): A =
+/**
+     * Retrieves a named property and casts its value to the requested type.
+     *
+     * @param interfaceName The D-Bus interface containing the property.
+     * @param propertyName The name of the property to retrieve.
+     * @return The property's value cast to the requested type.
+     * @throws UnknownProperty If the property is unavailable.
+     */
+    internal fun <A> Map<String, Variant<*>>.propertyOrThrow(interfaceName: String, propertyName: String): A =
     (this[propertyName] ?: throw UnknownProperty("$interfaceName.$propertyName is not available")) as A
 
 /**

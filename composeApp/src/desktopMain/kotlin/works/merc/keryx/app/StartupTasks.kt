@@ -34,6 +34,9 @@ import works.merc.keryx.app.resources.update_available_notification
 
 private const val LOG_TAG = "StartupTasks"
 
+/**
+ * Executes startup maintenance, synchronization, feed refresh, update checks, and search-index maintenance.
+ */
 internal suspend fun runStartupTasks(koin: Koin) {
     runCatching {
         warnIfAppTranslocated(koin)
@@ -70,8 +73,7 @@ private suspend fun maybeRebuildFtsIndex(koin: Koin) {
 }
 
 /**
- * Refreshes all feeds and, if new articles were fetched and notifications are enabled, notifies
- * via [NewArticleNotifier]. Shared by [runStartupTasks] and [backgroundUpdateLoop].
+ * Refreshes all feeds and processes notifications for newly fetched articles according to the local notification setting.
  */
 private suspend fun refreshFeedsAndNotify(koin: Koin) {
     val settingsRepository = koin.get<SettingsRepository>()
@@ -82,12 +84,10 @@ private suspend fun refreshFeedsAndNotify(koin: Koin) {
 }
 
 /**
- * Desktop background refresh loop (coroutine equivalent of a periodic timer). Also drives the
- * periodic (non-startup) update check on its own, independent cadence — see
- * [shouldCheckForUpdate] — so setting feed refresh to "manual only" (minutes <= 0) doesn't starve
- * update checking of everything but the once-per-launch startup check. Feed refresh is similarly
- * skipped here when "manual only" is set, but still gets one unconditional check at startup via
- * [runStartupTasks].
+ * Runs periodic background maintenance tasks.
+ *
+ * Feed refreshing and synchronization occur when the configured refresh interval is positive.
+ * Update checks and full-text index maintenance run independently of feed refresh settings.
  */
 internal suspend fun backgroundUpdateLoop(koin: Koin) {
     val settingsRepository = koin.get<SettingsRepository>()
@@ -134,11 +134,9 @@ private suspend fun checkForUpdateAndNotify(koin: Koin) {
 }
 
 /**
- * Reads an OPML file opened via a file association (double-click / "Open With" on an `.opml`
- * file), subscribes to every feed it lists, and surfaces the result via the notification center.
- * No dialog is shown for this — [activationRequests] brings the window to front and the new feeds
- * appear live in the (already-visible) feed list, matching the "restrained notification" treatment
- * error-design.md already prescribes for background-originated events.
+ * Imports feeds from an OPML file opened through a file association and notifies the user of the result.
+ *
+ * @param path The path to the OPML file.
  */
 internal suspend fun handleOpenedOpmlFile(koin: Koin, path: String) {
     val xml = FileIO.readText(path) ?: run {

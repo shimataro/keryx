@@ -120,7 +120,7 @@ override fun getObjectPath(): String = objectPath
         menuItemProperties(id, desired.get().state, listOf(name))[name] ?: Variant("")
 
     /**
-     * Handles a DBus menu event for the specified menu item.
+     * Processes a menu event for the specified item.
      *
      * @param id The menu item identifier.
      * @param eventId The event name.

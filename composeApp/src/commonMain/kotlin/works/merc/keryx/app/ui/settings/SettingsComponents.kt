@@ -87,6 +87,12 @@ internal fun Section(title: String, content: @Composable () -> Unit) {
  * @param url The external URL to open and display in the tooltip.
  */
 @OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Displays a clickable link with hover styling and a tooltip showing its URL.
+ *
+ * @param label The text displayed for the link.
+ * @param url The URL opened when the link is clicked.
+ */
 @Composable
 internal fun LinkRow(label: String, url: String) {
     val interactionSource = remember { MutableInteractionSource() }

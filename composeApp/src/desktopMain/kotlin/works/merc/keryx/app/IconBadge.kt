@@ -55,10 +55,12 @@ fun unreadBadgeLabel(count: Long): String? = when {
 }
 
 /**
- * Paints a red pill-shaped badge with centered [label], right-aligned to
- * [anchorRightX] with its top edge at [anchorTopY]. Shared by [drawUnreadBadge]
- * (badge composited onto a full icon) and [drawBadgeOnlyImage] (badge alone) so
- * both render identically.
+ * Draws a red rounded badge with a centered label.
+ *
+ * @param anchorRightX The x-coordinate of the badge's right edge.
+ * @param anchorTopY The y-coordinate of the badge's top edge.
+ * @param badgeHeight The badge height.
+ * @param label The text displayed in the badge.
  */
 private fun paintBadge(graphics: Graphics2D, anchorRightX: Float, anchorTopY: Float, badgeHeight: Float, label: String) {
     graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
@@ -83,9 +85,11 @@ private fun paintBadge(graphics: Graphics2D, anchorRightX: Float, anchorTopY: Fl
 }
 
 /**
- * Draws an unread-count badge onto a copy of [base], anchored to the top-right
- * corner. Returns an unmodified copy (never [base] itself) when [count] &lt;= 0,
- * so callers can always treat the result as a fresh, independently owned image.
+ * Draws an unread-count badge at the top-right corner of a copy of [base].
+ *
+ * @param base The image to copy and decorate.
+ * @param count The unread-item count used to determine the badge label.
+ * @return A new image containing [base] and, when applicable, the unread badge.
  */
 fun drawUnreadBadge(base: BufferedImage, count: Long): BufferedImage {
     val result = BufferedImage(base.width, base.height, BufferedImage.TYPE_INT_ARGB)
@@ -134,9 +138,11 @@ fun drawUnreadDot(base: BufferedImage, count: Long): BufferedImage {
 }
 
 /**
- * Draws the unread-count badge alone (no base icon) onto a transparent
- * [size]x[size] canvas, for use as a small taskbar-overlay image (e.g. Windows'
- * `Taskbar.setWindowIconBadge`). Returns `null` when [count] &lt;= 0.
+ * Draws an unread-count badge on a transparent square image for use as a taskbar overlay.
+ *
+ * @param count The unread item count.
+ * @param size The width and height of the generated image in pixels.
+ * @return The badge image, or `null` when [count] is less than or equal to zero.
  */
 fun drawBadgeOnlyImage(count: Long, size: Int = 64): BufferedImage? {
     val label = unreadBadgeLabel(count) ?: return null

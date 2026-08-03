@@ -19,21 +19,18 @@ private const val FIT_TOLERANCE = 2f
 private val CURSOR_OFFSET = 16.dp
 
 /**
- * Initial window size before the first auto-fit pass, for a given [initialWidth] (see
- * `DesktopModalWindow`'s parameter of the same name). Width must match whatever fixed width the
- * caller's content actually requests — `Modifier.width(x)` (unlike `requiredWidth`) clamps to the
- * *incoming* max-width constraint, so if the window starts narrower than `x`, the content measures
- * (and gets stuck) at that narrower width forever: `onSizeChanged` only re-fires when the measured
- * size changes, and content laid out inside an already-too-narrow window keeps reporting that same
- * narrow size on every subsequent pass. [KeryxAlertDialog] relies on the default
- * (`KERYX_ALERT_DIALOG_WIDTH`); [KeryxTabDialog] passes its own wider fixed width explicitly so it
- * doesn't inherit — and get stuck at — the alert dialog's narrower one. Height is a rough
- * placeholder that auto-fit immediately corrects (no equivalent trap for a too-narrow width).
+ * Provides the initial dialog size used before the first auto-fit pass.
+ *
+ * @param initialWidth The fixed width requested by the dialog content.
+ * @return A size with [initialWidth] and a placeholder height of 240.dp.
  */
 internal fun placeholderSize(initialWidth: Dp) = DpSize(initialWidth, 240.dp)
 
-/** Whether [window] has actually reached [target]. `DialogState.size` (Dp) and AWT window bounds
- * (points) are the same unit on desktop, so these compare directly. */
+/**
+         * Determines whether the window dimensions are within the allowed fit tolerance of the target size.
+         *
+         * @return `true` if both dimensions are within the fit tolerance, `false` otherwise.
+         */
 internal fun windowMatches(window: Window, target: DpSize): Boolean =
     abs(window.width - target.width.value) <= FIT_TOLERANCE &&
         abs(window.height - target.height.value) <= FIT_TOLERANCE
@@ -64,10 +61,14 @@ internal fun currentScreenBounds(cursor: Point?, owner: Window?): Rectangle {
     return graphicsEnvironment.defaultScreenDevice.defaultConfiguration.bounds
 }
 
-/** Computes a [WindowPosition.Absolute] a little below-and-right of [cursor] (see
- * [CURSOR_OFFSET]), clamped so a window of [size] stays fully within [screenBounds]. [cursor] and
- * [screenBounds] are both AWT "points" (same space as Compose's Dp at density 1.0 — see
- * [centeredPosition]), so this stays entirely in Dp; no density conversion needed. */
+/**
+ * Positions a window offset from the cursor while keeping it within the screen bounds.
+ *
+ * @param cursor The cursor position.
+ * @param screenBounds The available screen area.
+ * @param size The window size.
+ * @return The absolute window position.
+ */
 internal fun cursorAnchoredPosition(cursor: Point, screenBounds: Rectangle, size: DpSize): WindowPosition {
     val minX = screenBounds.x.dp
     val minY = screenBounds.y.dp
@@ -78,7 +79,14 @@ internal fun cursorAnchoredPosition(cursor: Point, screenBounds: Rectangle, size
     return WindowPosition.Absolute(x, y)
 }
 
-/** [cursorAnchoredPosition] when a cursor position was captured, otherwise the previous
- * owner-centered behavior. */
+/**
+     * Resolves a dialog position using the captured cursor position when available, or centers it over the owner window.
+     *
+     * @param cursor The captured cursor position, if available.
+     * @param owner The owner window used for centering when no cursor position is available.
+     * @param screenBounds The bounds of the screen used for cursor anchoring.
+     * @param size The dialog size.
+     * @return The resolved dialog position.
+     */
 internal fun resolvePosition(cursor: Point?, owner: Window?, screenBounds: Rectangle, size: DpSize): WindowPosition =
     if (cursor != null) cursorAnchoredPosition(cursor, screenBounds, size) else centeredPosition(owner, size)

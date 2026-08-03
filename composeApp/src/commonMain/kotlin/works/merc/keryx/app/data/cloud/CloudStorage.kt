@@ -37,15 +37,25 @@ internal suspend fun <T> withCloudToken(
     }
 }
 
-/** Maps a non-2xx HTTP [status]/[body] to the appropriate [CloudStorage] error, shared by every implementation's `mapError`. */
+/**
+ * Converts an HTTP error response into a cloud authentication or storage error.
+ *
+ * @param providerName The name of the cloud provider.
+ * @param status The HTTP status code.
+ * @param body The response body used to provide context for storage errors.
+ * @return An authentication error for status 401 or 403; otherwise, a storage error containing the provider, status, and truncated response body.
+ */
 internal fun cloudStorageError(providerName: String, status: Int, body: String): Result.Err = when (status) {
     401, 403 -> Result.Err(CloudAuthException("Authentication failed"))
     else -> Result.Err(CloudStorageException("$providerName error (HTTP $status): ${body.take(CLOUD_ERROR_BODY_PREVIEW_LENGTH)}"))
 }
 
 /**
- * Maps an upload/create response to [Result.Ok] on success, [SyncConflictException] when the
- * status matches [conflictStatus] (another device won the race), or [cloudStorageError] otherwise.
+ * Maps an HTTP response to a successful result, a sync conflict, or a cloud storage error.
+ *
+ * @param providerName The name of the cloud storage provider.
+ * @param conflictStatus The HTTP status code representing a sync conflict.
+ * @return A successful result for 2xx responses, a sync conflict for the configured status, or a cloud storage error otherwise.
  */
 internal suspend fun HttpResponse.okOrConflictOr(providerName: String, conflictStatus: Int): Result<Unit> = when {
     status.value in 200..299 -> Result.Ok(Unit)

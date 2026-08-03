@@ -521,12 +521,11 @@ private fun applyBrandedDockIcon(image: Image?) {
 }
 
 /**
- * Installs an in-process `java.awt.Desktop` handler when [action] is supported, logging (rather
- * than throwing) on any failure — every platform other than macOS lacks these handlers entirely.
+ * Registers a desktop handler when the requested action is supported.
  *
- * @param action The `Desktop.Action` that must be supported for [install] to run.
- * @param label Describes the handler in the failure log message.
- * @param install Registers the handler on the current `Desktop` instance.
+ * @param action The desktop action required for registration.
+ * @param label The handler name used in failure logs.
+ * @param install Registers the handler on the supported desktop instance.
  */
 private fun installDesktopHandler(action: Desktop.Action, label: String, install: (Desktop) -> Unit) {
     runCatching {

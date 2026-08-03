@@ -63,9 +63,9 @@ internal class LinuxOpmlAssociationRegistrar(
     },
 ) {
     /**
-     * Registers the Linux handler for `.opml` files.
+     * Registers Keryx as the Linux handler for `.opml` files.
      *
-     * @return `true` if registration succeeds or is already up to date, `false` if registration fails.
+     * @return `true` if registration succeeds or is already current, `false` otherwise.
      */
     fun register(): Boolean = runCatching {
         val desktopFile = File(applicationsDir, OPML_HANDLER_DESKTOP_FILE)
