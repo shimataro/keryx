@@ -153,10 +153,11 @@ fun feedListItemIndex(
     feedTagMap: Map<String, Set<String>> = emptyMap(),
     expandedTagIds: Set<String> = emptySet(),
 ): Int? {
-    // All, Starred and Search all live in the single first LazyColumn item (index 0).
+    // All, Starred, and Search are rendered outside the LazyColumn entirely; 0 means "scroll to
+    // top", since "folders-header" is now the first LazyColumn item.
     if (filter is ArticleFilter.Starred || filter is ArticleFilter.All || filter is ArticleFilter.Search) return 0
 
-    var index = 2 // 0: All/Starred/Search, 1: "Folders" header
+    var index = 1 // 0: "Folders" header
     for ((folder, feedsInFolder) in groupFeedsByFolder(feeds, folders)) {
         if (folder == null) {
             if (folders.isNotEmpty()) index++ // NoFolderHeader

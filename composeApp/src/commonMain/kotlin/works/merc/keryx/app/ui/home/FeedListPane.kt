@@ -310,6 +310,38 @@ fun FeedListPane(
                 .onFocusChanged { onSearchFieldFocusChange(it.isFocused) },
         )
 
+        // Kept outside the drop-target Box below (rather than as the LazyColumn's first item) so a
+        // feed drag hovering here falls outside Compose's single eligible drop-target region — the
+        // same reason the search field above already gets the OS's native no-drop cursor for free.
+        // These three quick filters are never valid feed drop targets (FeedListRowKey.Other), and
+        // Compose's dragAndDropTarget API has no way to reject a drop for only part of an accepted
+        // target's bounds, so this is the only way to get a real forbidden cursor over them.
+        SidebarRow(
+            icon = { KeryxIcon(KeryxIcons.Article, null) },
+            label = stringResource(Res.string.home_all_feeds),
+            count = totalUnread,
+            selected = filter == ArticleFilter.All,
+            focused = focused,
+            onClick = { vm.selectFilter(ArticleFilter.All); onActivated() },
+        )
+        SidebarRow(
+            icon = { KeryxIcon(KeryxIcons.Star, null) },
+            label = stringResource(Res.string.home_starred),
+            count = starredUnread,
+            selected = filter == ArticleFilter.Starred,
+            focused = focused,
+            onClick = { vm.selectFilter(ArticleFilter.Starred); onActivated() },
+        )
+        SidebarRow(
+            icon = { KeryxIcon(KeryxIcons.Search, null) },
+            label = stringResource(Res.string.home_search),
+            count = searchUnread,
+            selected = filter == ArticleFilter.Search,
+            focused = focused,
+            onClick = { vm.selectFilter(ArticleFilter.Search); vm.requestSearchFocus(); onActivated() },
+        )
+        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+
         Box(
             Modifier.weight(1f)
                 .onGloballyPositioned {
@@ -470,34 +502,6 @@ fun FeedListPane(
             // each slot to its identity, and the contentType keeps each kind in its own reuse
             // pool so a recycled slot is only ever refilled with the same kind of row.
             LazyColumn(Modifier.fillMaxSize(), state = listState) {
-                item(key = "sidebar", contentType = "sidebar") {
-                    SidebarRow(
-                        icon = { KeryxIcon(KeryxIcons.Article, null) },
-                        label = stringResource(Res.string.home_all_feeds),
-                        count = totalUnread,
-                        selected = filter == ArticleFilter.All,
-                        focused = focused,
-                        onClick = { vm.selectFilter(ArticleFilter.All); onActivated() },
-                    )
-                    SidebarRow(
-                        icon = { KeryxIcon(KeryxIcons.Star, null) },
-                        label = stringResource(Res.string.home_starred),
-                        count = starredUnread,
-                        selected = filter == ArticleFilter.Starred,
-                        focused = focused,
-                        onClick = { vm.selectFilter(ArticleFilter.Starred); onActivated() },
-                    )
-                    SidebarRow(
-                        icon = { KeryxIcon(KeryxIcons.Search, null) },
-                        label = stringResource(Res.string.home_search),
-                        count = searchUnread,
-                        selected = filter == ArticleFilter.Search,
-                        focused = focused,
-                        onClick = { vm.selectFilter(ArticleFilter.Search); vm.requestSearchFocus(); onActivated() },
-                    )
-                    HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                }
-
                 item(key = "folders-header", contentType = "section-header") {
                     Row(
                         Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
