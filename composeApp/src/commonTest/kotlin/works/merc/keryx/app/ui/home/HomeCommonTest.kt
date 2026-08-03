@@ -179,16 +179,16 @@ class HomeCommonTest {
     }
 
     @Test
-    fun feedListItemIndexAlwaysReturnsZeroForSidebarRows() {
-        // All, Starred, and Search are rendered outside the LazyColumn entirely; 0 means "scroll
-        // to top", since "folders-header" is now the first LazyColumn item.
+    fun feedListItemIndexReturnsNullForSidebarRows() {
+        // All, Starred, and Search are rendered outside the LazyColumn entirely as fixed
+        // SidebarRows, so they never correspond to a LazyColumn item and must not trigger a scroll.
         val folders = listOf(folder("d1"))
         val feeds = listOf(feed("f1", folderId = "d1"))
         val tags = listOf(tag("t1"))
 
-        assertEquals(0, feedListItemIndex(ArticleFilter.Starred, feeds, folders, tags, emptySet()))
-        assertEquals(0, feedListItemIndex(ArticleFilter.All, feeds, folders, tags, emptySet()))
-        assertEquals(0, feedListItemIndex(ArticleFilter.Search, feeds, folders, tags, emptySet()))
+        assertNull(feedListItemIndex(ArticleFilter.Starred, feeds, folders, tags, emptySet()))
+        assertNull(feedListItemIndex(ArticleFilter.All, feeds, folders, tags, emptySet()))
+        assertNull(feedListItemIndex(ArticleFilter.Search, feeds, folders, tags, emptySet()))
     }
 
     @Test

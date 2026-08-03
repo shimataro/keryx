@@ -153,9 +153,9 @@ fun feedListItemIndex(
     feedTagMap: Map<String, Set<String>> = emptyMap(),
     expandedTagIds: Set<String> = emptySet(),
 ): Int? {
-    // All, Starred, and Search are rendered outside the LazyColumn entirely; 0 means "scroll to
-    // top", since "folders-header" is now the first LazyColumn item.
-    if (filter is ArticleFilter.Starred || filter is ArticleFilter.All || filter is ArticleFilter.Search) return 0
+    // All, Starred, and Search are rendered outside the LazyColumn entirely (as fixed SidebarRows
+    // above it), so they never correspond to a LazyColumn item and selecting them must not scroll it.
+    if (filter is ArticleFilter.Starred || filter is ArticleFilter.All || filter is ArticleFilter.Search) return null
 
     var index = 1 // 0: "Folders" header
     for ((folder, feedsInFolder) in groupFeedsByFolder(feeds, folders)) {
