@@ -33,13 +33,6 @@ import works.merc.keryx.app.resources.settings_updates
  *   notification action or the "Open Settings" menu command), so the dialog jumps to [initialTabId]
  *   even if it's already open on that same tab id and the user has since switched tabs manually.
  */
-/**
- * Displays the tabbed settings dialog.
- *
- * @param onDismiss Called when the dialog should be dismissed.
- * @param initialTabId ID of the tab to select initially, or the first available tab if it is unavailable.
- * @param tabRequestToken Changes to force selection of `initialTabId` to be reapplied.
- */
 @Composable
 fun SettingsDialog(onDismiss: () -> Unit, initialTabId: String = "general", tabRequestToken: Int = 0) {
     val vm = koinInject<SettingsViewModel>()

@@ -125,16 +125,6 @@ private const val DRAG_POINTER_Y_CLEAR_DEBOUNCE_MS = 150L
  * @param onAddFeedClick Called when the user requests to add a feed.
  * @param onSearchFieldFocusChange Called when the search field focus changes.
  */
-/**
- * Displays the feed navigation pane with filters, folders, tags, search, and feed management actions.
- *
- * @param vm The view model providing feed data and navigation actions.
- * @param focused Whether the pane has focus.
- * @param onActivated Called when the pane becomes active.
- * @param modifier The modifier applied to the pane.
- * @param onAddFeedClick Called when the add-feed action is selected.
- * @param onSearchFieldFocusChange Called when the search field focus changes.
- */
 @Composable
 fun FeedListPane(
     vm: HomeViewModel,

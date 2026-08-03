@@ -503,11 +503,6 @@ internal fun FeedRow(
  * @param gone Whether the feed responded with HTTP 410 Gone.
  */
 @OptIn(ExperimentalMaterial3Api::class)
-/**
- * Displays a feed error indicator, with explanatory tooltip content for feeds that are gone.
- *
- * @param gone Whether the feed returned HTTP 410 Gone.
- */
 @Composable
 private fun FeedErrorIndicator(gone: Boolean) {
     val icon = @Composable {
