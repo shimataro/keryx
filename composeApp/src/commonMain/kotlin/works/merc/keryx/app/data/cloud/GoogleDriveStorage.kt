@@ -23,7 +23,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlin.random.Random
-import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SyncConflictException
@@ -63,12 +62,7 @@ class GoogleDriveStorage(
                 parameters.append("fields", "files(id)")
             }
         }
-        when {
-            response.status.value in 200..299 -> Result.Ok(Unit)
-            response.status.value in setOf(401, 403) ->
-                Result.Err(CloudAuthException("Authentication failed"))
-            else -> mapError(response.status.value, response.bodyAsText())
-        }
+        if (response.status.value in 200..299) Result.Ok(Unit) else mapError(response.status.value, response.bodyAsText())
     }
 
     override suspend fun download(path: String): Result<CloudFile> = withToken { token ->

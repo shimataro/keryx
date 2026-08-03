@@ -13,7 +13,6 @@ import io.ktor.http.contentType
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.ONEDRIVE_GRAPH_BASE
 import works.merc.keryx.app.core.Result
@@ -42,12 +41,10 @@ class OneDriveStorage(
 
     override suspend fun authenticate(): Result<Unit> = withToken { token ->
         val response = client.get(appRootUrl) { header("Authorization", "Bearer $token") }
-        when {
-            response.status.value in 200..299 -> Result.Ok(Unit)
+        when (response.status.value) {
+            in 200..299 -> Result.Ok(Unit)
             // The token is valid but the app folder has not been provisioned yet — still connected.
-            response.status.value == 404 -> Result.Ok(Unit)
-            response.status.value in setOf(401, 403) ->
-                Result.Err(CloudAuthException("Authentication failed"))
+            404 -> Result.Ok(Unit)
             else -> mapError(response.status.value, response.bodyAsText())
         }
     }

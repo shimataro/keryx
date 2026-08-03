@@ -13,7 +13,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SyncConflictException
@@ -36,12 +35,7 @@ class DropboxStorage(
         val response = client.post("$apiBase/2/users/get_current_account") {
             header("Authorization", "Bearer $token")
         }
-        when {
-            response.status.value in 200..299 -> Result.Ok(Unit)
-            response.status.value in setOf(401, 403) ->
-                Result.Err(CloudAuthException("Authentication failed"))
-            else -> Result.Err(CloudStorageException("HTTP ${response.status.value}"))
-        }
+        if (response.status.value in 200..299) Result.Ok(Unit) else mapError(response.status.value, response.bodyAsText())
     }
 
     override suspend fun download(path: String): Result<CloudFile> = withToken { token ->
