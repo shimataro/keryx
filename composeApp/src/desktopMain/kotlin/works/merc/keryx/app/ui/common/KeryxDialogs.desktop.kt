@@ -68,15 +68,12 @@ import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.LocalNativeWindow
 import works.merc.keryx.app.ui.theme.KeryxTheme
 import java.awt.FlowLayout
-import java.awt.GraphicsEnvironment
 import java.awt.MouseInfo
 import java.awt.Point
-import java.awt.Rectangle
 import java.awt.Window
 import javax.swing.JButton
 import javax.swing.JPanel
 import javax.swing.RootPaneContainer
-import kotlin.math.abs
 
 /**
  * Owner window of the immediately enclosing [DesktopModalWindow], if any. Lets a dialog opened
@@ -124,20 +121,6 @@ private const val MAX_HEIGHT_FRACTION = 0.85f
 private val KERYX_ALERT_DIALOG_WIDTH = 400.dp
 
 /**
- * Initial window size before the first auto-fit pass, for a given [initialWidth] (see
- * [DesktopModalWindow]'s parameter of the same name). Width must match whatever fixed width the
- * caller's content actually requests — `Modifier.width(x)` (unlike `requiredWidth`) clamps to the
- * *incoming* max-width constraint, so if the window starts narrower than `x`, the content measures
- * (and gets stuck) at that narrower width forever: `onSizeChanged` only re-fires when the measured
- * size changes, and content laid out inside an already-too-narrow window keeps reporting that same
- * narrow size on every subsequent pass. [KeryxAlertDialog] relies on the default
- * ([KERYX_ALERT_DIALOG_WIDTH]); [KeryxTabDialog] passes its own wider fixed width explicitly so it
- * doesn't inherit — and get stuck at — the alert dialog's narrower one. Height is a rough
- * placeholder that auto-fit immediately corrects (no equivalent trap — see `requiredHeightIn` below).
- */
-private fun placeholderSize(initialWidth: Dp) = DpSize(initialWidth, 240.dp)
-
-/**
  * Estimated height of the OS-drawn title bar on Windows/Linux, added on top of the measured
  * content height when computing [DialogState.size] for a decorated
  * ([DesktopModalWindow.undecorated] = false) dialog — `DialogState.size` describes the whole
@@ -165,10 +148,6 @@ private val DECORATION_HEIGHT_ALLOWANCE = 40.dp
  */
 private val MAC_TITLE_BAR_HEIGHT = 28.dp
 
-/** Offset (from the captured cursor position) at which a dialog opens, similar to a context menu
- * appearing slightly below-and-right of the click rather than directly under the pointer. */
-private val CURSOR_OFFSET = 16.dp
-
 /** Left padding reserved in the macOS merged-title-bar row so the title/[titleAction] never
  * overlaps the traffic-light window controls. */
 private val MAC_TRAFFIC_LIGHT_PADDING = 72.dp
@@ -192,64 +171,9 @@ private val KERYX_TAB_DIALOG_WIDTH = 640.dp
  */
 private const val FIT_REASSERT_MAX_FRAMES = 30
 
-/** Slack (in Dp/AWT points) when comparing the native window's size against the requested one, so
- * rounding between Compose's Dp and AWT's integer point sizes doesn't look like a mismatch. */
-private const val FIT_TOLERANCE = 2f
-
-/** Whether [window] has actually reached [target]. `DialogState.size` (Dp) and AWT window bounds
- * (points) are the same unit on desktop, so these compare directly. */
-private fun windowMatches(window: Window, target: DpSize): Boolean =
-    abs(window.width - target.width.value) <= FIT_TOLERANCE &&
-        abs(window.height - target.height.value) <= FIT_TOLERANCE
-
 /** The only [works.merc.keryx.app.data.local.LocalSettings] fields the dialog's [KeryxTheme] needs;
  * subscribed on its own so unrelated settings changes don't recompose the dialog content. */
 private data class DialogThemePrefs(val themeMode: String, val fontScale: Double)
-
-/** Computes a [WindowPosition.Absolute] that centers a window of [size] over [owner], falling
- * back to a platform-default (screen-centered) position when there is no owner window yet.
- * [owner]'s AWT bounds are in "points" (the same density-independent space Compose's Dp uses at
- * density 1.0 — see [MAX_HEIGHT_FRACTION]'s usage), so this stays entirely in Dp; no density
- * conversion is needed (or correct) here. */
-private fun centeredPosition(owner: Window?, size: DpSize): WindowPosition {
-    if (owner == null) return WindowPosition.PlatformDefault
-    val x = owner.x.dp + (owner.width.dp - size.width) / 2f
-    val y = owner.y.dp + (owner.height.dp - size.height) / 2f
-    return WindowPosition.Absolute(x, y)
-}
-
-/** Finds the bounds of the screen containing [cursor], falling back to [owner]'s screen, and
- * finally the platform's default screen device, when [cursor] is null or off any known screen. */
-private fun currentScreenBounds(cursor: Point?, owner: Window?): Rectangle {
-    val graphicsEnvironment = GraphicsEnvironment.getLocalGraphicsEnvironment()
-    if (cursor != null) {
-        for (device in graphicsEnvironment.screenDevices) {
-            val bounds = device.defaultConfiguration.bounds
-            if (bounds.contains(cursor)) return bounds
-        }
-    }
-    owner?.graphicsConfiguration?.bounds?.let { return it }
-    return graphicsEnvironment.defaultScreenDevice.defaultConfiguration.bounds
-}
-
-/** Computes a [WindowPosition.Absolute] a little below-and-right of [cursor] (see
- * [CURSOR_OFFSET]), clamped so a window of [size] stays fully within [screenBounds]. [cursor] and
- * [screenBounds] are both AWT "points" (same space as Compose's Dp at density 1.0 — see
- * [centeredPosition]), so this stays entirely in Dp; no density conversion needed. */
-private fun cursorAnchoredPosition(cursor: Point, screenBounds: Rectangle, size: DpSize): WindowPosition {
-    val minX = screenBounds.x.dp
-    val minY = screenBounds.y.dp
-    val maxX = (screenBounds.x.dp + screenBounds.width.dp - size.width).coerceAtLeast(minX)
-    val maxY = (screenBounds.y.dp + screenBounds.height.dp - size.height).coerceAtLeast(minY)
-    val x = (cursor.x.dp + CURSOR_OFFSET).coerceIn(minX, maxX)
-    val y = (cursor.y.dp + CURSOR_OFFSET).coerceIn(minY, maxY)
-    return WindowPosition.Absolute(x, y)
-}
-
-/** [cursorAnchoredPosition] when a cursor position was captured, otherwise the previous
- * owner-centered behavior. */
-private fun resolvePosition(cursor: Point?, owner: Window?, screenBounds: Rectangle, size: DpSize): WindowPosition =
-    if (cursor != null) cursorAnchoredPosition(cursor, screenBounds, size) else centeredPosition(owner, size)
 
 /**
  * Renders [content] in a real, separate, natively-decorated OS window (title bar with close
