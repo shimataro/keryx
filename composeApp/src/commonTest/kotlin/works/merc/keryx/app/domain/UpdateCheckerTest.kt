@@ -10,6 +10,9 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import works.merc.keryx.app.core.compareReleaseVersions
+import works.merc.keryx.app.core.isBelowStable
+import works.merc.keryx.app.core.isNewer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
