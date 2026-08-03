@@ -1,4 +1,4 @@
-package works.merc.keryx.app.ui.home
+package works.merc.keryx.app.domain
 
 import works.merc.keryx.app.core.DiscoveredFeedLink
 import works.merc.keryx.app.core.FeedDiscoveryException
@@ -6,7 +6,6 @@ import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.remote.UrlResolver
-import works.merc.keryx.app.domain.FeedRepository
 
 /** Outcome of [AddFeedPreviewResolver.resolvePreview] for the add-feed dialog. */
 sealed interface AddFeedPreview {
@@ -47,7 +46,10 @@ fun addFeedCanSubscribe(preview: AddFeedPreview?, selectedCandidates: Set<String
 fun addFeedAlreadySubscribed(url: String, feeds: List<Feeds>): Boolean =
     url.isNotBlank() && feeds.any { it.url == UrlResolver.withDefaultScheme(url) }
 
-/** Preview/subscribe orchestration for the add-feed dialog, split out of [HomeViewModel] to keep its surface smaller. */
+/**
+ * Preview/subscribe orchestration for the add-feed dialog, split out of
+ * [works.merc.keryx.app.ui.home.HomeViewModel] to keep its surface smaller.
+ */
 class AddFeedPreviewResolver(private val feedRepository: FeedRepository) {
     /**
      * Previews [rawUrl] and maps the outcome for the add-feed dialog. Handles scheme resolution

@@ -42,6 +42,8 @@ import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.ActivityCenter
+import works.merc.keryx.app.domain.AddFeedPreview
+import works.merc.keryx.app.domain.AddFeedPreviewResolver
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.ArticleSearchResult
 import works.merc.keryx.app.domain.CloudSession
@@ -50,6 +52,7 @@ import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.NotificationMessages
 import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.domain.SubscribeOutcome
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
 

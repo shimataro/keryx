@@ -35,6 +35,9 @@ import works.merc.keryx.app.core.DiscoveredFeedLink
 import works.merc.keryx.app.core.DiscoveredFeedType
 import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.data.local.db.Feeds
+import works.merc.keryx.app.domain.AddFeedPreview
+import works.merc.keryx.app.domain.addFeedAlreadySubscribed
+import works.merc.keryx.app.domain.addFeedCanSubscribe
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.resources.home_add_feed

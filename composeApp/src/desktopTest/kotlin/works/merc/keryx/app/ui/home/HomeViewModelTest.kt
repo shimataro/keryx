@@ -39,6 +39,8 @@ import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.domain.ActivityCenter
+import works.merc.keryx.app.domain.AddFeedPreview
+import works.merc.keryx.app.domain.addFeedCanSubscribe
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
