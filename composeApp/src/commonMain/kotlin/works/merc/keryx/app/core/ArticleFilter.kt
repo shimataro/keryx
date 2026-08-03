@@ -27,6 +27,9 @@ fun ArticleFilter.encode(): String = when (this) {
 
 fun decodeArticleFilter(encoded: String): ArticleFilter? = when {
     encoded == "all" -> ArticleFilter.All
+    // Decode-only compatibility for a value [encode] no longer produces, so an older-app-version
+    // persisted filter still round-trips instead of resolving to null (see decodeArticleFilter's
+    // else branch below).
     encoded == "unread" -> ArticleFilter.All
     encoded == "starred" -> ArticleFilter.Starred
     encoded == "search" -> ArticleFilter.Search
