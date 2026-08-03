@@ -10,6 +10,7 @@ import org.koin.dsl.module
 import works.merc.keryx.app.BuildConfig
 import works.merc.keryx.app.core.CONNECTION_TIMEOUT_MS
 import works.merc.keryx.app.core.CloudStorageType
+import works.merc.keryx.app.core.REQUEST_TIMEOUT_MS
 import works.merc.keryx.app.data.cloud.CloudAuthManager
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.DropboxStorage
@@ -53,7 +54,7 @@ actual val platformModule: Module = module {
             expectSuccess = false
             install(HttpTimeout) {
                 connectTimeoutMillis = CONNECTION_TIMEOUT_MS
-                requestTimeoutMillis = 60_000
+                requestTimeoutMillis = REQUEST_TIMEOUT_MS
             }
         }
     }

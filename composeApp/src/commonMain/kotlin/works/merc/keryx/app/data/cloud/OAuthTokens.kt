@@ -12,6 +12,7 @@ import kotlinx.serialization.json.Json
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.core.TOKEN_EXPIRY_SKEW_MS
 
 /**
  * OAuth 2.0 tokens for a cloud storage provider (Dropbox, Google Drive, …). We
@@ -33,7 +34,7 @@ data class OAuthTokens(
      * @param skewMillis The time interval in milliseconds used to account for clock skew.
      * @return `true` if an expiration time is set and the current time is at or after the adjusted expiration time, `false` otherwise.
      */
-    fun isExpired(nowMillis: Long, skewMillis: Long = 60_000): Boolean =
+    fun isExpired(nowMillis: Long, skewMillis: Long = TOKEN_EXPIRY_SKEW_MS): Boolean =
         expiresAtMillis != null && nowMillis >= expiresAtMillis - skewMillis
 }
 

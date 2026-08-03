@@ -22,6 +22,18 @@ import javax.imageio.ImageIO
 private val BADGE_COLOR = Color(0xFF, 0x3B, 0x30)
 private const val DOT_SIZE_RATIO = 0.3f
 
+/** Badge height relative to the base icon's height, for [drawUnreadBadge]'s composited badge. */
+private const val BADGE_HEIGHT_RATIO = 0.40f
+
+/** Badge font size relative to badge height, in [paintBadge]. */
+private const val BADGE_FONT_HEIGHT_RATIO = 0.48f
+
+/** Extra badge width (beyond the text width) reserved as horizontal padding, in [paintBadge]. */
+private const val BADGE_TEXT_PADDING_RATIO = 0.35f
+
+/** Badge height relative to the canvas size, for [drawBadgeOnlyImage]'s standalone badge (no base icon). */
+private const val BADGE_ONLY_HEIGHT_RATIO = 0.9f
+
 /**
  * The badge number's font family. On macOS, AWT's logical `SansSerif` family
  * doesn't resolve to San Francisco (the system UI font used by native badges
@@ -52,10 +64,10 @@ private fun paintBadge(graphics: Graphics2D, anchorRightX: Float, anchorTopY: Fl
     graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
     graphics.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
 
-    graphics.font = Font(BADGE_FONT_FAMILY, Font.BOLD, (badgeHeight * 0.48f).toInt())
+    graphics.font = Font(BADGE_FONT_FAMILY, Font.BOLD, (badgeHeight * BADGE_FONT_HEIGHT_RATIO).toInt())
     val metrics = graphics.fontMetrics
     val textWidth = metrics.stringWidth(label)
-    val badgeWidth = maxOf(badgeHeight, textWidth + badgeHeight * 0.35f)
+    val badgeWidth = maxOf(badgeHeight, textWidth + badgeHeight * BADGE_TEXT_PADDING_RATIO)
 
     val x = anchorRightX - badgeWidth
     val y = anchorTopY
@@ -86,7 +98,7 @@ fun drawUnreadBadge(base: BufferedImage, count: Long): BufferedImage {
         return result
     }
 
-    val badgeHeight = base.height * 0.40f
+    val badgeHeight = base.height * BADGE_HEIGHT_RATIO
     val inset = 0f
     paintBadge(graphics, anchorRightX = base.width - inset, anchorTopY = inset, badgeHeight = badgeHeight, label = label)
 
@@ -130,7 +142,7 @@ fun drawBadgeOnlyImage(count: Long, size: Int = 64): BufferedImage? {
     val label = unreadBadgeLabel(count) ?: return null
     val image = BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB)
     val graphics = image.createGraphics()
-    val badgeHeight = size * 0.9f
+    val badgeHeight = size * BADGE_ONLY_HEIGHT_RATIO
     val margin = (size - badgeHeight) / 2f
     paintBadge(graphics, anchorRightX = size - margin, anchorTopY = margin, badgeHeight = badgeHeight, label = label)
     graphics.dispose()

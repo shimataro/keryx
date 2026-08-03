@@ -9,6 +9,7 @@ import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.MILLIS_PER_DAY
+import works.merc.keryx.app.core.MILLIS_PER_MINUTE
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.domain.ActivityCenter
@@ -92,7 +93,7 @@ internal suspend fun backgroundUpdateLoop(koin: Koin) {
     val settingsRepository = koin.get<SettingsRepository>()
     while (true) {
         val minutes = settingsRepository.getLocalSettings().refreshIntervalMinutes
-        delay(if (minutes <= 0) 60_000L else minutes * 60_000L)
+        delay(if (minutes <= 0) MILLIS_PER_MINUTE else minutes * MILLIS_PER_MINUTE)
         runCatching {
             if (minutes > 0) {
                 refreshFeedsAndNotify(koin)
