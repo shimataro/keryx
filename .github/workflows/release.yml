@@ -129,8 +129,12 @@ jobs:
       - name: Install Linux packaging tools
         run: sudo apt-get update && sudo apt-get install -y fakeroot rpm
 
-      - name: Package Deb + Rpm
-        run: ./gradlew :composeApp:packageDeb :composeApp:packageRpm -PappVersion=${{ steps.version.outputs.version }}
+      # createDistributable must be requested explicitly: packageDeb/packageRpm build directly
+      # from the JLink runtime image and never depend on it (unlike packageDmg on macOS, which
+      # does), so without it composeApp/build/compose/binaries/main/app never gets created and
+      # the "Zip non-packaged app image" step below has nothing to zip.
+      - name: Package Deb + Rpm + App image
+        run: ./gradlew :composeApp:createDistributable :composeApp:packageDeb :composeApp:packageRpm -PappVersion=${{ steps.version.outputs.version }}
         env:
           DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
           GOOGLE_DRIVE_CLIENT_ID: ${{ secrets.GOOGLE_DRIVE_CLIENT_ID }}
