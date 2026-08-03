@@ -589,11 +589,11 @@ class HomeViewModel(
     }
 
     /**
-             * Retrieves the last focused home pane from local settings.
-             *
-             * @return The previously focused pane, or [HomePane.ArticleList] when no valid saved pane exists.
-             */
-            fun getInitialFocusedPane(): HomePane =
+     * Retrieves the last focused home pane from local settings.
+     *
+     * @return The previously focused pane, or [HomePane.ArticleList] when no valid saved pane exists.
+     */
+    fun getInitialFocusedPane(): HomePane =
         settingsRepository.getLocalSettings().lastFocusedPane
             ?.let { raw -> HomePane.entries.firstOrNull { it.name == raw } }
             ?: HomePane.ArticleList
@@ -771,13 +771,13 @@ class HomeViewModel(
     }
 
     /**
-         * Updates whether a feed is associated with a tag.
-         *
-         * @param feedId The ID of the feed.
-         * @param tagId The ID of the tag.
-         * @param attached Whether the tag should be associated with the feed.
-         */
-        fun setFeedTag(feedId: String, tagId: String, attached: Boolean) =
+     * Updates whether a feed is associated with a tag.
+     *
+     * @param feedId The ID of the feed.
+     * @param tagId The ID of the tag.
+     * @param attached Whether the tag should be associated with the feed.
+     */
+    fun setFeedTag(feedId: String, tagId: String, attached: Boolean) =
         tagRepository.setFeedTag(feedId, tagId, attached)
 
     // --- Folder actions ---
@@ -805,22 +805,22 @@ class HomeViewModel(
     }
 
     /**
-         * Moves a feed into a folder and optionally positions it relative to another feed.
-         *
-         * @param feedId The identifier of the feed to move.
-         * @param folderId The destination folder identifier, or `null` to remove the feed from a folder.
-         * @param targetFeedId The identifier of the feed to position the moved feed relative to, or `null` to use the default position.
-         */
-        fun moveFeed(feedId: String, folderId: String?, targetFeedId: String? = null) =
+     * Moves a feed into a folder and optionally positions it relative to another feed.
+     *
+     * @param feedId The identifier of the feed to move.
+     * @param folderId The destination folder identifier, or `null` to remove the feed from a folder.
+     * @param targetFeedId The identifier of the feed to position the moved feed relative to, or `null` to use the default position.
+     */
+    fun moveFeed(feedId: String, folderId: String?, targetFeedId: String? = null) =
         feedRepository.moveFeed(feedId, folderId, targetFeedId)
 
     /**
-         * Reorders a folder relative to the specified target folder.
-         *
-         * @param draggedFolderId The identifier of the folder being moved.
-         * @param targetFolderId The identifier of the folder to move before, or `null` to move to the end.
-         */
-        fun reorderFolders(draggedFolderId: String, targetFolderId: String?) =
+     * Reorders a folder relative to the specified target folder.
+     *
+     * @param draggedFolderId The identifier of the folder being moved.
+     * @param targetFolderId The identifier of the folder to move before, or `null` to move to the end.
+     */
+    fun reorderFolders(draggedFolderId: String, targetFolderId: String?) =
         folderRepository.reorderFolders(draggedFolderId, targetFolderId)
 }
 

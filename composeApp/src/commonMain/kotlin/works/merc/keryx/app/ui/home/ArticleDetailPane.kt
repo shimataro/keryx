@@ -201,14 +201,14 @@ fun ArticleDetailPane(
 }
 
 /**
-         * Formats the article author and publication time as a metadata line.
-         *
-         * Blank authors and unavailable publication times are omitted.
-         *
-         * @param author The article's author, if available.
-         * @param publishedAt The article's publication time in Unix milliseconds, if available.
-         * @return The formatted metadata line, or an empty string when neither value is available.
-         */
+ * Formats the article author and publication time as a metadata line.
+ *
+ * Blank authors and unavailable publication times are omitted.
+ *
+ * @param author The article's author, if available.
+ * @param publishedAt The article's publication time in Unix milliseconds, if available.
+ * @return The formatted metadata line, or an empty string when neither value is available.
+ */
 internal fun articleMetaText(author: String?, publishedAt: Long?): String =
     listOfNotNull(author?.takeIf { it.isNotBlank() }, formatTimestamp(publishedAt).ifBlank { null })
         .joinToString(" · ")

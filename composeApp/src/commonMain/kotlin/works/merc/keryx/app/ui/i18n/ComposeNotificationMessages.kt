@@ -37,12 +37,12 @@ internal suspend fun opmlImportedText(added: Int, failed: Int): String {
 /** [NotificationMessages] backed by Compose string resources (system-locale aware). */
 class ComposeNotificationMessages : NotificationMessages {
     /**
-         * Creates a notification message for a feed that is no longer available.
-         *
-         * @param feedTitle The title of the unavailable feed.
-         * @return The localized feed-unavailable message.
-         */
-        override suspend fun feedGone(feedTitle: String): String =
+     * Creates a notification message for a feed that is no longer available.
+     *
+     * @param feedTitle The title of the unavailable feed.
+     * @return The localized feed-unavailable message.
+     */
+    override suspend fun feedGone(feedTitle: String): String =
         getString(Res.string.feed_gone_message, feedTitle)
 
     override suspend fun feedUrlChanged(feedTitle: String): String =

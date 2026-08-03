@@ -91,17 +91,17 @@ fun feedsForTag(feeds: List<Feeds>, feedTagMap: Map<String, Set<String>>, tagId:
     feeds.filter { tagId in (feedTagMap[it.id] ?: emptySet()) }
 
 /**
-         * Builds the visual filter order used by the feed pane.
-         *
-         * Collapsed folders include only their folder filter; expanded folders include their feed filters,
-         * followed by tag filters.
-         *
-         * @param tags The tags to include at the end of the order.
-         * @param folders The folders used to organize feed filters.
-         * @param feeds The feeds to include in folder or unassigned groups.
-         * @param collapsedFolderIds The IDs of folders whose feed filters should be omitted.
-         * @return The filters in visual top-to-bottom order.
-         */
+ * Builds the visual filter order used by the feed pane.
+ *
+ * Collapsed folders include only their folder filter; expanded folders include their feed filters,
+ * followed by tag filters.
+ *
+ * @param tags The tags to include at the end of the order.
+ * @param folders The folders used to organize feed filters.
+ * @param feeds The feeds to include in folder or unassigned groups.
+ * @param collapsedFolderIds The IDs of folders whose feed filters should be omitted.
+ * @return The filters in visual top-to-bottom order.
+ */
 fun buildOrderedFilters(
     tags: List<Tags>,
     folders: List<Folders>,
