@@ -20,15 +20,15 @@ private val CURSOR_OFFSET = 16.dp
 
 /**
  * Initial window size before the first auto-fit pass, for a given [initialWidth] (see
- * [DesktopModalWindow]'s parameter of the same name). Width must match whatever fixed width the
+ * `DesktopModalWindow`'s parameter of the same name). Width must match whatever fixed width the
  * caller's content actually requests — `Modifier.width(x)` (unlike `requiredWidth`) clamps to the
  * *incoming* max-width constraint, so if the window starts narrower than `x`, the content measures
  * (and gets stuck) at that narrower width forever: `onSizeChanged` only re-fires when the measured
  * size changes, and content laid out inside an already-too-narrow window keeps reporting that same
  * narrow size on every subsequent pass. [KeryxAlertDialog] relies on the default
- * ([KERYX_ALERT_DIALOG_WIDTH]); [KeryxTabDialog] passes its own wider fixed width explicitly so it
+ * (`KERYX_ALERT_DIALOG_WIDTH`); [KeryxTabDialog] passes its own wider fixed width explicitly so it
  * doesn't inherit — and get stuck at — the alert dialog's narrower one. Height is a rough
- * placeholder that auto-fit immediately corrects (no equivalent trap — see `requiredHeightIn` below).
+ * placeholder that auto-fit immediately corrects (no equivalent trap for a too-narrow width).
  */
 internal fun placeholderSize(initialWidth: Dp) = DpSize(initialWidth, 240.dp)
 
@@ -41,7 +41,7 @@ internal fun windowMatches(window: Window, target: DpSize): Boolean =
 /** Computes a [WindowPosition.Absolute] that centers a window of [size] over [owner], falling
  * back to a platform-default (screen-centered) position when there is no owner window yet.
  * [owner]'s AWT bounds are in "points" (the same density-independent space Compose's Dp uses at
- * density 1.0 — see [MAX_HEIGHT_FRACTION]'s usage), so this stays entirely in Dp; no density
+ * density 1.0 — see `MAX_HEIGHT_FRACTION`'s usage), so this stays entirely in Dp; no density
  * conversion is needed (or correct) here. */
 internal fun centeredPosition(owner: Window?, size: DpSize): WindowPosition {
     if (owner == null) return WindowPosition.PlatformDefault

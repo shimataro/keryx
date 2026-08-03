@@ -6,6 +6,7 @@ paths:
   - "**/SyncRepository.kt"         # indexMissing() after merge
   - "**/FeedRepository.kt"         # indexMissing() after refresh
   - "**/StartupTasks.kt"           # maybeRebuildFtsIndex (daily idle heal)
+  - "**/main.kt"                   # ensureIndexed() called at startup, before application {}
   - "**/*.sq"                      # do NOT add articles_fts to a .sq file
 ---
 

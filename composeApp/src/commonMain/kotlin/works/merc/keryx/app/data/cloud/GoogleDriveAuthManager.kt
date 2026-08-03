@@ -7,7 +7,6 @@ import io.ktor.http.parameters
 import kotlinx.serialization.json.Json
 import works.merc.keryx.app.core.CLOUD_ERROR_BODY_PREVIEW_LENGTH
 import works.merc.keryx.app.core.Clock
-import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.GOOGLE_AUTHORIZE_ENDPOINT
 import works.merc.keryx.app.core.GOOGLE_DRIVE_APPDATA_SCOPE
 import works.merc.keryx.app.core.GOOGLE_REVOKE_ENDPOINT

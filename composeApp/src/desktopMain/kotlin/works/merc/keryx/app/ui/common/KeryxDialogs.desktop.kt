@@ -61,7 +61,6 @@ import androidx.compose.ui.window.DialogState
 import androidx.compose.ui.window.DialogWindow
 import androidx.compose.ui.window.DialogWindowScope
 import androidx.compose.ui.window.WindowDecoration
-import androidx.compose.ui.window.WindowPosition
 import org.koin.compose.koinInject
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.platform.isMacOs

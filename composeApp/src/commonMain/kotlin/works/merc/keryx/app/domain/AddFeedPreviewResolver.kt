@@ -47,8 +47,8 @@ fun addFeedAlreadySubscribed(url: String, feeds: List<Feeds>): Boolean =
     url.isNotBlank() && feeds.any { it.url == UrlResolver.withDefaultScheme(url) }
 
 /**
- * Preview/subscribe orchestration for the add-feed dialog, split out of
- * [works.merc.keryx.app.ui.home.HomeViewModel] to keep its surface smaller.
+ * Preview/subscribe orchestration for the add-feed dialog, split out of `HomeViewModel` to keep
+ * its surface smaller.
  */
 class AddFeedPreviewResolver(private val feedRepository: FeedRepository) {
     /**

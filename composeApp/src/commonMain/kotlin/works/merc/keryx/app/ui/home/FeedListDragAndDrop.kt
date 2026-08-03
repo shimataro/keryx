@@ -128,12 +128,11 @@ internal fun dropTargetBorderModifier(isDropTarget: Boolean, color: Color): Modi
  * @param listState The feed list's scroll state, used to hit-test the pointer against visible rows.
  * @param viewportTopState The list viewport's top Y in root coordinates, for translating pointer events.
  * @param dropIndexState The current feed/folder layout, used to resolve drop boundaries and apply drops.
- * @param dragPointerYState Updated (via [onDragPointerYChange]) with the drag pointer's Y in root coordinates.
  * @param activeBoundaryState Updated with the boundary the dragged row/folder would be inserted at.
  * @param draggedFeedIdState Updated with the id of the feed currently being dragged, or `null`.
  * @param hoveredAttachTagIdState Updated with the id of the tag currently hovered for attachment, or `null`.
- * @param onDragPointerYChange Called on every move/exit to update [dragPointerYState] (debounced on exit).
- * @param clearDragPointerYImmediately Called on drop/end to clear [dragPointerYState] without the exit debounce.
+ * @param onDragPointerYChange Called on every move/exit to update the drag pointer's Y in root coordinates (debounced on exit).
+ * @param clearDragPointerYImmediately Called on drop/end to clear the drag pointer's Y without the exit debounce.
  */
 @Composable
 internal fun rememberFeedListDragAndDropTarget(
@@ -141,7 +140,6 @@ internal fun rememberFeedListDragAndDropTarget(
     listState: LazyListState,
     viewportTopState: State<Float>,
     dropIndexState: State<FeedListDropIndex>,
-    dragPointerYState: MutableState<Float?>,
     activeBoundaryState: MutableState<DropBoundary?>,
     draggedFeedIdState: MutableState<String?>,
     hoveredAttachTagIdState: MutableState<String?>,

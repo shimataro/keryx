@@ -7,7 +7,6 @@ import io.ktor.http.URLBuilder
 import io.ktor.http.parameters
 import kotlinx.serialization.json.Json
 import works.merc.keryx.app.core.Clock
-import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.DROPBOX_AUTHORIZE_ENDPOINT
 import works.merc.keryx.app.core.DROPBOX_REVOKE_ENDPOINT
 import works.merc.keryx.app.core.DROPBOX_TOKEN_ENDPOINT

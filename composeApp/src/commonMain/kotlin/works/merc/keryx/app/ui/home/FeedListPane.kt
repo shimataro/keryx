@@ -357,7 +357,6 @@ fun FeedListPane(
                         listState = listState,
                         viewportTopState = viewportTopState,
                         dropIndexState = dropIndexState,
-                        dragPointerYState = dragPointerYState,
                         activeBoundaryState = activeBoundaryState,
                         draggedFeedIdState = draggedFeedIdState,
                         hoveredAttachTagIdState = hoveredAttachTagIdState,
