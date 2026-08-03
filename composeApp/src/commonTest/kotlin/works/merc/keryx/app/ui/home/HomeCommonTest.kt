@@ -180,6 +180,8 @@ class HomeCommonTest {
 
     @Test
     fun feedListItemIndexAlwaysReturnsZeroForSidebarRows() {
+        // All, Starred, and Search are rendered outside the LazyColumn entirely; 0 means "scroll
+        // to top", since "folders-header" is now the first LazyColumn item.
         val folders = listOf(folder("d1"))
         val feeds = listOf(feed("f1", folderId = "d1"))
         val tags = listOf(tag("t1"))
@@ -190,12 +192,11 @@ class HomeCommonTest {
 
     @Test
     fun feedListItemIndexWithNoFoldersOrTagsStartsFeedsRightAfterHeaders() {
-        // No folders => no NoFolderHeader row, so index 2 (after All/Starred + "Folders" header)
-        // is the first feed.
+        // No folders => no NoFolderHeader row, so index 1 (after "Folders" header) is the first feed.
         val feeds = listOf(feed("f1"), feed("f2"))
 
-        assertEquals(2, feedListItemIndex(ArticleFilter.Feed("f1"), feeds, emptyList(), emptyList(), emptySet()))
-        assertEquals(3, feedListItemIndex(ArticleFilter.Feed("f2"), feeds, emptyList(), emptyList(), emptySet()))
+        assertEquals(1, feedListItemIndex(ArticleFilter.Feed("f1"), feeds, emptyList(), emptyList(), emptySet()))
+        assertEquals(2, feedListItemIndex(ArticleFilter.Feed("f2"), feeds, emptyList(), emptyList(), emptySet()))
     }
 
     @Test
@@ -209,27 +210,26 @@ class HomeCommonTest {
             feed("f4"),
         )
 
-        // index 0: All/Starred
-        // index 1: "Folders" header
-        // index 2: folder d1 header
-        // index 3: feed f1 (under d1)
-        // index 4: folder d2 header
-        // index 5: feed f2 (under d2)
-        // index 6: NoFolderHeader (folders is non-empty)
-        // index 7: feed f3
-        // index 8: feed f4
-        // index 9: divider
-        // index 10: "Tags" header
-        // index 11: tag t1
-        // index 12: tag t2
-        assertEquals(2, feedListItemIndex(ArticleFilter.Folder("d1"), feeds, folders, tags, emptySet()))
-        assertEquals(3, feedListItemIndex(ArticleFilter.Feed("f1"), feeds, folders, tags, emptySet()))
-        assertEquals(4, feedListItemIndex(ArticleFilter.Folder("d2"), feeds, folders, tags, emptySet()))
-        assertEquals(5, feedListItemIndex(ArticleFilter.Feed("f2"), feeds, folders, tags, emptySet()))
-        assertEquals(7, feedListItemIndex(ArticleFilter.Feed("f3"), feeds, folders, tags, emptySet()))
-        assertEquals(8, feedListItemIndex(ArticleFilter.Feed("f4"), feeds, folders, tags, emptySet()))
-        assertEquals(11, feedListItemIndex(ArticleFilter.Tag("t1"), feeds, folders, tags, emptySet()))
-        assertEquals(12, feedListItemIndex(ArticleFilter.Tag("t2"), feeds, folders, tags, emptySet()))
+        // index 0: "Folders" header
+        // index 1: folder d1 header
+        // index 2: feed f1 (under d1)
+        // index 3: folder d2 header
+        // index 4: feed f2 (under d2)
+        // index 5: NoFolderHeader (folders is non-empty)
+        // index 6: feed f3
+        // index 7: feed f4
+        // index 8: divider
+        // index 9: "Tags" header
+        // index 10: tag t1
+        // index 11: tag t2
+        assertEquals(1, feedListItemIndex(ArticleFilter.Folder("d1"), feeds, folders, tags, emptySet()))
+        assertEquals(2, feedListItemIndex(ArticleFilter.Feed("f1"), feeds, folders, tags, emptySet()))
+        assertEquals(3, feedListItemIndex(ArticleFilter.Folder("d2"), feeds, folders, tags, emptySet()))
+        assertEquals(4, feedListItemIndex(ArticleFilter.Feed("f2"), feeds, folders, tags, emptySet()))
+        assertEquals(6, feedListItemIndex(ArticleFilter.Feed("f3"), feeds, folders, tags, emptySet()))
+        assertEquals(7, feedListItemIndex(ArticleFilter.Feed("f4"), feeds, folders, tags, emptySet()))
+        assertEquals(10, feedListItemIndex(ArticleFilter.Tag("t1"), feeds, folders, tags, emptySet()))
+        assertEquals(11, feedListItemIndex(ArticleFilter.Tag("t2"), feeds, folders, tags, emptySet()))
     }
 
     @Test
@@ -245,7 +245,7 @@ class HomeCommonTest {
         val folders = listOf(folder("d1"))
         val feeds = listOf(feed("f1", folderId = "d1"))
 
-        assertEquals(2, feedListItemIndex(ArticleFilter.Folder("d1"), feeds, folders, emptyList(), setOf("d1")))
+        assertEquals(1, feedListItemIndex(ArticleFilter.Folder("d1"), feeds, folders, emptyList(), setOf("d1")))
     }
 
     // --- feedsForTag ---
@@ -286,9 +286,9 @@ class HomeCommonTest {
         val feeds = listOf(feed("f1"), feed("f2"))
         val feedTagMap = mapOf("f1" to setOf("t1"), "f2" to setOf("t1"))
 
-        // 0: sidebar rows, 1: "Folders" header, 2: f1, 3: f2, 4: divider, 5: "Tags" header
-        assertEquals(6, feedListItemIndex(ArticleFilter.Tag("t1"), feeds, emptyList(), tags, emptySet(), feedTagMap, emptySet()))
-        assertEquals(7, feedListItemIndex(ArticleFilter.Tag("t2"), feeds, emptyList(), tags, emptySet(), feedTagMap, emptySet()))
+        // 0: "Folders" header, 1: f1, 2: f2, 3: divider, 4: "Tags" header
+        assertEquals(5, feedListItemIndex(ArticleFilter.Tag("t1"), feeds, emptyList(), tags, emptySet(), feedTagMap, emptySet()))
+        assertEquals(6, feedListItemIndex(ArticleFilter.Tag("t2"), feeds, emptyList(), tags, emptySet(), feedTagMap, emptySet()))
     }
 
     @Test
@@ -297,12 +297,12 @@ class HomeCommonTest {
         val feeds = listOf(feed("f1"), feed("f2"), feed("f3"))
         val feedTagMap = mapOf("f1" to setOf("t1"), "f2" to setOf("t1"), "f3" to setOf("t2"))
 
-        // 0: sidebar rows, 1: "Folders" header, 2-4: f1..f3, 5: divider, 6: "Tags" header,
-        // 7: tag t1, 8: f1 (under t1), 9: f2 (under t1), 10: tag t2, 11: f3 (under t2), 12: tag t3
+        // 0: "Folders" header, 1-3: f1..f3, 4: divider, 5: "Tags" header,
+        // 6: tag t1, 7: f1 (under t1), 8: f2 (under t1), 9: tag t2, 10: f3 (under t2), 11: tag t3
         val expanded = setOf("t1", "t2")
-        assertEquals(7, feedListItemIndex(ArticleFilter.Tag("t1"), feeds, emptyList(), tags, emptySet(), feedTagMap, expanded))
-        assertEquals(10, feedListItemIndex(ArticleFilter.Tag("t2"), feeds, emptyList(), tags, emptySet(), feedTagMap, expanded))
-        assertEquals(12, feedListItemIndex(ArticleFilter.Tag("t3"), feeds, emptyList(), tags, emptySet(), feedTagMap, expanded))
+        assertEquals(6, feedListItemIndex(ArticleFilter.Tag("t1"), feeds, emptyList(), tags, emptySet(), feedTagMap, expanded))
+        assertEquals(9, feedListItemIndex(ArticleFilter.Tag("t2"), feeds, emptyList(), tags, emptySet(), feedTagMap, expanded))
+        assertEquals(11, feedListItemIndex(ArticleFilter.Tag("t3"), feeds, emptyList(), tags, emptySet(), feedTagMap, expanded))
     }
 
     @Test
@@ -314,7 +314,7 @@ class HomeCommonTest {
         val feedTagMap = mapOf("f1" to setOf("t1"))
 
         assertEquals(
-            2,
+            1,
             feedListItemIndex(ArticleFilter.Feed("f1"), feeds, emptyList(), tags, emptySet(), feedTagMap, setOf("t1")),
         )
     }
@@ -324,8 +324,8 @@ class HomeCommonTest {
         val tags = listOf(tag("t1"), tag("t2"))
         val feeds = listOf(feed("f1"))
 
-        assertEquals(5, feedListItemIndex(ArticleFilter.Tag("t1"), feeds, emptyList(), tags, emptySet()))
-        assertEquals(6, feedListItemIndex(ArticleFilter.Tag("t2"), feeds, emptyList(), tags, emptySet()))
+        assertEquals(4, feedListItemIndex(ArticleFilter.Tag("t1"), feeds, emptyList(), tags, emptySet()))
+        assertEquals(5, feedListItemIndex(ArticleFilter.Tag("t2"), feeds, emptyList(), tags, emptySet()))
     }
 
     @Test
