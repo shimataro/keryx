@@ -5,7 +5,6 @@ import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.http.URLBuilder
 import io.ktor.http.parameters
-import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
@@ -67,19 +66,10 @@ class DropboxAuthManager(
         keepRefreshToken = refreshToken,
     )
 
-    override suspend fun revoke(accessToken: String): Result<Unit> = try {
-        val response = client.post(DROPBOX_REVOKE_ENDPOINT) {
+    override suspend fun revoke(accessToken: String): Result<Unit> = revokeOAuthToken {
+        client.post(DROPBOX_REVOKE_ENDPOINT) {
             header("Authorization", "Bearer $accessToken")
         }
-        if (response.status.value in 200..299) {
-            Result.Ok(Unit)
-        } else {
-            Result.Err(CloudAuthException("Revoke failed (HTTP ${response.status.value})"))
-        }
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Throwable) {
-        Result.Err(CloudAuthException(e.message ?: "Revoke failed"))
     }
 
     /**

@@ -2,6 +2,7 @@ package works.merc.keryx.app.data.cloud
 
 import io.ktor.client.HttpClient
 import io.ktor.client.request.forms.submitForm
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.Parameters
 import kotlinx.coroutines.CancellationException
@@ -84,4 +85,23 @@ internal suspend fun requestOAuthTokens(
     throw e
 } catch (e: Throwable) {
     Result.Err(CloudAuthException(e.message ?: "Token request failed"))
+}
+
+/**
+ * Sends a revoke request built by [makeRequest] and maps the outcome to a [Result].
+ *
+ * @param makeRequest Performs the provider-specific revoke HTTP call.
+ * @return `Result.Ok` on a 2xx response, or a [CloudAuthException] on failure.
+ */
+internal suspend fun revokeOAuthToken(makeRequest: suspend () -> HttpResponse): Result<Unit> = try {
+    val response = makeRequest()
+    if (response.status.value in 200..299) {
+        Result.Ok(Unit)
+    } else {
+        Result.Err(CloudAuthException("Revoke failed (HTTP ${response.status.value})"))
+    }
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Throwable) {
+    Result.Err(CloudAuthException(e.message ?: "Revoke failed"))
 }
