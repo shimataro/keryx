@@ -41,6 +41,7 @@ import kotlinx.coroutines.swing.Swing
 import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.painterResource
+import org.koin.core.Koin
 import org.koin.core.context.startKoin
 import org.koin.mp.KoinPlatform
 import works.merc.keryx.app.core.AppNotification
@@ -564,7 +565,7 @@ private fun installDesktopHandler(action: Desktop.Action, label: String, install
  *
  * @throws CancellationException If the startup task is cancelled.
  */
-private suspend fun runStartupTasks(koin: org.koin.core.Koin) {
+private suspend fun runStartupTasks(koin: Koin) {
     runCatching {
         warnIfAppTranslocated(koin)
         val settingsRepository = koin.get<SettingsRepository>()
@@ -588,7 +589,7 @@ private suspend fun runStartupTasks(koin: org.koin.core.Koin) {
 /**
  * Rebuilds the full FTS index when the application is idle and at least 24 hours have passed since the previous rebuild.
  */
-private suspend fun maybeRebuildFtsIndex(koin: org.koin.core.Koin) {
+private suspend fun maybeRebuildFtsIndex(koin: Koin) {
     val activityCenter = koin.get<ActivityCenter>()
     if (activityCenter.syncing.value || activityCenter.feedRefreshing.value) return
     val settingsRepository = koin.get<SettingsRepository>()
@@ -603,7 +604,7 @@ private suspend fun maybeRebuildFtsIndex(koin: org.koin.core.Koin) {
  * Refreshes all feeds and, if new articles were fetched and notifications are enabled, notifies
  * via [NewArticleNotifier]. Shared by [runStartupTasks] and [backgroundUpdateLoop].
  */
-private suspend fun refreshFeedsAndNotify(koin: org.koin.core.Koin) {
+private suspend fun refreshFeedsAndNotify(koin: Koin) {
     val settingsRepository = koin.get<SettingsRepository>()
     val results = koin.get<ActivityCenter>().trackFeedRefresh { koin.get<FeedRepository>().refreshAll() }
     koin.get<NewArticleNotifier>().notifyIfEnabled(
@@ -619,7 +620,7 @@ private suspend fun refreshFeedsAndNotify(koin: org.koin.core.Koin) {
  * skipped here when "manual only" is set, but still gets one unconditional check at startup via
  * [runStartupTasks].
  */
-private suspend fun backgroundUpdateLoop(koin: org.koin.core.Koin) {
+private suspend fun backgroundUpdateLoop(koin: Koin) {
     val settingsRepository = koin.get<SettingsRepository>()
     while (true) {
         val minutes = settingsRepository.getLocalSettings().refreshIntervalMinutes
@@ -643,7 +644,7 @@ private suspend fun backgroundUpdateLoop(koin: org.koin.core.Koin) {
  *
  * @param koin The dependency injection container used to resolve update and notification services.
  */
-private suspend fun checkForUpdateAndNotify(koin: org.koin.core.Koin) {
+private suspend fun checkForUpdateAndNotify(koin: Koin) {
     val settingsRepository = koin.get<SettingsRepository>()
     val status = koin.get<UpdateChecker>().check()
     settingsRepository.mutateLocalSettings { it.copy(lastUpdateCheckAt = SystemClock.nowMillis()) }
@@ -670,7 +671,7 @@ private suspend fun checkForUpdateAndNotify(koin: org.koin.core.Koin) {
  * appear live in the (already-visible) feed list, matching the "restrained notification" treatment
  * error-design.md already prescribes for background-originated events.
  */
-private suspend fun handleOpenedOpmlFile(koin: org.koin.core.Koin, path: String) {
+private suspend fun handleOpenedOpmlFile(koin: Koin, path: String) {
     val xml = FileIO.readText(path) ?: run {
         Log.warn(LOG_TAG, "Could not read the opened OPML file")
         return
@@ -696,7 +697,7 @@ private suspend fun handleOpenedOpmlFile(koin: org.koin.core.Koin, path: String)
  * Warns the user when the application is running from a translocated path that may prevent
  * `keryx://` OAuth callbacks from reaching the application.
  */
-private suspend fun warnIfAppTranslocated(koin: org.koin.core.Koin) {
+private suspend fun warnIfAppTranslocated(koin: Koin) {
     val exePath = currentExecutablePath()
     if (!isTranslocatedPath(exePath)) return
     Log.warn(LOG_TAG, "App is running from a translocated path ($exePath); keryx:// OAuth linking may fail")
