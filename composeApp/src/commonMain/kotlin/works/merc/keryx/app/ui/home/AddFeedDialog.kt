@@ -35,7 +35,6 @@ import works.merc.keryx.app.core.DiscoveredFeedLink
 import works.merc.keryx.app.core.DiscoveredFeedType
 import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.data.local.db.Feeds
-import works.merc.keryx.app.data.remote.UrlResolver
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.resources.home_add_feed
@@ -138,7 +137,7 @@ internal fun AddFeedDialog(
     val hasResult = preview != null
     val confirmEnabled = phase == null &&
         if (hasResult) addFeedCanSubscribe(preview, selectedCandidates) else url.isNotBlank()
-    val alreadySubscribed = url.isNotBlank() && feeds.any { it.url == UrlResolver.withDefaultScheme(url) }
+    val alreadySubscribed = addFeedAlreadySubscribed(url, feeds)
 
     KeryxAlertDialog(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,

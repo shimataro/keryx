@@ -4,6 +4,7 @@ import works.merc.keryx.app.core.DiscoveredFeedLink
 import works.merc.keryx.app.core.FeedDiscoveryException
 import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.remote.UrlResolver
 import works.merc.keryx.app.domain.FeedRepository
 
@@ -35,6 +36,16 @@ fun addFeedCanSubscribe(preview: AddFeedPreview?, selectedCandidates: Set<String
         is AddFeedPreview.Multiple -> selectedCandidates.isNotEmpty()
         else -> false
     }
+
+/**
+ * Determines whether the entered URL (after scheme normalization) already appears in [feeds].
+ *
+ * @param url The feed URL entered by the user.
+ * @param feeds The current subscriptions to check against.
+ * @return `true` if [url] matches an existing subscription, `false` otherwise.
+ */
+fun addFeedAlreadySubscribed(url: String, feeds: List<Feeds>): Boolean =
+    url.isNotBlank() && feeds.any { it.url == UrlResolver.withDefaultScheme(url) }
 
 /** Preview/subscribe orchestration for the add-feed dialog, split out of [HomeViewModel] to keep its surface smaller. */
 class AddFeedPreviewResolver(private val feedRepository: FeedRepository) {
