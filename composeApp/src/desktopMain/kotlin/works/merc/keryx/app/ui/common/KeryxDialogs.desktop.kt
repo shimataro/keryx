@@ -184,10 +184,6 @@ private data class DialogThemePrefs(val themeMode: String, val fontScale: Double
  * the owner window when no cursor position is available. Re-applies [KeryxTheme] because a
  * `DialogWindow`'s content is an independent composition root that does not inherit ambient
  * theme values from the caller.
- */
-@OptIn(ExperimentalComposeUiApi::class)
-/**
- * Displays dialog content in a native desktop window with content-driven sizing and positioning.
  *
  * @param title The native window title.
  * @param onDismissRequest Invoked when the dialog is closed or the Escape key is pressed.
@@ -195,6 +191,7 @@ private data class DialogThemePrefs(val themeMode: String, val fontScale: Double
  * @param initialWidth The initial and maximum content width.
  * @param content The composable content displayed in the dialog.
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun DesktopModalWindow(
     title: String?,
