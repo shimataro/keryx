@@ -188,6 +188,7 @@ class HomeCommonTest {
 
         assertEquals(0, feedListItemIndex(ArticleFilter.Starred, feeds, folders, tags, emptySet()))
         assertEquals(0, feedListItemIndex(ArticleFilter.All, feeds, folders, tags, emptySet()))
+        assertEquals(0, feedListItemIndex(ArticleFilter.Search, feeds, folders, tags, emptySet()))
     }
 
     @Test
