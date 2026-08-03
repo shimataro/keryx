@@ -5,7 +5,7 @@ paths:
   - "**/DatabaseSnapshot*.kt"      # VACUUM INTO snapshot drops articles_fts on the copy side
   - "**/SyncRepository.kt"         # indexMissing() after merge
   - "**/FeedRepository.kt"         # indexMissing() after refresh
-  - "**/main.kt"                   # maybeRebuildFtsIndex (daily idle heal)
+  - "**/StartupTasks.kt"           # maybeRebuildFtsIndex (daily idle heal)
   - "**/*.sq"                      # do NOT add articles_fts to a .sq file
 ---
 
@@ -20,7 +20,7 @@ never hits `no such table`. Hot paths (feed refresh, sync merge) index new
 rows incrementally via `FtsManager.indexMissing()` — never a full `'rebuild'`,
 which is O(all indexed text) and would block/zero-out concurrent searches. The
 whole index is only rebuilt in the rare healing pass: a once-per-24h idle pass
-in `main.kt` (`maybeRebuildFtsIndex`, gated on `lastFtsRebuiltAt` +
+in `StartupTasks.kt` (`maybeRebuildFtsIndex`, gated on `lastFtsRebuiltAt` +
 `ActivityCenter` idle), which re-indexes content that incremental indexing
 left stale. On startup, `FtsManager.ensureIndexed()` creates the table on first
 run and backfills any missing rows. `busy_timeout` (set in

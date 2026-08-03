@@ -10,10 +10,11 @@
 | Android | ✅ Roughly at the specified interval | WorkManager (planned) |
 | iOS | ⚠️ OS decides execution timing | BGTaskScheduler (planned) |
 
-## Desktop Implementation (`desktopMain/main.kt`)
+## Desktop Implementation (`desktopMain/main.kt` + `StartupTasks.kt`)
 
-`main()` launches an app-scope coroutine that loops at `refreshIntervalMinutes` intervals. The sketch
-below is abridged — per-cycle error handling and the separately-scheduled update check are omitted.
+`main()` launches an app-scope coroutine that runs `backgroundUpdateLoop` (`StartupTasks.kt`), looping
+at `refreshIntervalMinutes` intervals. The sketch below is abridged — per-cycle error handling and the
+separately-scheduled update check are omitted.
 
 ```kotlin
 while (true) {
