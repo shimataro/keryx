@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -509,6 +510,35 @@ fun FeedListPane(
                     }
                 }
 
+                val feedItems: LazyListScope.(feedsInFolder: List<Feeds>, indented: Boolean, folderId: String?) -> Unit =
+                    { feedsInFolder, indented, folderId ->
+                        itemsIndexed(
+                            feedsInFolder,
+                            key = { _, feed -> "feed-${feed.id}" },
+                            contentType = { _, _ -> "feed" },
+                        ) { index, feed ->
+                            FeedRow(
+                                feed = feed,
+                                count = unreadByFeed[feed.id] ?: 0L,
+                                selected = filter == ArticleFilter.Feed(feed.id),
+                                focused = focused,
+                                indented = indented,
+                                nextFeedId = feedsInFolder.getOrNull(index + 1)?.id,
+                                folderId = folderId,
+                                activeBoundaryState = activeBoundaryState,
+                                onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id)); onActivated() },
+                                onRename = { renamingFeed = feed },
+                                onRefresh = { vm.refreshFeed(feed) },
+                                tags = tags,
+                                attachedTagIds = feedTagMap[feed.id] ?: emptySet(),
+                                onToggleFeedTag = { tagId, attached -> vm.setFeedTag(feed.id, tagId, attached) },
+                                folders = folders,
+                                onMoveFeedToFolder = { moveFolderId -> vm.moveFeed(feed.id, moveFolderId) },
+                                onUnsubscribe = { confirmingUnsubscribeFeed = feed },
+                            )
+                        }
+                    }
+
                 groupFeedsByFolder(feeds, folders).forEach { (folder, feedsInFolder) ->
                     if (folder == null) {
                         if (folders.isNotEmpty()) {
@@ -520,31 +550,7 @@ fun FeedListPane(
                                 )
                             }
                         }
-                        itemsIndexed(
-                            feedsInFolder,
-                            key = { _, feed -> "feed-${feed.id}" },
-                            contentType = { _, _ -> "feed" },
-                        ) { index, feed ->
-                            FeedRow(
-                                feed = feed,
-                                count = unreadByFeed[feed.id] ?: 0L,
-                                selected = filter == ArticleFilter.Feed(feed.id),
-                                focused = focused,
-                                indented = false,
-                                nextFeedId = feedsInFolder.getOrNull(index + 1)?.id,
-                                folderId = null,
-                                activeBoundaryState = activeBoundaryState,
-                                onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id)); onActivated() },
-                                onRename = { renamingFeed = feed },
-                                onRefresh = { vm.refreshFeed(feed) },
-                                tags = tags,
-                                attachedTagIds = feedTagMap[feed.id] ?: emptySet(),
-                                onToggleFeedTag = { tagId, attached -> vm.setFeedTag(feed.id, tagId, attached) },
-                                folders = folders,
-                                onMoveFeedToFolder = { folderId -> vm.moveFeed(feed.id, folderId) },
-                                onUnsubscribe = { confirmingUnsubscribeFeed = feed },
-                            )
-                        }
+                        feedItems(feedsInFolder, false, null)
                     } else {
                         val collapsed = folder.id in collapsedFolderIds
                         val nextFolderId = folders.getOrNull(folders.indexOf(folder) + 1)?.id
@@ -567,31 +573,7 @@ fun FeedListPane(
                             )
                         }
                         if (!collapsed) {
-                            itemsIndexed(
-                                feedsInFolder,
-                                key = { _, feed -> "feed-${feed.id}" },
-                                contentType = { _, _ -> "feed" },
-                            ) { index, feed ->
-                                FeedRow(
-                                    feed = feed,
-                                    count = unreadByFeed[feed.id] ?: 0L,
-                                    selected = filter == ArticleFilter.Feed(feed.id),
-                                    focused = focused,
-                                    indented = true,
-                                    nextFeedId = feedsInFolder.getOrNull(index + 1)?.id,
-                                    folderId = folder.id,
-                                    activeBoundaryState = activeBoundaryState,
-                                    onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id)); onActivated() },
-                                    onRename = { renamingFeed = feed },
-                                    onRefresh = { vm.refreshFeed(feed) },
-                                    tags = tags,
-                                    attachedTagIds = feedTagMap[feed.id] ?: emptySet(),
-                                    onToggleFeedTag = { tagId, attached -> vm.setFeedTag(feed.id, tagId, attached) },
-                                    folders = folders,
-                                    onMoveFeedToFolder = { folderId -> vm.moveFeed(feed.id, folderId) },
-                                    onUnsubscribe = { confirmingUnsubscribeFeed = feed },
-                                )
-                            }
+                            feedItems(feedsInFolder, true, folder.id)
                         }
                     }
                 }
