@@ -20,7 +20,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -92,6 +91,7 @@ import works.merc.keryx.app.resources.home_tags
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.KeryxTextField
+import works.merc.keryx.app.ui.common.SmallSpinner
 import works.merc.keryx.app.ui.common.ToolbarIconGroup
 import works.merc.keryx.app.ui.common.TooltipIconButton
 
@@ -258,7 +258,7 @@ fun FeedListPane(
                 )
                 TooltipIconButton(tooltip = refreshTooltip, onClick = { vm.refreshAll() }) {
                     if (refreshing) {
-                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        SmallSpinner()
                     } else {
                         KeryxIcon(KeryxIcons.Refresh, refreshTooltip)
                     }
@@ -270,7 +270,7 @@ fun FeedListPane(
                     )
                     TooltipIconButton(tooltip = syncTooltip, onClick = { vm.sync() }) {
                         if (syncing) {
-                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                            SmallSpinner()
                         } else {
                             KeryxIcon(KeryxIcons.Cloud, syncTooltip)
                         }

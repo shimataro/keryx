@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,6 +33,7 @@ import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
+import works.merc.keryx.app.ui.common.SmallSpinner
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_abort
 import works.merc.keryx.app.resources.common_cancel
@@ -279,7 +279,7 @@ private fun CloudProviderRow(
                     FlatTonalButton(onClick = onResetCloudData, enabled = enabled) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (resetting) {
-                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                SmallSpinner(size = 18.dp)
                             } else {
                                 KeryxIcon(
                                     KeryxIcons.RestartAlt,
@@ -307,7 +307,7 @@ private fun CloudProviderRow(
                 // Still waiting on the OAuth browser redirect — offer an explicit abort.
                 FlatTonalButton(onClick = onCancel) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        SmallSpinner()
                         Spacer(Modifier.width(8.dp))
                         Text(stringResource(Res.string.common_abort))
                     }
@@ -317,7 +317,7 @@ private fun CloudProviderRow(
                 FlatButton(onClick = onSelect, enabled = idleEnabled) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (connecting) {
-                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                            SmallSpinner()
                             Spacer(Modifier.width(8.dp))
                         }
                         Text(stringResource(type.connectLabel()))
