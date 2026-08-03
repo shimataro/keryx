@@ -255,41 +255,33 @@ fun main(args: Array<String>) {
     // live in the macOS app (Keryx) menu, so they are omitted from AppMenuBar there. Registered
     // after the apple.awt.* properties above, since touching Desktop initializes AWT. macOS-only in
     // practice (APP_ABOUT / APP_PREFERENCES are unsupported elsewhere).
-    runCatching {
-        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.APP_ABOUT)) {
-            Desktop.getDesktop().setAboutHandler { menuController.send(MenuCommand.About) }
-        }
-    }.onFailure { Log.warn(LOG_TAG, "Could not install the About menu handler", it) }
-    runCatching {
-        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.APP_PREFERENCES)) {
-            Desktop.getDesktop().setPreferencesHandler { menuController.send(MenuCommand.OpenSettings) }
-        }
-    }.onFailure { Log.warn(LOG_TAG, "Could not install the Preferences menu handler", it) }
+    installDesktopHandler(Desktop.Action.APP_ABOUT, "About menu") {
+        it.setAboutHandler { menuController.send(MenuCommand.About) }
+    }
+    installDesktopHandler(Desktop.Action.APP_PREFERENCES, "Preferences menu") {
+        it.setPreferencesHandler { menuController.send(MenuCommand.OpenSettings) }
+    }
 
     // Install the in-process URI handler (macOS). Windows/Linux receive the URI as a
     // command-line argument instead, forwarded through SingleInstanceCoordinator.
-    runCatching {
-        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.APP_OPEN_URI)) {
-            Desktop.getDesktop().setOpenURIHandler { event ->
-                val uri = event.uri.toString()
-                if (uri.startsWith("keryx://")) dispatchOAuthCallback(uri)
-            }
+    installDesktopHandler(Desktop.Action.APP_OPEN_URI, "URI") {
+        it.setOpenURIHandler { event ->
+            val uri = event.uri.toString()
+            if (uri.startsWith("keryx://")) dispatchOAuthCallback(uri)
         }
-    }.onFailure { Log.warn(LOG_TAG, "Could not install URI handler", it) }
+    }
 
     // Install the in-process file-open handler (macOS). A double-clicked / "Open With"-launched
     // .opml file arrives here via an Apple Event whether or not Keryx was already running — unlike
     // Windows/Linux, which only ever deliver it as argv on a genuinely new process (see the
     // single-instance dispatch above).
-    runCatching {
-        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.APP_OPEN_FILE)) {
-            Desktop.getDesktop().setOpenFileHandler { event ->
-                event.files
-                    .filter { it.name.endsWith(".opml", ignoreCase = true) }
-                    .forEach { file -> dispatchOpmlFile(file.absolutePath) }
-            }
+    installDesktopHandler(Desktop.Action.APP_OPEN_FILE, ".opml file-open") {
+        it.setOpenFileHandler { event ->
+            event.files
+                .filter { it.name.endsWith(".opml", ignoreCase = true) }
+                .forEach { file -> dispatchOpmlFile(file.absolutePath) }
         }
-    }.onFailure { Log.warn(LOG_TAG, "Could not install the .opml file-open handler", it) }
+    }
 
     // Tell the OS how to handle keryx:// URIs and .opml files (Windows registry / Linux .desktop +
     // mimeapps.list). macOS declares both in Info.plist at packaging time, so it needs nothing here.
@@ -549,6 +541,22 @@ private fun applyBrandedDockIcon(image: Image?) {
     if (taskbar.isSupported(Taskbar.Feature.ICON_IMAGE)) {
         taskbar.iconImage = image
     }
+}
+
+/**
+ * Installs an in-process `java.awt.Desktop` handler when [action] is supported, logging (rather
+ * than throwing) on any failure — every platform other than macOS lacks these handlers entirely.
+ *
+ * @param action The `Desktop.Action` that must be supported for [install] to run.
+ * @param label Describes the handler in the failure log message.
+ * @param install Registers the handler on the current `Desktop` instance.
+ */
+private fun installDesktopHandler(action: Desktop.Action, label: String, install: (Desktop) -> Unit) {
+    runCatching {
+        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(action)) {
+            install(Desktop.getDesktop())
+        }
+    }.onFailure { Log.warn(LOG_TAG, "Could not install the $label handler", it) }
 }
 
 /**
