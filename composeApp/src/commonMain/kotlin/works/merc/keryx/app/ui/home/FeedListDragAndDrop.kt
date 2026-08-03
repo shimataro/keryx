@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -24,12 +25,15 @@ import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draganddrop.DragAndDropEvent
+import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -58,9 +62,12 @@ import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.platform.NativeCheckMenuItem
 import works.merc.keryx.app.platform.NativeMenuItem
 import works.merc.keryx.app.platform.NativeSubMenu
+import works.merc.keryx.app.platform.draggedFeedId
+import works.merc.keryx.app.platform.draggedFolderId
 import works.merc.keryx.app.platform.feedDragTransferData
 import works.merc.keryx.app.platform.folderDragTransferData
 import works.merc.keryx.app.platform.nativeContextMenu
+import works.merc.keryx.app.platform.positionYInRoot
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_assign_tags
 import works.merc.keryx.app.resources.home_delete_folder_menu
@@ -111,6 +118,167 @@ internal fun dropTargetContentColorOrNull(
 @Composable
 internal fun dropTargetBorderModifier(isDropTarget: Boolean, color: Color): Modifier =
     if (isDropTarget) Modifier.border(2.dp, color, MaterialTheme.shapes.small) else Modifier
+
+/**
+ * Builds the [DragAndDropTarget] for [FeedListPane]'s single centralized drop target: hit-tests the
+ * pointer against [listState]'s visible rows via [dropIndexState] and reports the current drop
+ * boundary / hovered tag through the supplied state, then applies the drop via [vm] on [DragAndDropTarget.onDrop].
+ *
+ * @param vm Performs the move/reorder/tag-attach mutation a drop resolves to.
+ * @param listState The feed list's scroll state, used to hit-test the pointer against visible rows.
+ * @param viewportTopState The list viewport's top Y in root coordinates, for translating pointer events.
+ * @param dropIndexState The current feed/folder layout, used to resolve drop boundaries and apply drops.
+ * @param dragPointerYState Updated (via [onDragPointerYChange]) with the drag pointer's Y in root coordinates.
+ * @param activeBoundaryState Updated with the boundary the dragged row/folder would be inserted at.
+ * @param draggedFeedIdState Updated with the id of the feed currently being dragged, or `null`.
+ * @param hoveredAttachTagIdState Updated with the id of the tag currently hovered for attachment, or `null`.
+ * @param onDragPointerYChange Called on every move/exit to update [dragPointerYState] (debounced on exit).
+ * @param clearDragPointerYImmediately Called on drop/end to clear [dragPointerYState] without the exit debounce.
+ */
+@Composable
+internal fun rememberFeedListDragAndDropTarget(
+    vm: HomeViewModel,
+    listState: LazyListState,
+    viewportTopState: State<Float>,
+    dropIndexState: State<FeedListDropIndex>,
+    dragPointerYState: MutableState<Float?>,
+    activeBoundaryState: MutableState<DropBoundary?>,
+    draggedFeedIdState: MutableState<String?>,
+    hoveredAttachTagIdState: MutableState<String?>,
+    onDragPointerYChange: (Float?) -> Unit,
+    clearDragPointerYImmediately: () -> Unit,
+): DragAndDropTarget = remember(vm) {
+    fun hitRow(event: DragAndDropEvent): Pair<FeedListRowBand, RowHalf>? {
+        val localY = event.positionYInRoot() - viewportTopState.value
+        val bands = listState.layoutInfo.visibleItemsInfo.map {
+            FeedListRowBand(it.key, it.offset, it.size)
+        }
+        val band = resolveHitBand(localY, bands) ?: return null
+        return band to resolveRowHalf(localY, band)
+    }
+
+    fun clearDragState() {
+        onDragPointerYChange(null)
+        draggedFeedIdState.value = null
+        activeBoundaryState.value = null
+        hoveredAttachTagIdState.value = null
+    }
+
+    // onEnded/onDrop each fire exactly once, unambiguously ending the whole
+    // drag gesture, so there's no reason to let the auto-scroll loop coast on
+    // the debounced pointer value there like clearDragState() does for onExited
+    // (onExited fires on this Box's own bounds and can be transient — see the
+    // grace-period rationale on DRAG_POINTER_Y_CLEAR_DEBOUNCE_MS above).
+    fun clearDragStateImmediately() {
+        clearDragPointerYImmediately()
+        draggedFeedIdState.value = null
+        activeBoundaryState.value = null
+        hoveredAttachTagIdState.value = null
+    }
+
+    fun handleMoved(event: DragAndDropEvent) {
+        onDragPointerYChange(event.positionYInRoot())
+        draggedFeedIdState.value = event.draggedFeedId()
+        val dropIndex = dropIndexState.value
+        val feedId = event.draggedFeedId()
+        val draggedFolderId = event.draggedFolderId()
+        val (band, half) = hitRow(event) ?: run {
+            activeBoundaryState.value = null
+            hoveredAttachTagIdState.value = null
+            return
+        }
+        val rowKey = parseFeedListRowKey(band.key)
+        hoveredAttachTagIdState.value = null
+        activeBoundaryState.value = when {
+            feedId != null -> when (rowKey) {
+                is FeedListRowKey.Folder -> dropIndex.feedZoneBoundaryFor(rowKey.folderId)
+                FeedListRowKey.NoFolderHeader -> dropIndex.feedZoneBoundaryFor(null)
+                is FeedListRowKey.Feed -> if (half == RowHalf.TOP) {
+                    DropBoundary.BeforeFeed(rowKey.feedId)
+                } else {
+                    dropIndex.belowBoundaryForFeed(rowKey.feedId)
+                }
+                is FeedListRowKey.Tag -> {
+                    hoveredAttachTagIdState.value = rowKey.tagId
+                    null
+                }
+                FeedListRowKey.Other -> null
+            }
+            draggedFolderId != null -> when (rowKey) {
+                is FeedListRowKey.Folder -> when {
+                    rowKey.folderId == draggedFolderId -> null
+                    half == RowHalf.TOP -> DropBoundary.BeforeFolder(rowKey.folderId)
+                    else -> dropIndex.belowBoundaryForFolder(rowKey.folderId)
+                }
+                is FeedListRowKey.Feed -> dropIndex.folderIdOfFeed[rowKey.feedId]
+                    ?.let(dropIndex::belowBoundaryForFolder)
+                else -> null
+            }
+            else -> null
+        }
+    }
+
+    object : DragAndDropTarget {
+        override fun onEntered(event: DragAndDropEvent) = handleMoved(event)
+        override fun onMoved(event: DragAndDropEvent) = handleMoved(event)
+        override fun onExited(event: DragAndDropEvent) = clearDragState()
+        override fun onEnded(event: DragAndDropEvent) = clearDragStateImmediately()
+
+        override fun onDrop(event: DragAndDropEvent): Boolean {
+            val dropIndex = dropIndexState.value
+            val hitResult = hitRow(event)
+            clearDragStateImmediately()
+            val (band, half) = hitResult ?: return false
+            val rowKey = parseFeedListRowKey(band.key)
+            val feedId = event.draggedFeedId()
+            if (feedId != null) {
+                return when (rowKey) {
+                    is FeedListRowKey.Folder -> {
+                        vm.moveFeed(feedId, rowKey.folderId, dropIndex.firstFeedIdOfGroup[rowKey.folderId])
+                        true
+                    }
+                    FeedListRowKey.NoFolderHeader -> {
+                        vm.moveFeed(feedId, null, dropIndex.firstFeedIdOfGroup[null])
+                        true
+                    }
+                    is FeedListRowKey.Feed -> {
+                        val insertBeforeId = if (half == RowHalf.TOP) {
+                            rowKey.feedId
+                        } else {
+                            dropIndex.nextFeedInGroup[rowKey.feedId]
+                        }
+                        vm.moveFeed(feedId, dropIndex.folderIdOfFeed[rowKey.feedId], insertBeforeId)
+                        true
+                    }
+                    is FeedListRowKey.Tag -> {
+                        vm.setFeedTag(feedId, rowKey.tagId, true)
+                        true
+                    }
+                    FeedListRowKey.Other -> false
+                }
+            }
+            val draggedFolderId = event.draggedFolderId() ?: return false
+            return when (rowKey) {
+                is FeedListRowKey.Folder -> {
+                    if (rowKey.folderId == draggedFolderId) return false
+                    val insertBeforeId = if (half == RowHalf.TOP) {
+                        rowKey.folderId
+                    } else {
+                        dropIndex.nextFolderId[rowKey.folderId]
+                    }
+                    vm.reorderFolders(draggedFolderId, insertBeforeId)
+                    true
+                }
+                is FeedListRowKey.Feed -> {
+                    val ownerFolderId = dropIndex.folderIdOfFeed[rowKey.feedId] ?: return false
+                    vm.reorderFolders(draggedFolderId, dropIndex.nextFolderId[ownerFolderId])
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+}
 
 /** How long a dragged feed must be held over a collapsed folder header before the folder opens by
  * itself, so the feeds inside it become reachable drop targets without letting go of the drag
