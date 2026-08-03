@@ -29,12 +29,12 @@ class TagRepository(
         }
 
     /**
-         * Watches the active tag IDs assigned to a feed.
-         *
-         * @param feedId The ID of the feed.
-         * @return A flow emitting the feed's active tag IDs.
-         */
-        fun watchTagIdsForFeed(feedId: String): Flow<List<String>> =
+     * Watches the active tag IDs assigned to a feed.
+     *
+     * @param feedId The ID of the feed.
+     * @return A flow emitting the feed's active tag IDs.
+     */
+    fun watchTagIdsForFeed(feedId: String): Flow<List<String>> =
         feedTags.watchTagIdsForFeed(feedId).asFlow().mapToList(dispatcher)
 
     /** The tag with [id], or `null` if none exists. */

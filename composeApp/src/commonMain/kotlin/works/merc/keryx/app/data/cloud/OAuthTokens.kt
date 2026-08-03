@@ -26,13 +26,13 @@ data class OAuthTokens(
     val expiresAtMillis: Long? = null,
 ) {
     /**
-         * Determines whether the token has expired, accounting for the configured clock skew.
-         *
-         * @param nowMillis The current Unix time in milliseconds.
-         * @param skewMillis The time interval in milliseconds used to account for clock skew.
-         * @return `true` if an expiration time is set and the current time is at or after the adjusted expiration time, `false` otherwise.
-         */
-        fun isExpired(nowMillis: Long, skewMillis: Long = 60_000): Boolean =
+     * Determines whether the token has expired, accounting for the configured clock skew.
+     *
+     * @param nowMillis The current Unix time in milliseconds.
+     * @param skewMillis The time interval in milliseconds used to account for clock skew.
+     * @return `true` if an expiration time is set and the current time is at or after the adjusted expiration time, `false` otherwise.
+     */
+    fun isExpired(nowMillis: Long, skewMillis: Long = 60_000): Boolean =
         expiresAtMillis != null && nowMillis >= expiresAtMillis - skewMillis
 }
 

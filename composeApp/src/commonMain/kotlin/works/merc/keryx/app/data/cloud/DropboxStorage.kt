@@ -154,12 +154,12 @@ class DropboxStorage(
     }
 
     /**
-         * Executes an operation with a valid Dropbox access token.
-         *
-         * @param block The operation to execute with the access token.
-         * @return The result produced by the operation.
-         */
-        private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> =
+     * Executes an operation with a valid Dropbox access token.
+     *
+     * @param block The operation to execute with the access token.
+     * @return The result produced by the operation.
+     */
+    private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> =
         withCloudToken(accessTokenProvider, "Dropbox", block)
 
     /**
