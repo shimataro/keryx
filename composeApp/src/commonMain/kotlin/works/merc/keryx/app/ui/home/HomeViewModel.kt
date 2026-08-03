@@ -33,12 +33,10 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.FEED_LIST_PANE_MAX_WIDTH
 import works.merc.keryx.app.core.FEED_LIST_PANE_MIN_WIDTH
-import works.merc.keryx.app.core.MAX_REMEMBERED_SCROLL_POSITIONS
 import works.merc.keryx.app.core.searchTerms
 import works.merc.keryx.app.core.decodeArticleFilter
 import works.merc.keryx.app.core.encode
 import works.merc.keryx.app.core.valueOrNull
-import works.merc.keryx.app.data.local.ArticleScrollPosition
 import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
@@ -343,12 +341,9 @@ class HomeViewModel(
 
     // --- Article scroll position memory ---
 
-    private val _scrollPositions = MutableStateFlow(
-        settingsRepository.getLocalSettings().recentArticleScrollPositions,
-    )
+    private val scrollPositionStore = ArticleScrollPositionStore(settingsRepository)
 
-    fun getScrollPosition(articleId: String): Int =
-        _scrollPositions.value.firstOrNull { it.articleId == articleId }?.scrollOffset ?: 0
+    fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPosition(articleId)
 
     /**
      * Saves the scroll offset for an article and retains only the most recent remembered positions.
@@ -356,14 +351,7 @@ class HomeViewModel(
      * @param articleId The identifier of the article.
      * @param offset The article's scroll offset.
      */
-    fun saveScrollPosition(articleId: String, offset: Int) {
-        val updated = (
-            listOf(ArticleScrollPosition(articleId, offset)) +
-                _scrollPositions.value.filter { it.articleId != articleId }
-            ).take(MAX_REMEMBERED_SCROLL_POSITIONS)
-        _scrollPositions.value = updated
-        settingsRepository.mutateLocalSettings { it.copy(recentArticleScrollPositions = updated) }
-    }
+    fun saveScrollPosition(articleId: String, offset: Int) = scrollPositionStore.saveScrollPosition(articleId, offset)
 
     init {
         // Restore the last-selected article (not via selectArticle(), to avoid re-marking it as
