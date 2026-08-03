@@ -42,8 +42,13 @@ internal fun windowMatches(window: Window, target: DpSize): Boolean =
  * conversion is needed (or correct) here. */
 internal fun centeredPosition(owner: Window?, size: DpSize): WindowPosition {
     if (owner == null) return WindowPosition.PlatformDefault
-    val x = owner.x.dp + (owner.width.dp - size.width) / 2f
-    val y = owner.y.dp + (owner.height.dp - size.height) / 2f
+    val screenBounds = currentScreenBounds(cursor = null, owner = owner)
+    val minX = screenBounds.x.dp
+    val minY = screenBounds.y.dp
+    val maxX = (screenBounds.x.dp + screenBounds.width.dp - size.width).coerceAtLeast(minX)
+    val maxY = (screenBounds.y.dp + screenBounds.height.dp - size.height).coerceAtLeast(minY)
+    val x = (owner.x.dp + (owner.width.dp - size.width) / 2f).coerceIn(minX, maxX)
+    val y = (owner.y.dp + (owner.height.dp - size.height) / 2f).coerceIn(minY, maxY)
     return WindowPosition.Absolute(x, y)
 }
 

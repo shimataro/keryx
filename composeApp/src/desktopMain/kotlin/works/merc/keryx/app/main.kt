@@ -252,8 +252,8 @@ fun main(args: Array<String>) {
     // .opml file arrives here via an Apple Event whether or not Keryx was already running — unlike
     // Windows/Linux, which only ever deliver it as argv on a genuinely new process (see the
     // single-instance dispatch above).
-    installDesktopHandler(Desktop.Action.APP_OPEN_FILE, ".opml file-open") {
-        it.setOpenFileHandler { event ->
+    installDesktopHandler(Desktop.Action.APP_OPEN_FILE, ".opml file-open") { desktop ->
+        desktop.setOpenFileHandler { event ->
             event.files
                 .filter { it.name.endsWith(".opml", ignoreCase = true) }
                 .forEach { file -> dispatchOpmlFile(file.absolutePath) }

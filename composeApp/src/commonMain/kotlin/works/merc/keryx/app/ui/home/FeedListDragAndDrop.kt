@@ -229,6 +229,7 @@ internal fun rememberFeedListDragAndDropTarget(
                     else -> dropIndex.belowBoundaryForFolder(rowKey.folderId)
                 }
                 is FeedListRowKey.Feed -> dropIndex.folderIdOfFeed[rowKey.feedId]
+                    ?.takeIf { it != draggedFolderId }
                     ?.let(dropIndex::belowBoundaryForFolder)
                 else -> null
             }
@@ -307,6 +308,7 @@ override fun onEnded(event: DragAndDropEvent) = clearDragStateImmediately()
                 }
                 is FeedListRowKey.Feed -> {
                     val ownerFolderId = dropIndex.folderIdOfFeed[rowKey.feedId] ?: return false
+                    if (ownerFolderId == draggedFolderId) return false
                     vm.reorderFolders(draggedFolderId, dropIndex.nextFolderId[ownerFolderId])
                     true
                 }
