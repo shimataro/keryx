@@ -28,12 +28,12 @@ private const val DEFAULT_APPLICATIONS = "Default Applications"
 private const val ADDED_ASSOCIATIONS = "Added Associations"
 
 /**
-         * Selects an XDG base directory from an environment variable or a user-home fallback.
-         *
-         * @param envName The environment variable containing the directory path.
-         * @param homeRelativeFallback The path relative to the user's home directory when the environment variable is unset or blank.
-         * @return The selected base directory.
-         */
+ * Selects an XDG base directory from an environment variable or a user-home fallback.
+ *
+ * @param envName The environment variable containing the directory path.
+ * @param homeRelativeFallback The path relative to the user's home directory when the environment variable is unset or blank.
+ * @return The selected base directory.
+ */
 internal fun xdgDir(envName: String, homeRelativeFallback: String): File =
     System.getenv(envName)?.takeIf { it.isNotBlank() }?.let { File(it) }
         ?: File(System.getProperty("user.home"), homeRelativeFallback)

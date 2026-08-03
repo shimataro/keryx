@@ -110,13 +110,13 @@ override fun getObjectPath(): String = objectPath
     }
 
     /**
-         * Retrieves a menu item property.
-         *
-         * @param id The menu item identifier.
-         * @param name The property name.
-         * @return The property's value, or an empty string variant when the property is unavailable.
-         */
-        override fun GetProperty(id: Int, name: String): Variant<*> =
+     * Retrieves a menu item property.
+     *
+     * @param id The menu item identifier.
+     * @param name The property name.
+     * @return The property's value, or an empty string variant when the property is unavailable.
+     */
+    override fun GetProperty(id: Int, name: String): Variant<*> =
         menuItemProperties(id, desired.get().state, listOf(name))[name] ?: Variant("")
 
     /**
@@ -132,12 +132,12 @@ override fun getObjectPath(): String = objectPath
     }
 
     /**
-         * Handles a group of menu events and returns the IDs of events that were not recognized.
-         *
-         * @param events The menu events to process.
-         * @return The IDs of events that were not handled.
-         */
-        override fun EventGroup(events: List<DBusMenuEventEntry>): List<Int> =
+     * Handles a group of menu events and returns the IDs of events that were not recognized.
+     *
+     * @param events The menu events to process.
+     * @return The IDs of events that were not handled.
+     */
+    override fun EventGroup(events: List<DBusMenuEventEntry>): List<Int> =
         events.filterNot { handleEvent(it.id, it.eventId) }.map { it.id }
 
     /**
