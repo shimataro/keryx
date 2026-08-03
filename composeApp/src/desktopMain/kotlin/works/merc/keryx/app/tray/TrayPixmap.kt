@@ -66,11 +66,11 @@ internal fun toSniPixmap(image: BufferedImage): SniPixmap {
 }
 
 /**
-     * Creates SNI icon pixmaps for the requested square sizes.
-     *
-     * @param sizes The square icon sizes to generate.
-     * @return One pixmap for each requested size, in the same order.
-     */
+ * Creates SNI icon pixmaps for the requested square sizes.
+ *
+ * @param sizes The square icon sizes to generate.
+ * @return One pixmap for each requested size, in the same order.
+ */
 internal fun toSniPixmaps(image: BufferedImage, sizes: IntArray = SNI_ICON_SIZES): List<SniPixmap> =
     sizes.map { toSniPixmap(scaleToSquare(image, it)) }
 

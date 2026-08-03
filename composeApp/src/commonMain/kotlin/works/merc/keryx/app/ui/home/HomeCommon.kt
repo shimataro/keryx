@@ -80,13 +80,13 @@ fun groupFeedsByFolder(feeds: List<Feeds>, folders: List<Folders>): List<Pair<Fo
 }
 
 /**
-     * Selects feeds associated with the specified tag while preserving their input order.
-     *
-     * @param feeds The feeds to filter.
-     * @param feedTagMap A mapping from feed IDs to their associated tag IDs.
-     * @param tagId The tag ID to match.
-     * @return The feeds associated with [tagId].
-     */
+ * Selects feeds associated with the specified tag while preserving their input order.
+ *
+ * @param feeds The feeds to filter.
+ * @param feedTagMap A mapping from feed IDs to their associated tag IDs.
+ * @param tagId The tag ID to match.
+ * @return The feeds associated with [tagId].
+ */
 fun feedsForTag(feeds: List<Feeds>, feedTagMap: Map<String, Set<String>>, tagId: String): List<Feeds> =
     feeds.filter { tagId in (feedTagMap[it.id] ?: emptySet()) }
 
