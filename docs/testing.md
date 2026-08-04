@@ -96,12 +96,16 @@ Launch with `./gradlew :composeApp:run` and visually verify 3-pane UI, theme swi
   **stays** expanded after the drop — the same persisted state as a click on its chevron. Merely
   passing over the header on the way elsewhere does not expand it, and dragging a *folder* over
   another collapsed folder's header (a reorder gesture) never expands it either.
-- **(Linux)** On a real X11 session (KDE Plasma, the reference environment used elsewhere in this
-  section), drag a feed row and a folder header: the cursor shows the normal "move allowed" icon
-  for the entire gesture, from pick-up to drop, including while the pointer is anywhere outside the
-  list — the forbidden icon should never appear (X11 AWT discards Compose's drag ghost, so this
-  stock cursor is the only feedback there; see `LinuxDragCursorFix`). Repeat once on a Plasma
-  Wayland (XWayland) session if available.
+- **(Linux, X11)** On a real Plasma **X11** session (the reference environment used elsewhere in
+  this section), drag a feed row and a folder header: the cursor shows the normal "move allowed"
+  icon for the entire gesture, from pick-up to drop, including while the pointer is anywhere outside
+  the list — the forbidden icon should never appear (X11 AWT discards Compose's drag ghost, so this
+  stock cursor is the only feedback there; see `LinuxDragCursorFix`). Treat any regression here (the
+  forbidden icon reappearing) as a real bug.
+- **(Linux, Wayland)** On a Plasma **Wayland** (XWayland) session, the same drag is *expected* to
+  still show the forbidden icon throughout — this is a known XWayland/compositor limitation, not a
+  regression (see the "Linux Wayland/XWayland" entry in `docs/known-issues.md`). The drop itself
+  should still succeed normally; only re-investigate if the drop stops working, not the cursor icon.
 
 The parallel feed refresh's core concurrency (overlapping fetches + complete per-feed writes) is covered automatically by `refreshAllFetchesFeedsConcurrentlyAndAppliesEveryWrite`, and the no-revert guarantee by `refreshAllDoesNotRevertConcurrentUnsubscribe` / `refreshAllDoesNotRevertConcurrentReorder`. The genuinely visual / end-to-end parts still need eyeballs, so with a multi-feed subscription visually confirm:
 
