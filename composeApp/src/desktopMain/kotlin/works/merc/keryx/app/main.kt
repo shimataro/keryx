@@ -299,10 +299,10 @@ fun main(args: Array<String>) {
     }
 
     // Linux: X11 AWT doesn't support custom drag images, so Compose's own drag decoration is
-    // discarded and only AWT's stock move/no-drop cursors ever show — but some window managers fail
-    // to keep that automatic swap live for a whole intra-window drag, leaving it stuck on "no-drop"
-    // even though the drop still succeeds. Forcing the cursor from the already-computed drop action
-    // on every event keeps it in sync without changing which drops are accepted.
+    // discarded and only AWT's stock move/no-drop cursors ever show. AWT's computed drop action
+    // can't be trusted for Keryx's intra-window drags (the forbidden icon stuck around even after
+    // mirroring it), so this always shows the "allowed" cursor instead — Compose's own drop-target
+    // hit-testing decides acceptance independently of this native cursor either way.
     if (isLinux) LinuxDragCursorFix.install()
 
     application {

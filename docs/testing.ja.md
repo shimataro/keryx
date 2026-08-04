@@ -80,7 +80,7 @@ App Key 空チェックで即エラーになる分岐のみ `OAuthConnectFlowTes
 `dragAndDropTarget`）もテスト不可。`LinuxDragCursorFix` の `DragSourceListener` コールバック
 （`dragEnter`/`dragOver`/`dropActionChanged`/`dragExit`）も、実際の AWT `DragSourceDragEvent`/
 `DragSourceEvent` をテストコードから生成できないという同じ理由で不可であり、委譲先の純粋関数
-`cursorForDropAction` のみをカバーする（`LinuxDragCursorFixTest`）。並び替えの計算ロジック自体（`ReorderUtil.reorderIds`）と、それを使う
+`dragCursor()` のみをカバーする（`LinuxDragCursorFixTest`）。並び替えの計算ロジック自体（`ReorderUtil.reorderIds`）と、それを使う
 `FeedRepository.moveFeed`/`FolderRepository.reorderFolders` の DB 反映は通常どおりテストする。
 Linux の SNI トレイでは `SniConnection`（接続・バス名取得・export・登録・再登録・close）が
 実セッションバスと稼働中の `org.kde.StatusNotifierWatcher` を必要とするため CI では不可。同様に
@@ -112,11 +112,11 @@ Linux の SNI トレイでは `SniConnection`（接続・バス名取得・expor
   （フォルダー所属や他のタグは変わらない）。そのフィードをタグ一覧からフォルダーや別のタグへ
   ドラッグして移動/付与できること。
 - **(Linux)** 実際の X11 セッション（このセクションの他項目と同じく KDE Plasma を基準環境とする）で
-  フィード行とフォルダーヘッダーをドラッグし、リスト内の有効なドロップ位置をホバーしている間は
-  禁止アイコンで固まらず通常の「移動可」カーソルが表示されること（X11 AWT では Compose のドラッグ
-  ゴーストが破棄されるため、この標準カーソルだけが唯一のフィードバックになる。`LinuxDragCursorFix`
-  を参照）。リストの外へドラッグした場合は従来どおり禁止アイコンになること。可能であれば Plasma
-  Wayland（XWayland）セッションでも一度確認する。
+  フィード行とフォルダーヘッダーをドラッグし、つかんでからドロップするまでの間（リストの外に
+  ポインターがある間も含む）ずっと禁止アイコンにならず通常の「移動可」カーソルが表示され続けること
+  （X11 AWT では Compose のドラッグゴーストが破棄されるため、この標準カーソルだけが唯一の
+  フィードバックになる。`LinuxDragCursorFix` を参照）。可能であれば Plasma Wayland（XWayland）
+  セッションでも一度確認する。
 
 並行フィード更新（並行取得＋直列書き込み、`FeedRepository.refreshAll`）の中核となる並行動作
 （取得のオーバーラップとフィードごとの書き込み完全性）は `refreshAllFetchesFeedsConcurrentlyAndAppliesEveryWrite` が、

@@ -2,7 +2,6 @@ package works.merc.keryx.app.platform
 
 import works.merc.keryx.app.core.Log
 import java.awt.Cursor
-import java.awt.dnd.DnDConstants
 import java.awt.dnd.DragSource
 import java.awt.dnd.DragSourceDragEvent
 import java.awt.dnd.DragSourceDropEvent
@@ -12,21 +11,26 @@ import java.awt.dnd.DragSourceListener
 private const val LOG_TAG = "DragCursor"
 
 /**
- * Keeps the native drag cursor in sync on Linux, where the feed list's drag gestures would
- * otherwise appear to be rejected.
+ * Keeps the native drag cursor showing "allowed" throughout Linux feed/folder drags, which would
+ * otherwise appear stuck on the forbidden icon for the whole gesture.
  *
  * X11 AWT reports no drag-image support (`Toolkit.isDragImageSupported()` is `false`), so Compose's
  * own drag decoration is discarded and the only feedback left is AWT's pair of stock cursors
- * ([DragSource.DefaultMoveDrop] / [DragSource.DefaultMoveNoDrop]). For an intra-window drag — a feed
- * or folder row dragged within the same list — some window managers fail to keep AWT's automatic
- * swap between those two live for the whole gesture, so it can stay stuck on the forbidden
- * "no-drop" icon even though the drop itself still succeeds.
+ * ([DragSource.DefaultMoveDrop] / [DragSource.DefaultMoveNoDrop]), normally swapped automatically
+ * based on the drop action AWT computes as the pointer moves. For Keryx's drags — always
+ * intra-window, a feed or folder row dragged within the same list — that computed action cannot be
+ * trusted on Linux: it was tried (mirroring it into `setCursor()`) and the forbidden icon still
+ * showed for the entire gesture, meaning AWT's X11 peer treats these drags as rejected throughout,
+ * not merely a repaint that fails to keep up with a correctly-computed "accepted" state.
  *
- * Per `DragSourceContext`'s own contract, calling `setCursor()` once turns off that automatic
- * handling for the rest of the gesture and makes the caller responsible for it — which is exactly
- * what this listener then does, deriving the cursor from the drop action AWT has already computed
- * for each event. Compose's `DragAndDropTarget` hit-testing is independent of this native cursor
- * state, so **this changes nothing about which drops are accepted** — only which icon is painted.
+ * Compose's own `DragAndDropTarget` hit-testing (`FeedListPane.kt`/`FeedListDragAndDrop.kt`) decides
+ * drop acceptance entirely independently of this native cursor — that's already why the drop keeps
+ * succeeding even while the wrong icon shows — so it is safe to simply never show the forbidden
+ * icon at all: it would never reflect anything true here anyway.
+ *
+ * Per `DragSourceContext`'s own contract, calling `setCursor()` once turns off AWT's automatic
+ * cursor handling for the rest of the gesture and makes the caller responsible for it, which is
+ * what makes this override possible.
  *
  * Installed on [DragSource.getDefaultDragSource], the process-wide singleton every
  * `dragAndDropSource` gesture is exported through, so it needs no teardown at exit.
@@ -40,35 +44,25 @@ internal object LinuxDragCursorFix : DragSourceListener {
     }
 
     override fun dragEnter(dsde: DragSourceDragEvent) {
-        dsde.dragSourceContext.cursor = cursorForDropAction(dsde.dropAction)
+        dsde.dragSourceContext.cursor = dragCursor()
     }
 
     override fun dragOver(dsde: DragSourceDragEvent) {
-        dsde.dragSourceContext.cursor = cursorForDropAction(dsde.dropAction)
+        dsde.dragSourceContext.cursor = dragCursor()
     }
 
     override fun dropActionChanged(dsde: DragSourceDragEvent) {
-        dsde.dragSourceContext.cursor = cursorForDropAction(dsde.dropAction)
+        dsde.dragSourceContext.cursor = dragCursor()
     }
 
-    /**
-     * Leaving a drop target means nothing is currently eligible. [DragSourceEvent] carries no drop
-     * action, so the forbidden cursor is set directly rather than derived.
-     */
+    /** Still the same Keryx-internal gesture while the pointer is outside the list, so no forbidden icon here either. */
     override fun dragExit(dse: DragSourceEvent) {
-        dse.dragSourceContext.cursor = DragSource.DefaultMoveNoDrop
+        dse.dragSourceContext.cursor = dragCursor()
     }
 
     /** Nothing to restore: AWT tears the native drag session down on its own. */
     override fun dragDropEnd(dsde: DragSourceDropEvent) = Unit
 }
 
-/**
- * Maps an AWT drop action to the cursor that represents it.
- *
- * @param dropAction The drop action AWT computed for the current event.
- * @return [DragSource.DefaultMoveDrop] for any action that would accept a drop,
- *   [DragSource.DefaultMoveNoDrop] for [DnDConstants.ACTION_NONE].
- */
-internal fun cursorForDropAction(dropAction: Int): Cursor =
-    if (dropAction != DnDConstants.ACTION_NONE) DragSource.DefaultMoveDrop else DragSource.DefaultMoveNoDrop
+/** The cursor shown for the entire duration of a Keryx feed/folder drag on Linux. */
+internal fun dragCursor(): Cursor = DragSource.DefaultMoveDrop
