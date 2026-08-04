@@ -13,11 +13,9 @@ import io.ktor.http.contentType
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.ONEDRIVE_GRAPH_BASE
 import works.merc.keryx.app.core.Result
-import works.merc.keryx.app.core.SyncConflictException
 
 /**
  * [CloudStorage] backed by the Microsoft Graph API, storing the sync DB in
@@ -40,14 +38,17 @@ class OneDriveStorage(
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) : CloudStorage {
 
+    /**
+     * Verifies access to the OneDrive app folder.
+     *
+     * @return A successful result when access is authorized or the app folder has not been provisioned; otherwise, a mapped storage error.
+     */
     override suspend fun authenticate(): Result<Unit> = withToken { token ->
         val response = client.get(appRootUrl) { header("Authorization", "Bearer $token") }
-        when {
-            response.status.value in 200..299 -> Result.Ok(Unit)
+        when (response.status.value) {
+            in 200..299 -> Result.Ok(Unit)
             // The token is valid but the app folder has not been provisioned yet — still connected.
-            response.status.value == 404 -> Result.Ok(Unit)
-            response.status.value in setOf(401, 403) ->
-                Result.Err(CloudAuthException("Authentication failed"))
+            404 -> Result.Ok(Unit)
             else -> mapError(response.status.value, response.bodyAsText())
         }
     }
@@ -81,6 +82,14 @@ class OneDriveStorage(
         Result.Ok(CloudFile(content.readRawBytes(), eTag))
     }
 
+    /**
+     * Uploads file content to OneDrive, optionally requiring a matching revision.
+     *
+     * @param path The path of the file to upload.
+     * @param data The file content.
+     * @param expectedRev The required current revision, or `null` to upload without revision checking.
+     * @return A result indicating whether the upload succeeded or encountered a revision conflict.
+     */
     override suspend fun upload(
         path: String,
         data: ByteArray,
@@ -92,14 +101,17 @@ class OneDriveStorage(
             contentType(ContentType.Application.OctetStream)
             setBody(data)
         }
-        when {
-            response.status.value in 200..299 -> Result.Ok(Unit)
-            // If-Match no longer matches — another device wrote first.
-            response.status.value == 412 -> Result.Err(SyncConflictException())
-            else -> mapError(response.status.value, response.bodyAsText())
-        }
+        // If-Match no longer matches — another device wrote first.
+        response.okOrConflictOr("OneDrive", conflictStatus = 412)
     }
 
+    /**
+     * Creates a file at the specified path without overwriting an existing file.
+     *
+     * @param path The file path within the OneDrive app folder.
+     * @param data The file content.
+     * @return A successful result when the file is created, or a conflict result when a file already exists.
+     */
     override suspend fun create(path: String, data: ByteArray): Result<Unit> = withToken { token ->
         // conflictBehavior=fail is Graph's native create-only: an existing file yields 409
         // instead of being overwritten, which we surface as a conflict so the caller falls back
@@ -110,13 +122,17 @@ class OneDriveStorage(
             contentType(ContentType.Application.OctetStream)
             setBody(data)
         }
-        when {
-            response.status.value in 200..299 -> Result.Ok(Unit)
-            response.status.value == 409 -> Result.Err(SyncConflictException())
-            else -> mapError(response.status.value, response.bodyAsText())
-        }
+        response.okOrConflictOr("OneDrive", conflictStatus = 409)
     }
 
+    /**
+     * Deletes the file at the specified path.
+     *
+     * Treats an already absent file as a successful deletion.
+     *
+     * @param path The path of the file to delete.
+     * @return A successful result when the file is deleted or already absent; otherwise, the mapped storage error.
+     */
     override suspend fun delete(path: String): Result<Unit> = withToken { token ->
         val response = client.delete(itemUrl(path)) { header("Authorization", "Bearer $token") }
         when {
@@ -143,12 +159,12 @@ class OneDriveStorage(
     }
 
     /**
-         * Executes an operation with an available OneDrive access token.
-         *
-         * @param block The operation to execute with the access token.
-         * @return The result produced by the operation.
-         */
-        private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> =
+     * Executes an operation with an available OneDrive access token.
+     *
+     * @param block The operation to execute with the access token.
+     * @return The result produced by the operation.
+     */
+    private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> =
         withCloudToken(accessTokenProvider, "OneDrive", block)
 
     /**

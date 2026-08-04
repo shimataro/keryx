@@ -26,7 +26,7 @@ composeApp/src/
     ui/           theme/, navigation/, setup/, home/（3ペイン + 検索 + 通知センター）, article/, settings/, i18n/
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq（7 テーブル）
   commonMain/composeResources/  values/strings.xml, drawable/
-  desktopMain/kotlin/…/  main.kt + 各 expect の actual（DatabaseDriverFactory, AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, Pkce, PlatformModule）+ OAuthConnectFlow, OAuthRedirectTransport（CustomUri/Loopback）, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）, DesktopOs（isMacOs/isWindows/isLinux）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf）
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（起動時/バックグラウンドタスク関数群）+ 各 expect の actual（DatabaseDriverFactory, AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, Pkce, PlatformModule）+ OAuthConnectFlow, OAuthRedirectTransport（CustomUri/Loopback）, OAuthUriParser, LaunchArg, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）, DesktopOs（isMacOs/isWindows/isLinux）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf）
     tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray + StatusNotifierItem/dbusmenu の D-Bus オブジェクト
   commonTest/ + desktopTest/
 ```

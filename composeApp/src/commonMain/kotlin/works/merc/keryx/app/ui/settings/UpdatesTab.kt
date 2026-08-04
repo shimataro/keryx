@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,6 +23,7 @@ import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.SegmentedControl
+import works.merc.keryx.app.ui.common.SmallSpinner
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.settings_update_check_3days
 import works.merc.keryx.app.resources.settings_update_check_available
@@ -42,6 +42,11 @@ import works.merc.keryx.app.resources.settings_update_open_release_page
  * An update check is started when the content opens if no result is available.
  *
  * @param vm The view model providing update settings, status, and actions.
+ */
+/**
+ * Displays update settings and the current update-check status.
+ *
+ * @param vm The view model that provides update settings, status, and actions.
  */
 @Composable
 internal fun UpdatesTabContent(vm: SettingsViewModel) {
@@ -74,7 +79,7 @@ internal fun UpdatesTabContent(vm: SettingsViewModel) {
         FlatTonalButton(onClick = { vm.checkForUpdate() }, enabled = !vm.checkingForUpdate) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (vm.checkingForUpdate) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    SmallSpinner()
                 } else {
                     KeryxIcon(
                         KeryxIcons.Update,

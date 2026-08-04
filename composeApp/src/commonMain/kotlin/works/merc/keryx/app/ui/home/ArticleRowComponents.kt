@@ -61,9 +61,6 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
 
 /**
  * Displays the notifications button, unread notification count, and notification popup.
- */
-/**
- * Displays the notifications button and opens the notification center popup when selected.
  *
  * @param notifVm The view model providing notification items and handling notification actions.
  */

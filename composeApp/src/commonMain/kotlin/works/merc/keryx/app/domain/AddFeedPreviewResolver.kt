@@ -1,11 +1,11 @@
-package works.merc.keryx.app.ui.home
+package works.merc.keryx.app.domain
 
 import works.merc.keryx.app.core.DiscoveredFeedLink
 import works.merc.keryx.app.core.FeedDiscoveryException
 import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.remote.UrlResolver
-import works.merc.keryx.app.domain.FeedRepository
 
 /** Outcome of [AddFeedPreviewResolver.resolvePreview] for the add-feed dialog. */
 sealed interface AddFeedPreview {
@@ -23,12 +23,12 @@ sealed interface AddFeedPreview {
 data class SubscribeOutcome(val successCount: Int, val failCount: Int, val firstError: KeryxException?)
 
 /**
-     * Determines whether the add-feed dialog can enable the subscribe action.
-     *
-     * @param preview The current feed preview state.
-     * @param selectedCandidates The feed URLs selected from a multiple-feed preview.
-     * @return `true` if subscription is available for the preview, `false` otherwise.
-     */
+ * Determines whether the add-feed dialog can enable the subscribe action.
+ *
+ * @param preview The current feed preview state.
+ * @param selectedCandidates The feed URLs selected from a multiple-feed preview.
+ * @return `true` if subscription is available for the preview, `false` otherwise.
+ */
 fun addFeedCanSubscribe(preview: AddFeedPreview?, selectedCandidates: Set<String>): Boolean =
     when (preview) {
         is AddFeedPreview.Single -> true
@@ -36,7 +36,20 @@ fun addFeedCanSubscribe(preview: AddFeedPreview?, selectedCandidates: Set<String
         else -> false
     }
 
-/** Preview/subscribe orchestration for the add-feed dialog, split out of [HomeViewModel] to keep its surface smaller. */
+/**
+ * Determines whether the entered URL (after scheme normalization) already appears in [feeds].
+ *
+ * @param url The feed URL entered by the user.
+ * @param feeds The current subscriptions to check against.
+ * @return `true` if [url] matches an existing subscription, `false` otherwise.
+ */
+fun addFeedAlreadySubscribed(url: String, feeds: List<Feeds>): Boolean =
+    url.isNotBlank() && feeds.any { it.url == UrlResolver.withDefaultScheme(url) }
+
+/**
+ * Preview/subscribe orchestration for the add-feed dialog, split out of `HomeViewModel` to keep
+ * its surface smaller.
+ */
 class AddFeedPreviewResolver(private val feedRepository: FeedRepository) {
     /**
      * Previews [rawUrl] and maps the outcome for the add-feed dialog. Handles scheme resolution

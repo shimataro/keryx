@@ -33,17 +33,17 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.FEED_LIST_PANE_MAX_WIDTH
 import works.merc.keryx.app.core.FEED_LIST_PANE_MIN_WIDTH
-import works.merc.keryx.app.core.MAX_REMEMBERED_SCROLL_POSITIONS
 import works.merc.keryx.app.core.searchTerms
 import works.merc.keryx.app.core.decodeArticleFilter
 import works.merc.keryx.app.core.encode
 import works.merc.keryx.app.core.valueOrNull
-import works.merc.keryx.app.data.local.ArticleScrollPosition
 import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.ActivityCenter
+import works.merc.keryx.app.domain.AddFeedPreview
+import works.merc.keryx.app.domain.AddFeedPreviewResolver
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.ArticleSearchResult
 import works.merc.keryx.app.domain.CloudSession
@@ -52,6 +52,7 @@ import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.NotificationMessages
 import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.domain.SubscribeOutcome
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
 
@@ -343,12 +344,15 @@ class HomeViewModel(
 
     // --- Article scroll position memory ---
 
-    private val _scrollPositions = MutableStateFlow(
-        settingsRepository.getLocalSettings().recentArticleScrollPositions,
-    )
+    private val scrollPositionStore = ArticleScrollPositionStore(settingsRepository)
 
-    fun getScrollPosition(articleId: String): Int =
-        _scrollPositions.value.firstOrNull { it.articleId == articleId }?.scrollOffset ?: 0
+    /**
+ * Gets the saved scroll position for an article.
+ *
+ * @param articleId The identifier of the article.
+ * @return The saved scroll offset, or the default position when none is stored.
+ */
+fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPosition(articleId)
 
     /**
      * Saves the scroll offset for an article and retains only the most recent remembered positions.
@@ -356,14 +360,7 @@ class HomeViewModel(
      * @param articleId The identifier of the article.
      * @param offset The article's scroll offset.
      */
-    fun saveScrollPosition(articleId: String, offset: Int) {
-        val updated = (
-            listOf(ArticleScrollPosition(articleId, offset)) +
-                _scrollPositions.value.filter { it.articleId != articleId }
-            ).take(MAX_REMEMBERED_SCROLL_POSITIONS)
-        _scrollPositions.value = updated
-        settingsRepository.mutateLocalSettings { it.copy(recentArticleScrollPositions = updated) }
-    }
+    fun saveScrollPosition(articleId: String, offset: Int) = scrollPositionStore.saveScrollPosition(articleId, offset)
 
     init {
         // Restore the last-selected article (not via selectArticle(), to avoid re-marking it as
@@ -581,7 +578,7 @@ class HomeViewModel(
     }
 
     /**
-     * Toggles the article sort order and persists the updated preference.
+     * Toggles between newest-first and oldest-first article ordering.
      */
     fun toggleSort() {
         _newestFirst.value = !_newestFirst.value
@@ -589,11 +586,11 @@ class HomeViewModel(
     }
 
     /**
-             * Retrieves the last focused home pane from local settings.
-             *
-             * @return The previously focused pane, or [HomePane.ArticleList] when no valid saved pane exists.
-             */
-            fun getInitialFocusedPane(): HomePane =
+     * Retrieves the last focused home pane from local settings.
+     *
+     * @return The previously focused pane, or [HomePane.ArticleList] when no valid saved pane exists.
+     */
+    fun getInitialFocusedPane(): HomePane =
         settingsRepository.getLocalSettings().lastFocusedPane
             ?.let { raw -> HomePane.entries.firstOrNull { it.name == raw } }
             ?: HomePane.ArticleList
@@ -759,7 +756,7 @@ class HomeViewModel(
     }
 
     /**
-     * Deletes a tag and removes it from the expanded-tag state.
+     * Deletes a tag and resets the active filter if it references the deleted tag.
      *
      * @param id The identifier of the tag to delete.
      */
@@ -771,13 +768,13 @@ class HomeViewModel(
     }
 
     /**
-         * Updates whether a feed is associated with a tag.
-         *
-         * @param feedId The ID of the feed.
-         * @param tagId The ID of the tag.
-         * @param attached Whether the tag should be associated with the feed.
-         */
-        fun setFeedTag(feedId: String, tagId: String, attached: Boolean) =
+     * Updates whether a feed is associated with a tag.
+     *
+     * @param feedId The ID of the feed.
+     * @param tagId The ID of the tag.
+     * @param attached Whether the tag should be associated with the feed.
+     */
+    fun setFeedTag(feedId: String, tagId: String, attached: Boolean) =
         tagRepository.setFeedTag(feedId, tagId, attached)
 
     // --- Folder actions ---
@@ -805,22 +802,22 @@ class HomeViewModel(
     }
 
     /**
-         * Moves a feed into a folder and optionally positions it relative to another feed.
-         *
-         * @param feedId The identifier of the feed to move.
-         * @param folderId The destination folder identifier, or `null` to remove the feed from a folder.
-         * @param targetFeedId The identifier of the feed to position the moved feed relative to, or `null` to use the default position.
-         */
-        fun moveFeed(feedId: String, folderId: String?, targetFeedId: String? = null) =
+     * Moves a feed into a folder and optionally positions it relative to another feed.
+     *
+     * @param feedId The identifier of the feed to move.
+     * @param folderId The destination folder identifier, or `null` to remove the feed from a folder.
+     * @param targetFeedId The identifier of the feed to position the moved feed relative to, or `null` to use the default position.
+     */
+    fun moveFeed(feedId: String, folderId: String?, targetFeedId: String? = null) =
         feedRepository.moveFeed(feedId, folderId, targetFeedId)
 
     /**
-         * Reorders a folder relative to the specified target folder.
-         *
-         * @param draggedFolderId The identifier of the folder being moved.
-         * @param targetFolderId The identifier of the folder to move before, or `null` to move to the end.
-         */
-        fun reorderFolders(draggedFolderId: String, targetFolderId: String?) =
+     * Reorders a folder relative to the specified target folder.
+     *
+     * @param draggedFolderId The identifier of the folder being moved.
+     * @param targetFolderId The identifier of the folder to move before, or `null` to move to the end.
+     */
+    fun reorderFolders(draggedFolderId: String, targetFolderId: String?) =
         folderRepository.reorderFolders(draggedFolderId, targetFolderId)
 }
 

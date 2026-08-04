@@ -59,13 +59,14 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  * dismiss the popover, both so the destination is visible and because this popup dismisses on focus
  * loss (anything it opened would go with it).
  *
+ * @param vm The view model providing notifications and handling notification actions.
  * @param onNavigated Called after any row action, so the caller can close the popover.
  */
 /**
- * Displays the notification center panel and its available actions.
+ * Displays the notification center sheet with available notifications and dismissal controls.
  *
- * @param vm The view model providing notifications and handling notification actions.
- * @param onNavigated Called after a notification action navigates to another destination.
+ * @param vm The view model that provides notifications and handles dismissal and action requests.
+ * @param onNavigated Called after any notification row action is handled.
  */
 @Composable
 fun NotificationCenterSheet(vm: NotificationCenterViewModel, onNavigated: () -> Unit = {}) {

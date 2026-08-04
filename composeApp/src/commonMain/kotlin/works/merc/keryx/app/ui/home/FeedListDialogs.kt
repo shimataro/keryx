@@ -38,9 +38,6 @@ import works.merc.keryx.app.ui.common.KeryxAlertDialog
  * The feed-list sidebar's modal dialogs: add/edit/delete tag, add/edit/delete folder, rename feed,
  * and confirm-unsubscribe. Split out of `FeedListPane` — each `on*Change` callback mirrors the
  * `var x by remember { mutableStateOf(...) }` state it replaces there, so behavior is unchanged.
- */
-/**
- * Displays modal dialogs for managing feed-list tags, folders, and feeds.
  *
  * @param tags The tags used for duplicate-name validation.
  * @param folders The folders used for duplicate-name validation.

@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,6 +26,7 @@ import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.SegmentedControl
+import works.merc.keryx.app.ui.common.SmallSpinner
 import works.merc.keryx.app.ui.i18n.opmlImportedText
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.settings_cache
@@ -106,7 +106,7 @@ internal fun DataTabContent(vm: SettingsViewModel) {
                 FlatTonalButton(onClick = { vm.importOpml() }, enabled = !opmlBusy) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (vm.importingOpml) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            SmallSpinner(size = 18.dp)
                         } else {
                             KeryxIcon(
                                 KeryxIcons.FileDownload,
@@ -122,7 +122,7 @@ internal fun DataTabContent(vm: SettingsViewModel) {
                 FlatTonalButton(onClick = { vm.exportOpml() }, enabled = !opmlBusy) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (vm.exportingOpml) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            SmallSpinner(size = 18.dp)
                         } else {
                             KeryxIcon(
                                 KeryxIcons.FileUpload,

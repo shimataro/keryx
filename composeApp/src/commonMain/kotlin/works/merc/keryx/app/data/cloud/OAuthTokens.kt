@@ -2,6 +2,7 @@ package works.merc.keryx.app.data.cloud
 
 import io.ktor.client.HttpClient
 import io.ktor.client.request.forms.submitForm
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.Parameters
 import kotlinx.coroutines.CancellationException
@@ -11,6 +12,7 @@ import kotlinx.serialization.json.Json
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.core.TOKEN_EXPIRY_SKEW_MS
 
 /**
  * OAuth 2.0 tokens for a cloud storage provider (Dropbox, Google Drive, …). We
@@ -26,13 +28,13 @@ data class OAuthTokens(
     val expiresAtMillis: Long? = null,
 ) {
     /**
-         * Determines whether the token has expired, accounting for the configured clock skew.
-         *
-         * @param nowMillis The current Unix time in milliseconds.
-         * @param skewMillis The time interval in milliseconds used to account for clock skew.
-         * @return `true` if an expiration time is set and the current time is at or after the adjusted expiration time, `false` otherwise.
-         */
-        fun isExpired(nowMillis: Long, skewMillis: Long = 60_000): Boolean =
+     * Determines whether the token has expired, accounting for the configured clock skew.
+     *
+     * @param nowMillis The current Unix time in milliseconds.
+     * @param skewMillis The time interval in milliseconds used to account for clock skew.
+     * @return `true` if an expiration time is set and the current time is at or after the adjusted expiration time, `false` otherwise.
+     */
+    fun isExpired(nowMillis: Long, skewMillis: Long = TOKEN_EXPIRY_SKEW_MS): Boolean =
         expiresAtMillis != null && nowMillis >= expiresAtMillis - skewMillis
 }
 
@@ -84,4 +86,23 @@ internal suspend fun requestOAuthTokens(
     throw e
 } catch (e: Throwable) {
     Result.Err(CloudAuthException(e.message ?: "Token request failed"))
+}
+
+/**
+ * Sends a revoke request built by [makeRequest] and maps the outcome to a [Result].
+ *
+ * @param makeRequest Performs the provider-specific revoke HTTP call.
+ * @return `Result.Ok` on a 2xx response, or a [CloudAuthException] on failure.
+ */
+internal suspend fun revokeOAuthToken(makeRequest: suspend () -> HttpResponse): Result<Unit> = try {
+    val response = makeRequest()
+    if (response.status.value in 200..299) {
+        Result.Ok(Unit)
+    } else {
+        Result.Err(CloudAuthException("Revoke failed (HTTP ${response.status.value})"))
+    }
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Throwable) {
+    Result.Err(CloudAuthException(e.message ?: "Revoke failed"))
 }

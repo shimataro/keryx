@@ -13,10 +13,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.Result
-import works.merc.keryx.app.core.SyncConflictException
 
 /**
  * [CloudStorage] backed by the Dropbox v2 REST API. [accessTokenProvider]
@@ -32,18 +30,24 @@ class DropboxStorage(
     private val apiBase = "https://api.dropboxapi.com"
     private val contentBase = "https://content.dropboxapi.com"
 
+    /**
+     * Authenticates the configured Dropbox account.
+     *
+     * @return A successful result when authentication succeeds, or a mapped storage error otherwise.
+     */
     override suspend fun authenticate(): Result<Unit> = withToken { token ->
         val response = client.post("$apiBase/2/users/get_current_account") {
             header("Authorization", "Bearer $token")
         }
-        when {
-            response.status.value in 200..299 -> Result.Ok(Unit)
-            response.status.value in setOf(401, 403) ->
-                Result.Err(CloudAuthException("Authentication failed"))
-            else -> Result.Err(CloudStorageException("HTTP ${response.status.value}"))
-        }
+        if (response.status.value in 200..299) Result.Ok(Unit) else mapError(response.status.value, response.bodyAsText())
     }
 
+    /**
+     * Downloads a file and its Dropbox revision metadata.
+     *
+     * @param path The path of the file to download.
+     * @return A result containing the file data and revision, or a storage error.
+     */
     override suspend fun download(path: String): Result<CloudFile> = withToken { token ->
         val response = client.post("$contentBase/2/files/download") {
             header("Authorization", "Bearer $token")
@@ -60,6 +64,14 @@ class DropboxStorage(
         Result.Ok(CloudFile(response.readRawBytes(), rev))
     }
 
+    /**
+     * Uploads file data to Dropbox, optionally requiring a specific revision.
+     *
+     * @param path The Dropbox path for the file.
+     * @param data The file contents.
+     * @param expectedRev The revision that must currently exist for the update to succeed, or `null` to overwrite.
+     * @return A successful result, a conflict result when the expected revision is stale, or a mapped failure.
+     */
     override suspend fun upload(
         path: String,
         data: ByteArray,
@@ -82,14 +94,17 @@ class DropboxStorage(
             contentType(ContentType.Application.OctetStream)
             setBody(data)
         }
-        when {
-            response.status.value in 200..299 -> Result.Ok(Unit)
-            // A rev-guarded update that loses the race returns 409 (conflict).
-            response.status.value == 409 -> Result.Err(SyncConflictException())
-            else -> mapError(response.status.value, response.bodyAsText())
-        }
+        // A rev-guarded update that loses the race returns 409 (conflict).
+        response.okOrConflictOr("Dropbox", conflictStatus = 409)
     }
 
+    /**
+     * Creates a new file at the specified path without overwriting an existing file.
+     *
+     * @param path The Dropbox path where the file will be created.
+     * @param data The file contents.
+     * @return A successful result when the file is created, or an error result for failures including an existing file conflict.
+     */
     override suspend fun create(path: String, data: ByteArray): Result<Unit> = withToken { token ->
         // WriteMode "add" is create-only: if the file already exists Dropbox returns 409
         // (with autorename=false it does not silently create a copy), which we surface as a
@@ -106,13 +121,15 @@ class DropboxStorage(
             contentType(ContentType.Application.OctetStream)
             setBody(data)
         }
-        when {
-            response.status.value in 200..299 -> Result.Ok(Unit)
-            response.status.value == 409 -> Result.Err(SyncConflictException())
-            else -> mapError(response.status.value, response.bodyAsText())
-        }
+        response.okOrConflictOr("Dropbox", conflictStatus = 409)
     }
 
+    /**
+     * Determines whether a file exists at the specified path.
+     *
+     * @param path The Dropbox path to check.
+     * @return `true` if the file exists, `false` if the path is not found, or an error result for other failures.
+     */
     override suspend fun exists(path: String): Result<Boolean> = withToken { token ->
         val response = client.post("$apiBase/2/files/get_metadata") {
             header("Authorization", "Bearer $token")
@@ -154,12 +171,12 @@ class DropboxStorage(
     }
 
     /**
-         * Executes an operation with a valid Dropbox access token.
-         *
-         * @param block The operation to execute with the access token.
-         * @return The result produced by the operation.
-         */
-        private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> =
+     * Executes an operation with a valid Dropbox access token.
+     *
+     * @param block The operation to execute with the access token.
+     * @return The result produced by the operation.
+     */
+    private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> =
         withCloudToken(accessTokenProvider, "Dropbox", block)
 
     /**

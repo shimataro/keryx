@@ -63,25 +63,21 @@ internal class LinuxOpmlAssociationRegistrar(
     },
 ) {
     /**
-     * Registers the Linux handler for `.opml` files.
+     * Registers Keryx as the Linux handler for `.opml` files.
      *
-     * @return `true` if registration succeeds or is already up to date, `false` if registration fails.
+     * @return `true` if registration succeeds or is already current, `false` otherwise.
      */
     fun register(): Boolean = runCatching {
         val desktopFile = File(applicationsDir, OPML_HANDLER_DESKTOP_FILE)
         val entry = desktopEntryContent(launcherPath, OPML_DESKTOP_MIME_TYPES.joinToString(";"), "%f")
         var changed = false
 
-        if (readOrNull(desktopFile) != entry) {
-            writeAtomically(desktopFile, entry)
-            changed = true
-        }
+        if (writeIfChanged(desktopFile, entry)) changed = true
 
         val mimePackageFile = File(mimePackagesDir, OPML_MIME_PACKAGE_FILE)
         val mimePackage = opmlMimePackageContent()
         var mimeDatabaseChanged = false
-        if (readOrNull(mimePackageFile) != mimePackage) {
-            writeAtomically(mimePackageFile, mimePackage)
+        if (writeIfChanged(mimePackageFile, mimePackage)) {
             changed = true
             mimeDatabaseChanged = true
         }
@@ -91,10 +87,7 @@ internal class LinuxOpmlAssociationRegistrar(
         for (mimeType in OPML_DESKTOP_MIME_TYPES) {
             mergedAssociations = mergeMimeAppsList(mergedAssociations, OPML_HANDLER_DESKTOP_FILE, mimeType)
         }
-        if (mergedAssociations != existingAssociations) {
-            writeAtomically(mimeAppsList, mergedAssociations)
-            changed = true
-        }
+        if (writeIfChanged(mimeAppsList, mergedAssociations)) changed = true
 
         if (mimeDatabaseChanged) {
             // Not best-effort, unlike the desktop-database refresh below: application/x-opml+xml is a

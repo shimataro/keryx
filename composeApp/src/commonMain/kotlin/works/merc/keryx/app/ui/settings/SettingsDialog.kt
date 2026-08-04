@@ -37,8 +37,8 @@ import works.merc.keryx.app.resources.settings_updates
  * Displays the tabbed settings dialog.
  *
  * @param onDismiss Called when the dialog should be dismissed.
- * @param initialTabId ID of the tab to select initially, or the first available tab if it is unavailable.
- * @param tabRequestToken Changes to force selection of `initialTabId` to be reapplied.
+ * @param initialTabId The identifier of the tab to select initially.
+ * @param tabRequestToken Changes to this value reapply the initial tab selection.
  */
 @Composable
 fun SettingsDialog(onDismiss: () -> Unit, initialTabId: String = "general", tabRequestToken: Int = 0) {

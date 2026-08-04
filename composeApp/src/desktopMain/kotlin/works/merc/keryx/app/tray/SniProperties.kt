@@ -15,14 +15,19 @@ import org.freedesktop.dbus.types.Variant
  * branch dereferences it. The resulting NPE is answered as a generic `DBusExecutionException`,
  * so the lookup has to reject the miss itself. Shared by the two exported objects so their
  * error behaviour cannot drift apart.
+ *
+ * @param interfaceName The D-Bus interface containing the property.
+ * @param propertyName The name of the property to retrieve.
+ * @return The property value cast to the requested type.
+ * @throws UnknownProperty If the property is unavailable.
  */
 @Suppress("UNCHECKED_CAST")
 /**
-     * Retrieves a D-Bus property value or reports that the property is unavailable.
+     * Retrieves a named property and casts its value to the requested type.
      *
      * @param interfaceName The D-Bus interface containing the property.
      * @param propertyName The name of the property to retrieve.
-     * @return The property value cast to the requested type.
+     * @return The property's value cast to the requested type.
      * @throws UnknownProperty If the property is unavailable.
      */
     internal fun <A> Map<String, Variant<*>>.propertyOrThrow(interfaceName: String, propertyName: String): A =
@@ -43,13 +48,13 @@ import org.freedesktop.dbus.types.Variant
 @DBusInterfaceName("org.freedesktop.DBus.Properties")
 internal interface ReadOnlyDBusProperties : Properties {
     /**
-         * Retrieves a property value from the specified interface.
-         *
-         * @param interfaceName The D-Bus interface containing the property.
-         * @param propertyName The name of the property to retrieve.
-         * @return The property's value.
-         */
-        override fun <A : Any?> Get(interfaceName: String, propertyName: String): A =
+     * Retrieves a property value from the specified interface.
+     *
+     * @param interfaceName The D-Bus interface containing the property.
+     * @param propertyName The name of the property to retrieve.
+     * @return The property's value.
+     */
+    override fun <A : Any?> Get(interfaceName: String, propertyName: String): A =
         GetAll(interfaceName).propertyOrThrow(interfaceName, propertyName)
 
     /**

@@ -17,6 +17,7 @@ const val SQLITE_BUSY_TIMEOUT_MS = 5_000L
 
 // --- Time ---
 const val MILLIS_PER_DAY = 24 * 60 * 60 * 1000L
+const val MILLIS_PER_MINUTE = 60_000L
 
 /** Cloud file path/name for the synced DB (leading slash for Dropbox; the basename for Google Drive). */
 const val CLOUD_DB_PATH = "/keryx.db"
@@ -28,6 +29,12 @@ const val SYNC_DEBOUNCE_MS = 5_000L
 const val CONNECTION_TIMEOUT_MS = 10_000L
 const val READ_TIMEOUT_SECONDS_DEFAULT = 30
 const val MAX_REDIRECTS = 5 // redirect loop guard
+
+/** HTTP request timeout for the shared client (distinct from [CONNECTION_TIMEOUT_MS], the connect phase). */
+const val REQUEST_TIMEOUT_MS = 60_000L
+
+/** Clock-skew tolerance for [works.merc.keryx.app.data.cloud.OAuthTokens.isExpired]'s default. */
+const val TOKEN_EXPIRY_SKEW_MS = 60_000L
 
 /** How much of a cloud-storage HTTP error body to keep in a log/exception message. */
 const val CLOUD_ERROR_BODY_PREVIEW_LENGTH = 200

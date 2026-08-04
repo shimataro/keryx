@@ -23,7 +23,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlin.random.Random
-import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SyncConflictException
@@ -54,6 +53,11 @@ class GoogleDriveStorage(
     private val apiBase = "https://www.googleapis.com/drive/v3"
     private val uploadBase = "https://www.googleapis.com/upload/drive/v3"
 
+    /**
+     * Verifies access to the Google Drive app-data folder.
+     *
+     * @return A successful result when access is available; otherwise, a mapped storage error.
+     */
     override suspend fun authenticate(): Result<Unit> = withToken { token ->
         val response = client.get("$apiBase/files") {
             header("Authorization", "Bearer $token")
@@ -63,14 +67,15 @@ class GoogleDriveStorage(
                 parameters.append("fields", "files(id)")
             }
         }
-        when {
-            response.status.value in 200..299 -> Result.Ok(Unit)
-            response.status.value in setOf(401, 403) ->
-                Result.Err(CloudAuthException("Authentication failed"))
-            else -> mapError(response.status.value, response.bodyAsText())
-        }
+        if (response.status.value in 200..299) Result.Ok(Unit) else mapError(response.status.value, response.bodyAsText())
     }
 
+    /**
+     * Downloads the file identified by the basename of the specified path.
+     *
+     * @param path The path whose basename identifies the file.
+     * @return The file content and its Google Drive revision.
+     */
     override suspend fun download(path: String): Result<CloudFile> = withToken { token ->
         val file = when (val f = findFile(token, fileName(path))) {
             is Result.Err -> return@withToken f

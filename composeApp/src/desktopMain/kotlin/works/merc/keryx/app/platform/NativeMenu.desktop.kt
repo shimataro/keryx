@@ -250,11 +250,11 @@ internal data class SubMenuSignature(
 ) : MenuEntrySignature
 
 /**
-     * Creates a value-comparable representation of the menu's rendered content.
-     *
-     * @param items The menu entries to represent.
-     * @return The labels, checked states, and submenu contents of the menu.
-     */
+ * Creates a value-comparable representation of the menu's rendered content.
+ *
+ * @param items The menu entries to represent.
+ * @return The labels, checked states, and submenu contents of the menu.
+ */
 internal fun menuSignature(items: List<NativeMenuEntry>): List<MenuEntrySignature> =
     items.map { entry ->
         when (entry) {

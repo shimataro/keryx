@@ -10,7 +10,7 @@
 | Android | ✅ 概ね指定間隔 | WorkManager（予定） |
 | iOS | ⚠️ OS が実行タイミングを判断 | BGTaskScheduler（予定） |
 
-## デスクトップ実装（`desktopMain/main.kt`）
+## デスクトップ実装（`desktopMain/main.kt` + `StartupTasks.kt`）
 
 `main()` でアプリスコープのコルーチンを起動し、`refreshIntervalMinutes` の間隔でループする。以下は
 要約で、各周回のエラー処理と、独立した間隔で走るアップデート確認は省略している。

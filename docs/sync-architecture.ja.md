@@ -108,7 +108,7 @@
   実行中の検索を弾き得るため hot path では使わない。本文が更新された既存記事の索引は次の rebuild まで古いまま
   （許容。記事はなお旧トークンでヒットするので検索が 0 件に退行しない）。
 - **healing 用の全再構築（`rebuildIndex()` = `'rebuild'`）**:
-  `main.kt` の日次アイドル pass（`maybeRebuildFtsIndex`、`local_settings.lastFtsRebuiltAt` の 24h ゲート +
+  `StartupTasks.kt` の日次アイドル pass（`maybeRebuildFtsIndex`、`local_settings.lastFtsRebuiltAt` の 24h ゲート +
   `ActivityCenter` アイドル）でのみ実行。増分投入以降に本文が更新されて古くなった既存行を作り直す。
   `'rebuild'` は単一文で原子的（読み手は再構築前後どちらかを見るだけ）＋ `busy_timeout` で待つため、
   実行中の検索も 0 件にならない。

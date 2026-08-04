@@ -5,10 +5,8 @@ import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.http.URLBuilder
 import io.ktor.http.parameters
-import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import works.merc.keryx.app.core.Clock
-import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.DROPBOX_AUTHORIZE_ENDPOINT
 import works.merc.keryx.app.core.DROPBOX_REVOKE_ENDPOINT
 import works.merc.keryx.app.core.DROPBOX_TOKEN_ENDPOINT
@@ -58,6 +56,13 @@ class DropboxAuthManager(
         },
     )
 
+    /**
+     * Refreshes OAuth tokens using an existing refresh token.
+     *
+     * @param clientId The Dropbox application client ID.
+     * @param refreshToken The refresh token used to obtain new tokens.
+     * @return The refreshed OAuth tokens, preserving the supplied refresh token.
+     */
     override suspend fun refresh(clientId: String, refreshToken: String): Result<OAuthTokens> = tokenRequest(
         parameters {
             append("grant_type", "refresh_token")
@@ -67,19 +72,16 @@ class DropboxAuthManager(
         keepRefreshToken = refreshToken,
     )
 
-    override suspend fun revoke(accessToken: String): Result<Unit> = try {
-        val response = client.post(DROPBOX_REVOKE_ENDPOINT) {
+    /**
+     * Revokes a Dropbox access token.
+     *
+     * @param accessToken The access token to revoke.
+     * @return The result of the revocation request.
+     */
+    override suspend fun revoke(accessToken: String): Result<Unit> = revokeOAuthToken {
+        client.post(DROPBOX_REVOKE_ENDPOINT) {
             header("Authorization", "Bearer $accessToken")
         }
-        if (response.status.value in 200..299) {
-            Result.Ok(Unit)
-        } else {
-            Result.Err(CloudAuthException("Revoke failed (HTTP ${response.status.value})"))
-        }
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Throwable) {
-        Result.Err(CloudAuthException(e.message ?: "Revoke failed"))
     }
 
     /**

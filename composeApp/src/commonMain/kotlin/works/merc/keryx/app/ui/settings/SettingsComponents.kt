@@ -88,10 +88,10 @@ internal fun Section(title: String, content: @Composable () -> Unit) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 /**
- * Displays a clickable link with hover styling and a URL tooltip.
+ * Displays a clickable link with hover styling and a tooltip showing its URL.
  *
  * @param label The text displayed for the link.
- * @param url The URL opened when the link is clicked and shown in the tooltip.
+ * @param url The URL opened when the link is clicked.
  */
 @Composable
 internal fun LinkRow(label: String, url: String) {

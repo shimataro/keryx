@@ -39,6 +39,9 @@ import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.domain.ActivityCenter
+import works.merc.keryx.app.domain.AddFeedPreview
+import works.merc.keryx.app.domain.addFeedAlreadySubscribed
+import works.merc.keryx.app.domain.addFeedCanSubscribe
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
@@ -1902,6 +1905,18 @@ class HomeViewModelTest {
         assertTrue(addFeedCanSubscribe(single, emptySet()))
         assertFalse(addFeedCanSubscribe(multiple, emptySet()))
         assertTrue(addFeedCanSubscribe(multiple, setOf("https://ex.com/a")))
+    }
+
+    @Test
+    fun addFeedAlreadySubscribedMatchesExistingUrlAfterSchemeNormalization() {
+        db.insertFeed("f1", url = "https://feed/f1")
+        val feeds = db.feedsQueries.watchAll().executeAsList()
+
+        assertFalse(addFeedAlreadySubscribed("", feeds))
+        assertFalse(addFeedAlreadySubscribed("https://feed/other", feeds))
+        assertTrue(addFeedAlreadySubscribed("https://feed/f1", feeds))
+        // No scheme typed: withDefaultScheme prepends https:// before comparing.
+        assertTrue(addFeedAlreadySubscribed("feed/f1", feeds))
     }
 }
 

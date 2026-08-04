@@ -28,12 +28,12 @@ private const val DEFAULT_APPLICATIONS = "Default Applications"
 private const val ADDED_ASSOCIATIONS = "Added Associations"
 
 /**
-         * Selects an XDG base directory from an environment variable or a user-home fallback.
-         *
-         * @param envName The environment variable containing the directory path.
-         * @param homeRelativeFallback The path relative to the user's home directory when the environment variable is unset or blank.
-         * @return The selected base directory.
-         */
+ * Selects an XDG base directory from an environment variable or a user-home fallback.
+ *
+ * @param envName The environment variable containing the directory path.
+ * @param homeRelativeFallback The path relative to the user's home directory when the environment variable is unset or blank.
+ * @return The selected base directory.
+ */
 internal fun xdgDir(envName: String, homeRelativeFallback: String): File =
     System.getenv(envName)?.takeIf { it.isNotBlank() }?.let { File(it) }
         ?: File(System.getProperty("user.home"), homeRelativeFallback)
@@ -83,18 +83,12 @@ internal class LinuxUriSchemeRegistrar(
         val entry = desktopEntryContent(launcherPath, CUSTOM_URI_MIME_TYPE, "%u")
         var changed = false
 
-        if (readOrNull(desktopFile) != entry) {
-            writeAtomically(desktopFile, entry)
-            changed = true
-        }
+        if (writeIfChanged(desktopFile, entry)) changed = true
 
         val existingAssociations = readOrNull(mimeAppsList)
         val mergedAssociations =
             mergeMimeAppsList(existingAssociations, URI_HANDLER_DESKTOP_FILE, CUSTOM_URI_MIME_TYPE)
-        if (mergedAssociations != existingAssociations) {
-            writeAtomically(mimeAppsList, mergedAssociations)
-            changed = true
-        }
+        if (writeIfChanged(mimeAppsList, mergedAssociations)) changed = true
 
         if (changed) {
             // Best-effort only. The `[Default Applications]` entry above is what GIO, KDE and
@@ -138,6 +132,19 @@ internal fun writeAtomically(target: File, content: String) {
         StandardCopyOption.ATOMIC_MOVE,
         StandardCopyOption.REPLACE_EXISTING,
     )
+}
+
+/**
+ * Writes [content] to [file] only when it differs from the file's current contents.
+ *
+ * @param file The file to update.
+ * @param content The desired file contents.
+ * @return `true` if [file] was written, `false` if it already held [content].
+ */
+internal fun writeIfChanged(file: File, content: String): Boolean {
+    if (readOrNull(file) == content) return false
+    writeAtomically(file, content)
+    return true
 }
 
 /**

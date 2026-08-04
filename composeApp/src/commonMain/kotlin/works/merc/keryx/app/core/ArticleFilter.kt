@@ -25,8 +25,19 @@ fun ArticleFilter.encode(): String = when (this) {
     is ArticleFilter.Folder -> "folder:$folderId"
 }
 
+/**
+ * Decodes a serialized article filter.
+ *
+ * The legacy `unread` value is mapped to `ArticleFilter.All` for compatibility.
+ *
+ * @param encoded The serialized filter value.
+ * @return The decoded article filter, or `null` for an unknown encoding.
+ */
 fun decodeArticleFilter(encoded: String): ArticleFilter? = when {
     encoded == "all" -> ArticleFilter.All
+    // Decode-only compatibility for a value [encode] no longer produces, so an older-app-version
+    // persisted filter still round-trips instead of resolving to null (see decodeArticleFilter's
+    // else branch below).
     encoded == "unread" -> ArticleFilter.All
     encoded == "starred" -> ArticleFilter.Starred
     encoded == "search" -> ArticleFilter.Search

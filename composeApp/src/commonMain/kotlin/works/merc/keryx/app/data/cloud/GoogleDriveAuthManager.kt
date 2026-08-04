@@ -4,11 +4,9 @@ import io.ktor.client.HttpClient
 import io.ktor.client.request.forms.submitForm
 import io.ktor.http.URLBuilder
 import io.ktor.http.parameters
-import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import works.merc.keryx.app.core.CLOUD_ERROR_BODY_PREVIEW_LENGTH
 import works.merc.keryx.app.core.Clock
-import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.GOOGLE_AUTHORIZE_ENDPOINT
 import works.merc.keryx.app.core.GOOGLE_DRIVE_APPDATA_SCOPE
 import works.merc.keryx.app.core.GOOGLE_REVOKE_ENDPOINT
@@ -68,6 +66,13 @@ class GoogleDriveAuthManager(
         },
     )
 
+    /**
+     * Refreshes OAuth tokens using an existing refresh token.
+     *
+     * @param clientId The OAuth client identifier.
+     * @param refreshToken The refresh token used to request new tokens.
+     * @return The refreshed OAuth tokens, preserving the supplied refresh token when the response omits one.
+     */
     override suspend fun refresh(clientId: String, refreshToken: String): Result<OAuthTokens> = tokenRequest(
         parameters {
             append("grant_type", "refresh_token")
@@ -78,18 +83,14 @@ class GoogleDriveAuthManager(
         keepRefreshToken = refreshToken,
     )
 
-    override suspend fun revoke(accessToken: String): Result<Unit> = try {
-        // Google's revoke endpoint takes the token as a form parameter (not a Bearer header).
-        val response = client.submitForm(GOOGLE_REVOKE_ENDPOINT, parameters { append("token", accessToken) })
-        if (response.status.value in 200..299) {
-            Result.Ok(Unit)
-        } else {
-            Result.Err(CloudAuthException("Revoke failed (HTTP ${response.status.value})"))
-        }
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Throwable) {
-        Result.Err(CloudAuthException(e.message ?: "Revoke failed"))
+    /**
+     * Revokes the specified Google OAuth access token.
+     *
+     * @param accessToken The access token to revoke.
+     * @return A successful result if the token is revoked; otherwise, a failed result.
+     */
+    override suspend fun revoke(accessToken: String): Result<Unit> = revokeOAuthToken {
+        client.submitForm(GOOGLE_REVOKE_ENDPOINT, parameters { append("token", accessToken) })
     }
 
     /**

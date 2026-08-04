@@ -80,28 +80,28 @@ fun groupFeedsByFolder(feeds: List<Feeds>, folders: List<Folders>): List<Pair<Fo
 }
 
 /**
-     * Selects feeds associated with the specified tag while preserving their input order.
-     *
-     * @param feeds The feeds to filter.
-     * @param feedTagMap A mapping from feed IDs to their associated tag IDs.
-     * @param tagId The tag ID to match.
-     * @return The feeds associated with [tagId].
-     */
+ * Selects feeds associated with the specified tag while preserving their input order.
+ *
+ * @param feeds The feeds to filter.
+ * @param feedTagMap A mapping from feed IDs to their associated tag IDs.
+ * @param tagId The tag ID to match.
+ * @return The feeds associated with [tagId].
+ */
 fun feedsForTag(feeds: List<Feeds>, feedTagMap: Map<String, Set<String>>, tagId: String): List<Feeds> =
     feeds.filter { tagId in (feedTagMap[it.id] ?: emptySet()) }
 
 /**
-         * Builds the visual filter order used by the feed pane.
-         *
-         * Collapsed folders include only their folder filter; expanded folders include their feed filters,
-         * followed by tag filters.
-         *
-         * @param tags The tags to include at the end of the order.
-         * @param folders The folders used to organize feed filters.
-         * @param feeds The feeds to include in folder or unassigned groups.
-         * @param collapsedFolderIds The IDs of folders whose feed filters should be omitted.
-         * @return The filters in visual top-to-bottom order.
-         */
+ * Builds the visual filter order used by the feed pane.
+ *
+ * Collapsed folders include only their folder filter; expanded folders include their feed filters,
+ * followed by tag filters.
+ *
+ * @param tags The tags to include at the end of the order.
+ * @param folders The folders used to organize feed filters.
+ * @param feeds The feeds to include in folder or unassigned groups.
+ * @param collapsedFolderIds The IDs of folders whose feed filters should be omitted.
+ * @return The filters in visual top-to-bottom order.
+ */
 fun buildOrderedFilters(
     tags: List<Tags>,
     folders: List<Folders>,
