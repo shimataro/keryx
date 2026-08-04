@@ -77,9 +77,9 @@ App Key 空チェックで即エラーになる分岐のみ `OAuthConnectFlowTes
 `positionYInRoot()` は実際の AWT `DropTargetDragEvent`/`DropTargetDropEvent` が無いと呼び出せずシームが
 無い）。同じ理由で、フィード/フォルダーの並び替え・移動（ドラッグ&ドロップ）の実際のジェスチャー自体
 （`FeedListDragAndDrop.kt` の `FeedRow`/`FolderGroupHeader`/`NoFolderHeader` の `dragAndDropSource`/
-`dragAndDropTarget`）もテスト不可。`LinuxDragCursorFix` の `DragSourceListener` コールバック
-（`dragEnter`/`dragOver`/`dropActionChanged`/`dragExit`）も、実際の AWT `DragSourceDragEvent`/
-`DragSourceEvent` をテストコードから生成できないという同じ理由で不可であり、委譲先の純粋関数
+`dragAndDropTarget`）もテスト不可。`LinuxDragCursorFix` の `DragSourceListener`/`DragSourceMotionListener`
+コールバック（`dragEnter`/`dragOver`/`dropActionChanged`/`dragExit`/`dragMouseMoved`）も、実際の AWT
+`DragSourceDragEvent`/`DragSourceEvent` をテストコードから生成できないという同じ理由で不可であり、委譲先の純粋関数
 `dragCursor()` のみをカバーする（`LinuxDragCursorFixTest`）。並び替えの計算ロジック自体（`ReorderUtil.reorderIds`）と、それを使う
 `FeedRepository.moveFeed`/`FolderRepository.reorderFolders` の DB 反映は通常どおりテストする。
 Linux の SNI トレイでは `SniConnection`（接続・バス名取得・export・登録・再登録・close）が
