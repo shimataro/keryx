@@ -79,6 +79,7 @@ import java.awt.Dimension
 import java.awt.Frame
 import java.awt.Image
 import java.awt.Taskbar
+import java.awt.desktop.AppReopenedListener
 import java.io.File
 import javax.swing.SwingUtilities
 
@@ -258,6 +259,16 @@ fun main(args: Array<String>) {
                 .filter { it.name.endsWith(".opml", ignoreCase = true) }
                 .forEach { file -> dispatchOpmlFile(file.absolutePath) }
         }
+    }
+
+    // macOS: a second Finder/Dock double-click while Keryx is already running never spawns a
+    // second process - Launch Services enforces single-instance for a plain .app bundle itself -
+    // it delivers a native "reopen" Apple Event to this process instead. SingleInstanceCoordinator's
+    // file-lock/socket handoff below only ever sees a genuine second process (Windows/Linux), so
+    // without this listener the window-restore + Dock-icon-reapply logic gated on activationRequests
+    // below never runs on macOS, leaving the window hidden and the Dock showing a generic icon.
+    installDesktopHandler(Desktop.Action.APP_EVENT_REOPENED, "reopen") {
+        it.addAppEventListener(AppReopenedListener { activationRequests.tryEmit(Unit) })
     }
 
     // Tell the OS how to handle keryx:// URIs and .opml files (Windows registry / Linux .desktop +
