@@ -187,8 +187,12 @@ private data class DialogThemePrefs(val themeMode: String, val fontScale: Double
  * @param title The native window title.
  * @param onDismissRequest Invoked when the dialog is closed or the Escape key is pressed.
  * @param modal Whether the dialog blocks interaction with its owner window.
- * @param initialWidth The initial and maximum content width.
- * @param content The composable content displayed in the dialog.
+ * @param initialWidth The dialog's initial and maximum content width.
+ * @param repositionOnResize Whether to recompute [DialogState.position] on every content-driven
+ *   size change. `false` keeps the dialog anchored to its initially computed position, which is
+ *   useful for tabbed dialogs whose height varies per tab but whose top edge should stay stable
+ *   when the user zaps between tabs.
+ * @param content The dialog content.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 /**
@@ -198,6 +202,7 @@ private data class DialogThemePrefs(val themeMode: String, val fontScale: Double
  * @param onDismissRequest Invoked when the dialog is closed or Escape is pressed.
  * @param modal Whether the dialog blocks interaction with its owner window.
  * @param initialWidth The dialog's initial and maximum content width.
+ * @param repositionOnResize Whether to recompute position whenever the content size changes.
  * @param content The dialog content.
  */
 @Composable
@@ -206,6 +211,7 @@ private fun DesktopModalWindow(
     onDismissRequest: () -> Unit,
     modal: Boolean = true,
     initialWidth: Dp = KERYX_ALERT_DIALOG_WIDTH,
+    repositionOnResize: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val owner = LocalDialogWindowOwner.current ?: LocalNativeWindow.current
@@ -304,6 +310,7 @@ private fun DesktopModalWindow(
                 // size, so both callbacks just publish the measurement here and this effect is the
                 // single place that resizes the window.
                 var capturedContentPx by remember { mutableStateOf<IntSize?>(null) }
+                var initialPositionApplied by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) {
                     snapshotFlow { capturedContentPx }.filterNotNull().collect { sizePx ->
                         val target = fitSizeFor(sizePx) ?: return@collect
@@ -321,7 +328,10 @@ private fun DesktopModalWindow(
                         var frames = 0
                         while (frames < FIT_REASSERT_MAX_FRAMES) {
                             dialogState.size = target
-                            dialogState.position = resolvePosition(cursorPoint, owner, screenBounds, target)
+                            if (repositionOnResize || !initialPositionApplied) {
+                                dialogState.position = resolvePosition(cursorPoint, owner, screenBounds, target)
+                                initialPositionApplied = true
+                            }
                             withFrameNanos { }
                             if (windowMatches(window, target)) break
                             frames++
@@ -637,6 +647,7 @@ actual fun KeryxTabDialog(
         onDismissRequest = onDismissRequest,
         modal = false,
         initialWidth = KERYX_TAB_DIALOG_WIDTH,
+        repositionOnResize = false,
     ) {
         Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
             Column(Modifier.width(KERYX_TAB_DIALOG_WIDTH)) {
