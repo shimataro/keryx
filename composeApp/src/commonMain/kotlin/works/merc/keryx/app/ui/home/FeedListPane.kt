@@ -2,7 +2,6 @@ package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.draganddrop.dragAndDropSource
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -703,7 +702,7 @@ private fun TagFeedRow(
             .clip(MaterialTheme.shapes.small)
             .background(selectionBackground(selected, focused))
             .clickable(onClick = onClick)
-            .dragAndDropSource(drawDragDecoration = dragDecoration) { feedDragTransferData(feed.id) }
+            .dragAndDropSourceWithThreshold(drawDragDecoration = dragDecoration) { feedDragTransferData(feed.id) }
             .nativeContextMenu(
                 items = { listOf(NativeMenuItem(removeLabel) { onRemoveFromTag() }) },
                 onOpen = { if (!selected) onClick() },
