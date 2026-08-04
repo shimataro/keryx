@@ -49,38 +49,64 @@ private const val LOG_TAG = "DragCursor"
  */
 internal object LinuxDragCursorFix : DragSourceListener, DragSourceMotionListener {
 
+    // TEMPORARY diagnostic: two rounds of blind cursor-forcing already had zero effect on real
+    // Linux hardware, which is itself evidence worth capturing rather than guessing a third time.
+    // This records, per gesture, which of these callbacks actually fire at all — logged to
+    // <appDataDir>/logs/keryx.0.log (and stderr) under the "DragCursor" tag. Remove once the real
+    // cause is confirmed (see the callers' commit history for context).
+    private val observedCallbacks = mutableSetOf<String>()
+
+    private fun logOnce(callback: String, dropAction: Int? = null) {
+        if (observedCallbacks.add(callback)) {
+            val suffix = dropAction?.let { " (dropAction=$it)" }.orEmpty()
+            Log.info(LOG_TAG, "Observed $callback for the first time this drag$suffix")
+        }
+    }
+
     /** Registers this listener on the default [DragSource]. Best effort: never throws. */
     fun install() {
         runCatching {
             DragSource.getDefaultDragSource().addDragSourceListener(this)
             DragSource.getDefaultDragSource().addDragSourceMotionListener(this)
-        }.onFailure { Log.warn(LOG_TAG, "Could not install the Linux drag-cursor fix", it) }
+        }.onSuccess {
+            Log.info(LOG_TAG, "Linux drag-cursor fix installed")
+        }.onFailure {
+            Log.warn(LOG_TAG, "Could not install the Linux drag-cursor fix", it)
+        }
     }
 
     /** The primary mechanism: fires on every pointer move regardless of drop-target acknowledgment. */
     override fun dragMouseMoved(dsde: DragSourceDragEvent) {
+        logOnce("dragMouseMoved", dsde.dropAction)
         dsde.dragSourceContext.cursor = dragCursor()
     }
 
     override fun dragEnter(dsde: DragSourceDragEvent) {
+        logOnce("dragEnter", dsde.dropAction)
         dsde.dragSourceContext.cursor = dragCursor()
     }
 
     override fun dragOver(dsde: DragSourceDragEvent) {
+        logOnce("dragOver", dsde.dropAction)
         dsde.dragSourceContext.cursor = dragCursor()
     }
 
     override fun dropActionChanged(dsde: DragSourceDragEvent) {
+        logOnce("dropActionChanged", dsde.dropAction)
         dsde.dragSourceContext.cursor = dragCursor()
     }
 
     /** Still the same Keryx-internal gesture while the pointer is outside the list, so no forbidden icon here either. */
     override fun dragExit(dse: DragSourceEvent) {
+        logOnce("dragExit")
         dse.dragSourceContext.cursor = dragCursor()
     }
 
     /** Nothing to restore: AWT tears the native drag session down on its own. */
-    override fun dragDropEnd(dsde: DragSourceDropEvent) = Unit
+    override fun dragDropEnd(dsde: DragSourceDropEvent) {
+        Log.info(LOG_TAG, "Drag ended; callbacks observed this gesture: $observedCallbacks")
+        observedCallbacks.clear()
+    }
 }
 
 /** The cursor shown for the entire duration of a Keryx feed/folder drag on Linux. */
