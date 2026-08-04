@@ -93,8 +93,10 @@ private class DragAndDropSourceWithThresholdNode(
                         val event = awaitPointerEvent()
                         val change = event.changes.firstOrNull { it.id == down.id } ?: break
                         if (change.changedToUpIgnoreConsumed()) break
+                        if (change.isConsumed) break
                         total += change.positionChangeIgnoreConsumed()
                         if (total.getDistance() >= thresholdPx) {
+                            change.consume()
                             dragAndDropModifierNode.requestDragAndDropTransfer(change.position)
                             break
                         }
