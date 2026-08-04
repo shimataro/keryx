@@ -3,7 +3,6 @@ package works.merc.keryx.app.ui.home
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.draganddrop.dragAndDropSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -488,7 +487,7 @@ internal fun FolderGroupHeader(
                 .clip(MaterialTheme.shapes.small)
                 .background(dropTargetBackground(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.secondaryContainer, isDragSource))
                 .then(dropTargetBorderModifier(isFeedDragHighlight, MaterialTheme.colorScheme.secondary))
-                .dragAndDropSource(
+                .dragAndDropSourceWithThreshold(
                     drawDragDecoration = {
                         drawDragPreviewChip(
                             folder.name,
@@ -638,7 +637,7 @@ internal fun FeedRow(
                 .clip(MaterialTheme.shapes.small)
                 .background(selectionBackground(selected, focused))
                 .clickable(onClick = onClick)
-                .dragAndDropSource(drawDragDecoration = dragDecoration) { feedDragTransferData(feed.id) }
+                .dragAndDropSourceWithThreshold(drawDragDecoration = dragDecoration) { feedDragTransferData(feed.id) }
                 .nativeContextMenu(
                     items = {
                         listOf(

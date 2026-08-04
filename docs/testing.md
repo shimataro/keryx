@@ -45,6 +45,12 @@ Known uncovered areas: `SettingsViewModel.exportOpml`/`importOpml` (no test seam
 
 Launch with `./gradlew :composeApp:run` and visually verify 3-pane UI, theme switching, feed addition, and search. Feed/folder reordering cannot be auto-tested, so visually confirm the following:
 
+- Pressing down on a feed row / folder header and moving less than the
+  drag-start threshold (`dragAndDropSourceWithThreshold` in
+  `DragAndDropSourceWithThreshold.kt`) does not start a drag — the row still
+  registers a plain click (selection) normally, with no visible drag ghost or
+  drop-target highlight anywhere in the list. Moving past the threshold starts
+  the drag exactly as before.
 - Drag folders to reorder; order persists after app restart.
 - Drag feeds inside a folder to reorder; order persists after restart.
 - Reorder feeds inside the "No Folder" group.
