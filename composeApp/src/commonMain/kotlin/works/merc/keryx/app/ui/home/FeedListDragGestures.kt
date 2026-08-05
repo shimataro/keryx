@@ -17,10 +17,6 @@ import androidx.compose.ui.unit.dp
  * because a mouse click is naturally precise. */
 private const val MOUSE_DRAG_THRESHOLD_DP = 4f
 
-/** Distance a touch/stylus pointer must move past the initial press before a drag starts.
- * Reuses Compose Foundation's own `defaultTouchSlop` value as-is. */
-private const val TOUCH_DRAG_THRESHOLD_DP = 18f
-
 /**
      * Adds feed-row reordering gestures to a non-virtualized drag host.
      *
@@ -40,9 +36,11 @@ internal fun Modifier.feedListReorderDrag(controller: FeedListDragController): M
                 val buttons = currentEvent.buttons
                 if (buttons.isSecondaryPressed || buttons.isTertiaryPressed) return@awaitEachGesture
                 val grab = controller.sourceAt(down.position.y) ?: return@awaitEachGesture
-                val thresholdPx = (
-                    if (down.type == PointerType.Mouse) MOUSE_DRAG_THRESHOLD_DP else TOUCH_DRAG_THRESHOLD_DP
-                    ).dp.toPx()
+                val thresholdPx = if (down.type == PointerType.Mouse) {
+                    MOUSE_DRAG_THRESHOLD_DP.dp.toPx()
+                } else {
+                    viewConfiguration.touchSlop
+                }
                 var total = Offset.Zero
                 while (true) {
                     val event = awaitPointerEvent(PointerEventPass.Initial)
