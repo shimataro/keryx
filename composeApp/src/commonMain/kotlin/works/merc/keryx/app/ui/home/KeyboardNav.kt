@@ -25,17 +25,6 @@ import androidx.compose.ui.input.key.type
  * Escape is the one exception: a drag can be in progress while the search field holds focus, and
  * aborting it must always be possible.
  */
-/**
- * Adds keyboard shortcuts for navigating and acting on the home screen.
- *
- * Escape invokes `onEscape` before search-field suppression. Other shortcuts are
- * ignored while the search field is focused. Handles Cmd/Ctrl+F, arrow keys,
- * J/K, and U/S/O/C shortcuts.
- *
- * @param searchFieldFocused Whether the search field currently has focus.
- * @param onEscape Handles Escape and indicates whether the event was consumed.
- * @return A modifier that processes the supported home-screen shortcuts.
- */
 fun Modifier.homeKeyboardShortcuts(
     searchFieldFocused: Boolean,
     onEscape: () -> Boolean,
