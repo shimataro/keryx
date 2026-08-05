@@ -382,13 +382,19 @@ theme/shape/indication/icon choices:
   directly at a call site.
 - **Icon set — chrome vs. semantic state**: action/chrome icons (add, refresh,
   cloud sync, settings, folder/tag management, search, notifications, sort,
-  mark-all-read, mark-unread, open-in-browser, back, close) use
-  `Icons.Outlined.*` / `Icons.AutoMirrored.Outlined.*`. Icons that encode
-  persistent state rather than an action — `Star`/`StarBorder`, `Folder`,
-  `Error`, `Public`, `CircleNotifications`, `Icons.AutoMirrored.Filled.Article`
-  — stay `Filled`, since they're meant to read as "on/set" indicators, not
-  as clickable chrome. Follow this split for any new icon: ask "is this a
-  button, or a status marker?"
+  mark-all-read, mark-unread, open-in-browser, back, close) use the
+  `KeryxIcons.XOutlined` (or bare-name, single-variant) entry. Icons that
+  encode persistent state rather than an action — `Star`/`StarBorder`,
+  `Folder`, `ErrorFilled`, `PublicFilled`, `Article` — use the `XFilled` entry,
+  since they're meant to read as "on/set" indicators, not as clickable chrome.
+  Follow this split for any new icon: ask "is this a button, or a status
+  marker?" Assets are Tabler Icons (MIT) svgs bundled under
+  `composeResources/drawable/`, referenced only through `ui/common/KeryxIcons.kt`
+  — never add a raw `painterResource(Res.drawable.ic_*)` call at a UI call
+  site. Tabler (thin stroke, rounded terminals) was picked over Material
+  Design's stock glyphs for a closer-to-macOS feel; it is not literal SF
+  Symbols, since Apple's license restricts those to Apple-platform apps and
+  this app also ships Windows/Linux builds.
 - **Flat surface pattern**: `NotificationCenterSheet`, `SetupScreen`'s
   `OptionCard`, and `TooltipIconButton`'s tooltip all use the same look for a
   "raised" panel instead of M3's tonal-elevation `Card`:

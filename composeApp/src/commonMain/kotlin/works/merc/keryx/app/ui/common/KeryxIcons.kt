@@ -52,7 +52,10 @@ import works.merc.keryx.app.resources.ic_warning_outlined
  * `ui-guidelines` skill) so call sites just reference a name and any future swap is a one-file edit.
  *
  * Icons where both variants are used carry an explicit `Outlined`/`Filled` suffix; single-variant
- * icons keep a bare name. Assets are the classic Material Icons set (Apache-2.0).
+ * icons keep a bare name. Assets are Tabler Icons (MIT) — chosen for a thin-stroke, rounded-terminal
+ * look closer to macOS's own iconography than Material Design's, without redistributing Apple's own
+ * SF Symbols (whose license restricts them to Apple-platform apps, and this app also ships
+ * Windows/Linux builds).
  */
 object KeryxIcons {
     // Chrome / actions (Outlined)
