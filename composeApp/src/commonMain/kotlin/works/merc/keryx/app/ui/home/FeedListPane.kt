@@ -343,12 +343,7 @@ internal fun FeedListPane(
         )
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
 
-        Box(
-            Modifier.weight(1f)
-                .onGloballyPositioned {
-                    hostBoundsState.value = Rect(it.positionInRoot(), it.size.toSize())
-                },
-        ) {
+        Box(Modifier.weight(1f)) {
             // The whole reorder gesture — both its source and its target resolution — lives on this
             // one Box, which is never virtualized away. It cannot live on the rows: auto-scroll
             // exists precisely so a drag can travel from the top of the list to the tags section at
@@ -364,6 +359,9 @@ internal fun FeedListPane(
             Box(
                 Modifier.fillMaxSize()
                     .testTag(FEED_LIST_DRAG_HOST_TEST_TAG)
+                    .onGloballyPositioned {
+                        hostBoundsState.value = Rect(it.positionInRoot(), it.size.toSize())
+                    }
                     .feedListReorderDrag(dragController),
             ) {
                 // Every slot below carries an explicit key and contentType. This list interleaves
