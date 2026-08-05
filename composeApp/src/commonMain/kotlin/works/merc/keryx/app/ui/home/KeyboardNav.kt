@@ -17,12 +17,17 @@ import androidx.compose.ui.input.key.type
  * - U : toggle read/unread,  S : toggle star,  O : open in browser,  C : copy URL
  *   (U/S/O/C all act on the currently selected article)
  * - Cmd/Ctrl+F : search
+ * - Esc : abort an in-progress feed/folder drag (handled by [onEscape], which reports whether
+ *   there was one — if not, the key is left alone for anything else to handle)
  *
  * When [searchFieldFocused] is true, all shortcuts are suppressed so the search text field (which
  * lives inside a pane, under this root `onPreviewKeyEvent`) receives typed letters/arrows normally.
+ * Escape is the one exception: a drag can be in progress while the search field holds focus, and
+ * aborting it must always be possible.
  */
 fun Modifier.homeKeyboardShortcuts(
     searchFieldFocused: Boolean,
+    onEscape: () -> Boolean,
     onUp: () -> Unit,
     onDown: () -> Unit,
     onLeft: () -> Unit,
@@ -36,6 +41,7 @@ fun Modifier.homeKeyboardShortcuts(
     onSearch: () -> Unit,
 ): Modifier = onPreviewKeyEvent { event ->
     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+    if (event.key == Key.Escape) return@onPreviewKeyEvent onEscape()
     if (searchFieldFocused) return@onPreviewKeyEvent false
     when {
         (event.isMetaPressed || event.isCtrlPressed) && event.key == Key.F -> { onSearch(); true }

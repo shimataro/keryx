@@ -58,7 +58,14 @@
 OPML、Dropbox ストレージ/認証、PKCE、OAuth ループバックサーバ、マージ（後勝ち・OR マージ・衝突ガード・
 FK ガード）、スキーマ、ローカル設定、記事 upsert、URL リゾルバ、日時パーサ、Result、Repository 層
 （Article/Feed/Tag/Settings）、CloudSession、NotificationCenter、IdGenerator、SyncRepository、
-ViewModel 層（Home/Settings/Setup/NotificationCenter）、名前とタイムスタンプを並べるメタ行（`ArticleRowMetadataTest`：フィードタイトルが長くても省略されるのはタイトル側だけで、記事カードのタイムスタンプは幅を奪われず行の右端に揃ったまま表示される。`ArticleDetailMetaLineTest`：詳細ヘッダーの `author · タイムスタンプ` も同様に保証される——ただし右端寄せではなくインライン——、あわせて `articleMetaText` が null または空白のみの著者名を除去し先頭に区切りが残らないこと）、ArticleWebViewHtml（extractLinks/wrapArticleHtml）、AppFont（Linux の UI フォント用 Pango フォント記述のパース）、カスタム URI スキーム登録（`UriSchemeRegistration` の OS 別ディスパッチとパッケージ版ランチャー判定、`LinuxUriSchemeRegistrar` の `.desktop` 生成——`%u` フィールドコードを含む——、`mimeapps.list` の非破壊マージ、冪等性）、FTS（FtsManager/FtsSearch、
+ViewModel 層（Home/Settings/Setup/NotificationCenter）、フィード一覧のドラッグ&ドロップの書き直し
+（`HomeCommonTest.kt` の `parseFeedListDragSourceKey` で純粋なキー解析ロジックを、`FeedListDragTest.kt`
+で実際にレンダリングしたコンポーザブルに対して `performMouseInput`/`performKeyInput` を使う実際の
+エンドツーエンドのジェスチャーをカバー——フィードを別のフィードの上にドラッグして永続化された順序を
+検証、しきい値未満の移動でも選択は効くケース、フォルダーヘッダー/タグ行へのドロップ、ドラッグ中に
+右クリックが来てもコンテキストメニューが開かずドラッグも中断されないこと、ゴーストオーバーレイの
+表示/非表示のライフサイクル、Escape によるキャンセル、フォルダー同士の並べ替え）、
+名前とタイムスタンプを並べるメタ行（`ArticleRowMetadataTest`：フィードタイトルが長くても省略されるのはタイトル側だけで、記事カードのタイムスタンプは幅を奪われず行の右端に揃ったまま表示される。`ArticleDetailMetaLineTest`：詳細ヘッダーの `author · タイムスタンプ` も同様に保証される——ただし右端寄せではなくインライン——、あわせて `articleMetaText` が null または空白のみの著者名を除去し先頭に区切りが残らないこと）、ArticleWebViewHtml（extractLinks/wrapArticleHtml）、AppFont（Linux の UI フォント用 Pango フォント記述のパース）、カスタム URI スキーム登録（`UriSchemeRegistration` の OS 別ディスパッチとパッケージ版ランチャー判定、`LinuxUriSchemeRegistrar` の `.desktop` 生成——`%u` フィールドコードを含む——、`mimeapps.list` の非破壊マージ、冪等性）、FTS（FtsManager/FtsSearch、
 `indexMissing` の増分投入・非破壊、`rebuildIndex` がテーブル存在を前提とすること、同期アップロードが
 `VACUUM INTO` スナップショットで `articles_fts` を除外し `user_version` を保全することを含む）、
 Linux の SNI トレイ（`TrayPixmapTest`＝ビッグエンディアン ARGB32 / RGBA エンコーダーとアルファ保全、
@@ -72,15 +79,12 @@ Linux の SNI トレイ（`TrayPixmapTest`＝ビッグエンディアン ARGB32 
 コード交換部分（`BrowserOpener`/`OAuthLoopbackServer` の実I/Oに依存し、シームなしにはモック不可。
 App Key 空チェックで即エラーになる分岐のみ `OAuthConnectFlowTest` でカバー済み）、
 `DatabaseDriverFactory.desktop.kt`（`AppDirs.appDataDir()` を直接参照しておりテスト用の
-ディレクトリ差し替えができない）、`FeedDragAndDrop.desktop.kt`（`DragAndDropTransferable` が
-ライブラリ内部型でありテストコードから中身を取り出せない上、`draggedFeedId()`/`draggedFolderId()`/
-`positionYInRoot()` は実際の AWT `DropTargetDragEvent`/`DropTargetDropEvent` が無いと呼び出せずシームが
-無い）。同じ理由で、フィード/フォルダーの並び替え・移動（ドラッグ&ドロップ）の実際のジェスチャー自体
-（`FeedListDragAndDrop.kt` の `FeedRow`/`FolderGroupHeader`/`NoFolderHeader` の `dragAndDropSource`/
-`dragAndDropTarget`）もテスト不可。`LinuxDragCursorFix` の `DragSourceListener`/`DragSourceMotionListener`
-コールバック（`dragEnter`/`dragOver`/`dropActionChanged`/`dragExit`/`dragMouseMoved`）も、実際の AWT
-`DragSourceDragEvent`/`DragSourceEvent` をテストコードから生成できないという同じ理由で不可であり、委譲先の純粋関数
-`dragCursor()` のみをカバーする（`LinuxDragCursorFixTest`）。並び替えの計算ロジック自体（`ReorderUtil.reorderIds`）と、それを使う
+ディレクトリ差し替えができない）。フィード/フォルダーの並び替えジェスチャー（`ui/home/FeedListDragController.kt`/
+`FeedListDragGestures.kt`）は、OS レベルの DnD ではなく自前実装の Compose ネイティブなドラッグになった
+ことで、まさにこの部分をテスト可能にするために書き直された経緯があり、`FeedListDragTest.kt` が
+`performMouseInput`/`performKeyInput` を使って実際にエンドツーエンドで検証する（ドラッグによる並べ替え、
+しきい値判定、フォルダー/タグへのドロップ、ドラッグ中の右クリック、ゴーストのライフサイクル、
+Escape によるキャンセル）。並び替えの計算ロジック自体（`ReorderUtil.reorderIds`）と、それを使う
 `FeedRepository.moveFeed`/`FolderRepository.reorderFolders` の DB 反映は通常どおりテストする。
 Linux の SNI トレイでは `SniConnection`（接続・バス名取得・export・登録・再登録・close）が
 実セッションバスと稼働中の `org.kde.StatusNotifierWatcher` を必要とするため CI では不可。同様に
@@ -92,7 +96,10 @@ Linux の SNI トレイでは `SniConnection`（接続・バス名取得・expor
 ## 手動確認（UI）
 
 `./gradlew :composeApp:run` で起動して 3 ペイン UI・テーマ切替・フィード追加・検索を目視確認する。
-フィード/フォルダーの並び替え機能は自動テストできないため、以下を目視確認する:
+`FeedListDragTest.kt` がドラッグの機構自体（並べ替え・しきい値判定・フォルダー/タグへのドロップ・
+右クリックガード・ゴーストのライフサイクル・Escape）をエンドツーエンドでカバーするようになったが、
+実際の画素レンダリング（色・アニメーションの滑らかさ・実コンテンツ上でのゴーストの見え方）は本質的に
+目視確認になるため、以下も併せて確認する:
 
 - フォルダーをドラッグして順序を入れ替え、アプリを再起動しても順序が保持されること。
 - フォルダー内のフィードをドラッグして順序を入れ替え、再起動後も順序が保持されること。
@@ -111,17 +118,25 @@ Linux の SNI トレイでは `SniConnection`（接続・バス名取得・expor
 - 展開したタグ配下のフィードを右クリック →「タグから外す」で、そのタグからのみ外れること
   （フォルダー所属や他のタグは変わらない）。そのフィードをタグ一覧からフォルダーや別のタグへ
   ドラッグして移動/付与できること。
-- **(Linux, X11)** 実際の Plasma **X11** セッション（このセクションの他項目と同じく基準環境と
-  する）でフィード行とフォルダーヘッダーをドラッグし、つかんでからドロップするまでの間（リストの
-  外にポインターがある間も含む）ずっと禁止アイコンにならず通常の「移動可」カーソルが表示され続ける
-  こと（X11 AWT では Compose のドラッグゴーストが破棄されるため、この標準カーソルだけが唯一の
-  フィードバックになる。`LinuxDragCursorFix` を参照）。ここで禁止アイコンが再び出るようになったら
-  実際の不具合として扱う。
-- **(Linux, Wayland)** Plasma **Wayland**（XWayland）セッションでは、同じドラッグで禁止アイコンが
-  ずっと表示され続けるのが*想定どおり*の挙動である — これは既知の XWayland／コンポジター側の制限で
-  あり、不具合の再発ではない（`docs/known-issues.md` の「Linux の Wayland/XWayland」の項を参照）。
-  ドロップ自体は通常どおり成功するはずで、再調査が必要なのはカーソルのアイコンではなくドロップが
-  失敗した場合のみ。
+- ドラッグ中は Compose 側で描画したチップ状のゴースト（アイコン＋タイトル）がポインターに追従して
+  表示され、macOS/Windows/Linux で同じ見た目になること — **Linux では初めてゴーストが表示される**
+  （X11 の AWT は Wayland のカーソル制限以前からそもそもゴースト自体に非対応だった。ドラッグが
+  OS レベルの DnD に触れなくなったことでどちらの制限も無関係になった経緯は `docs/known-issues.md`
+  の「Linux の Wayland/XWayland」の項を参照）。チップが明るい背景・暗い背景のどちらでも視認でき、
+  どのプラットフォームでも OS の禁止（no-drop）カーソルが一切表示されず、通常の矢印カーソルの
+  ままであること。
+- ドラッグ中に右クリックしてもコンテキストメニューは開かず、ドラッグも中断されないこと。そのまま
+  ドロップすれば通常どおり完了すること。
+- フィードペインの縦スクロールバーのつまみをドラッグすると通常どおりリストがスクロールし、
+  ドラッグしきい値を超えて動かしてもフィード/フォルダーのドラッグが始まらないこと。
+- ドラッグ中に Escape を押すと、並べ替えを適用せずに即座にキャンセルされゴーストが消えること。
+  ドラッグ中でない場合の Escape の挙動は従来どおり（ドラッグ処理に飲み込まれない）こと。
+- ドラッグ中に Alt-Tab などでウィンドウのフォーカスを失っても同様にキャンセルされること。
+- **(Linux, X11 / Wayland)** ドラッグゴーストとドロップの挙動が、この 2 つのセッション種別間で
+  区別できなくなっていること — 上記の並べ替え/フォルダーへのドロップ/タグへのドロップの確認を
+  Plasma X11 セッションと Plasma Wayland（XWayland）セッションの両方で行い、同じ挙動になることを
+  確認する（この変更によってどの OS レベル DnD の不具合からも無関係になった経緯は
+  `docs/known-issues.md` の「Linux の Wayland/XWayland」の項を参照）。
 
 並行フィード更新（並行取得＋直列書き込み、`FeedRepository.refreshAll`）の中核となる並行動作
 （取得のオーバーラップとフィードごとの書き込み完全性）は `refreshAllFetchesFeedsConcurrentlyAndAppliesEveryWrite` が、

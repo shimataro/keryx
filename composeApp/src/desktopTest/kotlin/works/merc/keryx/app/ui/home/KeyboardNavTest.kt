@@ -31,6 +31,7 @@ class KeyboardNavTest {
                 Box(
                     Modifier.testTag("root").size(10.dp).focusable().homeKeyboardShortcuts(
                         searchFieldFocused = searchFieldFocused,
+                        onEscape = { fired += "escape"; true },
                         onUp = { fired += "up" },
                         onDown = { fired += "down" },
                         onLeft = { fired += "left" },
@@ -112,6 +113,18 @@ class KeyboardNavTest {
     @Test
     fun plainFDoesNotFireSearch() {
         assertEquals(emptyList(), firedEvents { pressKey(Key.F) })
+    }
+
+    @Test
+    fun escapeFiresOnEscapeOnly() {
+        assertEquals(listOf("escape"), firedEvents { pressKey(Key.Escape) })
+    }
+
+    @Test
+    fun escapeStillFiresWhileSearchFieldFocused() {
+        // Escape is the one shortcut not suppressed by the search field: it aborts an in-progress
+        // feed/folder drag, which can be running whichever element happens to hold focus.
+        assertEquals(listOf("escape"), firedEvents(searchFieldFocused = true) { pressKey(Key.Escape) })
     }
 
     @Test

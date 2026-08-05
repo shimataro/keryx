@@ -2,7 +2,6 @@ package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -31,7 +30,6 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -40,16 +38,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.Job
+import androidx.compose.ui.unit.toSize
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import works.merc.keryx.app.core.ArticleFilter
@@ -63,7 +63,6 @@ import works.merc.keryx.app.platform.NativeMenuItem
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.platform.WindowChrome
 import works.merc.keryx.app.platform.WindowDragArea
-import works.merc.keryx.app.platform.feedDragTransferData
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_add_feed
@@ -101,29 +100,29 @@ private const val AUTO_SCROLL_MAX_SPEED_DP_PER_SEC = 900
 /** Auto-scroll tick length (~60fps). */
 private const val AUTO_SCROLL_FRAME_MS = 16L
 
-/** How long to hold off clearing [dragPointerYState] to `null` once drag-move reports stop. A
- * stationary pointer only produces new `onMoved` calls from sparse native drag-over jitter (Compose
- * desktop's DnD dispatch is native-event-driven, not relayout-driven — our own auto-scroll never
- * generates one), so a short but nonzero grace period keeps the scroll loop alive through those gaps
- * instead of stopping and restarting on every one. Other drag state (the insertion boundary, the
- * dragged-feed id, the hovered tag) doesn't need this: it's now set directly from the single
- * centralized drop target below on every real event, with no per-row handoff to paper over. */
-private const val DRAG_POINTER_Y_CLEAR_DEBOUNCE_MS = 150L
+/**
+ * Test tag on the pane's single non-virtualized drag-host `Box` (see its doc comment below),
+ * letting `FeedListDragTest` compute press/drop positions in that `Box`'s local coordinate space
+ * without depending on internal composition details (e.g. the `LazyListState` it owns).
+ */
+internal const val FEED_LIST_DRAG_HOST_TEST_TAG = "feed-list-drag-host"
 
 /**
  * Renders the feed navigation pane with filters, folders, tags, search, synchronization controls, and feed management actions.
  *
  * @param vm The view model that provides feed state and handles navigation and management operations.
  * @param focused Whether the pane currently has focus.
+ * @param dragOverlay Window-wide drag-ghost state, owned by `HomeScreen` (which renders the ghost).
  * @param onActivated Called when the pane becomes active.
  * @param modifier Modifier applied to the pane.
  * @param onAddFeedClick Called when the user requests to add a feed.
  * @param onSearchFieldFocusChange Called when the search field focus changes.
  */
 @Composable
-fun FeedListPane(
+internal fun FeedListPane(
     vm: HomeViewModel,
     focused: Boolean,
+    dragOverlay: FeedDragOverlayState,
     onActivated: () -> Unit,
     modifier: Modifier = Modifier,
     onAddFeedClick: () -> Unit = {},
@@ -180,35 +179,41 @@ fun FeedListPane(
             draggedFeedId?.let { id -> feeds.find { it.id == id }?.folder_id }
         }
     }
-    // A State (not a plain val) so the permanently-remembered drop target below always reads the
+    // A State (not a plain val) so the permanently-remembered drag controller below always reads the
     // current index instead of the one captured when it was first created.
     val dropIndexState = remember { derivedStateOf { buildFeedListDropIndex(feeds, folders) } }
     // Read only from the auto-scroll coroutine below (never in composition), so the per-move
     // pointer reports don't trigger a recomposition of the whole pane on every drag move.
     val dragPointerYState = remember { mutableStateOf<Float?>(null) }
-    val viewportTopState = remember { mutableStateOf(0f) }
-    val viewportBottomState = remember { mutableStateOf(0f) }
-    val dragAndDropScope = rememberCoroutineScope()
-    var pendingDragPointerYClearJob by remember { mutableStateOf<Job?>(null) }
-    val onDragPointerYChange: (Float?) -> Unit = { pointerY ->
-        pendingDragPointerYClearJob?.cancel()
-        if (pointerY != null) {
-            pendingDragPointerYClearJob = null
-            dragPointerYState.value = pointerY
-        } else {
-            pendingDragPointerYClearJob = dragAndDropScope.launch {
-                delay(DRAG_POINTER_Y_CLEAR_DEBOUNCE_MS)
-                dragPointerYState.value = null
-            }
-        }
-    }
-    val clearDragPointerYImmediately: () -> Unit = {
-        pendingDragPointerYClearJob?.cancel()
-        pendingDragPointerYClearJob = null
-        dragPointerYState.value = null
-    }
+    // The drag host's bounds in root coordinates: the drag gesture reports positions local to that
+    // host, and both the auto-scroll edge zones and the window-wide ghost need them in root space.
+    val hostBoundsState = remember { mutableStateOf(Rect.Zero) }
 
     val listState = rememberLazyListState()
+
+    val dragController = rememberFeedListDragController(
+        vm = vm,
+        listState = listState,
+        hostBoundsState = hostBoundsState,
+        dropIndexState = dropIndexState,
+        activeBoundaryState = activeBoundaryState,
+        draggedFeedIdState = draggedFeedIdState,
+        hoveredAttachTagIdState = hoveredAttachTagIdState,
+        dragPointerYState = dragPointerYState,
+        overlay = dragOverlay,
+    ) { key ->
+        when (key) {
+            is FeedListDragSourceKey.Feed -> feeds.find { it.id == key.feedId }?.displayTitle().orEmpty()
+            is FeedListDragSourceKey.Folder -> folders.find { it.id == key.folderId }?.name.orEmpty()
+        }
+    }
+
+    // Alt-Tab, an OS dialog, or anything else that takes the window's focus mid-drag: there will be
+    // no further pointer events for this gesture, so drop it rather than leave a ghost floating.
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    LaunchedEffect(windowFocused) {
+        if (!windowFocused) dragController.cancel()
+    }
 
     LaunchedEffect(filter, feeds.isNotEmpty(), tags.isNotEmpty(), folders.isNotEmpty()) {
         val index = feedListItemIndex(filter, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
@@ -224,14 +229,20 @@ fun FeedListPane(
             while (true) {
                 delay(AUTO_SCROLL_FRAME_MS)
                 val pointerY = dragPointerYState.value ?: continue
+                val bounds = hostBoundsState.value
                 val velocity = autoScrollVelocityPxPerSec(
                     pointerY = pointerY,
-                    viewportTop = viewportTopState.value,
-                    viewportBottom = viewportBottomState.value,
+                    viewportTop = bounds.top,
+                    viewportBottom = bounds.bottom,
                     edgeZonePx = autoScrollEdgeZonePx,
                     maxSpeedPxPerSec = autoScrollMaxSpeedPxPerSec,
                 )
-                if (velocity != 0f) listState.scrollBy(velocity * AUTO_SCROLL_FRAME_MS / 1000f)
+                if (velocity == 0f) continue
+                listState.scrollBy(velocity * AUTO_SCROLL_FRAME_MS / 1000f)
+                // The pointer hasn't moved, but the rows underneath it have — without this the
+                // insertion line and drop highlight would stay pinned to the row that was there
+                // when the last pointer event arrived.
+                dragController.refreshHover()
             }
         }
     }
@@ -302,12 +313,10 @@ fun FeedListPane(
                 .onFocusChanged { onSearchFieldFocusChange(it.isFocused) },
         )
 
-        // Kept outside the drop-target Box below (rather than as the LazyColumn's first item) so a
-        // feed drag hovering here falls outside Compose's single eligible drop-target region — the
-        // same reason the search field above already gets the OS's native no-drop cursor for free.
-        // These three quick filters are never valid feed drop targets (FeedListRowKey.Other), and
-        // Compose's dragAndDropTarget API has no way to reject a drop for only part of an accepted
-        // target's bounds, so this is the only way to get a real forbidden cursor over them.
+        // Kept outside the drag-host Box below (rather than as the LazyColumn's first item): these
+        // three quick filters are never valid feed drop targets (FeedListRowKey.Other), and living
+        // outside the host means a drag over them can never resolve to an insertion point and a
+        // press on them can never start one either — no per-row opt-out needed.
         SidebarRow(
             icon = { KeryxIcon(KeryxIcons.Article, null) },
             label = stringResource(Res.string.home_all_feeds),
@@ -337,175 +346,169 @@ fun FeedListPane(
         Box(
             Modifier.weight(1f)
                 .onGloballyPositioned {
-                    viewportTopState.value = it.positionInRoot().y
-                    viewportBottomState.value = viewportTopState.value + it.size.height
-                }
-                // The pane's only drop target. Compose desktop decides which composables are
-                // eligible ("interested") drop targets exactly once, when a drag enters the window
-                // — never re-evaluated while the drag continues. A row inside the LazyColumn would
-                // only be eligible if it already existed at that instant, so a row revealed later
-                // purely by our own auto-scroll (e.g. a tag scrolled into view mid-drag) could never
-                // accept a drop under per-row targets. This Box is never virtualized away, so it's
-                // always eligible; it resolves which row the pointer is over itself, via
-                // LazyListState.layoutInfo, instead of relying on Compose to dispatch to a nested
-                // per-row target.
-                .dragAndDropTarget(
-                    shouldStartDragAndDrop = { true },
-                    target = rememberFeedListDragAndDropTarget(
-                        vm = vm,
-                        listState = listState,
-                        viewportTopState = viewportTopState,
-                        dropIndexState = dropIndexState,
-                        activeBoundaryState = activeBoundaryState,
-                        draggedFeedIdState = draggedFeedIdState,
-                        hoveredAttachTagIdState = hoveredAttachTagIdState,
-                        onDragPointerYChange = onDragPointerYChange,
-                        clearDragPointerYImmediately = clearDragPointerYImmediately,
-                    ),
-                ),
+                    hostBoundsState.value = Rect(it.positionInRoot(), it.size.toSize())
+                },
         ) {
-            // Every slot below carries an explicit key and contentType. This list interleaves
-            // several structurally different row kinds, and an unkeyed `item {}` falls back to an
-            // index-derived key — so collapsing a folder or expanding a tag shifts those indices
-            // and hands a slot that held, say, a folder header to a feed row. Keying them pins
-            // each slot to its identity, and the contentType keeps each kind in its own reuse
-            // pool so a recycled slot is only ever refilled with the same kind of row.
-            LazyColumn(Modifier.fillMaxSize(), state = listState) {
-                item(key = "folders-header", contentType = "section-header") {
-                    Row(
-                        Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            stringResource(Res.string.home_folders),
-                            style = MaterialTheme.typography.labelMedium,
-                            modifier = Modifier.weight(1f),
-                        )
-                        val addFolderTooltip = stringResource(Res.string.home_add_folder)
-                        TooltipIconButton(tooltip = addFolderTooltip, onClick = { showAddFolder = true }) {
-                            KeryxIcon(KeryxIcons.CreateNewFolder, addFolderTooltip)
-                        }
-                    }
-                }
-
-                fun LazyListScope.feedItems(feedsInFolder: List<Feeds>, indented: Boolean, folderId: String?) {
-                    itemsIndexed(
-                        feedsInFolder,
-                        key = { _, feed -> "feed-${feed.id}" },
-                        contentType = { _, _ -> "feed" },
-                    ) { index, feed ->
-                        FeedRow(
-                            feed = feed,
-                            count = unreadByFeed[feed.id] ?: 0L,
-                            selected = filter == ArticleFilter.Feed(feed.id),
-                            focused = focused,
-                            indented = indented,
-                            nextFeedId = feedsInFolder.getOrNull(index + 1)?.id,
-                            folderId = folderId,
-                            activeBoundaryState = activeBoundaryState,
-                            onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id)); onActivated() },
-                            onRename = { renamingFeed = feed },
-                            onRefresh = { vm.refreshFeed(feed) },
-                            tags = tags,
-                            attachedTagIds = feedTagMap[feed.id] ?: emptySet(),
-                            onToggleFeedTag = { tagId, attached -> vm.setFeedTag(feed.id, tagId, attached) },
-                            folders = folders,
-                            onMoveFeedToFolder = { moveFolderId -> vm.moveFeed(feed.id, moveFolderId) },
-                            onUnsubscribe = { confirmingUnsubscribeFeed = feed },
-                        )
-                    }
-                }
-
-                groupFeedsByFolder(feeds, folders).forEach { (folder, feedsInFolder) ->
-                    if (folder == null) {
-                        if (folders.isNotEmpty()) {
-                            item(key = "no-folder-header", contentType = "folder-header") {
-                                NoFolderHeader(
-                                    firstFeedId = feedsInFolder.firstOrNull()?.id,
-                                    feedIdsInNoFolder = feedsInFolder.mapTo(mutableSetOf()) { it.id },
-                                    activeBoundaryState = activeBoundaryState,
-                                )
+            // The whole reorder gesture — both its source and its target resolution — lives on this
+            // one Box, which is never virtualized away. It cannot live on the rows: auto-scroll
+            // exists precisely so a drag can travel from the top of the list to the tags section at
+            // the bottom, which scrolls the *dragged* row out of the viewport, and LazyColumn then
+            // disposes that row's composition along with any pointerInput coroutine it hosted —
+            // killing the gesture mid-drag. Hosting it here instead, and resolving both which row
+            // was grabbed and which row is being hovered by hit-testing LazyListState.layoutInfo,
+            // makes the gesture independent of row recycling entirely.
+            //
+            // VerticalScrollbarIfNeeded is deliberately a *sibling* rather than a child: an
+            // ancestor is always in a hit-tested descendant's path, so nested inside the drag host
+            // a scrollbar-thumb press would turn into a feed drag once it passed the 4dp threshold.
+            Box(
+                Modifier.fillMaxSize()
+                    .testTag(FEED_LIST_DRAG_HOST_TEST_TAG)
+                    .feedListReorderDrag(dragController),
+            ) {
+                // Every slot below carries an explicit key and contentType. This list interleaves
+                // several structurally different row kinds, and an unkeyed `item {}` falls back to an
+                // index-derived key — so collapsing a folder or expanding a tag shifts those indices
+                // and hands a slot that held, say, a folder header to a feed row. Keying them pins
+                // each slot to its identity, and the contentType keeps each kind in its own reuse
+                // pool so a recycled slot is only ever refilled with the same kind of row.
+                LazyColumn(Modifier.fillMaxSize(), state = listState) {
+                    item(key = "folders-header", contentType = "section-header") {
+                        Row(
+                            Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                stringResource(Res.string.home_folders),
+                                style = MaterialTheme.typography.labelMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            val addFolderTooltip = stringResource(Res.string.home_add_folder)
+                            TooltipIconButton(tooltip = addFolderTooltip, onClick = { showAddFolder = true }) {
+                                KeryxIcon(KeryxIcons.CreateNewFolder, addFolderTooltip)
                             }
                         }
-                        feedItems(feedsInFolder, indented = false, folderId = null)
-                    } else {
-                        val collapsed = folder.id in collapsedFolderIds
-                        val nextFolderId = folders.getOrNull(folders.indexOf(folder) + 1)?.id
-                        item(key = "folder-${folder.id}", contentType = "folder-header") {
-                            FolderGroupHeader(
-                                folder = folder,
-                                count = unreadByFolder[folder.id] ?: 0L,
-                                collapsed = collapsed,
-                                selected = filter == ArticleFilter.Folder(folder.id),
-                                focused = focused,
-                                firstFeedId = feedsInFolder.firstOrNull()?.id,
-                                nextFolderId = nextFolderId,
-                                feedIdsInFolder = feedsInFolder.mapTo(mutableSetOf()) { it.id },
-                                activeBoundaryState = activeBoundaryState,
-                                onToggleCollapse = { vm.toggleFolderCollapsed(folder.id) },
-                                onClick = { vm.selectFilter(ArticleFilter.Folder(folder.id)); onActivated() },
-                                onEdit = { editingFolder = folder },
-                                onDelete = { confirmingDeleteFolder = folder },
-                                isDragSource = folder.id == draggedFeedFolderId,
-                            )
-                        }
-                        if (!collapsed) {
-                            feedItems(feedsInFolder, indented = true, folderId = folder.id)
-                        }
                     }
-                }
 
-                item(key = "tags-divider", contentType = "divider") {
-                    HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                }
-
-                item(key = "tags-header", contentType = "section-header") {
-                    Row(
-                        Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            stringResource(Res.string.home_tags),
-                            style = MaterialTheme.typography.labelMedium,
-                            modifier = Modifier.weight(1f),
-                        )
-                        val addTagTooltip = stringResource(Res.string.home_add_tag)
-                        TooltipIconButton(tooltip = addTagTooltip, onClick = { showAddTag = true }) {
-                            KeryxIcon(KeryxIcons.NewLabel, addTagTooltip)
-                        }
-                    }
-                }
-                tags.forEach { tag ->
-                    item(key = "tag-${tag.id}", contentType = "tag") {
-                        TagRow(
-                            tag = tag,
-                            count = unreadByTag[tag.id] ?: 0L,
-                            expanded = tag.id in expandedTagIds,
-                            selected = filter == ArticleFilter.Tag(tag.id),
-                            focused = focused,
-                            isDropTarget = tag.id == hoveredAttachTagId,
-                            onToggleExpanded = { vm.toggleTagExpanded(tag.id) },
-                            onClick = { vm.selectFilter(ArticleFilter.Tag(tag.id)); onActivated() },
-                            onEdit = { editingTag = tag },
-                            onDelete = { confirmingDeleteTag = tag },
-                        )
-                    }
-                    if (tag.id in expandedTagIds) {
-                        // A feed carrying several tags legitimately appears once per expanded tag (plus
-                        // once under its folder), so the key must be tag-scoped to stay unique.
-                        items(
-                            feedsForTag(feeds, feedTagMap, tag.id),
-                            key = { "tag-${tag.id}-feed-${it.id}" },
-                            contentType = { "tag-feed" },
-                        ) { feed ->
-                            TagFeedRow(
+                    fun LazyListScope.feedItems(feedsInFolder: List<Feeds>, indented: Boolean, folderId: String?) {
+                        itemsIndexed(
+                            feedsInFolder,
+                            key = { _, feed -> "feed-${feed.id}" },
+                            contentType = { _, _ -> "feed" },
+                        ) { index, feed ->
+                            FeedRow(
                                 feed = feed,
                                 count = unreadByFeed[feed.id] ?: 0L,
                                 selected = filter == ArticleFilter.Feed(feed.id),
                                 focused = focused,
+                                indented = indented,
+                                nextFeedId = feedsInFolder.getOrNull(index + 1)?.id,
+                                folderId = folderId,
+                                activeBoundaryState = activeBoundaryState,
                                 onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id)); onActivated() },
-                                onRemoveFromTag = { vm.setFeedTag(feed.id, tag.id, false) },
+                                onRename = { renamingFeed = feed },
+                                onRefresh = { vm.refreshFeed(feed) },
+                                tags = tags,
+                                attachedTagIds = feedTagMap[feed.id] ?: emptySet(),
+                                onToggleFeedTag = { tagId, attached -> vm.setFeedTag(feed.id, tagId, attached) },
+                                folders = folders,
+                                onMoveFeedToFolder = { moveFolderId -> vm.moveFeed(feed.id, moveFolderId) },
+                                onUnsubscribe = { confirmingUnsubscribeFeed = feed },
                             )
+                        }
+                    }
+
+                    groupFeedsByFolder(feeds, folders).forEach { (folder, feedsInFolder) ->
+                        if (folder == null) {
+                            if (folders.isNotEmpty()) {
+                                item(key = "no-folder-header", contentType = "folder-header") {
+                                    NoFolderHeader(
+                                        firstFeedId = feedsInFolder.firstOrNull()?.id,
+                                        feedIdsInNoFolder = feedsInFolder.mapTo(mutableSetOf()) { it.id },
+                                        activeBoundaryState = activeBoundaryState,
+                                    )
+                                }
+                            }
+                            feedItems(feedsInFolder, indented = false, folderId = null)
+                        } else {
+                            val collapsed = folder.id in collapsedFolderIds
+                            val nextFolderId = folders.getOrNull(folders.indexOf(folder) + 1)?.id
+                            item(key = "folder-${folder.id}", contentType = "folder-header") {
+                                FolderGroupHeader(
+                                    folder = folder,
+                                    count = unreadByFolder[folder.id] ?: 0L,
+                                    collapsed = collapsed,
+                                    selected = filter == ArticleFilter.Folder(folder.id),
+                                    focused = focused,
+                                    firstFeedId = feedsInFolder.firstOrNull()?.id,
+                                    nextFolderId = nextFolderId,
+                                    feedIdsInFolder = feedsInFolder.mapTo(mutableSetOf()) { it.id },
+                                    activeBoundaryState = activeBoundaryState,
+                                    onToggleCollapse = { vm.toggleFolderCollapsed(folder.id) },
+                                    onClick = { vm.selectFilter(ArticleFilter.Folder(folder.id)); onActivated() },
+                                    onEdit = { editingFolder = folder },
+                                    onDelete = { confirmingDeleteFolder = folder },
+                                    isDragSource = folder.id == draggedFeedFolderId,
+                                )
+                            }
+                            if (!collapsed) {
+                                feedItems(feedsInFolder, indented = true, folderId = folder.id)
+                            }
+                        }
+                    }
+
+                    item(key = "tags-divider", contentType = "divider") {
+                        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                    }
+
+                    item(key = "tags-header", contentType = "section-header") {
+                        Row(
+                            Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                stringResource(Res.string.home_tags),
+                                style = MaterialTheme.typography.labelMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            val addTagTooltip = stringResource(Res.string.home_add_tag)
+                            TooltipIconButton(tooltip = addTagTooltip, onClick = { showAddTag = true }) {
+                                KeryxIcon(KeryxIcons.NewLabel, addTagTooltip)
+                            }
+                        }
+                    }
+                    tags.forEach { tag ->
+                        item(key = "tag-${tag.id}", contentType = "tag") {
+                            TagRow(
+                                tag = tag,
+                                count = unreadByTag[tag.id] ?: 0L,
+                                expanded = tag.id in expandedTagIds,
+                                selected = filter == ArticleFilter.Tag(tag.id),
+                                focused = focused,
+                                isDropTarget = tag.id == hoveredAttachTagId,
+                                onToggleExpanded = { vm.toggleTagExpanded(tag.id) },
+                                onClick = { vm.selectFilter(ArticleFilter.Tag(tag.id)); onActivated() },
+                                onEdit = { editingTag = tag },
+                                onDelete = { confirmingDeleteTag = tag },
+                            )
+                        }
+                        if (tag.id in expandedTagIds) {
+                            // A feed carrying several tags legitimately appears once per expanded tag (plus
+                            // once under its folder), so the key must be tag-scoped to stay unique.
+                            items(
+                                feedsForTag(feeds, feedTagMap, tag.id),
+                                key = { "tag-${tag.id}-feed-${it.id}" },
+                                contentType = { "tag-feed" },
+                            ) { feed ->
+                                TagFeedRow(
+                                    feed = feed,
+                                    count = unreadByFeed[feed.id] ?: 0L,
+                                    selected = filter == ArticleFilter.Feed(feed.id),
+                                    focused = focused,
+                                    onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id)); onActivated() },
+                                    onRemoveFromTag = { vm.setFeedTag(feed.id, tag.id, false) },
+                                )
+                            }
                         }
                     }
                 }
@@ -577,18 +580,17 @@ private fun SidebarRow(
 /**
  * Renders a tag row: selection/filter target, expand toggle for its attached-feed list, and the
  * highlight for a feed drag currently hovering it (attach, handled by the pane's single centralized
- * drop target — see `FeedListPane`'s outer `Box`).
+ * drag host — see `FeedListPane`'s outer `Box`).
  *
  * The drop affordance is deliberately different from a folder's: attaching a tag is additive (a feed
  * may carry many tags) whereas dropping on a folder *moves* the feed, so this row tints itself and
  * its border `tertiary`/`tertiaryContainer` — not the `secondary`/`secondaryContainer` of
  * [FolderGroupHeader] — and additionally swaps its color dot for a filled "+" badge while hovered
- * (a folder gets no such badge, since a move has no equivalent "adding" semantics). Compose's
- * `supportedActions` is fixed at drag start and cannot be varied per drop target (confirmed by
- * decompiling `AwtDragAndDropManager`: the OS cursor reflects `getDropAction()`, computed from the
- * source's declared actions and held keyboard modifiers, never from which Compose target is
- * hovered), and the OS-level drag ghost always renders above any in-app overlay — so this in-row
- * cue is the only reliable place to signal "attach, not move".
+ * (a folder gets no such badge, since a move has no equivalent "adding" semantics). Now that the
+ * drag is Compose-drawn rather than OS-level, that "attach, not move" cue *could* live on the drag
+ * ghost instead — it deliberately doesn't: an affordance drawn on the target it applies to reads
+ * more clearly than one riding along with the pointer, and it keeps the ghost identical no matter
+ * what is underneath it.
  *
  * @param tag The tag represented by the row.
  * @param count The number of unread articles associated with the tag.
@@ -695,14 +697,12 @@ private fun TagFeedRow(
     onRemoveFromTag: () -> Unit,
 ) {
     val removeLabel = stringResource(Res.string.home_remove_feed_from_tag_menu)
-    val dragDecoration = rememberFeedDragDecoration(feed.displayTitle())
     Row(
         Modifier.fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 2.dp)
             .clip(MaterialTheme.shapes.small)
             .background(selectionBackground(selected, focused))
             .clickable(onClick = onClick)
-            .dragAndDropSourceWithThreshold(drawDragDecoration = dragDecoration) { feedDragTransferData(feed.id) }
             .nativeContextMenu(
                 items = { listOf(NativeMenuItem(removeLabel) { onRemoveFromTag() }) },
                 onOpen = { if (!selected) onClick() },

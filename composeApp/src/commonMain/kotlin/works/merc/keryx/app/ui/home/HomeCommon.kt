@@ -333,6 +333,37 @@ internal fun parseFeedListRowKey(key: Any?): FeedListRowKey {
     }
 }
 
+/** What a feed-list `LazyColumn` row can be dragged *as*, derived from its `key`. */
+internal sealed interface FeedListDragSourceKey {
+    data class Feed(val feedId: String) : FeedListDragSourceKey
+    data class Folder(val folderId: String) : FeedListDragSourceKey
+}
+
+/** Separator between a tag-attached feed row's tag id and its feed id (`"tag-$tagId-feed-$feedId"`). */
+private const val TAG_FEED_INFIX = "-feed-"
+
+/**
+ * Parses a feed-list `LazyColumn` item's `key` into what dragging that row would drag, or `null`
+ * when the row isn't draggable at all (a tag row, a section header, the divider).
+ *
+ * Deliberately separate from [parseFeedListRowKey], which answers the *drop target* question: a
+ * feed listed under an expanded tag (`"tag-$tagId-feed-$feedId"`) is a perfectly good drag source
+ * — it drags the feed itself — while remaining a non-target ([FeedListRowKey.Other]) there, since
+ * dropping onto it means nothing. The two must not be collapsed into one parser.
+ */
+internal fun parseFeedListDragSourceKey(key: Any?): FeedListDragSourceKey? {
+    val stringKey = key as? String ?: return null
+    return when {
+        stringKey.startsWith(FOLDER_KEY_PREFIX) ->
+            FeedListDragSourceKey.Folder(stringKey.removePrefix(FOLDER_KEY_PREFIX))
+        stringKey.startsWith(FEED_KEY_PREFIX) ->
+            FeedListDragSourceKey.Feed(stringKey.removePrefix(FEED_KEY_PREFIX))
+        stringKey.startsWith(TAG_KEY_PREFIX) && TAG_FEED_INFIX in stringKey ->
+            FeedListDragSourceKey.Feed(stringKey.substringAfter(TAG_FEED_INFIX))
+        else -> null
+    }
+}
+
 /**
  * A `LazyColumn` item's key and vertical bounds, in the same "distance from the viewport's leading
  * edge" space as `LazyListItemInfo.offset`/`.size` — deliberately decoupled from that real Compose

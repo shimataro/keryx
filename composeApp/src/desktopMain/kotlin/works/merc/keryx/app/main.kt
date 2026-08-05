@@ -55,7 +55,6 @@ import works.merc.keryx.app.domain.OAuthCallbackParams
 import works.merc.keryx.app.domain.parseOAuthUri
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.platform.AppDirs
-import works.merc.keryx.app.platform.LinuxDragCursorFix
 import works.merc.keryx.app.platform.isLinux
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.LocalNativeWindow
@@ -297,15 +296,6 @@ fun main(args: Array<String>) {
             Thread { runCatching { appMenuConnection.close(resolvedAppMenuXid.get()) } },
         )
     }
-
-    // Linux: X11 AWT doesn't support custom drag images, so Compose's own drag decoration is
-    // discarded and only AWT's stock move/no-drop cursors ever show, and for Keryx's intra-window
-    // drags those never got un-stuck from "no-drop" via the usual drag-status callbacks (which
-    // depend on the drop target acknowledging the drag over XDnD — never guaranteed for a
-    // same-window target). Driving the cursor from pointer motion instead, which needs no such
-    // acknowledgment, always shows the "allowed" cursor — Compose's own drop-target hit-testing
-    // decides acceptance independently of this native cursor either way.
-    if (isLinux) LinuxDragCursorFix.install()
 
     application {
         var windowVisible by remember { mutableStateOf(!saved.startMinimized) }

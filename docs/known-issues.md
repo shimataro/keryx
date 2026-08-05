@@ -7,8 +7,14 @@ Each entry records what was ruled out, so a later investigation doesn't repeat t
 
 ## Linux Wayland/XWayland: drag cursor stuck on "no-drop" despite a successful drop
 
-**Status**: fixed on X11 (`platform/LinuxDragCursorFix.kt`); not fixed on Wayland — XWayland/compositor
-limitation, cosmetic only (the drop itself always succeeds).
+**Status**: Resolved — by removing OS-level drag-and-drop from the feed list entirely. The feed/folder
+reorder gesture is now a hand-rolled Compose-native drag (`ui/home/FeedListDragController.kt` +
+`FeedListDragGestures.kt`: manual `pointerInput` tracking, a Compose-drawn floating ghost, direct
+hit-testing), so no XDnD/XWayland cursor negotiation happens at all on any session type. The
+investigation below is kept in full, since it remains valuable context against ever reintroducing
+`Modifier.dragAndDropSource`/`dragAndDropTarget` (real OS-level DnD) for this or a future
+intra-window-only drag — the analysis of *why* XWayland can't be worked around from the client side
+still holds if that's ever reconsidered.
 
 ### Symptom
 
@@ -99,8 +105,20 @@ genuine Wayland surface, not an X11 `Cursor` — which means either a native-Way
 Desktop toolkit (not available in the JDK/Compose Multiplatform versions this project targets), or
 hand-rolling a JNI bridge to libwayland bypassing AWT entirely for this one interaction. Both are far
 out of proportion to a cosmetic cursor icon, given the drop itself already succeeds on every session
-type. If a native-Wayland Compose Desktop toolkit becomes available in the future, re-test on a
-Wayland session before assuming this is still broken there.
+type.
+
+### How this was actually resolved
+
+Rather than pursue either option above, the feed list's drag was rebuilt to not use OS-level DnD at
+all: Keryx's drags are always intra-window (reordering within the same feed list — never to another
+app/window), so `java.awt.dnd` was never actually required. `LinuxDragCursorFix.kt` (attempt 3 above)
+and the AWT-backed `platform/FeedDragAndDrop.kt`/`FeedDragAndDrop.desktop.kt` and
+`ui/home/DragAndDropSourceWithThreshold.kt` were deleted outright, replaced by a hand-rolled drag
+hosted on the feed pane's single non-virtualized container (auto-scroll can otherwise dispose a
+per-row gesture mid-drag) with its own Compose-drawn ghost overlay. Bonus: Linux gets a real drag
+ghost for the first time (X11 AWT never supported one either, even before the cursor bug), and the
+gesture is unit/UI-testable for the first time (`ui/home/FeedListDragTest.kt`) — the OS-level version
+needed real, unconstructable AWT events and was documented as untestable in `docs/testing.md`.
 
 ## Article list crashes the UI thread during heavy scroll + selection churn
 

@@ -72,6 +72,10 @@ fun HomeScreen() {
     val articleListPaneWidth by vm.articleListPaneWidth.collectAsStateSafe(ARTICLE_LIST_PANE_WIDTH_DEFAULT.toDouble())
 
     var showAddFeed by remember { mutableStateOf(false) }
+    // The feed list's drag ghost is hosted here, not in FeedListPane: the chip has to be able to
+    // float across the whole window (past the feed pane's right edge, over the article list), and a
+    // composable inside FeedListPane would be painted before — and therefore under — its siblings.
+    val dragOverlay = remember { FeedDragOverlayState() }
     // Bumped on each keyboard-shortcut copy; ArticleDetailPane watches it to flash its copy button's
     // inline ✓ (the keyboard copies the selected article, which that pane already shows).
     var copyPulse by remember { mutableStateOf(0) }
@@ -142,6 +146,7 @@ fun HomeScreen() {
                 .focusable()
                 .homeKeyboardShortcuts(
                     searchFieldFocused = searchFieldFocused,
+                    onEscape = { dragOverlay.cancel() },
                     onUp = {
                         when (focusedPane) {
                             HomePane.FeedList -> moveFeedSelection(-1)
@@ -202,6 +207,7 @@ fun HomeScreen() {
                     FeedListPane(
                         vm,
                         focused = focusedPane == HomePane.FeedList && keyboardNavActive,
+                        dragOverlay = dragOverlay,
                         onActivated = { setFocusedPane(HomePane.FeedList) },
                         modifier = Modifier.width(displayedFeedWidth),
                         onAddFeedClick = { showAddFeed = true },
@@ -228,6 +234,8 @@ fun HomeScreen() {
                     )
                 }
             }
+            // Last child of the root Box, so the floating drag chip paints above every pane.
+            FeedDragGhost(dragOverlay)
         }
         LaunchedEffect(Unit) { focusRequester.requestFocus() }
     }
