@@ -23,6 +23,23 @@ A local-first, cross-platform RSS reader
 
 Currently available for macOS and Linux. Windows, and native apps for Android, iOS, iPadOS, and macOS, are planned for the future.
 
+## Download
+
+Download the latest release from the [Releases page](https://github.com/shimataro/keryx/releases).
+
+> [!IMPORTANT]
+> **macOS**: Until an officially signed release is available, downloaded `.dmg` / `.zip` files
+> are blocked by Gatekeeper as unsigned. Before opening the `.dmg` or extracting the `.zip`,
+> clear the quarantine attribute on the downloaded file itself (this also keeps the app inside
+> from inheriting it once opened/extracted):
+>
+> ```bash
+> xattr -d com.apple.quarantine ~/Downloads/Keryx-*.dmg   # or .zip
+> ```
+>
+> Alternatively, right-click the app and choose "Open" instead of double-clicking. See
+> [Signing & Notarization](docs/build.md#signing--notarization-future) for background.
+
 ## Development Documentation
 
 - [design documents](docs/README.md)

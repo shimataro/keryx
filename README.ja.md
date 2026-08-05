@@ -23,6 +23,23 @@
 
 現在 macOS / Linux に対応。Windows、および Android・iOS/iPadOS/macOS のネイティブアプリは今後対応予定。
 
+## ダウンロード
+
+最新版は [リリースページ](https://github.com/shimataro/keryx/releases) から入手できます。
+
+> [!IMPORTANT]
+> **macOS**: 正式な署名付きリリースが提供されるまでの間、ダウンロードした `.dmg` / `.zip` は
+> 未署名のため Gatekeeper にブロックされます。`.dmg` を開く・`.zip` を展開する前に、
+> ダウンロードしたファイル自体の quarantine（検疫）属性を削除してください
+> （こうすることで、開く・展開した後の App にも属性が伝播しません）。
+>
+> ```bash
+> xattr -d com.apple.quarantine ~/Downloads/Keryx-*.dmg   # または .zip
+> ```
+>
+> または、ダブルクリックの代わりに右クリックして「開く」を選択してください。背景は
+> [署名・公証](docs/build.ja.md#署名公証将来対応)を参照。
+
 ## 開発用ドキュメント
 
 - [設計ドキュメント一覧](docs/README.ja.md)

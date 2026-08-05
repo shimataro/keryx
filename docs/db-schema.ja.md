@@ -16,8 +16,6 @@
   （`<移行元バージョン>.sqm`）を追加すればバージョンは自動で上がる。あわせて
   `DatabaseMerger.EXPECTED_SCHEMA` / `validateSchema` を新バージョンに追随させること。
 
-> **旧版（前身実装）との互換性は考慮しない**（ユーザーの決定）。スキーマは合理的な最良形とする。
-
 ## テーブル一覧
 
 `feeds` / `articles` / `tags` / `feed_tags` / `folders` / `global_settings` / `sync_state` / `articles_fts`（仮想）。
@@ -109,6 +107,7 @@
 `key`(PK), `value`。既知キー: `last_synced_at`（Unix ミリ秒）, `cloud_file_rev`（クラウド上ファイルのリビジョン。
 Dropbox は `rev`、Google Drive は file resource の `version`）。
 
+> [!NOTE]
 > このテーブルへの読み書きが未実装だった問題を修正し、現在の実装では実際に記録する。
 
 ### articles_fts（FTS5 仮想テーブル、SQLDelight 管理外）

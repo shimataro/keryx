@@ -32,6 +32,7 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
 - Non-sync targets: device-local settings, cloud authentication info.
 - Import / export is OPML.
 
+> [!NOTE]
 > **DB and sync files are not backward-compatible with the legacy version** (a user decision).
 
 ## 5. Conflict Resolution Policy
@@ -71,6 +72,7 @@ On first launch, choose local-only / cloud sync (Dropbox / Google Drive / OneDri
 | 410 Gone | Warning in notification center (not auto-deleted) |
 | Timeout | Error notification after a fixed number of retries |
 
+> [!NOTE]
 > Fixed the bug where only 301 was supported with no redirect loop guard, and now all redirect codes are supported + a maximum 5-time loop guard is implemented.
 
 ## 8. Accessibility & Internationalization
