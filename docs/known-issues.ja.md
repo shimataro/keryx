@@ -90,14 +90,14 @@ Wayland ネイティブの DnD グラブにおいてカーソルの所有者が�
 
 ### 効かなかった対処（Wayland では。3 つとも X11 では効く）
 
-再度試さないように記録しておく。3 番目は現在出荷されているもので、X11 に対する実効性のある
-修正として残してある。
+再度試さないように記録しておく。3 番目はこの修正が入る前に出荷されていたもので、X11 に対する
+実効性のある修正だった。
 
 - 計算されたドロップアクションを `setCursor()` にそのまま反映する（対処 1）。
 - `DragSourceListener` のコールバックだけから `DragSource.DefaultMoveDrop` を無条件に強制する
   （対処 2）。
 - 同じ無条件の `setCursor()` 呼び出しのトリガーとして、より頻繁に発火する
-  `DragSourceMotionListener.dragMouseMoved` を追加する（対処 3、出荷版）。
+  `DragSourceMotionListener.dragMouseMoved` を追加する（対処 3、旧出荷版）。
 
 ### 本当に Wayland を直すには何が必要か
 

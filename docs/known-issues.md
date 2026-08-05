@@ -88,14 +88,14 @@ client — owns the cursor for a Wayland-native DnD grab.
 
 ### Workarounds that did not work (on Wayland; all three work on X11)
 
-Listed so they are not tried again as a *Wayland* fix — attempt 3 is what's currently shipped, kept
-because it is a genuine, working fix for X11:
+Listed so they are not tried again as a *Wayland* fix — attempt 3 is what shipped before this fix,
+kept because it was a genuine, working fix for X11:
 
 - Mirroring AWT's computed drop action into `setCursor()` (attempt 1).
 - Forcing `DragSource.DefaultMoveDrop` unconditionally from `DragSourceListener` callbacks alone
   (attempt 2).
 - Adding `DragSourceMotionListener.dragMouseMoved` as an additional, more frequently firing trigger
-  for the same `setCursor()` call (attempt 3, shipped).
+  for the same `setCursor()` call (attempt 3, previously shipped).
 
 ### What a real Wayland fix would need
 
