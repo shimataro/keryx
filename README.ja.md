@@ -34,7 +34,8 @@
 > （こうすることで、開く・展開した後の App にも属性が伝播しません）。
 >
 > ```bash
-> xattr -d com.apple.quarantine ~/Downloads/Keryx-*.dmg   # または .zip
+> xattr -d com.apple.quarantine ~/Downloads/Keryx-*.dmg   # .dmg の場合
+> xattr -d com.apple.quarantine ~/Downloads/Keryx-*.zip   # .zip の場合
 > ```
 >
 > または、ダブルクリックの代わりに右クリックして「開く」を選択してください。背景は

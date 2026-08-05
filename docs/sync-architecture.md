@@ -9,7 +9,6 @@ Target: cloud sync (Dropbox / Google Drive / OneDrive). Implementation is in `do
 - The sync file is `keryx.db` (SQLite) uploaded as-is. However, the live DB is not read directly; a consistent snapshot is created via `VACUUM INTO`, and **`articles_fts` is DROPped on the copy side** before upload (the live index is never DROPped → concurrent searches do not hit `no such table`. See `articles_fts` section in [db-schema.md](db-schema.md)).
 - Conflict resolution is merge (ATTACH DATABASE) on the app side before upload.
 - FTS5 index is not included in the cloud (dropped on the copy side). New articles from merge are **incrementally indexed** after merge.
-- **Cloud files are not backward-compatible with the legacy version** (user decision).
 
 ## Cloud File Structure
 

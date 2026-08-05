@@ -34,7 +34,8 @@ Download the latest release from the [Releases page](https://github.com/shimatar
 > from inheriting it once opened/extracted):
 >
 > ```bash
-> xattr -d com.apple.quarantine ~/Downloads/Keryx-*.dmg   # or .zip
+> xattr -d com.apple.quarantine ~/Downloads/Keryx-*.dmg   # .dmg
+> xattr -d com.apple.quarantine ~/Downloads/Keryx-*.zip   # .zip
 > ```
 >
 > Alternatively, right-click the app and choose "Open" instead of double-clicking. See

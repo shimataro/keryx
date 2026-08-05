@@ -15,9 +15,6 @@ Target: local SQLite (managed by SQLDelight). `.sq` files are located at
   highest migration file + 1). When the schema changes, add a `.sqm` file (`<from-version>.sqm`) and the version bumps
   automatically; `DatabaseMerger.EXPECTED_SCHEMA` / `validateSchema` must be updated to the new version in lockstep.
 
-> [!NOTE]
-> **Backward compatibility with the legacy version is not considered** (a user decision). The schema is the best reasonable form.
-
 ## Table List
 
 `feeds` / `articles` / `tags` / `feed_tags` / `folders` / `global_settings` / `sync_state` / `articles_fts` (virtual).
@@ -87,6 +84,9 @@ Indexes: `feed_id` / `is_read` / `is_starred` / `published_at DESC`.
 
 `key`(PK), `value`. Known keys: `last_synced_at` (Unix millis), `cloud_file_rev` (cloud file revision.
 Dropbox uses `rev`, Google Drive uses file resource's `version`).
+
+> [!NOTE]
+> The issue that read/write to this table was unimplemented has been fixed; the current implementation actually records these values.
 
 ### articles_fts (FTS5 virtual table, outside SQLDelight management)
 
