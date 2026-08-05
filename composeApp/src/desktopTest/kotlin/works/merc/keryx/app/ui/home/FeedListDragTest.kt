@@ -159,6 +159,50 @@ class FeedListDragTest {
     }
 
     @Test
+    fun draggingOutsideTheHostHorizontallyNeverAppliesADrop() = runDesktopComposeUiTest {
+        // Row hit-testing (bandAt/resolveHitBand) only ever compares vertical position, so a
+        // pointerInput-based gesture — unlike the platform DnD this replaced, whose target
+        // dispatch was bounds-based — keeps receiving move/release events even once the pointer
+        // has traveled out over a sibling pane. Without an explicit horizontal-bounds check
+        // (isWithinHost), a release out there would still land on whichever row happens to sit at
+        // the same height as the release point.
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("a", sortOrder = 0L)
+        db.insertFeed("b", sortOrder = 1L)
+        val vm = newHomeViewModel(driver, db)
+        try {
+            setFeedListDragContent(vm)
+            waitForIdle()
+
+            val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val bBounds = onNodeWithText("Feed b", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val start = localOf(aBounds.center, hostBounds)
+            // Same height as "b"'s row, but far to the right of the host's own width — as if the
+            // pointer had traveled out over the article list pane.
+            val outsideRight = localOf(Offset(hostBounds.right + 200f, bBounds.center.y), hostBounds)
+
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput {
+                moveTo(start)
+                press()
+                moveTo(start + Offset(0f, dragThresholdCrossPx))
+                moveTo(outsideRight)
+            }
+            waitForIdle()
+            // Must not show as a valid target just because it shares "b"'s row height.
+            onNodeWithTag(FEED_DRAG_GHOST_TEST_TAG, useUnmergedTree = true).assertExists()
+
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput { release() }
+            waitForIdle()
+
+            assertEquals(listOf("a", "b"), db.feedsQueries.getByFolder(null).executeAsList().map { it.id })
+        } finally {
+            vm.viewModelScope.cancel()
+            driver.close()
+        }
+    }
+
+    @Test
     fun movingLessThanTheThresholdDoesNotStartADragAndStillSelects() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertFeed("a", sortOrder = 0L)

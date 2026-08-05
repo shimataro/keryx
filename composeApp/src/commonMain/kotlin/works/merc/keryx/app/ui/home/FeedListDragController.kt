@@ -15,6 +15,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -84,6 +85,15 @@ internal class FeedDragOverlayState {
 
     /** Size of the ghost chip, matching the dragged row's own size. */
     var size: IntSize by mutableStateOf(IntSize.Zero)
+
+    /**
+     * Whether the pointer is currently over a valid drop target for the dragged item. Mirrors
+     * whether [FeedListDragController] resolved a non-null insertion boundary or hovered tag for
+     * the current position — the same check [FeedListPane]'s row/tag highlighting already relies
+     * on — so the ghost can show an "invalid here" cue over blank space, section headers, or a
+     * folder hovering itself, instead of implying every position is droppable.
+     */
+    var hasValidTarget: Boolean by mutableStateOf(false)
 
     /** Installed by [FeedListDragController] so the drag can be aborted from outside the pane. */
     var onCancel: () -> Unit = {}
@@ -203,7 +213,7 @@ internal class FeedListDragController(
         val bounds = hostBoundsState.value
         overlay.positionInRoot = Offset(bounds.left, bounds.top) + pos - grabOffset
         dragPointerYState.value = bounds.top + pos.y
-        updateHover(pos.y)
+        updateHover(pos)
     }
 
     /**
@@ -213,22 +223,47 @@ internal class FeedListDragController(
      */
     fun refreshHover() {
         if (overlay.item == null) return
-        updateHover(lastPosition.y)
+        updateHover(lastPosition)
     }
 
     /**
-     * Updates the active drop target for a pointer at [localY].
+     * Whether [pos] (local to the drag host) falls within the drag host's own horizontal extent.
      *
-     * Clears the active boundary and tag target when the pointer is outside a valid row.
+     * The drag host is exactly as wide as the feed pane, but a `pointerInput` gesture keeps
+     * receiving move events for the rest of its lifetime regardless of where the pointer travels —
+     * unlike the platform DnD this replaced, whose target dispatch was bounds-based and fired
+     * `onExited` the moment the pointer left the target composable. Row hit-testing itself
+     * ([bandAt]/[resolveHitBand]) only ever compares vertical position, so without this check a
+     * press dragged out over a sibling pane (e.g. the article list) would still resolve to
+     * whichever row happens to sit at the same *height*, both highlighting it and (in [end])
+     * actually applying the drop there — never mind that the pointer is nowhere near the feed list.
      */
-    private fun updateHover(localY: Float) {
+    private fun isWithinHost(pos: Offset): Boolean = pos.x in 0f..hostBoundsState.value.width
+
+    /**
+     * Updates the active drop target for a pointer at [pos] (local to the drag host).
+     *
+     * Clears the active boundary and tag target when the pointer is outside a valid row, or
+     * outside the drag host's horizontal extent entirely (see [isWithinHost]), and mirrors the
+     * result into [FeedDragOverlayState.hasValidTarget] so the ghost can show whether the current
+     * position would actually accept a drop.
+     */
+    private fun updateHover(pos: Offset) {
         val item = overlay.item ?: return
+        if (!isWithinHost(pos)) {
+            activeBoundaryState.value = null
+            hoveredAttachTagIdState.value = null
+            overlay.hasValidTarget = false
+            return
+        }
+        val localY = pos.y
         val dropIndex = dropIndexState.value
         val feedId = (item as? DraggedItem.Feed)?.feedId
         val draggedFolderId = (item as? DraggedItem.Folder)?.folderId
         val band = bandAt(localY) ?: run {
             activeBoundaryState.value = null
             hoveredAttachTagIdState.value = null
+            overlay.hasValidTarget = false
             return
         }
         val half = resolveRowHalf(localY, band)
@@ -262,17 +297,23 @@ internal class FeedListDragController(
             }
             else -> null
         }
+        overlay.hasValidTarget = activeBoundaryState.value != null || hoveredAttachTagIdState.value != null
     }
 
     /**
      * Applies the drop for a release at [pos] (local to the drag host) and ends the drag.
+     *
+     * A release outside the drag host's horizontal extent (see [isWithinHost]) never applies
+     * anything, for the same reason [updateHover] guards against it: row hit-testing is
+     * vertical-only, so without this check a release out over a sibling pane could still land on
+     * whichever row happens to share its height.
      *
      * @return `true` if the drop was valid and applied, `false` otherwise.
      */
     fun end(pos: Offset): Boolean {
         val item = overlay.item ?: return false
         val dropIndex = dropIndexState.value
-        val band = bandAt(pos.y)
+        val band = if (isWithinHost(pos)) bandAt(pos.y) else null
         val half = band?.let { resolveRowHalf(pos.y, it) }
         clear()
         if (band == null || half == null) return false
@@ -334,6 +375,7 @@ internal class FeedListDragController(
     /** Drops every piece of drag state: the ghost, the insertion line, the tag highlight, auto-scroll. */
     private fun clear() {
         overlay.item = null
+        overlay.hasValidTarget = false
         draggedFeedIdState.value = null
         activeBoundaryState.value = null
         hoveredAttachTagIdState.value = null
@@ -377,7 +419,18 @@ internal fun rememberFeedListDragController(
 }
 
 /**
- * Draws a legible drag chip: an opaque rounded-rect (icon + title) floating under the pointer.
+ * Opacity of the whole drag chip (applied to the ghost's layer, not baked into its paint colors —
+ * see [FeedDragGhost]). Below full opacity so the row/highlight the pointer is currently over stays
+ * visible underneath the chip instead of being fully hidden by it.
+ */
+private const val DRAG_GHOST_ALPHA = 0.75f
+
+/**
+ * Draws a legible drag chip: a rounded-rect (icon + title) floating under the pointer, tinted
+ * neutral over a valid drop target and toward [MaterialTheme.colorScheme.error] when the pointer
+ * is somewhere a drop would not be accepted (blank space, a section header, a folder hovering
+ * itself) — see [rememberFeedDragDecoration]'s `isValidTarget` and
+ * [FeedDragOverlayState.hasValidTarget].
  *
  * Everything is painted directly rather than captured from composition, so the chip is legible over
  * arbitrary content — the row's own background is transparent whenever unselected, which is exactly
@@ -419,20 +472,29 @@ private fun DrawScope.drawDragPreviewChip(
  * Resolves everything [drawDragPreviewChip] needs. Only [icon]/[iconTint] differ between a feed
  * chip (the same fallback icon [FeedAvatar][FeedListRowParts.kt] uses when a favicon isn't
  * available) and a folder chip, so both go through this one setup rather than duplicating it.
+ *
+ * @param isValidTarget Whether the pointer is currently over a position that would accept this
+ * drop. When `false`, the chip tints toward `error` instead of its usual neutral colors — the same
+ * signal [FeedDragOverlayState.hasValidTarget] carries — so hovering blank space, a section header,
+ * or (for a folder drag) the dragged folder itself reads as clearly invalid rather than looking
+ * identical to a real drop target.
  */
 @Composable
 private fun rememberFeedDragDecoration(
     title: String,
     icon: Painter,
     iconTint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    isValidTarget: Boolean = true,
 ): DrawScope.() -> Unit {
     val textMeasurer = rememberTextMeasurer()
     val textStyle = MaterialTheme.typography.bodyLarge
-    val textColor = MaterialTheme.colorScheme.onSurface
-    val backgroundColor = MaterialTheme.colorScheme.surfaceContainerHighest
-    val borderColor = MaterialTheme.colorScheme.outlineVariant
+    val errorColor = MaterialTheme.colorScheme.error
+    val textColor = if (isValidTarget) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onErrorContainer
+    val backgroundColor = if (isValidTarget) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.errorContainer
+    val borderColor = if (isValidTarget) MaterialTheme.colorScheme.outlineVariant else errorColor
+    val resolvedIconTint = if (isValidTarget) iconTint else errorColor
     return {
-        drawDragPreviewChip(title, textMeasurer, textStyle, textColor, icon, iconTint, backgroundColor, borderColor)
+        drawDragPreviewChip(title, textMeasurer, textStyle, textColor, icon, resolvedIconTint, backgroundColor, borderColor)
     }
 }
 
@@ -459,11 +521,12 @@ internal fun FeedDragGhost(state: FeedDragOverlayState) {
     Box(Modifier.onGloballyPositioned { originInRoot = it.positionInRoot() }) {
         val item = state.item ?: return@Box
         val decoration = when (item) {
-            is DraggedItem.Feed -> rememberFeedDragDecoration(item.title, feedIcon)
+            is DraggedItem.Feed -> rememberFeedDragDecoration(item.title, feedIcon, isValidTarget = state.hasValidTarget)
             is DraggedItem.Folder -> rememberFeedDragDecoration(
                 title = item.title,
                 icon = folderIcon,
                 iconTint = MaterialTheme.colorScheme.primary,
+                isValidTarget = state.hasValidTarget,
             )
         }
         val density = LocalDensity.current
@@ -476,6 +539,7 @@ internal fun FeedDragGhost(state: FeedDragOverlayState) {
                     IntOffset(local.x.roundToInt(), local.y.roundToInt())
                 }
                 .size(with(density) { size.width.toDp() }, with(density) { size.height.toDp() })
+                .alpha(DRAG_GHOST_ALPHA)
                 .drawBehind(decoration),
         )
     }
