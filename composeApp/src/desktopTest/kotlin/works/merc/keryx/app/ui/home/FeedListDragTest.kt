@@ -129,7 +129,8 @@ class FeedListDragTest {
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
         db.insertFeed("c", sortOrder = 2L)
-        val vm = newHomeViewModel(driver, db)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
         try {
             setFeedListDragContent(vm)
             waitForIdle()
@@ -154,6 +155,7 @@ class FeedListDragTest {
             assertEquals(listOf("c", "a", "b"), order)
         } finally {
             vm.viewModelScope.cancel()
+            fixture.close()
             driver.close()
         }
     }
@@ -169,7 +171,8 @@ class FeedListDragTest {
         val (driver, db) = inMemoryDb()
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
-        val vm = newHomeViewModel(driver, db)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
         try {
             setFeedListDragContent(vm)
             waitForIdle()
@@ -194,10 +197,12 @@ class FeedListDragTest {
 
             onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput { release() }
             waitForIdle()
+            onNodeWithTag(FEED_DRAG_GHOST_TEST_TAG, useUnmergedTree = true).assertDoesNotExist()
 
             assertEquals(listOf("a", "b"), db.feedsQueries.getByFolder(null).executeAsList().map { it.id })
         } finally {
             vm.viewModelScope.cancel()
+            fixture.close()
             driver.close()
         }
     }
@@ -208,7 +213,8 @@ class FeedListDragTest {
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
         db.insertFeed("c", sortOrder = 2L)
-        val vm = newHomeViewModel(driver, db)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
         try {
             setFeedListDragContent(vm)
             waitForIdle()
@@ -230,6 +236,7 @@ class FeedListDragTest {
             assertEquals(ArticleFilter.Feed("a"), vm.filter.value, "the row's own click must still register as a selection")
         } finally {
             vm.viewModelScope.cancel()
+            fixture.close()
             driver.close()
         }
     }
@@ -239,7 +246,8 @@ class FeedListDragTest {
         val (driver, db) = inMemoryDb()
         db.insertFolder("folder1", "Folder One", sortOrder = 0L)
         db.insertFeed("a", sortOrder = 0L)
-        val vm = newHomeViewModel(driver, db)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
         try {
             setFeedListDragContent(vm)
             waitForIdle()
@@ -262,6 +270,7 @@ class FeedListDragTest {
             assertEquals("folder1", db.feedsQueries.getById("a").executeAsOne().folder_id)
         } finally {
             vm.viewModelScope.cancel()
+            fixture.close()
             driver.close()
         }
     }
@@ -272,7 +281,8 @@ class FeedListDragTest {
         db.insertFolder("folder1", "Folder One", sortOrder = 0L)
         db.insertFeed("a", sortOrder = 0L, folderId = "folder1")
         db.insertTag("tag1", "Tag One", sortOrder = 0L)
-        val vm = newHomeViewModel(driver, db)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
         try {
             setFeedListDragContent(vm)
             waitForIdle()
@@ -300,6 +310,7 @@ class FeedListDragTest {
             )
         } finally {
             vm.viewModelScope.cancel()
+            fixture.close()
             driver.close()
         }
     }
@@ -310,7 +321,8 @@ class FeedListDragTest {
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
         db.insertFeed("c", sortOrder = 2L)
-        val vm = newHomeViewModel(driver, db)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
         try {
             setFeedListDragContent(vm)
             waitForIdle()
@@ -352,6 +364,7 @@ class FeedListDragTest {
             assertEquals(listOf("b", "c", "a"), order, "the drag must still complete despite the mid-drag right-click")
         } finally {
             vm.viewModelScope.cancel()
+            fixture.close()
             driver.close()
         }
     }
@@ -361,7 +374,8 @@ class FeedListDragTest {
         val (driver, db) = inMemoryDb()
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
-        val vm = newHomeViewModel(driver, db)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
         try {
             setFeedListDragContent(vm)
             waitForIdle()
@@ -391,6 +405,7 @@ class FeedListDragTest {
             onNodeWithTag(FEED_DRAG_GHOST_TEST_TAG, useUnmergedTree = true).assertDoesNotExist()
         } finally {
             vm.viewModelScope.cancel()
+            fixture.close()
             driver.close()
         }
     }
@@ -401,7 +416,8 @@ class FeedListDragTest {
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
         db.insertFeed("c", sortOrder = 2L)
-        val vm = newHomeViewModel(driver, db)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
         try {
             setFeedListDragContent(vm)
             waitForIdle()
@@ -438,6 +454,7 @@ class FeedListDragTest {
             assertEquals(listOf("a", "b", "c"), db.feedsQueries.getByFolder(null).executeAsList().map { it.id })
         } finally {
             vm.viewModelScope.cancel()
+            fixture.close()
             driver.close()
         }
     }
@@ -447,7 +464,8 @@ class FeedListDragTest {
         val (driver, db) = inMemoryDb()
         db.insertFolder("d1", "Alpha", sortOrder = 0L)
         db.insertFolder("d2", "Beta", sortOrder = 1L)
-        val vm = newHomeViewModel(driver, db)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
         try {
             setFeedListDragContent(vm)
             waitForIdle()
@@ -472,6 +490,7 @@ class FeedListDragTest {
             assertEquals(listOf("d2", "d1"), order)
         } finally {
             vm.viewModelScope.cancel()
+            fixture.close()
             driver.close()
         }
     }
@@ -493,22 +512,26 @@ private class FeedListDragTestTokenStorage : TokenStorage {
     override fun clear() { stored = null }
 }
 
-private fun feedListDragTestFailingFetcher(): FeedFetcher {
-    val client = HttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }) {
-        followRedirects = false
-        expectSuccess = false
-        install(HttpTimeout)
-    }
-    return FeedFetcher(client)
+private fun feedListDragTestNotFoundHttpClient(): HttpClient = HttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }) {
+    followRedirects = false
+    expectSuccess = false
+    install(HttpTimeout)
 }
 
-private fun feedListDragTestMissingFaviconResolver(): FaviconResolver {
-    val client = HttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }) {
-        followRedirects = false
-        expectSuccess = false
-        install(HttpTimeout)
+/**
+ * Bundles the [HomeViewModel] under test with the resources [newHomeViewModel] creates outside
+ * its own [HomeViewModel.viewModelScope] — [SyncRepository]'s channel-consumer scope and the
+ * MockEngine [HttpClient]s — so tests can release them in `finally`.
+ */
+private class HomeViewModelFixture(
+    val vm: HomeViewModel,
+    private val syncScope: CoroutineScope,
+    private val httpClients: List<HttpClient>,
+) {
+    fun close() {
+        syncScope.cancel()
+        httpClients.forEach { it.close() }
     }
-    return FaviconResolver(client)
 }
 
 /**
@@ -522,16 +545,18 @@ private fun newHomeViewModel(
     db: KeryxDatabase,
     syncScheduler: SyncScheduler = SyncScheduler {},
     clock: Clock = Clock { 0L },
-): HomeViewModel {
+): HomeViewModelFixture {
     // A fresh, unique directory per call (not a fixed name shared across every test in this file):
     // LocalSettingsStore persists lastFilter/collapsedFolderIds/etc. to a JSON file there, and a
     // shared path would leak state between tests within the same run (e.g. a filter selected by
     // one test becoming the *restored* initial filter of the next), exactly like
     // `HomeViewModelTest`'s per-instance `Random.nextInt()`-suffixed directory.
     val dir = FileIO.join(AppDirs.tempDir(), "feed-list-drag-test-${Random.nextInt()}")
+    val fetcherClient = feedListDragTestNotFoundHttpClient()
+    val faviconClient = feedListDragTestNotFoundHttpClient()
     val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
     val feedRepository = FeedRepository(
-        db, feedListDragTestFailingFetcher(), feedListDragTestMissingFaviconResolver(), articleRepository,
+        db, FeedFetcher(fetcherClient), FaviconResolver(faviconClient), articleRepository,
         ftsManagerIndexed(driver), syncScheduler, NotificationCenter(), FeedListDragTestNotificationMessages(),
         clock, Dispatchers.Unconfined,
     )
@@ -541,13 +566,14 @@ private fun newHomeViewModel(
         db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined,
     )
     val activityCenter = ActivityCenter()
+    val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
     val syncRepository = SyncRepository(
         driver = driver,
         db = db,
         ftsManager = FtsManager(driver),
         cloudProvider = { null },
         clock = clock,
-        scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+        scope = syncScope,
         activityCenter = activityCenter,
         notificationCenter = NotificationCenter(),
         notificationMessages = FeedListDragTestNotificationMessages(),
@@ -564,9 +590,10 @@ private fun newHomeViewModel(
         clientId = "",
         clock = clock,
     )
-    return HomeViewModel(
+    val vm = HomeViewModel(
         feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
         syncRepository, cloudSession, activityCenter, clock, NewArticleNotifier(), FeedListDragTestNotificationMessages(),
         Dispatchers.Unconfined, Dispatchers.Unconfined,
     )
+    return HomeViewModelFixture(vm, syncScope, listOf(fetcherClient, faviconClient, authClient))
 }
