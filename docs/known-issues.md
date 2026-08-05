@@ -5,6 +5,121 @@
 Defects that are understood but deliberately not fixed, with the evidence behind that decision.
 Each entry records what was ruled out, so a later investigation doesn't repeat the same work.
 
+## Linux Wayland/XWayland: drag cursor stuck on "no-drop" despite a successful drop
+
+**Status**: Resolved — by removing OS-level drag-and-drop from the feed list entirely. The feed/folder
+reorder gesture is now a hand-rolled Compose-native drag (`ui/home/FeedListDragController.kt` +
+`FeedListDragGestures.kt`: manual `pointerInput` tracking, a Compose-drawn floating ghost, direct
+hit-testing), so no XDnD/XWayland cursor negotiation happens at all on any session type. The
+investigation below is kept in full, since it remains valuable context against ever reintroducing
+`Modifier.dragAndDropSource`/`dragAndDropTarget` (real OS-level DnD) for this or a future
+intra-window-only drag — the analysis of *why* XWayland can't be worked around from the client side
+still holds if that's ever reconsidered.
+
+### Symptom
+
+Dragging a feed or folder row in the feed list shows the OS's forbidden ("no-drop") cursor for the
+whole gesture instead of a drag ghost. The drop completes successfully regardless — no data or
+functional impact, but a working feature looks broken.
+
+### Diagnosis
+
+Three code-level attempts were tried, in order, against real Linux hardware:
+
+1. Mirror AWT's own computed drop action into `DragSourceContext.setCursor()` from
+   `DragSourceListener`'s `dragEnter`/`dragOver`/`dropActionChanged`.
+2. Force the cursor unconditionally to `DragSource.DefaultMoveDrop` from those same callbacks,
+   regardless of the computed drop action.
+3. Add a `DragSourceMotionListener` (`dragMouseMoved`, which fires on every pointer move regardless
+   of drop-target acknowledgment) as an additional trigger for the same unconditional `setCursor()`
+   call, on the theory that the status-based callbacks might never fire for an intra-window drag.
+
+All three had **zero observable effect** on the reporter's machine. Rather than guess a fourth
+variant, temporary diagnostic logging was added to record exactly which callbacks fire during a
+drag. Two tests with that logging, same build, only the session type changed:
+
+Plasma **Wayland** session — forbidden cursor shown throughout:
+
+```text
+Linux drag-cursor fix installed
+Observed dragMouseMoved for the first time this drag (dropAction=0)
+Observed dragEnter for the first time this drag (dropAction=2)
+Observed dragOver for the first time this drag (dropAction=2)
+Drag ended; callbacks observed this gesture: [dragMouseMoved, dragEnter, dragOver]
+```
+
+Plasma **X11** session — cursor correct throughout, forbidden icon never appears:
+
+```text
+Linux drag-cursor fix installed
+Observed dragMouseMoved for the first time this drag (dropAction=0)
+Observed dragEnter for the first time this drag (dropAction=2)
+Observed dragOver for the first time this drag (dropAction=2)
+Observed dragExit for the first time this drag
+Drag ended; callbacks observed this gesture: [dragMouseMoved, dragEnter, dragOver, dragExit]
+```
+
+The two sequences are functionally identical (AWT resolves the drop action to `ACTION_MOVE` (`2`)
+within milliseconds on *both* sessions, and the same `setCursor(DragSource.DefaultMoveDrop)` calls
+are reached on *both*), yet only X11 shows the corrected cursor. The only variable that changed
+between the two tests was the session type.
+
+### Cause
+
+Keryx's Linux build runs on AWT's X11 toolkit — there is no general-availability native-Wayland
+AWT/Compose Desktop toolkit — so under a Wayland session the app runs as an **XWayland** client.
+XWayland bridges the client's X11 XDnD protocol to the compositor's native `wl_data_device` Wayland
+protocol, and the drag cursor shown during that bridged operation is compositor-drawn from the
+negotiated Wayland DnD action, not from the X11 cursor the client requests via
+`XDefineCursor`/`DragSourceContext.setCursor()`. This is a known category of XWayland DnD limitation,
+not anything specific to Keryx or Compose Desktop: the exact same calls that fix the cursor outright
+on X11 are silently ignored once bridged through XWayland, because the compositor — not the
+client — owns the cursor for a Wayland-native DnD grab.
+
+### Ruled out
+
+- **AWT computing the wrong (rejected) drop action** — disproved: it resolves to `ACTION_MOVE`
+  within milliseconds on both sessions, in both logs above.
+- **The `DragSourceListener`/`DragSourceMotionListener` callbacks never firing at all** — disproved:
+  the identical sequence of callbacks fires on both X11 and Wayland.
+- **Something specific to Keryx's or Compose Desktop's code** — the same build, same call sequence,
+  produces different visible results purely based on session type, with no code change between the
+  two tests.
+
+### Workarounds that did not work (on Wayland; all three work on X11)
+
+Listed so they are not tried again as a *Wayland* fix — attempt 3 is what shipped before this fix,
+kept because it was a genuine, working fix for X11:
+
+- Mirroring AWT's computed drop action into `setCursor()` (attempt 1).
+- Forcing `DragSource.DefaultMoveDrop` unconditionally from `DragSourceListener` callbacks alone
+  (attempt 2).
+- Adding `DragSourceMotionListener.dragMouseMoved` as an additional, more frequently firing trigger
+  for the same `setCursor()` call (attempt 3, previously shipped).
+
+### What a real Wayland fix would need
+
+Full control over the drag cursor under a Wayland session would require driving the drag through
+Wayland's native `wl_data_device`/`wl_data_source` protocol directly — setting the cursor via a
+genuine Wayland surface, not an X11 `Cursor` — which means either a native-Wayland AWT/Compose
+Desktop toolkit (not available in the JDK/Compose Multiplatform versions this project targets), or
+hand-rolling a JNI bridge to libwayland bypassing AWT entirely for this one interaction. Both are far
+out of proportion to a cosmetic cursor icon, given the drop itself already succeeds on every session
+type.
+
+### How this was actually resolved
+
+Rather than pursue either option above, the feed list's drag was rebuilt to not use OS-level DnD at
+all: Keryx's drags are always intra-window (reordering within the same feed list — never to another
+app/window), so `java.awt.dnd` was never actually required. `LinuxDragCursorFix.kt` (attempt 3 above)
+and the AWT-backed `platform/FeedDragAndDrop.kt`/`FeedDragAndDrop.desktop.kt` and
+`ui/home/DragAndDropSourceWithThreshold.kt` were deleted outright, replaced by a hand-rolled drag
+hosted on the feed pane's single non-virtualized container (auto-scroll can otherwise dispose a
+per-row gesture mid-drag) with its own Compose-drawn ghost overlay. Bonus: Linux gets a real drag
+ghost for the first time (X11 AWT never supported one either, even before the cursor bug), and the
+gesture is unit/UI-testable for the first time (`ui/home/FeedListDragTest.kt`) — the OS-level version
+needed real, unconstructable AWT events and was documented as untestable in `docs/testing.md`.
+
 ## Article list crashes the UI thread during heavy scroll + selection churn
 
 **Status**: not fixed — upstream Compose defect, waiting on a library update.

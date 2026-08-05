@@ -521,6 +521,49 @@ class HomeCommonTest {
         assertEquals(FeedListRowKey.Feed("aaaa-bbbb-cccc"), parseFeedListRowKey("feed-aaaa-bbbb-cccc"))
     }
 
+    // --- parseFeedListDragSourceKey ---
+
+    @Test
+    fun parseFeedListDragSourceKeyRecognizesFeedAndFolderRows() {
+        assertEquals(FeedListDragSourceKey.Feed("f1"), parseFeedListDragSourceKey("feed-f1"))
+        assertEquals(FeedListDragSourceKey.Folder("d1"), parseFeedListDragSourceKey("folder-d1"))
+    }
+
+    @Test
+    fun parseFeedListDragSourceKeyDragsTheFeedItselfFromATagAttachedFeedRow() {
+        // Unlike parseFeedListRowKey (which resolves this row to Other, since dropping *onto* it
+        // means nothing), dragging it drags the feed.
+        assertEquals(FeedListDragSourceKey.Feed("f1"), parseFeedListDragSourceKey("tag-t1-feed-f1"))
+    }
+
+    @Test
+    fun parseFeedListDragSourceKeyRejectsNonDraggableRows() {
+        assertNull(parseFeedListDragSourceKey("tag-t1"))
+        assertNull(parseFeedListDragSourceKey("no-folder-header"))
+        assertNull(parseFeedListDragSourceKey("folders-header"))
+        assertNull(parseFeedListDragSourceKey("tags-header"))
+        assertNull(parseFeedListDragSourceKey("tags-divider"))
+        assertNull(parseFeedListDragSourceKey(null))
+        assertNull(parseFeedListDragSourceKey(42))
+    }
+
+    @Test
+    fun parseFeedListDragSourceKeyHandlesIdsContainingDashes() {
+        // Real ids are UUIDs, which contain dashes themselves.
+        assertEquals(
+            FeedListDragSourceKey.Folder("aaaa-bbbb-cccc"),
+            parseFeedListDragSourceKey("folder-aaaa-bbbb-cccc"),
+        )
+        assertEquals(
+            FeedListDragSourceKey.Feed("aaaa-bbbb-cccc"),
+            parseFeedListDragSourceKey("feed-aaaa-bbbb-cccc"),
+        )
+        assertEquals(
+            FeedListDragSourceKey.Feed("dddd-eeee-ffff"),
+            parseFeedListDragSourceKey("tag-aaaa-bbbb-cccc-feed-dddd-eeee-ffff"),
+        )
+    }
+
     // --- resolveHitBand / resolveRowHalf ---
 
     @Test
