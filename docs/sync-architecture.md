@@ -9,7 +9,6 @@ Target: cloud sync (Dropbox / Google Drive / OneDrive). Implementation is in `do
 - The sync file is `keryx.db` (SQLite) uploaded as-is. However, the live DB is not read directly; a consistent snapshot is created via `VACUUM INTO`, and **`articles_fts` is DROPped on the copy side** before upload (the live index is never DROPped → concurrent searches do not hit `no such table`. See `articles_fts` section in [db-schema.md](db-schema.md)).
 - Conflict resolution is merge (ATTACH DATABASE) on the app side before upload.
 - FTS5 index is not included in the cloud (dropped on the copy side). New articles from merge are **incrementally indexed** after merge.
-- **Cloud files are not backward-compatible with the legacy version** (user decision).
 
 ## Cloud File Structure
 
@@ -35,7 +34,8 @@ Debouncing: After changes such as read/star, `SyncScheduler.scheduleSync()` batc
 
 Downloaded DB is attached as `cloud` and merged table-by-table via timestamp comparison.
 
-> **Important implementation note**: SQLDelight's JVM `JdbcSqliteDriver` opens a new connection per statement for file DBs. Therefore, executing `ATTACH` through the driver makes it invisible to subsequent merge statements (`no such table: cloud.*`). The merge is done on a **single dedicated JDBC connection** in `platform/DatabaseMerger`: attach → version check → merge (transaction) → detach.
+> [!IMPORTANT]
+> SQLDelight's JVM `JdbcSqliteDriver` opens a new connection per statement for file DBs. Therefore, executing `ATTACH` through the driver makes it invisible to subsequent merge statements (`no such table: cloud.*`). The merge is done on a **single dedicated JDBC connection** in `platform/DatabaseMerger`: attach → version check → merge (transaction) → detach.
 
 Merge SQL (`MergeSql`) key points:
 
@@ -58,6 +58,7 @@ Merge SQL (`MergeSql`) key points:
 Managed via `PRAGMA user_version`. At merge time, `cloud.user_version` is checked; if the cloud is newer than local, `SchemaVersionException` is thrown to prompt the user to update the app (merge aborts).
 Current `user_version` is 2 (`1.sqm` adds `articles.deleted_at` / `deleted_updated_at`).
 
+> [!NOTE]
 > **Local-direction migration for older cloud schema**: `DatabaseMerger.merge` checks the downloaded cloud DB's `user_version` before merging, and if older than local, runs `KeryxDatabase.Schema.migrate` on the temp file to bring it up to the local schema before merging. This prevents merge statements referencing newer columns from failing with `no such column` against an old cloud DB. With version 2, this uplift branch (`migrateCloudIfOlder`) now fires for a version-1 cloud DB, applying `1.sqm` to the downloaded copy so the article merge can reference `deleted_at`.
 
 ## FTS5 Handling
@@ -93,7 +94,8 @@ Redirect reception method is chosen per provider (see the `.claude/rules/cloud-o
 
 How the scheme is registered with the OS differs per platform. macOS declares it in Info.plist (`CFBundleURLTypes`) at packaging time. Windows and Linux register it at startup, from `registerCustomUriScheme()`: the Windows path writes `HKEY_CURRENT_USER\Software\Classes\keryx` (the per-user hive, so no admin elevation is needed), the Linux path writes a user-level `.desktop` entry (`$XDG_DATA_HOME/applications/keryx-url-handler.desktop`, default `~/.local/share/applications/keryx-url-handler.desktop`) and a `$XDG_CONFIG_HOME/mimeapps.list` (default `~/.config/mimeapps.list`) association via `LinuxUriSchemeRegistrar`. The Linux entry's `Exec` line must end in `%u` — without it the desktop-entry spec does not hand the URI to the process, and the browser cannot resolve the scheme at all (an "unknown protocol" error). On both platforms the OS then launches the app with the URL as a command-line argument, which `main.kt` forwards to the running instance via single-instance.
 
-> **Note (custom-URI providers on every desktop OS)**: `./gradlew :composeApp:run` cannot complete Dropbox / OneDrive linking. On macOS, LaunchServices routes `keryx://` to the packaged `Keryx.app`, so the `gradlew run` instance never receives the redirect. On Windows and Linux, the startup registration deliberately no-ops unless the process is a packaged launcher (`packagedLauncherPath()`), because registering the JDK's own `java` binary as the `keryx://` handler would outlive the Gradle run. To test/perform linking, build the app with `./gradlew :composeApp:createDistributable` and launch it (see [setup.md](setup.md) for details). Google Drive uses loopback reception, so this restriction does not apply and `gradlew run` can complete linking.
+> [!NOTE]
+> **Custom-URI providers on every desktop OS**: `./gradlew :composeApp:run` cannot complete Dropbox / OneDrive linking. On macOS, LaunchServices routes `keryx://` to the packaged `Keryx.app`, so the `gradlew run` instance never receives the redirect. On Windows and Linux, the startup registration deliberately no-ops unless the process is a packaged launcher (`packagedLauncherPath()`), because registering the JDK's own `java` binary as the `keryx://` handler would outlive the Gradle run. To test/perform linking, build the app with `./gradlew :composeApp:createDistributable` and launch it (see [setup.md](setup.md) for details). Google Drive uses loopback reception, so this restriction does not apply and `gradlew run` can complete linking.
 
 ### Token Storage
 

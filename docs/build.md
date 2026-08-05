@@ -68,6 +68,7 @@ Below is how to obtain API keys for each service.
 The redirect after OAuth2 cannot be arbitrarily determined like Dropbox, so it is received via loopback at `http://127.0.0.1:<port>` (the app temporarily sets up an HTTP server with `LoopbackRedirectTransport` to receive it).
 The flow uses PKCE (`code_verifier`), but **a client secret is also required separately** — unlike iOS/Android, Google's "Desktop app" OAuth client is not treated as a full public client, and Google's token endpoint rejects token exchange / refresh without `client_secret` with `invalid_request: client_secret is missing` (regardless of PKCE). The scope requested is `drive.appdata` only (an app-specific hidden folder in the user's Drive). During development, set the publishing status to "Testing" on the "Audience" tab and register test users.
 
+> [!IMPORTANT]
 > **Testing status expires refresh tokens after 7 days.** While the OAuth consent screen's
 > publishing status stays "Testing", Google issues refresh tokens that expire 7 days after
 > being granted, so a Google Drive sync connection needs to be re-linked roughly weekly (the
@@ -137,6 +138,7 @@ so `xdg-open` (or a browser resolving the scheme) can fail until the two are rem
 `keryx-url-handler.desktop` from the applications directory and drop the `x-scheme-handler/keryx` line(s) from
 `mimeapps.list`.
 
+> [!IMPORTANT]
 > **Custom-URI linking confirmation**: `./gradlew :composeApp:run` cannot complete Dropbox / OneDrive linking on any desktop OS — macOS routes `keryx://` to the packaged app, and the Windows/Linux startup registration deliberately skips non-packaged launchers. To verify linking behavior, build with `createDistributable` and launch the packaged app (see [setup.md](setup.md) "Common Issues" for details).
 
 ### `.opml` file association
@@ -246,8 +248,10 @@ Set `DROPBOX_APP_KEY` / `GOOGLE_DRIVE_CLIENT_ID` / `GOOGLE_DRIVE_CLIENT_SECRET` 
 **repository secrets**. If they are unset the build still succeeds, but the released app has the corresponding
 cloud integration hidden entirely (see `CloudStorageAvailability`).
 
-> **The released DMG is unsigned** (ad-hoc). Users will be blocked by Gatekeeper and must right-click → Open, or
-> clear the quarantine attribute. See "Signing & Notarization" below for what lifting this requires.
+> [!IMPORTANT]
+> **The released DMG is unsigned** (ad-hoc), so Gatekeeper blocks it on open. See the
+> [Download](../README.md#download) section for the workaround; "Signing & Notarization" below
+> covers what a permanent fix requires.
 
 ## Signing & Notarization (future)
 
@@ -256,6 +260,7 @@ Currently, packaged artifacts are **ad-hoc signed** (effectively unsigned). This
 - Distribution to other Macs (getting past Gatekeeper).
 - Removing Keychain access permission dialogs on macOS (a stable signing identity fixes the ACL).
 
+> [!CAUTION]
 > **Signing while still on a 0.x version needs care.** jpackage signs the `.app`, so anything that edits
 > `Info.plist` *afterwards* breaks the bundle seal. The custom URI scheme no longer does this — it goes through
 > `macOS { infoPlist { extraKeysRawXml } }` and is therefore already in the plist jpackage signs. What remains is

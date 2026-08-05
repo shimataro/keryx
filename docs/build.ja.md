@@ -70,6 +70,7 @@ Gradle のカスタムタスク（`generateBuildConfig`）で実現している�
 ※フローはPKCE（`code_verifier`）を使うが、**クライアントシークレットは別途必要**。
 ※開発中は「オーディエンス」タブで公開ステータスを「テスト」にしてテストユーザーを登録すれば事足りる。
 
+> [!IMPORTANT]
 > **「テスト」ステータスのままだとリフレッシュトークンが7日で失効する。** OAuth同意画面の公開ステータスを
 > 「テスト」のままにしていると、Googleは発行から7日で失効するリフレッシュトークンを発行するため、Google
 > Driveの同期接続はおよそ週1回の再連携が必要になる（アプリ側は `CloudAuthException` の通知センター表示として
@@ -139,6 +140,7 @@ URI がプロセスに届かないからである。代わりにアプリが初�
 が失敗しうる。除去は手動で行う必要があり、アプリケーションディレクトリの `keryx-url-handler.desktop` を削除し、
 `mimeapps.list` から `x-scheme-handler/keryx` の行を取り除く。
 
+> [!IMPORTANT]
 > **カスタム URI 連携の確認**: `./gradlew :composeApp:run` ではどのデスクトップ OS でも Dropbox / OneDrive
 > 連携が完了しない（macOS は `keryx://` がパッケージ版アプリにルーティングされ、Windows / Linux は起動時の
 > 登録がパッケージ版ランチャー以外を意図的にスキップするため）。連携の動作確認は `createDistributable` で
@@ -209,8 +211,10 @@ UI に一切現れない内部的なビルド識別子。中間成果物は `Ker
 **リポジトリの Secrets** に設定する。未設定でもビルドは成功するが、リリースされたアプリでは
 該当するクラウド連携が完全に非表示になる（`CloudStorageAvailability` 参照）。
 
-> **リリースされる DMG は未署名**（ad-hoc）。利用者は Gatekeeper にブロックされるため、
-> 右クリック →「開く」または quarantine 属性の削除が必要。解消に必要な作業は下記「署名・公証」を参照。
+> [!IMPORTANT]
+> **リリースされる DMG は未署名**（ad-hoc）のため、開く際に Gatekeeper にブロックされる。回避方法は
+> README の[ダウンロード](../README.ja.md#ダウンロード)節を参照。恒久的な解消に必要な作業は下記
+> 「署名・公証」を参照。
 
 ## 署名・公証（将来対応）
 
@@ -220,6 +224,7 @@ UI に一切現れない内部的なビルド識別子。中間成果物は `Ker
 - 他 Mac への配布（Gatekeeper を通す）。
 - macOS で Keychain アクセス時の許可ダイアログを消す（安定した署名アイデンティティにより ACL が固定される）。
 
+> [!CAUTION]
 > **0.x のまま署名を導入する場合は注意が必要。** jpackage が `.app` を署名するため、その**後**に
 > `Info.plist` を編集するとバンドルの署名シールが壊れる。カスタム URI スキームは
 > `macOS { infoPlist { extraKeysRawXml } }` 経由になったのでこれには該当しない

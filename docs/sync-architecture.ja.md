@@ -11,7 +11,6 @@
   （ライブの索引は決して DROP しない → 同期中の検索が `no such table` にならない。[db-schema.ja.md](db-schema.ja.md) の `articles_fts` 節）。
 - 競合解決はアップロード前にアプリ側でマージ（ATTACH DATABASE）する。
 - FTS5 インデックスはクラウドに含めない（コピー側で DROP）。マージで入った新記事はマージ後に**増分投入**する。
-- **クラウドファイルは旧版（前身実装）と非互換**（ユーザー決定）。
 
 ## クラウド上のファイル構成
 
@@ -42,7 +41,8 @@
 
 ダウンロードした DB を `cloud` としてアタッチし、テーブルごとにタイムスタンプ比較でマージする。
 
-> **重要な実装上の注意**: SQLDelight の JVM `JdbcSqliteDriver` は
+> [!IMPORTANT]
+> SQLDelight の JVM `JdbcSqliteDriver` は
 > ファイル DB に対してステートメントごとに新しいコネクションを開く。そのため `ATTACH` を driver 越しに
 > 実行すると後続のマージ文からアタッチが見えず `no such table: cloud.*` になる。マージは
 > `platform/DatabaseMerger` の**専用 JDBC コネクション 1 本**で attach → バージョン確認 → マージ
@@ -88,6 +88,7 @@
 `SchemaVersionException` を投げてユーザーにアプリ更新を促す（マージ中止）。
 現在の `user_version` は 2（`1.sqm` が `articles.deleted_at` / `deleted_updated_at` を追加する）。
 
+> [!NOTE]
 > **クラウドが古い場合のローカル方向マイグレーション**: `DatabaseMerger.merge` は
 > マージ本体の前にダウンロードしたクラウド DB の `user_version` を確認し、ローカルより古ければ一時ファイルに
 > 対して `KeryxDatabase.Schema.migrate` でローカルのスキーマまで引き上げてからマージする。これにより、
@@ -158,7 +159,8 @@ Desktop Entry 仕様上 URI がプロセスに渡らず、ブラウザーはス�
 エラーを出す。いずれも OS が URL をコマンドライン引数としてアプリを起動し、`main.kt` が
 single-instance 経由で実行中インスタンスへ転送する。
 
-> **注意（カスタム URI プロバイダーは全デスクトップ OS 共通）**: `./gradlew :composeApp:run` では
+> [!NOTE]
+> **カスタム URI プロバイダーは全デスクトップ OS 共通**: `./gradlew :composeApp:run` では
 > Dropbox / OneDrive 連携を完了できない。macOS では `keryx://` を LaunchServices がパッケージ版
 > `Keryx.app` にルーティングするため、`gradlew run` のインスタンスにはリダイレクトが届かない。
 > Windows / Linux では、起動時の登録がパッケージ版ランチャーからの起動でない限り意図的に何もしない
