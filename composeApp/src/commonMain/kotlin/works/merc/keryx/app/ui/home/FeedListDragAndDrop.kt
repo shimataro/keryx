@@ -115,9 +115,10 @@ internal sealed interface DropBoundary {
 }
 
 /**
- * A thin horizontal line marking a drag-and-drop insertion point (macOS "Notes"-style), aligned
- * to the same left indent as the row content it's next to — the indent communicates which group
- * (folder vs "no folder") the item will land in.
+ * Displays a horizontal insertion marker aligned with the surrounding row content.
+ *
+ * @param indented Whether to indent the marker for a folder item.
+ * @param visible Whether to display the marker in the primary color.
  */
 @Composable
 private fun InsertionLine(indented: Boolean, visible: Boolean) {
@@ -131,23 +132,23 @@ private fun InsertionLine(indented: Boolean, visible: Boolean) {
 }
 
 /**
- * Renders a folder header with selection styling, folder actions, and the highlight/insertion-line
- * rendering for a drag hovering it (the actual drop handling is centralized in `FeedListPane`'s
- * outer `Box` — see its doc comment for why).
+ * Renders a folder header with selection styling, context-menu actions, drag-hover highlighting,
+ * insertion indicators, and automatic expansion while a dragged feed hovers over a collapsed folder.
  *
  * @param folder The folder represented by the header.
  * @param count The number of feeds in the folder.
  * @param collapsed Whether the folder's feed list is collapsed.
  * @param selected Whether the folder is selected.
  * @param focused Whether the folder has focus.
- * @param firstFeedId The first feed in the folder, or `null` when the folder is empty.
- * @param nextFolderId The folder following this folder, or `null` when it is last.
+ * @param firstFeedId The first feed in the folder, or `null` if the folder is empty.
+ * @param nextFolderId The ID of the following folder, or `null` if this is the last folder.
+ * @param feedIdsInFolder The IDs of feeds contained in the folder.
  * @param activeBoundaryState The currently highlighted insertion boundary.
- * @param isDragSource Whether the folder currently contains the feed being dragged.
  * @param onToggleCollapse Toggles the folder's collapsed state.
- * @param onClick Handles selection of the folder.
+ * @param onClick Selects the folder.
  * @param onEdit Opens folder editing.
  * @param onDelete Deletes the folder.
+ * @param isDragSource Whether the folder contains the feed currently being dragged.
  */
 @Composable
 internal fun FolderGroupHeader(
@@ -284,15 +285,15 @@ internal fun NoFolderHeader(
 }
 
 /**
- * Displays a feed row with selection styling, feed actions, unread count, and the highlight/
- * insertion-line rendering for a drag hovering it (drop handling is centralized in `FeedListPane`'s
- * outer `Box`).
+ * Displays a feed row with selection styling, unread count, error indicators, context-menu actions,
+ * and insertion markers for drop boundaries.
  *
  * @param feed The feed represented by the row.
  * @param count The number of unread articles.
  * @param indented Whether to indent the row within a folder.
  * @param nextFeedId The ID of the following feed, or `null` when this is the last feed.
  * @param folderId The containing folder's ID, or `null` for feeds without a folder.
+ * @param activeBoundaryState The currently active insertion boundary.
  */
 @Composable
 internal fun FeedRow(

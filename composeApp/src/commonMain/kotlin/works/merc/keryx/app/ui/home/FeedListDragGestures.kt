@@ -22,21 +22,15 @@ private const val MOUSE_DRAG_THRESHOLD_DP = 4f
 private const val TOUCH_DRAG_THRESHOLD_DP = 18f
 
 /**
- * The feed list's reorder gesture, hosted on the pane's single non-virtualized drag-host `Box`
- * (never on a row — see [FeedListDragController] for why) and resolving what a press would drag by
- * hit-testing that press against the list's layout info.
- *
- * Everything runs on [PointerEventPass.Initial]: this host is an *ancestor* of the `LazyColumn`'s
- * own scrollable, and the initial pass reaches ancestors first, so the gesture can claim the
- * pointer before list scrolling consumes it. Below the drag threshold nothing is consumed, so a
- * plain press still selects the row and a press that isn't on a draggable row still scrolls the
- * list normally.
- *
- * Once dragging, **every** change is consumed. That is what suppresses the row's own click on
- * release and what keeps a right-click mid-drag from opening the native context menu
- * (`Modifier.nativeContextMenu` only opens on an *unconsumed* secondary press). A secondary or
- * middle press never starts a drag in the first place.
- */
+     * Adds feed-row reordering gestures to a non-virtualized drag host.
+     *
+     * Secondary and tertiary presses are ignored, and dragging begins only after the pointer moves
+     * beyond the applicable drag threshold. Active drags consume pointer events and are ended or
+     * cancelled when the gesture finishes.
+     *
+     * @param controller The controller that manages feed-row drag state.
+     * @return A modifier that handles feed-row reordering gestures.
+     */
 internal fun Modifier.feedListReorderDrag(controller: FeedListDragController): Modifier =
     pointerInput(controller) {
         awaitEachGesture {

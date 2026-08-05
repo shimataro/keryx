@@ -98,7 +98,11 @@ internal class FeedDragOverlayState {
     /** Installed by [FeedListDragController] so the drag can be aborted from outside the pane. */
     var onCancel: () -> Unit = {}
 
-    /** Aborts an in-progress drag without committing a reorder. Returns whether there was one. */
+    /**
+     * Cancels the active drag operation without committing its pending changes.
+     *
+     * @return `true` if a drag was active and canceled, `false` if no drag was active.
+     */
     fun cancel(): Boolean {
         if (item == null) return false
         onCancel()
@@ -175,8 +179,10 @@ internal class FeedListDragController(
     }
 
     /**
-     * What a press at [localY] would drag, or `null` when the row there isn't draggable at all
-     * (a tag row, a section header, the divider, or empty space below the last row).
+     * Identifies the draggable feed or folder at the specified list position.
+     *
+     * @param localY The vertical position within the feed list.
+     * @return The dragged item and its grab geometry, or `null` when the position is not draggable.
      */
     fun sourceAt(localY: Float): FeedListDragGrab? {
         val band = bandAt(localY) ?: return null
@@ -204,8 +210,9 @@ internal class FeedListDragController(
     }
 
     /**
-     * Reports the pointer moving to [pos] (local to the drag host): repositions the ghost, feeds
-     * the auto-scroll loop, and re-resolves the insertion boundary / hovered tag.
+     * Updates the drag preview position and recalculates the current drop target.
+     *
+     * @param pos The pointer position in the drag host's local coordinates.
      */
     fun move(pos: Offset) {
         if (overlay.item == null) return
@@ -227,17 +234,11 @@ internal class FeedListDragController(
     }
 
     /**
-     * Whether [pos] (local to the drag host) falls within the drag host's own horizontal extent.
-     *
-     * The drag host is exactly as wide as the feed pane, but a `pointerInput` gesture keeps
-     * receiving move events for the rest of its lifetime regardless of where the pointer travels —
-     * unlike the platform DnD this replaced, whose target dispatch was bounds-based and fired
-     * `onExited` the moment the pointer left the target composable. Row hit-testing itself
-     * ([bandAt]/[resolveHitBand]) only ever compares vertical position, so without this check a
-     * press dragged out over a sibling pane (e.g. the article list) would still resolve to
-     * whichever row happens to sit at the same *height*, both highlighting it and (in [end])
-     * actually applying the drop there — never mind that the pointer is nowhere near the feed list.
-     */
+ * Determines whether a drag position lies within the host's horizontal bounds.
+ *
+ * @param pos The drag position in host-local coordinates.
+ * @return `true` if the position is within the host's horizontal bounds, `false` otherwise.
+ */
     private fun isWithinHost(pos: Offset): Boolean = pos.x in 0f..hostBoundsState.value.width
 
     /**
@@ -301,14 +302,10 @@ internal class FeedListDragController(
     }
 
     /**
-     * Applies the drop for a release at [pos] (local to the drag host) and ends the drag.
+     * Applies a valid drop at the release position and ends the drag.
      *
-     * A release outside the drag host's horizontal extent (see [isWithinHost]) never applies
-     * anything, for the same reason [updateHover] guards against it: row hit-testing is
-     * vertical-only, so without this check a release out over a sibling pane could still land on
-     * whichever row happens to share its height.
-     *
-     * @return `true` if the drop was valid and applied, `false` otherwise.
+     * @param pos The release position in the drag host's local coordinates.
+     * @return `true` if the drop was applied, `false` if the position or target was invalid.
      */
     fun end(pos: Offset): Boolean {
         val item = overlay.item ?: return false
@@ -384,9 +381,10 @@ internal class FeedListDragController(
 }
 
 /**
- * Remembers the pane's [FeedListDragController]. [titleOf] is captured through
- * [rememberUpdatedState] so the permanently-remembered controller always resolves titles against
- * the current feed/folder lists rather than the ones present when it was first created.
+ * Remembers a feed-list drag controller for the specified view model and list state.
+ *
+ * @param titleOf Resolves the current title for a draggable feed or folder.
+ * @return The remembered feed-list drag controller.
  */
 @Composable
 internal fun rememberFeedListDragController(
@@ -426,16 +424,7 @@ internal fun rememberFeedListDragController(
 private const val DRAG_GHOST_ALPHA = 0.75f
 
 /**
- * Draws a legible drag chip: a rounded-rect (icon + title) floating under the pointer, tinted
- * neutral over a valid drop target and toward [MaterialTheme.colorScheme.error] when the pointer
- * is somewhere a drop would not be accepted (blank space, a section header, a folder hovering
- * itself) — see [rememberFeedDragDecoration]'s `isValidTarget` and
- * [FeedDragOverlayState.hasValidTarget].
- *
- * Everything is painted directly rather than captured from composition, so the chip is legible over
- * arbitrary content — the row's own background is transparent whenever unselected, which is exactly
- * what made the platform drag-shadow snapshot this replaced unreadable. `icon` is a plain [Painter]
- * (not a `@Composable`), so a raw `@Composable` like Coil's `AsyncImage` can't be embedded here.
+ * Draws a rounded drag-preview chip containing an icon and an ellipsized title.
  */
 private fun DrawScope.drawDragPreviewChip(
     title: String,
@@ -469,15 +458,10 @@ private fun DrawScope.drawDragPreviewChip(
 }
 
 /**
- * Resolves everything [drawDragPreviewChip] needs. Only [icon]/[iconTint] differ between a feed
- * chip (the same fallback icon [FeedAvatar][FeedListRowParts.kt] uses when a favicon isn't
- * available) and a folder chip, so both go through this one setup rather than duplicating it.
+ * Creates the visual decoration for a feed or folder drag preview.
  *
- * @param isValidTarget Whether the pointer is currently over a position that would accept this
- * drop. When `false`, the chip tints toward `error` instead of its usual neutral colors — the same
- * signal [FeedDragOverlayState.hasValidTarget] carries — so hovering blank space, a section header,
- * or (for a folder drag) the dragged folder itself reads as clearly invalid rather than looking
- * identical to a real drop target.
+ * @param isValidTarget Whether the preview is over a valid drop target.
+ * @return A drawing decoration styled for the current target validity.
  */
 @Composable
 private fun rememberFeedDragDecoration(
@@ -499,12 +483,9 @@ private fun rememberFeedDragDecoration(
 }
 
 /**
- * The floating drag chip. Hosted by `HomeScreen`'s root `Box` (last child, so it paints above every
- * pane) rather than by the feed pane, so the chip can travel across the whole window.
+ * Displays the active feed or folder drag preview across the window.
  *
- * The chip's position is read inside [Modifier.offset]'s layout-phase lambda, so a pointer move
- * repositions it without recomposing anything — the only recompositions per gesture are the ghost
- * appearing and disappearing.
+ * @param state The drag overlay state that provides the item, position, size, and target validity.
  */
 @Composable
 internal fun FeedDragGhost(state: FeedDragOverlayState) {

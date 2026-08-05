@@ -317,9 +317,12 @@ private const val TAG_KEY_PREFIX = "tag-"
 private const val NO_FOLDER_HEADER_KEY = "no-folder-header"
 
 /**
- * Parses a feed-list `LazyColumn` item's `key` (as assigned in `FeedListPane.kt`) into its row
- * identity. A tag-attached-feed row's key (`"tag-$tagId-feed-$feedId"`) must not be mistaken for its
- * tag's own row key (`"tag-$tagId"`), hence the `"-feed-"` exclusion below.
+ * Identifies the feed-list row represented by a `LazyColumn` item key.
+ *
+ * Tag-attached feed keys are classified as feed rows rather than tag rows.
+ *
+ * @param key The item key assigned to the feed-list row.
+ * @return The parsed row identity, or `FeedListRowKey.Other` for unrecognized keys.
  */
 internal fun parseFeedListRowKey(key: Any?): FeedListRowKey {
     val stringKey = key as? String ?: return FeedListRowKey.Other

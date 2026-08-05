@@ -390,6 +390,13 @@ internal fun FeedListPane(
                         }
                     }
 
+                    /**
+                     * Adds feed rows for a folder or uncategorized feed group.
+                     *
+                     * @param feedsInFolder The feeds to display.
+                     * @param indented Whether to indent the feed rows.
+                     * @param folderId The containing folder's identifier, or `null` for feeds without a folder.
+                     */
                     fun LazyListScope.feedItems(feedsInFolder: List<Feeds>, indented: Boolean, folderId: String?) {
                         itemsIndexed(
                             feedsInFolder,
