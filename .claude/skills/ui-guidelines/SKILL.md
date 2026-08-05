@@ -394,7 +394,22 @@ theme/shape/indication/icon choices:
   site. Tabler (thin stroke, rounded terminals) was picked over Material
   Design's stock glyphs for a closer-to-macOS feel; it is not literal SF
   Symbols, since Apple's license restricts those to Apple-platform apps and
-  this app also ships Windows/Linux builds.
+  this app also ships Windows/Linux builds. **When remapping `KeryxIcons` to a
+  different icon set later** (e.g. an Android `actual` using Material icons,
+  or any other re-skin), don't just match each icon by semantic name — grep
+  for `graphicsLayer`/`rotate`/`scaleX`/`scaleY` modifiers applied around each
+  `KeryxIcon(...)` call site first. A handful of icons are transformed at
+  their call site to represent state with a single asset (e.g.
+  `ArticleListPane.kt`'s sort button, which flips `KeryxIcons.Sort` vertically
+  for ascending/descending) — swapping in a same-named but
+  differently-shaped glyph (e.g. a symmetric double-arrow instead of a
+  directional bars+arrow icon) silently breaks the transform without
+  breaking compilation or tests, which is exactly what happened when Tabler's
+  `arrows-sort` initially replaced the directional Material "sort" glyph.
+  Where practical, prefer swapping between two distinct icon assets for a
+  two-state icon (as the folder/tag expand chevron already does, picking
+  between `ExpandMore`/`ChevronRight`) over transforming one shared asset —
+  it's immune to this class of mistake by construction.
 - **Flat surface pattern**: `NotificationCenterSheet`, `SetupScreen`'s
   `OptionCard`, and `TooltipIconButton`'s tooltip all use the same look for a
   "raised" panel instead of M3's tonal-elevation `Card`:
