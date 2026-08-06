@@ -109,6 +109,20 @@ All of this lives in `desktopMain` rather than behind an `expect`/`actual` pair:
 from `main.kt`, no ViewModel or Repository touches it, and a Linux panel protocol has no mobile
 counterpart.
 
+### アイコンセット
+
+`ui/common/KeryxIcons.kt` が全 UI 呼び出し箇所の唯一の間接参照点になっており（意味的な名前 →
+`composeResources/drawable/` 配下のバンドル SVG）、現在は Tabler Icons（MIT）を使用している（デスクトップ
+3OS 共通で Mac 寄りの見た目に寄せるため。詳細は `ui-guidelines` skill）。将来 Android 対応に着手する際は、
+Android のネイティブな視覚言語は Material Design であるため、Android ターゲットだけ Material 系アイコン
+（Material Symbols）に差し替えることを検討する余地がある — `KeryxIcons` を `expect`/`actual` に分割すれば
+プラットフォームごとに個別のアイコンセットを出し分けられる。ただし Android ターゲット自体がまだ存在しない
+現時点では検証しようがないため、着手は Android 対応開始時まで先送りする。iOS/iPadOS/macOS がいずれ
+ネイティブ SwiftUI 化された場合（`external-spec.md` §2 の想定どおり）、そちらは Kotlin の `KeryxIcons` とは
+無関係の別コードベースになるため、SF Symbols を `Image(systemName:)` で直接使えばよく、Kotlin 側に追加の
+差し替え機構は不要。つまり将来「SwiftUI = SF Symbols / Android = Material / Windows・Linux = 現行の Tabler」
+という3分岐になっても、Kotlin 側で実質必要になるのは上記の Android 用 `expect`/`actual` 分割だけである。
+
 ## Domain Model Policy
 
 SQLDelight generated classes (`Feeds` / `Articles` / …) are used as-is in all layers. Column names become properties in snake_case (e.g. `feed.site_url`). Booleans and timestamps are kept as `Long` (0/1, Unix millis) and converted with kotlinx-datetime at display time. No separate domain model classes are defined.
