@@ -51,16 +51,19 @@ Download the latest release from the [Releases page](https://github.com/shimatar
 
 - Additional platform support
   - [ ] Windows
+  - [x] macOS
   - [x] Linux ( `.deb` )
   - [x] Linux ( `.rpm` )
   - [ ] Android
   - [ ] iOS
   - [ ] iPadOS
 - Additional cloud storage support
+  - [x] [Dropbox](https://www.dropbox.com/)
+  - [x] [Google Drive](https://drive.google.com/)
   - [x] [OneDrive](https://onedrive.live.com/)
-  - [ ] [NextCloud](https://nextcloud.com/)
 - Multilingual UI
   - [ ] English
+  - [x] Japanese
 
 ## Other
 

@@ -51,16 +51,19 @@
 
 - 対応プラットフォーム追加
   - [ ] Windows
+  - [x] macOS
   - [x] Linux ( `.deb` )
   - [x] Linux ( `.rpm` )
   - [ ] Android
   - [ ] iOS
   - [ ] iPadOS
 - 対応クラウドストレージ追加
+  - [x] [Dropbox](https://www.dropbox.com/)
+  - [x] [Google Drive](https://drive.google.com/)
   - [x] [OneDrive](https://onedrive.live.com/)
-  - [ ] [NextCloud](https://nextcloud.com/)
 - 多言語対応
   - [ ] 英語
+  - [x] 日本語
 
 ## その他
 
