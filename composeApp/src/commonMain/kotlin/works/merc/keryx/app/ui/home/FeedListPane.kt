@@ -382,8 +382,8 @@ internal fun FeedListPane(
                                 modifier = Modifier.weight(1f),
                             )
                             val addFolderTooltip = stringResource(Res.string.home_add_folder)
-                            TooltipIconButton(tooltip = addFolderTooltip, onClick = { showAddFolder = true }) {
-                                KeryxIcon(KeryxIcons.CreateNewFolder, addFolderTooltip)
+                            TooltipIconButton(tooltip = addFolderTooltip, onClick = { showAddFolder = true }, size = 32.dp) {
+                                KeryxIcon(KeryxIcons.CreateNewFolder, addFolderTooltip, modifier = Modifier.size(20.dp))
                             }
                         }
                     }
@@ -477,8 +477,8 @@ internal fun FeedListPane(
                                 modifier = Modifier.weight(1f),
                             )
                             val addTagTooltip = stringResource(Res.string.home_add_tag)
-                            TooltipIconButton(tooltip = addTagTooltip, onClick = { showAddTag = true }) {
-                                KeryxIcon(KeryxIcons.NewLabel, addTagTooltip)
+                            TooltipIconButton(tooltip = addTagTooltip, onClick = { showAddTag = true }, size = 32.dp) {
+                                KeryxIcon(KeryxIcons.NewLabel, addTagTooltip, modifier = Modifier.size(20.dp))
                             }
                         }
                     }
