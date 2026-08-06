@@ -393,10 +393,15 @@ compose.desktop {
             linux {
                 iconFile.set(project.file("icons/keryx.png"))
                 menuGroup = "Network;News;Feed;"
-                // The keryx:// scheme is not registered here. jpackage only emits a .desktop file
-                // when given a shortcut or a file association, and its template's Exec line has no
-                // %u — so the URI would never reach the process. LinuxUriSchemeRegistrar writes a
-                // user-level .desktop entry at startup instead, which also covers app-image and
+                shortcut = true
+                // jpackage only installs a .desktop file under /usr/share/applications when
+                // explicitly given a shortcut or a file association. Confirmed on real hardware:
+                // without `shortcut = true`, the only .desktop jpackage produces sits under
+                // /opt/keryx/lib, a location neither GNOME Shell nor KDE Plasma ever scans, so the
+                // app never appeared in either launcher's menu at all (not merely a stale cache).
+                // Its template's Exec line still has no %u, so the keryx:// scheme still can't
+                // reach the process through this file — LinuxUriSchemeRegistrar writes a separate
+                // user-level .desktop entry at startup for that, which also covers app-image and
                 // tarball installs.
             }
         }

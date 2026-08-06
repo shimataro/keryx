@@ -88,3 +88,15 @@ cp local.properties.example local.properties   # 任意: Dropbox App Key を設�
   `keryx://` の既定ハンドラーとして指し続けるため、除去するまで `xdg-open`（やブラウザーのスキーム解決）が
   失敗しうる。除去は手動で行う必要があり、アプリケーションディレクトリの `keryx-url-handler.desktop` を
   削除し、`mimeapps.list` から `x-scheme-handler/keryx` の行を取り除く。
+- **（Linux）`.deb`/`.rpm` をインストールしても Keryx が GNOME/KDE のアプリメニューに一切出てこない
+  （修正済み）**: 原因は `composeApp/build.gradle.kts` の `nativeDistributions.linux { }` に
+  `shortcut = true` を設定していなかったこと。jpackage の Linux 用バンドラーは、shortcut を明示的に
+  要求しない限り、GNOME Shell や KDE Plasma のアプリメニューが実際に走査する
+  `/usr/share/applications/` には `.desktop` を一切インストールしない。実機で確認したところ、
+  これを指定しない場合に jpackage が生成する唯一の `.desktop` はアプリ自身のインストール
+  ディレクトリ（`/opt/keryx/lib`）内に留まり、どちらのランチャーもそこは走査対象にしていないため、
+  ログアウト/ログインやメニューキャッシュの再構築をいくら行っても表示されるはずがなかった
+  （そもそも走査対象の場所に一度もファイルが置かれていなかったため）。`shortcut = true` の追加で
+  修正済み。この修正より前のビルドが既にインストールされている場合は、先に
+  `sudo dpkg -r keryx`（rpm 系では相当のコマンド）でアンインストールしてから現行版を
+  インストールすること（そうしないと旧インストールの `/opt/keryx` が残ってしまう可能性がある）。

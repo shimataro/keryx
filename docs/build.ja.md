@@ -128,9 +128,17 @@ macOS は `appCategory = "public.app-category.news"`（`LSApplicationCategoryTyp
 カテゴリーの概念自体が無い（`menuGroup` はスタートメニューのフォルダ名でしかない）ため、
 Windows 側は何も設定していない。
 
-`keryx://` のカスタム URI スキームは deb/rpm パッケージでは**登録されない**。jpackage はショートカットか
-ファイル関連付けを指定しない限り `.desktop` を生成せず、そのテンプレートの `Exec` 行には `%u` が付かないため、
-URI がプロセスに届かないからである。代わりにアプリが初回起動時に自身を登録し（`LinuxUriSchemeRegistrar`）、
+> [!IMPORTANT]
+> Linux 側の `nativeDistributions.linux { }` では `shortcut = true` も設定している。jpackage は
+> ショートカットかファイル関連付けを明示的に指定しない限り、GNOME Shell や KDE Plasma のアプリ
+> メニューが実際に見に行く `/usr/share/applications/` には `.desktop` を一切インストールしない。
+> 実機で確認済みだが、これを指定しないとjpackageが生成する `.desktop` はアプリ自身のインストール
+> ディレクトリ（`/opt/keryx/lib`）内に留まり——どちらのランチャーもそこは走査しないため——
+> メニューキャッシュが古いのではなく、そもそも一度もメニューに現れない。
+
+`keryx://` のカスタム URI スキームは、上記の jpackage 生成 `.desktop` ファイルでは依然として
+**登録されない**。そのテンプレートの `Exec` 行には `%u` が付かないため、ショートカットを
+有効にしても URI はプロセスに届かない。代わりにアプリが初回起動時に自身を登録し（`LinuxUriSchemeRegistrar`）、
 `$XDG_DATA_HOME/applications/keryx-url-handler.desktop`（既定 `~/.local/share/applications`）と
 `$XDG_CONFIG_HOME/mimeapps.list`（既定 `~/.config/mimeapps.list`）の関連付けを書き出す。
 これにより `createDistributable` の app image や tarball 配置もカバーされる。この 2 ファイルはユーザーの

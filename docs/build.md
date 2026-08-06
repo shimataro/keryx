@@ -126,9 +126,17 @@ category in the freedesktop.org Desktop Menu Specification, with `News` and `Fee
 registered additional categories. Windows/jpackage has no category concept (its `menuGroup` is only
 the Start Menu folder name), so nothing is set there.
 
-The `keryx://` custom URI scheme is **not** registered by the deb/rpm package. jpackage only emits a `.desktop` file when
-given a shortcut or a file association, and its template's `Exec` line has no `%u`, so the URI would never reach the
-process. Instead the app registers itself on first launch (`LinuxUriSchemeRegistrar`), writing
+> [!IMPORTANT]
+> Linux's `nativeDistributions.linux { }` block also sets `shortcut = true`. jpackage only installs
+> a `.desktop` entry under `/usr/share/applications/` (where GNOME Shell's and KDE Plasma's app
+> menus actually look) when a shortcut or a file association is explicitly requested. Without it,
+> confirmed on real hardware, the only `.desktop` file jpackage produces stays inside the app's own
+> install directory (`/opt/keryx/lib`) — a location neither launcher ever scans — so the app never
+> appeared in either menu at all, not merely behind a stale cache.
+
+The `keryx://` custom URI scheme is still **not** registered by that jpackage-generated `.desktop`
+file: its template's `Exec` line has no `%u`, so the URI would never reach the process even with a
+shortcut. Instead the app registers itself on first launch (`LinuxUriSchemeRegistrar`), writing
 `$XDG_DATA_HOME/applications/keryx-url-handler.desktop` (default `~/.local/share/applications`) and an
 association in `$XDG_CONFIG_HOME/mimeapps.list` (default `~/.config/mimeapps.list`). This also covers
 `createDistributable` app images and tarball installs. Both files live in the user's home and are **not removed when the
