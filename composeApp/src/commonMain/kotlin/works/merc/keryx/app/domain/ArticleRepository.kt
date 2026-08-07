@@ -24,12 +24,48 @@ import works.merc.keryx.app.data.remote.ParsedArticle
 private const val ID_FETCH_CHUNK = 900
 
 /**
+ * The columns of an article that the list panes actually render, plus `created_at` as the sort
+ * tie-break.
+ *
+ * A deliberately narrow view of [Articles]: the full row also carries `content`, `summary` and
+ * `search_text`, i.e. the article body twice over, none of which the list shows. Loading those for
+ * every row made a single list emission proportional to the whole corpus's text — and the list
+ * query re-runs on every write to `articles` or `feeds`. The body is loaded for the one selected
+ * article instead, via [ArticleRepository.getArticleById].
+ *
+ * Constructed positionally as `::ArticleListRow` from the `.sq` list queries, so its parameter
+ * order and the SELECT column order must stay in step (see the note in `articles.sq`).
+ */
+data class ArticleListRow(
+    val id: String,
+    val feed_id: String,
+    val title: String,
+    val url: String,
+    val published_at: Long?,
+    val created_at: Long,
+    val is_read: Long,
+    val is_starred: Long,
+)
+
+/** Narrows a full article row to the columns the list renders. */
+fun Articles.toListRow(): ArticleListRow = ArticleListRow(
+    id = id,
+    feed_id = feed_id,
+    title = title,
+    url = url,
+    published_at = published_at,
+    created_at = created_at,
+    is_read = is_read,
+    is_starred = is_starred,
+)
+
+/**
  * A full-text search result: the matched article plus FTS5 highlight markup for its title (matched
  * terms wrapped in [FtsSearch.MARK_START]/[FtsSearch.MARK_END]). The UI renders the markup as
  * highlighted spans (bold + marker background).
  */
 data class ArticleSearchResult(
-    val article: Articles,
+    val article: ArticleListRow,
     val titleMarked: String,
 )
 
@@ -46,15 +82,18 @@ class ArticleRepository(
 ) {
     private val articles get() = db.articlesQueries
 
-    fun watchArticles(filter: ArticleFilter): Flow<List<Articles>> = when (filter) {
+    fun watchArticles(filter: ArticleFilter): Flow<List<ArticleListRow>> = when (filter) {
         // Search results aren't a DB query; the article-list pane renders them from `search()`
         // (via HomeViewModel.searchResults) instead of this flow.
         ArticleFilter.Search -> return flowOf(emptyList())
-        ArticleFilter.All -> articles.watchAll()
-        ArticleFilter.Starred -> articles.watchStarred()
-        is ArticleFilter.Feed -> articles.watchByFeed(filter.feedId)
-        is ArticleFilter.Tag -> articles.watchByTag(filter.tagId)
-        is ArticleFilter.Folder -> articles.watchByFolder(filter.folderId)
+        // ::ArticleListRow rather than the per-query generated types: narrowing a SELECT makes
+        // SQLDelight emit a distinct data class per query, which would leave these five branches
+        // with five mutually incompatible row types.
+        ArticleFilter.All -> articles.watchAll(::ArticleListRow)
+        ArticleFilter.Starred -> articles.watchStarred(::ArticleListRow)
+        is ArticleFilter.Feed -> articles.watchByFeed(filter.feedId, ::ArticleListRow)
+        is ArticleFilter.Tag -> articles.watchByTag(filter.tagId, ::ArticleListRow)
+        is ArticleFilter.Folder -> articles.watchByFolder(filter.folderId, ::ArticleListRow)
     }.asFlow().mapToList(dispatcher)
 
     fun watchUnreadCount(): Flow<Long> = articles.watchUnreadCount().asFlow().mapToOne(dispatcher)
@@ -141,7 +180,7 @@ class ArticleRepository(
             val byId = hits.asSequence()
                 .map { it.id }
                 .chunked(ID_FETCH_CHUNK)
-                .flatMap { articles.getByIds(it).executeAsList().asSequence() }
+                .flatMap { articles.getListRowsByIds(it, ::ArticleListRow).executeAsList().asSequence() }
                 .associateBy { it.id }
             hits.mapNotNull { hit ->
                 byId[hit.id]?.let { ArticleSearchResult(article = it, titleMarked = hit.titleMarked) }

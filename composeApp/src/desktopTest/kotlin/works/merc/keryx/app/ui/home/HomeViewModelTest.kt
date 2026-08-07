@@ -43,6 +43,7 @@ import works.merc.keryx.app.domain.AddFeedPreview
 import works.merc.keryx.app.domain.addFeedAlreadySubscribed
 import works.merc.keryx.app.domain.addFeedCanSubscribe
 import works.merc.keryx.app.domain.ArticleRepository
+import works.merc.keryx.app.domain.toListRow
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.NewArticleNotifier
@@ -330,6 +331,48 @@ class HomeViewModelTest {
         }
     }
 
+    /**
+     * The list flow carries only the columns the list renders, so selecting has to load the body
+     * for the detail pane. Guards that hydration: without it the reader would show an empty article.
+     */
+    @Test
+    fun selectArticleLoadsTheArticleBodyForTheDetailPane() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, content = "<p>the whole article body</p>")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        vm.selectArticle(vm.articles.value.single())
+
+        assertEquals("<p>the whole article body</p>", vm.selectedArticle.value?.content)
+    }
+
+    /**
+     * A sync merge can tombstone the row between the list emission the user clicked and the click
+     * itself. Blanking the reader on that race would be worse than leaving the previous article up,
+     * so the selection is kept; the read write still goes out (it is a no-op on a tombstone).
+     */
+    @Test
+    fun selectingAnArticleTombstonedSinceTheEmissionKeepsThePreviousSelection() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, content = "<p>first</p>")
+        db.insertArticle("a2", "f1", isRead = 0L, content = "<p>second</p>")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        val stale = vm.articles.value.first { it.id == "a2" }
+        vm.selectArticle(vm.articles.value.first { it.id == "a1" })
+        testScheduler.advanceUntilIdle()
+
+        driver.stampArticleDeleted("a2", deletedAt = 10L)
+        vm.selectArticle(stale)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("a1", vm.selectedArticle.value?.id)
+        assertEquals("<p>first</p>", vm.selectedArticle.value?.content)
+    }
+
     @Test
     fun selectArticleMarksReadAndUpdatesSelectedState() = runTest {
         db.insertFeed("f1")
@@ -339,7 +382,7 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
         val article = db.articlesQueries.getById("a1").executeAsOne()
 
-        vm.selectArticle(article)
+        vm.selectArticle(article.toListRow())
 
         assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
         assertEquals(1L, vm.selectedArticle.value?.is_read)
@@ -398,7 +441,7 @@ class HomeViewModelTest {
         assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
 
         val article1 = db.articlesQueries.getById("a1").executeAsOne()
-        vm.selectArticle(article1)
+        vm.selectArticle(article1.toListRow())
         testScheduler.advanceUntilIdle()
 
         // a1 is now read but stays visible in the unread-only list because it's pinned.
@@ -417,9 +460,9 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
 
         // Read through all three articles while unread-only is off.
-        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne())
-        vm.selectArticle(db.articlesQueries.getById("a2").executeAsOne())
-        vm.selectArticle(db.articlesQueries.getById("a3").executeAsOne())
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        vm.selectArticle(db.articlesQueries.getById("a2").executeAsOne().toListRow())
+        vm.selectArticle(db.articlesQueries.getById("a3").executeAsOne().toListRow())
         testScheduler.advanceUntilIdle()
 
         vm.setUnreadOnly(true)
@@ -439,7 +482,7 @@ class HomeViewModelTest {
         vm.setUnreadOnly(true)
         testScheduler.advanceUntilIdle()
         val article1 = db.articlesQueries.getById("a1").executeAsOne()
-        vm.selectArticle(article1)
+        vm.selectArticle(article1.toListRow())
         testScheduler.advanceUntilIdle()
         assertEquals(listOf("a1"), vm.articles.value.map { it.id })
 
@@ -462,7 +505,7 @@ class HomeViewModelTest {
         vm.setUnreadOnly(true)
         testScheduler.advanceUntilIdle()
         val article1 = db.articlesQueries.getById("a1").executeAsOne()
-        vm.selectArticle(article1)
+        vm.selectArticle(article1.toListRow())
         testScheduler.advanceUntilIdle()
         assertEquals(listOf("a1"), vm.articles.value.map { it.id })
 
@@ -483,7 +526,7 @@ class HomeViewModelTest {
         vm.setUnreadOnly(true)
         testScheduler.advanceUntilIdle()
         val article1 = db.articlesQueries.getById("a1").executeAsOne()
-        vm.selectArticle(article1)
+        vm.selectArticle(article1.toListRow())
         testScheduler.advanceUntilIdle()
 
         vm.markSelectedUnread()
@@ -507,13 +550,13 @@ class HomeViewModelTest {
         val a2 = db.articlesQueries.getById("a2").executeAsOne()
 
         // Not selected: DB updates, but selectedArticle stays null.
-        vm.toggleStar(a2)
+        vm.toggleStar(a2.toListRow())
         assertEquals(1L, db.articlesQueries.getById("a2").executeAsOne().is_starred)
         assertNull(vm.selectedArticle.value)
 
         // Select a1, then toggle its star: selectedArticle should refresh.
-        vm.selectArticle(a1)
-        vm.toggleStar(db.articlesQueries.getById("a1").executeAsOne())
+        vm.selectArticle(a1.toListRow())
+        vm.toggleStar(db.articlesQueries.getById("a1").executeAsOne().toListRow())
 
         assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_starred)
         assertEquals(1L, vm.selectedArticle.value?.is_starred)
@@ -530,21 +573,21 @@ class HomeViewModelTest {
         val a2 = db.articlesQueries.getById("a2").executeAsOne()
 
         // Not selected: unread -> read updates DB, but selectedArticle stays null.
-        vm.toggleRead(a2)
+        vm.toggleRead(a2.toListRow())
         assertEquals(1L, db.articlesQueries.getById("a2").executeAsOne().is_read)
         assertNull(vm.selectedArticle.value)
 
         // Not selected: read -> unread updates DB, still no selection.
-        vm.toggleRead(db.articlesQueries.getById("a2").executeAsOne())
+        vm.toggleRead(db.articlesQueries.getById("a2").executeAsOne().toListRow())
         assertEquals(0L, db.articlesQueries.getById("a2").executeAsOne().is_read)
         assertNull(vm.selectedArticle.value)
 
         // Select a1 (marks it read), then toggle it back to unread: selectedArticle should refresh.
         val a1 = db.articlesQueries.getById("a1").executeAsOne()
-        vm.selectArticle(a1)
+        vm.selectArticle(a1.toListRow())
         assertEquals(1L, vm.selectedArticle.value?.is_read)
 
-        vm.toggleRead(db.articlesQueries.getById("a1").executeAsOne())
+        vm.toggleRead(db.articlesQueries.getById("a1").executeAsOne().toListRow())
 
         assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_read)
         assertEquals(0L, vm.selectedArticle.value?.is_read)
@@ -604,7 +647,7 @@ class HomeViewModelTest {
         vm.selectFilter(ArticleFilter.All)
         testScheduler.advanceUntilIdle()
         val article1 = db.articlesQueries.getById("a1").executeAsOne()
-        vm.selectArticle(article1)
+        vm.selectArticle(article1.toListRow())
         vm.setUnreadOnly(true)
         testScheduler.advanceUntilIdle()
 
@@ -629,7 +672,7 @@ class HomeViewModelTest {
         vm.selectFilter(ArticleFilter.All)
         testScheduler.advanceUntilIdle()
         val article1 = db.articlesQueries.getById("a1").executeAsOne()
-        vm.selectArticle(article1)
+        vm.selectArticle(article1.toListRow())
         vm.setUnreadOnly(true)
         testScheduler.advanceUntilIdle()
 
@@ -650,7 +693,7 @@ class HomeViewModelTest {
         vm.selectFilter(ArticleFilter.All)
         testScheduler.advanceUntilIdle()
         val article1 = db.articlesQueries.getById("a1").executeAsOne()
-        vm.selectArticle(article1)
+        vm.selectArticle(article1.toListRow())
         vm.setUnreadOnly(true)
         testScheduler.advanceUntilIdle()
 
@@ -683,7 +726,7 @@ class HomeViewModelTest {
             vm.selectFilter(ArticleFilter.All)
             testScheduler.advanceUntilIdle()
             val article1 = db.articlesQueries.getById("a1").executeAsOne()
-            vm.selectArticle(article1)
+            vm.selectArticle(article1.toListRow())
             vm.setUnreadOnly(true)
             testScheduler.advanceUntilIdle()
 
@@ -694,7 +737,7 @@ class HomeViewModelTest {
             assertTrue(activityCenter.feedRefreshing.value)
             // The refresh is genuinely in flight here — simulate the user moving on to a2 before it completes.
             val article2 = db.articlesQueries.getById("a2").executeAsOne()
-            vm.selectArticle(article2)
+            vm.selectArticle(article2.toListRow())
             gate.complete(Unit)
 
             // The fetch resumes off the virtual scheduler (real MockEngine dispatch, see docs/testing.md),
@@ -725,7 +768,7 @@ class HomeViewModelTest {
         vm.selectFilter(ArticleFilter.All)
         testScheduler.advanceUntilIdle()
         val article1 = db.articlesQueries.getById("a1").executeAsOne()
-        vm.selectArticle(article1)
+        vm.selectArticle(article1.toListRow())
         vm.setUnreadOnly(true)
         testScheduler.advanceUntilIdle()
 
@@ -734,7 +777,7 @@ class HomeViewModelTest {
         // makes the actual sync a fast no-op once it runs, but it hasn't run yet) — selecting a2
         // now reproduces a selection change made while sync is still in flight.
         val article2 = db.articlesQueries.getById("a2").executeAsOne()
-        vm.selectArticle(article2)
+        vm.selectArticle(article2.toListRow())
         testScheduler.advanceUntilIdle()
 
         // Only a2 (the current selection) should remain pinned; a1 must not survive the sync.
@@ -751,14 +794,14 @@ class HomeViewModelTest {
         vm.selectFilter(ArticleFilter.All)
         testScheduler.advanceUntilIdle()
         val article1 = db.articlesQueries.getById("a1").executeAsOne()
-        vm.selectArticle(article1)
+        vm.selectArticle(article1.toListRow())
         vm.setUnreadOnly(true)
         testScheduler.advanceUntilIdle()
 
         // Simulate another device's sync propagating a soft-delete tombstone for the pinned article.
         driver.stampArticleDeleted("a1", deletedAt = 100L)
         val article2 = db.articlesQueries.getById("a2").executeAsOne()
-        vm.toggleStar(article2) // ordinary write to `articles` -> ticks articleChangeSignal
+        vm.toggleStar(article2.toListRow()) // ordinary write to `articles` -> ticks articleChangeSignal
         testScheduler.advanceUntilIdle()
 
         assertEquals(listOf("a2"), vm.articles.value.map { it.id })
@@ -781,7 +824,7 @@ class HomeViewModelTest {
         vm.selectFilter(ArticleFilter.All)
         vm.setUnreadOnly(true)
         testScheduler.advanceUntilIdle()
-        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne())
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
         testScheduler.advanceUntilIdle()
         assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
 
@@ -802,7 +845,7 @@ class HomeViewModelTest {
         vm.selectFilter(ArticleFilter.Starred)
         testScheduler.advanceUntilIdle()
         val article1 = db.articlesQueries.getById("a1").executeAsOne()
-        vm.selectArticle(article1)
+        vm.selectArticle(article1.toListRow())
         // Flip the selected article back to unread while keeping it selected, so it enters
         // markAllRead() as unread (selecting an article always marks it read immediately).
         vm.markSelectedUnread()
@@ -861,7 +904,7 @@ class HomeViewModelTest {
 
         // Selecting marks the article read, which does legitimately notify the articles table —
         // but exactly once, not once for the write plus once for the resulting pin.
-        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne())
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
         testScheduler.advanceUntilIdle()
         assertEquals(
             afterFilter + 1,
@@ -915,7 +958,7 @@ class HomeViewModelTest {
         assertEquals(listOf("a3", "a2", "a1"), vm.articles.value.map { it.id })
 
         // Selecting a2 marks it read; it stays pinned and keeps its oldest-first position.
-        vm.selectArticle(db.articlesQueries.getById("a2").executeAsOne())
+        vm.selectArticle(db.articlesQueries.getById("a2").executeAsOne().toListRow())
         testScheduler.advanceUntilIdle()
         assertEquals(listOf("a3", "a2", "a1"), vm.articles.value.map { it.id })
     }
@@ -1062,7 +1105,7 @@ class HomeViewModelTest {
 
         // Selecting a result marks it read immediately (pinned); the count drops by one.
         val article1 = db.articlesQueries.getById("a1").executeAsOne()
-        vm.selectArticle(article1)
+        vm.selectArticle(article1.toListRow())
         testScheduler.advanceUntilIdle()
         assertEquals(1L, vm.searchUnreadCount.value)
     }
@@ -1081,7 +1124,7 @@ class HomeViewModelTest {
         assertEquals(setOf("a1", "a2"), vm.searchResults.value.map { it.article.id }.toSet())
 
         val article1 = db.articlesQueries.getById("a1").executeAsOne()
-        vm.selectArticle(article1)
+        vm.selectArticle(article1.toListRow())
         testScheduler.advanceUntilIdle()
 
         // a1 is now read (selecting always marks read immediately) but stays visible because it's pinned.
@@ -1105,7 +1148,7 @@ class HomeViewModelTest {
         assertEquals(setOf("a1", "a2"), vm.searchResults.value.map { it.article.id }.toSet())
 
         val article1 = db.articlesQueries.getById("a1").executeAsOne()
-        vm.selectArticle(article1)
+        vm.selectArticle(article1.toListRow())
         testScheduler.advanceUntilIdle()
 
         // a1 is read but pinned, so it stays visible under unread-only.
@@ -1133,7 +1176,7 @@ class HomeViewModelTest {
         assertEquals(setOf("a1", "a2", "a3"), vm.searchResults.value.map { it.article.id }.toSet())
 
         val article1 = db.articlesQueries.getById("a1").executeAsOne()
-        vm.selectArticle(article1)
+        vm.selectArticle(article1.toListRow())
         testScheduler.advanceUntilIdle()
 
         vm.markAllRead()
@@ -1201,7 +1244,7 @@ class HomeViewModelTest {
 
         assertEquals(0L, vm.searchResults.value.single().article.is_read)
 
-        vm.toggleRead(db.articlesQueries.getById("a1").executeAsOne())
+        vm.toggleRead(db.articlesQueries.getById("a1").executeAsOne().toListRow())
         testScheduler.advanceUntilIdle()
 
         assertEquals(1L, vm.searchResults.value.single().article.is_read)
@@ -1219,7 +1262,7 @@ class HomeViewModelTest {
 
         assertEquals(0L, vm.searchResults.value.single().article.is_starred)
 
-        vm.toggleStar(db.articlesQueries.getById("a1").executeAsOne())
+        vm.toggleStar(db.articlesQueries.getById("a1").executeAsOne().toListRow())
         testScheduler.advanceUntilIdle()
 
         assertEquals(1L, vm.searchResults.value.single().article.is_starred)
@@ -1622,7 +1665,7 @@ class HomeViewModelTest {
         vm.selectFilter(ArticleFilter.All)
         testScheduler.advanceUntilIdle()
         val article1 = db.articlesQueries.getById("a1").executeAsOne()
-        vm.selectArticle(article1)
+        vm.selectArticle(article1.toListRow())
         assertEquals("a1", store.load().lastArticleId)
 
         vm.selectFilter(ArticleFilter.Feed("f1"))
@@ -1641,7 +1684,7 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
         val article = db.articlesQueries.getById("a1").executeAsOne()
 
-        vm.selectArticle(article)
+        vm.selectArticle(article.toListRow())
 
         assertEquals("a1", store.load().lastArticleId)
     }
@@ -1655,7 +1698,7 @@ class HomeViewModelTest {
         vm1.selectFilter(ArticleFilter.Feed("f1"))
         testScheduler.advanceUntilIdle()
         val article1 = db.articlesQueries.getById("a1").executeAsOne()
-        vm1.selectArticle(article1)
+        vm1.selectArticle(article1.toListRow())
         vm1.saveScrollPosition("a1", 321)
         testScheduler.advanceUntilIdle()
 
@@ -1697,7 +1740,7 @@ class HomeViewModelTest {
         vm1.selectFilter(ArticleFilter.All)
         testScheduler.advanceUntilIdle()
         val article1 = db.articlesQueries.getById("a1").executeAsOne()
-        vm1.selectArticle(article1)
+        vm1.selectArticle(article1.toListRow())
         testScheduler.advanceUntilIdle()
 
         val vm2 = newViewModel()
@@ -1719,7 +1762,7 @@ class HomeViewModelTest {
         vm1.selectFilter(ArticleFilter.All)
         testScheduler.advanceUntilIdle()
         val article1 = db.articlesQueries.getById("a1").executeAsOne()
-        vm1.selectArticle(article1)
+        vm1.selectArticle(article1.toListRow())
         testScheduler.advanceUntilIdle()
 
         val readAtAfterFirstSelection = db.articlesQueries.getById("a1").executeAsOne().read_at

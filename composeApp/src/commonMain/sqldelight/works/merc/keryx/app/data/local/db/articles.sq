@@ -42,27 +42,44 @@ CREATE INDEX idx_articles_is_read    ON articles(is_read);
 CREATE INDEX idx_articles_is_starred ON articles(is_starred);
 CREATE INDEX idx_articles_published  ON articles(published_at DESC, created_at DESC, id DESC);
 
+-- The five list queries below deliberately project only the eight columns the article list renders
+-- (plus created_at, the sort tie-break) instead of `*`. `content` / `summary` / `search_text` hold
+-- the whole article body twice over; selecting them here materialised every article's full text on
+-- every emission, and these flows re-run on every write to `articles` *or* `feeds`. The body is
+-- fetched per selected article by getById instead, and `search_text` has no Kotlin-side reader at
+-- all (it exists for FTS5's external content and for MergeSql).
+--
+-- The column ORDER IS LOAD-BEARING: all five are mapped with ::ArticleListRow, whose parameters are
+-- positional. Reordering `title`/`url` (both String) would compile and silently swap them, which is
+-- what ArticleRepositoryTest.articleListRowMapsEveryProjectedColumnToItsOwnField guards.
 watchAll:
-SELECT a.* FROM articles a
+SELECT a.id, a.feed_id, a.title, a.url, a.published_at, a.created_at, a.is_read, a.is_starred
+FROM articles a
 INNER JOIN feeds f ON f.id = a.feed_id
 WHERE f.deleted_at IS NULL AND a.deleted_at IS NULL
 ORDER BY a.published_at DESC, a.created_at DESC, a.id DESC;
 
 watchStarred:
-SELECT * FROM articles WHERE is_starred = 1 AND deleted_at IS NULL ORDER BY published_at DESC, created_at DESC, id DESC;
+SELECT id, feed_id, title, url, published_at, created_at, is_read, is_starred
+FROM articles WHERE is_starred = 1 AND deleted_at IS NULL
+ORDER BY published_at DESC, created_at DESC, id DESC;
 
 watchByFeed:
-SELECT * FROM articles WHERE feed_id = ? AND deleted_at IS NULL ORDER BY published_at DESC, created_at DESC, id DESC;
+SELECT id, feed_id, title, url, published_at, created_at, is_read, is_starred
+FROM articles WHERE feed_id = ? AND deleted_at IS NULL
+ORDER BY published_at DESC, created_at DESC, id DESC;
 
 watchByTag:
-SELECT a.* FROM articles a
+SELECT a.id, a.feed_id, a.title, a.url, a.published_at, a.created_at, a.is_read, a.is_starred
+FROM articles a
 INNER JOIN feeds f ON f.id = a.feed_id
 INNER JOIN feed_tags ft ON ft.feed_id = f.id
 WHERE ft.tag_id = ? AND ft.deleted_at IS NULL AND f.deleted_at IS NULL AND a.deleted_at IS NULL
 ORDER BY a.published_at DESC, a.created_at DESC, a.id DESC;
 
 watchByFolder:
-SELECT a.* FROM articles a
+SELECT a.id, a.feed_id, a.title, a.url, a.published_at, a.created_at, a.is_read, a.is_starred
+FROM articles a
 INNER JOIN feeds f ON f.id = a.feed_id
 WHERE f.folder_id = ? AND f.deleted_at IS NULL AND a.deleted_at IS NULL
 ORDER BY a.published_at DESC, a.created_at DESC, a.id DESC;
@@ -70,10 +87,12 @@ ORDER BY a.published_at DESC, a.created_at DESC, a.id DESC;
 getById:
 SELECT * FROM articles WHERE id = ?;
 
--- Batched by-id fetch (callers chunk the id list to stay under SQLite's bound-parameter limit).
--- Used by search() to load all FTS hits in one query per chunk instead of one getById per hit.
-getByIds:
-SELECT * FROM articles WHERE id IN ?;
+-- Batched by-id fetch of list rows (callers chunk the id list to stay under SQLite's bound-parameter
+-- limit). Used by search() to load all FTS hits in one query per chunk instead of one getById per
+-- hit. Same eight columns, and the same load-bearing order, as the list queries above.
+getListRowsByIds:
+SELECT id, feed_id, title, url, published_at, created_at, is_read, is_starred
+FROM articles WHERE id IN ?;
 
 getByFeedAndGuid:
 SELECT * FROM articles WHERE feed_id = ? AND guid = ?;

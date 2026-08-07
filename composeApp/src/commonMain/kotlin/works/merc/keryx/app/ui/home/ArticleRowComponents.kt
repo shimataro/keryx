@@ -43,7 +43,7 @@ import androidx.compose.ui.window.PopupProperties
 import kotlinx.datetime.TimeZone
 import coil3.compose.AsyncImage
 import org.jetbrains.compose.resources.stringResource
-import works.merc.keryx.app.data.local.db.Articles
+import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.platform.NativeMenuItem
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.resources.Res
@@ -196,7 +196,7 @@ internal fun rememberArticleRowStrings(): ArticleRowStrings {
  */
 @Composable
 internal fun ArticleRow(
-    article: Articles,
+    article: ArticleListRow,
     feedTitle: String,
     feedFavicon: String?,
     selected: Boolean,

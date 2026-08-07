@@ -7,7 +7,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.data.local.FtsSearch
-import works.merc.keryx.app.data.local.db.Articles
+import works.merc.keryx.app.domain.ArticleListRow
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -81,25 +81,12 @@ class ArticleRowHighlightTest {
     }
 }
 
-private fun article(id: String): Articles = Articles(
-    id = id,
+private fun article(id: String): ArticleListRow = ArticleListRow(    id = id,
     feed_id = "f1",
-    guid = "g$id",
-    url = "u$id",
     title = "Article $id",
-    summary = null,
-    content = null,
-    author = null,
+    url = "u$id",
     published_at = 0L,
-    thumbnail_url = null,
-    is_read = 1L,
-    read_at = null,
-    is_starred = 0L,
-    starred_at = null,
-    cached_at = 0L,
-    search_text = "",
-    updated_at = 0L,
     created_at = 0L,
-    deleted_at = null,
-    deleted_updated_at = null,
+    is_read = 1L,
+    is_starred = 0L,
 )

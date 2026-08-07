@@ -13,11 +13,16 @@ import java.io.File
  * test can assert that a purely display-level change (sort, unread-only, selection) does not
  * re-execute it.
  *
- * Identified by projecting `thumbnail_url` while ordering by `published_at DESC`: SQLDelight expands
- * the `*` / `a.*` projections into explicit columns, so the ordering is what separates these five
- * from the single-row `getById` / `getByIds` fetches, and the projected column is what separates them
- * from the unread-count aggregates (which select `ft.tag_id` / `f.folder_id` and must still re-run on
- * a read-state change) and from the FTS search, which orders by rank.
+ * Identified by projecting `is_starred` while ordering by `published_at DESC`. The ordering
+ * separates these five from the by-id fetches (`getById` / `getListRowsByIds`, which have no
+ * ORDER BY) and from the FTS search (which orders by rank); the projected column separates them
+ * from the unread-count aggregates, which select `ft.tag_id` / `f.folder_id` and must still re-run
+ * on a read-state change. `softDeleteExpired` matches both conditions but goes through `execute`,
+ * not `executeQuery`, so it never reaches this counter.
+ *
+ * Keep this in step with the list queries' projection in `articles.sq`: the previous sentinel used
+ * `thumbnail_url`, and when that column was dropped from the projection the counter silently stayed
+ * at zero, which would have made every "must not re-query" assertion pass vacuously.
  */
 class CountingSqlDriver(private val delegate: SqlDriver) : SqlDriver {
     var listQueryExecutions = 0
@@ -30,7 +35,7 @@ class CountingSqlDriver(private val delegate: SqlDriver) : SqlDriver {
         parameters: Int,
         binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
     ): app.cash.sqldelight.db.QueryResult<R> {
-        if (sql.contains("thumbnail_url") && sql.contains("published_at DESC")) listQueryExecutions++
+        if (sql.contains("is_starred") && sql.contains("published_at DESC")) listQueryExecutions++
         return delegate.executeQuery(identifier, sql, mapper, parameters, binders)
     }
 

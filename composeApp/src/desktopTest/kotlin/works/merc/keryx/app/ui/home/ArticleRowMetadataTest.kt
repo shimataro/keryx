@@ -11,7 +11,7 @@ import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
-import works.merc.keryx.app.data.local.db.Articles
+import works.merc.keryx.app.domain.ArticleListRow
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -55,7 +55,7 @@ class ArticleRowMetadataTest {
 
 /** Renders an [ArticleRow] with only the parameters this test varies. */
 @Composable
-private fun MetadataTestRow(article: Articles, feedTitle: String) {
+private fun MetadataTestRow(article: ArticleListRow, feedTitle: String) {
     ArticleRow(
         article = article,
         feedTitle = feedTitle,
@@ -72,25 +72,12 @@ private fun MetadataTestRow(article: Articles, feedTitle: String) {
     )
 }
 
-private fun article(id: String, publishedAt: Long): Articles = Articles(
-    id = id,
+private fun article(id: String, publishedAt: Long): ArticleListRow = ArticleListRow(    id = id,
     feed_id = "f1",
-    guid = "g$id",
-    url = "u$id",
     title = "Article $id",
-    summary = null,
-    content = null,
-    author = null,
+    url = "u$id",
     published_at = publishedAt,
-    thumbnail_url = null,
-    is_read = 1L,
-    read_at = null,
-    is_starred = 0L,
-    starred_at = null,
-    cached_at = 0L,
-    search_text = "",
-    updated_at = 0L,
     created_at = 0L,
-    deleted_at = null,
-    deleted_updated_at = null,
+    is_read = 1L,
+    is_starred = 0L,
 )

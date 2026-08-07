@@ -12,7 +12,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
-import works.merc.keryx.app.data.local.db.Articles
+import works.merc.keryx.app.domain.ArticleListRow
 import kotlin.test.Ignore
 import kotlin.test.Test
 import kotlin.test.fail
@@ -66,14 +66,14 @@ class ArticleReuseCrashRepro {
             runDesktopComposeUiTest {
                 val items = List(itemCount) { reproArticle("a$it", publishedAt = it.toLong()) }
                 lateinit var state: LazyListState
-                var selected by mutableStateOf<Articles?>(null)
+                var selected by mutableStateOf<ArticleListRow?>(null)
 
                 setContent {
                     state = rememberLazyListState()
                     ArticleListPaneContent(
                         articles = items,
                         feedTitles = mapOf("f1" to "Some Feed With A Fairly Long Title"),
-                        selected = selected,
+                        selectedId = selected?.id,
                         unreadOnly = false,
                         onToggleUnreadOnly = {},
                         onToggleSort = {},
@@ -111,25 +111,12 @@ class ArticleReuseCrashRepro {
  * @param publishedAt The publication timestamp used to populate the article and derive its read and starred flags.
  * @return The generated article record.
  */
-private fun reproArticle(id: String, publishedAt: Long): Articles = Articles(
-    id = id,
+private fun reproArticle(id: String, publishedAt: Long): ArticleListRow = ArticleListRow(    id = id,
     feed_id = "f1",
-    guid = "g$id",
-    url = "u$id",
     title = "Article $id",
-    summary = null,
-    content = null,
-    author = null,
+    url = "u$id",
     published_at = publishedAt,
-    thumbnail_url = null,
-    is_read = if (publishedAt % 2 == 0L) 1L else 0L,
-    read_at = null,
-    is_starred = if (publishedAt % 5 == 0L) 1L else 0L,
-    starred_at = null,
-    cached_at = 0L,
-    search_text = "",
-    updated_at = 0L,
     created_at = 0L,
-    deleted_at = null,
-    deleted_updated_at = null,
+    is_read = if (publishedAt % 2 == 0L) 1L else 0L,
+    is_starred = if (publishedAt % 5 == 0L) 1L else 0L,
 )

@@ -39,7 +39,7 @@ import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.searchTerms
-import works.merc.keryx.app.data.local.db.Articles
+import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.ClipboardEntries
@@ -108,7 +108,7 @@ fun ArticleListPane(
         articles = articles,
         feedTitles = feedTitles,
         feedFavicons = feedFavicons,
-        selected = selected,
+        selectedId = selected?.id,
         unreadOnly = unreadOnly,
         newestFirst = newestFirst,
         focused = focused,
@@ -288,7 +288,7 @@ internal fun ArticleListTopBar(
  * @param articles The articles to display.
  * @param feedTitles Display titles keyed by feed identifier.
  * @param feedFavicons Favicon URLs keyed by feed identifier.
- * @param selected The currently selected article, if any.
+ * @param selectedId The id of the currently selected article, if any.
  * @param unreadOnly Whether only unread articles are shown.
  * @param newestFirst Whether articles are sorted newest first.
  * @param focused Whether the list is focused.
@@ -296,18 +296,18 @@ internal fun ArticleListTopBar(
  */
 @Composable
 internal fun ArticleListPaneContent(
-    articles: List<Articles>,
+    articles: List<ArticleListRow>,
     feedTitles: Map<String, String>,
     feedFavicons: Map<String, String?> = emptyMap(),
-    selected: Articles?,
+    selectedId: String?,
     unreadOnly: Boolean,
     onToggleUnreadOnly: () -> Unit,
     onToggleSort: () -> Unit,
     newestFirst: Boolean = true,
     onMarkAllRead: () -> Unit,
-    onSelectArticle: (Articles) -> Unit,
-    onToggleRead: (Articles) -> Unit = {},
-    onToggleStar: (Articles) -> Unit = {},
+    onSelectArticle: (ArticleListRow) -> Unit,
+    onToggleRead: (ArticleListRow) -> Unit = {},
+    onToggleStar: (ArticleListRow) -> Unit = {},
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
     focused: Boolean = true,
@@ -315,8 +315,8 @@ internal fun ArticleListPaneContent(
     notifVm: NotificationCenterViewModel? = null,
     unreadOnlyEnabled: Boolean = true,
 ) {
-    LaunchedEffect(selected?.id, articles.isNotEmpty()) {
-        val index = articles.indexOfFirst { it.id == selected?.id }
+    LaunchedEffect(selectedId, articles.isNotEmpty()) {
+        val index = articles.indexOfFirst { it.id == selectedId }
         if (index !in articles.indices) return@LaunchedEffect
         listState.scrollToIndexIfNeeded(index)
     }
@@ -355,7 +355,7 @@ internal fun ArticleListPaneContent(
                             article = article,
                             feedTitle = feedTitles[article.feed_id].orEmpty(),
                             feedFavicon = feedFavicons[article.feed_id],
-                            selected = article.id == selected?.id,
+                            selected = article.id == selectedId,
                             focused = focused,
                             rowHeight = rowMetrics.rowHeight,
                             faviconSize = rowMetrics.faviconSize,
