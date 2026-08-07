@@ -134,7 +134,12 @@ article list renders (`id` / `feed_id` / `title` / `url` / `published_at` / `cre
 list made one emission proportional to the whole corpus's text, and the list query re-runs on every
 write to `articles` or `feeds`. The list queries in `articles.sq` project exactly those eight columns
 and map them with `::ArticleListRow`; the body is loaded per selected article via
-`getArticleById`, and `_selectedArticle` therefore stays a full `Articles`. Because a narrowed
+`getArticleById`, and `_selectedArticle` therefore stays a full `Articles`. That load runs off the
+UI thread and applies latest-wins — it pulls `content` on a connection the JVM driver opens per
+statement, so under a merge's or refresh's write lock it could otherwise burn the whole
+`busy_timeout` on the UI thread, ~30 times a second under a held arrow key. `HomeViewModel` keeps a
+synchronous `selectionCursorId` alongside it, so keyboard navigation steps from where the user
+actually is rather than from the last hydration to land. Because a narrowed
 `SELECT` makes SQLDelight generate a distinct type per query, the shared hand-written row is what
 lets `watchArticles`' five branches keep one return type — and its parameter order is positionally
 bound to the SELECT column order (guarded by
