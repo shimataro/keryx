@@ -374,3 +374,90 @@ AWT サーフェスの上には Compose が描画するものを一切重ねら�
   基準高さを超えて伸びうる。そこに固定の高さを共有で強制するとクリップしてしまう。詳細ペインの
   ツールバーにはそのような定数は不要 — 子はすべてフォントスケールの影響を受けない固定サイズの
   アイコンなので、状態間で Compose 構造をそのまま同一に保つだけで十分である。
+
+## ダイアログがたまに想定外のサイズで開く
+
+**ステータス**: 解決済み — ダイアログ自動フィットの「一発勝負・有界」な補正を、生存期間ずっと効く
+ドリフトガードに置き換えた（`ui/common/KeryxDialogs.desktop.kt` の `DesktopModalWindow`、判断は
+`ui/common/WindowGeometry.desktop.kt` の `nextDialogFit`）。同じバグに対する過去 2 回の修正試行が
+今もそのファイルのコメントに残っていること、そして以下の根拠が逆アセンブルで得た Compose Desktop の
+内部挙動であり、失うと再度導出し直すことになるため、記録として残す。
+
+### 症状
+
+設定ダイアログや About ダイアログを開くと、**たまに**内容が収まらないほど小さいウィンドウになる —
+プレースホルダーの高さ 240dp のまま、macOS がサイズ未適用のダイアログに与える ~80x28、あるいは
+設定のタブバーが末尾のタブを切り落とすほど狭い幅。発生は不定期で、一度起きるとそのダイアログの
+生存期間中ずっと直らない（ダイアログは `resizable = false` なので、ユーザーがドラッグして直すことも
+できない）。報告は macOS だが、機序はプラットフォーム非依存。閉じて開き直すとたいてい正常になるのは、
+開くたびに新しい `DialogWindow` が作られてレースがやり直されるため。
+
+### 診断
+
+ダイアログは Compose のコンテンツを測定し、フィットしたサイズを `DialogState.size` に書くことで
+サイズが決まる。`ui-desktop-1.11.1.jar` を逆アセンブルすると、Compose 側の実装はこうなっている:
+
+```kotlin
+// androidx.compose.ui.awt.SwingDialog の update ラムダ。UpdateEffect
+//（SnapshotStateObserver → Channel）経由なので非同期
+if (state.size != appliedState.size) { window.setSizeSafely(state.size, Floating); appliedState.size = state.size }
+
+// androidx.compose.ui.awt.SwingDialog の ComponentAdapter
+override fun componentResized(e) {
+    currentState.size = DpSize(dialog.width.dp, dialog.height.dp)  // DialogState に書き戻す
+    appliedState.size = currentState.size                          // かつ「適用済み」にする
+}
+```
+
+`DialogStateImpl.size` は既定（構造的等価）ポリシーの `mutableStateOf` であり、`AwtWindow` は
+`window.isVisible = true`（peer 生成 = ~80x28 の出どころ）を、最初の update を走らせたコンポジション
+パスの後に、別コルーチンから呼ぶ。ここから 3 つの帰結が出る:
+
+1. **同じ `DpSize` の再アサートは二重に無効。** `mutableStateOf` への同値書き込みは無効化を起こさず、
+   仮に update ラムダが再実行されても `state.size == appliedState.size` でネイティブ呼び出しが
+   スキップされる。従来の「フレームをまたいで再アサートする」ループは、実質ポーリングでしかなかった。
+2. **そのループは一致した最初のフレームで監視をやめ**、再武装する仕組みが無かった。測定したコンテンツ
+   サイズはウィンドウサイズから意図的に独立している（測定用 `Box` の `requiredWidthIn` /
+   `requiredHeightIn`。これ自体が「幅が狭いまま固着する」という別バグの修正だった）ため、
+   `capturedContentPx` は二度と変化せず `snapshotFlow` も再発火しない。
+3. **Compose 自身も自己修復できない。** `componentResized` がネイティブのサイズを `DialogState.size` と
+   自前の適用済みコピーの*両方*に書くので、裏側で着地したサイズは Compose から見て整合が取れている。
+
+結果として、ループ離脱後に着地したサイズ適用は恒久化する。着地が離脱の前か後かは純粋にスケジューリング
+次第 — これが不定期発生の正体であり、固着する値がプレースホルダーおよび未サイズ peer と一致する理由でもある。
+
+同じ見た目になる独立した 2 つ目の欠陥もあった: フィットが `LocalDensity` を*呼び出し元*
+（メインウィンドウ）のコンポジションから読みながら、*ダイアログ*のコンポジションで測定したピクセルを
+変換していた。スケールファクタの異なる画面ではその比率分ずれる — オーナー density 2 / ダイアログ
+density 1 なら 640dp 幅のコンテンツが 320pt のウィンドウになり、タブバーが切れ、内容が折り返して
+高さが画面上限に張り付く。
+
+### 除外した仮説
+
+- **フィットしたサイズをもっと何度も／もっと長いフレーム数だけ再アサートする** — 同値書き込みは
+  独立した 2 層で no-op（上記 1）なので、ループが実際に再適用できることは一度もなく、Compose 自身の
+  非同期適用が着地するのを待っていただけだった。
+- **有界ループのまま break を遅らせる／しない** — `withFrameNanos` はダイアログシーンの
+  `BroadcastFrameClock` に駆動され、シーンが描画されている間しかフレームが来ない。ループ中に設定
+  ダイアログが隠れたりトレイに最小化されたりすると、無期限に停止する。
+- **コンテンツ測定を再トリガーにする** — 構造上不可能。`requiredWidthIn` / `requiredHeightIn` が
+  測定値をコンテンツのみの関数にしている。外せば、それらが修正した「幅が狭いまま固着」が再発する。
+
+### 解決方法
+
+`DialogState.size` を観測値に含めた（`snapshotFlow { capturedContentPx to dialogState.size }`）ことで、
+Compose 自身によるネイティブリサイズの書き戻しがそのままドリフトイベントになる — ダイアログの生存期間
+ずっと、ポーリングなしで。各イベントで測定コンテンツから target を再計算し、ウィンドウが一致しなければ
+`DialogState.size` を書き（peer 未生成のウィンドウを pack してくれる経路）、さらにサイズを AWT ウィンドウへ
+直接押し込む（同値書き込みが no-op になる穴を塞ぐ）。その後 `componentResized` が Compose の状態を
+同期し直し、ガードを再武装する。collect 本体は suspend しないので、フレームクロックに依存せず再入もしない。
+`nextDialogFit` は target ごとに補正回数を制限し、ジオメトリを拒否するウィンドウマネージャーとの
+無限往復を防ぐ。諦める際はサイレントにせず `Log.warn` を 1 回出す。また target が変わったときだけ
+再配置するので、ユーザーがドラッグしたウィンドウがドリフト補正で引き戻されることはない。
+density はダイアログ自身のコンポジションから読むようにした。
+
+### 残存する制約
+
+`COMPONENT_RESIZED` を発火しないネイティブリサイズはガードから見えない。恒久ポーリング以外に検知手段が
+無く、Skia シーン自身のサイズも同じ peer イベント由来なので `onSizeChanged` を足しても得るものがない。
+許容する。

@@ -31,9 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -51,7 +49,6 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.IntSize
@@ -62,12 +59,12 @@ import androidx.compose.ui.window.DialogWindow
 import androidx.compose.ui.window.DialogWindowScope
 import androidx.compose.ui.window.WindowDecoration
 import org.koin.compose.koinInject
+import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.LocalNativeWindow
 import works.merc.keryx.app.ui.theme.KeryxTheme
 import java.awt.FlowLayout
-import java.awt.MouseInfo
 import java.awt.Point
 import java.awt.Window
 import javax.swing.JButton
@@ -113,9 +110,9 @@ private const val MAX_HEIGHT_FRACTION = 0.85f
  * some callers' `title`/`text` slots (e.g. `AssignTagsDialog`, `MoveToFolderDialog`) use
  * `Modifier.weight(1f)` to push an icon to the far edge, and `weight()` has no well-defined
  * intrinsic width — mixing it with `IntrinsicSize.Max` produced an unstable measured width that,
- * combined with [DesktopModalWindow]'s auto-fit resize loop, could leave the actual OS window
- * wider than what was actually painted (an unpainted default-background strip). A fixed width
- * sidesteps the instability entirely, at the cost of short dialogs not fitting quite as tightly.
+ * combined with [DesktopModalWindow]'s auto-fit, could leave the actual OS window wider than what
+ * was actually painted (an unpainted default-background strip). A fixed width sidesteps the
+ * instability entirely, at the cost of short dialogs not fitting quite as tightly.
  */
 private val KERYX_ALERT_DIALOG_WIDTH = 400.dp
 
@@ -126,9 +123,10 @@ private val KERYX_ALERT_DIALOG_WIDTH = 400.dp
  * window including decoration, not just the content area, and on those platforms the title bar is
  * real, separate chrome that Compose never measures. A deliberate fixed guess rather than reading
  * the real value from `window.insets`: insets can be unreliable until the window manager has
- * actually applied the decoration, a known AWT/X11 quirk on Linux, and our resize logic only
- * re-fires when the *content*'s measured size changes, so a late-arriving real inset value would
- * never trigger a corrective re-layout. A deliberate overestimate is safe here —
+ * actually applied the decoration, a known AWT/X11 quirk on Linux, and [DesktopModalWindow]'s
+ * drift guard re-fires on a change of the *content*'s measured size or of the *window*'s size —
+ * never on an inset value arriving late on its own, so that would not trigger a corrective
+ * re-layout either. A deliberate overestimate is safe here —
  * [DesktopModalWindow]'s full-bleed themed background simply shows a little extra of the same
  * color if the real decoration is shorter than this.
  */
@@ -163,48 +161,34 @@ private val MAC_TRAFFIC_LIGHT_PADDING = 72.dp
  */
 private val KERYX_TAB_DIALOG_WIDTH = 640.dp
 
-/**
- * How many frames [DesktopModalWindow]'s auto-fit will keep re-asserting its computed size before
- * giving up. Generous because it costs nothing in the normal case — the loop exits as soon as the
- * native window reports the target size, which is typically within a frame or two.
- */
-private const val FIT_REASSERT_MAX_FRAMES = 30
+/** Diagnostic log tag for this file (see [works.merc.keryx.app.core.Log]). */
+private const val LOG_TAG = "KeryxDialogs"
 
 /** The only [works.merc.keryx.app.data.local.LocalSettings] fields the dialog's [KeryxTheme] needs;
  * subscribed on its own so unrelated settings changes don't recompose the dialog content. */
 private data class DialogThemePrefs(val themeMode: String, val fontScale: Double)
 
 /**
- * Renders [content] in a real, separate, natively-decorated OS window (title bar with close
- * button, draggable) instead of a Compose `Popup` — see [KeryxAlertDialog] for why. Re-sizes to
- * fit [content] every time the content's measured size changes (auto-fit), clamping the window
- * height to [MAX_HEIGHT_FRACTION] of the current screen's height. Positions itself near the mouse
- * cursor at the moment it first composes (see [resolvePosition]), falling back to centering over
- * the owner window when no cursor position is available. Re-applies [KeryxTheme] because a
- * `DialogWindow`'s content is an independent composition root that does not inherit ambient
- * theme values from the caller.
+ * Renders [content] in a real, separate, natively-decorated, non-resizable OS window (title bar
+ * with close button, draggable) instead of a Compose `Popup` — see [KeryxAlertDialog] for why.
+ *
+ * The window is created at a placeholder size (see [placeholderSize]) and then kept fitted to
+ * [content] for its whole lifetime by the drift guard below, clamping the height to
+ * [MAX_HEIGHT_FRACTION] of the current screen's height. It centers itself over the owner window
+ * (see [resolvePosition]). [KeryxTheme] is re-applied because a `DialogWindow`'s content is an
+ * independent composition root that does not inherit ambient theme values from the caller.
  *
  * @param title The native window title.
  * @param onDismissRequest Invoked when the dialog is closed or the Escape key is pressed.
  * @param modal Whether the dialog blocks interaction with its owner window.
  * @param initialWidth The dialog's initial and maximum content width.
- * @param repositionOnResize Whether to recompute [DialogState.position] on every content-driven
- *   size change. `false` keeps the dialog anchored to its initially computed position, which is
+ * @param repositionOnResize Whether to recompute [DialogState.position] when the content's fitted
+ *   size changes. `false` keeps the dialog anchored to its initially computed position, which is
  *   useful for tabbed dialogs whose height varies per tab but whose top edge should stay stable
  *   when the user zaps between tabs.
  * @param content The dialog content.
  */
 @OptIn(ExperimentalComposeUiApi::class)
-/**
- * Displays a themed, non-resizable native dialog with content sized to its measured dimensions.
- *
- * @param title The native window title.
- * @param onDismissRequest Invoked when the dialog is closed or Escape is pressed.
- * @param modal Whether the dialog blocks interaction with its owner window.
- * @param initialWidth The dialog's initial and maximum content width.
- * @param repositionOnResize Whether to recompute position whenever the content size changes.
- * @param content The dialog content.
- */
 @Composable
 private fun DesktopModalWindow(
     title: String?,
@@ -215,7 +199,6 @@ private fun DesktopModalWindow(
     content: @Composable () -> Unit,
 ) {
     val owner = LocalDialogWindowOwner.current ?: LocalNativeWindow.current
-    val density = LocalDensity.current
 
     val cursorPoint: Point? = null
     val screenBounds = remember(cursorPoint, owner) { currentScreenBounds(cursorPoint, owner) }
@@ -277,32 +260,37 @@ private fun DesktopModalWindow(
             )
 
             KeryxTheme(themeMode = themePrefs.themeMode, fontScale = themePrefs.fontScale.toFloat()) {
-                // screenBounds is in AWT "points" (macOS logical resolution, same space as
-                // MouseInfo cursor coordinates) — the same space Compose's Dp uses at density 1.0.
-                // Deriving maxHeightDp directly from it (not via a stray extra density division)
-                // keeps it a true 85%-of-screen value; maxHeightPx is then derived FROM that dp
-                // value so it's genuinely comparable to sizePx (real device/Compose pixels) below.
-                val maxHeightDp = (screenBounds.height * MAX_HEIGHT_FRACTION).dp
-                val maxHeightPx = with(density) { maxHeightDp.toPx() }
+                // Density must come from the DIALOG's own composition, not the caller's: the pixels
+                // measured below are produced by the dialog's layout pass, so converting them with
+                // the owner window's density is off by the ratio between the two whenever owner and
+                // dialog sit on screens with different scale factors (at owner density 2 / dialog
+                // density 1, a 640dp-wide content became a 320pt window: tab bar clipped, content
+                // over-wrapped, height pinned to maxHeightDp). KeryxTheme overrides only fontScale,
+                // which toPx/toDp ignore, so reading inside it is equivalent for this conversion.
+                val density = LocalDensity.current
 
-                // Auto-fit the OS window to the measured content. On macOS the merged title row
-                // (drawn by KeryxAlertDialog when isMacOs) is already part of the measured Surface
-                // and fullWindowContent zeroes the insets, so no decoration allowance is added
-                // there; only non-mac needs the real title bar height added on top.
-                // Target window size for a given measured content size. Kept pure — actually
-                // applying it is a separate, repeated step (see the re-assert loop below). A
-                // degenerate measurement yields null rather than a zero-sized window.
-                val fitSizeFor: (IntSize) -> DpSize? = { sizePx ->
-                    if (sizePx.width <= 0 || sizePx.height <= 0) {
-                        null
-                    } else {
-                        val clampedHeightPx = sizePx.height.toFloat().coerceAtMost(maxHeightPx)
-                        val decorationAllowance = if (isMacOs) 0.dp else titleBarAllowanceDp
-                        with(density) {
-                            DpSize(sizePx.width.toDp(), clampedHeightPx.toDp() + decorationAllowance)
-                        }
-                    }
+                // screenBounds is in AWT "points" (macOS logical resolution, same space as the
+                // cursor coordinates) — the same space Compose's Dp uses at density 1.0. Deriving
+                // maxHeightDp directly from it (not via a stray extra density division) keeps it a
+                // true 85%-of-screen value.
+                val maxHeightDp = (screenBounds.height * MAX_HEIGHT_FRACTION).dp
+
+                // On macOS the merged title row (drawn by KeryxAlertDialog when isMacOs) is already
+                // part of the measured Surface and fullWindowContent zeroes the insets, so no
+                // decoration allowance is added there; only non-mac needs the real title bar height
+                // added on top of the measured content.
+                val decorationAllowance = if (isMacOs) 0.dp else titleBarAllowanceDp
+
+                // Held through rememberUpdatedState: the effect below lives as long as the dialog
+                // and must never keep a stale conversion — density and maxHeightDp both change if
+                // the dialog is dragged onto a screen with a different scale factor. Keying the
+                // effect on them instead would reset the guard's state and re-place a tabbed dialog
+                // on, say, a font-scale change.
+                val fitSize: (IntSize) -> DpSize? = { contentPx ->
+                    fitWindowSize(contentPx, density, maxHeightDp, decorationAllowance)
                 }
+                val currentFitSize by rememberUpdatedState(fitSize)
+
                 // A freshly created DialogWindow's first layout pass does not reliably fire
                 // onSizeChanged (not just the process's very first dialog — reopening the same
                 // dialog composable creates a brand-new DialogWindow each time, and was observed
@@ -310,31 +298,60 @@ private fun DesktopModalWindow(
                 // size, so both callbacks just publish the measurement here and this effect is the
                 // single place that resizes the window.
                 var capturedContentPx by remember { mutableStateOf<IntSize?>(null) }
-                var initialPositionApplied by remember { mutableStateOf(false) }
+
+                // Lifetime-long, event-driven drift guard.
+                //
+                // Compose's SwingDialog mirrors every native resize back into DialogState.size (its
+                // ComponentAdapter.componentResized writes BOTH DialogState.size and its own
+                // internal "already applied" copy), so a size that lands behind Compose's back —
+                // the asynchronous application of the initial placeholder, or the ~80x28 macOS
+                // gives a not-yet-sized dialog when the peer is realized by AwtWindow's launched
+                // setVisible(true) — is self-consistent from Compose's point of view and Compose
+                // will never correct it. Reading DialogState.size here turns each of those into an
+                // event, at any point in the dialog's life.
+                //
+                // The previous bounded, break-on-first-match re-assert loop could not: it stopped
+                // watching after one matching frame and nothing re-armed it, because the
+                // requiredWidthIn/requiredHeightIn below deliberately make the measured content
+                // size a function of content only, so capturedContentPx never changes again. That
+                // is why a late clobber stayed for the dialog's whole lifetime — the "tabs missing
+                // / tall empty dialog" report, which reproduced on 7 of 10 opens.
+                //
+                // DialogState.size must be part of the emitted value, not merely read: snapshotFlow
+                // only emits when the emitted value differs, so a size-only change would re-run the
+                // block and be swallowed as a duplicate.
+                //
+                // Applying is two steps. DialogState.size is written first because that is the path
+                // that packs a not-yet-displayable window (Compose's own sizing does
+                // setPreferredSize + pack() before setSize while the peer does not exist). The size
+                // is then pushed straight onto the native window, because writing an *unchanged*
+                // DpSize is a no-op twice over: mutableStateOf uses structural equality, and
+                // SwingDialog additionally skips the native call when state.size equals its applied
+                // copy. componentResized then feeds the real size back into DialogState, which is
+                // what re-arms this guard. The body is deliberately non-suspending — no
+                // withFrameNanos — so it neither depends on the dialog's frame clock (which stops
+                // delivering frames while the window is not being rendered) nor can be re-entered;
+                // it runs on Compose Desktop's main (AWT event) dispatcher, so touching the native
+                // window directly from here is safe.
                 LaunchedEffect(Unit) {
-                    snapshotFlow { capturedContentPx }.filterNotNull().collect { sizePx ->
-                        val target = fitSizeFor(sizePx) ?: return@collect
-                        // Re-assert across frames rather than assigning once. A brand-new
-                        // DialogWindow applies its own initial DialogState size asynchronously, and
-                        // that application was observed to land *after* this fit and clobber it:
-                        // the window sat at the 640x240 placeholder — or at the ~80x28 macOS gives
-                        // a not-yet-sized dialog — while the content underneath had been measured
-                        // perfectly (640x519 at density 2). Because the measured content size does
-                        // not change afterwards, neither onSizeChanged nor this flow fires again,
-                        // so a single lost assignment was never corrected and the dialog stayed
-                        // wrong for its whole lifetime — the "tabs missing / tall empty dialog"
-                        // report, which reproduced on 7 of 10 opens. Exits as soon as the native
-                        // window reports the target, so the settled case costs about one frame.
-                        var frames = 0
-                        while (frames < FIT_REASSERT_MAX_FRAMES) {
+                    var fit = DialogFitState()
+                    snapshotFlow { capturedContentPx to dialogState.size }.collect { (contentPx, _) ->
+                        val target = contentPx?.let(currentFitSize) ?: return@collect
+                        val actual = windowSize(window)
+                        val decision = nextDialogFit(fit, target, actual, repositionOnResize)
+                        fit = decision.state
+                        if (decision.applySize) {
                             dialogState.size = target
-                            if (repositionOnResize || !initialPositionApplied) {
-                                dialogState.position = resolvePosition(cursorPoint, owner, screenBounds, target)
-                                initialPositionApplied = true
-                            }
-                            withFrameNanos { }
-                            if (windowMatches(window, target)) break
-                            frames++
+                            applyWindowSize(window, target)
+                        }
+                        if (decision.applyPosition) {
+                            dialogState.position = resolvePosition(cursorPoint, owner, screenBounds, target)
+                        }
+                        if (decision.reportGiveUp) {
+                            Log.warn(
+                                LOG_TAG,
+                                "Dialog stayed at $actual after $MAX_FIT_CORRECTIONS attempts to fit $target",
+                            )
                         }
                     }
                 }
@@ -378,17 +395,17 @@ private fun DesktopModalWindow(
                                 // clamps to the incoming max (see placeholderSize's KDoc). Bounded by
                                 // the window, that max is whatever size the native window happens to
                                 // report at measure time; a DialogWindow that has not yet reached its
-                                // requested size measures narrower. applyFit then writes that narrow
-                                // width back to the window, and because onSizeChanged only re-fires
-                                // when the measured size *changes*, the next pass re-measures at the
-                                // same narrow width and reports nothing — the dialog is stuck narrow
-                                // for its whole lifetime. Symptoms of that stuck state: the tab bar
-                                // (a plain non-wrapping Row, ~530dp for the Japanese labels) clips its
-                                // trailing tabs away, and the over-wrapped content grows tall enough to
-                                // hit maxHeightDp, leaving a tall window mostly filled by the
-                                // background painted below. Pinning the max here makes the measured
-                                // width a function of content only, so a transient narrow window can no
-                                // longer become permanent.
+                                // requested size measures narrower. The fit above then writes that
+                                // narrow width back to the window, and because onSizeChanged only
+                                // re-fires when the measured size *changes*, the next pass re-measures
+                                // at the same narrow width and reports nothing — the dialog is stuck
+                                // narrow for its whole lifetime. Symptoms of that stuck state: the tab
+                                // bar (a plain non-wrapping Row, ~530dp for the Japanese labels) clips
+                                // its trailing tabs away, and the over-wrapped content grows tall
+                                // enough to hit maxHeightDp, leaving a tall window mostly filled by
+                                // the background painted below. Pinning the max here makes the
+                                // measured width a function of content only, so a transient narrow
+                                // window can no longer become permanent.
                                 .requiredWidthIn(max = initialWidth),
                         ) {
                             content()
