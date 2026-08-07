@@ -201,17 +201,32 @@ class ArticleRepository(
      * @return The number of articles that were not previously stored for the feed.
      */
     fun upsertParsed(feedId: String, parsed: List<ParsedArticle>): Int {
-        if (parsed.isEmpty()) return 0
-        val now = clock.nowMillis()
-        // Precompute everything CPU-heavy OUTSIDE the write transaction so HTML stripping (a full
-        // Ksoup DOM parse) and UUIDv5 hashing don't hold the SQLite write lock. The existence check
-        // is collapsed from one SELECT per article to a single guid fetch: seed a set with the
-        // feed's existing guids, then add each parsed guid — add() returns false when the guid was
-        // already present (existing row, or an intra-batch duplicate), so newCount counts each new
-        // article exactly once, matching the previous in-transaction re-read semantics.
+        val prepared = prepareParsed(feedId, parsed)
+        return db.transactionWithResult { insertPrepared(prepared) }
+    }
+
+    /**
+     * Does everything CPU-heavy about storing [parsed] *without* touching the write path, so HTML
+     * stripping (a full Ksoup DOM parse) and UUIDv5 hashing never hold the SQLite write lock.
+     *
+     * The existence check is collapsed from one SELECT per article to a single guid fetch: seed a
+     * set with the feed's existing guids, then add each parsed guid — `add` returns false when the
+     * guid was already present (existing row, or an intra-batch duplicate), so the new-article count
+     * counts each new article exactly once.
+     *
+     * Split from [insertPrepared] so a caller that already owns a transaction (the feed refresh,
+     * which batches a feed's `feeds` writes and its article upsert into one commit) can do this part
+     * before opening it.
+     *
+     * @param feedId The identifier of the feed containing the articles.
+     * @param parsed The fetched articles to store.
+     * @return The rows to insert, together with the new-article count.
+     */
+    fun prepareParsed(feedId: String, parsed: List<ParsedArticle>): PreparedArticles {
+        if (parsed.isEmpty()) return PreparedArticles(feedId, emptyList(), newCount = 0, now = 0L)
         val seenGuids = HashSet(articles.getGuidsByFeed(feedId).executeAsList())
         var newCount = 0
-        val prepared = parsed.map { p ->
+        val rows = parsed.map { p ->
             if (seenGuids.add(p.guid)) newCount++
             // search_text is the FTS body target: strip HTML so tag names/attributes don't match.
             // content/summary keep their raw HTML for reader rendering.
@@ -222,36 +237,57 @@ class ArticleRepository(
             // row's id/created_at and preserves is_read/is_starred/read_at/starred_at.
             PreparedInsert(id = IdGenerator.articleId(feedId, p.guid), parsed = p, searchText = searchText)
         }
-        db.transaction {
-            for (pi in prepared) {
-                val p = pi.parsed
-                articles.insert(
-                    id = pi.id,
-                    feed_id = feedId,
-                    guid = p.guid,
-                    url = p.url ?: "",
-                    title = p.title ?: "",
-                    summary = p.summary,
-                    content = p.content,
-                    author = p.author,
-                    published_at = p.publishedAtMillis,
-                    thumbnail_url = p.thumbnailUrl,
-                    is_read = 0L,
-                    read_at = null,
-                    is_starred = 0L,
-                    starred_at = null,
-                    cached_at = now,
-                    search_text = pi.searchText,
-                    updated_at = now,
-                    created_at = now,
-                )
-            }
-        }
-        return newCount
+        return PreparedArticles(feedId, rows, newCount, clock.nowMillis())
     }
 
+    /**
+     * Writes what [prepareParsed] produced. Must be called inside a transaction (its own, via
+     * [upsertParsed], or the caller's).
+     *
+     * @param prepared The rows to insert.
+     * @return The number of articles that were not previously stored for the feed.
+     */
+    fun insertPrepared(prepared: PreparedArticles): Int {
+        for (pi in prepared.rows) {
+            val p = pi.parsed
+            articles.insert(
+                id = pi.id,
+                feed_id = prepared.feedId,
+                guid = p.guid,
+                url = p.url ?: "",
+                title = p.title ?: "",
+                summary = p.summary,
+                content = p.content,
+                author = p.author,
+                published_at = p.publishedAtMillis,
+                thumbnail_url = p.thumbnailUrl,
+                is_read = 0L,
+                read_at = null,
+                is_starred = 0L,
+                starred_at = null,
+                cached_at = prepared.now,
+                search_text = pi.searchText,
+                updated_at = prepared.now,
+                created_at = prepared.now,
+            )
+        }
+        return prepared.newCount
+    }
+
+    /** The result of [prepareParsed]: rows ready to insert, plus the count of genuinely new ones. */
+    data class PreparedArticles(
+        internal val feedId: String,
+        internal val rows: List<PreparedInsert>,
+        val newCount: Int,
+        internal val now: Long,
+    )
+
     /** A parsed article with its FTS body text and deterministic id precomputed off the write path. */
-    private data class PreparedInsert(val id: String, val parsed: ParsedArticle, val searchText: String)
+    data class PreparedInsert internal constructor(
+        internal val id: String,
+        internal val parsed: ParsedArticle,
+        internal val searchText: String,
+    )
 
     /**
      * Soft-deletes articles older than the specified retention period.

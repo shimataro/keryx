@@ -318,6 +318,50 @@ class FeedRepositoryTest {
         }
     }
 
+    /**
+     * A feed's whole apply phase is one transaction, so SQLDelight defers `notifyQueries` to its
+     * commit: the feed's `feeds` writes and its article upsert produce a *single* notification round
+     * per feed instead of one per statement. The article-list query joins `feeds`, so it is
+     * registered against both tables and would otherwise re-run for every statement.
+     *
+     * Also pins the other half of the trade: the batching is per feed, never around the whole loop,
+     * so articles still appear feed by feed (see docs/testing.md's manual refresh checks) — the
+     * listener must observe a strictly growing article count, not one jump at the end.
+     */
+    @Test
+    fun refreshAllNotifiesOncePerFeedAndStillAppliesArticlesIncrementally(): Unit = runBlocking {
+        val (rawDriver, _) = inMemoryDb()
+        val driver = CountingSqlDriver(rawDriver)
+        val db = works.merc.keryx.app.data.local.db.KeryxDatabase(driver)
+        try {
+            val feedCount = 4
+            repeat(feedCount) { f ->
+                newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+                    .subscribeFeed("https://ex.com/$f/feed")
+            }
+            val listQuery = db.articlesQueries.watchAll(::ArticleListRow)
+            val observedCounts = mutableListOf<Int>()
+            val listener = app.cash.sqldelight.Query.Listener {
+                observedCounts += listQuery.executeAsList().size
+            }
+            listQuery.addListener(listener)
+
+            // Fresh content for every feed: new articles plus a changed title/description/etag, so
+            // each feed genuinely writes both tables.
+            val fresh = RSS.replace("<title>Feed</title>", "<title>Renamed</title>")
+                .replace("<guid>g1</guid>", "<guid>g-fresh</guid>")
+            newRepo(db, driver, fetcherWith { respond(fresh, HttpStatusCode.OK, headersOf(HttpHeaders.ETag, "e2")) })
+                .refreshAll()
+            listQuery.removeListener(listener)
+
+            assertEquals(feedCount, observedCounts.size, "expected exactly one notification per feed")
+            assertEquals(observedCounts.sorted(), observedCounts, "articles must appear feed by feed")
+            assertTrue(observedCounts.first() < observedCounts.last(), "each feed must add articles")
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun refreshFeedMakesNewArticleImmediatelySearchableWithoutManualRebuild(): Unit = runBlocking {
         val (driver, db) = inMemoryDb()

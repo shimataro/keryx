@@ -277,58 +277,75 @@ fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
             }
         }
 
-        // Each `feeds` write below is guarded on the value actually changing. SQLDelight notifies
-        // listeners per table, and the article-list query joins `feeds` (so it is registered against
-        // both tables) — an unconditional write therefore re-runs the whole list query even when the
-        // feed's row is identical to what is already stored. A steady-state refresh of an unchanged
-        // feed used to issue three such writes per feed; now it issues none.
-        if (feed.error_count != 0L || feed.last_error != null) {
-            feeds.resetErrorCount(clock.nowMillis(), feed.id)
-        }
+        // CPU-heavy preparation stays outside the transaction below, so it doesn't hold the write
+        // lock (the same reason upsertParsed precomputes before opening its own transaction).
+        val prepared = articleRepository.prepareParsed(feed.id, fetched.articles)
+        val urlChanged = fetched.redirectUrl != null && fetched.redirectUrl != feed.url
 
-        if (feed.favicon_url.isNullOrEmpty()) {
-            phase.resolvedFavicon?.let {
-                feeds.updateFaviconUrl(it, clock.nowMillis(), feed.id)
+        // One transaction for this feed's whole apply phase. SQLDelight defers notifyQueries to the
+        // outermost commit, so the feed's writes and its article upsert produce a single round of
+        // listener notifications instead of one per statement — and the article-list query, which
+        // joins `feeds`, is registered against both tables and would otherwise re-run for each.
+        // Deliberately per feed, not around the whole refreshAll loop: a loop-wide transaction would
+        // hold the write lock for the entire apply phase (starving concurrent search / mark-as-read
+        // of the busy_timeout) and would break the documented incremental appearance of articles.
+        //
+        // Each `feeds` write is additionally guarded on the value actually changing, so a refresh
+        // that changed nothing writes nothing at all and notifies no one.
+        val newCount = db.transactionWithResult {
+            if (feed.error_count != 0L || feed.last_error != null) {
+                feeds.resetErrorCount(clock.nowMillis(), feed.id)
             }
-        }
 
-        // A 304 carries no validators, so writing them back would erase the ones that produced it.
-        if (!fetched.notModified &&
-            (fetched.etag != feed.etag || fetched.lastModified != feed.last_modified)
-        ) {
-            feeds.updateCacheHeaders(fetched.etag, fetched.lastModified, clock.nowMillis(), feed.id)
-        }
-
-        if (fetched.title != null || fetched.description != null) {
-            // Refresh only writes the content columns it owns. It must NOT touch deleted_at /
-            // sort_order / custom_title / favicon_url: refreshAll fetches from a snapshot that can be
-            // stale for the whole concurrent-fetch phase, so writing those back would revert a
-            // concurrent unsubscribe / reorder / rename (and resurrect a just-deleted feed). Those
-            // fields are handled by their own dedicated statements or left to the user's edits.
-            val siteUrl = fetched.siteUrl ?: feed.site_url
-            val title = fetched.title ?: feed.title
-            val description = fetched.description ?: feed.description
-            if (siteUrl != feed.site_url || title != feed.title || description != feed.description) {
-                feeds.updateContent(
-                    site_url = siteUrl,
-                    title = title,
-                    description = description,
-                    updated_at = clock.nowMillis(),
-                    id = feed.id,
-                )
+            if (feed.favicon_url.isNullOrEmpty()) {
+                phase.resolvedFavicon?.let {
+                    feeds.updateFaviconUrl(it, clock.nowMillis(), feed.id)
+                }
             }
+
+            // A 304 carries no validators, so writing them back would erase the ones that produced it.
+            if (!fetched.notModified &&
+                (fetched.etag != feed.etag || fetched.lastModified != feed.last_modified)
+            ) {
+                feeds.updateCacheHeaders(fetched.etag, fetched.lastModified, clock.nowMillis(), feed.id)
+            }
+
+            if (fetched.title != null || fetched.description != null) {
+                // Refresh only writes the content columns it owns. It must NOT touch deleted_at /
+                // sort_order / custom_title / favicon_url: refreshAll fetches from a snapshot that can be
+                // stale for the whole concurrent-fetch phase, so writing those back would revert a
+                // concurrent unsubscribe / reorder / rename (and resurrect a just-deleted feed). Those
+                // fields are handled by their own dedicated statements or left to the user's edits.
+                val siteUrl = fetched.siteUrl ?: feed.site_url
+                val title = fetched.title ?: feed.title
+                val description = fetched.description ?: feed.description
+                if (siteUrl != feed.site_url || title != feed.title || description != feed.description) {
+                    feeds.updateContent(
+                        site_url = siteUrl,
+                        title = title,
+                        description = description,
+                        updated_at = clock.nowMillis(),
+                        id = feed.id,
+                    )
+                }
+            }
+
+            if (urlChanged) {
+                feeds.updateUrl(fetched.redirectUrl!!, clock.nowMillis(), feed.id)
+            }
+
+            articleRepository.insertPrepared(prepared)
         }
 
-        if (fetched.redirectUrl != null && fetched.redirectUrl != feed.url) {
-            feeds.updateUrl(fetched.redirectUrl, clock.nowMillis(), feed.id)
+        // Notifications are emitted after the commit: `notify` suspends, which a transaction block
+        // cannot host, and a listener must not observe a half-applied feed anyway.
+        if (urlChanged) {
             notify(
                 messages.feedUrlChanged(feed.displayTitle()),
                 AppNotificationLevel.WARNING,
                 action = AppNotificationAction.ShowFeedDetail(feed.id),
             )
         }
-
-        val newCount = articleRepository.upsertParsed(feed.id, fetched.articles)
         syncScheduler.scheduleSync()
         return RefreshOutcome(Result.Ok(newCount), fetched.articles.isNotEmpty())
     }
