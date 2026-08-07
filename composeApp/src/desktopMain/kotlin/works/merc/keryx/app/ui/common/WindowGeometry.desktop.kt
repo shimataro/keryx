@@ -3,10 +3,10 @@ package works.merc.keryx.app.ui.common
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.WindowPosition
 import java.awt.GraphicsEnvironment
+import java.awt.Insets
 import java.awt.Point
 import java.awt.Rectangle
 import java.awt.Window
@@ -63,63 +63,71 @@ internal fun sizeMatches(actual: DpSize, target: DpSize): Boolean =
 internal fun windowSize(window: Window): DpSize = DpSize(window.width.dp, window.height.dp)
 
 /**
- * Pushes [size] and/or [position] straight onto the native window, mirroring the Dp -> AWT-point
- * rounding Compose's own window sizing and positioning perform so the result is directly
- * comparable via [sizeMatches].
+ * Applies the requested size and absolute position to the native window in a single bounds update.
  *
- * Always **one** `setBounds` call, never a `setSize` followed by a `setLocation`: a window that
- * has been resized but not yet moved can be painted in between, which showed a dialog at its
- * final size but at the location AWT gives a freshly constructed `Window` — the screen origin
- * plus the screen insets, i.e. the top-left corner. An axis that is not being changed is filled
- * in from the window's current bounds.
- *
- * Only [androidx.compose.ui.window.WindowPosition.Absolute] carries coordinates; any other
- * position (`PlatformDefault`, which [centeredPosition] returns when there is no owner window) is
- * left to Compose, which resolves it against its own window-cascade tracker.
- *
- * @param window The native window.
- * @param size The size to apply, or `null` to keep the window's current size.
- * @param position The position to apply, or `null`/non-absolute to keep the current location.
+ * @param window The native window to update.
+ * @param size The size to apply, or `null` to preserve the current size.
+ * @param position The absolute position to apply, or `null` or a non-absolute position to preserve
+ *   the current location.
+ * @param minSize The minimum width and height applied to the requested size.
  */
-internal fun applyWindowGeometry(window: Window, size: DpSize?, position: WindowPosition?) {
+internal fun applyWindowGeometry(
+    window: Window,
+    size: DpSize?,
+    position: WindowPosition?,
+    minSize: DpSize = DpSize.Zero,
+) {
     val absolute = position as? WindowPosition.Absolute
     if (size == null && absolute == null) return
     window.setBounds(
         absolute?.x?.value?.roundToInt() ?: window.x,
         absolute?.y?.value?.roundToInt() ?: window.y,
-        size?.width?.value?.roundToInt()?.coerceAtLeast(0) ?: window.width,
-        size?.height?.value?.roundToInt()?.coerceAtLeast(0) ?: window.height,
+        size?.width?.value?.roundToInt()?.coerceAtLeast(minSize.width.value.roundToInt()) ?: window.width,
+        size?.height?.value?.roundToInt()?.coerceAtLeast(minSize.height.value.roundToInt()) ?: window.height,
     )
 }
 
 /**
- * Computes the OS-window size that fits content measured at [contentPx].
+ * Computes the window size required for fixed-width content and measured content height.
  *
- * [density] must be the *dialog's* own density: [contentPx] comes out of the dialog's layout pass,
- * so converting it with the owner window's density is off by the ratio between the two whenever
- * owner and dialog sit on screens with different scale factors.
+ * The content height is capped at [maxHeightDp] before [decorationAllowance] is added.
  *
- * The height cap is applied to the content *before* [decorationAllowance] is added, so the result
- * can exceed [maxHeightDp] by exactly the allowance — decoration is chrome the content never
- * occupies, and the cap is about how much of the screen the content may claim.
- *
- * @param contentPx Measured content size, in the dialog composition's pixels.
- * @param density The dialog composition's density.
- * @param maxHeightDp Height cap applied to the content.
- * @param decorationAllowance Extra height for OS-drawn decoration the content does not include.
- * @return The window size to request, or `null` for a degenerate measurement (which must never
- *   become a zero-sized window).
+ * @param contentWidth The dialog's fixed content width.
+ * @param contentHeightPx The measured content height in pixels.
+ * @param density The density used to convert the measured height to [Dp].
+ * @param maxHeightDp The maximum content height.
+ * @param decorationAllowance Additional size required for window decorations.
+ * @return The requested window size, or `null` when [contentHeightPx] is not positive.
  */
 internal fun fitWindowSize(
-    contentPx: IntSize,
+    contentWidth: Dp,
+    contentHeightPx: Int,
     density: Density,
     maxHeightDp: Dp,
-    decorationAllowance: Dp,
+    decorationAllowance: DpSize,
 ): DpSize? {
-    if (contentPx.width <= 0 || contentPx.height <= 0) return null
+    if (contentHeightPx <= 0) return null
     return with(density) {
-        val clampedHeightPx = contentPx.height.toFloat().coerceAtMost(maxHeightDp.toPx())
-        DpSize(contentPx.width.toDp(), clampedHeightPx.toDp() + decorationAllowance)
+        val clampedHeightPx = contentHeightPx.toFloat().coerceAtMost(maxHeightDp.toPx())
+        DpSize(contentWidth + decorationAllowance.width, clampedHeightPx.toDp() + decorationAllowance.height)
+    }
+}
+
+/**
+ * Determines the window decoration allowance for measured dialog content.
+ *
+ * @param insets The current AWT window insets.
+ * @param isMacOs Whether the application is running on macOS.
+ * @param fallbackHeight The height allowance used when all insets are zero.
+ * @return The horizontal and vertical decoration allowances.
+ */
+internal fun decorationAllowanceFor(insets: Insets, isMacOs: Boolean, fallbackHeight: Dp): DpSize {
+    if (isMacOs) return DpSize.Zero
+    val hasRealInsets = insets.left != 0 || insets.right != 0 || insets.top != 0 || insets.bottom != 0
+    return if (hasRealInsets) {
+        DpSize((insets.left + insets.right).dp, (insets.top + insets.bottom).dp)
+    } else {
+        DpSize(0.dp, fallbackHeight)
     }
 }
 
@@ -131,12 +139,16 @@ internal fun fitWindowSize(
  * @property positionApplied Whether the dialog has been placed at least once.
  * @property gaveUpReported Whether giving up on [target] has already been reported, so the warning
  *   is logged once per target rather than on every subsequent drift event.
+ * @property targetReached Whether the window has ever actually matched [target] (as opposed to
+ *   [corrections] simply not yet having hit the cap). This is what [nextDialogFit] checks before
+ *   refilling the correction budget on a target change — see its own doc for why.
  */
 internal data class DialogFitState(
     val target: DpSize? = null,
     val corrections: Int = 0,
     val positionApplied: Boolean = false,
     val gaveUpReported: Boolean = false,
+    val targetReached: Boolean = false,
 )
 
 /**
@@ -156,18 +168,13 @@ internal data class DialogFitDecision(
 )
 
 /**
- * Decides how to react to one observation of "content wants [target], window is at [actual]".
+ * Determines whether a dialog requires size correction or repositioning for its current target size.
  *
- * Position is re-applied only when the dialog has never been placed, or when the target itself
- * changed and the caller opted into repositioning: a mere drift correction must not yank a dialog
- * the user has dragged elsewhere, and a tabbed dialog ([repositionOnResize] = `false`) must keep
- * its top edge fixed while its height follows each tab.
- *
- * @param state The state returned by the previous call, or a default instance.
- * @param target The size the window should have for the currently measured content.
+ * @param state The state from the previous fitting decision.
+ * @param target The desired window size.
  * @param actual The window's current size.
- * @param repositionOnResize Whether the dialog re-places itself when its target size changes.
- * @return The decision for this event.
+ * @param repositionOnResize Whether to reposition the dialog when its target size changes.
+ * @return The updated fitting state and actions for the current observation.
  */
 internal fun nextDialogFit(
     state: DialogFitState,
@@ -176,8 +183,9 @@ internal fun nextDialogFit(
     repositionOnResize: Boolean,
 ): DialogFitDecision {
     val targetChanged = state.target != target
-    val corrections = if (targetChanged) 0 else state.corrections
-    val gaveUpReported = !targetChanged && state.gaveUpReported
+    val budgetRenewed = targetChanged && state.targetReached
+    val corrections = if (budgetRenewed) 0 else state.corrections
+    val gaveUpReported = if (budgetRenewed) false else state.gaveUpReported
 
     val matched = sizeMatches(actual, target)
     val applySize = !matched && corrections < MAX_FIT_CORRECTIONS
@@ -190,6 +198,7 @@ internal fun nextDialogFit(
             corrections = if (applySize) corrections + 1 else corrections,
             positionApplied = state.positionApplied || applyPosition,
             gaveUpReported = gaveUpReported || reportGiveUp,
+            targetReached = (if (targetChanged) false else state.targetReached) || matched,
         ),
         applySize = applySize,
         applyPosition = applyPosition,

@@ -2,11 +2,11 @@ package works.merc.keryx.app.ui.common
 
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpSize
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.WindowPosition
 import java.awt.Frame
 import java.awt.GraphicsEnvironment
+import java.awt.Insets
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -69,59 +69,96 @@ class WindowGeometryTest {
     // --- fitWindowSize -----------------------------------------------------------------------
 
     @Test
-    fun `fitWindowSize returns null for a degenerate measurement`() {
+    fun `fitWindowSize returns null for a degenerate height measurement`() {
         val density = Density(2f)
-        assertNull(fitWindowSize(IntSize(0, 100), density, 800.dp, 0.dp))
-        assertNull(fitWindowSize(IntSize(100, 0), density, 800.dp, 0.dp))
-        assertNull(fitWindowSize(IntSize(0, 0), density, 800.dp, 0.dp))
+        assertNull(fitWindowSize(400.dp, 0, density, 800.dp, DpSize.Zero))
+        assertNull(fitWindowSize(400.dp, -1, density, 800.dp, DpSize.Zero))
     }
 
     @Test
-    fun `fitWindowSize converts measured pixels with the given density`() {
+    fun `fitWindowSize always returns the given content width, ignoring how it was measured`() {
+        // The Linux regression guard: an earlier version derived width from the measured content
+        // pixels, which self-amplified into a runaway shrink when a modeless dialog's client area
+        // was momentarily reported narrower than requested during window placement. Width must now
+        // be a pure function of contentWidth (the dialog's fixed width), never of contentHeightPx or
+        // density — even a near-zero content height must not perturb it.
+        val fitted = fitWindowSize(640.dp, contentHeightPx = 1, Density(2f), maxHeightDp = 800.dp, DpSize.Zero)
+
+        assertEquals(640.dp, fitted?.width)
+    }
+
+    @Test
+    fun `fitWindowSize converts measured height pixels with the given density`() {
         // The dialog's own density, not the owner window's: at owner density 2 / dialog density 1 a
-        // 640dp-wide content used to become a 320pt window (clipped tab bar, over-wrapped content).
-        val fitted = fitWindowSize(IntSize(800, 600), Density(2f), maxHeightDp = 800.dp, decorationAllowance = 0.dp)
+        // 640dp-tall content used to become a 320pt window (over-wrapped content).
+        val fitted = fitWindowSize(400.dp, 600, Density(2f), maxHeightDp = 800.dp, decorationAllowance = DpSize.Zero)
 
         assertEquals(DpSize(400.dp, 300.dp), fitted)
     }
 
     @Test
     fun `fitWindowSize honours a fractional density`() {
-        val fitted = fitWindowSize(IntSize(800, 600), Density(1.5f), maxHeightDp = 800.dp, decorationAllowance = 0.dp)
+        val fitted = fitWindowSize(400.dp, 600, Density(1.5f), maxHeightDp = 800.dp, decorationAllowance = DpSize.Zero)
 
-        assertEquals(533.333f, fitted!!.width.value, 0.01f)
+        assertEquals(400f, fitted!!.width.value, 0.01f)
         assertEquals(400f, fitted.height.value, 0.01f)
     }
 
     @Test
     fun `fitWindowSize leaves content shorter than the cap untouched`() {
-        val fitted = fitWindowSize(IntSize(800, 600), Density(2f), maxHeightDp = 500.dp, decorationAllowance = 0.dp)
+        val fitted = fitWindowSize(400.dp, 600, Density(2f), maxHeightDp = 500.dp, decorationAllowance = DpSize.Zero)
 
         assertEquals(300.dp, fitted?.height)
     }
 
     @Test
     fun `fitWindowSize clamps the content height to the cap`() {
-        val fitted = fitWindowSize(IntSize(800, 2000), Density(2f), maxHeightDp = 500.dp, decorationAllowance = 0.dp)
+        val fitted = fitWindowSize(400.dp, 2000, Density(2f), maxHeightDp = 500.dp, decorationAllowance = DpSize.Zero)
 
         assertEquals(500.dp, fitted?.height)
     }
 
     @Test
-    fun `fitWindowSize adds the decoration allowance on top of the clamped height`() {
-        // The Windows/Linux path: the cap bounds how much of the screen the *content* may claim, so
-        // the resulting window may exceed it by exactly the OS decoration's height.
-        val fitted = fitWindowSize(IntSize(800, 2000), Density(2f), maxHeightDp = 500.dp, decorationAllowance = 40.dp)
+    fun `fitWindowSize adds the decoration allowance to both axes on top of the clamped height`() {
+        // The Windows/Linux path: the height cap bounds how much of the screen the *content* may
+        // claim, so the resulting window may exceed it by exactly the OS decoration's height. Width
+        // has no cap to exceed, so its allowance is added unconditionally.
+        val fitted = fitWindowSize(400.dp, 2000, Density(2f), maxHeightDp = 500.dp, DpSize(8.dp, 40.dp))
 
+        assertEquals(408.dp, fitted?.width)
         assertEquals(540.dp, fitted?.height)
     }
 
     @Test
     fun `fitWindowSize adds nothing when the decoration allowance is zero`() {
         // The macOS path: the merged title row is already part of the measured content.
-        val fitted = fitWindowSize(IntSize(800, 600), Density(2f), maxHeightDp = 800.dp, decorationAllowance = 0.dp)
+        val fitted = fitWindowSize(400.dp, 600, Density(2f), maxHeightDp = 800.dp, decorationAllowance = DpSize.Zero)
 
+        assertEquals(400.dp, fitted?.width)
         assertEquals(300.dp, fitted?.height)
+    }
+
+    // --- decorationAllowanceFor ---------------------------------------------------------------
+
+    @Test
+    fun `decorationAllowanceFor is always zero on macOS regardless of insets`() {
+        assertEquals(DpSize.Zero, decorationAllowanceFor(Insets(28, 0, 0, 0), isMacOs = true, fallbackHeight = 40.dp))
+    }
+
+    @Test
+    fun `decorationAllowanceFor uses real insets on both axes once the window manager reports them`() {
+        val allowance = decorationAllowanceFor(Insets(32, 4, 0, 6), isMacOs = false, fallbackHeight = 40.dp)
+
+        assertEquals(DpSize(10.dp, 32.dp), allowance)
+    }
+
+    @Test
+    fun `decorationAllowanceFor falls back to a height-only guess when insets read all zero`() {
+        // The AWT/X11 timing quirk: insets read as (0,0,0,0) before the window is
+        // reparented/decorated. The fallback must never claim a width allowance that isn't real.
+        val allowance = decorationAllowanceFor(Insets(0, 0, 0, 0), isMacOs = false, fallbackHeight = 40.dp)
+
+        assertEquals(DpSize(0.dp, 40.dp), allowance)
     }
 
     // --- sizeMatches -------------------------------------------------------------------------
@@ -219,6 +256,27 @@ class WindowGeometryTest {
         applyWindowGeometry(frame, DpSize((-10).dp, (-10).dp), position = null)
 
         assertBounds(frame, x = 10, y = 20, width = 0, height = 0)
+    }
+
+    @Test
+    fun `applyWindowGeometry floors size to the given minimum on each axis independently`() {
+        // The safety net behind fitWindowSize no longer deriving width from measurement: even a
+        // pathological requested size can never collapse a resizable=false dialog below minSize,
+        // since the user could not drag it back open.
+        val frame = boundsCountingFrame()
+
+        applyWindowGeometry(frame, DpSize(1.dp, 700.dp), position = null, minSize = DpSize(640.dp, 100.dp))
+
+        assertBounds(frame, x = 10, y = 20, width = 640, height = 700)
+    }
+
+    @Test
+    fun `applyWindowGeometry defaults the minimum to zero`() {
+        val frame = boundsCountingFrame()
+
+        applyWindowGeometry(frame, DpSize(1.dp, 1.dp), position = null)
+
+        assertBounds(frame, x = 10, y = 20, width = 1, height = 1)
     }
 
     // --- nextDialogFit -----------------------------------------------------------------------
@@ -341,17 +399,55 @@ class WindowGeometryTest {
     }
 
     @Test
-    fun `nextDialogFit grants a fresh attempt budget when the target changes`() {
-        var state = DialogFitState()
-        repeat(MAX_FIT_CORRECTIONS + 1) {
-            state = nextDialogFit(state, TARGET, PLACEHOLDER, repositionOnResize = false).state
-        }
+    fun `nextDialogFit grants a fresh attempt budget when the target changes after being reached`() {
+        // The legitimate case: e.g. switching tabs after the previous tab's height was
+        // successfully applied.
+        var state = nextDialogFit(DialogFitState(), TARGET, TARGET, repositionOnResize = false).state
+        assertTrue(state.targetReached)
 
-        val newTarget = nextDialogFit(state, GROWN_TARGET, PLACEHOLDER, repositionOnResize = false)
+        val newTarget = nextDialogFit(state, GROWN_TARGET, TARGET, repositionOnResize = false)
 
         assertTrue(newTarget.applySize)
         assertEquals(1, newTarget.state.corrections)
         assertFalse(newTarget.state.gaveUpReported)
+    }
+
+    @Test
+    fun `nextDialogFit does not grant a fresh attempt budget when the target changes before ever being reached`() {
+        // The Linux width-collapse regression this whole field exists to prevent: a target that
+        // keeps moving before the window ever actually matches it must not get a fresh correction
+        // budget on every change, or the cap never actually stops anything — which is exactly how a
+        // modeless dialog's width ran away to ~1dp instead of settling.
+        var state = DialogFitState()
+        repeat(MAX_FIT_CORRECTIONS) {
+            state = nextDialogFit(state, TARGET, PLACEHOLDER, repositionOnResize = false).state
+        }
+        assertFalse(state.targetReached)
+
+        val newTarget = nextDialogFit(state, GROWN_TARGET, PLACEHOLDER, repositionOnResize = false)
+
+        assertFalse(
+            newTarget.applySize,
+            "the budget must not refill for a target that keeps moving before ever being reached",
+        )
+    }
+
+    @Test
+    fun `nextDialogFit does not re-report giving up when a still-unreached target keeps changing`() {
+        var state = DialogFitState()
+        repeat(MAX_FIT_CORRECTIONS) {
+            state = nextDialogFit(state, TARGET, PLACEHOLDER, repositionOnResize = false).state
+        }
+        state = nextDialogFit(state, TARGET, PLACEHOLDER, repositionOnResize = false).also {
+            assertTrue(it.reportGiveUp)
+        }.state
+
+        val afterTargetChange = nextDialogFit(state, GROWN_TARGET, PLACEHOLDER, repositionOnResize = false)
+
+        assertFalse(
+            afterTargetChange.reportGiveUp,
+            "already reported give-up must not repeat just because the (still unreached) target moved again",
+        )
     }
 
     @Test
