@@ -367,8 +367,12 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
     init {
         // Restore the last-selected article (not via selectArticle(), to avoid re-marking it as
         // read and clobbering another device's "mark as unread" sync via read_at last-write-wins).
+        // A tombstone can land while the app is closed, so the restored row is filtered the same way
+        // selectArticle filters a concurrently-deleted one — otherwise the next launch would select
+        // and pin deleted content.
         val restoredArticle = settingsRepository.getLocalSettings().lastArticleId
             ?.let { articleRepository.getArticleById(it) }
+            ?.takeIf { it.deleted_at == null }
         if (restoredArticle != null) {
             if (restoredArticle.is_read == 1L) {
                 // Keep it visible in an unread-only list, mirroring selectArticle()'s pinning.
@@ -419,18 +423,20 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
      * @param article The article to select.
      */
     fun selectArticle(article: ArticleListRow) {
+        // The list row carries no body, so the detail pane's copy is loaded here — one PK lookup on
+        // selection, in place of loading every article's body on every list emission. A null (or
+        // tombstoned) row means a sync merge deleted it between the emission the user clicked and
+        // the click itself: leave the selection, the pin and the persisted id entirely alone rather
+        // than resurrecting deleted content into the list (which is what pinning would do — the
+        // `articles` merge above re-adds any pinned id missing from the query result) or restoring
+        // it on the next launch.
+        val full = articleRepository.getArticleById(article.id)
+        if (full == null || full.deleted_at != null) return
         if (article.is_read == 0L) {
             _pinnedReadArticles.update { it + (article.id to article.copy(is_read = 1L)) }
         }
-        // The list row carries no body, so the detail pane's copy is loaded here — one PK lookup on
-        // selection, in place of loading every article's body on every list emission. A null (or
-        // tombstoned) row means it was deleted between the emission and this click: keep the
-        // previous selection rather than blanking the pane, but still pin and persist as usual.
-        val full = articleRepository.getArticleById(article.id)
-        if (full != null && full.deleted_at == null) {
-            // Optimistic: show it read immediately; persist off the UI thread.
-            _selectedArticle.value = full.copy(is_read = 1L)
-        }
+        // Optimistic: show it read immediately; persist off the UI thread.
+        _selectedArticle.value = full.copy(is_read = 1L)
         settingsRepository.mutateLocalSettings { it.copy(lastArticleId = article.id) }
         viewModelScope.launch(dbWriteDispatcher) { articleRepository.markAsRead(article.id) }
     }

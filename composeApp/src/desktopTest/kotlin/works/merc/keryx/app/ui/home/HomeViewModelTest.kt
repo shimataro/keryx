@@ -371,6 +371,27 @@ class HomeViewModelTest {
 
         assertEquals("a1", vm.selectedArticle.value?.id)
         assertEquals("<p>first</p>", vm.selectedArticle.value?.content)
+        // Nothing about the dead article may be applied: pinning it would let the `articles` merge
+        // step re-add it to the visible list, and persisting it would restore it on the next launch.
+        assertTrue(vm.articles.value.none { it.id == "a2" && it.is_read == 1L })
+        assertEquals("a1", LocalSettingsStore(dirOverride = dir).load().lastArticleId)
+    }
+
+    /** The same guard at startup: a tombstone that landed while the app was closed. */
+    @Test
+    fun restoringALastArticleThatWasTombstonedWhileClosedSelectsNothing() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 1L)
+        val store = LocalSettingsStore(dirOverride = dir)
+        store.save(store.load().copy(lastArticleId = "a1"))
+        driver.stampArticleDeleted("a1", deletedAt = 10L)
+
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        assertNull(vm.selectedArticle.value)
+        assertTrue(vm.articles.value.none { it.id == "a1" })
     }
 
     /**
