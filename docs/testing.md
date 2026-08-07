@@ -184,6 +184,10 @@ Dialog auto-sizing (`DialogWindow` OS window behavior) cannot be auto-tested, so
   correct size. Never a short ~240pt-tall window, never a tiny ~80x28 one, never a narrow one with
   the trailing tabs clipped. The repetition is the point — the race this guards against reproduced
   on roughly 7 of 10 opens.
+- In those same ten opens, the dialog must appear **already centred** — never at the screen's
+  top-left corner for a frame before jumping to the centre. That is what AWT's default location for
+  a freshly constructed `Window` looks like, and it shows whenever the fitted size reaches the
+  native window ahead of the fitted position.
 - Settings: switch tabs repeatedly. The height follows each tab and the **top edge never moves**.
 - Drag a dialog off-centre, then make its content change (add-feed URL → candidate list). The alert
   dialog re-centres on the content change (expected); the Settings dialog stays where it was dropped.

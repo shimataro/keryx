@@ -460,6 +460,16 @@ spin the guard, logging once via `Log.warn` when it gives up rather than failing
 re-places the dialog on a target change so a drift correction never yanks a window the user dragged.
 The density is now read inside the dialog's own composition.
 
+The direct push must carry the **size and the position together, as one `setBounds`**
+(`applyWindowGeometry`). A first cut pushed only the size to AWT and left the position to
+`DialogState`, which meant the size landed synchronously and the position a `Channel` hop later
+through `UpdateEffect` — and a frame painted in that gap showed the dialog at its final size but at
+the location AWT gives a freshly constructed `Window`: the screen origin plus the screen insets,
+i.e. the top-left corner, from which it then jumped to the centre. (`java.awt.Window.init` offsets
+the initial location that way; Compose's own `WindowLocationTracker.getCascadeLocationFor` uses the
+same base point.) As with the size, whether a frame lands in the gap is pure scheduling, so this too
+was intermittent.
+
 ### Residual limitation
 
 A native resize that never fires `COMPONENT_RESIZED` is invisible to the guard. Nothing short of

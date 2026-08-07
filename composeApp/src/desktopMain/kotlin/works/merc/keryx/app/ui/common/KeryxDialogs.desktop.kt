@@ -340,13 +340,25 @@ private fun DesktopModalWindow(
                         val actual = windowSize(window)
                         val decision = nextDialogFit(fit, target, actual, repositionOnResize)
                         fit = decision.state
-                        if (decision.applySize) {
-                            dialogState.size = target
-                            applyWindowSize(window, target)
+                        // Size and position go onto the native window as ONE bounds change.
+                        // Writing only DialogState for the position while pushing the size
+                        // straight to AWT left the two out of step: the size landed
+                        // synchronously, the position a Channel hop later through Compose's
+                        // UpdateEffect, so a frame painted in between showed the dialog at its
+                        // final size but at the location AWT gives a freshly constructed Window —
+                        // the screen origin plus the screen insets, i.e. the top-left corner.
+                        // Whether a frame lands in that gap is pure scheduling, hence the
+                        // intermittency. DialogState is still written so Compose's model stays
+                        // truthful and keeps the setPreferredSize + pack() path it uses while the
+                        // peer does not exist yet.
+                        val position = if (decision.applyPosition) {
+                            resolvePosition(cursorPoint, owner, screenBounds, target)
+                        } else {
+                            null
                         }
-                        if (decision.applyPosition) {
-                            dialogState.position = resolvePosition(cursorPoint, owner, screenBounds, target)
-                        }
+                        if (decision.applySize) dialogState.size = target
+                        if (position != null) dialogState.position = position
+                        applyWindowGeometry(window, target.takeIf { decision.applySize }, position)
                         if (decision.reportGiveUp) {
                             Log.warn(
                                 LOG_TAG,

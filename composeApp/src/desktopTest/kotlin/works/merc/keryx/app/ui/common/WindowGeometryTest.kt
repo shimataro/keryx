@@ -146,6 +146,81 @@ class WindowGeometryTest {
         assertFalse(sizeMatches(DpSize(640.dp, 240.dp), DpSize(640.dp, 519.dp)))
     }
 
+    // --- applyWindowGeometry -----------------------------------------------------------------
+
+    @Test
+    fun `applyWindowGeometry applies the size and the location in a single bounds change`() {
+        // The regression guard: applying the size on its own left the window resizable-but-unmoved
+        // for however long the position took to arrive, and a frame painted in that gap showed the
+        // dialog at its final size but at AWT's default location for a fresh Window (the screen
+        // origin plus the screen insets — the top-left corner).
+        val frame = boundsCountingFrame()
+
+        applyWindowGeometry(frame, DpSize(640.dp, 519.dp), WindowPosition.Absolute(436.dp, 371.dp))
+
+        assertEquals(1, frame.setBoundsCalls, "size and location must reach AWT as one bounds change")
+        assertBounds(frame, x = 436, y = 371, width = 640, height = 519)
+    }
+
+    @Test
+    fun `applyWindowGeometry keeps the current location when only a size is given`() {
+        val frame = boundsCountingFrame()
+
+        applyWindowGeometry(frame, DpSize(640.dp, 519.dp), position = null)
+
+        assertBounds(frame, x = 10, y = 20, width = 640, height = 519)
+    }
+
+    @Test
+    fun `applyWindowGeometry keeps the current size when only a position is given`() {
+        val frame = boundsCountingFrame()
+
+        applyWindowGeometry(frame, size = null, position = WindowPosition.Absolute(436.dp, 371.dp))
+
+        assertBounds(frame, x = 436, y = 371, width = 100, height = 50)
+    }
+
+    @Test
+    fun `applyWindowGeometry ignores a position that carries no coordinates`() {
+        // PlatformDefault is what centeredPosition returns with no owner window; it has no x/y to
+        // apply, so Compose resolves it against its own window-cascade tracker instead.
+        val frame = boundsCountingFrame()
+
+        applyWindowGeometry(frame, DpSize(640.dp, 519.dp), WindowPosition.PlatformDefault)
+
+        assertBounds(frame, x = 10, y = 20, width = 640, height = 519)
+    }
+
+    @Test
+    fun `applyWindowGeometry does not touch the window when there is nothing to apply`() {
+        val frame = boundsCountingFrame()
+
+        applyWindowGeometry(frame, size = null, position = null)
+        applyWindowGeometry(frame, size = null, position = WindowPosition.PlatformDefault)
+
+        assertEquals(0, frame.setBoundsCalls)
+    }
+
+    @Test
+    fun `applyWindowGeometry rounds Dp to whole AWT points`() {
+        // Must match Compose's own Dp.value.roundToInt(), or sizeMatches would never agree with
+        // what the window reports back.
+        val frame = boundsCountingFrame()
+
+        applyWindowGeometry(frame, DpSize(639.4.dp, 519.6.dp), WindowPosition.Absolute(436.6.dp, 371.4.dp))
+
+        assertBounds(frame, x = 437, y = 371, width = 639, height = 520)
+    }
+
+    @Test
+    fun `applyWindowGeometry never requests a negative size`() {
+        val frame = boundsCountingFrame()
+
+        applyWindowGeometry(frame, DpSize((-10).dp, (-10).dp), position = null)
+
+        assertBounds(frame, x = 10, y = 20, width = 0, height = 0)
+    }
+
     // --- nextDialogFit -----------------------------------------------------------------------
 
     @Test
@@ -291,6 +366,30 @@ class WindowGeometryTest {
 
         state = nextDialogFit(state, TARGET, PLACEHOLDER, repositionOnResize = false).state
         assertEquals(2, state.corrections)
+    }
+
+    /** A never-shown [Frame] that counts how many times AWT is asked to change its bounds. */
+    private class BoundsCountingFrame : Frame() {
+        var setBoundsCalls = 0
+
+        override fun setBounds(x: Int, y: Int, width: Int, height: Int) {
+            setBoundsCalls++
+            super.setBounds(x, y, width, height)
+        }
+    }
+
+    /** A [BoundsCountingFrame] pre-placed at a known geometry, with the setup call not counted. */
+    private fun boundsCountingFrame(): BoundsCountingFrame =
+        BoundsCountingFrame().apply {
+            setBounds(10, 20, 100, 50)
+            setBoundsCalls = 0
+        }
+
+    private fun assertBounds(frame: Frame, x: Int, y: Int, width: Int, height: Int) {
+        assertEquals(x, frame.x, "x")
+        assertEquals(y, frame.y, "y")
+        assertEquals(width, frame.width, "width")
+        assertEquals(height, frame.height, "height")
     }
 
     private companion object {

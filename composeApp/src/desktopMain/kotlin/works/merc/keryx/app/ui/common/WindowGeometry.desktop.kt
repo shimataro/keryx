@@ -63,14 +63,33 @@ internal fun sizeMatches(actual: DpSize, target: DpSize): Boolean =
 internal fun windowSize(window: Window): DpSize = DpSize(window.width.dp, window.height.dp)
 
 /**
- * Pushes [size] straight onto the native window, mirroring the Dp -> AWT-point rounding Compose's
- * own window sizing performs so the result is directly comparable via [sizeMatches].
+ * Pushes [size] and/or [position] straight onto the native window, mirroring the Dp -> AWT-point
+ * rounding Compose's own window sizing and positioning perform so the result is directly
+ * comparable via [sizeMatches].
+ *
+ * Always **one** `setBounds` call, never a `setSize` followed by a `setLocation`: a window that
+ * has been resized but not yet moved can be painted in between, which showed a dialog at its
+ * final size but at the location AWT gives a freshly constructed `Window` — the screen origin
+ * plus the screen insets, i.e. the top-left corner. An axis that is not being changed is filled
+ * in from the window's current bounds.
+ *
+ * Only [androidx.compose.ui.window.WindowPosition.Absolute] carries coordinates; any other
+ * position (`PlatformDefault`, which [centeredPosition] returns when there is no owner window) is
+ * left to Compose, which resolves it against its own window-cascade tracker.
  *
  * @param window The native window.
- * @param size The size to apply.
+ * @param size The size to apply, or `null` to keep the window's current size.
+ * @param position The position to apply, or `null`/non-absolute to keep the current location.
  */
-internal fun applyWindowSize(window: Window, size: DpSize) {
-    window.setSize(size.width.value.roundToInt().coerceAtLeast(0), size.height.value.roundToInt().coerceAtLeast(0))
+internal fun applyWindowGeometry(window: Window, size: DpSize?, position: WindowPosition?) {
+    val absolute = position as? WindowPosition.Absolute
+    if (size == null && absolute == null) return
+    window.setBounds(
+        absolute?.x?.value?.roundToInt() ?: window.x,
+        absolute?.y?.value?.roundToInt() ?: window.y,
+        size?.width?.value?.roundToInt()?.coerceAtLeast(0) ?: window.width,
+        size?.height?.value?.roundToInt()?.coerceAtLeast(0) ?: window.height,
+    )
 }
 
 /**
