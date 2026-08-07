@@ -44,8 +44,10 @@ import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.AddFeedPreview
 import works.merc.keryx.app.domain.AddFeedPreviewResolver
+import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.ArticleSearchResult
+import works.merc.keryx.app.domain.toListRow
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
@@ -63,7 +65,7 @@ import works.merc.keryx.app.domain.TagRepository
  */
 private data class FilteredArticles(
     val filter: ArticleFilter,
-    val articles: List<Articles>,
+    val articles: List<ArticleListRow>,
 )
 
 /** Debounced FTS results tagged with the query that produced them (see [HomeViewModel.searching]). */
@@ -176,7 +178,7 @@ class HomeViewModel(
     // Articles selected while browsing the current filter that became read as a side effect of
     // selection. Kept visible (in read styling) until the user reloads/syncs or switches filters,
     // so the list doesn't shift under the user while reading down an unread list.
-    private val _pinnedReadArticles = MutableStateFlow<Map<String, Articles>>(emptyMap())
+    private val _pinnedReadArticles = MutableStateFlow<Map<String, ArticleListRow>>(emptyMap())
 
     // Only the filter keys the DB query: switching filters must switch queries, but the unread-only,
     // sort and pinned inputs are pure display transforms over whatever that query returned. Keeping
@@ -185,7 +187,7 @@ class HomeViewModel(
     private val filteredArticles: Flow<FilteredArticles> =
         _filter.flatMapLatest { f -> articleRepository.watchArticles(f).map { FilteredArticles(f, it) } }
 
-    val articles: StateFlow<List<Articles>> =
+    val articles: StateFlow<List<ArticleListRow>> =
         combine(filteredArticles, _unreadOnly, _newestFirst, _pinnedReadArticles) { (f, list), unread, newest, pinned ->
             // Nothing pinned is the common case, and then the id set has no reader — skip
             // building it rather than hashing every article's id on every emission.
@@ -196,7 +198,7 @@ class HomeViewModel(
                 pinned.values.filter { it.id !in existingIds }
             }
             val merged = if (extra.isEmpty()) list else (list + extra).sortedWith(
-                compareByDescending<Articles> { it.published_at ?: 0L }
+                compareByDescending<ArticleListRow> { it.published_at ?: 0L }
                     .thenByDescending { it.created_at }
                     .thenByDescending { it.id }
             )
@@ -214,6 +216,27 @@ class HomeViewModel(
 
     private val _selectedArticle = MutableStateFlow<Articles?>(null)
     val selectedArticle: StateFlow<Articles?> = _selectedArticle
+
+    /**
+     * The list cursor for keyboard navigation, and the identity of the newest selection request.
+     *
+     * [selectArticle] loads the article body asynchronously, so [_selectedArticle] lags the user's
+     * intent; this is updated synchronously instead, which keeps a held arrow key advancing at
+     * key-repeat speed and lets a superseded hydration recognise that it lost. Only ever touched on
+     * the ViewModel's (main) context, so it needs no synchronization.
+     */
+    private var selectionCursorId: String? = null
+
+    /**
+     * Identity of the current browsing context, bumped whenever the whole pinned-read set is dropped
+     * for a fresh one ([selectFilter], and a query change in [setSearchQuery]).
+     *
+     * [selectionCursorId] cannot stand in for this: it carries no scope identity, so a selection
+     * made under the new scope puts a non-null id back, and a hydration still in flight from the old
+     * one passes its null check and re-adds a pin that was just cleared. Only ever touched on the
+     * ViewModel's (main) context, so it needs no synchronization.
+     */
+    private var browsingEpoch = 0
 
     // --- Search ---
     private val _searchQuery = MutableStateFlow("")
@@ -365,14 +388,21 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
     init {
         // Restore the last-selected article (not via selectArticle(), to avoid re-marking it as
         // read and clobbering another device's "mark as unread" sync via read_at last-write-wins).
+        // A tombstone can land while the app is closed, so the restored row is filtered the same way
+        // selectArticle filters a concurrently-deleted one — otherwise the next launch would select
+        // and pin deleted content.
         val restoredArticle = settingsRepository.getLocalSettings().lastArticleId
             ?.let { articleRepository.getArticleById(it) }
+            ?.takeIf { it.deleted_at == null }
         if (restoredArticle != null) {
             if (restoredArticle.is_read == 1L) {
                 // Keep it visible in an unread-only list, mirroring selectArticle()'s pinning.
-                _pinnedReadArticles.update { it + (restoredArticle.id to restoredArticle) }
+                _pinnedReadArticles.update { it + (restoredArticle.id to restoredArticle.toListRow()) }
             }
             _selectedArticle.value = restoredArticle
+            // Seed the navigation cursor too, so the first arrow key steps from the restored
+            // article instead of jumping back to the top of the list.
+            selectionCursorId = restoredArticle.id
         }
 
         combine(_feedListPaneWidth, _articleListPaneWidth) { feed, article -> feed to article }
@@ -408,38 +438,83 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
         _filter.value = filter
         _selectedArticle.value = null
         _pinnedReadArticles.value = emptyMap()
+        // Cancels any selection whose body is still loading: without this, a hydration in flight
+        // across the switch would restore the selection and re-add the pin just cleared here. The
+        // cursor alone cannot carry that veto — a selection made under the new filter puts a
+        // non-null id straight back — so the epoch records the switch itself.
+        selectionCursorId = null
+        browsingEpoch++
         settingsRepository.mutateLocalSettings { it.copy(lastFilter = filter.encode(), lastArticleId = null) }
     }
 
     /**
-     * Selects an article and marks it as read.
+     * Selects an existing article, loads its full content, and marks it as read.
      *
-     * @param article The article to select.
+     * @param article The article row to select.
      */
-    fun selectArticle(article: Articles) {
-        if (article.is_read == 0L) {
-            _pinnedReadArticles.update { it + (article.id to article.copy(is_read = 1L)) }
+    fun selectArticle(article: ArticleListRow) {
+        // Synchronous, so keyboard navigation always steps from where the user actually is rather
+        // than from whatever the last completed hydration left in _selectedArticle.
+        selectionCursorId = article.id
+        // Stamped here too: the hydration below must pin into the browsing context the user actually
+        // selected in, not into whichever one is current when its DB lookup finally returns.
+        val epoch = browsingEpoch
+        viewModelScope.launch {
+            // The list row carries no body, so the detail pane's copy is loaded here — one PK lookup
+            // on selection, in place of loading every article's body on every list emission. Off the
+            // UI thread: this pulls the whole row including `content`, and the JVM driver opens a
+            // fresh connection per statement, so under a sync merge's or refresh's write lock it can
+            // wait out the whole busy_timeout. Held arrow keys would do that ~30 times a second.
+            val full = withContext(dispatcher) { articleRepository.getArticleById(article.id) }
+            // A null (or tombstoned) row means a sync merge deleted it between the emission the user
+            // clicked and the click itself: leave the selection, the pin and the persisted id
+            // entirely alone rather than resurrecting deleted content into the list (which is what
+            // pinning would do — the `articles` merge above re-adds any pinned id missing from the
+            // query result) or restoring it on the next launch.
+            if (full == null || full.deleted_at != null) {
+                // Resume navigating from what is actually on screen, not from the dead article.
+                if (selectionCursorId == article.id) selectionCursorId = _selectedArticle.value?.id
+                return@launch
+            }
+            // Marking read is unconditional (external-spec §7: read the instant it is selected), so
+            // an article passed over by a fast key repeat is still marked read exactly as before.
+            viewModelScope.launch(dbWriteDispatcher) { articleRepository.markAsRead(article.id) }
+            // Nothing is selected any more — a filter switch, or an earlier hydration finding its
+            // own article tombstoned — so there is nothing left to apply below.
+            val cursor = selectionCursorId ?: return@launch
+            // Pinned even when superseded, so an unread-only list cannot collapse under a held key —
+            // but never into a browsing context that dropped every pin (a filter switch, a new search
+            // query) while this lookup was still running, which the `articles` merge would read as an
+            // instruction to re-add this article to a list it does not belong to.
+            if (epoch == browsingEpoch && article.is_read == 0L) {
+                _pinnedReadArticles.update { it + (article.id to article.copy(is_read = 1L)) }
+            }
+            // Only the newest selection reaches the reader: an older lookup that finished later
+            // would otherwise put the wrong article back on screen.
+            if (cursor != article.id) return@launch
+            // Optimistic: show it read immediately; the persist above already went out.
+            _selectedArticle.value = full.copy(is_read = 1L)
+            settingsRepository.mutateLocalSettings { it.copy(lastArticleId = article.id) }
         }
-        // Optimistic: show it read immediately; persist off the UI thread.
-        _selectedArticle.value = article.copy(is_read = 1L)
-        settingsRepository.mutateLocalSettings { it.copy(lastArticleId = article.id) }
-        viewModelScope.launch(dbWriteDispatcher) { articleRepository.markAsRead(article.id) }
     }
 
     fun selectNext() = moveSelection(1)
     fun selectPrevious() = moveSelection(-1)
 
     /**
-     * The article list currently shown in the center pane: search hits when the Search scope is
-     * active, otherwise the feed-backed [articles]. Used for keyboard navigation and first-select.
-     */
-    fun currentArticles(): List<Articles> =
+         * Provides the article rows currently displayed in the center pane.
+         *
+         * @return Search-result rows for the search filter, or the filtered article rows otherwise.
+         */
+    fun currentArticles(): List<ArticleListRow> =
         if (_filter.value is ArticleFilter.Search) searchResults.value.map { it.article } else articles.value
 
     private fun moveSelection(delta: Int) {
         val list = currentArticles()
         if (list.isEmpty()) return
-        val currentId = _selectedArticle.value?.id
+        // The cursor, not _selectedArticle: the latter only catches up once the body has loaded, so
+        // stepping from it would make a held arrow key re-read the same stale index every repeat.
+        val currentId = selectionCursorId
         val index = list.indexOfFirst { it.id == currentId }
         val next = when {
             index < 0 -> 0
@@ -448,6 +523,9 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
         selectArticle(list[next])
     }
 
+    /**
+     * Marks the selected article as unread.
+     */
     fun markSelectedUnread() {
         val current = _selectedArticle.value ?: return
         val id = current.id
@@ -457,7 +535,12 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
         viewModelScope.launch(dbWriteDispatcher) { articleRepository.markAsUnread(id) }
     }
 
-    fun toggleRead(article: Articles) {
+    /**
+     * Toggles the read state of an article and persists the change.
+     *
+     * @param article The article whose read state should be toggled.
+     */
+    fun toggleRead(article: ArticleListRow) {
         val nowRead = article.is_read == 0L
         if (nowRead) {
             _pinnedReadArticles.update { it + (article.id to article.copy(is_read = 1L)) }
@@ -465,26 +548,41 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
             _pinnedReadArticles.update { it - article.id }
         }
         if (_selectedArticle.value?.id == article.id) {
-            _selectedArticle.value = article.copy(is_read = if (nowRead) 1L else 0L)
+            _selectedArticle.update { it?.copy(is_read = if (nowRead) 1L else 0L) }
         }
         viewModelScope.launch(dbWriteDispatcher) {
             if (nowRead) articleRepository.markAsRead(article.id) else articleRepository.markAsUnread(article.id)
         }
     }
 
-    fun toggleStar(article: Articles) {
+    /**
+ * Toggles the read state of the selected article.
+ */
+    fun toggleReadSelected() = _selectedArticle.value?.let { toggleRead(it.toListRow()) }
+
+    /**
+     * Toggles the starred state of an article.
+     *
+     * @param article The article whose starred state should be toggled.
+     */
+    fun toggleStar(article: ArticleListRow) {
         val starred = article.is_starred == 0L
         if (_selectedArticle.value?.id == article.id) {
-            _selectedArticle.value = article.copy(is_starred = if (starred) 1L else 0L)
+            _selectedArticle.update { it?.copy(is_starred = if (starred) 1L else 0L) }
         }
         viewModelScope.launch(dbWriteDispatcher) { articleRepository.setStarred(article.id, starred = starred) }
     }
 
     /**
-     * Marks applicable articles as read for the current filter.
+ * Toggles the starred state of the selected article.
+ */
+    fun toggleStarSelected() = _selectedArticle.value?.let { toggleStar(it.toListRow()) }
+
+    /**
+     * Marks unread articles in the current filter as read.
      *
-     * The starred filter preserves article read states, while other filters optimistically
-     * retain currently visible articles with updated read timestamps until the data refreshes.
+     * The starred filter preserves article read states, while other filters retain visible articles
+     * optimistically until the updated data is refreshed.
      */
     fun markAllRead() {
         val filter = _filter.value
@@ -500,17 +598,18 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
             val visibleUnread = currentArticles().filter { it.is_read == 0L }
             val pins = _pinnedReadArticles.value.toMutableMap()
             visibleUnread.forEach { article ->
-                pins[article.id] = article.copy(is_read = 1L, read_at = nowRead)
+                pins[article.id] = article.copy(is_read = 1L)
             }
             if (selected != null) {
                 val updatedSelected = selected.copy(is_read = 1L, read_at = nowRead)
-                pins[selected.id] = updatedSelected
+                pins[selected.id] = updatedSelected.toListRow()
                 _selectedArticle.value = updatedSelected
             }
             _pinnedReadArticles.value = pins
         } else {
             // Starred: markAllAsRead is a no-op, don't alter read state.
-            _pinnedReadArticles.value = if (selected != null) mapOf(selected.id to selected) else emptyMap()
+            _pinnedReadArticles.value =
+                if (selected != null) mapOf(selected.id to selected.toListRow()) else emptyMap()
         }
         val idsToMark = if (filter == ArticleFilter.Search) {
             _rawSearchResults.value.results
@@ -553,27 +652,37 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
      *
      * @return A map containing the selected article if it is read and not deleted; an empty map otherwise.
      */
-    private fun pinnedReadArticlesKeepingSelected(): Map<String, Articles> {
+    private fun pinnedReadArticlesKeepingSelected(): Map<String, ArticleListRow> {
         val selected = _selectedArticle.value
         if (selected == null || selected.is_read != 1L) return emptyMap()
+        // A newer selection is still loading its body, so [_selectedArticle] is the article being
+        // replaced: keeping it would preserve a pin the user has already navigated away from. The
+        // hydration in flight pins its own article when it lands, so nothing is lost by dropping
+        // everything here.
+        if (selectionCursorId != selected.id) return emptyMap()
         // The selected row may have been tombstoned by a sync merge that landed while it was
         // selected. Re-pinning it would put deleted content back into the visible list, because the
         // `articles` merge step re-adds any pinned id missing from the repository result — the same
         // reason [reconcilePinnedReadArticles] exists, and the same check it applies.
-        if (articleRepository.getArticleById(selected.id)?.deleted_at != null) return emptyMap()
-        return mapOf(selected.id to selected)
+        if (selected.id !in articleRepository.aliveArticleIds(listOf(selected.id))) return emptyMap()
+        return mapOf(selected.id to selected.toListRow())
     }
 
     /**
-     * Drops any pinned entry whose backing row has since been soft-deleted (e.g. a tombstone
-     * propagated by a sync merge while the article was pinned), so the `articles` merge step
-     * (which re-adds a pinned id missing from the filtered repository result) can never
-     * resurrect deleted content into the visible list.
+     * Removes pinned articles that have been deleted.
      */
     private fun reconcilePinnedReadArticles() {
+        val snapshot = _pinnedReadArticles.value
+        if (snapshot.isEmpty()) return
+        // Resolved with ONE query, outside the update lambda. Per-pin getById was both an N+1 (each
+        // one a full row on its own connection) and inside a CAS retry loop that can re-run it;
+        // "mark all read" sizes this set to the whole visible list, and it runs on every articles
+        // write.
+        val alive = articleRepository.aliveArticleIds(snapshot.keys)
         _pinnedReadArticles.update { pinned ->
-            if (pinned.isEmpty()) return@update pinned
-            pinned.filterValues { articleRepository.getArticleById(it.id)?.deleted_at == null }
+            // Keys added since the snapshot are kept: they were just pinned, so they are alive by
+            // construction, and `alive` has no verdict on them.
+            pinned.filterKeys { it in alive || it !in snapshot }
         }
     }
 
@@ -617,6 +726,10 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
         // Start a fresh browsing context when the text actually changes (already in Search scope).
         if (query != _searchQuery.value) {
             _pinnedReadArticles.value = emptyMap()
+            // Same veto as selectFilter: a body load still in flight from the previous query must
+            // not re-add a pin into the fresh context. Unlike a filter switch, the cursor and the
+            // selection deliberately survive a query change — only the pin does not.
+            browsingEpoch++
         }
         _searchQuery.value = query
         if (query.isNotEmpty() && _filter.value != ArticleFilter.Search) {

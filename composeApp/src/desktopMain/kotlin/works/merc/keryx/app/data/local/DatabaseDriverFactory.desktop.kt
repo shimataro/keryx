@@ -9,6 +9,28 @@ import works.merc.keryx.app.platform.AppDirs
 import java.io.File
 import java.util.Properties
 
+/**
+ * Connection properties applied to *every* connection the driver opens.
+ *
+ * This JVM driver opens a fresh connection per statement for file DBs (SQLDelight's
+ * `ThreadedConnectionManager` closes it again outside a transaction), so a PRAGMA issued once via
+ * `driver.execute` is gone by the next statement. Anything that must hold for all statements has to
+ * go here, where sqlite-jdbc replays it on each new connection.
+ *
+ * - `busy_timeout` lets a search wait out (rather than error on SQLITE_BUSY -> zero hits) the brief
+ *   write lock held by an incremental FTS insert or the rare full index rebuild on another connection.
+ * - `foreign_keys` is off by default in SQLite; the schema declares them.
+ */
+/**
+ * Creates SQLite JDBC connection properties for busy-timeout handling and foreign-key enforcement.
+ *
+ * @return Connection properties applied to each SQLite connection.
+ */
+internal fun sqliteConnectionProperties(): Properties = Properties().apply {
+    setProperty("busy_timeout", SQLITE_BUSY_TIMEOUT_MS.toString())
+    setProperty("foreign_keys", "true")
+}
+
 actual class DatabaseDriverFactory {
     /**
      * Creates and configures the SQLite database driver.
@@ -17,14 +39,7 @@ actual class DatabaseDriverFactory {
      */
     actual fun create(): SqlDriver {
         val dbFile = File(AppDirs.appDataDir(), DB_FILE_NAME)
-        // busy_timeout goes through connection properties, not a one-off PRAGMA: this JVM driver opens
-        // a fresh connection per statement for file DBs, so it must apply to every connection. It lets
-        // a search wait out (rather than error on SQLITE_BUSY -> zero hits) the brief write lock held
-        // by an incremental FTS insert or the rare full index rebuild on another connection.
-        val props = Properties().apply { setProperty("busy_timeout", SQLITE_BUSY_TIMEOUT_MS.toString()) }
-        val driver = JdbcSqliteDriver("jdbc:sqlite:${dbFile.absolutePath}", props)
-        // Foreign keys are off by default in SQLite; the schema declares them.
-        driver.execute(null, "PRAGMA foreign_keys=ON;", 0)
+        val driver = JdbcSqliteDriver("jdbc:sqlite:${dbFile.absolutePath}", sqliteConnectionProperties())
         migrateIfNeeded(driver)
         return driver
     }

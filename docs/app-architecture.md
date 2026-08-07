@@ -127,6 +127,24 @@ Android のネイティブな視覚言語は Material Design であるため、A
 
 SQLDelight generated classes (`Feeds` / `Articles` / …) are used as-is in all layers. Column names become properties in snake_case (e.g. `feed.site_url`). Booleans and timestamps are kept as `Long` (0/1, Unix millis) and converted with kotlinx-datetime at display time. No separate domain model classes are defined.
 
+The one exception is `domain/ArticleRepository.kt`'s **`ArticleListRow`**: the eight columns the
+article list renders (`id` / `feed_id` / `title` / `url` / `published_at` / `created_at` / `is_read` /
+`is_starred`). It exists for cost, not for modelling — the full `Articles` row also carries
+`content`, `summary` and `search_text`, i.e. the article body twice over, so selecting `*` for the
+list made one emission proportional to the whole corpus's text, and the list query re-runs on every
+write to `articles` or `feeds`. The list queries in `articles.sq` project exactly those eight columns
+and map them with `::ArticleListRow`; the body is loaded per selected article via
+`getArticleById`, and `_selectedArticle` therefore stays a full `Articles`. That load runs off the
+UI thread and applies latest-wins — it pulls `content` on a connection the JVM driver opens per
+statement, so under a merge's or refresh's write lock it could otherwise burn the whole
+`busy_timeout` on the UI thread, ~30 times a second under a held arrow key. `HomeViewModel` keeps a
+synchronous `selectionCursorId` alongside it, so keyboard navigation steps from where the user
+actually is rather than from the last hydration to land. Because a narrowed
+`SELECT` makes SQLDelight generate a distinct type per query, the shared hand-written row is what
+lets `watchArticles`' five branches keep one return type — and its parameter order is positionally
+bound to the SELECT column order (guarded by
+`ArticleRepositoryTest.articleListRowMapsEveryProjectedColumnToItsOwnField`).
+
 ## Navigation
 
 A simple stack navigator in `ui/navigation/Navigator.kt` switches between Setup / Home / Settings. Article view is a pane inside Home (not a root route).

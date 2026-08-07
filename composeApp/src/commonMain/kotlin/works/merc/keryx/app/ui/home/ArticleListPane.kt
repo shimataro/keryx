@@ -39,7 +39,7 @@ import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.searchTerms
-import works.merc.keryx.app.data.local.db.Articles
+import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.ClipboardEntries
@@ -69,6 +69,15 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  * @param onActivated Called when the pane becomes active.
  * @param modifier Modifier applied to the pane.
  * @param notifVm Optional view model providing notifications for the toolbar.
+ */
+/**
+ * Displays the article list or search results for the current home view filter.
+ *
+ * @param vm The home view model providing article data, filter state, and actions.
+ * @param focused Whether the pane currently has focus.
+ * @param onActivated Called when the pane becomes active.
+ * @param modifier Modifier applied to the pane.
+ * @param notifVm Optional view model used to display notifications.
  */
 @Composable
 fun ArticleListPane(
@@ -108,7 +117,7 @@ fun ArticleListPane(
         articles = articles,
         feedTitles = feedTitles,
         feedFavicons = feedFavicons,
-        selected = selected,
+        selectedId = selected?.id,
         unreadOnly = unreadOnly,
         newestFirst = newestFirst,
         focused = focused,
@@ -190,6 +199,7 @@ private fun SearchListPane(
                 results.isEmpty() -> CenteredHint(stringResource(Res.string.home_search_no_results))
                 else -> {
                     val rowMetrics = rememberArticleRowMetrics()
+                    val rowStrings = rememberArticleRowStrings()
                     val clipboard = LocalClipboard.current
                     val scope = rememberCoroutineScope()
                     LazyColumn(Modifier.fillMaxSize(), state = listState) {
@@ -213,6 +223,7 @@ private fun SearchListPane(
                                 },
                                 onOpenInBrowser = { BrowserOpener.open(article.url) },
                                 titleOverride = markedToAnnotatedString(result.titleMarked.ifBlank { article.title }),
+                                strings = rowStrings,
                             )
                         }
                     }
@@ -281,31 +292,31 @@ internal fun ArticleListTopBar(
 }
 
 /**
- * Renders the article list with filtering controls, selection state, and article actions.
+ * Renders the article list with sorting, unread filtering, selection, and article actions.
  *
- * @param articles The articles to display.
+ * @param articles The article rows to display.
  * @param feedTitles Display titles keyed by feed identifier.
  * @param feedFavicons Favicon URLs keyed by feed identifier.
- * @param selected The currently selected article, if any.
- * @param unreadOnly Whether only unread articles are shown.
- * @param newestFirst Whether articles are sorted newest first.
- * @param focused Whether the list is focused.
- * @param unreadOnlyEnabled Whether the unread-only toggle is enabled.
+ * @param selectedId The identifier of the selected article, if any.
+ * @param unreadOnly Whether to show only unread articles.
+ * @param newestFirst Whether to sort articles from newest to oldest.
+ * @param focused Whether the list has focus.
+ * @param unreadOnlyEnabled Whether the unread-only control is enabled.
  */
 @Composable
 internal fun ArticleListPaneContent(
-    articles: List<Articles>,
+    articles: List<ArticleListRow>,
     feedTitles: Map<String, String>,
     feedFavicons: Map<String, String?> = emptyMap(),
-    selected: Articles?,
+    selectedId: String?,
     unreadOnly: Boolean,
     onToggleUnreadOnly: () -> Unit,
     onToggleSort: () -> Unit,
     newestFirst: Boolean = true,
     onMarkAllRead: () -> Unit,
-    onSelectArticle: (Articles) -> Unit,
-    onToggleRead: (Articles) -> Unit = {},
-    onToggleStar: (Articles) -> Unit = {},
+    onSelectArticle: (ArticleListRow) -> Unit,
+    onToggleRead: (ArticleListRow) -> Unit = {},
+    onToggleStar: (ArticleListRow) -> Unit = {},
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
     focused: Boolean = true,
@@ -313,8 +324,8 @@ internal fun ArticleListPaneContent(
     notifVm: NotificationCenterViewModel? = null,
     unreadOnlyEnabled: Boolean = true,
 ) {
-    LaunchedEffect(selected?.id, articles.isNotEmpty()) {
-        val index = articles.indexOfFirst { it.id == selected?.id }
+    LaunchedEffect(selectedId, articles.isNotEmpty()) {
+        val index = articles.indexOfFirst { it.id == selectedId }
         if (index !in articles.indices) return@LaunchedEffect
         listState.scrollToIndexIfNeeded(index)
     }
@@ -343,6 +354,7 @@ internal fun ArticleListPaneContent(
             }
         } else {
             val rowMetrics = rememberArticleRowMetrics()
+            val rowStrings = rememberArticleRowStrings()
             Box(Modifier.fillMaxSize()) {
                 val clipboard = LocalClipboard.current
                 val scope = rememberCoroutineScope()
@@ -352,7 +364,7 @@ internal fun ArticleListPaneContent(
                             article = article,
                             feedTitle = feedTitles[article.feed_id].orEmpty(),
                             feedFavicon = feedFavicons[article.feed_id],
-                            selected = article.id == selected?.id,
+                            selected = article.id == selectedId,
                             focused = focused,
                             rowHeight = rowMetrics.rowHeight,
                             faviconSize = rowMetrics.faviconSize,
@@ -365,6 +377,7 @@ internal fun ArticleListPaneContent(
                                 }
                             },
                             onOpenInBrowser = { BrowserOpener.open(article.url) },
+                            strings = rowStrings,
                         )
                     }
                 }

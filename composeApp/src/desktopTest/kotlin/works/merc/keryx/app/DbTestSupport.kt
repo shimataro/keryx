@@ -4,6 +4,7 @@ import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import kotlinx.coroutines.runBlocking
 import works.merc.keryx.app.data.local.FtsManager
+import works.merc.keryx.app.data.local.sqliteConnectionProperties
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import java.io.File
 
@@ -13,16 +14,48 @@ import java.io.File
  * test can assert that a purely display-level change (sort, unread-only, selection) does not
  * re-execute it.
  *
- * Identified by projecting `thumbnail_url` while ordering by `published_at DESC`: SQLDelight expands
- * the `*` / `a.*` projections into explicit columns, so the ordering is what separates these five
- * from the single-row `getById` / `getByIds` fetches, and the projected column is what separates them
- * from the unread-count aggregates (which select `ft.tag_id` / `f.folder_id` and must still re-run on
- * a read-state change) and from the FTS search, which orders by rank.
+ * Identified by projecting `is_starred` while ordering by `published_at DESC`. The ordering
+ * separates these five from the by-id fetches (`getById` / `getListRowsByIds`, which have no
+ * ORDER BY) and from the FTS search (which orders by rank); the projected column separates them
+ * from the unread-count aggregates, which select `ft.tag_id` / `f.folder_id` and must still re-run
+ * on a read-state change. `softDeleteExpired` matches both conditions but goes through `execute`,
+ * not `executeQuery`, so it never reaches this counter.
+ *
+ * Keep this in step with the list queries' projection in `articles.sq`: the previous sentinel used
+ * `thumbnail_url`, and when that column was dropped from the projection the counter silently stayed
+ * at zero, which would have made every "must not re-query" assertion pass vacuously.
  */
 class CountingSqlDriver(private val delegate: SqlDriver) : SqlDriver {
     var listQueryExecutions = 0
         private set
 
+    /**
+     * How many `UPDATE feeds` statements were executed. The article-list query is registered against
+     * `feeds` as well as `articles` (it joins them), so every feeds write re-runs it — which is why
+     * a refresh that changes nothing must not write.
+     */
+    var feedUpdates = 0
+        private set
+
+    /**
+     * How many single-row `getById` fetches ran — the shape an N+1 shows up as. Matched on the
+     * trailing clause, not the projection: SQLDelight expands `SELECT *` into explicit columns, so
+     * a `startsWith("SELECT * ...")` sentinel would silently never match. `WHERE id = ?` separates
+     * it from `getListRowsByIds` and `aliveIdsIn`, which both use `WHERE id IN`.
+     */
+    var articleGetByIdExecutions = 0
+        private set
+
+    /**
+     * Executes a SQL query while recording article-list and single-article query executions.
+     *
+     * @param identifier The query identifier.
+     * @param sql The SQL statement to execute.
+     * @param mapper Maps the query cursor to a result.
+     * @param parameters The number of query parameters.
+     * @param binders Binds query parameters when provided.
+     * @return The query result.
+     */
     override fun <R> executeQuery(
         identifier: Int?,
         sql: String,
@@ -30,7 +63,8 @@ class CountingSqlDriver(private val delegate: SqlDriver) : SqlDriver {
         parameters: Int,
         binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
     ): app.cash.sqldelight.db.QueryResult<R> {
-        if (sql.contains("thumbnail_url") && sql.contains("published_at DESC")) listQueryExecutions++
+        if (sql.contains("is_starred") && sql.contains("published_at DESC")) listQueryExecutions++
+        if (sql.endsWith("FROM articles WHERE id = ?")) articleGetByIdExecutions++
         return delegate.executeQuery(identifier, sql, mapper, parameters, binders)
     }
 
@@ -42,7 +76,10 @@ class CountingSqlDriver(private val delegate: SqlDriver) : SqlDriver {
         sql: String,
         parameters: Int,
         binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
-    ) = delegate.execute(identifier, sql, parameters, binders)
+    ): app.cash.sqldelight.db.QueryResult<Long> {
+        if (sql.startsWith("UPDATE feeds")) feedUpdates++
+        return delegate.execute(identifier, sql, parameters, binders)
+    }
 
     /**
  * Starts a new database transaction.
@@ -78,16 +115,28 @@ override fun notifyListeners(vararg queryKeys: String) = delegate.notifyListener
 
 /** An in-memory KeryxDatabase for tests, with the schema applied. */
 fun inMemoryDb(): Pair<SqlDriver, KeryxDatabase> {
-    val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+    val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY, sqliteConnectionProperties())
     KeryxDatabase.Schema.create(driver)
-    driver.execute(null, "PRAGMA foreign_keys=ON;", 0)
     return driver to KeryxDatabase(driver)
 }
 
-/** A file-backed KeryxDatabase (needed for ATTACH DATABASE merge tests). */
+/**
+ * Creates a file-backed SQLite database for merge tests.
+ *
+ * @return A triple containing the temporary database file, SQL driver, and initialized database.
+ */
 fun fileDb(): Triple<File, SqlDriver, KeryxDatabase> {
     val file = File.createTempFile("keryx-test-", ".db").apply { deleteOnExit() }
-    val driver = JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
+    // Production's properties minus foreign_keys. The merge tests seed states that FK enforcement
+    // forbids on purpose — an article whose feed is missing, a feed_tag whose tag is missing, a feed
+    // pointing at an absent folder — because those are exactly what MergeSql's EXISTS/NOT EXISTS
+    // guards exist to skip when a cloud DB written by another device or version carries them. The
+    // production configuration (foreign_keys included) is covered against a real file DB by
+    // SqliteConnectionPropertiesTest.
+    val driver = JdbcSqliteDriver(
+        "jdbc:sqlite:${file.absolutePath}",
+        sqliteConnectionProperties().apply { remove("foreign_keys") },
+    )
     KeryxDatabase.Schema.create(driver)
     return Triple(file, driver, KeryxDatabase(driver))
 }

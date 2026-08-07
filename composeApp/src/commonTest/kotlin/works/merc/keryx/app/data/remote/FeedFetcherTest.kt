@@ -63,6 +63,43 @@ class FeedFetcherTest {
     }
 
     @Test
+    fun notModifiedFlagsItselfSoCallersKeepTheStoredValidators() = runBlocking {
+        val f = fetcherWith { respond("", HttpStatusCode.NotModified) }
+        val r = f.fetch("https://ex.com/feed", etag = "etag-1")
+        assertIs<Result.Ok<FetchedFeed>>(r)
+        // Without this flag the empty result is indistinguishable from a feed that stopped sending
+        // validators, and writing it back would NULL the stored etag / last_modified.
+        assertTrue(r.value.notModified)
+        assertNull(r.value.etag)
+    }
+
+    /**
+     * A feed that moved permanently *and* is unchanged answers 301 -> 304 on every poll. The new URL
+     * must still be reported, or the subscription URL is never updated and the 301/308 notification
+     * never fires (docs/external-spec.md "Behavior on Feed URL Change / Disappearance").
+     */
+    @Test
+    fun reportsTheNewUrlWhenAPermanentRedirectEndsIn304() = runBlocking {
+        val f = fetcherWith { request ->
+            if (request.url.toString().endsWith("/old")) {
+                respond(
+                    "",
+                    HttpStatusCode.MovedPermanently,
+                    headersOf(HttpHeaders.Location, "https://ex.com/new"),
+                )
+            } else {
+                respond("", HttpStatusCode.NotModified)
+            }
+        }
+
+        val r = f.fetch("https://ex.com/old", etag = "etag-1")
+
+        assertIs<Result.Ok<FetchedFeed>>(r)
+        assertTrue(r.value.notModified)
+        assertEquals("https://ex.com/new", r.value.redirectUrl)
+    }
+
+    @Test
     fun followsPermanentRedirectAndReportsNewUrl() = runBlocking {
         val f = fetcherWith { request ->
             if (request.url.toString().endsWith("/old")) {

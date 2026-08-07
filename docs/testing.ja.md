@@ -80,14 +80,22 @@ Linux の SNI トレイ（`TrayPixmapTest`＝ビッグエンディアン ARGB32 
 ネイティブダイアログ）、`OAuthConnectFlow.connect()` のブラウザー起動〜コールバック待受〜
 コード交換部分（`BrowserOpener`/`OAuthLoopbackServer` の実I/Oに依存し、シームなしにはモック不可。
 App Key 空チェックで即エラーになる分岐のみ `OAuthConnectFlowTest` でカバー済み）、
-`DatabaseDriverFactory.desktop.kt`（`AppDirs.appDataDir()` を直接参照しておりテスト用の
-ディレクトリ差し替えができない）。フィード/フォルダーの並び替えジェスチャー（`ui/home/FeedListDragController.kt`/
+`DatabaseDriverFactory.create()` そのもの（`AppDirs.appDataDir()` を直接参照しておりテスト用の
+ディレクトリ差し替えができない）。ただし本質的な部分である接続設定は `sqliteConnectionProperties()`
+として切り出され、`SqliteConnectionPropertiesTest` が実ファイル DB に対して検証している
+（`inMemoryDb()`/`fileDb()` もこれを使ってドライバを組み立てる）。フィード/フォルダーの並び替えジェスチャー（`ui/home/FeedListDragController.kt`/
 `FeedListDragGestures.kt`）は、OS レベルの DnD ではなく自前実装の Compose ネイティブなドラッグになった
 ことで、まさにこの部分をテスト可能にするために書き直された経緯があり、`FeedListDragTest.kt` が
 `performMouseInput`/`performKeyInput` を使って実際にエンドツーエンドで検証する（ドラッグによる並べ替え、
 しきい値判定、フォルダー/タグへのドロップ、ドラッグ中の右クリック、ゴーストのライフサイクル、
 Escape によるキャンセル）。並び替えの計算ロジック自体（`ReorderUtil.reorderIds`）と、それを使う
 `FeedRepository.moveFeed`/`FolderRepository.reorderFolders` の DB 反映は通常どおりテストする。
+新規に追加されたものとして、`SqliteConnectionPropertiesTest`（本番の接続プロパティが実際にすべての
+接続へ届くこと — 外部キーが効き `busy_timeout` が適用されること。JVM ドライバは文ごとに接続を開くため
+一度きりの `PRAGMA` では届かない）、`FormatTimestampTest`（`formatTimestamp` の出力そのものを固定する。
+他のタイムスタンプ検証は期待値を同関数から導出しているため書式変更を検出できない）、
+`LazyNativePopupTest`（初回の右クリックまでネイティブなものを一切構築しないこと。`LocalNativeWindow`
+が null になる Compose UI テストからは観測できない）がある。
 Linux の SNI トレイでは `SniConnection`（接続・バス名取得・export・登録・再登録・close）が
 実セッションバスと稼働中の `org.kde.StatusNotifierWatcher` を必要とするため CI では不可。同様に
 `NewIcon`/`NewToolTip`/`LayoutUpdated` の実配送（*発火の判断* はカバー済み）、`NameOwnerChanged` からの
@@ -165,7 +173,9 @@ Linux の SNI トレイでは `SniConnection`（接続・バス名取得・expor
 
 ネイティブなコンテキストメニュー（`nativeContextMenu`。Linux では実際の `JPopupMenu`、macOS/Windows
 では `java.awt.PopupMenu` によるもので、Compose 描画のポップアップではない）は Compose UI テストで
-検証できないため、以下を目視確認する:
+検証できないため、以下を目視確認する。ウィジェットはコンポジション時ではなく**初回の右クリック時**に
+構築されるようになった（`LazyNativePopup`）ので、クリック自身の呼び出しスタックの中でネイティブピアの
+生成が問題なく動くことを確かめられるのはこの目視確認だけである:
 
 - フィード行・フォルダーヘッダー・記事行を右クリックすると、正しいアクションを持つネイティブメニューが
   表示されること。

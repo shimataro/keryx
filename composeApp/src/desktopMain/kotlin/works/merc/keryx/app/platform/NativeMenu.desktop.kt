@@ -3,14 +3,10 @@ package works.merc.keryx.app.platform
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
@@ -263,8 +259,81 @@ internal fun menuSignature(items: List<NativeMenuEntry>): List<MenuEntrySignatur
         }
     }
 
-private fun leafSignature(entry: NativeMenuLeaf): LeafSignature =
+/**
+     * Creates a signature for a leaf menu entry from its label and checked state.
+     *
+     * @param entry The leaf menu entry to describe.
+     * @return The entry's rendered label and optional checked state.
+     */
+    private fun leafSignature(entry: NativeMenuLeaf): LeafSignature =
     LeafSignature(entry.label, (entry as? NativeCheckMenuItem)?.checked)
+
+/** Builds the backend appropriate to the current platform. */
+internal fun defaultPopupHandle(
+    items: List<NativeMenuEntry>,
+    currentItems: () -> List<NativeMenuEntry>,
+): NativePopupHandle =
+    if (isLinux) SwingPopupHandle(items, currentItems) else AwtPopupHandle(items, currentItems)
+
+/**
+ * Owns one call site's native menu and builds it **on the first right-click**, not on composition.
+ *
+ * Building eagerly is very expensive where it is least affordable. `Container.add(PopupMenu)` calls
+ * `Menu.addNotify()`, which creates the native menu peer and one peer per item, and `LazyColumn`
+ * re-initializes an item's `remember`/`DisposableEffect` slots every time a row is recycled — so a
+ * list scroll used to create and destroy a real `NSMenu`/Win32 menu per row that came into view, on
+ * the EDT, for a menu the user usually never opens. Most call sites never open it at all, and three
+ * of them pass no entries whatsoever (they only want the `onOpen` side effect).
+ *
+ * Rebuild/relabel decisions still go through [menuShape] and [menuSignature]; they simply run once
+ * per right-click now instead of once per row per composition.
+ */
+internal class LazyNativePopup(
+    private val window: NativeWindowHandle?,
+    private val currentItems: () -> List<NativeMenuEntry>,
+    private val factory: (List<NativeMenuEntry>, () -> List<NativeMenuEntry>) -> NativePopupHandle =
+        ::defaultPopupHandle,
+) {
+    private var handle: NativePopupHandle? = null
+    private var builtShape: List<String>? = null
+    private var syncedSignature: List<MenuEntrySignature>? = null
+
+    /**
+     * Displays the native menu for [entries], rebuilding or synchronizing its widgets when needed.
+     *
+     * @param entries The menu entries to display.
+     * @param invoker The component relative to which the menu is shown.
+     * @param x The horizontal display coordinate.
+     * @param y The vertical display coordinate.
+     */
+    fun showFor(entries: List<NativeMenuEntry>, invoker: Component, x: Int, y: Int) {
+        val shape = menuShape(entries)
+        var current = handle
+        if (current == null || builtShape != shape) {
+            current?.detach(window)
+            current = factory(entries, currentItems)
+            current.attach(window)
+            handle = current
+            builtShape = shape
+            // A fresh menu carries the labels it was built with, so the signature restarts unknown.
+            syncedSignature = null
+        }
+        val signature = menuSignature(entries)
+        if (syncedSignature != signature) {
+            current.sync(entries)
+            syncedSignature = signature
+        }
+        current.show(invoker, x, y)
+    }
+
+    /** Releases the native widgets, if any were ever built. */
+    fun dispose() {
+        handle?.detach(window)
+        handle = null
+        builtShape = null
+        syncedSignature = null
+    }
+}
 
 /**
  * Adds a native context menu that opens when the secondary mouse button is pressed.
@@ -282,34 +351,25 @@ actual fun Modifier.nativeContextMenu(
     val density = LocalDensity.current
     val currentItems by rememberUpdatedState(items)
     val currentOnOpen by rememberUpdatedState(onOpen)
-    var elementPosition by remember { mutableStateOf(Offset.Zero) }
+    // A plain holder, not a snapshot state: this is written from onGloballyPositioned on every
+    // layout of every attached element (so, per row per scroll frame) and only ever read from the
+    // suspending pointer handler below, never from composition. As snapshot state it would record
+    // a write per layout for no reader.
+    val elementPosition = remember { FloatArray(2) }
 
-    // Evaluate the caller's lambda once per composition; both descriptors below derive from it.
-    val entries = items()
-
-    // The menu's shape is assumed stable per call site across ordinary recompositions - see
-    // nativeContextMenu doc. Rebuild the native widgets whenever it actually changes (e.g. a
-    // folder is added/removed).
-    val handle = remember(menuShape(entries)) {
-        val provider = { currentItems() }
-        if (isLinux) SwingPopupHandle(entries, provider) else AwtPopupHandle(entries, provider)
+    // Nothing native is built until the first right-click — see LazyNativePopup.
+    val popup = remember(window) {
+        LazyNativePopup(window = window, currentItems = { currentItems() })
     }
-
-    // Keyed on the rendered labels/check states rather than on `entries` itself — see
-    // menuSignature. `handle` is included so a rebuilt menu is relabelled even in the (unlikely)
-    // case that its shape changed without its signature changing.
-    LaunchedEffect(handle, menuSignature(entries)) { handle.sync(currentItems()) }
-
-    DisposableEffect(window, handle) {
-        handle.attach(window)
-        onDispose { handle.detach(window) }
-    }
+    DisposableEffect(popup) { onDispose { popup.dispose() } }
 
     return this
         .onGloballyPositioned { coordinates ->
-            elementPosition = coordinates.positionInWindow()
+            val position = coordinates.positionInWindow()
+            elementPosition[0] = position.x
+            elementPosition[1] = position.y
         }
-        .pointerInput(window, handle) {
+        .pointerInput(window, popup) {
             awaitEachGesture {
                 while (true) {
                     val event = awaitPointerEvent()
@@ -320,14 +380,15 @@ actual fun Modifier.nativeContextMenu(
                     ) {
                         event.changes.forEach { it.consume() }
                         currentOnOpen()
-                        if (currentItems().isNotEmpty()) {
+                        val entries = currentItems()
+                        if (entries.isNotEmpty()) {
                             val win = window ?: continue
                             val localPosition = event.changes.first().position
-                            val x = ((elementPosition.x + localPosition.x) / density.density).toInt()
-                            val y = ((elementPosition.y + localPosition.y) / density.density).toInt()
+                            val x = ((elementPosition[0] + localPosition.x) / density.density).toInt()
+                            val y = ((elementPosition[1] + localPosition.y) / density.density).toInt()
                             // Whether this is synchronous is the backend's call — see
                             // SwingPopupHandle.show.
-                            handle.show(win.contentPane, x, y)
+                            popup.showFor(entries, win.contentPane, x, y)
                         }
                     }
                 }

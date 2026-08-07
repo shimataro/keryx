@@ -127,6 +127,22 @@ SQLDelight の生成クラス（`Feeds` / `Articles` / …）をそのまま各�
 プロパティになる（例: `feed.site_url`）。真偽値・タイムスタンプは `Long`（0/1・Unix ミリ秒）で保持し、
 表示時に kotlinx-datetime で変換する。別途ドメインモデルクラスは定義しない。
 
+唯一の例外が `domain/ArticleRepository.kt` の **`ArticleListRow`**（記事一覧が描画する8列:
+`id` / `feed_id` / `title` / `url` / `published_at` / `created_at` / `is_read` / `is_starred`）。
+モデリングのためではなくコストのために存在する — `Articles` 全体は `content` / `summary` /
+`search_text`、つまり記事本文を2重に持つため、一覧で `*` を選ぶと1回の emission が全記事の
+テキスト量に比例してしまい、しかもこのクエリは `articles` と `feeds` への書き込みのたびに再実行される。
+`articles.sq` の一覧クエリはこの8列だけを射影し `::ArticleListRow` でマップする。本文は選択された
+記事について `getArticleById` で読むので、`_selectedArticle` は `Articles` のままである。
+この読み込みは UI スレッド外で行い、最後の選択だけを反映する（latest-wins）— `content` を含む行を
+JVM ドライバがステートメントごとに開く接続で読むため、マージやリフレッシュの書き込みロック下では
+`busy_timeout` を UI スレッドで使い切りうるし、矢印キー長押しなら毎秒30回それが起きる。
+`HomeViewModel` は同期的な `selectionCursorId` を併せて保持しており、キーボード操作は
+最後に完了した読み込みではなくユーザーの実際の現在位置から進む。
+射影を絞ると SQLDelight はクエリごとに別の型を生成するため、この手書きの共通型が
+`watchArticles` の5分岐を単一の戻り値型に保っている。パラメータ順は SELECT の列順と位置で
+結び付いている（`ArticleRepositoryTest.articleListRowMapsEveryProjectedColumnToItsOwnField` が担保）。
+
 ## ナビゲーション
 
 `ui/navigation/Navigator.kt` の単純なスタック型ナビゲータで Setup / Home / Settings を切り替える。

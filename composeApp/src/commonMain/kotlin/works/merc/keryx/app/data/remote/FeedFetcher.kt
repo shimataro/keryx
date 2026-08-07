@@ -59,6 +59,16 @@ class FeedFetcher(
         }
     }
 
+    /**
+     * Fetches and parses a feed, following redirects and preserving conditional response metadata.
+     *
+     * @param url The feed URL to request.
+     * @param etag The previously received entity tag, if available.
+     * @param lastModified The previously received last-modified value, if available.
+     * @param redirectCount The number of redirects already followed.
+     * @param permanentTarget The permanent redirect destination to preserve across requests.
+     * @return The parsed feed, a not-modified result, or an error describing the failed fetch.
+     */
     private suspend fun doFetch(
         url: String,
         etag: String?,
@@ -78,7 +88,11 @@ class FeedFetcher(
         val status = response.status.value
 
         when (status) {
-            304 -> return Result.Ok(FetchedFeed())
+            // permanentTarget is carried through: a feed that moved permanently AND whose ETag
+            // still matches answers 301 -> 304 on every poll, so dropping it here would mean the
+            // subscription URL is never updated and the 301/308 notification never fires (see
+            // docs/external-spec.md "Behavior on Feed URL Change / Disappearance").
+            304 -> return Result.Ok(FetchedFeed(notModified = true, redirectUrl = permanentTarget))
             in permanentRedirects -> {
                 val target = resolveLocation(response.headers["location"], url)
                     ?: return Result.Err(FeedFetchException("$status without Location header"))

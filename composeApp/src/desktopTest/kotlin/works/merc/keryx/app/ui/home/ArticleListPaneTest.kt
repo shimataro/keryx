@@ -43,6 +43,7 @@ import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
+import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.FeedRepository
@@ -71,14 +72,14 @@ class ArticleListPaneTest {
     fun scrollsOffscreenSelectionIntoFullView() = runDesktopComposeUiTest {
         val items = articles(30)
         lateinit var state: LazyListState
-        var selected by mutableStateOf<Articles?>(null)
+        var selected by mutableStateOf<ArticleListRow?>(null)
 
         setContent {
             state = rememberLazyListState()
             ArticleListPaneContent(
                 articles = items,
                 feedTitles = emptyMap(),
-                selected = selected,
+                selectedId = selected?.id,
                 unreadOnly = false,
                 onToggleUnreadOnly = {},
                 onToggleSort = {},
@@ -103,14 +104,14 @@ class ArticleListPaneTest {
     fun doesNotScrollWhenSelectionAlreadyFullyVisible() = runDesktopComposeUiTest {
         val items = articles(30)
         lateinit var state: LazyListState
-        var selected by mutableStateOf<Articles?>(null)
+        var selected by mutableStateOf<ArticleListRow?>(null)
 
         setContent {
             state = rememberLazyListState()
             ArticleListPaneContent(
                 articles = items,
                 feedTitles = emptyMap(),
-                selected = selected,
+                selectedId = selected?.id,
                 unreadOnly = false,
                 onToggleUnreadOnly = {},
                 onToggleSort = {},
@@ -147,7 +148,7 @@ class ArticleListPaneTest {
             ArticleListPaneContent(
                 articles = items,
                 feedTitles = emptyMap(),
-                selected = null,
+                selectedId = null,
                 unreadOnly = false,
                 onToggleUnreadOnly = {},
                 onToggleSort = {},
@@ -167,7 +168,7 @@ class ArticleListPaneTest {
     fun scrollsJustEnoughToRevealPartiallyClippedSelection() = runDesktopComposeUiTest(height = 2500) {
         val items = articles(30)
         lateinit var state: LazyListState
-        var selected by mutableStateOf<Articles?>(null)
+        var selected by mutableStateOf<ArticleListRow?>(null)
         // First frame: tall enough that a single row is never clipped, so we can measure it.
         var containerHeight by mutableStateOf(2000.dp)
 
@@ -176,7 +177,7 @@ class ArticleListPaneTest {
             ArticleListPaneContent(
                 articles = items,
                 feedTitles = emptyMap(),
-                selected = selected,
+                selectedId = selected?.id,
                 unreadOnly = false,
                 onToggleUnreadOnly = {},
                 onToggleSort = {},
@@ -223,7 +224,7 @@ class ArticleListPaneTest {
             ArticleListPaneContent(
                 articles = emptyList(),
                 feedTitles = emptyMap(),
-                selected = null,
+                selectedId = null,
                 unreadOnly = false,
                 onToggleUnreadOnly = {},
                 onToggleSort = {},
@@ -252,7 +253,7 @@ class ArticleListPaneTest {
             ArticleListPaneContent(
                 articles = items,
                 feedTitles = emptyMap(),
-                selected = null,
+                selectedId = null,
                 unreadOnly = false,
                 onToggleUnreadOnly = {},
                 onToggleSort = {},
@@ -503,27 +504,15 @@ private fun newMinimalViewModel(
     )
 }
 
-private fun article(id: String, publishedAt: Long = 0L): Articles = Articles(
+private fun article(id: String, publishedAt: Long = 0L): ArticleListRow = ArticleListRow(
     id = id,
     feed_id = "f1",
-    guid = "g$id",
-    url = "u$id",
     title = "Article $id",
-    summary = null,
-    content = null,
-    author = null,
+    url = "u$id",
     published_at = publishedAt,
-    thumbnail_url = null,
-    is_read = 1L,
-    read_at = null,
-    is_starred = 0L,
-    starred_at = null,
-    cached_at = 0L,
-    search_text = "",
-    updated_at = 0L,
     created_at = 0L,
-    deleted_at = null,
-    deleted_updated_at = null,
+    is_read = 1L,
+    is_starred = 0L,
 )
 
-private fun articles(count: Int): List<Articles> = List(count) { article("a$it", publishedAt = it.toLong()) }
+private fun articles(count: Int): List<ArticleListRow> = List(count) { article("a$it", publishedAt = it.toLong()) }

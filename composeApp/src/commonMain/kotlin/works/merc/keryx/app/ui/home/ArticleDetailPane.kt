@@ -129,7 +129,7 @@ fun ArticleDetailPane(
             ToolbarIconGroup {
                 val starred = current.is_starred == 1L
                 val starTooltip = stringResource(if (starred) Res.string.article_unstar else Res.string.article_star)
-                TooltipIconButton(tooltip = starTooltip, onClick = { vm.toggleStar(current) }) {
+                TooltipIconButton(tooltip = starTooltip, onClick = { vm.toggleStarSelected() }) {
                     KeryxIcon(
                         if (starred) KeryxIcons.Star else KeryxIcons.StarBorder,
                         contentDescription = starTooltip,

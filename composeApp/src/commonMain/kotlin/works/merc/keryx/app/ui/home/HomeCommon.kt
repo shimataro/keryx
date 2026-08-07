@@ -387,11 +387,63 @@ internal enum class RowHalf { TOP, BOTTOM }
 internal fun resolveRowHalf(localY: Float, band: FeedListRowBand): RowHalf =
     if (localY - band.offsetPx < band.sizePx / 2f) RowHalf.TOP else RowHalf.BOTTOM
 
-/** Formats an epoch-millis timestamp as `yyyy-MM-dd HH:mm` in local time. */
+/**
+     * Formats an epoch-millisecond timestamp as `yyyy-MM-dd HH:mm` in the system default time zone.
+     *
+     * @param epochMillis The timestamp to format, or `null`.
+     * @return The formatted timestamp, or an empty string when `epochMillis` is `null`.
+     */
+fun formatTimestamp(epochMillis: Long?): String =
+    formatTimestamp(epochMillis, TimeZone.currentSystemDefault())
+
+/**
+ * Formats an epoch-millis timestamp as `yyyy-MM-dd HH:mm` in [zone].
+ *
+ * Callers that format many timestamps in a row (the article list) resolve the zone once and pass it
+ * here: `TimeZone.currentSystemDefault()` clones the JVM default zone on every call, which is the
+ * bulk of the cost when this runs per visible row.
+ */
 @OptIn(ExperimentalTime::class)
-fun formatTimestamp(epochMillis: Long?): String {
+/**
+ * Formats an epoch timestamp as `yyyy-MM-dd HH:mm` in the specified time zone.
+ *
+ * @param epochMillis The epoch timestamp in milliseconds, or `null`.
+ * @param zone The time zone used for formatting.
+ * @return The formatted timestamp, or an empty string when `epochMillis` is `null`.
+ */
+fun formatTimestamp(epochMillis: Long?, zone: TimeZone): String {
     if (epochMillis == null) return ""
-    val dt = Instant.fromEpochMilliseconds(epochMillis).toLocalDateTime(TimeZone.currentSystemDefault())
-    fun two(n: Int) = n.toString().padStart(2, '0')
-    return "${dt.year}-${two(dt.month.number)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}"
+    val dt = Instant.fromEpochMilliseconds(epochMillis).toLocalDateTime(zone)
+    // Hand-rolled padding rather than padStart: same output, without a StringBuilder and an
+    // intermediate String per field.
+    return buildString(16) {
+        appendFourDigits(dt.year)
+        append('-')
+        appendTwoDigits(dt.month.number)
+        append('-')
+        appendTwoDigits(dt.day)
+        append(' ')
+        appendTwoDigits(dt.hour)
+        append(':')
+        appendTwoDigits(dt.minute)
+    }
+}
+
+/** Appends [value] zero-padded to at least two digits. */
+private fun StringBuilder.appendTwoDigits(value: Int) {
+    if (value < 10) append('0')
+    append(value)
+}
+
+/**
+ * Appends [value] zero-padded to at least four digits, so the year keeps the documented `yyyy`
+ * width. A negative value is appended as-is: the format has no representation for one anyway.
+ */
+private fun StringBuilder.appendFourDigits(value: Int) {
+    when (value) {
+        in 0..9 -> append("000")
+        in 10..99 -> append("00")
+        in 100..999 -> append('0')
+    }
+    append(value)
 }

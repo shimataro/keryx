@@ -57,6 +57,65 @@ class ArticleRepositoryTest {
         clock: Clock = Clock { 0L },
     ) = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
 
+    /**
+     * The five list queries are mapped positionally with `::ArticleListRow`, so a reordered SELECT
+     * column list still compiles — `title` and `url` are both String, and so are `id`/`feed_id`.
+     * Every projected column therefore gets a distinguishable value here, checked field by field.
+     * This is the only guard against a silent column swap in `articles.sq`.
+     */
+    @Test
+    fun articleListRowMapsEveryProjectedColumnToItsOwnField() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("feed-id-1")
+            db.articlesQueries.insert(
+                id = "article-id-1", feed_id = "feed-id-1", guid = "guid-1",
+                url = "https://example.com/url-1", title = "Title 1",
+                summary = "summary", content = "content", author = "author",
+                published_at = 111L, thumbnail_url = null, is_read = 1L, read_at = 222L,
+                is_starred = 0L, starred_at = 333L, cached_at = 444L, search_text = "search",
+                updated_at = 555L, created_at = 666L,
+            )
+
+            val row = newRepo(db, driver).watchArticles(ArticleFilter.All).first().single()
+
+            assertEquals("article-id-1", row.id)
+            assertEquals("feed-id-1", row.feed_id)
+            assertEquals("Title 1", row.title)
+            assertEquals("https://example.com/url-1", row.url)
+            assertEquals(111L, row.published_at)
+            assertEquals(666L, row.created_at)
+            // Deliberately different from is_read: both are Long and adjacent in the SELECT, so
+            // seeding them alike would let a swap of the two columns compile *and* pass.
+            assertEquals(1L, row.is_read)
+            assertEquals(0L, row.is_starred)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * The list projection deliberately omits the body columns; the reader loads them per selected
+     * article instead. Pins the split so neither side drifts back.
+     */
+    @Test
+    fun theListRowCarriesNoBodyButGetArticleByIdStillDoes() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertArticle("a1", "f1", content = "<p>the whole article body</p>")
+            val repo = newRepo(db, driver)
+
+            val row = repo.watchArticles(ArticleFilter.All).first().single()
+            val full = repo.getArticleById(row.id)
+
+            assertEquals("<p>the whole article body</p>", full?.content)
+            assertEquals("<p>the whole article body</p>", full?.search_text)
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun watchArticlesAllReturnsArticlesFromNonDeletedFeedsOnly() = runTest {
         val (driver, db) = inMemoryDb()

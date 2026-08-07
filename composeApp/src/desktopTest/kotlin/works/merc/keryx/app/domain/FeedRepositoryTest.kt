@@ -22,6 +22,7 @@ import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
+import works.merc.keryx.app.CountingSqlDriver
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFolder
@@ -256,6 +257,110 @@ class FeedRepositoryTest {
             assertIs<Result.Ok<Int>>(result)
             val updated = db.feedsQueries.getById(feed.id).executeAsOne()
             assertEquals("etag-2", updated.etag)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * The article-list query joins `feeds`, so SQLDelight re-runs it on every `feeds` write. A
+     * steady-state refresh — same etag, same title/description, no error to clear — must therefore
+     * not write the row at all; it used to issue three unconditional UPDATEs per feed, and
+     * `refreshAll` multiplies that by the subscription count.
+     */
+    @Test
+    fun refreshFeedWritesNothingWhenTheFetchChangesNoFeedColumn(): Unit = runBlocking {
+        val (rawDriver, _) = inMemoryDb()
+        val driver = CountingSqlDriver(rawDriver)
+        val db = works.merc.keryx.app.data.local.db.KeryxDatabase(driver)
+        try {
+            val headers = headersOf(HttpHeaders.ETag, "etag-1")
+            newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK, headers) })
+                .subscribeFeed("https://ex.com/feed")
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+            // A first refresh settles any column the subscribe path left unset (e.g. site_url).
+            newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK, headers) })
+                .refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne())
+
+            val before = driver.feedUpdates
+            newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK, headers) })
+                .refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne())
+
+            assertEquals(before, driver.feedUpdates, "an unchanged refresh must not write `feeds`")
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A 304 means "your validators are still current", but the fetcher can only answer it with an
+     * otherwise-empty [works.merc.keryx.app.data.remote.FetchedFeed]. Writing that back used to
+     * NULL out `etag` / `last_modified`, so the *next* refresh sent no `If-None-Match` and the
+     * server had to return the whole feed — the conditional-request mechanism defeated itself on
+     * every other poll.
+     */
+    @Test
+    fun refreshFeedKeepsStoredValidatorsWhenTheServerAnswers304(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val etag = headersOf(HttpHeaders.ETag, "etag-1")
+            newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK, etag) })
+                .subscribeFeed("https://ex.com/feed")
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+            assertEquals("etag-1", feed.etag)
+
+            newRepo(db, driver, fetcherWith { respond("", HttpStatusCode.NotModified) })
+                .refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne())
+
+            assertEquals("etag-1", db.feedsQueries.getById(feed.id).executeAsOne().etag)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A feed's whole apply phase is one transaction, so SQLDelight defers `notifyQueries` to its
+     * commit: the feed's `feeds` writes and its article upsert produce a *single* notification round
+     * per feed instead of one per statement. The article-list query joins `feeds`, so it is
+     * registered against both tables and would otherwise re-run for every statement.
+     *
+     * Also pins the other half of the trade: the batching is per feed, never around the whole loop,
+     * so articles still appear feed by feed (see docs/testing.md's manual refresh checks) — the
+     * listener must observe a strictly growing article count, not one jump at the end.
+     */
+    @Test
+    fun refreshAllNotifiesOncePerFeedAndStillAppliesArticlesIncrementally(): Unit = runBlocking {
+        val (rawDriver, _) = inMemoryDb()
+        val driver = CountingSqlDriver(rawDriver)
+        val db = works.merc.keryx.app.data.local.db.KeryxDatabase(driver)
+        try {
+            val feedCount = 4
+            repeat(feedCount) { f ->
+                newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+                    .subscribeFeed("https://ex.com/$f/feed")
+            }
+            val listQuery = db.articlesQueries.watchAll(::ArticleListRow)
+            val observedCounts = mutableListOf<Int>()
+            val listener = app.cash.sqldelight.Query.Listener {
+                observedCounts += listQuery.executeAsList().size
+            }
+            listQuery.addListener(listener)
+
+            // Fresh content for every feed: new articles plus a changed title/description/etag, so
+            // each feed genuinely writes both tables.
+            val fresh = RSS.replace("<title>Feed</title>", "<title>Renamed</title>")
+                .replace("<guid>g1</guid>", "<guid>g-fresh</guid>")
+            newRepo(db, driver, fetcherWith { respond(fresh, HttpStatusCode.OK, headersOf(HttpHeaders.ETag, "e2")) })
+                .refreshAll()
+            listQuery.removeListener(listener)
+
+            assertEquals(feedCount, observedCounts.size, "expected exactly one notification per feed")
+            // Pairwise, not sorted()-plus-first-vs-last: the latter only proves the sequence is
+            // non-decreasing overall, so a feed that contributed nothing would still pass.
+            assertTrue(
+                observedCounts.zipWithNext().all { (previous, next) -> previous < next },
+                "articles must appear feed by feed, each feed adding at least one: $observedCounts",
+            )
         } finally {
             driver.close()
         }
