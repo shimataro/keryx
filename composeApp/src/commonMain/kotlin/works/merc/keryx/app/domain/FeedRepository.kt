@@ -284,6 +284,9 @@ fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
         // commit both need the value, and carrying it keeps its non-nullness with it at both sites.
         // Non-null exactly when the fetch reported a permanent redirect somewhere we are not already.
         val redirectTarget = fetched.redirectUrl?.takeIf { it != feed.url }
+        // One reading for the whole apply phase, taken before the transaction opens: every write
+        // below stamps the same `updated_at`, and no wall-clock read happens under the write lock.
+        val now = clock.nowMillis()
 
         // One transaction for this feed's whole apply phase. SQLDelight defers notifyQueries to the
         // outermost commit, so the feed's writes and its article upsert produce a single round of
@@ -297,12 +300,12 @@ fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
         // that changed nothing writes nothing at all and notifies no one.
         val newCount = db.transactionWithResult {
             if (feed.error_count != 0L || feed.last_error != null) {
-                feeds.resetErrorCount(clock.nowMillis(), feed.id)
+                feeds.resetErrorCount(now, feed.id)
             }
 
             if (feed.favicon_url.isNullOrEmpty()) {
                 phase.resolvedFavicon?.let {
-                    feeds.updateFaviconUrl(it, clock.nowMillis(), feed.id)
+                    feeds.updateFaviconUrl(it, now, feed.id)
                 }
             }
 
@@ -310,7 +313,7 @@ fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
             if (!fetched.notModified &&
                 (fetched.etag != feed.etag || fetched.lastModified != feed.last_modified)
             ) {
-                feeds.updateCacheHeaders(fetched.etag, fetched.lastModified, clock.nowMillis(), feed.id)
+                feeds.updateCacheHeaders(fetched.etag, fetched.lastModified, now, feed.id)
             }
 
             if (fetched.title != null || fetched.description != null) {
@@ -327,14 +330,14 @@ fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
                         site_url = siteUrl,
                         title = title,
                         description = description,
-                        updated_at = clock.nowMillis(),
+                        updated_at = now,
                         id = feed.id,
                     )
                 }
             }
 
             if (redirectTarget != null) {
-                feeds.updateUrl(redirectTarget, clock.nowMillis(), feed.id)
+                feeds.updateUrl(redirectTarget, now, feed.id)
             }
 
             articleRepository.insertPrepared(prepared)
