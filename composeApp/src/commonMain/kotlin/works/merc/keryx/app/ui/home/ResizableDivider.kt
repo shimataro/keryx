@@ -39,7 +39,7 @@ internal fun ResizableDivider(onDrag: (deltaPx: Float) -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         if (hovered) {
-            VerticalDivider(color = MaterialTheme.colorScheme.primary)
+            VerticalDivider(thickness = 2.dp, color = MaterialTheme.colorScheme.primary)
         } else {
             VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
         }
