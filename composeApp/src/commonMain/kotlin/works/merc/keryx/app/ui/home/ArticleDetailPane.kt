@@ -150,7 +150,9 @@ internal fun ArticleDetailPaneContent(
         ArticleHtmlTheme(surface, onSurface, linkColor, mutedColor, fontScale)
     }
 
-    val body = article?.let { it.content ?: it.summary }
+    val body = article?.let {
+        it.content?.takeIf { content -> content.isNotBlank() } ?: it.summary
+    }
     val title = article?.title?.ifBlank { noTitleText }.orEmpty()
     val meta = remember(article?.author, article?.published_at) {
         article?.let { articleMetaText(it.author, it.published_at) }.orEmpty()

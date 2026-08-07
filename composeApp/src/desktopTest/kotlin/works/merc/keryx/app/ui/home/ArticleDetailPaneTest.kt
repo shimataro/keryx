@@ -113,6 +113,22 @@ class ArticleDetailPaneTest {
         onNodeWithContentDescription("URL をコピー").assertIsNotEnabled()
         onNodeWithContentDescription("ブラウザーで開く").assertIsNotEnabled()
     }
+
+    @Test
+    fun blankContentFallsBackToSummaryInsteadOfShowingNoContentNotice() = runDesktopComposeUiTest {
+        var capturedBody: String? = null
+
+        setContent {
+            ArticleDetailPaneContent(
+                article = testArticle(content = "   ", summary = "fallback summary"),
+                modifier = Modifier.size(400.dp, 500.dp),
+                reader = { _, body -> capturedBody = body; Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        assertEquals("fallback summary", capturedBody)
+    }
 }
 
 private fun testArticle(
