@@ -198,6 +198,16 @@ private data class DialogThemePrefs(val themeMode: String, val fontScale: Double
  * @param content The dialog content.
  */
 @OptIn(ExperimentalComposeUiApi::class)
+/**
+ * Displays a non-resizable native dialog window containing Compose content.
+ *
+ * @param title The native window title.
+ * @param onDismissRequest Called when the window is closed or Escape is pressed.
+ * @param modal Whether the dialog blocks interaction with its owner window.
+ * @param initialWidth The fixed content width of the dialog.
+ * @param repositionOnResize Whether to reposition the dialog when its size changes.
+ * @param content The content to display in the dialog.
+ */
 @Composable
 private fun DesktopModalWindow(
     title: String?,

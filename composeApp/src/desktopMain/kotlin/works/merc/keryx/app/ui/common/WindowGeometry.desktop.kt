@@ -63,30 +63,13 @@ internal fun sizeMatches(actual: DpSize, target: DpSize): Boolean =
 internal fun windowSize(window: Window): DpSize = DpSize(window.width.dp, window.height.dp)
 
 /**
- * Pushes [size] and/or [position] straight onto the native window, mirroring the Dp -> AWT-point
- * rounding Compose's own window sizing and positioning perform so the result is directly
- * comparable via [sizeMatches].
+ * Applies the requested size and absolute position to the native window in a single bounds update.
  *
- * Always **one** `setBounds` call, never a `setSize` followed by a `setLocation`: a window that
- * has been resized but not yet moved can be painted in between, which showed a dialog at its
- * final size but at the location AWT gives a freshly constructed `Window` — the screen origin
- * plus the screen insets, i.e. the top-left corner. An axis that is not being changed is filled
- * in from the window's current bounds.
- *
- * Only [androidx.compose.ui.window.WindowPosition.Absolute] carries coordinates; any other
- * position (`PlatformDefault`, which [centeredPosition] returns when there is no owner window) is
- * left to Compose, which resolves it against its own window-cascade tracker.
- *
- * [minSize] floors each axis of [size] independently of whatever produced it — a safety net, not
- * the primary defense (that is [fitWindowSize] no longer deriving width from measurement at all),
- * kept because this is the one place a size actually reaches the native window and `resizable =
- * false` means a dialog that ever did collapse could not be dragged back by the user.
- *
- * @param window The native window.
- * @param size The size to apply, or `null` to keep the window's current size.
- * @param position The position to apply, or `null`/non-absolute to keep the current location.
- * @param minSize Floor applied to [size] on each axis; defaults to zero (only negative sizes are
- *   rejected).
+ * @param window The native window to update.
+ * @param size The size to apply, or `null` to preserve the current size.
+ * @param position The absolute position to apply, or `null` or a non-absolute position to preserve
+ *   the current location.
+ * @param minSize The minimum width and height applied to the requested size.
  */
 internal fun applyWindowGeometry(
     window: Window,
@@ -105,35 +88,16 @@ internal fun applyWindowGeometry(
 }
 
 /**
- * Computes the OS-window size that fits [contentHeightPx] of measured content at a fixed
- * [contentWidth].
+ * Computes the window size required for fixed-width content and measured content height.
  *
- * [contentWidth] is always the dialog's own fixed width (`KERYX_ALERT_DIALOG_WIDTH` /
- * `KERYX_TAB_DIALOG_WIDTH`), never derived from measurement. An earlier version fed the *measured*
- * content width back in here, which self-amplified into a runaway shrink on Linux: a modeless
- * dialog's client area was reported momentarily narrower than requested during window placement,
- * that narrower area made the content measure narrower, the narrower measurement became the next
- * requested width, which measured narrower still — down to ~1dp before the drift guard's
- * per-target correction budget ran out (see "Dialogs occasionally opened at an unexpected size" in
- * `docs/known-issues.md`). Height has no such feedback risk — it is deliberately allowed to
- * grow/shrink with content (see `requiredHeightIn` at the call site) — so only width was pinned.
- *
- * [density] must be the *dialog's* own density: [contentHeightPx] comes out of the dialog's layout
- * pass, so converting it with the owner window's density is off by the ratio between the two
- * whenever owner and dialog sit on screens with different scale factors.
- *
- * The height cap is applied to the content *before* [decorationAllowance] is added, so the result
- * can exceed [maxHeightDp] by exactly the allowance's height — decoration is chrome the content
- * never occupies, and the cap is about how much of the screen the content may claim.
+ * The content height is capped at [maxHeightDp] before [decorationAllowance] is added.
  *
  * @param contentWidth The dialog's fixed content width.
- * @param contentHeightPx Measured content height, in the dialog composition's pixels.
- * @param density The dialog composition's density.
- * @param maxHeightDp Height cap applied to the content.
- * @param decorationAllowance Extra size for OS-drawn decoration the content does not include (see
- *   [decorationAllowanceFor]).
- * @return The window size to request, or `null` for a degenerate height measurement (which must
- *   never become a zero-sized window).
+ * @param contentHeightPx The measured content height in pixels.
+ * @param density The density used to convert the measured height to [Dp].
+ * @param maxHeightDp The maximum content height.
+ * @param decorationAllowance Additional size required for window decorations.
+ * @return The requested window size, or `null` when [contentHeightPx] is not positive.
  */
 internal fun fitWindowSize(
     contentWidth: Dp,
@@ -150,26 +114,12 @@ internal fun fitWindowSize(
 }
 
 /**
- * Computes the decoration (chrome) allowance to add on top of measured content when sizing a
- * dialog window, given its real AWT [insets].
+ * Determines the window decoration allowance for measured dialog content.
  *
- * On macOS the merged title row (see `DesktopModalWindow` in `KeryxDialogs.desktop.kt`) is already
- * part of the measured content and `apple.awt.fullWindowContent` zeroes the insets, so no
- * allowance is ever added there — [isMacOs] short-circuits to [DpSize.Zero] regardless of what
- * [insets] reports.
- *
- * Elsewhere, [insets] is used directly when the window manager has actually reported it. Insets
- * can read as all-zero before the window is reparented/decorated — a known AWT/X11 timing quirk —
- * in which case [fallbackHeight] is used for the height only (this app's previous fixed guess),
- * with zero width allowance. The drift guard that consumes this re-fires on every native size
- * change, including the one the window manager's own reparenting produces, so a fallback-driven
- * fit self-corrects to the real insets on the very next tick rather than staying wrong for the
- * dialog's whole lifetime.
- *
- * @param insets The dialog window's current AWT insets.
- * @param isMacOs Whether the app is running on macOS.
- * @param fallbackHeight Height allowance to use when [insets] has not been reported yet.
- * @return The allowance to add to measured content on each axis.
+ * @param insets The current AWT window insets.
+ * @param isMacOs Whether the application is running on macOS.
+ * @param fallbackHeight The height allowance used when all insets are zero.
+ * @return The horizontal and vertical decoration allowances.
  */
 internal fun decorationAllowanceFor(insets: Insets, isMacOs: Boolean, fallbackHeight: Dp): DpSize {
     if (isMacOs) return DpSize.Zero
@@ -218,26 +168,13 @@ internal data class DialogFitDecision(
 )
 
 /**
- * Decides how to react to one observation of "content wants [target], window is at [actual]".
+ * Determines whether a dialog requires size correction or repositioning for its current target size.
  *
- * Position is re-applied only when the dialog has never been placed, or when the target itself
- * changed and the caller opted into repositioning: a mere drift correction must not yank a dialog
- * the user has dragged elsewhere, and a tabbed dialog ([repositionOnResize] = `false`) must keep
- * its top edge fixed while its height follows each tab.
- *
- * The correction budget only resets on a target change when the *previous* target was actually
- * reached ([DialogFitState.targetReached]) — not merely on any target change, as an earlier version
- * did. That earlier version is what let a moving target run the guard forever: if something keeps
- * producing a new [target] before the window ever matches the old one, resetting on every such
- * change hands out a fresh budget on every event, so [MAX_FIT_CORRECTIONS] never actually caps
- * anything. Once a target genuinely has been reached, a later change (a tab switch, content
- * growing) is a legitimate new request and does get a fresh budget.
- *
- * @param state The state returned by the previous call, or a default instance.
- * @param target The size the window should have for the currently measured content.
+ * @param state The state from the previous fitting decision.
+ * @param target The desired window size.
  * @param actual The window's current size.
- * @param repositionOnResize Whether the dialog re-places itself when its target size changes.
- * @return The decision for this event.
+ * @param repositionOnResize Whether to reposition the dialog when its target size changes.
+ * @return The updated fitting state and actions for the current observation.
  */
 internal fun nextDialogFit(
     state: DialogFitState,
