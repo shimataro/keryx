@@ -73,6 +73,19 @@ class ArticleWebViewHtmlTest {
     }
 
     @Test
+    fun wrapArticleHtmlAppliesFontScaleOnlyOnce() {
+        // font-size on a percentage is relative to the parent's computed size, so body (whose
+        // parent is html) must inherit rather than repeat the percentage — otherwise a 150%
+        // scale would compound to 225% (150% of the already-scaled html size).
+        val scaledTheme = theme.copy(fontScale = 1.5f)
+        val result = wrapArticleHtml(scaledTheme, title = "", meta = "", body = "<p>body</p>")
+        val htmlOnlyRule = Regex("""html\s*\{[^}]*}""").find(result)?.value
+        val sharedRule = Regex("""html,\s*body\s*\{[^}]*}""").find(result)?.value
+        assertTrue(htmlOnlyRule != null && htmlOnlyRule.contains("font-size: 150%;"))
+        assertTrue(sharedRule != null && !sharedRule.contains("font-size"))
+    }
+
+    @Test
     fun wrapArticleHtmlRendersEscapedTitleAndMeta() {
         val result = wrapArticleHtml(
             theme,

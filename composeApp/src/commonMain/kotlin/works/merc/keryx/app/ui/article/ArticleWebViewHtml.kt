@@ -76,13 +76,15 @@ private fun articleDocument(theme: ArticleHtmlTheme, content: String, bodyClass:
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <style>
+          html {
+            font-size: $fontPercent%;
+          }
           html, body {
             margin: 0;
             padding: 16px 8px 24px;
             background-color: ${theme.surface.toCssHex()};
             color: ${theme.onSurface.toCssHex()};
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-            font-size: $fontPercent%;
             line-height: 1.6;
             word-wrap: break-word;
           }
