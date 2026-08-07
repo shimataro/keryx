@@ -44,7 +44,10 @@ class LazyNativePopupTest {
             { entries, _ -> FakeHandle(entries).also { built += it } }
     }
 
-    private val invoker = java.awt.Label()
+    // A peer-free Component rather than e.g. java.awt.Label: Label's constructor calls
+    // GraphicsEnvironment.checkHeadless() and would throw, and nothing here needs a real widget —
+    // the fake handle only records that show() was called.
+    private val invoker = object : Component() {}
 
     private fun item(label: String): NativeMenuEntry = NativeMenuItem(label) {}
 
