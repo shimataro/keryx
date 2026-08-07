@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import kotlinx.datetime.TimeZone
 import coil3.compose.AsyncImage
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.data.local.db.Articles
@@ -128,6 +129,53 @@ internal fun rememberArticleRowMetrics(): ArticleRowMetrics {
     }
 }
 
+/** The article-row strings that do not vary per article, resolved once for a whole list. */
+internal data class ArticleRowStrings(
+    val markAsRead: String,
+    val markAsUnread: String,
+    val star: String,
+    val unstar: String,
+    val copyUrl: String,
+    val openInBrowser: String,
+    val noTitleFallback: String,
+    val zone: TimeZone,
+)
+
+/**
+ * Resolves the per-list article-row strings once, so [ArticleRow] does not repeat them per row.
+ *
+ * Every row used to run seven `stringResource` lookups (thirteen counting the nested
+ * `common_menu_item_with_shortcut` composition) plus a `TimeZone.currentSystemDefault()` clone,
+ * on every composition — work that is identical for all rows and only changes with the locale.
+ * Hoist this next to [rememberArticleRowMetrics], above the `items {}` block.
+ *
+ * @return The shared strings and time zone for the article rows in this list.
+ */
+@Composable
+internal fun rememberArticleRowStrings(): ArticleRowStrings {
+    val markAsRead = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.article_mark_as_read), "U")
+    val markAsUnread = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.article_mark_as_unread), "U")
+    val star = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.article_star), "S")
+    val unstar = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.article_unstar), "S")
+    val copyUrl = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.article_copy_url), "C")
+    val openInBrowser = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.article_open_in_browser), "O")
+    val noTitleFallback = stringResource(Res.string.article_no_title)
+    // Resolved with the strings rather than per row. An OS time-zone change is therefore picked up
+    // on the next list-level recomposition instead of the next row-level one.
+    return remember(markAsRead, markAsUnread, star, unstar, copyUrl, openInBrowser, noTitleFallback) {
+        ArticleRowStrings(
+            markAsRead = markAsRead,
+            markAsUnread = markAsUnread,
+            star = star,
+            unstar = unstar,
+            copyUrl = copyUrl,
+            openInBrowser = openInBrowser,
+            noTitleFallback = noTitleFallback,
+            zone = TimeZone.currentSystemDefault(),
+        )
+    }
+}
+
 /**
  * Renders an article row with selection styling, read and starred indicators, metadata, and context-menu actions.
  *
@@ -144,6 +192,7 @@ internal fun rememberArticleRowMetrics(): ArticleRowMetrics {
  * @param onCopyUrl Called to copy the article URL.
  * @param onOpenInBrowser Called to open the article URL in a browser.
  * @param titleOverride An optional title to display instead of the article title.
+ * @param strings The per-list strings and time zone, hoisted above `items {}` by the caller.
  */
 @Composable
 internal fun ArticleRow(
@@ -160,23 +209,17 @@ internal fun ArticleRow(
     onCopyUrl: () -> Unit,
     onOpenInBrowser: () -> Unit,
     titleOverride: AnnotatedString? = null,
+    strings: ArticleRowStrings = rememberArticleRowStrings(),
 ) {
     val unread = article.is_read == 0L
-    val toggleReadLabel = stringResource(
-        Res.string.common_menu_item_with_shortcut,
-        stringResource(if (article.is_read == 1L) Res.string.article_mark_as_unread else Res.string.article_mark_as_read),
-        "U",
-    )
-    val toggleStarLabel = stringResource(
-        Res.string.common_menu_item_with_shortcut,
-        stringResource(if (article.is_starred == 1L) Res.string.article_unstar else Res.string.article_star),
-        "S",
-    )
-    val copyUrlLabel = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.article_copy_url), "C")
-    val openInBrowserLabel = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.article_open_in_browser), "O")
-    val noTitleFallback = stringResource(Res.string.article_no_title)
+    val toggleReadLabel = if (article.is_read == 1L) strings.markAsUnread else strings.markAsRead
+    val toggleStarLabel = if (article.is_starred == 1L) strings.unstar else strings.star
+    val copyUrlLabel = strings.copyUrl
+    val openInBrowserLabel = strings.openInBrowser
+    val noTitleFallback = strings.noTitleFallback
+    val testTag = remember(article.id) { "article-${article.id}" }
     Row(
-        Modifier.testTag("article-${article.id}")
+        Modifier.testTag(testTag)
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 2.dp)
             .clip(MaterialTheme.shapes.small)
@@ -269,7 +312,9 @@ internal fun ArticleRow(
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    formatTimestamp(article.published_at),
+                    remember(strings.zone, article.published_at) {
+                        formatTimestamp(article.published_at, strings.zone)
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = metaColor,
                     maxLines = 1,

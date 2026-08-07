@@ -190,6 +190,7 @@ private fun SearchListPane(
                 results.isEmpty() -> CenteredHint(stringResource(Res.string.home_search_no_results))
                 else -> {
                     val rowMetrics = rememberArticleRowMetrics()
+                    val rowStrings = rememberArticleRowStrings()
                     val clipboard = LocalClipboard.current
                     val scope = rememberCoroutineScope()
                     LazyColumn(Modifier.fillMaxSize(), state = listState) {
@@ -213,6 +214,7 @@ private fun SearchListPane(
                                 },
                                 onOpenInBrowser = { BrowserOpener.open(article.url) },
                                 titleOverride = markedToAnnotatedString(result.titleMarked.ifBlank { article.title }),
+                                strings = rowStrings,
                             )
                         }
                     }
@@ -343,6 +345,7 @@ internal fun ArticleListPaneContent(
             }
         } else {
             val rowMetrics = rememberArticleRowMetrics()
+            val rowStrings = rememberArticleRowStrings()
             Box(Modifier.fillMaxSize()) {
                 val clipboard = LocalClipboard.current
                 val scope = rememberCoroutineScope()
@@ -365,6 +368,7 @@ internal fun ArticleListPaneContent(
                                 }
                             },
                             onOpenInBrowser = { BrowserOpener.open(article.url) },
+                            strings = rowStrings,
                         )
                     }
                 }
