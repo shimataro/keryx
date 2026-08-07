@@ -111,7 +111,8 @@ class ArticleReuseCrashRepro {
  * @param publishedAt The publication timestamp used to populate the article and derive its read and starred flags.
  * @return The generated article record.
  */
-private fun reproArticle(id: String, publishedAt: Long): ArticleListRow = ArticleListRow(    id = id,
+private fun reproArticle(id: String, publishedAt: Long): ArticleListRow = ArticleListRow(
+    id = id,
     feed_id = "f1",
     title = "Article $id",
     url = "u$id",

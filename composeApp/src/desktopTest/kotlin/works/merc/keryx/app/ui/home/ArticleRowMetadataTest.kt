@@ -72,7 +72,8 @@ private fun MetadataTestRow(article: ArticleListRow, feedTitle: String) {
     )
 }
 
-private fun article(id: String, publishedAt: Long): ArticleListRow = ArticleListRow(    id = id,
+private fun article(id: String, publishedAt: Long): ArticleListRow = ArticleListRow(
+    id = id,
     feed_id = "f1",
     title = "Article $id",
     url = "u$id",

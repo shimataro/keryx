@@ -4,6 +4,7 @@ import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import kotlinx.coroutines.runBlocking
 import works.merc.keryx.app.data.local.FtsManager
+import works.merc.keryx.app.data.local.sqliteConnectionProperties
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import java.io.File
 
@@ -104,16 +105,24 @@ override fun notifyListeners(vararg queryKeys: String) = delegate.notifyListener
 
 /** An in-memory KeryxDatabase for tests, with the schema applied. */
 fun inMemoryDb(): Pair<SqlDriver, KeryxDatabase> {
-    val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+    val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY, sqliteConnectionProperties())
     KeryxDatabase.Schema.create(driver)
-    driver.execute(null, "PRAGMA foreign_keys=ON;", 0)
     return driver to KeryxDatabase(driver)
 }
 
 /** A file-backed KeryxDatabase (needed for ATTACH DATABASE merge tests). */
 fun fileDb(): Triple<File, SqlDriver, KeryxDatabase> {
     val file = File.createTempFile("keryx-test-", ".db").apply { deleteOnExit() }
-    val driver = JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
+    // Production's properties minus foreign_keys. The merge tests seed states that FK enforcement
+    // forbids on purpose — an article whose feed is missing, a feed_tag whose tag is missing, a feed
+    // pointing at an absent folder — because those are exactly what MergeSql's EXISTS/NOT EXISTS
+    // guards exist to skip when a cloud DB written by another device or version carries them. The
+    // production configuration (foreign_keys included) is covered against a real file DB by
+    // SqliteConnectionPropertiesTest.
+    val driver = JdbcSqliteDriver(
+        "jdbc:sqlite:${file.absolutePath}",
+        sqliteConnectionProperties().apply { remove("foreign_keys") },
+    )
     KeryxDatabase.Schema.create(driver)
     return Triple(file, driver, KeryxDatabase(driver))
 }

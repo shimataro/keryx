@@ -81,7 +81,8 @@ class ArticleRowHighlightTest {
     }
 }
 
-private fun article(id: String): ArticleListRow = ArticleListRow(    id = id,
+private fun article(id: String): ArticleListRow = ArticleListRow(
+    id = id,
     feed_id = "f1",
     title = "Article $id",
     url = "u$id",

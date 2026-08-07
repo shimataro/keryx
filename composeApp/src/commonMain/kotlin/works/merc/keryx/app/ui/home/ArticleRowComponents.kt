@@ -160,8 +160,11 @@ internal fun rememberArticleRowStrings(): ArticleRowStrings {
     val copyUrl = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.article_copy_url), "C")
     val openInBrowser = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.article_open_in_browser), "O")
     val noTitleFallback = stringResource(Res.string.article_no_title)
-    // Resolved with the strings rather than per row. An OS time-zone change is therefore picked up
-    // on the next list-level recomposition instead of the next row-level one.
+    // Resolved once with the strings rather than per row. The keys below never change for a
+    // time-zone change, so a zone switched while Keryx is running (it is tray-resident, so that can
+    // be days) is only picked up when this composition is recreated. Accepted: the alternative is
+    // TimeZone.currentSystemDefault() — which clones the JVM default zone — per visible row per
+    // composition, and article timestamps are not a clock.
     return remember(markAsRead, markAsUnread, star, unstar, copyUrl, openInBrowser, noTitleFallback) {
         ArticleRowStrings(
             markAsRead = markAsRead,

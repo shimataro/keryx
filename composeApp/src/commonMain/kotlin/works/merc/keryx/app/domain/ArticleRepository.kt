@@ -239,8 +239,8 @@ class ArticleRepository(
      * @param parsed The fetched articles to store.
      * @return The rows to insert, together with the new-article count.
      */
-    fun prepareParsed(feedId: String, parsed: List<ParsedArticle>): PreparedArticles {
-        if (parsed.isEmpty()) return PreparedArticles(feedId, emptyList(), newCount = 0, now = 0L)
+    internal fun prepareParsed(feedId: String, parsed: List<ParsedArticle>): PreparedArticles {
+        if (parsed.isEmpty()) return PreparedArticles(feedId, emptyList(), newCount = 0, now = clock.nowMillis())
         val seenGuids = HashSet(articles.getGuidsByFeed(feedId).executeAsList())
         var newCount = 0
         val rows = parsed.map { p ->
@@ -264,7 +264,7 @@ class ArticleRepository(
      * @param prepared The rows to insert.
      * @return The number of articles that were not previously stored for the feed.
      */
-    fun insertPrepared(prepared: PreparedArticles): Int {
+    internal fun insertPrepared(prepared: PreparedArticles): Int {
         for (pi in prepared.rows) {
             val p = pi.parsed
             articles.insert(
@@ -292,18 +292,18 @@ class ArticleRepository(
     }
 
     /** The result of [prepareParsed]: rows ready to insert, plus the count of genuinely new ones. */
-    data class PreparedArticles(
-        internal val feedId: String,
-        internal val rows: List<PreparedInsert>,
+    internal data class PreparedArticles(
+        val feedId: String,
+        val rows: List<PreparedInsert>,
         val newCount: Int,
-        internal val now: Long,
+        val now: Long,
     )
 
     /** A parsed article with its FTS body text and deterministic id precomputed off the write path. */
-    data class PreparedInsert internal constructor(
-        internal val id: String,
-        internal val parsed: ParsedArticle,
-        internal val searchText: String,
+    internal data class PreparedInsert(
+        val id: String,
+        val parsed: ParsedArticle,
+        val searchText: String,
     )
 
     /**
