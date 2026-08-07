@@ -73,7 +73,7 @@ class ArticleRepositoryTest {
                 url = "https://example.com/url-1", title = "Title 1",
                 summary = "summary", content = "content", author = "author",
                 published_at = 111L, thumbnail_url = null, is_read = 1L, read_at = 222L,
-                is_starred = 1L, starred_at = 333L, cached_at = 444L, search_text = "search",
+                is_starred = 0L, starred_at = 333L, cached_at = 444L, search_text = "search",
                 updated_at = 555L, created_at = 666L,
             )
 
@@ -85,8 +85,10 @@ class ArticleRepositoryTest {
             assertEquals("https://example.com/url-1", row.url)
             assertEquals(111L, row.published_at)
             assertEquals(666L, row.created_at)
+            // Deliberately different from is_read: both are Long and adjacent in the SELECT, so
+            // seeding them alike would let a swap of the two columns compile *and* pass.
             assertEquals(1L, row.is_read)
-            assertEquals(1L, row.is_starred)
+            assertEquals(0L, row.is_starred)
         } finally {
             driver.close()
         }
