@@ -227,6 +227,17 @@ class HomeViewModel(
      */
     private var selectionCursorId: String? = null
 
+    /**
+     * Identity of the current browsing context, bumped whenever the whole pinned-read set is dropped
+     * for a fresh one ([selectFilter], and a query change in [setSearchQuery]).
+     *
+     * [selectionCursorId] cannot stand in for this: it carries no scope identity, so a selection
+     * made under the new scope puts a non-null id back, and a hydration still in flight from the old
+     * one passes its null check and re-adds a pin that was just cleared. Only ever touched on the
+     * ViewModel's (main) context, so it needs no synchronization.
+     */
+    private var browsingEpoch = 0
+
     // --- Search ---
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery
@@ -428,8 +439,11 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
         _selectedArticle.value = null
         _pinnedReadArticles.value = emptyMap()
         // Cancels any selection whose body is still loading: without this, a hydration in flight
-        // across the switch would restore the selection and re-add the pin just cleared here.
+        // across the switch would restore the selection and re-add the pin just cleared here. The
+        // cursor alone cannot carry that veto — a selection made under the new filter puts a
+        // non-null id straight back — so the epoch records the switch itself.
         selectionCursorId = null
+        browsingEpoch++
         settingsRepository.mutateLocalSettings { it.copy(lastFilter = filter.encode(), lastArticleId = null) }
     }
 
@@ -442,6 +456,9 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
         // Synchronous, so keyboard navigation always steps from where the user actually is rather
         // than from whatever the last completed hydration left in _selectedArticle.
         selectionCursorId = article.id
+        // Stamped here too: the hydration below must pin into the browsing context the user actually
+        // selected in, not into whichever one is current when its DB lookup finally returns.
+        val epoch = browsingEpoch
         viewModelScope.launch {
             // The list row carries no body, so the detail pane's copy is loaded here — one PK lookup
             // on selection, in place of loading every article's body on every list emission. Off the
@@ -462,11 +479,14 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
             // Marking read is unconditional (external-spec §7: read the instant it is selected), so
             // an article passed over by a fast key repeat is still marked read exactly as before.
             viewModelScope.launch(dbWriteDispatcher) { articleRepository.markAsRead(article.id) }
-            // selectFilter clears the cursor along with the selection and every pin; a hydration
-            // still in flight across that switch must not re-add a pin it just dropped.
+            // Nothing is selected any more — a filter switch, or an earlier hydration finding its
+            // own article tombstoned — so there is nothing left to apply below.
             val cursor = selectionCursorId ?: return@launch
-            // Pinned even when superseded, so an unread-only list cannot collapse under a held key.
-            if (article.is_read == 0L) {
+            // Pinned even when superseded, so an unread-only list cannot collapse under a held key —
+            // but never into a browsing context that dropped every pin (a filter switch, a new search
+            // query) while this lookup was still running, which the `articles` merge would read as an
+            // instruction to re-add this article to a list it does not belong to.
+            if (epoch == browsingEpoch && article.is_read == 0L) {
                 _pinnedReadArticles.update { it + (article.id to article.copy(is_read = 1L)) }
             }
             // Only the newest selection reaches the reader: an older lookup that finished later
@@ -706,6 +726,10 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
         // Start a fresh browsing context when the text actually changes (already in Search scope).
         if (query != _searchQuery.value) {
             _pinnedReadArticles.value = emptyMap()
+            // Same veto as selectFilter: a body load still in flight from the previous query must
+            // not re-add a pin into the fresh context. Unlike a filter switch, the cursor and the
+            // selection deliberately survive a query change — only the pin does not.
+            browsingEpoch++
         }
         _searchQuery.value = query
         if (query.isNotEmpty() && _filter.value != ArticleFilter.Search) {

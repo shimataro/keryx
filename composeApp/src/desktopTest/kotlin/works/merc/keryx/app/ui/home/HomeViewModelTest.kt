@@ -458,6 +458,39 @@ class HomeViewModelTest {
         assertNull(LocalSettingsStore(dirOverride = dir).load().lastArticleId)
     }
 
+    /**
+     * The same switch, but with a selection made under the *new* filter before the old body load
+     * lands. That refills the selection cursor, so a null check alone reads the stale hydration as
+     * still current and pins its article — which the `articles` merge then re-adds to a list it
+     * does not belong to. Only the browsing epoch can tell the two apart.
+     */
+    @Test
+    fun aSelectionUnderTheNewFilterDoesNotLetAStaleLoadPinThePreviousFiltersArticle() = runTest {
+        db.insertFeed("f1")
+        db.insertFeed("f2")
+        db.insertArticle("a1", "f1", isRead = 0L)
+        db.insertArticle("a2", "f2", isRead = 0L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+
+        // Read from the DB rather than the list: after the switch below, vm.articles hasn't
+        // recomputed yet, and pumping it would complete the very hydration this test holds open.
+        val a1 = db.articlesQueries.getById("a1").executeAsOne().toListRow()
+        val a2 = db.articlesQueries.getById("a2").executeAsOne().toListRow()
+
+        // No pump in between: a1's body load is still in flight across both the switch and the
+        // selection that follows it.
+        vm.selectArticle(a1)
+        vm.selectFilter(ArticleFilter.Feed("f2"))
+        vm.selectArticle(a2)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("a2", vm.selectedArticle.value?.id)
+        assertEquals(listOf("a2"), vm.articles.value.map { it.id })
+    }
+
     /** The same guard at startup: a tombstone that landed while the app was closed. */
     @Test
     fun restoringALastArticleThatWasTombstonedWhileClosedSelectsNothing() = runTest {
@@ -1328,6 +1361,36 @@ class HomeViewModelTest {
         // so even though it also matches "Java" it must not appear under unread-only.
         vm.setSearchQuery("Java")
         advanceForSearchDebounce()
+        assertEquals(listOf("a3"), vm.searchResults.value.map { it.article.id })
+    }
+
+    /**
+     * The same clearing, but with the query changed while the selected article's body is still
+     * loading. The selection deliberately survives a query change, so the cursor stays non-null and
+     * cannot veto the stale pin — without the browsing epoch, a1 is pinned *after* the clear and
+     * stays visible under unread-only in results it should have left behind.
+     */
+    @Test
+    fun changingSearchQueryClearsAPinWhoseBodyIsStillLoading() = runTest {
+        db.insertFeed("f1")
+        // a1 matches both queries, a2 only "Kotlin", a3 only "Java".
+        db.insertArticle("a1", "f1", title = "Kotlin and Java", content = "kotlin java", isRead = 0L)
+        db.insertArticle("a2", "f1", title = "Kotlin Only", content = "kotlin", isRead = 0L)
+        db.insertArticle("a3", "f1", title = "Java Only", content = "java", isRead = 0L)
+        ftsManagerIndexed(driver)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.setSearchQuery("Kotlin")
+        vm.setUnreadOnly(true)
+        advanceForSearchDebounce()
+        assertEquals(setOf("a1", "a2"), vm.searchResults.value.map { it.article.id }.toSet())
+
+        // No pump between the selection and the query change: a1's body load spans both.
+        val article1 = db.articlesQueries.getById("a1").executeAsOne()
+        vm.selectArticle(article1.toListRow())
+        vm.setSearchQuery("Java")
+        advanceForSearchDebounce()
+
         assertEquals(listOf("a3"), vm.searchResults.value.map { it.article.id })
     }
 
