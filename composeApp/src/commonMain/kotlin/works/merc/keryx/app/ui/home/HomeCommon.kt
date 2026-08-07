@@ -414,10 +414,10 @@ fun formatTimestamp(epochMillis: Long?): String =
 fun formatTimestamp(epochMillis: Long?, zone: TimeZone): String {
     if (epochMillis == null) return ""
     val dt = Instant.fromEpochMilliseconds(epochMillis).toLocalDateTime(zone)
-    // Hand-rolled two-digit padding rather than padStart: same output, without a StringBuilder and
-    // an intermediate String per field.
+    // Hand-rolled padding rather than padStart: same output, without a StringBuilder and an
+    // intermediate String per field.
     return buildString(16) {
-        append(dt.year)
+        appendFourDigits(dt.year)
         append('-')
         appendTwoDigits(dt.month.number)
         append('-')
@@ -432,5 +432,18 @@ fun formatTimestamp(epochMillis: Long?, zone: TimeZone): String {
 /** Appends [value] zero-padded to at least two digits. */
 private fun StringBuilder.appendTwoDigits(value: Int) {
     if (value < 10) append('0')
+    append(value)
+}
+
+/**
+ * Appends [value] zero-padded to at least four digits, so the year keeps the documented `yyyy`
+ * width. A negative value is appended as-is: the format has no representation for one anyway.
+ */
+private fun StringBuilder.appendFourDigits(value: Int) {
+    when (value) {
+        in 0..9 -> append("000")
+        in 10..99 -> append("00")
+        in 100..999 -> append('0')
+    }
     append(value)
 }

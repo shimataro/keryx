@@ -41,6 +41,15 @@ class FormatTimestampTest {
         assertEquals("2024-01-01 00:00", formatTimestamp(at(2024, 1, 1, 0, 0), utc))
     }
 
+    /** The year is padded to `yyyy` like every other field, so a year below 1000 keeps the width. */
+    @Test
+    fun padsYearsBelowOneThousandToFourDigits() {
+        assertEquals("0001-01-02 03:04", formatTimestamp(at(1, 1, 2, 3, 4), utc))
+        assertEquals("0099-01-02 03:04", formatTimestamp(at(99, 1, 2, 3, 4), utc))
+        assertEquals("0999-12-31 23:59", formatTimestamp(at(999, 12, 31, 23, 59), utc))
+        assertEquals("1000-01-01 00:00", formatTimestamp(at(1000, 1, 1, 0, 0), utc))
+    }
+
     @Test
     fun formatsAnEpochTimestamp() {
         assertEquals("1970-01-01 00:00", formatTimestamp(0L, utc))
