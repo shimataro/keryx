@@ -355,8 +355,12 @@ class FeedRepositoryTest {
             listQuery.removeListener(listener)
 
             assertEquals(feedCount, observedCounts.size, "expected exactly one notification per feed")
-            assertEquals(observedCounts.sorted(), observedCounts, "articles must appear feed by feed")
-            assertTrue(observedCounts.first() < observedCounts.last(), "each feed must add articles")
+            // Pairwise, not sorted()-plus-first-vs-last: the latter only proves the sequence is
+            // non-decreasing overall, so a feed that contributed nothing would still pass.
+            assertTrue(
+                observedCounts.zipWithNext().all { (previous, next) -> previous < next },
+                "articles must appear feed by feed, each feed adding at least one: $observedCounts",
+            )
         } finally {
             driver.close()
         }
