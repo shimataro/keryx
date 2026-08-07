@@ -78,7 +78,11 @@ class FeedFetcher(
         val status = response.status.value
 
         when (status) {
-            304 -> return Result.Ok(FetchedFeed(notModified = true))
+            // permanentTarget is carried through: a feed that moved permanently AND whose ETag
+            // still matches answers 301 -> 304 on every poll, so dropping it here would mean the
+            // subscription URL is never updated and the 301/308 notification never fires (see
+            // docs/external-spec.md "Behavior on Feed URL Change / Disappearance").
+            304 -> return Result.Ok(FetchedFeed(notModified = true, redirectUrl = permanentTarget))
             in permanentRedirects -> {
                 val target = resolveLocation(response.headers["location"], url)
                     ?: return Result.Err(FeedFetchException("$status without Location header"))
