@@ -373,6 +373,59 @@ class HomeViewModelTest {
         assertEquals("<p>first</p>", vm.selectedArticle.value?.content)
     }
 
+    /**
+     * The pinned-read set is revalidated on every `articles` write, and "mark all read" sizes it to
+     * the whole visible list. Doing that with one `getById` per pin was an N+1 of full-row reads —
+     * each on its own connection, inside a `MutableStateFlow.update` CAS lambda that can re-run it.
+     * One `id IN (...)` existence query replaces the lot.
+     */
+    @Test
+    fun revalidatingPinnedArticlesDoesNotIssueOneQueryPerPin() = runTest {
+        db.insertFeed("f1")
+        repeat(60) { db.insertArticle("a$it", "f1", isRead = 0L) }
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.markAllRead()
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.articles.value.size >= 60)
+
+        val before = driver.articleGetByIdExecutions
+        // Any articles write re-triggers the revalidation.
+        vm.toggleRead(vm.articles.value.first())
+        testScheduler.advanceUntilIdle()
+
+        assertTrue(
+            driver.articleGetByIdExecutions - before <= 1,
+            "expected at most the selection's own row fetch, got " +
+                "${driver.articleGetByIdExecutions - before} getById calls for 60 pins",
+        )
+    }
+
+    /**
+     * A tombstone that lands while an article is pinned must still drop it, or the `articles` merge
+     * step would re-add deleted content to the visible list.
+     */
+    @Test
+    fun revalidatingPinnedArticlesStillDropsATombstonedPin() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L)
+        db.insertArticle("a2", "f1", isRead = 0L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(vm.articles.value.first { it.id == "a1" })
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.articles.value.any { it.id == "a1" }, "the read article stays pinned")
+
+        driver.stampArticleDeleted("a1", deletedAt = 10L)
+        vm.toggleRead(vm.articles.value.first { it.id == "a2" })
+        testScheduler.advanceUntilIdle()
+
+        assertTrue(vm.articles.value.none { it.id == "a1" }, "a tombstoned pin must be dropped")
+    }
+
     @Test
     fun selectArticleMarksReadAndUpdatesSelectedState() = runTest {
         db.insertFeed("f1")

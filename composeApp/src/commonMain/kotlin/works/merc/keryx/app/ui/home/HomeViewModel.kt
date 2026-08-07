@@ -576,7 +576,7 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
         // selected. Re-pinning it would put deleted content back into the visible list, because the
         // `articles` merge step re-adds any pinned id missing from the repository result — the same
         // reason [reconcilePinnedReadArticles] exists, and the same check it applies.
-        if (articleRepository.getArticleById(selected.id)?.deleted_at != null) return emptyMap()
+        if (selected.id !in articleRepository.aliveArticleIds(listOf(selected.id))) return emptyMap()
         return mapOf(selected.id to selected.toListRow())
     }
 
@@ -587,9 +587,17 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
      * resurrect deleted content into the visible list.
      */
     private fun reconcilePinnedReadArticles() {
+        val snapshot = _pinnedReadArticles.value
+        if (snapshot.isEmpty()) return
+        // Resolved with ONE query, outside the update lambda. Per-pin getById was both an N+1 (each
+        // one a full row on its own connection) and inside a CAS retry loop that can re-run it;
+        // "mark all read" sizes this set to the whole visible list, and it runs on every articles
+        // write.
+        val alive = articleRepository.aliveArticleIds(snapshot.keys)
         _pinnedReadArticles.update { pinned ->
-            if (pinned.isEmpty()) return@update pinned
-            pinned.filterValues { articleRepository.getArticleById(it.id)?.deleted_at == null }
+            // Keys added since the snapshot are kept: they were just pinned, so they are alive by
+            // construction, and `alive` has no verdict on them.
+            pinned.filterKeys { it in alive || it !in snapshot }
         }
     }
 

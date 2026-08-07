@@ -36,6 +36,15 @@ class CountingSqlDriver(private val delegate: SqlDriver) : SqlDriver {
     var feedUpdates = 0
         private set
 
+    /**
+     * How many single-row `getById` fetches ran — the shape an N+1 shows up as. Matched on the
+     * trailing clause, not the projection: SQLDelight expands `SELECT *` into explicit columns, so
+     * a `startsWith("SELECT * ...")` sentinel would silently never match. `WHERE id = ?` separates
+     * it from `getListRowsByIds` and `aliveIdsIn`, which both use `WHERE id IN`.
+     */
+    var articleGetByIdExecutions = 0
+        private set
+
     override fun <R> executeQuery(
         identifier: Int?,
         sql: String,
@@ -44,6 +53,7 @@ class CountingSqlDriver(private val delegate: SqlDriver) : SqlDriver {
         binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
     ): app.cash.sqldelight.db.QueryResult<R> {
         if (sql.contains("is_starred") && sql.contains("published_at DESC")) listQueryExecutions++
+        if (sql.endsWith("FROM articles WHERE id = ?")) articleGetByIdExecutions++
         return delegate.executeQuery(identifier, sql, mapper, parameters, binders)
     }
 

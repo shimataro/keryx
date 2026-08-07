@@ -121,6 +121,23 @@ class ArticleRepository(
 
     fun getArticleById(id: String): Articles? = articles.getById(id).executeAsOneOrNull()
 
+    /**
+     * Which of [ids] still have a live (non-tombstoned) row.
+     *
+     * An existence check, so it reads only the id column — unlike [getArticleById], which pulls the
+     * whole row including the article body. One query per chunk instead of one per id: the caller
+     * (the pinned-read revalidation) runs on every `articles` write with a pin set that
+     * "mark all read" sizes to the whole visible list.
+     *
+     * @param ids The article ids to check.
+     * @return The subset of [ids] whose row exists and is not soft-deleted.
+     */
+    fun aliveArticleIds(ids: Collection<String>): Set<String> {
+        if (ids.isEmpty()) return emptySet()
+        return ids.chunked(ID_FETCH_CHUNK)
+            .flatMapTo(HashSet()) { articles.aliveIdsIn(it).executeAsList() }
+    }
+
     fun markAsRead(id: String) {
         val now = clock.nowMillis()
         articles.updateReadStatus(is_read = 1L, read_at = now, updated_at = now, id = id)

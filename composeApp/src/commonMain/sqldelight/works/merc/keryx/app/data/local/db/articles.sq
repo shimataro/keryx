@@ -94,6 +94,11 @@ getListRowsByIds:
 SELECT id, feed_id, title, url, published_at, created_at, is_read, is_starred
 FROM articles WHERE id IN ?;
 
+-- Which of the given ids still have a live row. Used to revalidate the pinned-read set in one
+-- query instead of one getById per pin (callers chunk to stay under the bound-parameter limit).
+aliveIdsIn:
+SELECT id FROM articles WHERE id IN ? AND deleted_at IS NULL;
+
 getByFeedAndGuid:
 SELECT * FROM articles WHERE feed_id = ? AND guid = ?;
 
