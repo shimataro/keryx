@@ -70,6 +70,15 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  * @param modifier Modifier applied to the pane.
  * @param notifVm Optional view model providing notifications for the toolbar.
  */
+/**
+ * Displays the article list or search results for the current home view filter.
+ *
+ * @param vm The home view model providing article data, filter state, and actions.
+ * @param focused Whether the pane currently has focus.
+ * @param onActivated Called when the pane becomes active.
+ * @param modifier Modifier applied to the pane.
+ * @param notifVm Optional view model used to display notifications.
+ */
 @Composable
 fun ArticleListPane(
     vm: HomeViewModel,
@@ -283,16 +292,16 @@ internal fun ArticleListTopBar(
 }
 
 /**
- * Renders the article list with filtering controls, selection state, and article actions.
+ * Renders the article list with sorting, unread filtering, selection, and article actions.
  *
- * @param articles The articles to display.
+ * @param articles The article rows to display.
  * @param feedTitles Display titles keyed by feed identifier.
  * @param feedFavicons Favicon URLs keyed by feed identifier.
- * @param selectedId The id of the currently selected article, if any.
- * @param unreadOnly Whether only unread articles are shown.
- * @param newestFirst Whether articles are sorted newest first.
- * @param focused Whether the list is focused.
- * @param unreadOnlyEnabled Whether the unread-only toggle is enabled.
+ * @param selectedId The identifier of the selected article, if any.
+ * @param unreadOnly Whether to show only unread articles.
+ * @param newestFirst Whether to sort articles from newest to oldest.
+ * @param focused Whether the list has focus.
+ * @param unreadOnlyEnabled Whether the unread-only control is enabled.
  */
 @Composable
 internal fun ArticleListPaneContent(

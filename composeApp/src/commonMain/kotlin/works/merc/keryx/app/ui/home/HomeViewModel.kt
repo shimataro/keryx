@@ -418,9 +418,9 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
     }
 
     /**
-     * Selects an article and marks it as read.
+     * Selects an existing article, loads its full content, and marks it as read.
      *
-     * @param article The article to select.
+     * @param article The article row to select.
      */
     fun selectArticle(article: ArticleListRow) {
         // The list row carries no body, so the detail pane's copy is loaded here — one PK lookup on
@@ -445,9 +445,10 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
     fun selectPrevious() = moveSelection(-1)
 
     /**
-     * The article list currently shown in the center pane: search hits when the Search scope is
-     * active, otherwise the feed-backed [articles]. Used for keyboard navigation and first-select.
-     */
+         * Provides the article rows currently displayed in the center pane.
+         *
+         * @return Search-result rows for the search filter, or the filtered article rows otherwise.
+         */
     fun currentArticles(): List<ArticleListRow> =
         if (_filter.value is ArticleFilter.Search) searchResults.value.map { it.article } else articles.value
 
@@ -463,6 +464,9 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
         selectArticle(list[next])
     }
 
+    /**
+     * Marks the selected article as unread.
+     */
     fun markSelectedUnread() {
         val current = _selectedArticle.value ?: return
         val id = current.id
@@ -472,6 +476,11 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
         viewModelScope.launch(dbWriteDispatcher) { articleRepository.markAsUnread(id) }
     }
 
+    /**
+     * Toggles the read state of an article and persists the change.
+     *
+     * @param article The article whose read state should be toggled.
+     */
     fun toggleRead(article: ArticleListRow) {
         val nowRead = article.is_read == 0L
         if (nowRead) {
@@ -487,9 +496,16 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
         }
     }
 
-    /** [toggleRead] for the selected article, whose full row the caller already holds. */
+    /**
+ * Toggles the read state of the selected article.
+ */
     fun toggleReadSelected() = _selectedArticle.value?.let { toggleRead(it.toListRow()) }
 
+    /**
+     * Toggles the starred state of an article.
+     *
+     * @param article The article whose starred state should be toggled.
+     */
     fun toggleStar(article: ArticleListRow) {
         val starred = article.is_starred == 0L
         if (_selectedArticle.value?.id == article.id) {
@@ -498,14 +514,16 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
         viewModelScope.launch(dbWriteDispatcher) { articleRepository.setStarred(article.id, starred = starred) }
     }
 
-    /** [toggleStar] for the selected article, whose full row the caller already holds. */
+    /**
+ * Toggles the starred state of the selected article.
+ */
     fun toggleStarSelected() = _selectedArticle.value?.let { toggleStar(it.toListRow()) }
 
     /**
-     * Marks applicable articles as read for the current filter.
+     * Marks unread articles in the current filter as read.
      *
-     * The starred filter preserves article read states, while other filters optimistically
-     * retain currently visible articles with updated read timestamps until the data refreshes.
+     * The starred filter preserves article read states, while other filters retain visible articles
+     * optimistically until the updated data is refreshed.
      */
     fun markAllRead() {
         val filter = _filter.value
@@ -587,10 +605,7 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
     }
 
     /**
-     * Drops any pinned entry whose backing row has since been soft-deleted (e.g. a tombstone
-     * propagated by a sync merge while the article was pinned), so the `articles` merge step
-     * (which re-adds a pinned id missing from the filtered repository result) can never
-     * resurrect deleted content into the visible list.
+     * Removes pinned articles that have been deleted.
      */
     private fun reconcilePinnedReadArticles() {
         val snapshot = _pinnedReadArticles.value

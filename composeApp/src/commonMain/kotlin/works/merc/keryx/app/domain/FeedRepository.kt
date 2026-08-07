@@ -248,7 +248,7 @@ fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
     }
 
     /**
-     * Applies fetched feed data, updates its articles, and emits relevant notifications.
+     * Applies fetched feed data, persists its articles, and emits notifications for permanent removal or URL changes.
      *
      * @param feed The feed being refreshed.
      * @param phase The fetched feed data and any resolved favicon.

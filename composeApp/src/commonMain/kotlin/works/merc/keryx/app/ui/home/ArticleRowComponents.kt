@@ -142,14 +142,9 @@ internal data class ArticleRowStrings(
 )
 
 /**
- * Resolves the per-list article-row strings once, so [ArticleRow] does not repeat them per row.
+ * Resolves localized article-row labels, fallback text, and the system time zone for reuse across a list.
  *
- * Every row used to run seven `stringResource` lookups (thirteen counting the nested
- * `common_menu_item_with_shortcut` composition) plus a `TimeZone.currentSystemDefault()` clone,
- * on every composition — work that is identical for all rows and only changes with the locale.
- * Hoist this next to [rememberArticleRowMetrics], above the `items {}` block.
- *
- * @return The shared strings and time zone for the article rows in this list.
+ * @return The shared article-row strings and time zone.
  */
 @Composable
 internal fun rememberArticleRowStrings(): ArticleRowStrings {

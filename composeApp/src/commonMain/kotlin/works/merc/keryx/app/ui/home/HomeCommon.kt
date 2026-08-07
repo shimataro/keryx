@@ -387,7 +387,12 @@ internal enum class RowHalf { TOP, BOTTOM }
 internal fun resolveRowHalf(localY: Float, band: FeedListRowBand): RowHalf =
     if (localY - band.offsetPx < band.sizePx / 2f) RowHalf.TOP else RowHalf.BOTTOM
 
-/** Formats an epoch-millis timestamp as `yyyy-MM-dd HH:mm` in local time. */
+/**
+     * Formats an epoch-millisecond timestamp as `yyyy-MM-dd HH:mm` in the system default time zone.
+     *
+     * @param epochMillis The timestamp to format, or `null`.
+     * @return The formatted timestamp, or an empty string when `epochMillis` is `null`.
+     */
 fun formatTimestamp(epochMillis: Long?): String =
     formatTimestamp(epochMillis, TimeZone.currentSystemDefault())
 
@@ -399,6 +404,13 @@ fun formatTimestamp(epochMillis: Long?): String =
  * bulk of the cost when this runs per visible row.
  */
 @OptIn(ExperimentalTime::class)
+/**
+ * Formats an epoch timestamp as `yyyy-MM-dd HH:mm` in the specified time zone.
+ *
+ * @param epochMillis The epoch timestamp in milliseconds, or `null`.
+ * @param zone The time zone used for formatting.
+ * @return The formatted timestamp, or an empty string when `epochMillis` is `null`.
+ */
 fun formatTimestamp(epochMillis: Long?, zone: TimeZone): String {
     if (epochMillis == null) return ""
     val dt = Instant.fromEpochMilliseconds(epochMillis).toLocalDateTime(zone)

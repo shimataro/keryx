@@ -259,7 +259,13 @@ internal fun menuSignature(items: List<NativeMenuEntry>): List<MenuEntrySignatur
         }
     }
 
-private fun leafSignature(entry: NativeMenuLeaf): LeafSignature =
+/**
+     * Creates a signature for a leaf menu entry from its label and checked state.
+     *
+     * @param entry The leaf menu entry to describe.
+     * @return The entry's rendered label and optional checked state.
+     */
+    private fun leafSignature(entry: NativeMenuLeaf): LeafSignature =
     LeafSignature(entry.label, (entry as? NativeCheckMenuItem)?.checked)
 
 /** Builds the backend appropriate to the current platform. */
@@ -292,7 +298,14 @@ internal class LazyNativePopup(
     private var builtShape: List<String>? = null
     private var syncedSignature: List<MenuEntrySignature>? = null
 
-    /** Builds (or reuses) the widgets for [entries], relabels them if needed, and shows the menu. */
+    /**
+     * Displays the native menu for [entries], rebuilding or synchronizing its widgets when needed.
+     *
+     * @param entries The menu entries to display.
+     * @param invoker The component relative to which the menu is shown.
+     * @param x The horizontal display coordinate.
+     * @param y The vertical display coordinate.
+     */
     fun showFor(entries: List<NativeMenuEntry>, invoker: Component, x: Int, y: Int) {
         val shape = menuShape(entries)
         var current = handle

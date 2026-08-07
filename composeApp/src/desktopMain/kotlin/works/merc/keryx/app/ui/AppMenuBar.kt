@@ -85,6 +85,18 @@ import works.merc.keryx.app.ui.settings.SettingsViewModel
  * @param renderMenuBar Whether to render the menu bar.
  * @param onTreeChanged Receives the current menu tree after composition.
  */
+/**
+ * Builds and optionally renders the application menu bar.
+ *
+ * Publishes the current menu tree through [onTreeChanged] on each recomposition. The menu bar
+ * remains published when [renderMenuBar] is `false`.
+ *
+ * @param onCloseWindow Closes the current window.
+ * @param onQuit Quits the application.
+ * @param menuBarToggle Controls the menu bar visibility option.
+ * @param renderMenuBar Whether to render the menu bar in the window.
+ * @param onTreeChanged Receives the current menu tree.
+ */
 @Composable
 internal fun FrameWindowScope.AppMenuBar(
     onCloseWindow: () -> Unit,

@@ -46,6 +46,16 @@ class CountingSqlDriver(private val delegate: SqlDriver) : SqlDriver {
     var articleGetByIdExecutions = 0
         private set
 
+    /**
+     * Executes a SQL query while recording article-list and single-article query executions.
+     *
+     * @param identifier The query identifier.
+     * @param sql The SQL statement to execute.
+     * @param mapper Maps the query cursor to a result.
+     * @param parameters The number of query parameters.
+     * @param binders Binds query parameters when provided.
+     * @return The query result.
+     */
     override fun <R> executeQuery(
         identifier: Int?,
         sql: String,
@@ -110,7 +120,11 @@ fun inMemoryDb(): Pair<SqlDriver, KeryxDatabase> {
     return driver to KeryxDatabase(driver)
 }
 
-/** A file-backed KeryxDatabase (needed for ATTACH DATABASE merge tests). */
+/**
+ * Creates a file-backed SQLite database for merge tests.
+ *
+ * @return A triple containing the temporary database file, SQL driver, and initialized database.
+ */
 fun fileDb(): Triple<File, SqlDriver, KeryxDatabase> {
     val file = File.createTempFile("keryx-test-", ".db").apply { deleteOnExit() }
     // Production's properties minus foreign_keys. The merge tests seed states that FK enforcement

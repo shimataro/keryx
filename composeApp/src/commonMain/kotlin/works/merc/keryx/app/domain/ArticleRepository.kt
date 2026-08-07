@@ -82,6 +82,14 @@ class ArticleRepository(
 ) {
     private val articles get() = db.articlesQueries
 
+    /**
+     * Observes list-row articles matching the specified filter.
+     *
+     * Search filters produce an empty flow because search results are provided separately.
+     *
+     * @param filter The article filter to apply.
+     * @return A flow of matching article list rows.
+     */
     fun watchArticles(filter: ArticleFilter): Flow<List<ArticleListRow>> = when (filter) {
         // Search results aren't a DB query; the article-list pane renders them from `search()`
         // (via HomeViewModel.searchResults) instead of this flow.
@@ -96,7 +104,12 @@ class ArticleRepository(
         is ArticleFilter.Folder -> articles.watchByFolder(filter.folderId, ::ArticleListRow)
     }.asFlow().mapToList(dispatcher)
 
-    fun watchUnreadCount(): Flow<Long> = articles.watchUnreadCount().asFlow().mapToOne(dispatcher)
+    /**
+ * Observes the total number of unread articles.
+ *
+ * @return A flow emitting the current unread article count.
+ */
+fun watchUnreadCount(): Flow<Long> = articles.watchUnreadCount().asFlow().mapToOne(dispatcher)
 
     fun watchStarredUnreadCount(): Flow<Long> = articles.watchStarredUnreadCount().asFlow().mapToOne(dispatcher)
 
@@ -119,18 +132,19 @@ class ArticleRepository(
         articles.watchUnreadCountsByFolder().asFlow().mapToList(dispatcher)
             .map { rows -> rows.associate { it.folder_id to it.cnt } }
 
-    fun getArticleById(id: String): Articles? = articles.getById(id).executeAsOneOrNull()
+    /**
+ * Retrieves an article by its identifier.
+ *
+ * @param id The article identifier.
+ * @return The matching article, or `null` if no article exists with the identifier.
+ */
+fun getArticleById(id: String): Articles? = articles.getById(id).executeAsOneOrNull()
 
     /**
-     * Which of [ids] still have a live (non-tombstoned) row.
+     * Determines which requested article IDs still refer to existing articles.
      *
-     * An existence check, so it reads only the id column — unlike [getArticleById], which pulls the
-     * whole row including the article body. One query per chunk instead of one per id: the caller
-     * (the pinned-read revalidation) runs on every `articles` write with a pin set that
-     * "mark all read" sizes to the whole visible list.
-     *
-     * @param ids The article ids to check.
-     * @return The subset of [ids] whose row exists and is not soft-deleted.
+     * @param ids The article IDs to check.
+     * @return The IDs of existing articles that have not been soft-deleted.
      */
     fun aliveArticleIds(ids: Collection<String>): Set<String> {
         if (ids.isEmpty()) return emptySet()
@@ -138,6 +152,11 @@ class ArticleRepository(
             .flatMapTo(HashSet()) { articles.aliveIdsIn(it).executeAsList() }
     }
 
+    /**
+     * Marks an article as read and schedules synchronization.
+     *
+     * @param id The ID of the article to mark as read.
+     */
     fun markAsRead(id: String) {
         val now = clock.nowMillis()
         articles.updateReadStatus(is_read = 1L, read_at = now, updated_at = now, id = id)
@@ -187,7 +206,13 @@ class ArticleRepository(
         syncScheduler.scheduleSync()
     }
 
-    fun search(query: String): List<ArticleSearchResult> =
+    /**
+         * Searches articles and preserves the search engine's result order.
+         *
+         * @param query The full-text search query.
+         * @return Matching articles with highlighted titles, or an empty list when the search index is temporarily unavailable.
+         */
+        fun search(query: String): List<ArticleSearchResult> =
         try {
             val hits = ftsSearch.search(query)
             // Load all hit rows with one `id IN (...)` query per chunk (chunked to stay under
@@ -223,21 +248,11 @@ class ArticleRepository(
     }
 
     /**
-     * Does everything CPU-heavy about storing [parsed] *without* touching the write path, so HTML
-     * stripping (a full Ksoup DOM parse) and UUIDv5 hashing never hold the SQLite write lock.
-     *
-     * The existence check is collapsed from one SELECT per article to a single guid fetch: seed a
-     * set with the feed's existing guids, then add each parsed guid — `add` returns false when the
-     * guid was already present (existing row, or an intra-batch duplicate), so the new-article count
-     * counts each new article exactly once.
-     *
-     * Split from [insertPrepared] so a caller that already owns a transaction (the feed refresh,
-     * which batches a feed's `feeds` writes and its article upsert into one commit) can do this part
-     * before opening it.
+     * Prepares parsed feed articles for insertion without modifying the database.
      *
      * @param feedId The identifier of the feed containing the articles.
-     * @param parsed The fetched articles to store.
-     * @return The rows to insert, together with the new-article count.
+     * @param parsed The articles fetched from the feed.
+     * @return The prepared article rows, their count of newly encountered articles, and a shared timestamp.
      */
     internal fun prepareParsed(feedId: String, parsed: List<ParsedArticle>): PreparedArticles {
         if (parsed.isEmpty()) return PreparedArticles(feedId, emptyList(), newCount = 0, now = clock.nowMillis())
@@ -258,11 +273,10 @@ class ArticleRepository(
     }
 
     /**
-     * Writes what [prepareParsed] produced. Must be called inside a transaction (its own, via
-     * [upsertParsed], or the caller's).
+     * Inserts prepared articles into the database while preserving existing article state.
      *
-     * @param prepared The rows to insert.
-     * @return The number of articles that were not previously stored for the feed.
+     * @param prepared The prepared articles and metadata to insert.
+     * @return The number of newly stored articles.
      */
     internal fun insertPrepared(prepared: PreparedArticles): Int {
         for (pi in prepared.rows) {

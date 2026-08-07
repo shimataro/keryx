@@ -59,6 +59,16 @@ class FeedFetcher(
         }
     }
 
+    /**
+     * Fetches and parses a feed, following redirects and preserving conditional response metadata.
+     *
+     * @param url The feed URL to request.
+     * @param etag The previously received entity tag, if available.
+     * @param lastModified The previously received last-modified value, if available.
+     * @param redirectCount The number of redirects already followed.
+     * @param permanentTarget The permanent redirect destination to preserve across requests.
+     * @return The parsed feed, a not-modified result, or an error describing the failed fetch.
+     */
     private suspend fun doFetch(
         url: String,
         etag: String?,
