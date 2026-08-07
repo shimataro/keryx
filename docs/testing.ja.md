@@ -67,7 +67,7 @@ ViewModel 層（Home/Settings/Setup/NotificationCenter）、フィード一覧�
 表示/非表示のライフサイクル、Escape によるキャンセル、フォルダー同士の並べ替え、
 ペインの水平方向の範囲を越えて押し出されたドラッグが行の高さと一致していても有効なドロップ先と
 判定されずドロップも適用されないこと）、
-名前とタイムスタンプを並べるメタ行（`ArticleRowMetadataTest`：フィードタイトルが長くても省略されるのはタイトル側だけで、記事カードのタイムスタンプは幅を奪われず行の右端に揃ったまま表示される。`ArticleDetailMetaLineTest`：詳細ヘッダーの `author · タイムスタンプ` も同様に保証される——ただし右端寄せではなくインライン——、あわせて `articleMetaText` が null または空白のみの著者名を除去し先頭に区切りが残らないこと）、ArticleWebViewHtml（extractLinks/wrapArticleHtml）、AppFont（Linux の UI フォント用 Pango フォント記述のパース）、カスタム URI スキーム登録（`UriSchemeRegistration` の OS 別ディスパッチとパッケージ版ランチャー判定、`LinuxUriSchemeRegistrar` の `.desktop` 生成——`%u` フィールドコードを含む——、`mimeapps.list` の非破壊マージ、冪等性）、FTS（FtsManager/FtsSearch、
+名前とタイムスタンプを並べるメタ行（`ArticleRowMetadataTest`：フィードタイトルが長くても省略されるのはタイトル側だけで、記事カードのタイムスタンプは幅を奪われず行の右端に揃ったまま表示される。`ArticleMetaTextTest`：`articleMetaText` が著者とタイムスタンプを結合すること、および null または空白のみの著者名を除去し先頭に区切りが残らないこと）、記事リーダーのネイティブ WebView（`ArticleWebViewHtmlTest`：`extractLinks`、および 3 つの文書ビルダー `wrapArticleHtml`／`articleNoContentHtml`／`articlePlaceholderHtml`——すべての文書が同じ `<style>` ブロックを共有し、テーマの色・フォントスケールで塗られるためどれもデフォルトの白いページを一瞬出せないこと、を含む。`ArticleDetailLoadGuardTest`：`shouldLoadArticleHtml` のリロード判定——プレースホルダー／本文なし状態が実記事と WebView を共有するため、記事 ID ではなく描画された文書の文字列をキーにしていること。`ArticleDetailPaneTest`：リーダーが常にコンポーズされたままであること、選択状態が変わってもその計測済みバウンズが動かないこと——`known-issues.md` に記載されたウインドウ全体のフリッカーの回帰ガード——、および未選択時にツールバーが非表示ではなく無効化されること）、AppFont（Linux の UI フォント用 Pango フォント記述のパース）、カスタム URI スキーム登録（`UriSchemeRegistration` の OS 別ディスパッチとパッケージ版ランチャー判定、`LinuxUriSchemeRegistrar` の `.desktop` 生成——`%u` フィールドコードを含む——、`mimeapps.list` の非破壊マージ、冪等性）、FTS（FtsManager/FtsSearch、
 `indexMissing` の増分投入・非破壊、`rebuildIndex` がテーブル存在を前提とすること、同期アップロードが
 `VACUUM INTO` スナップショットで `articles_fts` を除外し `user_version` を保全することを含む）、
 Linux の SNI トレイ（`TrayPixmapTest`＝ビッグエンディアン ARGB32 / RGBA エンコーダーとアルファ保全、
@@ -170,6 +170,23 @@ Linux の SNI トレイでは `SniConnection`（接続・バス名取得・expor
   最終的なリスト順序が安定していること。
 - フィードエラー / 301・308 の URL 変更 / 410 Gone の各通知が従来どおり発行され、未取得の
   ファビコンが更新後に補完されること。
+
+記事リーダーのネイティブ WebView（`ui/home/ArticleDetailPane.kt`）はヘビーウェイトな AWT
+サーフェスであり Compose UI テストでは一切ホストできないため、`ArticleDetailPaneTest` がカバーする
+バウンズ／無効化状態のチェックを超えた実際の画面上の挙動は目視で確認する必要がある。リーダーが
+常時マウントされている理由は `known-issues.ja.md` の「記事が未選択の状態から選択するとウインドウ
+全体がフリッカーする」を参照:
+
+- 未選択状態から記事をクリックし、また未選択（あるいは記事の無いフィード）に戻す操作を、本文の
+  ある記事・無い記事を交ぜながら繰り返す — ウインドウのどの部分（フィード一覧・記事一覧・ウインドウ
+  枠）もフリッカーしないこと。ライト・ダーク両テーマで確認する。
+- 未選択時、プレースホルダーのテキストがペインのテーマ背景色の上に中央表示され、デフォルトの白い
+  フラッシュが出ないこと。その上のツールバー（スター／未読に戻す／URL コピー／ブラウザで開く）は
+  表示されるが無効化されていること。URL のある記事を選択すると 4 つとも有効になり、URL が空の
+  記事を選択した場合はこのペインの改修前と同様にコピー／ブラウザで開くの 2 つが非表示のままである
+  こと。ツールバーの位置と高さはこれらどの状態でも変わらないこと。
+- 記事を開いた状態でライト／ダークテーマ（および文字サイズ設定）を切り替えると、リーダーが
+  即座に新しいテーマ／スケールで再描画されること（スクロールが先頭に戻るのは想定どおり）。
 
 ネイティブなコンテキストメニュー（`nativeContextMenu`。Linux では実際の `JPopupMenu`、macOS/Windows
 では `java.awt.PopupMenu` によるもので、Compose 描画のポップアップではない）は Compose UI テストで

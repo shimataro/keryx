@@ -281,3 +281,94 @@ entry (or keep the test as a normal regression test), keep `ArticleRow` reverted
 pre-mitigation structure, and remove the "Gaps and node count" section from the `ui-guidelines`
 skill — it only exists to document this workaround. If it still fails, restore both the `@Ignore`
 and the node-count mitigation (revert the temporary change).
+
+## Selecting an article after none was selected flickered the whole window
+
+**Status**: Resolved — by keeping the article reader's native WebView permanently mounted instead
+of composing it only while an article is selected.
+
+### Symptom
+
+With no article selected (the detail pane showing "Select an article to read it"), clicking an
+article briefly flickered the *entire* window — the feed list and article list panes too, not just
+the detail pane. Reproduced in both light and dark theme. Switching from one already-selected
+article to another never flickered.
+
+### Diagnosis
+
+The article reader (`ui/home/ArticleDetailPane.kt`) renders article HTML through
+`io.github.kdroidfilter.webview`'s `WebView` composable, which (confirmed by decompiling
+`webview-compose-jvm.jar` and `ui-desktop-1.11.1.jar`) is a heavyweight AWT `SwingPanel` hosting
+`WryWebViewPanel extends javax.swing.JPanel` — a real native OS browser surface (a skiko
+`HardwareLayer` `java.awt.Canvas`), not a Compose-drawn texture.
+
+`androidx.compose.ui.viewinterop.SwingInteropContainer.executeScheduledUpdates()` ends with:
+
+```text
+root.validate()
+root.repaint()
+```
+
+where `root` is the *window's* interop container, not just this pane's. Both adding/removing this
+heavyweight component (`SwingInteropContainer.place()`/`unplace()`) and moving it
+(`SwingInteropViewHolder.layoutAccordingTo()` → `setBounds(...)`) schedule this call, so either one
+repaints the whole window for a frame.
+
+The pane's previous structure had an early return for the "no article selected" state:
+
+```kotlin
+if (current == null) {
+    Box(...) { Text("Select an article to read it") }
+    return
+}
+```
+
+so the native WebView was never composed at all until an article was selected — going from no
+selection to a selection therefore added the heavyweight panel to the window **for the first
+time**, triggering the whole-window repaint above. Switching between two already-selected articles
+never hit this path, since the WebView stayed mounted continuously — matching the exact symptom
+reported (no flicker article-to-article, only none-to-article). The same early return also existed
+for an article with neither `content` nor `summary` (the "no content" branch), so switching to/from
+such an article had the identical flicker.
+
+### Ruled out
+
+- **Compose recomposition / layout thrash** — `HomeScreen` deliberately does not collect
+  `selectedArticle`, so selecting an article does not recompose the feed list or article list panes
+  at that level. The flicker is not a Compose-side relayout.
+- **Pane resizing** — the feed list and article list pane widths come from persisted settings and
+  are untouched by article selection.
+
+### How this was resolved
+
+The WebView is now composed unconditionally for the lifetime of the pane
+(`ArticleDetailPaneContent` in `ui/home/ArticleDetailPane.kt`), never behind an `if`. Since nothing
+Compose-drawn can appear over a heavyweight AWT surface in the same window (the same limitation
+that makes this app's dialogs real `DialogWindow`s — see `ui/common/KeryxDialogs.kt`), the "no
+article selected" placeholder and the "no content" notice are now rendered as HTML *inside* the
+same WebView (`ui/article/ArticleWebViewHtml.kt`'s `articlePlaceholderHtml`/`articleNoContentHtml`,
+sharing one `<style>` block with `wrapArticleHtml` so neither ever flashes a default white page in
+dark mode). The toolbar above the reader (star/mark-unread/copy-URL/open-in-browser) is also always
+present now, with buttons disabled rather than hidden when nothing is selected — this keeps the
+toolbar's Compose structure identical across states, which is what keeps the WebView's bounds from
+moving (a bounds change alone, via `layoutAccordingTo`, can also trigger the same whole-window
+repaint).
+
+### Workarounds that did not work / were not attempted
+
+Recorded so they are not retried:
+
+- **Keep the WebView mounted but zero-sized or off-screen when nothing is selected** — does not
+  work: a bounds change routes through `SwingInteropViewHolder.layoutAccordingTo()`, which schedules
+  the same whole-window `validate()`/`repaint()` as adding/removing the panel.
+- **Draw a Compose scrim/placeholder over the mounted WebView** — impossible: a heavyweight AWT
+  surface always composites above lightweight Compose content in the same window.
+- **Patch `SwingInteropContainer.executeScheduledUpdates()`** — not reachable from application code
+  (it lives inside `ui-desktop-1.11.1.jar`).
+- **Share a `Modifier.height(...)` constant between this toolbar and the article list's header
+  row to "guarantee" a stable height** — considered and rejected: the article list's header
+  includes a `ToggleChip` with real text, whose height can grow past the icon-only baseline at a
+  high font-scale setting (this app supports 0.8×–1.6×), so forcing a shared fixed height there
+  would clip it. The detail toolbar needs no such constant — all of its children are fixed-size
+  icons unaffected by font scale, so keeping its exact Compose structure identical between states
+  is enough on its own.

@@ -176,13 +176,14 @@ Whether the trailing half is pinned to the edge or stays inline is the `fill` fl
 | Context | Weight | Result |
 | --- | --- | --- |
 | List rows ([ArticleRowComponents.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/ArticleRowComponents.kt), `ArticleRow`) | `weight(1f)` (fill) | Timestamp pinned to the trailing edge, so dates align down the list |
-| Detail headers ([ArticleDetailPane.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/ArticleDetailPane.kt), `ArticleDetailMetaLine`) | `weight(1f, fill = false)` | Timestamp stays inline right after the leading value |
+| Detail header ([ArticleWebViewHtml.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/article/ArticleWebViewHtml.kt), `.article-meta`) | n/a (flowing HTML) | Timestamp stays inline right after the leading value |
 
-The detail header is inline because the same line is also rendered by the reader's WebView
-(`.article-meta` in [ArticleWebViewHtml.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/article/ArticleWebViewHtml.kt))
-as flowing HTML text, which cannot right-align to match. That `div` deliberately has no
-`white-space`/`text-overflow`/`overflow` rules — it wraps instead of clipping, so the
-timestamp is never lost there. Do not add single-line clamping CSS to it.
+The detail header is rendered as flowing HTML text inside the article reader's own WebView
+(`.article-meta` in [ArticleWebViewHtml.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/article/ArticleWebViewHtml.kt)),
+not as a Compose `Row` like the list row above — see "Popup vs. Dialog" below for why nothing in
+this pane is drawn by Compose. That `div` deliberately has no `white-space`/`text-overflow`/`overflow`
+rules — it wraps instead of clipping, so the timestamp is never lost there. Do not add single-line
+clamping CSS to it.
 
 When the leading half is optional, the separator travels with the **trailing** `Text`
 (`" · $timestamp"`), so it can never dangle after an ellipsized or absent leading value.
@@ -492,3 +493,18 @@ theme/shape/indication/icon choices:
   `ArticleListPane`, see the Flat surface / migration notes above.) Don't reach for `Popup` for anything that should block
   interaction with the rest of the window, and don't reach for `Dialog` for
   something that's meant to feel like a lightweight, dismissable overlay.
+- **Nothing Compose-drawn can appear over the article detail pane's content area**: the article
+  reader (`ArticleDetailPane.kt`) is a heavyweight native `SwingPanel` WebView, and a heavyweight
+  AWT surface always composites above lightweight Compose content in the same window (the same
+  limitation `KeryxDialogs.kt` documents for why dialogs are real `DialogWindow`s, not `Popup`).
+  The reader is composed unconditionally for the pane's whole lifetime — never behind an `if` —
+  because mounting/unmounting it (or moving its bounds) makes Compose Desktop's
+  `SwingInteropContainer` revalidate and repaint the *entire window*, not just this pane (see
+  `docs/known-issues.md`, "Selecting an article after none was selected flickered the whole
+  window"). Consequently, empty/error states for this pane (no article selected, no content) are
+  rendered as HTML *inside* the WebView (`ui/article/ArticleWebViewHtml.kt`), not as Compose
+  `Text`, and the toolbar above it keeps the exact same Compose structure (same buttons, only
+  `enabled` toggles) across every state rather than conditionally hiding an action — hiding one
+  would change the row's child count, and while that happens not to move this particular row's
+  height today (all its children are fixed-size icons), don't rely on that; keep the structure
+  literally unconditional. Do not reintroduce an early return that skips composing the WebView.

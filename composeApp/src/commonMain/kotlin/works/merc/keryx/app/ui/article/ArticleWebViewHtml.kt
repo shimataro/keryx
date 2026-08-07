@@ -16,30 +16,59 @@ fun extractLinks(html: String): Set<String> =
         .toSet()
 
 /**
- * Wraps article [body] HTML in a minimal document that applies the current app theme
- * (background/text/link colors, font scale) so the WebView doesn't flash a default
- * white/black page before/instead of matching the surrounding UI.
+ * The app-theme inputs shared by every document the article reader's WebView renders. Bundled so
+ * the placeholder, the "no content" notice and a real article are guaranteed to share the same
+ * background/text/link colors and font scale as the surrounding Compose pane.
+ */
+data class ArticleHtmlTheme(
+    val surface: Color,
+    val onSurface: Color,
+    val linkColor: Color,
+    val mutedColor: Color,
+    val fontScale: Float,
+)
+
+/**
+ * Wraps article [body] HTML in a minimal document that applies [theme] (background/text/link
+ * colors, font scale) so the WebView doesn't flash a default white/black page before/instead of
+ * matching the surrounding UI.
  *
  * [title] and [meta] (author · date) are rendered as a header before the body so they scroll
  * together with it — this is what keeps a long title from permanently shrinking the content
  * area. They are plain feed text, so they are HTML-escaped; [body] stays raw (trusted rich HTML).
- * [mutedColor] tints the meta line (onSurfaceVariant).
  */
-fun wrapArticleHtml(
-    body: String,
-    surface: Color,
-    onSurface: Color,
-    linkColor: Color,
-    fontScale: Float,
-    title: String,
-    meta: String,
-    mutedColor: Color,
-): String {
-    val fontPercent = (fontScale * 100).toInt()
-    val header = buildString {
-        if (title.isNotBlank()) append("""<h1 class="article-title">${escapeHtml(title)}</h1>""")
-        if (meta.isNotBlank()) append("""<div class="article-meta">${escapeHtml(meta)}</div>""")
-    }
+fun wrapArticleHtml(theme: ArticleHtmlTheme, title: String, meta: String, body: String): String =
+    articleDocument(theme, articleHeader(title, meta) + body)
+
+/**
+ * Same header as [wrapArticleHtml], with a muted [message] where the body would be — for an
+ * article whose feed supplied neither `content` nor `summary`. Rendered here rather than as
+ * Compose text so the reader WebView is never unmounted (see `ArticleDetailPane`'s KDoc).
+ */
+fun articleNoContentHtml(theme: ArticleHtmlTheme, title: String, meta: String, message: String): String =
+    articleDocument(theme, articleHeader(title, meta) + """<p class="article-notice">${escapeHtml(message)}</p>""")
+
+/** [message] centered in the viewport with no header — the "no article selected" state. */
+fun articlePlaceholderHtml(theme: ArticleHtmlTheme, message: String): String =
+    articleDocument(
+        theme,
+        """<div class="article-placeholder">${escapeHtml(message)}</div>""",
+        bodyClass = "placeholder",
+    )
+
+private fun articleHeader(title: String, meta: String): String = buildString {
+    if (title.isNotBlank()) append("""<h1 class="article-title">${escapeHtml(title)}</h1>""")
+    if (meta.isNotBlank()) append("""<div class="article-meta">${escapeHtml(meta)}</div>""")
+}
+
+/**
+ * Renders [content] inside the document shell shared by every state the article reader can be
+ * in. The `<style>` block is identical across all callers — this is what guarantees the
+ * placeholder and "no content" notice never flash a default white page in dark mode.
+ */
+private fun articleDocument(theme: ArticleHtmlTheme, content: String, bodyClass: String = ""): String {
+    val fontPercent = (theme.fontScale * 100).toInt()
+    val bodyTag = if (bodyClass.isBlank()) "<body>" else """<body class="$bodyClass">"""
     return """
         <!doctype html>
         <html>
@@ -47,27 +76,41 @@ fun wrapArticleHtml(
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <style>
+          html {
+            font-size: $fontPercent%;
+          }
           html, body {
             margin: 0;
             padding: 16px 8px 24px;
-            background-color: ${surface.toCssHex()};
-            color: ${onSurface.toCssHex()};
+            background-color: ${theme.surface.toCssHex()};
+            color: ${theme.onSurface.toCssHex()};
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-            font-size: $fontPercent%;
             line-height: 1.6;
             word-wrap: break-word;
           }
-          a { color: ${linkColor.toCssHex()}; }
+          a { color: ${theme.linkColor.toCssHex()}; }
           img, video, iframe { max-width: 100%; height: auto; }
           table { border-collapse: collapse; }
           td, th { padding: 4px 8px; }
           .article-title { font-size: 1.6em; font-weight: 600; line-height: 1.3; margin: 0 0 4px; }
-          .article-meta { font-size: 0.85em; color: ${mutedColor.toCssHex()}; margin: 0 0 16px; }
+          .article-meta { font-size: 0.85em; color: ${theme.mutedColor.toCssHex()}; margin: 0 0 16px; }
+          .article-notice { color: ${theme.mutedColor.toCssHex()}; margin: 0; }
+          .article-placeholder {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-sizing: border-box;
+            padding: 16px;
+            text-align: center;
+            color: ${theme.mutedColor.toCssHex()};
+          }
+          body.placeholder { overflow: hidden; }
         </style>
         </head>
-        <body>
-        $header
-        $body
+        $bodyTag
+        $content
         </body>
         </html>
     """.trimIndent()

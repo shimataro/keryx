@@ -65,6 +65,22 @@ ATTACH DATABASE merge runs through `platform/DatabaseMerger`, NOT the SQLDelight
 
 `appModule` (`commonMain`) registers repositories, services, and ViewModels. `platformModule` (`desktop`) registers HttpClient, TokenStorage, CloudSession, and CloudConnectFlow. ViewModels are registered as app-scope `single` for a single-window desktop app and obtained via `koinInject()`.
 
+### Article Reader (native WebView)
+
+`ui/home/ArticleDetailPane.kt`'s reader renders article HTML through a native WebView
+(`io.github.kdroidfilter.webview`, a heavyweight AWT `SwingPanel` wrapping a real OS browser view —
+Edge WebView2 on Windows, WebKit on macOS, WebKitGTK on Linux), not a Compose-drawn texture. It is
+composed unconditionally for the pane's lifetime — never behind an `if` — because Compose Desktop's
+`SwingInteropContainer` revalidates and repaints the *whole window* whenever a heavyweight
+component is added, removed, or moved, not just this pane (see [known-issues.md](known-issues.md)
+for the investigation). Consequently, states that have no article to render — "no article
+selected" and "no content" — are rendered as HTML *inside* the same WebView rather than as Compose
+`Text`, via `ui/article/ArticleWebViewHtml.kt`'s `articlePlaceholderHtml`/`articleNoContentHtml`
+(sharing one `<style>` block with the real-article `wrapArticleHtml` builder, so every state paints
+the same theme colors). The toolbar above the reader is likewise always present, with actions
+disabled rather than hidden when nothing is selected, keeping its Compose structure — and
+therefore the reader's measured bounds — identical across states.
+
 ### Desktop Tray (platform branch)
 
 `tray/KeryxTray.kt` picks one of three implementations:

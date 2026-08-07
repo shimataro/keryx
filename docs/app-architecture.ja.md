@@ -78,6 +78,22 @@ ATTACH DATABASE マージは**専用の JDBC コネクション 1 本**で行う
 HttpClient・TokenStorage・CloudSession・CloudConnectFlow を登録。ViewModel は単一ウィンドウの
 デスクトップアプリのためアプリスコープの `single` として登録し、`koinInject()` で取得する。
 
+### 記事リーダー（ネイティブ WebView）
+
+`ui/home/ArticleDetailPane.kt` のリーダーは記事 HTML をネイティブ WebView
+（`io.github.kdroidfilter.webview`。ヘビーウェイトな AWT `SwingPanel` が実 OS のブラウザビュー
+— Windows は Edge WebView2、macOS は WebKit、Linux は WebKitGTK — をラップしたもの）で描画して
+おり、Compose が描画するテクスチャではない。ペインの生存期間中は `if` の下に置かず常時
+無条件でコンポーズする — Compose Desktop の `SwingInteropContainer` はヘビーウェイトな
+コンポーネントが追加・削除・移動されるたびに、このペインだけでなく**ウインドウ全体**を
+再検証＋再描画するため（調査の詳細は [known-issues.md](known-issues.ja.md) 参照）。その帰結として、
+描画すべき記事が無い状態（「記事未選択」「本文なし」）は Compose の `Text` ではなく、同じ
+WebView **内部**の HTML として描画する（`ui/article/ArticleWebViewHtml.kt` の
+`articlePlaceholderHtml`／`articleNoContentHtml`。実記事用の `wrapArticleHtml` と同じ
+`<style>` ブロックを共有し、どの状態でも同じテーマ色で塗られる）。リーダー上部のツールバーも
+同様に常時表示し、未選択時はボタンを非表示にせず無効化する — これによりツールバーの Compose
+構造（ひいてはリーダーの計測済みバウンズ）が状態間で常に同一に保たれる。
+
 ### デスクトップトレイ（プラットフォーム分岐）
 
 `tray/KeryxTray.kt` が 3 実装のいずれかを選ぶ。
