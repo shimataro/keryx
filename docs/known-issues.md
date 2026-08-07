@@ -372,3 +372,106 @@ Recorded so they are not retried:
   would clip it. The detail toolbar needs no such constant — all of its children are fixed-size
   icons unaffected by font scale, so keeping its exact Compose structure identical between states
   is enough on its own.
+
+## Dialogs occasionally opened at an unexpected size
+
+**Status**: Resolved — by replacing the dialog auto-fit's bounded, one-shot correction with a
+lifetime-long drift guard (`DesktopModalWindow` in `ui/common/KeryxDialogs.desktop.kt`, decided by
+`nextDialogFit` in `ui/common/WindowGeometry.desktop.kt`). Kept because two earlier attempts at this
+same bug are still visible in that file's comments, and because the evidence below is decompiled
+Compose Desktop internals that would otherwise have to be re-derived.
+
+### Symptom
+
+Opening the Settings dialog or the About dialog *occasionally* produced a window far too small to
+show its content — stuck at the placeholder's 240dp height, at the ~80x28 macOS gives a
+not-yet-sized dialog, or narrow enough that the settings tab bar clipped its trailing tabs.
+Intermittent, and permanent for that dialog's lifetime once it happened (the dialogs are
+`resizable = false`, so it could not be dragged back to a usable size). Reported on macOS; the
+mechanism is platform-independent. Closing and reopening the dialog usually produced a correct one,
+because each open creates a brand-new `DialogWindow` and re-runs the race.
+
+### Diagnosis
+
+Every dialog is sized by measuring its Compose content and writing the fitted size into
+`DialogState.size`. Decompiling `ui-desktop-1.11.1.jar` shows what Compose does with that:
+
+```kotlin
+// androidx.compose.ui.awt.SwingDialog's update lambda, run via UpdateEffect
+// (a SnapshotStateObserver feeding a Channel — i.e. asynchronous)
+if (state.size != appliedState.size) { window.setSizeSafely(state.size, Floating); appliedState.size = state.size }
+
+// androidx.compose.ui.awt.SwingDialog's ComponentAdapter
+override fun componentResized(e) {
+    currentState.size = DpSize(dialog.width.dp, dialog.height.dp)  // mirrored back into DialogState
+    appliedState.size = currentState.size                          // ...and marked "already applied"
+}
+```
+
+`DialogStateImpl.size` is a `mutableStateOf` with the default (structural) equality policy, and
+`AwtWindow` calls `window.isVisible = true` — peer realization, where the ~80x28 comes from — from a
+launched coroutine, after the composition pass that already ran the first update. Three consequences:
+
+1. **Re-asserting the same `DpSize` does nothing, twice over.** The `mutableStateOf` write does not
+   invalidate, and even if the update lambda did re-run, `state.size == appliedState.size` skips the
+   native call. The previous "re-assert across frames" loop was therefore only a poll.
+2. **The loop stopped watching after one matching frame**, and nothing re-armed it: the measured
+   content size is deliberately independent of the window size (the `requiredWidthIn` /
+   `requiredHeightIn` overrides on the measured `Box`, themselves the fix for an earlier
+   stuck-narrow-forever bug), so `capturedContentPx` never changes again and the `snapshotFlow`
+   never re-emits.
+3. **Compose cannot self-heal either**, because `componentResized` writes the native size into
+   *both* `DialogState.size` and its own applied copy — a size that landed behind Compose's back is
+   self-consistent from Compose's point of view.
+
+So any size application that landed *after* the loop exited was permanent, and whether it landed
+before or after was pure scheduling — hence the intermittency, and hence the stuck values matching
+the placeholder and the un-sized peer exactly.
+
+A second, independent defect had the same visible symptom: the fit read `LocalDensity` from the
+*caller's* (main window's) composition while converting pixels measured in the *dialog's*
+composition. On screens with different scale factors that is off by their ratio — at owner density 2
+and dialog density 1 a 640dp-wide content becomes a 320pt window, which both clips the tab bar and
+over-wraps the content until its height hits the screen cap.
+
+### Ruled out
+
+- **Re-asserting the fitted size more times, or for more frames** — a same-value write is a no-op at
+  two independent layers (see 1 above), so the loop could never actually re-apply anything; it only
+  ever waited for Compose's own asynchronous application to land.
+- **Keeping the bounded loop but breaking later / never** — `withFrameNanos` is driven by the
+  dialog scene's `BroadcastFrameClock`, which only delivers frames while the scene renders. A
+  Settings dialog occluded or minimized to the tray mid-loop would stall it indefinitely.
+- **Re-triggering off the content measurement** — impossible by construction: `requiredWidthIn` /
+  `requiredHeightIn` make the measurement a function of content only. Removing them would reintroduce
+  the stuck-narrow-forever bug they were added to fix.
+
+### How this was resolved
+
+`DialogState.size` is now part of the observed value (`snapshotFlow { capturedContentPx to
+dialogState.size }`), which turns Compose's own mirror-back of every native resize into a drift
+event — for the dialog's whole lifetime, with no polling. Each event recomputes the target from the
+measured content and, if the window does not match, writes `DialogState.size` (the path that packs a
+not-yet-displayable window) *and* pushes the size straight onto the AWT window (which closes the
+same-value no-op hole); `componentResized` then re-syncs Compose's state and re-arms the guard. The
+collector body does not suspend, so it neither depends on the frame clock nor can be re-entered.
+`nextDialogFit` caps corrections per target so a window manager that refuses the geometry cannot
+spin the guard, logging once via `Log.warn` when it gives up rather than failing silently, and only
+re-places the dialog on a target change so a drift correction never yanks a window the user dragged.
+The density is now read inside the dialog's own composition.
+
+The direct push must carry the **size and the position together, as one `setBounds`**
+(`applyWindowGeometry`). A first cut pushed only the size to AWT and left the position to
+`DialogState`, which meant the size landed synchronously and the position a `Channel` hop later
+through `UpdateEffect` — and a frame painted in that gap showed the dialog at its final size but at
+the location AWT gives a freshly constructed `Window`: the screen origin plus the screen insets,
+i.e. the top-left corner, from which it then jumped to the centre. (`java.awt.Window.init` offsets
+the initial location that way; Compose's own `WindowLocationTracker.getCascadeLocationFor` uses the
+same base point.) As with the size, whether a frame lands in the gap is pure scheduling, so this too
+was intermittent.
+
+### Residual limitation
+
+A native resize that never fires `COMPONENT_RESIZED` is invisible to the guard. Nothing short of
+permanent polling could see it, and the Skia scene's own size derives from the same peer event, so
+an extra `onSizeChanged` would buy nothing. Accepted.
