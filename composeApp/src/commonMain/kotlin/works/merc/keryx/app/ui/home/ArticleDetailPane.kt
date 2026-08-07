@@ -7,13 +7,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -24,11 +21,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import io.github.kdroidfilter.webview.request.RequestInterceptor
@@ -42,6 +38,7 @@ import io.github.kdroidfilter.webview.web.rememberWebViewStateWithHTMLData
 import io.github.kdroidfilter.webview.wry.WryWebViewPanel
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
+import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.WindowDragArea
@@ -55,6 +52,9 @@ import works.merc.keryx.app.resources.article_star
 import works.merc.keryx.app.resources.article_unstar
 import works.merc.keryx.app.resources.article_url_copied
 import works.merc.keryx.app.resources.home_no_article_selected
+import works.merc.keryx.app.ui.article.ArticleHtmlTheme
+import works.merc.keryx.app.ui.article.articleNoContentHtml
+import works.merc.keryx.app.ui.article.articlePlaceholderHtml
 import works.merc.keryx.app.ui.article.extractLinks
 import works.merc.keryx.app.ui.article.wrapArticleHtml
 import works.merc.keryx.app.ui.common.KeryxIcon
@@ -64,6 +64,9 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
 
 /** How long the copy button shows its inline ✓ / "copied" state before reverting. */
 private const val COPIED_FEEDBACK_MS = 1500L
+
+/** Semantics test tag on the article reader's container, used to assert its bounds stay fixed across selection changes. */
+internal const val ARTICLE_READER_TEST_TAG = "article-reader"
 
 /**
  * Displays the selected article and provides actions for starring, marking it unread, copying its URL, and opening it in a browser.
@@ -80,11 +83,49 @@ fun ArticleDetailPane(
     copyPulse: Int = 0,
 ) {
     val article by vm.selectedArticle.collectAsStateSafe(null)
-    val current = article
 
-    // Inline "copied" feedback for the toolbar copy button. Kept above the early return (rather than
-    // inside the copy-button block) so the pane never leaves/re-enters composition here — otherwise
-    // LaunchedEffect(copyPulse) would re-fire with a stale pulse value and flash ✓ without a copy.
+    ArticleDetailPaneContent(
+        article = article,
+        modifier = modifier,
+        onActivated = onActivated,
+        copyPulse = copyPulse,
+        onToggleStar = { vm.toggleStarSelected() },
+        onMarkUnread = { vm.markSelectedUnread() },
+    )
+}
+
+/**
+ * The detail pane's Compose shell: a fixed-position toolbar and, under it, the article reader.
+ *
+ * The reader is a **heavyweight native AWT surface** (an OS browser view hosted through
+ * `SwingPanel`), so it is composed unconditionally here — never behind an `if` — regardless of
+ * whether [article] is selected. Compose Desktop's `SwingInteropContainer` runs a
+ * `validate()` + `repaint()` on the *whole window* whenever that surface is added, removed, or
+ * moved, so unmounting it for the "no article selected" state (as this pane used to do) flickers
+ * every pane, not just this one. See `docs/known-issues.md` for the full investigation.
+ *
+ * The corollary is that nothing Compose draws can appear over the reader's content area (the same
+ * heavyweight/lightweight interop limitation that makes the app's dialogs real `DialogWindow`s —
+ * see `ui/common/KeryxDialogs.kt`). The "no article selected" and "no content" messages are
+ * therefore rendered as HTML inside the reader itself, not as `Text` here.
+ *
+ * [reader] defaults to the real [ArticleWebView] and exists as a parameter purely so tests can
+ * substitute a lightweight stub: the real reader is a genuine native OS browser view, which a
+ * Compose UI test's offscreen renderer cannot host.
+ */
+@Composable
+internal fun ArticleDetailPaneContent(
+    article: Articles?,
+    modifier: Modifier = Modifier,
+    onActivated: () -> Unit = {},
+    copyPulse: Int = 0,
+    onToggleStar: () -> Unit = {},
+    onMarkUnread: () -> Unit = {},
+    reader: @Composable (html: String, body: String) -> Unit = { html, body -> ArticleWebView(html, body) },
+) {
+    // Inline "copied" feedback for the toolbar copy button. Kept above any conditional so this
+    // composable never leaves/re-enters composition — otherwise LaunchedEffect(copyPulse) would
+    // re-fire with a stale pulse value and flash ✓ without a copy.
     var showCopied by remember { mutableStateOf(false) }
     LaunchedEffect(showCopied) {
         if (showCopied) {
@@ -96,105 +137,121 @@ fun ArticleDetailPane(
     // feedback here. Initial copyPulse == 0 is skipped; only increments from HomeScreen fire it.
     LaunchedEffect(copyPulse) { if (copyPulse != 0) showCopied = true }
 
-    if (current == null) {
-        Box(
-            modifier
-                .background(MaterialTheme.colorScheme.surface)
-                .fillMaxSize()
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onActivated),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                stringResource(Res.string.home_no_article_selected),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        return
+    val placeholderText = stringResource(Res.string.home_no_article_selected)
+    val noContentText = stringResource(Res.string.article_no_content)
+    val noTitleText = stringResource(Res.string.article_no_title)
+
+    val surface = MaterialTheme.colorScheme.surface
+    val onSurface = MaterialTheme.colorScheme.onSurface
+    val linkColor = MaterialTheme.colorScheme.primary
+    val mutedColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val fontScale = LocalDensity.current.fontScale
+    val theme = remember(surface, onSurface, linkColor, mutedColor, fontScale) {
+        ArticleHtmlTheme(surface, onSurface, linkColor, mutedColor, fontScale)
     }
 
-    val body = current.content ?: current.summary
+    val body = article?.let { it.content ?: it.summary }
+    val title = article?.title?.ifBlank { noTitleText }.orEmpty()
+    val meta = remember(article?.author, article?.published_at) {
+        article?.let { articleMetaText(it.author, it.published_at) }.orEmpty()
+    }
+
+    val html = remember(theme, article?.id, title, meta, body, placeholderText, noContentText) {
+        when {
+            article == null -> articlePlaceholderHtml(theme, placeholderText)
+            body.isNullOrBlank() -> articleNoContentHtml(theme, title, meta, noContentText)
+            else -> wrapArticleHtml(theme, title, meta, body)
+        }
+    }
 
     Column(
         modifier
-            .background(MaterialTheme.colorScheme.surface)
+            .background(surface)
             .fillMaxSize()
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onActivated),
     ) {
         WindowDragArea(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.End,
-        ) {
-            ToolbarIconGroup {
-                val starred = current.is_starred == 1L
-                val starTooltip = stringResource(if (starred) Res.string.article_unstar else Res.string.article_star)
-                TooltipIconButton(tooltip = starTooltip, onClick = { vm.toggleStarSelected() }) {
-                    KeryxIcon(
-                        if (starred) KeryxIcons.Star else KeryxIcons.StarBorder,
-                        contentDescription = starTooltip,
-                        tint = if (starred) StarredColor else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                val markUnreadTooltip = stringResource(Res.string.article_mark_as_unread)
-                TooltipIconButton(tooltip = markUnreadTooltip, onClick = { vm.markSelectedUnread() }) {
-                    KeryxIcon(KeryxIcons.Circle, contentDescription = markUnreadTooltip)
-                }
-                if (current.url.isNotBlank()) {
-                    val clipboard = LocalClipboard.current
-                    val scope = rememberCoroutineScope()
-                    val copyUrlTooltip = stringResource(
-                        if (showCopied) Res.string.article_url_copied else Res.string.article_copy_url,
-                    )
-                    TooltipIconButton(
-                        tooltip = copyUrlTooltip,
-                        onClick = {
-                            scope.launch {
-                                clipboard.setClipEntry(ClipboardEntries.ofText(current.url))
-                                showCopied = true
-                            }
-                        },
-                    ) {
-                        KeryxIcon(
-                            if (showCopied) KeryxIcons.CheckOutlined else KeryxIcons.ContentCopy,
-                            contentDescription = copyUrlTooltip,
-                        )
-                    }
-                    val openInBrowserTooltip = stringResource(Res.string.article_open_in_browser)
-                    TooltipIconButton(tooltip = openInBrowserTooltip, onClick = { BrowserOpener.open(current.url) }) {
-                        KeryxIcon(KeryxIcons.PublicOutlined, contentDescription = openInBrowserTooltip)
-                    }
-                }
-            }
+            ArticleDetailToolbar(
+                article = article,
+                showCopied = showCopied,
+                onToggleStar = onToggleStar,
+                onMarkUnread = onMarkUnread,
+                onCopied = { showCopied = true },
+            )
         }
+        Box(Modifier.fillMaxSize().testTag(ARTICLE_READER_TEST_TAG)) {
+            reader(html, body.orEmpty())
         }
+    }
+}
 
-        val title = current.title.ifBlank { stringResource(Res.string.article_no_title) }
-        val meta = articleMetaText(current.author, current.published_at)
+/**
+ * The detail pane's action toolbar. Always renders all four actions — star, mark unread, copy
+ * URL, open in browser — rather than hiding them when [article] is `null`, per the "prefer
+ * disabled over hidden" rule in `.claude/skills/ui-guidelines/SKILL.md`: with an unconditional
+ * toolbar shape, the reader beneath it (see [ArticleDetailPaneContent]) never has to move.
+ *
+ * The copy/open-in-browser pair keeps its pre-existing behavior of disappearing entirely for a
+ * selected article with a blank URL (unrelated to article selection, so left untouched), and is
+ * additionally shown-but-disabled specifically for the no-selection case.
+ */
+@Composable
+private fun ArticleDetailToolbar(
+    article: Articles?,
+    showCopied: Boolean,
+    onToggleStar: () -> Unit,
+    onMarkUnread: () -> Unit,
+    onCopied: () -> Unit,
+) {
+    val hasArticle = article != null
+    val starred = article?.is_starred == 1L
+    val url = article?.url.orEmpty()
+    val copyOpenVisible = article == null || url.isNotBlank()
+    val copyOpenEnabled = hasArticle && url.isNotBlank()
 
-        if (body.isNullOrBlank()) {
-            // No article body to scroll, so the reserved-height problem doesn't apply here — keep
-            // the lightweight Compose header + "no content" text rather than spinning up a native
-            // WebView just to render a single line.
-            Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 16.dp)) {
-                Text(title, style = MaterialTheme.typography.headlineSmall)
-                Spacer(Modifier.height(6.dp))
-                ArticleDetailMetaLine(current.author, current.published_at)
-            }
-            Box(Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
-                Text(stringResource(Res.string.article_no_content), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        } else {
-            // Title + meta live inside the WebView HTML so they scroll away with the body; the
-            // content area then uses the full pane height regardless of how long the title is.
-            Box(Modifier.fillMaxSize()) {
-                ArticleWebView(
-                    articleId = current.id,
-                    title = title,
-                    meta = meta,
-                    body = body,
-                    mutedColor = MaterialTheme.colorScheme.onSurfaceVariant,
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.End,
+    ) {
+        ToolbarIconGroup {
+            val starTooltip = stringResource(if (starred) Res.string.article_unstar else Res.string.article_star)
+            TooltipIconButton(tooltip = starTooltip, onClick = onToggleStar, enabled = hasArticle) {
+                KeryxIcon(
+                    if (starred) KeryxIcons.Star else KeryxIcons.StarBorder,
+                    contentDescription = starTooltip,
+                    tint = if (starred) StarredColor else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            val markUnreadTooltip = stringResource(Res.string.article_mark_as_unread)
+            TooltipIconButton(tooltip = markUnreadTooltip, onClick = onMarkUnread, enabled = hasArticle) {
+                KeryxIcon(KeryxIcons.Circle, contentDescription = markUnreadTooltip)
+            }
+            if (copyOpenVisible) {
+                val clipboard = LocalClipboard.current
+                val scope = rememberCoroutineScope()
+                val copyUrlTooltip = stringResource(
+                    if (showCopied) Res.string.article_url_copied else Res.string.article_copy_url,
+                )
+                TooltipIconButton(
+                    tooltip = copyUrlTooltip,
+                    enabled = copyOpenEnabled,
+                    onClick = {
+                        scope.launch {
+                            clipboard.setClipEntry(ClipboardEntries.ofText(url))
+                            onCopied()
+                        }
+                    },
+                ) {
+                    KeryxIcon(
+                        if (showCopied) KeryxIcons.CheckOutlined else KeryxIcons.ContentCopy,
+                        contentDescription = copyUrlTooltip,
+                    )
+                }
+                val openInBrowserTooltip = stringResource(Res.string.article_open_in_browser)
+                TooltipIconButton(tooltip = openInBrowserTooltip, enabled = copyOpenEnabled, onClick = { BrowserOpener.open(url) }) {
+                    KeryxIcon(KeryxIcons.PublicOutlined, contentDescription = openInBrowserTooltip)
+                }
             }
         }
     }
@@ -214,68 +271,21 @@ internal fun articleMetaText(author: String?, publishedAt: Long?): String =
         .joinToString(" · ")
 
 /**
- * Displays the article author and publication time as inline metadata.
+ * Displays a prebuilt HTML [html] document in a native web view.
  *
- * Blank authors and unavailable publication times are omitted. Long author text is ellipsized while
- * preserving the publication time.
- *
- * @param author The article's author, if available.
- * @param publishedAt The article's publication time in Unix milliseconds, if available.
+ * [html] is the complete, already-themed document to render (built by
+ * [works.merc.keryx.app.ui.article.wrapArticleHtml] or one of its sibling builders); this
+ * composable only owns the native WebView lifecycle. [body] is the raw article body HTML (not
+ * the wrapped document) used to decide which link clicks should escape to the system browser.
  */
 @Composable
-internal fun ArticleDetailMetaLine(author: String?, publishedAt: Long?, modifier: Modifier = Modifier) {
-    val authorText = author?.takeIf { it.isNotBlank() }
-    val timestamp = formatTimestamp(publishedAt)
-    val color = MaterialTheme.colorScheme.onSurfaceVariant
-    Row(modifier.fillMaxWidth()) {
-        if (authorText != null) {
-            Text(
-                authorText,
-                style = MaterialTheme.typography.labelMedium,
-                color = color,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-        }
-        if (timestamp.isNotEmpty()) {
-            Text(
-                if (authorText == null) timestamp else " · $timestamp",
-                style = MaterialTheme.typography.labelMedium,
-                color = color,
-                maxLines = 1,
-            )
-        }
-    }
-}
-
-/**
- * Displays an article's HTML content in a native web view.
- *
- * @param articleId The identifier of the article being displayed.
- * @param title The article title.
- * @param meta Metadata displayed with the article.
- * @param body The article HTML content.
- * @param mutedColor The color used for muted article text.
- */
-@Composable
-private fun ArticleWebView(articleId: String, title: String, meta: String, body: String, mutedColor: Color) {
-    val surface = MaterialTheme.colorScheme.surface
-    val onSurface = MaterialTheme.colorScheme.onSurface
-    val linkColor = MaterialTheme.colorScheme.primary
-    val fontScale = LocalDensity.current.fontScale
-
-    val wrappedHtml = remember(articleId, body, surface, onSurface, linkColor, fontScale, title, meta, mutedColor) {
-        wrapArticleHtml(body, surface, onSurface, linkColor, fontScale, title, meta, mutedColor)
-    }
-
+private fun ArticleWebView(html: String, body: String) {
     // Only genuine outbound links from the article's own HTML are forwarded to the system
     // browser. A plain "any http(s) main-frame request" check would also catch SNS-embed
     // widgets' own internal requests (confirmed during the spike for the X/Twitter widget),
-    // breaking the embed instead of letting it render in place. Title/meta carry no links, so
-    // this stays keyed on the body only.
+    // breaking the embed instead of letting it render in place.
     val knownLinks = remember { mutableStateOf(emptySet<String>()) }
-    LaunchedEffect(articleId, body) {
+    LaunchedEffect(body) {
         knownLinks.value = extractLinks(body)
     }
     val scope = rememberCoroutineScope()
@@ -292,16 +302,19 @@ private fun ArticleWebView(articleId: String, title: String, meta: String, body:
         }
     }
     val navigator = rememberWebViewNavigator(scope, interceptor)
-    val webViewState = rememberWebViewStateWithHTMLData(data = wrappedHtml)
+    val webViewState = rememberWebViewStateWithHTMLData(data = html)
 
     // Workaround: this (beta) library's rememberWebViewStateWithHTMLData doesn't reliably
     // navigate past its initial "about:blank" on desktop — confirmed during the spike. Push
-    // the HTML manually once the WebView reports it's idle.
-    val loadedForArticleId = remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(webViewState.loadingState, articleId, wrappedHtml) {
-        if (webViewState.loadingState is LoadingState.Finished && loadedForArticleId.value != articleId) {
-            loadedForArticleId.value = articleId
-            navigator.loadHtml(wrappedHtml)
+    // the HTML manually once the WebView reports it's idle. Guarded on the rendered *document*
+    // rather than an article id: this one WebView also renders the "no article selected"
+    // placeholder and the "no content" notice, which have no article id, and comparing the HTML
+    // also picks up a theme/font-scale change for an otherwise-unchanged article.
+    val loadedHtml = remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(webViewState.loadingState, html) {
+        if (shouldLoadArticleHtml(webViewState.loadingState, loadedHtml.value, html)) {
+            loadedHtml.value = html
+            navigator.loadHtml(html)
         }
     }
 
@@ -337,3 +350,12 @@ private fun ArticleWebView(articleId: String, title: String, meta: String, body:
         },
     )
 }
+
+/**
+ * Whether the pending [html] document still needs to be pushed to the WebView, given the last
+ * document pushed ([loadedHtml]) and the view's [loadingState]. Compared by document rather than
+ * by article id: the placeholder and the "no content" notice share the same WebView, and a
+ * theme or font-scale change produces a new document for an otherwise-unchanged article.
+ */
+internal fun shouldLoadArticleHtml(loadingState: LoadingState, loadedHtml: String?, html: String): Boolean =
+    loadingState is LoadingState.Finished && loadedHtml != html

@@ -6,6 +6,14 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class ArticleWebViewHtmlTest {
+    private val theme = ArticleHtmlTheme(
+        surface = Color(1f, 1f, 1f),
+        onSurface = Color(0f, 0f, 0f),
+        linkColor = Color(0f, 0f, 1f),
+        mutedColor = Color(0.5f, 0.5f, 0.5f),
+        fontScale = 1.0f,
+    )
+
     @Test
     fun extractLinksReturnsEmptySetWhenNoLinks() {
         assertEquals(emptySet(), extractLinks("<p>no links here</p>"))
@@ -44,31 +52,14 @@ class ArticleWebViewHtmlTest {
     @Test
     fun wrapArticleHtmlContainsBodyUnchanged() {
         val body = "<p>hello & world</p>"
-        val result = wrapArticleHtml(
-            body = body,
-            surface = Color(1f, 1f, 1f),
-            onSurface = Color(0f, 0f, 0f),
-            linkColor = Color(0f, 0f, 1f),
-            fontScale = 1.0f,
-            title = "",
-            meta = "",
-            mutedColor = Color(0.5f, 0.5f, 0.5f),
-        )
+        val result = wrapArticleHtml(theme, title = "", meta = "", body = body)
         assertTrue(result.contains(body))
     }
 
     @Test
     fun wrapArticleHtmlContainsExpectedColorsAndFontSize() {
-        val result = wrapArticleHtml(
-            body = "<p>body</p>",
-            surface = Color(1f, 1f, 1f),
-            onSurface = Color(0f, 0f, 0f),
-            linkColor = Color(1f, 0f, 0f),
-            fontScale = 1.5f,
-            title = "",
-            meta = "",
-            mutedColor = Color(0.5f, 0.5f, 0.5f),
-        )
+        val customTheme = theme.copy(linkColor = Color(1f, 0f, 0f), fontScale = 1.5f)
+        val result = wrapArticleHtml(customTheme, title = "", meta = "", body = "<p>body</p>")
         assertTrue(result.contains("background-color: #ffffff;"))
         assertTrue(result.contains("color: #000000;"))
         assertTrue(result.contains("a { color: #ff0000; }"))
@@ -77,30 +68,17 @@ class ArticleWebViewHtmlTest {
 
     @Test
     fun wrapArticleHtmlComputesFontPercentForDefaultScale() {
-        val result = wrapArticleHtml(
-            body = "<p>body</p>",
-            surface = Color(1f, 1f, 1f),
-            onSurface = Color(0f, 0f, 0f),
-            linkColor = Color(0f, 0f, 0f),
-            fontScale = 1.0f,
-            title = "",
-            meta = "",
-            mutedColor = Color(0.5f, 0.5f, 0.5f),
-        )
+        val result = wrapArticleHtml(theme, title = "", meta = "", body = "<p>body</p>")
         assertTrue(result.contains("font-size: 100%;"))
     }
 
     @Test
     fun wrapArticleHtmlRendersEscapedTitleAndMeta() {
         val result = wrapArticleHtml(
-            body = "<p>body</p>",
-            surface = Color(1f, 1f, 1f),
-            onSurface = Color(0f, 0f, 0f),
-            linkColor = Color(0f, 0f, 0f),
-            fontScale = 1.0f,
+            theme,
             title = "A <b> & \"quoted\" title",
             meta = "Alice · 2026-07-13 09:00",
-            mutedColor = Color(0.5f, 0.5f, 0.5f),
+            body = "<p>body</p>",
         )
         assertTrue(result.contains("""<h1 class="article-title">A &lt;b&gt; &amp; &quot;quoted&quot; title</h1>"""))
         assertTrue(result.contains("""<div class="article-meta">Alice · 2026-07-13 09:00</div>"""))
@@ -112,19 +90,60 @@ class ArticleWebViewHtmlTest {
 
     @Test
     fun wrapArticleHtmlOmitsTitleAndMetaWhenBlank() {
-        val result = wrapArticleHtml(
-            body = "<p>body</p>",
-            surface = Color(1f, 1f, 1f),
-            onSurface = Color(0f, 0f, 0f),
-            linkColor = Color(0f, 0f, 0f),
-            fontScale = 1.0f,
-            title = "",
-            meta = "",
-            mutedColor = Color(0.5f, 0.5f, 0.5f),
-        )
+        val result = wrapArticleHtml(theme, title = "", meta = "", body = "<p>body</p>")
         // The CSS rules for these classes are always present; assert the *elements* aren't emitted.
         assertTrue(!result.contains("""<h1 class="article-title">"""))
         assertTrue(!result.contains("""<div class="article-meta">"""))
+    }
+
+    @Test
+    fun articlePlaceholderHtmlRendersOnlyTheCenteredEscapedMessage() {
+        val result = articlePlaceholderHtml(theme, "Select <an> article & read it")
+        assertTrue(result.contains("""<div class="article-placeholder">Select &lt;an&gt; article &amp; read it</div>"""))
+        assertTrue(!result.contains("""<h1 class="article-title">"""))
+        assertTrue(!result.contains("""<div class="article-meta">"""))
+        assertTrue(!result.contains("<an>"))
+    }
+
+    @Test
+    fun articleNoContentHtmlRendersHeaderAboveTheEscapedNotice() {
+        val result = articleNoContentHtml(theme, title = "My Title", meta = "Alice · now", message = "No <b>content</b>")
+        val titleIndex = result.indexOf("""<h1 class="article-title">My Title</h1>""")
+        val metaIndex = result.indexOf("""<div class="article-meta">Alice · now</div>""")
+        val noticeIndex = result.indexOf("""<p class="article-notice">No &lt;b&gt;content&lt;/b&gt;</p>""")
+        assertTrue(titleIndex >= 0 && metaIndex >= 0 && noticeIndex >= 0)
+        assertTrue(titleIndex < metaIndex)
+        assertTrue(metaIndex < noticeIndex)
+        assertTrue(!result.contains("<b>content</b>"))
+    }
+
+    @Test
+    fun everyDocumentPaintsTheThemeBackgroundAndFontScale() {
+        val scaledTheme = theme.copy(fontScale = 1.5f)
+        val documents = listOf(
+            wrapArticleHtml(scaledTheme, title = "", meta = "", body = "<p>body</p>"),
+            articleNoContentHtml(scaledTheme, title = "", meta = "", message = "empty"),
+            articlePlaceholderHtml(scaledTheme, "placeholder"),
+        )
+        for (document in documents) {
+            assertTrue(document.contains("background-color: #ffffff;"))
+            assertTrue(document.contains("color: #000000;"))
+            assertTrue(document.contains("font-size: 150%;"))
+        }
+    }
+
+    @Test
+    fun everyDocumentSharesTheSameStyleBlock() {
+        fun styleBlockOf(document: String): String {
+            val start = document.indexOf("<style>")
+            val end = document.indexOf("</style>") + "</style>".length
+            return document.substring(start, end)
+        }
+        val a = styleBlockOf(wrapArticleHtml(theme, title = "", meta = "", body = "<p>body</p>"))
+        val b = styleBlockOf(articleNoContentHtml(theme, title = "", meta = "", message = "empty"))
+        val c = styleBlockOf(articlePlaceholderHtml(theme, "placeholder"))
+        assertEquals(a, b)
+        assertEquals(b, c)
     }
 
     @Test
