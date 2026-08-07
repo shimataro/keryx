@@ -40,6 +40,11 @@ data class NativeSubMenu(override val label: String, val items: List<NativeMenuL
  * still change when the underlying data it reflects changes (e.g. the user
  * adds a folder), which is handled by rebuilding the native menu.
  *
+ * [items] is only evaluated when a right-click actually happens — the native
+ * widgets are built lazily on that first click, never on composition. Adding
+ * this modifier to a `LazyColumn` row therefore costs nothing until the user
+ * opens the menu on that row.
+ *
  * [onOpen] is invoked right before the menu is shown; callers typically use it
  * to select the right-clicked row, so right-click behaves like left-click
  * selection. If [items] is empty, no menu is shown and [onOpen] is the only
