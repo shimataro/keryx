@@ -22,6 +22,7 @@ import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
+import works.merc.keryx.app.CountingSqlDriver
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFolder
@@ -256,6 +257,36 @@ class FeedRepositoryTest {
             assertIs<Result.Ok<Int>>(result)
             val updated = db.feedsQueries.getById(feed.id).executeAsOne()
             assertEquals("etag-2", updated.etag)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * The article-list query joins `feeds`, so SQLDelight re-runs it on every `feeds` write. A
+     * steady-state refresh — same etag, same title/description, no error to clear — must therefore
+     * not write the row at all; it used to issue three unconditional UPDATEs per feed, and
+     * `refreshAll` multiplies that by the subscription count.
+     */
+    @Test
+    fun refreshFeedWritesNothingWhenTheFetchChangesNoFeedColumn(): Unit = runBlocking {
+        val (rawDriver, _) = inMemoryDb()
+        val driver = CountingSqlDriver(rawDriver)
+        val db = works.merc.keryx.app.data.local.db.KeryxDatabase(driver)
+        try {
+            val headers = headersOf(HttpHeaders.ETag, "etag-1")
+            newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK, headers) })
+                .subscribeFeed("https://ex.com/feed")
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+            // A first refresh settles any column the subscribe path left unset (e.g. site_url).
+            newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK, headers) })
+                .refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne())
+
+            val before = driver.feedUpdates
+            newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK, headers) })
+                .refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne())
+
+            assertEquals(before, driver.feedUpdates, "an unchanged refresh must not write `feeds`")
         } finally {
             driver.close()
         }

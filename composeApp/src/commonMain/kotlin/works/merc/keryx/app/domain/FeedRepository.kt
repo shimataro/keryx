@@ -277,7 +277,14 @@ fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
             }
         }
 
-        feeds.resetErrorCount(clock.nowMillis(), feed.id)
+        // Each `feeds` write below is guarded on the value actually changing. SQLDelight notifies
+        // listeners per table, and the article-list query joins `feeds` (so it is registered against
+        // both tables) — an unconditional write therefore re-runs the whole list query even when the
+        // feed's row is identical to what is already stored. A steady-state refresh of an unchanged
+        // feed used to issue three such writes per feed; now it issues none.
+        if (feed.error_count != 0L || feed.last_error != null) {
+            feeds.resetErrorCount(clock.nowMillis(), feed.id)
+        }
 
         if (feed.favicon_url.isNullOrEmpty()) {
             phase.resolvedFavicon?.let {
@@ -285,7 +292,9 @@ fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
             }
         }
 
-        feeds.updateCacheHeaders(fetched.etag, fetched.lastModified, clock.nowMillis(), feed.id)
+        if (fetched.etag != feed.etag || fetched.lastModified != feed.last_modified) {
+            feeds.updateCacheHeaders(fetched.etag, fetched.lastModified, clock.nowMillis(), feed.id)
+        }
 
         if (fetched.title != null || fetched.description != null) {
             // Refresh only writes the content columns it owns. It must NOT touch deleted_at /
@@ -293,13 +302,18 @@ fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
             // stale for the whole concurrent-fetch phase, so writing those back would revert a
             // concurrent unsubscribe / reorder / rename (and resurrect a just-deleted feed). Those
             // fields are handled by their own dedicated statements or left to the user's edits.
-            feeds.updateContent(
-                site_url = fetched.siteUrl ?: feed.site_url,
-                title = fetched.title ?: feed.title,
-                description = fetched.description ?: feed.description,
-                updated_at = clock.nowMillis(),
-                id = feed.id,
-            )
+            val siteUrl = fetched.siteUrl ?: feed.site_url
+            val title = fetched.title ?: feed.title
+            val description = fetched.description ?: feed.description
+            if (siteUrl != feed.site_url || title != feed.title || description != feed.description) {
+                feeds.updateContent(
+                    site_url = siteUrl,
+                    title = title,
+                    description = description,
+                    updated_at = clock.nowMillis(),
+                    id = feed.id,
+                )
+            }
         }
 
         if (fetched.redirectUrl != null && fetched.redirectUrl != feed.url) {

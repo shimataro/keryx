@@ -28,6 +28,14 @@ class CountingSqlDriver(private val delegate: SqlDriver) : SqlDriver {
     var listQueryExecutions = 0
         private set
 
+    /**
+     * How many `UPDATE feeds` statements were executed. The article-list query is registered against
+     * `feeds` as well as `articles` (it joins them), so every feeds write re-runs it — which is why
+     * a refresh that changes nothing must not write.
+     */
+    var feedUpdates = 0
+        private set
+
     override fun <R> executeQuery(
         identifier: Int?,
         sql: String,
@@ -47,7 +55,10 @@ class CountingSqlDriver(private val delegate: SqlDriver) : SqlDriver {
         sql: String,
         parameters: Int,
         binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
-    ) = delegate.execute(identifier, sql, parameters, binders)
+    ): app.cash.sqldelight.db.QueryResult<Long> {
+        if (sql.startsWith("UPDATE feeds")) feedUpdates++
+        return delegate.execute(identifier, sql, parameters, binders)
+    }
 
     /**
  * Starts a new database transaction.
