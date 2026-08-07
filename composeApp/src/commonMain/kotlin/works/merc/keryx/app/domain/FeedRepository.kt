@@ -292,7 +292,10 @@ fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
             }
         }
 
-        if (fetched.etag != feed.etag || fetched.lastModified != feed.last_modified) {
+        // A 304 carries no validators, so writing them back would erase the ones that produced it.
+        if (!fetched.notModified &&
+            (fetched.etag != feed.etag || fetched.lastModified != feed.last_modified)
+        ) {
             feeds.updateCacheHeaders(fetched.etag, fetched.lastModified, clock.nowMillis(), feed.id)
         }
 

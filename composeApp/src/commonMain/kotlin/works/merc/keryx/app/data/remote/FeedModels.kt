@@ -22,4 +22,12 @@ data class FetchedFeed(
     /** Set when the subscription URL should be permanently updated (301/308). */
     val redirectUrl: String? = null,
     val articles: List<ParsedArticle> = emptyList(),
+    /**
+     * True when the server answered 304 Not Modified, i.e. every other field is absent because
+     * there was nothing to send — not because the feed stopped providing it. Callers must leave the
+     * stored `etag` / `last_modified` alone in that case: overwriting them with these nulls drops
+     * the validators, so the next request carries no `If-None-Match` / `If-Modified-Since` and the
+     * server has to send the whole feed again.
+     */
+    val notModified: Boolean = false,
 )

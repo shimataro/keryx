@@ -78,7 +78,7 @@ class FeedFetcher(
         val status = response.status.value
 
         when (status) {
-            304 -> return Result.Ok(FetchedFeed())
+            304 -> return Result.Ok(FetchedFeed(notModified = true))
             in permanentRedirects -> {
                 val target = resolveLocation(response.headers["location"], url)
                     ?: return Result.Err(FeedFetchException("$status without Location header"))

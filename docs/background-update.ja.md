@@ -42,6 +42,15 @@ while (true) {
 `FeedFetcher` は `If-None-Match`（ETag）/ `If-Modified-Since`（Last-Modified）を送り、304 なら
 新着なしとして空を返す。更新後の ETag / Last-Modified は `feeds` テーブルに保存する。
 
+304 応答は `FetchedFeed.notModified` で区別され、`FeedRepository` は保存済みの検証子を書き換えない。
+このフラグがないと、304 の空の結果は「検証子を送らなくなったフィード」と区別できず、そのまま書き戻すと
+`etag` / `last_modified` が NULL になる。すると次回は条件付きヘッダを送れずサーバが全文を返すため、
+1回おきに仕組みが無効化されていた。
+
+更新経路の `feeds` への書き込みはすべて「実際に値が変わったとき」だけに絞ってある。記事一覧クエリは
+`feeds` を結合しているので、SQLDelight は `feeds` への書き込みのたびにこれを再実行する。何も変わらない
+更新では書き込みも再クエリも発生しない。
+
 `FeedRepository.refreshAll` は各フィードのネットワーク取得を**並行**（同時取得数を
 `REFRESH_FETCH_CONCURRENCY` で上限）で行い、その後で各フィードの DB 書き込みをフィード順に
 **直列**で適用する。そのため購読数が多くても、更新にかかる時間は「全取得の合計」ではなく

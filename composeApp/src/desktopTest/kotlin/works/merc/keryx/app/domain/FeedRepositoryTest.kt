@@ -292,6 +292,32 @@ class FeedRepositoryTest {
         }
     }
 
+    /**
+     * A 304 means "your validators are still current", but the fetcher can only answer it with an
+     * otherwise-empty [works.merc.keryx.app.data.remote.FetchedFeed]. Writing that back used to
+     * NULL out `etag` / `last_modified`, so the *next* refresh sent no `If-None-Match` and the
+     * server had to return the whole feed — the conditional-request mechanism defeated itself on
+     * every other poll.
+     */
+    @Test
+    fun refreshFeedKeepsStoredValidatorsWhenTheServerAnswers304(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val etag = headersOf(HttpHeaders.ETag, "etag-1")
+            newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK, etag) })
+                .subscribeFeed("https://ex.com/feed")
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+            assertEquals("etag-1", feed.etag)
+
+            newRepo(db, driver, fetcherWith { respond("", HttpStatusCode.NotModified) })
+                .refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne())
+
+            assertEquals("etag-1", db.feedsQueries.getById(feed.id).executeAsOne().etag)
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun refreshFeedMakesNewArticleImmediatelySearchableWithoutManualRebuild(): Unit = runBlocking {
         val (driver, db) = inMemoryDb()
