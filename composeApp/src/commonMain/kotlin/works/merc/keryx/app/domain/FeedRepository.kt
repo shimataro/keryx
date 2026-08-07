@@ -280,7 +280,10 @@ fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
         // CPU-heavy preparation stays outside the transaction below, so it doesn't hold the write
         // lock (the same reason upsertParsed precomputes before opening its own transaction).
         val prepared = articleRepository.prepareParsed(feed.id, fetched.articles)
-        val urlChanged = fetched.redirectUrl != null && fetched.redirectUrl != feed.url
+        // The target itself rather than a boolean: the write below and the notification after the
+        // commit both need the value, and carrying it keeps its non-nullness with it at both sites.
+        // Non-null exactly when the fetch reported a permanent redirect somewhere we are not already.
+        val redirectTarget = fetched.redirectUrl?.takeIf { it != feed.url }
 
         // One transaction for this feed's whole apply phase. SQLDelight defers notifyQueries to the
         // outermost commit, so the feed's writes and its article upsert produce a single round of
@@ -330,8 +333,8 @@ fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
                 }
             }
 
-            if (urlChanged) {
-                feeds.updateUrl(fetched.redirectUrl!!, clock.nowMillis(), feed.id)
+            if (redirectTarget != null) {
+                feeds.updateUrl(redirectTarget, clock.nowMillis(), feed.id)
             }
 
             articleRepository.insertPrepared(prepared)
@@ -339,7 +342,7 @@ fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
 
         // Notifications are emitted after the commit: `notify` suspends, which a transaction block
         // cannot host, and a listener must not observe a half-applied feed anyway.
-        if (urlChanged) {
+        if (redirectTarget != null) {
             notify(
                 messages.feedUrlChanged(feed.displayTitle()),
                 AppNotificationLevel.WARNING,
