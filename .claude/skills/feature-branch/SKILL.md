@@ -11,6 +11,8 @@ Ensure the repository is on a feature branch before making commits.
 git branch --show-current
 ```
 
+- If the output is **empty** (detached `HEAD`), proceed straight to Step 2 — there is no
+  existing feature branch to already be on.
 - If the current branch is **not** a version branch (`v*` — e.g. `v0`, `v1`), output:
 
   ```text
@@ -39,6 +41,17 @@ Example for `/feature-branch feat "add drag-and-drop reordering"`:
 2. `feat/feed-list-drag-reorder`
 3. `feat/drag-and-drop`
 
+For each candidate, check whether a local branch of that name already exists:
+
+```bash
+git rev-parse --verify --quiet refs/heads/<candidate>
+```
+
+Drop any candidate that already exists and generate a replacement (e.g. append `-2`, `-3`, ... to
+the summary) so every candidate presented in Step 3 is actually available. This matters most for
+a generic, hint-less invocation (e.g. `/feature-branch fix`), where repeated runs would otherwise
+keep deriving the same generic candidate.
+
 ## Step 3 — Prompt for selection
 
 Present the candidates via `AskUserQuestion` with an additional **"Other"** option so the user can type their own. Include a brief explanation of why a feature branch is needed (per `.claude/CLAUDE.md` "Branching").
@@ -47,15 +60,36 @@ Present the candidates via `AskUserQuestion` with an additional **"Other"** opti
 
 If the user picks a candidate (or supplies their own via "Other"):
 
-1. Create and switch to the branch immediately:
+1. Validate the name:
 
    ```bash
-   git switch -c <name>
+   git check-ref-format --branch "<name>"
+   ```
+
+   If this fails, or the name does not match the repo convention `<type>/<kebab-summary>`
+   (`<type>` one of the Conventional Commits types listed in Step 2, `<kebab-summary>` lower-case
+   kebab-case), explain why and re-prompt via `AskUserQuestion` for a corrected name instead of
+   proceeding.
+
+2. Check for a collision:
+
+   ```bash
+   git rev-parse --verify --quiet refs/heads/<name>
+   ```
+
+   If it already exists (exit code `0`), tell the user and re-prompt via `AskUserQuestion` — do
+   not silently overwrite it or let `git switch -c` fail. This also covers an "Other" name, which
+   bypasses the Step 2 pre-filtering.
+
+3. Create and switch to the branch:
+
+   ```bash
+   git switch -c "<name>"
    ```
 
    This carries any staged/unstaged changes along (no stash needed).
 
-2. Output a confirmation:
+4. Output a confirmation:
 
    ```text
    Switched to a new branch '<name>'.
