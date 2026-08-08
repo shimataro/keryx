@@ -52,6 +52,8 @@ sealed interface OpmlResult {
     data class Imported(val added: Int, val failed: Int) : OpmlResult
     data object Exported : OpmlResult
     data object Cancelled : OpmlResult
+    data object ExportFailed : OpmlResult
+    data object ImportFailed : OpmlResult
 }
 
 class SettingsViewModel(
@@ -313,8 +315,12 @@ fun setThemeMode(mode: String) = update { it.copy(themeMode = mode) }
                     opmlResult = OpmlResult.Cancelled
                     return@launch
                 }
-                withContext(dispatcher) { FileIO.writeText(path, buildOpmlDocument()) }
-                opmlResult = OpmlResult.Exported
+                opmlResult = try {
+                    withContext(dispatcher) { FileIO.writeText(path, buildOpmlDocument()) }
+                    OpmlResult.Exported
+                } catch (e: Throwable) {
+                    OpmlResult.ExportFailed
+                }
             } finally {
                 exportingOpml = false
             }
@@ -365,12 +371,12 @@ fun setThemeMode(mode: String) = update { it.copy(themeMode = mode) }
                     opmlResult = OpmlResult.Cancelled
                     return@launch
                 }
-                val outcome = withContext(dispatcher) { FileIO.readText(path)?.let { opmlImporter.import(it) } }
-                if (outcome == null) {
-                    opmlResult = OpmlResult.Cancelled
-                    return@launch
+                opmlResult = try {
+                    val outcome = withContext(dispatcher) { FileIO.readText(path)?.let { opmlImporter.import(it) } }
+                    if (outcome == null) OpmlResult.ImportFailed else OpmlResult.Imported(outcome.added, outcome.failed)
+                } catch (e: Throwable) {
+                    OpmlResult.ImportFailed
                 }
-                opmlResult = OpmlResult.Imported(outcome.added, outcome.failed)
             } finally {
                 importingOpml = false
             }

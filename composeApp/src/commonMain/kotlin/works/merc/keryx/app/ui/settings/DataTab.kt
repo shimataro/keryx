@@ -34,8 +34,10 @@ import works.merc.keryx.app.resources.settings_data_management
 import works.merc.keryx.app.resources.settings_days30
 import works.merc.keryx.app.resources.settings_days7
 import works.merc.keryx.app.resources.settings_days90
+import works.merc.keryx.app.resources.settings_export_error
 import works.merc.keryx.app.resources.settings_export_opml
 import works.merc.keryx.app.resources.settings_export_success
+import works.merc.keryx.app.resources.settings_import_error
 import works.merc.keryx.app.resources.settings_import_opml
 import works.merc.keryx.app.resources.settings_read_timeout
 import works.merc.keryx.app.resources.settings_seconds10
@@ -60,6 +62,8 @@ internal fun DataTabContent(vm: SettingsViewModel) {
         opmlStatus = when (val r = vm.opmlResult) {
             is OpmlResult.Exported -> getString(Res.string.settings_export_success)
             is OpmlResult.Imported -> opmlImportedText(r.added, r.failed)
+            OpmlResult.ExportFailed -> getString(Res.string.settings_export_error)
+            OpmlResult.ImportFailed -> getString(Res.string.settings_import_error)
             OpmlResult.Cancelled, null -> opmlStatus
         }
         vm.clearOpmlResult()

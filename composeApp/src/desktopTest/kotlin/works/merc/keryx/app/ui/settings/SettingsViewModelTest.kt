@@ -7,6 +7,7 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpStatusCode
+import java.io.File
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -185,7 +186,7 @@ class SettingsViewModelTest {
         createdSyncScopes.clear()
         Dispatchers.resetMain()
         driver.close()
-        FileIO.delete(FileIO.join(dir, "local_settings.json"))
+        File(dir).deleteRecursively()
     }
 
     private fun failingFetcher(): FeedFetcher {
@@ -803,6 +804,19 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun exportOpmlReportsFailedWhenTheWriteThrows() = runTest {
+        val blockingFile = FileIO.join(dir, "not-a-directory")
+        FileIO.writeText(blockingFile, "x")
+        val path = FileIO.join(blockingFile, "export.opml")
+        val vm = newViewModel(fileSelector = FakeFileSelector(savePath = path))
+
+        vm.exportOpml()
+
+        awaitTrue { vm.opmlResult != null }
+        assertEquals(OpmlResult.ExportFailed, vm.opmlResult)
+    }
+
+    @Test
     fun importOpmlSubscribesEveryFeedInThePickedFile() = runTest {
         val xml = """<opml><body><outline text="Feed" xmlUrl="https://ex.com/feed"/></body></opml>"""
         val path = FileIO.join(dir, "import.opml")
@@ -829,13 +843,13 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun importOpmlReportsCancelledWhenTheFileCannotBeRead() = runTest {
+    fun importOpmlReportsFailedWhenTheFileCannotBeRead() = runTest {
         val missingPath = FileIO.join(dir, "does-not-exist.opml")
         val vm = newViewModel(fileSelector = FakeFileSelector(openPath = missingPath))
 
         vm.importOpml()
 
-        assertEquals(OpmlResult.Cancelled, vm.opmlResult)
+        assertEquals(OpmlResult.ImportFailed, vm.opmlResult)
     }
 
     @Test

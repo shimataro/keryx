@@ -154,6 +154,8 @@
     <string name="settings_import_failed">%1$d 件の追加に失敗しました</string>
     <string name="settings_export_success">エクスポートしました</string>
     <string name="settings_import_cancelled">キャンセルしました</string>
+    <string name="settings_export_error">エクスポートに失敗しました</string>
+    <string name="settings_import_error">インポートに失敗しました</string>
     <string name="settings_refresh_interval">フィード更新間隔</string>
     <string name="settings_refresh_min15">15分</string>
     <string name="settings_refresh_min30">30分</string>
