@@ -355,9 +355,8 @@ individual Red approval covers that one item — once given, the item proceeds
 straight through apply → re-measure → verify → commit (Step 5) with no further
 approval gate, the same shape as `evaluate-review`'s Case B. Before Step 5
 makes its first commit: if the current branch is a version branch (`v*`),
-apply the repo's Branching rule (`.claude/CLAUDE.md`) via `AskUserQuestion` and
-switch to the chosen branch first — Step 1's worktree check already ruled out
-unrelated dirty changes.
+run `/feature-branch perf` to create and switch to a feature branch first
+— Step 1's worktree check already ruled out unrelated dirty changes.
 
 ### Step 5 — Apply one at a time, verified
 
