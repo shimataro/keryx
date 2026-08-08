@@ -1,0 +1,159 @@
+# CodeRabbit configuration for Keryx.
+# Schema: https://coderabbit.ai/integrations/schema.v2.json
+# Docs: https://docs.coderabbit.ai/reference/configuration
+
+language: "en-US"
+early_access: false
+
+reviews:
+  profile: "chill"
+  high_level_summary: true
+  collapse_walkthrough: true
+  sequence_diagrams: true
+  poem: false
+
+  # build/.gradle/.kotlin are already gitignored (SQLDelight-generated code, generated
+  # BuildConfig.kt, native packaging output live under build/); excluded here too as a guard.
+  path_filters:
+    - "!**/build/**"
+    - "!**/.gradle/**"
+    - "!**/.kotlin/**"
+
+  # Restate the highest-consequence rules from .claude/CLAUDE.md / docs/*.md / .claude/rules/*.md
+  # as active review-focus instructions on the paths they apply to. CLAUDE.md itself is already
+  # picked up automatically by knowledge_base.code_guidelines (see below) — these are a
+  # reinforcement, not a duplicate of the whole file.
+  path_instructions:
+    - path: "composeApp/src/**/data/local/**"
+      instructions: >
+        articles_fts is runtime-only raw SQL owned by FtsManager — it must never be added to a
+        .sq file, and the live table must never be DROPped. Hot paths (feed refresh, sync merge)
+        must index via FtsManager.indexMissing() (incremental) only; a full 'rebuild' is only
+        allowed in the daily idle heal in StartupTasks.kt. Flag any change that DROPs
+        articles_fts on the live DB or calls 'rebuild' from a hot path.
+
+    - path: "composeApp/src/**/domain/SyncRepository.kt"
+      instructions: &sync_merge_note >
+        The ATTACH-DATABASE sync merge must run through platform/DatabaseMerger on a single
+        dedicated JDBC connection, never through the SQLDelight driver (which opens a fresh
+        connection per statement for file DBs, so an ATTACH would not survive to the next merge
+        statement). Merge SQL must explicitly list columns (never SELECT *, to avoid column-count
+        mismatch across schema versions) and follow the last-write-wins / OR-merge policy per
+        field described in docs/sync-architecture.md.
+    - path: "composeApp/src/**/domain/MergeSql.kt"
+      instructions: *sync_merge_note
+    - path: "composeApp/src/**/platform/DatabaseMerger*.kt"
+      instructions: *sync_merge_note
+
+    - path: "composeApp/src/commonMain/**"
+      instructions: >
+        Platform-specific code (file IO, AWT/Swing, OS keyring, D-Bus, etc.) must stay behind an
+        `expect` declaration here, with the real implementation as `actual` in desktopMain. Flag
+        any direct platform-specific API usage (java.io/java.awt/etc.) leaking into commonMain
+        outside an expect/actual boundary.
+
+    - path: "composeApp/src/**/ui/**"
+      instructions: >
+        No hardcoded user-facing strings — all UI text must go through Compose Resources
+        (composeResources/values/strings.xml) via stringResource/getString, including text built
+        outside composition such as tray/notification text. Compose style (pane tonal roles,
+        divider policy, article card style, layout stability under conditional state, flat
+        native-feel components, dialog/popup conventions) should follow the ui-guidelines skill
+        at .claude/skills/ui-guidelines/SKILL.md.
+
+    - path: "composeApp/src/**/*.kt"
+      instructions: >
+        Comments, KDoc, log/exception messages, and non-UI string literals must be written in
+        English regardless of the language used elsewhere in the project, with one exception:
+        test assertions that must match real rendered Japanese UI text (e.g.
+        onNodeWithText("...") against an actual strings.xml value) legitimately contain that
+        Japanese string.
+
+    - path: "composeApp/src/{commonMain,desktopMain}/kotlin/**/domain/**/*.kt"
+      instructions: &test_coverage_note >
+        New or changed logic here (excluding UI-only visual/layout tweaks with no runtime logic)
+        needs a corresponding test in commonTest/ or desktopTest/ per docs/testing.md's
+        conventions (kotlin-test, Ktor MockEngine, DbTestSupport helpers, Clock/SyncScheduler
+        fakes). Flag a non-trivial logic change with no accompanying test change.
+    - path: "composeApp/src/{commonMain,desktopMain}/kotlin/**/data/**/*.kt"
+      instructions: *test_coverage_note
+    - path: "composeApp/src/**/ui/**/*ViewModel.kt"
+      instructions: *test_coverage_note
+
+    - path: "gradle/libs.versions.toml"
+      instructions: >
+        When a shipped runtime dependency is added or removed whose license requires attribution
+        (Apache-2.0, MIT, BSD, etc.), THIRD-PARTY-LICENSES.md at the repo root must be updated in
+        the same PR (library name / SPDX identifier / project URL). Test-only dependencies are
+        excluded from this requirement.
+
+    - path: "composeApp/src/commonMain/sqldelight/**/*.sq"
+      instructions: >
+        A schema change needs a new `<from-version>.sqm` migration file rather than editing an
+        already-shipped .sq/.sqm in place, and platform/DatabaseMerger's EXPECTED_SCHEMA /
+        validateSchema must be bumped to match in the same PR. Logical deletion uses deleted_at
+        (NULL = alive, not a hard DELETE); booleans and timestamps are INTEGER (0/1, Unix millis).
+
+  auto_review:
+    enabled: true
+
+  finishing_touches:
+    docstrings:
+      enabled: false  # no KDoc convention in this repo; avoid nudging toward unwanted comments
+    unit_tests:
+      enabled: true
+
+  pre_merge_checks:
+    docstrings:
+      mode: "off"
+    title:
+      mode: "warning"
+      requirements: >
+        Should follow Conventional Commits, e.g. "fix(scope): ..." / "feat(scope): ..." —
+        types used in this repo: fix, feat, docs, refactor, chore, build, test, ci, perf, style.
+
+  tools:
+    detekt:
+      enabled: true
+    markdownlint:
+      enabled: true
+
+knowledge_base:
+  code_guidelines:
+    filePatterns:
+      # CLAUDE.md itself is auto-detected by CodeRabbit's default patterns (**/CLAUDE.md) —
+      # no entry needed here. These add the docs/*.md and .claude/rules/*.md files it does not
+      # auto-detect, scoped to the source areas they actually describe. Only the English (.md)
+      # doc is referenced, not its .ja.md sibling, to avoid doubling near-duplicate context.
+      - files: "docs/app-architecture.md"
+        applyTo: "composeApp/src/**"
+      - files: "docs/error-design.md"
+        applyTo: "composeApp/src/**"
+      - files: "docs/db-schema.md"
+        applyTo: "composeApp/src/**"
+      - files: "docs/sync-architecture.md"
+        applyTo: "composeApp/src/**"
+      - files: "docs/background-update.md"
+        applyTo: "composeApp/src/**"
+      - files: "docs/testing.md"
+        applyTo: "composeApp/src/**"
+      - files: "docs/known-issues.md"
+        applyTo: "composeApp/src/**"
+      - files: "docs/external-spec.md"
+        applyTo: "composeApp/src/**"
+      - files: "docs/build.md"
+        applyTo: "composeApp/**"
+      - files: "docs/setup.md"
+        applyTo: "composeApp/**"
+      - files: ".claude/rules/fts-index.md"
+        applyTo: "composeApp/src/**/data/local/**"
+      - files: ".claude/rules/sync-merge.md"
+        applyTo: "composeApp/src/**"
+      - files: ".claude/rules/cloud-oauth-transport.md"
+        applyTo: "composeApp/src/**"
+      - files: ".claude/skills/ui-guidelines/SKILL.md"
+        applyTo: "composeApp/src/**/ui/**"
+
+code_generation:
+  docstrings:
+    language: "en-US"  # keep any generated docstring text English regardless of review language
