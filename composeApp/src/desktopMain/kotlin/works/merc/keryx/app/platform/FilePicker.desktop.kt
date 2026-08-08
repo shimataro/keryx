@@ -19,8 +19,22 @@ import javax.swing.filechooser.FileNameExtensionFilter
  * Every method is blocking and must be called on the EDT.
  */
 internal interface FilePickerBackend {
-    fun pickOpen(request: OpenFileRequest, owner: Window?): String?
-    fun pickSave(request: SaveFileRequest, owner: Window?): String?
+    /**
+ * Opens a file selection dialog.
+ *
+ * @param request The open-file request containing the dialog title and extension filters.
+ * @param owner The window that owns the dialog, or `null` for no owner.
+ * @return The absolute path of the selected file, or `null` if selection is canceled.
+ */
+fun pickOpen(request: OpenFileRequest, owner: Window?): String?
+    /**
+ * Displays a save-file dialog.
+ *
+ * @param request The save dialog configuration.
+ * @param owner The window that owns the dialog, or `null` for no owner.
+ * @return The selected absolute file path, or `null` if no file is selected.
+ */
+fun pickSave(request: SaveFileRequest, owner: Window?): String?
 }
 
 /**
@@ -30,12 +44,27 @@ internal interface FilePickerBackend {
  * no UI to attach to (AWT's filter callback has no description slot).
  */
 internal object AwtFilePickerBackend : FilePickerBackend {
+    /**
+     * Creates a file dialog with the specified owner, title, and mode.
+     *
+     * @param owner The window that owns the dialog, or `null` for no owner.
+     * @param title The dialog title.
+     * @param mode The dialog mode, such as open or save.
+     * @return The configured file dialog.
+     */
     private fun newFileDialog(owner: Window?, title: String, mode: Int): FileDialog = when (owner) {
         is Frame -> FileDialog(owner, title, mode)
         is Dialog -> FileDialog(owner, title, mode)
         else -> FileDialog(null as Frame?, title, mode)
     }
 
+    /**
+     * Opens a file-selection dialog and retrieves the selected file path.
+     *
+     * @param request The dialog title and optional filename extensions to display.
+     * @param owner The window that owns the dialog, or `null` for no owner.
+     * @return The selected file's absolute path, or `null` if no file is selected.
+     */
     override fun pickOpen(request: OpenFileRequest, owner: Window?): String? {
         val dialog = newFileDialog(owner, request.title, FileDialog.LOAD)
         if (request.extensions.isNotEmpty()) {
@@ -49,6 +78,13 @@ internal object AwtFilePickerBackend : FilePickerBackend {
         return if (dir != null && file != null) File(dir, file).absolutePath else null
     }
 
+    /**
+     * Opens a native save dialog and returns the selected file path.
+     *
+     * @param request The save dialog title and default filename.
+     * @param owner The window that owns the dialog, or `null` for no owner.
+     * @return The absolute path of the selected file, or `null` if no file was selected.
+     */
     override fun pickSave(request: SaveFileRequest, owner: Window?): String? {
         val dialog = newFileDialog(owner, request.title, FileDialog.SAVE)
         dialog.file = request.defaultName
@@ -69,6 +105,13 @@ internal object AwtFilePickerBackend : FilePickerBackend {
  * so it never reaches that native code, and it picks up FlatLaf like the rest of this app's Linux UI.
  */
 internal object SwingFilePickerBackend : FilePickerBackend {
+    /**
+     * Opens a file selection dialog for the specified request.
+     *
+     * @param request The dialog title and optional filename extensions.
+     * @param owner The window that owns the dialog.
+     * @return The selected file's absolute path, or `null` if no file is selected.
+     */
     override fun pickOpen(request: OpenFileRequest, owner: Window?): String? {
         val chooser = JFileChooser().apply {
             dialogTitle = request.title
@@ -90,6 +133,13 @@ internal object SwingFilePickerBackend : FilePickerBackend {
         }
     }
 
+    /**
+     * Opens a save dialog and resolves the selected file path.
+     *
+     * @param request The save request containing the dialog title and default filename.
+     * @param owner The window that owns the dialog, if available.
+     * @return The selected file path, or `null` if the dialog is cancelled.
+     */
     override fun pickSave(request: SaveFileRequest, owner: Window?): String? {
         val chooser = JFileChooser().apply {
             dialogTitle = request.title
@@ -108,6 +158,13 @@ internal object SwingFilePickerBackend : FilePickerBackend {
         }
     }
 
+    /**
+     * Prompts the user to confirm replacing an existing file.
+     *
+     * @param owner The window that owns the confirmation dialog.
+     * @param request The save request containing the dialog text and button labels.
+     * @return `true` if the user confirms replacement, `false` otherwise.
+     */
     private fun confirmOverwrite(owner: Window?, request: SaveFileRequest): Boolean {
         // Explicit option labels rather than YES_NO_OPTION: that constant's button text comes from
         // Swing's own locale bundles, which need jdk.localedata for ja in a jlinked runtime (see
@@ -127,18 +184,24 @@ internal object SwingFilePickerBackend : FilePickerBackend {
     }
 }
 
-/** Matches the AWT `FilenameFilter` predicate; shared so both backends agree. */
+/**
+     * Determines whether a filename ends with one of the specified extensions.
+     *
+     * @param name The filename to check.
+     * @param extensions The file extensions to match, without leading periods.
+     * @return `true` if the filename matches an extension, `false` otherwise.
+     */
 internal fun hasAnyExtension(name: String, extensions: List<String>): Boolean =
     extensions.any { name.endsWith(".$it", ignoreCase = true) }
 
 /**
- * Post-processes an approved save selection: if [path] already exists, ask [confirmOverwrite]
- * before returning it. This restores the overwrite confirmation the pre-crash Linux `FileDialog`
- * already had via `gtk_file_chooser_set_do_overwrite_confirmation` (and that macOS/Windows still
- * have natively) — `JFileChooser` has no such prompt of its own.
- *
- * @return [path], or null when the user declined the overwrite.
- */
+     * Resolves a selected save path, requesting confirmation before replacing an existing file.
+     *
+     * @param path The selected save path.
+     * @param exists Determines whether the path already exists.
+     * @param confirmOverwrite Confirms replacement of an existing file.
+     * @return The selected path, or `null` if overwrite is declined.
+     */
 internal fun resolveSavePath(path: String, exists: (String) -> Boolean, confirmOverwrite: () -> Boolean): String? =
     if (!exists(path) || confirmOverwrite()) path else null
 
@@ -153,16 +216,32 @@ internal fun defaultFilePickerBackend(linux: Boolean = isLinux): FilePickerBacke
 internal fun <W> chooseDialogOwner(active: W?, showingFrames: List<W>): W? = active ?: showingFrames.firstOrNull()
 
 // KeyboardFocusManager is EDT-affine (see AppMenuBarHost.kt's own use of it), so this is only ever
-// called from inside the EDT hop below.
+/**
+ * Resolves the window to use as the owner for a file picker dialog.
+ *
+ * @return The active window, the first visible frame, or `null` when no suitable owner exists.
+ */
 private fun resolveDialogOwner(): Window? = chooseDialogOwner(
     KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow,
     Frame.getFrames().filter { it.isShowing },
 )
 
 actual object FilePicker {
-    actual suspend fun pickOpenFile(request: OpenFileRequest): String? =
+    /**
+         * Opens a file selection dialog using the requested title and extension filters.
+         *
+         * @param request The open-file dialog configuration.
+         * @return The absolute path of the selected file, or `null` if the dialog is canceled.
+         */
+        actual suspend fun pickOpenFile(request: OpenFileRequest): String? =
         withContext(Dispatchers.Swing) { defaultFilePickerBackend().pickOpen(request, resolveDialogOwner()) }
 
-    actual suspend fun pickSaveFile(request: SaveFileRequest): String? =
+    /**
+         * Opens a save-file dialog and returns the selected path.
+         *
+         * @param request The save-file request containing the dialog title and default filename.
+         * @return The selected file path, or `null` if selection is canceled.
+         */
+        actual suspend fun pickSaveFile(request: SaveFileRequest): String? =
         withContext(Dispatchers.Swing) { defaultFilePickerBackend().pickSave(request, resolveDialogOwner()) }
 }

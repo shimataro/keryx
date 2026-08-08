@@ -293,9 +293,9 @@ fun setThemeMode(mode: String) = update { it.copy(themeMode = mode) }
     }
 
     /**
-     * Exports subscribed feeds, including their folders and tags, to an OPML file selected by the user.
+     * Exports subscribed feeds, folders, and tags to a user-selected OPML file.
      *
-     * Updates the OPML result to indicate whether the export completed or was canceled.
+     * Updates the OPML result to indicate whether the export succeeded, was canceled, or failed.
      */
     fun exportOpml() {
         if (exportingOpml || importingOpml) return
