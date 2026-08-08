@@ -8,6 +8,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpStatusCode
 import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -139,6 +140,13 @@ private class CountingDispatcher : CoroutineDispatcher() {
     override fun dispatch(context: CoroutineContext, block: Runnable) {
         dispatchCount++
         block.run()
+    }
+}
+
+/** Throws [CancellationException] the moment work is dispatched to it — simulates the coroutine being cancelled mid-`withContext`. */
+private class CancellingDispatcher : CoroutineDispatcher() {
+    override fun dispatch(context: CoroutineContext, block: Runnable) {
+        throw CancellationException("cancelled for test")
     }
 }
 
@@ -817,6 +825,17 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun exportOpmlRethrowsCancellationInsteadOfReportingFailure() = runTest {
+        val path = FileIO.join(dir, "export-cancel.opml")
+        val vm = newViewModel(fileSelector = FakeFileSelector(savePath = path), dispatcher = CancellingDispatcher())
+
+        vm.exportOpml()
+
+        assertNull(vm.opmlResult)
+        assertFalse(vm.exportingOpml)
+    }
+
+    @Test
     fun importOpmlSubscribesEveryFeedInThePickedFile() = runTest {
         val xml = """<opml><body><outline text="Feed" xmlUrl="https://ex.com/feed"/></body></opml>"""
         val path = FileIO.join(dir, "import.opml")
@@ -850,6 +869,18 @@ class SettingsViewModelTest {
         vm.importOpml()
 
         assertEquals(OpmlResult.ImportFailed, vm.opmlResult)
+    }
+
+    @Test
+    fun importOpmlRethrowsCancellationInsteadOfReportingFailure() = runTest {
+        val path = FileIO.join(dir, "import-cancel.opml")
+        FileIO.writeText(path, "<opml><body/></opml>")
+        val vm = newViewModel(fileSelector = FakeFileSelector(openPath = path), dispatcher = CancellingDispatcher())
+
+        vm.importOpml()
+
+        assertNull(vm.opmlResult)
+        assertFalse(vm.importingOpml)
     }
 
     @Test

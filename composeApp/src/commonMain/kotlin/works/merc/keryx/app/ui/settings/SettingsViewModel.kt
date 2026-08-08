@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -318,7 +319,10 @@ fun setThemeMode(mode: String) = update { it.copy(themeMode = mode) }
                 opmlResult = try {
                     withContext(dispatcher) { FileIO.writeText(path, buildOpmlDocument()) }
                     OpmlResult.Exported
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Throwable) {
+                    Log.warn(TAG, "Failed to export OPML", e)
                     OpmlResult.ExportFailed
                 }
             } finally {
@@ -374,7 +378,10 @@ fun setThemeMode(mode: String) = update { it.copy(themeMode = mode) }
                 opmlResult = try {
                     val outcome = withContext(dispatcher) { FileIO.readText(path)?.let { opmlImporter.import(it) } }
                     if (outcome == null) OpmlResult.ImportFailed else OpmlResult.Imported(outcome.added, outcome.failed)
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Throwable) {
+                    Log.warn(TAG, "Failed to import OPML", e)
                     OpmlResult.ImportFailed
                 }
             } finally {
