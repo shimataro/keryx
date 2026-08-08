@@ -299,6 +299,8 @@ in this exact format:
 ```markdown
 ## Evaluation
 
+**URL**: <the comment/review URL being evaluated>
+**Finding summary**: <one-line paraphrase of the comment/review's point, not a verbatim quote>
 **Validity**: [Valid / Invalid / Partially Valid]
 **Confidence**: [High / Medium / Low]
 
