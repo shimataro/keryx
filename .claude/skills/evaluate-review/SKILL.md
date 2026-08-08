@@ -418,7 +418,8 @@ Check `git status --porcelain`. If the working tree is dirty with changes unrela
 run, warn and skip this URL entirely (commit nothing, note "Working tree not clean" in the
 closing summary) rather than making any Case B edits — a failed-verification revert (step 3
 below) must never be able to destroy pre-existing uncommitted work in the same file. For a
-multi-URL run this only skips the current URL; continue to the next one at Step 2.
+multi-URL run this only skips the current URL; continue to the next one at Step 2. A clean
+result here becomes this run's baseline for the re-check below.
 
 Print the summary table (per the "Common rule — summary table" above) covering every
 comment in `associated_comments`.
@@ -435,6 +436,14 @@ continue to the next URL at Step 2. This one-time confirmation authorizes the wh
 but does not itself substitute for reviewing individual comments — each comment's own
 detail block is still surfaced as it is reached (see step 1 below), just without a further
 approval gate.
+
+**Re-check immediately before the first edit**: because the one-time run confirmation above
+blocks on the user for an unbounded time, re-run `git status --porcelain` right before the
+first edit (i.e., right before step 3 fires for the first Valid/Partially Valid comment
+below) and confirm it still matches the baseline (still clean). If it no longer does, treat
+it exactly like the initial dirty-tree case: skip this URL entirely (commit nothing, note
+"Working tree not clean" in the closing summary) rather than starting any Case B edits, and
+continue to the next URL in a multi-URL run.
 
 For each comment in `associated_comments`, in order:
 
