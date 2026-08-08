@@ -7,6 +7,8 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpStatusCode
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -17,6 +19,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import org.jetbrains.compose.resources.getString
 import works.merc.keryx.app.FakeCloudConnectFlow
 import works.merc.keryx.app.FakeTokenStorage
 import works.merc.keryx.app.SuspendingCloudConnectFlow
@@ -60,9 +63,16 @@ import works.merc.keryx.app.insertTag
 import works.merc.keryx.app.multiProviderCloudSession
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
+import works.merc.keryx.app.platform.FileSelector
+import works.merc.keryx.app.platform.OpenFileRequest
+import works.merc.keryx.app.platform.SaveFileRequest
+import works.merc.keryx.app.resources.Res
+import works.merc.keryx.app.resources.settings_export_opml
+import works.merc.keryx.app.resources.settings_import_opml
 import works.merc.keryx.app.singleProviderCloudSession
 import works.merc.keryx.app.ui.home.formatTimestamp
 import works.merc.keryx.app.ftsManagerIndexed
+import kotlin.coroutines.CoroutineContext
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -84,6 +94,51 @@ private class AlwaysFailingCloudStorage : CloudStorage {
     override suspend fun create(path: String, data: ByteArray): Result<Unit> = fail()
     override suspend fun delete(path: String): Result<Unit> = fail()
     override suspend fun exists(path: String): Result<Boolean> = fail()
+}
+
+/** A [FileSelector] fake: returns fixed paths (or null, i.e. "cancelled") and records what it was asked for. */
+private class FakeFileSelector(
+    private val openPath: String? = null,
+    private val savePath: String? = null,
+) : FileSelector {
+    var lastOpenRequest: OpenFileRequest? = null
+        private set
+    var lastSaveRequest: SaveFileRequest? = null
+        private set
+
+    override suspend fun pickOpenFile(request: OpenFileRequest): String? {
+        lastOpenRequest = request
+        return openPath
+    }
+
+    override suspend fun pickSaveFile(request: SaveFileRequest): String? {
+        lastSaveRequest = request
+        return savePath
+    }
+}
+
+/** A [FileSelector] whose open pick suspends until the test resolves [openDeferred] — for exercising the in-flight state of a still-running import. */
+private class SuspendingFileSelector : FileSelector {
+    val openDeferred = CompletableDeferred<String?>()
+    override suspend fun pickOpenFile(request: OpenFileRequest): String? = openDeferred.await()
+    override suspend fun pickSaveFile(request: SaveFileRequest): String? = error("not used by this test")
+}
+
+/**
+ * Counts [dispatch] calls, so a test can assert that `withContext(dispatcher)` actually ran — then
+ * runs the block immediately rather than delegating to [Dispatchers.Unconfined], whose real
+ * synchronous-execution trick lives behind `isDispatchNeeded() == false` and isn't reached when
+ * `dispatch()` is invoked directly (calling it here left the resumed coroutine parked instead of
+ * run, so `awaitTrue` timed out).
+ */
+private class CountingDispatcher : CoroutineDispatcher() {
+    var dispatchCount = 0
+        private set
+
+    override fun dispatch(context: CoroutineContext, block: Runnable) {
+        dispatchCount++
+        block.run()
+    }
 }
 
 private class SettingsViewModelTestNotificationMessages : NotificationMessages {
@@ -142,6 +197,20 @@ class SettingsViewModelTest {
         return FeedFetcher(client)
     }
 
+    /** A [FeedFetcher] that answers every request with a minimal valid feed, for OPML import tests. */
+    private fun succeedingFetcher(): FeedFetcher {
+        val rss = """<?xml version="1.0"?><rss version="2.0"><channel>
+            <title>Feed</title><link>https://ex.com</link>
+            <item><title>Post</title><link>https://ex.com/1</link><guid>g1</guid></item>
+            </channel></rss>"""
+        val client = HttpClient(MockEngine { respond(rss, HttpStatusCode.OK) }) {
+            followRedirects = false
+            expectSuccess = false
+            install(HttpTimeout)
+        }
+        return FeedFetcher(client)
+    }
+
     private fun missingFaviconResolver(): FaviconResolver {
         val client = HttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }) {
             followRedirects = false
@@ -180,6 +249,12 @@ class SettingsViewModelTest {
         // Backs the SyncRepository built below. Default: local-only (every sync is a no-op success);
         // a test can supply a failing storage to exercise the sync-error state.
         syncCloudProvider: () -> CloudStorage? = { null },
+        // Default cancels every OPML pick — a test exercising import/export supplies its own.
+        fileSelector: FileSelector = FakeFileSelector(),
+        // Passed to the VM's own `dispatcher` (blocking OPML build/write/import work). Default
+        // matches the rest of newViewModel's Unconfined setup; a test can supply a CountingDispatcher
+        // to assert it was actually used.
+        dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
     ): SettingsViewModel {
         val syncScheduler = SyncScheduler {}
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
@@ -225,7 +300,7 @@ class SettingsViewModelTest {
         createdSyncRepository = syncRepository
         return SettingsViewModel(
             settingsRepository, session, syncRepository, feedRepository, folderRepository, tagRepository,
-            opmlImporter, updateChecker, activityCenter, Dispatchers.Unconfined,
+            opmlImporter, updateChecker, activityCenter, dispatcher, fileSelector,
         ).also { createdViewModels += it }
     }
 
@@ -669,6 +744,134 @@ class SettingsViewModelTest {
         assertEquals(listOf("Tech", "Tech", "News", null), reimported.map { it.folderName })
         assertEquals(listOf("kotlin", "daily"), reimported[0].tags)
         assertTrue(reimported.drop(1).all { it.tags.isEmpty() })
+    }
+
+    @Test
+    fun exportOpmlWritesTheBuiltDocumentToThePickedPath() = runTest {
+        db.insertFeed("f1", url = "https://a.com/feed")
+        val path = FileIO.join(dir, "export.opml")
+        val vm = newViewModel(fileSelector = FakeFileSelector(savePath = path))
+
+        vm.exportOpml()
+
+        // The write runs on the injected (non-test) dispatcher, so it's a real, non-virtual hop.
+        awaitTrue { vm.opmlResult != null }
+        assertEquals(OpmlResult.Exported, vm.opmlResult)
+        val written = FileIO.readText(path)
+        assertNotNull(written)
+        assertEquals(listOf("https://a.com/feed"), OpmlCodec.import(written).map { it.xmlUrl })
+    }
+
+    @Test
+    fun exportOpmlReportsCancelledWhenTheDialogIsDismissed() = runTest {
+        val vm = newViewModel(fileSelector = FakeFileSelector(savePath = null))
+
+        vm.exportOpml()
+
+        assertEquals(OpmlResult.Cancelled, vm.opmlResult)
+    }
+
+    @Test
+    fun exportOpmlPassesTheLocalizedTitleAndOverwriteLabelsToTheDialog() = runTest {
+        val selector = FakeFileSelector(savePath = null)
+        val vm = newViewModel(fileSelector = selector)
+
+        vm.exportOpml()
+
+        val request = selector.lastSaveRequest
+        assertNotNull(request)
+        assertEquals(getString(Res.string.settings_export_opml), request.title)
+        assertEquals("keryx.opml", request.defaultName)
+        assertTrue(request.overwriteTitle.isNotBlank())
+        assertTrue(request.overwriteMessage.isNotBlank())
+        assertTrue(request.overwriteReplaceLabel.isNotBlank())
+        assertTrue(request.overwriteCancelLabel.isNotBlank())
+    }
+
+    @Test
+    fun exportOpmlRunsTheDocumentBuildAndWriteOnTheInjectedDispatcher() = runTest {
+        db.insertFeed("f1", url = "https://a.com/feed")
+        val path = FileIO.join(dir, "export-dispatcher.opml")
+        val counting = CountingDispatcher()
+        val vm = newViewModel(fileSelector = FakeFileSelector(savePath = path), dispatcher = counting)
+
+        vm.exportOpml()
+
+        awaitTrue { vm.opmlResult != null }
+        assertEquals(OpmlResult.Exported, vm.opmlResult)
+        assertTrue(counting.dispatchCount > 0)
+    }
+
+    @Test
+    fun importOpmlSubscribesEveryFeedInThePickedFile() = runTest {
+        val xml = """<opml><body><outline text="Feed" xmlUrl="https://ex.com/feed"/></body></opml>"""
+        val path = FileIO.join(dir, "import.opml")
+        FileIO.writeText(path, xml)
+        val vm = newViewModel(feedFetcher = succeedingFetcher(), fileSelector = FakeFileSelector(openPath = path))
+
+        vm.importOpml()
+
+        // The read + import (network fetch, DB writes) run on the injected (non-test) dispatcher.
+        awaitTrue { vm.opmlResult != null }
+        val result = vm.opmlResult
+        assertIs<OpmlResult.Imported>(result)
+        assertEquals(1, result.added)
+        assertEquals(0, result.failed)
+    }
+
+    @Test
+    fun importOpmlReportsCancelledWhenTheDialogIsDismissed() = runTest {
+        val vm = newViewModel(fileSelector = FakeFileSelector(openPath = null))
+
+        vm.importOpml()
+
+        assertEquals(OpmlResult.Cancelled, vm.opmlResult)
+    }
+
+    @Test
+    fun importOpmlReportsCancelledWhenTheFileCannotBeRead() = runTest {
+        val missingPath = FileIO.join(dir, "does-not-exist.opml")
+        val vm = newViewModel(fileSelector = FakeFileSelector(openPath = missingPath))
+
+        vm.importOpml()
+
+        assertEquals(OpmlResult.Cancelled, vm.opmlResult)
+    }
+
+    @Test
+    fun importOpmlRunsTheReadAndImportOnTheInjectedDispatcher() = runTest {
+        val xml = """<opml><body><outline text="Feed" xmlUrl="https://ex.com/feed"/></body></opml>"""
+        val path = FileIO.join(dir, "import-dispatcher.opml")
+        FileIO.writeText(path, xml)
+        val counting = CountingDispatcher()
+        val vm = newViewModel(
+            feedFetcher = succeedingFetcher(),
+            fileSelector = FakeFileSelector(openPath = path),
+            dispatcher = counting,
+        )
+
+        vm.importOpml()
+
+        awaitTrue { vm.opmlResult != null }
+        assertIs<OpmlResult.Imported>(vm.opmlResult)
+        assertTrue(counting.dispatchCount > 0)
+    }
+
+    @Test
+    fun importAndExportOpmlRefuseToRunConcurrently() = runTest {
+        val selector = SuspendingFileSelector()
+        val vm = newViewModel(fileSelector = selector)
+
+        vm.importOpml()
+        assertTrue(vm.importingOpml)
+
+        // Guarded no-op: importingOpml is still true, so this must not touch exportingOpml at all.
+        vm.exportOpml()
+        assertFalse(vm.exportingOpml)
+
+        selector.openDeferred.complete(null)
+        assertEquals(OpmlResult.Cancelled, vm.opmlResult)
+        assertFalse(vm.importingOpml)
     }
 
     /** Polls with real wall-clock waits (for coroutines that hop onto a real, non-virtual dispatcher). */

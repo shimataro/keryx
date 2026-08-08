@@ -146,6 +146,10 @@
     <string name="settings_data_management">データ管理</string>
     <string name="settings_import_opml">OPML をインポート</string>
     <string name="settings_export_opml">OPML をエクスポート</string>
+    <string name="file_filter_opml">OPML ファイル</string>
+    <string name="file_overwrite_title">上書きの確認</string>
+    <string name="file_overwrite_message">このファイルは既に存在します。置き換えますか？</string>
+    <string name="file_overwrite_replace">置き換える</string>
     <string name="settings_import_success">%1$d 件のフィードを追加しました</string>
     <string name="settings_import_failed">%1$d 件の追加に失敗しました</string>
     <string name="settings_export_success">エクスポートしました</string>

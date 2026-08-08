@@ -5,6 +5,90 @@
 原因は判明しているが、意図的に修正していない不具合と、その判断の根拠。
 調査で除外した内容も記録してあるので、後から調べ直すときに同じ作業を繰り返さずに済む。
 
+## Linux: OPML のインポート/エクスポートで libawt_xawt.so の SIGSEGV により JVM がクラッシュする
+
+**状態**: 解決済み — Linux の OPML ファイルダイアログのバックエンドを `javax.swing.JFileChooser`
+（`platform/FilePicker.desktop.kt`）に差し替えたことで解決した。macOS/Windows は `java.awt.FileDialog`
+のまま。デコンパイルした OpenJDK の内部実装が根拠になっており再調査を避けるため、また単なる JVM
+フラグによる回避策を却下した理由の記録として、全文を残す。
+
+### 症状
+
+Linux で OPML のインポート/エクスポートダイアログ（設定 ▸ データ管理 ▸ OPML をインポート/エクスポート）
+を開くとウインドウがフリーズし、プロセス全体が `SIGSEGV` でクラッシュした:
+
+```text
+# A fatal error has been detected by the Java Runtime Environment:
+#  SIGSEGV (0xb) at pc=0x00007f0318391a5f, ...
+# Problematic frame:
+# C  [libawt_xawt.so+0x51a5f]
+```
+
+インポートとエクスポートは同じライブラリ内の異なるオフセット（インポートは `+0x51a5f`、エクスポートは
+`+0x51af9`）でクラッシュした。macOS では再現しなかった。
+
+### 調査
+
+`platform/FilePicker.desktop.kt` は `java.awt.FileDialog` を使っていた。Linux では
+`sun.awt.X11.XToolkit.createFileDialog()` が `GtkFileDialogPeer`（`libawt_xawt.so` 内の GTK3 ネイティブ
+コード）を選ぶ（`sun.awt.disableGtkFileDialogs=true` を設定しない限り）。macOS は
+`LWCToolkit`/`NSSavePanel` を使うためこの経路を一切通らず、報告どおり macOS では問題なかった。
+
+OpenJDK ソースの `sun_awt_X11_GtkFileDialogPeer.c` をデコンパイルし、各 `hs_err_pid*.log` の 2 つの
+クラッシュアドレスを逆アセンブルしたところ、両方とも同じ根本原因 — NULL チェックなしで逆参照された
+NULL の `JNU_GetEnv(jvm, JNI_VERSION_1_2)` の返り値 — に行き着いた:
+
+| 操作 | pc | 関数 | 逆アセンブルで判明したこと |
+| --- | --- | --- | --- |
+| インポート | `+0x51a5f` | `filenameFilterCallback`（`FilenameFilter` を設定したときだけ登録される＝インポート側のみ。エクスポート側は登録しない） | `mov rsi,[r13+8]` = `filter_info->filename`、その後 `NewStringUTF` の vtable スロット経由の呼び出し |
+| エクスポート | `+0x51af9` | `handle_response` | `cmp r12d,-3`（`GTK_RESPONSE_ACCEPT`）、その後 `ExceptionCheck` の vtable スロット経由の呼び出し |
+
+`JNU_GetEnv` が NULL を返すのは呼び出しスレッドが JVM にアタッチされていないときだけで、両方の
+`hs_err` ヘッダがまさにそれを示している: `Current thread is native thread`。プロセスには既に
+`libgtk-3`・`libgdk-3`・**`libwebkit2gtk-4.1`** がロードされていた — 記事リーダーのネイティブ
+WebView（`io.github.kdroidfilter.webview`/wry）はペインの生存期間中ずっと無条件にマウントされる方針
+（下記の WebView のエントリ参照）なので、プロセスのデフォルト `GMainContext` を共有する 2 つ目の
+GTK コンシューマになっている。埋め込み WebView を持たない素の Swing アプリでこれが起きないのは、
+GTK コンシューマが 1 つだけなら GTK 自身のシグナルディスパッチが JVM に既知のスレッド上にとどまる
+ためと考えられる。
+
+### 除外した仮説
+
+- **インポートまたはエクスポート固有のバグ** — 反証済み: どちらも同じネイティブファイル内の、同じ
+  チェックなし API（`JNU_GetEnv`）の呼び出し箇所（各ダイアログの応答経路ごとに 1 箇所）でクラッシュ
+  している。
+- **`FilenameFilter` 自体が引き金** — エクスポート側のクラッシュ（`handle_response`）には
+  `FilenameFilter` が一切関与していない。共通の原因は JNI アタッチであり、フィルタではない。
+
+### 効果がなかった／却下した回避策
+
+- **`-Dsun.awt.disableGtkFileDialogs=true`** — Linux を `XFileDialogPeer` 経由にすることで GTK ピア
+  （とクラッシュ）を丸ごと回避できる。却下: AWT/ツールキット初期化前に設定する必要があり
+  （`ui/theme/DesktopLookAndFeel.installLookAndFeel` と同じ順序制約 — `app-architecture.md` 参照）、
+  `XFileDialogPeer` はこのアプリが同じ「見た目が古い」という理由で FlatLaf に置き換えた GTK2 世代の
+  Swing Look & Feel よりもさらに古い Motif 風の XAWT ダイアログである（下記「Desktop Tray」「Native
+  file dialogs」参照）。FlatLaf にもまったく追従しない点も `JFileChooser` と異なる。
+
+### 解決方法
+
+Linux のバックエンドを `javax.swing.JFileChooser`（`platform/FilePicker.desktop.kt` の
+`SwingFilePickerBackend`）に完全に差し替えた。コンテキストメニューで既に使っている Linux
+Swing-vs-AWT の分岐（`NativeMenu.desktop.kt` の `defaultPopupHandle`）と同じパターン。
+`JFileChooser` はどの Look & Feel 上でも純粋な Swing 実装であり — FlatLaf が失敗した場合の
+システム L&F フォールバックでも、`GTKLookAndFeel` 自身の `GTKFileChooserUI` は純粋な Swing
+実装なので — クラッシュした GTK ネイティブコードには一切到達しない。結果の設計、上書き確認の詳細、
+そして将来課題として記録した XDG デスクトップポータルについては `app-architecture.md` の
+「Native file dialogs (platform branch)」を参照。
+
+挙動面で記録に値する点が一つある: 同じネイティブファイルをデコンパイルしたところ、クラッシュ前の
+Linux の `FileDialog` は SAVE アクションで無条件に
+`gtk_file_chooser_set_do_overwrite_confirmation(dialog, TRUE)` を呼んでおり、既にネイティブの
+上書き確認を持っていたことが分かった（macOS/Windows も今なお同様）。`JFileChooser` にはそうした
+確認機能が一切ないため、今回の修正ではそれを明示的に復元している（`resolveSavePath` ＋
+`JOptionPane` による確認）。Linux 自身の従来の挙動に対して黙って退行させないための対応である。
+同じソースには拡張子の自動補完ロジックはどのプラットフォームにも一切存在しなかったため、
+そちらは意図的に追加していない。
+
 ## Linux の Wayland/XWayland: ドラッグ中のカーソルが「禁止」のまま固着する（ドロップ自体は成功）
 
 **状態**: 解決済み — フィード一覧から OS レベルのドラッグ&ドロップそのものを取り除いたことで解決した。

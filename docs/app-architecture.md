@@ -125,6 +125,33 @@ All of this lives in `desktopMain` rather than behind an `expect`/`actual` pair:
 from `main.kt`, no ViewModel or Repository touches it, and a Linux panel protocol has no mobile
 counterpart.
 
+### Native file dialogs (platform branch)
+
+`platform/FilePicker.desktop.kt`'s `defaultFilePickerBackend` picks one of two implementations, the
+same Linux-Swing-vs-AWT split as `NativeMenu.desktop.kt`'s `defaultPopupHandle`:
+
+| Platform | Implementation | Why |
+| --- | --- | --- |
+| macOS / Windows | `AwtFilePickerBackend` (`java.awt.FileDialog`) | AWT maps it onto the real native panel (`NSSavePanel` / `GetOpenFileName`), including native overwrite prompting. |
+| Linux | `SwingFilePickerBackend` (`javax.swing.JFileChooser`) | `sun.awt.X11.XToolkit.createFileDialog()` selects `GtkFileDialogPeer`, whose native GTK callbacks dereference a NULL `JNU_GetEnv` result once the article reader's WebView makes WebKitGTK a second GTK consumer in the process — a JVM-crashing SIGSEGV (see `known-issues.md`). `JFileChooser` is pure Swing and never reaches that code, and it picks up FlatLaf like the app's other Linux Swing surfaces. |
+
+The dialog's owner window is resolved *inside* the desktop `actual`
+(`KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow`, falling back to any showing
+`Frame`), not threaded in from the caller — `LocalNativeWindow` only ever resolves to the main
+window, which would be the wrong owner for a dialog opened from the modeless Settings window. Since
+`JFileChooser` has no native overwrite-confirmation of its own (unlike the AWT backend, which gets it
+free from the OS), `SwingFilePickerBackend` restores it explicitly — see `known-issues.md` for why
+that specific behavior was restored rather than left as a plain crash fix.
+
+**Future work**: an `org.freedesktop.portal.FileChooser` (XDG Desktop Portal) backend could be
+dropped into the same `FilePickerBackend` seam, spoken over the dbus-java connection this app
+already uses for the SNI tray and AppMenu, giving a genuinely native KDE/GNOME dialog (and
+sandbox-correct behavior) — the pre-crash Linux `FileDialog` already had native overwrite
+confirmation via GTK, so a portal-backed dialog likely would too, needing none of
+`SwingFilePickerBackend`'s explicit `resolveSavePath`/`JOptionPane` fallback. It would fall back to
+`JFileChooser` when no portal backend is present, detected the same way `KeryxTray` picks SNI vs.
+AWT: probing for `org.freedesktop.portal.Desktop` on the session bus at startup.
+
 ### アイコンセット
 
 `ui/common/KeryxIcons.kt` が全 UI 呼び出し箇所の唯一の間接参照点になっており（意味的な名前 →

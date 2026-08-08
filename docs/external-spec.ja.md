@@ -94,7 +94,10 @@ FlatLaf を使う（Java の Linux 向けシステム L&F は GTK2 世代のエ�
 デスクトップでは古く見えるため）。ライト/ダークはアプリのテーマ設定に再起動なしで追従する。
 コンテキストメニューは macOS / Windows では `java.awt.PopupMenu`（本物の `NSMenu` /
 Win32 メニュー）、Linux では `javax.swing.JPopupMenu`（AWT のポップアップは Look & Feel を
-完全に無視するため）。UI フォントは OS 標準で、macOS は SF Pro、Windows は Segoe UI、
+完全に無視するため）。OPML インポート/エクスポートのファイルダイアログも同じ分岐で、
+macOS / Windows は `java.awt.FileDialog`、Linux は `javax.swing.JFileChooser` を使う
+（AWT 自身のファイルダイアログはアプリをクラッシュさせうる GTK ネイティブコードを経由するため。
+`app-architecture.md` と `known-issues.md` を参照）。UI フォントは OS 標準で、macOS は SF Pro、Windows は Segoe UI、
 Linux は Look & Feel が解決したフォント、次にデスクトップの設定フォント（XSettings から取得）、
 取得できなければ Adwaita Sans / Cantarell / Ubuntu / Noto Sans / DejaVu Sans の順にフォールバックする。
 
