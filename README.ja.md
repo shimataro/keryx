@@ -49,7 +49,7 @@
 
 ## 今後の予定
 
-- 対応プラットフォーム追加
+- 対応プラットフォーム
   - [ ] Windows
   - [x] macOS
   - [x] Linux ( `.deb` )
@@ -57,7 +57,7 @@
   - [ ] Android
   - [ ] iOS
   - [ ] iPadOS
-- 対応クラウドストレージ追加
+- 対応クラウドストレージ
   - [x] [Dropbox](https://www.dropbox.com/)
   - [x] [Google Drive](https://drive.google.com/)
   - [x] [OneDrive](https://onedrive.live.com/)
