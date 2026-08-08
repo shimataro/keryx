@@ -57,9 +57,13 @@ jobs:
       # Multiplatform project, so there is no root-level `testClasses` task - the real
       # tasks are namespaced per target (e.g. `composeApp:compileTestKotlinDesktop`).
       # Analysis only needs compiled code, not executed tests, so tests never run here.
+      # --no-build-cache is required: the Gradle build cache setup-gradle restores can
+      # satisfy these tasks with no compiler invocation at all (a cache hit from ci.yml's
+      # own build of the same commit), which leaves CodeQL's build tracer with nothing to
+      # observe and fails the whole analysis ("didn't build any of it").
       - name: Compile Kotlin sources for analysis
         if: matrix.build-mode == 'manual'
-        run: ./gradlew :composeApp:assemble :composeApp:compileTestKotlinDesktop --no-configuration-cache
+        run: ./gradlew :composeApp:assemble :composeApp:compileTestKotlinDesktop --no-configuration-cache --no-build-cache
         env:
           DROPBOX_APP_KEY: ""
           GOOGLE_DRIVE_CLIENT_ID: ""
