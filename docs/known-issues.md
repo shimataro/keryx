@@ -559,3 +559,99 @@ was intermittent.
 A native resize that never fires `COMPONENT_RESIZED` is invisible to the guard. Nothing short of
 permanent polling could see it, and the Skia scene's own size derives from the same peer event, so
 an extra `onSizeChanged` would buy nothing. Accepted.
+
+## Linux: modeless dialogs (Settings, About) shrank their window width to near-zero
+
+**Status**: Resolved — `fitWindowSize` (`ui/common/WindowGeometry.desktop.kt`) no longer derives
+the requested window *width* from measured content at all; it now always uses the dialog's own
+fixed width, using the measurement only for height. That closes the feedback path described below
+regardless of what triggers a transient narrow report from the window manager.
+
+### Symptom
+
+On Linux (KDE Plasma, reproduced under Wayland/XWayland) opening the Settings dialog or the About
+dialog showed the correct width at first, then over roughly 1–2 seconds the window's outer frame —
+not just its drawn content — narrowed progressively until it was almost zero pixels wide. The
+dialogs are `resizable = false`, so the user could not drag them back open; closing and reopening
+reproduced it again. Never observed on macOS. Every other dialog built on the same
+`KeryxAlertDialog`/`DesktopModalWindow` machinery — add feed, add/edit/delete folder or tag, rename
+feed, every confirmation dialog — was unaffected.
+
+### Diagnosis
+
+A real-machine log line was the first hard evidence that this was the app requesting a collapsing
+size, not merely a window manager refusing a larger one:
+
+```text
+WARNING [KeryxDialogs] Dialog stayed at 11.0.dp x 535.0.dp after 5 attempts to fit 1.0.dp x 535.0.dp
+```
+
+Height matched between target and actual (535dp both — the height auto-fit was working correctly);
+only width had diverged, and critically the *target* itself — not just what had been successfully
+applied — had degraded to 1.0dp.
+
+Comparing which dialogs reproduce (Settings, About) against which don't (every other
+`KeryxAlertDialog` caller) matched exactly one code difference: `modal = false` — `AboutDialog`
+passes it explicitly, and `KeryxTabDialog` (Settings' host) always does — versus the default
+`modal = true` every other caller left unset. Inside `DesktopModalWindow` the only parameter this
+flag changes that actually reaches AWT is `modalityType` (`DocumentModal` vs `Modeless`);
+`resizable` and the effective decoration are identical either way, and both branches funnel into
+the same `SwingDialog`/`ComposeDialog` implementation (confirmed by reading the Compose Desktop
+1.11.1 sources jar).
+
+The mechanism itself was a self-amplifying measurement loop:
+
+1. `fitWindowSize` computed the requested width purely from the measured content `Box`'s width
+   (`contentPx.width.toDp()`). That `Box` was bounded by `requiredWidthIn(max = initialWidth)`,
+   which pins a *maximum* but has no *minimum* — the incoming constraint it clamps to is whatever
+   the window's current client area happens to be at measure time.
+2. On Linux, a modeless dialog's client area was reported momentarily narrower than requested while
+   the window manager was placing it (apparently not something that happens for a document-modal
+   one — the two only differ in that one AWT modality flag). Under that momentarily narrower
+   incoming max, the enforce-incoming `Column(Modifier.width(initialWidth))` inside the `Box`
+   measured narrower than `initialWidth` too.
+3. That narrower measurement fed straight back into the next requested window width via
+   `componentResized` → `DialogState.size` → the drift guard's `snapshotFlow` collector, which
+   requested the narrower width from AWT.
+4. The narrower window produced an even narrower client-area report on the next tick, and the loop
+   repeated — narrower window → narrower measurement → narrower request — compounding down to ~1dp.
+
+`nextDialogFit`'s five-attempt-per-target correction cap could not stop this: the *target* itself
+kept changing on almost every tick (each new, narrower width was a different `DpSize`), and the
+budget reset unconditionally on every target change, so the cap effectively never engaged until the
+loop bottomed out on its own at AWT's practical size floor.
+
+### Ruled out
+
+- **The window manager forcibly shrinking the outer frame from outside** — disproved by the log:
+  the *target* the app was requesting, not merely the size actually applied, had itself degraded to
+  1dp. This was the app asking for a tiny width, not a window manager refusing a larger one.
+- **Something specific to the Settings dialog** (e.g. its tab content changing height as
+  ViewModel-driven state loads, repeatedly moving the fit target) — disproved by `AboutDialog`
+  reproducing identically despite completely static content. The two share nothing in their content
+  or lifecycle; the only thing they share is being routed through `DesktopModalWindow`'s
+  `modal = false` branch.
+
+### How this was resolved
+
+- `fitWindowSize` no longer takes measured width as input at all. It now takes the dialog's own
+  fixed `contentWidth` (the caller's `initialWidth`) directly, and uses the measured `contentPx`
+  only for height — the one axis genuinely meant to auto-fit. This closes the feedback loop
+  outright: whatever momentarily narrow client area a window manager reports during placement can
+  no longer become the next requested width, on Linux or anywhere else, `resizable = true` dialog or
+  not.
+- Reusing a height-only decoration allowance for a size comparison that is fundamentally about both
+  axes was itself a latent, independent asymmetry (the *outer* window width was being compared
+  against a *content-only* target width, with no compensation on that axis at all — the reason
+  the settings tab bar could clip a few trailing pixels even without this bug). `decorationAllowanceFor`
+  now computes a `DpSize` allowance from the window's real `insets` on both axes, falling back to
+  the previous height-only fixed guess only while insets still read all-zero (before the window
+  manager has reparented/decorated the window — a known AWT/X11 timing quirk).
+- `nextDialogFit`'s correction budget now only resets on a target change when the *previous* target
+  was actually reached (`DialogFitState.targetReached`), rather than on every target change
+  unconditionally. This closes the specific hole that let a moving target dodge the cap
+  indefinitely — a defense that holds even if some future change reintroduces a target that can
+  drift on its own, independent of the width fix above.
+- `applyWindowGeometry` gained an optional `minSize` floor, and `DesktopModalWindow` now also sets
+  `window.minimumSize` at creation. Both are a last-resort safety net, not the primary fix — given
+  `resizable = false`, any future collapse would otherwise be unrecoverable by the user.
