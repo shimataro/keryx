@@ -5,6 +5,90 @@
 Defects that are understood but deliberately not fixed, with the evidence behind that decision.
 Each entry records what was ruled out, so a later investigation doesn't repeat the same work.
 
+## Linux: OPML import/export crashed the JVM with SIGSEGV in libawt_xawt.so
+
+**Status**: Resolved — by replacing the Linux OPML file dialog backend with `javax.swing.JFileChooser`
+(`platform/FilePicker.desktop.kt`), leaving `java.awt.FileDialog` in place on macOS/Windows. Kept in
+full because the evidence is decompiled OpenJDK internals that would otherwise have to be
+re-derived, and because it documents why a plain JVM-flag workaround was rejected.
+
+### Symptom
+
+On Linux, opening the OPML import or export dialog (Settings ▸ Data Management ▸ Import/Export OPML)
+froze the window and then crashed the whole process with `SIGSEGV`:
+
+```text
+# A fatal error has been detected by the Java Runtime Environment:
+#  SIGSEGV (0xb) at pc=0x00007f0318391a5f, ...
+# Problematic frame:
+# C  [libawt_xawt.so+0x51a5f]
+```
+
+Import and export crashed at two different offsets in the same library
+(`+0x51a5f` for import, `+0x51af9` for export). macOS was unaffected.
+
+### Diagnosis
+
+`platform/FilePicker.desktop.kt` used `java.awt.FileDialog`. On Linux, `sun.awt.X11.XToolkit
+.createFileDialog()` selects `GtkFileDialogPeer` — GTK3-backed native code inside `libawt_xawt.so` —
+unless `sun.awt.disableGtkFileDialogs=true` is set. macOS uses `LWCToolkit`/`NSSavePanel` instead, so
+it never touches this code path at all, matching the reporter's "fine on macOS" observation.
+
+Decompiling `sun_awt_X11_GtkFileDialogPeer.c` from the OpenJDK source and disassembling the two crash
+addresses in each `hs_err_pid*.log` pinned both crashes to the same root cause — a NULL
+`JNU_GetEnv(jvm, JNI_VERSION_1_2)` result, dereferenced with no NULL check:
+
+| Operation | pc | Function | What the disassembly showed |
+| --- | --- | --- | --- |
+| Import | `+0x51a5f` | `filenameFilterCallback` (only registered when a `FilenameFilter` is set — import sets one, export does not) | `mov rsi,[r13+8]` = `filter_info->filename`, then a call through the `NewStringUTF` vtable slot |
+| Export | `+0x51af9` | `handle_response` | `cmp r12d,-3` (`GTK_RESPONSE_ACCEPT`), then a call through the `ExceptionCheck` vtable slot |
+
+`JNU_GetEnv` returns NULL only when the calling thread is not attached to the JVM, and both
+`hs_err` headers confirm exactly that: `Current thread is native thread`. The process already had
+`libgtk-3`, `libgdk-3`, and **`libwebkit2gtk-4.1`** mapped — the article reader's native WebView
+(`io.github.kdroidfilter.webview`/wry) is mounted unconditionally for the lifetime of the pane (see
+the WebView entry below), so it is a second GTK consumer sharing the process's default
+`GMainContext`. That is the plausible reason a plain Swing app without an embedded WebView would
+not hit this: with only one GTK consumer, GTK's own signal dispatch stays on a thread the JVM
+already knows about.
+
+### Ruled out
+
+- **A bug specific to import or to export** — disproved: both crash inside the same native file, at
+  the two call sites of the exact same unchecked API (`JNU_GetEnv`), one on each dialog's response
+  path.
+- **`FilenameFilter` itself being the trigger** — the export crash (`handle_response`) has no
+  `FilenameFilter` involved at all; the shared cause is the JNI attachment, not the filter.
+
+### Workarounds that did not work / were rejected
+
+- **`-Dsun.awt.disableGtkFileDialogs=true`** — would route Linux through `XFileDialogPeer` instead,
+  avoiding the GTK peer (and the crash) entirely. Rejected: it must be set before AWT/toolkit
+  initialization (an ordering constraint shared with `ui/theme/DesktopLookAndFeel.installLookAndFeel`
+  — see `app-architecture.md`), and `XFileDialogPeer` is an even older, Motif-era XAWT dialog than the
+  GTK2-era Swing Look & Feel this app already replaced with FlatLaf for exactly that dated-appearance
+  reason (see "Desktop Tray" and "Native file dialogs" below). It also does not pick up FlatLaf at all,
+  unlike a `JFileChooser`.
+
+### How this was resolved
+
+The Linux backend was replaced outright with `javax.swing.JFileChooser`
+(`SwingFilePickerBackend` in `platform/FilePicker.desktop.kt`), mirroring the same
+Linux-Swing-vs-AWT split already used for context menus (`NativeMenu.desktop.kt`'s
+`defaultPopupHandle`). `JFileChooser` is pure Swing on every Look & Feel — including the
+FlatLaf-failed system-L&F fallback, since `GTKLookAndFeel`'s own `GTKFileChooserUI` is itself pure
+Swing — so it never reaches the native GTK code that crashed. See "Native file dialogs (platform
+branch)" in `app-architecture.md` for the resulting design, including the overwrite-confirmation
+detail below and the XDG Desktop Portal noted there as future work.
+
+One behavioral detail worth recording: decompiling the same native file showed that the pre-crash
+Linux `FileDialog` already had native overwrite confirmation
+(`gtk_file_chooser_set_do_overwrite_confirmation(dialog, TRUE)`, set unconditionally for the SAVE
+action) — matching what macOS/Windows still provide natively. `JFileChooser` has no such prompt of
+its own, so the fix restores it explicitly (`resolveSavePath` + a `JOptionPane` confirmation) rather
+than silently regressing Linux relative to its own prior behavior. The same source showed no
+extension-auto-append logic anywhere, on any platform, so that was deliberately not added.
+
 ## Linux Wayland/XWayland: drag cursor stuck on "no-drop" despite a successful drop
 
 **Status**: Resolved — by removing OS-level drag-and-drop from the feed list entirely. The feed/folder

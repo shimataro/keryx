@@ -137,6 +137,32 @@ AWT のバルーンを置き換える。その `image-data` ヒントは SNI ピ
 これら一式は `expect`/`actual` ではなく `desktopMain` に置く。`main.kt` からしか到達せず、ViewModel や
 Repository は触れず、Linux のパネルプロトコルにモバイル側の対応物が無いため。
 
+### ネイティブファイルダイアログ（プラットフォーム分岐）
+
+`platform/FilePicker.desktop.kt` の `defaultFilePickerBackend` は 2 つの実装のどちらかを選ぶ。
+`NativeMenu.desktop.kt` の `defaultPopupHandle` と同じ Linux は Swing・他は AWT という分岐である。
+
+| プラットフォーム | 実装 | 理由 |
+| --- | --- | --- |
+| macOS / Windows | `AwtFilePickerBackend`（`java.awt.FileDialog`） | AWT が実際のネイティブパネル（`NSSavePanel` / `GetOpenFileName`）に写像し、ネイティブの上書き確認も含めて提供する。 |
+| Linux | `SwingFilePickerBackend`（`javax.swing.JFileChooser`） | `sun.awt.X11.XToolkit.createFileDialog()` は `GtkFileDialogPeer` を選ぶが、そのネイティブ GTK コールバックは、記事リーダーの WebView がプロセス内で WebKitGTK を 2 つ目の GTK コンシューマにした状態だと NULL の `JNU_GetEnv` の返り値を逆参照し、JVM をクラッシュさせる SIGSEGV になる（`known-issues.md` 参照）。`JFileChooser` は純粋な Swing でそのコードには一切到達せず、アプリの他の Linux Swing 画面と同じく FlatLaf にも追従する。 |
+
+ダイアログの親ウィンドウは呼び出し元から渡すのではなく、デスクトップ版 `actual` の**内部**で解決する
+（`KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow`、表示中の `Frame` へのフォール
+バック付き）。`LocalNativeWindow` は常にメインウィンドウにしか解決されず、modeless な設定ウインドウ
+から開いたダイアログの親としては不適切なため。`JFileChooser` にはネイティブな上書き確認が無い（AWT
+バックエンドは OS からタダで得られる）ため、`SwingFilePickerBackend` はそれを明示的に復元している —
+なぜクラッシュ修正に留めずその挙動まで復元したのかは `known-issues.md` を参照。
+
+**将来課題**: 同じ `FilePickerBackend` の継ぎ目に `org.freedesktop.portal.FileChooser`（XDG デスクトップ
+ポータル）バックエンドを追加できる。SNI トレイや AppMenu で既に使っている dbus-java 接続経由で、
+KDE/GNOME 純正のダイアログ（かつサンドボックスに適合した挙動）が得られる — クラッシュ前の Linux の
+`FileDialog` は GTK 経由で既にネイティブの上書き確認を持っていたので、ポータル経由のダイアログも
+恐らく同様であり、`SwingFilePickerBackend` の明示的な `resolveSavePath`/`JOptionPane` によるフォール
+バックは不要になる見込みである。ポータルバックエンドが無い環境では `JFileChooser` にフォールバック
+する。検出は `KeryxTray` が SNI と AWT を選び分けるのと同じく、起動時にセッションバス上の
+`org.freedesktop.portal.Desktop` の有無を確認する方式になる。
+
 ## ドメインモデルの方針
 
 SQLDelight の生成クラス（`Feeds` / `Articles` / …）をそのまま各層で使う。列名は snake_case のまま

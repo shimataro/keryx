@@ -285,7 +285,13 @@ compose.desktop {
             //   com.sun.security.auth.module.UnixSystem on every non-Windows host. Without
             //   it the jlink image builds fine but the packaged .deb/.rpm dies with
             //   NoClassDefFoundError, while `./gradlew run` (full JDK) works.
-            modules("java.sql", "java.naming", "java.desktop", "jdk.httpserver", "jdk.security.auth")
+            // jdk.localedata: the Linux OPML file chooser (platform/FilePicker.desktop.kt) is a
+            //   javax.swing.JFileChooser, whose built-in chrome ("Open", "Cancel", "File name", …)
+            //   comes from the JDK's own com.sun.swing.internal.plaf.basic.resources.basic
+            //   bundles — FlatLaf ships no ja translation of its own for these keys. Without this
+            //   module the chooser renders in English on a packaged (jlink'd) Linux build only;
+            //   `./gradlew run` (full JDK) doesn't show the gap.
+            modules("java.sql", "java.naming", "java.desktop", "jdk.httpserver", "jdk.security.auth", "jdk.localedata")
 
             macOS {
                 bundleID = "works.merc.keryx"

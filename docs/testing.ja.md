@@ -58,7 +58,13 @@
 OPML、Dropbox ストレージ/認証、PKCE、OAuth ループバックサーバ、マージ（後勝ち・OR マージ・衝突ガード・
 FK ガード）、スキーマ、ローカル設定、記事 upsert、URL リゾルバ、日時パーサ、Result、Repository 層
 （Article/Feed/Tag/Settings）、CloudSession、NotificationCenter、IdGenerator、SyncRepository、
-ViewModel 層（Home/Settings/Setup/NotificationCenter）、フィード一覧のドラッグ&ドロップの書き直し
+ViewModel 層（Home/Settings/Setup/NotificationCenter。`SettingsViewModel` の OPML インポート/エクスポート
+経路——構築したドキュメント/読み込んだファイルがピックしたパスと往復すること、ローカライズ済みの
+リクエスト内容が `FakeFileSelector` に渡ること、キャンセル、そしてドキュメントの構築/書き込み/取り込み
+処理が EDT ではなく注入したディスパッチャ上で実行されることを含む）、Linux/macOS/Windows の
+ファイルダイアログのバックエンド分岐（`FilePickerTest`：`defaultFilePickerBackend` の OS 判定、
+`FileNameExtensionFilter` と一致する拡張子述語——ディレクトリを accept することを含む——、
+上書き確認の解決、ダイアログの親ウインドウ選択）、フィード一覧のドラッグ&ドロップの書き直し
 （`HomeCommonTest.kt` の `parseFeedListDragSourceKey` で純粋なキー解析ロジックを、`FeedListDragTest.kt`
 で実際にレンダリングしたコンポーザブルに対して `performMouseInput`/`performKeyInput` を使う実際の
 エンドツーエンドのジェスチャーをカバー——フィードを別のフィードの上にドラッグして永続化された順序を
@@ -76,8 +82,12 @@ Linux の SNI トレイ（`TrayPixmapTest`＝ビッグエンディアン ARGB32 
 `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` の失敗は DB スキーマ・
 マージ SQL・同期オーケストレーションの退行を意味するので特に注意する。
 
-既知の未カバー範囲: `SettingsViewModel.exportOpml`/`importOpml`（`FilePicker` にテスト用シームが無い
-ネイティブダイアログ）、`OAuthConnectFlow.connect()` のブラウザー起動〜コールバック待受〜
+既知の未カバー範囲: `SettingsViewModel.exportOpml`/`importOpml` は今やテスト用シーム（`FileSelector`、
+テストでは `FakeFileSelector` でフェイク化）を持ちカバー済み——未カバーのまま残るのは、ネイティブ
+ダイアログが実際に表示される部分（本物の `JFileChooser`/`FileDialog` にはディスプレイと人手が要る
+ため、下記の手動確認に留まる）と、`FilePicker.desktop.kt` の `resolveDialogOwner()` を実ウインドウに
+対して動かす部分（委譲先の純粋な `chooseDialogOwner` の選択ロジックのみテスト済み）である。
+`OAuthConnectFlow.connect()` のブラウザー起動〜コールバック待受〜
 コード交換部分（`BrowserOpener`/`OAuthLoopbackServer` の実I/Oに依存し、シームなしにはモック不可。
 App Key 空チェックで即エラーになる分岐のみ `OAuthConnectFlowTest` でカバー済み）、
 `DatabaseDriverFactory.create()` そのもの（`AppDirs.appDataDir()` を直接参照しておりテスト用の
@@ -211,6 +221,47 @@ Linux の SNI トレイでは `SniConnection`（接続・バス名取得・expor
 - （Linux）アプリ内テーマ（ライト↔ダーク）を再起動なしで切り替えた際、メニューバーと開いている
   ダイアログのボタン列は即座に再スタイルされ、切替後に新しく開いたコンテキストメニューも新テーマを
   反映すること。
+
+OPML のファイルダイアログは実際の OS ウインドウ（macOS は `NSSavePanel`、Windows は
+`GetOpenFileName`、Linux は `JFileChooser` の `JDialog`）であり Compose UI テストでは駆動できないため、
+手動で確認する。この分岐が存在する理由そのものである Linux は、**パッケージ版**
+（`createDistributable` → `bin/Keryx`）で、Plasma **X11**・Plasma **Wayland**（XWayland）・GNOME の
+各セッションで確認すること:
+
+- **先に記事を選択**して記事リーダーの WebKitGTK WebView をプロセス内で生かした状態にしてから
+  （旧 GTK ファイルダイアログピアが落ちた条件——`known-issues.md` 参照）Settings ▸ データ管理 ▸
+  OPML をインポート。GTK ではなく Swing のチューザが開き、アプリはクラッシュせず、選んだファイルが
+  取り込まれる。エクスポートも同様。`<appDataDir>/logs/keryx.0.log` に何も出ず、ランチャーの隣に
+  `hs_err_pid*.log` が生成されない。
+- チューザが記事リーダーの WebView の**手前**に描画され、背後に隠れないこと。
+- インポート: 「OPML ファイル」フィルタ選択時は `.opml`/`.xml` のみが一覧に出る。「すべてのファイル」
+  に切り替えると全件表示される。フォルダーをダブルクリックして中に入れる（ディレクトリを弾く
+  フィルタだと操作不能になる）。
+- エクスポート: 初期名は `keryx.opml`。既存のファイルを選ぶと日本語の 置き換える／キャンセル 確認が
+  出て、キャンセルするとチューザに戻る（エクスポート自体は中断しない）。置き換えると上書きされる。
+  新規のファイル名なら確認なしで保存される。
+- チューザの文言（「開く」「キャンセル」「ファイル名」…）がパッケージ版で**日本語**になっていること
+  ——これが `composeApp/build.gradle.kts` に `jdk.localedata` モジュールを追加した理由であり、英語で
+  表示される場合はまずそのモジュール一覧を確認する。
+- インポート/エクスポートを 3 つの経路すべてから起動し、チューザの親ウインドウが正しいことを確認する:
+  (1) Settings のボタン——チューザが Settings の**手前**に出る、(2) ウインドウ内メニューバーの
+  File ▸、(3) 内蔵バーを隠した状態の KDE Global Menu の File ▸。
+- 再起動せずにアプリ内テーマをライト⇔ダークで切り替えてからチューザを開き直すと、新しい FlatLaf
+  テーマで描画される。
+- 大きな OPML のインポート中もアプリが応答し続ける——インポートボタンのスピナーが回り続け、
+  フィード/記事ペインもスクロールできる（OPML のドキュメント構築/書き込み/取り込み処理を EDT から
+  外した効果の回帰確認）。
+
+macOS と Windows は引き続き `java.awt.FileDialog` を使うが、親ウインドウと表示元のスレッドが
+どちらも変わった（従来は親なしダイアログを EDT 外から表示していた）ため、こちらも再確認する:
+
+- パネル/ダイアログが**開いた元のウインドウの中央**に出る（Settings のボタンから開いた場合は
+  Settings の上）こと、かつ表示中も背後の Compose ウインドウが**再描画され続ける**こと
+  （バックグラウンドスレッドではなく EDT 自身のセカンダリイベントループから表示していることの確認）。
+- macOS: インポートで拡張子フィルタが引き続き効くこと、既存ファイルへの保存でシステム純正の
+  置換確認が引き続き出ること。
+- Windows: インポート/エクスポートが引き続き完了すること（インポートで `FilenameFilter` が効かない
+  のは既存の挙動であり、今回の変更による退行ではない）。
 
 ダイアログのサイズ自動調整（`DialogWindow` の OS ウィンドウ挙動）は自動テストできないため、以下を
 目視確認する:

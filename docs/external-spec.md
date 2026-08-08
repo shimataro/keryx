@@ -88,7 +88,10 @@ macOS and Windows use the system one; Linux uses FlatLaf tinted to the app's own
 because Java's Linux system L&F is a GTK2-era emulation that looks dated next to a modern
 desktop. Light / dark follows the in-app theme setting without a restart. Context menus are
 `java.awt.PopupMenu` (a genuine `NSMenu` / Win32 menu) on macOS / Windows and
-`javax.swing.JPopupMenu` on Linux, where AWT's popup ignores the Look & Feel entirely. The UI
+`javax.swing.JPopupMenu` on Linux, where AWT's popup ignores the Look & Feel entirely. The OPML
+import/export file dialog follows the same split: `java.awt.FileDialog` on macOS / Windows and a
+`javax.swing.JFileChooser` on Linux, where AWT's own file dialog routes through GTK native code
+that can crash the app (see `app-architecture.md` and `known-issues.md`). The UI
 font is the OS's own: SF Pro on macOS, Segoe UI on Windows, and on Linux the font resolved by
 the Look & Feel, then the desktop's configured font from XSettings, falling back to Adwaita Sans /
 Cantarell / Ubuntu / Noto Sans / DejaVu Sans.

@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -31,8 +32,16 @@ import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.domain.UpdateStatus
 import works.merc.keryx.app.platform.FileIO
-import works.merc.keryx.app.platform.FilePicker
+import works.merc.keryx.app.platform.FileSelector
+import works.merc.keryx.app.platform.OpenFileRequest
+import works.merc.keryx.app.platform.PlatformFileSelector
+import works.merc.keryx.app.platform.SaveFileRequest
 import works.merc.keryx.app.resources.Res
+import works.merc.keryx.app.resources.common_cancel
+import works.merc.keryx.app.resources.file_filter_opml
+import works.merc.keryx.app.resources.file_overwrite_message
+import works.merc.keryx.app.resources.file_overwrite_replace
+import works.merc.keryx.app.resources.file_overwrite_title
 import works.merc.keryx.app.resources.settings_export_opml
 import works.merc.keryx.app.resources.settings_import_opml
 
@@ -44,6 +53,8 @@ sealed interface OpmlResult {
     data class Imported(val added: Int, val failed: Int) : OpmlResult
     data object Exported : OpmlResult
     data object Cancelled : OpmlResult
+    data object ExportFailed : OpmlResult
+    data object ImportFailed : OpmlResult
 }
 
 class SettingsViewModel(
@@ -59,6 +70,7 @@ class SettingsViewModel(
     // Token store / sync touch the OS Keychain (macOS shells out to `security`, which may
     // block and show an authorization dialog), so keep them off the Main/EDT dispatcher.
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val fileSelector: FileSelector = PlatformFileSelector,
 ) : ViewModel() {
 
     val localSettings = settingsRepository.localSettings
@@ -282,22 +294,37 @@ fun setThemeMode(mode: String) = update { it.copy(themeMode = mode) }
     }
 
     /**
-     * Exports subscribed feeds, including their folders and tags, to an OPML file selected by the user.
+     * Exports subscribed feeds, folders, and tags to a user-selected OPML file.
      *
-     * Updates the OPML result to indicate whether the export completed or was canceled.
+     * Updates the OPML result to indicate whether the export succeeded, was canceled, or failed.
      */
     fun exportOpml() {
         if (exportingOpml || importingOpml) return
         viewModelScope.launch {
             exportingOpml = true
             try {
-                val path = FilePicker.pickSaveFile(getString(Res.string.settings_export_opml), "keryx.opml")
+                val request = SaveFileRequest(
+                    title = getString(Res.string.settings_export_opml),
+                    defaultName = "keryx.opml",
+                    overwriteTitle = getString(Res.string.file_overwrite_title),
+                    overwriteMessage = getString(Res.string.file_overwrite_message),
+                    overwriteReplaceLabel = getString(Res.string.file_overwrite_replace),
+                    overwriteCancelLabel = getString(Res.string.common_cancel),
+                )
+                val path = fileSelector.pickSaveFile(request)
                 if (path == null) {
                     opmlResult = OpmlResult.Cancelled
                     return@launch
                 }
-                FileIO.writeText(path, buildOpmlDocument())
-                opmlResult = OpmlResult.Exported
+                opmlResult = try {
+                    withContext(dispatcher) { FileIO.writeText(path, buildOpmlDocument()) }
+                    OpmlResult.Exported
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    Log.warn(TAG, "Failed to export OPML", e)
+                    OpmlResult.ExportFailed
+                }
             } finally {
                 exportingOpml = false
             }
@@ -338,17 +365,25 @@ fun setThemeMode(mode: String) = update { it.copy(themeMode = mode) }
         viewModelScope.launch {
             importingOpml = true
             try {
-                val path = FilePicker.pickOpenFile(getString(Res.string.settings_import_opml), listOf("opml", "xml"))
+                val request = OpenFileRequest(
+                    title = getString(Res.string.settings_import_opml),
+                    extensions = listOf("opml", "xml"),
+                    filterLabel = getString(Res.string.file_filter_opml),
+                )
+                val path = fileSelector.pickOpenFile(request)
                 if (path == null) {
                     opmlResult = OpmlResult.Cancelled
                     return@launch
                 }
-                val xml = FileIO.readText(path) ?: run {
-                    opmlResult = OpmlResult.Cancelled
-                    return@launch
+                opmlResult = try {
+                    val outcome = withContext(dispatcher) { FileIO.readText(path)?.let { opmlImporter.import(it) } }
+                    if (outcome == null) OpmlResult.ImportFailed else OpmlResult.Imported(outcome.added, outcome.failed)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    Log.warn(TAG, "Failed to import OPML", e)
+                    OpmlResult.ImportFailed
                 }
-                val outcome = opmlImporter.import(xml)
-                opmlResult = OpmlResult.Imported(outcome.added, outcome.failed)
             } finally {
                 importingOpml = false
             }
