@@ -204,9 +204,9 @@ This approval is also the **one-time run confirmation**: once given, every
 approved batch below proceeds straight through apply → verify → commit (Step 4)
 with no further per-batch approval gate — the same shape as `evaluate-review`'s
 Case B. Before Step 4 makes its first commit: if the current branch is a
-version branch (`v*`), apply the repo's Branching rule (`.claude/CLAUDE.md`)
-via `AskUserQuestion` and switch to the chosen branch first — Step 1's worktree
-check already ruled out unrelated dirty changes.
+version branch (`v*`), run `/feature-branch refactor` to create and switch
+to a feature branch first — Step 1's worktree check already ruled out unrelated
+dirty changes.
 
 ### Step 4 — Apply batches (behavior-preserving, verified)
 

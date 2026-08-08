@@ -51,9 +51,13 @@ convention (see `.claude/CLAUDE.md` → "Commit messages"):
   non-obvious *what*). Separate it from the subject with a blank line. Keep it
   short.
 
-Do **not** add a `Co-Authored-By` trailer.
+## Step 5 — Branching
 
-## Step 5 — Output
+If the current branch is a version branch (`v*`), run `/feature-branch <type>`
+(using the Conventional Commits type from Step 4) to create and switch to a feature
+branch before this message is used to commit.
+
+## Step 6 — Output
 
 Output the commit message only, inside a fenced code block so it is easy to
 copy. Do not commit.
