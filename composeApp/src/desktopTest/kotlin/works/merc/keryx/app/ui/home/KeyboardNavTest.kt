@@ -116,6 +116,36 @@ class KeyboardNavTest {
     }
 
     @Test
+    fun ctrlJDoesNotFireNextArticle() {
+        assertEquals(emptyList(), firedEvents { withKeyDown(Key.CtrlLeft) { pressKey(Key.J) } })
+    }
+
+    @Test
+    fun ctrlKDoesNotFirePreviousArticle() {
+        assertEquals(emptyList(), firedEvents { withKeyDown(Key.CtrlLeft) { pressKey(Key.K) } })
+    }
+
+    @Test
+    fun ctrlUDoesNotFireToggleRead() {
+        assertEquals(emptyList(), firedEvents { withKeyDown(Key.CtrlLeft) { pressKey(Key.U) } })
+    }
+
+    @Test
+    fun ctrlSDoesNotFireToggleStar() {
+        assertEquals(emptyList(), firedEvents { withKeyDown(Key.CtrlLeft) { pressKey(Key.S) } })
+    }
+
+    @Test
+    fun ctrlODoesNotFireOpenInBrowser() {
+        assertEquals(emptyList(), firedEvents { withKeyDown(Key.CtrlLeft) { pressKey(Key.O) } })
+    }
+
+    @Test
+    fun ctrlCDoesNotFireCopyUrl() {
+        assertEquals(emptyList(), firedEvents { withKeyDown(Key.CtrlLeft) { pressKey(Key.C) } })
+    }
+
+    @Test
     fun escapeFiresOnEscapeOnly() {
         assertEquals(listOf("escape"), firedEvents { pressKey(Key.Escape) })
     }

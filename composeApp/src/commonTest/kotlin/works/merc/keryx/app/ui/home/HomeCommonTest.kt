@@ -106,6 +106,13 @@ class HomeCommonTest {
     }
 
     @Test
+    fun articleActionAllowedIsFalseOnlyForFeedListPane() {
+        assertEquals(false, articleActionAllowed(HomePane.FeedList))
+        assertEquals(true, articleActionAllowed(HomePane.ArticleList))
+        assertEquals(true, articleActionAllowed(HomePane.ArticleDetail))
+    }
+
+    @Test
     fun groupFeedsByFolderReturnsOnePairPerFolderInOrderPlusUnassignedLast() {
         val folders = listOf(folder("d1"), folder("d2"))
         val feeds = listOf(feed("f1", folderId = "d1"), feed("f2"))

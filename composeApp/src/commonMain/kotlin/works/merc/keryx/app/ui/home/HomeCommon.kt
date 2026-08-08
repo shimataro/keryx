@@ -134,6 +134,14 @@ fun nextFeedFilter(current: ArticleFilter, orderedFilters: List<ArticleFilter>, 
 }
 
 /**
+ * Whether a keyboard shortcut that acts on the selected article (toggle read/star, open in
+ * browser, copy URL) should fire while [pane] has keyboard focus. These mirror real
+ * context-menu items and have side effects (clipboard, browser launch, read/star state), so they
+ * are scoped to the panes that actually show the article — not the feed list.
+ */
+fun articleActionAllowed(pane: HomePane): Boolean = pane != HomePane.FeedList
+
+/**
  * Finds the rendered list index for a feed, folder, or tag filter.
  *
  * Expanded tags account for their attached feed rows when calculating subsequent indices.

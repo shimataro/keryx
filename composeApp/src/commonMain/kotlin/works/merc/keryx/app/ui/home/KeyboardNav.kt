@@ -13,9 +13,15 @@ import androidx.compose.ui.input.key.type
  * Keyboard shortcuts for the home screen (attach to a focused root):
  * - ↓ / ↑ / ← / → : pane-dependent navigation (selection change, scroll, or focus move —
  *   the caller decides based on which pane is logically focused)
- * - J : next article,  K : previous article (always operate on the article list)
+ * - J : next article,  K : previous article (always operate on the article list, regardless of
+ *   which pane is focused — deliberately unscoped so articles can be skimmed while the feed list
+ *   still has focus; this has no side effects, unlike U/S/O/C)
  * - U : toggle read/unread,  S : toggle star,  O : open in browser,  C : copy URL
- *   (U/S/O/C all act on the currently selected article)
+ *   (U/S/O/C all act on the currently selected article; the caller is expected to scope these to
+ *   the article list/detail panes since they have side effects — clipboard, browser launch,
+ *   read/star state — that shouldn't fire while focus is elsewhere, e.g. the feed list)
+ * - Every plain-letter shortcut above requires neither Ctrl nor Meta to be held, so it never
+ *   shadows the OS's own Ctrl/Cmd+<letter> bindings (e.g. Ctrl+C for copy)
  * - Cmd/Ctrl+F : search
  * - Esc : abort an in-progress feed/folder drag (handled by [onEscape], which reports whether
  *   there was one — if not, the key is left alone for anything else to handle)
@@ -49,12 +55,12 @@ fun Modifier.homeKeyboardShortcuts(
         event.key == Key.DirectionUp -> { onUp(); true }
         event.key == Key.DirectionLeft -> { onLeft(); true }
         event.key == Key.DirectionRight -> { onRight(); true }
-        event.key == Key.J -> { onNextArticle(); true }
-        event.key == Key.K -> { onPreviousArticle(); true }
-        event.key == Key.U -> { onToggleRead(); true }
-        event.key == Key.S -> { onToggleStar(); true }
-        event.key == Key.O -> { onOpenInBrowser(); true }
-        event.key == Key.C -> { onCopyUrl(); true }
+        !event.isCtrlPressed && !event.isMetaPressed && event.key == Key.J -> { onNextArticle(); true }
+        !event.isCtrlPressed && !event.isMetaPressed && event.key == Key.K -> { onPreviousArticle(); true }
+        !event.isCtrlPressed && !event.isMetaPressed && event.key == Key.U -> { onToggleRead(); true }
+        !event.isCtrlPressed && !event.isMetaPressed && event.key == Key.S -> { onToggleStar(); true }
+        !event.isCtrlPressed && !event.isMetaPressed && event.key == Key.O -> { onOpenInBrowser(); true }
+        !event.isCtrlPressed && !event.isMetaPressed && event.key == Key.C -> { onCopyUrl(); true }
         else -> false
     }
 }
