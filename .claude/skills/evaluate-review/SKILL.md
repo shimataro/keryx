@@ -373,11 +373,11 @@ Then output the reviewer-facing reply per the Common rule above.
 always follow Case A instead — the user still approves a plan and performs the commit
 themselves there.
 
-Before starting, if the current branch is a version branch (`v*`), apply the repo's Branching
-rule (`.claude/CLAUDE.md`) once up front via `AskUserQuestion` and switch to the chosen
-feature branch before making any commits. Step 3's branch-alignment check already makes this
-unlikely in practice (the PR's head branch is normally already a feature branch), but guard
-for it anyway.
+Before starting, if the current branch is a version branch (`v*`), run
+`/feature-branch fix` to create and switch to a feature branch before
+making any commits. Step 3's branch-alignment check already makes this
+unlikely in practice (the PR's head branch is normally already a feature branch),
+but guard for it anyway.
 
 **One-time run confirmation**: before touching any comment, ask the user via `AskUserQuestion`
 to confirm the whole Case B run once — e.g. "About to independently evaluate and, for each valid

@@ -49,7 +49,7 @@ Download the latest release from the [Releases page](https://github.com/shimatar
 
 ## Roadmap
 
-- Additional platform support
+- Platform support
   - [ ] Windows
   - [x] macOS
   - [x] Linux ( `.deb` )
@@ -57,7 +57,7 @@ Download the latest release from the [Releases page](https://github.com/shimatar
   - [ ] Android
   - [ ] iOS
   - [ ] iPadOS
-- Additional cloud storage support
+- Cloud storage support
   - [x] [Dropbox](https://www.dropbox.com/)
   - [x] [Google Drive](https://drive.google.com/)
   - [x] [OneDrive](https://onedrive.live.com/)
