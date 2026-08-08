@@ -15,6 +15,7 @@
       "Bash(git show:*)",
       "Bash(git ls-files:*)",
       "WebSearch"
-    ]
+    ],
+    "defaultMode": "plan"
   }
 }
