@@ -289,11 +289,18 @@ For `pr_review` with `associated_comments`, apply these same criteria **independ
 each associated comment**, producing a separate verdict per comment — not only a single
 verdict for the review as a whole. See Step 8 for how these per-comment verdicts are used.
 
-Output the evaluation in this exact format:
+For every item evaluated — the single comment/review for Case A, or each associated
+comment independently for Case B — record its **Validity** ([Valid / Invalid / Partially
+Valid]), **Confidence** ([High / Medium / Low]), and **Reasoning**. Do not print this
+immediately: Step 8 defines exactly when and how it is surfaced — first as a row in the
+run's summary table ("Common rule — summary table"), then as this per-item detail block,
+in this exact format:
 
 ```markdown
 ## Evaluation
 
+**URL**: <the comment/review URL being evaluated>
+**Finding summary**: <one-line paraphrase of the comment/review's point, not a verbatim quote>
 **Validity**: [Valid / Invalid / Partially Valid]
 **Confidence**: [High / Medium / Low]
 
@@ -305,6 +312,33 @@ Output the evaluation in this exact format:
 
 Branch on `comment_type` and, for `pr_review`, on whether `associated_comments` (gathered in
 Step 4) is non-empty, into one of two cases below (Case A / Case B).
+
+**Common rule — summary table (always, printed before any per-item detail)**: Before
+printing any item's Step 7 detail block or taking any action on it, print one Markdown
+table summarizing every item this run is evaluating:
+
+| Comment URL | Finding summary | Validity | Confidence | Next action |
+| --- | --- | --- | --- | --- |
+
+- **Comment URL** — the target URL for Case A (the `discussion_r...`/`pullrequestreview-...`
+  URL given to the skill); for Case B, each associated comment's own `html_url` (fall back
+  to its `path`:`line`/`original_line` if no URL is available).
+- **Finding summary** — a concise one-line paraphrase (not a verbatim quote) of what the
+  comment/review points out.
+- **Validity** / **Confidence** — that item's Step 7 Validity / Confidence.
+- **Next action** — the planned outcome: **Implementation plan** (Case A, Valid/Partially
+  Valid + code change needed), **Fix & commit** (Case B, Valid/Partially Valid + code
+  change needed), or **No action needed** (Invalid, or valid but no code change required).
+- **Case A**: exactly one row, from the Step 7 evaluation already performed for this
+  comment/review.
+- **Case B**: one row per entry in `associated_comments`, in that order, from the verdicts
+  Step 7 already produced for every associated comment (Step 7 evaluates all of them before
+  Step 8 begins — see its "apply independently to each associated comment" rule). No
+  comment is acted on until every row is printed.
+
+This table is a preview of the plan, not the final outcome — Case B's closing summary
+still reports what actually happened to each comment (`Committed <sha>` / `Skipped` /
+`Verification failed`), which can differ from Next action if a fix later fails verification.
 
 **Common rule — reviewer-facing reply for "no change needed" outcomes**: whenever a comment or
 review (or, in Case B, an individual associated comment) is judged **Invalid**, or **Valid**/
@@ -338,6 +372,9 @@ or in Japanese:
 This case is unchanged from before: it always ends in a plan awaiting user approval, and
 the user authors/performs the eventual commit themselves (per the repo's normal "don't commit
 unless asked" rule).
+
+This case always begins by printing the one-row summary table and this item's Step 7
+detail block, per the "Common rule — summary table" above.
 
 If the evaluation is **Valid** or **Partially Valid** **and** the comment/review calls for code changes, proceed:
 
@@ -379,31 +416,46 @@ making any commits. Step 3's branch-alignment check already makes this
 unlikely in practice (the PR's head branch is normally already a feature branch),
 but guard for it anyway.
 
-**One-time run confirmation**: before touching any comment, ask the user via `AskUserQuestion`
-to confirm the whole Case B run once — e.g. "About to independently evaluate and, for each valid
-finding, auto-fix and commit N comment(s) from this review — proceed?" (Proceed / Cancel this
-URL). This satisfies the repo's "don't commit unless asked" convention while preserving Case B's
-per-comment efficiency: once confirmed, every comment below still proceeds straight to fix →
-verify → commit with no further per-comment approval. If the user cancels, skip this URL
-entirely (commit nothing, note "Cancelled by user" in the closing summary) and, for a multi-URL
-run, continue to the next URL at Step 2. This one-time confirmation authorizes the whole run, but
-does not itself substitute for reviewing individual comments — each comment's own evaluation is
-still surfaced as it is reached (see step 1 below), just without a further approval gate.
+Check `git status --porcelain`. If the working tree is dirty with changes unrelated to this
+run, warn and skip this URL entirely (commit nothing, note "Working tree not clean" in the
+closing summary) rather than making any Case B edits — a failed-verification revert (step 3
+below) must never be able to destroy pre-existing uncommitted work in the same file. For a
+multi-URL run this only skips the current URL; continue to the next one at Step 2. A clean
+result here becomes this run's baseline for the re-check below.
 
-Before the loop, check `git status --porcelain`. If the working tree is dirty with changes
-unrelated to this run, warn and skip this URL entirely (commit nothing, note "Working tree not
-clean" in the closing summary) rather than making any Case B edits — a failed-verification
-revert (step 3 below) must never be able to destroy pre-existing uncommitted work in the same
-file. For a multi-URL run this only skips the current URL; continue to the next one at Step 2.
+Print the summary table (per the "Common rule — summary table" above) covering every
+comment in `associated_comments`.
+
+**One-time run confirmation**: ask the user via `AskUserQuestion` to confirm the whole
+Case B run once, referencing the table just printed — e.g. "Found N comment(s): X
+Valid/Partially Valid (will fix & commit), Y Invalid or no change needed (skipped) —
+proceed with the plan above?" (Proceed / Cancel this URL). This satisfies the repo's
+"don't commit unless asked" convention while preserving Case B's per-comment efficiency:
+once confirmed, every comment below still proceeds straight to fix → verify → commit with
+no further per-comment approval. If the user cancels, skip this URL entirely (commit
+nothing, note "Cancelled by user" in the closing summary) and, for a multi-URL run,
+continue to the next URL at Step 2. This one-time confirmation authorizes the whole run,
+but does not itself substitute for reviewing individual comments — each comment's own
+detail block is still surfaced as it is reached (see step 1 below), just without a further
+approval gate.
+
+**Re-check immediately before the first edit**: because the one-time run confirmation above
+blocks on the user for an unbounded time, re-run `git status --porcelain` right before the
+first edit (i.e., right before step 3 fires for the first Valid/Partially Valid comment
+below) and confirm it still matches the baseline (still clean). If it no longer does, treat
+it exactly like the initial dirty-tree case: skip this URL entirely (commit nothing, note
+"Working tree not clean" in the closing summary) rather than starting any Case B edits, and
+continue to the next URL in a multi-URL run.
 
 For each comment in `associated_comments`, in order:
 
-1. Using that comment's own thread context (Step 5) and code context (Step 6), run the
-   Step 7 criteria against it individually, then **output its evaluation** — this comment's
-   file:line or comment URL, followed by the Step 7 **Validity** / **Confidence** /
-   **Reasoning** — to the user, **before** taking any action on it. This is informational only,
-   not a per-comment approval gate: the one-time run confirmation above already authorizes
-   proceeding, so continue immediately to step 2 or 3 below without waiting for a reply.
+1. This comment's Step 7 evaluation was already produced while Step 7 evaluated every
+   associated comment (that already fed one row of the summary table printed above) — do
+   not re-run it. Output its detail block now — this comment's file:line or comment URL,
+   followed by the Step 7 **Validity** / **Confidence** / **Reasoning** — to the user,
+   **before** taking any action on it. This is informational only, not a per-comment
+   approval gate: the one-time run confirmation above already authorizes proceeding, so
+   continue immediately to step 2 or 3 below without waiting for a reply.
 2. If **Invalid**, or valid but no code change is required: skip this comment — implement
    nothing, commit nothing. Output the reviewer-facing reply for this comment per the Common
    rule above. Note it (with the reason) for the closing summary.
