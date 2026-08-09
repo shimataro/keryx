@@ -258,6 +258,9 @@ class AppMenuTreeTest {
         assertEquals(AppMenuShortcut.CloseWindow, root.menu("File").item("Close").shortcut)
         assertEquals(AppMenuShortcut.RefreshAll, root.menu("Feed").item("RefreshAll").shortcut)
         assertEquals(AppMenuShortcut.Search, root.menu("View").item("Search").shortcut)
+        assertEquals(AppMenuShortcut.ImportOpml, root.menu("File").item("Import").shortcut)
+        assertEquals(AppMenuShortcut.ExportOpml, root.menu("File").item("Export").shortcut)
+        assertEquals(AppMenuShortcut.UnreadOnly, root.menu("View").checkbox("UnreadOnly")!!.shortcut)
     }
 
     @Test

@@ -51,6 +51,9 @@ internal enum class AppMenuShortcut(
     RefreshAll(Key.R, "R"),
     ShowMenuBar(Key.M, "M"),
     Search(Key.F, "F"),
+    ImportOpml(Key.I, "I"),
+    ExportOpml(Key.E, "E"),
+    UnreadOnly(Key.U, "U"),
     ToggleRead(Key.U, "U", shift = true),
     ToggleStar(Key.S, "S", shift = true),
     OpenInBrowser(Key.O, "O", shift = true),
@@ -199,8 +202,8 @@ internal fun buildAppMenuTree(
         add(AppMenuNode.Item(labels.addFolder, ui.addItemsEnabled, onClick = actions.addFolder))
         add(AppMenuNode.Item(labels.addTag, ui.addItemsEnabled, onClick = actions.addTag))
         add(AppMenuNode.Separator)
-        add(AppMenuNode.Item(labels.importOpml, ui.opmlEnabled, onClick = actions.importOpml))
-        add(AppMenuNode.Item(labels.exportOpml, ui.opmlEnabled, onClick = actions.exportOpml))
+        add(AppMenuNode.Item(labels.importOpml, ui.opmlEnabled, AppMenuShortcut.ImportOpml, actions.importOpml))
+        add(AppMenuNode.Item(labels.exportOpml, ui.opmlEnabled, AppMenuShortcut.ExportOpml, actions.exportOpml))
         add(AppMenuNode.Separator)
         add(AppMenuNode.Item(labels.closeWindow, enabled = true, shortcut = AppMenuShortcut.CloseWindow, onClick = actions.closeWindow))
         // On macOS, Settings and Quit live in the native app menu (see main.kt).
@@ -213,7 +216,15 @@ internal fun buildAppMenuTree(
 
     val viewItems = buildList {
         add(AppMenuNode.Item(labels.search, ui.searchEnabled, AppMenuShortcut.Search, actions.focusSearch))
-        add(AppMenuNode.CheckboxItem(labels.unreadOnly, ui.unreadOnlyEnabled, ui.unreadOnlyChecked, onCheckedChange = actions.setUnreadOnly))
+        add(
+            AppMenuNode.CheckboxItem(
+                labels.unreadOnly,
+                ui.unreadOnlyEnabled,
+                ui.unreadOnlyChecked,
+                AppMenuShortcut.UnreadOnly,
+                onCheckedChange = actions.setUnreadOnly,
+            ),
+        )
         add(AppMenuNode.Item(labels.toggleSort, ui.toggleSortEnabled, onClick = actions.toggleSort))
         add(AppMenuNode.Separator)
         add(AppMenuNode.Item(labels.markAllRead, ui.markAllReadEnabled, onClick = actions.markAllRead))

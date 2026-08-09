@@ -82,6 +82,9 @@ class MenuBarVisibilityTest {
         assertEquals(KeyEvent.VK_R, AppMenuShortcut.RefreshAll.awtKeyCode())
         assertEquals(KeyEvent.VK_M, AppMenuShortcut.ShowMenuBar.awtKeyCode())
         assertEquals(KeyEvent.VK_F, AppMenuShortcut.Search.awtKeyCode())
+        assertEquals(KeyEvent.VK_I, AppMenuShortcut.ImportOpml.awtKeyCode())
+        assertEquals(KeyEvent.VK_E, AppMenuShortcut.ExportOpml.awtKeyCode())
+        assertEquals(KeyEvent.VK_U, AppMenuShortcut.UnreadOnly.awtKeyCode())
     }
 
     // --- shortcut matching ---
@@ -96,6 +99,12 @@ class MenuBarVisibilityTest {
 
         val showMenuBar = matchMenuShortcut(tree(), KeyEvent.VK_M, ctrl = true, meta = false)
         assertTrue(showMenuBar is AppMenuNode.CheckboxItem && showMenuBar.label == "ShowMenuBar")
+
+        val importOpml = matchMenuShortcut(tree(), KeyEvent.VK_I, ctrl = true, meta = false)
+        assertTrue(importOpml is AppMenuNode.Item && importOpml.label == "Import")
+
+        val unreadOnly = matchMenuShortcut(tree(), KeyEvent.VK_U, ctrl = true, meta = false)
+        assertTrue(unreadOnly is AppMenuNode.CheckboxItem && unreadOnly.label == "UnreadOnly")
     }
 
     @Test
