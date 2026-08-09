@@ -14,6 +14,7 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.resources.Res
+import works.merc.keryx.app.resources.common_menu_item_with_shortcut
 import works.merc.keryx.app.resources.home_assign_tags
 import works.merc.keryx.app.resources.home_move_to_folder
 import works.merc.keryx.app.resources.home_no_folder
@@ -50,6 +51,8 @@ import works.merc.keryx.app.resources.menu_view_toggle_sort
 import works.merc.keryx.app.resources.menu_view_unread_only
 import works.merc.keryx.app.ui.home.HomePane
 import works.merc.keryx.app.ui.home.HomeViewModel
+import works.merc.keryx.app.ui.home.deleteShortcutKeyLabel
+import works.merc.keryx.app.ui.home.renameShortcutKeyLabel
 import works.merc.keryx.app.ui.menu.AppMenuActions
 import works.merc.keryx.app.ui.menu.AppMenuLabels
 import works.merc.keryx.app.ui.menu.AppMenuNode
@@ -163,19 +166,27 @@ internal fun FrameWindowScope.AppMenuBar(
         markAllRead = stringResource(Res.string.menu_view_mark_all_read),
         showMenuBar = stringResource(Res.string.menu_view_show_menu_bar),
         articleMenu = stringResource(Res.string.menu_article),
-        toggleRead = stringResource(Res.string.menu_article_toggle_read),
-        toggleStar = stringResource(Res.string.menu_article_toggle_star),
-        openInBrowser = stringResource(Res.string.menu_article_open_in_browser),
-        copyUrl = stringResource(Res.string.menu_article_copy_url),
+        toggleRead = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.menu_article_toggle_read), "U"),
+        toggleStar = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.menu_article_toggle_star), "S"),
+        openInBrowser = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.menu_article_open_in_browser), "O"),
+        copyUrl = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.menu_article_copy_url), "C"),
         feedMenu = stringResource(Res.string.menu_feed),
         refreshAll = stringResource(Res.string.menu_feed_refresh_all),
         syncNow = stringResource(Res.string.menu_feed_sync_now),
-        feedRefresh = stringResource(Res.string.home_refresh),
+        feedRefresh = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.home_refresh), "R"),
         feedAssignTags = stringResource(Res.string.home_assign_tags),
         feedMoveToFolder = stringResource(Res.string.home_move_to_folder),
         feedNoFolder = stringResource(Res.string.home_no_folder),
-        feedRename = stringResource(Res.string.home_rename_feed),
-        feedUnsubscribe = stringResource(Res.string.home_unsubscribe_menu),
+        feedRename = stringResource(
+            Res.string.common_menu_item_with_shortcut,
+            stringResource(Res.string.home_rename_feed),
+            renameShortcutKeyLabel(),
+        ),
+        feedUnsubscribe = stringResource(
+            Res.string.common_menu_item_with_shortcut,
+            stringResource(Res.string.home_unsubscribe_menu),
+            deleteShortcutKeyLabel(),
+        ),
         helpMenu = stringResource(Res.string.menu_help),
         website = stringResource(Res.string.menu_help_website),
         projectPage = stringResource(Res.string.menu_help_project_page),
