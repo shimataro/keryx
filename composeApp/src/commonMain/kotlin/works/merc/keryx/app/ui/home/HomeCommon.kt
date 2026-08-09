@@ -215,6 +215,31 @@ fun feedListItemIndex(
     return null
 }
 
+/** The feed/folder/tag resolved by [resolveFeedListSelectionTarget] for the current filter. */
+internal sealed interface FeedListSelectionTarget {
+    data class Feed(val feed: Feeds) : FeedListSelectionTarget
+    data class Folder(val folder: Folders) : FeedListSelectionTarget
+    data class Tag(val tag: Tags) : FeedListSelectionTarget
+}
+
+/**
+ * Resolves [filter] against the current feed/folder/tag lists, for the rename/delete keyboard
+ * shortcuts and the equivalent Feed-menu commands (both need "what is currently selected" without
+ * duplicating this lookup). Returns `null` for `All`/`Starred`/`Search`, or if the selected item no
+ * longer exists in its list (e.g. unsubscribed between selection and the shortcut firing).
+ */
+internal fun resolveFeedListSelectionTarget(
+    filter: ArticleFilter,
+    feeds: List<Feeds>,
+    folders: List<Folders>,
+    tags: List<Tags>,
+): FeedListSelectionTarget? = when (filter) {
+    is ArticleFilter.Feed -> feeds.find { it.id == filter.feedId }?.let(FeedListSelectionTarget::Feed)
+    is ArticleFilter.Folder -> folders.find { it.id == filter.folderId }?.let(FeedListSelectionTarget::Folder)
+    is ArticleFilter.Tag -> tags.find { it.id == filter.tagId }?.let(FeedListSelectionTarget::Tag)
+    else -> null
+}
+
 /**
  * Turns FTS5 highlight/snippet markup (matched spans wrapped in
  * [FtsSearch.MARK_START]/[FtsSearch.MARK_END]) into an [AnnotatedString] whose matched spans get the

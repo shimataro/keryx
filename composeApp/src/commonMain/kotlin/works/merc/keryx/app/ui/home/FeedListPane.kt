@@ -169,19 +169,19 @@ internal fun FeedListPane(
     // against this pane's own already-collected rows and open the same dialogs the context menu's
     // Rename/Edit and Unsubscribe/Delete items do.
     fun openRenameDialogForSelection() {
-        when (val target = filter) {
-            is ArticleFilter.Feed -> feeds.find { it.id == target.feedId }?.let { renamingFeed = it }
-            is ArticleFilter.Folder -> folders.find { it.id == target.folderId }?.let { editingFolder = it }
-            is ArticleFilter.Tag -> tags.find { it.id == target.tagId }?.let { editingTag = it }
-            else -> {}
+        when (val target = resolveFeedListSelectionTarget(filter, feeds, folders, tags)) {
+            is FeedListSelectionTarget.Feed -> renamingFeed = target.feed
+            is FeedListSelectionTarget.Folder -> editingFolder = target.folder
+            is FeedListSelectionTarget.Tag -> editingTag = target.tag
+            null -> {}
         }
     }
     fun openDeleteDialogForSelection() {
-        when (val target = filter) {
-            is ArticleFilter.Feed -> feeds.find { it.id == target.feedId }?.let { confirmingUnsubscribeFeed = it }
-            is ArticleFilter.Folder -> folders.find { it.id == target.folderId }?.let { confirmingDeleteFolder = it }
-            is ArticleFilter.Tag -> tags.find { it.id == target.tagId }?.let { confirmingDeleteTag = it }
-            else -> {}
+        when (val target = resolveFeedListSelectionTarget(filter, feeds, folders, tags)) {
+            is FeedListSelectionTarget.Feed -> confirmingUnsubscribeFeed = target.feed
+            is FeedListSelectionTarget.Folder -> confirmingDeleteFolder = target.folder
+            is FeedListSelectionTarget.Tag -> confirmingDeleteTag = target.tag
+            null -> {}
         }
     }
 

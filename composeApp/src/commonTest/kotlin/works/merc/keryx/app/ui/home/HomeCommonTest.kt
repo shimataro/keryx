@@ -347,6 +347,57 @@ class HomeCommonTest {
         assertNull(feedListItemIndex(ArticleFilter.Folder("gone"), feeds, folders, tags, emptySet()))
     }
 
+    // --- resolveFeedListSelectionTarget ---
+
+    @Test
+    fun resolveFeedListSelectionTargetResolvesTheSelectedFeed() {
+        val feeds = listOf(feed("f1"), feed("f2"))
+
+        val target = resolveFeedListSelectionTarget(ArticleFilter.Feed("f2"), feeds, emptyList(), emptyList())
+
+        assertEquals(FeedListSelectionTarget.Feed(feeds[1]), target)
+    }
+
+    @Test
+    fun resolveFeedListSelectionTargetResolvesTheSelectedFolder() {
+        val folders = listOf(folder("d1"), folder("d2"))
+
+        val target = resolveFeedListSelectionTarget(ArticleFilter.Folder("d2"), emptyList(), folders, emptyList())
+
+        assertEquals(FeedListSelectionTarget.Folder(folders[1]), target)
+    }
+
+    @Test
+    fun resolveFeedListSelectionTargetResolvesTheSelectedTag() {
+        val tags = listOf(tag("t1"), tag("t2"))
+
+        val target = resolveFeedListSelectionTarget(ArticleFilter.Tag("t2"), emptyList(), emptyList(), tags)
+
+        assertEquals(FeedListSelectionTarget.Tag(tags[1]), target)
+    }
+
+    @Test
+    fun resolveFeedListSelectionTargetReturnsNullWhenTheSelectedItemNoLongerExists() {
+        val feeds = listOf(feed("f1"))
+        val folders = listOf(folder("d1"))
+        val tags = listOf(tag("t1"))
+
+        assertNull(resolveFeedListSelectionTarget(ArticleFilter.Feed("gone"), feeds, folders, tags))
+        assertNull(resolveFeedListSelectionTarget(ArticleFilter.Folder("gone"), feeds, folders, tags))
+        assertNull(resolveFeedListSelectionTarget(ArticleFilter.Tag("gone"), feeds, folders, tags))
+    }
+
+    @Test
+    fun resolveFeedListSelectionTargetReturnsNullForSidebarRows() {
+        val feeds = listOf(feed("f1"))
+        val folders = listOf(folder("d1"))
+        val tags = listOf(tag("t1"))
+
+        assertNull(resolveFeedListSelectionTarget(ArticleFilter.All, feeds, folders, tags))
+        assertNull(resolveFeedListSelectionTarget(ArticleFilter.Starred, feeds, folders, tags))
+        assertNull(resolveFeedListSelectionTarget(ArticleFilter.Search, feeds, folders, tags))
+    }
+
     // --- autoScrollVelocityPxPerSec ---
 
     @Test
