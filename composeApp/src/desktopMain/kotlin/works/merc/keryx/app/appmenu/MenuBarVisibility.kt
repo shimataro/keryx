@@ -31,6 +31,7 @@ internal fun AppMenuShortcut.awtKeyCode(): Int = when (this) {
     AppMenuShortcut.Quit -> KeyEvent.VK_Q
     AppMenuShortcut.RefreshAll -> KeyEvent.VK_R
     AppMenuShortcut.ShowMenuBar -> KeyEvent.VK_M
+    AppMenuShortcut.Search -> KeyEvent.VK_F
     AppMenuShortcut.ToggleRead -> KeyEvent.VK_U
     AppMenuShortcut.ToggleStar -> KeyEvent.VK_S
     AppMenuShortcut.OpenInBrowser -> KeyEvent.VK_O

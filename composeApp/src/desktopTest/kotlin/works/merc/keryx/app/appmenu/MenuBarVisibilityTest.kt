@@ -81,6 +81,7 @@ class MenuBarVisibilityTest {
         assertEquals(KeyEvent.VK_Q, AppMenuShortcut.Quit.awtKeyCode())
         assertEquals(KeyEvent.VK_R, AppMenuShortcut.RefreshAll.awtKeyCode())
         assertEquals(KeyEvent.VK_M, AppMenuShortcut.ShowMenuBar.awtKeyCode())
+        assertEquals(KeyEvent.VK_F, AppMenuShortcut.Search.awtKeyCode())
     }
 
     // --- shortcut matching ---

@@ -50,6 +50,7 @@ internal enum class AppMenuShortcut(
     Quit(Key.Q, "Q"),
     RefreshAll(Key.R, "R"),
     ShowMenuBar(Key.M, "M"),
+    Search(Key.F, "F"),
     ToggleRead(Key.U, "U", shift = true),
     ToggleStar(Key.S, "S", shift = true),
     OpenInBrowser(Key.O, "O", shift = true),
@@ -211,7 +212,7 @@ internal fun buildAppMenuTree(
     }
 
     val viewItems = buildList {
-        add(AppMenuNode.Item(labels.search, ui.searchEnabled, onClick = actions.focusSearch))
+        add(AppMenuNode.Item(labels.search, ui.searchEnabled, AppMenuShortcut.Search, actions.focusSearch))
         add(AppMenuNode.CheckboxItem(labels.unreadOnly, ui.unreadOnlyEnabled, ui.unreadOnlyChecked, onCheckedChange = actions.setUnreadOnly))
         add(AppMenuNode.Item(labels.toggleSort, ui.toggleSortEnabled, onClick = actions.toggleSort))
         add(AppMenuNode.Separator)

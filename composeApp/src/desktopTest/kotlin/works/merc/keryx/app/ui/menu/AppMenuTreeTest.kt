@@ -257,6 +257,7 @@ class AppMenuTreeTest {
         assertEquals(AppMenuShortcut.AddFeed, root.menu("File").item("AddFeed").shortcut)
         assertEquals(AppMenuShortcut.CloseWindow, root.menu("File").item("Close").shortcut)
         assertEquals(AppMenuShortcut.RefreshAll, root.menu("Feed").item("RefreshAll").shortcut)
+        assertEquals(AppMenuShortcut.Search, root.menu("View").item("Search").shortcut)
     }
 
     @Test
