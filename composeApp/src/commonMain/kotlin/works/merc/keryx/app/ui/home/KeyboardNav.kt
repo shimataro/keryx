@@ -20,8 +20,12 @@ import androidx.compose.ui.input.key.type
  *   (U/S/O/C all act on the currently selected article; the caller is expected to scope these to
  *   the article list/detail panes since they have side effects — clipboard, browser launch,
  *   read/star state — that shouldn't fire while focus is elsewhere, e.g. the feed list)
- * - Every plain-letter shortcut above requires neither Ctrl nor Meta to be held, so it never
- *   shadows the OS's own Ctrl/Cmd+<letter> bindings (e.g. Ctrl+C for copy)
+ * - R : refresh the selected feed,  F2 (Windows/Linux) or Return (macOS) : rename/edit the
+ *   selected item,  Delete or Backspace : unsubscribe/delete the selected item (mirrors each
+ *   OS's own file-manager rename convention — Explorer/Nautilus/Dolphin use F2, Finder uses
+ *   Return). Like U/S/O/C, the caller is expected to scope these to the feed list pane.
+ * - Every plain-letter/function-key shortcut above requires neither Ctrl nor Meta to be held, so
+ *   it never shadows the OS's own Ctrl/Cmd+<key> bindings (e.g. Ctrl+C for copy)
  * - Cmd/Ctrl+F : search
  * - Esc : abort an in-progress feed/folder drag (handled by [onEscape], which reports whether
  *   there was one — if not, the key is left alone for anything else to handle)
@@ -44,7 +48,11 @@ fun Modifier.homeKeyboardShortcuts(
     onToggleStar: () -> Unit,
     onOpenInBrowser: () -> Unit,
     onCopyUrl: () -> Unit,
+    onFeedListRefresh: () -> Unit,
+    onFeedListRename: () -> Unit,
+    onFeedListDelete: () -> Unit,
     onSearch: () -> Unit,
+    isMacOs: Boolean = works.merc.keryx.app.platform.isMacOs,
 ): Modifier = onPreviewKeyEvent { event ->
     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
     if (event.key == Key.Escape) return@onPreviewKeyEvent onEscape()
@@ -61,6 +69,11 @@ fun Modifier.homeKeyboardShortcuts(
         !event.isCtrlPressed && !event.isMetaPressed && event.key == Key.S -> { onToggleStar(); true }
         !event.isCtrlPressed && !event.isMetaPressed && event.key == Key.O -> { onOpenInBrowser(); true }
         !event.isCtrlPressed && !event.isMetaPressed && event.key == Key.C -> { onCopyUrl(); true }
+        !event.isCtrlPressed && !event.isMetaPressed && event.key == Key.R -> { onFeedListRefresh(); true }
+        !event.isCtrlPressed && !event.isMetaPressed &&
+            (if (isMacOs) event.key == Key.Enter else event.key == Key.F2) -> { onFeedListRename(); true }
+        !event.isCtrlPressed && !event.isMetaPressed &&
+            (event.key == Key.Delete || event.key == Key.Backspace) -> { onFeedListDelete(); true }
         else -> false
     }
 }

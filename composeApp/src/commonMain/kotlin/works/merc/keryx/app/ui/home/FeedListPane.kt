@@ -65,6 +65,7 @@ import works.merc.keryx.app.platform.WindowChrome
 import works.merc.keryx.app.platform.WindowDragArea
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.resources.Res
+import works.merc.keryx.app.resources.common_menu_item_with_shortcut
 import works.merc.keryx.app.resources.home_add_feed
 import works.merc.keryx.app.resources.home_add_folder
 import works.merc.keryx.app.resources.home_add_tag
@@ -117,6 +118,11 @@ internal const val FEED_LIST_DRAG_HOST_TEST_TAG = "feed-list-drag-host"
  * @param modifier Modifier applied to the pane.
  * @param onAddFeedClick Called when the user requests to add a feed.
  * @param onSearchFieldFocusChange Called when the search field focus changes.
+ * @param renameSelectedRequestId Bumped by the keyboard rename/edit shortcut (F2/Return); on change,
+ *   opens the rename/edit dialog for whichever feed/folder/tag the current filter selects.
+ * @param deleteSelectedRequestId Bumped by the keyboard delete shortcut (Delete/Backspace); on
+ *   change, opens the unsubscribe/delete confirmation for whichever feed/folder/tag the current
+ *   filter selects.
  */
 @Composable
 internal fun FeedListPane(
@@ -127,6 +133,8 @@ internal fun FeedListPane(
     modifier: Modifier = Modifier,
     onAddFeedClick: () -> Unit = {},
     onSearchFieldFocusChange: (Boolean) -> Unit = {},
+    renameSelectedRequestId: Int = 0,
+    deleteSelectedRequestId: Int = 0,
 ) {
     val feeds by vm.feeds.collectAsStateSafe(emptyList())
     val tags by vm.tags.collectAsStateSafe(emptyList())
@@ -168,6 +176,28 @@ internal fun FeedListPane(
     }
     var renamingFeed by remember { mutableStateOf<Feeds?>(null) }
     var confirmingUnsubscribeFeed by remember { mutableStateOf<Feeds?>(null) }
+    // Driven by the feed-list keyboard shortcuts (KeyboardNav.kt's R/F2/Enter/Delete/Backspace,
+    // wired through HomeScreen): resolve the currently selected filter against this pane's own
+    // already-collected rows and open the same dialogs the context menu's Rename/Edit and
+    // Unsubscribe/Delete items do. request id 0 is the initial/no-op sentinel.
+    LaunchedEffect(renameSelectedRequestId) {
+        if (renameSelectedRequestId == 0) return@LaunchedEffect
+        when (val target = filter) {
+            is ArticleFilter.Feed -> feeds.find { it.id == target.feedId }?.let { renamingFeed = it }
+            is ArticleFilter.Folder -> folders.find { it.id == target.folderId }?.let { editingFolder = it }
+            is ArticleFilter.Tag -> tags.find { it.id == target.tagId }?.let { editingTag = it }
+            else -> {}
+        }
+    }
+    LaunchedEffect(deleteSelectedRequestId) {
+        if (deleteSelectedRequestId == 0) return@LaunchedEffect
+        when (val target = filter) {
+            is ArticleFilter.Feed -> feeds.find { it.id == target.feedId }?.let { confirmingUnsubscribeFeed = it }
+            is ArticleFilter.Folder -> folders.find { it.id == target.folderId }?.let { confirmingDeleteFolder = it }
+            is ArticleFilter.Tag -> tags.find { it.id == target.tagId }?.let { confirmingDeleteTag = it }
+            else -> {}
+        }
+    }
     val activeBoundaryState = remember { mutableStateOf<DropBoundary?>(null) }
     var activeBoundary by activeBoundaryState
     val draggedFeedIdState = remember { mutableStateOf<String?>(null) }
@@ -621,8 +651,16 @@ private fun TagRow(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val editLabel = stringResource(Res.string.home_edit_tag_menu)
-    val deleteLabel = stringResource(Res.string.home_delete_tag_menu)
+    val editLabel = stringResource(
+        Res.string.common_menu_item_with_shortcut,
+        stringResource(Res.string.home_edit_tag_menu),
+        renameShortcutKeyLabel(),
+    )
+    val deleteLabel = stringResource(
+        Res.string.common_menu_item_with_shortcut,
+        stringResource(Res.string.home_delete_tag_menu),
+        "Delete",
+    )
     val contentColor = dropTargetContentColorOrNull(isDropTarget, selected, focused, MaterialTheme.colorScheme.onTertiaryContainer)
     Row(
         Modifier.fillMaxWidth()

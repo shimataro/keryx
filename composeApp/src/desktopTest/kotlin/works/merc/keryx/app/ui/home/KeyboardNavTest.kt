@@ -23,6 +23,7 @@ class KeyboardNavTest {
 
     private fun firedEvents(
         searchFieldFocused: Boolean = false,
+        isMacOs: Boolean = false,
         press: KeyInjectionScope.() -> Unit,
     ): List<String> {
         val fired = mutableListOf<String>()
@@ -42,7 +43,11 @@ class KeyboardNavTest {
                         onToggleStar = { fired += "toggleStar" },
                         onOpenInBrowser = { fired += "openInBrowser" },
                         onCopyUrl = { fired += "copyUrl" },
+                        onFeedListRefresh = { fired += "feedListRefresh" },
+                        onFeedListRename = { fired += "feedListRename" },
+                        onFeedListDelete = { fired += "feedListDelete" },
                         onSearch = { fired += "search" },
+                        isMacOs = isMacOs,
                     ),
                 )
             }
@@ -143,6 +148,51 @@ class KeyboardNavTest {
     @Test
     fun ctrlCDoesNotFireCopyUrl() {
         assertEquals(emptyList(), firedEvents { withKeyDown(Key.CtrlLeft) { pressKey(Key.C) } })
+    }
+
+    @Test
+    fun rFiresOnFeedListRefreshOnly() {
+        assertEquals(listOf("feedListRefresh"), firedEvents { pressKey(Key.R) })
+    }
+
+    @Test
+    fun ctrlRDoesNotFireFeedListRefresh() {
+        assertEquals(emptyList(), firedEvents { withKeyDown(Key.CtrlLeft) { pressKey(Key.R) } })
+    }
+
+    @Test
+    fun f2FiresOnFeedListRenameWhenNotMac() {
+        assertEquals(listOf("feedListRename"), firedEvents(isMacOs = false) { pressKey(Key.F2) })
+    }
+
+    @Test
+    fun enterDoesNotFireFeedListRenameWhenNotMac() {
+        assertEquals(emptyList(), firedEvents(isMacOs = false) { pressKey(Key.Enter) })
+    }
+
+    @Test
+    fun enterFiresOnFeedListRenameWhenMac() {
+        assertEquals(listOf("feedListRename"), firedEvents(isMacOs = true) { pressKey(Key.Enter) })
+    }
+
+    @Test
+    fun f2DoesNotFireFeedListRenameWhenMac() {
+        assertEquals(emptyList(), firedEvents(isMacOs = true) { pressKey(Key.F2) })
+    }
+
+    @Test
+    fun deleteFiresOnFeedListDeleteOnly() {
+        assertEquals(listOf("feedListDelete"), firedEvents { pressKey(Key.Delete) })
+    }
+
+    @Test
+    fun backspaceFiresOnFeedListDeleteOnly() {
+        assertEquals(listOf("feedListDelete"), firedEvents { pressKey(Key.Backspace) })
+    }
+
+    @Test
+    fun ctrlDeleteDoesNotFireFeedListDelete() {
+        assertEquals(emptyList(), firedEvents { withKeyDown(Key.CtrlLeft) { pressKey(Key.Delete) } })
     }
 
     @Test

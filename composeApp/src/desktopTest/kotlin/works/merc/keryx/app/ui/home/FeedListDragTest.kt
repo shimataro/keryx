@@ -4,6 +4,10 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -92,6 +96,11 @@ class FeedListDragTest {
 
     @Composable
     private fun FeedListDragTestHost(vm: HomeViewModel, dragOverlay: FeedDragOverlayState) {
+        // Mirrors HomeScreen.kt's own request-id wiring for the keyboard rename/delete shortcuts,
+        // so tests can drive them end to end (real F2/Delete key presses -> real FeedListPane
+        // dialogs) exactly like a user would, rather than poking FeedListPane's private state.
+        var renameSelectedRequestId by remember { mutableStateOf(0) }
+        var deleteSelectedRequestId by remember { mutableStateOf(0) }
         Box(
             Modifier.testTag("root").size(320.dp, 700.dp).focusable().homeKeyboardShortcuts(
                 searchFieldFocused = false,
@@ -106,17 +115,43 @@ class FeedListDragTest {
                 onToggleStar = {},
                 onOpenInBrowser = {},
                 onCopyUrl = {},
+                onFeedListRefresh = {},
+                onFeedListRename = { renameSelectedRequestId++ },
+                onFeedListDelete = { deleteSelectedRequestId++ },
                 onSearch = {},
             ),
         ) {
-            FeedListPane(vm = vm, focused = true, dragOverlay = dragOverlay, onActivated = {})
+            FeedListPane(
+                vm = vm,
+                focused = true,
+                dragOverlay = dragOverlay,
+                onActivated = {},
+                renameSelectedRequestId = renameSelectedRequestId,
+                deleteSelectedRequestId = deleteSelectedRequestId,
+            )
             FeedDragGhost(dragOverlay)
         }
     }
 
-    private fun androidx.compose.ui.test.ComposeUiTest.setFeedListDragContent(vm: HomeViewModel, dragOverlay: FeedDragOverlayState = FeedDragOverlayState()): FeedDragOverlayState {
+    private fun androidx.compose.ui.test.ComposeUiTest.setFeedListDragContent(
+        vm: HomeViewModel,
+        dragOverlay: FeedDragOverlayState = FeedDragOverlayState(),
+        // Only needed by tests that open a KeryxAlertDialog (e.g. the delete/unsubscribe confirm
+        // dialogs the rename/delete shortcuts trigger) — DesktopModalWindow reads it via koinInject
+        // for the theme mode. Existing drag tests never open one, so this stays null for them.
+        settingsRepository: SettingsRepository? = null,
+    ): FeedDragOverlayState {
         setContent {
-            KoinApplication(application = { modules(module { single { MenuController() } }) }) {
+            KoinApplication(
+                application = {
+                    modules(
+                        module {
+                            single { MenuController() }
+                            settingsRepository?.let { sr -> single { sr } }
+                        },
+                    )
+                },
+            ) {
                 FeedListDragTestHost(vm, dragOverlay)
             }
         }
@@ -494,6 +529,82 @@ class FeedListDragTest {
             driver.close()
         }
     }
+
+    @Test
+    fun pressingTheRenameKeyWithAFeedSelectedOpensTheRenameDialog() = runDesktopComposeUiTest {
+        // FeedListDragTestHost wires homeKeyboardShortcuts with the real platform isMacOs (same as
+        // production HomeScreen.kt), so the key that fires the rename shortcut is OS-dependent —
+        // F2 everywhere except macOS, where it's Enter/Return (see KeyboardNav.kt).
+        val renameKey = if (works.merc.keryx.app.platform.isMacOs) Key.Enter else Key.F2
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("a", sortOrder = 0L)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            setFeedListDragContent(vm, settingsRepository = fixture.settingsRepository)
+            waitForIdle()
+            vm.selectFilter(ArticleFilter.Feed("a"))
+            waitForIdle()
+
+            onNodeWithTag("root").requestFocus()
+            onNodeWithTag("root").performKeyInput { pressKey(renameKey) }
+            waitForIdle()
+
+            onNodeWithText("タイトルを変更").assertExists()
+        } finally {
+            vm.viewModelScope.cancel()
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    @Test
+    fun pressingDeleteWithAFeedSelectedOpensTheUnsubscribeConfirmation() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("a", sortOrder = 0L)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            setFeedListDragContent(vm, settingsRepository = fixture.settingsRepository)
+            waitForIdle()
+            vm.selectFilter(ArticleFilter.Feed("a"))
+            waitForIdle()
+
+            onNodeWithTag("root").requestFocus()
+            onNodeWithTag("root").performKeyInput { pressKey(Key.Delete) }
+            waitForIdle()
+
+            onNodeWithText("「Feed a」の購読を削除しますか？").assertExists()
+        } finally {
+            vm.viewModelScope.cancel()
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    @Test
+    fun pressingDeleteWithNoFeedFolderOrTagSelectedOpensNoDialog() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("a", sortOrder = 0L)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            setFeedListDragContent(vm)
+            waitForIdle()
+            vm.selectFilter(ArticleFilter.All)
+            waitForIdle()
+
+            onNodeWithTag("root").requestFocus()
+            onNodeWithTag("root").performKeyInput { pressKey(Key.Delete) }
+            waitForIdle()
+
+            onNodeWithText("「Feed a」の購読を削除しますか？").assertDoesNotExist()
+        } finally {
+            vm.viewModelScope.cancel()
+            fixture.close()
+            driver.close()
+        }
+    }
 }
 
 /** A [NotificationMessages] fake returning canned, recognizable strings. */
@@ -527,6 +638,7 @@ private class HomeViewModelFixture(
     val vm: HomeViewModel,
     private val syncScope: CoroutineScope,
     private val httpClients: List<HttpClient>,
+    val settingsRepository: SettingsRepository,
 ) {
     fun close() {
         syncScope.cancel()
@@ -595,5 +707,5 @@ private fun newHomeViewModel(
         syncRepository, cloudSession, activityCenter, clock, NewArticleNotifier(), FeedListDragTestNotificationMessages(),
         Dispatchers.Unconfined, Dispatchers.Unconfined,
     )
-    return HomeViewModelFixture(vm, syncScope, listOf(fetcherClient, faviconClient, authClient))
+    return HomeViewModelFixture(vm, syncScope, listOf(fetcherClient, faviconClient, authClient), settingsRepository)
 }

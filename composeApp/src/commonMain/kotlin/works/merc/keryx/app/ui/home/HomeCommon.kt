@@ -22,10 +22,18 @@ import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
+import works.merc.keryx.app.platform.isMacOs
 
 /** [collectAsState] for a [StateFlow] — the `initial` documents the value type. */
 @Composable
 fun <T> StateFlow<T>.collectAsStateSafe(@Suppress("UNUSED_PARAMETER") initial: T): State<T> = collectAsState()
+
+/**
+ * The key-cap label shown in the feed-list rename/edit context-menu hints, matching each OS's own
+ * file-manager rename convention (Explorer/Nautilus/Dolphin use F2, Finder uses Return) — see the
+ * `F2`/`Enter` branch in `KeyboardNav.kt`'s `homeKeyboardShortcuts`, which this label documents.
+ */
+internal fun renameShortcutKeyLabel(): String = if (isMacOs) "Enter" else "F2"
 
 /**
  * Background for a selectable row: full-strength when its pane is focused, dimmed when the
@@ -140,6 +148,14 @@ fun nextFeedFilter(current: ArticleFilter, orderedFilters: List<ArticleFilter>, 
  * are scoped to the panes that actually show the article — not the feed list.
  */
 fun articleActionAllowed(pane: HomePane): Boolean = pane != HomePane.FeedList
+
+/**
+ * Whether a keyboard shortcut that acts on the selected feed-list item (refresh, rename/edit,
+ * unsubscribe/delete) should fire while [pane] has keyboard focus. These mirror the feed/folder/tag
+ * row context-menu items, so — the mirror image of [articleActionAllowed] — they only make sense
+ * while the feed list itself is focused.
+ */
+fun feedListActionAllowed(pane: HomePane): Boolean = pane == HomePane.FeedList
 
 /**
  * Finds the rendered list index for a feed, folder, or tag filter.
