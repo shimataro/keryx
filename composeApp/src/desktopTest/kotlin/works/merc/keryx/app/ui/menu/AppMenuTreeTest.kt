@@ -1,5 +1,6 @@
 package works.merc.keryx.app.ui.menu
 
+import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.platform.isMacOs
@@ -58,15 +59,22 @@ class AppMenuTreeTest {
     private fun enabledUi() = computeMenuUiState(
         screen = Screen.Home, hasSelectedArticle = true, selectedArticleHasUrl = true,
         feedRefreshing = false, syncing = false, cloudConnected = true,
-        filterIsSearch = false, unreadOnly = true,
-        feedListFocused = true, hasSelectedFeed = true,
+        filter = ArticleFilter.All, unreadOnly = true,
+        hasSelectedFeed = true,
     )
 
     private fun disabledUi() = computeMenuUiState(
         screen = Screen.Setup, hasSelectedArticle = false, selectedArticleHasUrl = false,
         feedRefreshing = true, syncing = true, cloudConnected = false,
-        filterIsSearch = true, unreadOnly = false,
-        feedListFocused = false, hasSelectedFeed = false,
+        filter = ArticleFilter.Search, unreadOnly = false,
+        hasSelectedFeed = false,
+    )
+
+    private fun starredFilterUi() = computeMenuUiState(
+        screen = Screen.Home, hasSelectedArticle = true, selectedArticleHasUrl = true,
+        feedRefreshing = false, syncing = false, cloudConnected = true,
+        filter = ArticleFilter.Starred, unreadOnly = true,
+        hasSelectedFeed = true,
     )
 
     private fun selectedFeedMenu(
@@ -107,6 +115,7 @@ class AppMenuTreeTest {
         assertEquals(ui.addItemsEnabled, root.menu("File").item("AddFeed").enabled)
         assertEquals(ui.opmlEnabled, root.menu("File").item("Import").enabled)
         assertEquals(ui.searchEnabled, root.menu("View").item("Search").enabled)
+        assertEquals(ui.unreadOnlyEnabled, root.menu("View").checkbox("UnreadOnly")!!.enabled)
         assertEquals(ui.toggleSortEnabled, root.menu("View").item("ToggleSort").enabled)
         assertEquals(ui.markAllReadEnabled, root.menu("View").item("MarkAllRead").enabled)
         assertEquals(ui.articleActionsEnabled, root.menu("Article").item("ToggleRead").enabled)
@@ -189,6 +198,15 @@ class AppMenuTreeTest {
     fun `the unread-only checkbox reflects the ui checked flag`() {
         assertEquals(true, tree(enabledUi()).menu("View").checkbox("UnreadOnly")!!.checked)
         assertEquals(false, tree(disabledUi()).menu("View").checkbox("UnreadOnly")!!.checked)
+    }
+
+    @Test
+    fun `the unread-only checkbox is disabled in the starred filter while other View items stay enabled`() {
+        val ui = starredFilterUi()
+        val root = tree(ui)
+        assertEquals(false, root.menu("View").checkbox("UnreadOnly")!!.enabled)
+        assertEquals(true, root.menu("View").item("Search").enabled)
+        assertEquals(true, root.menu("View").item("MarkAllRead").enabled)
     }
 
     @Test

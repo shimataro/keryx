@@ -212,7 +212,7 @@ internal fun buildAppMenuTree(
 
     val viewItems = buildList {
         add(AppMenuNode.Item(labels.search, ui.searchEnabled, onClick = actions.focusSearch))
-        add(AppMenuNode.CheckboxItem(labels.unreadOnly, ui.searchEnabled, ui.unreadOnlyChecked, onCheckedChange = actions.setUnreadOnly))
+        add(AppMenuNode.CheckboxItem(labels.unreadOnly, ui.unreadOnlyEnabled, ui.unreadOnlyChecked, onCheckedChange = actions.setUnreadOnly))
         add(AppMenuNode.Item(labels.toggleSort, ui.toggleSortEnabled, onClick = actions.toggleSort))
         add(AppMenuNode.Separator)
         add(AppMenuNode.Item(labels.markAllRead, ui.markAllReadEnabled, onClick = actions.markAllRead))

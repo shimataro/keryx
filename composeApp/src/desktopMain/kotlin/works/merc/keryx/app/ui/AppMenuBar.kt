@@ -48,7 +48,6 @@ import works.merc.keryx.app.resources.menu_view_search
 import works.merc.keryx.app.resources.menu_view_show_menu_bar
 import works.merc.keryx.app.resources.menu_view_toggle_sort
 import works.merc.keryx.app.resources.menu_view_unread_only
-import works.merc.keryx.app.ui.home.HomePane
 import works.merc.keryx.app.ui.home.HomeViewModel
 import works.merc.keryx.app.ui.menu.AppMenuActions
 import works.merc.keryx.app.ui.menu.AppMenuLabels
@@ -118,7 +117,6 @@ internal fun FrameWindowScope.AppMenuBar(
     val settingsVm = koinInject<SettingsViewModel>()
 
     val screen by menuController.currentScreen.collectAsState()
-    val focusedPane by menuController.focusedPane.collectAsState()
     val searchFieldFocused by menuController.searchFieldFocused.collectAsState()
     val selected by homeVm.selectedArticle.collectAsState()
     val feedRefreshing by homeVm.feedRefreshing.collectAsState()
@@ -140,9 +138,8 @@ internal fun FrameWindowScope.AppMenuBar(
         feedRefreshing = feedRefreshing,
         syncing = syncing,
         cloudConnected = cloudConnected,
-        filterIsSearch = filter == ArticleFilter.Search,
+        filter = filter,
         unreadOnly = unreadOnly,
-        feedListFocused = focusedPane == HomePane.FeedList,
         hasSelectedFeed = selectedFeed != null,
         searchFieldFocused = searchFieldFocused,
     )

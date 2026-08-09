@@ -1,5 +1,6 @@
 package works.merc.keryx.app.ui.menu
 
+import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.ui.navigation.Screen
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -15,9 +16,8 @@ class MenuUiStateTest {
         feedRefreshing: Boolean = false,
         syncing: Boolean = false,
         cloudConnected: Boolean = false,
-        filterIsSearch: Boolean = false,
+        filter: ArticleFilter = ArticleFilter.All,
         unreadOnly: Boolean = false,
-        feedListFocused: Boolean = false,
         hasSelectedFeed: Boolean = false,
         searchFieldFocused: Boolean = false,
     ) = computeMenuUiState(
@@ -27,9 +27,8 @@ class MenuUiStateTest {
         feedRefreshing = feedRefreshing,
         syncing = syncing,
         cloudConnected = cloudConnected,
-        filterIsSearch = filterIsSearch,
+        filter = filter,
         unreadOnly = unreadOnly,
-        feedListFocused = feedListFocused,
         hasSelectedFeed = hasSelectedFeed,
         searchFieldFocused = searchFieldFocused,
     )
@@ -42,6 +41,7 @@ class MenuUiStateTest {
         assertTrue(ui.addItemsEnabled)
         assertTrue(ui.opmlEnabled)
         assertTrue(ui.searchEnabled)
+        assertTrue(ui.unreadOnlyEnabled)
         assertTrue(ui.markAllReadEnabled)
         assertTrue(ui.toggleSortEnabled)
         assertTrue(ui.openSettingsEnabled)
@@ -54,12 +54,12 @@ class MenuUiStateTest {
             hasSelectedArticle = true,
             selectedArticleHasUrl = true,
             cloudConnected = true,
-            feedListFocused = true,
             hasSelectedFeed = true,
         )
         assertFalse(ui.addItemsEnabled)
         assertFalse(ui.opmlEnabled)
         assertFalse(ui.searchEnabled)
+        assertFalse(ui.unreadOnlyEnabled)
         assertFalse(ui.markAllReadEnabled)
         assertFalse(ui.toggleSortEnabled)
         assertFalse(ui.openSettingsEnabled)
@@ -93,21 +93,38 @@ class MenuUiStateTest {
     }
 
     @Test
-    fun article_and_url_actions_disabled_while_the_feed_list_pane_has_focus_even_with_an_article_selected() {
-        // Ctrl+Shift+U/S/O/C's app-menu accelerator is now the only way to trigger these (the bare
-        // KeyboardNav.kt binding was removed), so this gate carries the whole responsibility of not
-        // firing on a stale article selection while the user has since moved focus to the feed list.
-        val ui = state(hasSelectedArticle = true, selectedArticleHasUrl = true, feedListFocused = true)
-        assertFalse(ui.articleActionsEnabled)
-        assertFalse(ui.urlActionsEnabled)
+    fun article_and_url_actions_stay_enabled_regardless_of_feed_list_pane_focus() {
+        // The real article-detail toolbar has no pane-focus dependency (it only checks the
+        // selection itself), so the menu must not grey out just because the feed list pane
+        // happens to hold keyboard focus for the same selected article.
+        val ui = state(hasSelectedArticle = true, selectedArticleHasUrl = true)
+        assertTrue(ui.articleActionsEnabled)
+        assertTrue(ui.urlActionsEnabled)
     }
 
     // --- Sort / search interaction ---
 
     @Test
     fun toggle_sort_disabled_in_search_scope() {
-        assertFalse(state(filterIsSearch = true).toggleSortEnabled)
-        assertTrue(state(filterIsSearch = false).toggleSortEnabled)
+        assertFalse(state(filter = ArticleFilter.Search).toggleSortEnabled)
+        assertTrue(state(filter = ArticleFilter.All).toggleSortEnabled)
+    }
+
+    // --- Unread-only requires a filter other than Starred ---
+
+    @Test
+    fun unread_only_enabled_except_in_starred_filter() {
+        assertTrue(state(filter = ArticleFilter.All).unreadOnlyEnabled)
+        assertTrue(state(filter = ArticleFilter.Search).unreadOnlyEnabled)
+        assertTrue(state(filter = ArticleFilter.Feed("f1")).unreadOnlyEnabled)
+        assertTrue(state(filter = ArticleFilter.Tag("t1")).unreadOnlyEnabled)
+        assertTrue(state(filter = ArticleFilter.Folder("fo1")).unreadOnlyEnabled)
+        assertFalse(state(filter = ArticleFilter.Starred).unreadOnlyEnabled)
+    }
+
+    @Test
+    fun unread_only_disabled_away_from_home_even_off_starred() {
+        assertFalse(state(screen = Screen.Setup, filter = ArticleFilter.All).unreadOnlyEnabled)
     }
 
     // --- Refresh / sync gating ---
@@ -125,21 +142,20 @@ class MenuUiStateTest {
         assertTrue(state(cloudConnected = true, syncing = false).syncEnabled)
     }
 
-    // --- Feed actions require Home + feed-list focus + a selected feed, all three ---
+    // --- Feed actions require Home + a selected feed ---
 
     @Test
-    fun feed_actions_require_home_feed_list_focus_and_a_selected_feed() {
-        assertTrue(state(feedListFocused = true, hasSelectedFeed = true).feedActionsEnabled)
-        assertFalse(state(screen = Screen.Setup, feedListFocused = true, hasSelectedFeed = true).feedActionsEnabled)
-        assertFalse(state(feedListFocused = false, hasSelectedFeed = true).feedActionsEnabled)
-        assertFalse(state(feedListFocused = true, hasSelectedFeed = false).feedActionsEnabled)
+    fun feed_actions_require_home_and_a_selected_feed() {
+        assertTrue(state(hasSelectedFeed = true).feedActionsEnabled)
+        assertFalse(state(screen = Screen.Setup, hasSelectedFeed = true).feedActionsEnabled)
+        assertFalse(state(hasSelectedFeed = false).feedActionsEnabled)
     }
 
     @Test
     fun feed_actions_disabled_while_the_search_field_has_focus_even_with_a_feed_selected() {
         // Rename/Unsubscribe's app-menu accelerator is a bare F2/Delete with no equivalent to
         // KeyboardNav.kt's searchFieldFocused suppression, so this flag has to do that job instead.
-        val ui = state(feedListFocused = true, hasSelectedFeed = true, searchFieldFocused = true)
+        val ui = state(hasSelectedFeed = true, searchFieldFocused = true)
         assertFalse(ui.feedActionsEnabled)
     }
 
