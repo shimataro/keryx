@@ -176,7 +176,7 @@ internal fun FolderGroupHeader(
     val deleteFolderLabel = stringResource(
         Res.string.common_menu_item_with_shortcut,
         stringResource(Res.string.home_delete_folder_menu),
-        "Delete",
+        deleteShortcutKeyLabel(),
     )
     val isEmpty = firstFeedId == null
     val feedZoneBoundary = if (isEmpty) DropBoundary.AppendFeeds(folder.id) else firstFeedId.let(DropBoundary::BeforeFeed)
@@ -336,7 +336,7 @@ internal fun FeedRow(
     val unsubscribeLabel = stringResource(
         Res.string.common_menu_item_with_shortcut,
         stringResource(Res.string.home_unsubscribe_menu),
-        "Delete",
+        deleteShortcutKeyLabel(),
     )
     val belowBoundary = nextFeedId?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(folderId)
 

@@ -659,7 +659,7 @@ private fun TagRow(
     val deleteLabel = stringResource(
         Res.string.common_menu_item_with_shortcut,
         stringResource(Res.string.home_delete_tag_menu),
-        "Delete",
+        deleteShortcutKeyLabel(),
     )
     val contentColor = dropTargetContentColorOrNull(isDropTarget, selected, focused, MaterialTheme.colorScheme.onTertiaryContainer)
     Row(

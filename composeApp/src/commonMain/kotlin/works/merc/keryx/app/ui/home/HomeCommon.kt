@@ -33,7 +33,15 @@ fun <T> StateFlow<T>.collectAsStateSafe(@Suppress("UNUSED_PARAMETER") initial: T
  * file-manager rename convention (Explorer/Nautilus/Dolphin use F2, Finder uses Return) — see the
  * `F2`/`Enter` branch in `KeyboardNav.kt`'s `homeKeyboardShortcuts`, which this label documents.
  */
-internal fun renameShortcutKeyLabel(): String = if (isMacOs) "Enter" else "F2"
+internal fun renameShortcutKeyLabel(): String = if (isMacOs) "↩" else "F2"
+
+/**
+ * The key-cap label shown in the feed-list unsubscribe/delete context-menu hints. macOS's own menu
+ * rendering uses the dedicated `⌫` glyph for Delete/Backspace; Windows/Linux convention has no
+ * symbol equivalent, so it stays spelled out — see the `Delete`/`Backspace` branch in
+ * `KeyboardNav.kt`'s `homeKeyboardShortcuts`, which this label documents.
+ */
+internal fun deleteShortcutKeyLabel(): String = if (isMacOs) "⌫" else "Delete"
 
 /**
  * Background for a selectable row: full-strength when its pane is focused, dimmed when the
