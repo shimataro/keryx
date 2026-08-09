@@ -163,6 +163,22 @@ class AppMenuLayoutBuilderTest {
     }
 
     @Test
+    fun `a shift shortcut includes Shift in its dbusmenu combo`() {
+        val root = AppMenuRoot(
+            listOf(
+                AppMenuNode.Menu(
+                    "Article",
+                    listOf(AppMenuNode.Item("Copy URL", enabled = true, shortcut = AppMenuShortcut.CopyUrl, onClick = {})),
+                ),
+            ),
+        )
+        val layout = buildAppMenuLayout(root)
+        val copyUrl = layout.buildItem(parentId = 2, recursionDepth = 0, propertyNames = emptyList())
+
+        assertEquals(listOf(listOf("Control", "Shift", "C")), copyUrl.prop("shortcut"))
+    }
+
+    @Test
     fun `an item without a shortcut has no shortcut property`() {
         val layout = buildAppMenuLayout(sampleRoot())
         val add = layout.buildItem(parentId = 2, recursionDepth = 0, propertyNames = emptyList())

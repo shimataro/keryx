@@ -2,6 +2,7 @@ package works.merc.keryx.app.platform
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
 
 /** A single entry of a native context menu shown via [nativeContextMenu]. */
 sealed interface NativeMenuEntry {
@@ -13,8 +14,27 @@ sealed interface NativeMenuLeaf : NativeMenuEntry {
     val onClick: () -> Unit
 }
 
+/**
+ * A shortcut-key hint rendered alongside a [NativeMenuItem], right-aligned in the platform's own
+ * native style (never baked into the label as parenthetical text). [ctrl] means "use the
+ * platform's primary modifier" (Ctrl elsewhere, ⌘ on macOS) — same convention as
+ * `AppMenuShortcut.ctrl` in `ui/menu/AppMenuTree.kt`, kept as a separate, smaller type here since
+ * that one is desktopMain-only and this needs to be constructible from commonMain call sites.
+ *
+ * A bare key (`ctrl = false`) — used for the rename (F2/Return) and delete (Delete) family of
+ * items — can only be shown natively on Linux (`SwingPopupHandle`, via `JMenuItem.accelerator`):
+ * AWT's `java.awt.MenuShortcut` (macOS/Windows' `AwtPopupHandle`) has no way to represent a
+ * shortcut without the primary modifier, so those items render with no hint at all there. A
+ * modifier'd key (`ctrl = true`) renders on every platform.
+ */
+data class NativeMenuShortcut(val key: Key, val ctrl: Boolean = false, val shift: Boolean = false)
+
 /** A leaf item of a native context menu that performs [onClick] when selected. */
-data class NativeMenuItem(override val label: String, override val onClick: () -> Unit) : NativeMenuLeaf
+data class NativeMenuItem(
+    override val label: String,
+    val shortcut: NativeMenuShortcut? = null,
+    override val onClick: () -> Unit,
+) : NativeMenuLeaf
 
 /**
  * A leaf item that also carries an on/off state, drawn with the platform's own checkmark. Use

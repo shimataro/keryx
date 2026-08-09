@@ -2,6 +2,7 @@ package works.merc.keryx.app.appmenu
 
 import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.local.LocalSettingsStore
+import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.ui.menu.AppMenuActions
 import works.merc.keryx.app.ui.menu.AppMenuLabels
 import works.merc.keryx.app.ui.menu.AppMenuNode
@@ -97,10 +98,33 @@ class MenuBarVisibilityTest {
 
     @Test
     fun `a wrong modifier combination does not match`() {
-        // The shipped accelerators require Ctrl (not Meta) and no Shift.
+        // AddFeed requires Ctrl (not Meta) and no Shift.
         assertNull(matchMenuShortcut(tree(), KeyEvent.VK_N, ctrl = false, meta = true))
         assertNull(matchMenuShortcut(tree(), KeyEvent.VK_N, ctrl = false, meta = false))
         assertNull(matchMenuShortcut(tree(), KeyEvent.VK_N, ctrl = true, meta = false, shift = true))
+    }
+
+    @Test
+    fun `ctrl shift plus the accelerator key resolves the selected-item entries, distinct from their plain-ctrl counterparts`() {
+        val toggleRead = matchMenuShortcut(tree(), KeyEvent.VK_U, ctrl = true, meta = false, shift = true)
+        assertTrue(toggleRead is AppMenuNode.Item && toggleRead.label == "ToggleRead")
+
+        val feedRefresh = matchMenuShortcut(tree(), KeyEvent.VK_R, ctrl = true, meta = false, shift = true)
+        assertTrue(feedRefresh is AppMenuNode.Item && feedRefresh.label == "FeedRefresh")
+
+        // Ctrl+R (no Shift) still means RefreshAll, not FeedRefresh, even though both use VK_R.
+        val refreshAll = matchMenuShortcut(tree(), KeyEvent.VK_R, ctrl = true, meta = false, shift = false)
+        assertTrue(refreshAll is AppMenuNode.Item && refreshAll.label == "RefreshAll")
+    }
+
+    @Test
+    fun `rename and unsubscribe resolve on their original bare key, no modifier`() {
+        val renameKey = if (isMacOs) KeyEvent.VK_ENTER else KeyEvent.VK_F2
+        val rename = matchMenuShortcut(tree(), renameKey, ctrl = false, meta = false)
+        assertTrue(rename is AppMenuNode.Item && rename.label == "FeedRename")
+
+        val unsubscribe = matchMenuShortcut(tree(), KeyEvent.VK_DELETE, ctrl = false, meta = false)
+        assertTrue(unsubscribe is AppMenuNode.Item && unsubscribe.label == "FeedUnsubscribe")
     }
 
     @Test

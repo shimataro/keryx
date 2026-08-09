@@ -106,13 +106,6 @@ class HomeCommonTest {
     }
 
     @Test
-    fun articleActionAllowedIsFalseOnlyForFeedListPane() {
-        assertEquals(false, articleActionAllowed(HomePane.FeedList))
-        assertEquals(true, articleActionAllowed(HomePane.ArticleList))
-        assertEquals(true, articleActionAllowed(HomePane.ArticleDetail))
-    }
-
-    @Test
     fun feedListActionAllowedIsTrueOnlyForFeedListPane() {
         assertEquals(true, feedListActionAllowed(HomePane.FeedList))
         assertEquals(false, feedListActionAllowed(HomePane.ArticleList))

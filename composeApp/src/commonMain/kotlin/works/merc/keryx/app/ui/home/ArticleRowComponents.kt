@@ -28,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.key.Key
 import org.jetbrains.compose.resources.painterResource
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
@@ -45,6 +46,7 @@ import coil3.compose.AsyncImage
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.platform.NativeMenuItem
+import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_copy_url
@@ -54,7 +56,6 @@ import works.merc.keryx.app.resources.article_no_title
 import works.merc.keryx.app.resources.article_open_in_browser
 import works.merc.keryx.app.resources.article_star
 import works.merc.keryx.app.resources.article_unstar
-import works.merc.keryx.app.resources.common_menu_item_with_shortcut
 import works.merc.keryx.app.resources.home_notifications
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
@@ -148,12 +149,12 @@ internal data class ArticleRowStrings(
  */
 @Composable
 internal fun rememberArticleRowStrings(): ArticleRowStrings {
-    val markAsRead = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.article_mark_as_read), "U")
-    val markAsUnread = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.article_mark_as_unread), "U")
-    val star = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.article_star), "S")
-    val unstar = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.article_unstar), "S")
-    val copyUrl = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.article_copy_url), "C")
-    val openInBrowser = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.article_open_in_browser), "O")
+    val markAsRead = stringResource(Res.string.article_mark_as_read)
+    val markAsUnread = stringResource(Res.string.article_mark_as_unread)
+    val star = stringResource(Res.string.article_star)
+    val unstar = stringResource(Res.string.article_unstar)
+    val copyUrl = stringResource(Res.string.article_copy_url)
+    val openInBrowser = stringResource(Res.string.article_open_in_browser)
     val noTitleFallback = stringResource(Res.string.article_no_title)
     // Resolved once with the strings rather than per row. The keys below never change for a
     // time-zone change, so a zone switched while Keryx is running (it is tray-resident, so that can
@@ -226,11 +227,16 @@ internal fun ArticleRow(
             .nativeContextMenu(
                 items = {
                     buildList {
-                        add(NativeMenuItem(toggleStarLabel) { onToggleStar() })
-                        add(NativeMenuItem(toggleReadLabel) { onToggleRead() })
+                        add(NativeMenuItem(toggleStarLabel, NativeMenuShortcut(Key.S, ctrl = true, shift = true)) { onToggleStar() })
+                        add(NativeMenuItem(toggleReadLabel, NativeMenuShortcut(Key.U, ctrl = true, shift = true)) { onToggleRead() })
                         if (article.url.isNotBlank()) {
-                            add(NativeMenuItem(copyUrlLabel) { onCopyUrl() })
-                            add(NativeMenuItem(openInBrowserLabel) { onOpenInBrowser() })
+                            add(NativeMenuItem(copyUrlLabel, NativeMenuShortcut(Key.C, ctrl = true, shift = true)) { onCopyUrl() })
+                            add(
+                                NativeMenuItem(
+                                    openInBrowserLabel,
+                                    NativeMenuShortcut(Key.O, ctrl = true, shift = true),
+                                ) { onOpenInBrowser() },
+                            )
                         }
                     }
                 },

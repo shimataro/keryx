@@ -16,7 +16,6 @@
     <string name="common_ok">OK</string>
     <string name="common_back">戻る</string>
     <string name="common_abort">中止</string>
-    <string name="common_menu_item_with_shortcut">%1$s (%2$s)</string>
 
     <!-- setup -->
     <string name="setup_title">Keryx へようこそ</string>

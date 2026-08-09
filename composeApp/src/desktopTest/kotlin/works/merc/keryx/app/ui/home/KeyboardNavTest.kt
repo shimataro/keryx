@@ -39,11 +39,6 @@ class KeyboardNavTest {
                         onRight = { fired += "right" },
                         onNextArticle = { fired += "nextArticle" },
                         onPreviousArticle = { fired += "previousArticle" },
-                        onToggleRead = { fired += "toggleRead" },
-                        onToggleStar = { fired += "toggleStar" },
-                        onOpenInBrowser = { fired += "openInBrowser" },
-                        onCopyUrl = { fired += "copyUrl" },
-                        onFeedListRefresh = { fired += "feedListRefresh" },
                         onFeedListRename = { fired += "feedListRename" },
                         onFeedListDelete = { fired += "feedListDelete" },
                         onSearch = { fired += "search" },
@@ -91,23 +86,26 @@ class KeyboardNavTest {
     }
 
     @Test
-    fun uFiresOnToggleReadOnly() {
-        assertEquals(listOf("toggleRead"), firedEvents { pressKey(Key.U) })
+    fun bareUDoesNotFireAnything() {
+        // Toggle read/star/open-in-browser/copy-URL no longer have a bare-key binding here — they
+        // are Ctrl+Shift+<letter> app-menu accelerators instead (see AppMenuShortcut), since a bare
+        // key was too easy to trigger by accident for actions with side effects.
+        assertEquals(emptyList(), firedEvents { pressKey(Key.U) })
     }
 
     @Test
-    fun sFiresOnToggleStarOnly() {
-        assertEquals(listOf("toggleStar"), firedEvents { pressKey(Key.S) })
+    fun bareSDoesNotFireAnything() {
+        assertEquals(emptyList(), firedEvents { pressKey(Key.S) })
     }
 
     @Test
-    fun oFiresOnOpenInBrowserOnly() {
-        assertEquals(listOf("openInBrowser"), firedEvents { pressKey(Key.O) })
+    fun bareODoesNotFireAnything() {
+        assertEquals(emptyList(), firedEvents { pressKey(Key.O) })
     }
 
     @Test
-    fun cFiresOnCopyUrlOnly() {
-        assertEquals(listOf("copyUrl"), firedEvents { pressKey(Key.C) })
+    fun bareCDoesNotFireAnything() {
+        assertEquals(emptyList(), firedEvents { pressKey(Key.C) })
     }
 
     @Test
@@ -131,33 +129,9 @@ class KeyboardNavTest {
     }
 
     @Test
-    fun ctrlUDoesNotFireToggleRead() {
-        assertEquals(emptyList(), firedEvents { withKeyDown(Key.CtrlLeft) { pressKey(Key.U) } })
-    }
-
-    @Test
-    fun ctrlSDoesNotFireToggleStar() {
-        assertEquals(emptyList(), firedEvents { withKeyDown(Key.CtrlLeft) { pressKey(Key.S) } })
-    }
-
-    @Test
-    fun ctrlODoesNotFireOpenInBrowser() {
-        assertEquals(emptyList(), firedEvents { withKeyDown(Key.CtrlLeft) { pressKey(Key.O) } })
-    }
-
-    @Test
-    fun ctrlCDoesNotFireCopyUrl() {
-        assertEquals(emptyList(), firedEvents { withKeyDown(Key.CtrlLeft) { pressKey(Key.C) } })
-    }
-
-    @Test
-    fun rFiresOnFeedListRefreshOnly() {
-        assertEquals(listOf("feedListRefresh"), firedEvents { pressKey(Key.R) })
-    }
-
-    @Test
-    fun ctrlRDoesNotFireFeedListRefresh() {
-        assertEquals(emptyList(), firedEvents { withKeyDown(Key.CtrlLeft) { pressKey(Key.R) } })
+    fun bareRDoesNotFireAnything() {
+        // Refresh-selected-feed likewise has no bare-key binding here anymore — see AppMenuShortcut.FeedRefresh.
+        assertEquals(emptyList(), firedEvents { pressKey(Key.R) })
     }
 
     @Test

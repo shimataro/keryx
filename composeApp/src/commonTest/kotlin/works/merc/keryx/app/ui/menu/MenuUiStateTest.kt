@@ -19,6 +19,7 @@ class MenuUiStateTest {
         unreadOnly: Boolean = false,
         feedListFocused: Boolean = false,
         hasSelectedFeed: Boolean = false,
+        searchFieldFocused: Boolean = false,
     ) = computeMenuUiState(
         screen = screen,
         hasSelectedArticle = hasSelectedArticle,
@@ -30,6 +31,7 @@ class MenuUiStateTest {
         unreadOnly = unreadOnly,
         feedListFocused = feedListFocused,
         hasSelectedFeed = hasSelectedFeed,
+        searchFieldFocused = searchFieldFocused,
     )
 
     // --- Screen gating ---
@@ -90,6 +92,16 @@ class MenuUiStateTest {
         assertFalse(ui.urlActionsEnabled)
     }
 
+    @Test
+    fun article_and_url_actions_disabled_while_the_feed_list_pane_has_focus_even_with_an_article_selected() {
+        // Ctrl+Shift+U/S/O/C's app-menu accelerator is now the only way to trigger these (the bare
+        // KeyboardNav.kt binding was removed), so this gate carries the whole responsibility of not
+        // firing on a stale article selection while the user has since moved focus to the feed list.
+        val ui = state(hasSelectedArticle = true, selectedArticleHasUrl = true, feedListFocused = true)
+        assertFalse(ui.articleActionsEnabled)
+        assertFalse(ui.urlActionsEnabled)
+    }
+
     // --- Sort / search interaction ---
 
     @Test
@@ -121,6 +133,14 @@ class MenuUiStateTest {
         assertFalse(state(screen = Screen.Setup, feedListFocused = true, hasSelectedFeed = true).feedActionsEnabled)
         assertFalse(state(feedListFocused = false, hasSelectedFeed = true).feedActionsEnabled)
         assertFalse(state(feedListFocused = true, hasSelectedFeed = false).feedActionsEnabled)
+    }
+
+    @Test
+    fun feed_actions_disabled_while_the_search_field_has_focus_even_with_a_feed_selected() {
+        // Rename/Unsubscribe's app-menu accelerator is a bare F2/Delete with no equivalent to
+        // KeyboardNav.kt's searchFieldFocused suppression, so this flag has to do that job instead.
+        val ui = state(feedListFocused = true, hasSelectedFeed = true, searchFieldFocused = true)
+        assertFalse(ui.feedActionsEnabled)
     }
 
     // --- Checkbox passthrough ---

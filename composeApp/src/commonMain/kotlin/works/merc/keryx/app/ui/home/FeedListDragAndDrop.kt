@@ -27,6 +27,7 @@ import androidx.compose.runtime.State
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -39,10 +40,10 @@ import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.platform.NativeCheckMenuItem
 import works.merc.keryx.app.platform.NativeMenuItem
+import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.NativeSubMenu
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.resources.Res
-import works.merc.keryx.app.resources.common_menu_item_with_shortcut
 import works.merc.keryx.app.resources.home_assign_tags
 import works.merc.keryx.app.resources.home_delete_folder_menu
 import works.merc.keryx.app.resources.home_edit_folder_menu
@@ -168,16 +169,8 @@ internal fun FolderGroupHeader(
     onDelete: () -> Unit,
     isDragSource: Boolean = false,
 ) {
-    val editFolderLabel = stringResource(
-        Res.string.common_menu_item_with_shortcut,
-        stringResource(Res.string.home_edit_folder_menu),
-        renameShortcutKeyLabel(),
-    )
-    val deleteFolderLabel = stringResource(
-        Res.string.common_menu_item_with_shortcut,
-        stringResource(Res.string.home_delete_folder_menu),
-        deleteShortcutKeyLabel(),
-    )
+    val editFolderLabel = stringResource(Res.string.home_edit_folder_menu)
+    val deleteFolderLabel = stringResource(Res.string.home_delete_folder_menu)
     val isEmpty = firstFeedId == null
     val feedZoneBoundary = if (isEmpty) DropBoundary.AppendFeeds(folder.id) else firstFeedId.let(DropBoundary::BeforeFeed)
     val isFeedDragHighlight = when (val boundary = activeBoundaryState.value) {
@@ -208,8 +201,8 @@ internal fun FolderGroupHeader(
                 .nativeContextMenu(
                     items = {
                         listOf(
-                            NativeMenuItem(editFolderLabel) { onEdit() },
-                            NativeMenuItem(deleteFolderLabel) { onDelete() },
+                            NativeMenuItem(editFolderLabel, renameNativeShortcut) { onEdit() },
+                            NativeMenuItem(deleteFolderLabel, deleteNativeShortcut) { onDelete() },
                         )
                     },
                     onOpen = { if (!selected) onClick() },
@@ -324,20 +317,12 @@ internal fun FeedRow(
     onMoveFeedToFolder: (folderId: String?) -> Unit,
     onUnsubscribe: () -> Unit,
 ) {
-    val refreshLabel = stringResource(Res.string.common_menu_item_with_shortcut, stringResource(Res.string.home_refresh), "R")
+    val refreshLabel = stringResource(Res.string.home_refresh)
     val assignTagsLabel = stringResource(Res.string.home_assign_tags)
-    val renameFeedLabel = stringResource(
-        Res.string.common_menu_item_with_shortcut,
-        stringResource(Res.string.home_rename_feed),
-        renameShortcutKeyLabel(),
-    )
+    val renameFeedLabel = stringResource(Res.string.home_rename_feed)
     val moveToFolderLabel = stringResource(Res.string.home_move_to_folder)
     val noFolderLabel = stringResource(Res.string.home_no_folder)
-    val unsubscribeLabel = stringResource(
-        Res.string.common_menu_item_with_shortcut,
-        stringResource(Res.string.home_unsubscribe_menu),
-        deleteShortcutKeyLabel(),
-    )
+    val unsubscribeLabel = stringResource(Res.string.home_unsubscribe_menu)
     val belowBoundary = nextFeedId?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(folderId)
 
     Column(Modifier.fillMaxWidth()) {
@@ -351,7 +336,7 @@ internal fun FeedRow(
                 .nativeContextMenu(
                     items = {
                         listOf(
-                            NativeMenuItem(refreshLabel) { onRefresh() },
+                            NativeMenuItem(refreshLabel, NativeMenuShortcut(Key.R, ctrl = true, shift = true)) { onRefresh() },
                             NativeSubMenu(
                                 label = assignTagsLabel,
                                 items = tags.map { tag ->
@@ -377,8 +362,8 @@ internal fun FeedRow(
                                     }
                                 },
                             ),
-                            NativeMenuItem(renameFeedLabel) { onRename() },
-                            NativeMenuItem(unsubscribeLabel) { onUnsubscribe() },
+                            NativeMenuItem(renameFeedLabel, renameNativeShortcut) { onRename() },
+                            NativeMenuItem(unsubscribeLabel, deleteNativeShortcut) { onUnsubscribe() },
                         )
                     },
                     onOpen = { if (!selected) onClick() },

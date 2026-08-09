@@ -18,9 +18,19 @@ import works.merc.keryx.app.platform.isMacOs
  */
 
 /**
- * The modifier + key of a menu accelerator. Every shipped shortcut is a plain "mod" shortcut
- * (Ctrl elsewhere, ⌘ on macOS), so [ctrl] defaults to `true`; the in-window renderer applies the
- * platform modifier while the Linux [MenuShortcutDispatcher] matches [ctrl]/[meta] directly.
+ * The modifier + key of a menu accelerator. [ctrl] means "use the platform's primary modifier"
+ * (Ctrl elsewhere, ⌘ on macOS) — the in-window renderer (`AppMenuBar.toKeyShortcut`) derives the
+ * actual per-platform `ctrl`/`meta` `KeyShortcut` flags from it, and the Linux
+ * [MenuShortcutDispatcher] matches [ctrl]/[meta] directly. It defaults to `true`, used by every
+ * "always available" shortcut as a plain Ctrl/⌘ combo. Selected-item shortcuts (enabled only with
+ * the right selection/focus — the Article and Feed menus' `Ctrl+Shift+<letter>` entries)
+ * additionally set [shift], keeping them in a chord space that can never collide with a plain-Ctrl
+ * "always available" shortcut and is never typed into a text field (unlike the bare, unmodified
+ * keys `KeyboardNav.kt` and the context menus use). `Rename`/`Unsubscribe` are the deliberate
+ * exception — [ctrl] is `false`, so they keep their original bare accelerator (F2/Return, Delete),
+ * since a bare "act on the focused/selected item" key is itself an established convention
+ * (file-manager rename/delete); see [MenuUiState.feedActionsEnabled]'s `searchFieldFocused` guard
+ * for how that stays safe.
  *
  * [dbusmenuKeyName] is the AWT virtual-key *name* the `com.canonical.dbusmenu` host expects for
  * this key — plain strings, so it lives here alongside [key] rather than in `appmenu/`. The AWT
@@ -32,6 +42,7 @@ internal enum class AppMenuShortcut(
     val dbusmenuKeyName: String,
     val ctrl: Boolean = true,
     val meta: Boolean = false,
+    val shift: Boolean = false,
 ) {
     AddFeed(Key.N, "N"),
     CloseWindow(Key.W, "W"),
@@ -39,6 +50,13 @@ internal enum class AppMenuShortcut(
     Quit(Key.Q, "Q"),
     RefreshAll(Key.R, "R"),
     ShowMenuBar(Key.M, "M"),
+    ToggleRead(Key.U, "U", shift = true),
+    ToggleStar(Key.S, "S", shift = true),
+    OpenInBrowser(Key.O, "O", shift = true),
+    CopyUrl(Key.C, "C", shift = true),
+    FeedRefresh(Key.R, "R", shift = true),
+    FeedRename(if (isMacOs) Key.Enter else Key.F2, if (isMacOs) "Return" else "F2", ctrl = false),
+    FeedUnsubscribe(Key.Delete, "Delete", ctrl = false),
 }
 
 /** A node in the application menu tree. */
@@ -213,18 +231,18 @@ internal fun buildAppMenuTree(
     }
 
     val articleItems = listOf(
-        AppMenuNode.Item(labels.toggleRead, ui.articleActionsEnabled, onClick = actions.toggleRead),
-        AppMenuNode.Item(labels.toggleStar, ui.articleActionsEnabled, onClick = actions.toggleStar),
+        AppMenuNode.Item(labels.toggleRead, ui.articleActionsEnabled, AppMenuShortcut.ToggleRead, actions.toggleRead),
+        AppMenuNode.Item(labels.toggleStar, ui.articleActionsEnabled, AppMenuShortcut.ToggleStar, actions.toggleStar),
         AppMenuNode.Separator,
-        AppMenuNode.Item(labels.openInBrowser, ui.urlActionsEnabled, onClick = actions.openInBrowser),
-        AppMenuNode.Item(labels.copyUrl, ui.urlActionsEnabled, onClick = actions.copyUrl),
+        AppMenuNode.Item(labels.openInBrowser, ui.urlActionsEnabled, AppMenuShortcut.OpenInBrowser, actions.openInBrowser),
+        AppMenuNode.Item(labels.copyUrl, ui.urlActionsEnabled, AppMenuShortcut.CopyUrl, actions.copyUrl),
     )
 
     val feedItems = listOf(
         AppMenuNode.Item(labels.refreshAll, ui.refreshAllEnabled, AppMenuShortcut.RefreshAll, actions.refreshAll),
         AppMenuNode.Item(labels.syncNow, ui.syncEnabled, onClick = actions.sync),
         AppMenuNode.Separator,
-        AppMenuNode.Item(labels.feedRefresh, ui.feedActionsEnabled, onClick = actions.refreshSelectedFeed),
+        AppMenuNode.Item(labels.feedRefresh, ui.feedActionsEnabled, AppMenuShortcut.FeedRefresh, actions.refreshSelectedFeed),
         AppMenuNode.Menu(
             label = labels.feedAssignTags,
             enabled = ui.feedActionsEnabled,
@@ -261,9 +279,9 @@ internal fun buildAppMenuTree(
                 }
             },
         ),
-        AppMenuNode.Item(labels.feedRename, ui.feedActionsEnabled, onClick = actions.renameSelectedFeed),
+        AppMenuNode.Item(labels.feedRename, ui.feedActionsEnabled, AppMenuShortcut.FeedRename, actions.renameSelectedFeed),
         AppMenuNode.Separator,
-        AppMenuNode.Item(labels.feedUnsubscribe, ui.feedActionsEnabled, onClick = actions.unsubscribeSelectedFeed),
+        AppMenuNode.Item(labels.feedUnsubscribe, ui.feedActionsEnabled, AppMenuShortcut.FeedUnsubscribe, actions.unsubscribeSelectedFeed),
     )
 
     val helpItems = buildList {

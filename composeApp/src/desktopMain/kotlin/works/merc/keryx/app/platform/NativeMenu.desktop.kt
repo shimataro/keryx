@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
@@ -14,11 +15,35 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import java.awt.Component
+import java.awt.MenuShortcut
+import java.awt.event.InputEvent
+import java.awt.event.KeyEvent
 import javax.swing.JCheckBoxMenuItem
 import javax.swing.JMenu
 import javax.swing.JMenuItem
 import javax.swing.JPopupMenu
+import javax.swing.KeyStroke
 import javax.swing.SwingUtilities
+
+/**
+ * The AWT virtual-key code for [NativeMenuShortcut.key]. Covers only the keys actually used by a
+ * [NativeMenuItem] shortcut today (R/U/S/O/C for the Ctrl+Shift app-menu-mirrored actions, F2/
+ * Enter/Delete for the bare rename/delete family) — deliberately not a general `Key` → `VK_*`
+ * mapping. `appmenu/MenuBarVisibility.kt` has its own, separate `awtKeyCode()` for `AppMenuShortcut`;
+ * that lives in the KDE-Global-Menu-specific `appmenu/` package, so pulling `platform/` code from
+ * it would be a backwards layering dependency — this is kept local instead.
+ */
+private fun NativeMenuShortcut.awtKeyCode(): Int = when (key) {
+    Key.R -> KeyEvent.VK_R
+    Key.U -> KeyEvent.VK_U
+    Key.S -> KeyEvent.VK_S
+    Key.O -> KeyEvent.VK_O
+    Key.C -> KeyEvent.VK_C
+    Key.F2 -> KeyEvent.VK_F2
+    Key.Enter -> KeyEvent.VK_ENTER
+    Key.Delete -> KeyEvent.VK_DELETE
+    else -> error("No AWT key-code mapping for native menu shortcut key $key")
+}
 
 /**
  * The native menu widgets backing one [nativeContextMenu] call site, hiding which toolkit drew
@@ -58,8 +83,12 @@ private fun awtLabel(entry: NativeMenuEntry): String =
 /**
  * `java.awt.PopupMenu` backend, used on macOS and Windows where AWT maps it onto a genuine
  * platform menu (an `NSMenu` and a Win32 popup menu respectively).
+ *
+ * Internal rather than private so tests can check what actually ended up in the menu (mirrors
+ * [SwingPopupHandle]) — load-bearing since [defaultPopupHandle] only picks this backend on
+ * macOS/Windows, so a Linux CI runner would otherwise never construct or exercise it at all.
  */
-private class AwtPopupHandle(
+internal class AwtPopupHandle(
     items: List<NativeMenuEntry>,
     currentItems: () -> List<NativeMenuEntry>,
 ) : NativePopupHandle {
@@ -71,6 +100,13 @@ private class AwtPopupHandle(
             is NativeMenuLeaf ->
                 java.awt.MenuItem().apply {
                     addActionListener { leafAt(currentItems(), index, childIndex = null)?.onClick?.invoke() }
+                    // A bare (ctrl = false) shortcut — the rename/delete family — has no
+                    // MenuShortcut representation at all: the class always bakes in the platform's
+                    // primary modifier, so it can only show a modifier'd combo correctly. Those
+                    // items render with no native hint here; see NativeMenuShortcut's doc comment.
+                    if (entry is NativeMenuItem) {
+                        entry.shortcut?.takeIf { it.ctrl }?.let { shortcut = MenuShortcut(it.awtKeyCode(), it.shift) }
+                    }
                 }
             is NativeSubMenu ->
                 java.awt.Menu().apply {
@@ -85,7 +121,7 @@ private class AwtPopupHandle(
         }
     }
 
-    private val popupMenu = java.awt.PopupMenu().apply { menuItems.forEach { add(it) } }
+    internal val popupMenu = java.awt.PopupMenu().apply { menuItems.forEach { add(it) } }
 
     override fun sync(items: List<NativeMenuEntry>) {
         items.forEachIndexed { index, entry ->
@@ -167,6 +203,20 @@ internal class SwingPopupHandle(
     private fun swingLeaf(entry: NativeMenuLeaf, onClick: () -> Unit): JMenuItem {
         val item = if (entry is NativeCheckMenuItem) JCheckBoxMenuItem() else JMenuItem()
         item.addActionListener { onClick() }
+        // Safe even for a bare (ctrl = false) key: this JPopupMenu is never attached to a
+        // JMenuBar/JRootPane (see the note on `attach` below), so Swing's automatic
+        // WHEN_IN_FOCUSED_WINDOW global keybinding registration — which only walks from a
+        // JMenuBar's structure — never reaches it. Setting `accelerator` here is purely cosmetic:
+        // it renders in Swing's own native accelerator column with no live global keybinding.
+        if (entry is NativeMenuItem) {
+            entry.shortcut?.let { shortcut ->
+                // Linux only, so the primary modifier is always Ctrl — never Cmd.
+                var modifiers = 0
+                if (shortcut.ctrl) modifiers = modifiers or InputEvent.CTRL_DOWN_MASK
+                if (shortcut.shift) modifiers = modifiers or InputEvent.SHIFT_DOWN_MASK
+                item.accelerator = KeyStroke.getKeyStroke(shortcut.awtKeyCode(), modifiers)
+            }
+        }
         return item
     }
 

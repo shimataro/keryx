@@ -146,6 +146,7 @@ private fun AppMenuShortcut.toDbusmenuShortcut(): Variant<*> {
     val combo = buildList {
         if (ctrl) add("Control")
         if (meta) add("Super")
+        if (shift) add("Shift")
         add(dbusmenuKeyName)
     }
     return Variant(listOf(combo), "aas")

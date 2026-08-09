@@ -17,11 +17,13 @@ import kotlinx.datetime.number
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
+import androidx.compose.ui.input.key.Key
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
+import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.isMacOs
 
 /** [collectAsState] for a [StateFlow] — the `initial` documents the value type. */
@@ -29,19 +31,18 @@ import works.merc.keryx.app.platform.isMacOs
 fun <T> StateFlow<T>.collectAsStateSafe(@Suppress("UNUSED_PARAMETER") initial: T): State<T> = collectAsState()
 
 /**
- * The key-cap label shown in the feed-list rename/edit context-menu hints, matching each OS's own
- * file-manager rename convention (Explorer/Nautilus/Dolphin use F2, Finder uses Return) — see the
- * `F2`/`Enter` branch in `KeyboardNav.kt`'s `homeKeyboardShortcuts`, which this label documents.
+ * The bare-key context-menu shortcut for rename/edit-type actions (feed/folder/tag), matching each
+ * OS's own file-manager rename convention (Explorer/Nautilus/Dolphin use F2, Finder uses Return).
+ * Renders as a real native accelerator on Linux; AWT's `MenuShortcut` can't represent a bare key at
+ * all, so macOS/Windows show no hint for it — see `NativeMenuShortcut`'s doc comment.
  */
-internal fun renameShortcutKeyLabel(): String = if (isMacOs) "↩" else "F2"
+internal val renameNativeShortcut = NativeMenuShortcut(if (isMacOs) Key.Enter else Key.F2)
 
 /**
- * The key-cap label shown in the feed-list unsubscribe/delete context-menu hints. macOS's own menu
- * rendering uses the dedicated `⌫` glyph for Delete/Backspace; Windows/Linux convention has no
- * symbol equivalent, so it stays spelled out — see the `Delete`/`Backspace` branch in
- * `KeyboardNav.kt`'s `homeKeyboardShortcuts`, which this label documents.
+ * The bare-key context-menu shortcut for unsubscribe/delete-type actions (feed/folder/tag). Same
+ * platform-display caveat as [renameNativeShortcut].
  */
-internal fun deleteShortcutKeyLabel(): String = if (isMacOs) "⌫" else "Delete"
+internal val deleteNativeShortcut = NativeMenuShortcut(Key.Delete)
 
 /**
  * Background for a selectable row: full-strength when its pane is focused, dimmed when the
@@ -150,18 +151,12 @@ fun nextFeedFilter(current: ArticleFilter, orderedFilters: List<ArticleFilter>, 
 }
 
 /**
- * Whether a keyboard shortcut that acts on the selected article (toggle read/star, open in
- * browser, copy URL) should fire while [pane] has keyboard focus. These mirror real
- * context-menu items and have side effects (clipboard, browser launch, read/star state), so they
- * are scoped to the panes that actually show the article — not the feed list.
- */
-fun articleActionAllowed(pane: HomePane): Boolean = pane != HomePane.FeedList
-
-/**
- * Whether a keyboard shortcut that acts on the selected feed-list item (refresh, rename/edit,
+ * Whether a keyboard shortcut that acts on the selected feed-list item (rename/edit,
  * unsubscribe/delete) should fire while [pane] has keyboard focus. These mirror the feed/folder/tag
- * row context-menu items, so — the mirror image of [articleActionAllowed] — they only make sense
- * while the feed list itself is focused.
+ * row context-menu items, so they only make sense while the feed list itself is focused. (Toggle
+ * read/star, open in browser, copy URL, and refresh-selected-feed have no bare-key equivalent
+ * scoped this way — they are Ctrl+Shift+<letter> app-menu accelerators instead, gated by
+ * `MenuUiState.articleActionsEnabled`/`urlActionsEnabled`/`feedActionsEnabled`.)
  */
 fun feedListActionAllowed(pane: HomePane): Boolean = pane == HomePane.FeedList
 

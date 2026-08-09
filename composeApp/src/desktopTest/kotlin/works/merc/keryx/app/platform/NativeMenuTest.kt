@@ -1,8 +1,12 @@
 package works.merc.keryx.app.platform
 
+import androidx.compose.ui.input.key.Key
 import java.awt.Color
+import java.awt.event.InputEvent
+import java.awt.event.KeyEvent
 import javax.swing.JCheckBoxMenuItem
 import javax.swing.JMenu
+import javax.swing.KeyStroke
 import javax.swing.SwingUtilities
 import javax.swing.UIManager
 import javax.swing.plaf.ColorUIResource
@@ -10,6 +14,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -215,5 +220,65 @@ class NativeMenuTest {
         assertFalse(noFolder.isSelected)
         assertTrue(news.isSelected)
         assertFalse(checked, "sync should only relabel/recheck widgets, not invoke onClick")
+    }
+
+    @Test
+    fun swingSetsAZeroModifierAcceleratorForABareShortcut() {
+        // Safe here (unlike a JMenuBar-hosted item) since this JPopupMenu is never attached to a
+        // JMenuBar/JRootPane — see the comment on swingLeaf's shortcut handling.
+        val handle = handleOf(NativeMenuItem("Rename", NativeMenuShortcut(Key.F2)) {})
+
+        val item = handle.popupMenu.getComponent(0) as javax.swing.JMenuItem
+        assertEquals(KeyStroke.getKeyStroke(KeyEvent.VK_F2, 0), item.accelerator)
+    }
+
+    @Test
+    fun swingSetsACtrlShiftAcceleratorForAModifierShortcut() {
+        val handle = handleOf(NativeMenuItem("Refresh", NativeMenuShortcut(Key.R, ctrl = true, shift = true)) {})
+
+        val item = handle.popupMenu.getComponent(0) as javax.swing.JMenuItem
+        assertEquals(
+            KeyStroke.getKeyStroke(KeyEvent.VK_R, InputEvent.CTRL_DOWN_MASK or InputEvent.SHIFT_DOWN_MASK),
+            item.accelerator,
+        )
+    }
+
+    @Test
+    fun swingLeavesAcceleratorNullWithNoShortcut() {
+        val handle = handleOf(NativeMenuItem("Refresh") {})
+
+        val item = handle.popupMenu.getComponent(0) as javax.swing.JMenuItem
+        assertNull(item.accelerator)
+    }
+
+    private fun awtHandleOf(vararg entries: NativeMenuEntry): AwtPopupHandle {
+        val items = entries.toList()
+        return AwtPopupHandle(items) { items }
+    }
+
+    @Test
+    fun awtSetsAMenuShortcutForAModifierShortcut() {
+        val handle = awtHandleOf(NativeMenuItem("Refresh", NativeMenuShortcut(Key.R, ctrl = true, shift = true)) {})
+
+        val shortcut = handle.popupMenu.getItem(0).shortcut
+        assertEquals(KeyEvent.VK_R, shortcut?.key)
+        assertTrue(shortcut?.usesShiftModifier() == true)
+    }
+
+    @Test
+    fun awtLeavesShortcutNullForABareShortcut() {
+        // java.awt.MenuShortcut structurally cannot represent a key without the platform's
+        // primary modifier, so the rename/delete family (ctrl = false) gets no native hint here —
+        // see NativeMenuShortcut's doc comment.
+        val handle = awtHandleOf(NativeMenuItem("Rename", NativeMenuShortcut(Key.F2)) {})
+
+        assertNull(handle.popupMenu.getItem(0).shortcut)
+    }
+
+    @Test
+    fun awtLeavesShortcutNullWithNoShortcut() {
+        val handle = awtHandleOf(NativeMenuItem("Refresh") {})
+
+        assertNull(handle.popupMenu.getItem(0).shortcut)
     }
 }

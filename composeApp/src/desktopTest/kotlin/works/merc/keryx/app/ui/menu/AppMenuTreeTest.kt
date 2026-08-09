@@ -240,4 +240,16 @@ class AppMenuTreeTest {
         assertEquals(AppMenuShortcut.CloseWindow, root.menu("File").item("Close").shortcut)
         assertEquals(AppMenuShortcut.RefreshAll, root.menu("Feed").item("RefreshAll").shortcut)
     }
+
+    @Test
+    fun `the selected-item accelerators are attached to their items`() {
+        val root = tree(enabledUi())
+        assertEquals(AppMenuShortcut.ToggleRead, root.menu("Article").item("ToggleRead").shortcut)
+        assertEquals(AppMenuShortcut.ToggleStar, root.menu("Article").item("ToggleStar").shortcut)
+        assertEquals(AppMenuShortcut.OpenInBrowser, root.menu("Article").item("OpenInBrowser").shortcut)
+        assertEquals(AppMenuShortcut.CopyUrl, root.menu("Article").item("CopyUrl").shortcut)
+        assertEquals(AppMenuShortcut.FeedRefresh, root.menu("Feed").item("FeedRefresh").shortcut)
+        assertEquals(AppMenuShortcut.FeedRename, root.menu("Feed").item("FeedRename").shortcut)
+        assertEquals(AppMenuShortcut.FeedUnsubscribe, root.menu("Feed").item("FeedUnsubscribe").shortcut)
+    }
 }

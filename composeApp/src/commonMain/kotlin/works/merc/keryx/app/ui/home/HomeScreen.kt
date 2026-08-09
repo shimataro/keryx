@@ -106,6 +106,10 @@ fun HomeScreen() {
     // App.kt already uses for currentScreen) so AppMenuBar can gate the Feed menu's selected-feed
     // items on the feed list actually having keyboard focus.
     LaunchedEffect(focusedPane) { menuController.focusedPane.value = focusedPane }
+    // Same mirroring for the search field: a native Swing accelerator has no equivalent to
+    // KeyboardNav.kt's searchFieldFocused suppression, so AppMenuBar needs this to disable the
+    // Feed menu's bare-key items (F2/Delete) while the user is actually typing a search query.
+    LaunchedEffect(searchFieldFocused) { menuController.searchFieldFocused.value = searchFieldFocused }
 
     val orderedFilters = remember(tags, folders, feeds, collapsedFolderIds) {
         buildOrderedFilters(tags, folders, feeds, collapsedFolderIds)
@@ -131,10 +135,6 @@ fun HomeScreen() {
         vm.selectFilter(ArticleFilter.Search)
         setFocusedPane(HomePane.FeedList)
         vm.requestSearchFocus()
-    }
-    fun refreshSelectedFeedListItem() {
-        val target = (filter as? ArticleFilter.Feed) ?: return
-        feeds.find { it.id == target.feedId }?.let { vm.refreshFeed(it) }
     }
 
     // Menu commands whose target state lives in this screen's composition.
@@ -194,11 +194,6 @@ fun HomeScreen() {
                     },
                     onNextArticle = { vm.selectNext() },
                     onPreviousArticle = { vm.selectPrevious() },
-                    onToggleRead = { if (articleActionAllowed(focusedPane)) vm.toggleReadSelected() },
-                    onToggleStar = { if (articleActionAllowed(focusedPane)) vm.toggleStarSelected() },
-                    onOpenInBrowser = { if (articleActionAllowed(focusedPane)) openSelectedInBrowser() },
-                    onCopyUrl = { if (articleActionAllowed(focusedPane)) copySelectedUrl() },
-                    onFeedListRefresh = { if (feedListActionAllowed(focusedPane)) refreshSelectedFeedListItem() },
                     onFeedListRename = { if (feedListActionAllowed(focusedPane)) feedListRenameRequestId++ },
                     onFeedListDelete = { if (feedListActionAllowed(focusedPane)) feedListDeleteRequestId++ },
                     onSearch = { focusSearch() },

@@ -65,7 +65,6 @@ import works.merc.keryx.app.platform.WindowChrome
 import works.merc.keryx.app.platform.WindowDragArea
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.resources.Res
-import works.merc.keryx.app.resources.common_menu_item_with_shortcut
 import works.merc.keryx.app.resources.home_add_feed
 import works.merc.keryx.app.resources.home_add_folder
 import works.merc.keryx.app.resources.home_add_tag
@@ -662,16 +661,8 @@ private fun TagRow(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val editLabel = stringResource(
-        Res.string.common_menu_item_with_shortcut,
-        stringResource(Res.string.home_edit_tag_menu),
-        renameShortcutKeyLabel(),
-    )
-    val deleteLabel = stringResource(
-        Res.string.common_menu_item_with_shortcut,
-        stringResource(Res.string.home_delete_tag_menu),
-        deleteShortcutKeyLabel(),
-    )
+    val editLabel = stringResource(Res.string.home_edit_tag_menu)
+    val deleteLabel = stringResource(Res.string.home_delete_tag_menu)
     val contentColor = dropTargetContentColorOrNull(isDropTarget, selected, focused, MaterialTheme.colorScheme.onTertiaryContainer)
     Row(
         Modifier.fillMaxWidth()
@@ -682,8 +673,8 @@ private fun TagRow(
             .nativeContextMenu(
                 items = {
                     listOf(
-                        NativeMenuItem(editLabel) { onEdit() },
-                        NativeMenuItem(deleteLabel) { onDelete() },
+                        NativeMenuItem(editLabel, renameNativeShortcut) { onEdit() },
+                        NativeMenuItem(deleteLabel, deleteNativeShortcut) { onDelete() },
                     )
                 },
                 onOpen = { if (!selected) onClick() },
