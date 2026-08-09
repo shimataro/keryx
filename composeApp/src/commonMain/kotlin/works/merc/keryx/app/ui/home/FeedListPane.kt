@@ -162,6 +162,29 @@ internal fun FeedListPane(
     var showAddFolder by remember { mutableStateOf(false) }
     var editingFolder by remember { mutableStateOf<Folders?>(null) }
     var confirmingDeleteFolder by remember { mutableStateOf<Folders?>(null) }
+    var renamingFeed by remember { mutableStateOf<Feeds?>(null) }
+    var confirmingUnsubscribeFeed by remember { mutableStateOf<Feeds?>(null) }
+
+    // Shared by the keyboard shortcuts (via the request-id effects below) and the Feed menu bar
+    // items (via MenuCommand.RenameFeed/UnsubscribeFeed): resolve the currently selected filter
+    // against this pane's own already-collected rows and open the same dialogs the context menu's
+    // Rename/Edit and Unsubscribe/Delete items do.
+    fun openRenameDialogForSelection() {
+        when (val target = filter) {
+            is ArticleFilter.Feed -> feeds.find { it.id == target.feedId }?.let { renamingFeed = it }
+            is ArticleFilter.Folder -> folders.find { it.id == target.folderId }?.let { editingFolder = it }
+            is ArticleFilter.Tag -> tags.find { it.id == target.tagId }?.let { editingTag = it }
+            else -> {}
+        }
+    }
+    fun openDeleteDialogForSelection() {
+        when (val target = filter) {
+            is ArticleFilter.Feed -> feeds.find { it.id == target.feedId }?.let { confirmingUnsubscribeFeed = it }
+            is ArticleFilter.Folder -> folders.find { it.id == target.folderId }?.let { confirmingDeleteFolder = it }
+            is ArticleFilter.Tag -> tags.find { it.id == target.tagId }?.let { confirmingDeleteTag = it }
+            else -> {}
+        }
+    }
 
     // Menu bar commands whose dialog state lives in this pane (see AppMenuBar / MenuController).
     val menuController = koinInject<MenuController>()
@@ -170,33 +193,21 @@ internal fun FeedListPane(
             when (command) {
                 MenuCommand.AddFolder -> showAddFolder = true
                 MenuCommand.AddTag -> showAddTag = true
+                MenuCommand.RenameFeed -> openRenameDialogForSelection()
+                MenuCommand.UnsubscribeFeed -> openDeleteDialogForSelection()
                 else -> {}
             }
         }
     }
-    var renamingFeed by remember { mutableStateOf<Feeds?>(null) }
-    var confirmingUnsubscribeFeed by remember { mutableStateOf<Feeds?>(null) }
     // Driven by the feed-list keyboard shortcuts (KeyboardNav.kt's R/F2/Enter/Delete/Backspace,
-    // wired through HomeScreen): resolve the currently selected filter against this pane's own
-    // already-collected rows and open the same dialogs the context menu's Rename/Edit and
-    // Unsubscribe/Delete items do. request id 0 is the initial/no-op sentinel.
+    // wired through HomeScreen). request id 0 is the initial/no-op sentinel.
     LaunchedEffect(renameSelectedRequestId) {
         if (renameSelectedRequestId == 0) return@LaunchedEffect
-        when (val target = filter) {
-            is ArticleFilter.Feed -> feeds.find { it.id == target.feedId }?.let { renamingFeed = it }
-            is ArticleFilter.Folder -> folders.find { it.id == target.folderId }?.let { editingFolder = it }
-            is ArticleFilter.Tag -> tags.find { it.id == target.tagId }?.let { editingTag = it }
-            else -> {}
-        }
+        openRenameDialogForSelection()
     }
     LaunchedEffect(deleteSelectedRequestId) {
         if (deleteSelectedRequestId == 0) return@LaunchedEffect
-        when (val target = filter) {
-            is ArticleFilter.Feed -> feeds.find { it.id == target.feedId }?.let { confirmingUnsubscribeFeed = it }
-            is ArticleFilter.Folder -> folders.find { it.id == target.folderId }?.let { confirmingDeleteFolder = it }
-            is ArticleFilter.Tag -> tags.find { it.id == target.tagId }?.let { confirmingDeleteTag = it }
-            else -> {}
-        }
+        openDeleteDialogForSelection()
     }
     val activeBoundaryState = remember { mutableStateOf<DropBoundary?>(null) }
     var activeBoundary by activeBoundaryState

@@ -67,6 +67,7 @@ import works.merc.keryx.app.insertTag
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.singleProviderCloudSession
+import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
 import kotlin.random.Random
 import kotlin.test.Test
@@ -140,13 +141,17 @@ class FeedListDragTest {
         // dialogs the rename/delete shortcuts trigger) — DesktopModalWindow reads it via koinInject
         // for the theme mode. Existing drag tests never open one, so this stays null for them.
         settingsRepository: SettingsRepository? = null,
+        // Tests that need to send a MenuCommand (e.g. RenameFeed/UnsubscribeFeed, mirroring the Feed
+        // menu bar's items) pass their own instance so they can call send(...) on the exact instance
+        // FeedListPane is collecting from.
+        menuController: MenuController = MenuController(),
     ): FeedDragOverlayState {
         setContent {
             KoinApplication(
                 application = {
                     modules(
                         module {
-                            single { MenuController() }
+                            single { menuController }
                             settingsRepository?.let { sr -> single { sr } }
                         },
                     )
@@ -598,6 +603,32 @@ class FeedListDragTest {
             onNodeWithTag("root").performKeyInput { pressKey(Key.Delete) }
             waitForIdle()
 
+            onNodeWithText("「Feed a」の購読を削除しますか？").assertDoesNotExist()
+        } finally {
+            vm.viewModelScope.cancel()
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    @Test
+    fun sendingRenameOrUnsubscribeFeedCommandWithNoFeedSelectedOpensNoDialog() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("a", sortOrder = 0L)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        val menuController = MenuController()
+        try {
+            setFeedListDragContent(vm, menuController = menuController)
+            waitForIdle()
+            vm.selectFilter(ArticleFilter.All)
+            waitForIdle()
+
+            menuController.send(MenuCommand.RenameFeed)
+            menuController.send(MenuCommand.UnsubscribeFeed)
+            waitForIdle()
+
+            onNodeWithText("タイトルを変更").assertDoesNotExist()
             onNodeWithText("「Feed a」の購読を削除しますか？").assertDoesNotExist()
         } finally {
             vm.viewModelScope.cancel()

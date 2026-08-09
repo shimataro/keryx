@@ -19,8 +19,13 @@ internal const val APPMENU_LAYOUT_SIGNATURE = "(ia{sv}av)"
  * Ids are assigned in **pre-order** (root = 0, then encounter order). This is stable across
  * rebuilds because the menu *shape* is fixed at startup (`isMacOs` is a process constant, and the
  * only optional item — "Show Menu Bar" — is added/removed by whether a registrar exists, not at
- * runtime). Stable ids are what make click dispatch by id correct across the constant relabelling
- * every recomposition produces.
+ * runtime) — **except** for the Feed menu's Tags/Move-to-folder submenus, whose item count follows
+ * the live tag/folder lists and can change while the app runs. That variable-length region is still
+ * safe: `AppMenuDBusMenu.updateState` bumps the revision on *every* rebuild with no dedup, and
+ * `AboutToShow` reports "stale" whenever the revision changed since it was last served to the host —
+ * the dbusmenu protocol's own mechanism for forcing a host to refetch the current layout (and
+ * therefore the current ids) before it displays a submenu. Stable ids are what make click dispatch
+ * by id correct across the constant relabelling every recomposition produces.
  *
  * @property dispatch the actionable ([AppMenuNode.Item] / [AppMenuNode.CheckboxItem]) nodes by id.
  * @property knownIds every id present in the layout (used to accept/reject dbusmenu events).
@@ -106,7 +111,7 @@ internal fun buildAppMenuLayout(root: AppMenuRoot): AppMenuLayout {
 private fun propertiesFor(node: AppMenuNode): Map<String, Variant<*>> = when (node) {
     is AppMenuNode.Menu -> mapOf(
         "label" to Variant(escapeMenuLabel(node.label)),
-        "enabled" to Variant(true),
+        "enabled" to Variant(node.enabled),
         "visible" to Variant(true),
         "children-display" to Variant("submenu"),
     )

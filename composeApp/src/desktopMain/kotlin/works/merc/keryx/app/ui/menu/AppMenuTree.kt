@@ -1,6 +1,8 @@
 package works.merc.keryx.app.ui.menu
 
 import androidx.compose.ui.input.key.Key
+import works.merc.keryx.app.data.local.db.Folders
+import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.platform.isMacOs
 
 /**
@@ -41,7 +43,7 @@ internal enum class AppMenuShortcut(
 
 /** A node in the application menu tree. */
 internal sealed interface AppMenuNode {
-    data class Menu(val label: String, val items: List<AppMenuNode>) : AppMenuNode
+    data class Menu(val label: String, val items: List<AppMenuNode>, val enabled: Boolean = true) : AppMenuNode
 
     data class Item(
         val label: String,
@@ -96,6 +98,12 @@ internal data class AppMenuLabels(
     val feedMenu: String,
     val refreshAll: String,
     val syncNow: String,
+    val feedRefresh: String,
+    val feedAssignTags: String,
+    val feedMoveToFolder: String,
+    val feedNoFolder: String,
+    val feedRename: String,
+    val feedUnsubscribe: String,
     val helpMenu: String,
     val website: String,
     val projectPage: String,
@@ -122,26 +130,50 @@ internal data class AppMenuActions(
     val copyUrl: () -> Unit,
     val refreshAll: () -> Unit,
     val sync: () -> Unit,
+    val refreshSelectedFeed: () -> Unit,
+    val toggleFeedTag: (tagId: String, attached: Boolean) -> Unit,
+    val moveFeedToFolder: (folderId: String?) -> Unit,
+    val renameSelectedFeed: () -> Unit,
+    val unsubscribeSelectedFeed: () -> Unit,
     val openWebsite: () -> Unit,
     val openProjectPage: () -> Unit,
     val about: () -> Unit,
 )
 
 /**
+ * The selected feed's dynamic submenu data for the Feed menu's Tags/Move-to-folder items. Empty
+ * lists / a `null` [currentFolderId] when no feed is meaningfully selected — harmless, since the
+ * submenus are disabled via [MenuUiState.feedActionsEnabled] in that case and never opened.
+ */
+internal data class SelectedFeedMenuData(
+    val tags: List<Tags>,
+    val attachedTagIds: Set<String>,
+    val folders: List<Folders>,
+    val currentFolderId: String?,
+)
+
+/**
  * Builds the application menu tree from the current [ui] state, resolved [labels] and [actions].
  *
- * The menu *shape* is fixed at startup: [isMacOs] is a process constant, and [menuBarToggle] only
- * ever adds/removes the trailing "Show Menu Bar" item. Everything else varies only by label /
- * enabled / checked, which is what keeps the D-Bus node ids stable across rebuilds
- * (see `AppMenuLayoutBuilder`).
+ * The menu shape is fixed at startup **except** for the Feed menu's Tags/Move-to-folder submenus,
+ * whose item count follows [selectedFeedMenu]'s tag/folder lists and can therefore change while the
+ * app is running: [isMacOs] is a process constant, and [menuBarToggle] only ever adds/removes the
+ * trailing "Show Menu Bar" item. Everything else (including the rest of this tree) varies only by
+ * label / enabled / checked, which is what keeps the D-Bus node ids stable across rebuilds for that
+ * fixed portion (see `AppMenuLayoutBuilder`, which documents why the variable-length region is
+ * still safe).
  *
  * @param menuBarToggle when non-null, appends a "Show Menu Bar" checkbox to the View menu (KDE only).
+ * @param selectedFeedMenu the currently selected feed's tags/folder data, backing the Feed menu's
+ *   Tags/Move-to-folder submenus (empty/`null` content when [MenuUiState.feedActionsEnabled] is
+ *   `false` — see [SelectedFeedMenuData]).
  */
 internal fun buildAppMenuTree(
     ui: MenuUiState,
     labels: AppMenuLabels,
     actions: AppMenuActions,
     menuBarToggle: MenuBarToggle?,
+    selectedFeedMenu: SelectedFeedMenuData,
 ): AppMenuRoot {
     val fileItems = buildList {
         add(AppMenuNode.Item(labels.addFeed, ui.addItemsEnabled, AppMenuShortcut.AddFeed, actions.addFeed))
@@ -191,6 +223,47 @@ internal fun buildAppMenuTree(
     val feedItems = listOf(
         AppMenuNode.Item(labels.refreshAll, ui.refreshAllEnabled, AppMenuShortcut.RefreshAll, actions.refreshAll),
         AppMenuNode.Item(labels.syncNow, ui.syncEnabled, onClick = actions.sync),
+        AppMenuNode.Separator,
+        AppMenuNode.Item(labels.feedRefresh, ui.feedActionsEnabled, onClick = actions.refreshSelectedFeed),
+        AppMenuNode.Menu(
+            label = labels.feedAssignTags,
+            enabled = ui.feedActionsEnabled,
+            items = selectedFeedMenu.tags.map { tag ->
+                AppMenuNode.CheckboxItem(
+                    label = tag.name,
+                    enabled = true,
+                    checked = tag.id in selectedFeedMenu.attachedTagIds,
+                    onCheckedChange = { attached -> actions.toggleFeedTag(tag.id, attached) },
+                )
+            },
+        ),
+        AppMenuNode.Menu(
+            label = labels.feedMoveToFolder,
+            enabled = ui.feedActionsEnabled,
+            items = buildList {
+                add(
+                    AppMenuNode.CheckboxItem(
+                        label = labels.feedNoFolder,
+                        enabled = true,
+                        checked = selectedFeedMenu.currentFolderId == null,
+                        onCheckedChange = { actions.moveFeedToFolder(null) },
+                    ),
+                )
+                selectedFeedMenu.folders.forEach { folder ->
+                    add(
+                        AppMenuNode.CheckboxItem(
+                            label = folder.name,
+                            enabled = true,
+                            checked = selectedFeedMenu.currentFolderId == folder.id,
+                            onCheckedChange = { actions.moveFeedToFolder(folder.id) },
+                        ),
+                    )
+                }
+            },
+        ),
+        AppMenuNode.Item(labels.feedRename, ui.feedActionsEnabled, onClick = actions.renameSelectedFeed),
+        AppMenuNode.Separator,
+        AppMenuNode.Item(labels.feedUnsubscribe, ui.feedActionsEnabled, onClick = actions.unsubscribeSelectedFeed),
     )
 
     val helpItems = buildList {

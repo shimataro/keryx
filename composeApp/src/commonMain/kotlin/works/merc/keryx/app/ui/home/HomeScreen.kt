@@ -102,6 +102,11 @@ fun HomeScreen() {
         vm.setFocusedPane(pane)
     }
 
+    // Mirrors focusedPane into MenuController (composition-local state -> StateFlow, same pattern
+    // App.kt already uses for currentScreen) so AppMenuBar can gate the Feed menu's selected-feed
+    // items on the feed list actually having keyboard focus.
+    LaunchedEffect(focusedPane) { menuController.focusedPane.value = focusedPane }
+
     val orderedFilters = remember(tags, folders, feeds, collapsedFolderIds) {
         buildOrderedFilters(tags, folders, feeds, collapsedFolderIds)
     }

@@ -17,6 +17,8 @@ class MenuUiStateTest {
         cloudConnected: Boolean = false,
         filterIsSearch: Boolean = false,
         unreadOnly: Boolean = false,
+        feedListFocused: Boolean = false,
+        hasSelectedFeed: Boolean = false,
     ) = computeMenuUiState(
         screen = screen,
         hasSelectedArticle = hasSelectedArticle,
@@ -26,6 +28,8 @@ class MenuUiStateTest {
         cloudConnected = cloudConnected,
         filterIsSearch = filterIsSearch,
         unreadOnly = unreadOnly,
+        feedListFocused = feedListFocused,
+        hasSelectedFeed = hasSelectedFeed,
     )
 
     // --- Screen gating ---
@@ -48,6 +52,8 @@ class MenuUiStateTest {
             hasSelectedArticle = true,
             selectedArticleHasUrl = true,
             cloudConnected = true,
+            feedListFocused = true,
+            hasSelectedFeed = true,
         )
         assertFalse(ui.addItemsEnabled)
         assertFalse(ui.opmlEnabled)
@@ -59,6 +65,7 @@ class MenuUiStateTest {
         assertFalse(ui.syncEnabled)
         assertFalse(ui.articleActionsEnabled)
         assertFalse(ui.urlActionsEnabled)
+        assertFalse(ui.feedActionsEnabled)
     }
 
     // --- Article actions require a selection ---
@@ -104,6 +111,16 @@ class MenuUiStateTest {
         assertFalse(state(cloudConnected = false, syncing = false).syncEnabled)
         assertFalse(state(cloudConnected = true, syncing = true).syncEnabled)
         assertTrue(state(cloudConnected = true, syncing = false).syncEnabled)
+    }
+
+    // --- Feed actions require Home + feed-list focus + a selected feed, all three ---
+
+    @Test
+    fun feed_actions_require_home_feed_list_focus_and_a_selected_feed() {
+        assertTrue(state(feedListFocused = true, hasSelectedFeed = true).feedActionsEnabled)
+        assertFalse(state(screen = Screen.Setup, feedListFocused = true, hasSelectedFeed = true).feedActionsEnabled)
+        assertFalse(state(feedListFocused = false, hasSelectedFeed = true).feedActionsEnabled)
+        assertFalse(state(feedListFocused = true, hasSelectedFeed = false).feedActionsEnabled)
     }
 
     // --- Checkbox passthrough ---

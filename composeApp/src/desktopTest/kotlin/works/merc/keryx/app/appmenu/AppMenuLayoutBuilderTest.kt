@@ -170,6 +170,61 @@ class AppMenuLayoutBuilderTest {
         assertTrue("shortcut" !in add.properties.keys)
     }
 
+    // Ids: root=0, File=1, submenu(2), then one id per item label in order.
+    private fun rootWithSubmenu(
+        submenuEnabled: Boolean = true,
+        itemLabels: List<String> = listOf("A", "B"),
+    ) = AppMenuRoot(
+        listOf(
+            AppMenuNode.Menu(
+                "File",
+                listOf(
+                    AppMenuNode.Menu(
+                        "Tags",
+                        itemLabels.map { AppMenuNode.Item(it, enabled = true, onClick = {}) },
+                        enabled = submenuEnabled,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    @Test
+    fun `a disabled submenu reports enabled false`() {
+        val layout = buildAppMenuLayout(rootWithSubmenu(submenuEnabled = false))
+        val tags = layout.buildItem(parentId = 2, recursionDepth = 0, propertyNames = emptyList())
+        assertEquals(false, tags.prop("enabled"))
+    }
+
+    @Test
+    fun `an enabled submenu reports enabled true`() {
+        val layout = buildAppMenuLayout(rootWithSubmenu(submenuEnabled = true))
+        val tags = layout.buildItem(parentId = 2, recursionDepth = 0, propertyNames = emptyList())
+        assertEquals(true, tags.prop("enabled"))
+    }
+
+    @Test
+    fun `rebuilding with a variable-length submenu still resolves dispatch to the current items`() {
+        // Simulates a tag being added between two rebuilds (e.g. Tags/Move-to-folder submenus,
+        // whose length follows the live tag/folder lists) — the one case in this codebase where the
+        // tree shape genuinely changes at runtime, not just at startup (see AppMenuLayoutBuilder's
+        // class doc comment).
+        val threeItems = buildAppMenuLayout(rootWithSubmenu(itemLabels = listOf("A", "B", "C")))
+        assertEquals(setOf(0, 1, 2, 3, 4, 5), threeItems.knownIds)
+        assertEquals("A", (threeItems.dispatch[3] as AppMenuNode.Item).label)
+        assertEquals("B", (threeItems.dispatch[4] as AppMenuNode.Item).label)
+        assertEquals("C", (threeItems.dispatch[5] as AppMenuNode.Item).label)
+
+        val twoItems = buildAppMenuLayout(rootWithSubmenu(itemLabels = listOf("X", "Y")))
+        assertEquals(setOf(0, 1, 2, 3, 4), twoItems.knownIds)
+        assertEquals("X", (twoItems.dispatch[3] as AppMenuNode.Item).label)
+        assertEquals("Y", (twoItems.dispatch[4] as AppMenuNode.Item).label)
+        // Id 5 no longer exists in this rebuild's layout — a click against the previous rebuild's
+        // stale id 5 would be resolved by the host re-fetching first (AboutToShow), not by this
+        // layout still knowing about it.
+        assertTrue(5 !in twoItems.knownIds)
+    }
+
     @Test
     fun `ids are stable across rebuilds of an unchanged-shape tree`() {
         val first = buildAppMenuLayout(sampleRoot(addLabel = "Add", unreadChecked = true))

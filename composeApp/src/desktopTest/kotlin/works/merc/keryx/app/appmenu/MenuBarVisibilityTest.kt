@@ -7,6 +7,7 @@ import works.merc.keryx.app.ui.menu.AppMenuLabels
 import works.merc.keryx.app.ui.menu.AppMenuNode
 import works.merc.keryx.app.ui.menu.AppMenuShortcut
 import works.merc.keryx.app.ui.menu.MenuBarToggle
+import works.merc.keryx.app.ui.menu.SelectedFeedMenuData
 import works.merc.keryx.app.ui.menu.buildAppMenuTree
 import works.merc.keryx.app.ui.menu.computeMenuUiState
 import works.merc.keryx.app.ui.navigation.Screen
@@ -41,6 +42,8 @@ class MenuBarVisibilityTest {
         articleMenu = "Article", toggleRead = "ToggleRead", toggleStar = "ToggleStar",
         openInBrowser = "OpenInBrowser", copyUrl = "CopyUrl",
         feedMenu = "Feed", refreshAll = "RefreshAll", syncNow = "SyncNow",
+        feedRefresh = "FeedRefresh", feedAssignTags = "AssignTags", feedMoveToFolder = "MoveToFolder",
+        feedNoFolder = "NoFolder", feedRename = "FeedRename", feedUnsubscribe = "FeedUnsubscribe",
         helpMenu = "Help", website = "Website", projectPage = "ProjectPage", about = "About",
     )
 
@@ -48,7 +51,10 @@ class MenuBarVisibilityTest {
         addFeed = { addFeedCalled = true }, addFolder = {}, addTag = {}, importOpml = {}, exportOpml = {},
         closeWindow = {}, openSettings = {}, quit = {}, focusSearch = {}, setUnreadOnly = {},
         toggleSort = {}, markAllRead = {}, toggleRead = {}, toggleStar = {}, openInBrowser = {},
-        copyUrl = {}, refreshAll = { refreshCalled = true }, sync = {}, openWebsite = {}, openProjectPage = {}, about = {},
+        copyUrl = {}, refreshAll = { refreshCalled = true }, sync = {},
+        refreshSelectedFeed = {}, toggleFeedTag = { _, _ -> }, moveFeedToFolder = {},
+        renameSelectedFeed = {}, unsubscribeSelectedFeed = {},
+        openWebsite = {}, openProjectPage = {}, about = {},
     )
 
     private fun tree(menuBarVisible: Boolean = false) = buildAppMenuTree(
@@ -60,6 +66,7 @@ class MenuBarVisibilityTest {
         labels = labels(),
         actions = actions(),
         menuBarToggle = MenuBarToggle(visible = menuBarVisible, onToggle = { toggledTo = it }),
+        selectedFeedMenu = SelectedFeedMenuData(emptyList(), emptySet(), emptyList(), null),
     )
 
     // --- AWT key-code mapping ---

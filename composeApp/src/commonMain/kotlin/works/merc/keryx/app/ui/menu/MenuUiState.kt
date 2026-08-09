@@ -24,6 +24,10 @@ data class MenuUiState(
     val refreshAllEnabled: Boolean,
     val syncEnabled: Boolean,
     val openSettingsEnabled: Boolean,
+    /** Refresh/Tags/Move to folder/Rename/Unsubscribe for the selected feed — require the feed
+     * list pane to actually have keyboard focus, not just a selection (a feed can stay "selected"
+     * while the user has since moved focus to the article list/detail pane or the search field). */
+    val feedActionsEnabled: Boolean,
 )
 
 /**
@@ -44,6 +48,8 @@ fun computeMenuUiState(
     cloudConnected: Boolean,
     filterIsSearch: Boolean,
     unreadOnly: Boolean,
+    feedListFocused: Boolean = false,
+    hasSelectedFeed: Boolean = false,
 ): MenuUiState {
     val onHome = screen == Screen.Home
     return MenuUiState(
@@ -58,5 +64,6 @@ fun computeMenuUiState(
         refreshAllEnabled = onHome && !feedRefreshing,
         syncEnabled = onHome && cloudConnected && !syncing,
         openSettingsEnabled = onHome,
+        feedActionsEnabled = onHome && feedListFocused && hasSelectedFeed,
     )
 }
