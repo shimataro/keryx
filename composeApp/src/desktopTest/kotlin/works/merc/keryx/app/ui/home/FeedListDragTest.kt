@@ -15,6 +15,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.MouseButton
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performKeyInput
@@ -548,7 +549,14 @@ class FeedListDragTest {
 
             onNodeWithTag("root").requestFocus()
             onNodeWithTag("root").performKeyInput { pressKey(renameKey) }
-            waitForIdle()
+            // The rename dialog is a real, separate native DialogWindow (DesktopModalWindow),
+            // whose creation/first layout is asynchronous relative to this test's own scene —
+            // waitForIdle() alone only drains the root scene and can race the dialog window into
+            // existence on a slow/headless CI machine (see docs/known-issues.md's dialog-window
+            // timing entries for the same class of race).
+            waitUntil(timeoutMillis = 5_000) {
+                onAllNodesWithText("タイトルを変更").fetchSemanticsNodes().isNotEmpty()
+            }
 
             onNodeWithText("タイトルを変更").assertExists()
         } finally {
@@ -572,7 +580,10 @@ class FeedListDragTest {
 
             onNodeWithTag("root").requestFocus()
             onNodeWithTag("root").performKeyInput { pressKey(Key.Delete) }
-            waitForIdle()
+            // See the rename test above: same real cross-window async gap.
+            waitUntil(timeoutMillis = 5_000) {
+                onAllNodesWithText("「Feed a」の購読を削除しますか？").fetchSemanticsNodes().isNotEmpty()
+            }
 
             onNodeWithText("「Feed a」の購読を削除しますか？").assertExists()
         } finally {
