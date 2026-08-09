@@ -4,7 +4,6 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import works.merc.keryx.app.ui.home.HomePane
 import works.merc.keryx.app.ui.navigation.Screen
 
 /**
@@ -30,20 +29,15 @@ enum class MenuCommand {
  *
  * - [currentScreen] is kept in sync by `App` so the menu bar can gate item enabled-state on the
  *   active top-level destination.
- * - [focusedPane] is kept in sync by `HomeScreen` the same way, so the menu bar can gate
- *   feed-list-scoped items (Refresh/Tags/Move to folder/Rename/Unsubscribe) on which pane actually
- *   has keyboard focus, not just on there being a selection.
- * - [searchFieldFocused] is likewise kept in sync by `HomeScreen`, so the same feed-list-scoped
- *   items can be disabled while the sidebar search field has real focus — needed because a native
- *   Swing accelerator (unlike `KeyboardNav.kt`) has no way to defer to a focused text field, and a
- *   direct click into the search box changes neither [focusedPane] nor the active filter.
+ * - [searchFieldFocused] is kept in sync by `HomeScreen`, so feed-list-scoped items can be
+ *   disabled while the sidebar search field has real focus — needed because a native Swing
+ *   accelerator (unlike `KeyboardNav.kt`) has no way to defer to a focused text field.
  * - [commands] carries one-shot menu clicks to whichever composable owns the target state.
  *
  * App-scoped Koin singleton (single-window desktop app).
  */
 class MenuController {
     val currentScreen = MutableStateFlow<Screen>(Screen.Setup)
-    val focusedPane = MutableStateFlow<HomePane?>(null)
     val searchFieldFocused = MutableStateFlow(false)
 
     private val _commands = MutableSharedFlow<MenuCommand>(extraBufferCapacity = 8)

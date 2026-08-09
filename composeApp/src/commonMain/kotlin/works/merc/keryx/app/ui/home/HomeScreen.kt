@@ -76,7 +76,7 @@ fun HomeScreen() {
     // Bumped on each keyboard-shortcut copy; ArticleDetailPane watches it to flash its copy button's
     // inline ✓ (the keyboard copies the selected article, which that pane already shows).
     var copyPulse by remember { mutableStateOf(0) }
-    // Bumped by the R/F2(Enter)/Delete feed-list shortcuts; FeedListPane observes these and resolves
+    // Bumped by the F2(Enter)/Delete feed-list shortcuts; FeedListPane observes these and resolves
     // the currently selected filter (feed/folder/tag) against its own already-collected rows to
     // trigger the same rename/edit and delete/unsubscribe dialogs the context menu uses.
     var feedListRenameRequestId by remember { mutableStateOf(0) }
@@ -102,13 +102,11 @@ fun HomeScreen() {
         vm.setFocusedPane(pane)
     }
 
-    // Mirrors focusedPane into MenuController (composition-local state -> StateFlow, same pattern
-    // App.kt already uses for currentScreen) so AppMenuBar can gate the Feed menu's selected-feed
-    // items on the feed list actually having keyboard focus.
-    LaunchedEffect(focusedPane) { menuController.focusedPane.value = focusedPane }
-    // Same mirroring for the search field: a native Swing accelerator has no equivalent to
-    // KeyboardNav.kt's searchFieldFocused suppression, so AppMenuBar needs this to disable the
-    // Feed menu's bare-key items (F2/Delete) while the user is actually typing a search query.
+    // Mirrors the search field's focus state into MenuController (composition-local state ->
+    // StateFlow, same pattern App.kt already uses for currentScreen): a native Swing accelerator
+    // has no equivalent to KeyboardNav.kt's searchFieldFocused suppression, so AppMenuBar needs
+    // this to disable the Feed menu's bare-key items (F2/Delete) while the user is actually typing
+    // a search query.
     LaunchedEffect(searchFieldFocused) { menuController.searchFieldFocused.value = searchFieldFocused }
 
     val orderedFilters = remember(tags, folders, feeds, collapsedFolderIds) {

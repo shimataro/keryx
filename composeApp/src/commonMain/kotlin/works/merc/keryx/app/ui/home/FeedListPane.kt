@@ -198,7 +198,7 @@ internal fun FeedListPane(
             }
         }
     }
-    // Driven by the feed-list keyboard shortcuts (KeyboardNav.kt's R/F2/Enter/Delete/Backspace,
+    // Driven by the feed-list keyboard shortcuts (KeyboardNav.kt's F2/Enter/Delete/Backspace,
     // wired through HomeScreen). request id 0 is the initial/no-op sentinel.
     LaunchedEffect(renameSelectedRequestId) {
         if (renameSelectedRequestId == 0) return@LaunchedEffect

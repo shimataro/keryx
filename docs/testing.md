@@ -308,10 +308,13 @@ in order of how likely each is to be wrong):
   is hidden (the regression this feature specifically guards against). **Ctrl+M** and the Global-Menu-exported
   **"Show Menu Bar" checkbox** both bring the in-window bar back, and the choice persists across restart. Shortcuts
   fire **exactly once** (not twice) in both states — bar visible (native accelerator) and hidden
-  (`MenuShortcutDispatcher`) — a mishandled handoff between the two could double-fire an action like Add Feed.
+  (`MenuShortcutDispatcher`) — a mishandled handoff between the two could double-fire an action like Add Feed,
+  a `Ctrl+Shift+<letter>` item like Toggle Star, and a bare-key item like Rename Feed (F2).
 - Add the "Application Menu Bar" panel widget: File/View/Article/Feed/Help appear there with correct labels,
-  and items with a shortcut (Add Feed, Close Window, Settings, Quit, Refresh All, Show Menu Bar) show the
-  matching accelerator hint (e.g. "Ctrl+N").
+  and items with a shortcut show the matching accelerator hint — the plain `Ctrl+<letter>` items (Add Feed,
+  Close Window, Settings, Quit, Refresh All, Show Menu Bar, Search, Import/Export OPML, Unread Only), the
+  `Ctrl+Shift+<letter>` Article/Feed items (Toggle Read, Toggle Star, Open in Browser, Copy URL, Refresh Feed),
+  and the bare-key Feed items (Rename Feed: F2, Unsubscribe: Delete).
 - Enable the titlebar "Application Menu" button instead: same check.
 - Dynamic state (enabled/disabled items, the "Unread only" checkbox check state) and every click action match the
   in-window menu exactly.
