@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import androidx.compose.ui.Alignment
@@ -170,6 +171,16 @@ private val MAC_TRAFFIC_LIGHT_PADDING = 72.dp
  */
 private val KERYX_TAB_DIALOG_WIDTH = 640.dp
 
+/**
+ * Safety net for [DesktopModalWindow]'s "stay invisible until fitted" gate: however the fit goes,
+ * the dialog is shown once this long has passed since it entered the composition. The gate itself
+ * releases as soon as the drift guard reports [DialogFitDecision.presentable], which normally
+ * happens within a frame or two of the content's first measurement — this only covers the
+ * pathological case where content never reports a usable height at all (the guard's `return@collect`
+ * on a null measurement), which would otherwise leave the window invisible forever.
+ */
+private const val DIALOG_PRESENT_FALLBACK_MS = 500L
+
 /** Diagnostic log tag for this file (see [works.merc.keryx.app.core.Log]). */
 private const val LOG_TAG = "KeryxDialogs"
 
@@ -195,6 +206,9 @@ private data class DialogThemePrefs(val themeMode: String, val fontScale: Double
  *   size changes. `false` keeps the dialog anchored to its initially computed position, which is
  *   useful for tabbed dialogs whose height varies per tab but whose top edge should stay stable
  *   when the user zaps between tabs.
+ * @param containerColor The color [content] paints its own card with, or [Color.Unspecified] to use
+ *   the theme's `surface`. Used for the full-bleed background *and* the native window's own
+ *   background, so no area the card doesn't cover can show a different tone.
  * @param content The dialog content.
  */
 @OptIn(ExperimentalComposeUiApi::class)
@@ -206,6 +220,8 @@ private data class DialogThemePrefs(val themeMode: String, val fontScale: Double
  * @param modal Whether the dialog blocks interaction with its owner window.
  * @param initialWidth The fixed content width of the dialog.
  * @param repositionOnResize Whether to reposition the dialog when its size changes.
+ * @param containerColor The dialog's background color, or [Color.Unspecified] for the theme's
+ *   `surface`.
  * @param content The content to display in the dialog.
  */
 @Composable
@@ -215,6 +231,7 @@ private fun DesktopModalWindow(
     modal: Boolean = true,
     initialWidth: Dp = KERYX_ALERT_DIALOG_WIDTH,
     repositionOnResize: Boolean = true,
+    containerColor: Color = Color.Unspecified,
     content: @Composable () -> Unit,
 ) {
     val owner = LocalDialogWindowOwner.current ?: LocalNativeWindow.current
@@ -228,6 +245,22 @@ private fun DesktopModalWindow(
             position = resolvePosition(cursorPoint, owner, screenBounds, placeholderSize),
             size = placeholderSize,
         )
+    }
+
+    // The window is created (and its content composed and measured) while still invisible, and only
+    // shown once the drift guard below reports there is nothing left to correct. Compose Desktop
+    // realizes the peer via pack() from SwingDialog's update — "Pack to allow drawing the first
+    // frame" — which is what runs the composition, and makes the window visible separately, from a
+    // coroutine launched by AwtWindow's DisposableEffect(visible). Those two land in an order that
+    // is pure scheduling, so without this gate the placeholder-sized (see placeholderSize), and
+    // therefore placeholder-*centered*, first frame could be on screen before the fit landed: the
+    // card visibly warped upward by (fittedHeight - 240dp) / 2 as the correction arrived. That is
+    // the "components appeared somewhere else for an instant" report, and it is theme-independent —
+    // it happened in light mode too.
+    var readyToShow by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(DIALOG_PRESENT_FALLBACK_MS)
+        readyToShow = true
     }
 
     val onPreviewKey: (KeyEvent) -> Boolean = { keyEvent ->
@@ -282,6 +315,30 @@ private fun DesktopModalWindow(
             )
 
             KeryxTheme(themeMode = themePrefs.themeMode, fontScale = themePrefs.fontScale.toFloat()) {
+                // Resolved here (rather than only in the content) because the same color has to
+                // reach three surfaces that must never disagree: the card the content draws, the
+                // full-bleed background behind it, and the *native* window underneath both. It is
+                // the same input and the same fallback KeryxAlertDialog applies to its own card
+                // within this very KeryxTheme scope, so the two always resolve identically.
+                val resolvedContainerColor = containerColor.takeOrElse { MaterialTheme.colorScheme.surface }
+
+                // Paint the native window/content-pane with the dialog's own background color, the
+                // same technique (and for the same reason) as main.kt does for the main window: the
+                // AWT window's default background is the platform Look & Feel's, i.e. light, and it
+                // is what shows through wherever Compose hasn't painted yet. Two places expose it —
+                // the area a resize adds before Compose repaints it, and the rectangle the native
+                // button row's SwingPanel punches out of the Compose canvas with BlendMode.Clear
+                // (SwingInteropContainer schedules its bounds update asynchronously and follows it
+                // with a validate()/repaint() of the whole dialog root). Applied synchronously
+                // during composition, not from a LaunchedEffect, so it lands before the first frame
+                // — the same call this function's remember(window) block above already makes for
+                // the other AWT properties. Keyed on the color so a runtime theme switch follows.
+                remember(resolvedContainerColor) {
+                    val nativeSurface = java.awt.Color(resolvedContainerColor.toArgb())
+                    window.background = nativeSurface
+                    (window as? RootPaneContainer)?.contentPane?.background = nativeSurface
+                }
+
                 // Density must come from the DIALOG's own composition, not the caller's: the pixels
                 // measured below are produced by the dialog's layout pass, so converting them with
                 // the owner window's density is off by the ratio between the two whenever owner and
@@ -394,6 +451,19 @@ private fun DesktopModalWindow(
                                 "Dialog stayed at $actual after $MAX_FIT_CORRECTIONS attempts to fit $target",
                             )
                         }
+                        if (decision.presentable && !readyToShow) {
+                            // Draw the fitted frame into the still-invisible window before letting
+                            // AwtWindow show it, so the first visible frame is already the final
+                            // one. This is the same API, used for the same reason, that Compose
+                            // Desktop's own SwingDialog.update calls when the peer first becomes
+                            // displayable ("make sure we draw the first frame before making the
+                            // dialog visible to avoid showing the dialog background") — extended
+                            // from the placeholder frame to the fitted one. The !readyToShow guard
+                            // keeps it to exactly one call: later drift corrections on an
+                            // already-visible dialog repaint through the normal path.
+                            window.renderImmediately()
+                            readyToShow = true
+                        }
                     }
                 }
 
@@ -403,7 +473,13 @@ private fun DesktopModalWindow(
                     // (or longer, if the size feedback loop hasn't settled) the window can be
                     // larger than what content actually measures — without this, that surplus area
                     // would show Skia's default (light) clear color instead of the theme.
-                    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
+                    //
+                    // It paints the card's OWN color, not a distinct tone: a different tone (this
+                    // used to be surfaceContainerLow against a `surface` card — #141218 vs #1D1B20
+                    // in the M3 dark scheme) reads as a visible band around the card for as long as
+                    // the size takes to settle, which is precisely the window in which the surplus
+                    // exists at all.
+                    Box(Modifier.fillMaxSize().background(resolvedContainerColor)) {
                         // TopCenter (not Center): any excess between the window's actual size and
                         // the measured content must only ever show up as extra space at the
                         // *bottom* (covered by the background above). Center would split that
@@ -464,6 +540,7 @@ private fun DesktopModalWindow(
         DialogWindow(
             onCloseRequest = onDismissRequest,
             state = dialogState,
+            visible = readyToShow,
             title = title ?: "",
             undecorated = false,
             transparent = false,
@@ -478,6 +555,7 @@ private fun DesktopModalWindow(
         DialogWindow(
             onCloseRequest = onDismissRequest,
             state = dialogState,
+            visible = readyToShow,
             title = title ?: "",
             decoration = WindowDecoration.SystemDefault,
             transparent = false,
@@ -522,7 +600,19 @@ private fun NativeButtonRow(
     val onSurface = MaterialTheme.colorScheme.onSurface
     val awtCancelForeground = remember(onSurface) { java.awt.Color(onSurface.toArgb()) }
 
+    // Values from the previous `update` invocation that actually affect the row's *layout*, so a
+    // recomposition that changes nothing dimensional doesn't revalidate (see the update block).
+    // Deliberately a plain holder rather than a mutableStateOf: SwingPanel's update runs inside
+    // InteropViewHolder's SnapshotStateObserver.observeReads, so reading snapshot state here would
+    // register an observation and writing it would schedule yet another interop update — i.e.
+    // another SwingInteropContainer root validate()/repaint(), exactly the work being avoided.
+    val lastLayoutInputs = remember { ButtonRowLayoutInputs() }
+
     SwingPanel(
+        // Explicit, though SwingPanel's own update sets it immediately before invoking the update
+        // block below (which sets it again): the parameter's default is Color.White, and nothing
+        // should depend on that ordering to keep a white panel off a dark dialog.
+        background = backgroundColor,
         modifier = Modifier.fillMaxWidth(),
         factory = {
             // isFocusable = false: with a heavyweight SwingPanel now present in the same window,
@@ -567,10 +657,42 @@ private fun NativeButtonRow(
             confirm.text = confirmText
             confirm.isEnabled = confirmEnabled
             (dialogWindow as? RootPaneContainer)?.rootPane?.defaultButton = confirm
-            panel.revalidate()
+            // revalidate() only when something dimensional changed. This block runs on EVERY
+            // recomposition of the parent (callers pass non-remembered onConfirm/onDismissRequest
+            // lambdas, so Compose can never skip it) — e.g. on every keystroke in TextPromptDialog,
+            // where confirmEnabled flips. An unconditional revalidate() there reached
+            // SwingInteropViewGroup.invalidate() -> layoutNode.invalidateMeasurements(), and since
+            // AwtContentMeasurePolicy measures the node from component.preferredSize, that fed a
+            // Compose re-measure -> window resize -> componentResized -> another drift-guard tick,
+            // per keystroke. Only the button labels and whether the cancel button is shown can
+            // change the row's preferred size; isEnabled and foreground are repaint-only.
+            if (lastLayoutInputs.changedTo(confirmText, dismissText)) panel.revalidate()
             panel.repaint()
         },
     )
+}
+
+/**
+ * Last layout-affecting inputs seen by [NativeButtonRow]'s `update` block. Intentionally *not*
+ * Compose snapshot state — see the comment at its construction site.
+ */
+private class ButtonRowLayoutInputs {
+    private var recorded: Pair<String, String?>? = null
+
+    /**
+     * Records the current layout-affecting inputs and reports whether they differ from the previous
+     * invocation's.
+     *
+     * @param confirmText The confirm button's label.
+     * @param dismissText The dismiss button's label, or `null` when that button is hidden.
+     * @return `true` when either value changed since the last call (including the first call).
+     */
+    fun changedTo(confirmText: String, dismissText: String?): Boolean {
+        val current = confirmText to dismissText
+        val changed = recorded != current
+        recorded = current
+        return changed
+    }
 }
 
 /**
@@ -602,7 +724,15 @@ actual fun KeryxAlertDialog(
     tonalElevation: Dp,
     modal: Boolean,
 ) {
-    DesktopModalWindow(title = title, onDismissRequest = onDismissRequest, modal = modal) {
+    DesktopModalWindow(
+        title = title,
+        onDismissRequest = onDismissRequest,
+        modal = modal,
+        // Forwarded raw (not pre-resolved): DesktopModalWindow applies the same Unspecified ->
+        // surface fallback inside its own KeryxTheme scope, which is the scope that owns the
+        // full-bleed background and the native window it also has to paint.
+        containerColor = containerColor,
+    ) {
         val maxHeightDp = LocalDialogMaxContentHeight.current
         val titleBarAllowanceDp = LocalDialogTitleBarAllowance.current
         val dialogWindow = LocalDialogWindowOwner.current

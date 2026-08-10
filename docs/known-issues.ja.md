@@ -642,3 +642,149 @@ sources jar を読んで確認済み）。
   `window.minimumSize` も設定するようにした。どちらも最後の安全網であって本命の修正ではないが、
   `resizable = false` である以上、将来同様の潰れが起きた場合にユーザー側で回復できない点を踏まえて
   持たせている。
+
+## ダイアログを開いたときフリッカーし、内容が一瞬別の位置に表示される
+
+**状態**: 解決済み — ドリフトガードがジオメトリの確定を報告する（`DialogFitDecision.presentable`）まで
+ダイアログの OS ウィンドウを可視化しないようにし、あわせてネイティブウィンドウ自身の背景をダイアログの
+コンテナ色でプリフィルすることで解決した。上記の「ダイアログがたまに想定外のサイズで開く」「Linux:
+モードレスダイアログ（設定・About）の横幅がほぼ 0 まで縮む」と同じ `DesktopModalWindow` の自動フィット
+機構を巡る同一ファミリーの3件目だが、経路は既存2件のどちらとも異なる —— 既存2件が「最終的にどのサイズに
+落ち着くか」の問題だったのに対し、本件は「そこへ至る途中で画面に何が出るか」の問題である。根拠が
+Compose Desktop の sources jar から読み取った内部実装であり、再調査コストが高いためそのまま残す。
+
+### 症状
+
+ダイアログを開いたとき、**時々**フリッカーが発生する。macOS の**ライトモード・ダークモード両方**で
+発生し（ダークのほうが目立つ）、設定 / About / フィード追加 / 名前変更 / 各種削除確認 —— つまり
+`ui/common/KeryxDialogs.desktop.kt` の共通基盤（`DesktopModalWindow` / `KeryxAlertDialog` /
+`KeryxTabDialog`）に載っている**すべてのダイアログ**で起きる。
+
+ダイアログ全体ではなく一部。報告内容は「**コンポーネントが一瞬別の場所に表示された**ように見える」で、
+ダークモードではさらに明るい帯が一瞬見える。整定してしまえば消える。
+
+### 診断
+
+主因は色ではなく**ジオメトリの飛び**であり、テーマに依存しない構造的な問題である（だからライトモードでも
+再現する）。
+
+`DesktopModalWindow` はウィンドウを必ず `placeholderSize(initialWidth)` = ダイアログの固定幅 ×
+**プレースホルダー高さ 240dp** で生成し、`resolvePosition` は**その 240dp を前提に**オーナー中央へ配置
+する。実サイズへの補正はその後に走るドリフトガードの担当である。`ui-desktop-1.11.1-sources.jar` を
+読むと、その間に何が起きるかが確定する:
+
+| 段階 | Compose Desktop 側の実装 | 効果 |
+| --- | --- | --- |
+| 1 | `AwtWindow` の `DisposableEffect(Unit)` → `create()` | `ComposeDialog` を生成。`setContent` はラムダを保持するだけ |
+| 2 | `UpdateEffect` → `SwingDialog.update` → `setSizeSafely` | まだ displayable でないので `pack()`（"Pack to allow drawing the first frame"）→ `ComposePanel.addNotify()` → **ここで初めて composition と measure が走る** |
+| 3 | `if (!wasDisplayable && it.isDisplayable) it.renderImmediately()` | プレースホルダー 240dp のフレームを描画 |
+| 4 | `AwtWindow` の `DisposableEffect(visible)` → `GlobalScope.launch(MainUIDispatcher) { window().isVisible = true }` | **別の EDT tick でウィンドウを可視化** |
+| 5 | Keryx のドリフトガードが `capturedContentPx` を受けて `applyWindowGeometry` | 実サイズ高さへリサイズ＋**実サイズ基準で再センタリング** |
+
+4 と 5 の順序は純粋にスケジューリング依存であり（上記2件と同種の競合。「時々」なのはこのため）、4 が
+先に来ると、240dp・240dp 基準の中央位置のフレームが一瞬表示されてから 5 が到着する。カードは
+ウィンドウ内で `Alignment.TopCenter` に配置されるため、240dp から実サイズ H へ拡大しつつ再センタリング
+すると、カードの上端は `(H − 240) / 2` dp だけ上へ移動する（H=500dp なら 130dp）。これが「コンポーネントが
+一瞬別の場所に表示された」の正体である。
+
+`KeryxTabDialog`（設定）は `repositionOnResize = false` だが例外ではない: 初回 tick では
+`nextDialogFit` が `applyPosition = !state.positionApplied` すなわち true を返すため、ちょうど1回だけ
+再センタリングされる —— そしてここで問題になるのはその1回である。
+
+報告の「色」の側面、および**表示済みダイアログ**の内容駆動リサイズ時（フィード追加の候補リスト出現、
+設定のタブ切替、名前変更ダイアログの supporting text の出入り）に同じちらつきが出ることについては、
+以下の3つが寄与している:
+
+- **ダイアログのネイティブ AWT ウィンドウ背景がテーマ色で塗られていなかった。** `main.kt` はメイン
+  ウィンドウについてまさにこの目的で同じことをしている（"Paint the native window/content-pane with the
+  theme surface so a dark-mode launch doesn't flash the platform-default (light) background"）が、
+  `DesktopModalWindow` の `remember(window)` ブロックは `minimumSize` と macOS の `apple.awt.*`
+  クライアントプロパティしか設定していなかった。そのためリサイズで新たに露出した領域は、Compose が
+  塗り直すまで L&F 既定（明るい）で塗られる。
+- **ネイティブボタン行が Compose キャンバスに透明の穴を開ける。** `NativeButtonRow` は実 `JButton` を
+  `SwingPanel` で埋め込み、上流の `SwingInteropViewHolder.init` はその矩形を `BlendMode.Clear` で
+  くり抜くため、全面 `Box` もカードの `Surface` もそこを塗らない。さらに
+  `SwingInteropViewHolder.layoutAccordingTo` は `container.scheduleUpdate` で非同期に境界を更新し、
+  `SwingInteropContainer.executeScheduledUpdates()` は最後にダイアログルート全体の
+  `root.validate(); root.repaint()` を行う。その間、穴からは下地 —— つまり上記の未設定なネイティブ背景 ——
+  がそのまま見える。これは独立した原因ではなく、前項に**従属する**現象である。
+- **全面塗りの色とカードの色が違っていた。** 全面 `Box` は `surfaceContainerLow` 固定である一方、
+  `KeryxAlertDialog` は既定で `surface`、`KeryxTabDialog` も `surface` をハードコードしていたため、
+  ウィンドウの現在サイズと測定済みコンテンツの差分（整定中の余剰領域）が別トーンの帯として見えていた
+  （M3 ダークで `#141218` vs `#1D1B20`）。
+
+4つめは塗りではなくフィードバックループである: `NativeButtonRow` の `SwingPanel` の `update` ブロックは
+`panel.revalidate()` を**無条件に**呼んでいた。呼び出し側は `onConfirm` / `onDismissRequest` に
+非 `remember` のラムダを渡すため Compose の再コンポジションスキップが効かず、このブロックは親の
+あらゆる再コンポジション（例: `confirmEnabled` が変わる `TextPromptDialog` の毎打鍵）で実行される。
+`SwingInteropViewGroup.invalidate()` は `layoutNode.invalidateMeasurements()` を呼び、
+`AwtContentMeasurePolicy` はノードのサイズを `component.preferredSize` から決めるため、そのたびに
+Compose 再 measure → ウィンドウリサイズ → `componentResized` → ドリフトガード再起動 → `SwingPanel`
+再配置 → `root.validate()/repaint()` という経路が回りうる。
+
+### 除外した仮説
+
+- **「単なるダークモードの色のちらつき」** — 報告者がライトモードでも観測していること、および報告内容が
+  色ではなく位置についてであることから否定。上記の色の寄与は実在するが副次的。
+- **`SwingPanel` の `background` 既定値 `Color.White` が実際に白く描画されている** —
+  `SwingPanel.desktop.kt` を読んで否定: 内部の update は `it.background = background.toAwtColor()` を
+  実行した後、**同一呼び出し内で**呼び出し側の `update` を続けて実行し、Keryx 側の update がそこで
+  `panel.background = awtBackground` を設定するため、既定値で描画されるフレームは存在しない。
+  `background` の明示指定は、この順序に依存しないための保険として採用したものであり、修正の本体ではない。
+- **特定のダイアログ固有、あるいは `modal = false` 分岐固有の原因** — 上記の Linux 幅潰れの件を特定した
+  切り分け基準は本件には当てはまらない: モーダルな `KeryxAlertDialog`（名前変更・削除確認）でも
+  設定 / About と同様に再現する。
+
+### 効果がなかった／見送った対処法
+
+- **プレースホルダー高さをより良い値に推測して開く** — 原理的に不十分: 実サイズの高さはコンテンツを
+  測定するまで分からず、上表のとおり測定は `pack()` でピアが実体化してから初めて走る。ダイアログごとの
+  ハードコード推測値にすると、フォントサイズ設定やロケールごとに再調整が必要になる。
+- **表示済みダイアログの内容駆動リサイズ時にも一旦隠す**（候補リスト出現、タブ切替） — 見送り: 小さな
+  飛びを「消えて出直す」に置き換えるだけであり、「設定のタブ切替で上端を動かさない」という既存の意図的な
+  仕様とも直接衝突する。この経路は隠すのではなく、背景・色の修正で綺麗に描画されるようにした。
+- **可視化前にジオメトリをより強く再適用する** — 本ファミリー1件目で既に否定済み: 同値の書き込みは
+  独立した2層で no-op になるため、実質ポーリングにしかならない。今回のゲートはガードと競争するのではなく、
+  ガード自身の判断を待つ。
+
+### 解決方法
+
+- `DialogFitDecision` に **`presentable`** フラグを追加した（`WindowGeometry.desktop.kt`）。これ以上
+  補正することがない状態 —— ウィンドウが既にターゲットに一致しているか、補正予算を使い切ったか —— で
+  true になる。`DesktopModalWindow` は両 `DialogWindow` オーバーロードに `visible = readyToShow` を渡し、
+  ガードが最初に `presentable` を報告した時点で `readyToShow` を立てる。その直前に
+  `window.renderImmediately()` を呼ぶので、**最初に見えるフレームが既にフィット後のフレーム**になる。
+  これは上表の段階3で Compose Desktop 自身が同じ理由で使っている API を、プレースホルダーのフレームから
+  フィット後のフレームへ移して適用したものである。上表の 1〜3 と 5 はすべて不可視のうちに完了するため、
+  プレースホルダーのフレームが画面に出ることはなくなった。`presentable` は補正を諦めたケースでも
+  意図的に true にしてあり、要求ジオメトリを拒むウィンドウマネージャ環境でもダイアログが永久に出ない
+  ことはない。さらに、コンテンツが有効な高さを一度も報告しない病的ケースに備えて
+  `DIALOG_PRESENT_FALLBACK_MS`（500ms）の `LaunchedEffect` を安全網として置いている。
+- `DesktopModalWindow` に **`containerColor`** パラメータを追加した（既定 `Color.Unspecified` →
+  テーマの `surface`）。自身の `KeryxTheme` スコープ内で解決し、全面 `Box`（ハードコードの
+  `surfaceContainerLow` を置き換え、トーンの帯を解消）と、ネイティブの `window.background` /
+  `contentPane.background`（`main.kt` と同じ手法）の両方に使う。`LaunchedEffect` ではなく
+  `remember(resolvedColor)` でコンポジション中に同期適用しており、これは `main.kt` が記録している
+  "as early as possible" と同じ判断による。色をキーにしているので実行中のテーマ切り替えにも追従する。
+  `KeryxAlertDialog` は受け取った `containerColor` をそのまま転送するだけ、`KeryxTabDialog` は既定値が
+  既にハードコードしていた `surface` に解決されるため無改修。
+- `NativeButtonRow` は `SwingPanel` に `background = backgroundColor` を明示的に渡すようにし（保険。
+  「除外した仮説」参照）、`revalidate()` は**レイアウトに影響する値が前回の `update` から実際に変わった
+  ときだけ**呼ぶようにした（確定ボタンのラベル、およびキャンセルボタンの表示可否を兼ねる却下ラベル）。
+  `isEnabled` / `foreground` の変更は repaint のみで足りるため、打鍵が `invalidateMeasurements()` に
+  到達することはなくなった。前回値は、意図的に snapshot state ではないプレーンなホルダーで保持している:
+  `SwingPanel` の update は `InteropViewHolder` の `SnapshotStateObserver.observeReads` の内側で走るため、
+  ここで `mutableStateOf` を読むと購読が登録され、書くと更に別の interop update ——
+  すなわち `SwingInteropContainer` のルート `validate()`/`repaint()` —— がスケジュールされてしまい、
+  まさに削ろうとしている処理を呼び戻すことになる。
+- `WindowGeometryTest` に `presentable` のケースを追加した（補正が残っている間は false、サイズが
+  landed したら true、補正上限を使い切ったら true、`FIT_TOLERANCE` 以内の差分なら true）。背景の
+  プリフィルと `revalidate()` の条件化は実ネイティブピアに対する挙動で純粋関数として切り出せないため、
+  `docs/testing.md` に既に記録されている「実 `DialogWindow` へのサイズ適用」と同じ理由により手動確認に
+  委ねる。
+
+### 残存する制約
+
+**既に表示されているダイアログ**が、内容の変化でサイズを変える場合（フィード追加の候補リスト、設定の
+タブ切替）は、仕様どおり画面上でリサイズされる —— 上記の見送った対処法を参照。この場合に変わったのは、
+新たに露出する領域とボタン行の interop の穴が、L&F 既定ではなくダイアログ自身の色で塗られる点だけである。

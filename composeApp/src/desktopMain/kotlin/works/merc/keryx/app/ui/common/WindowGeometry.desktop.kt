@@ -159,12 +159,19 @@ internal data class DialogFitState(
  * @property applyPosition Whether the window should be (re)placed.
  * @property reportGiveUp Whether this event is the one that exhausted [MAX_FIT_CORRECTIONS] for the
  *   current target, and should therefore be logged.
+ * @property presentable Whether the window's geometry is final as far as this guard is concerned,
+ *   i.e. there is nothing left to correct — either the window already matches the target, or the
+ *   correction budget is spent and no further attempt will be made. A dialog is kept invisible
+ *   until this first turns `true`, so the placeholder-sized, placeholder-centered first frame is
+ *   never shown (see `DesktopModalWindow`). It is deliberately also `true` in the gave-up case: a
+ *   window manager that refuses the requested geometry must not leave the dialog invisible forever.
  */
 internal data class DialogFitDecision(
     val state: DialogFitState,
     val applySize: Boolean,
     val applyPosition: Boolean,
     val reportGiveUp: Boolean,
+    val presentable: Boolean,
 )
 
 /**
@@ -203,6 +210,9 @@ internal fun nextDialogFit(
         applySize = applySize,
         applyPosition = applyPosition,
         reportGiveUp = reportGiveUp,
+        // Nothing left to correct: either the window is already at the target, or the budget is
+        // spent and no further attempt will be made (so the dialog must still be allowed to show).
+        presentable = matched || !applySize,
     )
 }
 

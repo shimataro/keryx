@@ -655,3 +655,162 @@ loop bottomed out on its own at AWT's practical size floor.
 - `applyWindowGeometry` gained an optional `minSize` floor, and `DesktopModalWindow` now also sets
   `window.minimumSize` at creation. Both are a last-resort safety net, not the primary fix — given
   `resizable = false`, any future collapse would otherwise be unrecoverable by the user.
+
+## Dialogs flickered on open, briefly showing their content in the wrong place
+
+**Status**: Resolved — by keeping a dialog's OS window invisible until the drift guard reports its
+geometry is final (`DialogFitDecision.presentable`), and by pre-filling the native window's own
+background with the dialog's container color. Third in the same family as "Dialogs occasionally
+opened at an unexpected size" and "Linux: modeless dialogs (Settings, About) shrank their window
+width to near-zero" above — the same `DesktopModalWindow` auto-fit machinery — but on a path neither
+of those touched: those two were about the size the dialog *ends up* at, this one about what is on
+screen on the way there. Kept in full because the evidence is Compose Desktop internals read out of
+the sources jar, which would otherwise have to be re-derived.
+
+### Symptom
+
+Opening a dialog *sometimes* flickered. Reported on macOS in **both light and dark mode** (more
+obvious in dark), and on **every** dialog — Settings, About, add feed, rename, the delete
+confirmations — i.e. everything built on the shared `DesktopModalWindow` /`KeryxAlertDialog` /
+`KeryxTabDialog` infrastructure in `ui/common/KeryxDialogs.desktop.kt`.
+
+Not the whole dialog at once. The reporter's description was that **a component appeared somewhere
+else for an instant** before settling, and in dark mode there was additionally a brief light band.
+Intermittent, and gone as soon as the dialog had settled.
+
+### Diagnosis
+
+The geometry jump — not the color — was the main event, and it is structural rather than
+theme-dependent, which is why it reproduced in light mode too.
+
+`DesktopModalWindow` always creates its window at `placeholderSize(initialWidth)` = the dialog's
+fixed width x a **240dp placeholder height**, and `resolvePosition` centers it over the owner
+*using that placeholder size*. Correcting both to the real fitted size is the drift guard's job,
+and it runs afterwards. Reading `ui-desktop-1.11.1-sources.jar` pins down what happens in between:
+
+| Step | Compose Desktop code | Effect |
+| --- | --- | --- |
+| 1 | `AwtWindow`'s `DisposableEffect(Unit)` → `create()` | `ComposeDialog` constructed; `setContent` only stores the lambda |
+| 2 | `UpdateEffect` → `SwingDialog.update` → `setSizeSafely` | window is not displayable, so `pack()` ("Pack to allow drawing the first frame") → `ComposePanel.addNotify()` → **the composition and first measure happen here** |
+| 3 | `if (!wasDisplayable && it.isDisplayable) it.renderImmediately()` | the 240dp placeholder frame is drawn |
+| 4 | `AwtWindow`'s `DisposableEffect(visible)` → `GlobalScope.launch(MainUIDispatcher) { window().isVisible = true }` | **the window becomes visible on a separate EDT tick** |
+| 5 | Keryx's drift guard receives `capturedContentPx` → `applyWindowGeometry` | resize to the fitted height **and re-center against the fitted size** |
+
+The order of 4 and 5 is pure scheduling — the same kind of race as the two entries above, hence the
+"sometimes". When 4 wins, the placeholder-sized, placeholder-*centered* frame is on screen for a
+moment before 5 lands. Because the card is laid out `Alignment.TopCenter` inside the window, a
+window that grows from 240dp to a fitted height H while re-centering moves the card's top edge up by
+`(H - 240) / 2` dp — 130dp for a 500dp-tall dialog. That is the reported "a component appeared
+somewhere else".
+
+`KeryxTabDialog` (Settings) passes `repositionOnResize = false`, but it is not exempt: on the very
+first tick `nextDialogFit` returns `applyPosition = !state.positionApplied`, i.e. `true`, so it
+re-centers exactly once — which is the once that matters here.
+
+Three secondary contributors accounted for the color part of the report, and for the same flicker
+occurring on a *already-visible* dialog whose content changes size (the add-feed candidate list
+appearing, a Settings tab switch, a rename dialog's supporting text coming and going):
+
+- **The dialog's native AWT window background was never painted with the theme color.**
+  `main.kt` does exactly this for the main window, for exactly this reason ("Paint the native
+  window/content-pane with the theme surface so a dark-mode launch doesn't flash the
+  platform-default (light) background"), but `DesktopModalWindow`'s `remember(window)` block only
+  set `minimumSize` and the macOS `apple.awt.*` client properties. Any area a resize newly exposes
+  is therefore painted by the Look & Feel's default — light — until Compose repaints it.
+- **The native button row punches a transparent hole in the Compose canvas.** `NativeButtonRow`
+  embeds real `JButton`s through `SwingPanel`, and upstream `SwingInteropViewHolder.init` clears
+  that rectangle with `BlendMode.Clear`, so neither the full-bleed `Box` nor the card's `Surface`
+  paints it. `SwingInteropViewHolder.layoutAccordingTo` then schedules the bounds update
+  asynchronously (`container.scheduleUpdate`), and `SwingInteropContainer.executeScheduledUpdates()`
+  finishes with `root.validate(); root.repaint()` over the whole dialog root. During that window the
+  hole shows whatever is underneath — i.e. the unpainted native background above. This is a
+  *consequence* of the previous item, not an independent cause.
+- **The full-bleed background and the card were different colors.** The outer `Box` was hardcoded to
+  `surfaceContainerLow` while `KeryxAlertDialog` defaults its card to `surface` and `KeryxTabDialog`
+  hardcoded `surface`, so any surplus between the window's current size and the measured content
+  showed as a distinctly toned band while the size settled (`#141218` vs `#1D1B20` in the M3 dark
+  scheme).
+
+A fourth finding is a feedback loop rather than a paint problem: `NativeButtonRow`'s `SwingPanel`
+`update` block called `panel.revalidate()` **unconditionally**. Callers pass non-remembered
+`onConfirm` / `onDismissRequest` lambdas, so Compose can never skip that block — it runs on every
+recomposition of the parent, e.g. on every keystroke in `TextPromptDialog` (where `confirmEnabled`
+flips). `SwingInteropViewGroup.invalidate()` calls back into `layoutNode.invalidateMeasurements()`,
+and `AwtContentMeasurePolicy` measures the node from `component.preferredSize`, so each of those
+could run: Compose re-measure → window resize → `componentResized` → another drift-guard tick →
+`SwingPanel` re-placement → `root.validate()/repaint()`.
+
+### Ruled out
+
+- **"It's just a dark-mode color flash"** — disproved by the reporter seeing it in light mode as
+  well, and by the description being about position rather than color. The color contributors above
+  are real but secondary.
+- **`SwingPanel`'s `background` parameter defaulting to `Color.White` actually painting white** —
+  disproved by reading `SwingPanel.desktop.kt`: its own update block runs
+  `it.background = background.toAwtColor()` and then calls the caller's `update` **within the same
+  invocation**, and Keryx's update sets `panel.background = awtBackground` there, so no frame is
+  ever painted with the default. Passing `background` explicitly was still adopted, as insurance
+  against that ordering rather than as the fix.
+- **Something specific to one dialog, or to the `modal = false` branch** — the discriminator that
+  identified the Linux width-collapse entry above does not apply here: this reproduces on the modal
+  `KeryxAlertDialog` dialogs (rename, delete confirmation) just as much as on Settings/About.
+
+### Workarounds that did not work / were rejected
+
+- **Opening the window at a better-guessed placeholder height** — cannot work in general: the fitted
+  height is not knowable before the content is measured, and per the table above the measurement
+  only happens once `pack()` has realized the peer. A per-dialog hardcoded guess would also have to
+  be re-tuned for every font-scale setting and locale.
+- **Hiding the window again for post-show, content-driven resizes** (candidate list appearing, tab
+  switch) — rejected: it would trade a small jump for a full disappear/reappear, and it directly
+  conflicts with the deliberate existing behavior that the Settings dialog's top edge must not move
+  when a tab changes its height. Those resizes are instead covered by the background/color fixes,
+  which is what makes them paint cleanly rather than not happen.
+- **Re-asserting the geometry more aggressively before showing** — already ruled out by the first
+  entry in this family: a same-value write is a no-op at two independent layers, so it only ever
+  polls. The gate below waits on the guard's own decision instead of racing it.
+
+### How this was resolved
+
+- `DialogFitDecision` gained a **`presentable`** flag (`WindowGeometry.desktop.kt`), true when there
+  is nothing left to correct — either the window already matches the target, or the correction
+  budget is spent. `DesktopModalWindow` passes `visible = readyToShow` to both `DialogWindow`
+  overloads and flips `readyToShow` the first time the guard reports `presentable`, calling
+  `window.renderImmediately()` immediately before so the first *visible* frame is already the fitted
+  one. This is the same API Compose Desktop itself uses in step 3 above, for the same stated reason,
+  moved from the placeholder frame to the fitted frame. Everything the table's steps 1-3 and 5 do
+  now happens while the window is invisible, so the placeholder frame can no longer reach the
+  screen. `presentable` is deliberately also true in the gave-up case, so a window manager that
+  refuses the requested geometry cannot leave a dialog invisible forever, and a
+  `DIALOG_PRESENT_FALLBACK_MS` (500ms) `LaunchedEffect` shows it regardless if content never reports
+  a usable height at all.
+- `DesktopModalWindow` gained a **`containerColor`** parameter (default `Color.Unspecified` →
+  the theme's `surface`), resolved inside its own `KeryxTheme` scope and used for both the full-bleed
+  `Box` (replacing the hardcoded `surfaceContainerLow`, closing the tonal-band gap) and the native
+  `window.background` / `contentPane.background`, mirroring `main.kt`'s technique. Applied
+  synchronously from a `remember(resolvedColor)` during composition rather than a `LaunchedEffect`,
+  the same "as early as possible" reasoning `main.kt` records, and keyed on the color so a runtime
+  theme switch follows. `KeryxAlertDialog` forwards its own `containerColor` through unchanged;
+  `KeryxTabDialog` needed no change, since the default resolves to the `surface` it already
+  hardcoded.
+- `NativeButtonRow` now passes `background = backgroundColor` to `SwingPanel` explicitly (insurance,
+  see "Ruled out"), and calls `revalidate()` **only when a layout-affecting value actually changed**
+  since the previous `update` — the confirm label, or the dismiss label (which is also what decides
+  whether the cancel button is shown). `isEnabled` / `foreground` changes are repaint-only, so a
+  keystroke no longer reaches `invalidateMeasurements()` at all. The previous values are held in a
+  plain, deliberately non-snapshot holder: `SwingPanel`'s update runs inside
+  `InteropViewHolder`'s `SnapshotStateObserver.observeReads`, so a `mutableStateOf` there would
+  register an observation and writing it would schedule another interop update — another
+  `SwingInteropContainer` root `validate()`/`repaint()`, exactly the work being removed.
+- `WindowGeometryTest` covers `presentable` (withheld while a correction is pending, true once the
+  size lands, true once the attempt cap is spent, true within `FIT_TOLERANCE`). The background
+  pre-fill and the conditional `revalidate()` act on a real native peer and are not extractable as
+  pure functions, so they stay manual checks in `docs/testing.md`, for the same reason recorded
+  there for applying a size to a real `DialogWindow`.
+
+### Residual limitation
+
+A dialog that is **already visible** and then changes size because its content did (the add-feed
+candidate list, a Settings tab switch) still resizes on screen, by design — see the rejected
+workaround above. What changed for that case is only that the newly exposed area, and the button
+row's interop hole, now paint the dialog's own color instead of the Look & Feel's default.
