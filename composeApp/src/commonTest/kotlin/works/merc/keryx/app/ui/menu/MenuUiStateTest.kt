@@ -97,10 +97,10 @@ class MenuUiStateTest {
     }
 
     @Test
-    fun article_and_url_actions_stay_enabled_regardless_of_feed_list_pane_focus() {
-        // The real article-detail toolbar has no pane-focus dependency (it only checks the
-        // selection itself), so the menu must not grey out just because the feed list pane
-        // happens to hold keyboard focus for the same selected article.
+    fun article_and_url_actions_require_a_selected_article_with_url() {
+        // articleActionsEnabled/urlActionsEnabled require only a selection (and URL) — computeMenuUiState
+        // has no pane-focus input to gate them on, unlike feedActionsEnabled/renameOrDeleteEnabled's
+        // searchFieldFocused guard. See MenuUiState.kt's articleActionsEnabled doc for why.
         val ui = state(hasSelectedArticle = true, selectedArticleHasUrl = true)
         assertTrue(ui.articleActionsEnabled)
         assertTrue(ui.urlActionsEnabled)
