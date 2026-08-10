@@ -55,7 +55,9 @@ the first right-click; not observable through a Compose UI test, where `LocalNat
 auto-fit arithmetic `fitWindowSize`/`sizeMatches`, and `nextDialogFit`'s drift-correction state
 machine — including the regression case where a size applied behind Compose's back *after* the fit
 had settled must still be corrected, plus the per-target attempt cap that keeps a window manager
-that refuses the geometry from spinning the guard forever),
+that refuses the geometry from spinning the guard forever, and the `presentable` flag that keeps a
+dialog invisible until its fit has landed — including its release once that cap is spent, so a window
+manager refusing the geometry can never leave a dialog invisible),
 etc. `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` failures specifically indicate regression in DB schema / merge SQL / sync orchestration and require extra attention.
 
 Known uncovered areas: `SettingsViewModel.exportOpml`/`importOpml` now have a test seam
@@ -233,17 +235,40 @@ changed (previously an unowned dialog shown off the EDT), so re-confirm there to
 
 Dialog auto-sizing (`DialogWindow` OS window behavior) cannot be auto-tested, so visually confirm:
 
-- Open Settings and About **ten times in a row each**; every open shows its full content at the
-  correct size. Never a short ~240pt-tall window, never a tiny ~80x28 one, never a narrow one with
-  the trailing tabs clipped. The repetition is the point — the race this guards against reproduced
-  on roughly 7 of 10 opens.
+- Open Settings, About, add feed and rename feed **ten times in a row each**; every open shows its
+  full content at the correct size **and at its final position, from the very first visible frame**.
+  Content must never appear in one place and then warp to another (typically upward, by half the
+  difference between the 240pt placeholder and the fitted height) — the window is now held invisible
+  until its fit has landed. Never a short ~240pt-tall window, never a tiny ~80x28 one, never a narrow
+  one with the trailing tabs clipped. The repetition is the point — the races these guard against
+  reproduced on roughly 7 of 10 opens.
 - In those same ten opens, the dialog must appear **already centred** — never at the screen's
   top-left corner for a frame before jumping to the centre. That is what AWT's default location for
   a freshly constructed `Window` looks like, and it shows whenever the fitted size reaches the
   native window ahead of the fitted position.
+- Repeat those opens in **dark mode**: not a single frame may show a light rectangle or a
+  lighter-toned band — not around the card's edges, and not around the native button row at the
+  bottom (the native window background and the full-bleed fill are both painted with the dialog's own
+  container color now, so nothing should differ in tone from the card).
+- The invisible-until-fitted gate must not be **perceptible**: each dialog still appears immediately
+  on click, with no dead time where nothing is on screen. If one ever takes visibly long, suspect the
+  500ms `DIALOG_PRESENT_FALLBACK_MS` safety net having been what released it, and check the log for
+  the `Dialog stayed at …` warning below.
+- **Autofocus still works**: in a text-prompt dialog (rename feed/folder/tag, add feed) the caret is
+  in the text field the moment it appears, and typing straight away goes into it. This is the most
+  likely thing for the delayed-visibility change to have broken — check it every time.
+- Type continuously in a rename dialog so its supporting text appears and disappears: no judder, and
+  the native button row does not flicker or re-lay-out per keystroke (it now revalidates only when a
+  button *label* changes, not when the confirm button's enabled state does).
 - Settings: switch tabs repeatedly. The height follows each tab and the **top edge never moves**.
+- Switch the in-app theme light ↔ dark while running, then reopen each dialog: the *native* window
+  background follows too — visible as the tone behind and around the native button row, and in any
+  surplus area — not just the Compose-drawn card.
 - Drag a dialog off-centre, then make its content change (add-feed URL → candidate list). The alert
   dialog re-centres on the content change (expected); the Settings dialog stays where it was dropped.
+  That expansion is a resize of an *already visible* dialog, so seeing it resize is expected; what
+  must not happen is the newly exposed area, or the strip around the native button row, flashing
+  light while it settles (dark mode especially).
 - On a multi-monitor setup with different scale factors (e.g. macOS Retina + an external 1x
   display): open both dialogs with the main window on each screen in turn, and drag an open dialog
   across the boundary. Correctly sized on both — the fit converts the measured content with the
@@ -254,6 +279,9 @@ Dialog auto-sizing (`DialogWindow` OS window behavior) cannot be auto-tested, so
 - Through all of the above: no visible size oscillation, no CPU spin, and no
   `Dialog stayed at … after … attempts to fit …` warning in `<appDataDir>/logs/keryx.0.log`
   (macOS: `~/Library/Application Support/Keryx/logs/`).
+- (Linux, Plasma **X11** and **Wayland**) Repeat the checks above to confirm the two earlier dialog
+  defects have not regressed: a modeless dialog (Settings, About) opens at the correct size, and its
+  width does not creep narrower over the following second.
 - In feed addition, entering a URL for an HTML page with multiple feed links → on confirmation, **the dialog expands to show candidate list (checkboxes)**. Editing the URL shrinks it again. No shaking or flickering during input→candidate transition.
 - Candidate list "Select All / Deselect All" toggle and selection count display; "Subscribe" disabled at 0 selections, enabled after selection; subscribe button always visible below candidate list. Button label toggles between Confirm ↔ Subscribe; can submit with Enter.
 - Single feed URL input shows title and "N articles" and is subscribable.
