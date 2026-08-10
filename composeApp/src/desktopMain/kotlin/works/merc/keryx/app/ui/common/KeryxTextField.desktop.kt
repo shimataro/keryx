@@ -19,11 +19,16 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
@@ -31,6 +36,11 @@ import androidx.compose.ui.unit.dp
  * `commonMain` for the rationale (Native-feel restyle; no SwingPanel). The [modifier] goes on the
  * inner [BasicTextField] so a caller's `focusRequester` / `onFocusChanged { it.isFocused }` keeps
  * working; the border/background/padding/leading/trailing/placeholder are drawn in `decorationBox`.
+ *
+ * The caller still owns a plain [String]; the [TextFieldValue] below is internal state, kept only so
+ * the caret/selection can be positioned (`initiallySelectAll`). It mirrors what
+ * `BasicTextField(value: String, …)` does internally, except that its initial selection is
+ * configurable and defaults to the end of the text rather than to index 0.
  */
 @Composable
 actual fun KeryxTextField(
@@ -45,9 +55,19 @@ actual fun KeryxTextField(
     trailingIcon: (@Composable () -> Unit)?,
     keyboardOptions: KeyboardOptions,
     keyboardActions: KeyboardActions,
+    minHeight: Dp,
+    horizontalPadding: Dp,
+    initiallySelectAll: Boolean,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
+    var fieldValue by remember {
+        val selection = if (initiallySelectAll) TextRange(0, value.length) else TextRange(value.length)
+        mutableStateOf(TextFieldValue(value, selection))
+    }
+    // A value changed from the outside (the caller rejecting/transforming input, or state arriving
+    // from elsewhere) wins over the local copy, and puts the caret at the end of the new text.
+    val displayed = if (fieldValue.text == value) fieldValue else TextFieldValue(value, TextRange(value.length))
 
     val borderColor = when {
         isError -> MaterialTheme.colorScheme.error
@@ -57,8 +77,11 @@ actual fun KeryxTextField(
 
     Column(modifier = Modifier) {
         BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
+            value = displayed,
+            onValueChange = { updated ->
+                fieldValue = updated
+                if (updated.text != value) onValueChange(updated.text)
+            },
             modifier = modifier,
             singleLine = singleLine,
             interactionSource = interactionSource,
@@ -73,8 +96,8 @@ actual fun KeryxTextField(
                     modifier = Modifier
                         .border(BorderStroke(1.dp, borderColor), MaterialTheme.shapes.small)
                         .background(MaterialTheme.colorScheme.surface, MaterialTheme.shapes.small)
-                        .heightIn(min = 40.dp)
-                        .padding(horizontal = 12.dp),
+                        .heightIn(min = minHeight)
+                        .padding(horizontal = horizontalPadding),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (leadingIcon != null) {

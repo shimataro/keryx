@@ -19,7 +19,7 @@ class MenuUiStateTest {
         filter: ArticleFilter = ArticleFilter.All,
         unreadOnly: Boolean = false,
         hasSelectedFeed: Boolean = false,
-        searchFieldFocused: Boolean = false,
+        textInputFocused: Boolean = false,
         hasRenamableSelection: Boolean = false,
     ) = computeMenuUiState(
         screen = screen,
@@ -31,7 +31,7 @@ class MenuUiStateTest {
         filter = filter,
         unreadOnly = unreadOnly,
         hasSelectedFeed = hasSelectedFeed,
-        searchFieldFocused = searchFieldFocused,
+        textInputFocused = textInputFocused,
         hasRenamableSelection = hasRenamableSelection,
     )
 
@@ -100,7 +100,7 @@ class MenuUiStateTest {
     fun article_and_url_actions_require_a_selected_article_with_url() {
         // articleActionsEnabled/urlActionsEnabled require only a selection (and URL) — computeMenuUiState
         // has no pane-focus input to gate them on, unlike feedActionsEnabled/renameOrDeleteEnabled's
-        // searchFieldFocused guard. See MenuUiState.kt's articleActionsEnabled doc for why.
+        // textInputFocused guard. See MenuUiState.kt's articleActionsEnabled doc for why.
         val ui = state(hasSelectedArticle = true, selectedArticleHasUrl = true)
         assertTrue(ui.articleActionsEnabled)
         assertTrue(ui.urlActionsEnabled)
@@ -158,8 +158,8 @@ class MenuUiStateTest {
     @Test
     fun feed_actions_disabled_while_the_search_field_has_focus_even_with_a_feed_selected() {
         // Rename/Unsubscribe's app-menu accelerator is a bare F2/Delete with no equivalent to
-        // KeyboardNav.kt's searchFieldFocused suppression, so this flag has to do that job instead.
-        val ui = state(hasSelectedFeed = true, searchFieldFocused = true)
+        // KeyboardNav.kt's textInputFocused suppression, so this flag has to do that job instead.
+        val ui = state(hasSelectedFeed = true, textInputFocused = true)
         assertFalse(ui.feedActionsEnabled)
     }
 
@@ -185,7 +185,7 @@ class MenuUiStateTest {
     fun rename_or_delete_disabled_while_the_search_field_has_focus_even_with_a_selection() {
         // Same guard as feedActionsEnabled: the bare F2/Delete accelerator must not be live while
         // the user is typing a search query.
-        val ui = state(hasSelectedFeed = true, hasRenamableSelection = true, searchFieldFocused = true)
+        val ui = state(hasSelectedFeed = true, hasRenamableSelection = true, textInputFocused = true)
         assertFalse(ui.renameOrDeleteEnabled)
         assertFalse(ui.feedActionsEnabled)
     }

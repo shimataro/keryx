@@ -83,15 +83,16 @@ fun HomeScreen() {
     var feedListDeleteRequestId by remember { mutableStateOf(0) }
     val focusRequester = remember { FocusRequester() }
     var focusedPane by remember { mutableStateOf(vm.getInitialFocusedPane()) }
-    // True while the sidebar search field holds focus, so the root keyboard shortcuts step aside and
-    // let typed letters/arrows reach the field (they'd otherwise be swallowed by homeKeyboardShortcuts).
-    var searchFieldFocused by remember { mutableStateOf(false) }
+    // True while a text input in the feed list pane holds focus — the sidebar search field or a
+    // row's inline name editor — so the root keyboard shortcuts step aside and let typed
+    // letters/arrows reach it (they'd otherwise be swallowed by homeKeyboardShortcuts).
+    var textInputFocused by remember { mutableStateOf(false) }
     // Arrow keys only actually reach a pane when this window has real OS focus (not a modal dialog,
     // Settings/About, or another application) and the search field isn't the one consuming them —
     // panes must render their selection dimmed in every other case, not just when focus moved to a
     // different pane within this window.
     val windowFocused = LocalWindowInfo.current.isWindowFocused
-    val keyboardNavActive = windowFocused && !searchFieldFocused
+    val keyboardNavActive = windowFocused && !textInputFocused
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboard.current
     val density = LocalDensity.current
@@ -102,12 +103,11 @@ fun HomeScreen() {
         vm.setFocusedPane(pane)
     }
 
-    // Mirrors the search field's focus state into MenuController (composition-local state ->
-    // StateFlow, same pattern App.kt already uses for currentScreen): a native Swing accelerator
-    // has no equivalent to KeyboardNav.kt's searchFieldFocused suppression, so AppMenuBar needs
-    // this to disable the Feed menu's bare-key items (F2/Delete) while the user is actually typing
-    // a search query.
-    LaunchedEffect(searchFieldFocused) { menuController.searchFieldFocused.value = searchFieldFocused }
+    // Mirrors that focus state into MenuController (composition-local state -> StateFlow, same
+    // pattern App.kt already uses for currentScreen): a native Swing accelerator has no equivalent
+    // to KeyboardNav.kt's textInputFocused suppression, so AppMenuBar needs this to disable the
+    // Feed menu's bare-key items (F2/Delete) while the user is actually typing.
+    LaunchedEffect(textInputFocused) { menuController.textInputFocused.value = textInputFocused }
 
     val orderedFilters = remember(tags, folders, feeds, collapsedFolderIds) {
         buildOrderedFilters(tags, folders, feeds, collapsedFolderIds)
@@ -154,7 +154,7 @@ fun HomeScreen() {
                 .focusRequester(focusRequester)
                 .focusable()
                 .homeKeyboardShortcuts(
-                    searchFieldFocused = searchFieldFocused,
+                    textInputFocused = textInputFocused,
                     onEscape = { dragOverlay.cancel() },
                     onUp = {
                         when (focusedPane) {
@@ -218,7 +218,7 @@ fun HomeScreen() {
                         onActivated = { setFocusedPane(HomePane.FeedList) },
                         modifier = Modifier.width(displayedFeedWidth),
                         onAddFeedClick = { showAddFeed = true },
-                        onSearchFieldFocusChange = { searchFieldFocused = it },
+                        onTextInputFocusChange = { textInputFocused = it },
                         renameSelectedRequestId = feedListRenameRequestId,
                         deleteSelectedRequestId = feedListDeleteRequestId,
                     )

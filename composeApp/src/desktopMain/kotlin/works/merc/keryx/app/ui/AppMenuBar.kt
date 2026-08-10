@@ -123,7 +123,7 @@ internal fun FrameWindowScope.AppMenuBar(
     val settingsVm = koinInject<SettingsViewModel>()
 
     val screen by menuController.currentScreen.collectAsState()
-    val searchFieldFocused by menuController.searchFieldFocused.collectAsState()
+    val textInputFocused by menuController.textInputFocused.collectAsState()
     val selected by homeVm.selectedArticle.collectAsState()
     val feedRefreshing by homeVm.feedRefreshing.collectAsState()
     val syncing by homeVm.syncing.collectAsState()
@@ -150,7 +150,7 @@ internal fun FrameWindowScope.AppMenuBar(
         filter = filter,
         unreadOnly = unreadOnly,
         hasSelectedFeed = selectedFeed != null,
-        searchFieldFocused = searchFieldFocused,
+        textInputFocused = textInputFocused,
         hasRenamableSelection = selectionTarget != null,
     )
 

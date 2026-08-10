@@ -398,6 +398,25 @@ class HomeCommonTest {
         assertNull(resolveFeedListSelectionTarget(ArticleFilter.Search, feeds, folders, tags))
     }
 
+    // --- toInlineEditTarget ---
+
+    @Test
+    fun toInlineEditTargetKeepsEachSelectionKindAndRoundTripsBackToItsFilter() {
+        // The inline editor keys off an id + kind rather than the row value, and the pane scrolls
+        // the row into view via the filter this hands back, so both directions must line up.
+        val cases = listOf(
+            FeedListSelectionTarget.Feed(feed("f1")) to (InlineEditTarget.Feed("f1") to ArticleFilter.Feed("f1")),
+            FeedListSelectionTarget.Folder(folder("d1")) to (InlineEditTarget.Folder("d1") to ArticleFilter.Folder("d1")),
+            FeedListSelectionTarget.Tag(tag("t1")) to (InlineEditTarget.Tag("t1") to ArticleFilter.Tag("t1")),
+        )
+        for ((selection, expected) in cases) {
+            val (expectedTarget, expectedFilter) = expected
+            val target = selection.toInlineEditTarget()
+            assertEquals(expectedTarget, target)
+            assertEquals(expectedFilter, target.filter)
+        }
+    }
+
     // --- autoScrollVelocityPxPerSec ---
 
     @Test

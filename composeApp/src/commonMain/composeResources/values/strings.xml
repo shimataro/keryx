@@ -76,13 +76,11 @@
     <string name="home_folder_name_duplicate">同じ名前のフォルダーが既にあります</string>
     <string name="home_delete_folder_confirm">フォルダー「%1$s」を削除しますか？フィード自体は削除されず、「フォルダーなし」に移動します。</string>
     <string name="home_edit_folder_menu">編集</string>
-    <string name="home_edit_folder">フォルダーを編集</string>
     <string name="home_delete_folder_menu">削除</string>
     <string name="home_move_to_folder">フォルダーに移動</string>
     <string name="home_no_folder">フォルダーなし</string>
     <string name="home_rename_feed_menu">タイトルを変更</string>
     <string name="home_rename_feed">タイトルを変更</string>
-    <string name="home_rename_feed_hint">空欄にすると既定のタイトルに戻ります</string>
     <string name="home_unsubscribe_menu">購読を削除</string>
     <string name="home_menu_rename_folder">フォルダー名を変更</string>
     <string name="home_menu_delete_folder">フォルダーを削除</string>

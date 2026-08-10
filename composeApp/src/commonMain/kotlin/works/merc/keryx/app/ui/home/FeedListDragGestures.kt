@@ -25,10 +25,14 @@ private const val MOUSE_DRAG_THRESHOLD_DP = 4f
      * cancelled when the gesture finishes.
      *
      * @param controller The controller that manages feed-row drag state.
+     * @param enabled Whether presses may start a drag at all. Callers switch this off while a row
+     *   hosts a focused text editor, which owns its own press-and-sweep (text selection) and must
+     *   not have it stolen by this ancestor's `Initial`-pass gesture.
      * @return A modifier that handles feed-row reordering gestures.
      */
-internal fun Modifier.feedListReorderDrag(controller: FeedListDragController): Modifier =
-    pointerInput(controller) {
+internal fun Modifier.feedListReorderDrag(controller: FeedListDragController, enabled: Boolean = true): Modifier =
+    pointerInput(controller, enabled) {
+        if (!enabled) return@pointerInput
         awaitEachGesture {
             var dragging = false
             try {
