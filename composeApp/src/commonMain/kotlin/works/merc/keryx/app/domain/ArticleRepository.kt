@@ -263,11 +263,20 @@ fun getArticleById(id: String): Articles? = articles.getById(id).executeAsOneOrN
             // search_text is the FTS body target: strip HTML so tag names/attributes don't match.
             // content/summary keep their raw HTML for reader rendering.
             val searchText = (p.content ?: p.summary)?.let { HtmlText.toPlainText(it) } ?: ""
+            // The reader (ArticleDetailPane) only ever falls back to summary when content is
+            // blank/absent, so summary is pure dead weight — stored and synced for nothing — on any
+            // article that already has content. Only persist it where it's actually the value shown.
+            val summaryToStore = p.summary?.takeIf { p.content.isNullOrBlank() }
             // id is a deterministic UUIDv5 of (feed_id, guid) so the same article gets the SAME id on
             // every device — required for the sync merge (which matches articles by id) to propagate
             // read/star state cross-device. On re-fetch, ON CONFLICT(feed_id, guid) keeps the existing
             // row's id/created_at and preserves is_read/is_starred/read_at/starred_at.
-            PreparedInsert(id = IdGenerator.articleId(feedId, p.guid), parsed = p, searchText = searchText)
+            PreparedInsert(
+                id = IdGenerator.articleId(feedId, p.guid),
+                parsed = p,
+                summaryToStore = summaryToStore,
+                searchText = searchText,
+            )
         }
         return PreparedArticles(feedId, rows, newCount, clock.nowMillis())
     }
@@ -287,7 +296,7 @@ fun getArticleById(id: String): Articles? = articles.getById(id).executeAsOneOrN
                 guid = p.guid,
                 url = p.url ?: "",
                 title = p.title ?: "",
-                summary = p.summary,
+                summary = pi.summaryToStore,
                 content = p.content,
                 author = p.author,
                 published_at = p.publishedAtMillis,
@@ -317,6 +326,8 @@ fun getArticleById(id: String): Articles? = articles.getById(id).executeAsOneOrN
     internal data class PreparedInsert(
         val id: String,
         val parsed: ParsedArticle,
+        /** [ParsedArticle.summary], or null when [ParsedArticle.content] makes it redundant. */
+        val summaryToStore: String?,
         val searchText: String,
     )
 

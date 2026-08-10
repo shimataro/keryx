@@ -12,6 +12,7 @@ import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ArticleUpsertTest {
@@ -72,6 +73,37 @@ class ArticleUpsertTest {
             repo.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", summary = "only summary")))
             val a = db.articlesQueries.getByFeedAndGuid("f1", "g1").executeAsOne()
             assertEquals("only summary", a.search_text)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun summaryIsDroppedWhenContentIsPresent() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1L })
+            db.insertFeed("f1")
+            repo.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", content = "body", summary = "summary")))
+            val a = db.articlesQueries.getByFeedAndGuid("f1", "g1").executeAsOne()
+            // The reader only ever falls back to summary when content is blank, so a summary
+            // stored alongside real content would just be a dead duplicate of the article body.
+            assertNull(a.summary)
+            assertEquals("body", a.content)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun summaryIsKeptWhenContentIsBlank() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1L })
+            db.insertFeed("f1")
+            repo.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", content = "", summary = "summary")))
+            val a = db.articlesQueries.getByFeedAndGuid("f1", "g1").executeAsOne()
+            assertEquals("summary", a.summary)
         } finally {
             driver.close()
         }

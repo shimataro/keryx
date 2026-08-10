@@ -28,9 +28,23 @@ actual object DatabaseSnapshot {
 
         // Exclude the derived FTS index from the uploaded file — on the copy, never the live DB.
         // Dropping the virtual table also removes its shadow tables (_data/_idx/_docsize/_config).
+        // The four idx_articles_* indexes are also dropped: DatabaseMerger's merge SQL never looks
+        // up rows on the attached `cloud.*` side by anything but its own NOT EXISTS/EXISTS guards
+        // against `main.*`, so they serve no purpose in an uploaded snapshot.
+        //
+        // DROP TABLE/INDEX alone does not shrink the file — the freed pages just join SQLite's
+        // internal freelist — so a plain VACUUM follows to actually reclaim that space before the
+        // bytes are read for upload. VACUUM (unlike VACUUM INTO) operates in place on this
+        // already-created copy, and preserves PRAGMA user_version, so DatabaseMerger's schema check
+        // on the receiving device is unaffected.
         DriverManager.getConnection("jdbc:sqlite:$destPath").use { conn ->
             conn.createStatement().use { st ->
                 st.execute("DROP TABLE IF EXISTS articles_fts")
+                st.execute("DROP INDEX IF EXISTS idx_articles_feed_id")
+                st.execute("DROP INDEX IF EXISTS idx_articles_is_read")
+                st.execute("DROP INDEX IF EXISTS idx_articles_is_starred")
+                st.execute("DROP INDEX IF EXISTS idx_articles_published")
+                st.execute("VACUUM")
             }
         }
     }
