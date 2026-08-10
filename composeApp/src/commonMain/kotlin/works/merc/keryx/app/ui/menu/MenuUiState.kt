@@ -31,12 +31,17 @@ data class MenuUiState(
     val refreshAllEnabled: Boolean,
     val syncEnabled: Boolean,
     val openSettingsEnabled: Boolean,
-    /** Refresh/Tags/Move to folder/Rename/Unsubscribe for the selected feed — require a selected
-     * feed, and require the search field not to be the thing actually holding keyboard focus
-     * (Rename/Unsubscribe's F2/Delete accelerator would otherwise be live while the user is
-     * typing a search query). Not gated on the feed list pane holding focus, matching the feed
-     * row's own context menu, which acts on the row regardless of pane focus. */
+    /** Refresh/Tags/Move to folder for the selected feed — feed-specific operations, so they
+     * require a selected feed, and require the search field not to be the thing actually holding
+     * keyboard focus. Not gated on the feed list pane holding focus, matching the feed row's own
+     * context menu, which acts on the row regardless of pane focus. */
     val feedActionsEnabled: Boolean,
+    /** Rename/Delete — unlike [feedActionsEnabled] these act on whatever feed list item is
+     * selected (feed, folder or tag: `resolveFeedListSelectionTarget` resolves it and
+     * `FeedListPane` opens the matching dialog), so they only require *some* renamable selection.
+     * The search-field guard is the same: Rename/Delete's F2/Delete accelerator would otherwise be
+     * live while the user is typing a search query. */
+    val renameOrDeleteEnabled: Boolean,
 )
 
 /**
@@ -48,6 +53,9 @@ data class MenuUiState(
  * can't be toggled while the Search scope is active (search order is fixed to relevance rank).
  * Refresh/sync are suppressed while their operation is already in flight, and sync additionally
  * requires a connected cloud account.
+ *
+ * [hasSelectedFeed] gates the feed-specific actions, while [hasRenamableSelection] gates
+ * rename/delete, which act on any selected feed list item (feed, folder or tag).
  */
 fun computeMenuUiState(
     screen: Screen,
@@ -60,6 +68,7 @@ fun computeMenuUiState(
     unreadOnly: Boolean,
     hasSelectedFeed: Boolean = false,
     searchFieldFocused: Boolean = false,
+    hasRenamableSelection: Boolean = false,
 ): MenuUiState {
     val onHome = screen == Screen.Home
     return MenuUiState(
@@ -76,5 +85,6 @@ fun computeMenuUiState(
         syncEnabled = onHome && cloudConnected && !syncing,
         openSettingsEnabled = onHome,
         feedActionsEnabled = onHome && hasSelectedFeed && !searchFieldFocused,
+        renameOrDeleteEnabled = onHome && hasRenamableSelection && !searchFieldFocused,
     )
 }

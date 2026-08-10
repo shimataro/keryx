@@ -20,6 +20,7 @@ class MenuUiStateTest {
         unreadOnly: Boolean = false,
         hasSelectedFeed: Boolean = false,
         searchFieldFocused: Boolean = false,
+        hasRenamableSelection: Boolean = false,
     ) = computeMenuUiState(
         screen = screen,
         hasSelectedArticle = hasSelectedArticle,
@@ -31,6 +32,7 @@ class MenuUiStateTest {
         unreadOnly = unreadOnly,
         hasSelectedFeed = hasSelectedFeed,
         searchFieldFocused = searchFieldFocused,
+        hasRenamableSelection = hasRenamableSelection,
     )
 
     // --- Screen gating ---
@@ -55,6 +57,7 @@ class MenuUiStateTest {
             selectedArticleHasUrl = true,
             cloudConnected = true,
             hasSelectedFeed = true,
+            hasRenamableSelection = true,
         )
         assertFalse(ui.addItemsEnabled)
         assertFalse(ui.opmlEnabled)
@@ -68,6 +71,7 @@ class MenuUiStateTest {
         assertFalse(ui.articleActionsEnabled)
         assertFalse(ui.urlActionsEnabled)
         assertFalse(ui.feedActionsEnabled)
+        assertFalse(ui.renameOrDeleteEnabled)
     }
 
     // --- Article actions require a selection ---
@@ -156,6 +160,33 @@ class MenuUiStateTest {
         // Rename/Unsubscribe's app-menu accelerator is a bare F2/Delete with no equivalent to
         // KeyboardNav.kt's searchFieldFocused suppression, so this flag has to do that job instead.
         val ui = state(hasSelectedFeed = true, searchFieldFocused = true)
+        assertFalse(ui.feedActionsEnabled)
+    }
+
+    // --- Rename/delete follow the selection, whatever its type ---
+
+    @Test
+    fun rename_or_delete_requires_home_and_a_renamable_selection() {
+        assertTrue(state(hasRenamableSelection = true).renameOrDeleteEnabled)
+        assertFalse(state(screen = Screen.Setup, hasRenamableSelection = true).renameOrDeleteEnabled)
+        assertFalse(state(hasRenamableSelection = false).renameOrDeleteEnabled)
+    }
+
+    @Test
+    fun rename_or_delete_enabled_for_a_folder_or_tag_selection_that_leaves_feed_actions_disabled() {
+        // Selecting a folder or a tag resolves a rename/delete target without selecting a feed, so
+        // the feed-specific actions (Refresh/Tags/Move to folder) stay disabled while these don't.
+        val ui = state(hasSelectedFeed = false, hasRenamableSelection = true)
+        assertTrue(ui.renameOrDeleteEnabled)
+        assertFalse(ui.feedActionsEnabled)
+    }
+
+    @Test
+    fun rename_or_delete_disabled_while_the_search_field_has_focus_even_with_a_selection() {
+        // Same guard as feedActionsEnabled: the bare F2/Delete accelerator must not be live while
+        // the user is typing a search query.
+        val ui = state(hasSelectedFeed = true, hasRenamableSelection = true, searchFieldFocused = true)
+        assertFalse(ui.renameOrDeleteEnabled)
         assertFalse(ui.feedActionsEnabled)
     }
 

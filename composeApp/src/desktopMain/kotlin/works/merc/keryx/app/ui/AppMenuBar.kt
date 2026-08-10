@@ -15,6 +15,10 @@ import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_assign_tags
+import works.merc.keryx.app.resources.home_menu_delete_folder
+import works.merc.keryx.app.resources.home_menu_delete_tag
+import works.merc.keryx.app.resources.home_menu_rename_folder
+import works.merc.keryx.app.resources.home_menu_rename_tag
 import works.merc.keryx.app.resources.home_move_to_folder
 import works.merc.keryx.app.resources.home_no_folder
 import works.merc.keryx.app.resources.home_refresh
@@ -48,7 +52,9 @@ import works.merc.keryx.app.resources.menu_view_search
 import works.merc.keryx.app.resources.menu_view_show_menu_bar
 import works.merc.keryx.app.resources.menu_view_toggle_sort
 import works.merc.keryx.app.resources.menu_view_unread_only
+import works.merc.keryx.app.ui.home.FeedListSelectionTarget
 import works.merc.keryx.app.ui.home.HomeViewModel
+import works.merc.keryx.app.ui.home.resolveFeedListSelectionTarget
 import works.merc.keryx.app.ui.menu.AppMenuActions
 import works.merc.keryx.app.ui.menu.AppMenuLabels
 import works.merc.keryx.app.ui.menu.AppMenuNode
@@ -130,6 +136,9 @@ internal fun FrameWindowScope.AppMenuBar(
     val feedTagMap by homeVm.feedTagMap.collectAsState()
 
     val selectedFeed = (filter as? ArticleFilter.Feed)?.let { f -> feeds.find { it.id == f.feedId } }
+    // Rename/delete act on any selected feed list item, so they resolve the same feed/folder/tag
+    // target `FeedListPane` uses to decide which dialog to open.
+    val selectionTarget = resolveFeedListSelectionTarget(filter, feeds, folders, tags)
 
     val ui = computeMenuUiState(
         screen = screen,
@@ -142,7 +151,21 @@ internal fun FrameWindowScope.AppMenuBar(
         unreadOnly = unreadOnly,
         hasSelectedFeed = selectedFeed != null,
         searchFieldFocused = searchFieldFocused,
+        hasRenamableSelection = selectionTarget != null,
     )
+
+    // Rename/delete wording follows the selected item's type. A `null` target falls back to the
+    // feed wording; the two items are disabled in that case, so the text is never acted on.
+    val renameLabel = when (selectionTarget) {
+        is FeedListSelectionTarget.Folder -> stringResource(Res.string.home_menu_rename_folder)
+        is FeedListSelectionTarget.Tag -> stringResource(Res.string.home_menu_rename_tag)
+        is FeedListSelectionTarget.Feed, null -> stringResource(Res.string.home_rename_feed)
+    }
+    val deleteLabel = when (selectionTarget) {
+        is FeedListSelectionTarget.Folder -> stringResource(Res.string.home_menu_delete_folder)
+        is FeedListSelectionTarget.Tag -> stringResource(Res.string.home_menu_delete_tag)
+        is FeedListSelectionTarget.Feed, null -> stringResource(Res.string.home_unsubscribe_menu)
+    }
 
     val websiteUrl = stringResource(Res.string.website_url)
     val labels = AppMenuLabels(
@@ -173,8 +196,8 @@ internal fun FrameWindowScope.AppMenuBar(
         feedAssignTags = stringResource(Res.string.home_assign_tags),
         feedMoveToFolder = stringResource(Res.string.home_move_to_folder),
         feedNoFolder = stringResource(Res.string.home_no_folder),
-        feedRename = stringResource(Res.string.home_rename_feed),
-        feedUnsubscribe = stringResource(Res.string.home_unsubscribe_menu),
+        feedRename = renameLabel,
+        feedUnsubscribe = deleteLabel,
         helpMenu = stringResource(Res.string.menu_help),
         website = stringResource(Res.string.menu_help_website),
         projectPage = stringResource(Res.string.menu_help_project_page),

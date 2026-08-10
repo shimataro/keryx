@@ -60,21 +60,29 @@ class AppMenuTreeTest {
         screen = Screen.Home, hasSelectedArticle = true, selectedArticleHasUrl = true,
         feedRefreshing = false, syncing = false, cloudConnected = true,
         filter = ArticleFilter.All, unreadOnly = true,
-        hasSelectedFeed = true,
+        hasSelectedFeed = true, hasRenamableSelection = true,
     )
 
     private fun disabledUi() = computeMenuUiState(
         screen = Screen.Setup, hasSelectedArticle = false, selectedArticleHasUrl = false,
         feedRefreshing = true, syncing = true, cloudConnected = false,
         filter = ArticleFilter.Search, unreadOnly = false,
-        hasSelectedFeed = false,
+        hasSelectedFeed = false, hasRenamableSelection = false,
+    )
+
+    /** A folder (or tag) selected: a rename/delete target, but no feed-specific selection. */
+    private fun folderSelectedUi() = computeMenuUiState(
+        screen = Screen.Home, hasSelectedArticle = false, selectedArticleHasUrl = false,
+        feedRefreshing = false, syncing = false, cloudConnected = true,
+        filter = ArticleFilter.Folder("fo1"), unreadOnly = false,
+        hasSelectedFeed = false, hasRenamableSelection = true,
     )
 
     private fun starredFilterUi() = computeMenuUiState(
         screen = Screen.Home, hasSelectedArticle = true, selectedArticleHasUrl = true,
         feedRefreshing = false, syncing = false, cloudConnected = true,
         filter = ArticleFilter.Starred, unreadOnly = true,
-        hasSelectedFeed = true,
+        hasSelectedFeed = true, hasRenamableSelection = true,
     )
 
     private fun selectedFeedMenu(
@@ -123,10 +131,23 @@ class AppMenuTreeTest {
         assertEquals(ui.refreshAllEnabled, root.menu("Feed").item("RefreshAll").enabled)
         assertEquals(ui.syncEnabled, root.menu("Feed").item("SyncNow").enabled)
         assertEquals(ui.feedActionsEnabled, root.menu("Feed").item("FeedRefresh").enabled)
-        assertEquals(ui.feedActionsEnabled, root.menu("Feed").item("FeedRename").enabled)
-        assertEquals(ui.feedActionsEnabled, root.menu("Feed").item("FeedUnsubscribe").enabled)
+        assertEquals(ui.renameOrDeleteEnabled, root.menu("Feed").item("FeedRename").enabled)
+        assertEquals(ui.renameOrDeleteEnabled, root.menu("Feed").item("FeedUnsubscribe").enabled)
         assertEquals(ui.feedActionsEnabled, root.menu("Feed").submenu("AssignTags").enabled)
         assertEquals(ui.feedActionsEnabled, root.menu("Feed").submenu("MoveToFolder").enabled)
+    }
+
+    @Test
+    fun `rename and unsubscribe stay enabled for a folder or tag selection with no feed selected`() {
+        // They act on whatever feed list item is selected, unlike the feed-specific items above.
+        val ui = folderSelectedUi()
+        val root = tree(ui)
+
+        assertEquals(true, root.menu("Feed").item("FeedRename").enabled)
+        assertEquals(true, root.menu("Feed").item("FeedUnsubscribe").enabled)
+        assertEquals(false, root.menu("Feed").item("FeedRefresh").enabled)
+        assertEquals(false, root.menu("Feed").submenu("AssignTags").enabled)
+        assertEquals(false, root.menu("Feed").submenu("MoveToFolder").enabled)
     }
 
     @Test

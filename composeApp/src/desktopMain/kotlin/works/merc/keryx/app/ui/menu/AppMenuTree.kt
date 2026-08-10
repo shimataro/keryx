@@ -29,8 +29,8 @@ import works.merc.keryx.app.platform.isMacOs
  * keys `KeyboardNav.kt` and the context menus use). `Rename`/`Unsubscribe` are the deliberate
  * exception — [ctrl] is `false`, so they keep their original bare accelerator (F2/Return, Delete),
  * since a bare "act on the focused/selected item" key is itself an established convention
- * (file-manager rename/delete); see [MenuUiState.feedActionsEnabled]'s `searchFieldFocused` guard
- * for how that stays safe.
+ * (file-manager rename/delete); see [MenuUiState.renameOrDeleteEnabled]'s `searchFieldFocused`
+ * guard for how that stays safe.
  *
  * [dbusmenuKeyName] is the AWT virtual-key *name* the `com.canonical.dbusmenu` host expects for
  * this key — plain strings, so it lives here alongside [key] rather than in `appmenu/`. The AWT
@@ -124,6 +124,8 @@ internal data class AppMenuLabels(
     val feedAssignTags: String,
     val feedMoveToFolder: String,
     val feedNoFolder: String,
+    /** Rename/delete wording for the *currently selected* item — a feed, folder or tag, not always
+     * a feed (`AppMenuBar` picks the matching string per selection type). */
     val feedRename: String,
     val feedUnsubscribe: String,
     val helpMenu: String,
@@ -291,9 +293,11 @@ internal fun buildAppMenuTree(
                 }
             },
         ),
-        AppMenuNode.Item(labels.feedRename, ui.feedActionsEnabled, AppMenuShortcut.FeedRename, actions.renameSelectedFeed),
+        // Rename/Unsubscribe act on whatever feed list item is selected (feed, folder or tag), so
+        // unlike the items above they use renameOrDeleteEnabled, not feedActionsEnabled.
+        AppMenuNode.Item(labels.feedRename, ui.renameOrDeleteEnabled, AppMenuShortcut.FeedRename, actions.renameSelectedFeed),
         AppMenuNode.Separator,
-        AppMenuNode.Item(labels.feedUnsubscribe, ui.feedActionsEnabled, AppMenuShortcut.FeedUnsubscribe, actions.unsubscribeSelectedFeed),
+        AppMenuNode.Item(labels.feedUnsubscribe, ui.renameOrDeleteEnabled, AppMenuShortcut.FeedUnsubscribe, actions.unsubscribeSelectedFeed),
     )
 
     val helpItems = buildList {

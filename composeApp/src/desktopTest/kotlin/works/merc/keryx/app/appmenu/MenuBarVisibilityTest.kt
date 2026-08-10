@@ -64,7 +64,7 @@ class MenuBarVisibilityTest {
             screen = Screen.Home, hasSelectedArticle = true, selectedArticleHasUrl = true,
             feedRefreshing = false, syncing = false, cloudConnected = true,
             filter = ArticleFilter.All, unreadOnly = false,
-            hasSelectedFeed = true,
+            hasSelectedFeed = true, hasRenamableSelection = true,
         ),
         labels = labels(),
         actions = actions(),

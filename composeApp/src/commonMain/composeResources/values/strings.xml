@@ -84,6 +84,10 @@
     <string name="home_rename_feed">タイトルを変更</string>
     <string name="home_rename_feed_hint">空欄にすると既定のタイトルに戻ります</string>
     <string name="home_unsubscribe_menu">購読を削除</string>
+    <string name="home_menu_rename_folder">フォルダー名を変更</string>
+    <string name="home_menu_delete_folder">フォルダーを削除</string>
+    <string name="home_menu_rename_tag">タグ名を変更</string>
+    <string name="home_menu_delete_tag">タグを削除</string>
     <string name="home_unsubscribe_title">「%1$s」の購読を削除しますか？</string>
     <string name="home_unsubscribe_body">スター付き記事は引き続き閲覧できます。</string>
     <string name="home_refresh">更新</string>
