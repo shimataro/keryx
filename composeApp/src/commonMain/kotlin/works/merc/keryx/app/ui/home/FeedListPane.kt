@@ -71,6 +71,7 @@ import works.merc.keryx.app.resources.home_add_tag
 import works.merc.keryx.app.resources.home_all_feeds
 import works.merc.keryx.app.resources.home_delete_tag_menu
 import works.merc.keryx.app.resources.home_edit_tag_menu
+import works.merc.keryx.app.resources.home_folder_name_duplicate
 import works.merc.keryx.app.resources.home_folders
 import works.merc.keryx.app.resources.home_refresh
 import works.merc.keryx.app.resources.home_refreshing
@@ -81,6 +82,8 @@ import works.merc.keryx.app.resources.home_search_placeholder
 import works.merc.keryx.app.resources.home_starred
 import works.merc.keryx.app.resources.home_sync
 import works.merc.keryx.app.resources.home_syncing
+import works.merc.keryx.app.resources.home_tag_color
+import works.merc.keryx.app.resources.home_tag_name_duplicate
 import works.merc.keryx.app.resources.home_tags
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
@@ -116,9 +119,11 @@ internal const val FEED_LIST_DRAG_HOST_TEST_TAG = "feed-list-drag-host"
  * @param onActivated Called when the pane becomes active.
  * @param modifier Modifier applied to the pane.
  * @param onAddFeedClick Called when the user requests to add a feed.
- * @param onSearchFieldFocusChange Called when the search field focus changes.
+ * @param onTextInputFocusChange Called when this pane starts or stops holding text-entry focus —
+ *   the search field or a row's inline name editor. Bare-key shortcuts (J/K, arrows, F2, Delete)
+ *   must stand aside for both, so they report through one channel.
  * @param renameSelectedRequestId Bumped by the keyboard rename/edit shortcut (F2/Return); on change,
- *   opens the rename/edit dialog for whichever feed/folder/tag the current filter selects.
+ *   starts inline name editing on whichever feed/folder/tag the current filter selects.
  * @param deleteSelectedRequestId Bumped by the keyboard delete shortcut (Delete/Backspace); on
  *   change, opens the unsubscribe/delete confirmation for whichever feed/folder/tag the current
  *   filter selects.
@@ -131,7 +136,7 @@ internal fun FeedListPane(
     onActivated: () -> Unit,
     modifier: Modifier = Modifier,
     onAddFeedClick: () -> Unit = {},
-    onSearchFieldFocusChange: (Boolean) -> Unit = {},
+    onTextInputFocusChange: (Boolean) -> Unit = {},
     renameSelectedRequestId: Int = 0,
     deleteSelectedRequestId: Int = 0,
 ) {
@@ -156,25 +161,29 @@ internal fun FeedListPane(
     }
 
     var showAddTag by remember { mutableStateOf(false) }
-    var editingTag by remember { mutableStateOf<Tags?>(null) }
     var confirmingDeleteTag by remember { mutableStateOf<Tags?>(null) }
     var showAddFolder by remember { mutableStateOf(false) }
-    var editingFolder by remember { mutableStateOf<Folders?>(null) }
     var confirmingDeleteFolder by remember { mutableStateOf<Folders?>(null) }
-    var renamingFeed by remember { mutableStateOf<Feeds?>(null) }
     var confirmingUnsubscribeFeed by remember { mutableStateOf<Feeds?>(null) }
+    // The single row (if any) whose name is currently being edited in place. Renaming a feed,
+    // folder, or tag happens in the row itself rather than in a dialog — see InlineRename.kt.
+    var inlineEdit by remember { mutableStateOf<InlineEditTarget?>(null) }
+    var searchFieldFocused by remember { mutableStateOf(false) }
+    val folderNameDuplicateError = stringResource(Res.string.home_folder_name_duplicate)
+    val tagNameDuplicateError = stringResource(Res.string.home_tag_name_duplicate)
+
+    // Typed characters must reach an open editor rather than the root's bare-key shortcuts, and the
+    // menu bar's own F2/Delete accelerators must stand down too (see MenuController).
+    LaunchedEffect(searchFieldFocused, inlineEdit != null) {
+        onTextInputFocusChange(searchFieldFocused || inlineEdit != null)
+    }
 
     // Shared by the keyboard shortcuts (via the request-id effects below) and the Feed menu bar
     // items (via MenuCommand.RenameFeed/UnsubscribeFeed): resolve the currently selected filter
-    // against this pane's own already-collected rows and open the same dialogs the context menu's
-    // Rename/Edit and Unsubscribe/Delete items do.
-    fun openRenameDialogForSelection() {
-        when (val target = resolveFeedListSelectionTarget(filter, feeds, folders, tags)) {
-            is FeedListSelectionTarget.Feed -> renamingFeed = target.feed
-            is FeedListSelectionTarget.Folder -> editingFolder = target.folder
-            is FeedListSelectionTarget.Tag -> editingTag = target.tag
-            null -> {}
-        }
+    // against this pane's own already-collected rows and start the same inline edit (or open the
+    // same confirmation dialog) the context menu's Rename/Edit and Unsubscribe/Delete items do.
+    fun startInlineRenameForSelection() {
+        inlineEdit = resolveFeedListSelectionTarget(filter, feeds, folders, tags)?.toInlineEditTarget()
     }
     fun openDeleteDialogForSelection() {
         when (val target = resolveFeedListSelectionTarget(filter, feeds, folders, tags)) {
@@ -192,7 +201,7 @@ internal fun FeedListPane(
             when (command) {
                 MenuCommand.AddFolder -> showAddFolder = true
                 MenuCommand.AddTag -> showAddTag = true
-                MenuCommand.RenameFeed -> openRenameDialogForSelection()
+                MenuCommand.RenameFeed -> startInlineRenameForSelection()
                 MenuCommand.UnsubscribeFeed -> openDeleteDialogForSelection()
                 else -> {}
             }
@@ -202,7 +211,7 @@ internal fun FeedListPane(
     // wired through HomeScreen). request id 0 is the initial/no-op sentinel.
     LaunchedEffect(renameSelectedRequestId) {
         if (renameSelectedRequestId == 0) return@LaunchedEffect
-        openRenameDialogForSelection()
+        startInlineRenameForSelection()
     }
     LaunchedEffect(deleteSelectedRequestId) {
         if (deleteSelectedRequestId == 0) return@LaunchedEffect
@@ -261,6 +270,15 @@ internal fun FeedListPane(
         listState.scrollToIndexIfNeeded(index)
     }
 
+    // An edit can be started from the menu bar (or a shortcut) while its row is scrolled out of
+    // view, and an editor the user cannot see would swallow every keystroke with nothing to show.
+    LaunchedEffect(inlineEdit) {
+        val target = inlineEdit ?: return@LaunchedEffect
+        val index = feedListItemIndex(target.filter, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
+            ?: return@LaunchedEffect
+        listState.scrollToIndexIfNeeded(index)
+    }
+
     val autoScrollEdgeZonePx = with(LocalDensity.current) { AUTO_SCROLL_EDGE_ZONE_DP.dp.toPx() }
     val autoScrollMaxSpeedPxPerSec = with(LocalDensity.current) { AUTO_SCROLL_MAX_SPEED_DP_PER_SEC.dp.toPx() }
     LaunchedEffect(autoScrollEdgeZonePx, autoScrollMaxSpeedPxPerSec) {
@@ -309,7 +327,7 @@ internal fun FeedListPane(
                 val refreshTooltip = stringResource(
                     if (refreshing) Res.string.home_refreshing else Res.string.home_refresh,
                 )
-                TooltipIconButton(tooltip = refreshTooltip, onClick = { vm.refreshAll() }, enabled = !refreshing) {
+                TooltipIconButton(tooltip = refreshTooltip, onClick = { vm.refreshAll() }) {
                     if (refreshing) {
                         SmallSpinner()
                     } else {
@@ -321,7 +339,7 @@ internal fun FeedListPane(
                     val syncTooltip = stringResource(
                         if (syncing) Res.string.home_syncing else Res.string.home_sync,
                     )
-                    TooltipIconButton(tooltip = syncTooltip, onClick = { vm.sync() }, enabled = !syncing) {
+                    TooltipIconButton(tooltip = syncTooltip, onClick = { vm.sync() }) {
                         if (syncing) {
                             SmallSpinner()
                         } else {
@@ -350,7 +368,7 @@ internal fun FeedListPane(
             modifier = Modifier.fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 4.dp)
                 .focusRequester(searchFocusRequester)
-                .onFocusChanged { onSearchFieldFocusChange(it.isFocused) },
+                .onFocusChanged { searchFieldFocused = it.isFocused },
         )
 
         // Kept outside the drag-host Box below (rather than as the LazyColumn's first item): these
@@ -402,7 +420,10 @@ internal fun FeedListPane(
                     .onGloballyPositioned {
                         hostBoundsState.value = Rect(it.positionInRoot(), it.size.toSize())
                     }
-                    .feedListReorderDrag(dragController),
+                    // The drag gesture watches the *Initial* pointer pass on this ancestor Box, so
+                    // without this gate a press-and-sweep to select text inside an open inline
+                    // editor would be stolen from the field and turned into a row drag.
+                    .feedListReorderDrag(dragController, enabled = inlineEdit == null),
             ) {
                 // Every slot below carries an explicit key and contentType. This list interleaves
                 // several structurally different row kinds, and an unkeyed `item {}` falls back to an
@@ -451,7 +472,10 @@ internal fun FeedListPane(
                                 folderId = folderId,
                                 activeBoundaryState = activeBoundaryState,
                                 onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id)); onActivated() },
-                                onRename = { renamingFeed = feed },
+                                onRename = { inlineEdit = InlineEditTarget.Feed(feed.id) },
+                                editingName = inlineEdit == InlineEditTarget.Feed(feed.id),
+                                onRenameCommit = { vm.renameFeed(feed.id, it); inlineEdit = null },
+                                onRenameCancel = { inlineEdit = null },
                                 onRefresh = { vm.refreshFeed(feed) },
                                 tags = tags,
                                 attachedTagIds = feedTagMap[feed.id] ?: emptySet(),
@@ -491,8 +515,14 @@ internal fun FeedListPane(
                                     activeBoundaryState = activeBoundaryState,
                                     onToggleCollapse = { vm.toggleFolderCollapsed(folder.id) },
                                     onClick = { vm.selectFilter(ArticleFilter.Folder(folder.id)); onActivated() },
-                                    onEdit = { editingFolder = folder },
+                                    onEdit = { inlineEdit = InlineEditTarget.Folder(folder.id) },
                                     onDelete = { confirmingDeleteFolder = folder },
+                                    editingName = inlineEdit == InlineEditTarget.Folder(folder.id),
+                                    onRenameCommit = { vm.updateFolder(folder.id, it); inlineEdit = null },
+                                    onRenameCancel = { inlineEdit = null },
+                                    nameError = { name ->
+                                        if (folders.any { it.id != folder.id && it.name == name }) folderNameDuplicateError else null
+                                    },
                                     isDragSource = folder.id == draggedFeedFolderId,
                                 )
                             }
@@ -533,8 +563,19 @@ internal fun FeedListPane(
                                 isDropTarget = tag.id == hoveredAttachTagId,
                                 onToggleExpanded = { vm.toggleTagExpanded(tag.id) },
                                 onClick = { vm.selectFilter(ArticleFilter.Tag(tag.id)); onActivated() },
-                                onEdit = { editingTag = tag },
+                                onEdit = { inlineEdit = InlineEditTarget.Tag(tag.id) },
                                 onDelete = { confirmingDeleteTag = tag },
+                                editingName = inlineEdit == InlineEditTarget.Tag(tag.id),
+                                onRenameCommit = { vm.updateTag(tag.id, it, tag.color); inlineEdit = null },
+                                onRenameCancel = { inlineEdit = null },
+                                nameError = { name ->
+                                    if (tags.any { it.id != tag.id && it.deleted_at == null && it.name == name }) {
+                                        tagNameDuplicateError
+                                    } else {
+                                        null
+                                    }
+                                },
+                                onSelectColor = { vm.updateTag(tag.id, tag.name, it) },
                             )
                         }
                         if (tag.id in expandedTagIds) {
@@ -568,18 +609,12 @@ internal fun FeedListPane(
         folders = folders,
         showAddTag = showAddTag,
         onShowAddTagChange = { showAddTag = it },
-        editingTag = editingTag,
-        onEditingTagChange = { editingTag = it },
         confirmingDeleteTag = confirmingDeleteTag,
         onConfirmingDeleteTagChange = { confirmingDeleteTag = it },
         showAddFolder = showAddFolder,
         onShowAddFolderChange = { showAddFolder = it },
-        editingFolder = editingFolder,
-        onEditingFolderChange = { editingFolder = it },
         confirmingDeleteFolder = confirmingDeleteFolder,
         onConfirmingDeleteFolderChange = { confirmingDeleteFolder = it },
-        renamingFeed = renamingFeed,
-        onRenamingFeedChange = { renamingFeed = it },
         confirmingUnsubscribeFeed = confirmingUnsubscribeFeed,
         onConfirmingUnsubscribeFeedChange = { confirmingUnsubscribeFeed = it },
     )
@@ -645,8 +680,14 @@ private fun SidebarRow(
  * @param isDropTarget Whether a dragged feed is currently hovering this tag.
  * @param onToggleExpanded Toggles the attached-feed list.
  * @param onClick Selects the tag.
- * @param onEdit Opens tag editing.
+ * @param onEdit Starts inline editing of the tag's name.
  * @param onDelete Deletes the tag.
+ * @param editingName Whether the name is currently open for inline editing (see [InlineRenameField]).
+ * @param onRenameCommit Applies an edited tag name.
+ * @param onRenameCancel Abandons an in-progress name edit.
+ * @param nameError Produces a validation message for an edited name, or `null` when valid.
+ * @param onSelectColor Applies a color picked from the color dot's popover. Independent of name
+ *   editing: the dot is clickable whether or not the row is currently being renamed.
  */
 @Composable
 private fun TagRow(
@@ -660,9 +701,16 @@ private fun TagRow(
     onClick: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    editingName: Boolean = false,
+    onRenameCommit: (String) -> Unit = {},
+    onRenameCancel: () -> Unit = {},
+    nameError: (String) -> String? = { null },
+    onSelectColor: (String?) -> Unit = {},
 ) {
     val editLabel = stringResource(Res.string.home_edit_tag_menu)
     val deleteLabel = stringResource(Res.string.home_delete_tag_menu)
+    val colorLabel = stringResource(Res.string.home_tag_color)
+    var showColorPicker by remember { mutableStateOf(false) }
     val contentColor = dropTargetContentColorOrNull(isDropTarget, selected, focused, MaterialTheme.colorScheme.onTertiaryContainer)
     Row(
         Modifier.fillMaxWidth()
@@ -693,26 +741,63 @@ private fun TagRow(
                 Modifier.weight(1f).clickable(onClick = onClick).padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Fixed-size slot so swapping the dot for the "+" badge never shifts the tag name.
-                Box(Modifier.size(TAG_MARKER_SIZE_DP.dp), contentAlignment = Alignment.Center) {
-                    if (isDropTarget) {
-                        Box(
-                            Modifier.size(TAG_MARKER_SIZE_DP.dp).background(MaterialTheme.colorScheme.tertiary, CircleShape),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            KeryxIcon(
-                                KeryxIcons.Add,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onTertiary,
-                                modifier = Modifier.size(12.dp),
-                            )
+                // Anchors the color popover; sized by the click target inside it.
+                Box {
+                    Box(
+                        // The click target is deliberately larger than the dot it contains: it
+                        // absorbs the 8dp gap that used to be a Spacer here plus 4dp above and
+                        // below, so the geometry of the row is unchanged while the hit area is not
+                        // a 10dp circle. (A full Material 48dp touch target would change the row's
+                        // height, which belongs to a mobile density pass, not here.)
+                        Modifier
+                            .testTag(tagColorDotTestTag(tag.id))
+                            .clickable(onClickLabel = colorLabel) { showColorPicker = true }
+                            .padding(top = 4.dp, bottom = 4.dp, end = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        // Fixed-size slot so swapping the dot for the "+" badge never shifts the tag name.
+                        Box(Modifier.size(TAG_MARKER_SIZE_DP.dp), contentAlignment = Alignment.Center) {
+                            if (isDropTarget) {
+                                Box(
+                                    Modifier.size(TAG_MARKER_SIZE_DP.dp).background(MaterialTheme.colorScheme.tertiary, CircleShape),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    KeryxIcon(
+                                        KeryxIcons.Add,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onTertiary,
+                                        modifier = Modifier.size(12.dp),
+                                    )
+                                }
+                            } else {
+                                Box(Modifier.size(TAG_COLOR_DOT_SIZE_DP.dp).background(colorFromHex(tag.color), CircleShape))
+                            }
                         }
-                    } else {
-                        Box(Modifier.size(10.dp).background(colorFromHex(tag.color), CircleShape))
+                    }
+                    if (showColorPicker) {
+                        TagColorPickerPopup(
+                            selected = tag.color,
+                            onSelect = { showColorPicker = false; onSelectColor(it) },
+                            onDismissRequest = { showColorPicker = false },
+                            anchorOffsetY = (TAG_MARKER_SIZE_DP + TAG_COLOR_DOT_HIT_PADDING_DP * 2).dp,
+                        )
                     }
                 }
-                Spacer(Modifier.width(8.dp))
-                Text(tag.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // Same weighted slot either way, so the color dot on the left and the count badge on
+                // the right never move when editing starts or ends.
+                if (editingName) {
+                    Box(Modifier.weight(1f)) {
+                        InlineRenameField(
+                            value = tag.name,
+                            onCommit = onRenameCommit,
+                            onCancel = onRenameCancel,
+                            blockingError = nameError,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                } else {
+                    Text(tag.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
         if (count > 0) CountBadge(count, selected, focused, isDropTarget, onContainerColor = MaterialTheme.colorScheme.onTertiaryContainer)
@@ -721,6 +806,16 @@ private fun TagRow(
 
 /** Size of a [TagRow]'s leading marker slot, holding either the tag color dot or the drop "+" glyph. */
 private const val TAG_MARKER_SIZE_DP = 16
+
+/** Diameter of the visible tag color dot inside the [TAG_MARKER_SIZE_DP] marker slot. */
+private const val TAG_COLOR_DOT_SIZE_DP = 10
+
+/** Vertical slack added around the marker slot to widen the color dot's click target without
+ * changing the row's height (the row's own text is taller than the resulting box). */
+private const val TAG_COLOR_DOT_HIT_PADDING_DP = 4
+
+/** Test tag on a tag row's color dot, which opens its color popover. */
+internal fun tagColorDotTestTag(tagId: String): String = "tag-color-dot-$tagId"
 
 /**
  * Renders a feed attached to an expanded tag.

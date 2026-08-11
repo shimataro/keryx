@@ -22,22 +22,22 @@ import works.merc.keryx.app.resources.home_delete_folder_confirm
 import works.merc.keryx.app.resources.home_delete_folder_menu
 import works.merc.keryx.app.resources.home_delete_tag_confirm
 import works.merc.keryx.app.resources.home_delete_tag_menu
-import works.merc.keryx.app.resources.home_edit_folder
-import works.merc.keryx.app.resources.home_edit_tag_menu
 import works.merc.keryx.app.resources.home_folder_name_duplicate
 import works.merc.keryx.app.resources.home_new_folder_hint
 import works.merc.keryx.app.resources.home_new_tag_hint
-import works.merc.keryx.app.resources.home_rename_feed
-import works.merc.keryx.app.resources.home_rename_feed_hint
 import works.merc.keryx.app.resources.home_tag_name_duplicate
 import works.merc.keryx.app.resources.home_unsubscribe_body
 import works.merc.keryx.app.resources.home_unsubscribe_title
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
 
 /**
- * The feed-list sidebar's modal dialogs: add/edit/delete tag, add/edit/delete folder, rename feed,
- * and confirm-unsubscribe. Split out of `FeedListPane` — each `on*Change` callback mirrors the
+ * The feed-list sidebar's modal dialogs: add tag, add folder, the delete/unsubscribe confirmations.
+ * Split out of `FeedListPane` — each `on*Change` callback mirrors the
  * `var x by remember { mutableStateOf(...) }` state it replaces there, so behavior is unchanged.
+ *
+ * **Renaming is not here**: a feed/folder/tag name is edited in its own row (see `InlineRename.kt`).
+ * Creating still uses a dialog — there is no row to edit in place yet, and a new tag picks its name
+ * and color at once.
  *
  * @param tags The tags used for duplicate-name validation.
  * @param folders The folders used for duplicate-name validation.
@@ -49,18 +49,12 @@ internal fun FeedListDialogs(
     folders: List<Folders>,
     showAddTag: Boolean,
     onShowAddTagChange: (Boolean) -> Unit,
-    editingTag: Tags?,
-    onEditingTagChange: (Tags?) -> Unit,
     confirmingDeleteTag: Tags?,
     onConfirmingDeleteTagChange: (Tags?) -> Unit,
     showAddFolder: Boolean,
     onShowAddFolderChange: (Boolean) -> Unit,
-    editingFolder: Folders?,
-    onEditingFolderChange: (Folders?) -> Unit,
     confirmingDeleteFolder: Folders?,
     onConfirmingDeleteFolderChange: (Folders?) -> Unit,
-    renamingFeed: Feeds?,
-    onRenamingFeedChange: (Feeds?) -> Unit,
     confirmingUnsubscribeFeed: Feeds?,
     onConfirmingUnsubscribeFeedChange: (Feeds?) -> Unit,
 ) {
@@ -75,31 +69,6 @@ internal fun FeedListDialogs(
             extraContent = { TagColorPicker(selected = color, onSelect = { color = it }) },
             onConfirm = { vm.createTag(it, color); onShowAddTagChange(false) },
             onDismiss = { onShowAddTagChange(false) },
-        )
-    }
-    editingTag?.let { tag ->
-        val duplicateError = stringResource(Res.string.home_tag_name_duplicate)
-        var color by remember { mutableStateOf(tag.color) }
-        TextPromptDialog(
-            title = stringResource(Res.string.home_edit_tag_menu),
-            hint = stringResource(Res.string.home_new_tag_hint),
-            initial = tag.name,
-            blockingError = { name -> if (tags.any { it.id != tag.id && it.deleted_at == null && it.name == name }) duplicateError else null },
-            extraContent = { TagColorPicker(selected = color, onSelect = { color = it }) },
-            onConfirm = { vm.updateTag(tag.id, it, color); onEditingTagChange(null) },
-            onDismiss = { onEditingTagChange(null) },
-        )
-    }
-    renamingFeed?.let { feed ->
-        val resetHint = stringResource(Res.string.home_rename_feed_hint)
-        TextPromptDialog(
-            title = stringResource(Res.string.home_rename_feed),
-            hint = feed.title,
-            initial = feed.custom_title ?: feed.title,
-            allowBlank = true,
-            infoHint = { name -> if (name.isEmpty()) resetHint else null },
-            onConfirm = { vm.renameFeed(feed.id, it); onRenamingFeedChange(null) },
-            onDismiss = { onRenamingFeedChange(null) },
         )
     }
     confirmingDeleteTag?.let { tag ->
@@ -123,19 +92,6 @@ internal fun FeedListDialogs(
             blockingError = { name -> if (folders.any { it.name == name }) duplicateError else null },
             onConfirm = { vm.createFolder(it); onShowAddFolderChange(false) },
             onDismiss = { onShowAddFolderChange(false) },
-        )
-    }
-    editingFolder?.let { folder ->
-        val duplicateError = stringResource(Res.string.home_folder_name_duplicate)
-        TextPromptDialog(
-            title = stringResource(Res.string.home_edit_folder),
-            hint = stringResource(Res.string.home_new_folder_hint),
-            initial = folder.name,
-            blockingError = { name ->
-                if (folders.any { it.id != folder.id && it.name == name }) duplicateError else null
-            },
-            onConfirm = { vm.updateFolder(folder.id, it); onEditingFolderChange(null) },
-            onDismiss = { onEditingFolderChange(null) },
         )
     }
     confirmingDeleteFolder?.let { folder ->

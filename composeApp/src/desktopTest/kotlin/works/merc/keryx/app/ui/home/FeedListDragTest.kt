@@ -104,7 +104,7 @@ class FeedListDragTest {
         var deleteSelectedRequestId by remember { mutableStateOf(0) }
         Box(
             Modifier.testTag("root").size(320.dp, 700.dp).focusable().homeKeyboardShortcuts(
-                searchFieldFocused = false,
+                textInputFocused = false,
                 onEscape = { dragOverlay.cancel() },
                 onUp = {},
                 onDown = {},
@@ -132,10 +132,7 @@ class FeedListDragTest {
     private fun androidx.compose.ui.test.ComposeUiTest.setFeedListDragContent(
         vm: HomeViewModel,
         dragOverlay: FeedDragOverlayState = FeedDragOverlayState(),
-        // Tests that need to send a MenuCommand (e.g. RenameFeed/UnsubscribeFeed, mirroring the Feed
-        // menu bar's items) pass their own instance so they can call send(...) on the exact instance
-        // FeedListPane is collecting from.
-        menuController: MenuController = MenuController(),
+        menuController: MenuController = testMenuController,
     ): FeedDragOverlayState {
         setContent {
             KoinApplication(
@@ -561,12 +558,12 @@ class FeedListDragTest {
     }
 
     @Test
-    fun sendingRenameOrUnsubscribeFeedCommandWithNoFeedSelectedOpensNoDialog() = runDesktopComposeUiTest {
+    fun sendingRenameOrUnsubscribeFeedCommandWithNoFeedSelectedStartsNothing() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertFeed("a", sortOrder = 0L)
         val fixture = newHomeViewModel(driver, db)
         val vm = fixture.vm
-        val menuController = MenuController()
+        val menuController = testMenuController
         try {
             setFeedListDragContent(vm, menuController = menuController)
             waitForIdle()
@@ -577,7 +574,7 @@ class FeedListDragTest {
             menuController.send(MenuCommand.UnsubscribeFeed)
             waitForIdle()
 
-            onNodeWithText("タイトルを変更").assertDoesNotExist()
+            onNodeWithTag(INLINE_RENAME_FIELD_TEST_TAG, useUnmergedTree = true).assertDoesNotExist()
             onNodeWithText("「Feed a」の購読を削除しますか？").assertDoesNotExist()
         } finally {
             vm.viewModelScope.cancel()
@@ -586,6 +583,18 @@ class FeedListDragTest {
         }
     }
 }
+
+/**
+ * One [MenuController] for the whole test JVM, shared by every feed-list UI test.
+ *
+ * koin-compose's `KoinApplication` does not isolate per composition across `runDesktopComposeUiTest`
+ * runs in the same JVM: the first Koin application created keeps serving `koinInject<MenuController>()`
+ * to every later test's `FeedListPane`. A per-test instance therefore leaves the pane collecting from
+ * a different object than the test sends on — which silently makes menu-command assertions vacuous
+ * rather than failing loudly. Sharing one instance makes that identity irrelevant. Commands carry no
+ * replay and every collector dies with its composition, so nothing leaks between tests.
+ */
+internal val testMenuController = MenuController()
 
 /** A [NotificationMessages] fake returning canned, recognizable strings. */
 private class FeedListDragTestNotificationMessages : NotificationMessages {
@@ -614,7 +623,7 @@ private fun feedListDragTestNotFoundHttpClient(): HttpClient = HttpClient(MockEn
  * its own [HomeViewModel.viewModelScope] — [SyncRepository]'s channel-consumer scope and the
  * MockEngine [HttpClient]s — so tests can release them in `finally`.
  */
-private class HomeViewModelFixture(
+internal class HomeViewModelFixture(
     val vm: HomeViewModel,
     private val syncScope: CoroutineScope,
     private val httpClients: List<HttpClient>,
@@ -632,7 +641,7 @@ private class HomeViewModelFixture(
  * writes triggered by the drag gesture (via [FeedRepository.moveFeed] etc.) apply synchronously
  * within the test.
  */
-private fun newHomeViewModel(
+internal fun newHomeViewModel(
     driver: SqlDriver,
     db: KeryxDatabase,
     syncScheduler: SyncScheduler = SyncScheduler {},

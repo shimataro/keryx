@@ -241,6 +241,38 @@ internal fun resolveFeedListSelectionTarget(
 }
 
 /**
+ * Which feed-list row currently has its name open for inline editing (`FeedListPane`'s single
+ * edit-mode state — there is never more than one). Kept as an id + kind rather than as the row's
+ * whole `Feeds`/`Folders`/`Tags` value, so a row that recomposes with fresh data mid-edit still
+ * matches, and so the two id spaces (a feed and a folder can never be edited at once anyway) can't
+ * be confused for each other.
+ */
+internal sealed interface InlineEditTarget {
+    /** The filter that selects this row, so the pane can scroll it into view before editing starts. */
+    val filter: ArticleFilter
+
+    data class Feed(val id: String) : InlineEditTarget {
+        override val filter: ArticleFilter get() = ArticleFilter.Feed(id)
+    }
+
+    data class Folder(val id: String) : InlineEditTarget {
+        override val filter: ArticleFilter get() = ArticleFilter.Folder(id)
+    }
+
+    data class Tag(val id: String) : InlineEditTarget {
+        override val filter: ArticleFilter get() = ArticleFilter.Tag(id)
+    }
+}
+
+/** The inline-edit target for a selection resolved by [resolveFeedListSelectionTarget] — the bridge
+ * between "what is selected" (keyboard shortcut / menu command) and "what row is being edited". */
+internal fun FeedListSelectionTarget.toInlineEditTarget(): InlineEditTarget = when (this) {
+    is FeedListSelectionTarget.Feed -> InlineEditTarget.Feed(feed.id)
+    is FeedListSelectionTarget.Folder -> InlineEditTarget.Folder(folder.id)
+    is FeedListSelectionTarget.Tag -> InlineEditTarget.Tag(tag.id)
+}
+
+/**
  * Turns FTS5 highlight/snippet markup (matched spans wrapped in
  * [FtsSearch.MARK_START]/[FtsSearch.MARK_END]) into an [AnnotatedString] whose matched spans get the
  * [SearchHighlightSpanStyle] highlighter (bold + yellow marker background). The sentinel chars are

@@ -148,8 +148,12 @@ private fun InsertionLine(indented: Boolean, visible: Boolean) {
  * @param activeBoundaryState The currently highlighted insertion boundary.
  * @param onToggleCollapse Toggles the folder's collapsed state.
  * @param onClick Selects the folder.
- * @param onEdit Opens folder editing.
+ * @param onEdit Starts inline editing of the folder's name.
  * @param onDelete Deletes the folder.
+ * @param editingName Whether the name is currently open for inline editing (see [InlineRenameField]).
+ * @param onRenameCommit Applies an edited folder name.
+ * @param onRenameCancel Abandons an in-progress name edit.
+ * @param nameError Produces a validation message for an edited name, or `null` when valid.
  * @param isDragSource Whether the folder contains the feed currently being dragged.
  */
 @Composable
@@ -167,6 +171,10 @@ internal fun FolderGroupHeader(
     onClick: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    editingName: Boolean = false,
+    onRenameCommit: (String) -> Unit = {},
+    onRenameCancel: () -> Unit = {},
+    nameError: (String) -> String? = { null },
     isDragSource: Boolean = false,
 ) {
     val editFolderLabel = stringResource(Res.string.home_edit_folder_menu)
@@ -234,7 +242,21 @@ internal fun FolderGroupHeader(
                         modifier = Modifier.size(18.dp),
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text(folder.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    // Same weighted slot either way, so the chevron/folder icon on the left and the
+                    // count badge on the right never move when editing starts or ends.
+                    if (editingName) {
+                        Box(Modifier.weight(1f)) {
+                            InlineRenameField(
+                                value = folder.name,
+                                onCommit = onRenameCommit,
+                                onCancel = onRenameCancel,
+                                blockingError = nameError,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    } else {
+                        Text(folder.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
             if (count > 0) CountBadge(count, selected, focused, isFeedDragHighlight, isDragSource)
@@ -296,6 +318,10 @@ internal fun NoFolderHeader(
  * @param nextFeedId The ID of the following feed, or `null` when this is the last feed.
  * @param folderId The containing folder's ID, or `null` for feeds without a folder.
  * @param activeBoundaryState The currently active insertion boundary.
+ * @param onRename Starts inline editing of the feed's display title.
+ * @param editingName Whether the title is currently open for inline editing (see [InlineRenameField]).
+ * @param onRenameCommit Applies an edited title; a blank value resets it to the feed's own title.
+ * @param onRenameCancel Abandons an in-progress title edit.
  */
 @Composable
 internal fun FeedRow(
@@ -309,6 +335,9 @@ internal fun FeedRow(
     activeBoundaryState: State<DropBoundary?>,
     onClick: () -> Unit,
     onRename: () -> Unit,
+    editingName: Boolean,
+    onRenameCommit: (String) -> Unit,
+    onRenameCancel: () -> Unit,
     onRefresh: () -> Unit,
     tags: List<Tags>,
     attachedTagIds: Set<String>,
@@ -373,13 +402,30 @@ internal fun FeedRow(
         ) {
             FeedAvatar(feed.displayTitle(), feed.favicon_url)
             Spacer(Modifier.width(12.dp))
-            CompositionLocalProvider(LocalContentColor provides (selectionContentColorOrNull(selected, focused) ?: LocalContentColor.current)) {
-                Text(
-                    feed.displayTitle(),
-                    Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            // Same weighted slot either way, so the favicon on the left and the error indicator /
+            // count badge on the right never move when editing starts or ends. A blank value is
+            // meaningful here (it clears `custom_title`), so it commits rather than being rejected,
+            // and the placeholder shows the feed's own title it would fall back to.
+            if (editingName) {
+                Box(Modifier.weight(1f)) {
+                    InlineRenameField(
+                        value = feed.custom_title ?: feed.title,
+                        onCommit = onRenameCommit,
+                        onCancel = onRenameCancel,
+                        placeholder = feed.title,
+                        allowBlank = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            } else {
+                CompositionLocalProvider(LocalContentColor provides (selectionContentColorOrNull(selected, focused) ?: LocalContentColor.current)) {
+                    Text(
+                        feed.displayTitle(),
+                        Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             // A 410-Gone feed deliberately keeps error_count at 0 (it is permanent, not a retry
             // candidate), so it is recognized by its last_error marker instead — otherwise a

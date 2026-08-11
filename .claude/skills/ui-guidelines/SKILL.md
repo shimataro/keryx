@@ -302,6 +302,50 @@ for `OutlinedTextField`/`TextField`/`BasicTextField` directly at a call site —
   entered-text color (`onSurface`, alpha 1.0) to tell empty-with-hint apart from
   filled-in at a glance; the flat field bakes in the darker placeholder.
 
+## Inline row editing
+
+Renaming a feed, folder, or tag happens **in the row**, not in a dialog: the row's label `Text` is
+swapped for
+[`InlineRenameField`](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/InlineRename.kt),
+driven by `FeedListPane`'s single `inlineEdit: InlineEditTarget?` state. Any new row kind that
+gains a rename should reuse that composable rather than adding another `TextPromptDialog` call, and
+should follow the same rules:
+
+- **Same slot, same height.** The editor goes in the *exact* `Modifier.weight(1f)` slot the label
+  occupied, so no sibling (chevron, avatar, color dot, error indicator, `CountBadge`) moves when
+  editing starts or ends — the "Layout stability under state changes" rule above applies to the
+  edit/not-edit flip like any other state. That is what
+  `KeryxTextField`'s `minHeight`/`horizontalPadding` parameters are for: `InlineRenameField` passes
+  `minHeight = 0.dp` so the field is exactly one text line tall, matching the `Text` it replaced.
+  Don't give the editor a `supportingText` — it would add a second line and grow the row. Say it
+  with `placeholder` instead (the feed editor shows the feed's own title there, so a blanked
+  custom title visibly announces what it falls back to).
+- **The field is `KeryxTextField`**, like every other text input (see "Text input dialogs" above).
+- **Commit/cancel convention** (desktop file managers): Enter — or the IME `Done` action, so a
+  future touch target needs no second path — commits *when valid* and is otherwise swallowed with
+  the editor left open; **Escape cancels**; **losing focus commits when valid and silently cancels
+  when not** (focus has already moved on, so never drag it back). Every editor also shows a small
+  "×" cancel affordance while open, via `KeryxTextField`'s existing `trailingIcon` — Escape has no
+  touch equivalent and is undiscoverable even on desktop. Keep the "×" smaller than one line of row
+  text so showing it can't change the row's height.
+- **Validation is `TextPromptDialog`'s model, not a new one** (`inlineRenameValidation`): a blank
+  value is *not* an error — no message, no red frame, it simply cannot be committed — unless
+  `allowBlank` says a blank value is itself meaningful. `blockingError` (e.g. the duplicate-name
+  check) is what turns the frame red. Per-row-kind differences are real and deliberate: a feed
+  title allows blank and has no duplicate check; folder and tag names allow neither.
+- **The whole state machine stays platform-agnostic.** `inlineEdit`, commit/cancel, and validation
+  know nothing about right-click menus, F2/Return, or hover — starting an edit is just an
+  `onRename`/`onEdit` lambda, so a touch long-press could call the same one later.
+- **Nothing else may claim the row's pointers or keys while an editor is open.** The feed pane's
+  reorder drag watches the `Initial` pointer pass on an ancestor, so it is switched off
+  (`feedListReorderDrag(enabled = …)`) while editing, or a press-and-sweep to select text would
+  become a row drag. Likewise the pane reports editing focus through `onTextInputFocusChange`, the
+  same channel as the search field, which is what makes the root's bare-key shortcuts and the menu
+  bar's F2/Delete accelerators stand aside.
+
+Creating still uses a dialog (`FeedListDialogs.kt`'s add folder / add tag): there is no row to edit
+in place yet, and a new tag picks its name and color at once.
+
 ## Native-feel restyle (flat press feedback, icon set, popovers)
 
 The app does not embed AWT/Swing widgets via `SwingPanel` for ordinary controls
@@ -485,7 +529,14 @@ theme/shape/indication/icon choices:
   `androidx.compose.ui.window.Popup` — `NotificationCenterSheet`, opened from
   `ArticleListPane`'s bell icon, is the first example (a `Box` around the
   `TooltipIconButton` holds local `showNotifications` state and anchors the
-  `Popup` with `alignment = Alignment.TopEnd` + a small `y` offset). Anything
+  `Popup` with `alignment = Alignment.TopEnd` + a small `y` offset). The tag
+  color picker is the second: `TagColorPickerPopup`
+  (`ui/home/TagColorPicker.kt`), anchored to the tag row's own color dot, which
+  is clickable at all times and independent of whether that row is being
+  renamed — picking a swatch applies immediately, so there is nothing to
+  confirm and nothing to block the window for. Note the container and the
+  swatches are deliberately separate composables, so a phone-width
+  `ModalBottomSheet` could host the same swatches later. Anything
   that demands full attention and blocks the rest of the UI (confirmations,
   text-prompt forms, the add-feed flow) stays an `AlertDialog`/`Dialog`
   — see `TextPromptDialog`, the various `AlertDialog` usages

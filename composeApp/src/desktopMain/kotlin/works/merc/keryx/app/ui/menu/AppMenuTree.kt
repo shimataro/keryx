@@ -29,7 +29,7 @@ import works.merc.keryx.app.platform.isMacOs
  * keys `KeyboardNav.kt` and the context menus use). `Rename`/`Unsubscribe` are the deliberate
  * exception — [ctrl] is `false`, so they keep their original bare accelerator (F2/Return, Delete),
  * since a bare "act on the focused/selected item" key is itself an established convention
- * (file-manager rename/delete); see [MenuUiState.renameOrDeleteEnabled]'s `searchFieldFocused`
+ * (file-manager rename/delete); see [MenuUiState.renameOrDeleteEnabled]'s `textInputFocused`
  * guard for how that stays safe.
  *
  * [dbusmenuKeyName] is the AWT virtual-key *name* the `com.canonical.dbusmenu` host expects for

@@ -22,7 +22,7 @@ import kotlin.test.assertEquals
 class KeyboardNavTest {
 
     private fun firedEvents(
-        searchFieldFocused: Boolean = false,
+        textInputFocused: Boolean = false,
         isMacOs: Boolean = false,
         press: KeyInjectionScope.() -> Unit,
     ): List<String> {
@@ -31,7 +31,7 @@ class KeyboardNavTest {
             setContent {
                 Box(
                     Modifier.testTag("root").size(10.dp).focusable().homeKeyboardShortcuts(
-                        searchFieldFocused = searchFieldFocused,
+                        textInputFocused = textInputFocused,
                         onEscape = { fired += "escape"; true },
                         onUp = { fired += "up" },
                         onDown = { fired += "down" },
@@ -178,18 +178,18 @@ class KeyboardNavTest {
     fun escapeStillFiresWhileSearchFieldFocused() {
         // Escape is the one shortcut not suppressed by the search field: it aborts an in-progress
         // feed/folder drag, which can be running whichever element happens to hold focus.
-        assertEquals(listOf("escape"), firedEvents(searchFieldFocused = true) { pressKey(Key.Escape) })
+        assertEquals(listOf("escape"), firedEvents(textInputFocused = true) { pressKey(Key.Escape) })
     }
 
     @Test
     fun shortcutsAreSuppressedWhileSearchFieldFocused() {
         // With the sidebar search field focused, all shortcuts step aside so typed letters/arrows
         // reach the field instead of being swallowed by this root handler.
-        assertEquals(emptyList(), firedEvents(searchFieldFocused = true) { pressKey(Key.J) })
-        assertEquals(emptyList(), firedEvents(searchFieldFocused = true) { pressKey(Key.DirectionDown) })
+        assertEquals(emptyList(), firedEvents(textInputFocused = true) { pressKey(Key.J) })
+        assertEquals(emptyList(), firedEvents(textInputFocused = true) { pressKey(Key.DirectionDown) })
         assertEquals(
             emptyList(),
-            firedEvents(searchFieldFocused = true) { withKeyDown(Key.CtrlLeft) { pressKey(Key.F) } },
+            firedEvents(textInputFocused = true) { withKeyDown(Key.CtrlLeft) { pressKey(Key.F) } },
         )
     }
 }

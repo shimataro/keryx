@@ -67,7 +67,7 @@ fun computeMenuUiState(
     filter: ArticleFilter,
     unreadOnly: Boolean,
     hasSelectedFeed: Boolean = false,
-    searchFieldFocused: Boolean = false,
+    textInputFocused: Boolean = false,
     hasRenamableSelection: Boolean = false,
 ): MenuUiState {
     val onHome = screen == Screen.Home
@@ -84,7 +84,7 @@ fun computeMenuUiState(
         refreshAllEnabled = onHome && !feedRefreshing,
         syncEnabled = onHome && cloudConnected && !syncing,
         openSettingsEnabled = onHome,
-        feedActionsEnabled = onHome && hasSelectedFeed && !searchFieldFocused,
-        renameOrDeleteEnabled = onHome && hasRenamableSelection && !searchFieldFocused,
+        feedActionsEnabled = onHome && hasSelectedFeed && !textInputFocused,
+        renameOrDeleteEnabled = onHome && hasRenamableSelection && !textInputFocused,
     )
 }

@@ -13,7 +13,7 @@ import kotlin.test.assertTrue
 /**
  * [MenuController] bridges the desktop application menu bar (built outside any screen's
  * composition) to whichever screen owns the target state. These tests cover its two pieces of
- * shared state — [MenuController.currentScreen] and [MenuController.searchFieldFocused] — and the
+ * shared state — [MenuController.currentScreen] and [MenuController.textInputFocused] — and the
  * one-shot [MenuController.commands] flow, including the [MenuCommand.RenameFeed] /
  * [MenuCommand.UnsubscribeFeed] commands the Feed menu's rename/unsubscribe items send.
  */
@@ -27,9 +27,9 @@ class MenuControllerTest {
     }
 
     @Test
-    fun searchFieldFocusedDefaultsToFalse() {
+    fun textInputFocusedDefaultsToFalse() {
         val controller = MenuController()
-        assertFalse(controller.searchFieldFocused.value)
+        assertFalse(controller.textInputFocused.value)
     }
 
     @Test
@@ -46,15 +46,15 @@ class MenuControllerTest {
     }
 
     @Test
-    fun searchFieldFocusedReflectsWhateverIsWrittenToIt() {
-        // HomeScreen mirrors its local searchFieldFocused state here the same way.
+    fun textInputFocusedReflectsWhateverIsWrittenToIt() {
+        // HomeScreen mirrors its local textInputFocused state here the same way.
         val controller = MenuController()
 
-        controller.searchFieldFocused.value = true
-        assertTrue(controller.searchFieldFocused.value)
+        controller.textInputFocused.value = true
+        assertTrue(controller.textInputFocused.value)
 
-        controller.searchFieldFocused.value = false
-        assertFalse(controller.searchFieldFocused.value)
+        controller.textInputFocused.value = false
+        assertFalse(controller.textInputFocused.value)
     }
 
     @Test
@@ -127,9 +127,9 @@ class MenuControllerTest {
         val b = MenuController()
 
         a.currentScreen.value = Screen.Home
-        a.searchFieldFocused.value = true
+        a.textInputFocused.value = true
 
         assertEquals(Screen.Setup, b.currentScreen.value)
-        assertFalse(b.searchFieldFocused.value)
+        assertFalse(b.textInputFocused.value)
     }
 }
