@@ -432,9 +432,11 @@ internal fun FeedListPane(
                 // each slot to its identity, and the contentType keeps each kind in its own reuse
                 // pool so a recycled slot is only ever refilled with the same kind of row.
                 LazyColumn(Modifier.fillMaxSize(), state = listState) {
-                    item(key = "folders-header", contentType = "section-header") {
+                    stickyHeader(key = "folders-header", contentType = "section-header") {
                         Row(
-                            Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
+                            Modifier.fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                                .padding(start = 16.dp, end = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
@@ -536,9 +538,11 @@ internal fun FeedListPane(
                         HorizontalDivider(Modifier.padding(vertical = 4.dp))
                     }
 
-                    item(key = "tags-header", contentType = "section-header") {
+                    stickyHeader(key = "tags-header", contentType = "section-header") {
                         Row(
-                            Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
+                            Modifier.fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                                .padding(start = 16.dp, end = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(

@@ -142,6 +142,11 @@ Launch with `./gradlew :composeApp:run` and visually verify 3-pane UI, theme swi
   Specifically confirm the scroll stays smooth (no stutter or stop-start) while crossing the
   "Folders"/"Tags" section headers, the divider above "Tags", and the top sidebar rows — not just
   while scrolling through folder/feed rows.
+- With the "Folders"/"Tags" section headers now pinned while scrolling (VSCode-Explorer-style),
+  confirm each header visually covers the rows scrolling underneath it with no flicker/see-through,
+  and that dragging a feed or folder so the pointer sits over a *pinned* header resolves the
+  hover/drop target to the header's own row, not any row hidden behind it — then confirm the pinned
+  header correctly hands off to the next section's header the moment that header reaches the top.
 - **Drop onto a row revealed only by auto-scroll, without leaving the window**: start dragging a feed
   from well above the tags section, hold near the bottom edge until a tag scrolls into view, then drop
   directly on it — the tag highlights and the drop succeeds on the first try. Repeat dropping into a
