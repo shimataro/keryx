@@ -13,7 +13,8 @@ Target: cloud sync (Dropbox / Google Drive / OneDrive). Implementation is in `do
 ## Cloud File Structure
 
 ```bash
-/keryx.db   ← Sync SQLite (without articles_fts)
+/keryx.db                              ← Sync SQLite (without articles_fts)
+/keryx-YYYYMMDD-HHMMSS.db.bak          ← archive left behind by a cloud-data reset (never pruned)
 ```
 
 Conflict prevention is done via a revision check on upload — Dropbox: `rev`, a real server-side compare-and-set (409 on mismatch); Google Drive: the file's `version` field, compared client-side before writing (mitigated by the sync retry loop); OneDrive: the DriveItem `eTag`, sent via `If-Match` (412 on mismatch). No lock file is used.
@@ -22,6 +23,7 @@ Conflict prevention is done via a revision check on upload — Dropbox: `rev`, a
 
 1. If `keryx.db` does not exist in the cloud, upload the local DB as-is (first time).
 2. Download `keryx.db` from the cloud (to a temp file).
+   - The downloaded bytes are checked against SQLite's 16-byte file header (`core/SqliteFile.kt`'s `looksLikeSqliteFile`) before anything is written to disk — symmetric with the same check on the upload side (step 5). A payload that fails it (truncated download, an HTML error page, a 0-byte or otherwise non-SQLite file) is rejected immediately as `CloudDataIncompatibleException`, rather than reaching `DatabaseMerger` and failing deep inside the merge statements with an ambiguous `no such table: cloud.folders`.
 3. **`DatabaseMerger.merge()` to merge** (see below). Immediately after, `ftsManager.indexMissing()` incrementally indexes new articles from merge (without wiping the live index), then `driver.notifyListeners(...)` (all tables touched by merge) is called. Because merge writes via `DatabaseMerger`'s dedicated raw JDBC connection without firing SQLDelight query notifications, `watchAll` flows (and re-search with updated index) must be re-triggered to reflect sync content in the UI without restart.
 4. Record `sync_state.cloud_file_rev`.
 5. `DatabaseSnapshot.exportForUpload()` creates a `VACUUM INTO` snapshot, **drops `articles_fts` on the copy side** (live DB is unchanged). Upload its bytes specifying `rev`.
@@ -29,6 +31,16 @@ Conflict prevention is done via a revision check on upload — Dropbox: `rev`, a
 6. On success, record `last_synced_at`.
 
 Debouncing: After changes such as read/star, `SyncScheduler.scheduleSync()` batches sync after a fixed delay from the last operation.
+
+### Automatic-Sync Suspension
+
+`SyncRepository.sync(trigger: SyncTrigger = MANUAL)` takes who is asking. `SyncTrigger.AUTOMATIC` — the debounced-write consumer, `runStartupTasks`, and `backgroundUpdateLoop` — is subject to a gate: while `autoSyncSuspended` (a `StateFlow<Boolean>`) is true, an `AUTOMATIC` call skips the download/merge/upload cycle entirely and returns `Result.Ok(Unit)` without spinning the sync spinner or touching the notification center, so a known-unusable cloud DB is not re-downloaded and re-merged on every debounced write. `SyncTrigger.MANUAL` (the default, used by every UI-triggered sync — the toolbar/menu "sync now", "Refresh All", the initial connect-time sync, `SettingsViewModel.connect()`) **always runs for real**, so a person who explicitly asked for a sync always gets a real attempt and the failure that explains why, never a silent no-op.
+
+The gate is set by `updateAutoSyncGate` (called from both `sync()` and `resetCloudData()`, right before `emitErrorNotification`): a result carrying `CloudDataIncompatibleException` sets it, any `Result.Ok` clears it. `SchemaVersionException` is deliberately excluded — it is equally permanent, but its fix is "update the app", and gating background syncing on it would hide the moment a newly-installed version starts working again. `scheduleSync()` also checks the gate before enqueueing a debounce signal, so a write burst does not even spin up the debounce wait while the cloud is known-unusable.
+
+`autoSyncSuspended` is deliberately **in-memory, not persisted**: a process restart is a free, honest retry (another device may have fixed the cloud data in the meantime), and the gate's entire purpose — not re-downloading/re-merging the same unusable file, and not re-raising the same notification, within one running process — needs nothing more durable than that. It clears on any successful sync (manual or automatic), on a successful `resetCloudData()`, and via `clearSyncFailureState()` (renamed from `clearLastSyncError()` — it now also clears the gate, alongside the mirrored failure-reason text), called when the connection that produced it is disconnected or switched (`SettingsViewModel.disconnect()`/`switchTo()`).
+
+Nothing about the reset/notification UI is affected by the gate: the notification-center `ResetCloudData` button and the settings screen's reset button are unconditional (not gated), and `lastSyncError` is left untouched by a skipped `AUTOMATIC` call, so the cloud-sync tab keeps showing why sync is currently broken.
 
 ## Merge (`DatabaseMerger` + `MergeSql`)
 
@@ -53,6 +65,23 @@ Merge SQL (`MergeSql`) key points:
   `updateFoldersByName, insertFolders, feeds, mergeFeedFolderId, mergeFeedSortOrder, mergeFeedCustomTitle, mergeFeedDeletedAt, updateTagsByName, insertTags, articles, feedTags, globalSettings`.
   `folders` is before `feeds` (for `feeds.folder_id` FK), and the four `mergeFeed*` are after `feeds` (and `insertFolders`) (so main has both feed rows and folder rows before resolution).
 
+### Merge Failure Classification
+
+`DatabaseMerger.merge` classifies a failure from `mergeUnclassified` (its private, unclassified implementation) using SQLite's **error code** — not message text, which is locale- and driver-version-fragile — found by walking the cause chain for an `org.sqlite.SQLiteException` (`findSqliteCause`, bounded against a cause cycle). `SchemaVersionException` is caught and rethrown first, before the classifying catch-all, so it is never reclassified. Classification is deliberately conservative: an error it doesn't recognize (or one with no `SQLiteException` in its cause chain) is rethrown unchanged, so a miss falls through to `SyncRepository`'s own catch-all as a transient `CloudStorageException` rather than regressing behavior.
+
+| SQLite primary result code | Classification |
+| --- | --- |
+| `SQLITE_NOTADB`, `SQLITE_CORRUPT`, `SQLITE_FORMAT`, `SQLITE_EMPTY` | **Permanent** → `CloudDataIncompatibleException`. The file itself is broken. |
+| `SQLITE_CONSTRAINT` (covers every extended `SQLITE_CONSTRAINT_*` variant — `_UNIQUE`, `_NOTNULL`, `_FOREIGNKEY`, etc. — since an extended code's low byte is always its primary code) | **Permanent** → `CloudDataIncompatibleException`. `MergeSql`'s `NOT EXISTS`/`EXISTS` guards already rule out every collision with *main*'s own rows (see above), so the only way a merge statement can still hit a constraint is the cloud DB's own row set violating it — a duplicate `url` inside the cloud DB, a NULL where the cloud's own (laxer) schema allowed one, etc. That is data this app's schema cannot represent, exactly what `CloudDataIncompatibleException` means. |
+| `SQLITE_ERROR` (`no such table`, `no such column`) | **Ambiguous** — this is what a foreign/legacy cloud schema looks like, but also what a broken *local* schema (an unrelated app bug) looks like. Resolved by calling `validateSchema` against the downloaded cloud file: `false` → `CloudDataIncompatibleException`; `true` or `null` (undetermined) → rethrown unchanged, since neither confidently pins the failure on the cloud. |
+| Anything else (`SQLITE_CANTOPEN`, `SQLITE_IOERR`, `SQLITE_FULL`, `SQLITE_BUSY`, `SQLITE_LOCKED`, `SQLITE_READONLY`, no `SQLiteException` found, …) | **Transient / app-side** — rethrown unchanged. |
+
+Because classification lives entirely inside `DatabaseMerger.merge` (which only wraps `mergeUnclassified`, not anything the caller does afterward), it structurally cannot see `SyncRepository.mergeCloud`'s post-commit steps — `ftsManager.indexMissing()` and `driver.notifyListeners(...)`, both of which run *after* the merge has already committed. A failure there (e.g. a dropped local `articles_fts` table, itself `SQLITE_ERROR`) reaches `SyncRepository`'s own catch-all unclassified and is reported as `CloudStorageException`, never `CloudDataIncompatibleException` — the merge already succeeded, so offering a destructive cloud-data reset for it would be wrong. (This was a real risk under the previous message-text-matching design in `SyncRepository`, whose `try` covered these same post-commit calls.)
+
+A residual, accepted risk: with `PRAGMA foreign_keys=ON` active during the merge transaction, a pre-existing inconsistency on the *main* (local) side could in principle only be exposed once a merge `UPDATE` statement touches it, surfacing as `SQLITE_CONSTRAINT_FOREIGNKEY` and being misclassified as cloud-caused. In practice this is unlikely — e.g. `mergeFeedFolderId` always resolves `folder_id` to either an existing `main.folders` row or `NULL` — and even if misclassified, no data is lost: the reset path (below) archives rather than deletes. The extended SQLite error code is logged for post-hoc diagnosis.
+
+**Future work**: `PRAGMA quick_check`/`integrity_check` on the downloaded cloud DB is deliberately *not* run on every sync — it is O(DB size), and SQLite already surfaces a corrupt page as a distinct error code the moment the merge touches it (see "Merge failure classification" below), so a whole-file scan on every sync would buy nothing for the pages the merge doesn't visit. It also cannot detect the failure mode this feature targets (a cloud DB with duplicate/NULL data that violates *this app's* constraints but not the cloud DB's own, since `quick_check` only verifies a DB's internal consistency against its own schema). If ever added, it belongs as a second-stage check inside the merge-failure classification path (only once the ambiguous `SQLITE_ERROR` case has already ruled out a schema mismatch), not on the hot sync path.
+
 ## Schema Version
 
 Managed via `PRAGMA user_version`. At merge time, `cloud.user_version` is checked; if the cloud is newer than local, `SchemaVersionException` is thrown to prompt the user to update the app (merge aborts).
@@ -60,6 +89,8 @@ Current `user_version` is 2 (`1.sqm` adds `articles.deleted_at` / `deleted_updat
 
 > [!NOTE]
 > **Local-direction migration for older cloud schema**: `DatabaseMerger.merge` checks the downloaded cloud DB's `user_version` before merging, and if older than local, runs `KeryxDatabase.Schema.migrate` on the temp file to bring it up to the local schema before merging. This prevents merge statements referencing newer columns from failing with `no such column` against an old cloud DB. With version 2, this uplift branch (`migrateCloudIfOlder`) now fires for a version-1 cloud DB, applying `1.sqm` to the downloaded copy so the article merge can reference `deleted_at`.
+
+`DatabaseMerger.validateSchema(dbPath, schemaVersion)` returns a **nullable** `Boolean` — `true`/`false` for a registered schema version's tables/columns, `null` when `schemaVersion` has no entry in the desktop actual's `EXPECTED_SCHEMAS` map. This is deliberately fail-safe in the direction that matters: a version bump (`KeryxDatabase.Schema.version`) whose expected-schema entry was forgotten degrades `validateSchema` from `true` to `null` rather than `false`, and every caller treats `null` the same as `true` — an undetermined verdict must never be used to offer a destructive cloud-data reset for what is really just a missing registration. `SyncMergerTest.validateSchemaReturnsTrueForValidKeryxDb` pins the current schema version to `true`, so a forgotten registration fails that test immediately rather than silently degrading behavior in the field; `schemaVersion` is a plain `Long`, so this cannot be enforced by the compiler (no sealed/enum exhaustiveness check applies), making that test the actual guard.
 
 ## FTS5 Handling
 
@@ -113,3 +144,11 @@ How the scheme is registered with the OS differs per platform. macOS declares it
 ## Sync Target Article Range
 
 Startup cache cleanup **soft-deletes** articles past the retention period (stamps `deleted_at` / `deleted_updated_at`) rather than physically removing them. The tombstones are uploaded and propagate via the merge (last-write-wins on `deleted_updated_at`), so a device that missed the deletion converges instead of re-adding the article. The rows are not physically reclaimed yet (physical GC of old tombstones is future work), so soft-deleted articles still ride along in the uploaded snapshot until then.
+
+## Resetting (Archiving) Cloud Data
+
+`SyncRepository.resetCloudData()` is the recovery path for a cloud DB the app cannot use. It does **not** delete the cloud file outright: `archiveCloudDb()` first renames it to a timestamped path via `CloudStorage.rename()` (`core/CloudBackupPath.kt`'s `cloudBackupPath(clock.nowMillis())`, e.g. `/keryx-20260811-103000.db.bak`, formatted in UTC so the name is deterministic for a fixed instant regardless of device time zone), then `createFresh()` re-uploads a snapshot of the local DB as the new `/keryx.db`. The archive is never automatically pruned — `CloudStorage` has no listing API, and removing that mechanism entirely would defeat the point of keeping a way back to a mistaken reset or a merge bug that only *looked* like corruption.
+
+- **`rename` semantics** (`CloudStorage.rename`, implemented per-provider — Dropbox `files/move_v2` with `autorename=false`, Google Drive a metadata `PATCH` on the file id resolved by name lookup, Microsoft Graph a metadata `PATCH` on the app-folder item): idempotent when the source is already absent (`Result.Ok`, so a reset on an already-clean cloud folder still proceeds to `createFresh`), and fails rather than overwriting when the destination already exists.
+- **Delete fallback**: if the rename itself fails for a storage reason (e.g. an occupied archive name), `archiveCloudDb()` falls back to `cloud.delete(CLOUD_DB_PATH)` so a reset can never become permanently blocked. A `CloudAuthException` is the one exception *not* retried as a delete — the same missing credentials would fail identically.
+- **Backup path naming**: deliberately not derived from `CLOUD_DB_PATH` (`CLOUD_DB_BACKUP_PREFIX`/`CLOUD_DB_BACKUP_SUFFIX` in `core/Constants.kt`), so the archive's basename never matches Google Drive's `name = 'keryx.db'` lookup or OneDrive's basename addressing — otherwise `CloudStorage.exists(CLOUD_DB_PATH)` would see the archive too.

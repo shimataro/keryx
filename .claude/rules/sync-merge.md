@@ -14,5 +14,19 @@ connection per statement for file DBs, so an `ATTACH` on one call is invisible
 to the merge statements on the next. `DatabaseMerger` does the whole
 attach → version-check → merge → detach on a single dedicated JDBC connection.
 
-See also: `docs/sync-architecture.md` ("Merge (`DatabaseMerger` + `MergeSql`)")
+## Merge-failure classification lives in DatabaseMerger, not SyncRepository
+
+Classifying "the cloud DB is permanently unusable" vs. "this was transient / our bug" is done
+inside `DatabaseMerger.merge` from SQLite's **error codes** (`SQLiteException.resultCode`), and is
+surfaced as `CloudDataIncompatibleException`. Do NOT reintroduce message-string matching in
+`SyncRepository`: its `try` (`mergeCloud`) also covers `ftsManager.indexMissing()` and
+`driver.notifyListeners()`, which run **after** the merge has committed — classifying those as
+"the cloud is corrupt" would offer the user a destructive reset for a local/app-side fault.
+
+`CloudDataIncompatibleException` is what drives `AppNotificationAction.ResetCloudData` (a
+destructive action — the cloud DB is archived then recreated), so widening what it covers is a
+destructive-action decision, not a refactor.
+
+See also: `docs/sync-architecture.md` ("Merge (`DatabaseMerger` + `MergeSql`)",
+"Merge Failure Classification", "Resetting (Archiving) Cloud Data")
 and `docs/app-architecture.md` ("DatabaseMerger (expect / actual)").

@@ -249,7 +249,7 @@ fun setThemeMode(mode: String) = update { it.copy(themeMode = mode) }
             withContext(dispatcher) { cloudSession.disconnect(type) }
             // Clear before exposing the disconnect, so a subsequent connect (to this or another
             // provider) never inherits this provider's stale failure reason.
-            syncRepository.clearLastSyncError()
+            syncRepository.clearSyncFailureState()
             update { it.copy(cloudStorageType = null) }
             connectedType = null
             lastSyncedAtText = null
@@ -281,7 +281,7 @@ fun setThemeMode(mode: String) = update { it.copy(themeMode = mode) }
             withContext(dispatcher) { cloudSession.disconnect(oldType) }
             // Clear before connecting the new provider, so it never inherits the old provider's
             // stale failure reason.
-            syncRepository.clearLastSyncError()
+            syncRepository.clearSyncFailureState()
             update { it.copy(cloudStorageType = null) }
             connectedType = null
             lastSyncedAtText = null

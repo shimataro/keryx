@@ -8,6 +8,7 @@ import io.ktor.client.engine.mock.respondError
 import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.OutgoingContent
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
@@ -263,5 +264,43 @@ class OneDriveStorageTest {
         job.cancel()
         job.join()
         assertNull(result)
+    }
+
+    @Test
+    fun renamePatchesTheItemName() = runTest {
+        var capturedPath: String? = null
+        var capturedBody: String? = null
+        val (s, history, verify) = storage(
+            "tok",
+            { request ->
+                capturedPath = request.url.encodedPath
+                capturedBody = (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString()
+                respond("{}", HttpStatusCode.OK, jsonHeaders)
+            },
+        )
+        val r = s.rename(CLOUD_DB_PATH, "/keryx-20260811-103000.db.bak")
+        assertIs<Result.Ok<Unit>>(r)
+        assertEquals(1, history.size)
+        assertEquals("PATCH", history[0].method.value)
+        assertEquals("/v1.0/me/drive/special/approot:/keryx.db", capturedPath)
+        assertEquals("""{"name":"keryx-20260811-103000.db.bak"}""", capturedBody)
+        verify()
+    }
+
+    @Test
+    fun renameTreatsAnAbsentItemAsSuccess() = runTest {
+        val (s, _, verify) = storage("tok", { respondError(HttpStatusCode.NotFound) })
+        val r = s.rename(CLOUD_DB_PATH, "/keryx-20260811-103000.db.bak")
+        assertIs<Result.Ok<Unit>>(r)
+        verify()
+    }
+
+    @Test
+    fun renameSurfacesANameConflict() = runTest {
+        val (s, _, verify) = storage("tok", { respondError(HttpStatusCode.Conflict) })
+        val r = s.rename(CLOUD_DB_PATH, "/keryx-20260811-103000.db.bak")
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+        verify()
     }
 }

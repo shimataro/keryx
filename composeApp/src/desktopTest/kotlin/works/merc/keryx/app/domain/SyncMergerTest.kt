@@ -1,5 +1,7 @@
 package works.merc.keryx.app.domain
 
+import works.merc.keryx.app.core.CloudDataIncompatibleException
+import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.insertFeed
@@ -11,10 +13,10 @@ import works.merc.keryx.app.stampArticleDeleted
 import works.merc.keryx.app.platform.DatabaseMerger
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
-import kotlin.test.assertTrue
 
 /** Verifies the ATTACH-DATABASE merge (timestamp-last-wins) via [DatabaseMerger]. */
 class SyncMergerTest {
@@ -856,10 +858,134 @@ class SyncMergerTest {
     }
 
     @Test
+    fun mergeThrowsCloudDataIncompatibleForForeignSchema() {
+        val cloudFile = java.io.File.createTempFile("foreign", ".db")
+        java.sql.DriverManager.getConnection("jdbc:sqlite:${cloudFile.absolutePath}").use { conn ->
+            conn.createStatement().use { st ->
+                st.execute("PRAGMA user_version = ${KeryxDatabase.Schema.version}")
+                st.execute("CREATE TABLE unrelated (x INTEGER)")
+            }
+        }
+        val (localFile, localDriver, _) = fileDb()
+        localDriver.close()
+
+        assertFailsWith<CloudDataIncompatibleException> {
+            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+        }
+        cloudFile.delete()
+    }
+
+    @Test
+    fun mergeThrowsCloudDataIncompatibleForDuplicateUniqueKeys() {
+        // Two cloud feeds rows share a url — only possible because this fixture's feeds table
+        // (unlike main's real schema) has no UNIQUE(url). MergeSql's NOT EXISTS guards only rule
+        // out collisions against *main*'s rows, so this reaches SQLite's UNIQUE check unguarded.
+        val cloudFile = java.io.File.createTempFile("dup-url", ".db")
+        java.sql.DriverManager.getConnection("jdbc:sqlite:${cloudFile.absolutePath}").use { conn ->
+            conn.createStatement().use { st ->
+                st.execute("PRAGMA user_version = ${KeryxDatabase.Schema.version}")
+                st.execute(
+                    "CREATE TABLE feeds (id TEXT NOT NULL PRIMARY KEY, url TEXT NOT NULL, site_url TEXT, " +
+                        "title TEXT NOT NULL, description TEXT, favicon_url TEXT, etag TEXT, last_modified TEXT, " +
+                        "error_count INTEGER NOT NULL DEFAULT 0, last_error TEXT, custom_title TEXT, folder_id TEXT, " +
+                        "deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, " +
+                        "sort_order INTEGER NOT NULL DEFAULT 0, folder_updated_at INTEGER, " +
+                        "sort_order_updated_at INTEGER, custom_title_updated_at INTEGER, deleted_updated_at INTEGER)",
+                )
+                st.execute(
+                    "CREATE TABLE folders (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL UNIQUE, " +
+                        "sort_order INTEGER NOT NULL DEFAULT 0, deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL)",
+                )
+                st.execute(
+                    "CREATE TABLE tags (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL UNIQUE, color TEXT, " +
+                        "sort_order INTEGER NOT NULL DEFAULT 0, deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL)",
+                )
+                st.execute(
+                    "CREATE TABLE articles (id TEXT NOT NULL PRIMARY KEY, feed_id TEXT NOT NULL, guid TEXT NOT NULL, " +
+                        "url TEXT NOT NULL, title TEXT NOT NULL, summary TEXT, content TEXT, author TEXT, " +
+                        "published_at INTEGER, thumbnail_url TEXT, is_read INTEGER NOT NULL DEFAULT 0, read_at INTEGER, " +
+                        "is_starred INTEGER NOT NULL DEFAULT 0, starred_at INTEGER, cached_at INTEGER NOT NULL, " +
+                        "search_text TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, " +
+                        "deleted_at INTEGER, deleted_updated_at INTEGER, UNIQUE (feed_id, guid))",
+                )
+                st.execute(
+                    "CREATE TABLE feed_tags (feed_id TEXT NOT NULL, tag_id TEXT NOT NULL, deleted_at INTEGER, " +
+                        "updated_at INTEGER NOT NULL, PRIMARY KEY (feed_id, tag_id))",
+                )
+                st.execute("CREATE TABLE global_settings (key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL)")
+                st.execute("INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f-dup-1', 'https://dup.example/feed', 'Dup 1', 0, 0)")
+                st.execute("INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f-dup-2', 'https://dup.example/feed', 'Dup 2', 0, 0)")
+            }
+        }
+        val (localFile, localDriver, _) = fileDb()
+        localDriver.close()
+
+        assertFailsWith<CloudDataIncompatibleException> {
+            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+        }
+        cloudFile.delete()
+    }
+
+    @Test
+    fun mergeThrowsCloudDataIncompatibleForACorruptFile() {
+        // A file that passes the 16-byte SQLite header check (SyncRepository's gate, not exercised
+        // here) but is corrupt past it: flipping bytes well after the header of an otherwise-valid
+        // DB produces a genuine SQLITE_CORRUPT once SQLite reads the damaged page.
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f1", now = 0)
+        cloudDriver.close()
+        val bytes = cloudFile.readBytes().copyOf()
+        for (i in 4096 until minOf(bytes.size, 8192)) {
+            bytes[i] = bytes[i].inc()
+        }
+        cloudFile.writeBytes(bytes)
+
+        val (localFile, localDriver, _) = fileDb()
+        localDriver.close()
+
+        assertFailsWith<CloudDataIncompatibleException> {
+            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+        }
+    }
+
+    @Test
+    fun mergeDoesNotClassifyABrokenLocalSchemaAsCloudDataIncompatible() {
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f1", now = 0)
+        cloudDriver.close()
+
+        val (localFile, localDriver, _) = fileDb()
+        localDriver.execute(null, "DROP TABLE global_settings", 0)
+        localDriver.close()
+
+        val thrown = assertFailsWith<Exception> {
+            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+        }
+        assertFalse(thrown is CloudDataIncompatibleException)
+    }
+
+    @Test
+    fun mergeRethrowsSchemaVersionExceptionForANewerCloud() {
+        val (cloudFile, cloudDriver, _) = fileDb()
+        cloudDriver.execute(null, "PRAGMA user_version = 999;", 0)
+        cloudDriver.close()
+
+        val (localFile, localDriver, _) = fileDb()
+        localDriver.close()
+
+        assertFailsWith<SchemaVersionException> {
+            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+        }
+    }
+
+    @Test
     fun validateSchemaReturnsTrueForValidKeryxDb() {
         val (file, driver, _) = fileDb()
         driver.close()
-        assertTrue(DatabaseMerger.validateSchema(file.absolutePath, KeryxDatabase.Schema.version))
+        // Also the guard against a schema-version bump silently going unregistered in
+        // EXPECTED_SCHEMAS: if it did, this would degrade from `true` to `null` here, not fail
+        // silently — see validateSchemaIsUndeterminedForAnUnknownVersion for what `null` means.
+        assertEquals(true, DatabaseMerger.validateSchema(file.absolutePath, KeryxDatabase.Schema.version))
     }
 
     @Test
@@ -871,7 +997,7 @@ class SyncMergerTest {
                 st.execute("CREATE TABLE unrelated (x INTEGER)")
             }
         }
-        assertFalse(DatabaseMerger.validateSchema(file.absolutePath, KeryxDatabase.Schema.version))
+        assertEquals(false, DatabaseMerger.validateSchema(file.absolutePath, KeryxDatabase.Schema.version))
         file.delete()
     }
 
@@ -879,8 +1005,17 @@ class SyncMergerTest {
     fun validateSchemaReturnsFalseForCorruptFile() {
         val file = java.io.File.createTempFile("corrupt", ".db")
         file.writeBytes(byteArrayOf(1, 2, 3, 4))
-        assertFalse(DatabaseMerger.validateSchema(file.absolutePath, KeryxDatabase.Schema.version))
+        assertEquals(false, DatabaseMerger.validateSchema(file.absolutePath, KeryxDatabase.Schema.version))
         file.delete()
+    }
+
+    @Test
+    fun validateSchemaIsUndeterminedForAnUnknownVersion() {
+        val (file, driver, _) = fileDb()
+        driver.close()
+        // No EXPECTED_SCHEMAS entry is registered for version 999 — undetermined (null), never
+        // false: an unregistered version must not be treated as "definitely incompatible".
+        assertNull(DatabaseMerger.validateSchema(file.absolutePath, 999L))
     }
 
     @Test

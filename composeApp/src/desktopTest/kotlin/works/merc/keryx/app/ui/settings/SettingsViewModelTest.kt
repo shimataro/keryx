@@ -14,8 +14,9 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -95,6 +96,7 @@ private class AlwaysFailingCloudStorage : CloudStorage {
     override suspend fun upload(path: String, data: ByteArray, expectedRev: String?): Result<Unit> = fail()
     override suspend fun create(path: String, data: ByteArray): Result<Unit> = fail()
     override suspend fun delete(path: String): Result<Unit> = fail()
+    override suspend fun rename(from: String, to: String): Result<Unit> = fail()
     override suspend fun exists(path: String): Result<Boolean> = fail()
 }
 
@@ -188,9 +190,16 @@ class SettingsViewModelTest {
 
     @AfterTest
     fun tearDown() {
-        createdViewModels.forEach { it.viewModelScope.cancel() }
+        // cancelAndJoin (not plain cancel) so no coroutine — including work hopping through
+        // withContext(dispatcher) for exportOpml/importOpml/etc. — can still be resuming when
+        // driver.close()/resetMain() run below; a still-resuming one throwing against torn-down
+        // state is what previously surfaced (flakily, on a later test) as
+        // kotlinx.coroutines.test.UncaughtExceptionsBeforeTest.
+        runBlocking {
+            createdViewModels.forEach { it.viewModelScope.coroutineContext.job.cancelAndJoin() }
+            createdSyncScopes.forEach { it.coroutineContext.job.cancelAndJoin() }
+        }
         createdViewModels.clear()
-        createdSyncScopes.forEach { it.cancel() }
         createdSyncScopes.clear()
         Dispatchers.resetMain()
         driver.close()
@@ -241,6 +250,15 @@ class SettingsViewModelTest {
         return UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo")
     }
 
+    /**
+     * An [ActivityCenter] whose scope is tracked in [createdSyncScopes], so tearDown() cancels
+     * its eager stateIn collectors instead of leaking them for the life of the JVM test process.
+     */
+    private fun trackedActivityCenter(): ActivityCenter =
+        ActivityCenter(
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also { createdSyncScopes += it },
+        )
+
     private fun newViewModel(
         connectResult: Result<OAuthTokens> = Result.Ok(OAuthTokens("AT")),
         tokenStorage: TokenStorage = FakeTokenStorage(),
@@ -254,7 +272,7 @@ class SettingsViewModelTest {
         cloudSession: CloudSession? = null,
         // Shared with the SyncRepository built below so a test can drive activityCenter.trackSync {}
         // to simulate a sync completing and assert the ViewModel reacts to it.
-        activityCenter: ActivityCenter = ActivityCenter(),
+        activityCenter: ActivityCenter = trackedActivityCenter(),
         // Backs the SyncRepository built below. Default: local-only (every sync is a no-op success);
         // a test can supply a failing storage to exercise the sync-error state.
         syncCloudProvider: () -> CloudStorage? = { null },
@@ -563,7 +581,7 @@ class SettingsViewModelTest {
     // runTest's own TestCoroutineScheduler, so we poll with real wall-clock waits instead.
     @Test
     fun lastSyncedAtTextRefreshesWhenActivityCenterReportsSyncCompletion() {
-        val activityCenter = ActivityCenter()
+        val activityCenter = trackedActivityCenter()
         val vm = newViewModel(activityCenter = activityCenter)
         assertNull(vm.lastSyncedAtText)
 
@@ -610,7 +628,7 @@ class SettingsViewModelTest {
         vm.disconnect()
         // Await the actual condition being asserted, not just connectedType: lastSyncErrorText is
         // updated by an independent collector coroutine (init block) reacting to
-        // clearLastSyncError()'s StateFlow write, so polling connectedType alone gives no
+        // clearSyncFailureState()'s StateFlow write, so polling connectedType alone gives no
         // happens-before guarantee for it.
         awaitTrue { vm.connectedType == null && vm.lastSyncErrorText == null }
 
@@ -641,9 +659,9 @@ class SettingsViewModelTest {
         vm.switchTo(CloudStorageType.GOOGLE_DRIVE)
         // connectingType flips to GOOGLE_DRIVE synchronously at the top of switchTo(), before the old
         // provider is even disconnected — wait for canCancelConnect instead, which only becomes true
-        // once connect(newType) is underway (i.e. after clearLastSyncError() has already run). Also
+        // once connect(newType) is underway (i.e. after clearSyncFailureState() has already run). Also
         // await lastSyncErrorText directly: it's updated by an independent collector coroutine
-        // reacting to clearLastSyncError()'s StateFlow write, so canCancelConnect alone gives no
+        // reacting to clearSyncFailureState()'s StateFlow write, so canCancelConnect alone gives no
         // happens-before guarantee for it (see disconnectClearsLastSyncErrorText for the same race).
         awaitTrue { vm.canCancelConnect && vm.lastSyncErrorText == null }
 

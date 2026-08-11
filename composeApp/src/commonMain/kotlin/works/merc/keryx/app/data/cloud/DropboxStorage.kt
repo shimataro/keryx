@@ -171,6 +171,41 @@ class DropboxStorage(
     }
 
     /**
+     * Renames (moves) a file, without overwriting an existing destination.
+     *
+     * @param from The current Dropbox path.
+     * @param to The destination Dropbox path.
+     * @return A successful result when the file is moved or the source is already absent;
+     * otherwise, a mapped storage error (including an occupied destination).
+     */
+    override suspend fun rename(from: String, to: String): Result<Unit> = withToken { token ->
+        // move_v2 with autorename=false is a plain rename: it never silently creates "(1)"
+        // copies, so an occupied destination surfaces as a conflict instead of being papered over.
+        val response = client.post("$apiBase/2/files/move_v2") {
+            header("Authorization", "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("from_path", from)
+                    put("to_path", to)
+                    put("autorename", false)
+                }.toString(),
+            )
+        }
+        when {
+            response.status.value in 200..299 -> Result.Ok(Unit)
+            response.status.value == 409 -> {
+                val body = response.bodyAsText()
+                // "from_lookup/not_found" is the source being absent — idempotent success. Matching
+                // the tagged path (rather than a bare "not_found") keeps a "to/conflict" or
+                // "to/malformed_path" error from being swallowed as success.
+                if (body.contains("from_lookup/not_found")) Result.Ok(Unit) else mapError(409, body)
+            }
+            else -> mapError(response.status.value, response.bodyAsText())
+        }
+    }
+
+    /**
      * Executes an operation with a valid Dropbox access token.
      *
      * @param block The operation to execute with the access token.

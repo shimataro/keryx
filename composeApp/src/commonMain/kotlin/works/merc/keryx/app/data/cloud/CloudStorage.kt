@@ -94,5 +94,22 @@ interface CloudStorage {
      */
     suspend fun delete(path: String): Result<Unit>
 
+    /**
+     * Renames (moves) [from] to [to] within the provider's app folder.
+     *
+     * Idempotent on a missing source: succeeds with [Result.Ok] when [from] does not exist, so a
+     * caller archiving a file it may or may not have can treat the archive as done either way.
+     *
+     * Never overwrites [to]: an existing destination fails with
+     * [works.merc.keryx.app.core.CloudStorageException]. The archive is the only copy of the data
+     * being replaced, so clobbering it would be the data loss this call exists to prevent.
+     * (Google Drive is name-addressed and permits duplicate names, so a destination collision is
+     * not observable there; that asymmetry is harmless because the archive name carries a
+     * timestamp.)
+     *
+     * Used to archive the cloud sync DB before recreating it (see `SyncRepository.resetCloudData`).
+     */
+    suspend fun rename(from: String, to: String): Result<Unit>
+
     suspend fun exists(path: String): Result<Boolean>
 }

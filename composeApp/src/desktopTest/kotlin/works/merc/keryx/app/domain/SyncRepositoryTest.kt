@@ -42,6 +42,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -58,6 +59,10 @@ private class FakeCloudStorage : CloudStorage {
     var uploadCount = 0
     var createCount = 0
     var deleteCount = 0
+    var renameCount = 0
+
+    /** The destination of the last [rename] call, so a test can assert the archive name. */
+    var lastRenameTo: String? = null
 
     /** When set, [download] suspends on this gate before returning, so a test can observe an in-flight sync. */
     var downloadGate: CompletableDeferred<Unit>? = null
@@ -67,12 +72,14 @@ private class FakeCloudStorage : CloudStorage {
     private val uploadQueue = ArrayDeque<Result<Unit>>()
     private val createQueue = ArrayDeque<Result<Unit>>()
     private val deleteQueue = ArrayDeque<Result<Unit>>()
+    private val renameQueue = ArrayDeque<Result<Unit>>()
 
     fun queueExists(r: Result<Boolean>) = existsQueue.addLast(r)
     fun queueDownload(r: Result<CloudFile>) = downloadQueue.addLast(r)
     fun queueUpload(r: Result<Unit>) = uploadQueue.addLast(r)
     fun queueCreate(r: Result<Unit>) = createQueue.addLast(r)
     fun queueDelete(r: Result<Unit>) = deleteQueue.addLast(r)
+    fun queueRename(r: Result<Unit>) = renameQueue.addLast(r)
 
     fun put(path: String, data: ByteArray, rev: String) {
         files[path] = data to rev
@@ -116,6 +123,19 @@ private class FakeCloudStorage : CloudStorage {
         deleteCount++
         deleteQueue.removeFirstOrNull()?.let { return it }
         files.remove(path) // idempotent: succeeds whether or not it existed
+        return Result.Ok(Unit)
+    }
+
+    override suspend fun rename(from: String, to: String): Result<Unit> {
+        renameCount++
+        lastRenameTo = to
+        renameQueue.removeFirstOrNull()?.let { return it }
+        val f = files.remove(from) ?: return Result.Ok(Unit) // idempotent: absent source is a no-op
+        if (files.containsKey(to)) {
+            files[from] = f // put it back — the real backends never overwrite the destination
+            return Result.Err(CloudStorageException("destination exists: $to"))
+        }
+        files[to] = f
         return Result.Ok(Unit)
     }
 }
@@ -205,6 +225,109 @@ class SyncRepositoryTest {
         file.delete()
         return bytes
     }
+
+    /**
+     * Builds a structurally-valid keryx cloud DB (all six tables, with the columns
+     * `DatabaseMerger.validateSchema` expects) whose `feeds` table is [feedsTableSql] instead of
+     * the real DDL — typically the same columns minus one constraint — then populated via
+     * [insertSql]. Used to reproduce "the cloud's own row set violates a constraint this app's
+     * schema requires": `MergeSql`'s `NOT EXISTS`/`EXISTS` guards only rule out collisions against
+     * *main*'s rows, so a violation entirely inside the cloud DB — impossible to construct through
+     * this app, since its own schema forbids it — reaches the merge INSERT unguarded.
+     */
+    private fun cloudDbWithRelaxedFeedsSchema(feedsTableSql: String, insertSql: List<String>): ByteArray {
+        val file = File.createTempFile("relaxed-feeds-", ".db", tempDir)
+        DriverManager.getConnection("jdbc:sqlite:${file.absolutePath}").use { conn ->
+            conn.createStatement().use { st ->
+                st.execute("PRAGMA user_version = ${KeryxDatabase.Schema.version}")
+                st.execute(
+                    """
+                    CREATE TABLE folders (
+                        id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+                        sort_order INTEGER NOT NULL DEFAULT 0, deleted_at INTEGER,
+                        updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                st.execute(feedsTableSql)
+                st.execute(
+                    """
+                    CREATE TABLE tags (
+                        id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL UNIQUE, color TEXT,
+                        sort_order INTEGER NOT NULL DEFAULT 0, deleted_at INTEGER,
+                        updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                st.execute(
+                    """
+                    CREATE TABLE articles (
+                        id TEXT NOT NULL PRIMARY KEY, feed_id TEXT NOT NULL, guid TEXT NOT NULL,
+                        url TEXT NOT NULL, title TEXT NOT NULL, summary TEXT, content TEXT, author TEXT,
+                        published_at INTEGER, thumbnail_url TEXT, is_read INTEGER NOT NULL DEFAULT 0,
+                        read_at INTEGER, is_starred INTEGER NOT NULL DEFAULT 0, starred_at INTEGER,
+                        cached_at INTEGER NOT NULL, search_text TEXT NOT NULL DEFAULT '',
+                        updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
+                        deleted_at INTEGER, deleted_updated_at INTEGER,
+                        UNIQUE (feed_id, guid)
+                    )
+                    """.trimIndent(),
+                )
+                st.execute(
+                    """
+                    CREATE TABLE feed_tags (
+                        feed_id TEXT NOT NULL, tag_id TEXT NOT NULL, deleted_at INTEGER,
+                        updated_at INTEGER NOT NULL, PRIMARY KEY (feed_id, tag_id)
+                    )
+                    """.trimIndent(),
+                )
+                st.execute(
+                    "CREATE TABLE global_settings (key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL)",
+                )
+                for (sql in insertSql) st.execute(sql)
+            }
+        }
+        val bytes = file.readBytes()
+        file.delete()
+        return bytes
+    }
+
+    /** Two cloud `feeds` rows sharing a `url` — invalid only because the cloud DB's own `feeds`
+     *  table (unlike this app's) carries no `UNIQUE(url)`, so both rows coexist there. */
+    private fun cloudDbWithDuplicateFeedUrls(): ByteArray = cloudDbWithRelaxedFeedsSchema(
+        feedsTableSql = """
+            CREATE TABLE feeds (
+                id TEXT NOT NULL PRIMARY KEY, url TEXT NOT NULL, site_url TEXT, title TEXT NOT NULL,
+                description TEXT, favicon_url TEXT, etag TEXT, last_modified TEXT,
+                error_count INTEGER NOT NULL DEFAULT 0, last_error TEXT, custom_title TEXT, folder_id TEXT,
+                deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0, folder_updated_at INTEGER,
+                sort_order_updated_at INTEGER, custom_title_updated_at INTEGER, deleted_updated_at INTEGER
+            )
+        """.trimIndent(),
+        insertSql = listOf(
+            "INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f-dup-1', 'https://dup.example/feed', 'Dup 1', 0, 0)",
+            "INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f-dup-2', 'https://dup.example/feed', 'Dup 2', 0, 0)",
+        ),
+    )
+
+    /** A cloud `feeds` row with a NULL `title` — invalid only against *this app's* `NOT NULL`
+     *  constraint on `feeds.title` (the cloud DB's own `feeds.title` column allows NULL). */
+    private fun cloudDbWithNotNullViolationOnFeedTitle(): ByteArray = cloudDbWithRelaxedFeedsSchema(
+        feedsTableSql = """
+            CREATE TABLE feeds (
+                id TEXT NOT NULL PRIMARY KEY, url TEXT NOT NULL UNIQUE, site_url TEXT, title TEXT,
+                description TEXT, favicon_url TEXT, etag TEXT, last_modified TEXT,
+                error_count INTEGER NOT NULL DEFAULT 0, last_error TEXT, custom_title TEXT, folder_id TEXT,
+                deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0, folder_updated_at INTEGER,
+                sort_order_updated_at INTEGER, custom_title_updated_at INTEGER, deleted_updated_at INTEGER
+            )
+        """.trimIndent(),
+        insertSql = listOf(
+            "INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f-null-title', 'https://null-title.example/feed', NULL, 0, 0)",
+        ),
+    )
 
     private fun tempCloudDbFile(): File = File(tempDir, "cloud_keryx.db")
 
@@ -429,6 +552,36 @@ class SyncRepositoryTest {
     }
 
     @Test
+    fun emptyCloudBytesAreRejectedBeforeTouchingTheMerger() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, byteArrayOf(), "r1")
+        val repo = newRepo(cloud)
+
+        val result = repo.sync()
+
+        assertIs<Result.Err>(result)
+        assertIs<CloudDataIncompatibleException>(result.exception)
+        assertEquals(0, cloud.uploadCount)
+        assertFalse(tempCloudDbFile().exists())
+    }
+
+    @Test
+    fun truncatedSqliteHeaderIsRejectedBeforeTouchingTheMerger() = runTest {
+        val cloud = FakeCloudStorage()
+        // The real 16-byte SQLite magic minus its last byte — one byte short is still not a match.
+        val truncated = "SQLite format 3".encodeToByteArray()
+        cloud.put(CLOUD_DB_PATH, truncated, "r1")
+        val repo = newRepo(cloud)
+
+        val result = repo.sync()
+
+        assertIs<Result.Err>(result)
+        assertIs<CloudDataIncompatibleException>(result.exception)
+        assertEquals(0, cloud.uploadCount)
+        assertFalse(tempCloudDbFile().exists())
+    }
+
+    @Test
     fun incompatibleSchemaCloudDbIsReportedAsIncompatible() = runTest {
         // A valid SQLite file (user_version matches local) but a foreign schema: the merge statements
         // hit "no such table: cloud.folders", which must be classified as incompatible, not transient.
@@ -442,6 +595,73 @@ class SyncRepositoryTest {
         assertIs<CloudDataIncompatibleException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+    }
+
+    @Test
+    fun duplicateUrlsInCloudFeedsIsReportedAsIncompatible() = runTest {
+        // Two cloud feeds rows share a url — only possible because the cloud DB's own feeds table
+        // (unlike main's) has no UNIQUE(url). Merging both into main's UNIQUE(url) column must be
+        // classified as incompatible cloud data, not a transient/app-side failure.
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbWithDuplicateFeedUrls(), "r1")
+        val repo = newRepo(cloud)
+
+        val result = repo.sync()
+
+        assertIs<Result.Err>(result)
+        assertIs<CloudDataIncompatibleException>(result.exception)
+        assertEquals(0, cloud.uploadCount)
+        assertFalse(tempCloudDbFile().exists())
+        val notes = notificationCenter.items.value
+        assertEquals(1, notes.size)
+        assertEquals(AppNotificationAction.ResetCloudData, notes.first().action)
+    }
+
+    @Test
+    fun notNullViolationInCloudFeedsIsReportedAsIncompatible() = runTest {
+        // A cloud feeds row has a NULL title — only possible because the cloud DB's own feeds.title
+        // column (unlike main's) allows NULL. Merging it into main's NOT NULL column must be
+        // classified as incompatible cloud data, not a transient/app-side failure.
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbWithNotNullViolationOnFeedTitle(), "r1")
+        val repo = newRepo(cloud)
+
+        val result = repo.sync()
+
+        assertIs<Result.Err>(result)
+        assertIs<CloudDataIncompatibleException>(result.exception)
+        assertEquals(0, cloud.uploadCount)
+        assertFalse(tempCloudDbFile().exists())
+        val notes = notificationCenter.items.value
+        assertEquals(1, notes.size)
+        assertEquals(AppNotificationAction.ResetCloudData, notes.first().action)
+    }
+
+    @Test
+    fun postMergeIndexFailureIsNotClassifiedAsCloudDataIncompatible() = runTest {
+        // ftsManager.indexMissing() runs *after* DatabaseMerger.merge() has already committed, so
+        // a failure there is never the cloud's fault — it must fall to CloudStorageException, not
+        // be (mis)classified as CloudDataIncompatibleException, even though its underlying SQLite
+        // error code (SQLITE_ERROR, "no such table") is the same ambiguous code a broken cloud
+        // schema would produce. FtsManager is a final class (cannot be faked), so dropping its
+        // table locally is the only way to reach this path.
+        localDriver.execute(null, "DROP TABLE articles_fts", 0)
+        // A distinct feed id ("f2", not setUp()'s "f1") so a successful merge is observable.
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f2", now = 0)
+        cloudDriver.close()
+        val cloudBytes = cloudFile.readBytes()
+        cloudFile.delete()
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudBytes, "r1")
+        val repo = newRepo(cloud)
+
+        val result = repo.sync()
+
+        assertIs<Result.Err>(result)
+        assertIs<CloudStorageException>(result.exception)
+        // The merge itself committed before indexMissing() failed: the cloud feed is now in main.
+        assertNotNull(localDb.feedsQueries.getById("f2").executeAsOneOrNull())
     }
 
     @Test
@@ -506,7 +726,7 @@ class SyncRepositoryTest {
     }
 
     @Test
-    fun clearLastSyncErrorResetsToNull() = runTest {
+    fun clearSyncFailureStateResetsLastSyncErrorToNull() = runTest {
         // Used when the connection that produced the error is torn down, so a subsequently-connected
         // provider does not inherit it (see SettingsViewModel.disconnect()/switchTo()).
         val cloud = FakeCloudStorage()
@@ -517,7 +737,7 @@ class SyncRepositoryTest {
         assertIs<Result.Err>(repo.sync())
         assertEquals("syncFailed:CloudAuthException", repo.lastSyncError.value)
 
-        repo.clearLastSyncError()
+        repo.clearSyncFailureState()
 
         assertNull(repo.lastSyncError.value)
     }
@@ -603,7 +823,7 @@ class SyncRepositoryTest {
     }
 
     @Test
-    fun resetCloudDataDeletesThenRecreates() = runTest {
+    fun resetCloudDataArchivesInsteadOfDeleting() = runTest {
         val cloud = FakeCloudStorage()
         cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1") // a pre-existing (e.g. incompatible) cloud file
         val repo = newRepo(cloud, clockMillis = 55_000L)
@@ -611,17 +831,56 @@ class SyncRepositoryTest {
         val result = repo.resetCloudData()
 
         assertIs<Result.Ok<Unit>>(result)
-        assertEquals(1, cloud.deleteCount)
+        assertEquals(1, cloud.renameCount)
+        assertEquals(0, cloud.deleteCount)
         assertEquals(1, cloud.createCount)
+        assertEquals("/keryx-19700101-000055.db.bak", cloud.lastRenameTo)
+        assertTrue(cloud.files.containsKey("/keryx-19700101-000055.db.bak"))
         assertTrue(cloud.files.containsKey(CLOUD_DB_PATH))
         assertEquals(55_000L, repo.lastSyncedAt())
         assertTrue(notificationCenter.items.value.isEmpty())
     }
 
     @Test
-    fun resetCloudDataDeleteFailureSurfacesErrorAndDoesNotCreate() = runTest {
+    fun resetCloudDataFallsBackToDeleteWhenArchiveFails() = runTest {
         val cloud = FakeCloudStorage()
         cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1")
+        cloud.queueRename(Result.Err(CloudStorageException("destination exists")))
+        val repo = newRepo(cloud)
+
+        val result = repo.resetCloudData()
+
+        assertIs<Result.Ok<Unit>>(result)
+        assertEquals(1, cloud.renameCount)
+        assertEquals(1, cloud.deleteCount)
+        assertEquals(1, cloud.createCount)
+        assertTrue(notificationCenter.items.value.isEmpty())
+    }
+
+    @Test
+    fun resetCloudDataSkipsTheDeleteFallbackOnAuthFailure() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1")
+        cloud.queueRename(Result.Err(CloudAuthException("revoked")))
+        val repo = newRepo(cloud)
+
+        val result = repo.resetCloudData()
+
+        assertIs<Result.Err>(result)
+        assertIs<CloudAuthException>(result.exception)
+        assertEquals(1, cloud.renameCount)
+        assertEquals(0, cloud.deleteCount)
+        assertEquals(0, cloud.createCount)
+        val notes = notificationCenter.items.value
+        assertEquals(1, notes.size)
+        assertEquals(AppNotificationLevel.ERROR, notes.first().level)
+    }
+
+    @Test
+    fun resetCloudDataFailsWhenArchiveAndDeleteBothFail() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1")
+        cloud.queueRename(Result.Err(CloudStorageException("destination exists")))
         cloud.queueDelete(Result.Err(CloudAuthException("revoked")))
         val repo = newRepo(cloud)
 
@@ -629,11 +888,154 @@ class SyncRepositoryTest {
 
         assertIs<Result.Err>(result)
         assertIs<CloudAuthException>(result.exception)
-        assertEquals(1, cloud.deleteCount)
         assertEquals(0, cloud.createCount)
         val notes = notificationCenter.items.value
         assertEquals(1, notes.size)
         assertEquals(AppNotificationLevel.ERROR, notes.first().level)
+    }
+
+    @Test
+    fun resetCloudDataOnAnAbsentCloudFileStillRecreates() = runTest {
+        val cloud = FakeCloudStorage() // no pre-existing cloud file
+        val repo = newRepo(cloud, clockMillis = 55_000L)
+
+        val result = repo.resetCloudData()
+
+        assertIs<Result.Ok<Unit>>(result)
+        assertEquals(1, cloud.renameCount) // idempotent no-op on an absent source
+        assertEquals(1, cloud.createCount)
+        assertTrue(cloud.files.containsKey(CLOUD_DB_PATH))
+    }
+
+    @Test
+    fun resetCloudDataSurfacesErrorWhenCreateFreshFailsAfterSuccessfulArchive() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1")
+        cloud.queueCreate(Result.Err(CloudStorageException("quota exceeded")))
+        val repo = newRepo(cloud, clockMillis = 55_000L)
+
+        val result = repo.resetCloudData()
+
+        assertIs<Result.Err>(result)
+        // The archive succeeded (no data lost) even though create-fresh then failed. The absent
+        // CLOUD_DB_PATH means the next ordinary sync's createFresh fallback (syncLocked) recovers.
+        assertTrue(cloud.files.containsKey("/keryx-19700101-000055.db.bak"))
+        assertFalse(cloud.files.containsKey(CLOUD_DB_PATH))
+    }
+
+    @Test
+    fun automaticSyncIsSuspendedAfterCloudDataIncompatible() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, byteArrayOf(1, 2, 3, 4), "r1") // not a SQLite file
+        val repo = newRepo(cloud)
+
+        val first = repo.sync(SyncTrigger.AUTOMATIC)
+        assertIs<Result.Err>(first)
+        assertIs<CloudDataIncompatibleException>(first.exception)
+        assertEquals(1, cloud.downloadCount)
+        assertTrue(repo.autoSyncSuspended.value)
+
+        val second = repo.sync(SyncTrigger.AUTOMATIC)
+        assertIs<Result.Ok<Unit>>(second)
+        assertEquals(1, cloud.downloadCount) // no second download attempt
+        // Neither the notification nor the settings-tab failure reason is disturbed by the skip.
+        assertEquals(1, notificationCenter.items.value.size)
+        assertNotNull(repo.lastSyncError.value)
+    }
+
+    @Test
+    fun manualSyncIsNeverSuspended() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, byteArrayOf(1, 2, 3, 4), "r1")
+        val repo = newRepo(cloud)
+        repo.sync(SyncTrigger.AUTOMATIC)
+        assertTrue(repo.autoSyncSuspended.value)
+
+        val manual = repo.sync(SyncTrigger.MANUAL)
+
+        assertIs<Result.Err>(manual)
+        assertEquals(2, cloud.downloadCount) // a real second attempt, not skipped
+    }
+
+    @Test
+    fun scheduleSyncIsSuppressedWhileCloudDataIsUnusable() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, byteArrayOf(1, 2, 3, 4), "r1")
+        val repo = newRepo(cloud)
+        repo.sync(SyncTrigger.AUTOMATIC)
+        assertTrue(repo.autoSyncSuspended.value)
+
+        repo.scheduleSync()
+        advanceTimeBy(SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+
+        assertEquals(1, cloud.existsCount) // only the initial sync() call's own exists() check
+    }
+
+    @Test
+    fun resetCloudDataResumesAutomaticSync() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, byteArrayOf(1, 2, 3, 4), "r1")
+        val repo = newRepo(cloud, clockMillis = 55_000L)
+        repo.sync(SyncTrigger.AUTOMATIC)
+        assertTrue(repo.autoSyncSuspended.value)
+
+        assertIs<Result.Ok<Unit>>(repo.resetCloudData())
+        assertFalse(repo.autoSyncSuspended.value)
+
+        val after = repo.sync(SyncTrigger.AUTOMATIC)
+        assertIs<Result.Ok<Unit>>(after) // ran for real (fresh cloud data merges cleanly)
+        assertEquals(2, cloud.downloadCount)
+    }
+
+    @Test
+    fun successfulManualSyncResumesAutomaticSync() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, byteArrayOf(1, 2, 3, 4), "r1")
+        val repo = newRepo(cloud)
+        repo.sync(SyncTrigger.AUTOMATIC)
+        assertTrue(repo.autoSyncSuspended.value)
+
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r2") // the cloud data gets fixed
+        assertIs<Result.Ok<Unit>>(repo.sync(SyncTrigger.MANUAL))
+        assertFalse(repo.autoSyncSuspended.value)
+
+        val after = repo.sync(SyncTrigger.AUTOMATIC)
+        assertIs<Result.Ok<Unit>>(after)
+        assertEquals(3, cloud.downloadCount)
+    }
+
+    @Test
+    fun clearSyncFailureStateResumesAutomaticSync() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, byteArrayOf(1, 2, 3, 4), "r1")
+        val repo = newRepo(cloud)
+        repo.sync(SyncTrigger.AUTOMATIC)
+        assertTrue(repo.autoSyncSuspended.value)
+
+        repo.clearSyncFailureState()
+        assertFalse(repo.autoSyncSuspended.value)
+
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r2")
+        val after = repo.sync(SyncTrigger.AUTOMATIC)
+        assertIs<Result.Ok<Unit>>(after) // gate no longer blocks it
+        assertEquals(2, cloud.downloadCount)
+    }
+
+    @Test
+    fun schemaVersionExceptionDoesNotSuspendAutomaticSync() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(userVersion = 999L), "r1")
+        val repo = newRepo(cloud)
+
+        val first = repo.sync(SyncTrigger.AUTOMATIC)
+        assertIs<Result.Err>(first)
+        assertIs<SchemaVersionException>(first.exception)
+        assertFalse(repo.autoSyncSuspended.value)
+
+        val second = repo.sync(SyncTrigger.AUTOMATIC)
+        assertIs<Result.Err>(second)
+        assertEquals(2, cloud.downloadCount) // both attempts ran for real, never gated
     }
 
     @Test

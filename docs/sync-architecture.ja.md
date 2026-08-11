@@ -15,7 +15,8 @@
 ## クラウド上のファイル構成
 
 ```bash
-/keryx.db   ← 同期用 SQLite（articles_fts なし）
+/keryx.db                              ← 同期用 SQLite（articles_fts なし）
+/keryx-YYYYMMDD-HHMMSS.db.bak          ← クラウドデータのリセットで退避される旧ファイル（自動削除されない）
 ```
 
 競合防止はアップロード時のリビジョンチェックで行う — Dropbox: `rev`、サーバー側の compare-and-set（不一致時 409）。Google Drive: ファイルの `version`、クライアント側で比較後に書き込み（同期のリトライで担保）。lock ファイルは使わない。
@@ -24,6 +25,11 @@
 
 1. クラウドに `keryx.db` が無ければローカルをそのままアップロード（初回）。
 2. クラウドから `keryx.db` をダウンロード（一時ファイルへ）。
+   - ダウンロードしたバイト列は、ディスクに書き込む前に SQLite の 16 バイトファイルヘッダと照合される
+     （`core/SqliteFile.kt` の `looksLikeSqliteFile`。アップロード側（手順5）と対称なチェック）。これに
+     落ちるペイロード（ダウンロードの途中切断、HTML エラーページ、0 バイトなど非 SQLite ファイル）は、
+     `DatabaseMerger` まで到達してマージ文の中で `no such table: cloud.folders` のような曖昧なエラーに
+     なる前に、`CloudDataIncompatibleException` として即座に弾かれる。
 3. **`DatabaseMerger.merge()` でマージ**（後述）。直後に `ftsManager.indexMissing()` でマージが入れた
    新記事を**増分投入**（ライブ索引は wipe しない）してから、`driver.notifyListeners(...)`（マージが触れる
    全テーブル）を呼ぶ。マージは `DatabaseMerger` 専用の生 JDBC コネクションで書き込み SQLDelight のクエリ通知を
@@ -36,6 +42,38 @@
 
 デバウンス: 既読・スター等の変更後は `SyncScheduler.scheduleSync()` が最後の操作から一定秒後に
 まとめて同期する。
+
+### 自動同期の抑制
+
+`SyncRepository.sync(trigger: SyncTrigger = MANUAL)` は「誰が呼んでいるか」を受け取る。
+`SyncTrigger.AUTOMATIC`（デバウンス書き込みの消費者、`runStartupTasks`、`backgroundUpdateLoop`）は
+ゲートの対象になる — `autoSyncSuspended`（`StateFlow<Boolean>`）が true の間、`AUTOMATIC` 呼び出しは
+ダウンロード／マージ／アップロードのサイクルを一切実行せず `Result.Ok(Unit)` を返す。同期スピナーも
+動かさず、通知センターにも触れないので、既に利用不能と分かっているクラウド DB が書き込みのたびに
+再ダウンロード・再マージされることはない。`SyncTrigger.MANUAL`（デフォルト。UI から呼ばれる同期
+——ツールバー／メニューの「今すぐ同期」、「すべて更新」、初回接続時の同期、`SettingsViewModel.connect()`
+——はすべてこちら）は**常に実際に実行される**。ユーザーが明示的に同期を求めた場合、必ず本当の試行と
+その失敗理由を受け取れる — 黙って何もしない、ということは起きない。
+
+ゲートは `updateAutoSyncGate`（`sync()` と `resetCloudData()` の両方から、`emitErrorNotification` の
+直前に呼ばれる）が設定する: 結果が `CloudDataIncompatibleException` を運んでいれば true に、
+`Result.Ok` ならどんな場合でも false にクリアする。`SchemaVersionException` は意図的に除外している
+——同じく永続的だが、その直し方は「アプリを更新する」であり、これでバックグラウンド同期をゲートすると、
+新しいバージョンが導入されて動き始めた瞬間が隠れてしまう。`scheduleSync()` もデバウンス信号を積む前に
+ゲートを確認するので、クラウドが利用不能と分かっている間は書き込みバーストがデバウンス待ちのループすら
+起動しない。
+
+`autoSyncSuspended` はあえて**インメモリで、永続化しない**: プロセス再起動は「他端末がクラウドの
+データを直しているかもしれない」を確認できる無料の再試行であり、ゲートの本来の目的
+——同じ壊れたファイルを1プロセス内で何度も再ダウンロード・再マージせず、同じ通知を何度も出さないこと
+——にはそれ以上の永続性は不要である。成功した同期（手動・自動どちらでも）、`resetCloudData()` の成功、
+そして `clearSyncFailureState()`（旧 `clearLastSyncError()` から改名 — ミラーされている失敗理由の
+テキストと合わせてゲートもクリアするようになった。接続の解除・切り替え時（
+`SettingsViewModel.disconnect()`/`switchTo()`）に呼ばれる）でクリアされる。
+
+リセット／通知の UI 側はゲートの影響を一切受けない: 通知センターの `ResetCloudData` ボタンも設定画面の
+リセットボタンも無条件（ゲートされない）で、スキップされた `AUTOMATIC` 呼び出しは `lastSyncError` に
+一切触れないため、クラウド同期タブは同期が今なぜ壊れているかを表示し続ける。
 
 ## マージ（`DatabaseMerger` + `MergeSql`）
 
@@ -82,6 +120,49 @@
   `folders` を `feeds` より前にマージし（`feeds.folder_id` の FK 参照のため）、4 つの `mergeFeed*` は
   `feeds`（および `insertFolders`）の後に置く（main 側に feed 行と folder 行が揃ってから解決するため）。
 
+### マージ失敗の分類
+
+`DatabaseMerger.merge` は、`mergeUnclassified`（分類前の実装本体、private）からの失敗を SQLite の
+**エラーコード**（ロケールや JDBC ドライバのバージョンに左右されやすいメッセージ文字列ではない）を使って分類する。
+エラーコードは、cause チェーンを辿って `org.sqlite.SQLiteException` を探すことで得る（`findSqliteCause`、
+cause の循環に備えて深さ上限あり）。`SchemaVersionException` は、分類する catch-all よりも**先に** catch して
+再 throw する — これにより誤って再分類されることはない。分類は意図的に保守的で、認識できないエラー
+（cause チェーンに `SQLiteException` が無い場合を含む）はそのまま再 throw される。そのため分類漏れが
+挙動を後退させることはなく、`SyncRepository` 自身の catch-all が一時的な `CloudStorageException` として
+扱う。
+
+| SQLite の主エラーコード | 分類 |
+| --- | --- |
+| `SQLITE_NOTADB`、`SQLITE_CORRUPT`、`SQLITE_FORMAT`、`SQLITE_EMPTY` | **永続** → `CloudDataIncompatibleException`。ファイル自体が壊れている。 |
+| `SQLITE_CONSTRAINT`（`_UNIQUE`／`_NOTNULL`／`_FOREIGNKEY` 等、全ての拡張 `SQLITE_CONSTRAINT_*` を含む — 拡張コードの下位バイトは常にその主コードに一致する） | **永続** → `CloudDataIncompatibleException`。`MergeSql` の `NOT EXISTS`/`EXISTS` ガード（前述）が main 側の行との衝突は既にすべて潰しているため、マージ文がそれでも制約に触れうるのはクラウド DB 自身の行集合がそれに違反している場合だけ（クラウド DB 内部の url 重複、クラウド側の（より緩い）スキーマが許していた NULL 等）。それはこのアプリのスキーマで表現できないデータであり、まさに `CloudDataIncompatibleException` の意味そのもの。 |
+| `SQLITE_ERROR`（`no such table`／`no such column`） | **曖昧** — これは外部・レガシーなクラウドスキーマの見た目でもあり、（無関係なアプリのバグによる）ローカル側スキーマの破損の見た目でもある。ダウンロードしたクラウドファイルに対して `validateSchema` を呼んで解決する：`false` なら `CloudDataIncompatibleException`、`true` または `null`（判定不能）ならどちらもクラウド起因と確信できないためそのまま再 throw。 |
+| それ以外（`SQLITE_CANTOPEN`、`SQLITE_IOERR`、`SQLITE_FULL`、`SQLITE_BUSY`、`SQLITE_LOCKED`、`SQLITE_READONLY`、`SQLiteException` が見つからない場合、等） | **一時的／アプリ側** — そのまま再 throw。 |
+
+分類が `DatabaseMerger.merge`（`mergeUnclassified` だけをラップしており、呼び出し元がその後に行うことは
+見えない）の内部に完全に閉じているため、`SyncRepository.mergeCloud` の post-commit の処理
+——`ftsManager.indexMissing()` と `driver.notifyListeners(...)`。どちらもマージが**既に commit した後**に
+走る——は構造的に見えない。ここでの失敗（例: ローカルの `articles_fts` テーブルが DROP されている、これも
+`SQLITE_ERROR`）は `SyncRepository` 自身の catch-all で未分類のまま `CloudStorageException` として報告され、
+`CloudDataIncompatibleException` には決してならない — マージ自体は既に成功しているので、そのために
+破壊的なクラウドデータリセットを提示するのは誤りである。（これは `SyncRepository` 側の旧メッセージ文字列
+マッチ方式では実際に起こりうるリスクだった。旧方式の `try` はこの post-commit の呼び出しも同じブロックに
+含んでいたため。）
+
+許容している残存リスクが一つある：マージのトランザクション中は `PRAGMA foreign_keys=ON` が有効なので、
+main（ローカル）側に既に存在する不整合が、マージの `UPDATE` 文がそれに触れて初めて表面化し、
+`SQLITE_CONSTRAINT_FOREIGNKEY` としてクラウド起因に誤分類される可能性は理論上ゼロではない。実際には
+起きにくい（例えば `mergeFeedFolderId` は `folder_id` を常に既存の `main.folders` 行か `NULL` のどちらかに
+解決する）うえ、誤分類してもデータは失われない — 下記のリセット経路は削除ではなく退避を行うため。
+拡張エラーコードはログに残し、事後診断できるようにしている。
+
+**将来対応**: ダウンロードしたクラウド DB に対する `PRAGMA quick_check`/`integrity_check` は、毎回の同期では
+あえて実行しない — DB サイズに比例したコストがかかるうえ、SQLite はマージが触れた瞬間に破損ページを別個の
+エラーコードとして返す（後述「マージ失敗の分類」参照）ので、マージが触れないページまで毎回全走査しても
+得られるものが無い。またこの機能が本来検出したい失敗モード（クラウド DB 自身のスキーマとしては整合していても、
+このアプリの制約には違反するデータ）も検出できない（`quick_check` は DB が自分自身のスキーマと整合しているかしか
+見ない）。将来追加するとすれば、マージ失敗分類パスの第2段階（曖昧な `SQLITE_ERROR` でスキーマ不一致を除外した後）
+に位置づけるべきで、同期のホットパスには置かない。
+
 ## スキーマバージョン
 
 `PRAGMA user_version` で管理。マージ時に `cloud.user_version` を確認し、クラウドがローカルより新しければ
@@ -95,6 +176,17 @@
 > 新しい列を参照するマージ文が古いクラウドに対して `no such column` で失敗しない。バージョン 2 では、
 > この引き上げ分岐（`migrateCloudIfOlder`）がバージョン 1 のクラウド DB に対して発火し、ダウンロードした
 > コピーへ `1.sqm` を適用してから記事マージが `deleted_at` を参照できるようにする。
+
+`DatabaseMerger.validateSchema(dbPath, schemaVersion)` は **nullable な** `Boolean` を返す —
+登録済みのスキーマバージョンに対するテーブル・カラムの有無なら `true`/`false`、`schemaVersion` が
+デスクトップ actual 側の `EXPECTED_SCHEMAS` マップに未登録なら `null`。これは意図的に安全側へ倒す
+方向のフェイルセーフである — バージョンを上げた（`KeryxDatabase.Schema.version`）際に対応する
+期待スキーマの登録を忘れると、`validateSchema` は `false` ではなく `true` から `null` へ*劣化*し、
+呼び出し側はすべて `null` を `true` と同様に扱う — 判定不能な結果を使って破壊的なクラウドデータリセットを
+提示してはならない。`SyncMergerTest.validateSchemaReturnsTrueForValidKeryxDb` が現行スキーマバージョンで
+`true` になることを固定しているため、登録を忘れるとこのテストが即座に失敗する（本番での挙動劣化として
+静かに埋もれることはない）。`schemaVersion` はただの `Long` なのでこれをコンパイラで強制する手段は無く
+（sealed / enum の網羅性チェックは効かない）、このテストが実質的な歯止めになっている。
 
 ## FTS5 の扱い
 
@@ -200,3 +292,11 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
 を刻む）する。トゥームストーンはアップロードされマージ（`deleted_updated_at` の後勝ち）で伝播するため、
 削除を取りこぼしたデバイスも記事を再追加せず収束する。行の物理回収はまだ行わない（古いトゥームストーンの
 物理GCは将来対応）ので、それまで論理削除済み記事もアップロードのスナップショットに含まれ続ける。
+
+## クラウドデータのリセット（退避）
+
+`SyncRepository.resetCloudData()` は、アプリが使用できないクラウドDBからの復旧手段である。クラウド上のファイルをいきなり削除はしない — `archiveCloudDb()` がまず `CloudStorage.rename()` でタイムスタンプ付きパスへリネームする（`core/CloudBackupPath.kt` の `cloudBackupPath(clock.nowMillis())`、例: `/keryx-20260811-103000.db.bak`。端末のタイムゾーンに関わらず同じ瞬間なら同じ名前になるよう UTC で整形）。その後 `createFresh()` がローカルDBのスナップショットを新しい `/keryx.db` として再アップロードする。退避ファイルは自動削除されない — `CloudStorage` に一覧取得APIが無いことに加え、この仕組みを取り除くと「誤判定によるリセット」や「破損に見えただけのマージバグ」からの復旧手段自体が失われてしまう。
+
+- **`rename` の意味論**（`CloudStorage.rename`、プロバイダごとに実装 — Dropbox は `files/move_v2`（`autorename=false`）、Google Drive は名前検索で解決したファイルIDへのメタデータ `PATCH`、Microsoft Graph はアプリフォルダ内アイテムへのメタデータ `PATCH`）: リネーム元が既に存在しない場合は冪等に `Result.Ok`（クラウドフォルダが既にきれいな状態でのリセットも `createFresh` まで進む）。リネーム先が既に存在する場合は上書きせず失敗する。
+- **削除へのフォールバック**: リネーム自体がストレージ側の理由（退避先が既に存在する等）で失敗した場合、`archiveCloudDb()` は `cloud.delete(CLOUD_DB_PATH)` にフォールバックし、リセットが恒久的に行き詰まることを防ぐ。`CloudAuthException` だけは削除へリトライしない — 同じ資格情報の欠如で削除も同様に失敗するため。
+- **退避ファイル名**: あえて `CLOUD_DB_PATH` から派生させていない（`core/Constants.kt` の `CLOUD_DB_BACKUP_PREFIX`/`CLOUD_DB_BACKUP_SUFFIX`）。退避ファイルのベース名が Google Drive の `name = 'keryx.db'` 検索や OneDrive のベース名アドレッシングに一致してしまうと、`CloudStorage.exists(CLOUD_DB_PATH)` が退避ファイルまで拾ってしまうため。
