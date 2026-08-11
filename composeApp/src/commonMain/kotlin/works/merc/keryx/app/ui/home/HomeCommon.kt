@@ -161,15 +161,74 @@ fun nextFeedFilter(current: ArticleFilter, orderedFilters: List<ArticleFilter>, 
 fun feedListActionAllowed(pane: HomePane): Boolean = pane == HomePane.FeedList
 
 /**
- * Finds the rendered list index for a feed, folder, or tag filter.
+ * Finds every rendered list index for a feed, folder, or tag filter. A feed can render more than
+ * once — once under its folder group, and again under each expanded tag it's attached to — so this
+ * returns every such row's index, in top-to-bottom order (the folder/unassigned-group row first,
+ * then one per expanded tag it belongs to, in tag order). Folder and tag filters never duplicate,
+ * so their result is at most a single-element list.
  *
  * Expanded tags account for their attached feed rows when calculating subsequent indices.
  *
- * @param filter The filter whose list index to find.
+ * @param filter The filter whose list index(es) to find.
  * @param collapsedFolderIds Folder IDs whose feed rows are hidden.
  * @param feedTagMap Mapping of tag IDs to associated feed IDs.
  * @param expandedTagIds Tag IDs whose attached feed rows are rendered.
- * @return The filter's list index, or `null` if it is not currently rendered.
+ * @return The filter's list indices in top-to-bottom order, or empty if it is not currently rendered.
+ */
+fun feedListItemIndices(
+    filter: ArticleFilter,
+    feeds: List<Feeds>,
+    folders: List<Folders>,
+    tags: List<Tags>,
+    collapsedFolderIds: Set<String>,
+    feedTagMap: Map<String, Set<String>> = emptyMap(),
+    expandedTagIds: Set<String> = emptySet(),
+): List<Int> {
+    // All, Starred, and Search are rendered outside the LazyColumn entirely (as fixed SidebarRows
+    // above it), so they never correspond to a LazyColumn item and selecting them must not scroll it.
+    if (filter is ArticleFilter.Starred || filter is ArticleFilter.All || filter is ArticleFilter.Search) return emptyList()
+
+    val indices = mutableListOf<Int>()
+    var index = 1 // 0: "Folders" header
+    for ((folder, feedsInFolder) in groupFeedsByFolder(feeds, folders)) {
+        if (folder == null) {
+            if (folders.isNotEmpty()) index++ // NoFolderHeader
+            feedsInFolder.forEachIndexed { i, feed ->
+                if (filter is ArticleFilter.Feed && filter.feedId == feed.id) indices += index + i
+            }
+            index += feedsInFolder.size
+        } else {
+            if (filter is ArticleFilter.Folder && filter.folderId == folder.id) indices += index
+            index++ // FolderGroupHeader
+            if (folder.id !in collapsedFolderIds) {
+                feedsInFolder.forEachIndexed { i, feed ->
+                    if (filter is ArticleFilter.Feed && filter.feedId == feed.id) indices += index + i
+                }
+                index += feedsInFolder.size
+            }
+        }
+    }
+    index++ // divider
+    index++ // "Tags" header
+    for (tag in tags) {
+        if (filter is ArticleFilter.Tag && filter.tagId == tag.id) indices += index
+        index++ // TagRow
+        if (tag.id in expandedTagIds) {
+            val feedsInTag = feedsForTag(feeds, feedTagMap, tag.id)
+            if (filter is ArticleFilter.Feed) {
+                feedsInTag.forEachIndexed { i, feed -> if (filter.feedId == feed.id) indices += index + i }
+            }
+            index += feedsInTag.size
+        }
+    }
+    return indices
+}
+
+/**
+ * The single, folder-preferred rendered list index for a feed/folder/tag filter — the first of
+ * [feedListItemIndices] (a feed's folder-group row, ahead of any expanded-tag duplicate). Used
+ * where only one canonical row makes sense, e.g. scrolling to a row about to enter inline rename
+ * (only the folder-group row supports it — see `FeedListPane`'s `inlineEdit` effect).
  */
 fun feedListItemIndex(
     filter: ArticleFilter,
@@ -179,41 +238,8 @@ fun feedListItemIndex(
     collapsedFolderIds: Set<String>,
     feedTagMap: Map<String, Set<String>> = emptyMap(),
     expandedTagIds: Set<String> = emptySet(),
-): Int? {
-    // All, Starred, and Search are rendered outside the LazyColumn entirely (as fixed SidebarRows
-    // above it), so they never correspond to a LazyColumn item and selecting them must not scroll it.
-    if (filter is ArticleFilter.Starred || filter is ArticleFilter.All || filter is ArticleFilter.Search) return null
-
-    var index = 1 // 0: "Folders" header
-    for ((folder, feedsInFolder) in groupFeedsByFolder(feeds, folders)) {
-        if (folder == null) {
-            if (folders.isNotEmpty()) index++ // NoFolderHeader
-            feedsInFolder.forEachIndexed { i, feed ->
-                if (filter is ArticleFilter.Feed && filter.feedId == feed.id) return index + i
-            }
-            index += feedsInFolder.size
-        } else {
-            if (filter is ArticleFilter.Folder && filter.folderId == folder.id) return index
-            index++ // FolderGroupHeader
-            if (folder.id !in collapsedFolderIds) {
-                feedsInFolder.forEachIndexed { i, feed ->
-                    if (filter is ArticleFilter.Feed && filter.feedId == feed.id) return index + i
-                }
-                index += feedsInFolder.size
-            }
-        }
-    }
-    index++ // divider
-    index++ // "Tags" header
-    for (tag in tags) {
-        if (filter is ArticleFilter.Tag && filter.tagId == tag.id) return index
-        index++ // TagRow
-        if (tag.id in expandedTagIds) {
-            index += feedsForTag(feeds, feedTagMap, tag.id).size
-        }
-    }
-    return null
-}
+): Int? =
+    feedListItemIndices(filter, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds).firstOrNull()
 
 /** The feed/folder/tag resolved by [resolveFeedListSelectionTarget] for the current filter. */
 internal sealed interface FeedListSelectionTarget {
@@ -311,6 +337,28 @@ suspend fun LazyListState.scrollToIndexIfNeeded(index: Int) {
             itemEnd > viewportEnd -> animateScrollBy((itemEnd - viewportEnd).toFloat())
         }
     }
+}
+
+/**
+ * Picks which of a selected item's (possibly several — see [feedListItemIndices]) rendered indices
+ * to scroll to: one already on screen is left alone, so a row the user just clicked (already
+ * visible, by definition) stays put rather than the view jumping to a different, currently
+ * off-screen instance of the same feed. Falls back to the first index — [feedListItemIndices]'
+ * folder-preferred order — when none of them are currently visible (e.g. a keyboard/search/
+ * notification-driven selection, which only ever targets the folder-group instance).
+ */
+fun pickScrollTargetIndex(indices: List<Int>, visibleIndices: Set<Int>): Int? =
+    indices.firstOrNull { it in visibleIndices } ?: indices.firstOrNull()
+
+/**
+ * Scrolls a selected item's rendered row(s) into view, as [scrollToIndexIfNeeded] above but for an
+ * item that may render at more than one [indices] (see [feedListItemIndices]). See
+ * [pickScrollTargetIndex] for how the target is chosen among them.
+ */
+suspend fun LazyListState.scrollToIndexIfNeeded(indices: List<Int>) {
+    val visibleIndices = layoutInfo.visibleItemsInfo.mapTo(mutableSetOf()) { it.index }
+    val target = pickScrollTargetIndex(indices, visibleIndices) ?: return
+    scrollToIndexIfNeeded(target)
 }
 
 /**

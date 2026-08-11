@@ -347,6 +347,57 @@ class HomeCommonTest {
         assertNull(feedListItemIndex(ArticleFilter.Folder("gone"), feeds, folders, tags, emptySet()))
     }
 
+    // --- feedListItemIndices ---
+
+    @Test
+    fun feedListItemIndicesReturnsBothTheFolderRowAndEveryExpandedTagNestedRow() {
+        // A feed attached to two expanded tags renders three times: once under its folder group
+        // ("no folder", here), and once under each expanded tag, in tag order.
+        val tags = listOf(tag("t1"), tag("t2"))
+        val feeds = listOf(feed("f1"))
+        val feedTagMap = mapOf("f1" to setOf("t1", "t2"))
+
+        // 0: "Folders" header, 1: f1 (no folder), 2: divider, 3: "Tags" header,
+        // 4: tag t1, 5: f1 (under t1), 6: tag t2, 7: f1 (under t2)
+        assertEquals(
+            listOf(1, 5, 7),
+            feedListItemIndices(ArticleFilter.Feed("f1"), feeds, emptyList(), tags, emptySet(), feedTagMap, setOf("t1", "t2")),
+        )
+    }
+
+    @Test
+    fun feedListItemIndicesFirstElementMatchesFeedListItemIndex() {
+        // feedListItemIndex is defined as the first of feedListItemIndices; pin that relationship
+        // directly rather than only via each function's own separate assertions above.
+        val tags = listOf(tag("t1"))
+        val feeds = listOf(feed("f1"))
+        val feedTagMap = mapOf("f1" to setOf("t1"))
+
+        val indices = feedListItemIndices(ArticleFilter.Feed("f1"), feeds, emptyList(), tags, emptySet(), feedTagMap, setOf("t1"))
+        val index = feedListItemIndex(ArticleFilter.Feed("f1"), feeds, emptyList(), tags, emptySet(), feedTagMap, setOf("t1"))
+
+        assertEquals(indices.firstOrNull(), index)
+    }
+
+    // --- pickScrollTargetIndex ---
+
+    @Test
+    fun pickScrollTargetIndexPrefersAnAlreadyVisibleIndexOverTheFirst() {
+        // The folder-row instance (1) isn't on screen, but the tag-nested one (7) is — e.g. the
+        // row the user just clicked. Nothing should move.
+        assertEquals(7, pickScrollTargetIndex(listOf(1, 5, 7), visibleIndices = setOf(7)))
+    }
+
+    @Test
+    fun pickScrollTargetIndexFallsBackToTheFirstIndexWhenNoneAreVisible() {
+        assertEquals(1, pickScrollTargetIndex(listOf(1, 5, 7), visibleIndices = setOf(20, 21)))
+    }
+
+    @Test
+    fun pickScrollTargetIndexReturnsNullForAnEmptyList() {
+        assertNull(pickScrollTargetIndex(emptyList(), visibleIndices = setOf(1, 2, 3)))
+    }
+
     // --- resolveFeedListSelectionTarget ---
 
     @Test
