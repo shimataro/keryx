@@ -109,6 +109,53 @@ only to the pane that sits in the window's top-left corner — currently
   call must stay *after* the inner content padding (see Article card style
   below) — the outer margin doesn't affect that ordering.
 
+## Sticky section headers in scrollable lists
+
+**Desktop only** — see the note at the end of this section.
+
+A scrollable list whose content is split into distinct, named sections (e.g.
+`FeedListPane`'s "フォルダー" and "タグ" groups) pins each section's header to
+the top of the scrollable area while scrolling through that section, handing
+off to the next section's header once it reaches the top — the same
+interaction VSCode's Explorer sidebar uses for stacked sections ("Outline",
+"Timeline", etc.). Use `LazyListScope.stickyHeader(key, contentType, content)`
+(stable in this project's Compose Multiplatform version, no `@OptIn` needed)
+rather than a plain `item(...)` for any such header, following
+`FeedListPane`'s "フォルダー"/"タグ" headers as the reference implementation:
+
+- Paint the header's own background with the *same* tonal-role token the pane
+  itself uses (e.g. `surfaceContainerLow` for `FeedListPane`, per "Pane
+  structure & tonal roles" above), placed between `Modifier.fillMaxWidth()`
+  and the row's `Modifier.padding(...)` so it fills edge-to-edge. A
+  `stickyHeader` draws above content scrolling beneath it but has no opacity
+  of its own — without this, rows scrolling underneath would show through.
+- No hairline border, divider, or drop shadow on the header itself — per the
+  Divider policy above, a fixed row meeting a scroll area needs no divider
+  ("both sides share the same tone… spacing alone is enough"), and a pinned
+  header is that same relationship, just achieved by pinning instead of
+  static layout. A shadow would also reintroduce the M3 tonal-elevation look
+  this app avoids everywhere else.
+- A semantic divider between two sections (e.g. `FeedListPane`'s
+  `"tags-divider"`) stays a plain, unpinned `item(...)` — do not fold it into
+  either section's sticky header. The header's own opaque background already
+  separates it from content scrolling beneath; baking a divider into the
+  header would show it permanently, even at rest with both sections fully
+  visible — exactly the "fixed row/scroll boundary" case the Divider policy
+  says needs none.
+- This does not change how a list's rows are hit-tested for drag-and-drop
+  (`FeedListDragController`/`HomeCommon.resolveHitBand`):
+  `LazyListState.layoutInfo.visibleItemsInfo` keeps every item — sticky or
+  not — in ascending index order, so a pinned header's band is always
+  resolved before any row hidden behind it, with no extra code needed.
+
+**Desktop only.** This convention targets the current Compose Multiplatform
+desktop 3-pane layout. Android/iOS mobile targets (see `external-spec.md` §2)
+are only planned, not yet built, and a phone-sized layout may not reuse this
+same sidebar/list structure at all — defer whether/how sticky section headers
+apply on mobile until that layout is actually designed, the same way
+`app-architecture.md` already defers the Android icon-set question to when
+Android work begins.
+
 ## Article card style
 
 `ArticleRow` in
