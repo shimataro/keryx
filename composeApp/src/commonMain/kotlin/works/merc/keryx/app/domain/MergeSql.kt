@@ -152,7 +152,10 @@ object MergeSql {
         )
         SELECT
             c.id, c.feed_id, c.guid, c.url, c.title,
-            COALESCE(c.summary, l.summary),
+            -- summary is dead weight once content covers the same text (see ArticleRepository.
+            -- prepareParsed), so a merged article that ends up with content must not resurrect a
+            -- stale summary left over on either side.
+            CASE WHEN COALESCE(c.content, l.content) IS NOT NULL THEN NULL ELSE COALESCE(c.summary, l.summary) END,
             COALESCE(c.content, l.content),
             c.author, c.published_at, c.thumbnail_url,
             CASE WHEN COALESCE(c.read_at, 0) >= COALESCE(l.read_at, 0) THEN c.is_read ELSE l.is_read END,
@@ -194,7 +197,7 @@ object MergeSql {
         )
           AND EXISTS (SELECT 1 FROM main.feeds mf WHERE mf.id = c.feed_id)
         ON CONFLICT(id) DO UPDATE SET
-            summary = COALESCE(excluded.summary, summary),
+            summary = excluded.summary,
             content = COALESCE(excluded.content, content),
             cached_at = CASE
                 WHEN excluded.cached_at IS NOT NULL AND cached_at IS NOT NULL THEN MAX(excluded.cached_at, cached_at)

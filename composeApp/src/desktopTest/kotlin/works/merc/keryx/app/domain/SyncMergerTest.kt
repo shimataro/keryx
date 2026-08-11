@@ -234,6 +234,36 @@ class SyncMergerTest {
     }
 
     @Test
+    fun mergedArticleWithContentNeverResurrectsAStaleSummary() {
+        // Regression guard: a peer that still carries a stale summary alongside content (a
+        // pre-fix row, or a device that hasn't re-fetched) must never resurrect that summary
+        // into an already-clean local row once the merged article has content.
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f1", now = 100)
+        insertArticle(
+            cloudDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100,
+            content = "cloud body", summary = "stale cloud summary",
+        )
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("f1", now = 50)
+        insertArticle(
+            localDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 50,
+            content = null, summary = null,
+        )
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
+        assertEquals("cloud body", merged.content)
+        assertNull(merged.summary)
+        verifyDriver.close()
+    }
+
+    @Test
     fun articleGuidCollisionGuardSkipsCloudArticle() {
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFeed("f1", now = 100)

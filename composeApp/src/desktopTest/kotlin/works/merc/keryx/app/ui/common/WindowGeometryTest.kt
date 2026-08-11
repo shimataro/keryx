@@ -451,6 +451,56 @@ class WindowGeometryTest {
     }
 
     @Test
+    fun `nextDialogFit withholds presentability while the window is still at the placeholder size`() {
+        // The flicker guard: the dialog stays invisible for as long as there is a correction left
+        // to make, so the placeholder-sized (and therefore placeholder-centered) frame is never
+        // shown before the fitted one.
+        val decision = nextDialogFit(DialogFitState(), TARGET, PLACEHOLDER, repositionOnResize = true)
+
+        assertTrue(decision.applySize)
+        assertFalse(decision.presentable)
+    }
+
+    @Test
+    fun `nextDialogFit reports presentable once the applied size has landed`() {
+        val state = nextDialogFit(DialogFitState(), TARGET, PLACEHOLDER, repositionOnResize = true).state
+
+        val settled = nextDialogFit(state, TARGET, TARGET, repositionOnResize = true)
+
+        assertFalse(settled.applySize)
+        assertTrue(settled.presentable)
+    }
+
+    @Test
+    fun `nextDialogFit reports presentable once the attempt cap is spent even though the size never matched`() {
+        // A window manager that refuses the requested geometry must not leave the dialog invisible
+        // forever: once the guard has given up, there is nothing left to wait for.
+        var state = DialogFitState()
+        repeat(MAX_FIT_CORRECTIONS) {
+            val decision = nextDialogFit(state, TARGET, PLACEHOLDER, repositionOnResize = false)
+            assertFalse(decision.presentable, "still correcting, so not yet presentable")
+            state = decision.state
+        }
+
+        val exhausted = nextDialogFit(state, TARGET, PLACEHOLDER, repositionOnResize = false)
+
+        assertFalse(exhausted.applySize)
+        assertTrue(exhausted.presentable)
+    }
+
+    @Test
+    fun `nextDialogFit reports presentable for a difference within the rounding tolerance`() {
+        // Rounding between Compose's Dp and AWT's integer points must not hold the dialog back:
+        // sizeMatches already calls this settled, so nothing further would ever be applied.
+        val nearlyTarget = DpSize(TARGET.width, TARGET.height - 1.dp)
+
+        val decision = nextDialogFit(DialogFitState(), TARGET, nearlyTarget, repositionOnResize = true)
+
+        assertFalse(decision.applySize)
+        assertTrue(decision.presentable)
+    }
+
+    @Test
     fun `nextDialogFit does not spend attempts on events where the window already matches`() {
         // Otherwise the cap would be consumed by the guard's own success feedback rather than by
         // genuine fights with the window manager.
