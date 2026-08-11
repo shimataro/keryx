@@ -42,6 +42,11 @@ sealed class KeryxException(message: String) : Exception(message)
     `FeedDiscoveryException` を返す。最大 5 回のリダイレクトループガードあり。
   - `DropboxStorage`: 401/403 → `CloudAuthException`、409（upload）→ `SyncConflictException`、
     409 `path/not_found`（get_metadata）→ 存在しない、を判別。
+  - `DatabaseMerger.merge`: マージ失敗を SQLite の**エラーコード**（`SQLiteException.resultCode`。
+    メッセージ文字列ではない）から分類し、`CloudDataIncompatibleException`（破損ファイル、外部・
+    レガシースキーマ、またはクラウド DB 自身の（より緩い）スキーマが許していた制約違反）にするか、
+    そのまま変更しない（一時的／アプリのバグ）。詳細は [sync-architecture.ja.md](sync-architecture.ja.md)
+    の「マージ失敗の分類」を参照。
 - **Repository 層**: `Result` を受けてビジネスロジック（リトライ等）を適用。
 - **ViewModel 層**: `Result` を UI 状態へ変換。
 - **UI 層**: `ui/i18n/ErrorMessages.kt` の `userMessage(KeryxException)` は `KeryxException` を
@@ -71,7 +76,7 @@ sealed class KeryxException(message: String) : Exception(message)
 | `ShowFeedDetail(feedId)` | フィード消失(410) / URL 変更(301/308) | フィード一覧で該当フィードを選択（一覧をクリックしたときと同じ） |
 | `ShowSettingsTab(tabId)` | 同期エラー（`SchemaVersionException` は `updates`、その他は `cloud_sync`） | 設定ダイアログを該当タブで開く。`cloud_sync` タブは `SyncRepository.lastSyncError` を失敗理由として表示し、`updates` タブは開いた時点で自動的に更新確認を行う |
 | `ShowInfoDialog(detail)` | macOS の translocated 警告 | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
-| `ResetCloudData` | `CloudDataIncompatibleException` | 専用のインラインボタン → 確認ダイアログ → クラウドデータのリセット |
+| `ResetCloudData` | `CloudDataIncompatibleException` | 専用のインラインボタン → 確認ダイアログ → クラウドDBをタイムスタンプ付き名前で退避してから作り直す（[sync-architecture.ja.md](sync-architecture.ja.md)「クラウドデータのリセット（退避）」参照） |
 
 `AppNotification(id, level: INFO|WARNING|ERROR, message, timestampMillis, action)`。
 Repository から通知を出す際、文言は `NotificationMessages`（`getString` ベース、テストでは Fake）で
@@ -86,7 +91,7 @@ Repository から通知を出す際、文言は `NotificationMessages`（`getStr
 | `CloudStorageException` | ✅ | ✅ |
 | `SyncConflictException` | ✅（内部） | ❌ |
 | `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ |
-| `CloudDataIncompatibleException`（破損/非互換なクラウドDB） | ❌ | ✅ |
+| `CloudDataIncompatibleException`（破損/非互換なクラウドDB／制約違反データ） | ❌（リセットまたは手動同期の成功まで**自動**同期そのものが抑制される — `SyncTrigger.AUTOMATIC` ゲート。[sync-architecture.ja.md](sync-architecture.ja.md)「自動同期の抑制」参照） | ✅ |
 | `FeedNotFoundException(isGone=true)` | ❌ | ✅ |
 
 ## 定数（`core/Constants.kt`）

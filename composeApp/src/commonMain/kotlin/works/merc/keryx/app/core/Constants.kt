@@ -22,6 +22,15 @@ const val MILLIS_PER_MINUTE = 60_000L
 /** Cloud file path/name for the synced DB (leading slash for Dropbox; the basename for Google Drive). */
 const val CLOUD_DB_PATH = "/keryx.db"
 
+/**
+ * Prefix/suffix of the archive a cloud-data reset creates, e.g. `/keryx-20260811-103000.db.bak`
+ * (see `cloudBackupPath`). Deliberately *not* derived from [CLOUD_DB_PATH]: the archive name must
+ * not match Google Drive's `name = 'keryx.db'` lookup or OneDrive's basename addressing, or
+ * `CloudStorage.exists(CLOUD_DB_PATH)` would end up seeing the archive too.
+ */
+const val CLOUD_DB_BACKUP_PREFIX = "/keryx-"
+const val CLOUD_DB_BACKUP_SUFFIX = ".db.bak"
+
 // --- Sync / network ---
 const val SYNC_MAX_RETRY = 3
 const val FEED_TIMEOUT_RETRY_COUNT = 1

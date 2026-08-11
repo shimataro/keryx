@@ -23,6 +23,7 @@ import works.merc.keryx.app.domain.NotificationMessages
 import works.merc.keryx.app.domain.OpmlImporter
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
+import works.merc.keryx.app.domain.SyncTrigger
 import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.domain.UpdateStatus
 import works.merc.keryx.app.domain.shouldCheckForUpdate
@@ -50,7 +51,7 @@ internal suspend fun runStartupTasks(koin: Koin) {
             settingsRepository.mutateLocalSettings { it.copy(lastCacheCleanupAt = now) }
         }
         if (koin.get<CloudSession>().isConnected()) {
-            koin.get<SyncRepository>().sync()
+            koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
         }
         refreshFeedsAndNotify(koin)
         checkForUpdateAndNotify(koin)
@@ -97,7 +98,7 @@ internal suspend fun backgroundUpdateLoop(koin: Koin) {
         runCatching {
             if (minutes > 0) {
                 refreshFeedsAndNotify(koin)
-                koin.get<SyncRepository>().sync()
+                koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
             }
             val settings = settingsRepository.getLocalSettings()
             if (shouldCheckForUpdate(SystemClock.nowMillis(), settings.lastUpdateCheckAt, settings.updateCheckIntervalHours)) {

@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.patch
 import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
@@ -12,7 +13,9 @@ import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.ONEDRIVE_GRAPH_BASE
 import works.merc.keryx.app.core.Result
@@ -139,6 +142,32 @@ class OneDriveStorage(
             response.status.value in 200..299 -> Result.Ok(Unit)
             // Already absent — delete is idempotent.
             response.status.value == 404 -> Result.Ok(Unit)
+            else -> mapError(response.status.value, response.bodyAsText())
+        }
+    }
+
+    /**
+     * Renames the app-folder item at [from] to [to]'s basename via a Graph metadata PATCH.
+     *
+     * Treats an already-absent item as success; an occupied destination surfaces as 409
+     * (`nameAlreadyExists`) — Graph's `@microsoft.graph.conflictBehavior` is a content-upload
+     * parameter and does not apply to a metadata PATCH, so the default no-overwrite behavior
+     * stands.
+     *
+     * @param from The current path of the item within the app folder.
+     * @param to The path whose basename becomes the item's new name.
+     * @return A successful result when the item is renamed or already absent; otherwise, the
+     * mapped storage error (including an occupied destination).
+     */
+    override suspend fun rename(from: String, to: String): Result<Unit> = withToken { token ->
+        val response = client.patch(itemUrl(from)) {
+            header("Authorization", "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { put("name", fileName(to)) }.toString())
+        }
+        when {
+            response.status.value in 200..299 -> Result.Ok(Unit)
+            response.status.value == 404 -> Result.Ok(Unit) // already absent — rename is idempotent
             else -> mapError(response.status.value, response.bodyAsText())
         }
     }

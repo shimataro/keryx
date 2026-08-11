@@ -15,9 +15,12 @@ import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.CLOUD_DB_PATH
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.DB_FILE_NAME
+import works.merc.keryx.app.core.cloudBackupPath
+import works.merc.keryx.app.core.looksLikeSqliteFile
 import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.Result
@@ -34,6 +37,14 @@ import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.DatabaseMerger
 import works.merc.keryx.app.platform.DatabaseSnapshot
 import works.merc.keryx.app.platform.FileIO
+
+/**
+ * Who asked for a sync. Only [AUTOMATIC] is subject to the unusable-cloud-DB gate
+ * ([SyncRepository.autoSyncSuspended]): a person who pressed "sync" must always get a real
+ * attempt (and the failure that explains why), or the app would silently do nothing with no way
+ * for them to find out.
+ */
+enum class SyncTrigger { MANUAL, AUTOMATIC }
 
 /**
  * Cloud sync via the "upload the whole SQLite file" strategy. Downloads the
@@ -60,6 +71,7 @@ class SyncRepository(
 
     private val mutex = Mutex()
     private val _lastSyncError = MutableStateFlow<String?>(null)
+    private val _autoSyncSuspended = MutableStateFlow(false)
 
     /**
      * Debounce signals, coalesced. [scheduleSync] is called from the UI thread (tag / folder / feed
@@ -86,7 +98,7 @@ class SyncRepository(
                 // nobody reads. sync() is not exception-proof (a bare SQLDelight write in
                 // setSyncState, resource loading in emitErrorNotification), which is why its other
                 // call sites in main.kt guard the same way.
-                runCatching { sync() }
+                runCatching { sync(SyncTrigger.AUTOMATIC) }
                     .onFailure { e ->
                         if (e is CancellationException) throw e
                         Log.error(TAG, "Debounced sync failed", e)
@@ -103,11 +115,23 @@ class SyncRepository(
     val lastSyncError: StateFlow<String?> = _lastSyncError
 
     /**
-     * Clears the mirrored sync-failure reason, e.g. when the connection that produced it is being
-     * torn down so a subsequently-connected provider does not inherit it.
+     * True while the cloud DB is known-unusable and automatic syncing is therefore paused (see
+     * [sync]). Deliberately in-memory, not persisted: a process restart is a free, honest retry
+     * (another device may have reset the cloud in the meantime), and suppressing repeated failures
+     * within one running process — the entire point, since every debounced write and every
+     * background cycle would otherwise re-download the same unusable file, re-run the merge, and
+     * re-raise the same notification — needs nothing more durable than that.
      */
-    fun clearLastSyncError() {
+    val autoSyncSuspended: StateFlow<Boolean> = _autoSyncSuspended
+
+    /**
+     * Clears everything that describes "why sync is currently broken" — the mirrored failure
+     * reason and the automatic-sync pause — e.g. when the connection that produced them is being
+     * torn down so a subsequently-connected provider does not inherit either.
+     */
+    fun clearSyncFailureState() {
         _lastSyncError.value = null
+        _autoSyncSuspended.value = false
     }
 
     /**
@@ -115,42 +139,98 @@ class SyncRepository(
      */
     override fun scheduleSync() {
         if (cloudProvider() == null) return
+        if (_autoSyncSuspended.value) return
         syncSignals.trySend(Unit)
     }
 
     /**
      * Synchronizes the local database with the cloud provider.
      *
+     * @param trigger Who is asking. [SyncTrigger.AUTOMATIC] is skipped (returning [Result.Ok]) while
+     * [autoSyncSuspended] is true, so a known-unusable cloud DB does not get re-downloaded and
+     * re-merged on every debounced write or background cycle; [SyncTrigger.MANUAL] (the default)
+     * always runs, so a person who explicitly asked for a sync always gets a real attempt.
      * @return The synchronization result.
      */
-    suspend fun sync(): Result<Unit> {
+    suspend fun sync(trigger: SyncTrigger = SyncTrigger.MANUAL): Result<Unit> {
+        if (trigger == SyncTrigger.AUTOMATIC && _autoSyncSuspended.value) {
+            Log.info(TAG, "Automatic sync skipped: cloud data is unusable until it is reset")
+            return Result.Ok(Unit)
+        }
         val result = activityCenter.trackSync { mutex.withLock { syncLocked() } }
+        updateAutoSyncGate(result)
         emitErrorNotification(result)
         return result
     }
 
     /**
-     * Replaces the cloud database with a fresh snapshot of the local database.
+     * Pauses automatic syncing once a sync fails with [CloudDataIncompatibleException], and
+     * resumes it the moment a sync (or a reset) succeeds. [SchemaVersionException] is deliberately
+     * left out: it is equally permanent, but its fix is "update the app", and silencing background
+     * syncing would hide the moment a newly-installed version starts working again.
+     */
+    private fun updateAutoSyncGate(result: Result<Unit>) {
+        when {
+            result is Result.Err && result.exception is CloudDataIncompatibleException ->
+                _autoSyncSuspended.value = true
+            result is Result.Ok -> _autoSyncSuspended.value = false
+        }
+    }
+
+    /**
+     * Archives the current cloud database under a timestamped name and replaces it with a fresh
+     * snapshot of the local database — the recovery path for a cloud DB this app cannot use.
      *
-     * @return A successful result when the cloud database is recreated; otherwise, the deletion or
+     * The old file is renamed rather than deleted so a mistaken reset (or a merge bug that only
+     * *looked* like corruption) is still recoverable by hand from the provider's app folder.
+     * Archives are never pruned automatically.
+     *
+     * @return A successful result when the cloud database is recreated; otherwise, the archive or
      * creation failure.
      */
     suspend fun resetCloudData(): Result<Unit> {
         val cloud = cloudProvider() ?: return Result.Ok(Unit)
         val result = activityCenter.trackSync {
             mutex.withLock {
-                when (val del = cloud.delete(CLOUD_DB_PATH)) {
-                    is Result.Err -> {
-                        Log.error(TAG, "Reset: delete failed: ${del.exception.message}")
-                        del
-                    }
-                    // The cloud file is gone, so re-create it from the local DB.
+                when (val archived = archiveCloudDb(cloud)) {
+                    is Result.Err -> archived
+                    // The old file is out of the way (archived or deleted), so re-create it.
                     is Result.Ok -> createFresh(cloud)
                 }
             }
         }
+        updateAutoSyncGate(result)
         emitErrorNotification(result)
         return result
+    }
+
+    /**
+     * Moves the cloud DB aside so [createFresh] can recreate it.
+     *
+     * Falls back to deleting it when the rename fails for a storage reason (an occupied archive
+     * name, a provider that rejected the move): reset is the only way out of an unusable cloud DB,
+     * so it must never become impossible. An auth failure is not retried as a delete — the same
+     * missing credentials would fail it identically, so the error is surfaced as-is.
+     */
+    private suspend fun archiveCloudDb(cloud: CloudStorage): Result<Unit> {
+        val backupPath = cloudBackupPath(clock.nowMillis())
+        return when (val renamed = cloud.rename(CLOUD_DB_PATH, backupPath)) {
+            is Result.Ok -> Result.Ok(Unit)
+            is Result.Err -> {
+                if (renamed.exception is CloudAuthException) {
+                    Log.error(TAG, "Reset: archive failed (not authenticated)")
+                    return renamed
+                }
+                Log.warn(TAG, "Reset: archive to $backupPath failed (${renamed.exception.message}); deleting instead")
+                when (val deleted = cloud.delete(CLOUD_DB_PATH)) {
+                    is Result.Ok -> Result.Ok(Unit)
+                    is Result.Err -> {
+                        Log.error(TAG, "Reset: delete fallback failed: ${deleted.exception.message}")
+                        deleted
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -295,6 +375,18 @@ class SyncRepository(
      * @throws CancellationException If the coroutine is cancelled during the merge.
      */
     private suspend fun mergeCloud(data: ByteArray): Result<Unit> {
+        // Symmetric with snapshotBytesForUpload(): reject a payload that is definitely not a
+        // SQLite file before touching the disk. A 0-byte file is a *valid* empty SQLite DB as far
+        // as the engine is concerned, so it would otherwise attach cleanly and only fail deep
+        // inside the merge statements with an ambiguous "no such table: cloud.folders" — this
+        // catches the cheaper, unambiguous case (truncated download, HTML error page, wrong file)
+        // up front. Unlike the upload-side check (CloudStorageException, a local guard against
+        // sending bad data), this is CloudDataIncompatibleException: the cloud itself is what's
+        // broken here, so the user is offered the reset action.
+        if (!looksLikeSqliteFile(data)) {
+            Log.warn(TAG, "Cloud DB is not a SQLite file (${data.size} bytes)")
+            return Result.Err(CloudDataIncompatibleException("Cloud DB is not a SQLite file"))
+        }
         val tempPath = FileIO.join(tempDir, "cloud_keryx.db")
         try {
             FileIO.writeBytes(tempPath, data)
@@ -328,42 +420,16 @@ class SyncRepository(
             // that surfaces those writes to the SQLDelight query flows.
             throw e
         } catch (e: Throwable) {
-            val msg = e.message ?: ""
-            // Distinguish a permanently-unusable cloud DB (corrupt file or incompatible/foreign
-            // schema) from a genuinely transient failure: the former will never succeed on retry,
-            // so it must not be reported as "try again later".
-            if (isUnusableCloudDb(msg)) {
-                val hasExpectedSchema = DatabaseMerger.validateSchema(tempPath, KeryxDatabase.Schema.version)
-                if (hasExpectedSchema) {
-                    // Schema looks correct: this is an app bug, not incompatible data.
-                    Log.error(TAG, "Cloud DB merge failed despite compatible schema", e)
-                    return Result.Err(CloudStorageException("Merge failed: ${e.message}"))
-                }
-                Log.warn(TAG, "Cloud DB unusable (corrupt or incompatible schema): $msg")
-                return Result.Err(CloudDataIncompatibleException("Cloud DB unusable: $msg"))
-            }
+            // DatabaseMerger.merge() already classifies a permanently-unusable cloud DB as
+            // CloudDataIncompatibleException (a KeryxException, caught above) using SQLite's error
+            // code. Anything reaching this catch-all — including a post-commit failure in
+            // indexMissing()/notifyListeners(), which run after the merge has already succeeded —
+            // is therefore never the cloud's fault, and must not offer the destructive reset action.
             Log.error(TAG, "Cloud DB merge failed", e)
             return Result.Err(CloudStorageException("Merge failed: ${e.message}"))
         } finally {
             FileIO.delete(tempPath)
         }
-    }
-
-    /**
-     * Heuristic classification of a merge failure as "the cloud DB is unusable" (corrupt or an
-     * incompatible schema) rather than transient, by matching SQLite's error text. On no match we
-     * fall back to [CloudStorageException] (transient), so a miss never regresses behavior.
-     */
-    private fun isUnusableCloudDb(message: String): Boolean {
-        val m = message.lowercase()
-        return listOf(
-            "not a database",
-            "malformed",
-            "disk image",
-            "no such column",
-            "no such table",
-            "file is encrypted",
-        ).any { it in m }
     }
 
     /**
@@ -380,12 +446,10 @@ class SyncRepository(
         return try {
             DatabaseSnapshot.exportForUpload(localDbPath, snapshotPath)
             val bytes = FileIO.readBytes(snapshotPath)
-            when {
-                bytes == null || bytes.size < SQLITE_HEADER.size ->
-                    Result.Err(CloudStorageException("Snapshot missing or too small to upload"))
-                !bytes.copyOf(SQLITE_HEADER.size).contentEquals(SQLITE_HEADER) ->
-                    Result.Err(CloudStorageException("Snapshot is not a valid SQLite file"))
-                else -> Result.Ok(bytes)
+            if (looksLikeSqliteFile(bytes)) {
+                Result.Ok(bytes!!)
+            } else {
+                Result.Err(CloudStorageException("Snapshot missing or not a valid SQLite file"))
             }
         } catch (e: Throwable) {
             Log.error(TAG, "Snapshot export failed", e)
@@ -401,12 +465,6 @@ class SyncRepository(
 
     private companion object {
         const val TAG = "Sync"
-
-        /** The 16-byte magic string every valid SQLite database file starts with. */
-        val SQLITE_HEADER = byteArrayOf(
-            0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66,
-            0x6f, 0x72, 0x6d, 0x61, 0x74, 0x20, 0x33, 0x00,
-        )
     }
 
     fun lastSyncedAt(): Long? =

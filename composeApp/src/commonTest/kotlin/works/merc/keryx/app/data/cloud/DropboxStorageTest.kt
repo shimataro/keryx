@@ -6,6 +6,7 @@ import io.ktor.client.engine.mock.MockRequestHandler
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.respondError
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.OutgoingContent
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
@@ -82,6 +83,51 @@ class DropboxStorageTest {
         val r = s.delete(CLOUD_DB_PATH)
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
+    }
+
+    @Test
+    fun renamePostsMoveV2WithBothPaths() = runTest {
+        var capturedPath: String? = null
+        var capturedBody: String? = null
+        val s = storage { request ->
+            capturedPath = request.url.encodedPath
+            capturedBody = (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString()
+            respond("{}", HttpStatusCode.OK)
+        }
+        val r = s.rename(CLOUD_DB_PATH, "/keryx-20260811-103000.db.bak")
+        assertIs<Result.Ok<Unit>>(r)
+        assertEquals("/2/files/move_v2", capturedPath)
+        assertEquals(
+            """{"from_path":"$CLOUD_DB_PATH","to_path":"/keryx-20260811-103000.db.bak","autorename":false}""",
+            capturedBody,
+        )
+    }
+
+    @Test
+    fun renameTreatsAnAbsentSourceAsSuccess() = runTest {
+        val s = storage {
+            respond("""{"error_summary":"from_lookup/not_found/..."}""", HttpStatusCode.Conflict)
+        }
+        val r = s.rename(CLOUD_DB_PATH, "/keryx-20260811-103000.db.bak")
+        assertIs<Result.Ok<Unit>>(r)
+    }
+
+    @Test
+    fun renameSurfacesADestinationConflict() = runTest {
+        val s = storage {
+            respond("""{"error_summary":"to/conflict/file/..."}""", HttpStatusCode.Conflict)
+        }
+        val r = s.rename(CLOUD_DB_PATH, "/keryx-20260811-103000.db.bak")
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+    }
+
+    @Test
+    fun renameMapsAuthFailure() = runTest {
+        val s = storage { respondError(HttpStatusCode.Unauthorized) }
+        val r = s.rename(CLOUD_DB_PATH, "/keryx-20260811-103000.db.bak")
+        assertIs<Result.Err>(r)
+        assertIs<CloudAuthException>(r.exception)
     }
 
     @Test

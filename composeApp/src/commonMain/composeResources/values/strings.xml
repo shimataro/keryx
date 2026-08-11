@@ -183,7 +183,7 @@
     <string name="settings_cloud_switch_confirm_action">切り替える</string>
     <string name="settings_cloud_reset">同期データをリセット</string>
     <string name="settings_cloud_reset_confirm_title">クラウドの同期データをリセットしますか？</string>
-    <string name="settings_cloud_reset_confirm_body">クラウド上の同期データを削除し、この端末のデータで作り直します。他の端末で未同期の変更がある場合は失われることがあります。</string>
+    <string name="settings_cloud_reset_confirm_body">クラウド上の同期データを退避用の名前（keryx-日時.db.bak）に変更したうえで、この端末のデータで作り直します。退避できなかった場合は削除されます。退避したデータは自動では消えません。他の端末で未同期の変更がある場合は失われることがあります。</string>
     <string name="settings_cloud_reset_confirm_action">リセット</string>
     <string name="settings_last_synced">最終同期: %1$s</string>
     <string name="settings_font_size">文字サイズ</string>
@@ -273,7 +273,7 @@
     <string name="error_cloud_storage">同期に失敗しました。後でもう一度お試しください</string>
     <string name="error_sync_conflict">同期の競合が解決できませんでした</string>
     <string name="error_schema_version">クラウドの同期データが非対応のバージョンです。アプリを更新するか、クラウドの同期データを削除してください。</string>
-    <string name="error_cloud_data_incompatible">クラウドの同期データが壊れているか、非対応の形式です。クラウドの同期データを削除して作り直してください。</string>
+    <string name="error_cloud_data_incompatible">クラウドの同期データが壊れているか、非対応の形式です。リセットするまで自動同期は停止します。同期データをリセットして作り直してください（元のデータは退避されます）。</string>
     <string name="error_feed_gone">フィードが削除されました</string>
     <string name="error_feed_not_found">フィードが見つかりませんでした</string>
     <string name="error_invalid_url">フィード URL が正しくありません</string>

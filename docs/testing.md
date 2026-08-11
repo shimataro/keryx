@@ -17,7 +17,14 @@ New tests are placed at the same relative path as the code under test.
   (`followRedirects=false`, `expectSuccess=false`, fetcher installs `HttpTimeout`).
 - Time is faked via `Clock { fixedMillis }`, scheduling via `SyncScheduler {}`.
 - Merge is verified by calling `platform/DatabaseMerger.merge(...)` on two `fileDb()` instances
-  (close the SQLDelight driver before merging on the raw connection).
+  (close the SQLDelight driver before merging on the raw connection). Merge-failure classification
+  (a corrupt/incompatible cloud DB vs. a transient/app-side failure — see "Merge Failure
+  Classification" in [sync-architecture.md](sync-architecture.md)) is verified the same way:
+  `SyncMergerTest.kt`'s `mergeThrows*`/`mergeDoesNotClassify*`/`mergeRethrows*` tests call `merge`
+  directly against hand-built cloud DB files (a foreign schema, a `feeds` table missing its
+  `UNIQUE(url)`/`NOT NULL` constraints so it can hold data that violates the real schema, a byte-
+  flipped corrupt file, a `PRAGMA user_version` newer than local), and assert the thrown exception
+  type; `SyncRepositoryTest.kt` covers the same classification end-to-end through `sync()`.
 - `androidx.lifecycle.ViewModel` tests (depending on `viewModelScope` using `Dispatchers.Main.immediate`) must call `Dispatchers.setMain(StandardTestDispatcher())` in `@BeforeTest` and `Dispatchers.resetMain()` in `@AfterTest` (`HomeViewModelTest.kt` is the first example). If the `StateFlow` uses `SharingStarted.WhileSubscribed(...)`, the test must explicitly `collect` to start subscription, or values will not update.
 - Classes that directly use `CloudStorage` like `SyncRepository` are verified by swapping `CloudStorage` with a hand-rolled fake (in-memory Map + rev management) instead of mocking the HTTP layer (`SyncRepositoryTest.kt`). `DropboxStorage`/`DropboxAuthManager` tests themselves mock the HTTP layer via Ktor `MockEngine` as usual.
 - Combining `runTest` (virtual time) with Ktor `MockEngine`'s `HttpTimeout` or real socket I/O can cause false timeout detection and flakiness. Affected tests switch to `kotlinx.coroutines.runBlocking` (or real-time polling) (`FeedFetcherTest.kt`, `FeedRepositoryTest.kt`, `OAuthLoopbackServerTest.kt`, etc.).
@@ -58,6 +65,7 @@ had settled must still be corrected, plus the per-target attempt cap that keeps 
 that refuses the geometry from spinning the guard forever, and the `presentable` flag that keeps a
 dialog invisible until its fit has landed — including its release once that cap is spent, so a window
 manager refusing the geometry can never leave a dialog invisible),
+cloud-data corruption/incompatibility recovery (`SyncRepositoryTest.kt`/`SyncMergerTest.kt`: constraint-violating cloud data — a `feeds` row set with a UNIQUE-`url` duplicate or a NOT-NULL-violating NULL only the cloud DB's own laxer schema allowed — classified as `CloudDataIncompatibleException` alongside corrupt-file and foreign-schema cases, `SyncMergerTest.mergeDoesNotClassifyABrokenLocalSchemaAsCloudDataIncompatible` guarding the inverse, and `SyncRepositoryTest.postMergeIndexFailureIsNotClassifiedAsCloudDataIncompatible` guarding that a post-commit `FtsManager.indexMissing()` failure — which shares the same ambiguous SQLite error code as a broken cloud schema — is never misclassified as the cloud's fault; `core/SqliteFileTest.kt` for the downloaded-bytes SQLite-header rejection symmetric with the upload-side check), the cloud-data reset now archiving rather than deleting (`core/CloudBackupPathTest.kt` for the deterministic UTC-formatted backup path; `CloudStorage.rename` exercised per provider in `DropboxStorageTest.kt`/`GoogleDriveStorageTest.kt`/`OneDriveStorageTest.kt` including the destination-conflict and absent-source cases; `SyncRepositoryTest.kt`'s `resetCloudData*` tests for the rename-then-recreate flow and its delete fallback), and the automatic-sync suspension gate (`SyncRepositoryTest.kt`: an `AUTOMATIC`-triggered sync skipped while `autoSyncSuspended`, a `MANUAL` one never gated, `scheduleSync()` likewise suppressed, and the gate clearing on a successful sync/reset/`clearSyncFailureState()` — `SchemaVersionException` deliberately never triggers the gate),
 etc. `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` failures specifically indicate regression in DB schema / merge SQL / sync orchestration and require extra attention.
 
 Known uncovered areas: `SettingsViewModel.exportOpml`/`importOpml` now have a test seam
@@ -156,6 +164,13 @@ The parallel feed refresh's core concurrency (overlapping fetches + complete per
 
 - "Refresh all" over many feeds: articles still appear incrementally (feed by feed) rather than all at once at the end, and the final list order is stable.
 - Feed error / 301·308 URL-change / 410 Gone notifications still fire, and missing favicons still fill in after a refresh.
+
+Cloud-data corruption recovery needs a real cloud connection end to end, so confirm by hand, once per connected provider (Dropbox / Google Drive / OneDrive):
+
+- Replace the cloud `keryx.db` with an arbitrary non-SQLite file, then sync: the bell notification offers "同期データをリセット" (`ResetCloudData`). Running it leaves a `keryx-YYYYMMDD-HHMMSS.db.bak` archive in the provider's app folder alongside a freshly re-created `keryx.db` — the old file is not simply deleted.
+- Download `keryx.db`, add a `feeds` row whose `url` duplicates an existing one (only possible by editing the file directly, since the app itself never produces this), re-upload, then sync: the same `ResetCloudData` notification appears — confirms constraint-violating cloud data is treated the same as outright corruption.
+- With the cloud DB still unusable, trigger several automatic syncs (toggle read/star repeatedly, or wait for the background interval) and confirm no further download happens (no network activity, no repeated/duplicate notification) until the data is reset — then confirm a manual "sync now" *does* still attempt a real sync (and fails again) even while automatic syncs are suppressed.
+- After a successful reset, confirm automatic syncing resumes (a read/star toggle triggers a real sync again).
 
 The article reader's native WebView (`ui/home/ArticleDetailPane.kt`) is a heavyweight AWT surface
 that Compose UI tests cannot host at all, so its actual on-screen behavior — beyond the bounds/

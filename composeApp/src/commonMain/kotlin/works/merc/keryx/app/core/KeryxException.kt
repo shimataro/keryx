@@ -36,9 +36,11 @@ class SchemaVersionException(val localVersion: Long, val cloudVersion: Long) :
     KeryxException("Schema version mismatch")
 
 /**
- * The cloud sync DB cannot be used: it is corrupt (not a valid SQLite file / malformed) or its
- * schema is incompatible with this app (foreign/legacy layout). Permanent — retrying will not
- * help; the user must reset (delete and recreate) the cloud sync data.
+ * The cloud sync DB cannot be used: it is corrupt (not a valid SQLite file / malformed), its
+ * schema is incompatible with this app (foreign/legacy layout), or its data violates this app's
+ * schema constraints (a UNIQUE/NOT NULL/FOREIGN KEY violation the cloud DB's own — laxer — schema
+ * allowed). Permanent — retrying will not help; the user must reset (archive and recreate) the
+ * cloud sync data.
  */
 class CloudDataIncompatibleException(message: String) : KeryxException(message)
 

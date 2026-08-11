@@ -221,6 +221,55 @@ class GoogleDriveStorage(
         }
     }
 
+    /**
+     * Renames every app-data file matching [from]'s basename to [to]'s basename.
+     *
+     * Drive is name-addressed and tolerates duplicates, so — as with [delete] — all matches are
+     * handled: the deterministic winner (lowest id, see [findFile]) is renamed and the rest are
+     * deleted, leaving no leftover under the old name that a subsequent [create] would collide
+     * with.
+     *
+     * @param from The sync path whose basename identifies the file(s) to rename.
+     * @param to The sync path whose basename becomes the new name.
+     * @return `Result.Ok` when the rename (and any duplicate cleanup) succeeds or no file matched;
+     * otherwise, the first lookup, rename, or cleanup error.
+     */
+    override suspend fun rename(from: String, to: String): Result<Unit> = withToken { token ->
+        val files = when (val list = listFilesByName(token, fileName(from))) {
+            is Result.Err -> return@withToken list
+            is Result.Ok -> list.value
+        }
+        val winner = files.minByOrNull { it.id } ?: return@withToken Result.Ok(Unit) // absent = done
+        when (val renamed = renameById(token, winner.id, fileName(to))) {
+            is Result.Err -> return@withToken renamed
+            is Result.Ok -> Unit
+        }
+        for (file in files) {
+            if (file.id == winner.id) continue
+            when (val del = deleteById(token, file.id)) {
+                is Result.Err -> return@withToken del
+                is Result.Ok -> Unit
+            }
+        }
+        Result.Ok(Unit)
+    }
+
+    /** Renames a file by its Drive ID via a metadata PATCH. 404 is treated as success (idempotent). */
+    private suspend fun renameById(token: String, fileId: String, name: String): Result<Unit> {
+        // The *metadata* endpoint ($apiBase), not $uploadBase: updateFile()'s uploadType=media PATCH
+        // replaces content, this one only changes the name.
+        val response = client.patch("$apiBase/files/$fileId") {
+            header("Authorization", "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { put("name", name) }.toString())
+        }
+        return when {
+            response.status.value in 200..299 -> Result.Ok(Unit)
+            response.status.value == 404 -> Result.Ok(Unit)
+            else -> mapError(response.status.value, response.bodyAsText())
+        }
+    }
+
     override suspend fun exists(path: String): Result<Boolean> = withToken { token ->
         when (val f = findFile(token, fileName(path))) {
             is Result.Err -> f

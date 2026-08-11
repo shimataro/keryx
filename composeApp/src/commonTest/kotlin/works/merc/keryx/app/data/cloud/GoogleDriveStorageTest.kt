@@ -7,6 +7,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.respondError
 import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.OutgoingContent
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
@@ -586,6 +587,55 @@ class GoogleDriveStorageTest {
         assertEquals(1, history.size)
         assertEquals("GET", history[0].method.value)
         assertEquals("/drive/v3/files", history[0].url.encodedPath)
+        verify()
+    }
+
+    @Test
+    fun renamePatchesFileMetadataNotContent() = runTest {
+        val (s, history, verify) = storage(
+            "tok",
+            { respond(foundFile(), HttpStatusCode.OK) },
+            { respond("""{"id":"F1","version":"r2"}""", HttpStatusCode.OK) },
+        )
+        val r = s.rename(CLOUD_DB_PATH, "/keryx-20260811-103000.db.bak")
+        assertIs<Result.Ok<Unit>>(r)
+        assertEquals(2, history.size)
+        assertEquals("GET", history[0].method.value)
+        assertEquals("/drive/v3/files", history[0].url.encodedPath)
+        // The metadata endpoint ($apiBase), not the upload endpoint ($uploadBase) that
+        // updateFile() uses to replace content.
+        assertEquals("PATCH", history[1].method.value)
+        assertEquals("/drive/v3/files/F1", history[1].url.encodedPath)
+        val body = (history[1].body as OutgoingContent.ByteArrayContent).bytes().decodeToString()
+        assertEquals("""{"name":"keryx-20260811-103000.db.bak"}""", body)
+        verify()
+    }
+
+    @Test
+    fun renameOnAnAbsentFileSucceedsWithoutAPatch() = runTest {
+        val (s, history, verify) = storage("tok", { respond(notFound, HttpStatusCode.OK) })
+        val r = s.rename(CLOUD_DB_PATH, "/keryx-20260811-103000.db.bak")
+        assertIs<Result.Ok<Unit>>(r)
+        assertEquals(1, history.size)
+        verify()
+    }
+
+    @Test
+    fun renameRenamesTheWinnerAndDeletesDuplicates() = runTest {
+        val (s, history, verify) = storage(
+            "tok",
+            { respond("""{"files":[{"id":"F1","version":"r1"},{"id":"F2","version":"r2"}]}""", HttpStatusCode.OK) },
+            { respond("""{"id":"F1","version":"r2"}""", HttpStatusCode.OK) },
+            { respond("", HttpStatusCode.NoContent) },
+        )
+        val r = s.rename(CLOUD_DB_PATH, "/keryx-20260811-103000.db.bak")
+        assertIs<Result.Ok<Unit>>(r)
+        assertEquals(3, history.size)
+        assertEquals("PATCH", history[1].method.value)
+        assertEquals("/drive/v3/files/F1", history[1].url.encodedPath)
+        // No leftover under the old name — a subsequent create() must not collide with it.
+        assertEquals("DELETE", history[2].method.value)
+        assertEquals("/drive/v3/files/F2", history[2].url.encodedPath)
         verify()
     }
 }

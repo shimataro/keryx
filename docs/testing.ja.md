@@ -24,7 +24,14 @@
   （`followRedirects=false`, `expectSuccess=false`, フェッチャは `install(HttpTimeout)`）で組む。
 - 時刻は `Clock { fixedMillis }`、スケジューリングは `SyncScheduler {}` でフェイクする。
 - マージは `platform/DatabaseMerger.merge(...)` を 2 つの `fileDb()` に対して呼んで検証する
-  （生コネクションでマージする前に SQLDelight ドライバを close する）。
+  （生コネクションでマージする前に SQLDelight ドライバを close する）。マージ失敗の分類
+  （破損／非互換なクラウドDBか、一時的／アプリ側の失敗かの判別。[sync-architecture.ja.md](sync-architecture.ja.md)
+  「マージ失敗の分類」参照）も同じ方法で検証する: `SyncMergerTest.kt` の
+  `mergeThrows*`／`mergeDoesNotClassify*`／`mergeRethrows*` 系テストが、手作りしたクラウドDBファイル
+  （外部スキーマ、実スキーマの `UNIQUE(url)`／`NOT NULL` 制約を外した `feeds` テーブル（実スキーマなら
+  違反するデータを保持できる）、バイトを改変した破損ファイル、ローカルより新しい `PRAGMA user_version`）
+  に対して `merge` を直接呼び、投げられる例外の型を検証する。`SyncRepositoryTest.kt` は同じ分類を
+  `sync()` 経由でエンドツーエンドに検証する。
 - `androidx.lifecycle.ViewModel`（`viewModelScope` は `Dispatchers.Main.immediate` 依存）のテストは
   `@BeforeTest` で `Dispatchers.setMain(StandardTestDispatcher())`、`@AfterTest` で `Dispatchers.resetMain()`
   を呼ぶ（`HomeViewModelTest.kt` が最初の導入例）。`StateFlow` が `SharingStarted.WhileSubscribed(...)`
@@ -86,7 +93,23 @@ Enter で確定、Escape と「×」アイコンでのキャンセル、blur に
 `VACUUM INTO` スナップショットで `articles_fts` を除外し `user_version` を保全することを含む）、
 Linux の SNI トレイ（`TrayPixmapTest`＝ビッグエンディアン ARGB32 / RGBA エンコーダーとアルファ保全、
 `TrayMenuModelTest`＝dbusmenu レイアウト、`TrayMenuRevisionTest`＝revision / `AboutToShow` /
-イベントディスパッチ、`DBusSignatureTest`＝export した D-Bus シグネチャ）などを網羅する。
+イベントディスパッチ、`DBusSignatureTest`＝export した D-Bus シグネチャ）、
+クラウドデータの破損／非互換からの復旧（`SyncRepositoryTest.kt`／`SyncMergerTest.kt`：制約違反する
+クラウドデータ——`feeds` の行集合が UNIQUE な `url` を重複させている、または NOT NULL 違反の NULL を
+クラウド DB 自身の（より緩い）スキーマだけが許していた——を、破損ファイルや外部スキーマと同様に
+`CloudDataIncompatibleException` として分類すること、`SyncMergerTest.mergeDoesNotClassifyABrokenLocalSchemaAsCloudDataIncompatible`
+がその逆（ローカル側の破損は誤分類しない）を担保すること、`SyncRepositoryTest.postMergeIndexFailureIsNotClassifiedAsCloudDataIncompatible`
+がマージ commit 後の `FtsManager.indexMissing()` の失敗——壊れたクラウドスキーマと同じ曖昧な SQLite
+エラーコードを共有する——を誤って分類しないことを担保すること。`core/SqliteFileTest.kt`＝アップロード
+側と対称なダウンロードバイト列の SQLite ヘッダ検証）、削除ではなく退避するようになったクラウドデータの
+リセット（`core/CloudBackupPathTest.kt`＝決定的で UTC 整形された退避パス、`CloudStorage.rename` は
+`DropboxStorageTest.kt`／`GoogleDriveStorageTest.kt`／`OneDriveStorageTest.kt` でプロバイダごとに
+（退避先の衝突・退避元の不在ケースを含めて）検証、`SyncRepositoryTest.kt` の `resetCloudData*` 系が
+リネームしてから作り直すフローとその削除フォールバックを検証）、自動同期の抑制ゲート
+（`SyncRepositoryTest.kt`：`AUTOMATIC` トリガーの同期が `autoSyncSuspended` 中はスキップされること、
+`MANUAL` は決してゲートされないこと、`scheduleSync()` も同様に抑制されること、成功した同期／リセット／
+`clearSyncFailureState()` でゲートがクリアされること——`SchemaVersionException` は意図的にゲートを
+一切起動しない）などを網羅する。
 `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` の失敗は DB スキーマ・
 マージ SQL・同期オーケストレーションの退行を意味するので特に注意する。
 
@@ -197,6 +220,23 @@ Linux の SNI トレイでは `SniConnection`（接続・バス名取得・expor
   最終的なリスト順序が安定していること。
 - フィードエラー / 301・308 の URL 変更 / 410 Gone の各通知が従来どおり発行され、未取得の
   ファビコンが更新後に補完されること。
+
+クラウドデータの破損からの復旧は実際のクラウド接続がエンドツーエンドで必要なため、接続済みの
+各プロバイダ（Dropbox / Google Drive / OneDrive）ごとに1回、手動で確認する:
+
+- クラウド上の `keryx.db` を任意の非 SQLite ファイルに置き換えて同期する: ベル通知に
+  「同期データをリセット」（`ResetCloudData`）が出る。実行すると、プロバイダのアプリフォルダに
+  `keryx-YYYYMMDD-HHMMSS.db.bak` の退避ファイルが残り、隣に新しく作り直された `keryx.db` ができる
+  ——古いファイルが単に削除されるわけではないこと。
+- `keryx.db` をダウンロードし、既存の行と `url` が重複する `feeds` 行を追加してから
+  （アプリ自体は決してこの状態を作らないため、ファイルを直接編集するしかない）再アップロードして
+  同期する: 同じ「同期データをリセット」通知が出ること——制約に違反するクラウドデータも、正真正銘の
+  破損と同様に扱われることの確認。
+- クラウド DB が壊れたままの状態で、自動同期を何度か発生させ（既読・スターを何度もトグルする、
+  または背景更新の間隔を待つ）、データがリセットされるまでそれ以上ダウンロードが発生しないこと
+  （通信も発生せず、通知も繰り返し／重複しない）を確認する——その後、自動同期が抑制されている間でも
+  手動の「今すぐ同期」は実際に同期を試み（そして再び失敗する）ことを確認する。
+- リセットに成功した後、自動同期が再開すること（既読・スターのトグルで実際に同期が走ること）を確認する。
 
 記事リーダーのネイティブ WebView（`ui/home/ArticleDetailPane.kt`）はヘビーウェイトな AWT
 サーフェスであり Compose UI テストでは一切ホストできないため、`ArticleDetailPaneTest` がカバーする
