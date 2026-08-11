@@ -14,8 +14,9 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -189,9 +190,16 @@ class SettingsViewModelTest {
 
     @AfterTest
     fun tearDown() {
-        createdViewModels.forEach { it.viewModelScope.cancel() }
+        // cancelAndJoin (not plain cancel) so no coroutine — including work hopping through
+        // withContext(dispatcher) for exportOpml/importOpml/etc. — can still be resuming when
+        // driver.close()/resetMain() run below; a still-resuming one throwing against torn-down
+        // state is what previously surfaced (flakily, on a later test) as
+        // kotlinx.coroutines.test.UncaughtExceptionsBeforeTest.
+        runBlocking {
+            createdViewModels.forEach { it.viewModelScope.coroutineContext.job.cancelAndJoin() }
+            createdSyncScopes.forEach { it.coroutineContext.job.cancelAndJoin() }
+        }
         createdViewModels.clear()
-        createdSyncScopes.forEach { it.cancel() }
         createdSyncScopes.clear()
         Dispatchers.resetMain()
         driver.close()
@@ -255,7 +263,12 @@ class SettingsViewModelTest {
         cloudSession: CloudSession? = null,
         // Shared with the SyncRepository built below so a test can drive activityCenter.trackSync {}
         // to simulate a sync completing and assert the ViewModel reacts to it.
-        activityCenter: ActivityCenter = ActivityCenter(),
+        // The default's scope is explicit (not ActivityCenter()'s own Dispatchers.Default one) and
+        // tracked in createdSyncScopes, so tearDown() cancels it too instead of leaking it for the
+        // life of the JVM test process.
+        activityCenter: ActivityCenter = ActivityCenter(
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also { createdSyncScopes += it },
+        ),
         // Backs the SyncRepository built below. Default: local-only (every sync is a no-op success);
         // a test can supply a failing storage to exercise the sync-error state.
         syncCloudProvider: () -> CloudStorage? = { null },
