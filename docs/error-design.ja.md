@@ -43,10 +43,11 @@ sealed class KeryxException(message: String) : Exception(message)
   - `DropboxStorage`: 401/403 → `CloudAuthException`、409（upload）→ `SyncConflictException`、
     409 `path/not_found`（get_metadata）→ 存在しない、を判別。
   - `DatabaseMerger.merge`: マージ失敗を SQLite の**エラーコード**（`SQLiteException.resultCode`。
-    メッセージ文字列ではない）から分類し、`CloudDataIncompatibleException`（破損ファイル、外部・
-    レガシースキーマ、またはクラウド DB 自身の（より緩い）スキーマが許していた制約違反）にするか、
-    そのまま変更しない（一時的／アプリのバグ）。詳細は [sync-architecture.ja.md](sync-architecture.ja.md)
-    の「マージ失敗の分類」を参照。
+    メッセージ文字列ではない）から分類し、`CloudDataIncompatibleException`（破損ファイル、クラウド
+    DB 自身の（より緩い）スキーマが許していた制約違反、または — `validateSchema` がダウンロードした
+    ファイルとアプリのスキーマの不一致を確認できた場合に限り — 外部・レガシースキーマ）にするか、
+    そのまま変更しない（一時的／アプリのバグ、または `validateSchema` が確定できなかったスキーマ
+    エラー）。詳細は [sync-architecture.ja.md](sync-architecture.ja.md) の「マージ失敗の分類」を参照。
 - **Repository 層**: `Result` を受けてビジネスロジック（リトライ等）を適用。
 - **ViewModel 層**: `Result` を UI 状態へ変換。
 - **UI 層**: `ui/i18n/ErrorMessages.kt` の `userMessage(KeryxException)` は `KeryxException` を
