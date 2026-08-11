@@ -250,6 +250,15 @@ class SettingsViewModelTest {
         return UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo")
     }
 
+    /**
+     * An [ActivityCenter] whose scope is tracked in [createdSyncScopes], so tearDown() cancels
+     * its eager stateIn collectors instead of leaking them for the life of the JVM test process.
+     */
+    private fun trackedActivityCenter(): ActivityCenter =
+        ActivityCenter(
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also { createdSyncScopes += it },
+        )
+
     private fun newViewModel(
         connectResult: Result<OAuthTokens> = Result.Ok(OAuthTokens("AT")),
         tokenStorage: TokenStorage = FakeTokenStorage(),
@@ -263,12 +272,7 @@ class SettingsViewModelTest {
         cloudSession: CloudSession? = null,
         // Shared with the SyncRepository built below so a test can drive activityCenter.trackSync {}
         // to simulate a sync completing and assert the ViewModel reacts to it.
-        // The default's scope is explicit (not ActivityCenter()'s own Dispatchers.Default one) and
-        // tracked in createdSyncScopes, so tearDown() cancels it too instead of leaking it for the
-        // life of the JVM test process.
-        activityCenter: ActivityCenter = ActivityCenter(
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also { createdSyncScopes += it },
-        ),
+        activityCenter: ActivityCenter = trackedActivityCenter(),
         // Backs the SyncRepository built below. Default: local-only (every sync is a no-op success);
         // a test can supply a failing storage to exercise the sync-error state.
         syncCloudProvider: () -> CloudStorage? = { null },
@@ -577,7 +581,7 @@ class SettingsViewModelTest {
     // runTest's own TestCoroutineScheduler, so we poll with real wall-clock waits instead.
     @Test
     fun lastSyncedAtTextRefreshesWhenActivityCenterReportsSyncCompletion() {
-        val activityCenter = ActivityCenter()
+        val activityCenter = trackedActivityCenter()
         val vm = newViewModel(activityCenter = activityCenter)
         assertNull(vm.lastSyncedAtText)
 
