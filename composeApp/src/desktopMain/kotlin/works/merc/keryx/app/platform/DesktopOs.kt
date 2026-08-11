@@ -5,9 +5,10 @@ internal val osName = System.getProperty("os.name")?.lowercase() ?: ""
 
 /**
  * Whether this desktop JVM is running on macOS. Gates the platform integrations that only exist
- * there (screen menu bar, merged title bar, Dock activation policy, Aqua-specific styling).
+ * there (screen menu bar, merged title bar, Dock activation policy, Aqua-specific styling), and
+ * (via the commonMain `expect val` this backs) the `Return`-vs-`F2` rename shortcut convention.
  */
-internal val isMacOs = osName.contains("mac")
+actual val isMacOs = osName.contains("mac")
 
 /**
  * Whether this desktop JVM is running on Windows. Gates the integrations the OS only offers there

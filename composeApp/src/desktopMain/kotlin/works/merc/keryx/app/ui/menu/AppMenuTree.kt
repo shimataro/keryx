@@ -1,6 +1,8 @@
 package works.merc.keryx.app.ui.menu
 
 import androidx.compose.ui.input.key.Key
+import works.merc.keryx.app.data.local.db.Folders
+import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.platform.isMacOs
 
 /**
@@ -16,9 +18,19 @@ import works.merc.keryx.app.platform.isMacOs
  */
 
 /**
- * The modifier + key of a menu accelerator. Every shipped shortcut is a plain "mod" shortcut
- * (Ctrl elsewhere, ⌘ on macOS), so [ctrl] defaults to `true`; the in-window renderer applies the
- * platform modifier while the Linux [MenuShortcutDispatcher] matches [ctrl]/[meta] directly.
+ * The modifier + key of a menu accelerator. [ctrl] means "use the platform's primary modifier"
+ * (Ctrl elsewhere, ⌘ on macOS) — the in-window renderer (`AppMenuBar.toKeyShortcut`) derives the
+ * actual per-platform `ctrl`/`meta` `KeyShortcut` flags from it, and the Linux
+ * [MenuShortcutDispatcher] matches [ctrl]/[meta] directly. It defaults to `true`, used by every
+ * "always available" shortcut as a plain Ctrl/⌘ combo. Selected-item shortcuts (enabled only with
+ * the right selection/focus — the Article and Feed menus' `Ctrl+Shift+<letter>` entries)
+ * additionally set [shift], keeping them in a chord space that can never collide with a plain-Ctrl
+ * "always available" shortcut and is never typed into a text field (unlike the bare, unmodified
+ * keys `KeyboardNav.kt` and the context menus use). `Rename`/`Unsubscribe` are the deliberate
+ * exception — [ctrl] is `false`, so they keep their original bare accelerator (F2/Return, Delete),
+ * since a bare "act on the focused/selected item" key is itself an established convention
+ * (file-manager rename/delete); see [MenuUiState.renameOrDeleteEnabled]'s `searchFieldFocused`
+ * guard for how that stays safe.
  *
  * [dbusmenuKeyName] is the AWT virtual-key *name* the `com.canonical.dbusmenu` host expects for
  * this key — plain strings, so it lives here alongside [key] rather than in `appmenu/`. The AWT
@@ -30,6 +42,7 @@ internal enum class AppMenuShortcut(
     val dbusmenuKeyName: String,
     val ctrl: Boolean = true,
     val meta: Boolean = false,
+    val shift: Boolean = false,
 ) {
     AddFeed(Key.N, "N"),
     CloseWindow(Key.W, "W"),
@@ -37,11 +50,22 @@ internal enum class AppMenuShortcut(
     Quit(Key.Q, "Q"),
     RefreshAll(Key.R, "R"),
     ShowMenuBar(Key.M, "M"),
+    Search(Key.F, "F"),
+    ImportOpml(Key.I, "I"),
+    ExportOpml(Key.E, "E"),
+    UnreadOnly(Key.U, "U"),
+    ToggleRead(Key.U, "U", shift = true),
+    ToggleStar(Key.S, "S", shift = true),
+    OpenInBrowser(Key.O, "O", shift = true),
+    CopyUrl(Key.C, "C", shift = true),
+    FeedRefresh(Key.R, "R", shift = true),
+    FeedRename(if (isMacOs) Key.Enter else Key.F2, if (isMacOs) "Return" else "F2", ctrl = false),
+    FeedUnsubscribe(Key.Delete, "Delete", ctrl = false),
 }
 
 /** A node in the application menu tree. */
 internal sealed interface AppMenuNode {
-    data class Menu(val label: String, val items: List<AppMenuNode>) : AppMenuNode
+    data class Menu(val label: String, val items: List<AppMenuNode>, val enabled: Boolean = true) : AppMenuNode
 
     data class Item(
         val label: String,
@@ -96,6 +120,14 @@ internal data class AppMenuLabels(
     val feedMenu: String,
     val refreshAll: String,
     val syncNow: String,
+    val feedRefresh: String,
+    val feedAssignTags: String,
+    val feedMoveToFolder: String,
+    val feedNoFolder: String,
+    /** Rename/delete wording for the *currently selected* item — a feed, folder or tag, not always
+     * a feed (`AppMenuBar` picks the matching string per selection type). */
+    val feedRename: String,
+    val feedUnsubscribe: String,
     val helpMenu: String,
     val website: String,
     val projectPage: String,
@@ -122,34 +154,58 @@ internal data class AppMenuActions(
     val copyUrl: () -> Unit,
     val refreshAll: () -> Unit,
     val sync: () -> Unit,
+    val refreshSelectedFeed: () -> Unit,
+    val toggleFeedTag: (tagId: String, attached: Boolean) -> Unit,
+    val moveFeedToFolder: (folderId: String?) -> Unit,
+    val renameSelectedFeed: () -> Unit,
+    val unsubscribeSelectedFeed: () -> Unit,
     val openWebsite: () -> Unit,
     val openProjectPage: () -> Unit,
     val about: () -> Unit,
 )
 
 /**
+ * The selected feed's dynamic submenu data for the Feed menu's Tags/Move-to-folder items. Empty
+ * lists / a `null` [currentFolderId] when no feed is meaningfully selected — harmless, since the
+ * submenus are disabled via [MenuUiState.feedActionsEnabled] in that case and never opened.
+ */
+internal data class SelectedFeedMenuData(
+    val tags: List<Tags>,
+    val attachedTagIds: Set<String>,
+    val folders: List<Folders>,
+    val currentFolderId: String?,
+)
+
+/**
  * Builds the application menu tree from the current [ui] state, resolved [labels] and [actions].
  *
- * The menu *shape* is fixed at startup: [isMacOs] is a process constant, and [menuBarToggle] only
- * ever adds/removes the trailing "Show Menu Bar" item. Everything else varies only by label /
- * enabled / checked, which is what keeps the D-Bus node ids stable across rebuilds
- * (see `AppMenuLayoutBuilder`).
+ * The menu shape is fixed at startup **except** for the Feed menu's Tags/Move-to-folder submenus,
+ * whose item count follows [selectedFeedMenu]'s tag/folder lists and can therefore change while the
+ * app is running: [isMacOs] is a process constant, and [menuBarToggle] only ever adds/removes the
+ * trailing "Show Menu Bar" item. Everything else (including the rest of this tree) varies only by
+ * label / enabled / checked, which is what keeps the D-Bus node ids stable across rebuilds for that
+ * fixed portion (see `AppMenuLayoutBuilder`, which documents why the variable-length region is
+ * still safe).
  *
  * @param menuBarToggle when non-null, appends a "Show Menu Bar" checkbox to the View menu (KDE only).
+ * @param selectedFeedMenu the currently selected feed's tags/folder data, backing the Feed menu's
+ *   Tags/Move-to-folder submenus (empty/`null` content when [MenuUiState.feedActionsEnabled] is
+ *   `false` — see [SelectedFeedMenuData]).
  */
 internal fun buildAppMenuTree(
     ui: MenuUiState,
     labels: AppMenuLabels,
     actions: AppMenuActions,
     menuBarToggle: MenuBarToggle?,
+    selectedFeedMenu: SelectedFeedMenuData,
 ): AppMenuRoot {
     val fileItems = buildList {
         add(AppMenuNode.Item(labels.addFeed, ui.addItemsEnabled, AppMenuShortcut.AddFeed, actions.addFeed))
         add(AppMenuNode.Item(labels.addFolder, ui.addItemsEnabled, onClick = actions.addFolder))
         add(AppMenuNode.Item(labels.addTag, ui.addItemsEnabled, onClick = actions.addTag))
         add(AppMenuNode.Separator)
-        add(AppMenuNode.Item(labels.importOpml, ui.opmlEnabled, onClick = actions.importOpml))
-        add(AppMenuNode.Item(labels.exportOpml, ui.opmlEnabled, onClick = actions.exportOpml))
+        add(AppMenuNode.Item(labels.importOpml, ui.opmlEnabled, AppMenuShortcut.ImportOpml, actions.importOpml))
+        add(AppMenuNode.Item(labels.exportOpml, ui.opmlEnabled, AppMenuShortcut.ExportOpml, actions.exportOpml))
         add(AppMenuNode.Separator)
         add(AppMenuNode.Item(labels.closeWindow, enabled = true, shortcut = AppMenuShortcut.CloseWindow, onClick = actions.closeWindow))
         // On macOS, Settings and Quit live in the native app menu (see main.kt).
@@ -161,8 +217,16 @@ internal fun buildAppMenuTree(
     }
 
     val viewItems = buildList {
-        add(AppMenuNode.Item(labels.search, ui.searchEnabled, onClick = actions.focusSearch))
-        add(AppMenuNode.CheckboxItem(labels.unreadOnly, ui.searchEnabled, ui.unreadOnlyChecked, onCheckedChange = actions.setUnreadOnly))
+        add(AppMenuNode.Item(labels.search, ui.searchEnabled, AppMenuShortcut.Search, actions.focusSearch))
+        add(
+            AppMenuNode.CheckboxItem(
+                labels.unreadOnly,
+                ui.unreadOnlyEnabled,
+                ui.unreadOnlyChecked,
+                AppMenuShortcut.UnreadOnly,
+                onCheckedChange = actions.setUnreadOnly,
+            ),
+        )
         add(AppMenuNode.Item(labels.toggleSort, ui.toggleSortEnabled, onClick = actions.toggleSort))
         add(AppMenuNode.Separator)
         add(AppMenuNode.Item(labels.markAllRead, ui.markAllReadEnabled, onClick = actions.markAllRead))
@@ -181,16 +245,59 @@ internal fun buildAppMenuTree(
     }
 
     val articleItems = listOf(
-        AppMenuNode.Item(labels.toggleRead, ui.articleActionsEnabled, onClick = actions.toggleRead),
-        AppMenuNode.Item(labels.toggleStar, ui.articleActionsEnabled, onClick = actions.toggleStar),
+        AppMenuNode.Item(labels.toggleRead, ui.articleActionsEnabled, AppMenuShortcut.ToggleRead, actions.toggleRead),
+        AppMenuNode.Item(labels.toggleStar, ui.articleActionsEnabled, AppMenuShortcut.ToggleStar, actions.toggleStar),
         AppMenuNode.Separator,
-        AppMenuNode.Item(labels.openInBrowser, ui.urlActionsEnabled, onClick = actions.openInBrowser),
-        AppMenuNode.Item(labels.copyUrl, ui.urlActionsEnabled, onClick = actions.copyUrl),
+        AppMenuNode.Item(labels.openInBrowser, ui.urlActionsEnabled, AppMenuShortcut.OpenInBrowser, actions.openInBrowser),
+        AppMenuNode.Item(labels.copyUrl, ui.urlActionsEnabled, AppMenuShortcut.CopyUrl, actions.copyUrl),
     )
 
     val feedItems = listOf(
         AppMenuNode.Item(labels.refreshAll, ui.refreshAllEnabled, AppMenuShortcut.RefreshAll, actions.refreshAll),
         AppMenuNode.Item(labels.syncNow, ui.syncEnabled, onClick = actions.sync),
+        AppMenuNode.Separator,
+        AppMenuNode.Item(labels.feedRefresh, ui.feedActionsEnabled, AppMenuShortcut.FeedRefresh, actions.refreshSelectedFeed),
+        AppMenuNode.Menu(
+            label = labels.feedAssignTags,
+            enabled = ui.feedActionsEnabled,
+            items = selectedFeedMenu.tags.map { tag ->
+                AppMenuNode.CheckboxItem(
+                    label = tag.name,
+                    enabled = true,
+                    checked = tag.id in selectedFeedMenu.attachedTagIds,
+                    onCheckedChange = { attached -> actions.toggleFeedTag(tag.id, attached) },
+                )
+            },
+        ),
+        AppMenuNode.Menu(
+            label = labels.feedMoveToFolder,
+            enabled = ui.feedActionsEnabled,
+            items = buildList {
+                add(
+                    AppMenuNode.CheckboxItem(
+                        label = labels.feedNoFolder,
+                        enabled = true,
+                        checked = selectedFeedMenu.currentFolderId == null,
+                        onCheckedChange = { actions.moveFeedToFolder(null) },
+                    ),
+                )
+                selectedFeedMenu.folders.forEach { folder ->
+                    add(
+                        AppMenuNode.CheckboxItem(
+                            label = folder.name,
+                            enabled = true,
+                            checked = selectedFeedMenu.currentFolderId == folder.id,
+                            onCheckedChange = { actions.moveFeedToFolder(folder.id) },
+                        ),
+                    )
+                }
+            },
+        ),
+        // Rename/Unsubscribe act on whatever feed list item is selected (feed, folder or tag), so
+        // unlike the items above they use renameOrDeleteEnabled, not feedActionsEnabled.
+        AppMenuNode.Item(labels.feedRename, ui.renameOrDeleteEnabled, AppMenuShortcut.FeedRename, actions.renameSelectedFeed),
+        AppMenuNode.Separator,
+        AppMenuNode.Item(labels.feedUnsubscribe, ui.renameOrDeleteEnabled, AppMenuShortcut.FeedUnsubscribe, actions.unsubscribeSelectedFeed),
     )
 
     val helpItems = buildList {

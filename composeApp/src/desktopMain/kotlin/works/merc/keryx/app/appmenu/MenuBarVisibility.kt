@@ -1,6 +1,7 @@
 package works.merc.keryx.app.appmenu
 
 import works.merc.keryx.app.data.local.LocalSettings
+import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.ui.menu.AppMenuNode
 import works.merc.keryx.app.ui.menu.AppMenuRoot
 import works.merc.keryx.app.ui.menu.AppMenuShortcut
@@ -30,6 +31,17 @@ internal fun AppMenuShortcut.awtKeyCode(): Int = when (this) {
     AppMenuShortcut.Quit -> KeyEvent.VK_Q
     AppMenuShortcut.RefreshAll -> KeyEvent.VK_R
     AppMenuShortcut.ShowMenuBar -> KeyEvent.VK_M
+    AppMenuShortcut.Search -> KeyEvent.VK_F
+    AppMenuShortcut.ImportOpml -> KeyEvent.VK_I
+    AppMenuShortcut.ExportOpml -> KeyEvent.VK_E
+    AppMenuShortcut.UnreadOnly -> KeyEvent.VK_U
+    AppMenuShortcut.ToggleRead -> KeyEvent.VK_U
+    AppMenuShortcut.ToggleStar -> KeyEvent.VK_S
+    AppMenuShortcut.OpenInBrowser -> KeyEvent.VK_O
+    AppMenuShortcut.CopyUrl -> KeyEvent.VK_C
+    AppMenuShortcut.FeedRefresh -> KeyEvent.VK_R
+    AppMenuShortcut.FeedRename -> if (isMacOs) KeyEvent.VK_ENTER else KeyEvent.VK_F2
+    AppMenuShortcut.FeedUnsubscribe -> KeyEvent.VK_DELETE
 }
 
 /** The `enabled` flag of an actionable node (`true` for anything without one). */
@@ -44,8 +56,9 @@ internal fun AppMenuNode.isEnabled(): Boolean = when (this) {
  * or `null` if none does. Pure and AWT-key-code based, so it is unit-testable with synthetic input.
  *
  * A shortcut matches only on an exact modifier combination: its own [AppMenuShortcut.ctrl] /
- * [AppMenuShortcut.meta] must equal [ctrl] / [meta], and [shift] must be up (no shipped accelerator
- * uses Shift). Enabled state is **not** consulted here — the caller decides whether to invoke.
+ * [AppMenuShortcut.meta] / [AppMenuShortcut.shift] must equal [ctrl] / [meta] / [shift] — this is
+ * what keeps e.g. Ctrl+R (`RefreshAll`) and Ctrl+Shift+R (`FeedRefresh`) from being confused with
+ * one another. Enabled state is **not** consulted here — the caller decides whether to invoke.
  */
 internal fun matchMenuShortcut(
     root: AppMenuRoot,
@@ -54,8 +67,6 @@ internal fun matchMenuShortcut(
     meta: Boolean,
     shift: Boolean = false,
 ): AppMenuNode? {
-    if (shift) return null
-
     fun shortcutOf(node: AppMenuNode): AppMenuShortcut? = when (node) {
         is AppMenuNode.Item -> node.shortcut
         is AppMenuNode.CheckboxItem -> node.shortcut
@@ -68,7 +79,8 @@ internal fun matchMenuShortcut(
             if (shortcut != null &&
                 shortcut.awtKeyCode() == keyCode &&
                 shortcut.ctrl == ctrl &&
-                shortcut.meta == meta
+                shortcut.meta == meta &&
+                shortcut.shift == shift
             ) {
                 return node
             }

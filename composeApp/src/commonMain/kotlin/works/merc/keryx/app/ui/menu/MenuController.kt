@@ -19,6 +19,8 @@ enum class MenuCommand {
     FocusSearch,
     OpenInBrowser,
     CopyUrl,
+    RenameFeed,
+    UnsubscribeFeed,
     About,
 }
 
@@ -27,12 +29,16 @@ enum class MenuCommand {
  *
  * - [currentScreen] is kept in sync by `App` so the menu bar can gate item enabled-state on the
  *   active top-level destination.
+ * - [searchFieldFocused] is kept in sync by `HomeScreen`, so feed-list-scoped items can be
+ *   disabled while the sidebar search field has real focus — needed because a native Swing
+ *   accelerator (unlike `KeyboardNav.kt`) has no way to defer to a focused text field.
  * - [commands] carries one-shot menu clicks to whichever composable owns the target state.
  *
  * App-scoped Koin singleton (single-window desktop app).
  */
 class MenuController {
     val currentScreen = MutableStateFlow<Screen>(Screen.Setup)
+    val searchFieldFocused = MutableStateFlow(false)
 
     private val _commands = MutableSharedFlow<MenuCommand>(extraBufferCapacity = 8)
     val commands: SharedFlow<MenuCommand> = _commands.asSharedFlow()

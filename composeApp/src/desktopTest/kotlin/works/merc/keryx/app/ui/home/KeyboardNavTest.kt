@@ -23,6 +23,7 @@ class KeyboardNavTest {
 
     private fun firedEvents(
         searchFieldFocused: Boolean = false,
+        isMacOs: Boolean = false,
         press: KeyInjectionScope.() -> Unit,
     ): List<String> {
         val fired = mutableListOf<String>()
@@ -38,11 +39,10 @@ class KeyboardNavTest {
                         onRight = { fired += "right" },
                         onNextArticle = { fired += "nextArticle" },
                         onPreviousArticle = { fired += "previousArticle" },
-                        onToggleRead = { fired += "toggleRead" },
-                        onToggleStar = { fired += "toggleStar" },
-                        onOpenInBrowser = { fired += "openInBrowser" },
-                        onCopyUrl = { fired += "copyUrl" },
+                        onFeedListRename = { fired += "feedListRename" },
+                        onFeedListDelete = { fired += "feedListDelete" },
                         onSearch = { fired += "search" },
+                        isMacOs = isMacOs,
                     ),
                 )
             }
@@ -86,23 +86,26 @@ class KeyboardNavTest {
     }
 
     @Test
-    fun uFiresOnToggleReadOnly() {
-        assertEquals(listOf("toggleRead"), firedEvents { pressKey(Key.U) })
+    fun bareUDoesNotFireAnything() {
+        // Toggle read/star/open-in-browser/copy-URL no longer have a bare-key binding here — they
+        // are Ctrl+Shift+<letter> app-menu accelerators instead (see AppMenuShortcut), since a bare
+        // key was too easy to trigger by accident for actions with side effects.
+        assertEquals(emptyList(), firedEvents { pressKey(Key.U) })
     }
 
     @Test
-    fun sFiresOnToggleStarOnly() {
-        assertEquals(listOf("toggleStar"), firedEvents { pressKey(Key.S) })
+    fun bareSDoesNotFireAnything() {
+        assertEquals(emptyList(), firedEvents { pressKey(Key.S) })
     }
 
     @Test
-    fun oFiresOnOpenInBrowserOnly() {
-        assertEquals(listOf("openInBrowser"), firedEvents { pressKey(Key.O) })
+    fun bareODoesNotFireAnything() {
+        assertEquals(emptyList(), firedEvents { pressKey(Key.O) })
     }
 
     @Test
-    fun cFiresOnCopyUrlOnly() {
-        assertEquals(listOf("copyUrl"), firedEvents { pressKey(Key.C) })
+    fun bareCDoesNotFireAnything() {
+        assertEquals(emptyList(), firedEvents { pressKey(Key.C) })
     }
 
     @Test
@@ -113,6 +116,57 @@ class KeyboardNavTest {
     @Test
     fun plainFDoesNotFireSearch() {
         assertEquals(emptyList(), firedEvents { pressKey(Key.F) })
+    }
+
+    @Test
+    fun ctrlJDoesNotFireNextArticle() {
+        assertEquals(emptyList(), firedEvents { withKeyDown(Key.CtrlLeft) { pressKey(Key.J) } })
+    }
+
+    @Test
+    fun ctrlKDoesNotFirePreviousArticle() {
+        assertEquals(emptyList(), firedEvents { withKeyDown(Key.CtrlLeft) { pressKey(Key.K) } })
+    }
+
+    @Test
+    fun bareRDoesNotFireAnything() {
+        // Refresh-selected-feed likewise has no bare-key binding here anymore — see AppMenuShortcut.FeedRefresh.
+        assertEquals(emptyList(), firedEvents { pressKey(Key.R) })
+    }
+
+    @Test
+    fun f2FiresOnFeedListRenameWhenNotMac() {
+        assertEquals(listOf("feedListRename"), firedEvents(isMacOs = false) { pressKey(Key.F2) })
+    }
+
+    @Test
+    fun enterDoesNotFireFeedListRenameWhenNotMac() {
+        assertEquals(emptyList(), firedEvents(isMacOs = false) { pressKey(Key.Enter) })
+    }
+
+    @Test
+    fun enterFiresOnFeedListRenameWhenMac() {
+        assertEquals(listOf("feedListRename"), firedEvents(isMacOs = true) { pressKey(Key.Enter) })
+    }
+
+    @Test
+    fun f2DoesNotFireFeedListRenameWhenMac() {
+        assertEquals(emptyList(), firedEvents(isMacOs = true) { pressKey(Key.F2) })
+    }
+
+    @Test
+    fun deleteFiresOnFeedListDeleteOnly() {
+        assertEquals(listOf("feedListDelete"), firedEvents { pressKey(Key.Delete) })
+    }
+
+    @Test
+    fun backspaceFiresOnFeedListDeleteOnly() {
+        assertEquals(listOf("feedListDelete"), firedEvents { pressKey(Key.Backspace) })
+    }
+
+    @Test
+    fun ctrlDeleteDoesNotFireFeedListDelete() {
+        assertEquals(emptyList(), firedEvents { withKeyDown(Key.CtrlLeft) { pressKey(Key.Delete) } })
     }
 
     @Test

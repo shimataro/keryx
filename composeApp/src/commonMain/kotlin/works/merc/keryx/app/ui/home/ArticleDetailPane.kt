@@ -133,8 +133,9 @@ internal fun ArticleDetailPaneContent(
             showCopied = false
         }
     }
-    // Keyboard ⌘/Ctrl+C copies the selected article (shown in this pane), so mirror the button's
-    // feedback here. Initial copyPulse == 0 is skipped; only increments from HomeScreen fire it.
+    // Keyboard ⌘/Ctrl+Shift+C copies the selected article (shown in this pane), so mirror the
+    // button's feedback here. Initial copyPulse == 0 is skipped; only increments from HomeScreen
+    // fire it.
     LaunchedEffect(copyPulse) { if (copyPulse != 0) showCopied = true }
 
     val placeholderText = stringResource(Res.string.home_no_article_selected)

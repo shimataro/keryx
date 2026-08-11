@@ -27,6 +27,7 @@ import androidx.compose.runtime.State
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -39,6 +40,7 @@ import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.platform.NativeCheckMenuItem
 import works.merc.keryx.app.platform.NativeMenuItem
+import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.NativeSubMenu
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.resources.Res
@@ -199,8 +201,8 @@ internal fun FolderGroupHeader(
                 .nativeContextMenu(
                     items = {
                         listOf(
-                            NativeMenuItem(editFolderLabel) { onEdit() },
-                            NativeMenuItem(deleteFolderLabel) { onDelete() },
+                            NativeMenuItem(editFolderLabel, renameNativeShortcut) { onEdit() },
+                            NativeMenuItem(deleteFolderLabel, deleteNativeShortcut) { onDelete() },
                         )
                     },
                     onOpen = { if (!selected) onClick() },
@@ -334,7 +336,7 @@ internal fun FeedRow(
                 .nativeContextMenu(
                     items = {
                         listOf(
-                            NativeMenuItem(refreshLabel) { onRefresh() },
+                            NativeMenuItem(refreshLabel, NativeMenuShortcut(Key.R, ctrl = true, shift = true)) { onRefresh() },
                             NativeSubMenu(
                                 label = assignTagsLabel,
                                 items = tags.map { tag ->
@@ -360,8 +362,8 @@ internal fun FeedRow(
                                     }
                                 },
                             ),
-                            NativeMenuItem(renameFeedLabel) { onRename() },
-                            NativeMenuItem(unsubscribeLabel) { onUnsubscribe() },
+                            NativeMenuItem(renameFeedLabel, renameNativeShortcut) { onRename() },
+                            NativeMenuItem(unsubscribeLabel, deleteNativeShortcut) { onUnsubscribe() },
                         )
                     },
                     onOpen = { if (!selected) onClick() },

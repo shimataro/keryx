@@ -14,6 +14,16 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.resources.Res
+import works.merc.keryx.app.resources.home_assign_tags
+import works.merc.keryx.app.resources.home_menu_delete_folder
+import works.merc.keryx.app.resources.home_menu_delete_tag
+import works.merc.keryx.app.resources.home_menu_rename_folder
+import works.merc.keryx.app.resources.home_menu_rename_tag
+import works.merc.keryx.app.resources.home_move_to_folder
+import works.merc.keryx.app.resources.home_no_folder
+import works.merc.keryx.app.resources.home_refresh
+import works.merc.keryx.app.resources.home_rename_feed
+import works.merc.keryx.app.resources.home_unsubscribe_menu
 import works.merc.keryx.app.resources.menu_article
 import works.merc.keryx.app.resources.menu_article_copy_url
 import works.merc.keryx.app.resources.menu_article_open_in_browser
@@ -42,7 +52,9 @@ import works.merc.keryx.app.resources.menu_view_search
 import works.merc.keryx.app.resources.menu_view_show_menu_bar
 import works.merc.keryx.app.resources.menu_view_toggle_sort
 import works.merc.keryx.app.resources.menu_view_unread_only
+import works.merc.keryx.app.ui.home.FeedListSelectionTarget
 import works.merc.keryx.app.ui.home.HomeViewModel
+import works.merc.keryx.app.ui.home.resolveFeedListSelectionTarget
 import works.merc.keryx.app.ui.menu.AppMenuActions
 import works.merc.keryx.app.ui.menu.AppMenuLabels
 import works.merc.keryx.app.ui.menu.AppMenuNode
@@ -51,6 +63,7 @@ import works.merc.keryx.app.ui.menu.AppMenuShortcut
 import works.merc.keryx.app.ui.menu.MenuBarToggle
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
+import works.merc.keryx.app.ui.menu.SelectedFeedMenuData
 import works.merc.keryx.app.ui.menu.buildAppMenuTree
 import works.merc.keryx.app.ui.menu.computeMenuUiState
 import works.merc.keryx.app.ui.settings.PROJECT_URL
@@ -110,12 +123,22 @@ internal fun FrameWindowScope.AppMenuBar(
     val settingsVm = koinInject<SettingsViewModel>()
 
     val screen by menuController.currentScreen.collectAsState()
+    val searchFieldFocused by menuController.searchFieldFocused.collectAsState()
     val selected by homeVm.selectedArticle.collectAsState()
     val feedRefreshing by homeVm.feedRefreshing.collectAsState()
     val syncing by homeVm.syncing.collectAsState()
     val filter by homeVm.filter.collectAsState()
     val unreadOnly by homeVm.unreadOnly.collectAsState()
     val cloudConnected by homeVm.cloudConnected.collectAsState()
+    val feeds by homeVm.feeds.collectAsState()
+    val tags by homeVm.tags.collectAsState()
+    val folders by homeVm.folders.collectAsState()
+    val feedTagMap by homeVm.feedTagMap.collectAsState()
+
+    val selectedFeed = (filter as? ArticleFilter.Feed)?.let { f -> feeds.find { it.id == f.feedId } }
+    // Rename/delete act on any selected feed list item, so they resolve the same feed/folder/tag
+    // target `FeedListPane` uses to decide which dialog to open.
+    val selectionTarget = resolveFeedListSelectionTarget(filter, feeds, folders, tags)
 
     val ui = computeMenuUiState(
         screen = screen,
@@ -124,9 +147,25 @@ internal fun FrameWindowScope.AppMenuBar(
         feedRefreshing = feedRefreshing,
         syncing = syncing,
         cloudConnected = cloudConnected,
-        filterIsSearch = filter == ArticleFilter.Search,
+        filter = filter,
         unreadOnly = unreadOnly,
+        hasSelectedFeed = selectedFeed != null,
+        searchFieldFocused = searchFieldFocused,
+        hasRenamableSelection = selectionTarget != null,
     )
+
+    // Rename/delete wording follows the selected item's type. A `null` target falls back to the
+    // feed wording; the two items are disabled in that case, so the text is never acted on.
+    val renameLabel = when (selectionTarget) {
+        is FeedListSelectionTarget.Folder -> stringResource(Res.string.home_menu_rename_folder)
+        is FeedListSelectionTarget.Tag -> stringResource(Res.string.home_menu_rename_tag)
+        is FeedListSelectionTarget.Feed, null -> stringResource(Res.string.home_rename_feed)
+    }
+    val deleteLabel = when (selectionTarget) {
+        is FeedListSelectionTarget.Folder -> stringResource(Res.string.home_menu_delete_folder)
+        is FeedListSelectionTarget.Tag -> stringResource(Res.string.home_menu_delete_tag)
+        is FeedListSelectionTarget.Feed, null -> stringResource(Res.string.home_unsubscribe_menu)
+    }
 
     val websiteUrl = stringResource(Res.string.website_url)
     val labels = AppMenuLabels(
@@ -153,6 +192,12 @@ internal fun FrameWindowScope.AppMenuBar(
         feedMenu = stringResource(Res.string.menu_feed),
         refreshAll = stringResource(Res.string.menu_feed_refresh_all),
         syncNow = stringResource(Res.string.menu_feed_sync_now),
+        feedRefresh = stringResource(Res.string.home_refresh),
+        feedAssignTags = stringResource(Res.string.home_assign_tags),
+        feedMoveToFolder = stringResource(Res.string.home_move_to_folder),
+        feedNoFolder = stringResource(Res.string.home_no_folder),
+        feedRename = renameLabel,
+        feedUnsubscribe = deleteLabel,
         helpMenu = stringResource(Res.string.menu_help),
         website = stringResource(Res.string.menu_help_website),
         projectPage = stringResource(Res.string.menu_help_project_page),
@@ -178,12 +223,23 @@ internal fun FrameWindowScope.AppMenuBar(
         copyUrl = { menuController.send(MenuCommand.CopyUrl) },
         refreshAll = { homeVm.refreshAll() },
         sync = { homeVm.sync() },
+        refreshSelectedFeed = { selectedFeed?.let { homeVm.refreshFeed(it) } },
+        toggleFeedTag = { tagId, attached -> selectedFeed?.let { homeVm.setFeedTag(it.id, tagId, attached) } },
+        moveFeedToFolder = { folderId -> selectedFeed?.let { homeVm.moveFeed(it.id, folderId) } },
+        renameSelectedFeed = { menuController.send(MenuCommand.RenameFeed) },
+        unsubscribeSelectedFeed = { menuController.send(MenuCommand.UnsubscribeFeed) },
         openWebsite = { BrowserOpener.open(websiteUrl) },
         openProjectPage = { BrowserOpener.open(PROJECT_URL) },
         about = { menuController.send(MenuCommand.About) },
     )
 
-    val tree = buildAppMenuTree(ui, labels, actions, menuBarToggle)
+    val selectedFeedMenu = SelectedFeedMenuData(
+        tags = tags,
+        attachedTagIds = selectedFeed?.let { feedTagMap[it.id] }.orEmpty(),
+        folders = folders,
+        currentFolderId = selectedFeed?.folder_id,
+    )
+    val tree = buildAppMenuTree(ui, labels, actions, menuBarToggle, selectedFeedMenu)
 
     // Publish the tree to any D-Bus exporter on every (re)composition; harmless (a no-op default)
     // when there is no registrar.
@@ -203,7 +259,7 @@ internal fun FrameWindowScope.AppMenuBar(
 private fun MenuScope.renderNodes(nodes: List<AppMenuNode>) {
     nodes.forEach { node ->
         when (node) {
-            is AppMenuNode.Menu -> Menu(node.label) { renderNodes(node.items) }
+            is AppMenuNode.Menu -> Menu(node.label, enabled = node.enabled) { renderNodes(node.items) }
             is AppMenuNode.Item -> Item(
                 text = node.label,
                 shortcut = node.shortcut?.toKeyShortcut(),
@@ -222,5 +278,10 @@ private fun MenuScope.renderNodes(nodes: List<AppMenuNode>) {
     }
 }
 
-/** ⌘ on macOS, Ctrl elsewhere — the platform "mod" every shipped menu accelerator uses. */
-private fun AppMenuShortcut.toKeyShortcut(): KeyShortcut = KeyShortcut(key, meta = isMacOs, ctrl = !isMacOs)
+/**
+ * ⌘ on macOS, Ctrl elsewhere, when [AppMenuShortcut.ctrl] is set (the platform "mod" every
+ * always-available and Ctrl+Shift selected-item shortcut uses) — omitted entirely when it's
+ * `false` (`FeedRename`/`FeedUnsubscribe`'s bare F2/Return/Delete). [shift] applies independently.
+ */
+private fun AppMenuShortcut.toKeyShortcut(): KeyShortcut =
+    KeyShortcut(key, meta = ctrl && isMacOs, ctrl = ctrl && !isMacOs, shift = shift)

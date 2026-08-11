@@ -117,6 +117,11 @@ internal const val FEED_LIST_DRAG_HOST_TEST_TAG = "feed-list-drag-host"
  * @param modifier Modifier applied to the pane.
  * @param onAddFeedClick Called when the user requests to add a feed.
  * @param onSearchFieldFocusChange Called when the search field focus changes.
+ * @param renameSelectedRequestId Bumped by the keyboard rename/edit shortcut (F2/Return); on change,
+ *   opens the rename/edit dialog for whichever feed/folder/tag the current filter selects.
+ * @param deleteSelectedRequestId Bumped by the keyboard delete shortcut (Delete/Backspace); on
+ *   change, opens the unsubscribe/delete confirmation for whichever feed/folder/tag the current
+ *   filter selects.
  */
 @Composable
 internal fun FeedListPane(
@@ -127,6 +132,8 @@ internal fun FeedListPane(
     modifier: Modifier = Modifier,
     onAddFeedClick: () -> Unit = {},
     onSearchFieldFocusChange: (Boolean) -> Unit = {},
+    renameSelectedRequestId: Int = 0,
+    deleteSelectedRequestId: Int = 0,
 ) {
     val feeds by vm.feeds.collectAsStateSafe(emptyList())
     val tags by vm.tags.collectAsStateSafe(emptyList())
@@ -154,6 +161,29 @@ internal fun FeedListPane(
     var showAddFolder by remember { mutableStateOf(false) }
     var editingFolder by remember { mutableStateOf<Folders?>(null) }
     var confirmingDeleteFolder by remember { mutableStateOf<Folders?>(null) }
+    var renamingFeed by remember { mutableStateOf<Feeds?>(null) }
+    var confirmingUnsubscribeFeed by remember { mutableStateOf<Feeds?>(null) }
+
+    // Shared by the keyboard shortcuts (via the request-id effects below) and the Feed menu bar
+    // items (via MenuCommand.RenameFeed/UnsubscribeFeed): resolve the currently selected filter
+    // against this pane's own already-collected rows and open the same dialogs the context menu's
+    // Rename/Edit and Unsubscribe/Delete items do.
+    fun openRenameDialogForSelection() {
+        when (val target = resolveFeedListSelectionTarget(filter, feeds, folders, tags)) {
+            is FeedListSelectionTarget.Feed -> renamingFeed = target.feed
+            is FeedListSelectionTarget.Folder -> editingFolder = target.folder
+            is FeedListSelectionTarget.Tag -> editingTag = target.tag
+            null -> {}
+        }
+    }
+    fun openDeleteDialogForSelection() {
+        when (val target = resolveFeedListSelectionTarget(filter, feeds, folders, tags)) {
+            is FeedListSelectionTarget.Feed -> confirmingUnsubscribeFeed = target.feed
+            is FeedListSelectionTarget.Folder -> confirmingDeleteFolder = target.folder
+            is FeedListSelectionTarget.Tag -> confirmingDeleteTag = target.tag
+            null -> {}
+        }
+    }
 
     // Menu bar commands whose dialog state lives in this pane (see AppMenuBar / MenuController).
     val menuController = koinInject<MenuController>()
@@ -162,12 +192,22 @@ internal fun FeedListPane(
             when (command) {
                 MenuCommand.AddFolder -> showAddFolder = true
                 MenuCommand.AddTag -> showAddTag = true
+                MenuCommand.RenameFeed -> openRenameDialogForSelection()
+                MenuCommand.UnsubscribeFeed -> openDeleteDialogForSelection()
                 else -> {}
             }
         }
     }
-    var renamingFeed by remember { mutableStateOf<Feeds?>(null) }
-    var confirmingUnsubscribeFeed by remember { mutableStateOf<Feeds?>(null) }
+    // Driven by the feed-list keyboard shortcuts (KeyboardNav.kt's F2/Enter/Delete/Backspace,
+    // wired through HomeScreen). request id 0 is the initial/no-op sentinel.
+    LaunchedEffect(renameSelectedRequestId) {
+        if (renameSelectedRequestId == 0) return@LaunchedEffect
+        openRenameDialogForSelection()
+    }
+    LaunchedEffect(deleteSelectedRequestId) {
+        if (deleteSelectedRequestId == 0) return@LaunchedEffect
+        openDeleteDialogForSelection()
+    }
     val activeBoundaryState = remember { mutableStateOf<DropBoundary?>(null) }
     var activeBoundary by activeBoundaryState
     val draggedFeedIdState = remember { mutableStateOf<String?>(null) }
@@ -633,8 +673,8 @@ private fun TagRow(
             .nativeContextMenu(
                 items = {
                     listOf(
-                        NativeMenuItem(editLabel) { onEdit() },
-                        NativeMenuItem(deleteLabel) { onDelete() },
+                        NativeMenuItem(editLabel, renameNativeShortcut) { onEdit() },
+                        NativeMenuItem(deleteLabel, deleteNativeShortcut) { onDelete() },
                     )
                 },
                 onOpen = { if (!selected) onClick() },

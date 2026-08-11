@@ -1,12 +1,15 @@
 package works.merc.keryx.app.appmenu
 
+import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.local.LocalSettingsStore
+import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.ui.menu.AppMenuActions
 import works.merc.keryx.app.ui.menu.AppMenuLabels
 import works.merc.keryx.app.ui.menu.AppMenuNode
 import works.merc.keryx.app.ui.menu.AppMenuShortcut
 import works.merc.keryx.app.ui.menu.MenuBarToggle
+import works.merc.keryx.app.ui.menu.SelectedFeedMenuData
 import works.merc.keryx.app.ui.menu.buildAppMenuTree
 import works.merc.keryx.app.ui.menu.computeMenuUiState
 import works.merc.keryx.app.ui.navigation.Screen
@@ -41,6 +44,8 @@ class MenuBarVisibilityTest {
         articleMenu = "Article", toggleRead = "ToggleRead", toggleStar = "ToggleStar",
         openInBrowser = "OpenInBrowser", copyUrl = "CopyUrl",
         feedMenu = "Feed", refreshAll = "RefreshAll", syncNow = "SyncNow",
+        feedRefresh = "FeedRefresh", feedAssignTags = "AssignTags", feedMoveToFolder = "MoveToFolder",
+        feedNoFolder = "NoFolder", feedRename = "FeedRename", feedUnsubscribe = "FeedUnsubscribe",
         helpMenu = "Help", website = "Website", projectPage = "ProjectPage", about = "About",
     )
 
@@ -48,18 +53,23 @@ class MenuBarVisibilityTest {
         addFeed = { addFeedCalled = true }, addFolder = {}, addTag = {}, importOpml = {}, exportOpml = {},
         closeWindow = {}, openSettings = {}, quit = {}, focusSearch = {}, setUnreadOnly = {},
         toggleSort = {}, markAllRead = {}, toggleRead = {}, toggleStar = {}, openInBrowser = {},
-        copyUrl = {}, refreshAll = { refreshCalled = true }, sync = {}, openWebsite = {}, openProjectPage = {}, about = {},
+        copyUrl = {}, refreshAll = { refreshCalled = true }, sync = {},
+        refreshSelectedFeed = {}, toggleFeedTag = { _, _ -> }, moveFeedToFolder = {},
+        renameSelectedFeed = {}, unsubscribeSelectedFeed = {},
+        openWebsite = {}, openProjectPage = {}, about = {},
     )
 
     private fun tree(menuBarVisible: Boolean = false) = buildAppMenuTree(
         ui = computeMenuUiState(
             screen = Screen.Home, hasSelectedArticle = true, selectedArticleHasUrl = true,
             feedRefreshing = false, syncing = false, cloudConnected = true,
-            filterIsSearch = false, unreadOnly = false,
+            filter = ArticleFilter.All, unreadOnly = false,
+            hasSelectedFeed = true, hasRenamableSelection = true,
         ),
         labels = labels(),
         actions = actions(),
         menuBarToggle = MenuBarToggle(visible = menuBarVisible, onToggle = { toggledTo = it }),
+        selectedFeedMenu = SelectedFeedMenuData(emptyList(), emptySet(), emptyList(), null),
     )
 
     // --- AWT key-code mapping ---
@@ -72,6 +82,10 @@ class MenuBarVisibilityTest {
         assertEquals(KeyEvent.VK_Q, AppMenuShortcut.Quit.awtKeyCode())
         assertEquals(KeyEvent.VK_R, AppMenuShortcut.RefreshAll.awtKeyCode())
         assertEquals(KeyEvent.VK_M, AppMenuShortcut.ShowMenuBar.awtKeyCode())
+        assertEquals(KeyEvent.VK_F, AppMenuShortcut.Search.awtKeyCode())
+        assertEquals(KeyEvent.VK_I, AppMenuShortcut.ImportOpml.awtKeyCode())
+        assertEquals(KeyEvent.VK_E, AppMenuShortcut.ExportOpml.awtKeyCode())
+        assertEquals(KeyEvent.VK_U, AppMenuShortcut.UnreadOnly.awtKeyCode())
     }
 
     // --- shortcut matching ---
@@ -86,14 +100,43 @@ class MenuBarVisibilityTest {
 
         val showMenuBar = matchMenuShortcut(tree(), KeyEvent.VK_M, ctrl = true, meta = false)
         assertTrue(showMenuBar is AppMenuNode.CheckboxItem && showMenuBar.label == "ShowMenuBar")
+
+        val importOpml = matchMenuShortcut(tree(), KeyEvent.VK_I, ctrl = true, meta = false)
+        assertTrue(importOpml is AppMenuNode.Item && importOpml.label == "Import")
+
+        val unreadOnly = matchMenuShortcut(tree(), KeyEvent.VK_U, ctrl = true, meta = false)
+        assertTrue(unreadOnly is AppMenuNode.CheckboxItem && unreadOnly.label == "UnreadOnly")
     }
 
     @Test
     fun `a wrong modifier combination does not match`() {
-        // The shipped accelerators require Ctrl (not Meta) and no Shift.
+        // AddFeed requires Ctrl (not Meta) and no Shift.
         assertNull(matchMenuShortcut(tree(), KeyEvent.VK_N, ctrl = false, meta = true))
         assertNull(matchMenuShortcut(tree(), KeyEvent.VK_N, ctrl = false, meta = false))
         assertNull(matchMenuShortcut(tree(), KeyEvent.VK_N, ctrl = true, meta = false, shift = true))
+    }
+
+    @Test
+    fun `ctrl shift plus the accelerator key resolves the selected-item entries, distinct from their plain-ctrl counterparts`() {
+        val toggleRead = matchMenuShortcut(tree(), KeyEvent.VK_U, ctrl = true, meta = false, shift = true)
+        assertTrue(toggleRead is AppMenuNode.Item && toggleRead.label == "ToggleRead")
+
+        val feedRefresh = matchMenuShortcut(tree(), KeyEvent.VK_R, ctrl = true, meta = false, shift = true)
+        assertTrue(feedRefresh is AppMenuNode.Item && feedRefresh.label == "FeedRefresh")
+
+        // Ctrl+R (no Shift) still means RefreshAll, not FeedRefresh, even though both use VK_R.
+        val refreshAll = matchMenuShortcut(tree(), KeyEvent.VK_R, ctrl = true, meta = false, shift = false)
+        assertTrue(refreshAll is AppMenuNode.Item && refreshAll.label == "RefreshAll")
+    }
+
+    @Test
+    fun `rename and unsubscribe resolve on their original bare key, no modifier`() {
+        val renameKey = if (isMacOs) KeyEvent.VK_ENTER else KeyEvent.VK_F2
+        val rename = matchMenuShortcut(tree(), renameKey, ctrl = false, meta = false)
+        assertTrue(rename is AppMenuNode.Item && rename.label == "FeedRename")
+
+        val unsubscribe = matchMenuShortcut(tree(), KeyEvent.VK_DELETE, ctrl = false, meta = false)
+        assertTrue(unsubscribe is AppMenuNode.Item && unsubscribe.label == "FeedUnsubscribe")
     }
 
     @Test

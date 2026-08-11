@@ -17,15 +17,32 @@ import kotlinx.datetime.number
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
+import androidx.compose.ui.input.key.Key
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
+import works.merc.keryx.app.platform.NativeMenuShortcut
+import works.merc.keryx.app.platform.isMacOs
 
 /** [collectAsState] for a [StateFlow] — the `initial` documents the value type. */
 @Composable
 fun <T> StateFlow<T>.collectAsStateSafe(@Suppress("UNUSED_PARAMETER") initial: T): State<T> = collectAsState()
+
+/**
+ * The bare-key context-menu shortcut for rename/edit-type actions (feed/folder/tag), matching each
+ * OS's own file-manager rename convention (Explorer/Nautilus/Dolphin use F2, Finder uses Return).
+ * Renders as a real native accelerator on Linux; AWT's `MenuShortcut` can't represent a bare key at
+ * all, so macOS/Windows show no hint for it — see `NativeMenuShortcut`'s doc comment.
+ */
+internal val renameNativeShortcut = NativeMenuShortcut(if (isMacOs) Key.Enter else Key.F2)
+
+/**
+ * The bare-key context-menu shortcut for unsubscribe/delete-type actions (feed/folder/tag). Same
+ * platform-display caveat as [renameNativeShortcut].
+ */
+internal val deleteNativeShortcut = NativeMenuShortcut(Key.Delete)
 
 /**
  * Background for a selectable row: full-strength when its pane is focused, dimmed when the
@@ -134,6 +151,16 @@ fun nextFeedFilter(current: ArticleFilter, orderedFilters: List<ArticleFilter>, 
 }
 
 /**
+ * Whether a keyboard shortcut that acts on the selected feed-list item (rename/edit,
+ * unsubscribe/delete) should fire while [pane] has keyboard focus. These mirror the feed/folder/tag
+ * row context-menu items, so they only make sense while the feed list itself is focused. (Toggle
+ * read/star, open in browser, copy URL, and refresh-selected-feed have no bare-key equivalent
+ * scoped this way — they are Ctrl+Shift+<letter> app-menu accelerators instead, gated by
+ * `MenuUiState.articleActionsEnabled`/`urlActionsEnabled`/`feedActionsEnabled`.)
+ */
+fun feedListActionAllowed(pane: HomePane): Boolean = pane == HomePane.FeedList
+
+/**
  * Finds the rendered list index for a feed, folder, or tag filter.
  *
  * Expanded tags account for their attached feed rows when calculating subsequent indices.
@@ -186,6 +213,31 @@ fun feedListItemIndex(
         }
     }
     return null
+}
+
+/** The feed/folder/tag resolved by [resolveFeedListSelectionTarget] for the current filter. */
+internal sealed interface FeedListSelectionTarget {
+    data class Feed(val feed: Feeds) : FeedListSelectionTarget
+    data class Folder(val folder: Folders) : FeedListSelectionTarget
+    data class Tag(val tag: Tags) : FeedListSelectionTarget
+}
+
+/**
+ * Resolves [filter] against the current feed/folder/tag lists, for the rename/delete keyboard
+ * shortcuts and the equivalent Feed-menu commands (both need "what is currently selected" without
+ * duplicating this lookup). Returns `null` for `All`/`Starred`/`Search`, or if the selected item no
+ * longer exists in its list (e.g. unsubscribed between selection and the shortcut firing).
+ */
+internal fun resolveFeedListSelectionTarget(
+    filter: ArticleFilter,
+    feeds: List<Feeds>,
+    folders: List<Folders>,
+    tags: List<Tags>,
+): FeedListSelectionTarget? = when (filter) {
+    is ArticleFilter.Feed -> feeds.find { it.id == filter.feedId }?.let(FeedListSelectionTarget::Feed)
+    is ArticleFilter.Folder -> folders.find { it.id == filter.folderId }?.let(FeedListSelectionTarget::Folder)
+    is ArticleFilter.Tag -> tags.find { it.id == filter.tagId }?.let(FeedListSelectionTarget::Tag)
+    else -> null
 }
 
 /**

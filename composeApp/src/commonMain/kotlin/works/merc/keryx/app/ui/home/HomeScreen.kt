@@ -76,6 +76,11 @@ fun HomeScreen() {
     // Bumped on each keyboard-shortcut copy; ArticleDetailPane watches it to flash its copy button's
     // inline ✓ (the keyboard copies the selected article, which that pane already shows).
     var copyPulse by remember { mutableStateOf(0) }
+    // Bumped by the F2(Enter)/Delete feed-list shortcuts; FeedListPane observes these and resolves
+    // the currently selected filter (feed/folder/tag) against its own already-collected rows to
+    // trigger the same rename/edit and delete/unsubscribe dialogs the context menu uses.
+    var feedListRenameRequestId by remember { mutableStateOf(0) }
+    var feedListDeleteRequestId by remember { mutableStateOf(0) }
     val focusRequester = remember { FocusRequester() }
     var focusedPane by remember { mutableStateOf(vm.getInitialFocusedPane()) }
     // True while the sidebar search field holds focus, so the root keyboard shortcuts step aside and
@@ -96,6 +101,13 @@ fun HomeScreen() {
         focusedPane = pane
         vm.setFocusedPane(pane)
     }
+
+    // Mirrors the search field's focus state into MenuController (composition-local state ->
+    // StateFlow, same pattern App.kt already uses for currentScreen): a native Swing accelerator
+    // has no equivalent to KeyboardNav.kt's searchFieldFocused suppression, so AppMenuBar needs
+    // this to disable the Feed menu's bare-key items (F2/Delete) while the user is actually typing
+    // a search query.
+    LaunchedEffect(searchFieldFocused) { menuController.searchFieldFocused.value = searchFieldFocused }
 
     val orderedFilters = remember(tags, folders, feeds, collapsedFolderIds) {
         buildOrderedFilters(tags, folders, feeds, collapsedFolderIds)
@@ -180,10 +192,8 @@ fun HomeScreen() {
                     },
                     onNextArticle = { vm.selectNext() },
                     onPreviousArticle = { vm.selectPrevious() },
-                    onToggleRead = { vm.toggleReadSelected() },
-                    onToggleStar = { vm.toggleStarSelected() },
-                    onOpenInBrowser = { openSelectedInBrowser() },
-                    onCopyUrl = { copySelectedUrl() },
+                    onFeedListRename = { if (feedListActionAllowed(focusedPane)) feedListRenameRequestId++ },
+                    onFeedListDelete = { if (feedListActionAllowed(focusedPane)) feedListDeleteRequestId++ },
                     onSearch = { focusSearch() },
                 ),
         ) {
@@ -209,6 +219,8 @@ fun HomeScreen() {
                         modifier = Modifier.width(displayedFeedWidth),
                         onAddFeedClick = { showAddFeed = true },
                         onSearchFieldFocusChange = { searchFieldFocused = it },
+                        renameSelectedRequestId = feedListRenameRequestId,
+                        deleteSelectedRequestId = feedListDeleteRequestId,
                     )
                     ResizableDivider(onDrag = { deltaPx ->
                         vm.setFeedListPaneWidth(feedListPaneWidth + with(density) { deltaPx.toDp().value })
