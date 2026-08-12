@@ -256,6 +256,38 @@ class HomeCommonTest {
         assertEquals(1, feedListItemIndex(ArticleFilter.Folder("d1"), feeds, folders, emptyList(), setOf("d1")))
     }
 
+    @Test
+    fun feedListItemIndexReturnsNullForFeedInCollapsedFolderEvenWhenVisibleUnderAnExpandedTag() {
+        // The feed still renders once, as a TagFeedRow — but that row has no inline editor (see
+        // FeedListPane.kt), so the canonical-only lookup must not resolve to it.
+        val folders = listOf(folder("d1"))
+        val tags = listOf(tag("t1"))
+        val feeds = listOf(feed("f1", folderId = "d1"))
+        val feedTagMap = mapOf("f1" to setOf("t1"))
+
+        assertNull(
+            feedListItemIndex(ArticleFilter.Feed("f1"), feeds, folders, tags, setOf("d1"), feedTagMap, setOf("t1")),
+        )
+    }
+
+    @Test
+    fun feedListItemIndicesStillReturnsTheTagNestedRowForAFeedInACollapsedFolder() {
+        // feedListItemIndices intentionally still includes this row — only feedListItemIndex (the
+        // canonical-only lookup, tested above) excludes it.
+        val folders = listOf(folder("d1"))
+        val tags = listOf(tag("t1"))
+        val feeds = listOf(feed("f1", folderId = "d1"))
+        val feedTagMap = mapOf("f1" to setOf("t1"))
+
+        // 0: Folders header, 1: FolderGroupHeader d1 (collapsed, feed row hidden),
+        // 2: NoFolderHeader (folders.isNotEmpty(), even though the unassigned group is empty here),
+        // 3: divider, 4: Tags header, 5: tag t1, 6: f1 (under t1)
+        assertEquals(
+            listOf(6),
+            feedListItemIndices(ArticleFilter.Feed("f1"), feeds, folders, tags, setOf("d1"), feedTagMap, setOf("t1")),
+        )
+    }
+
     // --- feedsForTag ---
 
     @Test
