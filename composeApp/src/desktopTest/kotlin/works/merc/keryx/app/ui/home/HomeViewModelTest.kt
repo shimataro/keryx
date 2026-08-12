@@ -58,6 +58,7 @@ import works.merc.keryx.app.ftsManager
 import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
+import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertTag
 import works.merc.keryx.app.stampArticleDeleted
@@ -714,6 +715,59 @@ class HomeViewModelTest {
 
         assertEquals("a1", vm.selectedArticle.value?.id)
         assertEquals(listOf("a1"), vm.articles.value.map { it.id })
+    }
+
+    @Test
+    fun selectFilterOnSameFilterStillMovesTheSelectedRowInstance() = runTest {
+        // Clicking the tag-nested copy of a feed already selected under its folder must move the
+        // primary highlight to that row without disturbing the loaded article/pin state (the
+        // filter itself is unchanged, so none of selectFilter's reset side effects may fire).
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        val article1 = db.articlesQueries.getById("a1").executeAsOne()
+        vm.selectArticle(article1.toListRow())
+        testScheduler.advanceUntilIdle()
+        assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), vm.selectedRowInstance.value)
+
+        vm.selectFilter(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInTag("f1", "t1"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(FeedListRowSelection.FeedInTag("f1", "t1"), vm.selectedRowInstance.value)
+        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
+        assertEquals("a1", vm.selectedArticle.value?.id)
+        assertEquals(listOf("a1"), vm.articles.value.map { it.id })
+    }
+
+    @Test
+    fun selectFilterWithoutAnInstanceFallsBackToTheCanonicalRow() = runTest {
+        // The ~40 call sites that pass only a filter (search jump, notification action, menus) must
+        // land on the folder-group row, not keep a stale tag-nested instance.
+        db.insertFeed("f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInTag("f1", "t1"))
+        testScheduler.advanceUntilIdle()
+
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        assertEquals(FeedListRowSelection.Starred, vm.selectedRowInstance.value)
+
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), vm.selectedRowInstance.value)
+
+        // Same-filter early-return path: selecting a tag-nested instance while its filter is
+        // already active, then re-selecting the bare filter, must demote it too.
+        vm.selectFilter(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInTag("f1", "t1"))
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), vm.selectedRowInstance.value)
     }
 
     @Test
@@ -1828,6 +1882,47 @@ class HomeViewModelTest {
 
         assertFalse("t1" in vm.expandedTagIds.value)
         assertFalse("t1" in store.load().expandedTagIds)
+    }
+
+    @Test
+    fun toggleTagExpandedDemotesStaleTagNestedRowInstanceWhenCollapsed() = runTest {
+        db.insertFeed("f1")
+        db.insertTag("t1", "Kotlin")
+        db.insertFeedTag("f1", "t1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.toggleTagExpanded("t1")
+        vm.selectFilter(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInTag("f1", "t1"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(FeedListRowSelection.FeedInTag("f1", "t1"), vm.selectedRowInstance.value)
+
+        // Collapsing the tag stops rendering the nested row, so the stale instance must fall
+        // back to the feed's canonical (folder-group) row.
+        vm.toggleTagExpanded("t1")
+
+        assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), vm.selectedRowInstance.value)
+    }
+
+    @Test
+    fun deleteTagDemotesStaleTagNestedRowInstance() = runTest {
+        db.insertFeed("f1")
+        db.insertTag("t1", "Kotlin")
+        db.insertFeedTag("f1", "t1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.toggleTagExpanded("t1")
+        // The active filter stays Feed("f1"), not Tag("t1"), so deleteTag's
+        // selectFilter(ArticleFilter.All) reset branch does not fire — this exercises the
+        // separate demotion path for a selection that just happens to be tag-nested.
+        vm.selectFilter(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInTag("f1", "t1"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(FeedListRowSelection.FeedInTag("f1", "t1"), vm.selectedRowInstance.value)
+
+        vm.deleteTag("t1")
+
+        assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), vm.selectedRowInstance.value)
     }
 
     // --- Article scroll position memory ---

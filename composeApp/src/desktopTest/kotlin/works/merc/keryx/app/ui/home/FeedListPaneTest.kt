@@ -29,8 +29,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * End-to-end Compose UI tests for `FeedListPane`'s scroll-to-selection behavior
- * (`scrollToIndexIfNeeded(List<Int>)` in `HomeCommon.kt`), driven against the real rendered pane
+ * End-to-end Compose UI tests for `FeedListPane`'s scroll-to-selection behavior (`feedListRowIndex`
+ * + `scrollToIndexIfNeeded(Int)` in `HomeCommon.kt`), driven against the real rendered pane
  * exactly like `FeedListDragTest.kt`/`FeedListInlineRenameTest.kt` — `FeedListPane` (unlike
  * `ArticleListPaneContent`) does not expose its `LazyListState`, so row/host positions are read
  * from the semantics tree instead.
@@ -53,7 +53,7 @@ class FeedListPaneTest {
     }
 
     @Test
-    fun doesNotScrollWhenSelectingAPartiallyVisibleTagNestedFeedRow() = runDesktopComposeUiTest {
+    fun nudgesAPartiallyVisibleTagNestedFeedRowFullyIntoView() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertFolder("d1", "Folder One")
         db.insertFeed("f-tag", folderId = "d1")
@@ -93,11 +93,58 @@ class FeedListPaneTest {
             assertTrue(boundsBefore.height > 0f, "row must still be (partially) visible")
             assertTrue(boundsBefore.height < tallBounds.height, "row must be clipped, not fully visible")
 
-            vm.selectFilter(ArticleFilter.Feed("f-tag"))
+            // Exactly what TagFeedRow's own onClick now passes: the tag-nested instance, not the
+            // canonical folder-group one. With a bare `selectFilter(ArticleFilter.Feed("f-tag"))`
+            // this test would pass for the wrong reason — the canonical instance is hidden by the
+            // collapsed folder, so its index is simply unresolvable and no scroll could happen
+            // regardless of the behavior under test.
+            vm.selectFilter(ArticleFilter.Feed("f-tag"), FeedListRowSelection.FeedInTag("f-tag", "t1"))
             waitForIdle()
 
+            // Now that the selection names one exact row, the scroll is the ordinary
+            // `scrollToIndexIfNeeded(Int)` nudge: the clipped row is brought fully into view,
+            // rather than left clipped by the old "some instance is already visible, do nothing"
+            // heuristic that existed only because a selection couldn't say which row it meant.
             val boundsAfter = onNodeWithText("Feed f-tag", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-            assertEquals(boundsBefore, boundsAfter, "selecting an already (partially) visible row must not scroll the list")
+            assertTrue(boundsAfter.height > boundsBefore.height, "the clipped row must be revealed, not left clipped")
+            assertEquals(
+                tallBounds.height,
+                boundsAfter.height,
+                absoluteTolerance = 1f,
+                message = "the row must end up fully visible, at its natural height",
+            )
+        } finally {
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    @Test
+    fun scrollsToTheSelectedTagNestedRowRatherThanTheSameFeedsFolderGroupRow() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFolder("d1", "Folder One")
+        db.insertFeed("f-tag", folderId = "d1", sortOrder = 0L)
+        repeat(30) { i -> db.insertFeed("f$i", sortOrder = (i + 1).toLong()) }
+        db.insertTag("t1", "Tag One")
+        db.insertFeedTag("f-tag", "t1")
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            // The feed now renders twice: once near the top under its (expanded) folder, and once
+            // under the expanded tag, far below the viewport.
+            vm.toggleTagExpanded("t1")
+            setContent { FeedListPaneTestHost(vm, 400.dp) }
+            waitForIdle()
+            onNodeWithText("Feed f-tag", useUnmergedTree = true).assertIsDisplayed()
+
+            vm.selectFilter(ArticleFilter.Feed("f-tag"), FeedListRowSelection.FeedInTag("f-tag", "t1"))
+            waitForIdle()
+
+            // Resolving the canonical (folder-group) instance instead would leave the list exactly
+            // where it is — that row is already fully visible — so reaching the tags section is
+            // what proves the *selected* instance is the one scrolled to.
+            onNodeWithText("Tag One", useUnmergedTree = true).assertIsDisplayed()
+            onNodeWithText("Feed f-tag", useUnmergedTree = true).assertIsDisplayed()
         } finally {
             fixture.close()
             driver.close()

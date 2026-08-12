@@ -6,103 +6,270 @@ import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 
 class HomeCommonTest {
 
+    // --- FeedListRowSelection.canonicalFor ---
+
     @Test
-    fun buildOrderedFiltersPutsSidebarRowsFirstThenUnassignedFeedsThenTagsWhenNoFolders() {
+    fun canonicalForMapsEveryFilterVariantToItsFolderGroupOrHeaderRow() {
+        // A bare filter change (search jump, notification "show feed detail") has no specific
+        // rendered row in mind, so a feed always resolves to its folder-group row, never a
+        // tag-nested copy.
+        assertEquals(FeedListRowSelection.All, FeedListRowSelection.canonicalFor(ArticleFilter.All))
+        assertEquals(FeedListRowSelection.Starred, FeedListRowSelection.canonicalFor(ArticleFilter.Starred))
+        assertEquals(FeedListRowSelection.Search, FeedListRowSelection.canonicalFor(ArticleFilter.Search))
+        assertEquals(
+            FeedListRowSelection.FeedInFolderGroup("f1"),
+            FeedListRowSelection.canonicalFor(ArticleFilter.Feed("f1")),
+        )
+        assertEquals(
+            FeedListRowSelection.Folder("d1"),
+            FeedListRowSelection.canonicalFor(ArticleFilter.Folder("d1")),
+        )
+        assertEquals(FeedListRowSelection.Tag("t1"), FeedListRowSelection.canonicalFor(ArticleFilter.Tag("t1")))
+    }
+
+    @Test
+    fun feedListRowSelectionCarriesTheFilterEachRowSelects() {
+        assertEquals(ArticleFilter.All, FeedListRowSelection.All.filter)
+        assertEquals(ArticleFilter.Starred, FeedListRowSelection.Starred.filter)
+        assertEquals(ArticleFilter.Search, FeedListRowSelection.Search.filter)
+        assertEquals(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInFolderGroup("f1").filter)
+        assertEquals(ArticleFilter.Folder("d1"), FeedListRowSelection.Folder("d1").filter)
+        assertEquals(ArticleFilter.Tag("t1"), FeedListRowSelection.Tag("t1").filter)
+        // The two instances of one feed select the same filter but are different rows — the whole
+        // point of the type.
+        assertEquals(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInTag("f1", "t1").filter)
+        assertNotEquals<FeedListRowSelection>(
+            FeedListRowSelection.FeedInFolderGroup("f1"),
+            FeedListRowSelection.FeedInTag("f1", "t1"),
+        )
+    }
+
+    // --- buildOrderedFeedListRows ---
+
+    @Test
+    fun buildOrderedFeedListRowsPutsSidebarRowsFirstThenUnassignedFeedsThenTagsWhenNoFolders() {
         val tags = listOf(tag("t1"), tag("t2"))
         val feeds = listOf(feed("f1"), feed("f2"))
 
-        val ordered = buildOrderedFilters(tags, emptyList(), feeds, emptySet())
+        val ordered = buildOrderedFeedListRows(tags, emptyList(), feeds, emptySet(), emptySet(), emptyMap())
 
         assertEquals(
             listOf(
-                ArticleFilter.All,
-                ArticleFilter.Starred,
-                ArticleFilter.Search,
-                ArticleFilter.Feed("f1"),
-                ArticleFilter.Feed("f2"),
-                ArticleFilter.Tag("t1"),
-                ArticleFilter.Tag("t2"),
+                FeedListRowSelection.All,
+                FeedListRowSelection.Starred,
+                FeedListRowSelection.Search,
+                FeedListRowSelection.FeedInFolderGroup("f1"),
+                FeedListRowSelection.FeedInFolderGroup("f2"),
+                FeedListRowSelection.Tag("t1"),
+                FeedListRowSelection.Tag("t2"),
             ),
             ordered,
         )
     }
 
     @Test
-    fun buildOrderedFiltersPutsFolderGroupsBeforeUnassignedFeedsAndTags() {
+    fun buildOrderedFeedListRowsPutsFolderGroupsBeforeUnassignedFeedsAndTags() {
         val tags = listOf(tag("t1"))
         val folders = listOf(folder("d1"))
         val feeds = listOf(feed("f1", folderId = "d1"), feed("f2"))
 
-        val ordered = buildOrderedFilters(tags, folders, feeds, emptySet())
+        val ordered = buildOrderedFeedListRows(tags, folders, feeds, emptySet(), emptySet(), emptyMap())
 
         assertEquals(
             listOf(
-                ArticleFilter.All,
-                ArticleFilter.Starred,
-                ArticleFilter.Search,
-                ArticleFilter.Folder("d1"),
-                ArticleFilter.Feed("f1"),
-                ArticleFilter.Feed("f2"),
-                ArticleFilter.Tag("t1"),
+                FeedListRowSelection.All,
+                FeedListRowSelection.Starred,
+                FeedListRowSelection.Search,
+                FeedListRowSelection.Folder("d1"),
+                FeedListRowSelection.FeedInFolderGroup("f1"),
+                FeedListRowSelection.FeedInFolderGroup("f2"),
+                FeedListRowSelection.Tag("t1"),
             ),
             ordered,
         )
     }
 
     @Test
-    fun buildOrderedFiltersSkipsFeedsUnderCollapsedFolders() {
+    fun buildOrderedFeedListRowsSkipsFeedsUnderCollapsedFolders() {
         val folders = listOf(folder("d1"))
         val feeds = listOf(feed("f1", folderId = "d1"))
 
-        val ordered = buildOrderedFilters(emptyList(), folders, feeds, setOf("d1"))
+        val ordered = buildOrderedFeedListRows(emptyList(), folders, feeds, setOf("d1"), emptySet(), emptyMap())
 
         assertEquals(
-            listOf(ArticleFilter.All, ArticleFilter.Starred, ArticleFilter.Search, ArticleFilter.Folder("d1")),
+            listOf(
+                FeedListRowSelection.All,
+                FeedListRowSelection.Starred,
+                FeedListRowSelection.Search,
+                FeedListRowSelection.Folder("d1"),
+            ),
             ordered,
         )
     }
 
     @Test
-    fun buildOrderedFiltersWithNoTagsOrFeedsHasOnlySidebarRows() {
-        val ordered = buildOrderedFilters(emptyList(), emptyList(), emptyList(), emptySet())
+    fun buildOrderedFeedListRowsWithNoTagsOrFeedsHasOnlySidebarRows() {
+        val ordered = buildOrderedFeedListRows(emptyList(), emptyList(), emptyList(), emptySet(), emptySet(), emptyMap())
 
-        assertEquals(listOf(ArticleFilter.All, ArticleFilter.Starred, ArticleFilter.Search), ordered)
+        assertEquals(
+            listOf(FeedListRowSelection.All, FeedListRowSelection.Starred, FeedListRowSelection.Search),
+            ordered,
+        )
     }
 
     @Test
-    fun nextFeedFilterMovesForwardAndBackwardWithinBounds() {
-        val ordered = buildOrderedFilters(listOf(tag("t1")), emptyList(), listOf(feed("f1")), emptySet())
+    fun buildOrderedFeedListRowsPutsAnExpandedTagsFeedRowsRightAfterThatTag() {
+        val tags = listOf(tag("t1"), tag("t2"))
+        val feeds = listOf(feed("f1"), feed("f2"))
+        val feedTagMap = mapOf("f1" to setOf("t1", "t2"), "f2" to setOf("t1"))
 
-        assertEquals(ArticleFilter.Starred, nextFeedFilter(ArticleFilter.All, ordered, 1))
-        assertEquals(ArticleFilter.Tag("t1"), nextFeedFilter(ArticleFilter.Feed("f1"), ordered, 1))
-        assertEquals(ArticleFilter.All, nextFeedFilter(ArticleFilter.Starred, ordered, -1))
+        val ordered = buildOrderedFeedListRows(tags, emptyList(), feeds, emptySet(), setOf("t1"), feedTagMap)
+
+        assertEquals(
+            listOf(
+                FeedListRowSelection.All,
+                FeedListRowSelection.Starred,
+                FeedListRowSelection.Search,
+                FeedListRowSelection.FeedInFolderGroup("f1"),
+                FeedListRowSelection.FeedInFolderGroup("f2"),
+                FeedListRowSelection.Tag("t1"),
+                FeedListRowSelection.FeedInTag("f1", "t1"),
+                FeedListRowSelection.FeedInTag("f2", "t1"),
+                // t2 is collapsed, so f1's row under it is not navigable.
+                FeedListRowSelection.Tag("t2"),
+            ),
+            ordered,
+        )
     }
 
     @Test
-    fun nextFeedFilterAtTopBoundaryReturnsNullInsteadOfReselectingCurrent() {
-        val ordered = buildOrderedFilters(emptyList(), emptyList(), emptyList(), emptySet())
+    fun buildOrderedFeedListRowsOmitsTagNestedRowsWhileTheTagIsCollapsed() {
+        val tags = listOf(tag("t1"))
+        val feeds = listOf(feed("f1"))
+        val feedTagMap = mapOf("f1" to setOf("t1"))
 
-        assertNull(nextFeedFilter(ArticleFilter.All, ordered, -1))
+        val ordered = buildOrderedFeedListRows(tags, emptyList(), feeds, emptySet(), emptySet(), feedTagMap)
+
+        assertEquals(
+            listOf(
+                FeedListRowSelection.All,
+                FeedListRowSelection.Starred,
+                FeedListRowSelection.Search,
+                FeedListRowSelection.FeedInFolderGroup("f1"),
+                FeedListRowSelection.Tag("t1"),
+            ),
+            ordered,
+        )
+    }
+
+    // --- nextFeedListRow ---
+
+    @Test
+    fun nextFeedListRowMovesForwardAndBackwardWithinBounds() {
+        val ordered = buildOrderedFeedListRows(
+            listOf(tag("t1")),
+            emptyList(),
+            listOf(feed("f1")),
+            emptySet(),
+            emptySet(),
+            emptyMap(),
+        )
+
+        assertEquals(FeedListRowSelection.Starred, nextFeedListRow(FeedListRowSelection.All, ordered, 1))
+        assertEquals(
+            FeedListRowSelection.Tag("t1"),
+            nextFeedListRow(FeedListRowSelection.FeedInFolderGroup("f1"), ordered, 1),
+        )
+        assertEquals(FeedListRowSelection.All, nextFeedListRow(FeedListRowSelection.Starred, ordered, -1))
     }
 
     @Test
-    fun nextFeedFilterAtBottomBoundaryReturnsNullInsteadOfReselectingCurrent() {
-        val ordered = buildOrderedFilters(emptyList(), emptyList(), listOf(feed("f1")), emptySet())
+    fun nextFeedListRowStepsFromAnExpandedTagIntoItsNestedFeedRowsAndBackOut() {
+        val tags = listOf(tag("t1"), tag("t2"))
+        val feeds = listOf(feed("f1"), feed("f2"))
+        val feedTagMap = mapOf("f1" to setOf("t1"), "f2" to setOf("t1"))
+        val ordered = buildOrderedFeedListRows(tags, emptyList(), feeds, emptySet(), setOf("t1"), feedTagMap)
 
-        assertNull(nextFeedFilter(ArticleFilter.Feed("f1"), ordered, 1))
+        // Down from the tag row lands on its first nested feed, not on the next tag.
+        assertEquals(
+            FeedListRowSelection.FeedInTag("f1", "t1"),
+            nextFeedListRow(FeedListRowSelection.Tag("t1"), ordered, 1),
+        )
+        assertEquals(
+            FeedListRowSelection.FeedInTag("f2", "t1"),
+            nextFeedListRow(FeedListRowSelection.FeedInTag("f1", "t1"), ordered, 1),
+        )
+        // Past the last nested row, navigation continues into the next tag.
+        assertEquals(
+            FeedListRowSelection.Tag("t2"),
+            nextFeedListRow(FeedListRowSelection.FeedInTag("f2", "t1"), ordered, 1),
+        )
+        // And back up out of the nested rows onto the tag itself.
+        assertEquals(
+            FeedListRowSelection.Tag("t1"),
+            nextFeedListRow(FeedListRowSelection.FeedInTag("f1", "t1"), ordered, -1),
+        )
     }
 
     @Test
-    fun nextFeedFilterFallsBackToFirstEntryWhenCurrentIsNotInOrderedList() {
-        val ordered = buildOrderedFilters(emptyList(), emptyList(), listOf(feed("f1"), feed("f2")), emptySet())
+    fun nextFeedListRowTreatsAFeedsFolderRowAndItsTagNestedRowAsDifferentPositions() {
+        val tags = listOf(tag("t1"))
+        val feeds = listOf(feed("f1"))
+        val feedTagMap = mapOf("f1" to setOf("t1"))
+        val ordered = buildOrderedFeedListRows(tags, emptyList(), feeds, emptySet(), setOf("t1"), feedTagMap)
 
-        // A filter for a feed that's already been unsubscribed (stale/defensive case): treated as
+        // From the folder-group row, down lands on the tag; from the tag-nested row of the *same*
+        // feed, down is the list end (null). A filter-keyed lookup couldn't tell these apart.
+        assertEquals(
+            FeedListRowSelection.Tag("t1"),
+            nextFeedListRow(FeedListRowSelection.FeedInFolderGroup("f1"), ordered, 1),
+        )
+        assertNull(nextFeedListRow(FeedListRowSelection.FeedInTag("f1", "t1"), ordered, 1))
+    }
+
+    @Test
+    fun nextFeedListRowAtTopBoundaryReturnsNullInsteadOfReselectingCurrent() {
+        val ordered = buildOrderedFeedListRows(emptyList(), emptyList(), emptyList(), emptySet(), emptySet(), emptyMap())
+
+        assertNull(nextFeedListRow(FeedListRowSelection.All, ordered, -1))
+    }
+
+    @Test
+    fun nextFeedListRowAtBottomBoundaryReturnsNullInsteadOfReselectingCurrent() {
+        val ordered = buildOrderedFeedListRows(
+            emptyList(),
+            emptyList(),
+            listOf(feed("f1")),
+            emptySet(),
+            emptySet(),
+            emptyMap(),
+        )
+
+        assertNull(nextFeedListRow(FeedListRowSelection.FeedInFolderGroup("f1"), ordered, 1))
+    }
+
+    @Test
+    fun nextFeedListRowFallsBackToFirstEntryWhenCurrentIsNotInOrderedList() {
+        val ordered = buildOrderedFeedListRows(
+            emptyList(),
+            emptyList(),
+            listOf(feed("f1"), feed("f2")),
+            emptySet(),
+            emptySet(),
+            emptyMap(),
+        )
+
+        // A row for a feed that's already been unsubscribed (stale/defensive case): treated as
         // if currently at index 0 (`All`), so moving forward by 1 lands on the next entry, `Starred`.
-        assertEquals(ArticleFilter.Starred, nextFeedFilter(ArticleFilter.Feed("gone"), ordered, 1))
+        assertEquals(
+            FeedListRowSelection.Starred,
+            nextFeedListRow(FeedListRowSelection.FeedInFolderGroup("gone"), ordered, 1),
+        )
     }
 
     @Test
@@ -186,29 +353,35 @@ class HomeCommonTest {
     }
 
     @Test
-    fun feedListItemIndexReturnsNullForSidebarRows() {
+    fun feedListRowIndexReturnsNullForSidebarRows() {
         // All, Starred, and Search are rendered outside the LazyColumn entirely as fixed
         // SidebarRows, so they never correspond to a LazyColumn item and must not trigger a scroll.
         val folders = listOf(folder("d1"))
         val feeds = listOf(feed("f1", folderId = "d1"))
         val tags = listOf(tag("t1"))
 
-        assertNull(feedListItemIndex(ArticleFilter.Starred, feeds, folders, tags, emptySet()))
-        assertNull(feedListItemIndex(ArticleFilter.All, feeds, folders, tags, emptySet()))
-        assertNull(feedListItemIndex(ArticleFilter.Search, feeds, folders, tags, emptySet()))
+        assertNull(feedListRowIndex(FeedListRowSelection.Starred, feeds, folders, tags, emptySet()))
+        assertNull(feedListRowIndex(FeedListRowSelection.All, feeds, folders, tags, emptySet()))
+        assertNull(feedListRowIndex(FeedListRowSelection.Search, feeds, folders, tags, emptySet()))
     }
 
     @Test
-    fun feedListItemIndexWithNoFoldersOrTagsStartsFeedsRightAfterHeaders() {
+    fun feedListRowIndexWithNoFoldersOrTagsStartsFeedsRightAfterHeaders() {
         // No folders => no NoFolderHeader row, so index 1 (after "Folders" header) is the first feed.
         val feeds = listOf(feed("f1"), feed("f2"))
 
-        assertEquals(1, feedListItemIndex(ArticleFilter.Feed("f1"), feeds, emptyList(), emptyList(), emptySet()))
-        assertEquals(2, feedListItemIndex(ArticleFilter.Feed("f2"), feeds, emptyList(), emptyList(), emptySet()))
+        assertEquals(
+            1,
+            feedListRowIndex(FeedListRowSelection.FeedInFolderGroup("f1"), feeds, emptyList(), emptyList(), emptySet()),
+        )
+        assertEquals(
+            2,
+            feedListRowIndex(FeedListRowSelection.FeedInFolderGroup("f2"), feeds, emptyList(), emptyList(), emptySet()),
+        )
     }
 
     @Test
-    fun feedListItemIndexWalksFoldersUnassignedFeedsDividerAndTagsInOrder() {
+    fun feedListRowIndexWalksFoldersUnassignedFeedsDividerAndTagsInOrder() {
         val folders = listOf(folder("d1"), folder("d2"))
         val tags = listOf(tag("t1"), tag("t2"))
         val feeds = listOf(
@@ -230,50 +403,41 @@ class HomeCommonTest {
         // index 9: "Tags" header
         // index 10: tag t1
         // index 11: tag t2
-        assertEquals(1, feedListItemIndex(ArticleFilter.Folder("d1"), feeds, folders, tags, emptySet()))
-        assertEquals(2, feedListItemIndex(ArticleFilter.Feed("f1"), feeds, folders, tags, emptySet()))
-        assertEquals(3, feedListItemIndex(ArticleFilter.Folder("d2"), feeds, folders, tags, emptySet()))
-        assertEquals(4, feedListItemIndex(ArticleFilter.Feed("f2"), feeds, folders, tags, emptySet()))
-        assertEquals(6, feedListItemIndex(ArticleFilter.Feed("f3"), feeds, folders, tags, emptySet()))
-        assertEquals(7, feedListItemIndex(ArticleFilter.Feed("f4"), feeds, folders, tags, emptySet()))
-        assertEquals(10, feedListItemIndex(ArticleFilter.Tag("t1"), feeds, folders, tags, emptySet()))
-        assertEquals(11, feedListItemIndex(ArticleFilter.Tag("t2"), feeds, folders, tags, emptySet()))
+        assertEquals(1, feedListRowIndex(FeedListRowSelection.Folder("d1"), feeds, folders, tags, emptySet()))
+        assertEquals(2, feedListRowIndex(FeedListRowSelection.FeedInFolderGroup("f1"), feeds, folders, tags, emptySet()))
+        assertEquals(3, feedListRowIndex(FeedListRowSelection.Folder("d2"), feeds, folders, tags, emptySet()))
+        assertEquals(4, feedListRowIndex(FeedListRowSelection.FeedInFolderGroup("f2"), feeds, folders, tags, emptySet()))
+        assertEquals(6, feedListRowIndex(FeedListRowSelection.FeedInFolderGroup("f3"), feeds, folders, tags, emptySet()))
+        assertEquals(7, feedListRowIndex(FeedListRowSelection.FeedInFolderGroup("f4"), feeds, folders, tags, emptySet()))
+        assertEquals(10, feedListRowIndex(FeedListRowSelection.Tag("t1"), feeds, folders, tags, emptySet()))
+        assertEquals(11, feedListRowIndex(FeedListRowSelection.Tag("t2"), feeds, folders, tags, emptySet()))
     }
 
     @Test
-    fun feedListItemIndexReturnsNullForFeedUnderCollapsedFolder() {
+    fun feedListRowIndexReturnsNullForFeedUnderCollapsedFolder() {
         val folders = listOf(folder("d1"))
         val feeds = listOf(feed("f1", folderId = "d1"))
-
-        assertNull(feedListItemIndex(ArticleFilter.Feed("f1"), feeds, folders, emptyList(), setOf("d1")))
-    }
-
-    @Test
-    fun feedListItemIndexStillReturnsFolderHeaderRowWhenCollapsed() {
-        val folders = listOf(folder("d1"))
-        val feeds = listOf(feed("f1", folderId = "d1"))
-
-        assertEquals(1, feedListItemIndex(ArticleFilter.Folder("d1"), feeds, folders, emptyList(), setOf("d1")))
-    }
-
-    @Test
-    fun feedListItemIndexReturnsNullForFeedInCollapsedFolderEvenWhenVisibleUnderAnExpandedTag() {
-        // The feed still renders once, as a TagFeedRow — but that row has no inline editor (see
-        // FeedListPane.kt), so the canonical-only lookup must not resolve to it.
-        val folders = listOf(folder("d1"))
-        val tags = listOf(tag("t1"))
-        val feeds = listOf(feed("f1", folderId = "d1"))
-        val feedTagMap = mapOf("f1" to setOf("t1"))
 
         assertNull(
-            feedListItemIndex(ArticleFilter.Feed("f1"), feeds, folders, tags, setOf("d1"), feedTagMap, setOf("t1")),
+            feedListRowIndex(FeedListRowSelection.FeedInFolderGroup("f1"), feeds, folders, emptyList(), setOf("d1")),
         )
     }
 
     @Test
-    fun feedListItemIndicesStillReturnsTheTagNestedRowForAFeedInACollapsedFolder() {
-        // feedListItemIndices intentionally still includes this row — only feedListItemIndex (the
-        // canonical-only lookup, tested above) excludes it.
+    fun feedListRowIndexStillReturnsFolderHeaderRowWhenCollapsed() {
+        val folders = listOf(folder("d1"))
+        val feeds = listOf(feed("f1", folderId = "d1"))
+
+        assertEquals(
+            1,
+            feedListRowIndex(FeedListRowSelection.Folder("d1"), feeds, folders, emptyList(), setOf("d1")),
+        )
+    }
+
+    @Test
+    fun feedListRowIndexResolvesTheTagNestedRowOfAFeedWhoseFolderRowIsHidden() {
+        // The folder-group instance is hidden by the collapsed folder, but the tag-nested instance
+        // is a different row and still rendered — each resolves independently.
         val folders = listOf(folder("d1"))
         val tags = listOf(tag("t1"))
         val feeds = listOf(feed("f1", folderId = "d1"))
@@ -282,9 +446,28 @@ class HomeCommonTest {
         // 0: Folders header, 1: FolderGroupHeader d1 (collapsed, feed row hidden),
         // 2: NoFolderHeader (folders.isNotEmpty(), even though the unassigned group is empty here),
         // 3: divider, 4: Tags header, 5: tag t1, 6: f1 (under t1)
+        assertNull(
+            feedListRowIndex(
+                FeedListRowSelection.FeedInFolderGroup("f1"),
+                feeds,
+                folders,
+                tags,
+                setOf("d1"),
+                feedTagMap,
+                setOf("t1"),
+            ),
+        )
         assertEquals(
-            listOf(6),
-            feedListItemIndices(ArticleFilter.Feed("f1"), feeds, folders, tags, setOf("d1"), feedTagMap, setOf("t1")),
+            6,
+            feedListRowIndex(
+                FeedListRowSelection.FeedInTag("f1", "t1"),
+                feeds,
+                folders,
+                tags,
+                setOf("d1"),
+                feedTagMap,
+                setOf("t1"),
+            ),
         )
     }
 
@@ -318,21 +501,39 @@ class HomeCommonTest {
         assertEquals(listOf("f1", "f2"), feedsForTag(feeds, feedTagMap, "t2").map { it.id })
     }
 
-    // --- feedListItemIndex, expanded tags ---
+    // --- feedListRowIndex, expanded tags ---
 
     @Test
-    fun feedListItemIndexIgnoresTagFeedRowsWhenNoTagIsExpanded() {
+    fun feedListRowIndexIgnoresTagFeedRowsWhenNoTagIsExpanded() {
         val tags = listOf(tag("t1"), tag("t2"))
         val feeds = listOf(feed("f1"), feed("f2"))
         val feedTagMap = mapOf("f1" to setOf("t1"), "f2" to setOf("t1"))
 
         // 0: "Folders" header, 1: f1, 2: f2, 3: divider, 4: "Tags" header
-        assertEquals(5, feedListItemIndex(ArticleFilter.Tag("t1"), feeds, emptyList(), tags, emptySet(), feedTagMap, emptySet()))
-        assertEquals(6, feedListItemIndex(ArticleFilter.Tag("t2"), feeds, emptyList(), tags, emptySet(), feedTagMap, emptySet()))
+        assertEquals(
+            5,
+            feedListRowIndex(FeedListRowSelection.Tag("t1"), feeds, emptyList(), tags, emptySet(), feedTagMap, emptySet()),
+        )
+        assertEquals(
+            6,
+            feedListRowIndex(FeedListRowSelection.Tag("t2"), feeds, emptyList(), tags, emptySet(), feedTagMap, emptySet()),
+        )
+        // A tag-nested instance under a collapsed tag isn't rendered at all.
+        assertNull(
+            feedListRowIndex(
+                FeedListRowSelection.FeedInTag("f1", "t1"),
+                feeds,
+                emptyList(),
+                tags,
+                emptySet(),
+                feedTagMap,
+                emptySet(),
+            ),
+        )
     }
 
     @Test
-    fun feedListItemIndexShiftsLaterTagsByAnExpandedTagsFeedRows() {
+    fun feedListRowIndexShiftsLaterTagsByAnExpandedTagsFeedRows() {
         val tags = listOf(tag("t1"), tag("t2"), tag("t3"))
         val feeds = listOf(feed("f1"), feed("f2"), feed("f3"))
         val feedTagMap = mapOf("f1" to setOf("t1"), "f2" to setOf("t1"), "f3" to setOf("t2"))
@@ -340,100 +541,104 @@ class HomeCommonTest {
         // 0: "Folders" header, 1-3: f1..f3, 4: divider, 5: "Tags" header,
         // 6: tag t1, 7: f1 (under t1), 8: f2 (under t1), 9: tag t2, 10: f3 (under t2), 11: tag t3
         val expanded = setOf("t1", "t2")
-        assertEquals(6, feedListItemIndex(ArticleFilter.Tag("t1"), feeds, emptyList(), tags, emptySet(), feedTagMap, expanded))
-        assertEquals(9, feedListItemIndex(ArticleFilter.Tag("t2"), feeds, emptyList(), tags, emptySet(), feedTagMap, expanded))
-        assertEquals(11, feedListItemIndex(ArticleFilter.Tag("t3"), feeds, emptyList(), tags, emptySet(), feedTagMap, expanded))
-    }
-
-    @Test
-    fun feedListItemIndexResolvesFeedToItsFolderRowNotItsTagNestedRow() {
-        // A feed nested under an expanded tag is a duplicate view; the primary row under its
-        // folder group is what a selection scrolls to.
-        val tags = listOf(tag("t1"))
-        val feeds = listOf(feed("f1"))
-        val feedTagMap = mapOf("f1" to setOf("t1"))
-
         assertEquals(
-            1,
-            feedListItemIndex(ArticleFilter.Feed("f1"), feeds, emptyList(), tags, emptySet(), feedTagMap, setOf("t1")),
+            6,
+            feedListRowIndex(FeedListRowSelection.Tag("t1"), feeds, emptyList(), tags, emptySet(), feedTagMap, expanded),
+        )
+        assertEquals(
+            7,
+            feedListRowIndex(FeedListRowSelection.FeedInTag("f1", "t1"), feeds, emptyList(), tags, emptySet(), feedTagMap, expanded),
+        )
+        assertEquals(
+            8,
+            feedListRowIndex(FeedListRowSelection.FeedInTag("f2", "t1"), feeds, emptyList(), tags, emptySet(), feedTagMap, expanded),
+        )
+        assertEquals(
+            9,
+            feedListRowIndex(FeedListRowSelection.Tag("t2"), feeds, emptyList(), tags, emptySet(), feedTagMap, expanded),
+        )
+        assertEquals(
+            10,
+            feedListRowIndex(FeedListRowSelection.FeedInTag("f3", "t2"), feeds, emptyList(), tags, emptySet(), feedTagMap, expanded),
+        )
+        assertEquals(
+            11,
+            feedListRowIndex(FeedListRowSelection.Tag("t3"), feeds, emptyList(), tags, emptySet(), feedTagMap, expanded),
         )
     }
 
     @Test
-    fun feedListItemIndexDefaultsToNoExpandedTagsWhenTagArgumentsAreOmitted() {
-        val tags = listOf(tag("t1"), tag("t2"))
-        val feeds = listOf(feed("f1"))
-
-        assertEquals(4, feedListItemIndex(ArticleFilter.Tag("t1"), feeds, emptyList(), tags, emptySet()))
-        assertEquals(5, feedListItemIndex(ArticleFilter.Tag("t2"), feeds, emptyList(), tags, emptySet()))
-    }
-
-    @Test
-    fun feedListItemIndexReturnsNullForNonexistentIds() {
-        val folders = listOf(folder("d1"))
-        val tags = listOf(tag("t1"))
-        val feeds = listOf(feed("f1", folderId = "d1"))
-
-        assertNull(feedListItemIndex(ArticleFilter.Feed("gone"), feeds, folders, tags, emptySet()))
-        assertNull(feedListItemIndex(ArticleFilter.Tag("gone"), feeds, folders, tags, emptySet()))
-        assertNull(feedListItemIndex(ArticleFilter.Folder("gone"), feeds, folders, tags, emptySet()))
-    }
-
-    // --- feedListItemIndices ---
-
-    @Test
-    fun feedListItemIndicesReturnsBothTheFolderRowAndEveryExpandedTagNestedRow() {
-        // A feed attached to two expanded tags renders three times: once under its folder group
-        // ("no folder", here), and once under each expanded tag, in tag order.
+    fun feedListRowIndexResolvesTheSameFeedsFolderAndTagRowsToDifferentIndices() {
+        // The same feed id renders twice here — the instance is what decides which row is meant.
         val tags = listOf(tag("t1"), tag("t2"))
         val feeds = listOf(feed("f1"))
         val feedTagMap = mapOf("f1" to setOf("t1", "t2"))
 
         // 0: "Folders" header, 1: f1 (no folder), 2: divider, 3: "Tags" header,
         // 4: tag t1, 5: f1 (under t1), 6: tag t2, 7: f1 (under t2)
+        val expanded = setOf("t1", "t2")
         assertEquals(
-            listOf(1, 5, 7),
-            feedListItemIndices(ArticleFilter.Feed("f1"), feeds, emptyList(), tags, emptySet(), feedTagMap, setOf("t1", "t2")),
+            1,
+            feedListRowIndex(FeedListRowSelection.FeedInFolderGroup("f1"), feeds, emptyList(), tags, emptySet(), feedTagMap, expanded),
+        )
+        assertEquals(
+            5,
+            feedListRowIndex(FeedListRowSelection.FeedInTag("f1", "t1"), feeds, emptyList(), tags, emptySet(), feedTagMap, expanded),
+        )
+        assertEquals(
+            7,
+            feedListRowIndex(FeedListRowSelection.FeedInTag("f1", "t2"), feeds, emptyList(), tags, emptySet(), feedTagMap, expanded),
         )
     }
 
     @Test
-    fun feedListItemIndicesFirstElementMatchesFeedListItemIndexWhenTheCanonicalRowIsRendered() {
-        // feedListItemIndex is the first *canonical* entry of feedListItemPositions, not simply
-        // feedListItemIndices(...).firstOrNull() — those only coincide when the canonical
-        // (folder-group) row is among the rendered positions, as it is for this feed (no
-        // folderId, so no collapsed folder can hide it). When it isn't,
-        // feedListItemIndexReturnsNullForFeedInCollapsedFolderEvenWhenVisibleUnderAnExpandedTag /
-        // feedListItemIndicesStillReturnsTheTagNestedRowForAFeedInACollapsedFolder above show the
-        // two functions diverge: feedListItemIndices still returns the tag-nested row while
-        // feedListItemIndex correctly returns null.
+    fun feedListRowIndexResolvesOnlyTheFolderGroupRowWhileTheFeedsTagIsCollapsed() {
+        // Expanded folder + collapsed tag: only the folder-group instance resolves.
+        val folders = listOf(folder("d1"))
         val tags = listOf(tag("t1"))
-        val feeds = listOf(feed("f1"))
+        val feeds = listOf(feed("f1", folderId = "d1"))
         val feedTagMap = mapOf("f1" to setOf("t1"))
 
-        val indices = feedListItemIndices(ArticleFilter.Feed("f1"), feeds, emptyList(), tags, emptySet(), feedTagMap, setOf("t1"))
-        val index = feedListItemIndex(ArticleFilter.Feed("f1"), feeds, emptyList(), tags, emptySet(), feedTagMap, setOf("t1"))
-
-        assertEquals(indices.firstOrNull(), index)
-    }
-
-    // --- pickScrollTargetIndex ---
-
-    @Test
-    fun pickScrollTargetIndexPrefersAnAlreadyVisibleIndexOverTheFirst() {
-        // The folder-row instance (1) isn't on screen, but the tag-nested one (7) is — e.g. the
-        // row the user just clicked. Nothing should move.
-        assertEquals(7, pickScrollTargetIndex(listOf(1, 5, 7), visibleIndices = setOf(7)))
+        // 0: "Folders" header, 1: folder d1, 2: f1 (under d1), 3: NoFolderHeader,
+        // 4: divider, 5: "Tags" header, 6: tag t1
+        assertEquals(
+            2,
+            feedListRowIndex(FeedListRowSelection.FeedInFolderGroup("f1"), feeds, folders, tags, emptySet(), feedTagMap, emptySet()),
+        )
+        assertNull(
+            feedListRowIndex(FeedListRowSelection.FeedInTag("f1", "t1"), feeds, folders, tags, emptySet(), feedTagMap, emptySet()),
+        )
     }
 
     @Test
-    fun pickScrollTargetIndexFallsBackToTheFirstIndexWhenNoneAreVisible() {
-        assertEquals(1, pickScrollTargetIndex(listOf(1, 5, 7), visibleIndices = setOf(20, 21)))
+    fun feedListRowIndexDefaultsToNoExpandedTagsWhenTagArgumentsAreOmitted() {
+        val tags = listOf(tag("t1"), tag("t2"))
+        val feeds = listOf(feed("f1"))
+
+        assertEquals(4, feedListRowIndex(FeedListRowSelection.Tag("t1"), feeds, emptyList(), tags, emptySet()))
+        assertEquals(5, feedListRowIndex(FeedListRowSelection.Tag("t2"), feeds, emptyList(), tags, emptySet()))
     }
 
     @Test
-    fun pickScrollTargetIndexReturnsNullForAnEmptyList() {
-        assertNull(pickScrollTargetIndex(emptyList(), visibleIndices = setOf(1, 2, 3)))
+    fun feedListRowIndexReturnsNullForNonexistentIds() {
+        val folders = listOf(folder("d1"))
+        val tags = listOf(tag("t1"))
+        val feeds = listOf(feed("f1", folderId = "d1"))
+
+        assertNull(feedListRowIndex(FeedListRowSelection.FeedInFolderGroup("gone"), feeds, folders, tags, emptySet()))
+        assertNull(feedListRowIndex(FeedListRowSelection.Tag("gone"), feeds, folders, tags, emptySet()))
+        assertNull(feedListRowIndex(FeedListRowSelection.Folder("gone"), feeds, folders, tags, emptySet()))
+        assertNull(
+            feedListRowIndex(
+                FeedListRowSelection.FeedInTag("f1", "gone"),
+                feeds,
+                folders,
+                tags,
+                emptySet(),
+                mapOf("f1" to setOf("t1")),
+                setOf("t1"),
+            ),
+        )
     }
 
     // --- resolveFeedListSelectionTarget ---
@@ -492,18 +697,45 @@ class HomeCommonTest {
     @Test
     fun toInlineEditTargetKeepsEachSelectionKindAndRoundTripsBackToItsFilter() {
         // The inline editor keys off an id + kind rather than the row value, and the pane scrolls
-        // the row into view via the filter this hands back, so both directions must line up.
+        // the row into view via the filter this hands back, so both directions must line up. Folder
+        // and Tag selections carry no tag context, so any rowInstance is passed through unused here.
         val cases = listOf(
-            FeedListSelectionTarget.Feed(feed("f1")) to (InlineEditTarget.Feed("f1") to ArticleFilter.Feed("f1")),
-            FeedListSelectionTarget.Folder(folder("d1")) to (InlineEditTarget.Folder("d1") to ArticleFilter.Folder("d1")),
-            FeedListSelectionTarget.Tag(tag("t1")) to (InlineEditTarget.Tag("t1") to ArticleFilter.Tag("t1")),
+            Triple(FeedListSelectionTarget.Feed(feed("f1")), FeedListRowSelection.FeedInFolderGroup("f1"), InlineEditTarget.Feed("f1") to ArticleFilter.Feed("f1")),
+            Triple(FeedListSelectionTarget.Folder(folder("d1")), FeedListRowSelection.All, InlineEditTarget.Folder("d1") to ArticleFilter.Folder("d1")),
+            Triple(FeedListSelectionTarget.Tag(tag("t1")), FeedListRowSelection.All, InlineEditTarget.Tag("t1") to ArticleFilter.Tag("t1")),
         )
-        for ((selection, expected) in cases) {
+        for ((selection, rowInstance, expected) in cases) {
             val (expectedTarget, expectedFilter) = expected
-            val target = selection.toInlineEditTarget()
+            val target = selection.toInlineEditTarget(rowInstance)
             assertEquals(expectedTarget, target)
             assertEquals(expectedFilter, target.filter)
         }
+    }
+
+    @Test
+    fun toInlineEditTargetForFeedUsesTheFolderGroupRowInstanceWhenSelectedThatWay() {
+        val target = FeedListSelectionTarget.Feed(feed("f1"))
+            .toInlineEditTarget(FeedListRowSelection.FeedInFolderGroup("f1"))
+        assertEquals(InlineEditTarget.Feed("f1", tagId = null), target)
+        assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), target.rowInstance)
+    }
+
+    @Test
+    fun toInlineEditTargetForFeedCarriesTheTagIdWhenSelectedViaItsTagNestedRow() {
+        val target = FeedListSelectionTarget.Feed(feed("f1"))
+            .toInlineEditTarget(FeedListRowSelection.FeedInTag("f1", "t1"))
+        assertEquals(InlineEditTarget.Feed("f1", tagId = "t1"), target)
+        assertEquals(FeedListRowSelection.FeedInTag("f1", "t1"), target.rowInstance)
+    }
+
+    @Test
+    fun toInlineEditTargetForFeedIgnoresATagInstanceBelongingToAnotherFeed() {
+        // rowInstance and the resolved selection are always set together by
+        // HomeViewModel.selectFilter, so this should never actually happen — a defensive guard
+        // against misattributing another feed's tag context rather than a reachable production case.
+        val target = FeedListSelectionTarget.Feed(feed("f1"))
+            .toInlineEditTarget(FeedListRowSelection.FeedInTag("other-feed", "t1"))
+        assertEquals(InlineEditTarget.Feed("f1", tagId = null), target)
     }
 
     // --- autoScrollVelocityPxPerSec ---
