@@ -370,6 +370,12 @@ class HomeViewModel(
         _expandedTagIds.value = _expandedTagIds.value.let {
             if (tagId in it) it - tagId else it + tagId
         }
+        // A collapsed tag no longer renders its nested feed rows, so a selection on one of them
+        // falls back to that feed's canonical row.
+        val instance = _selectedRowInstance.value
+        if (instance is FeedListRowSelection.FeedInTag && instance.tagId == tagId && tagId !in _expandedTagIds.value) {
+            _selectedRowInstance.value = FeedListRowSelection.FeedInFolderGroup(instance.feedId)
+        }
         settingsRepository.mutateLocalSettings { it.copy(expandedTagIds = _expandedTagIds.value) }
     }
 
@@ -895,6 +901,12 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
     fun deleteTag(id: String) {
         tagRepository.deleteTag(id)
         if (_filter.value == ArticleFilter.Tag(id)) selectFilter(ArticleFilter.All)
+        // A deleted tag no longer renders its nested feed rows, so a selection on one of them
+        // falls back to that feed's canonical row (a no-op if the branch above already reset it).
+        val instance = _selectedRowInstance.value
+        if (instance is FeedListRowSelection.FeedInTag && instance.tagId == id) {
+            _selectedRowInstance.value = FeedListRowSelection.FeedInFolderGroup(instance.feedId)
+        }
         _expandedTagIds.value = _expandedTagIds.value - id
         settingsRepository.mutateLocalSettings { it.copy(expandedTagIds = _expandedTagIds.value) }
     }

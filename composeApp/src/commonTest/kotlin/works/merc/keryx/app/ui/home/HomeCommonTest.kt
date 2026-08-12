@@ -592,7 +592,7 @@ class HomeCommonTest {
     }
 
     @Test
-    fun feedListRowIndexResolvesAnExpandedTagsRowsWhileTheFeedsOwnFolderIsExpanded() {
+    fun feedListRowIndexResolvesOnlyTheFolderGroupRowWhileTheFeedsTagIsCollapsed() {
         // Expanded folder + collapsed tag: only the folder-group instance resolves.
         val folders = listOf(folder("d1"))
         val tags = listOf(tag("t1"))
