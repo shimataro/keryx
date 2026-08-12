@@ -646,6 +646,9 @@ internal fun newHomeViewModel(
     db: KeryxDatabase,
     syncScheduler: SyncScheduler = SyncScheduler {},
     clock: Clock = Clock { 0L },
+    activityCenter: ActivityCenter = ActivityCenter(),
+    tokenStorage: TokenStorage = FeedListDragTestTokenStorage(),
+    appKey: String = "",
 ): HomeViewModelFixture {
     // A fresh, unique directory per call (not a fixed name shared across every test in this file):
     // LocalSettingsStore persists lastFilter/collapsedFolderIds/etc. to a JSON file there, and a
@@ -666,7 +669,6 @@ internal fun newHomeViewModel(
     val settingsRepository = SettingsRepository(
         db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined,
     )
-    val activityCenter = ActivityCenter()
     val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
     val syncRepository = SyncRepository(
         driver = driver,
@@ -681,14 +683,13 @@ internal fun newHomeViewModel(
         localDbPath = "unused",
         tempDir = "unused",
     )
-    val tokenStorage = FeedListDragTestTokenStorage()
     val authClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.OK) }) { expectSuccess = false }
     val authManager = DropboxAuthManager(authClient, clock = clock)
     val cloudSession = singleProviderCloudSession(
         client = authClient,
         tokenStorage = tokenStorage,
         authManager = authManager,
-        clientId = "",
+        clientId = appKey,
         clock = clock,
     )
     val vm = HomeViewModel(

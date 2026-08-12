@@ -367,10 +367,11 @@ internal fun FeedListPane(
                     KeryxIcon(KeryxIcons.Add, addFeedTooltip)
                 }
                 val refreshing by vm.feedRefreshing.collectAsStateSafe(false)
+                val syncing by vm.syncing.collectAsStateSafe(false)
                 val refreshTooltip = stringResource(
                     if (refreshing) Res.string.home_refreshing else Res.string.home_refresh,
                 )
-                TooltipIconButton(tooltip = refreshTooltip, onClick = { vm.refreshAll() }) {
+                TooltipIconButton(tooltip = refreshTooltip, onClick = { vm.refreshAll() }, enabled = !refreshing && !syncing) {
                     if (refreshing) {
                         SmallSpinner()
                     } else {
@@ -378,11 +379,10 @@ internal fun FeedListPane(
                     }
                 }
                 if (cloudConnected) {
-                    val syncing by vm.syncing.collectAsStateSafe(false)
                     val syncTooltip = stringResource(
                         if (syncing) Res.string.home_syncing else Res.string.home_sync,
                     )
-                    TooltipIconButton(tooltip = syncTooltip, onClick = { vm.sync() }) {
+                    TooltipIconButton(tooltip = syncTooltip, onClick = { vm.sync() }, enabled = !syncing && !refreshing) {
                         if (syncing) {
                             SmallSpinner()
                         } else {

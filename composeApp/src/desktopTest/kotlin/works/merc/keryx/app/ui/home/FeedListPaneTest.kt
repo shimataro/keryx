@@ -11,14 +11,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import org.koin.compose.KoinApplication
 import org.koin.dsl.module
 import works.merc.keryx.app.core.ArticleFilter
+import works.merc.keryx.app.data.cloud.OAuthTokens
+import works.merc.keryx.app.data.cloud.TokenStorage
+import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
@@ -172,6 +183,86 @@ class FeedListPaneTest {
             driver.close()
         }
     }
+
+    @Test
+    fun refreshButtonStaysDisabledThroughRefreshAllsSyncPhase() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        val testScope = CoroutineScope(Dispatchers.Unconfined)
+        val activityCenter = ActivityCenter(testScope)
+        val fixture = newHomeViewModel(driver, db, activityCenter = activityCenter)
+        val vm = fixture.vm
+        try {
+            setContent { FeedListPaneTestHost(vm, 300.dp) }
+            waitForIdle()
+            onNodeWithContentDescription("更新").assertIsEnabled()
+
+            // Reproduces refreshAll()'s own sequencing: the feed-fetch phase (trackFeedRefresh)
+            // completes, then the chained sync phase (trackSync) is still running.
+            val syncGate = CompletableDeferred<Unit>()
+            testScope.launch {
+                activityCenter.trackFeedRefresh { }
+                activityCenter.trackSync { syncGate.await() }
+            }
+            waitForIdle()
+
+            onNodeWithContentDescription("更新").assertIsNotEnabled()
+
+            syncGate.complete(Unit)
+            waitForIdle()
+            onNodeWithContentDescription("更新").assertIsEnabled()
+        } finally {
+            testScope.cancel()
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    @Test
+    fun syncButtonStaysDisabledThroughRefreshAllsFetchPhase() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        val testScope = CoroutineScope(Dispatchers.Unconfined)
+        val activityCenter = ActivityCenter(testScope)
+        val tokenStorage = FeedListPaneTestTokenStorage().apply { save(OAuthTokens("AT", "RT")) }
+        val fixture = newHomeViewModel(
+            driver, db, activityCenter = activityCenter, tokenStorage = tokenStorage, appKey = "test-app-key",
+        )
+        val vm = fixture.vm
+        try {
+            setContent { FeedListPaneTestHost(vm, 300.dp) }
+            waitForIdle()
+            onNodeWithContentDescription("同期").assertIsEnabled()
+
+            // Counterpart to refreshButtonStaysDisabledThroughRefreshAllsSyncPhase: proves the sync
+            // button stays disabled through refreshAll()'s fetch phase (trackFeedRefresh), before the
+            // chained sync phase (trackSync) starts. (Not during trackSync itself: syncing == true
+            // swaps this button's content to a bare SmallSpinner with no content description, so it
+            // can no longer be located by "同期" at that point — the fetch phase is the assertion
+            // window where the button is both disabled and still identifiable this way.)
+            val fetchGate = CompletableDeferred<Unit>()
+            testScope.launch {
+                activityCenter.trackFeedRefresh { fetchGate.await() }
+                activityCenter.trackSync { }
+            }
+            waitForIdle()
+
+            onNodeWithContentDescription("同期").assertIsNotEnabled()
+
+            fetchGate.complete(Unit)
+            waitForIdle()
+            onNodeWithContentDescription("同期").assertIsEnabled()
+        } finally {
+            testScope.cancel()
+            fixture.close()
+            driver.close()
+        }
+    }
+}
+
+private class FeedListPaneTestTokenStorage : TokenStorage {
+    private var stored: OAuthTokens? = null
+    override fun save(tokens: OAuthTokens) { stored = tokens }
+    override fun load(): OAuthTokens? = stored
+    override fun clear() { stored = null }
 }
 
 private const val ROOT_TEST_TAG = "feed-list-pane-test-root"
