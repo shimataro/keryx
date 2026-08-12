@@ -54,6 +54,7 @@ import works.merc.keryx.app.resources.menu_view_toggle_sort
 import works.merc.keryx.app.resources.menu_view_unread_only
 import works.merc.keryx.app.ui.home.FeedListSelectionTarget
 import works.merc.keryx.app.ui.home.HomeViewModel
+import works.merc.keryx.app.ui.home.hasUsableArticleUrl
 import works.merc.keryx.app.ui.home.resolveFeedListSelectionTarget
 import works.merc.keryx.app.ui.menu.AppMenuActions
 import works.merc.keryx.app.ui.menu.AppMenuLabels
@@ -143,7 +144,7 @@ internal fun FrameWindowScope.AppMenuBar(
     val ui = computeMenuUiState(
         screen = screen,
         hasSelectedArticle = selected != null,
-        selectedArticleHasUrl = selected?.url?.isNotBlank() == true,
+        selectedArticleHasUrl = hasUsableArticleUrl(selected?.url),
         feedRefreshing = feedRefreshing,
         syncing = syncing,
         cloudConnected = cloudConnected,

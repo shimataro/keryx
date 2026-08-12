@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.menu
 
 import works.merc.keryx.app.core.ArticleFilter
+import works.merc.keryx.app.ui.home.feedOperationsAvailable
 import works.merc.keryx.app.ui.navigation.Screen
 
 /**
@@ -77,8 +78,8 @@ fun computeMenuUiState(
         markAllReadEnabled = onHome,
         articleActionsEnabled = onHome && hasSelectedArticle,
         urlActionsEnabled = onHome && hasSelectedArticle && selectedArticleHasUrl,
-        refreshAllEnabled = onHome && !feedRefreshing,
-        syncEnabled = onHome && cloudConnected && !syncing,
+        refreshAllEnabled = onHome && feedOperationsAvailable(feedRefreshing, syncing),
+        syncEnabled = onHome && cloudConnected && feedOperationsAvailable(feedRefreshing, syncing),
         openSettingsEnabled = onHome,
         feedActionsEnabled = onHome && hasSelectedFeed && !textInputFocused,
         renameOrDeleteEnabled = onHome && hasRenamableSelection && !textInputFocused,

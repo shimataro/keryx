@@ -209,8 +209,8 @@ private fun ArticleDetailToolbar(
     val hasArticle = article != null
     val starred = article?.is_starred == 1L
     val url = article?.url.orEmpty()
-    val copyOpenVisible = article == null || url.isNotBlank()
-    val copyOpenEnabled = hasArticle && url.isNotBlank()
+    val copyOpenVisible = article == null || hasUsableArticleUrl(article.url)
+    val copyOpenEnabled = hasArticle && hasUsableArticleUrl(article.url)
 
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),

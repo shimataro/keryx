@@ -371,7 +371,7 @@ internal fun FeedListPane(
                 val refreshTooltip = stringResource(
                     if (refreshing) Res.string.home_refreshing else Res.string.home_refresh,
                 )
-                TooltipIconButton(tooltip = refreshTooltip, onClick = { vm.refreshAll() }, enabled = !refreshing && !syncing) {
+                TooltipIconButton(tooltip = refreshTooltip, onClick = { vm.refreshAll() }, enabled = feedOperationsAvailable(refreshing, syncing)) {
                     if (refreshing) {
                         SmallSpinner()
                     } else {
@@ -382,7 +382,7 @@ internal fun FeedListPane(
                     val syncTooltip = stringResource(
                         if (syncing) Res.string.home_syncing else Res.string.home_sync,
                     )
-                    TooltipIconButton(tooltip = syncTooltip, onClick = { vm.sync() }, enabled = !syncing && !refreshing) {
+                    TooltipIconButton(tooltip = syncTooltip, onClick = { vm.sync() }, enabled = feedOperationsAvailable(refreshing, syncing)) {
                         if (syncing) {
                             SmallSpinner()
                         } else {

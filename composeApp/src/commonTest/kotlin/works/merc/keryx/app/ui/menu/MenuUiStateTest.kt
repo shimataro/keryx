@@ -140,10 +140,23 @@ class MenuUiStateTest {
     }
 
     @Test
+    fun refresh_all_also_disabled_while_syncing() {
+        // Mirrors FeedListPane's toolbar buttons, which block Refresh while a sync is running —
+        // running both at once isn't supported (see feedOperationsAvailable).
+        assertFalse(state(feedRefreshing = false, syncing = true).refreshAllEnabled)
+    }
+
+    @Test
     fun sync_requires_connection_and_not_syncing() {
         assertFalse(state(cloudConnected = false, syncing = false).syncEnabled)
         assertFalse(state(cloudConnected = true, syncing = true).syncEnabled)
         assertTrue(state(cloudConnected = true, syncing = false).syncEnabled)
+    }
+
+    @Test
+    fun sync_also_disabled_while_refreshing() {
+        // Mirrors FeedListPane's toolbar buttons, which block Sync while a refresh is running.
+        assertFalse(state(cloudConnected = true, syncing = false, feedRefreshing = true).syncEnabled)
     }
 
     // --- Feed actions require Home + a selected feed ---
