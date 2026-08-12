@@ -11,14 +11,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.koin.compose.KoinApplication
 import org.koin.dsl.module
 import works.merc.keryx.app.core.ArticleFilter
+import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
@@ -167,6 +175,37 @@ class FeedListPaneTest {
             waitForIdle()
 
             onNodeWithText("Feed f29", useUnmergedTree = true).assertIsDisplayed()
+        } finally {
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    @Test
+    fun refreshButtonStaysDisabledThroughRefreshAllsSyncPhase() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        val activityCenter = ActivityCenter(CoroutineScope(Dispatchers.Unconfined))
+        val fixture = newHomeViewModel(driver, db, activityCenter = activityCenter)
+        val vm = fixture.vm
+        try {
+            setContent { FeedListPaneTestHost(vm, 300.dp) }
+            waitForIdle()
+            onNodeWithContentDescription("更新").assertIsEnabled()
+
+            // Reproduces refreshAll()'s own sequencing: the feed-fetch phase (trackFeedRefresh)
+            // completes, then the chained sync phase (trackSync) is still running.
+            val syncGate = CompletableDeferred<Unit>()
+            CoroutineScope(Dispatchers.Unconfined).launch {
+                activityCenter.trackFeedRefresh { }
+                activityCenter.trackSync { syncGate.await() }
+            }
+            waitForIdle()
+
+            onNodeWithContentDescription("更新").assertIsNotEnabled()
+
+            syncGate.complete(Unit)
+            waitForIdle()
+            onNodeWithContentDescription("更新").assertIsEnabled()
         } finally {
             fixture.close()
             driver.close()

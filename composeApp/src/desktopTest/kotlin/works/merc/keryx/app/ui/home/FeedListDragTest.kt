@@ -646,6 +646,7 @@ internal fun newHomeViewModel(
     db: KeryxDatabase,
     syncScheduler: SyncScheduler = SyncScheduler {},
     clock: Clock = Clock { 0L },
+    activityCenter: ActivityCenter = ActivityCenter(),
 ): HomeViewModelFixture {
     // A fresh, unique directory per call (not a fixed name shared across every test in this file):
     // LocalSettingsStore persists lastFilter/collapsedFolderIds/etc. to a JSON file there, and a
@@ -666,7 +667,6 @@ internal fun newHomeViewModel(
     val settingsRepository = SettingsRepository(
         db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined,
     )
-    val activityCenter = ActivityCenter()
     val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
     val syncRepository = SyncRepository(
         driver = driver,
