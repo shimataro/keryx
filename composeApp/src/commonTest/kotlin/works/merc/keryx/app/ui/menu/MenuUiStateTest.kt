@@ -114,20 +114,20 @@ class MenuUiStateTest {
         assertTrue(state(filter = ArticleFilter.All).toggleSortEnabled)
     }
 
-    // --- Unread-only requires a filter other than Starred ---
+    // --- Unread-only is enabled uniformly across every filter, including Starred ---
 
     @Test
-    fun unread_only_enabled_except_in_starred_filter() {
+    fun unread_only_enabled_for_every_filter() {
         assertTrue(state(filter = ArticleFilter.All).unreadOnlyEnabled)
         assertTrue(state(filter = ArticleFilter.Search).unreadOnlyEnabled)
         assertTrue(state(filter = ArticleFilter.Feed("f1")).unreadOnlyEnabled)
         assertTrue(state(filter = ArticleFilter.Tag("t1")).unreadOnlyEnabled)
         assertTrue(state(filter = ArticleFilter.Folder("fo1")).unreadOnlyEnabled)
-        assertFalse(state(filter = ArticleFilter.Starred).unreadOnlyEnabled)
+        assertTrue(state(filter = ArticleFilter.Starred).unreadOnlyEnabled)
     }
 
     @Test
-    fun unread_only_disabled_away_from_home_even_off_starred() {
+    fun unread_only_disabled_away_from_home() {
         assertFalse(state(screen = Screen.Setup, filter = ArticleFilter.All).unreadOnlyEnabled)
     }
 

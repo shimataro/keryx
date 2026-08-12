@@ -125,8 +125,11 @@ internal fun FrameWindowScope.AppMenuBarHost(
 
     // Host-initiated clicks arrive on a dbus-java worker thread and are re-published on clickedIds;
     // dispatch them here on the UI thread via the *latest* table (nodeFor reads the current layout).
+    // The enabled check guards against a host delivering a `clicked` event for a greyed-out item
+    // (e.g. a stale layout revision on the host side) — mirrors MenuShortcutDispatcher's own guard,
+    // which is the only reason a disabled item can otherwise still run its action on Linux.
     LaunchedEffect(exporter) {
-        exporter.clickedIds.collect { id -> exporter.nodeFor(id)?.invokeAction() }
+        exporter.clickedIds.collect { id -> exporter.nodeFor(id)?.let { if (it.isEnabled()) it.invokeAction() } }
     }
 
     // Install the global shortcut dispatcher exactly while the in-window bar is hidden, and remove it

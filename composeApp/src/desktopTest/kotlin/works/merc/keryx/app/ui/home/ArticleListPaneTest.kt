@@ -62,7 +62,6 @@ import works.merc.keryx.app.singleProviderCloudSession
 import works.merc.keryx.app.ftsManagerIndexed
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
@@ -321,29 +320,6 @@ class ArticleListPaneTest {
     }
 
     @Test
-    fun articleListTopBarUnreadOnlyDisabledDoesNotInvokeCallback() = runDesktopComposeUiTest {
-        var toggleUnreadCount = 0
-
-        setContent {
-            ArticleListTopBar(
-                unreadOnly = false,
-                onToggleUnreadOnly = { toggleUnreadCount++ },
-                newestFirst = true,
-                onToggleSort = {},
-                onMarkAllRead = {},
-                unreadOnlyEnabled = false,
-            )
-        }
-        waitForIdle()
-
-        onNodeWithText("未読のみ").assertIsNotEnabled()
-        onNodeWithText("未読のみ").performClick()
-        waitForIdle()
-
-        assertEquals(0, toggleUnreadCount)
-    }
-
-    @Test
     fun articleListTopBarUnreadOnlyEnabledInvokesCallback() = runDesktopComposeUiTest {
         var toggleUnreadCount = 0
 
@@ -354,7 +330,6 @@ class ArticleListPaneTest {
                 newestFirst = true,
                 onToggleSort = {},
                 onMarkAllRead = {},
-                unreadOnlyEnabled = true,
             )
         }
         waitForIdle()
@@ -367,37 +342,7 @@ class ArticleListPaneTest {
     }
 
     @Test
-    fun unreadOnlyIsEnabledForAllFilter() {
-        assertTrue(isUnreadOnlyEnabled(ArticleFilter.All))
-    }
-
-    @Test
-    fun unreadOnlyIsDisabledForStarredFilter() {
-        assertFalse(isUnreadOnlyEnabled(ArticleFilter.Starred))
-    }
-
-    @Test
-    fun unreadOnlyIsEnabledForFeedFilter() {
-        assertTrue(isUnreadOnlyEnabled(ArticleFilter.Feed("f1")))
-    }
-
-    @Test
-    fun unreadOnlyIsEnabledForTagFilter() {
-        assertTrue(isUnreadOnlyEnabled(ArticleFilter.Tag("t1")))
-    }
-
-    @Test
-    fun unreadOnlyIsEnabledForFolderFilter() {
-        assertTrue(isUnreadOnlyEnabled(ArticleFilter.Folder("folder1")))
-    }
-
-    @Test
-    fun unreadOnlyIsEnabledForSearchFilter() {
-        assertTrue(isUnreadOnlyEnabled(ArticleFilter.Search))
-    }
-
-    @Test
-    fun articleListPaneUnreadOnlyDisabledForStarredFilter() {
+    fun articleListPaneUnreadOnlyEnabledForStarredFilter() {
         val (driver, db) = inMemoryDb()
         val vm = newMinimalViewModel(driver, db)
         try {
@@ -409,7 +354,7 @@ class ArticleListPaneTest {
 
                 vm.selectFilter(ArticleFilter.Starred)
                 waitForIdle()
-                onNodeWithText("未読のみ").assertIsNotEnabled()
+                onNodeWithText("未読のみ").assertIsEnabled()
 
                 vm.selectFilter(ArticleFilter.All)
                 waitForIdle()
