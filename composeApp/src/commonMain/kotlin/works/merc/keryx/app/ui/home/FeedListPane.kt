@@ -265,9 +265,8 @@ internal fun FeedListPane(
     }
 
     LaunchedEffect(filter, feeds.isNotEmpty(), tags.isNotEmpty(), folders.isNotEmpty()) {
-        val index = feedListItemIndex(filter, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
-            ?: return@LaunchedEffect
-        listState.scrollToIndexIfNeeded(index)
+        val indices = feedListItemIndices(filter, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
+        listState.scrollToIndexIfNeeded(indices)
     }
 
     // An edit can be started from the menu bar (or a shortcut) while its row is scrolled out of

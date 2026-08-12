@@ -256,6 +256,38 @@ class HomeCommonTest {
         assertEquals(1, feedListItemIndex(ArticleFilter.Folder("d1"), feeds, folders, emptyList(), setOf("d1")))
     }
 
+    @Test
+    fun feedListItemIndexReturnsNullForFeedInCollapsedFolderEvenWhenVisibleUnderAnExpandedTag() {
+        // The feed still renders once, as a TagFeedRow — but that row has no inline editor (see
+        // FeedListPane.kt), so the canonical-only lookup must not resolve to it.
+        val folders = listOf(folder("d1"))
+        val tags = listOf(tag("t1"))
+        val feeds = listOf(feed("f1", folderId = "d1"))
+        val feedTagMap = mapOf("f1" to setOf("t1"))
+
+        assertNull(
+            feedListItemIndex(ArticleFilter.Feed("f1"), feeds, folders, tags, setOf("d1"), feedTagMap, setOf("t1")),
+        )
+    }
+
+    @Test
+    fun feedListItemIndicesStillReturnsTheTagNestedRowForAFeedInACollapsedFolder() {
+        // feedListItemIndices intentionally still includes this row — only feedListItemIndex (the
+        // canonical-only lookup, tested above) excludes it.
+        val folders = listOf(folder("d1"))
+        val tags = listOf(tag("t1"))
+        val feeds = listOf(feed("f1", folderId = "d1"))
+        val feedTagMap = mapOf("f1" to setOf("t1"))
+
+        // 0: Folders header, 1: FolderGroupHeader d1 (collapsed, feed row hidden),
+        // 2: NoFolderHeader (folders.isNotEmpty(), even though the unassigned group is empty here),
+        // 3: divider, 4: Tags header, 5: tag t1, 6: f1 (under t1)
+        assertEquals(
+            listOf(6),
+            feedListItemIndices(ArticleFilter.Feed("f1"), feeds, folders, tags, setOf("d1"), feedTagMap, setOf("t1")),
+        )
+    }
+
     // --- feedsForTag ---
 
     @Test
@@ -345,6 +377,63 @@ class HomeCommonTest {
         assertNull(feedListItemIndex(ArticleFilter.Feed("gone"), feeds, folders, tags, emptySet()))
         assertNull(feedListItemIndex(ArticleFilter.Tag("gone"), feeds, folders, tags, emptySet()))
         assertNull(feedListItemIndex(ArticleFilter.Folder("gone"), feeds, folders, tags, emptySet()))
+    }
+
+    // --- feedListItemIndices ---
+
+    @Test
+    fun feedListItemIndicesReturnsBothTheFolderRowAndEveryExpandedTagNestedRow() {
+        // A feed attached to two expanded tags renders three times: once under its folder group
+        // ("no folder", here), and once under each expanded tag, in tag order.
+        val tags = listOf(tag("t1"), tag("t2"))
+        val feeds = listOf(feed("f1"))
+        val feedTagMap = mapOf("f1" to setOf("t1", "t2"))
+
+        // 0: "Folders" header, 1: f1 (no folder), 2: divider, 3: "Tags" header,
+        // 4: tag t1, 5: f1 (under t1), 6: tag t2, 7: f1 (under t2)
+        assertEquals(
+            listOf(1, 5, 7),
+            feedListItemIndices(ArticleFilter.Feed("f1"), feeds, emptyList(), tags, emptySet(), feedTagMap, setOf("t1", "t2")),
+        )
+    }
+
+    @Test
+    fun feedListItemIndicesFirstElementMatchesFeedListItemIndexWhenTheCanonicalRowIsRendered() {
+        // feedListItemIndex is the first *canonical* entry of feedListItemPositions, not simply
+        // feedListItemIndices(...).firstOrNull() — those only coincide when the canonical
+        // (folder-group) row is among the rendered positions, as it is for this feed (no
+        // folderId, so no collapsed folder can hide it). When it isn't,
+        // feedListItemIndexReturnsNullForFeedInCollapsedFolderEvenWhenVisibleUnderAnExpandedTag /
+        // feedListItemIndicesStillReturnsTheTagNestedRowForAFeedInACollapsedFolder above show the
+        // two functions diverge: feedListItemIndices still returns the tag-nested row while
+        // feedListItemIndex correctly returns null.
+        val tags = listOf(tag("t1"))
+        val feeds = listOf(feed("f1"))
+        val feedTagMap = mapOf("f1" to setOf("t1"))
+
+        val indices = feedListItemIndices(ArticleFilter.Feed("f1"), feeds, emptyList(), tags, emptySet(), feedTagMap, setOf("t1"))
+        val index = feedListItemIndex(ArticleFilter.Feed("f1"), feeds, emptyList(), tags, emptySet(), feedTagMap, setOf("t1"))
+
+        assertEquals(indices.firstOrNull(), index)
+    }
+
+    // --- pickScrollTargetIndex ---
+
+    @Test
+    fun pickScrollTargetIndexPrefersAnAlreadyVisibleIndexOverTheFirst() {
+        // The folder-row instance (1) isn't on screen, but the tag-nested one (7) is — e.g. the
+        // row the user just clicked. Nothing should move.
+        assertEquals(7, pickScrollTargetIndex(listOf(1, 5, 7), visibleIndices = setOf(7)))
+    }
+
+    @Test
+    fun pickScrollTargetIndexFallsBackToTheFirstIndexWhenNoneAreVisible() {
+        assertEquals(1, pickScrollTargetIndex(listOf(1, 5, 7), visibleIndices = setOf(20, 21)))
+    }
+
+    @Test
+    fun pickScrollTargetIndexReturnsNullForAnEmptyList() {
+        assertNull(pickScrollTargetIndex(emptyList(), visibleIndices = setOf(1, 2, 3)))
     }
 
     // --- resolveFeedListSelectionTarget ---
