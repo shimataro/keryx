@@ -398,9 +398,15 @@ class HomeCommonTest {
     }
 
     @Test
-    fun feedListItemIndicesFirstElementMatchesFeedListItemIndex() {
-        // feedListItemIndex is defined as the first of feedListItemIndices; pin that relationship
-        // directly rather than only via each function's own separate assertions above.
+    fun feedListItemIndicesFirstElementMatchesFeedListItemIndexWhenTheCanonicalRowIsRendered() {
+        // feedListItemIndex is the first *canonical* entry of feedListItemPositions, not simply
+        // feedListItemIndices(...).firstOrNull() — those only coincide when the canonical
+        // (folder-group) row is among the rendered positions, as it is for this feed (no
+        // folderId, so no collapsed folder can hide it). When it isn't,
+        // feedListItemIndexReturnsNullForFeedInCollapsedFolderEvenWhenVisibleUnderAnExpandedTag /
+        // feedListItemIndicesStillReturnsTheTagNestedRowForAFeedInACollapsedFolder above show the
+        // two functions diverge: feedListItemIndices still returns the tag-nested row while
+        // feedListItemIndex correctly returns null.
         val tags = listOf(tag("t1"))
         val feeds = listOf(feed("f1"))
         val feedTagMap = mapOf("f1" to setOf("t1"))
