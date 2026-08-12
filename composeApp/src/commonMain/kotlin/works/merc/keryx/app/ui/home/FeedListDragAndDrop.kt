@@ -314,6 +314,9 @@ internal fun NoFolderHeader(
  *
  * @param feed The feed represented by the row.
  * @param count The number of unread articles.
+ * @param selectionTone How this rendered instance paints its selection — the same feed can render
+ *   again under an expanded tag, and only the instance actually selected paints
+ *   [RowSelectionTone.PRIMARY] (see [FeedListRowSelection]).
  * @param indented Whether to indent the row within a folder.
  * @param nextFeedId The ID of the following feed, or `null` when this is the last feed.
  * @param folderId The containing folder's ID, or `null` for feeds without a folder.
@@ -327,7 +330,7 @@ internal fun NoFolderHeader(
 internal fun FeedRow(
     feed: Feeds,
     count: Long,
-    selected: Boolean,
+    selectionTone: RowSelectionTone,
     focused: Boolean,
     indented: Boolean,
     nextFeedId: String?,
@@ -360,7 +363,7 @@ internal fun FeedRow(
             Modifier.fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 2.dp)
                 .clip(MaterialTheme.shapes.small)
-                .background(selectionBackground(selected, focused))
+                .background(selectionBackground(selectionTone, focused))
                 .clickable(onClick = onClick)
                 .nativeContextMenu(
                     items = {
@@ -395,7 +398,9 @@ internal fun FeedRow(
                             NativeMenuItem(unsubscribeLabel, deleteNativeShortcut) { onUnsubscribe() },
                         )
                     },
-                    onOpen = { if (!selected) onClick() },
+                    // A secondary-toned (or unselected) row is not the one currently focused, so a
+                    // right-click on it promotes it first, exactly as the old `!selected` check did.
+                    onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
                 )
                 .padding(start = if (indented) 36.dp else 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -418,7 +423,7 @@ internal fun FeedRow(
                     )
                 }
             } else {
-                CompositionLocalProvider(LocalContentColor provides (selectionContentColorOrNull(selected, focused) ?: LocalContentColor.current)) {
+                CompositionLocalProvider(LocalContentColor provides (selectionContentColorOrNull(selectionTone, focused) ?: LocalContentColor.current)) {
                     Text(
                         feed.displayTitle(),
                         Modifier.weight(1f),
@@ -435,7 +440,7 @@ internal fun FeedRow(
                 FeedErrorIndicator(gone)
                 Spacer(Modifier.width(4.dp))
             }
-            if (count > 0) CountBadge(count, selected, focused)
+            if (count > 0) CountBadge(count, selectionTone == RowSelectionTone.PRIMARY, focused)
         }
         if (nextFeedId == null) {
             InsertionLine(indented, visible = activeBoundaryState.value == belowBoundary)

@@ -66,6 +66,100 @@ fun selectionBackground(selected: Boolean, focused: Boolean): Color = when {
 fun selectionContentColorOrNull(selected: Boolean, focused: Boolean): Color? =
     if (selected && focused) MaterialTheme.colorScheme.onPrimary else null
 
+/**
+ * Alpha of the [RowSelectionTone.SECONDARY] tint — deliberately well below the 0.4 alpha of an
+ * unfocused [RowSelectionTone.PRIMARY] row, so a duplicate row of the selected feed reads as
+ * "same feed, not the row you're on" rather than as a second selection.
+ */
+internal const val SECONDARY_SELECTION_ALPHA = 0.15f
+
+/**
+ * How strongly a feed-list row paints its selection. A feed renders once under its folder group and
+ * again under every expanded tag it carries, so "selected" is not a single row: exactly one rendered
+ * instance is the one actually clicked/keyboard-navigated to ([PRIMARY]), and every other instance of
+ * the same selected feed is a [SECONDARY] echo of it. [NONE] is an unselected row.
+ */
+enum class RowSelectionTone { NONE, SECONDARY, PRIMARY }
+
+/**
+ * Background for a row that can render as more than one instance (see [RowSelectionTone]). [PRIMARY]
+ * matches the boolean [selectionBackground] exactly, so a feed with no duplicates looks unchanged.
+ */
+@Composable
+fun selectionBackground(tone: RowSelectionTone, focused: Boolean): Color = when (tone) {
+    RowSelectionTone.PRIMARY ->
+        if (focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+    RowSelectionTone.SECONDARY -> MaterialTheme.colorScheme.primary.copy(alpha = SECONDARY_SELECTION_ALPHA)
+    RowSelectionTone.NONE -> Color.Transparent
+}
+
+/**
+ * Content color to pair with the tone-aware [selectionBackground] — only the opaque
+ * `PRIMARY && focused` background needs one, exactly as in the boolean overload.
+ */
+@Composable
+fun selectionContentColorOrNull(tone: RowSelectionTone, focused: Boolean): Color? =
+    if (tone == RowSelectionTone.PRIMARY && focused) MaterialTheme.colorScheme.onPrimary else null
+
+/**
+ * One specific *rendered row instance* of the feed list, as opposed to [ArticleFilter], which only
+ * says what the article list shows. A feed renders once under its folder group and again under each
+ * expanded tag it is attached to, so `ArticleFilter.Feed(id)` alone cannot say which of those rows
+ * the user actually clicked or navigated to. This UI-only type does — driving keyboard-navigation
+ * order, exact scroll-into-view targeting, and which duplicate paints the [RowSelectionTone.PRIMARY]
+ * highlight.
+ */
+sealed interface FeedListRowSelection {
+    /** The filter this row selects when activated. */
+    val filter: ArticleFilter
+
+    data object All : FeedListRowSelection {
+        override val filter: ArticleFilter get() = ArticleFilter.All
+    }
+
+    data object Starred : FeedListRowSelection {
+        override val filter: ArticleFilter get() = ArticleFilter.Starred
+    }
+
+    data object Search : FeedListRowSelection {
+        override val filter: ArticleFilter get() = ArticleFilter.Search
+    }
+
+    /** A feed's row under its folder group (or the unassigned group) — its canonical row. */
+    data class FeedInFolderGroup(val feedId: String) : FeedListRowSelection {
+        override val filter: ArticleFilter get() = ArticleFilter.Feed(feedId)
+    }
+
+    /** A feed's row nested under an expanded tag. */
+    data class FeedInTag(val feedId: String, val tagId: String) : FeedListRowSelection {
+        override val filter: ArticleFilter get() = ArticleFilter.Feed(feedId)
+    }
+
+    data class Folder(val folderId: String) : FeedListRowSelection {
+        override val filter: ArticleFilter get() = ArticleFilter.Folder(folderId)
+    }
+
+    data class Tag(val tagId: String) : FeedListRowSelection {
+        override val filter: ArticleFilter get() = ArticleFilter.Tag(tagId)
+    }
+
+    companion object {
+        /**
+         * Canonical instance for a bare [ArticleFilter] change (search jump, notification-center
+         * "show feed detail", any caller with no specific row in mind) — always the folder-group
+         * instance for a feed.
+         */
+        fun canonicalFor(filter: ArticleFilter): FeedListRowSelection = when (filter) {
+            ArticleFilter.All -> All
+            ArticleFilter.Starred -> Starred
+            ArticleFilter.Search -> Search
+            is ArticleFilter.Feed -> FeedInFolderGroup(filter.feedId)
+            is ArticleFilter.Folder -> Folder(filter.folderId)
+            is ArticleFilter.Tag -> Tag(filter.tagId)
+        }
+    }
+}
+
 /** Shared tint for the starred-article indicator (article list row badge, detail-view toggle). */
 val StarredColor = Color(0xFFFFC107)
 
@@ -108,45 +202,62 @@ fun feedsForTag(feeds: List<Feeds>, feedTagMap: Map<String, Set<String>>, tagId:
     feeds.filter { tagId in (feedTagMap[it.id] ?: emptySet()) }
 
 /**
- * Builds the visual filter order used by the feed pane.
+ * Builds the visual row order used by the feed pane's keyboard navigation.
  *
- * Collapsed folders include only their folder filter; expanded folders include their feed filters,
- * followed by tag filters.
+ * Collapsed folders contribute only their own row; expanded folders contribute their feed rows too.
+ * Tags follow, and an expanded tag likewise contributes the feed rows nested under it (which are
+ * distinct rows from the same feeds' folder-group rows — see [FeedListRowSelection]).
  *
  * @param tags The tags to include at the end of the order.
- * @param folders The folders used to organize feed filters.
+ * @param folders The folders used to organize feed rows.
  * @param feeds The feeds to include in folder or unassigned groups.
- * @param collapsedFolderIds The IDs of folders whose feed filters should be omitted.
- * @return The filters in visual top-to-bottom order.
+ * @param collapsedFolderIds The IDs of folders whose feed rows are hidden.
+ * @param expandedTagIds The IDs of tags whose attached feed rows are rendered.
+ * @param feedTagMap Mapping of feed IDs to their attached tag IDs.
+ * @return The rows in visual top-to-bottom order.
  */
-fun buildOrderedFilters(
+fun buildOrderedFeedListRows(
     tags: List<Tags>,
     folders: List<Folders>,
     feeds: List<Feeds>,
     collapsedFolderIds: Set<String>,
-): List<ArticleFilter> =
-    listOf(ArticleFilter.All, ArticleFilter.Starred, ArticleFilter.Search) +
+    expandedTagIds: Set<String>,
+    feedTagMap: Map<String, Set<String>>,
+): List<FeedListRowSelection> =
+    listOf(FeedListRowSelection.All, FeedListRowSelection.Starred, FeedListRowSelection.Search) +
         groupFeedsByFolder(feeds, folders).flatMap { (folder, feedsInFolder) ->
             if (folder == null) {
-                feedsInFolder.map { ArticleFilter.Feed(it.id) }
+                feedsInFolder.map { FeedListRowSelection.FeedInFolderGroup(it.id) }
             } else if (folder.id in collapsedFolderIds) {
-                listOf(ArticleFilter.Folder(folder.id))
+                listOf(FeedListRowSelection.Folder(folder.id))
             } else {
-                listOf(ArticleFilter.Folder(folder.id)) + feedsInFolder.map { ArticleFilter.Feed(it.id) }
+                listOf(FeedListRowSelection.Folder(folder.id)) +
+                    feedsInFolder.map { FeedListRowSelection.FeedInFolderGroup(it.id) }
             }
         } +
-        tags.map { ArticleFilter.Tag(it.id) }
+        tags.flatMap { tag ->
+            if (tag.id in expandedTagIds) {
+                listOf(FeedListRowSelection.Tag(tag.id)) +
+                    feedsForTag(feeds, feedTagMap, tag.id).map { FeedListRowSelection.FeedInTag(it.id, tag.id) }
+            } else {
+                listOf(FeedListRowSelection.Tag(tag.id))
+            }
+        }
 
 /**
- * The filter to move to from [current] by [delta] positions in [orderedFilters]. Returns null
+ * The row to move to from [current] by [delta] positions in [orderedRows]. Returns null
  * when the move would land back on [current] (e.g. already at a boundary) — callers must treat
- * null as a no-op rather than reselecting the same filter, since `HomeViewModel.selectFilter`
- * unconditionally clears the selected article as a side effect.
+ * null as a no-op rather than reselecting the same row, since `HomeViewModel.selectFilter`
+ * clears the selected article as a side effect whenever the filter itself changes.
  */
-fun nextFeedFilter(current: ArticleFilter, orderedFilters: List<ArticleFilter>, delta: Int): ArticleFilter? {
-    val index = orderedFilters.indexOf(current).let { if (it < 0) 0 else it }
-    val next = (index + delta).coerceIn(0, orderedFilters.lastIndex)
-    val target = orderedFilters.getOrNull(next) ?: return null
+fun nextFeedListRow(
+    current: FeedListRowSelection,
+    orderedRows: List<FeedListRowSelection>,
+    delta: Int,
+): FeedListRowSelection? {
+    val index = orderedRows.indexOf(current).let { if (it < 0) 0 else it }
+    val next = (index + delta).coerceIn(0, orderedRows.lastIndex)
+    val target = orderedRows.getOrNull(next) ?: return null
     return target.takeIf { it != current }
 }
 
@@ -161,46 +272,49 @@ fun nextFeedFilter(current: ArticleFilter, orderedFilters: List<ArticleFilter>, 
 fun feedListActionAllowed(pane: HomePane): Boolean = pane == HomePane.FeedList
 
 /**
- * Finds every rendered position for a feed, folder, or tag filter, tagged with whether it's the
- * canonical row (a folder-group/unassigned feed row, or the folder/tag header row itself) or a
- * tag-nested duplicate. A feed can render more than once — once under its folder group, and again
- * under each expanded tag it's attached to — so a `Feed` filter's canonical row can be absent (its
- * folder collapsed) while a duplicate is still present. Folder and tag filters never duplicate, so
- * their result is always a single canonical entry or none.
+ * The rendered `LazyColumn` index for one specific feed-list row instance, or `null` if it isn't
+ * currently rendered (its folder is collapsed, its tag isn't expanded, or the item no longer
+ * exists). Because [instance] names exactly one rendered row — a feed's folder-group row and its
+ * row under a given expanded tag are different instances — no "pick among several" heuristic is
+ * needed: the answer is exact.
  *
- * Shared by [feedListItemIndices] (every rendered row, in top-to-bottom order) and
- * [feedListItemIndex] (the canonical row only), so both stay in step with a single traversal.
- *
- * Expanded tags account for their attached feed rows when calculating subsequent indices.
+ * @param instance The row instance whose list index to find.
+ * @param collapsedFolderIds Folder IDs whose feed rows are hidden.
+ * @param feedTagMap Mapping of feed IDs to their attached tag IDs.
+ * @param expandedTagIds Tag IDs whose attached feed rows are rendered.
  */
-private fun feedListItemPositions(
-    filter: ArticleFilter,
+fun feedListRowIndex(
+    instance: FeedListRowSelection,
     feeds: List<Feeds>,
     folders: List<Folders>,
     tags: List<Tags>,
     collapsedFolderIds: Set<String>,
-    feedTagMap: Map<String, Set<String>>,
-    expandedTagIds: Set<String>,
-): List<Pair<Int, Boolean>> {
+    feedTagMap: Map<String, Set<String>> = emptyMap(),
+    expandedTagIds: Set<String> = emptySet(),
+): Int? {
     // All, Starred, and Search are rendered outside the LazyColumn entirely (as fixed SidebarRows
     // above it), so they never correspond to a LazyColumn item and selecting them must not scroll it.
-    if (filter is ArticleFilter.Starred || filter is ArticleFilter.All || filter is ArticleFilter.Search) return emptyList()
+    if (instance is FeedListRowSelection.All ||
+        instance is FeedListRowSelection.Starred ||
+        instance is FeedListRowSelection.Search
+    ) {
+        return null
+    }
 
-    val positions = mutableListOf<Pair<Int, Boolean>>()
     var index = 1 // 0: "Folders" header
     for ((folder, feedsInFolder) in groupFeedsByFolder(feeds, folders)) {
         if (folder == null) {
             if (folders.isNotEmpty()) index++ // NoFolderHeader
             feedsInFolder.forEachIndexed { i, feed ->
-                if (filter is ArticleFilter.Feed && filter.feedId == feed.id) positions += (index + i) to true
+                if (instance is FeedListRowSelection.FeedInFolderGroup && instance.feedId == feed.id) return index + i
             }
             index += feedsInFolder.size
         } else {
-            if (filter is ArticleFilter.Folder && filter.folderId == folder.id) positions += index to true
+            if (instance is FeedListRowSelection.Folder && instance.folderId == folder.id) return index
             index++ // FolderGroupHeader
             if (folder.id !in collapsedFolderIds) {
                 feedsInFolder.forEachIndexed { i, feed ->
-                    if (filter is ArticleFilter.Feed && filter.feedId == feed.id) positions += (index + i) to true
+                    if (instance is FeedListRowSelection.FeedInFolderGroup && instance.feedId == feed.id) return index + i
                 }
                 index += feedsInFolder.size
             }
@@ -209,60 +323,18 @@ private fun feedListItemPositions(
     index++ // divider
     index++ // "Tags" header
     for (tag in tags) {
-        if (filter is ArticleFilter.Tag && filter.tagId == tag.id) positions += index to true
+        if (instance is FeedListRowSelection.Tag && instance.tagId == tag.id) return index
         index++ // TagRow
         if (tag.id in expandedTagIds) {
             val feedsInTag = feedsForTag(feeds, feedTagMap, tag.id)
-            if (filter is ArticleFilter.Feed) {
-                feedsInTag.forEachIndexed { i, feed -> if (filter.feedId == feed.id) positions += (index + i) to false }
+            if (instance is FeedListRowSelection.FeedInTag && instance.tagId == tag.id) {
+                feedsInTag.forEachIndexed { i, feed -> if (instance.feedId == feed.id) return index + i }
             }
             index += feedsInTag.size
         }
     }
-    return positions
+    return null
 }
-
-/**
- * Finds every rendered list index for a feed, folder, or tag filter, in top-to-bottom order (the
- * folder/unassigned-group row first, then one per expanded tag it belongs to, in tag order). See
- * [feedListItemPositions].
- *
- * @param filter The filter whose list index(es) to find.
- * @param collapsedFolderIds Folder IDs whose feed rows are hidden.
- * @param feedTagMap Mapping of tag IDs to associated feed IDs.
- * @param expandedTagIds Tag IDs whose attached feed rows are rendered.
- * @return The filter's list indices in top-to-bottom order, or empty if it is not currently rendered.
- */
-fun feedListItemIndices(
-    filter: ArticleFilter,
-    feeds: List<Feeds>,
-    folders: List<Folders>,
-    tags: List<Tags>,
-    collapsedFolderIds: Set<String>,
-    feedTagMap: Map<String, Set<String>> = emptyMap(),
-    expandedTagIds: Set<String> = emptySet(),
-): List<Int> =
-    feedListItemPositions(filter, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds).map { it.first }
-
-/**
- * The single, canonical rendered list index for a feed/folder/tag filter — the folder-group (or
- * unassigned) row, never a tag-nested duplicate under [feedListItemIndices]. Used where only one
- * canonical row makes sense, e.g. scrolling to a row about to enter inline rename (only the
- * folder-group row supports it — see `FeedListPane`'s `inlineEdit` effect). Returns `null` when
- * that canonical row isn't currently rendered — including when it's hidden by a collapsed folder,
- * even if the same feed happens to also be visible under an expanded tag.
- */
-fun feedListItemIndex(
-    filter: ArticleFilter,
-    feeds: List<Feeds>,
-    folders: List<Folders>,
-    tags: List<Tags>,
-    collapsedFolderIds: Set<String>,
-    feedTagMap: Map<String, Set<String>> = emptyMap(),
-    expandedTagIds: Set<String> = emptySet(),
-): Int? =
-    feedListItemPositions(filter, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
-        .firstOrNull { it.second }?.first
 
 /** The feed/folder/tag resolved by [resolveFeedListSelectionTarget] for the current filter. */
 internal sealed interface FeedListSelectionTarget {
@@ -360,29 +432,6 @@ suspend fun LazyListState.scrollToIndexIfNeeded(index: Int) {
             itemEnd > viewportEnd -> animateScrollBy((itemEnd - viewportEnd).toFloat())
         }
     }
-}
-
-/**
- * Picks which of a selected item's (possibly several — see [feedListItemIndices]) rendered indices
- * to scroll to: one already on screen is left alone, so a row the user just clicked (already
- * visible, by definition) stays put rather than the view jumping to a different, currently
- * off-screen instance of the same feed. Falls back to the first index — [feedListItemIndices]'
- * folder-preferred order — when none of them are currently visible (e.g. a keyboard/search/
- * notification-driven selection, which only ever targets the folder-group instance).
- */
-fun pickScrollTargetIndex(indices: List<Int>, visibleIndices: Set<Int>): Int? =
-    indices.firstOrNull { it in visibleIndices } ?: indices.firstOrNull()
-
-/**
- * Scrolls a selected item's rendered row(s) into view, as [scrollToIndexIfNeeded] above but for an
- * item that may render at more than one [indices] (see [feedListItemIndices]). See
- * [pickScrollTargetIndex] for how the target is chosen among them.
- */
-suspend fun LazyListState.scrollToIndexIfNeeded(indices: List<Int>) {
-    val visibleIndices = layoutInfo.visibleItemsInfo.mapTo(mutableSetOf()) { it.index }
-    val target = pickScrollTargetIndex(indices, visibleIndices) ?: return
-    if (target in visibleIndices) return
-    scrollToIndexIfNeeded(target)
 }
 
 /**

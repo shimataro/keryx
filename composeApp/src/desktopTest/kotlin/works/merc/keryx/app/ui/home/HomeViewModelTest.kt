@@ -717,6 +717,51 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun selectFilterOnSameFilterStillMovesTheSelectedRowInstance() = runTest {
+        // Clicking the tag-nested copy of a feed already selected under its folder must move the
+        // primary highlight to that row without disturbing the loaded article/pin state (the
+        // filter itself is unchanged, so none of selectFilter's reset side effects may fire).
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        val article1 = db.articlesQueries.getById("a1").executeAsOne()
+        vm.selectArticle(article1.toListRow())
+        testScheduler.advanceUntilIdle()
+        assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), vm.selectedRowInstance.value)
+
+        vm.selectFilter(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInTag("f1", "t1"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(FeedListRowSelection.FeedInTag("f1", "t1"), vm.selectedRowInstance.value)
+        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
+        assertEquals("a1", vm.selectedArticle.value?.id)
+        assertEquals(listOf("a1"), vm.articles.value.map { it.id })
+    }
+
+    @Test
+    fun selectFilterWithoutAnInstanceFallsBackToTheCanonicalRow() = runTest {
+        // The ~40 call sites that pass only a filter (search jump, notification action, menus) must
+        // land on the folder-group row, not keep a stale tag-nested instance.
+        db.insertFeed("f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInTag("f1", "t1"))
+        testScheduler.advanceUntilIdle()
+
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        assertEquals(FeedListRowSelection.Starred, vm.selectedRowInstance.value)
+
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), vm.selectedRowInstance.value)
+    }
+
+    @Test
     fun markSelectedUnreadClearsPinAndUpdatesSelectedState() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L)

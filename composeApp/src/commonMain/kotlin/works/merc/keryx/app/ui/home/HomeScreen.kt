@@ -64,7 +64,9 @@ fun HomeScreen() {
     val tags by vm.tags.collectAsStateSafe(emptyList())
     val folders by vm.folders.collectAsStateSafe(emptyList())
     val collapsedFolderIds by vm.collapsedFolderIds.collectAsStateSafe(emptySet())
-    val filter by vm.filter.collectAsStateSafe(ArticleFilter.All)
+    val expandedTagIds by vm.expandedTagIds.collectAsStateSafe(emptySet())
+    val feedTagMap by vm.feedTagMap.collectAsStateSafe(emptyMap())
+    val selectedRowInstance by vm.selectedRowInstance.collectAsStateSafe(FeedListRowSelection.All)
     val feedListPaneWidth by vm.feedListPaneWidth.collectAsStateSafe(FEED_LIST_PANE_WIDTH_DEFAULT.toDouble())
     val articleListPaneWidth by vm.articleListPaneWidth.collectAsStateSafe(ARTICLE_LIST_PANE_WIDTH_DEFAULT.toDouble())
 
@@ -109,11 +111,11 @@ fun HomeScreen() {
     // Feed menu's bare-key items (F2/Delete) while the user is actually typing.
     LaunchedEffect(textInputFocused) { menuController.textInputFocused.value = textInputFocused }
 
-    val orderedFilters = remember(tags, folders, feeds, collapsedFolderIds) {
-        buildOrderedFilters(tags, folders, feeds, collapsedFolderIds)
+    val orderedRows = remember(tags, folders, feeds, collapsedFolderIds, expandedTagIds, feedTagMap) {
+        buildOrderedFeedListRows(tags, folders, feeds, collapsedFolderIds, expandedTagIds, feedTagMap)
     }
     fun moveFeedSelection(delta: Int) {
-        nextFeedFilter(filter, orderedFilters, delta)?.let { vm.selectFilter(it) }
+        nextFeedListRow(selectedRowInstance, orderedRows, delta)?.let { vm.selectFilter(it.filter, it) }
     }
 
     // Shared by the keyboard shortcuts and the menu bar (via MenuController). Read the current

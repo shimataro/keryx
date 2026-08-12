@@ -163,6 +163,14 @@ class HomeViewModel(
     private val _filter = MutableStateFlow<ArticleFilter>(restoreFilter())
     val filter: StateFlow<ArticleFilter> = _filter
 
+    // Which *rendered row* of the feed list the selection is on — a feed renders once under its
+    // folder and again under every expanded tag it carries, and only this says which of those the
+    // user is actually on (primary highlight, scroll-into-view target, keyboard-nav cursor).
+    // Deliberately not persisted: only the filter is restored across launches, so the instance
+    // starts at that filter's canonical (folder-group) row, matching pre-instance behavior.
+    private val _selectedRowInstance = MutableStateFlow(FeedListRowSelection.canonicalFor(_filter.value))
+    val selectedRowInstance: StateFlow<FeedListRowSelection> = _selectedRowInstance
+
     private val _unreadOnly = MutableStateFlow(
         legacyUnreadFilter ||
             (
@@ -431,11 +439,22 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
      * Selects the active article filter and clears the current article selection and pinned read articles.
      *
      * @param filter The article filter to select.
+     * @param instance Which rendered feed-list row was selected — defaults to [filter]'s canonical
+     *   (folder-group) row for callers with no specific row in mind (search, notification actions).
+     *   Selecting a *different rendered instance of the already-selected filter* (e.g. the
+     *   tag-nested copy of a feed already selected under its folder) only moves the highlight: the
+     *   article/cursor/epoch side effects below stay gated on the filter itself changing.
      */
-
-    fun selectFilter(filter: ArticleFilter) {
-        if (filter == _filter.value) return
+    fun selectFilter(
+        filter: ArticleFilter,
+        instance: FeedListRowSelection = FeedListRowSelection.canonicalFor(filter),
+    ) {
+        if (filter == _filter.value) {
+            _selectedRowInstance.value = instance
+            return
+        }
         _filter.value = filter
+        _selectedRowInstance.value = instance
         _selectedArticle.value = null
         _pinnedReadArticles.value = emptyMap()
         // Cancels any selection whose body is still loading: without this, a hydration in flight

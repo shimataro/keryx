@@ -153,6 +153,7 @@ internal fun FeedListPane(
     val starredUnread by vm.starredUnreadCount.collectAsStateSafe(0L)
     val searchUnread by vm.searchUnreadCount.collectAsStateSafe(0L)
     val filter by vm.filter.collectAsStateSafe(ArticleFilter.All)
+    val selectedRowInstance by vm.selectedRowInstance.collectAsStateSafe(FeedListRowSelection.All)
     val searchQuery by vm.searchQuery.collectAsStateSafe("")
     val cloudConnected by vm.cloudConnected.collectAsStateSafe(false)
     val searchFocusRequester = remember { FocusRequester() }
@@ -192,6 +193,15 @@ internal fun FeedListPane(
             is FeedListSelectionTarget.Tag -> confirmingDeleteTag = target.tag
             null -> {}
         }
+    }
+
+    // A feed renders once under its folder group and again under every expanded tag it carries, so
+    // "selected" isn't one row: the instance the user actually clicked/navigated to is PRIMARY, and
+    // every other rendered copy of the same selection is a dimmer SECONDARY echo.
+    fun toneFor(instance: FeedListRowSelection): RowSelectionTone = when {
+        selectedRowInstance == instance -> RowSelectionTone.PRIMARY
+        filter == instance.filter -> RowSelectionTone.SECONDARY
+        else -> RowSelectionTone.NONE
     }
 
     // Menu bar commands whose dialog state lives in this pane (see AppMenuBar / MenuController).
@@ -264,17 +274,28 @@ internal fun FeedListPane(
         if (!windowFocused) dragController.cancel()
     }
 
-    LaunchedEffect(filter, feeds.isNotEmpty(), tags.isNotEmpty(), folders.isNotEmpty()) {
-        val indices = feedListItemIndices(filter, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
-        listState.scrollToIndexIfNeeded(indices)
+    // Scrolls to exactly the row instance that was selected — the tag-nested copy when that's the
+    // one clicked/navigated to, not whichever copy of the same feed happens to already be visible.
+    LaunchedEffect(selectedRowInstance, feeds.isNotEmpty(), tags.isNotEmpty(), folders.isNotEmpty()) {
+        val index = feedListRowIndex(selectedRowInstance, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
+        if (index != null) listState.scrollToIndexIfNeeded(index)
     }
 
     // An edit can be started from the menu bar (or a shortcut) while its row is scrolled out of
     // view, and an editor the user cannot see would swallow every keystroke with nothing to show.
+    // Inline renaming only ever happens on the canonical (folder-group / header) row, so that's the
+    // instance resolved here.
     LaunchedEffect(inlineEdit) {
         val target = inlineEdit ?: return@LaunchedEffect
-        val index = feedListItemIndex(target.filter, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
-            ?: return@LaunchedEffect
+        val index = feedListRowIndex(
+            FeedListRowSelection.canonicalFor(target.filter),
+            feeds,
+            folders,
+            tags,
+            collapsedFolderIds,
+            feedTagMap,
+            expandedTagIds,
+        ) ?: return@LaunchedEffect
         listState.scrollToIndexIfNeeded(index)
     }
 
@@ -463,16 +484,17 @@ internal fun FeedListPane(
                             key = { _, feed -> "feed-${feed.id}" },
                             contentType = { _, _ -> "feed" },
                         ) { index, feed ->
+                            val instance = FeedListRowSelection.FeedInFolderGroup(feed.id)
                             FeedRow(
                                 feed = feed,
                                 count = unreadByFeed[feed.id] ?: 0L,
-                                selected = filter == ArticleFilter.Feed(feed.id),
+                                selectionTone = toneFor(instance),
                                 focused = focused,
                                 indented = indented,
                                 nextFeedId = feedsInFolder.getOrNull(index + 1)?.id,
                                 folderId = folderId,
                                 activeBoundaryState = activeBoundaryState,
-                                onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id)); onActivated() },
+                                onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id), instance); onActivated() },
                                 onRename = { inlineEdit = InlineEditTarget.Feed(feed.id) },
                                 editingName = inlineEdit == InlineEditTarget.Feed(feed.id),
                                 onRenameCommit = { vm.renameFeed(feed.id, it); inlineEdit = null },
@@ -589,12 +611,13 @@ internal fun FeedListPane(
                                 key = { "tag-${tag.id}-feed-${it.id}" },
                                 contentType = { "tag-feed" },
                             ) { feed ->
+                                val instance = FeedListRowSelection.FeedInTag(feed.id, tag.id)
                                 TagFeedRow(
                                     feed = feed,
                                     count = unreadByFeed[feed.id] ?: 0L,
-                                    selected = filter == ArticleFilter.Feed(feed.id),
+                                    selectionTone = toneFor(instance),
                                     focused = focused,
-                                    onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id)); onActivated() },
+                                    onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id), instance); onActivated() },
                                     onRemoveFromTag = { vm.setFeedTag(feed.id, tag.id, false) },
                                 )
                             }
@@ -825,7 +848,9 @@ internal fun tagColorDotTestTag(tagId: String): String = "tag-color-dot-$tagId"
  *
  * @param feed The attached feed.
  * @param count The number of unread articles in the feed.
- * @param selected Whether the feed is the active filter.
+ * @param selectionTone How this rendered instance paints its selection — the same feed also renders
+ *   under its folder group, and only the instance actually selected paints
+ *   [RowSelectionTone.PRIMARY] (see [FeedListRowSelection]).
  * @param focused Whether the sidebar has focus.
  * @param onClick Handles feed selection.
  * @param onRemoveFromTag Detaches the feed from the tag.
@@ -834,7 +859,7 @@ internal fun tagColorDotTestTag(tagId: String): String = "tag-color-dot-$tagId"
 private fun TagFeedRow(
     feed: Feeds,
     count: Long,
-    selected: Boolean,
+    selectionTone: RowSelectionTone,
     focused: Boolean,
     onClick: () -> Unit,
     onRemoveFromTag: () -> Unit,
@@ -844,20 +869,22 @@ private fun TagFeedRow(
         Modifier.fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 2.dp)
             .clip(MaterialTheme.shapes.small)
-            .background(selectionBackground(selected, focused))
+            .background(selectionBackground(selectionTone, focused))
             .clickable(onClick = onClick)
             .nativeContextMenu(
                 items = { listOf(NativeMenuItem(removeLabel) { onRemoveFromTag() }) },
-                onOpen = { if (!selected) onClick() },
+                // A secondary-toned (or unselected) row is not the one currently focused, so a
+                // right-click on it promotes it first, exactly as the old `!selected` check did.
+                onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
             )
             .padding(start = 36.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FeedAvatar(feed.displayTitle(), feed.favicon_url)
         Spacer(Modifier.width(12.dp))
-        CompositionLocalProvider(LocalContentColor provides (selectionContentColorOrNull(selected, focused) ?: LocalContentColor.current)) {
+        CompositionLocalProvider(LocalContentColor provides (selectionContentColorOrNull(selectionTone, focused) ?: LocalContentColor.current)) {
             Text(feed.displayTitle(), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (count > 0) CountBadge(count, selected, focused)
+        if (count > 0) CountBadge(count, selectionTone == RowSelectionTone.PRIMARY, focused)
     }
 }
