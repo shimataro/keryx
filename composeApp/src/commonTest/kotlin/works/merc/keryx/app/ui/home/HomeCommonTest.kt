@@ -697,18 +697,45 @@ class HomeCommonTest {
     @Test
     fun toInlineEditTargetKeepsEachSelectionKindAndRoundTripsBackToItsFilter() {
         // The inline editor keys off an id + kind rather than the row value, and the pane scrolls
-        // the row into view via the filter this hands back, so both directions must line up.
+        // the row into view via the filter this hands back, so both directions must line up. Folder
+        // and Tag selections carry no tag context, so any rowInstance is passed through unused here.
         val cases = listOf(
-            FeedListSelectionTarget.Feed(feed("f1")) to (InlineEditTarget.Feed("f1") to ArticleFilter.Feed("f1")),
-            FeedListSelectionTarget.Folder(folder("d1")) to (InlineEditTarget.Folder("d1") to ArticleFilter.Folder("d1")),
-            FeedListSelectionTarget.Tag(tag("t1")) to (InlineEditTarget.Tag("t1") to ArticleFilter.Tag("t1")),
+            Triple(FeedListSelectionTarget.Feed(feed("f1")), FeedListRowSelection.FeedInFolderGroup("f1"), InlineEditTarget.Feed("f1") to ArticleFilter.Feed("f1")),
+            Triple(FeedListSelectionTarget.Folder(folder("d1")), FeedListRowSelection.All, InlineEditTarget.Folder("d1") to ArticleFilter.Folder("d1")),
+            Triple(FeedListSelectionTarget.Tag(tag("t1")), FeedListRowSelection.All, InlineEditTarget.Tag("t1") to ArticleFilter.Tag("t1")),
         )
-        for ((selection, expected) in cases) {
+        for ((selection, rowInstance, expected) in cases) {
             val (expectedTarget, expectedFilter) = expected
-            val target = selection.toInlineEditTarget()
+            val target = selection.toInlineEditTarget(rowInstance)
             assertEquals(expectedTarget, target)
             assertEquals(expectedFilter, target.filter)
         }
+    }
+
+    @Test
+    fun toInlineEditTargetForFeedUsesTheFolderGroupRowInstanceWhenSelectedThatWay() {
+        val target = FeedListSelectionTarget.Feed(feed("f1"))
+            .toInlineEditTarget(FeedListRowSelection.FeedInFolderGroup("f1"))
+        assertEquals(InlineEditTarget.Feed("f1", tagId = null), target)
+        assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), target.rowInstance)
+    }
+
+    @Test
+    fun toInlineEditTargetForFeedCarriesTheTagIdWhenSelectedViaItsTagNestedRow() {
+        val target = FeedListSelectionTarget.Feed(feed("f1"))
+            .toInlineEditTarget(FeedListRowSelection.FeedInTag("f1", "t1"))
+        assertEquals(InlineEditTarget.Feed("f1", tagId = "t1"), target)
+        assertEquals(FeedListRowSelection.FeedInTag("f1", "t1"), target.rowInstance)
+    }
+
+    @Test
+    fun toInlineEditTargetForFeedIgnoresATagInstanceBelongingToAnotherFeed() {
+        // rowInstance and the resolved selection are always set together by
+        // HomeViewModel.selectFilter, so this should never actually happen — a defensive guard
+        // against misattributing another feed's tag context rather than a reachable production case.
+        val target = FeedListSelectionTarget.Feed(feed("f1"))
+            .toInlineEditTarget(FeedListRowSelection.FeedInTag("other-feed", "t1"))
+        assertEquals(InlineEditTarget.Feed("f1", tagId = null), target)
     }
 
     // --- autoScrollVelocityPxPerSec ---

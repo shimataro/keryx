@@ -76,6 +76,7 @@ import works.merc.keryx.app.resources.home_folders
 import works.merc.keryx.app.resources.home_refresh
 import works.merc.keryx.app.resources.home_refreshing
 import works.merc.keryx.app.resources.home_remove_feed_from_tag_menu
+import works.merc.keryx.app.resources.home_rename_feed
 import works.merc.keryx.app.resources.home_search
 import works.merc.keryx.app.resources.home_search_clear
 import works.merc.keryx.app.resources.home_search_placeholder
@@ -184,7 +185,8 @@ internal fun FeedListPane(
     // against this pane's own already-collected rows and start the same inline edit (or open the
     // same confirmation dialog) the context menu's Rename/Edit and Unsubscribe/Delete items do.
     fun startInlineRenameForSelection() {
-        inlineEdit = resolveFeedListSelectionTarget(filter, feeds, folders, tags)?.toInlineEditTarget()
+        inlineEdit = resolveFeedListSelectionTarget(filter, feeds, folders, tags)
+            ?.toInlineEditTarget(selectedRowInstance)
     }
     fun openDeleteDialogForSelection() {
         when (val target = resolveFeedListSelectionTarget(filter, feeds, folders, tags)) {
@@ -283,12 +285,13 @@ internal fun FeedListPane(
 
     // An edit can be started from the menu bar (or a shortcut) while its row is scrolled out of
     // view, and an editor the user cannot see would swallow every keystroke with nothing to show.
-    // Inline renaming only ever happens on the canonical (folder-group / header) row, so that's the
-    // instance resolved here.
+    // target.rowInstance is the exact rendered row the edit is on (a feed's folder-group row, or the
+    // specific tag-nested copy it was selected through — see InlineEditTarget), so this never scrolls
+    // to (or expands the folder behind) the wrong copy of the same feed.
     LaunchedEffect(inlineEdit) {
         val target = inlineEdit ?: return@LaunchedEffect
         val index = feedListRowIndex(
-            FeedListRowSelection.canonicalFor(target.filter),
+            target.rowInstance,
             feeds,
             folders,
             tags,
@@ -297,6 +300,26 @@ internal fun FeedListPane(
             expandedTagIds,
         ) ?: return@LaunchedEffect
         listState.scrollToIndexIfNeeded(index)
+    }
+
+    // An in-progress edit's row can vanish out from under it — its tag collapses, the feed is
+    // detached from the tag, or the feed/folder/tag itself is deleted — leaving no row composing
+    // InlineRenameField to ever call onRenameCommit/onRenameCancel. Without this, inlineEdit would
+    // stay stuck, permanently suppressing bare-key shortcuts and drag-reordering. Deliberately does
+    // not scroll — only clears the stranded state — so it never fights a user who scrolled away for
+    // unrelated reasons.
+    LaunchedEffect(inlineEdit, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds) {
+        val target = inlineEdit ?: return@LaunchedEffect
+        val stillRendered = feedListRowIndex(
+            target.rowInstance,
+            feeds,
+            folders,
+            tags,
+            collapsedFolderIds,
+            feedTagMap,
+            expandedTagIds,
+        ) != null
+        if (!stillRendered) inlineEdit = null
     }
 
     val autoScrollEdgeZonePx = with(LocalDensity.current) { AUTO_SCROLL_EDGE_ZONE_DP.dp.toPx() }
@@ -618,6 +641,10 @@ internal fun FeedListPane(
                                     selectionTone = toneFor(instance),
                                     focused = focused,
                                     onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id), instance); onActivated() },
+                                    onRename = { inlineEdit = InlineEditTarget.Feed(feed.id, tag.id) },
+                                    editingName = inlineEdit == InlineEditTarget.Feed(feed.id, tag.id),
+                                    onRenameCommit = { vm.renameFeed(feed.id, it); inlineEdit = null },
+                                    onRenameCancel = { inlineEdit = null },
                                     onRemoveFromTag = { vm.setFeedTag(feed.id, tag.id, false) },
                                 )
                             }
@@ -853,6 +880,11 @@ internal fun tagColorDotTestTag(tagId: String): String = "tag-color-dot-$tagId"
  *   [RowSelectionTone.PRIMARY] (see [FeedListRowSelection]).
  * @param focused Whether the sidebar has focus.
  * @param onClick Handles feed selection.
+ * @param onRename Starts inline editing of the feed's display title, on this tag-nested row.
+ * @param editingName Whether the title is currently open for inline editing on this row (see
+ *   [InlineRenameField]) — this feed's folder-group row edits independently of this one.
+ * @param onRenameCommit Applies an edited title; a blank value resets it to the feed's own title.
+ * @param onRenameCancel Abandons an in-progress title edit.
  * @param onRemoveFromTag Detaches the feed from the tag.
  */
 @Composable
@@ -862,8 +894,13 @@ private fun TagFeedRow(
     selectionTone: RowSelectionTone,
     focused: Boolean,
     onClick: () -> Unit,
+    onRename: () -> Unit,
+    editingName: Boolean,
+    onRenameCommit: (String) -> Unit,
+    onRenameCancel: () -> Unit,
     onRemoveFromTag: () -> Unit,
 ) {
+    val renameLabel = stringResource(Res.string.home_rename_feed)
     val removeLabel = stringResource(Res.string.home_remove_feed_from_tag_menu)
     Row(
         Modifier.fillMaxWidth()
@@ -872,7 +909,12 @@ private fun TagFeedRow(
             .background(selectionBackground(selectionTone, focused))
             .clickable(onClick = onClick)
             .nativeContextMenu(
-                items = { listOf(NativeMenuItem(removeLabel) { onRemoveFromTag() }) },
+                items = {
+                    listOf(
+                        NativeMenuItem(renameLabel, renameNativeShortcut) { onRename() },
+                        NativeMenuItem(removeLabel) { onRemoveFromTag() },
+                    )
+                },
                 // A secondary-toned (or unselected) row is not the one currently focused, so a
                 // right-click on it promotes it first, exactly as the old `!selected` check did.
                 onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
@@ -882,8 +924,23 @@ private fun TagFeedRow(
     ) {
         FeedAvatar(feed.displayTitle(), feed.favicon_url)
         Spacer(Modifier.width(12.dp))
-        CompositionLocalProvider(LocalContentColor provides (selectionContentColorOrNull(selectionTone, focused) ?: LocalContentColor.current)) {
-            Text(feed.displayTitle(), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // Same weighted slot either way, so the favicon on the left and the count badge on the right
+        // never move when editing starts or ends (mirrors FeedRow's folder-group editor).
+        if (editingName) {
+            Box(Modifier.weight(1f)) {
+                InlineRenameField(
+                    value = feed.custom_title ?: feed.title,
+                    onCommit = onRenameCommit,
+                    onCancel = onRenameCancel,
+                    placeholder = feed.title,
+                    allowBlank = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        } else {
+            CompositionLocalProvider(LocalContentColor provides (selectionContentColorOrNull(selectionTone, focused) ?: LocalContentColor.current)) {
+                Text(feed.displayTitle(), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
         if (count > 0) CountBadge(count, selectionTone == RowSelectionTone.PRIMARY, focused)
     }

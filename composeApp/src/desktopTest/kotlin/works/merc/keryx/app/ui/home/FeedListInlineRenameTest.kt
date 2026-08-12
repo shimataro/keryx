@@ -32,6 +32,7 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
+import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertTag
 import works.merc.keryx.app.ui.menu.MenuCommand
@@ -39,6 +40,7 @@ import works.merc.keryx.app.ui.menu.MenuController
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * End-to-end Compose UI tests for the feed list's in-row rename editor and the tag color popover,
@@ -102,9 +104,16 @@ class FeedListInlineRenameTest {
         waitForIdle()
     }
 
-    /** Selects [filter], then starts inline editing on it with the real F2 shortcut. */
-    private fun ComposeUiTest.startInlineRename(vm: HomeViewModel, filter: ArticleFilter) {
-        vm.selectFilter(filter)
+    /**
+     * Selects [filter] on [instance] (defaults to the folder-canonical row), then starts inline
+     * editing on it with the real F2 shortcut.
+     */
+    private fun ComposeUiTest.startInlineRename(
+        vm: HomeViewModel,
+        filter: ArticleFilter,
+        instance: FeedListRowSelection = FeedListRowSelection.canonicalFor(filter),
+    ) {
+        vm.selectFilter(filter, instance)
         waitForIdle()
         onNodeWithTag(ROOT_TEST_TAG).requestFocus()
         onNodeWithTag(ROOT_TEST_TAG).performKeyInput { pressKey(Key.F2) }
@@ -412,6 +421,144 @@ class FeedListInlineRenameTest {
             typeName("From the menu")
             pressEnter()
             assertEquals("From the menu", db.customTitleOf("a"))
+        } finally {
+            vm.viewModelScope.cancel()
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    @Test
+    fun f2StartsInlineEditingOnTheTagNestedRowWhenItIsThePrimarySelection() = runDesktopComposeUiTest {
+        // Regression test for the bug where a feed selected via its tag-nested row instead opened
+        // the editor on its folder-group row, force-expanding the (collapsed) folder to do it.
+        val (driver, db) = inMemoryDb()
+        db.insertFolder("d1", "Folder One", sortOrder = 0L)
+        db.insertFeed("a", folderId = "d1", sortOrder = 0L)
+        db.insertTag("t1", "Tag One", sortOrder = 0L)
+        db.insertFeedTag("a", "t1")
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            // The feed's only rendered row is the tag-nested one: its folder is collapsed while the
+            // tag it's attached to is expanded.
+            vm.toggleFolderCollapsed("d1")
+            vm.toggleTagExpanded("t1")
+            setInlineRenameContent(vm)
+            startInlineRename(vm, ArticleFilter.Feed("a"), FeedListRowSelection.FeedInTag("a", "t1"))
+
+            // The folder must never be force-expanded to host the editor.
+            assertTrue("d1" in vm.collapsedFolderIds.value)
+
+            typeName("Renamed via tag row")
+            pressEnter()
+
+            assertEquals("Renamed via tag row", db.customTitleOf("a"))
+            editor().assertDoesNotExist()
+            onNodeWithText("Renamed via tag row", useUnmergedTree = true).assertExists()
+        } finally {
+            vm.viewModelScope.cancel()
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    @Test
+    fun theRenameFeedMenuCommandStartsInlineEditingOnTheTagNestedRowWhenItIsThePrimarySelection() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFolder("d1", "Folder One", sortOrder = 0L)
+        db.insertFeed("a", folderId = "d1", sortOrder = 0L)
+        db.insertTag("t1", "Tag One", sortOrder = 0L)
+        db.insertFeedTag("a", "t1")
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        val menuController = testMenuController
+        try {
+            vm.toggleFolderCollapsed("d1")
+            vm.toggleTagExpanded("t1")
+            setInlineRenameContent(vm, menuController)
+            vm.selectFilter(ArticleFilter.Feed("a"), FeedListRowSelection.FeedInTag("a", "t1"))
+            onNodeWithTag(ROOT_TEST_TAG).requestFocus()
+            waitForIdle()
+
+            menuController.send(MenuCommand.RenameFeed)
+            waitForIdle()
+            waitUntil { onAllNodesWithTag(INLINE_RENAME_FIELD_TEST_TAG, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+
+            editor().assertIsDisplayed()
+            assertTrue("d1" in vm.collapsedFolderIds.value)
+            typeName("From the menu via tag row")
+            pressEnter()
+            assertEquals("From the menu via tag row", db.customTitleOf("a"))
+        } finally {
+            vm.viewModelScope.cancel()
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    @Test
+    fun folderRowRenameStillWorksWhenTheFeedIsAlsoAttachedToATag() = runDesktopComposeUiTest {
+        // No regression: a feed carrying a tag that also renders under it must still edit its
+        // folder-group row when that's the instance actually selected.
+        val (driver, db) = inMemoryDb()
+        db.insertFolder("d1", "Folder One", sortOrder = 0L)
+        db.insertFeed("a", folderId = "d1", sortOrder = 0L)
+        db.insertTag("t1", "Tag One", sortOrder = 0L)
+        db.insertFeedTag("a", "t1")
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            // The feed renders twice: once under its folder, once under the expanded tag.
+            vm.toggleTagExpanded("t1")
+            setInlineRenameContent(vm)
+            startInlineRename(vm, ArticleFilter.Feed("a"), FeedListRowSelection.FeedInFolderGroup("a"))
+
+            assertEquals(1, onAllNodesWithTag(INLINE_RENAME_FIELD_TEST_TAG, useUnmergedTree = true).fetchSemanticsNodes().size)
+
+            typeName("Renamed via folder row")
+            pressEnter()
+
+            assertEquals("Renamed via folder row", db.customTitleOf("a"))
+        } finally {
+            vm.viewModelScope.cancel()
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    @Test
+    fun aStrandedTagRowEditIsClosedWhenItsTagCollapsesMidEdit() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("a", sortOrder = 0L)
+        db.insertTag("t1", "Tag One", sortOrder = 0L)
+        db.insertFeedTag("a", "t1")
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            vm.toggleTagExpanded("t1")
+            setInlineRenameContent(vm)
+            startInlineRename(vm, ArticleFilter.Feed("a"), FeedListRowSelection.FeedInTag("a", "t1"))
+
+            // The tag collapses out from under the in-progress edit — the row hosting the editor
+            // stops rendering entirely, and nothing else would ever call onRenameCommit/onRenameCancel.
+            vm.toggleTagExpanded("t1")
+            waitForIdle()
+
+            editor().assertDoesNotExist()
+
+            // inlineEdit must not be stuck: a fresh F2 elsewhere still opens an editor. The editor's
+            // own field took focus while it was open, so it must be moved back to the root first,
+            // exactly like the other tests' blur() does after closing an editor.
+            onNodeWithTag(ROOT_TEST_TAG).requestFocus()
+            onNodeWithTag(ROOT_TEST_TAG).performKeyInput { pressKey(Key.F2) }
+            waitForIdle()
+            editor().assertIsDisplayed()
+
+            // Close the reopened editor before teardown: an editor left mounted would fire its
+            // blur-commit as the scene disposes, writing to the DB after driver.close() below.
+            editor().performKeyInput { pressKey(Key.Escape) }
+            waitForIdle()
         } finally {
             vm.viewModelScope.cancel()
             fixture.close()

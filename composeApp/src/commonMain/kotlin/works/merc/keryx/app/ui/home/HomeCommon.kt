@@ -369,26 +369,39 @@ internal fun resolveFeedListSelectionTarget(
  * be confused for each other.
  */
 internal sealed interface InlineEditTarget {
-    /** The filter that selects this row, so the pane can scroll it into view before editing starts. */
-    val filter: ArticleFilter
+    /** The exact rendered row this edit is on — a feed edits on its folder-group row unless
+     * [Feed.tagId] names the specific tag-nested row it was started from instead. */
+    val rowInstance: FeedListRowSelection
 
-    data class Feed(val id: String) : InlineEditTarget {
-        override val filter: ArticleFilter get() = ArticleFilter.Feed(id)
+    /** The filter that selects this row, so the pane can scroll it into view before editing starts. */
+    val filter: ArticleFilter get() = rowInstance.filter
+
+    /** @param tagId Non-null when editing started on the row nested under that tag, rather than the
+     *   feed's canonical folder-group row (see [FeedListRowSelection]). */
+    data class Feed(val id: String, val tagId: String? = null) : InlineEditTarget {
+        override val rowInstance: FeedListRowSelection
+            get() = tagId?.let { FeedListRowSelection.FeedInTag(id, it) }
+                ?: FeedListRowSelection.FeedInFolderGroup(id)
     }
 
     data class Folder(val id: String) : InlineEditTarget {
-        override val filter: ArticleFilter get() = ArticleFilter.Folder(id)
+        override val rowInstance: FeedListRowSelection get() = FeedListRowSelection.Folder(id)
     }
 
     data class Tag(val id: String) : InlineEditTarget {
-        override val filter: ArticleFilter get() = ArticleFilter.Tag(id)
+        override val rowInstance: FeedListRowSelection get() = FeedListRowSelection.Tag(id)
     }
 }
 
 /** The inline-edit target for a selection resolved by [resolveFeedListSelectionTarget] — the bridge
- * between "what is selected" (keyboard shortcut / menu command) and "what row is being edited". */
-internal fun FeedListSelectionTarget.toInlineEditTarget(): InlineEditTarget = when (this) {
-    is FeedListSelectionTarget.Feed -> InlineEditTarget.Feed(feed.id)
+ * between "what is selected" (keyboard shortcut / menu command) and "what row is being edited".
+ * [rowInstance] carries which rendered row instance (folder-group vs. a specific tag-nested copy)
+ * the selection was actually made on, so a feed selected via its tag-nested row edits there too. */
+internal fun FeedListSelectionTarget.toInlineEditTarget(rowInstance: FeedListRowSelection): InlineEditTarget = when (this) {
+    is FeedListSelectionTarget.Feed -> InlineEditTarget.Feed(
+        id = feed.id,
+        tagId = (rowInstance as? FeedListRowSelection.FeedInTag)?.takeIf { it.feedId == feed.id }?.tagId,
+    )
     is FeedListSelectionTarget.Folder -> InlineEditTarget.Folder(folder.id)
     is FeedListSelectionTarget.Tag -> InlineEditTarget.Tag(tag.id)
 }
