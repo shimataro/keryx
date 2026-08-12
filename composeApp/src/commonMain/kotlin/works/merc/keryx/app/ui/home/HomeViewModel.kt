@@ -58,16 +58,6 @@ import works.merc.keryx.app.domain.SubscribeOutcome
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
 
-/**
- * A repository article list tagged with the filter that produced it, so the display transform can
- * apply filter-dependent rules (e.g. the starred exemption) against the right filter even though
- * it no longer runs inside the `flatMapLatest` that switched to that filter.
- */
-private data class FilteredArticles(
-    val filter: ArticleFilter,
-    val articles: List<ArticleListRow>,
-)
-
 /** Debounced FTS results tagged with the query that produced them (see [HomeViewModel.searching]). */
 private data class SearchSnapshot(
     val query: String,
@@ -192,11 +182,11 @@ class HomeViewModel(
     // sort and pinned inputs are pure display transforms over whatever that query returned. Keeping
     // them in the flatMapLatest key made every article selection (which pins the article it marks
     // read) cancel and re-execute the whole unbounded list query.
-    private val filteredArticles: Flow<FilteredArticles> =
-        _filter.flatMapLatest { f -> articleRepository.watchArticles(f).map { FilteredArticles(f, it) } }
+    private val filteredArticles: Flow<List<ArticleListRow>> =
+        _filter.flatMapLatest { f -> articleRepository.watchArticles(f) }
 
     val articles: StateFlow<List<ArticleListRow>> =
-        combine(filteredArticles, _unreadOnly, _newestFirst, _pinnedReadArticles) { (f, list), unread, newest, pinned ->
+        combine(filteredArticles, _unreadOnly, _newestFirst, _pinnedReadArticles) { list, unread, newest, pinned ->
             // Nothing pinned is the common case, and then the id set has no reader — skip
             // building it rather than hashing every article's id on every emission.
             val extra = if (pinned.isEmpty()) {
@@ -210,7 +200,7 @@ class HomeViewModel(
                     .thenByDescending { it.created_at }
                     .thenByDescending { it.id }
             )
-            val filtered = if (unread && f != ArticleFilter.Starred) {
+            val filtered = if (unread) {
                 merged.filter { it.is_read == 0L || it.id in pinned }
             } else {
                 merged

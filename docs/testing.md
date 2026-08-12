@@ -372,6 +372,10 @@ in order of how likely each is to be wrong):
 - Enable the titlebar "Application Menu" button instead: same check.
 - Dynamic state (enabled/disabled items, the "Unread only" checkbox check state) and every click action match the
   in-window menu exactly.
+- Clicking a **greyed-out** item (e.g. "同期" while no cloud account is connected, or a Feed-menu item with
+  nothing selected) never runs its action — confirms the D-Bus click handler's `isEnabled()` guard
+  (`AppMenuBarHost.kt`) actually blocks a `clicked` event the host still delivers for a disabled item, mirroring
+  what `MenuShortcutDispatcher` already enforced for the keyboard-shortcut path.
 - `startMinimized`: launch minimized, restore, confirm the Global Menu populates (validates the deferred/retried
   XID lookup) and the in-window bar still hides once ready.
 - `systemctl --user restart plasma-plasmashell`: the Global Menu keeps working without restarting Keryx (validates

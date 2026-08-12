@@ -15,9 +15,6 @@ data class MenuUiState(
     /** OPML import/export — available once past initial setup. */
     val opmlEnabled: Boolean,
     val searchEnabled: Boolean,
-    /** Toggling unread-only has no effect while viewing [ArticleFilter.Starred] (that filter
-     * ignores the flag entirely — see `HomeViewModel`'s `articles` pipeline), mirroring
-     * `isUnreadOnlyEnabled` in `ArticleListPane.kt` for the real toggle chip. */
     val unreadOnlyEnabled: Boolean,
     val unreadOnlyChecked: Boolean,
     val toggleSortEnabled: Boolean,
@@ -48,8 +45,7 @@ data class MenuUiState(
  * Computes [MenuUiState] from the current app/UI state. Pure so it can be tested directly.
  *
  * Most items are gated on being on the Home screen (their targets live in Home's composition).
- * Article/URL actions additionally require a selection (and a non-blank URL for the latter).
- * Unread-only additionally requires the active filter not to be [ArticleFilter.Starred]. Sort
+ * Article/URL actions additionally require a selection (and a non-blank URL for the latter). Sort
  * can't be toggled while the Search scope is active (search order is fixed to relevance rank).
  * Refresh/sync are suppressed while their operation is already in flight, and sync additionally
  * requires a connected cloud account.
@@ -75,7 +71,7 @@ fun computeMenuUiState(
         addItemsEnabled = onHome,
         opmlEnabled = screen != Screen.Setup,
         searchEnabled = onHome,
-        unreadOnlyEnabled = onHome && filter != ArticleFilter.Starred,
+        unreadOnlyEnabled = onHome,
         unreadOnlyChecked = unreadOnly,
         toggleSortEnabled = onHome && filter != ArticleFilter.Search,
         markAllReadEnabled = onHome,

@@ -1118,6 +1118,26 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun unreadOnlyFiltersTheStarredFilterTheSameAsEveryOtherFilter() = runTest {
+        db.insertFeed("f1")
+        // Starred-but-unread is a state sync merge can genuinely produce — read/star are merged
+        // independently (see MergeSql / db-schema.md) — so the toggle must not special-case Starred.
+        db.insertArticle("a1", "f1", isRead = 0L, isStarred = 1L)
+        db.insertArticle("a2", "f1", isRead = 1L, isStarred = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(setOf("a1", "a2"), vm.articles.value.map { it.id }.toSet())
+
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf("a1"), vm.articles.value.map { it.id })
+    }
+
+    @Test
     fun setUnreadOnlyAndToggleSortFlipExposedState() = runTest {
         val vm = newViewModel()
         subscribeAll(vm)

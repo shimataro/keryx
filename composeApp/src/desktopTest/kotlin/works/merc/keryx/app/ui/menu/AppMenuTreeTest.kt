@@ -222,10 +222,10 @@ class AppMenuTreeTest {
     }
 
     @Test
-    fun `the unread-only checkbox is disabled in the starred filter while other View items stay enabled`() {
+    fun `the unread-only checkbox stays enabled in the starred filter like other View items`() {
         val ui = starredFilterUi()
         val root = tree(ui)
-        assertEquals(false, root.menu("View").checkbox("UnreadOnly")!!.enabled)
+        assertEquals(true, root.menu("View").checkbox("UnreadOnly")!!.enabled)
         assertEquals(true, root.menu("View").item("Search").enabled)
         assertEquals(true, root.menu("View").item("MarkAllRead").enabled)
     }
