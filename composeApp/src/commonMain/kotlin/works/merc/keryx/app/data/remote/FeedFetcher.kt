@@ -16,6 +16,7 @@ import works.merc.keryx.app.core.FeedNotFoundException
 import works.merc.keryx.app.core.FeedParseException
 import works.merc.keryx.app.core.FeedTimeoutException
 import works.merc.keryx.app.core.MAX_REDIRECTS
+import works.merc.keryx.app.core.MILLIS_PER_SECOND
 import works.merc.keryx.app.core.READ_TIMEOUT_SECONDS_DEFAULT
 import works.merc.keryx.app.core.Result
 
@@ -83,7 +84,7 @@ class FeedFetcher(
         val response = client.get(url) {
             etag?.let { header("If-None-Match", it) }
             lastModified?.let { header("If-Modified-Since", it) }
-            timeout { requestTimeoutMillis = readTimeoutSeconds() * 1000L }
+            timeout { requestTimeoutMillis = readTimeoutSeconds() * MILLIS_PER_SECOND }
         }
         val status = response.status.value
 

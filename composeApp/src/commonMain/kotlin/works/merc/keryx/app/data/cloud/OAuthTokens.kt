@@ -11,6 +11,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
+import works.merc.keryx.app.core.MILLIS_PER_SECOND
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.TOKEN_EXPIRY_SKEW_MS
 
@@ -77,7 +78,7 @@ internal suspend fun requestOAuthTokens(
                 OAuthTokens(
                     accessToken = access,
                     refreshToken = dto.refreshToken ?: keepRefreshToken,
-                    expiresAtMillis = dto.expiresInSeconds?.let { clock.nowMillis() + it * 1000L },
+                    expiresAtMillis = dto.expiresInSeconds?.let { clock.nowMillis() + it * MILLIS_PER_SECOND },
                 ),
             )
         }

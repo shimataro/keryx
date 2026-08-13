@@ -13,6 +13,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.MILLIS_PER_HOUR
 import works.merc.keryx.app.core.compareReleaseVersions
 import works.merc.keryx.app.core.isBelowStable
 import works.merc.keryx.app.core.isNewer
@@ -143,4 +144,4 @@ private fun versionOf(release: JsonObject): String? =
  * The startup check itself runs unconditionally and doesn't go through this function.
  */
 internal fun shouldCheckForUpdate(nowMillis: Long, lastCheckMillis: Long?, intervalHours: Int): Boolean =
-    intervalHours > 0 && (lastCheckMillis == null || nowMillis - lastCheckMillis >= intervalHours * 3_600_000L)
+    intervalHours > 0 && (lastCheckMillis == null || nowMillis - lastCheckMillis >= intervalHours * MILLIS_PER_HOUR)
