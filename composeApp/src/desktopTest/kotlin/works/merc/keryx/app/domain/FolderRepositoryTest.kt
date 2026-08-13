@@ -106,6 +106,22 @@ class FolderRepositoryTest {
     }
 
     @Test
+    fun createFolderReactivatingSoftDeletedFolderPreservesOriginalCreatedAt() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Kotlin", now = 5L, deletedAt = 20L)
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            repo.createFolder("Kotlin")
+
+            val row = db.foldersQueries.getById("d1").executeAsOne()
+            assertEquals(5L, row.created_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun createFolderAppendsNewFolderToTheEndOfTheList() {
         val (driver, db) = inMemoryDb()
         try {

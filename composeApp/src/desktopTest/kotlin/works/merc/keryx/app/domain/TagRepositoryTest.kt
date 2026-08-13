@@ -69,6 +69,54 @@ class TagRepositoryTest {
     }
 
     @Test
+    fun createTagReactivatingSoftDeletedTagPreservesOriginalCreatedAt() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertTag("t1", "Kotlin", now = 5L, deletedAt = 20L)
+            val repo = newRepo(db, clock = Clock { 100L })
+
+            repo.createTag("Kotlin")
+
+            val row = db.tagsQueries.getById("t1").executeAsOne()
+            assertEquals(5L, row.created_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun createTagReactivatingWithNoColorArgumentPreservesExistingColor() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertTag("t1", "Kotlin", now = 10L, deletedAt = 20L, color = "#111111")
+            val repo = newRepo(db, clock = Clock { 100L })
+
+            repo.createTag("Kotlin") // no color argument
+
+            val row = db.tagsQueries.getById("t1").executeAsOne()
+            assertEquals("#111111", row.color)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun createTagReactivatingSoftDeletedTagPreservesExistingSortOrder() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertTag("t1", "Kotlin", now = 10L, deletedAt = 20L, sortOrder = 3L)
+            val repo = newRepo(db, clock = Clock { 100L })
+
+            repo.createTag("Kotlin")
+
+            val row = db.tagsQueries.getById("t1").executeAsOne()
+            assertEquals(3L, row.sort_order)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun updateTagUpdatesNameAndColorAndPersists() {
         val (driver, db) = inMemoryDb()
         try {

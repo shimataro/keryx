@@ -1304,6 +1304,21 @@ class HomeViewModelTest {
         assertTrue(vm.newestFirst.value)
     }
 
+    @Test
+    fun setFeedListPaneWidthAndSetArticleListPaneWidthPersistAfterDebounce() = runTest {
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        vm.setFeedListPaneWidth(300.0)
+        vm.setArticleListPaneWidth(400.0)
+        testScheduler.advanceUntilIdle()
+
+        val settings = LocalSettingsStore(dirOverride = dir).load()
+        assertEquals(300.0, settings.feedListPaneWidth)
+        assertEquals(400.0, settings.articleListPaneWidth)
+    }
+
     /**
      * The unread-only, sort and pinned-read inputs are pure display transforms over whatever the
      * article-list query returned, so only a filter change may re-execute that query. Guards against

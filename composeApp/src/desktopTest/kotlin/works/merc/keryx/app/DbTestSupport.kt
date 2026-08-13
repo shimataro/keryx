@@ -195,9 +195,9 @@ fun KeryxDatabase.insertFolder(id: String, name: String, now: Long = 0L, deleted
 }
 
 /** Inserts a tag. */
-fun KeryxDatabase.insertTag(id: String, name: String, now: Long = 0L, deletedAt: Long? = null, sortOrder: Long = 0L) {
+fun KeryxDatabase.insertTag(id: String, name: String, now: Long = 0L, deletedAt: Long? = null, sortOrder: Long = 0L, color: String? = null) {
     tagsQueries.upsert(
-        id = id, name = name, color = null, sort_order = sortOrder,
+        id = id, name = name, color = color, sort_order = sortOrder,
         deleted_at = deletedAt, updated_at = now, created_at = now,
     )
 }
