@@ -69,14 +69,9 @@ class TagRepository(
     fun createTag(name: String, color: String? = null): String {
         val now = clock.nowMillis()
         val existing = tags.getByName(name).executeAsOneOrNull()
-        val id = if (existing != null) {
-            // Reactivate / update an existing (possibly soft-deleted) tag of the same name.
-            tags.upsert(existing.id, name, color ?: existing.color, existing.sort_order, null, now, existing.created_at)
-            existing.id
-        } else {
-            val newId = IdGenerator.newId()
-            tags.upsert(newId, name, color, 0, null, now, now)
-            newId
+        val id = createOrReactivateId(existing?.id) { id ->
+            // Reactivates an existing (possibly soft-deleted) tag of the same name in place.
+            tags.upsert(id, name, color ?: existing?.color, existing?.sort_order ?: 0, null, now, existing?.created_at ?: now)
         }
         syncScheduler.scheduleSync()
         return id

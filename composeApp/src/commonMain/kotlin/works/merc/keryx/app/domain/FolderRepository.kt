@@ -49,13 +49,8 @@ class FolderRepository(
         // end of the folder list — a soft-deleted folder's old position isn't meaningful anymore
         // since other folders may have been reordered while it was gone.
         val nextSortOrder = folders.nextSortOrder().executeAsOne()
-        val id = if (existing != null) {
-            folders.upsert(existing.id, name, nextSortOrder, null, now, existing.created_at)
-            existing.id
-        } else {
-            val newId = IdGenerator.newId()
-            folders.upsert(newId, name, nextSortOrder, null, now, now)
-            newId
+        val id = createOrReactivateId(existing?.id) { id ->
+            folders.upsert(id, name, nextSortOrder, null, now, existing?.created_at ?: now)
         }
         syncScheduler.scheduleSync()
         return id
