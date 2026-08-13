@@ -12,3 +12,6 @@ interface TokenStorage {
     fun load(): OAuthTokens?
     fun clear()
 }
+
+/** Shared [works.merc.keryx.app.core.Log] tag for every [TokenStorage] implementation. */
+internal const val TOKEN_STORAGE_LOG_TAG = "TokenStorage"

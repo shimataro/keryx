@@ -22,14 +22,14 @@ class KeyringTokenStorage(
     private val domain = KEYCHAIN_SERVICE
 
     private val keyring: Keyring? = runCatching { Keyring.create() }
-        .onFailure { Log.warn(TAG, "No OS secret store available; falling back to file storage", it) }
+        .onFailure { Log.warn(TOKEN_STORAGE_LOG_TAG, "No OS secret store available; falling back to file storage", it) }
         .getOrNull()
 
     override fun save(tokens: OAuthTokens) {
         val payload = json.encodeToString(tokens)
         val stored = keyring?.let {
             runCatching { it.setPassword(domain, account, payload) }
-                .onFailure { e -> Log.warn(TAG, "Keyring save failed; falling back to file storage", e) }
+                .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Keyring save failed; falling back to file storage", e) }
                 .isSuccess
         } ?: false
         if (!stored) fallback.save(tokens)
@@ -40,14 +40,14 @@ class KeyringTokenStorage(
             runCatching { it.getPassword(domain, account) }
                 .onFailure { e ->
                     if (!isExpectedKeyringLoadFailure(e)) {
-                        Log.warn(TAG, "Keyring load failed; falling back to file storage", e)
+                        Log.warn(TOKEN_STORAGE_LOG_TAG, "Keyring load failed; falling back to file storage", e)
                     }
                 }
                 .getOrNull()
         }
         val decoded = raw?.let {
             runCatching { json.decodeFromString<OAuthTokens>(it) }
-                .onFailure { e -> Log.warn(TAG, "Stored token payload could not be decoded", e) }
+                .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Stored token payload could not be decoded", e) }
                 .getOrNull()
         }
         return decoded ?: fallback.load()
@@ -56,13 +56,9 @@ class KeyringTokenStorage(
     override fun clear() {
         keyring?.let {
             runCatching { it.deletePassword(domain, account) }
-                .onFailure { e -> Log.warn(TAG, "Keyring clear failed", e) }
+                .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Keyring clear failed", e) }
         }
         fallback.clear()
-    }
-
-    private companion object {
-        const val TAG = "TokenStorage"
     }
 }
 
