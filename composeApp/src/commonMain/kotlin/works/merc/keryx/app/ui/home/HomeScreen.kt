@@ -262,46 +262,56 @@ fun HomeScreen() {
         )
     }
 
-    // Notification next-actions whose target lives on this screen are resolved here — hosted at the
-    // screen level, outside the bell popup which dismisses on focus loss. ShowSettingsTab is resolved
-    // by App instead (the settings dialog lives there).
-    notifVm.pendingAction?.let { pending ->
-        when (val action = pending.action) {
-            AppNotificationAction.ResetCloudData ->
-                // Corrupt/incompatible cloud DB: confirm the destructive reset, then clear the
-                // now-stale error notification.
-                KeryxAlertDialog(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    tonalElevation = 0.dp,
-                    onDismissRequest = { notifVm.clearPendingAction() },
-                    title = stringResource(Res.string.settings_cloud_reset_confirm_title),
-                    text = { Text(stringResource(Res.string.settings_cloud_reset_confirm_body)) },
-                    confirmText = stringResource(Res.string.settings_cloud_reset_confirm_action),
-                    onConfirm = {
-                        vm.resetCloudData()
-                        notifVm.dismiss(pending.id)
-                        notifVm.clearPendingAction()
-                    },
-                    dismissText = stringResource(Res.string.common_cancel),
-                )
-            // Same effect as clicking that feed in the feed list.
-            is AppNotificationAction.ShowFeedDetail -> LaunchedEffect(pending.id) {
-                vm.selectFilter(ArticleFilter.Feed(action.feedId))
-                setFocusedPane(HomePane.FeedList)
-                notifVm.clearPendingAction()
-            }
-            // Explanation only (e.g. the macOS translocation warning) — no navigation, one button.
-            is AppNotificationAction.ShowInfoDialog ->
-                KeryxAlertDialog(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    tonalElevation = 0.dp,
-                    onDismissRequest = { notifVm.clearPendingAction() },
-                    title = stringResource(Res.string.notification_detail_title),
-                    text = { Text(action.detail) },
-                    confirmText = stringResource(Res.string.common_ok),
-                    onConfirm = { notifVm.clearPendingAction() },
-                )
-            else -> Unit
+    PendingNotificationActionHost(vm, notifVm, onFocusPane = { setFocusedPane(it) })
+}
+
+/**
+ * Resolves a notification's next action whose target lives on this screen — hosted at the screen
+ * level, outside the bell popup which dismisses on focus loss. `ShowSettingsTab` is resolved by
+ * `App` instead (the settings dialog lives there).
+ */
+@Composable
+private fun PendingNotificationActionHost(
+    vm: HomeViewModel,
+    notifVm: NotificationCenterViewModel,
+    onFocusPane: (HomePane) -> Unit,
+) {
+    val pending = notifVm.pendingAction ?: return
+    when (val action = pending.action) {
+        AppNotificationAction.ResetCloudData ->
+            // Corrupt/incompatible cloud DB: confirm the destructive reset, then clear the
+            // now-stale error notification.
+            KeryxAlertDialog(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                tonalElevation = 0.dp,
+                onDismissRequest = { notifVm.clearPendingAction() },
+                title = stringResource(Res.string.settings_cloud_reset_confirm_title),
+                text = { Text(stringResource(Res.string.settings_cloud_reset_confirm_body)) },
+                confirmText = stringResource(Res.string.settings_cloud_reset_confirm_action),
+                onConfirm = {
+                    vm.resetCloudData()
+                    notifVm.dismiss(pending.id)
+                    notifVm.clearPendingAction()
+                },
+                dismissText = stringResource(Res.string.common_cancel),
+            )
+        // Same effect as clicking that feed in the feed list.
+        is AppNotificationAction.ShowFeedDetail -> LaunchedEffect(pending.id) {
+            vm.selectFilter(ArticleFilter.Feed(action.feedId))
+            onFocusPane(HomePane.FeedList)
+            notifVm.clearPendingAction()
         }
+        // Explanation only (e.g. the macOS translocation warning) — no navigation, one button.
+        is AppNotificationAction.ShowInfoDialog ->
+            KeryxAlertDialog(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                tonalElevation = 0.dp,
+                onDismissRequest = { notifVm.clearPendingAction() },
+                title = stringResource(Res.string.notification_detail_title),
+                text = { Text(action.detail) },
+                confirmText = stringResource(Res.string.common_ok),
+                onConfirm = { notifVm.clearPendingAction() },
+            )
+        else -> Unit
     }
 }
