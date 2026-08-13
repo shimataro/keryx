@@ -486,21 +486,37 @@ fun main(args: Array<String>) {
                 activationRequests.collect {
                     windowVisible = true
                     SwingUtilities.invokeLater {
-                        window.isVisible = true
-                        window.extendedState = window.extendedState and Frame.ICONIFIED.inv()
                         if (isMacOs) {
-                            // LaunchedEffect(windowVisible) above only re-fires on a value change, so it
-                            // won't call activateIgnoringOtherApps when the window was already visible
-                            // (just backgrounded, not tray-hidden/minimized). Call it unconditionally here
-                            // on every activation signal instead - harmless no-op when the Dock policy is
-                            // already REGULAR.
+                            // Promote to Regular + activate *before* touching the window at all.
+                            // Showing/ordering the window first and only promoting the app
+                            // afterward (the previous order here) left the window never actually
+                            // rendering when starting from tray-hidden (Accessory policy) - the
+                            // window server can drop an order-front that lands while the app is
+                            // still Accessory, in the same tick as an immediately-following policy
+                            // promotion. This didn't reproduce when the window was merely
+                            // backgrounded (Regular the whole time already, no transition to race).
+                            // LaunchedEffect(windowVisible) above only re-fires on a value change, so
+                            // it won't call activateIgnoringOtherApps when the window was already
+                            // visible. Call it unconditionally here on every activation signal
+                            // instead - harmless no-op when the Dock policy is already REGULAR.
                             MacActivationPolicy.setDockIconVisible(true)
-                            // As above: re-apply the branded icon on a later EDT turn, since the policy
-                            // switch may have recreated the Dock tile and dropped the icon override.
-                            SwingUtilities.invokeLater { applyBrandedDockIcon(dockBadgedImage) }
+                            // Defer showing/fronting/focusing the window (and the Dock icon
+                            // re-application) to a later EDT turn, giving the Accessory->Regular
+                            // transition - which recreates the Dock tile from scratch - time to
+                            // settle first (guaranteed FIFO, after the tile is recreated).
+                            SwingUtilities.invokeLater {
+                                window.isVisible = true
+                                window.extendedState = window.extendedState and Frame.ICONIFIED.inv()
+                                applyBrandedDockIcon(dockBadgedImage)
+                                window.toFront()
+                                window.requestFocus()
+                            }
+                        } else {
+                            window.isVisible = true
+                            window.extendedState = window.extendedState and Frame.ICONIFIED.inv()
+                            window.toFront()
+                            window.requestFocus()
                         }
-                        window.toFront()
-                        window.requestFocus()
                     }
                 }
             }
