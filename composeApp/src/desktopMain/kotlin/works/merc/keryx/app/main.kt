@@ -379,7 +379,11 @@ fun main(args: Array<String>) {
             // Reuses the same activation signal as the single-instance/reopen paths below
             // (window.toFront/requestFocus, de-iconify, activateIgnoringOtherApps) - see the
             // LaunchedEffect(Unit) collecting activationRequests further down.
-            onNotificationClicked = { activationRequests.tryEmit(Unit) },
+            onNotificationClicked = {
+                // TODO(diagnostic): remove once the tray-hidden notification-click restore bug is root-caused.
+                Log.info(LOG_TAG, "onNotificationClicked callback invoked")
+                activationRequests.tryEmit(Unit)
+            },
             // Windows/Linux-fallback's Compose Tray() has only one click hook shared between the
             // icon and a notification balloon (unlike onNotificationClicked above, which macOS/
             // Linux-SNI can wire separately - see KeryxTray's KDoc), with no platform way to tell
@@ -484,6 +488,8 @@ fun main(args: Array<String>) {
             // to front and restore it from the tray / OS-level minimized state.
             LaunchedEffect(Unit) {
                 activationRequests.collect {
+                    // TODO(diagnostic): remove once the tray-hidden notification-click restore bug is root-caused.
+                    Log.info(LOG_TAG, "activationRequests received (windowVisible=$windowVisible, isMacOs=$isMacOs)")
                     windowVisible = true
                     SwingUtilities.invokeLater {
                         if (isMacOs) {
@@ -499,17 +505,24 @@ fun main(args: Array<String>) {
                             // it won't call activateIgnoringOtherApps when the window was already
                             // visible. Call it unconditionally here on every activation signal
                             // instead - harmless no-op when the Dock policy is already REGULAR.
+                            // TODO(diagnostic): remove once the tray-hidden notification-click restore bug is root-caused.
+                            Log.info(LOG_TAG, "invokeLater(1): before setDockIconVisible(true)")
                             MacActivationPolicy.setDockIconVisible(true)
+                            Log.info(LOG_TAG, "invokeLater(1): after setDockIconVisible(true)")
                             // Defer showing/fronting/focusing the window (and the Dock icon
                             // re-application) to a later EDT turn, giving the Accessory->Regular
                             // transition - which recreates the Dock tile from scratch - time to
                             // settle first (guaranteed FIFO, after the tile is recreated).
                             SwingUtilities.invokeLater {
+                                // TODO(diagnostic): remove once the tray-hidden notification-click restore bug is root-caused.
+                                Log.info(LOG_TAG, "invokeLater(2): start (window.isVisible=${window.isVisible})")
                                 window.isVisible = true
                                 window.extendedState = window.extendedState and Frame.ICONIFIED.inv()
                                 applyBrandedDockIcon(dockBadgedImage)
                                 window.toFront()
                                 window.requestFocus()
+                                // TODO(diagnostic): remove once the tray-hidden notification-click restore bug is root-caused.
+                                Log.info(LOG_TAG, "invokeLater(2): done (window.isVisible=${window.isVisible}, isActive=${window.isActive})")
                             }
                         } else {
                             window.isVisible = true
