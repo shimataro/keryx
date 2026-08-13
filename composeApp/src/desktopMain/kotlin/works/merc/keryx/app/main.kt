@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.LocalWindowExceptionHandlerFactory
 import androidx.compose.ui.window.Window
@@ -41,6 +42,7 @@ import org.jetbrains.compose.resources.painterResource
 import org.koin.core.context.startKoin
 import org.koin.mp.KoinPlatform
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.core.WINDOW_DEFAULT_HEIGHT
 import works.merc.keryx.app.core.WINDOW_DEFAULT_WIDTH
 import works.merc.keryx.app.core.WINDOW_MIN_HEIGHT
@@ -66,6 +68,7 @@ import works.merc.keryx.app.resources.tray_icon
 import works.merc.keryx.app.appmenu.AppMenuBarHost
 import works.merc.keryx.app.appmenu.AppMenuConnection
 import works.merc.keryx.app.tray.KeryxTray
+import works.merc.keryx.app.tray.shouldHideOnTrayAction
 import works.merc.keryx.app.tray.SniConnection
 import works.merc.keryx.app.ui.home.HomeViewModel
 import works.merc.keryx.app.ui.menu.MenuCommand
@@ -299,6 +302,17 @@ fun main(args: Array<String>) {
 
     application {
         var windowVisible by remember { mutableStateOf(!saved.startMinimized) }
+        // Mirrors windowVisible's role: mutated inside Window{}'s content (the only place
+        // LocalWindowInfo.current is resolvable, see the LaunchedEffect further down) and read
+        // here, before Window{} is even composed, by the Windows/Linux tray-fallback's
+        // onTrayAction below - it needs to know whether a click should hide the window (visible
+        // and focused - a deliberate icon click) or bring it to front (everything else, which
+        // also covers a notification click landing while the window is merely backgrounded).
+        var windowFocused by remember { mutableStateOf(false) }
+        // Read by onTrayAction below (see shouldHideOnTrayAction) so a notification-balloon click
+        // landing while the window happens to already be visible and focused still activates
+        // instead of hiding it, on the Windows/Linux fallback where the two clicks share one hook.
+        var lastNotificationSentAtMillis by remember { mutableStateOf(0L) }
         val windowState = remember {
             WindowState(
                 position = WindowPosition.Aligned(Alignment.Center),
@@ -317,6 +331,13 @@ fun main(args: Array<String>) {
                     )
                 }
             }
+        }
+
+        // Tracks when a new-article notification was last sent, for onTrayAction's recency bias
+        // below (shouldHideOnTrayAction). A plain additional collector of the same SharedFlow
+        // KeryxTray itself collects - safe and already the established pattern for this flow.
+        LaunchedEffect(Unit) {
+            newArticleNotifications.collect { lastNotificationSentAtMillis = SystemClock.nowMillis() }
         }
 
         val unreadCount by koin.get<ArticleRepository>().watchUnreadCount().collectAsState(0L)
@@ -355,6 +376,24 @@ fun main(args: Array<String>) {
             windowVisible = windowVisible,
             onToggle = { windowVisible = !windowVisible },
             onQuit = ::exitApplication,
+            // Reuses the same activation signal as the single-instance/reopen paths below
+            // (window.toFront/requestFocus, de-iconify, activateIgnoringOtherApps) - see the
+            // LaunchedEffect(Unit) collecting activationRequests further down.
+            onNotificationClicked = { activationRequests.tryEmit(Unit) },
+            // Windows/Linux-fallback's Compose Tray() has only one click hook shared between the
+            // icon and a notification balloon (unlike onNotificationClicked above, which Linux SNI
+            // can wire separately - see KeryxTray's KDoc; macOS has no equivalent, see
+            // known-issues.md), with no platform way to tell them apart. shouldHideOnTrayAction
+            // (tray/TrayActionPolicy.kt) decides: hide only what looks like a deliberate icon
+            // click, otherwise activate - see its KDoc for the exact heuristic and its documented
+            // residual gap.
+            onTrayAction = {
+                if (shouldHideOnTrayAction(windowVisible, windowFocused, SystemClock.nowMillis(), lastNotificationSentAtMillis)) {
+                    windowVisible = false
+                } else {
+                    activationRequests.tryEmit(Unit)
+                }
+            },
             newArticleNotifications = newArticleNotifications,
         )
 
@@ -443,29 +482,54 @@ fun main(args: Array<String>) {
 
             // A second launch signals this instance (via SingleInstanceCoordinator's
             // loopback socket) instead of opening its own window. Bring this window
-            // to front and restore it from the tray / OS-level minimized state.
+            // to front and restore it from the tray / OS-level minimized state. Also fed
+            // by a Linux SNI notification click (onNotificationClicked below) - macOS has
+            // no equivalent path here; see known-issues.md "macOS: clicking a notification
+            // banner does not restore a tray-hidden window" for why.
             LaunchedEffect(Unit) {
                 activationRequests.collect {
                     windowVisible = true
                     SwingUtilities.invokeLater {
-                        window.isVisible = true
-                        window.extendedState = window.extendedState and Frame.ICONIFIED.inv()
                         if (isMacOs) {
-                            // LaunchedEffect(windowVisible) above only re-fires on a value change, so it
-                            // won't call activateIgnoringOtherApps when the window was already visible
-                            // (just backgrounded, not tray-hidden/minimized). Call it unconditionally here
-                            // on every activation signal instead - harmless no-op when the Dock policy is
-                            // already REGULAR.
+                            // Promote to Regular + activate *before* touching the window at all.
+                            // Showing/ordering the window first and only promoting the app
+                            // afterward left the window never actually rendering when starting
+                            // from tray-hidden (Accessory policy) - the window server can drop an
+                            // order-front that lands while the app is still Accessory, in the same
+                            // tick as an immediately-following policy promotion. This didn't
+                            // reproduce when the window was merely backgrounded (Regular the whole
+                            // time already, no transition to race).
+                            // LaunchedEffect(windowVisible) above only re-fires on a value change, so
+                            // it won't call activateIgnoringOtherApps when the window was already
+                            // visible. Call it unconditionally here on every activation signal
+                            // instead - harmless no-op when the Dock policy is already REGULAR.
                             MacActivationPolicy.setDockIconVisible(true)
-                            // As above: re-apply the branded icon on a later EDT turn, since the policy
-                            // switch may have recreated the Dock tile and dropped the icon override.
-                            SwingUtilities.invokeLater { applyBrandedDockIcon(dockBadgedImage) }
+                            // Defer showing/fronting/focusing the window (and the Dock icon
+                            // re-application) to a later EDT turn, giving the Accessory->Regular
+                            // transition - which recreates the Dock tile from scratch - time to
+                            // settle first (guaranteed FIFO, after the tile is recreated).
+                            SwingUtilities.invokeLater {
+                                window.isVisible = true
+                                window.extendedState = window.extendedState and Frame.ICONIFIED.inv()
+                                applyBrandedDockIcon(dockBadgedImage)
+                                window.toFront()
+                                window.requestFocus()
+                            }
+                        } else {
+                            window.isVisible = true
+                            window.extendedState = window.extendedState and Frame.ICONIFIED.inv()
+                            window.toFront()
+                            window.requestFocus()
                         }
-                        window.toFront()
-                        window.requestFocus()
                     }
                 }
             }
+
+            // Mirrors the observed focus state into the app-scope windowFocused var declared
+            // above (outside Window{}, where onTrayAction needs to read it) - LocalWindowInfo is
+            // only resolvable inside Window{}'s own content, unlike windowState.size above.
+            val currentWindowFocused = LocalWindowInfo.current.isWindowFocused
+            LaunchedEffect(currentWindowFocused) { windowFocused = currentWindowFocused }
 
             // Menu commands that must be visible on screen — "About Keryx" and "Settings…" from the
             // native macOS app menu — may fire while the window is tray-hidden, so surface it. App()

@@ -85,6 +85,10 @@ const val ARTICLE_LIST_PANE_MIN_WIDTH = 240
 const val ARTICLE_LIST_PANE_MAX_WIDTH = 600
 const val DETAIL_PANE_MIN_WIDTH = 280
 
+// How long after a new-article notification is sent onTrayAction still treats a click as an
+// activation rather than a deliberate hide - see tray/TrayActionPolicy.kt.
+const val TRAY_ACTION_NOTIFICATION_RECENCY_MS = 5_000L
+
 // --- Article scroll memory ---
 const val MAX_REMEMBERED_SCROLL_POSITIONS = 5
 

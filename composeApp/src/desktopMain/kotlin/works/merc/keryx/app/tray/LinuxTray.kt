@@ -24,6 +24,10 @@ private const val LOG_TAG = "LinuxTray"
  * tray actions and new article notifications to the supplied callbacks and notification flow.
  *
  * @param connection The D-Bus connection used to export and announce the tray objects.
+ * @param onNotificationClicked Called when the user clicks a displayed notification's body.
+ * Unlike [onToggle] this always brings the window to front rather than toggling it, since the
+ * window may already be visible (just backgrounded or on another workspace) when the click
+ * arrives.
  */
 @Composable
 internal fun LinuxTray(
@@ -35,10 +39,12 @@ internal fun LinuxTray(
     quitLabel: String,
     onToggle: () -> Unit,
     onQuit: () -> Unit,
+    onNotificationClicked: () -> Unit,
     newArticleNotifications: SharedFlow<String>,
 ) {
     val currentOnToggle by rememberUpdatedState(onToggle)
     val currentOnQuit by rememberUpdatedState(onQuit)
+    val currentOnNotificationClicked by rememberUpdatedState(onNotificationClicked)
 
     val item = remember(connection) {
         SniStatusNotifierItem(
@@ -107,6 +113,22 @@ internal fun LinuxTray(
         newArticleNotifications.collect { message ->
             withContext(Dispatchers.IO) { notifier.notify(summary = "Keryx", body = message) }
         }
+    }
+
+    // Host-initiated actions arrive on dbus-java worker threads (see the comment above), and
+    // notificationActionInvoked is unscoped by sender - notifier.consumeIfOwn filters out
+    // every other application's notifications before this reaches currentOnNotificationClicked.
+    LaunchedEffect(connection, notifier) {
+        connection.notificationActionInvoked.collect { id ->
+            if (notifier.consumeIfOwn(id)) currentOnNotificationClicked()
+        }
+    }
+
+    // Forgets a closed notification's id regardless of why it closed (expired, dismissed, or
+    // programmatically closed) - consumeIfOwn's boolean result is irrelevant here since a close
+    // is never itself a click.
+    LaunchedEffect(connection, notifier) {
+        connection.notificationClosed.collect { id -> notifier.consumeIfOwn(id) }
     }
 }
 

@@ -6,6 +6,7 @@ import org.freedesktop.dbus.connections.impl.DBusConnection
 import org.freedesktop.dbus.connections.impl.DBusConnectionBuilder
 import org.freedesktop.dbus.interfaces.DBus
 import org.freedesktop.dbus.messages.DBusSignal
+import org.freedesktop.dbus.types.UInt32
 import works.merc.keryx.app.DBUS_BUS
 import works.merc.keryx.app.DBUS_PATH
 import works.merc.keryx.app.core.Log
@@ -57,6 +58,43 @@ internal class SniConnection private constructor(
             }
         }
     }.onFailure { Log.warn(LOG_TAG, "Could not watch for $WATCHER_BUS restarts", it) }.getOrNull()
+
+    private val _notificationActionInvoked = MutableSharedFlow<UInt32>(extraBufferCapacity = 4)
+
+    /**
+     * Emitted with a notification's id whenever the notification daemon reports its `"default"`
+     * action was invoked (a click on the notification body). Unscoped by sender, so this fires
+     * for every application's notifications, not just ours - `LinuxTray` filters by id via
+     * [LinuxNotifier.consumeIfOwn] before treating it as a click on one of Keryx's own.
+     */
+    val notificationActionInvoked: SharedFlow<UInt32> = _notificationActionInvoked
+
+    /**
+     * Watches for notification-click events. Installed once, for the connection's own lifetime,
+     * same rationale as [nameOwnerHandler]. A failure here only costs the click-to-front feature,
+     * so it must not abort [announce].
+     */
+    private val actionInvokedHandler: AutoCloseable? = runCatching {
+        connection.addSigHandler(FreedesktopNotifications.ActionInvoked::class.java) { signal ->
+            if (signal.actionKey == "default") _notificationActionInvoked.tryEmit(signal.id)
+        }
+    }.onFailure { Log.warn(LOG_TAG, "Could not watch for notification clicks", it) }.getOrNull()
+
+    private val _notificationClosed = MutableSharedFlow<UInt32>(extraBufferCapacity = 4)
+
+    /** Emitted with a notification's id whenever the daemon reports it closed, for any reason. */
+    val notificationClosed: SharedFlow<UInt32> = _notificationClosed
+
+    /**
+     * Watches for notification-close events (expired, dismissed, or programmatically closed), so
+     * a pending id is forgotten even when the user never clicks the notification. Same
+     * installation/failure rationale as [actionInvokedHandler].
+     */
+    private val notificationClosedHandler: AutoCloseable? = runCatching {
+        connection.addSigHandler(FreedesktopNotifications.NotificationClosed::class.java) { signal ->
+            _notificationClosed.tryEmit(signal.id)
+        }
+    }.onFailure { Log.warn(LOG_TAG, "Could not watch for notification close events", it) }.getOrNull()
 
     /**
      * Exports the status notifier item and its menu on the connection.
@@ -118,6 +156,10 @@ internal class SniConnection private constructor(
     fun close() {
         runCatching { nameOwnerHandler?.close() }
             .onFailure { Log.warn(LOG_TAG, "Could not remove the NameOwnerChanged handler", it) }
+        runCatching { actionInvokedHandler?.close() }
+            .onFailure { Log.warn(LOG_TAG, "Could not remove the ActionInvoked handler", it) }
+        runCatching { notificationClosedHandler?.close() }
+            .onFailure { Log.warn(LOG_TAG, "Could not remove the NotificationClosed handler", it) }
         runCatching { connection.releaseBusName(busName) }
             .onFailure { Log.warn(LOG_TAG, "Could not release $busName", it) }
         runCatching { connection.disconnect() }
