@@ -280,6 +280,22 @@ class HomeCommonTest {
     }
 
     @Test
+    fun feedOperationsAvailableRequiresNeitherRefreshNorSyncInFlight() {
+        assertEquals(true, feedOperationsAvailable(feedRefreshing = false, syncing = false))
+        assertEquals(false, feedOperationsAvailable(feedRefreshing = true, syncing = false))
+        assertEquals(false, feedOperationsAvailable(feedRefreshing = false, syncing = true))
+        assertEquals(false, feedOperationsAvailable(feedRefreshing = true, syncing = true))
+    }
+
+    @Test
+    fun hasUsableArticleUrlRejectsNullEmptyAndBlank() {
+        assertEquals(false, hasUsableArticleUrl(null))
+        assertEquals(false, hasUsableArticleUrl(""))
+        assertEquals(false, hasUsableArticleUrl("   "))
+        assertEquals(true, hasUsableArticleUrl("https://example.com"))
+    }
+
+    @Test
     fun groupFeedsByFolderReturnsOnePairPerFolderInOrderPlusUnassignedLast() {
         val folders = listOf(folder("d1"), folder("d2"))
         val feeds = listOf(feed("f1", folderId = "d1"), feed("f2"))

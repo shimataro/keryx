@@ -121,10 +121,10 @@ fun HomeScreen() {
     // Shared by the keyboard shortcuts and the menu bar (via MenuController). Read the current
     // selection at call time (vm.selectedArticle.value) so a command collected once stays correct.
     fun openSelectedInBrowser() {
-        vm.selectedArticle.value?.url?.takeIf { it.isNotBlank() }?.let { BrowserOpener.open(it) }
+        vm.selectedArticle.value?.url?.takeIf { hasUsableArticleUrl(it) }?.let { BrowserOpener.open(it) }
     }
     fun copySelectedUrl() {
-        vm.selectedArticle.value?.url?.takeIf { it.isNotBlank() }?.let {
+        vm.selectedArticle.value?.url?.takeIf { hasUsableArticleUrl(it) }?.let {
             scope.launch {
                 clipboard.setClipEntry(ClipboardEntries.ofText(it))
                 copyPulse++

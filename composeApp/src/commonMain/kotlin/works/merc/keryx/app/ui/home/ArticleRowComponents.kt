@@ -229,7 +229,7 @@ internal fun ArticleRow(
                     buildList {
                         add(NativeMenuItem(toggleStarLabel, NativeMenuShortcut(Key.S, ctrl = true, shift = true)) { onToggleStar() })
                         add(NativeMenuItem(toggleReadLabel, NativeMenuShortcut(Key.U, ctrl = true, shift = true)) { onToggleRead() })
-                        if (article.url.isNotBlank()) {
+                        if (hasUsableArticleUrl(article.url)) {
                             add(NativeMenuItem(copyUrlLabel, NativeMenuShortcut(Key.C, ctrl = true, shift = true)) { onCopyUrl() })
                             add(
                                 NativeMenuItem(
