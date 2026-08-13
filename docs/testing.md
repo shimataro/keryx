@@ -321,8 +321,12 @@ confirm by hand — trigger a new-article notification (e.g. via a manual refres
 articles) and click it while the window is in each of these states:
 
 - Behind other windows on the same Space → the window comes to front and gets focus.
-- Minimized to the tray (hidden) → the window restores and comes to front, same as toggling it
-  from the tray icon/menu.
+- **Minimized to the tray (hidden) → currently does *not* restore the window — this is a known,
+  unfixed limitation, not a regression to chase.** See known-issues.md "macOS: clicking a
+  notification banner does not restore a tray-hidden window" for the diagnosis (confirmed via
+  diagnostic logging that AWT's `TrayIcon.ActionListener` is never invoked at all in this state).
+  Restoring from tray-hidden still works via the ordinary tray-icon click or by relaunching the app
+  (single-instance forwarding) — confirm those two still work instead.
 - On a different Space → macOS switches to that Space and brings the window to front (this relies
   on `activateIgnoringOtherApps:`'s standard OS behavior, not app-specific code — confirm it still
   holds on the OS version under test).

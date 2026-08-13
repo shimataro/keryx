@@ -5,6 +5,82 @@
 Defects that are understood but deliberately not fixed, with the evidence behind that decision.
 Each entry records what was ruled out, so a later investigation doesn't repeat the same work.
 
+## macOS: clicking a notification banner does not restore a tray-hidden window
+
+**Status**: not fixed — external (JDK/AWT) limitation. Restoring via the tray icon click or by
+relaunching the app (single-instance forwarding, e.g. clicking the Dock icon while already
+running) both work correctly, so the window is never permanently unreachable; only the
+notification banner's own click-through is affected.
+
+### Symptom
+
+With the window hidden to the tray on macOS, clicking a new-article desktop notification does
+nothing at all — no window flash, no Dock icon reappearing, no sound, nothing. Clicking the
+banner's "表示" (Show) action button dismisses the banner but likewise has no other effect. The
+same click, when the window is merely backgrounded (visible but unfocused/behind other windows),
+was reported to work.
+
+### Diagnosis
+
+`MacTray.kt`'s notification click is wired through AWT's `TrayIcon.addActionListener(...)` — the
+only API `TrayIcon` exposes for a click on a `displayMessage(...)`-shown banner. Temporary
+diagnostic logging (`Log.info` as the very first statement inside that `ActionListener`, and at
+each subsequent stage of `main.kt`'s `activationRequests` collector) confirmed via `tail -f` on a
+real packaged build that **the `ActionListener` is never invoked at all** when the click happens
+while the window is tray-hidden (Accessory activation policy) — zero log lines, at any level,
+anywhere in the chain. The same collector, reached instead via the ordinary tray-icon click or via
+a second app launch being forwarded to the running instance (both logged, both restore correctly),
+proves the restore logic itself (`main.kt`'s `activationRequests` collector, including the
+Accessory→Regular activation-policy reordering fix living there now) is not the problem.
+
+This points at `TrayIcon`'s native macOS peer (`CTrayIcon`), which bridges `displayMessage(...)`
+through the deprecated `NSUserNotification` API. The click-through delegate callback
+(`userNotificationCenter:didActivateNotification:`) apparently is not reliably bridged back into
+Java's `ActionListener` when the owning app has no Dock icon (`NSApplicationActivationPolicyAccessory`)
+— i.e. exactly the tray-hidden state this feature exists for. This could not be narrowed further
+from Kotlin/Java code alone; it would need decompiling `CTrayIcon`'s native implementation (as was
+done for the Linux `GtkFileDialogPeer` crash elsewhere in this file) or reproducing it in a minimal
+pure-AWT test app outside this codebase, neither of which has been done yet.
+
+### Ruled out
+
+- **A bug in `main.kt`'s restore/activation-policy logic** — disproved: the exact same
+  `activationRequests` collector, reached via the tray-icon click or a forwarded second launch,
+  restores the window correctly every time, with logging confirming every stage completes.
+- **Ordering of the Cocoa activation-policy promotion vs. showing the window** — a full reorder
+  (promote to Regular + activate first, defer showing/fronting/focusing the window a further EDT
+  turn) was implemented and tested and made no observable difference for the notification-click
+  case specifically, while it *did* fix a real, separate bug: the same collector's restore-from-tray
+  behavior when reached via the single-instance/reopen path. Kept for that reason.
+
+### Workaround
+
+None applied — the currently-working restore paths (tray icon click, relaunching the app) remain
+the supported way to bring a tray-hidden window back on macOS. The `onNotificationClicked` wiring
+itself is left in place (harmless, and correctly implemented against AWT's documented API) rather
+than removed, in case a future JDK release fixes the underlying bridging.
+
+### What a real fix would need
+
+Bypass AWT's `TrayIcon.displayMessage()`/`ActionListener` for notification display and click
+detection on macOS entirely, and drive the Cocoa `NSUserNotificationCenter` (or the modern,
+non-deprecated `UserNotifications` framework) directly via a JNA-based Objective-C bridge — in the
+same spirit as `MacActivationPolicy`'s existing raw `objc_msgSend` calls, but substantially larger:
+it requires creating a runtime Objective-C class (`objc_allocateClassPair`/`class_addMethod` with a
+JNA `Callback` as the implementation) to act as the notification center's delegate, which is
+inherently higher-risk native interop (a mistake can crash the JVM, the same class of risk as the
+Linux GTK crash documented elsewhere in this file) and would need several real-hardware
+iterations to get right.
+
+This would very likely become moot rather than worth building, though: `app-architecture.md` notes
+macOS is expected to eventually move to a native SwiftUI implementation (`external-spec.md` §2 — a
+longer-term, not-yet-scheduled direction, alongside Android and iOS not existing as targets yet). A
+native app would use `UNUserNotificationCenterDelegate` through the ordinary app lifecycle — no AWT
+bridge, no deprecated API, no Accessory-policy-specific bridging bug — which is a common, reliably
+working pattern for macOS menu-bar-only (`LSUIElement`) apps. Given that, building the JNA bridge
+above is deferred indefinitely in favor of this note, unless the native SwiftUI port itself keeps
+being deferred long enough that the workaround gap becomes worth closing on its own.
+
 ## Linux: OPML import/export crashed the JVM with SIGSEGV in libawt_xawt.so
 
 **Status**: Resolved — by replacing the Linux OPML file dialog backend with `javax.swing.JFileChooser`

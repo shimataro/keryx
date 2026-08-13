@@ -7,7 +7,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import kotlinx.coroutines.flow.SharedFlow
-import works.merc.keryx.app.core.Log
 import java.awt.Frame
 import java.awt.Image
 import java.awt.MenuItem
@@ -17,9 +16,6 @@ import java.awt.TrayIcon
 import java.awt.event.ActionListener
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
-
-// TODO(diagnostic): remove once the tray-hidden notification-click restore bug is root-caused.
-private const val LOG_TAG = "MacTray"
 
 /**
  * macOS-only replacement for the Compose `Tray()` composable.
@@ -41,6 +37,9 @@ private const val LOG_TAG = "MacTray"
  * @param onNotificationClicked Called when the user clicks a displayed notification banner.
  * Unlike [onToggle] this must always bring the window to front rather than toggle it, since the
  * window may already be visible (just backgrounded or on another Space) when the click arrives.
+ * AWT does not currently deliver this callback at all while the window is tray-hidden (Accessory
+ * activation policy) - see known-issues.md "macOS: clicking a notification banner does not
+ * restore a tray-hidden window".
  * @param newArticleNotifications Notifications to display as macOS user notifications.
  */
 @Composable
@@ -115,10 +114,7 @@ internal fun MacTray(
         // notification banner through (there is no other AWT API for it - see
         // MacTray's KDoc / the plan that added this). Registered on the same
         // trayIcon/lifecycle as the MouseAdapter above.
-        val notificationListener = ActionListener {
-            Log.info(LOG_TAG, "notification ActionListener fired")
-            currentOnNotificationClicked()
-        }
+        val notificationListener = ActionListener { currentOnNotificationClicked() }
         trayIcon.addActionListener(notificationListener)
         val systemTray = SystemTray.getSystemTray()
         systemTray.add(trayIcon)
