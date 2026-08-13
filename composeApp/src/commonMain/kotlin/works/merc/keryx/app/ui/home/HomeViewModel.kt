@@ -178,17 +178,33 @@ class HomeViewModel(
         settingsRepository.getLocalSettings().lastUnreadOnlyStarred ?: false,
     )
 
+    // Search is scoped independently for the same reason as Starred: the primary motivation for
+    // searching is finding an article already read, so inheriting the shared toggle would leave
+    // "unread only" users with empty/incomplete results with no obvious cause. Deliberately not
+    // seeded from getArticleListDefaultUnreadOnly() for the same reason as Starred.
+    private val _unreadOnlySearch = MutableStateFlow(
+        settingsRepository.getLocalSettings().lastUnreadOnlySearch ?: false,
+    )
+
     // Selects which backing toggle is currently in effect. Starred's own toggle still filters
     // "starred ∩ unread" correctly when turned on (a state sync merge can legitimately produce,
     // since read/star are merged independently — see MergeSql), only which toggle is consulted
     // differs by filter.
     val unreadOnly: StateFlow<Boolean> =
-        combine(_filter, _unreadOnly, _unreadOnlyStarred) { f, general, starred ->
-            if (f == ArticleFilter.Starred) starred else general
+        combine(_filter, _unreadOnly, _unreadOnlyStarred, _unreadOnlySearch) { f, general, starred, search ->
+            when (f) {
+                ArticleFilter.Starred -> starred
+                ArticleFilter.Search -> search
+                else -> general
+            }
         }.stateIn(
             viewModelScope,
             started,
-            if (_filter.value == ArticleFilter.Starred) _unreadOnlyStarred.value else _unreadOnly.value,
+            when (_filter.value) {
+                ArticleFilter.Starred -> _unreadOnlyStarred.value
+                ArticleFilter.Search -> _unreadOnlySearch.value
+                else -> _unreadOnly.value
+            },
         )
 
     private val _newestFirst = MutableStateFlow(settingsRepository.getLocalSettings().lastNewestFirst ?: true)
@@ -679,12 +695,19 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
         if (value) {
             _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         }
-        if (_filter.value == ArticleFilter.Starred) {
-            _unreadOnlyStarred.value = value
-            settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnlyStarred = value) }
-        } else {
-            _unreadOnly.value = value
-            settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnly = value) }
+        when (_filter.value) {
+            ArticleFilter.Starred -> {
+                _unreadOnlyStarred.value = value
+                settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnlyStarred = value) }
+            }
+            ArticleFilter.Search -> {
+                _unreadOnlySearch.value = value
+                settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnlySearch = value) }
+            }
+            else -> {
+                _unreadOnly.value = value
+                settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnly = value) }
+            }
         }
     }
 
