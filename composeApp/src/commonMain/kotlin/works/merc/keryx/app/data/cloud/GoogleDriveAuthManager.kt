@@ -2,6 +2,7 @@ package works.merc.keryx.app.data.cloud
 
 import io.ktor.client.HttpClient
 import io.ktor.client.request.forms.submitForm
+import io.ktor.http.Parameters
 import io.ktor.http.URLBuilder
 import io.ktor.http.parameters
 import kotlinx.serialization.json.Json
@@ -101,7 +102,7 @@ class GoogleDriveAuthManager(
      * @return The resulting OAuth tokens or an authentication error.
      */
     private suspend fun tokenRequest(
-        form: io.ktor.http.Parameters,
+        form: Parameters,
         keepRefreshToken: String? = null,
     ): Result<OAuthTokens> = requestOAuthTokens(client, json, clock, GOOGLE_TOKEN_ENDPOINT, form, keepRefreshToken) { status, body ->
         Log.warn(TAG, "Google token request failed (HTTP $status): ${body.take(CLOUD_ERROR_BODY_PREVIEW_LENGTH)}")

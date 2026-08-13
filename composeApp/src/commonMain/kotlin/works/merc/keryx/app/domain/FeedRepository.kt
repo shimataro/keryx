@@ -52,12 +52,12 @@ class FeedRepository(
     fun watchAllFeeds(): Flow<List<Feeds>> = feeds.watchAll().asFlow().mapToList(dispatcher)
 
     /**
- * Retrieves a feed by its identifier.
- *
- * @param id The feed identifier.
- * @return The matching feed, or `null` if no feed exists with the identifier.
- */
-fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
+     * Retrieves a feed by its identifier.
+     *
+     * @param id The feed identifier.
+     * @return The matching feed, or `null` if no feed exists with the identifier.
+     */
+    fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
 
     /** All feeds currently stored in the database. */
     fun getAllFeeds(): List<Feeds> = feeds.watchAll().executeAsList()
@@ -89,7 +89,7 @@ fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
     }
 
     /** Outcome of [subscribeFeedWrite]: the subscribe result, plus whether the feed had articles. */
-    internal data class SubscribeOutcome(val result: Result<Feeds>, val hadArticles: Boolean)
+    internal data class FeedWriteOutcome(val result: Result<Feeds>, val hadArticles: Boolean)
 
     /**
      * Fetches a feed and persists its metadata and articles without indexing them.
@@ -97,10 +97,10 @@ fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
      * @param url The URL of the feed to subscribe to.
      * @return The subscription result, including the stored feed or fetch error and whether articles were fetched.
      */
-    internal suspend fun subscribeFeedWrite(url: String): SubscribeOutcome {
+    internal suspend fun subscribeFeedWrite(url: String): FeedWriteOutcome {
         val fetched = when (val r = feedFetcher.fetch(url)) {
             is Result.Ok -> r.value
-            is Result.Err -> return SubscribeOutcome(r, hadArticles = false)
+            is Result.Err -> return FeedWriteOutcome(r, hadArticles = false)
         }
         val effectiveUrl = fetched.redirectUrl ?: url
         val existing = feeds.getByUrl(effectiveUrl).executeAsOneOrNull()
@@ -144,7 +144,7 @@ fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
         if (existing?.deleted_at != null) feeds.stampResubscribed(now, feedId)
         articleRepository.upsertParsed(feedId, fetched.articles)
         syncScheduler.scheduleSync()
-        return SubscribeOutcome(
+        return FeedWriteOutcome(
             Result.Ok(feeds.getById(feedId).executeAsOne()),
             hadArticles = fetched.articles.isNotEmpty(),
         )

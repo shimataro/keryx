@@ -98,11 +98,10 @@ class SettingsRepository(
     }
 
     /**
- * Gets the current device-local settings.
- *
- * @return The current local settings.
- */
-
+     * Gets the current device-local settings.
+     *
+     * @return The current local settings.
+     */
     fun getLocalSettings(): LocalSettings = _localSettings.value
 
     /**

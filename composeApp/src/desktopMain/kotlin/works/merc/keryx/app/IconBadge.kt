@@ -34,6 +34,9 @@ private const val BADGE_TEXT_PADDING_RATIO = 0.35f
 /** Badge height relative to the canvas size, for [drawBadgeOnlyImage]'s standalone badge (no base icon). */
 private const val BADGE_ONLY_HEIGHT_RATIO = 0.9f
 
+/** Default canvas size for [drawBadgeOnlyImage]'s standalone badge image, in pixels. */
+private const val DEFAULT_BADGE_ONLY_IMAGE_SIZE_PX = 64
+
 /**
  * The badge number's font family. On macOS, AWT's logical `SansSerif` family
  * doesn't resolve to San Francisco (the system UI font used by native badges
@@ -103,8 +106,7 @@ fun drawUnreadBadge(base: BufferedImage, count: Long): BufferedImage {
     }
 
     val badgeHeight = base.height * BADGE_HEIGHT_RATIO
-    val inset = 0f
-    paintBadge(graphics, anchorRightX = base.width - inset, anchorTopY = inset, badgeHeight = badgeHeight, label = label)
+    paintBadge(graphics, anchorRightX = base.width.toFloat(), anchorTopY = 0f, badgeHeight = badgeHeight, label = label)
 
     graphics.dispose()
     return result
@@ -144,7 +146,7 @@ fun drawUnreadDot(base: BufferedImage, count: Long): BufferedImage {
  * @param size The width and height of the generated image in pixels.
  * @return The badge image, or `null` when [count] is less than or equal to zero.
  */
-fun drawBadgeOnlyImage(count: Long, size: Int = 64): BufferedImage? {
+fun drawBadgeOnlyImage(count: Long, size: Int = DEFAULT_BADGE_ONLY_IMAGE_SIZE_PX): BufferedImage? {
     val label = unreadBadgeLabel(count) ?: return null
     val image = BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB)
     val graphics = image.createGraphics()

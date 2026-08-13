@@ -23,10 +23,10 @@ class TagRepository(
     fun watchAllTags(): Flow<List<Tags>> = tags.watchAll().asFlow().mapToList(dispatcher)
 
     /**
-         * Observes active feed-to-tag assignments grouped by feed.
-         *
-         * @return A flow emitting a map from feed IDs to their attached tag IDs.
-         */
+     * Observes active feed-to-tag assignments grouped by feed.
+     *
+     * @return A flow emitting a map from feed IDs to their attached tag IDs.
+     */
     fun watchFeedTagMap(): Flow<Map<String, Set<String>>> =
         feedTags.watchAllActive().asFlow().mapToList(dispatcher).map { rows ->
             rows.groupBy({ it.feed_id }, { it.tag_id }).mapValues { it.value.toSet() }
@@ -45,17 +45,17 @@ class TagRepository(
     fun getTagById(id: String): Tags? = tags.getById(id).executeAsOneOrNull()
 
     /**
- * Retrieves all active tags in display order.
- *
- * @return The active tags.
- */
+     * Retrieves all active tags in display order.
+     *
+     * @return The active tags.
+     */
     fun getAllTags(): List<Tags> = tags.watchAll().executeAsList()
 
     /**
-         * Retrieves active tag assignments grouped by feed.
-         *
-         * @return A map from feed IDs to their associated tag IDs.
-         */
+     * Retrieves active tag assignments grouped by feed.
+     *
+     * @return A map from feed IDs to their associated tag IDs.
+     */
     fun getFeedTagMap(): Map<String, Set<String>> =
         feedTags.watchAllActive().executeAsList().groupBy({ it.feed_id }, { it.tag_id }).mapValues { it.value.toSet() }
 
@@ -69,14 +69,9 @@ class TagRepository(
     fun createTag(name: String, color: String? = null): String {
         val now = clock.nowMillis()
         val existing = tags.getByName(name).executeAsOneOrNull()
-        val id = if (existing != null) {
-            // Reactivate / update an existing (possibly soft-deleted) tag of the same name.
-            tags.upsert(existing.id, name, color ?: existing.color, existing.sort_order, null, now, existing.created_at)
-            existing.id
-        } else {
-            val newId = IdGenerator.newId()
-            tags.upsert(newId, name, color, 0, null, now, now)
-            newId
+        val id = createOrReactivateId(existing?.id) { id ->
+            // Reactivates an existing (possibly soft-deleted) tag of the same name in place.
+            tags.upsert(id, name, color ?: existing?.color, existing?.sort_order ?: 0, null, now, existing?.created_at ?: now)
         }
         syncScheduler.scheduleSync()
         return id

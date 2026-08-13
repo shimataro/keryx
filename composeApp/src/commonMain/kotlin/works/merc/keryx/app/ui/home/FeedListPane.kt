@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -26,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -322,31 +324,7 @@ internal fun FeedListPane(
         if (!stillRendered) inlineEdit = null
     }
 
-    val autoScrollEdgeZonePx = with(LocalDensity.current) { AUTO_SCROLL_EDGE_ZONE_DP.dp.toPx() }
-    val autoScrollMaxSpeedPxPerSec = with(LocalDensity.current) { AUTO_SCROLL_MAX_SPEED_DP_PER_SEC.dp.toPx() }
-    LaunchedEffect(autoScrollEdgeZonePx, autoScrollMaxSpeedPxPerSec) {
-        snapshotFlow { dragPointerYState.value != null }.collectLatest { dragging ->
-            if (!dragging) return@collectLatest
-            while (true) {
-                delay(AUTO_SCROLL_FRAME_MS)
-                val pointerY = dragPointerYState.value ?: continue
-                val bounds = hostBoundsState.value
-                val velocity = autoScrollVelocityPxPerSec(
-                    pointerY = pointerY,
-                    viewportTop = bounds.top,
-                    viewportBottom = bounds.bottom,
-                    edgeZonePx = autoScrollEdgeZonePx,
-                    maxSpeedPxPerSec = autoScrollMaxSpeedPxPerSec,
-                )
-                if (velocity == 0f) continue
-                listState.scrollBy(velocity * AUTO_SCROLL_FRAME_MS / 1000f)
-                // The pointer hasn't moved, but the rows underneath it have — without this the
-                // insertion line and drop highlight would stay pinned to the row that was there
-                // when the last pointer event arrived.
-                dragController.refreshHover()
-            }
-        }
-    }
+    FeedListAutoScrollEffect(dragPointerYState, hostBoundsState, listState, dragController)
 
     Column(
         modifier
@@ -355,44 +333,11 @@ internal fun FeedListPane(
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onActivated)
             .nativeContextMenu(items = { emptyList() }, onOpen = onActivated),
     ) {
-        WindowDragArea(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.fillMaxWidth().padding(top = WindowChrome.titleBarInsetDp.dp, start = 4.dp, end = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Spacer(Modifier.weight(1f))
-            ToolbarIconGroup {
-                val addFeedTooltip = stringResource(Res.string.home_add_feed)
-                TooltipIconButton(tooltip = addFeedTooltip, onClick = onAddFeedClick) {
-                    KeryxIcon(KeryxIcons.Add, addFeedTooltip)
-                }
-                val refreshing by vm.feedRefreshing.collectAsStateSafe(false)
-                val syncing by vm.syncing.collectAsStateSafe(false)
-                val refreshTooltip = stringResource(
-                    if (refreshing) Res.string.home_refreshing else Res.string.home_refresh,
-                )
-                TooltipIconButton(tooltip = refreshTooltip, onClick = { vm.refreshAll() }, enabled = feedOperationsAvailable(refreshing, syncing)) {
-                    if (refreshing) {
-                        SmallSpinner()
-                    } else {
-                        KeryxIcon(KeryxIcons.Refresh, refreshTooltip)
-                    }
-                }
-                if (cloudConnected) {
-                    val syncTooltip = stringResource(
-                        if (syncing) Res.string.home_syncing else Res.string.home_sync,
-                    )
-                    TooltipIconButton(tooltip = syncTooltip, onClick = { vm.sync() }, enabled = feedOperationsAvailable(refreshing, syncing)) {
-                        if (syncing) {
-                            SmallSpinner()
-                        } else {
-                            KeryxIcon(KeryxIcons.Cloud, syncTooltip)
-                        }
-                    }
-                }
-            }
-        }
-        }
+        FeedListToolbarRow(
+            vm = vm,
+            cloudConnected = cloudConnected,
+            onAddFeedClick = onAddFeedClick,
+        )
 
         KeryxTextField(
             value = searchQuery,
@@ -671,6 +616,97 @@ internal fun FeedListPane(
         confirmingUnsubscribeFeed = confirmingUnsubscribeFeed,
         onConfirmingUnsubscribeFeedChange = { confirmingUnsubscribeFeed = it },
     )
+}
+
+/**
+ * Drives feed-list auto-scroll while a drag's pointer sits in an edge zone: while
+ * [dragPointerYState] is non-null, scrolls [listState] toward whichever edge of [hostBoundsState]
+ * the pointer is near, faster the closer it is, and refreshes [dragController]'s hover state each
+ * frame so the insertion line tracks the rows sliding underneath a motionless pointer.
+ */
+@Composable
+private fun FeedListAutoScrollEffect(
+    dragPointerYState: State<Float?>,
+    hostBoundsState: State<Rect>,
+    listState: LazyListState,
+    dragController: FeedListDragController,
+) {
+    val autoScrollEdgeZonePx = with(LocalDensity.current) { AUTO_SCROLL_EDGE_ZONE_DP.dp.toPx() }
+    val autoScrollMaxSpeedPxPerSec = with(LocalDensity.current) { AUTO_SCROLL_MAX_SPEED_DP_PER_SEC.dp.toPx() }
+    LaunchedEffect(autoScrollEdgeZonePx, autoScrollMaxSpeedPxPerSec) {
+        snapshotFlow { dragPointerYState.value != null }.collectLatest { dragging ->
+            if (!dragging) return@collectLatest
+            while (true) {
+                delay(AUTO_SCROLL_FRAME_MS)
+                val pointerY = dragPointerYState.value ?: continue
+                val bounds = hostBoundsState.value
+                val velocity = autoScrollVelocityPxPerSec(
+                    pointerY = pointerY,
+                    viewportTop = bounds.top,
+                    viewportBottom = bounds.bottom,
+                    edgeZonePx = autoScrollEdgeZonePx,
+                    maxSpeedPxPerSec = autoScrollMaxSpeedPxPerSec,
+                )
+                if (velocity == 0f) continue
+                listState.scrollBy(velocity * AUTO_SCROLL_FRAME_MS / 1000f)
+                // The pointer hasn't moved, but the rows underneath it have — without this the
+                // insertion line and drop highlight would stay pinned to the row that was there
+                // when the last pointer event arrived.
+                dragController.refreshHover()
+            }
+        }
+    }
+}
+
+/**
+ * [FeedListPane]'s top toolbar row: add feed / refresh all / cloud sync (when [cloudConnected]).
+ * Reads [vm]'s refreshing/syncing state itself (rather than taking it as a parameter) so a
+ * refresh/sync toggle only invalidates this row's own restart scope, not the whole pane.
+ */
+@Composable
+private fun FeedListToolbarRow(
+    vm: HomeViewModel,
+    cloudConnected: Boolean,
+    onAddFeedClick: () -> Unit,
+) {
+    val refreshing by vm.feedRefreshing.collectAsStateSafe(false)
+    val syncing by vm.syncing.collectAsStateSafe(false)
+    WindowDragArea(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().padding(top = WindowChrome.titleBarInsetDp.dp, start = 4.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Spacer(Modifier.weight(1f))
+            ToolbarIconGroup {
+                val addFeedTooltip = stringResource(Res.string.home_add_feed)
+                TooltipIconButton(tooltip = addFeedTooltip, onClick = onAddFeedClick) {
+                    KeryxIcon(KeryxIcons.Add, addFeedTooltip)
+                }
+                val refreshTooltip = stringResource(
+                    if (refreshing) Res.string.home_refreshing else Res.string.home_refresh,
+                )
+                TooltipIconButton(tooltip = refreshTooltip, onClick = { vm.refreshAll() }, enabled = feedOperationsAvailable(refreshing, syncing)) {
+                    if (refreshing) {
+                        SmallSpinner()
+                    } else {
+                        KeryxIcon(KeryxIcons.Refresh, refreshTooltip)
+                    }
+                }
+                if (cloudConnected) {
+                    val syncTooltip = stringResource(
+                        if (syncing) Res.string.home_syncing else Res.string.home_sync,
+                    )
+                    TooltipIconButton(tooltip = syncTooltip, onClick = { vm.sync() }, enabled = feedOperationsAvailable(refreshing, syncing)) {
+                        if (syncing) {
+                            SmallSpinner()
+                        } else {
+                            KeryxIcon(KeryxIcons.Cloud, syncTooltip)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /**

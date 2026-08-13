@@ -36,23 +36,19 @@ class FileTokenStorage(
             file.setReadable(false, false); file.setReadable(true, true)
             file.setWritable(false, false); file.setWritable(true, true)
             file.writeText(json.encodeToString(tokens))
-        }.onFailure { e -> Log.warn(TAG, "Token file could not be written", e) }
+        }.onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Token file could not be written", e) }
     }
 
     override fun load(): OAuthTokens? =
         file.takeIf { it.exists() }
             ?.let {
                 runCatching { json.decodeFromString<OAuthTokens>(it.readText()) }
-                    .onFailure { e -> Log.warn(TAG, "Token file could not be read/decoded", e) }
+                    .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Token file could not be read/decoded", e) }
                     .getOrNull()
             }
 
     override fun clear() {
         runCatching { file.delete() }
-            .onFailure { e -> Log.warn(TAG, "Token file delete failed", e) }
-    }
-
-    private companion object {
-        const val TAG = "TokenStorage"
+            .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Token file delete failed", e) }
     }
 }

@@ -20,20 +20,20 @@ class FolderRepository(
     private val folders get() = db.foldersQueries
 
     /**
- * Observes all folders and emits the current folder list whenever it changes.
- *
- * @return A flow containing the current list of folders.
- */
-fun watchAllFolders(): Flow<List<Folders>> = folders.watchAll().asFlow().mapToList(dispatcher)
+     * Observes all folders and emits the current folder list whenever it changes.
+     *
+     * @return A flow containing the current list of folders.
+     */
+    fun watchAllFolders(): Flow<List<Folders>> = folders.watchAll().asFlow().mapToList(dispatcher)
 
     /** The folder with [id], or `null` if none exists. */
     fun getFolderById(id: String): Folders? = folders.getById(id).executeAsOneOrNull()
 
     /**
- * Retrieves all active folders in display order.
- *
- * @return The active folders in display order.
- */
+     * Retrieves all active folders in display order.
+     *
+     * @return The active folders in display order.
+     */
     fun getAllFolders(): List<Folders> = folders.watchAll().executeAsList()
 
     /**
@@ -49,13 +49,8 @@ fun watchAllFolders(): Flow<List<Folders>> = folders.watchAll().asFlow().mapToLi
         // end of the folder list — a soft-deleted folder's old position isn't meaningful anymore
         // since other folders may have been reordered while it was gone.
         val nextSortOrder = folders.nextSortOrder().executeAsOne()
-        val id = if (existing != null) {
-            folders.upsert(existing.id, name, nextSortOrder, null, now, existing.created_at)
-            existing.id
-        } else {
-            val newId = IdGenerator.newId()
-            folders.upsert(newId, name, nextSortOrder, null, now, now)
-            newId
+        val id = createOrReactivateId(existing?.id) { id ->
+            folders.upsert(id, name, nextSortOrder, null, now, existing?.created_at ?: now)
         }
         syncScheduler.scheduleSync()
         return id

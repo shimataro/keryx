@@ -33,6 +33,8 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.FEED_LIST_PANE_MAX_WIDTH
 import works.merc.keryx.app.core.FEED_LIST_PANE_MIN_WIDTH
+import works.merc.keryx.app.core.PANE_WIDTH_PERSIST_DEBOUNCE_MS
+import works.merc.keryx.app.core.SEARCH_DEBOUNCE_MS
 import works.merc.keryx.app.core.searchTerms
 import works.merc.keryx.app.core.decodeArticleFilter
 import works.merc.keryx.app.core.encode
@@ -292,7 +294,7 @@ class HomeViewModel(
     // whether the current live query has been searched yet (see below).
     private val _rawSearchResults: StateFlow<SearchSnapshot> =
         combine(
-            _searchQuery.debounce(250),
+            _searchQuery.debounce(SEARCH_DEBOUNCE_MS),
             _searchRefreshTrigger,
             // Re-run search whenever the articles table changes (read/star toggles, refresh, sync
             // merge) so results stay in sync — search() reads a raw-SQL FTS index that SQLDelight
@@ -411,12 +413,12 @@ class HomeViewModel(
     private val scrollPositionStore = ArticleScrollPositionStore(settingsRepository)
 
     /**
- * Gets the saved scroll position for an article.
- *
- * @param articleId The identifier of the article.
- * @return The saved scroll offset, or the default position when none is stored.
- */
-fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPosition(articleId)
+     * Gets the saved scroll position for an article.
+     *
+     * @param articleId The identifier of the article.
+     * @return The saved scroll offset, or the default position when none is stored.
+     */
+    fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPosition(articleId)
 
     /**
      * Saves the scroll offset for an article and retains only the most recent remembered positions.
@@ -447,7 +449,7 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
         }
 
         combine(_feedListPaneWidth, _articleListPaneWidth) { feed, article -> feed to article }
-            .debounce(500)
+            .debounce(PANE_WIDTH_PERSIST_DEBOUNCE_MS)
             .onEach { (feed, article) ->
                 settingsRepository.mutateLocalSettings { it.copy(feedListPaneWidth = feed, articleListPaneWidth = article) }
             }.launchIn(viewModelScope)
@@ -554,10 +556,10 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
     fun selectPrevious() = moveSelection(-1)
 
     /**
-         * Provides the article rows currently displayed in the center pane.
-         *
-         * @return Search-result rows for the search filter, or the filtered article rows otherwise.
-         */
+     * Provides the article rows currently displayed in the center pane.
+     *
+     * @return Search-result rows for the search filter, or the filtered article rows otherwise.
+     */
     fun currentArticles(): List<ArticleListRow> =
         if (_filter.value is ArticleFilter.Search) searchResults.value.map { it.article } else articles.value
 
@@ -608,8 +610,8 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
     }
 
     /**
- * Toggles the read state of the selected article.
- */
+     * Toggles the read state of the selected article.
+     */
     fun toggleReadSelected() = _selectedArticle.value?.let { toggleRead(it.toListRow()) }
 
     /**
@@ -626,8 +628,8 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
     }
 
     /**
- * Toggles the starred state of the selected article.
- */
+     * Toggles the starred state of the selected article.
+     */
     fun toggleStarSelected() = _selectedArticle.value?.let { toggleStar(it.toListRow()) }
 
     /**

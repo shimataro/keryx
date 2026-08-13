@@ -101,15 +101,7 @@ internal fun registerWindowsUriScheme(
             "/f",
         ),
     )
-    for (command in commands) {
-        runCatching { runCommand(command) }
-            .onSuccess { exitCode ->
-                if (exitCode != 0) {
-                    Log.warn(LOG_TAG, "reg.exe exited with $exitCode for: ${command.joinToString(" ")}")
-                }
-            }
-            .onFailure { Log.warn(LOG_TAG, "Could not register Windows URI scheme", it) }
-    }
+    runRegistryCommands(commands, "Windows URI scheme", runCommand)
 }
 
 /**
@@ -138,6 +130,17 @@ internal fun registerWindowsOpmlAssociation(
             "/f",
         ),
     )
+    runRegistryCommands(commands, "Windows .opml association", runCommand)
+}
+
+/**
+ * Runs each of [commands] via [runCommand] (a `reg.exe` invocation), logging a warning for a
+ * non-zero exit code or a failure to run it at all — shared by [registerWindowsUriScheme] and
+ * [registerWindowsOpmlAssociation], which differ only in which registry keys they write.
+ *
+ * @param failureContext Describes what registration this is, for the failure log message.
+ */
+private fun runRegistryCommands(commands: List<List<String>>, failureContext: String, runCommand: (List<String>) -> Int) {
     for (command in commands) {
         runCatching { runCommand(command) }
             .onSuccess { exitCode ->
@@ -145,6 +148,6 @@ internal fun registerWindowsOpmlAssociation(
                     Log.warn(LOG_TAG, "reg.exe exited with $exitCode for: ${command.joinToString(" ")}")
                 }
             }
-            .onFailure { Log.warn(LOG_TAG, "Could not register Windows .opml association", it) }
+            .onFailure { Log.warn(LOG_TAG, "Could not register $failureContext", it) }
     }
 }

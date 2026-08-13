@@ -197,13 +197,13 @@ class OneDriveStorage(
         withCloudToken(accessTokenProvider, "OneDrive", block)
 
     /**
- * Converts a OneDrive response error into a storage error result.
- *
- * @param status The HTTP response status code.
- * @param body The response body containing error details.
- * @return An error result describing the OneDrive failure.
- */
-private fun mapError(status: Int, body: String): Result.Err = cloudStorageError("OneDrive", status, body)
+     * Converts a OneDrive response error into a storage error result.
+     *
+     * @param status The HTTP response status code.
+     * @param body The response body containing error details.
+     * @return An error result describing the OneDrive failure.
+     */
+    private fun mapError(status: Int, body: String): Result.Err = cloudStorageError("OneDrive", status, body)
 
     /** Graph app-folder items are path-addressed by name: use the basename of the sync path. */
     private fun fileName(path: String): String = path.substringAfterLast('/')

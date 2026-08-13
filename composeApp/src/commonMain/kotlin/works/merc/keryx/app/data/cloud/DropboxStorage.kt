@@ -215,11 +215,11 @@ class DropboxStorage(
         withCloudToken(accessTokenProvider, "Dropbox", block)
 
     /**
- * Converts a Dropbox API failure response into a storage error result.
- *
- * @param status The HTTP status code returned by Dropbox.
- * @param body The response body containing error details.
- * @return An error result representing the Dropbox failure.
- */
-private fun mapError(status: Int, body: String): Result.Err = cloudStorageError("Dropbox", status, body)
+     * Converts a Dropbox API failure response into a storage error result.
+     *
+     * @param status The HTTP status code returned by Dropbox.
+     * @param body The response body containing error details.
+     * @return An error result representing the Dropbox failure.
+     */
+    private fun mapError(status: Int, body: String): Result.Err = cloudStorageError("Dropbox", status, body)
 }

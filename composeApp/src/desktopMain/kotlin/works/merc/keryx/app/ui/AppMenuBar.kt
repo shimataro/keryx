@@ -92,25 +92,6 @@ import works.merc.keryx.app.ui.settings.SettingsViewModel
  *   in-window `MenuBar` is not rendered (the KDE Global Menu is showing it instead).
  * @param onTreeChanged invoked with the freshly built tree on every recomposition.
  */
-/**
- * Builds the application menu and optionally renders it in the window menu bar.
- *
- * @param menuBarToggle Optional control for showing or hiding the menu bar.
- * @param renderMenuBar Whether to render the menu bar.
- * @param onTreeChanged Receives the current menu tree after composition.
- */
-/**
- * Builds and optionally renders the application menu bar.
- *
- * Publishes the current menu tree through [onTreeChanged] on each recomposition. The menu bar
- * remains published when [renderMenuBar] is `false`.
- *
- * @param onCloseWindow Closes the current window.
- * @param onQuit Quits the application.
- * @param menuBarToggle Controls the menu bar visibility option.
- * @param renderMenuBar Whether to render the menu bar in the window.
- * @param onTreeChanged Receives the current menu tree.
- */
 @Composable
 internal fun FrameWindowScope.AppMenuBar(
     onCloseWindow: () -> Unit,

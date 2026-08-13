@@ -98,7 +98,7 @@ class SecurityCliTokenStorage internal constructor(
         val raw = readKeychainRaw()
         val fromKeychain = raw?.let {
             runCatching { json.decodeFromString<OAuthTokens>(it) }
-                .onFailure { e -> Log.warn(TAG, "Stored token payload could not be decoded", e) }
+                .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Stored token payload could not be decoded", e) }
                 .getOrNull()
         }
         cached = fromKeychain ?: fallback.load()
@@ -110,7 +110,7 @@ class SecurityCliTokenStorage internal constructor(
     override fun clear() {
         val result = runSecurity("delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account, loginKeychain)
         // Exit 44 (not found) is a no-op; a null result means `security` could not run.
-        if (result == null) Log.warn(TAG, "security delete-generic-password could not run")
+        if (result == null) Log.warn(TOKEN_STORAGE_LOG_TAG, "security delete-generic-password could not run")
         fallback.clear()
         cached = null
         loaded = true
@@ -124,11 +124,11 @@ class SecurityCliTokenStorage internal constructor(
     private fun writeToKeychainVerified(payload: String): Boolean {
         val add = runSecurity("add-generic-password", "-U", "-s", KEYCHAIN_SERVICE, "-a", account, "-w", payload, loginKeychain)
         if (add?.exitCode != 0) {
-            Log.warn(TAG, "security add-generic-password failed (${describe(add)}); using file storage")
+            Log.warn(TOKEN_STORAGE_LOG_TAG, "security add-generic-password failed (${describe(add)}); using file storage")
             return false
         }
         if (readKeychainRaw() != payload) {
-            Log.warn(TAG, "Keychain write could not be verified (add reported success but read-back mismatched); using file storage")
+            Log.warn(TOKEN_STORAGE_LOG_TAG, "Keychain write could not be verified (add reported success but read-back mismatched); using file storage")
             return false
         }
         return true
@@ -139,12 +139,12 @@ class SecurityCliTokenStorage internal constructor(
         val result = runSecurity("find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account, "-w", loginKeychain)
         return when {
             result == null -> {
-                Log.warn(TAG, "security find-generic-password could not run; falling back to file storage")
+                Log.warn(TOKEN_STORAGE_LOG_TAG, "security find-generic-password could not run; falling back to file storage")
                 null
             }
             result.exitCode == ITEM_NOT_FOUND -> null // normal "no entry" — quiet
             result.exitCode != 0 -> {
-                Log.warn(TAG, "security find-generic-password failed (exit ${result.exitCode}); falling back to file storage")
+                Log.warn(TOKEN_STORAGE_LOG_TAG, "security find-generic-password failed (exit ${result.exitCode}); falling back to file storage")
                 null
             }
             else -> result.stdout.trim()
@@ -153,14 +153,13 @@ class SecurityCliTokenStorage internal constructor(
 
     private fun runSecurity(vararg args: String): CommandResult? =
         runCatching { runner.run(listOf(SECURITY) + args) }
-            .onFailure { e -> Log.warn(TAG, "security command failed to run", e) }
+            .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "security command failed to run", e) }
             .getOrNull()
 
     private fun describe(result: CommandResult?): String =
         if (result == null) "could not run" else "exit ${result.exitCode}: ${result.stderr.trim()}"
 
     private companion object {
-        const val TAG = "TokenStorage"
         const val SECURITY = "/usr/bin/security"
         const val ITEM_NOT_FOUND = 44 // errSecItemNotFound
     }

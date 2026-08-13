@@ -3,6 +3,7 @@ package works.merc.keryx.app.data.cloud
 import io.ktor.client.HttpClient
 import io.ktor.client.request.header
 import io.ktor.client.request.post
+import io.ktor.http.Parameters
 import io.ktor.http.URLBuilder
 import io.ktor.http.parameters
 import kotlinx.serialization.json.Json
@@ -92,7 +93,7 @@ class DropboxAuthManager(
      * @return The result of the OAuth token request.
      */
     private suspend fun tokenRequest(
-        form: io.ktor.http.Parameters,
+        form: Parameters,
         keepRefreshToken: String? = null,
     ): Result<OAuthTokens> = requestOAuthTokens(client, json, clock, DROPBOX_TOKEN_ENDPOINT, form, keepRefreshToken)
 }

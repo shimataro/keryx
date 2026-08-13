@@ -24,6 +24,10 @@ actual object Log {
     /** JUL logger name; also the white-box hook tests attach a capturing handler to. */
     const val LOGGER_NAME: String = "works.merc.keryx"
 
+    /** Max bytes per rotated log file, and how many rotated files [FileHandler] keeps. */
+    private const val LOG_FILE_MAX_BYTES = 1_000_000
+    private const val LOG_FILE_ROTATION_COUNT = 3
+
     private val logger: Logger by lazy { createLogger() }
 
     actual fun debug(tag: String, message: String) = log(Level.FINE, tag, message, null)
@@ -55,7 +59,7 @@ actual object Log {
 
         runCatching {
             val logsDir = File(logDir(), "logs").apply { mkdirs() }
-            FileHandler(File(logsDir, "keryx.%g.log").path, 1_000_000, 3, true).apply {
+            FileHandler(File(logsDir, "keryx.%g.log").path, LOG_FILE_MAX_BYTES, LOG_FILE_ROTATION_COUNT, true).apply {
                 this.formatter = formatter
                 level = Level.ALL
                 logger.addHandler(this)

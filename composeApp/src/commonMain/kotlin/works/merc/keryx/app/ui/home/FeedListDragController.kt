@@ -234,11 +234,11 @@ internal class FeedListDragController(
     }
 
     /**
- * Determines whether a drag position lies within the host's horizontal bounds.
- *
- * @param pos The drag position in host-local coordinates.
- * @return `true` if the position is within the host's horizontal bounds, `false` otherwise.
- */
+     * Determines whether a drag position lies within the host's horizontal bounds.
+     *
+     * @param pos The drag position in host-local coordinates.
+     * @return `true` if the position is within the host's horizontal bounds, `false` otherwise.
+     */
     private fun isWithinHost(pos: Offset): Boolean = pos.x in 0f..hostBoundsState.value.width
 
     /**

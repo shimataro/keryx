@@ -17,7 +17,9 @@ const val SQLITE_BUSY_TIMEOUT_MS = 5_000L
 
 // --- Time ---
 const val MILLIS_PER_DAY = 24 * 60 * 60 * 1000L
+const val MILLIS_PER_HOUR = 60 * 60 * 1000L
 const val MILLIS_PER_MINUTE = 60_000L
+const val MILLIS_PER_SECOND = 1_000L
 
 /** Cloud file path/name for the synced DB (leading slash for Dropbox; the basename for Google Drive). */
 const val CLOUD_DB_PATH = "/keryx.db"
@@ -84,6 +86,12 @@ const val FEED_LIST_PANE_MAX_WIDTH = 480
 const val ARTICLE_LIST_PANE_MIN_WIDTH = 240
 const val ARTICLE_LIST_PANE_MAX_WIDTH = 600
 const val DETAIL_PANE_MIN_WIDTH = 280
+
+/** Debounce for re-running search as the user types, so every keystroke doesn't trigger an FTS query. */
+const val SEARCH_DEBOUNCE_MS = 250L
+
+/** Debounce for persisting a pane's width to disk while it's being dragged. */
+const val PANE_WIDTH_PERSIST_DEBOUNCE_MS = 500L
 
 // How long after a new-article notification is sent onTrayAction still treats a click as an
 // activation rather than a deliberate hide - see tray/TrayActionPolicy.kt.

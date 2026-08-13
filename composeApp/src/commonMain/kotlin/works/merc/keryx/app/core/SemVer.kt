@@ -7,12 +7,7 @@ package works.merc.keryx.app.core
  * "not newer" (returns false) rather than throwing — a malformed remote tag should never be
  * reported as an available update.
  */
-/**
-     * Determines whether the remote version is newer than the local version.
-     *
-     * @return `true` if the remote version compares greater than the local version, `false` otherwise.
-     */
-    internal fun isNewer(remote: String, local: String): Boolean =
+internal fun isNewer(remote: String, local: String): Boolean =
     compareVersions(remote, local)?.let { it > 0 } ?: false
 
 /**
@@ -103,10 +98,10 @@ private fun comparePrerelease(a: String, b: String): Int {
 }
 
 /**
-     * Determines whether a version has a numeric major component below 1.
-     *
-     * @param version The version to evaluate.
-     * @return `true` if the major component is below 1, `false` for null or unparseable versions.
-     */
+ * Determines whether a version has a numeric major component below 1.
+ *
+ * @param version The version to evaluate.
+ * @return `true` if the major component is below 1, `false` for null or unparseable versions.
+ */
 internal fun isBelowStable(version: String?): Boolean =
     (version?.substringBefore('.')?.toIntOrNull() ?: return false) < 1
