@@ -51,9 +51,8 @@ class CloudSession(
 
     /** The active provider's storage, or null when local-only. */
     fun current(): CloudStorage? {
-        val type = selectedType() ?: return null
+        val type = connectedType() ?: return null
         val provider = providers[type] ?: return null
-        if (provider.clientId.isEmpty() || provider.tokenStorage.load() == null) return null
         return provider.createStorage { validAccessToken(provider) }
     }
 
