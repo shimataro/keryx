@@ -26,7 +26,7 @@ internal class SingleInstanceCoordinator(private val appDataDir: File) {
 
     /** Returns false if another instance already holds the lock. */
     fun tryAcquireLock(): Boolean {
-        val file = File(appDataDir, "keryx.lock")
+        val file = File(appDataDir, LOCK_FILE_NAME)
         val channel = RandomAccessFile(file, "rw").channel
         val lock = try {
             channel.tryLock()
@@ -56,8 +56,8 @@ internal class SingleInstanceCoordinator(private val appDataDir: File) {
         serverSocket = socket
 
         try {
-            val portFile = File(appDataDir, "keryx.port")
-            val tmpFile = File(appDataDir, "keryx.port.tmp")
+            val portFile = File(appDataDir, PORT_FILE_NAME)
+            val tmpFile = File(appDataDir, PORT_TMP_FILE_NAME)
             tmpFile.writeText(socket.localPort.toString())
             Files.move(
                 tmpFile.toPath(),
@@ -92,7 +92,7 @@ internal class SingleInstanceCoordinator(private val appDataDir: File) {
 
     /** Returns false if no running instance could be reached (stale/missing port file, connection refused). */
     fun signalRunningInstance(uri: String? = null): Boolean {
-        val portFile = File(appDataDir, "keryx.port")
+        val portFile = File(appDataDir, PORT_FILE_NAME)
         if (!portFile.exists()) return false
         val port = try {
             portFile.readText().trim().toInt()
@@ -101,7 +101,7 @@ internal class SingleInstanceCoordinator(private val appDataDir: File) {
         }
         return try {
             Socket().use { socket ->
-                socket.connect(InetSocketAddress(InetAddress.getLoopbackAddress(), port), 500)
+                socket.connect(InetSocketAddress(InetAddress.getLoopbackAddress(), port), ACTIVATION_SIGNAL_CONNECT_TIMEOUT_MS)
                 if (!uri.isNullOrBlank()) {
                     socket.getOutputStream().writer(Charsets.UTF_8).use { it.write(uri) }
                 }
@@ -114,6 +114,12 @@ internal class SingleInstanceCoordinator(private val appDataDir: File) {
 
     private companion object {
         const val TAG = "SingleInstance"
+        const val LOCK_FILE_NAME = "keryx.lock"
+        const val PORT_FILE_NAME = "keryx.port"
+        const val PORT_TMP_FILE_NAME = "keryx.port.tmp"
+
+        /** Bounds how long a second launch waits to reach the already-running instance's activation socket. */
+        const val ACTIVATION_SIGNAL_CONNECT_TIMEOUT_MS = 500
     }
 
     /** Stops the listener thread and releases the socket (tests only - main() never calls this). */
