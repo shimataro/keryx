@@ -190,8 +190,7 @@ private fun SearchListPane(
                 else -> {
                     val rowMetrics = rememberArticleRowMetrics()
                     val rowStrings = rememberArticleRowStrings()
-                    val clipboard = LocalClipboard.current
-                    val scope = rememberCoroutineScope()
+                    val copyUrl = rememberCopyUrlAction()
                     LazyColumn(Modifier.fillMaxSize(), state = listState) {
                         items(results, key = { it.article.id }) { result ->
                             val article = result.article
@@ -206,11 +205,7 @@ private fun SearchListPane(
                                 onClick = { vm.selectArticle(article); onActivated() },
                                 onToggleRead = { vm.toggleRead(article) },
                                 onToggleStar = { vm.toggleStar(article) },
-                                onCopyUrl = {
-                                    scope.launch {
-                                        clipboard.setClipEntry(ClipboardEntries.ofText(article.url))
-                                    }
-                                },
+                                onCopyUrl = { copyUrl(article.url) },
                                 onOpenInBrowser = { BrowserOpener.open(article.url) },
                                 titleOverride = markedToAnnotatedString(result.titleMarked.ifBlank { article.title }),
                                 strings = rowStrings,
@@ -221,6 +216,19 @@ private fun SearchListPane(
                 }
             }
         }
+    }
+}
+
+/**
+ * Remembers a "copy URL to clipboard" action, shared by [SearchListPane]'s and
+ * [ArticleListPaneContent]'s article rows.
+ */
+@Composable
+private fun rememberCopyUrlAction(): (String) -> Unit {
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
+    return remember(clipboard, scope) {
+        { url: String -> scope.launch { clipboard.setClipEntry(ClipboardEntries.ofText(url)) } }
     }
 }
 
@@ -338,8 +346,7 @@ internal fun ArticleListPaneContent(
             val rowMetrics = rememberArticleRowMetrics()
             val rowStrings = rememberArticleRowStrings()
             Box(Modifier.fillMaxSize()) {
-                val clipboard = LocalClipboard.current
-                val scope = rememberCoroutineScope()
+                val copyUrl = rememberCopyUrlAction()
                 LazyColumn(Modifier.fillMaxSize(), state = listState) {
                     items(articles, key = { it.id }) { article ->
                         ArticleRow(
@@ -353,11 +360,7 @@ internal fun ArticleListPaneContent(
                             onClick = { onSelectArticle(article) },
                             onToggleRead = { onToggleRead(article) },
                             onToggleStar = { onToggleStar(article) },
-                            onCopyUrl = {
-                                scope.launch {
-                                    clipboard.setClipEntry(ClipboardEntries.ofText(article.url))
-                                }
-                            },
+                            onCopyUrl = { copyUrl(article.url) },
                             onOpenInBrowser = { BrowserOpener.open(article.url) },
                             strings = rowStrings,
                         )
