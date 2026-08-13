@@ -52,12 +52,12 @@ class FeedRepository(
     fun watchAllFeeds(): Flow<List<Feeds>> = feeds.watchAll().asFlow().mapToList(dispatcher)
 
     /**
- * Retrieves a feed by its identifier.
- *
- * @param id The feed identifier.
- * @return The matching feed, or `null` if no feed exists with the identifier.
- */
-fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
+     * Retrieves a feed by its identifier.
+     *
+     * @param id The feed identifier.
+     * @return The matching feed, or `null` if no feed exists with the identifier.
+     */
+    fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
 
     /** All feeds currently stored in the database. */
     fun getAllFeeds(): List<Feeds> = feeds.watchAll().executeAsList()

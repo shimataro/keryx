@@ -378,13 +378,13 @@ class GoogleDriveStorage(
         withCloudToken(accessTokenProvider, "Google Drive", block)
 
     /**
- * Maps a Google Drive HTTP response to a cloud storage error.
- *
- * @param status The HTTP response status code.
- * @param body The response body.
- * @return The corresponding cloud storage error result.
- */
-private fun mapError(status: Int, body: String): Result.Err = cloudStorageError("Google Drive", status, body)
+     * Maps a Google Drive HTTP response to a cloud storage error.
+     *
+     * @param status The HTTP response status code.
+     * @param body The response body.
+     * @return The corresponding cloud storage error result.
+     */
+    private fun mapError(status: Int, body: String): Result.Err = cloudStorageError("Google Drive", status, body)
 
     /** Drive files are named, not path-addressed: use the basename of the sync path. */
     private fun fileName(path: String): String = path.substringAfterLast('/')

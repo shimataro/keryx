@@ -131,10 +131,10 @@ class UpdateChecker(
 }
 
 /**
-     * Extracts a release version from its `tag_name`, removing a leading `v` or `V`.
-     *
-     * @return The version string, or `null` when `tag_name` is unavailable.
-     */
+ * Extracts a release version from its `tag_name`, removing a leading `v` or `V`.
+ *
+ * @return The version string, or `null` when `tag_name` is unavailable.
+ */
 private fun versionOf(release: JsonObject): String? =
     release["tag_name"]?.jsonPrimitive?.content?.removePrefix("v")?.removePrefix("V")
 

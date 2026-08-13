@@ -1,6 +1,7 @@
 package works.merc.keryx.app.data.cloud
 
 import io.ktor.client.HttpClient
+import io.ktor.http.Parameters
 import io.ktor.http.URLBuilder
 import io.ktor.http.parameters
 import kotlinx.serialization.json.Json
@@ -85,7 +86,7 @@ class OneDriveAuthManager(
      * @return The resulting OAuth tokens or a request failure.
      */
     private suspend fun tokenRequest(
-        form: io.ktor.http.Parameters,
+        form: Parameters,
         keepRefreshToken: String? = null,
     ): Result<OAuthTokens> = requestOAuthTokens(client, json, clock, ONEDRIVE_TOKEN_ENDPOINT, form, keepRefreshToken)
 }

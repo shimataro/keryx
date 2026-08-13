@@ -16,11 +16,11 @@ import works.merc.keryx.app.data.cloud.OAuthTokens
  */
 interface CloudConnectFlow {
     /**
- * Runs the cloud provider's interactive OAuth connection flow.
- *
- * @return The issued OAuth tokens wrapped in a result.
- */
-suspend fun connect(): Result<OAuthTokens>
+     * Runs the cloud provider's interactive OAuth connection flow.
+     *
+     * @return The issued OAuth tokens wrapped in a result.
+     */
+    suspend fun connect(): Result<OAuthTokens>
 }
 
 /**

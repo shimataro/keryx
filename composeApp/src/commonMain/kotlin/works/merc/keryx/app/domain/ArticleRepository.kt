@@ -105,11 +105,11 @@ class ArticleRepository(
     }.asFlow().mapToList(dispatcher)
 
     /**
- * Observes the total number of unread articles.
- *
- * @return A flow emitting the current unread article count.
- */
-fun watchUnreadCount(): Flow<Long> = articles.watchUnreadCount().asFlow().mapToOne(dispatcher)
+     * Observes the total number of unread articles.
+     *
+     * @return A flow emitting the current unread article count.
+     */
+    fun watchUnreadCount(): Flow<Long> = articles.watchUnreadCount().asFlow().mapToOne(dispatcher)
 
     fun watchStarredUnreadCount(): Flow<Long> = articles.watchStarredUnreadCount().asFlow().mapToOne(dispatcher)
 
@@ -133,12 +133,12 @@ fun watchUnreadCount(): Flow<Long> = articles.watchUnreadCount().asFlow().mapToO
             .map { rows -> rows.associate { it.folder_id to it.cnt } }
 
     /**
- * Retrieves an article by its identifier.
- *
- * @param id The article identifier.
- * @return The matching article, or `null` if no article exists with the identifier.
- */
-fun getArticleById(id: String): Articles? = articles.getById(id).executeAsOneOrNull()
+     * Retrieves an article by its identifier.
+     *
+     * @param id The article identifier.
+     * @return The matching article, or `null` if no article exists with the identifier.
+     */
+    fun getArticleById(id: String): Articles? = articles.getById(id).executeAsOneOrNull()
 
     /**
      * Determines which requested article IDs still refer to existing articles.
@@ -207,12 +207,12 @@ fun getArticleById(id: String): Articles? = articles.getById(id).executeAsOneOrN
     }
 
     /**
-         * Searches articles and preserves the search engine's result order.
-         *
-         * @param query The full-text search query.
-         * @return Matching articles with highlighted titles, or an empty list when the search index is temporarily unavailable.
-         */
-        fun search(query: String): List<ArticleSearchResult> =
+     * Searches articles and preserves the search engine's result order.
+     *
+     * @param query The full-text search query.
+     * @return Matching articles with highlighted titles, or an empty list when the search index is temporarily unavailable.
+     */
+    fun search(query: String): List<ArticleSearchResult> =
         try {
             val hits = ftsSearch.search(query)
             // Load all hit rows with one `id IN (...)` query per chunk (chunked to stay under

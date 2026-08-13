@@ -20,20 +20,20 @@ class FolderRepository(
     private val folders get() = db.foldersQueries
 
     /**
- * Observes all folders and emits the current folder list whenever it changes.
- *
- * @return A flow containing the current list of folders.
- */
-fun watchAllFolders(): Flow<List<Folders>> = folders.watchAll().asFlow().mapToList(dispatcher)
+     * Observes all folders and emits the current folder list whenever it changes.
+     *
+     * @return A flow containing the current list of folders.
+     */
+    fun watchAllFolders(): Flow<List<Folders>> = folders.watchAll().asFlow().mapToList(dispatcher)
 
     /** The folder with [id], or `null` if none exists. */
     fun getFolderById(id: String): Folders? = folders.getById(id).executeAsOneOrNull()
 
     /**
- * Retrieves all active folders in display order.
- *
- * @return The active folders in display order.
- */
+     * Retrieves all active folders in display order.
+     *
+     * @return The active folders in display order.
+     */
     fun getAllFolders(): List<Folders> = folders.watchAll().executeAsList()
 
     /**

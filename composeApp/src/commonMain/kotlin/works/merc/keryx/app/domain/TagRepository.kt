@@ -23,10 +23,10 @@ class TagRepository(
     fun watchAllTags(): Flow<List<Tags>> = tags.watchAll().asFlow().mapToList(dispatcher)
 
     /**
-         * Observes active feed-to-tag assignments grouped by feed.
-         *
-         * @return A flow emitting a map from feed IDs to their attached tag IDs.
-         */
+     * Observes active feed-to-tag assignments grouped by feed.
+     *
+     * @return A flow emitting a map from feed IDs to their attached tag IDs.
+     */
     fun watchFeedTagMap(): Flow<Map<String, Set<String>>> =
         feedTags.watchAllActive().asFlow().mapToList(dispatcher).map { rows ->
             rows.groupBy({ it.feed_id }, { it.tag_id }).mapValues { it.value.toSet() }
@@ -45,17 +45,17 @@ class TagRepository(
     fun getTagById(id: String): Tags? = tags.getById(id).executeAsOneOrNull()
 
     /**
- * Retrieves all active tags in display order.
- *
- * @return The active tags.
- */
+     * Retrieves all active tags in display order.
+     *
+     * @return The active tags.
+     */
     fun getAllTags(): List<Tags> = tags.watchAll().executeAsList()
 
     /**
-         * Retrieves active tag assignments grouped by feed.
-         *
-         * @return A map from feed IDs to their associated tag IDs.
-         */
+     * Retrieves active tag assignments grouped by feed.
+     *
+     * @return A map from feed IDs to their associated tag IDs.
+     */
     fun getFeedTagMap(): Map<String, Set<String>> =
         feedTags.watchAllActive().executeAsList().groupBy({ it.feed_id }, { it.tag_id }).mapValues { it.value.toSet() }
 
