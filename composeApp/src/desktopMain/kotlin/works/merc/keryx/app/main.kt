@@ -42,6 +42,7 @@ import org.jetbrains.compose.resources.painterResource
 import org.koin.core.context.startKoin
 import org.koin.mp.KoinPlatform
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.core.WINDOW_DEFAULT_HEIGHT
 import works.merc.keryx.app.core.WINDOW_DEFAULT_WIDTH
 import works.merc.keryx.app.core.WINDOW_MIN_HEIGHT
@@ -67,6 +68,7 @@ import works.merc.keryx.app.resources.tray_icon
 import works.merc.keryx.app.appmenu.AppMenuBarHost
 import works.merc.keryx.app.appmenu.AppMenuConnection
 import works.merc.keryx.app.tray.KeryxTray
+import works.merc.keryx.app.tray.shouldHideOnTrayAction
 import works.merc.keryx.app.tray.SniConnection
 import works.merc.keryx.app.ui.home.HomeViewModel
 import works.merc.keryx.app.ui.menu.MenuCommand
@@ -307,6 +309,10 @@ fun main(args: Array<String>) {
         // and focused - a deliberate icon click) or bring it to front (everything else, which
         // also covers a notification click landing while the window is merely backgrounded).
         var windowFocused by remember { mutableStateOf(false) }
+        // Read by onTrayAction below (see shouldHideOnTrayAction) so a notification-balloon click
+        // landing while the window happens to already be visible and focused still activates
+        // instead of hiding it, on the Windows/Linux fallback where the two clicks share one hook.
+        var lastNotificationSentAtMillis by remember { mutableStateOf(0L) }
         val windowState = remember {
             WindowState(
                 position = WindowPosition.Aligned(Alignment.Center),
@@ -325,6 +331,13 @@ fun main(args: Array<String>) {
                     )
                 }
             }
+        }
+
+        // Tracks when a new-article notification was last sent, for onTrayAction's recency bias
+        // below (shouldHideOnTrayAction). A plain additional collector of the same SharedFlow
+        // KeryxTray itself collects - safe and already the established pattern for this flow.
+        LaunchedEffect(Unit) {
+            newArticleNotifications.collect { lastNotificationSentAtMillis = SystemClock.nowMillis() }
         }
 
         val unreadCount by koin.get<ArticleRepository>().watchUnreadCount().collectAsState(0L)
@@ -369,13 +382,16 @@ fun main(args: Array<String>) {
             onNotificationClicked = { activationRequests.tryEmit(Unit) },
             // Windows/Linux-fallback's Compose Tray() has only one click hook shared between the
             // icon and a notification balloon (unlike onNotificationClicked above, which macOS/
-            // Linux-SNI can wire separately - see KeryxTray's KDoc). Hide only when the window is
-            // both visible and focused (a deliberate icon click); otherwise treat it the same as
-            // a notification click and bring the window to front - this also covers the window
-            // being visible but merely backgrounded/behind other windows/on another workspace.
+            // Linux-SNI can wire separately - see KeryxTray's KDoc), with no platform way to tell
+            // them apart. shouldHideOnTrayAction (tray/TrayActionPolicy.kt) decides: hide only what
+            // looks like a deliberate icon click, otherwise activate - see its KDoc for the exact
+            // heuristic and its documented residual gap.
             onTrayAction = {
-                if (windowVisible && windowFocused) windowVisible = false
-                else activationRequests.tryEmit(Unit)
+                if (shouldHideOnTrayAction(windowVisible, windowFocused, SystemClock.nowMillis(), lastNotificationSentAtMillis)) {
+                    windowVisible = false
+                } else {
+                    activationRequests.tryEmit(Unit)
+                }
             },
             newArticleNotifications = newArticleNotifications,
         )

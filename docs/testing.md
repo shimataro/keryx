@@ -350,12 +350,19 @@ workspace), plus:
 
 (Windows, and Linux without an SNI host — the Compose `Tray()` fallback) Since this path funnels
 both a tray-icon click and a notification-balloon click through the same `onAction` hook
-(`KeryxTray`'s `onTrayAction`, a focus-aware "hide if visible-and-focused, else bring to front"
-heuristic — see the KDoc on `onTrayAction` in `KeryxTray.kt` and its wiring in `main.kt`), confirm
-by hand:
+(`KeryxTray`'s `onTrayAction`, decided by `shouldHideOnTrayAction` in `tray/TrayActionPolicy.kt` —
+a focus-aware "hide if visible-and-focused, else bring to front" heuristic, biased for
+`TRAY_ACTION_NOTIFICATION_RECENCY_MS` (5s) after a notification is sent so a balloon click landing
+while the window happens to already be visible and focused still activates instead of hiding —
+see the KDoc on `shouldHideOnTrayAction` and the wiring in `main.kt`), confirm by hand:
 
-- With the window visible and focused, click the tray icon → the window hides, same as before this
-  change.
+- With the window visible and focused, click the tray icon **more than 5s after any new-article
+  notification** → the window hides, same as before this change.
+- Trigger a new-article notification while the window is already visible and focused, then click
+  the tray icon (or the balloon, if the daemon fires `onAction` for it) **within 5s** → the window
+  stays visible and gets focus, rather than being hidden. Click the icon again after waiting out
+  the 5s → it hides normally. (The residual gap this doesn't cover: a genuine icon click landing
+  inside that same 5s window still activates instead of hiding — an accepted, narrower trade-off.)
 - With the window visible but *not* focused (click another app, or move it behind another window,
   then trigger a new-article notification and click it — or click the tray icon itself while
   unfocused) → the window comes to front and gets focus, rather than being hidden.

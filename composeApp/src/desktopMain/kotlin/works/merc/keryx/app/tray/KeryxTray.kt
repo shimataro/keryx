@@ -48,8 +48,8 @@ import java.awt.image.BufferedImage
  * `ActionInvoked` D-Bus signal).
  * @param onTrayAction Invoked for Compose's own `Tray()` `onAction` (Windows, and Linux without
  * an SNI host) - the fallback path where a notification click and an icon click share the same
- * single hook, so it cannot simply be [onToggle]; see the call site in `main.kt` for the
- * focus-aware logic that covers both.
+ * single hook, so it cannot simply be [onToggle]. The call site in `main.kt` decides between hide
+ * and activate via [shouldHideOnTrayAction]'s focus-plus-notification-recency heuristic.
  * @param newArticleNotifications Source of new-article notification messages.
  */
 @Composable
