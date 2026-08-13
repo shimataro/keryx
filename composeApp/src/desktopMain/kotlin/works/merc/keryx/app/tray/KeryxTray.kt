@@ -43,9 +43,13 @@ import java.awt.image.BufferedImage
  * @param onToggle Invoked to show or hide the application window.
  * @param onQuit Invoked to quit the application.
  * @param onNotificationClicked Invoked to bring the window to front when a notification is
- * clicked, on the platforms that can tell a notification click apart from a plain tray-icon
- * click: macOS (via [MacTray]'s separate `ActionListener`) and Linux SNI (via [LinuxTray]'s
- * `ActionInvoked` D-Bus signal).
+ * clicked, on Linux SNI (via [LinuxTray]'s `ActionInvoked` D-Bus signal) - the only platform that
+ * can tell a notification click apart from a plain tray-icon click. macOS has no equivalent: AWT's
+ * `TrayIcon.ActionListener` for a notification click never fires while the window is tray-hidden
+ * (see known-issues.md "macOS: clicking a notification banner does not restore a tray-hidden
+ * window"), and was confirmed to add nothing even when it does fire (the window merely
+ * backgrounded already comes to front via macOS's own default click-to-activate behavior,
+ * independent of any app code) - so [MacTray] doesn't take this parameter at all.
  * @param onTrayAction Invoked for Compose's own `Tray()` `onAction` (Windows, and Linux without
  * an SNI host) - the fallback path where a notification click and an icon click share the same
  * single hook, so it cannot simply be [onToggle]. The call site in `main.kt` decides between hide
@@ -98,7 +102,6 @@ internal fun ApplicationScope.KeryxTray(
                 windowVisible = windowVisible,
                 onToggle = onToggle,
                 onQuit = onQuit,
-                onNotificationClicked = onNotificationClicked,
                 newArticleNotifications = newArticleNotifications,
             )
         }

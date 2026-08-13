@@ -315,24 +315,23 @@ Dock/taskbar icons (`Taskbar` / Cocoa activation policy native path) cannot be a
 - Repeated hide/restore with unread > 0 preserves the badge.
 - No regression on Windows/Linux taskbar icon/unread overlay.
 
-(macOS) Clicking a notification banner (`MacTray`'s `onNotificationClicked`, wired to the same
-`activationRequests` signal as single-instance/reopen activation) cannot be auto-tested either, so
-confirm by hand — trigger a new-article notification (e.g. via a manual refresh with unread
-articles) and click it while the window is in each of these states:
+(macOS) `MacTray` has no notification-click handling of its own (removed — see known-issues.md
+"macOS: clicking a notification banner does not restore a tray-hidden window" for why: it never
+worked, and every case it appeared to cover turned out to be macOS's own default
+click-to-activate behavior for a visible app, independent of any app code). So clicking a
+notification banner is not app-tested behavior on macOS at all; confirm by hand only that the
+*OS default* still holds — trigger a new-article notification (e.g. via a manual refresh with
+unread articles) and click it while the window is in each of these states:
 
-- Behind other windows on the same Space → the window comes to front and gets focus.
-- **Minimized to the tray (hidden) → currently does *not* restore the window — this is a known,
-  unfixed limitation, not a regression to chase.** See known-issues.md "macOS: clicking a
-  notification banner does not restore a tray-hidden window" for the diagnosis (confirmed via
-  diagnostic logging that AWT's `TrayIcon.ActionListener` is never invoked at all in this state).
-  Restoring from tray-hidden still works via the ordinary tray-icon click or by relaunching the app
-  (single-instance forwarding) — confirm those two still work instead.
-- On a different Space → macOS switches to that Space and brings the window to front (this relies
-  on `activateIgnoringOtherApps:`'s standard OS behavior, not app-specific code — confirm it still
-  holds on the OS version under test).
-- Also confirm a plain click on the tray icon itself still toggles show/hide as before (i.e.
-  `TrayIcon`'s `ActionListener` added for notification clicks does not also fire for an ordinary
-  icon click and fight the toggle) — this is the main regression risk from this feature.
+- Behind other windows on the same Space → the window comes to front and gets focus (OS default,
+  not app code).
+- **Minimized to the tray (hidden) → does *not* restore the window — known, unfixed limitation,
+  not a regression to chase.** Restoring from tray-hidden still works via the ordinary tray-icon
+  click or by relaunching the app (single-instance forwarding) — confirm those two still work
+  instead.
+- On a different Space → macOS switches to that Space and brings the window to front (OS default;
+  confirm it still holds on the OS version under test).
+- Also confirm a plain click on the tray icon itself still toggles show/hide as before.
 
 (Linux, SNI host present — KDE/GNOME) Clicking a notification's body (`LinuxNotifier`'s `"default"`
 action, routed through `SniConnection.notificationActionInvoked` and filtered by

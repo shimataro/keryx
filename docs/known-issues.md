@@ -7,10 +7,12 @@ Each entry records what was ruled out, so a later investigation doesn't repeat t
 
 ## macOS: clicking a notification banner does not restore a tray-hidden window
 
-**Status**: not fixed — external (JDK/AWT) limitation. Restoring via the tray icon click or by
-relaunching the app (single-instance forwarding, e.g. clicking the Dock icon while already
-running) both work correctly, so the window is never permanently unreachable; only the
-notification banner's own click-through is affected.
+**Status**: not fixed — external (JDK/AWT) limitation, and the app-side `MacTray` code that
+attempted to work around it has been **removed as dead code** (it never actually did anything —
+see "The custom wiring was dead code" below). Restoring via the tray icon click or by relaunching
+the app (single-instance forwarding, e.g. clicking the Dock icon while already running) both work
+correctly, so the window is never permanently unreachable; only the notification banner's own
+click-through is affected, and only while tray-hidden.
 
 ### Symptom
 
@@ -18,29 +20,47 @@ With the window hidden to the tray on macOS, clicking a new-article desktop noti
 nothing at all — no window flash, no Dock icon reappearing, no sound, nothing. Clicking the
 banner's "表示" (Show) action button dismisses the banner but likewise has no other effect. The
 same click, when the window is merely backgrounded (visible but unfocused/behind other windows),
-was reported to work.
+brings the window to front correctly.
 
 ### Diagnosis
 
-`MacTray.kt`'s notification click is wired through AWT's `TrayIcon.addActionListener(...)` — the
-only API `TrayIcon` exposes for a click on a `displayMessage(...)`-shown banner. Temporary
-diagnostic logging (`Log.info` as the very first statement inside that `ActionListener`, and at
-each subsequent stage of `main.kt`'s `activationRequests` collector) confirmed via `tail -f` on a
-real packaged build that **the `ActionListener` is never invoked at all** when the click happens
-while the window is tray-hidden (Accessory activation policy) — zero log lines, at any level,
-anywhere in the chain. The same collector, reached instead via the ordinary tray-icon click or via
-a second app launch being forwarded to the running instance (both logged, both restore correctly),
-proves the restore logic itself (`main.kt`'s `activationRequests` collector, including the
-Accessory→Regular activation-policy reordering fix living there now) is not the problem.
+An earlier version of `MacTray.kt` wired notification clicks through AWT's
+`TrayIcon.addActionListener(...)` — the only API `TrayIcon` exposes for a click on a
+`displayMessage(...)`-shown banner. Temporary diagnostic logging (`Log.info` as the very first
+statement inside that `ActionListener`, and at each subsequent stage of `main.kt`'s
+`activationRequests` collector) confirmed via `tail -f` on a real packaged build that **the
+`ActionListener` is never invoked at all** when the click happens while the window is tray-hidden
+(Accessory activation policy) — zero log lines, at any level, anywhere in the chain. The same
+collector, reached instead via the ordinary tray-icon click or via a second app launch being
+forwarded to the running instance (both logged, both restore correctly), proved the restore logic
+itself (`main.kt`'s `activationRequests` collector, including the Accessory→Regular
+activation-policy reordering fix living there) was not the problem.
 
 This points at `TrayIcon`'s native macOS peer (`CTrayIcon`), which bridges `displayMessage(...)`
 through the deprecated `NSUserNotification` API. The click-through delegate callback
 (`userNotificationCenter:didActivateNotification:`) apparently is not reliably bridged back into
 Java's `ActionListener` when the owning app has no Dock icon (`NSApplicationActivationPolicyAccessory`)
-— i.e. exactly the tray-hidden state this feature exists for. This could not be narrowed further
+— i.e. exactly the tray-hidden state this feature existed for. This could not be narrowed further
 from Kotlin/Java code alone; it would need decompiling `CTrayIcon`'s native implementation (as was
 done for the Linux `GtkFileDialogPeer` crash elsewhere in this file) or reproducing it in a minimal
-pure-AWT test app outside this codebase, neither of which has been done yet.
+pure-AWT test app outside this codebase, neither of which has been done.
+
+### The custom wiring was dead code
+
+A follow-up check settled the question of whether the `ActionListener`-based code contributed
+*anything*: the exact same behavior — front-on-click while backgrounded, no restore while
+tray-hidden — was confirmed on the `v0` branch, i.e. **before** `MacTray` had any
+`onNotificationClicked`/`ActionListener` wiring at all. This proves the "backgrounded → comes to
+front" case was never the app's own code running; it is macOS's own default notification
+click-to-activate behavior for any Regular-policy app, which happens regardless of whether the app
+registers a notification delegate. The custom AWT wiring added across a handful of commits (see
+git history around `MacTray.kt`) never ran on the one path it was built for (tray-hidden) and was
+redundant on the one path where the `ActionListener` does fire — so it has been removed outright:
+`MacTray` no longer takes an `onNotificationClicked` parameter or registers a `TrayIcon`
+`ActionListener` at all. Linux SNI's own, independently-working notification-click handling
+(`LinuxTray`, via `LinuxNotifier`'s D-Bus `ActionInvoked` signal) is untouched — `KeryxTray`'s
+`onNotificationClicked` parameter and `main.kt`'s `activationRequests.tryEmit(Unit)` callback still
+exist and still feed it.
 
 ### Ruled out
 
@@ -51,14 +71,13 @@ pure-AWT test app outside this codebase, neither of which has been done yet.
   (promote to Regular + activate first, defer showing/fronting/focusing the window a further EDT
   turn) was implemented and tested and made no observable difference for the notification-click
   case specifically, while it *did* fix a real, separate bug: the same collector's restore-from-tray
-  behavior when reached via the single-instance/reopen path. Kept for that reason.
+  behavior when reached via the single-instance/reopen path. Kept for that reason (it's still live
+  in `main.kt`, just no longer reachable from a macOS notification click).
 
 ### Workaround
 
 None applied — the currently-working restore paths (tray icon click, relaunching the app) remain
-the supported way to bring a tray-hidden window back on macOS. The `onNotificationClicked` wiring
-itself is left in place (harmless, and correctly implemented against AWT's documented API) rather
-than removed, in case a future JDK release fixes the underlying bridging.
+the supported way to bring a tray-hidden window back on macOS.
 
 ### What a real fix would need
 
@@ -77,9 +96,10 @@ macOS is expected to eventually move to a native SwiftUI implementation (`extern
 longer-term, not-yet-scheduled direction, alongside Android and iOS not existing as targets yet). A
 native app would use `UNUserNotificationCenterDelegate` through the ordinary app lifecycle — no AWT
 bridge, no deprecated API, no Accessory-policy-specific bridging bug — which is a common, reliably
-working pattern for macOS menu-bar-only (`LSUIElement`) apps. Given that, building the JNA bridge
-above is deferred indefinitely in favor of this note, unless the native SwiftUI port itself keeps
-being deferred long enough that the workaround gap becomes worth closing on its own.
+working pattern for macOS menu-bar-only (`LSUIElement`) apps. Given that, and given the AWT-based
+version above turned out not to work anyway, building the JNA bridge is deferred indefinitely in
+favor of this note, revisited only if the native SwiftUI port itself keeps being deferred long
+enough that the tray-hidden gap becomes worth closing on its own.
 
 ## Linux: OPML import/export crashed the JVM with SIGSEGV in libawt_xawt.so
 

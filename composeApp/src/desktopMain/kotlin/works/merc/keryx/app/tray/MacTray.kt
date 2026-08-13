@@ -13,7 +13,6 @@ import java.awt.MenuItem
 import java.awt.PopupMenu
 import java.awt.SystemTray
 import java.awt.TrayIcon
-import java.awt.event.ActionListener
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 
@@ -34,12 +33,6 @@ import java.awt.event.MouseEvent
  * @param windowVisible Whether the application window is currently visible.
  * @param onToggle Called when the tray icon or toggle menu item is activated.
  * @param onQuit Called when the quit menu item is activated.
- * @param onNotificationClicked Called when the user clicks a displayed notification banner.
- * Unlike [onToggle] this must always bring the window to front rather than toggle it, since the
- * window may already be visible (just backgrounded or on another Space) when the click arrives.
- * AWT does not currently deliver this callback at all while the window is tray-hidden (Accessory
- * activation policy) - see known-issues.md "macOS: clicking a notification banner does not
- * restore a tray-hidden window".
  * @param newArticleNotifications Notifications to display as macOS user notifications.
  */
 @Composable
@@ -52,14 +45,12 @@ internal fun MacTray(
     windowVisible: Boolean,
     onToggle: () -> Unit,
     onQuit: () -> Unit,
-    onNotificationClicked: () -> Unit,
     newArticleNotifications: SharedFlow<String>,
 ) {
     val image = image ?: return
 
     val currentOnToggle by rememberUpdatedState(onToggle)
     val currentOnQuit by rememberUpdatedState(onQuit)
-    val currentOnNotificationClicked by rememberUpdatedState(onNotificationClicked)
 
     // TrayIcon isn't a java.awt.Component, so PopupMenu.show(...) needs some
     // origin Component. This Frame exists only to host the PopupMenu and is
@@ -110,17 +101,10 @@ internal fun MacTray(
             }
         }
         trayIcon.addMouseListener(listener)
-        // TrayIcon's ActionListener slot is what macOS routes a click on a displayed
-        // notification banner through (there is no other AWT API for it - see
-        // MacTray's KDoc / the plan that added this). Registered on the same
-        // trayIcon/lifecycle as the MouseAdapter above.
-        val notificationListener = ActionListener { currentOnNotificationClicked() }
-        trayIcon.addActionListener(notificationListener)
         val systemTray = SystemTray.getSystemTray()
         systemTray.add(trayIcon)
         onDispose {
             trayIcon.removeMouseListener(listener)
-            trayIcon.removeActionListener(notificationListener)
             systemTray.remove(trayIcon)
         }
     }

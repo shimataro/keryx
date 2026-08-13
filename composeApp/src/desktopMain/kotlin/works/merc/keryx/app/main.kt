@@ -381,11 +381,12 @@ fun main(args: Array<String>) {
             // LaunchedEffect(Unit) collecting activationRequests further down.
             onNotificationClicked = { activationRequests.tryEmit(Unit) },
             // Windows/Linux-fallback's Compose Tray() has only one click hook shared between the
-            // icon and a notification balloon (unlike onNotificationClicked above, which macOS/
-            // Linux-SNI can wire separately - see KeryxTray's KDoc), with no platform way to tell
-            // them apart. shouldHideOnTrayAction (tray/TrayActionPolicy.kt) decides: hide only what
-            // looks like a deliberate icon click, otherwise activate - see its KDoc for the exact
-            // heuristic and its documented residual gap.
+            // icon and a notification balloon (unlike onNotificationClicked above, which Linux SNI
+            // can wire separately - see KeryxTray's KDoc; macOS has no equivalent, see
+            // known-issues.md), with no platform way to tell them apart. shouldHideOnTrayAction
+            // (tray/TrayActionPolicy.kt) decides: hide only what looks like a deliberate icon
+            // click, otherwise activate - see its KDoc for the exact heuristic and its documented
+            // residual gap.
             onTrayAction = {
                 if (shouldHideOnTrayAction(windowVisible, windowFocused, SystemClock.nowMillis(), lastNotificationSentAtMillis)) {
                     windowVisible = false
@@ -481,12 +482,10 @@ fun main(args: Array<String>) {
 
             // A second launch signals this instance (via SingleInstanceCoordinator's
             // loopback socket) instead of opening its own window. Bring this window
-            // to front and restore it from the tray / OS-level minimized state. (macOS
-            // notification clicks feed this too, but AWT's TrayIcon does not currently
-            // deliver that click event at all when tray-hidden - see known-issues.md
-            // "macOS: clicking a notification banner does not restore a tray-hidden
-            // window" - so in practice this collector is reached on macOS only via the
-            // single-instance/reopen path.)
+            // to front and restore it from the tray / OS-level minimized state. Also fed
+            // by a Linux SNI notification click (onNotificationClicked below) - macOS has
+            // no equivalent path here; see known-issues.md "macOS: clicking a notification
+            // banner does not restore a tray-hidden window" for why.
             LaunchedEffect(Unit) {
                 activationRequests.collect {
                     windowVisible = true
