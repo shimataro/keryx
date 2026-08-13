@@ -22,6 +22,7 @@ internal class LinuxNotifier(
     icon: BufferedImage?,
 ) {
     private val imageData = icon?.let { toNotificationImageData(scaleToSquare(it, NOTIFICATION_ICON_SIZE)) }
+    private val pendingIds = PendingNotificationIds()
 
     /**
      * Delivers a desktop notification with the specified summary and body.
@@ -43,11 +44,20 @@ internal class LinuxNotifier(
                 appIcon = "",
                 summary = summary,
                 body = body,
-                actions = emptyList(),
+                // "default" is the conventional action key most notification daemons invoke when
+                // the notification body itself is clicked, rather than a rendered button.
+                actions = listOf("default", ""),
                 hints = hints,
                 // -1 = let the daemon apply its own default timeout.
                 expireTimeout = -1,
             )
-        }.onFailure { Log.warn(LOG_TAG, "Could not deliver a desktop notification", it) }
+        }.onSuccess { id -> pendingIds.add(id) }
+            .onFailure { Log.warn(LOG_TAG, "Could not deliver a desktop notification", it) }
     }
+
+    /**
+     * Returns `true` if [id] belongs to a notification this instance sent (and forgets it),
+     * `false` if it belongs to some other application's notification - see [PendingNotificationIds].
+     */
+    fun consumeIfOwn(id: UInt32): Boolean = pendingIds.consume(id)
 }

@@ -330,6 +330,40 @@ articles) and click it while the window is in each of these states:
   `TrayIcon`'s `ActionListener` added for notification clicks does not also fire for an ordinary
   icon click and fight the toggle) — this is the main regression risk from this feature.
 
+(Linux, SNI host present — KDE/GNOME) Clicking a notification's body (`LinuxNotifier`'s `"default"`
+action, routed through `SniConnection.notificationActionInvoked` and filtered by
+`LinuxNotifier.consumeIfOwn`) also cannot be auto-tested, so confirm by hand — same window-state
+cases as the macOS list above (behind other windows, minimized to the tray, on a different
+workspace), plus:
+
+- **Critical regression check**: trigger a notification from a *different* application (e.g. a
+  chat client, a mail client) while Keryx is running, and click it — Keryx's window must **not**
+  come to front. This is the check for the id-filtering in `PendingNotificationIds`/
+  `consumeIfOwn` — the `ActionInvoked` D-Bus signal is unscoped by sender, so without correct
+  filtering, any application's notification click would wrongly activate Keryx.
+- Also confirm a plain click on the tray icon itself still toggles show/hide as before (the SNI
+  icon's `Activate`/`SecondaryActivate` path is unrelated to `ActionInvoked`, but worth
+  reconfirming alongside the above).
+- If no notification daemon is present, or the daemon doesn't honor the `"default"` action key,
+  notifications should still display (best-effort) with no crash — clicking them just does
+  nothing, same as before this change.
+
+(Windows, and Linux without an SNI host — the Compose `Tray()` fallback) Since this path funnels
+both a tray-icon click and a notification-balloon click through the same `onAction` hook
+(`KeryxTray`'s `onTrayAction`, a focus-aware "hide if visible-and-focused, else bring to front"
+heuristic — see the KDoc on `onTrayAction` in `KeryxTray.kt` and its wiring in `main.kt`), confirm
+by hand:
+
+- With the window visible and focused, click the tray icon → the window hides, same as before this
+  change.
+- With the window visible but *not* focused (click another app, or move it behind another window,
+  then trigger a new-article notification and click it — or click the tray icon itself while
+  unfocused) → the window comes to front and gets focus, rather than being hidden.
+- With the window minimized to the tray (hidden), click the tray icon or a notification → the
+  window restores and comes to front.
+- The "表示"/"非表示" tray menu item still toggles deterministically regardless of focus state
+  (it uses the unchanged `onToggle`, not `onTrayAction`).
+
 - The tray icon asset depends on how the platform draws it. macOS and Linux-with-an-SNI-host get the white glyph +
   black outline (`tray_icon_outlined.png`), which needs real alpha and at least ~22px. The Windows notification area
   and the Linux AWT fallback get the full-colour glyph (`tray_icon.png`), because Windows renders at 16px and never

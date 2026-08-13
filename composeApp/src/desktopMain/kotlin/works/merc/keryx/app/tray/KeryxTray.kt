@@ -42,8 +42,14 @@ import java.awt.image.BufferedImage
  * @param windowVisible Whether the application window is currently visible.
  * @param onToggle Invoked to show or hide the application window.
  * @param onQuit Invoked to quit the application.
- * @param onNotificationClicked Invoked to bring the window to front when a macOS notification
- * banner is clicked (macOS only - see [MacTray]).
+ * @param onNotificationClicked Invoked to bring the window to front when a notification is
+ * clicked, on the platforms that can tell a notification click apart from a plain tray-icon
+ * click: macOS (via [MacTray]'s separate `ActionListener`) and Linux SNI (via [LinuxTray]'s
+ * `ActionInvoked` D-Bus signal).
+ * @param onTrayAction Invoked for Compose's own `Tray()` `onAction` (Windows, and Linux without
+ * an SNI host) - the fallback path where a notification click and an icon click share the same
+ * single hook, so it cannot simply be [onToggle]; see the call site in `main.kt` for the
+ * focus-aware logic that covers both.
  * @param newArticleNotifications Source of new-article notification messages.
  */
 @Composable
@@ -55,6 +61,7 @@ internal fun ApplicationScope.KeryxTray(
     onToggle: () -> Unit,
     onQuit: () -> Unit,
     onNotificationClicked: () -> Unit,
+    onTrayAction: () -> Unit,
     newArticleNotifications: SharedFlow<String>,
 ) {
     // The outlined (white glyph + black halo) variant is only used where the icon is
@@ -108,6 +115,7 @@ internal fun ApplicationScope.KeryxTray(
                 quitLabel = quitLabel,
                 onToggle = onToggle,
                 onQuit = onQuit,
+                onNotificationClicked = onNotificationClicked,
                 newArticleNotifications = newArticleNotifications,
             )
         }
@@ -125,7 +133,7 @@ internal fun ApplicationScope.KeryxTray(
                     icon = painter,
                     state = trayState,
                     tooltip = tooltip,
-                    onAction = onToggle,
+                    onAction = onTrayAction,
                     menu = {
                         Item(toggleLabel, onClick = onToggle)
                         Item(quitLabel, onClick = onQuit)

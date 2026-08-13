@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.LocalWindowExceptionHandlerFactory
 import androidx.compose.ui.window.Window
@@ -299,6 +300,13 @@ fun main(args: Array<String>) {
 
     application {
         var windowVisible by remember { mutableStateOf(!saved.startMinimized) }
+        // Mirrors windowVisible's role: mutated inside Window{}'s content (the only place
+        // LocalWindowInfo.current is resolvable, see the LaunchedEffect further down) and read
+        // here, before Window{} is even composed, by the Windows/Linux tray-fallback's
+        // onTrayAction below - it needs to know whether a click should hide the window (visible
+        // and focused - a deliberate icon click) or bring it to front (everything else, which
+        // also covers a notification click landing while the window is merely backgrounded).
+        var windowFocused by remember { mutableStateOf(false) }
         val windowState = remember {
             WindowState(
                 position = WindowPosition.Aligned(Alignment.Center),
@@ -359,6 +367,16 @@ fun main(args: Array<String>) {
             // (window.toFront/requestFocus, de-iconify, activateIgnoringOtherApps) - see the
             // LaunchedEffect(Unit) collecting activationRequests further down.
             onNotificationClicked = { activationRequests.tryEmit(Unit) },
+            // Windows/Linux-fallback's Compose Tray() has only one click hook shared between the
+            // icon and a notification balloon (unlike onNotificationClicked above, which macOS/
+            // Linux-SNI can wire separately - see KeryxTray's KDoc). Hide only when the window is
+            // both visible and focused (a deliberate icon click); otherwise treat it the same as
+            // a notification click and bring the window to front - this also covers the window
+            // being visible but merely backgrounded/behind other windows/on another workspace.
+            onTrayAction = {
+                if (windowVisible && windowFocused) windowVisible = false
+                else activationRequests.tryEmit(Unit)
+            },
             newArticleNotifications = newArticleNotifications,
         )
 
@@ -470,6 +488,12 @@ fun main(args: Array<String>) {
                     }
                 }
             }
+
+            // Mirrors the observed focus state into the app-scope windowFocused var declared
+            // above (outside Window{}, where onTrayAction needs to read it) - LocalWindowInfo is
+            // only resolvable inside Window{}'s own content, unlike windowState.size above.
+            val currentWindowFocused = LocalWindowInfo.current.isWindowFocused
+            LaunchedEffect(currentWindowFocused) { windowFocused = currentWindowFocused }
 
             // Menu commands that must be visible on screen — "About Keryx" and "Settings…" from the
             // native macOS app menu — may fire while the window is tray-hidden, so surface it. App()

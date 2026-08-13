@@ -184,4 +184,13 @@ internal interface FreedesktopNotifications : DBusInterface {
         hints: Map<String, @JvmSuppressWildcards Variant<*>>,
         expireTimeout: Int,
     ): UInt32
+
+    /**
+     * Emitted by the notification daemon when the user invokes an action - including the
+     * conventional `"default"` key, which most daemons invoke on a click of the notification
+     * body itself rather than a rendered button. Unscoped by sender, so this also fires for
+     * every other application's notifications; callers must filter by the [id] returned from
+     * their own [Notify] call.
+     */
+    class ActionInvoked(path: String, val id: UInt32, val actionKey: String) : DBusSignal(path, id, actionKey)
 }
