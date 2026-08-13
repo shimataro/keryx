@@ -333,15 +333,10 @@ internal fun FeedListPane(
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onActivated)
             .nativeContextMenu(items = { emptyList() }, onOpen = onActivated),
     ) {
-        val refreshing by vm.feedRefreshing.collectAsStateSafe(false)
-        val syncing by vm.syncing.collectAsStateSafe(false)
         FeedListToolbarRow(
+            vm = vm,
             cloudConnected = cloudConnected,
-            refreshing = refreshing,
-            syncing = syncing,
             onAddFeedClick = onAddFeedClick,
-            onRefreshAll = { vm.refreshAll() },
-            onSync = { vm.sync() },
         )
 
         KeryxTextField(
@@ -665,16 +660,17 @@ private fun FeedListAutoScrollEffect(
 
 /**
  * [FeedListPane]'s top toolbar row: add feed / refresh all / cloud sync (when [cloudConnected]).
+ * Reads [vm]'s refreshing/syncing state itself (rather than taking it as a parameter) so a
+ * refresh/sync toggle only invalidates this row's own restart scope, not the whole pane.
  */
 @Composable
 private fun FeedListToolbarRow(
+    vm: HomeViewModel,
     cloudConnected: Boolean,
-    refreshing: Boolean,
-    syncing: Boolean,
     onAddFeedClick: () -> Unit,
-    onRefreshAll: () -> Unit,
-    onSync: () -> Unit,
 ) {
+    val refreshing by vm.feedRefreshing.collectAsStateSafe(false)
+    val syncing by vm.syncing.collectAsStateSafe(false)
     WindowDragArea(Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().padding(top = WindowChrome.titleBarInsetDp.dp, start = 4.dp, end = 4.dp),
@@ -689,7 +685,7 @@ private fun FeedListToolbarRow(
                 val refreshTooltip = stringResource(
                     if (refreshing) Res.string.home_refreshing else Res.string.home_refresh,
                 )
-                TooltipIconButton(tooltip = refreshTooltip, onClick = onRefreshAll, enabled = feedOperationsAvailable(refreshing, syncing)) {
+                TooltipIconButton(tooltip = refreshTooltip, onClick = { vm.refreshAll() }, enabled = feedOperationsAvailable(refreshing, syncing)) {
                     if (refreshing) {
                         SmallSpinner()
                     } else {
@@ -700,7 +696,7 @@ private fun FeedListToolbarRow(
                     val syncTooltip = stringResource(
                         if (syncing) Res.string.home_syncing else Res.string.home_sync,
                     )
-                    TooltipIconButton(tooltip = syncTooltip, onClick = onSync, enabled = feedOperationsAvailable(refreshing, syncing)) {
+                    TooltipIconButton(tooltip = syncTooltip, onClick = { vm.sync() }, enabled = feedOperationsAvailable(refreshing, syncing)) {
                         if (syncing) {
                             SmallSpinner()
                         } else {
