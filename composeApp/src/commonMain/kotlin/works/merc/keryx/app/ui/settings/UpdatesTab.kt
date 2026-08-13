@@ -43,11 +43,6 @@ import works.merc.keryx.app.resources.settings_update_open_release_page
  *
  * @param vm The view model providing update settings, status, and actions.
  */
-/**
- * Displays update settings and the current update-check status.
- *
- * @param vm The view model that provides update settings, status, and actions.
- */
 @Composable
 internal fun UpdatesTabContent(vm: SettingsViewModel) {
     val settings by vm.localSettings.collectAsState()

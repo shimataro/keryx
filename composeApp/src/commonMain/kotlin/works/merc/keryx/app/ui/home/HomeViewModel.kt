@@ -411,12 +411,12 @@ class HomeViewModel(
     private val scrollPositionStore = ArticleScrollPositionStore(settingsRepository)
 
     /**
- * Gets the saved scroll position for an article.
- *
- * @param articleId The identifier of the article.
- * @return The saved scroll offset, or the default position when none is stored.
- */
-fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPosition(articleId)
+     * Gets the saved scroll position for an article.
+     *
+     * @param articleId The identifier of the article.
+     * @return The saved scroll offset, or the default position when none is stored.
+     */
+    fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPosition(articleId)
 
     /**
      * Saves the scroll offset for an article and retains only the most recent remembered positions.
@@ -554,10 +554,10 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
     fun selectPrevious() = moveSelection(-1)
 
     /**
-         * Provides the article rows currently displayed in the center pane.
-         *
-         * @return Search-result rows for the search filter, or the filtered article rows otherwise.
-         */
+     * Provides the article rows currently displayed in the center pane.
+     *
+     * @return Search-result rows for the search filter, or the filtered article rows otherwise.
+     */
     fun currentArticles(): List<ArticleListRow> =
         if (_filter.value is ArticleFilter.Search) searchResults.value.map { it.article } else articles.value
 
@@ -608,8 +608,8 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
     }
 
     /**
- * Toggles the read state of the selected article.
- */
+     * Toggles the read state of the selected article.
+     */
     fun toggleReadSelected() = _selectedArticle.value?.let { toggleRead(it.toListRow()) }
 
     /**
@@ -626,8 +626,8 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
     }
 
     /**
- * Toggles the starred state of the selected article.
- */
+     * Toggles the starred state of the selected article.
+     */
     fun toggleStarSelected() = _selectedArticle.value?.let { toggleStar(it.toListRow()) }
 
     /**

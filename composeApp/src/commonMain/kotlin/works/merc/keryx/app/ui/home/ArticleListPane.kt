@@ -61,7 +61,7 @@ import works.merc.keryx.app.ui.common.ToggleChip
 import works.merc.keryx.app.ui.common.ToolbarIconGroup
 import works.merc.keryx.app.ui.common.TooltipIconButton
 
-/**  
+/**
  * Displays the article list for the current filter and routes search filters to the search list.
  *
  * @param vm The view model providing article, feed, selection, and filter state.
@@ -69,15 +69,6 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  * @param onActivated Called when the pane becomes active.
  * @param modifier Modifier applied to the pane.
  * @param notifVm Optional view model providing notifications for the toolbar.
- */
-/**
- * Displays the article list or search results for the current home view filter.
- *
- * @param vm The home view model providing article data, filter state, and actions.
- * @param focused Whether the pane currently has focus.
- * @param onActivated Called when the pane becomes active.
- * @param modifier Modifier applied to the pane.
- * @param notifVm Optional view model used to display notifications.
  */
 @Composable
 fun ArticleListPane(

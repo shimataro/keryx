@@ -163,11 +163,11 @@ class SettingsViewModel(
     }
 
     /**
- * Updates the selected theme mode.
- *
- * @param mode The theme mode to apply.
- */
-fun setThemeMode(mode: String) = update { it.copy(themeMode = mode) }
+     * Updates the selected theme mode.
+     *
+     * @param mode The theme mode to apply.
+     */
+    fun setThemeMode(mode: String) = update { it.copy(themeMode = mode) }
     fun setFontScale(scale: Double) = update { it.copy(fontSizeScale = scale) }
     fun setRefreshIntervalMinutes(minutes: Int) = update { it.copy(refreshIntervalMinutes = minutes) }
     fun setNotificationEnabled(enabled: Boolean) = update { it.copy(notificationEnabled = enabled) }
