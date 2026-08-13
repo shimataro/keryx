@@ -1138,12 +1138,78 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun unreadOnlyIsScopedIndependentlyForTheStarredFilter() = runTest {
+        db.insertFeed("f1")
+        // Most starred articles are already read by the time they're starred, so a global toggle
+        // inherited from the feed list would leave the Starred view looking empty.
+        db.insertArticle("a1", "f1", isRead = 1L, isStarred = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.unreadOnly.value)
+
+        // Switching to Starred does not inherit the feed list's "unread only" state — it starts
+        // at its own (unset) default, so the already-read starred article is still shown.
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        assertFalse(vm.unreadOnly.value)
+        assertEquals(listOf("a1"), vm.articles.value.map { it.id })
+
+        // Turning it on within Starred filters correctly, and does not touch the feed list's toggle.
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.unreadOnly.value)
+        assertEquals(emptyList(), vm.articles.value.map { it.id })
+
+        // Switching back to All restores the feed list's own (still-on) toggle state.
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.unreadOnly.value)
+    }
+
+    @Test
+    fun setUnreadOnlyOnTheStarredFilterPersistsSeparatelyFromTheSharedToggle() = runTest {
+        val store = LocalSettingsStore(dirOverride = dir)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+
+        vm.setUnreadOnly(true)
+
+        assertEquals(true, store.load().lastUnreadOnlyStarred)
+        assertNull(store.load().lastUnreadOnly)
+    }
+
+    @Test
+    fun restartRestoresUnreadOnlyStarredIndependentlyFromTheSharedToggle() = runTest {
+        val vm1 = newViewModel()
+        subscribeAll(vm1)
+        vm1.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        vm1.setUnreadOnly(true)
+
+        val vm2 = newViewModel()
+        subscribeAll(vm2)
+        vm2.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm2.unreadOnly.value)
+
+        vm2.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        assertFalse(vm2.unreadOnly.value)
+    }
+
+    @Test
     fun setUnreadOnlyAndToggleSortFlipExposedState() = runTest {
         val vm = newViewModel()
         subscribeAll(vm)
 
         assertFalse(vm.unreadOnly.value)
         vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
         assertTrue(vm.unreadOnly.value)
 
         assertTrue(vm.newestFirst.value)
@@ -2206,6 +2272,25 @@ class HomeViewModelTest {
 
         assertFalse(vm.unreadOnly.value)
         assertTrue(vm.newestFirst.value)
+    }
+
+    @Test
+    fun unreadOnlyStarredIgnoresTheDeviceWideDefaultUnlikeEveryOtherFilter() = runTest {
+        // article_list_default_unread_only is the fallback for the *shared* toggle only — the
+        // Starred-specific one always starts OFF regardless, so it never inherits the device-wide
+        // "start with unread only" preference.
+        val settingsRepository = SettingsRepository(
+            db, LocalSettingsStore(dirOverride = dir), SyncScheduler {}, Clock { 0L }, writeDispatcher = Dispatchers.Unconfined,
+        )
+        settingsRepository.setArticleListDefaultUnreadOnly(true)
+
+        val vm = newViewModel()
+        subscribeAll(vm)
+        assertTrue(vm.unreadOnly.value)
+
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        assertFalse(vm.unreadOnly.value)
     }
 
     @Test

@@ -168,7 +168,28 @@ class HomeViewModel(
                     ?: settingsRepository.getArticleListDefaultUnreadOnly()
                 ),
     )
-    val unreadOnly: StateFlow<Boolean> = _unreadOnly
+
+    // Starred is scoped independently from every other filter: a user who keeps "unread only" on
+    // while browsing feeds would otherwise see an almost-empty Starred view the moment they switch,
+    // since most starred articles are already read by the time they're starred. Deliberately not
+    // seeded from getArticleListDefaultUnreadOnly() — that default is about the shared toggle, not
+    // this dedicated one, so an unset Starred toggle always starts OFF.
+    private val _unreadOnlyStarred = MutableStateFlow(
+        settingsRepository.getLocalSettings().lastUnreadOnlyStarred ?: false,
+    )
+
+    // Selects which backing toggle is currently in effect. Starred's own toggle still filters
+    // "starred ∩ unread" correctly when turned on (a state sync merge can legitimately produce,
+    // since read/star are merged independently — see MergeSql), only which toggle is consulted
+    // differs by filter.
+    val unreadOnly: StateFlow<Boolean> =
+        combine(_filter, _unreadOnly, _unreadOnlyStarred) { f, general, starred ->
+            if (f == ArticleFilter.Starred) starred else general
+        }.stateIn(
+            viewModelScope,
+            started,
+            if (_filter.value == ArticleFilter.Starred) _unreadOnlyStarred.value else _unreadOnly.value,
+        )
 
     private val _newestFirst = MutableStateFlow(settingsRepository.getLocalSettings().lastNewestFirst ?: true)
     val newestFirst: StateFlow<Boolean> = _newestFirst
@@ -186,7 +207,7 @@ class HomeViewModel(
         _filter.flatMapLatest { f -> articleRepository.watchArticles(f) }
 
     val articles: StateFlow<List<ArticleListRow>> =
-        combine(filteredArticles, _unreadOnly, _newestFirst, _pinnedReadArticles) { list, unread, newest, pinned ->
+        combine(filteredArticles, unreadOnly, _newestFirst, _pinnedReadArticles) { list, unread, newest, pinned ->
             // Nothing pinned is the common case, and then the id set has no reader — skip
             // building it rather than hashing every article's id on every emission.
             val extra = if (pinned.isEmpty()) {
@@ -281,7 +302,7 @@ class HomeViewModel(
     // a changed query text means a new search, so leaving a pinned article from the previous
     // query stuck in results that no longer match would be surprising.
     val searchResults: StateFlow<List<ArticleSearchResult>> =
-        combine(_rawSearchResults, _unreadOnly, _pinnedReadArticles) { snapshot, unread, pinned ->
+        combine(_rawSearchResults, unreadOnly, _pinnedReadArticles) { snapshot, unread, pinned ->
             val raw = snapshot.results
             // Apply only the optimistic read-state from pinned (never the whole snapshot): other
             // fields — notably is_starred — must come from the fresh re-search, or starring an
@@ -654,12 +675,17 @@ fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPos
      * @param value Whether to show only unread articles.
      */
     fun setUnreadOnly(value: Boolean) {
-        if (value == _unreadOnly.value) return
+        if (value == unreadOnly.value) return
         if (value) {
             _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         }
-        _unreadOnly.value = value
-        settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnly = value) }
+        if (_filter.value == ArticleFilter.Starred) {
+            _unreadOnlyStarred.value = value
+            settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnlyStarred = value) }
+        } else {
+            _unreadOnly.value = value
+            settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnly = value) }
+        }
     }
 
     /**

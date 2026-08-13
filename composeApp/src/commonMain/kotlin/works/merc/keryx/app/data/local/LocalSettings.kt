@@ -36,6 +36,8 @@ data class LocalSettings(
     val recentArticleScrollPositions: List<ArticleScrollPosition> = emptyList(),
     val lastFocusedPane: String? = null,
     val lastUnreadOnly: Boolean? = null,
+    /** "Unread only" state scoped to the Starred filter alone, independent of [lastUnreadOnly]. */
+    val lastUnreadOnlyStarred: Boolean? = null,
     val lastNewestFirst: Boolean? = null,
     /** 0 = startup checks only, no periodic recheck (see [works.merc.keryx.app.domain.shouldCheckForUpdate]). */
     val updateCheckIntervalHours: Int = 24,
