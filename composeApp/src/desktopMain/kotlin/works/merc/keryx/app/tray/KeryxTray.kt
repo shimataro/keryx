@@ -42,6 +42,8 @@ import java.awt.image.BufferedImage
  * @param windowVisible Whether the application window is currently visible.
  * @param onToggle Invoked to show or hide the application window.
  * @param onQuit Invoked to quit the application.
+ * @param onNotificationClicked Invoked to bring the window to front when a macOS notification
+ * banner is clicked (macOS only - see [MacTray]).
  * @param newArticleNotifications Source of new-article notification messages.
  */
 @Composable
@@ -52,6 +54,7 @@ internal fun ApplicationScope.KeryxTray(
     windowVisible: Boolean,
     onToggle: () -> Unit,
     onQuit: () -> Unit,
+    onNotificationClicked: () -> Unit,
     newArticleNotifications: SharedFlow<String>,
 ) {
     // The outlined (white glyph + black halo) variant is only used where the icon is
@@ -88,6 +91,7 @@ internal fun ApplicationScope.KeryxTray(
                 windowVisible = windowVisible,
                 onToggle = onToggle,
                 onQuit = onQuit,
+                onNotificationClicked = onNotificationClicked,
                 newArticleNotifications = newArticleNotifications,
             )
         }

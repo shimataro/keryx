@@ -315,6 +315,21 @@ Dock/taskbar icons (`Taskbar` / Cocoa activation policy native path) cannot be a
 - Repeated hide/restore with unread > 0 preserves the badge.
 - No regression on Windows/Linux taskbar icon/unread overlay.
 
+(macOS) Clicking a notification banner (`MacTray`'s `onNotificationClicked`, wired to the same
+`activationRequests` signal as single-instance/reopen activation) cannot be auto-tested either, so
+confirm by hand — trigger a new-article notification (e.g. via a manual refresh with unread
+articles) and click it while the window is in each of these states:
+
+- Behind other windows on the same Space → the window comes to front and gets focus.
+- Minimized to the tray (hidden) → the window restores and comes to front, same as toggling it
+  from the tray icon/menu.
+- On a different Space → macOS switches to that Space and brings the window to front (this relies
+  on `activateIgnoringOtherApps:`'s standard OS behavior, not app-specific code — confirm it still
+  holds on the OS version under test).
+- Also confirm a plain click on the tray icon itself still toggles show/hide as before (i.e.
+  `TrayIcon`'s `ActionListener` added for notification clicks does not also fire for an ordinary
+  icon click and fight the toggle) — this is the main regression risk from this feature.
+
 - The tray icon asset depends on how the platform draws it. macOS and Linux-with-an-SNI-host get the white glyph +
   black outline (`tray_icon_outlined.png`), which needs real alpha and at least ~22px. The Windows notification area
   and the Linux AWT fallback get the full-colour glyph (`tray_icon.png`), because Windows renders at 16px and never

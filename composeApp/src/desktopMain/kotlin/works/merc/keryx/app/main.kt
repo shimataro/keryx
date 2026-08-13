@@ -355,6 +355,10 @@ fun main(args: Array<String>) {
             windowVisible = windowVisible,
             onToggle = { windowVisible = !windowVisible },
             onQuit = ::exitApplication,
+            // Reuses the same activation signal as the single-instance/reopen paths below
+            // (window.toFront/requestFocus, de-iconify, activateIgnoringOtherApps) - see the
+            // LaunchedEffect(Unit) collecting activationRequests further down.
+            onNotificationClicked = { activationRequests.tryEmit(Unit) },
             newArticleNotifications = newArticleNotifications,
         )
 
