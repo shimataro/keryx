@@ -21,11 +21,6 @@ import java.util.Properties
  *   write lock held by an incremental FTS insert or the rare full index rebuild on another connection.
  * - `foreign_keys` is off by default in SQLite; the schema declares them.
  */
-/**
- * Creates SQLite JDBC connection properties for busy-timeout handling and foreign-key enforcement.
- *
- * @return Connection properties applied to each SQLite connection.
- */
 internal fun sqliteConnectionProperties(): Properties = Properties().apply {
     setProperty("busy_timeout", SQLITE_BUSY_TIMEOUT_MS.toString())
     setProperty("foreign_keys", "true")
