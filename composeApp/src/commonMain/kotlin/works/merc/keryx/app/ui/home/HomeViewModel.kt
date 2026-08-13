@@ -33,6 +33,8 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.FEED_LIST_PANE_MAX_WIDTH
 import works.merc.keryx.app.core.FEED_LIST_PANE_MIN_WIDTH
+import works.merc.keryx.app.core.PANE_WIDTH_PERSIST_DEBOUNCE_MS
+import works.merc.keryx.app.core.SEARCH_DEBOUNCE_MS
 import works.merc.keryx.app.core.searchTerms
 import works.merc.keryx.app.core.decodeArticleFilter
 import works.merc.keryx.app.core.encode
@@ -292,7 +294,7 @@ class HomeViewModel(
     // whether the current live query has been searched yet (see below).
     private val _rawSearchResults: StateFlow<SearchSnapshot> =
         combine(
-            _searchQuery.debounce(250),
+            _searchQuery.debounce(SEARCH_DEBOUNCE_MS),
             _searchRefreshTrigger,
             // Re-run search whenever the articles table changes (read/star toggles, refresh, sync
             // merge) so results stay in sync — search() reads a raw-SQL FTS index that SQLDelight
@@ -447,7 +449,7 @@ class HomeViewModel(
         }
 
         combine(_feedListPaneWidth, _articleListPaneWidth) { feed, article -> feed to article }
-            .debounce(500)
+            .debounce(PANE_WIDTH_PERSIST_DEBOUNCE_MS)
             .onEach { (feed, article) ->
                 settingsRepository.mutateLocalSettings { it.copy(feedListPaneWidth = feed, articleListPaneWidth = article) }
             }.launchIn(viewModelScope)
