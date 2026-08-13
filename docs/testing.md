@@ -387,6 +387,10 @@ likely each is to be wrong):
 - The unread dot appears/disappears live (`NewIcon` reaches the host).
 - After `systemctl --user restart plasma-plasmashell` the icon comes back without restarting Keryx.
 - A background refresh raises a desktop notification with the app icon.
+- A notification's id is forgotten once it closes for any reason (clicked, dismissed, or
+  auto-expired) - trigger several notifications, let some expire/dismiss without clicking, and
+  confirm no leftover state affects later click-to-front handling (best confirmed indirectly,
+  since PendingNotificationIds has no visible size counter).
 - On GNOME without the AppIndicator extension it silently falls back to the AWT tray (no crash, no stack trace), and
   launching without `DBUS_SESSION_BUS_ADDRESS` neither hangs nor throws.
 - Same behaviour on a Plasma Wayland session.

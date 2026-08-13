@@ -123,6 +123,13 @@ internal fun LinuxTray(
             if (notifier.consumeIfOwn(id)) currentOnNotificationClicked()
         }
     }
+
+    // Forgets a closed notification's id regardless of why it closed (expired, dismissed, or
+    // programmatically closed) - consumeIfOwn's boolean result is irrelevant here since a close
+    // is never itself a click.
+    LaunchedEffect(connection, notifier) {
+        connection.notificationClosed.collect { id -> notifier.consumeIfOwn(id) }
+    }
 }
 
 /**

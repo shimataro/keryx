@@ -80,6 +80,22 @@ internal class SniConnection private constructor(
         }
     }.onFailure { Log.warn(LOG_TAG, "Could not watch for notification clicks", it) }.getOrNull()
 
+    private val _notificationClosed = MutableSharedFlow<UInt32>(extraBufferCapacity = 4)
+
+    /** Emitted with a notification's id whenever the daemon reports it closed, for any reason. */
+    val notificationClosed: SharedFlow<UInt32> = _notificationClosed
+
+    /**
+     * Watches for notification-close events (expired, dismissed, or programmatically closed), so
+     * a pending id is forgotten even when the user never clicks the notification. Same
+     * installation/failure rationale as [actionInvokedHandler].
+     */
+    private val notificationClosedHandler: AutoCloseable? = runCatching {
+        connection.addSigHandler(FreedesktopNotifications.NotificationClosed::class.java) { signal ->
+            _notificationClosed.tryEmit(signal.id)
+        }
+    }.onFailure { Log.warn(LOG_TAG, "Could not watch for notification close events", it) }.getOrNull()
+
     /**
      * Exports the status notifier item and its menu on the connection.
      *
@@ -142,6 +158,8 @@ internal class SniConnection private constructor(
             .onFailure { Log.warn(LOG_TAG, "Could not remove the NameOwnerChanged handler", it) }
         runCatching { actionInvokedHandler?.close() }
             .onFailure { Log.warn(LOG_TAG, "Could not remove the ActionInvoked handler", it) }
+        runCatching { notificationClosedHandler?.close() }
+            .onFailure { Log.warn(LOG_TAG, "Could not remove the NotificationClosed handler", it) }
         runCatching { connection.releaseBusName(busName) }
             .onFailure { Log.warn(LOG_TAG, "Could not release $busName", it) }
         runCatching { connection.disconnect() }

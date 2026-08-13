@@ -231,4 +231,10 @@ class DBusSignatureTest {
         assertEquals("susssasa{sv}i", Marshalling.getDBusType(notify.genericParameterTypes))
         assertEquals("u", Marshalling.getDBusType(notify.genericReturnType).single())
     }
+
+    @Test
+    fun `NotificationClosed carries id and reason`() {
+        val ctor = FreedesktopNotifications.NotificationClosed::class.java.declaredConstructors.single()
+        assertEquals("uu", Marshalling.getDBusType(ctor.genericParameterTypes.drop(1).toTypedArray()))
+    }
 }

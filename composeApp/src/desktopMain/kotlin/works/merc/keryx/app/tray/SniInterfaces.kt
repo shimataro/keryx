@@ -193,4 +193,11 @@ internal interface FreedesktopNotifications : DBusInterface {
      * their own [Notify] call.
      */
     class ActionInvoked(path: String, val id: UInt32, val actionKey: String) : DBusSignal(path, id, actionKey)
+
+    /**
+     * Emitted by the notification daemon when a notification is closed for any reason (expired,
+     * dismissed, or closed via `CloseNotification`) - the id becomes invalid afterward regardless
+     * of which. Unscoped by sender, like [ActionInvoked]; callers filter by their own ids.
+     */
+    class NotificationClosed(path: String, val id: UInt32, val reason: UInt32) : DBusSignal(path, id, reason)
 }
