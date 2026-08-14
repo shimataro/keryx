@@ -232,7 +232,10 @@ class GoogleDriveStorageTest {
     @Test
     fun metadataReturnsVersionOrNullWhenAbsent() = runTest {
         val (yes, yesHistory, yesVerify) = storage("tok", { respond(foundFile(), HttpStatusCode.OK) })
-        assertNotNull((yes.metadata(CLOUD_DB_PATH) as Result.Ok<CloudFileMeta?>).value)
+        // The rev, not merely its presence: it is what the unchanged-transfer skip compares against
+        // sync_state.cloud_file_rev to decide whether a download can be skipped.
+        val meta = assertNotNull((yes.metadata(CLOUD_DB_PATH) as Result.Ok<CloudFileMeta?>).value)
+        assertEquals("r1", meta.rev)
         assertEquals(1, yesHistory.size)
         assertEquals("GET", yesHistory[0].method.value)
         assertEquals("/drive/v3/files", yesHistory[0].url.encodedPath)
