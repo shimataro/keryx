@@ -22,6 +22,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -229,16 +230,19 @@ class GoogleDriveStorageTest {
     }
 
     @Test
-    fun existsTrueAndFalse() = runTest {
+    fun metadataReturnsVersionOrNullWhenAbsent() = runTest {
         val (yes, yesHistory, yesVerify) = storage("tok", { respond(foundFile(), HttpStatusCode.OK) })
-        assertEquals(true, (yes.exists(CLOUD_DB_PATH) as Result.Ok).value)
+        // The rev, not merely its presence: it is what the unchanged-transfer skip compares against
+        // sync_state.cloud_file_rev to decide whether a download can be skipped.
+        val meta = assertNotNull((yes.metadata(CLOUD_DB_PATH) as Result.Ok<CloudFileMeta?>).value)
+        assertEquals("r1", meta.rev)
         assertEquals(1, yesHistory.size)
         assertEquals("GET", yesHistory[0].method.value)
         assertEquals("/drive/v3/files", yesHistory[0].url.encodedPath)
         yesVerify()
 
         val (no, noHistory, noVerify) = storage("tok", { respond(notFound, HttpStatusCode.OK) })
-        assertEquals(false, (no.exists(CLOUD_DB_PATH) as Result.Ok).value)
+        assertNull((no.metadata(CLOUD_DB_PATH) as Result.Ok<CloudFileMeta?>).value)
         assertEquals(1, noHistory.size)
         assertEquals("GET", noHistory[0].method.value)
         assertEquals("/drive/v3/files", noHistory[0].url.encodedPath)
@@ -267,6 +271,25 @@ class GoogleDriveStorageTest {
         assertEquals("/drive/v3/files", history[2].url.encodedPath)
         assertEquals("GET", history[3].method.value)
         assertEquals("/drive/v3/files", history[3].url.encodedPath)
+        verify()
+    }
+
+    @Test
+    fun createReturnsTheVersionFromItsOwnWriteNotALaterListing() = runTest {
+        // The race-resolving listings run up to RACE_RECHECK_DELAY_MS after our create, so a racing
+        // device's upload() can bump our file's version in between. Reporting that bumped version
+        // would tell SyncRepository we had already merged a revision we never downloaded, and the
+        // next sync would skip fetching it.
+        val (s, _, verify) = storage(
+            "tok",
+            { respond(notFound, HttpStatusCode.OK) },
+            { respond("""{"id":"F1","version":"r-created"}""", HttpStatusCode.OK) },
+            { respond("""{"files":[{"id":"F1","version":"r-bumped"}]}""", HttpStatusCode.OK) },
+            { respond("""{"files":[{"id":"F1","version":"r-bumped"}]}""", HttpStatusCode.OK) },
+        )
+        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        assertIs<Result.Ok<CloudFileMeta>>(r)
+        assertEquals("r-created", r.value.rev)
         verify()
     }
 
@@ -461,7 +484,7 @@ class GoogleDriveStorageTest {
     @Test
     fun findFileMissingFilesArrayIsCloudStorageError() = runTest {
         val (s, history, verify) = storage("tok", { respond("{}", HttpStatusCode.OK) })
-        val r = s.exists(CLOUD_DB_PATH)
+        val r = s.metadata(CLOUD_DB_PATH)
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
         assertEquals("Missing files array in response", r.exception.message)
@@ -474,7 +497,7 @@ class GoogleDriveStorageTest {
     @Test
     fun findFileMissingIdIsCloudStorageError() = runTest {
         val (s, history, verify) = storage("tok", { respond("""{"files":[{"version":"r1"}]}""", HttpStatusCode.OK) })
-        val r = s.exists(CLOUD_DB_PATH)
+        val r = s.metadata(CLOUD_DB_PATH)
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
         assertEquals("File metadata missing id", r.exception.message)
@@ -487,7 +510,7 @@ class GoogleDriveStorageTest {
     @Test
     fun findFileMissingVersionIsCloudStorageError() = runTest {
         val (s, history, verify) = storage("tok", { respond("""{"files":[{"id":"F1"}]}""", HttpStatusCode.OK) })
-        val r = s.exists(CLOUD_DB_PATH)
+        val r = s.metadata(CLOUD_DB_PATH)
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
         assertEquals("File metadata missing version", r.exception.message)
@@ -579,9 +602,9 @@ class GoogleDriveStorageTest {
     }
 
     @Test
-    fun existsNetworkExceptionIsCaughtAsCloudStorageError() = runTest {
+    fun metadataNetworkExceptionIsCaughtAsCloudStorageError() = runTest {
         val (s, history, verify) = storage("tok", { throw IOException("boom") })
-        val r = s.exists(CLOUD_DB_PATH)
+        val r = s.metadata(CLOUD_DB_PATH)
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
         assertEquals(1, history.size)

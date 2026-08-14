@@ -7,6 +7,7 @@ import io.ktor.client.request.header
 import io.ktor.client.request.patch
 import io.ktor.client.request.put
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.client.statement.readRawBytes
 import io.ktor.http.ContentType
@@ -19,6 +20,7 @@ import kotlinx.serialization.json.put
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.ONEDRIVE_GRAPH_BASE
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.core.SyncConflictException
 
 /**
  * [CloudStorage] backed by the Microsoft Graph API, storing the sync DB in
@@ -97,7 +99,7 @@ class OneDriveStorage(
         path: String,
         data: ByteArray,
         expectedRev: String?,
-    ): Result<Unit> = withToken { token ->
+    ): Result<CloudFileMeta> = withToken { token ->
         val response = client.put("${itemUrl(path)}:/content") {
             header("Authorization", "Bearer $token")
             if (expectedRev != null) header("If-Match", expectedRev)
@@ -105,7 +107,7 @@ class OneDriveStorage(
             setBody(data)
         }
         // If-Match no longer matches — another device wrote first.
-        response.okOrConflictOr("OneDrive", conflictStatus = 412)
+        response.metaOrConflictOr(conflictStatus = 412)
     }
 
     /**
@@ -115,7 +117,7 @@ class OneDriveStorage(
      * @param data The file content.
      * @return A successful result when the file is created, or a conflict result when a file already exists.
      */
-    override suspend fun create(path: String, data: ByteArray): Result<Unit> = withToken { token ->
+    override suspend fun create(path: String, data: ByteArray): Result<CloudFileMeta> = withToken { token ->
         // conflictBehavior=fail is Graph's native create-only: an existing file yields 409
         // instead of being overwritten, which we surface as a conflict so the caller falls back
         // to the merge path. encodedParameters keeps the "@"/"." literal (already URL-safe).
@@ -125,7 +127,28 @@ class OneDriveStorage(
             contentType(ContentType.Application.OctetStream)
             setBody(data)
         }
-        response.okOrConflictOr("OneDrive", conflictStatus = 409)
+        response.metaOrConflictOr(conflictStatus = 409)
+    }
+
+    /**
+     * Maps a content-write response to the revision it produced, a sync conflict, or a storage error.
+     *
+     * A successful content PUT answers with the resulting DriveItem, so the new `eTag` comes from
+     * the write itself rather than a follow-up item GET, which could otherwise observe another
+     * device's later write.
+     *
+     * @param conflictStatus The HTTP status Graph uses to report the lost write (412 for `If-Match`, 409 for create-only).
+     * @return The written revision, a conflict, or a mapped storage error.
+     */
+    private suspend fun HttpResponse.metaOrConflictOr(conflictStatus: Int): Result<CloudFileMeta> = when {
+        status.value in 200..299 -> {
+            val eTag = (json.parseToJsonElement(bodyAsText()) as? JsonObject)
+                ?.get("eTag")?.jsonPrimitive?.content
+                ?: return Result.Err(CloudStorageException("Missing eTag in upload response"))
+            Result.Ok(CloudFileMeta(eTag))
+        }
+        status.value == conflictStatus -> Result.Err(SyncConflictException())
+        else -> mapError(status.value, bodyAsText())
     }
 
     /**
@@ -178,11 +201,18 @@ class OneDriveStorage(
      * @param path The path of the item within the app folder.
      * @return `true` if the item exists, `false` if it is not found.
      */
-    override suspend fun exists(path: String): Result<Boolean> = withToken { token ->
+    override suspend fun metadata(path: String): Result<CloudFileMeta?> = withToken { token ->
         val response = client.get(itemUrl(path)) { header("Authorization", "Bearer $token") }
         when {
-            response.status.value in 200..299 -> Result.Ok(true)
-            response.status.value == 404 -> Result.Ok(false)
+            response.status.value in 200..299 -> {
+                // The DriveItem `eTag` is the rev this provider guards uploads with (`If-Match`).
+                // It comes from the same item GET that used to be read only for its status code.
+                val eTag = (json.parseToJsonElement(response.bodyAsText()) as? JsonObject)
+                    ?.get("eTag")?.jsonPrimitive?.content
+                    ?: return@withToken Result.Err(CloudStorageException("Missing eTag in metadata"))
+                Result.Ok(CloudFileMeta(eTag))
+            }
+            response.status.value == 404 -> Result.Ok(null)
             else -> mapError(response.status.value, response.bodyAsText())
         }
     }

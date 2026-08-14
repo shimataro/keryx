@@ -74,6 +74,13 @@ const val SEARCH_MIN_TERM_LENGTH = 3
 const val SYNC_STATE_LAST_SYNCED_AT = "last_synced_at"
 const val SYNC_STATE_CLOUD_FILE_REV = "cloud_file_rev"
 
+/**
+ * Hex SHA-256 of the snapshot most recently uploaded to the cloud. A freshly built snapshot with
+ * the same digest carries no change this device has not already published, so the upload is
+ * skipped. Device-local (`sync_state` is excluded from the uploaded snapshot).
+ */
+const val SYNC_STATE_LAST_UPLOADED_DIGEST = "last_uploaded_snapshot_digest"
+
 // --- Window / pane sizing (desktop) ---
 const val WINDOW_DEFAULT_WIDTH = 1280
 const val WINDOW_DEFAULT_HEIGHT = 800

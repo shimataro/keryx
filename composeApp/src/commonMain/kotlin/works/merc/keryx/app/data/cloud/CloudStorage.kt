@@ -13,6 +13,16 @@ import works.merc.keryx.app.core.SyncConflictException
 class CloudFile(val data: ByteArray, val rev: String)
 
 /**
+ * A cloud file's revision, without its contents.
+ *
+ * Every provider already returns this in the same metadata request that answers "does the file
+ * exist" (Dropbox's `get_metadata`, Drive's name lookup, Graph's item GET), so carrying the rev
+ * out of that call costs no extra round trip — and lets `SyncRepository` recognise a cloud file
+ * it has already merged and skip downloading it again.
+ */
+class CloudFileMeta(val rev: String)
+
+/**
  * Executes [block] with an access token and maps authentication or storage failures to [Result.Err].
  *
  * @param providerName The cloud provider name used in authentication and storage error messages.
@@ -77,16 +87,24 @@ interface CloudStorage {
      * Uploads [data] to [path]. When [expectedRev] is non-null, the write fails
      * with [works.merc.keryx.app.core.SyncConflictException] if the remote rev
      * differs (another device wrote first).
+     *
+     * Returns the revision **this write produced**. The caller records it as the revision it has
+     * already merged, so its next sync recognises its own upload and does not download it back.
+     * It must come from the write's own response rather than a follow-up [metadata] call: a
+     * second request could observe another device's newer write instead, and storing that rev
+     * would make the next sync skip a download whose contents were never merged.
      */
-    suspend fun upload(path: String, data: ByteArray, expectedRev: String? = null): Result<Unit>
+    suspend fun upload(path: String, data: ByteArray, expectedRev: String? = null): Result<CloudFileMeta>
 
     /**
      * Creates [path] with [data] only if it does not already exist. If the file
      * is already present, fails with [works.merc.keryx.app.core.SyncConflictException]
      * rather than overwriting it — the safe primitive for the first-ever upload, so a
      * wrong "does not exist" reading can never destroy another device's data.
+     *
+     * Returns the created file's revision, for the same reason as [upload].
      */
-    suspend fun create(path: String, data: ByteArray): Result<Unit>
+    suspend fun create(path: String, data: ByteArray): Result<CloudFileMeta>
 
     /**
      * Deletes [path]. Idempotent: succeeds with [Result.Ok] when the file is already absent.
@@ -111,5 +129,13 @@ interface CloudStorage {
      */
     suspend fun rename(from: String, to: String): Result<Unit>
 
-    suspend fun exists(path: String): Result<Boolean>
+    /**
+     * Fetches [path]'s revision without its contents, or `null` when the file does not exist.
+     *
+     * Doubles as the existence check (`null` == absent). Every implementation already issued this
+     * exact request to answer that question and discarded the rev; returning it lets a caller
+     * compare against the last revision it merged, so an unchanged cloud file need not be
+     * downloaded at all.
+     */
+    suspend fun metadata(path: String): Result<CloudFileMeta?>
 }

@@ -21,16 +21,31 @@ Conflict prevention is done via a revision check on upload — Dropbox: `rev`, a
 
 ## Sync Flow (`SyncRepository.sync()`)
 
-1. If `keryx.db` does not exist in the cloud, upload the local DB as-is (first time).
-2. Download `keryx.db` from the cloud (to a temp file).
+1. `CloudStorage.metadata(CLOUD_DB_PATH)` fetches the cloud file's revision — or `null` when it does not exist yet, in which case the local DB is uploaded as-is via create-only (first time) and the sync ends. This single request replaces the old existence check; every provider already returned the revision in it (Dropbox's `get_metadata` `rev`, Drive's name-lookup `version`, Graph's item `eTag`) and simply discarded it, so learning the revision costs no extra round trip.
+2. Download `keryx.db` from the cloud (to a temp file) — **skipped when the revision equals `sync_state.cloud_file_rev`**, i.e. this device has already merged exactly this file. Re-downloading it would only re-merge bytes that are by definition already in the local DB.
    - The downloaded bytes are checked against SQLite's 16-byte file header (`core/SqliteFile.kt`'s `looksLikeSqliteFile`) before anything is written to disk — symmetric with the same check on the upload side (step 5). A payload that fails it (truncated download, an HTML error page, a 0-byte or otherwise non-SQLite file) is rejected immediately as `CloudDataIncompatibleException`, rather than reaching `DatabaseMerger` and failing deep inside the merge statements with an ambiguous `no such table: cloud.folders`.
 3. **`DatabaseMerger.merge()` to merge** (see below). Immediately after, `ftsManager.indexMissing()` incrementally indexes new articles from merge (without wiping the live index), then `driver.notifyListeners(...)` (all tables touched by merge) is called. Because merge writes via `DatabaseMerger`'s dedicated raw JDBC connection without firing SQLDelight query notifications, `watchAll` flows (and re-search with updated index) must be re-triggered to reflect sync content in the UI without restart.
 4. Record `sync_state.cloud_file_rev`.
-5. `DatabaseSnapshot.exportForUpload()` creates a `VACUUM INTO` snapshot, **drops `articles_fts` on the copy side** (live DB is unchanged). Upload its bytes specifying `rev`.
+5. `DatabaseSnapshot.exportForUpload()` creates a `VACUUM INTO` snapshot, **drops `articles_fts` and `sync_state` on the copy side** (live DB is unchanged). Upload its bytes specifying `rev` — **skipped when the snapshot's SHA-256 equals `sync_state.last_uploaded_snapshot_digest` and step 2 merged nothing**, i.e. the cloud already holds exactly these bytes.
    - If `rev` mismatch (409 → `SyncConflictException`), retry from re-download (max 3 retries).
-6. On success, record `last_synced_at`.
+6. On success, record `last_synced_at`, the uploaded snapshot's digest, and **the revision the upload itself produced** (`CloudStorage.upload`/`create` return it). It must come from the write's own response, never a follow-up `metadata()` call: a second request could observe another device's newer write, and storing that revision would make the next sync skip a download whose contents were never merged.
 
 Debouncing: After changes such as read/star, `SyncScheduler.scheduleSync()` batches sync after a fixed delay from the last operation.
+
+### Skipping Unchanged Transfers
+
+The background loop syncs on a timer, so the overwhelmingly common case is that neither side changed since last time. Both halves of the cycle are therefore conditional, and a sync in that state costs **one metadata request and zero payload bytes**:
+
+- **Download** is skipped on an unchanged revision (step 2). Because step 6 records the revision the upload produced, a device that is the only writer recognises its own uploads and never downloads them back.
+- **Upload** is skipped when the freshly built snapshot hashes to the same digest as the last uploaded one *and* no merge happened this cycle (step 5). A merge is always followed by an upload even if nothing else changed locally, because last-write-wins can leave the local DB holding rows the cloud lacks.
+
+Comparing the snapshot's own content is what makes skipping safe: a local edit cannot hash to the previous digest, so no change is ever silently dropped. The opposite misjudgement — treating identical data as changed — merely uploads, exactly as before. Dropping `sync_state` from the snapshot (step 5) is what makes the digest stable: `last_synced_at` is rewritten on every successful sync, so leaving it in would change the bytes every cycle and the check could never fire. That table is device-local by design (see [db-schema.md](db-schema.md)) and appears in neither `MergeSql` nor `DatabaseMerger`'s expected schema, so no receiving device ever read it out of the uploaded file.
+
+The digest is stored in `sync_state`, which is itself excluded from the upload — so it is per-device state, and a device that has never uploaded simply finds no digest and uploads.
+
+Both markers describe **one provider's file**, so `clearSyncFailureState()` clears them alongside the failure state when a connection is disconnected or switched (`SettingsViewModel.disconnect()`/`switchTo()`). Each provider's revision is an opaque string in its own format, so a stale one would in practice never match the next provider's — but a match would skip a download that was never merged, and that is not a risk worth leaving to chance. Reconnecting to the same provider re-establishes both on the first sync.
+
+The clear runs **under the same mutex `sync()` holds**, which is also why `updateAutoSyncGate()` / `emitErrorNotification()` are called inside that lock rather than after it: all four fields the clear touches (the revision, the digest, `lastSyncError`, `autoSyncSuspended`) are written by a sync too, so a sync already in flight would otherwise finish *after* the disconnect and restore the markers describing the provider that was just torn down — reintroducing exactly the skipped-download-never-merged case the clear exists to prevent. The cost is that disconnecting waits out an in-flight sync (bounded by the HTTP timeouts, and visible as the usual sync spinner), which is the correct ordering anyway.
 
 ### Automatic-Sync Suspension
 

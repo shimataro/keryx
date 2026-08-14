@@ -28,12 +28,14 @@ import works.merc.keryx.app.core.SYNC_DEBOUNCE_MS
 import works.merc.keryx.app.core.SYNC_MAX_RETRY
 import works.merc.keryx.app.core.SYNC_STATE_CLOUD_FILE_REV
 import works.merc.keryx.app.core.SYNC_STATE_LAST_SYNCED_AT
+import works.merc.keryx.app.core.SYNC_STATE_LAST_UPLOADED_DIGEST
 import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.core.SyncConflictException
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.platform.AppDirs
+import works.merc.keryx.app.platform.ContentDigest
 import works.merc.keryx.app.platform.DatabaseMerger
 import works.merc.keryx.app.platform.DatabaseSnapshot
 import works.merc.keryx.app.platform.FileIO
@@ -125,13 +127,29 @@ class SyncRepository(
     val autoSyncSuspended: StateFlow<Boolean> = _autoSyncSuspended
 
     /**
-     * Clears everything that describes "why sync is currently broken" — the mirrored failure
-     * reason and the automatic-sync pause — e.g. when the connection that produced them is being
-     * torn down so a subsequently-connected provider does not inherit either.
+     * Clears everything tied to the current cloud connection — the mirrored failure reason, the
+     * automatic-sync pause, and the "what we last saw / last uploaded" markers — e.g. when the
+     * connection that produced them is being torn down so a subsequently-connected provider does
+     * not inherit any of it.
+     *
+     * The revision and digest are dropped for the same reason as the failure state: they describe
+     * one provider's file. Each provider's revision is an opaque string in its own format, so a
+     * stale one would in practice never match the next provider's — but "would never match" is a
+     * weaker guarantee than "cannot", and a match here would skip a download that was never
+     * merged. Reconnecting to the *same* provider re-establishes both on the first sync.
+     *
+     * Runs under [mutex] — the same lock [sync] holds across everything that writes these four
+     * fields. Without it, a sync already past its upload would re-write the revision and digest
+     * *after* this cleared them, handing the next connection markers describing the old provider's
+     * file: the very skipped-download-that-was-never-merged this method exists to prevent.
      */
-    fun clearSyncFailureState() {
-        _lastSyncError.value = null
-        _autoSyncSuspended.value = false
+    suspend fun clearSyncFailureState() {
+        mutex.withLock {
+            _lastSyncError.value = null
+            _autoSyncSuspended.value = false
+            setSyncState(SYNC_STATE_CLOUD_FILE_REV, "")
+            setSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST, "")
+        }
     }
 
     /**
@@ -157,10 +175,17 @@ class SyncRepository(
             Log.info(TAG, "Automatic sync skipped: cloud data is unusable until it is reset")
             return Result.Ok(Unit)
         }
-        val result = activityCenter.trackSync { mutex.withLock { syncLocked() } }
-        updateAutoSyncGate(result)
-        emitErrorNotification(result)
-        return result
+        // The gate and the failure text are written inside the lock, not after it: they are two of
+        // the four fields clearSyncFailureState() clears, and it takes the same lock so a
+        // disconnect can never be undone by a sync that was already in flight.
+        return activityCenter.trackSync {
+            mutex.withLock {
+                val result = syncLocked()
+                updateAutoSyncGate(result)
+                emitErrorNotification(result)
+                result
+            }
+        }
     }
 
     /**
@@ -190,18 +215,19 @@ class SyncRepository(
      */
     suspend fun resetCloudData(): Result<Unit> {
         val cloud = cloudProvider() ?: return Result.Ok(Unit)
-        val result = activityCenter.trackSync {
+        // Gate and failure text written inside the lock, same reason as in sync().
+        return activityCenter.trackSync {
             mutex.withLock {
-                when (val archived = archiveCloudDb(cloud)) {
+                val result = when (val archived = archiveCloudDb(cloud)) {
                     is Result.Err -> archived
                     // The old file is out of the way (archived or deleted), so re-create it.
                     is Result.Ok -> createFresh(cloud)
                 }
+                updateAutoSyncGate(result)
+                emitErrorNotification(result)
+                result
             }
         }
-        updateAutoSyncGate(result)
-        emitErrorNotification(result)
-        return result
     }
 
     /**
@@ -290,47 +316,79 @@ class SyncRepository(
             return Result.Ok(Unit)
         }
 
-        // First sync ever: no cloud file yet → create it (create-only, never overwrite).
-        // If the file actually already exists (a wrong `exists=false`, a scope/account mismatch,
-        // or a concurrent creator), `createFresh` returns SyncConflictException and we fall through
-        // to the download→merge→update path instead of clobbering the other device's data.
-        when (val exists = cloud.exists(CLOUD_DB_PATH)) {
-            is Result.Err -> {
-                Log.error(TAG, "Sync: exists() failed: ${exists.exception.message}")
-                return exists
+        repeat(SYNC_MAX_RETRY) {
+            // One metadata request answers both "does the cloud file exist" and "is it still the
+            // revision we last merged". It is the same request the old existence check made, so
+            // learning the rev here costs no extra round trip.
+            val remoteRev = when (val meta = cloud.metadata(CLOUD_DB_PATH)) {
+                is Result.Err -> {
+                    Log.error(TAG, "Sync: metadata() failed: ${meta.exception.message}")
+                    return meta
+                }
+                is Result.Ok -> meta.value?.rev
             }
-            is Result.Ok -> if (!exists.value) {
+
+            // First sync ever: no cloud file yet → create it (create-only, never overwrite).
+            // If the file actually already exists (a wrong "absent" reading, a scope/account
+            // mismatch, or a concurrent creator), `createFresh` returns SyncConflictException and
+            // we retry into the download→merge→upload path instead of clobbering the other
+            // device's data.
+            if (remoteRev == null) {
                 when (val created = createFresh(cloud)) {
                     is Result.Ok -> return Result.Ok(Unit)
-                    is Result.Err ->
+                    is Result.Err -> {
                         if (created.exception !is SyncConflictException) return created
-                    // else: cloud file already exists → continue into the merge path below.
-                }
-            }
-        }
-
-        repeat(SYNC_MAX_RETRY) {
-            val cloudFile = when (val d = cloud.download(CLOUD_DB_PATH)) {
-                is Result.Ok -> d.value
-                is Result.Err -> {
-                    Log.error(TAG, "Sync: download failed: ${d.exception.message}")
-                    return d
+                        return@repeat
+                    }
                 }
             }
 
-            when (val merged = mergeCloud(cloudFile.data)) {
-                is Result.Err -> return merged
-                is Result.Ok -> Unit
+            // Skip the download when the cloud file is the exact revision this device already
+            // merged: re-downloading it would re-merge bytes that are, by definition, already in
+            // the local DB. `mergedRemote` records whether we did merge, because a merge can leave
+            // the local DB holding rows the cloud lacks (anything local that won last-write-wins),
+            // which must still be uploaded even if nothing else changed locally.
+            val mergedRemote = remoteRev != getSyncState(SYNC_STATE_CLOUD_FILE_REV)
+            if (mergedRemote) {
+                val cloudFile = when (val d = cloud.download(CLOUD_DB_PATH)) {
+                    is Result.Ok -> d.value
+                    is Result.Err -> {
+                        Log.error(TAG, "Sync: download failed: ${d.exception.message}")
+                        return d
+                    }
+                }
+                when (val merged = mergeCloud(cloudFile.data)) {
+                    is Result.Err -> return merged
+                    is Result.Ok -> Unit
+                }
+                setSyncState(SYNC_STATE_CLOUD_FILE_REV, cloudFile.rev)
             }
-            setSyncState(SYNC_STATE_CLOUD_FILE_REV, cloudFile.rev)
 
             val bytes = when (val b = snapshotBytesForUpload()) {
                 is Result.Ok -> b.value
                 is Result.Err -> return b
             }
 
-            when (val upload = cloud.upload(CLOUD_DB_PATH, bytes, expectedRev = cloudFile.rev)) {
+            // Skip the upload when the snapshot is byte-identical to the one already in the cloud.
+            // The comparison is over the snapshot's own content (`sync_state` is excluded from it,
+            // so it does not drift on its own), which is what makes skipping safe: a local change
+            // cannot hash to the previous digest, so no edit is ever silently dropped. The
+            // opposite misjudgement only costs an upload that would have happened anyway.
+            val digest = ContentDigest.sha256(bytes)
+            if (!mergedRemote && digest == getSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST)) {
+                Log.info(TAG, "Sync: nothing changed locally or remotely; skipping transfer")
+                setSyncState(SYNC_STATE_LAST_SYNCED_AT, clock.nowMillis().toString())
+                return Result.Ok(Unit)
+            }
+
+            when (val upload = cloud.upload(CLOUD_DB_PATH, bytes, expectedRev = remoteRev)) {
                 is Result.Ok -> {
+                    // Record the revision this write produced, so the next sync recognises its own
+                    // upload and skips downloading it back. It comes from the write's own response
+                    // (never a follow-up metadata call, which could return another device's newer
+                    // write and make the next sync skip a download it never merged).
+                    setSyncState(SYNC_STATE_CLOUD_FILE_REV, upload.value.rev)
+                    setSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST, digest)
                     setSyncState(SYNC_STATE_LAST_SYNCED_AT, clock.nowMillis().toString())
                     return Result.Ok(Unit)
                 }
@@ -360,6 +418,10 @@ class SyncRepository(
         }
         return when (val r = cloud.create(CLOUD_DB_PATH, bytes)) {
             is Result.Ok -> {
+                // Same bookkeeping as a successful upload: the file we just created is, by
+                // definition, already merged here, so the next sync can skip downloading it.
+                setSyncState(SYNC_STATE_CLOUD_FILE_REV, r.value.rev)
+                setSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST, ContentDigest.sha256(bytes))
                 setSyncState(SYNC_STATE_LAST_SYNCED_AT, clock.nowMillis().toString())
                 Result.Ok(Unit)
             }
@@ -462,6 +524,9 @@ class SyncRepository(
     private fun setSyncState(key: String, value: String) {
         db.sync_stateQueries.upsert(key, value)
     }
+
+    private fun getSyncState(key: String): String? =
+        db.sync_stateQueries.get(key).executeAsOneOrNull()
 
     private companion object {
         const val TAG = "Sync"

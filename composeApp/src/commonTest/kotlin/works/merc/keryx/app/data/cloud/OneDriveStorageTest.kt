@@ -111,9 +111,10 @@ class OneDriveStorageTest {
 
     @Test
     fun uploadSendsIfMatchAndSucceeds() = runTest {
-        val (s, history, verify) = storage("tok", { respond("{}", HttpStatusCode.OK, jsonHeaders) })
+        val (s, history, verify) = storage("tok", { respond("""{"eTag":"etag2"}""", HttpStatusCode.OK, jsonHeaders) })
         val r = s.upload(CLOUD_DB_PATH, byteArrayOf(1), expectedRev = "etag1")
-        assertIs<Result.Ok<Unit>>(r)
+        assertIs<Result.Ok<CloudFileMeta>>(r)
+        assertEquals("etag2", r.value.rev)
         assertEquals(1, history.size)
         assertEquals("PUT", history[0].method.value)
         assertTrue(history[0].url.toString().contains(":/content"))
@@ -133,9 +134,9 @@ class OneDriveStorageTest {
 
     @Test
     fun uploadWithNullExpectedRevSendsNoIfMatch() = runTest {
-        val (s, history, verify) = storage("tok", { respond("{}", HttpStatusCode.OK, jsonHeaders) })
+        val (s, history, verify) = storage("tok", { respond("""{"eTag":"etag2"}""", HttpStatusCode.OK, jsonHeaders) })
         val r = s.upload(CLOUD_DB_PATH, byteArrayOf(1), expectedRev = null)
-        assertIs<Result.Ok<Unit>>(r)
+        assertIs<Result.Ok<CloudFileMeta>>(r)
         assertEquals(1, history.size)
         assertEquals("PUT", history[0].method.value)
         assertNull(history[0].headers["If-Match"])
@@ -144,9 +145,10 @@ class OneDriveStorageTest {
 
     @Test
     fun createSucceedsWithConflictBehaviorFail() = runTest {
-        val (s, history, verify) = storage("tok", { respond("{}", HttpStatusCode.Created, jsonHeaders) })
+        val (s, history, verify) = storage("tok", { respond("""{"eTag":"etag1"}""", HttpStatusCode.Created, jsonHeaders) })
         val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
-        assertIs<Result.Ok<Unit>>(r)
+        assertIs<Result.Ok<CloudFileMeta>>(r)
+        assertEquals("etag1", r.value.rev)
         assertEquals(1, history.size)
         assertEquals("PUT", history[0].method.value)
         assertTrue(history[0].url.toString().contains("conflictBehavior"))
@@ -181,13 +183,13 @@ class OneDriveStorageTest {
     }
 
     @Test
-    fun existsTrueAndFalse() = runTest {
-        val (yes, _, yesVerify) = storage("tok", { respond("{}", HttpStatusCode.OK, jsonHeaders) })
-        assertEquals(true, (yes.exists(CLOUD_DB_PATH) as Result.Ok).value)
+    fun metadataReturnsETagOrNull() = runTest {
+        val (yes, _, yesVerify) = storage("tok", { respond("""{"eTag":"e7"}""", HttpStatusCode.OK, jsonHeaders) })
+        assertEquals("e7", (yes.metadata(CLOUD_DB_PATH) as Result.Ok<CloudFileMeta?>).value?.rev)
         yesVerify()
 
         val (no, _, noVerify) = storage("tok", { respondError(HttpStatusCode.NotFound) })
-        assertEquals(false, (no.exists(CLOUD_DB_PATH) as Result.Ok).value)
+        assertNull((no.metadata(CLOUD_DB_PATH) as Result.Ok<CloudFileMeta?>).value)
         noVerify()
     }
 
