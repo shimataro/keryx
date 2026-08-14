@@ -133,7 +133,7 @@ class GoogleDriveStorage(
         } else {
             when (val created = createFile(token, name, data)) {
                 is Result.Err -> created
-                is Result.Ok -> resolveCreateRace(token, name, created.value.id)
+                is Result.Ok -> resolveCreateRace(token, name, created.value)
             }
         }
     }
@@ -148,10 +148,10 @@ class GoogleDriveStorage(
      *
      * @param token The Google Drive access token.
      * @param name The file name shared by the concurrent creations.
-     * @param createdId The ID of the file created by the current operation.
+     * @param created The file created by the current operation, as returned by its own write.
      * @return `Result.Ok` if the current file is retained and duplicates are deleted; a conflict error if another file wins.
      */
-    private suspend fun resolveCreateRace(token: String, name: String, createdId: String): Result<CloudFileMeta> {
+    private suspend fun resolveCreateRace(token: String, name: String, created: DriveFile): Result<CloudFileMeta> {
         var rechecked = false
         while (true) {
             val listResult = listFilesByName(token, name)
@@ -161,13 +161,13 @@ class GoogleDriveStorage(
             if (winner == null) {
                 return Result.Err(CloudStorageException("Created file disappeared immediately"))
             }
-            if (winner.id != createdId) {
+            if (winner.id != created.id) {
                 // Lost the race — delete the file we just created so it does not linger as an orphan
                 // (the winner may have listed before ours became visible and so never sees it to clean
                 // up). Best-effort: a failed cleanup must not mask the conflict signal, and a
                 // double-delete with the winner is safe (404 == Ok). The sync flow will then download
                 // the winner's file and retry.
-                deleteById(token, createdId)
+                deleteById(token, created.id)
                 return Result.Err(SyncConflictException())
             }
             if (files.size == 1 && !rechecked) {
@@ -184,9 +184,14 @@ class GoogleDriveStorage(
                     }
                 }
             }
-            // The listing that decided the race already carries the winner's `version`, so the
-            // created file's rev needs no extra request.
-            return Result.Ok(CloudFileMeta(winner.version))
+            // We won, so the retained file is the one we created — report the version its *own*
+            // write returned, not the one this listing just read. The listing happens up to
+            // RACE_RECHECK_DELAY_MS after that write, and a racing device's upload() landing in
+            // between bumps our file's version; returning that would tell SyncRepository we had
+            // merged a revision we never saw, and the next sync would skip downloading it.
+            // Reporting a *stale* version is safe by comparison: it only costs one extra
+            // download+merge next cycle.
+            return Result.Ok(CloudFileMeta(created.version))
         }
     }
 

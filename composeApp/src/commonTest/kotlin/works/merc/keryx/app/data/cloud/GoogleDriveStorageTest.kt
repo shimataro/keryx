@@ -272,6 +272,25 @@ class GoogleDriveStorageTest {
     }
 
     @Test
+    fun createReturnsTheVersionFromItsOwnWriteNotALaterListing() = runTest {
+        // The race-resolving listings run up to RACE_RECHECK_DELAY_MS after our create, so a racing
+        // device's upload() can bump our file's version in between. Reporting that bumped version
+        // would tell SyncRepository we had already merged a revision we never downloaded, and the
+        // next sync would skip fetching it.
+        val (s, _, verify) = storage(
+            "tok",
+            { respond(notFound, HttpStatusCode.OK) },
+            { respond("""{"id":"F1","version":"r-created"}""", HttpStatusCode.OK) },
+            { respond("""{"files":[{"id":"F1","version":"r-bumped"}]}""", HttpStatusCode.OK) },
+            { respond("""{"files":[{"id":"F1","version":"r-bumped"}]}""", HttpStatusCode.OK) },
+        )
+        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        assertIs<Result.Ok<CloudFileMeta>>(r)
+        assertEquals("r-created", r.value.rev)
+        verify()
+    }
+
+    @Test
     fun createRecheckConfirmsSoleWinner() = runTest {
         // Same shape as createNewFileSucceeds, but asserting explicitly that exactly one recheck
         // happens (no third listing) once the recheck also comes back solitary.
