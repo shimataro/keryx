@@ -688,6 +688,44 @@ class ArticleRepositoryTest {
     }
 
     @Test
+    fun deleteExpiredArticlesProtectsLatest10PerFeedIndependently() {
+        // The "keep latest 10" protection is per feed, so it must be ranked PARTITION BY feed_id
+        // rather than over the table as a whole. The two feeds' published_at ranges are kept
+        // disjoint (f1 strictly older than f2) so a table-wide ranking is unambiguously
+        // distinguishable: it would protect only f2's newest 10 and tombstone every f1 row.
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertFeed("f2")
+            val oneDayMs = 24 * 60 * 60 * 1000L
+            val now = 10 * oneDayMs
+            val cutoff = now - 1 * oneDayMs // retentionDays = 1
+
+            // 12 expired articles per feed: the newest 10 of *each* feed must survive.
+            for (i in 0 until 12) {
+                db.insertArticle("f1a$i", "f1", publishedAt = 1000L + i, cachedAt = cutoff - 1)
+                db.insertArticle("f2a$i", "f2", publishedAt = 2000L + i, cachedAt = cutoff - 1)
+            }
+
+            val repo = newRepo(db, driver, clock = Clock { now })
+            repo.deleteExpiredArticles(retentionDays = 1)
+
+            for (feed in listOf("f1", "f2")) {
+                // The 2 oldest of this feed fall outside its own top 10 and are tombstoned.
+                for (i in 0 until 2) {
+                    assertEquals(now, db.articlesQueries.getById("${feed}a$i").executeAsOne().deleted_at)
+                }
+                // The newest 10 of this feed are protected, independently of the other feed.
+                for (i in 2 until 12) {
+                    assertNull(db.articlesQueries.getById("${feed}a$i").executeAsOne().deleted_at)
+                }
+            }
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun upsertDoesNotReviveDeletedArticle() {
         // A feed refresh re-inserts the same (feed_id, guid) via `insert ... ON CONFLICT`. That path
         // must preserve an existing tombstone, otherwise refresh would resurrect a deleted article.
