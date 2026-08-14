@@ -24,6 +24,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlin.random.Random
 import works.merc.keryx.app.core.CloudStorageException
+import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SyncConflictException
 import works.merc.keryx.app.core.map
@@ -89,7 +90,7 @@ class GoogleDriveStorage(
         if (response.status.value !in 200..299) {
             return@withToken mapError(response.status.value, response.bodyAsText())
         }
-        response.writeBodyToFile(destPath)
+        response.writeBodyToFile(destPath, MAX_SYNC_DB_SIZE_BYTES)
         // The version came from the name lookup above, which is the same read this download is
         // already based on — no extra request to learn what was just fetched.
         Result.Ok(CloudFileMeta(file.version))

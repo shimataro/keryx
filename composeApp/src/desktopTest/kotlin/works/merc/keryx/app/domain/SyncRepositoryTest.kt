@@ -21,6 +21,7 @@ import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.KeryxException
+import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SYNC_DEBOUNCE_MS
 import works.merc.keryx.app.core.SYNC_MAX_RETRY
@@ -253,7 +254,7 @@ class SyncRepositoryTest {
     private fun gunzipOf(gzBytes: ByteArray): ByteArray {
         val src = File.createTempFile("keryx-gunzip-src-", ".gz").apply { deleteOnExit(); writeBytes(gzBytes) }
         val dst = File.createTempFile("keryx-gunzip-dst-", ".bin").apply { deleteOnExit() }
-        Gzip.decompressFile(src.absolutePath, dst.absolutePath)
+        Gzip.decompressFile(src.absolutePath, dst.absolutePath, MAX_SYNC_DB_SIZE_BYTES)
         val out = dst.readBytes()
         src.delete()
         dst.delete()

@@ -24,6 +24,7 @@ import works.merc.keryx.app.core.cloudBackupPath
 import works.merc.keryx.app.core.looksLikeSqliteFile
 import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SYNC_DEBOUNCE_MS
 import works.merc.keryx.app.core.SYNC_MAX_RETRY
@@ -500,7 +501,7 @@ class SyncRepository(
             }
             val mergeTarget = if (compressed) {
                 try {
-                    Gzip.decompressFile(downloadPath, cloudTempPath)
+                    Gzip.decompressFile(downloadPath, cloudTempPath, MAX_SYNC_DB_SIZE_BYTES)
                 } catch (e: Exception) {
                     // Symmetric with mergeCloud's own SQLite-header check below: a foreign/corrupt
                     // cloud file is the cloud's fault, not a transient/app-side failure, so it is

@@ -18,9 +18,11 @@ expect object Gzip {
     /**
      * Decompresses the gzip file at [sourcePath] into [destPath], replacing it if present.
      *
-     * Throws when [sourcePath] is not a valid gzip stream (a foreign/corrupt cloud file) or on
-     * I/O error — callers are expected to classify that as the cloud data being unusable, the same
-     * way an invalid SQLite header is classified elsewhere in the sync flow.
+     * Throws when [sourcePath] is not a valid gzip stream (a foreign/corrupt cloud file), when the
+     * decompressed output would exceed [maxBytes] (a small, highly-compressed file expanding to
+     * exhaust disk space), or on I/O error — callers are expected to classify that as the cloud
+     * data being unusable, the same way an invalid SQLite header is classified elsewhere in the
+     * sync flow.
      */
-    fun decompressFile(sourcePath: String, destPath: String)
+    fun decompressFile(sourcePath: String, destPath: String, maxBytes: Long)
 }

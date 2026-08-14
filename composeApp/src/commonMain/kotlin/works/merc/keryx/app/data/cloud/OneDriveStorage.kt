@@ -18,6 +18,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import works.merc.keryx.app.core.CloudStorageException
+import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
 import works.merc.keryx.app.core.ONEDRIVE_GRAPH_BASE
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SyncConflictException
@@ -84,7 +85,7 @@ class OneDriveStorage(
         if (content.status.value !in 200..299) {
             return@withToken mapError(content.status.value, content.bodyAsText())
         }
-        content.writeBodyToFile(destPath)
+        content.writeBodyToFile(destPath, MAX_SYNC_DB_SIZE_BYTES)
         // The eTag came from the item metadata fetched above, which is the read this download is
         // based on — no extra request to learn what was just fetched.
         Result.Ok(CloudFileMeta(eTag))

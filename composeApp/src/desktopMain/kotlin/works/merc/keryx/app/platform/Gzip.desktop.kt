@@ -1,6 +1,7 @@
 package works.merc.keryx.app.platform
 
 import java.io.File
+import java.io.IOException
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
@@ -21,13 +22,18 @@ actual object Gzip {
         }
     }
 
-    actual fun decompressFile(sourcePath: String, destPath: String) {
+    actual fun decompressFile(sourcePath: String, destPath: String, maxBytes: Long) {
         val buffer = ByteArray(GZIP_CHUNK_BYTES)
+        var total = 0L
         GZIPInputStream(File(sourcePath).inputStream()).use { input ->
             File(destPath).outputStream().use { output ->
                 while (true) {
                     val read = input.read(buffer)
                     if (read <= 0) break
+                    total += read
+                    if (total > maxBytes) {
+                        throw IOException("Decompressed output exceeds the $maxBytes-byte limit")
+                    }
                     output.write(buffer, 0, read)
                 }
             }

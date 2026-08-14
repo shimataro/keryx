@@ -52,6 +52,16 @@ const val CLOUD_DB_BACKUP_PREFIX = "/keryx-"
 const val CLOUD_DB_BACKUP_SUFFIX = ".db.gz.bak"
 
 // --- Sync / network ---
+/**
+ * Upper bound on the size of the sync database, both the raw download (CloudFileTransfer)
+ * and the decompressed gzip output (Gzip.decompressFile). A real 3,671-article snapshot
+ * measures 21.4 MB uncompressed (see sync-architecture.md); this leaves generous headroom for
+ * legitimate growth while still capping how much disk a corrupt or hostile cloud file — via a
+ * small gzip payload with a very high expansion ratio, or simply an oversized raw file — can
+ * consume before the SQLite-header check or the merge ever inspects it.
+ */
+const val MAX_SYNC_DB_SIZE_BYTES = 1024L * 1024 * 1024 // 1 GiB
+
 const val SYNC_MAX_RETRY = 3
 const val FEED_TIMEOUT_RETRY_COUNT = 1
 const val SYNC_DEBOUNCE_MS = 5_000L
