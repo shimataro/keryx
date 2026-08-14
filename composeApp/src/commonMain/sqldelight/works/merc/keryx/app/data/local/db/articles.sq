@@ -191,6 +191,13 @@ WHERE is_read = 0 AND deleted_at IS NULL AND feed_id IN (
 -- articles and the latest 10 alive per feed (the subquery excludes tombstoned rows, so a
 -- persisted tombstone can't occupy a protected slot and drop live retention below 10).
 -- `deleted_at IS NULL` makes it idempotent (never re-stamps an already-tombstoned row).
+--
+-- The protected set is ranked with ROW_NUMBER() rather than a correlated `... WHERE
+-- a2.feed_id = articles.feed_id ORDER BY ... LIMIT 10` subquery, so it is evaluated ONCE for
+-- the whole statement instead of re-running (and re-sorting, via a temp B-tree) for every
+-- candidate row. Both forms select the same rows: a row eligible for stamping is by definition
+-- excluded by this `NOT IN` guard, so no member of the protected set is ever stamped and the
+-- set cannot shift while the statement runs — which makes per-row re-evaluation redundant.
 softDeleteExpired:
 UPDATE articles
 SET deleted_at = ?, deleted_updated_at = ?, updated_at = ?
@@ -198,11 +205,15 @@ WHERE is_starred = 0
   AND deleted_at IS NULL
   AND cached_at < ?
   AND id NOT IN (
-      SELECT id FROM articles AS a2
-      WHERE a2.feed_id = articles.feed_id
-        AND a2.deleted_at IS NULL
-      ORDER BY a2.published_at DESC, a2.created_at DESC, a2.id DESC
-      LIMIT 10
+      SELECT id FROM (
+          SELECT id, ROW_NUMBER() OVER (
+              PARTITION BY feed_id
+              ORDER BY published_at DESC, created_at DESC, id DESC
+          ) AS rn
+          FROM articles
+          WHERE deleted_at IS NULL
+      )
+      WHERE rn <= 10
   );
 
 lastRowId:
