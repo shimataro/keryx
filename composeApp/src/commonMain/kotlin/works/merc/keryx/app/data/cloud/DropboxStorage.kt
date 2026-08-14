@@ -15,6 +15,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import works.merc.keryx.app.core.CloudStorageException
+import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SyncConflictException
 
@@ -66,7 +67,7 @@ class DropboxStorage(
             ?: return@withToken Result.Err(CloudStorageException("Missing rev in metadata"))
         // Read the rev before the body: the metadata rides in a header, so a failure to parse it
         // costs nothing, whereas streaming first would write a file we then throw away.
-        response.writeBodyToFile(destPath)
+        response.writeBodyToFile(destPath, MAX_SYNC_DB_SIZE_BYTES)
         Result.Ok(CloudFileMeta(rev))
     }
 

@@ -27,14 +27,23 @@ private const val TRANSFER_CHUNK_BYTES = 64 * 1024
  * through in [TRANSFER_CHUNK_BYTES] pieces instead.
  *
  * @param destPath Filesystem path to write the body to.
+ * @param maxBytes Upper bound on the written size. Throws before writing a chunk that would
+ * cross it — a defense against an oversized (or incompressible-archive) cloud file exhausting
+ * disk before any content validation runs.
  */
-internal suspend fun HttpResponse.writeBodyToFile(destPath: String) {
+internal suspend fun HttpResponse.writeBodyToFile(destPath: String, maxBytes: Long) {
     val channel = bodyAsChannel()
+    var total = 0L
     SystemFileSystem.sink(Path(destPath)).buffered().use { sink ->
         while (true) {
             val packet = channel.readRemaining(TRANSFER_CHUNK_BYTES.toLong())
             if (packet.exhausted()) break
-            sink.write(packet.readByteArray())
+            val bytes = packet.readByteArray()
+            total += bytes.size
+            if (total > maxBytes) {
+                error("Downloaded body exceeds the $maxBytes-byte limit")
+            }
+            sink.write(bytes)
         }
     }
 }

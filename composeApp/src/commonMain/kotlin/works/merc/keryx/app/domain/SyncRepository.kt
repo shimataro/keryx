@@ -13,6 +13,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
+import works.merc.keryx.app.core.CLOUD_DB_GZ_PATH
 import works.merc.keryx.app.core.CLOUD_DB_PATH
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
@@ -23,6 +24,7 @@ import works.merc.keryx.app.core.cloudBackupPath
 import works.merc.keryx.app.core.looksLikeSqliteFile
 import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SYNC_DEBOUNCE_MS
 import works.merc.keryx.app.core.SYNC_MAX_RETRY
@@ -38,6 +40,7 @@ import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.ContentDigest
 import works.merc.keryx.app.platform.DatabaseMerger
+import works.merc.keryx.app.platform.Gzip
 import works.merc.keryx.app.platform.DatabaseSnapshot
 import works.merc.keryx.app.platform.FileIO
 
@@ -234,6 +237,12 @@ class SyncRepository(
     /**
      * Moves the cloud DB aside so [createFresh] can recreate it.
      *
+     * Only ever targets [CLOUD_DB_GZ_PATH] — the legacy [CLOUD_DB_PATH] is a read-only fallback
+     * and is deliberately never touched by a reset, so it stays available as a rollback path.
+     * [createFresh] then writes a fresh, valid [CLOUD_DB_GZ_PATH], which self-heals even a reset
+     * whose real cause was corruption in the legacy file: the next sync finds the fresh compressed
+     * file and never looks at the legacy one again.
+     *
      * Falls back to deleting it when the rename fails for a storage reason (an occupied archive
      * name, a provider that rejected the move): reset is the only way out of an unusable cloud DB,
      * so it must never become impossible. An auth failure is not retried as a delete — the same
@@ -241,7 +250,7 @@ class SyncRepository(
      */
     private suspend fun archiveCloudDb(cloud: CloudStorage): Result<Unit> {
         val backupPath = cloudBackupPath(clock.nowMillis())
-        return when (val renamed = cloud.rename(CLOUD_DB_PATH, backupPath)) {
+        return when (val renamed = cloud.rename(CLOUD_DB_GZ_PATH, backupPath)) {
             is Result.Ok -> Result.Ok(Unit)
             is Result.Err -> {
                 if (renamed.exception is CloudAuthException) {
@@ -249,7 +258,7 @@ class SyncRepository(
                     return renamed
                 }
                 Log.warn(TAG, "Reset: archive to $backupPath failed (${renamed.exception.message}); deleting instead")
-                when (val deleted = cloud.delete(CLOUD_DB_PATH)) {
+                when (val deleted = cloud.delete(CLOUD_DB_GZ_PATH)) {
                     is Result.Ok -> Result.Ok(Unit)
                     is Result.Err -> {
                         Log.error(TAG, "Reset: delete fallback failed: ${deleted.exception.message}")
@@ -318,67 +327,100 @@ class SyncRepository(
         }
 
         repeat(SYNC_MAX_RETRY) {
-            // One metadata request answers both "does the cloud file exist" and "is it still the
-            // revision we last merged". It is the same request the old existence check made, so
-            // learning the rev here costs no extra round trip.
-            val remoteRev = when (val meta = cloud.metadata(CLOUD_DB_PATH)) {
+            // The compressed file is authoritative. Its metadata request answers both "does it
+            // exist" and "is it still the revision we last merged" in one round trip, same as
+            // before compression — every provider already returns the revision from this same
+            // request. The legacy CLOUD_DB_PATH is consulted only when this comes back absent; see
+            // "Compressed Upload / Legacy Fallback" in sync-architecture.md.
+            val gzMeta = when (val meta = cloud.metadata(CLOUD_DB_GZ_PATH)) {
                 is Result.Err -> {
                     Log.error(TAG, "Sync: metadata() failed: ${meta.exception.message}")
                     return meta
                 }
-                is Result.Ok -> meta.value?.rev
+                is Result.Ok -> meta.value
             }
 
-            // First sync ever: no cloud file yet → create it (create-only, never overwrite).
-            // If the file actually already exists (a wrong "absent" reading, a scope/account
-            // mismatch, or a concurrent creator), `createFresh` returns SyncConflictException and
-            // we retry into the download→merge→upload path instead of clobbering the other
-            // device's data.
-            if (remoteRev == null) {
-                when (val created = createFresh(cloud)) {
-                    is Result.Ok -> return Result.Ok(Unit)
-                    is Result.Err -> {
-                        if (created.exception !is SyncConflictException) return created
-                        return@repeat
+            // `mergedRemote` records whether a download+merge happened this cycle, because a merge
+            // can leave the local DB holding rows the cloud lacks (anything local that won
+            // last-write-wins), which must still be uploaded even if nothing else changed locally.
+            // `expectedRev` is what the upload guards on — `null` means "no compressed file exists
+            // remotely yet", which selects create-only below instead of a rev-guarded update.
+            val mergedRemote: Boolean
+            val expectedRev: String?
+            if (gzMeta != null) {
+                val changed = gzMeta.rev != getSyncState(SYNC_STATE_CLOUD_FILE_REV)
+                if (changed) {
+                    when (val merged = downloadAndMerge(cloud, CLOUD_DB_GZ_PATH, compressed = true)) {
+                        is Result.Err -> return merged
+                        is Result.Ok -> setSyncState(SYNC_STATE_CLOUD_FILE_REV, merged.value.rev)
                     }
                 }
-            }
-
-            // Skip the download when the cloud file is the exact revision this device already
-            // merged: re-downloading it would re-merge bytes that are, by definition, already in
-            // the local DB. `mergedRemote` records whether we did merge, because a merge can leave
-            // the local DB holding rows the cloud lacks (anything local that won last-write-wins),
-            // which must still be uploaded even if nothing else changed locally.
-            val mergedRemote = remoteRev != getSyncState(SYNC_STATE_CLOUD_FILE_REV)
-            if (mergedRemote) {
-                when (val merged = downloadAndMerge(cloud)) {
-                    is Result.Err -> return merged
-                    is Result.Ok -> setSyncState(SYNC_STATE_CLOUD_FILE_REV, merged.value.rev)
+                mergedRemote = changed
+                expectedRev = gzMeta.rev
+            } else {
+                val legacyMeta = when (val meta = cloud.metadata(CLOUD_DB_PATH)) {
+                    is Result.Err -> {
+                        Log.error(TAG, "Sync: legacy metadata() failed: ${meta.exception.message}")
+                        return meta
+                    }
+                    is Result.Ok -> meta.value
                 }
+                if (legacyMeta == null) {
+                    // Nothing in the cloud at all: first sync ever. If the file actually already
+                    // exists (a wrong "absent" reading, a scope/account mismatch, or a concurrent
+                    // creator), `createFresh` returns SyncConflictException and we retry — the next
+                    // attempt finds it and takes the gzMeta-present branch above instead of
+                    // clobbering the other device's data.
+                    when (val created = createFresh(cloud)) {
+                        is Result.Ok -> return Result.Ok(Unit)
+                        is Result.Err -> {
+                            if (created.exception !is SyncConflictException) return created
+                            return@repeat
+                        }
+                    }
+                }
+                // Legacy-only cloud: a device (this one, or another) has not written the
+                // compressed file yet. Migrate by merging the legacy content once, then always
+                // write a fresh compressed file below — there is no compressed revision or digest
+                // yet to compare against, so the upload-skip check below is bypassed by
+                // `mergedRemote = true`, and `expectedRev = null` selects create-only (guarding
+                // against a device racing to migrate at the same time).
+                when (val merged = downloadAndMerge(cloud, CLOUD_DB_PATH, compressed = false)) {
+                    is Result.Err -> return merged
+                    is Result.Ok -> Unit // its revision belongs to the legacy file; nothing to store
+                }
+                mergedRemote = true
+                expectedRev = null
             }
 
-            // The snapshot stays a file for its whole life: hashed from disk, streamed to the
-            // cloud from disk, deleted afterwards. It is the largest thing this app handles, and
-            // nothing here needs it as a contiguous array.
-            when (val prepared = prepareSnapshot()) {
+            // Both temp files stay files for their whole life: hashed and compressed from disk,
+            // streamed to the cloud from disk, deleted afterwards. The snapshot is the largest
+            // thing this app handles, and nothing here needs it as a contiguous array.
+            val digest = when (val prepared = prepareCompressedUpload()) {
                 is Result.Err -> return prepared
-                is Result.Ok -> Unit
+                is Result.Ok -> prepared.value
             }
             try {
                 // Skip the upload when the snapshot is byte-identical to the one already in the
-                // cloud. The comparison is over the snapshot's own content (`sync_state` is
-                // excluded from it, so it does not drift on its own), which is what makes skipping
-                // safe: a local change cannot hash to the previous digest, so no edit is ever
-                // silently dropped. The opposite misjudgement only costs an upload that would have
-                // happened anyway — which is also what an unreadable snapshot (null digest) gets.
-                val digest = ContentDigest.sha256File(snapshotPath)
+                // cloud. The comparison is over the *uncompressed* snapshot's own content
+                // (`sync_state` is excluded from it, so it does not drift on its own, and gzip's
+                // own output is not byte-stable across otherwise-identical input) — see "Skipping
+                // Unchanged Transfers" in sync-architecture.md. Comparing content is what makes
+                // skipping safe: a local change cannot hash to the previous digest, so no edit is
+                // ever silently dropped. The opposite misjudgement only costs an upload that would
+                // have happened anyway — which is also what an unreadable snapshot (null digest) gets.
                 if (!mergedRemote && digest != null && digest == getSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST)) {
                     Log.info(TAG, "Sync: nothing changed locally or remotely; skipping transfer")
                     setSyncState(SYNC_STATE_LAST_SYNCED_AT, clock.nowMillis().toString())
                     return Result.Ok(Unit)
                 }
 
-                when (val upload = cloud.upload(CLOUD_DB_PATH, snapshotPath, expectedRev = remoteRev)) {
+                val upload = if (expectedRev == null) {
+                    cloud.create(CLOUD_DB_GZ_PATH, snapshotGzPath)
+                } else {
+                    cloud.upload(CLOUD_DB_GZ_PATH, snapshotGzPath, expectedRev = expectedRev)
+                }
+                when (upload) {
                     is Result.Ok -> {
                         // Record the revision this write produced, so the next sync recognises its
                         // own upload and skips downloading it back. It comes from the write's own
@@ -400,6 +442,7 @@ class SyncRepository(
                 }
             } finally {
                 FileIO.delete(snapshotPath)
+                FileIO.delete(snapshotGzPath)
             }
         }
         Log.warn(TAG, "Sync failed after $SYNC_MAX_RETRY retries (rev conflict never resolved)")
@@ -413,13 +456,12 @@ class SyncRepository(
      * including a conflict if the cloud file already exists.
      */
     private suspend fun createFresh(cloud: CloudStorage): Result<Unit> {
-        when (val prepared = prepareSnapshot()) {
+        val digest = when (val prepared = prepareCompressedUpload()) {
             is Result.Err -> return prepared
-            is Result.Ok -> Unit
+            is Result.Ok -> prepared.value
         }
         return try {
-            val digest = ContentDigest.sha256File(snapshotPath)
-            when (val r = cloud.create(CLOUD_DB_PATH, snapshotPath)) {
+            when (val r = cloud.create(CLOUD_DB_GZ_PATH, snapshotGzPath)) {
                 is Result.Ok -> {
                     // Same bookkeeping as a successful upload: the file we just created is, by
                     // definition, already merged here, so the next sync can skip downloading it.
@@ -432,30 +474,53 @@ class SyncRepository(
             }
         } finally {
             FileIO.delete(snapshotPath)
+            FileIO.delete(snapshotGzPath)
         }
     }
 
     /**
-     * Streams the cloud DB to a temp file and merges it, returning the revision that was merged.
+     * Streams [path] to a temp file and merges it, returning the revision that was downloaded.
      *
-     * Owns the temp file's whole lifetime, so a failed download or a failed merge cannot leave a
-     * partial database behind for the next cycle to trip over.
+     * Owns the temp file's whole lifetime (both of them, when [compressed]), so a failed download,
+     * a failed decompression, or a failed merge cannot leave a partial database behind for the
+     * next cycle to trip over.
+     *
+     * @param compressed Whether [path] is gzip-compressed ([works.merc.keryx.app.core.CLOUD_DB_GZ_PATH])
+     * and must be decompressed before the merger opens it, or the legacy plain-SQLite fallback
+     * ([works.merc.keryx.app.core.CLOUD_DB_PATH]).
      */
-    private suspend fun downloadAndMerge(cloud: CloudStorage): Result<CloudFileMeta> {
+    private suspend fun downloadAndMerge(cloud: CloudStorage, path: String, compressed: Boolean): Result<CloudFileMeta> {
+        val downloadPath = if (compressed) cloudTempGzPath else cloudTempPath
         try {
-            val meta = when (val d = cloud.download(CLOUD_DB_PATH, cloudTempPath)) {
+            val meta = when (val d = cloud.download(path, downloadPath)) {
                 is Result.Ok -> d.value
                 is Result.Err -> {
                     Log.error(TAG, "Sync: download failed: ${d.exception.message}")
                     return d
                 }
             }
-            return when (val merged = mergeCloud(cloudTempPath)) {
+            val mergeTarget = if (compressed) {
+                try {
+                    Gzip.decompressFile(downloadPath, cloudTempPath, MAX_SYNC_DB_SIZE_BYTES)
+                } catch (e: Exception) {
+                    // Symmetric with mergeCloud's own SQLite-header check below: a foreign/corrupt
+                    // cloud file is the cloud's fault, not a transient/app-side failure, so it is
+                    // classified immediately rather than reaching the merger with a decompressed
+                    // garbage file.
+                    Log.warn(TAG, "Cloud DB is not a valid gzip file: ${e.message}")
+                    return Result.Err(CloudDataIncompatibleException("Cloud DB is not a valid gzip file"))
+                }
+                cloudTempPath
+            } else {
+                downloadPath
+            }
+            return when (val merged = mergeCloud(mergeTarget)) {
                 is Result.Ok -> Result.Ok(meta)
                 is Result.Err -> merged
             }
         } finally {
-            FileIO.delete(cloudTempPath)
+            FileIO.delete(downloadPath)
+            if (compressed) FileIO.delete(cloudTempPath)
         }
     }
 
@@ -545,11 +610,43 @@ class SyncRepository(
         Result.Err(CloudStorageException("Snapshot export failed: ${e.message}"))
     }
 
-    /** Temp file the cloud DB is streamed into before the merge attaches it. */
+    /**
+     * Builds the file to upload: [prepareSnapshot]'s plain export, gzip-compressed. Returns the
+     * plain snapshot's own content digest — the upload-skip check compares on the *uncompressed*
+     * content (see [syncLocked]) — or `null` when it could not be hashed.
+     *
+     * On success the caller owns both [snapshotPath] and [snapshotGzPath] and deletes them once
+     * the upload is done or skipped, because the upload streams straight from the compressed file.
+     * Both are already cleaned up on failure.
+     */
+    private fun prepareCompressedUpload(): Result<String?> {
+        when (val prepared = prepareSnapshot()) {
+            is Result.Err -> return prepared
+            is Result.Ok -> Unit
+        }
+        return try {
+            val digest = ContentDigest.sha256File(snapshotPath)
+            Gzip.compressFile(snapshotPath, snapshotGzPath)
+            Result.Ok(digest)
+        } catch (e: Throwable) {
+            Log.error(TAG, "Snapshot compression failed", e)
+            FileIO.delete(snapshotPath)
+            FileIO.delete(snapshotGzPath)
+            Result.Err(CloudStorageException("Snapshot compression failed: ${e.message}"))
+        }
+    }
+
+    /** Temp file the (plain, legacy) cloud DB is streamed into before the merge attaches it. */
     private val cloudTempPath: String get() = FileIO.join(tempDir, "cloud_keryx.db")
 
-    /** Temp file the upload snapshot is written to and streamed from. */
+    /** Temp file the compressed cloud DB is streamed into before being decompressed to [cloudTempPath]. */
+    private val cloudTempGzPath: String get() = FileIO.join(tempDir, "cloud_keryx.db.gz")
+
+    /** Temp file the upload snapshot is written to (plain) before being compressed to [snapshotGzPath]. */
     private val snapshotPath: String get() = FileIO.join(tempDir, "upload_keryx.db")
+
+    /** Temp file the compressed upload snapshot is written to and streamed from. */
+    private val snapshotGzPath: String get() = FileIO.join(tempDir, "upload_keryx.db.gz")
 
     private fun setSyncState(key: String, value: String) {
         db.sync_stateQueries.upsert(key, value)

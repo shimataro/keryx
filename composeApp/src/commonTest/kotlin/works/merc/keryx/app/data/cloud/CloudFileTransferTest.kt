@@ -19,6 +19,7 @@ import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 
 /**
  * The file/HTTP streaming helpers the cloud providers share. The sync DB is the largest payload
@@ -41,7 +42,7 @@ class CloudFileTransferTest {
         val client = HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }
         val dest = File.createTempFile("keryx-dest-", ".bin").apply { deleteOnExit() }
 
-        client.get("https://example.invalid/x").writeBodyToFile(dest.absolutePath)
+        client.get("https://example.invalid/x").writeBodyToFile(dest.absolutePath, payload.size.toLong())
 
         assertContentEquals(payload, dest.readBytes())
     }
@@ -54,9 +55,22 @@ class CloudFileTransferTest {
         val payload = byteArrayOf(1, 2, 3, 4)
         val client = HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }
 
-        client.get("https://example.invalid/x").writeBodyToFile(dest.absolutePath)
+        client.get("https://example.invalid/x").writeBodyToFile(dest.absolutePath, payload.size.toLong())
 
         assertContentEquals(payload, dest.readBytes())
+    }
+
+    @Test
+    fun bodyExceedingTheSizeLimitThrows() = runTest {
+        // A hostile or corrupt cloud file could be arbitrarily large; the limit exists so it
+        // can't exhaust disk before any content validation ever inspects it.
+        val payload = multiChunkBytes()
+        val client = HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }
+        val dest = File.createTempFile("keryx-dest-", ".bin").apply { deleteOnExit() }
+
+        assertFailsWith<IllegalStateException> {
+            client.get("https://example.invalid/x").writeBodyToFile(dest.absolutePath, (payload.size - 1).toLong())
+        }
     }
 
     @Test
