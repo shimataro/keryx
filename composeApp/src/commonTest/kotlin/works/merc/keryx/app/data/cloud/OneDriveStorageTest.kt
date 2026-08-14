@@ -65,10 +65,11 @@ class OneDriveStorageTest {
             { respond(meta(eTag = "etag42"), HttpStatusCode.OK, jsonHeaders) },
             { respond(bytes, HttpStatusCode.OK) },
         )
-        val r = s.download(CLOUD_DB_PATH)
-        assertIs<Result.Ok<CloudFile>>(r)
+        val dest = downloadDestPath()
+        val r = s.download(CLOUD_DB_PATH, dest)
+        assertIs<Result.Ok<CloudFileMeta>>(r)
         assertEquals("etag42", r.value.rev)
-        assertContentEquals(bytes, r.value.data)
+        assertContentEquals(bytes, bytesAt(dest))
         assertEquals(2, history.size)
         assertEquals("GET", history[0].method.value)
         assertTrue(history[0].url.toString().contains("approot"))
@@ -90,10 +91,11 @@ class OneDriveStorageTest {
             { respond("", HttpStatusCode.Found, headersOf(HttpHeaders.Location, "https://cdn.example/x")) },
             { respond(bytes, HttpStatusCode.OK) },
         )
-        val r = s.download(CLOUD_DB_PATH)
-        assertIs<Result.Ok<CloudFile>>(r)
+        val dest = downloadDestPath()
+        val r = s.download(CLOUD_DB_PATH, dest)
+        assertIs<Result.Ok<CloudFileMeta>>(r)
         assertEquals("etagR", r.value.rev)
-        assertContentEquals(bytes, r.value.data)
+        assertContentEquals(bytes, bytesAt(dest))
         assertEquals(3, history.size)
         assertEquals("https://cdn.example/x", history[2].url.toString())
         verify()
@@ -102,7 +104,8 @@ class OneDriveStorageTest {
     @Test
     fun downloadFileNotFoundIsCloudStorageError() = runTest {
         val (s, history, verify) = storage("tok", { respondError(HttpStatusCode.NotFound) })
-        val r = s.download(CLOUD_DB_PATH)
+        val dest = downloadDestPath()
+        val r = s.download(CLOUD_DB_PATH, dest)
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
         assertEquals(1, history.size)
@@ -112,7 +115,7 @@ class OneDriveStorageTest {
     @Test
     fun uploadSendsIfMatchAndSucceeds() = runTest {
         val (s, history, verify) = storage("tok", { respond("""{"eTag":"etag2"}""", HttpStatusCode.OK, jsonHeaders) })
-        val r = s.upload(CLOUD_DB_PATH, byteArrayOf(1), expectedRev = "etag1")
+        val r = s.upload(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)), expectedRev = "etag1")
         assertIs<Result.Ok<CloudFileMeta>>(r)
         assertEquals("etag2", r.value.rev)
         assertEquals(1, history.size)
@@ -125,7 +128,7 @@ class OneDriveStorageTest {
     @Test
     fun uploadConflictWhenIfMatchFails() = runTest {
         val (s, history, verify) = storage("tok", { respondError(HttpStatusCode.PreconditionFailed) })
-        val r = s.upload(CLOUD_DB_PATH, byteArrayOf(1), expectedRev = "etag1")
+        val r = s.upload(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)), expectedRev = "etag1")
         assertIs<Result.Err>(r)
         assertIs<SyncConflictException>(r.exception)
         assertEquals(1, history.size)
@@ -135,7 +138,7 @@ class OneDriveStorageTest {
     @Test
     fun uploadWithNullExpectedRevSendsNoIfMatch() = runTest {
         val (s, history, verify) = storage("tok", { respond("""{"eTag":"etag2"}""", HttpStatusCode.OK, jsonHeaders) })
-        val r = s.upload(CLOUD_DB_PATH, byteArrayOf(1), expectedRev = null)
+        val r = s.upload(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)), expectedRev = null)
         assertIs<Result.Ok<CloudFileMeta>>(r)
         assertEquals(1, history.size)
         assertEquals("PUT", history[0].method.value)
@@ -146,7 +149,7 @@ class OneDriveStorageTest {
     @Test
     fun createSucceedsWithConflictBehaviorFail() = runTest {
         val (s, history, verify) = storage("tok", { respond("""{"eTag":"etag1"}""", HttpStatusCode.Created, jsonHeaders) })
-        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        val r = s.create(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)))
         assertIs<Result.Ok<CloudFileMeta>>(r)
         assertEquals("etag1", r.value.rev)
         assertEquals(1, history.size)
@@ -158,7 +161,7 @@ class OneDriveStorageTest {
     @Test
     fun createConflictWhenAlreadyExists() = runTest {
         val (s, history, verify) = storage("tok", { respondError(HttpStatusCode.Conflict) })
-        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        val r = s.create(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)))
         assertIs<Result.Err>(r)
         assertIs<SyncConflictException>(r.exception)
         assertEquals(1, history.size)
@@ -220,7 +223,8 @@ class OneDriveStorageTest {
     @Test
     fun missingTokenIsAuthError() = runTest {
         val (s, history, verify) = storage(token = null)
-        val r = s.download(CLOUD_DB_PATH)
+        val dest = downloadDestPath()
+        val r = s.download(CLOUD_DB_PATH, dest)
         assertIs<Result.Err>(r)
         assertIs<CloudAuthException>(r.exception)
         assertEquals(0, history.size)
@@ -230,7 +234,8 @@ class OneDriveStorageTest {
     @Test
     fun unauthorizedOnMetadataMapsToAuthError() = runTest {
         val (s, history, verify) = storage("tok", { respondError(HttpStatusCode.Unauthorized) })
-        val r = s.download(CLOUD_DB_PATH)
+        val dest = downloadDestPath()
+        val r = s.download(CLOUD_DB_PATH, dest)
         assertIs<Result.Err>(r)
         assertIs<CloudAuthException>(r.exception)
         assertEquals(1, history.size)
@@ -240,7 +245,8 @@ class OneDriveStorageTest {
     @Test
     fun downloadNetworkExceptionIsCloudStorageError() = runTest {
         val (s, history, verify) = storage("tok", { throw IOException("boom") })
-        val r = s.download(CLOUD_DB_PATH)
+        val dest = downloadDestPath()
+        val r = s.download(CLOUD_DB_PATH, dest)
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
         assertEquals(1, history.size)
@@ -259,8 +265,8 @@ class OneDriveStorageTest {
                 respond(meta(), HttpStatusCode.OK, jsonHeaders)
             },
         )
-        var result: Result<CloudFile>? = null
-        val job = launch { result = s.download(CLOUD_DB_PATH) }
+        var result: Result<CloudFileMeta>? = null
+        val job = launch { result = s.download(CLOUD_DB_PATH, downloadDestPath()) }
         runCurrent()
         started.await()
         job.cancel()

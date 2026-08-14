@@ -71,12 +71,13 @@ class GoogleDriveStorage(
     }
 
     /**
-     * Downloads the file identified by the basename of the specified path.
+     * Streams the file identified by the basename of the specified path to disk.
      *
      * @param path The path whose basename identifies the file.
-     * @return The file content and its Google Drive revision.
+     * @param destPath The local file to write the contents to.
+     * @return The downloaded file's Google Drive revision.
      */
-    override suspend fun download(path: String): Result<CloudFile> = withToken { token ->
+    override suspend fun download(path: String, destPath: String): Result<CloudFileMeta> = withToken { token ->
         val file = when (val f = findFile(token, fileName(path))) {
             is Result.Err -> return@withToken f
             is Result.Ok -> f.value ?: return@withToken Result.Err(CloudStorageException("File not found: ${fileName(path)}"))
@@ -88,12 +89,15 @@ class GoogleDriveStorage(
         if (response.status.value !in 200..299) {
             return@withToken mapError(response.status.value, response.bodyAsText())
         }
-        Result.Ok(CloudFile(response.readRawBytes(), file.version))
+        response.writeBodyToFile(destPath)
+        // The version came from the name lookup above, which is the same read this download is
+        // already based on — no extra request to learn what was just fetched.
+        Result.Ok(CloudFileMeta(file.version))
     }
 
     override suspend fun upload(
         path: String,
-        data: ByteArray,
+        sourcePath: String,
         expectedRev: String?,
     ): Result<CloudFileMeta> = withToken { token ->
         val name = fileName(path)
@@ -102,13 +106,13 @@ class GoogleDriveStorage(
             is Result.Ok -> f.value
         }
         if (existing == null) {
-            createFile(token, name, data).map { CloudFileMeta(it.version) }
+            createFile(token, name, sourcePath).map { CloudFileMeta(it.version) }
         } else {
             // Best-effort optimistic concurrency: bail if the remote changed since download().
             if (expectedRev != null && existing.version != expectedRev) {
                 return@withToken Result.Err(SyncConflictException())
             }
-            updateFile(token, existing.id, data)
+            updateFile(token, existing.id, sourcePath)
         }
     }
 
@@ -116,10 +120,10 @@ class GoogleDriveStorage(
      * Creates a new file without overwriting an existing file.
      *
      * @param path The sync path identifying the file.
-     * @param data The file contents.
+     * @param sourcePath The path to the file to upload.
      * @return `Ok` when the file is created successfully, or an error if the file already exists or creation fails.
      */
-    override suspend fun create(path: String, data: ByteArray): Result<CloudFileMeta> = withToken { token ->
+    override suspend fun create(path: String, sourcePath: String): Result<CloudFileMeta> = withToken { token ->
         val name = fileName(path)
         // Best-effort create-only: Drive has no atomic create-if-absent, so we check first and
         // fail with a conflict when the file already exists rather than overwriting it. The small
@@ -131,7 +135,7 @@ class GoogleDriveStorage(
         if (existing != null) {
             Result.Err(SyncConflictException())
         } else {
-            when (val created = createFile(token, name, data)) {
+            when (val created = createFile(token, name, sourcePath)) {
                 is Result.Err -> created
                 is Result.Ok -> resolveCreateRace(token, name, created.value)
             }
@@ -324,7 +328,7 @@ class GoogleDriveStorage(
     }
 
     /** Creates the file in appDataFolder via a multipart/related upload (metadata + media). Returns the created file's id and version. */
-    private suspend fun createFile(token: String, name: String, data: ByteArray): Result<DriveFile> {
+    private suspend fun createFile(token: String, name: String, sourcePath: String): Result<DriveFile> {
         val boundary = "keryx-${Random.nextLong().toULong()}"
         val metadata = buildJsonObject {
             put("name", name)
@@ -338,7 +342,6 @@ class GoogleDriveStorage(
             append("Content-Type: application/octet-stream\r\n\r\n")
         }.encodeToByteArray()
         val closing = "\r\n--$boundary--\r\n".encodeToByteArray()
-        val body = opening + data + closing
 
         val response = client.post("$uploadBase/files") {
             header("Authorization", "Bearer $token")
@@ -346,8 +349,16 @@ class GoogleDriveStorage(
                 parameters.append("uploadType", "multipart")
                 parameters.append("fields", "id,version")
             }
-            contentType(ContentType("multipart", "related").withParameter("boundary", boundary))
-            setBody(body)
+            // The envelope is streamed around the file rather than concatenated with it: building
+            // `opening + data + closing` would hold the whole database on the heap twice over.
+            setBody(
+                FileUploadContent(
+                    sourcePath = sourcePath,
+                    contentType = ContentType("multipart", "related").withParameter("boundary", boundary),
+                    prefix = opening,
+                    suffix = closing,
+                )
+            )
         }
         if (response.status.value !in 200..299) {
             return mapError(response.status.value, response.bodyAsText())
@@ -356,15 +367,14 @@ class GoogleDriveStorage(
     }
 
     /** Overwrites the file's content with a simple media upload. Returns the resulting version. */
-    private suspend fun updateFile(token: String, fileId: String, data: ByteArray): Result<CloudFileMeta> {
+    private suspend fun updateFile(token: String, fileId: String, sourcePath: String): Result<CloudFileMeta> {
         val response = client.patch("$uploadBase/files/$fileId") {
             header("Authorization", "Bearer $token")
             url {
                 parameters.append("uploadType", "media")
                 parameters.append("fields", "id,version")
             }
-            contentType(ContentType.Application.OctetStream)
-            setBody(data)
+            setBody(FileUploadContent(sourcePath))
         }
         if (response.status.value !in 200..299) {
             return mapError(response.status.value, response.bodyAsText())

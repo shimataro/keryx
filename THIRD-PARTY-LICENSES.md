@@ -14,6 +14,7 @@ its respective license.
 | kotlinx.coroutines | Apache-2.0 | <https://github.com/Kotlin/kotlinx.coroutines> |
 | kotlinx.serialization | Apache-2.0 | <https://github.com/Kotlin/kotlinx.serialization> |
 | kotlinx-datetime | Apache-2.0 | <https://github.com/Kotlin/kotlinx-datetime> |
+| kotlinx-io | Apache-2.0 | <https://github.com/Kotlin/kotlinx-io> |
 | AndroidX Lifecycle | Apache-2.0 | <https://github.com/JetBrains/compose-multiplatform-core> |
 | Koin | Apache-2.0 | <https://github.com/InsertKoinIO/koin> |
 | SQLDelight | Apache-2.0 | <https://github.com/sqldelight/sqldelight> |

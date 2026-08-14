@@ -31,6 +31,7 @@ import works.merc.keryx.app.core.SYNC_STATE_LAST_SYNCED_AT
 import works.merc.keryx.app.core.SYNC_STATE_LAST_UPLOADED_DIGEST
 import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.core.SyncConflictException
+import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.db.KeryxDatabase
@@ -350,55 +351,55 @@ class SyncRepository(
             // which must still be uploaded even if nothing else changed locally.
             val mergedRemote = remoteRev != getSyncState(SYNC_STATE_CLOUD_FILE_REV)
             if (mergedRemote) {
-                val cloudFile = when (val d = cloud.download(CLOUD_DB_PATH)) {
-                    is Result.Ok -> d.value
-                    is Result.Err -> {
-                        Log.error(TAG, "Sync: download failed: ${d.exception.message}")
-                        return d
-                    }
-                }
-                when (val merged = mergeCloud(cloudFile.data)) {
+                when (val merged = downloadAndMerge(cloud)) {
                     is Result.Err -> return merged
-                    is Result.Ok -> Unit
+                    is Result.Ok -> setSyncState(SYNC_STATE_CLOUD_FILE_REV, merged.value.rev)
                 }
-                setSyncState(SYNC_STATE_CLOUD_FILE_REV, cloudFile.rev)
             }
 
-            val bytes = when (val b = snapshotBytesForUpload()) {
-                is Result.Ok -> b.value
-                is Result.Err -> return b
+            // The snapshot stays a file for its whole life: hashed from disk, streamed to the
+            // cloud from disk, deleted afterwards. It is the largest thing this app handles, and
+            // nothing here needs it as a contiguous array.
+            when (val prepared = prepareSnapshot()) {
+                is Result.Err -> return prepared
+                is Result.Ok -> Unit
             }
-
-            // Skip the upload when the snapshot is byte-identical to the one already in the cloud.
-            // The comparison is over the snapshot's own content (`sync_state` is excluded from it,
-            // so it does not drift on its own), which is what makes skipping safe: a local change
-            // cannot hash to the previous digest, so no edit is ever silently dropped. The
-            // opposite misjudgement only costs an upload that would have happened anyway.
-            val digest = ContentDigest.sha256(bytes)
-            if (!mergedRemote && digest == getSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST)) {
-                Log.info(TAG, "Sync: nothing changed locally or remotely; skipping transfer")
-                setSyncState(SYNC_STATE_LAST_SYNCED_AT, clock.nowMillis().toString())
-                return Result.Ok(Unit)
-            }
-
-            when (val upload = cloud.upload(CLOUD_DB_PATH, bytes, expectedRev = remoteRev)) {
-                is Result.Ok -> {
-                    // Record the revision this write produced, so the next sync recognises its own
-                    // upload and skips downloading it back. It comes from the write's own response
-                    // (never a follow-up metadata call, which could return another device's newer
-                    // write and make the next sync skip a download it never merged).
-                    setSyncState(SYNC_STATE_CLOUD_FILE_REV, upload.value.rev)
-                    setSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST, digest)
+            try {
+                // Skip the upload when the snapshot is byte-identical to the one already in the
+                // cloud. The comparison is over the snapshot's own content (`sync_state` is
+                // excluded from it, so it does not drift on its own), which is what makes skipping
+                // safe: a local change cannot hash to the previous digest, so no edit is ever
+                // silently dropped. The opposite misjudgement only costs an upload that would have
+                // happened anyway — which is also what an unreadable snapshot (null digest) gets.
+                val digest = ContentDigest.sha256File(snapshotPath)
+                if (!mergedRemote && digest != null && digest == getSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST)) {
+                    Log.info(TAG, "Sync: nothing changed locally or remotely; skipping transfer")
                     setSyncState(SYNC_STATE_LAST_SYNCED_AT, clock.nowMillis().toString())
                     return Result.Ok(Unit)
                 }
-                is Result.Err ->
-                    if (upload.exception is SyncConflictException) {
-                        return@repeat
-                    } else {
-                        Log.error(TAG, "Sync: upload failed: ${upload.exception.message}")
-                        return upload
+
+                when (val upload = cloud.upload(CLOUD_DB_PATH, snapshotPath, expectedRev = remoteRev)) {
+                    is Result.Ok -> {
+                        // Record the revision this write produced, so the next sync recognises its
+                        // own upload and skips downloading it back. It comes from the write's own
+                        // response (never a follow-up metadata call, which could return another
+                        // device's newer write and make the next sync skip a download it never
+                        // merged).
+                        setSyncState(SYNC_STATE_CLOUD_FILE_REV, upload.value.rev)
+                        if (digest != null) setSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST, digest)
+                        setSyncState(SYNC_STATE_LAST_SYNCED_AT, clock.nowMillis().toString())
+                        return Result.Ok(Unit)
                     }
+                    is Result.Err ->
+                        if (upload.exception is SyncConflictException) {
+                            return@repeat
+                        } else {
+                            Log.error(TAG, "Sync: upload failed: ${upload.exception.message}")
+                            return upload
+                        }
+                }
+            } finally {
+                FileIO.delete(snapshotPath)
             }
         }
         Log.warn(TAG, "Sync failed after $SYNC_MAX_RETRY retries (rev conflict never resolved)")
@@ -412,49 +413,77 @@ class SyncRepository(
      * including a conflict if the cloud file already exists.
      */
     private suspend fun createFresh(cloud: CloudStorage): Result<Unit> {
-        val bytes = when (val b = snapshotBytesForUpload()) {
-            is Result.Ok -> b.value
-            is Result.Err -> return b
+        when (val prepared = prepareSnapshot()) {
+            is Result.Err -> return prepared
+            is Result.Ok -> Unit
         }
-        return when (val r = cloud.create(CLOUD_DB_PATH, bytes)) {
-            is Result.Ok -> {
-                // Same bookkeeping as a successful upload: the file we just created is, by
-                // definition, already merged here, so the next sync can skip downloading it.
-                setSyncState(SYNC_STATE_CLOUD_FILE_REV, r.value.rev)
-                setSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST, ContentDigest.sha256(bytes))
-                setSyncState(SYNC_STATE_LAST_SYNCED_AT, clock.nowMillis().toString())
-                Result.Ok(Unit)
+        return try {
+            val digest = ContentDigest.sha256File(snapshotPath)
+            when (val r = cloud.create(CLOUD_DB_PATH, snapshotPath)) {
+                is Result.Ok -> {
+                    // Same bookkeeping as a successful upload: the file we just created is, by
+                    // definition, already merged here, so the next sync can skip downloading it.
+                    setSyncState(SYNC_STATE_CLOUD_FILE_REV, r.value.rev)
+                    if (digest != null) setSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST, digest)
+                    setSyncState(SYNC_STATE_LAST_SYNCED_AT, clock.nowMillis().toString())
+                    Result.Ok(Unit)
+                }
+                is Result.Err -> r
             }
-            is Result.Err -> r
+        } finally {
+            FileIO.delete(snapshotPath)
+        }
+    }
+
+    /**
+     * Streams the cloud DB to a temp file and merges it, returning the revision that was merged.
+     *
+     * Owns the temp file's whole lifetime, so a failed download or a failed merge cannot leave a
+     * partial database behind for the next cycle to trip over.
+     */
+    private suspend fun downloadAndMerge(cloud: CloudStorage): Result<CloudFileMeta> {
+        try {
+            val meta = when (val d = cloud.download(CLOUD_DB_PATH, cloudTempPath)) {
+                is Result.Ok -> d.value
+                is Result.Err -> {
+                    Log.error(TAG, "Sync: download failed: ${d.exception.message}")
+                    return d
+                }
+            }
+            return when (val merged = mergeCloud(cloudTempPath)) {
+                is Result.Ok -> Result.Ok(meta)
+                is Result.Err -> merged
+            }
+        } finally {
+            FileIO.delete(cloudTempPath)
         }
     }
 
     /**
      * Merges downloaded cloud database data into the local database and updates affected search and query listeners.
      *
-     * @param data The downloaded cloud database contents.
+     * @param cloudDbPath The path to the downloaded cloud database file.
      * @return A successful result when the merge completes, or an error describing why it failed.
      * @throws CancellationException If the coroutine is cancelled during the merge.
      */
-    private suspend fun mergeCloud(data: ByteArray): Result<Unit> {
-        // Symmetric with snapshotBytesForUpload(): reject a payload that is definitely not a
-        // SQLite file before touching the disk. A 0-byte file is a *valid* empty SQLite DB as far
-        // as the engine is concerned, so it would otherwise attach cleanly and only fail deep
-        // inside the merge statements with an ambiguous "no such table: cloud.folders" — this
-        // catches the cheaper, unambiguous case (truncated download, HTML error page, wrong file)
-        // up front. Unlike the upload-side check (CloudStorageException, a local guard against
-        // sending bad data), this is CloudDataIncompatibleException: the cloud itself is what's
-        // broken here, so the user is offered the reset action.
-        if (!looksLikeSqliteFile(data)) {
-            Log.warn(TAG, "Cloud DB is not a SQLite file (${data.size} bytes)")
+    private suspend fun mergeCloud(cloudDbPath: String): Result<Unit> {
+        // Symmetric with prepareSnapshot(): reject a payload that is definitely not a SQLite file
+        // before the merger opens it. A 0-byte file is a *valid* empty SQLite DB as far as the
+        // engine is concerned, so it would otherwise attach cleanly and only fail deep inside the
+        // merge statements with an ambiguous "no such table: cloud.folders" — this catches the
+        // cheaper, unambiguous case (truncated download, HTML error page, wrong file) up front.
+        // Unlike the upload-side check (CloudStorageException, a local guard against sending bad
+        // data), this is CloudDataIncompatibleException: the cloud itself is what's broken here,
+        // so the user is offered the reset action. Reads only the file's first 16 bytes — the
+        // payload is deliberately never loaded whole.
+        if (!looksLikeSqliteFile(cloudDbPath)) {
+            Log.warn(TAG, "Cloud DB is not a SQLite file")
             return Result.Err(CloudDataIncompatibleException("Cloud DB is not a SQLite file"))
         }
-        val tempPath = FileIO.join(tempDir, "cloud_keryx.db")
         try {
-            FileIO.writeBytes(tempPath, data)
             DatabaseMerger.merge(
                 localDbPath = localDbPath,
-                cloudDbPath = tempPath,
+                cloudDbPath = cloudDbPath,
                 localSchemaVersion = KeryxDatabase.Schema.version,
                 mergeStatements = MergeSql.all,
             )
@@ -489,37 +518,38 @@ class SyncRepository(
             // is therefore never the cloud's fault, and must not offer the destructive reset action.
             Log.error(TAG, "Cloud DB merge failed", e)
             return Result.Err(CloudStorageException("Merge failed: ${e.message}"))
-        } finally {
-            FileIO.delete(tempPath)
         }
     }
 
     /**
-     * Builds the bytes to upload: an FTS-free, consistent snapshot of the local DB. The live DB and
-     * its `articles_fts` index are untouched (see [DatabaseSnapshot]), so a concurrent search never
-     * sees a missing index.
+     * Writes the file to upload at [snapshotPath]: an FTS-free, consistent snapshot of the local
+     * DB. The live DB and its `articles_fts` index are untouched (see [DatabaseSnapshot]), so a
+     * concurrent search never sees a missing index.
      *
-     * Returns [Result.Err] rather than a partial/empty payload: an export failure or a truncated /
-     * non-SQLite snapshot must never be uploaded over good cloud data. The `finally` still deletes
-     * the temp file even on failure.
+     * Returns [Result.Err] rather than leaving a partial/empty payload for the caller to send: an
+     * export failure or a truncated / non-SQLite snapshot must never be uploaded over good cloud
+     * data. Deletes the file itself on failure; on success the caller owns it (and deletes it once
+     * the upload is done or skipped), because the upload streams straight from it.
      */
-    private fun snapshotBytesForUpload(): Result<ByteArray> {
-        val snapshotPath = FileIO.join(tempDir, "upload_keryx.db")
-        return try {
-            DatabaseSnapshot.exportForUpload(localDbPath, snapshotPath)
-            val bytes = FileIO.readBytes(snapshotPath)
-            if (looksLikeSqliteFile(bytes)) {
-                Result.Ok(bytes!!)
-            } else {
-                Result.Err(CloudStorageException("Snapshot missing or not a valid SQLite file"))
-            }
-        } catch (e: Throwable) {
-            Log.error(TAG, "Snapshot export failed", e)
-            Result.Err(CloudStorageException("Snapshot export failed: ${e.message}"))
-        } finally {
+    private fun prepareSnapshot(): Result<Unit> = try {
+        DatabaseSnapshot.exportForUpload(localDbPath, snapshotPath)
+        if (looksLikeSqliteFile(snapshotPath)) {
+            Result.Ok(Unit)
+        } else {
             FileIO.delete(snapshotPath)
+            Result.Err(CloudStorageException("Snapshot missing or not a valid SQLite file"))
         }
+    } catch (e: Throwable) {
+        Log.error(TAG, "Snapshot export failed", e)
+        FileIO.delete(snapshotPath)
+        Result.Err(CloudStorageException("Snapshot export failed: ${e.message}"))
     }
+
+    /** Temp file the cloud DB is streamed into before the merge attaches it. */
+    private val cloudTempPath: String get() = FileIO.join(tempDir, "cloud_keryx.db")
+
+    /** Temp file the upload snapshot is written to and streamed from. */
+    private val snapshotPath: String get() = FileIO.join(tempDir, "upload_keryx.db")
 
     private fun setSyncState(key: String, value: String) {
         db.sync_stateQueries.upsert(key, value)

@@ -12,6 +12,12 @@ package works.merc.keryx.app.platform
  * This is a change detector, not a security primitive: nothing here authenticates the payload.
  */
 expect object ContentDigest {
-    /** Hex-encoded SHA-256 of [bytes]. */
-    fun sha256(bytes: ByteArray): String
+    /**
+     * Hex-encoded SHA-256 of the file at [path], read incrementally.
+     *
+     * Takes a path rather than bytes because the snapshot it hashes is deliberately never held in
+     * memory — the sync flow streams it straight from disk to the cloud. Returns `null` when the
+     * file cannot be read, which callers treat as "no usable digest" and therefore upload.
+     */
+    fun sha256File(path: String): String?
 }

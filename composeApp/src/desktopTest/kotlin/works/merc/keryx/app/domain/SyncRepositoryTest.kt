@@ -27,7 +27,6 @@ import works.merc.keryx.app.core.SYNC_STATE_CLOUD_FILE_REV
 import works.merc.keryx.app.core.SYNC_STATE_LAST_SYNCED_AT
 import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.core.SyncConflictException
-import works.merc.keryx.app.data.cloud.CloudFile
 import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.local.FtsManager
@@ -74,14 +73,14 @@ private class FakeCloudStorage : CloudStorage {
     var downloadGate: CompletableDeferred<Unit>? = null
 
     private val existsQueue = ArrayDeque<Result<CloudFileMeta?>>()
-    private val downloadQueue = ArrayDeque<Result<CloudFile>>()
+    private val downloadQueue = ArrayDeque<Result<CloudFileMeta>>()
     private val uploadQueue = ArrayDeque<Result<CloudFileMeta>>()
     private val createQueue = ArrayDeque<Result<CloudFileMeta>>()
     private val deleteQueue = ArrayDeque<Result<Unit>>()
     private val renameQueue = ArrayDeque<Result<Unit>>()
 
     fun queueExists(r: Result<CloudFileMeta?>) = existsQueue.addLast(r)
-    fun queueDownload(r: Result<CloudFile>) = downloadQueue.addLast(r)
+    fun queueDownload(r: Result<CloudFileMeta>) = downloadQueue.addLast(r)
     fun queueUpload(r: Result<CloudFileMeta>) = uploadQueue.addLast(r)
     fun queueCreate(r: Result<CloudFileMeta>) = createQueue.addLast(r)
     fun queueDelete(r: Result<Unit>) = deleteQueue.addLast(r)
@@ -102,16 +101,20 @@ private class FakeCloudStorage : CloudStorage {
         return Result.Ok(files[path]?.let { CloudFileMeta(it.second) })
     }
 
-    override suspend fun download(path: String): Result<CloudFile> {
+    override suspend fun download(path: String, destPath: String): Result<CloudFileMeta> {
         downloadCount++
         downloadGate?.await()
         downloadQueue.removeFirstOrNull()?.let { return it }
         val f = files[path] ?: return Result.Err(CloudStorageException("not found: $path"))
         downloadedBytes += f.first.size
-        return Result.Ok(CloudFile(f.first, f.second))
+        // Write to destPath exactly as a real provider streams the body there, so the merge that
+        // follows reads a real file rather than bytes the fake handed back.
+        File(destPath).writeBytes(f.first)
+        return Result.Ok(CloudFileMeta(f.second))
     }
 
-    override suspend fun upload(path: String, data: ByteArray, expectedRev: String?): Result<CloudFileMeta> {
+    override suspend fun upload(path: String, sourcePath: String, expectedRev: String?): Result<CloudFileMeta> {
+        val data = File(sourcePath).readBytes()
         uploadCount++
         uploadQueue.removeFirstOrNull()?.let { queued ->
             // A rev-guarded write is only rejected because another writer got there first, so a
@@ -135,7 +138,8 @@ private class FakeCloudStorage : CloudStorage {
         return Result.Ok(CloudFileMeta(rev))
     }
 
-    override suspend fun create(path: String, data: ByteArray): Result<CloudFileMeta> {
+    override suspend fun create(path: String, sourcePath: String): Result<CloudFileMeta> {
+        val data = File(sourcePath).readBytes()
         createCount++
         createQueue.removeFirstOrNull()?.let { return it }
         // Create-only: refuse to overwrite an existing file, as the real backends do.
@@ -359,6 +363,8 @@ class SyncRepositoryTest {
 
     private fun tempCloudDbFile(): File = File(tempDir, "cloud_keryx.db")
 
+    private fun tempSnapshotFile(): File = File(tempDir, "upload_keryx.db")
+
     @Test
     fun secondSyncWithNothingChangedTransfersNothing() = runTest {
         // The background loop syncs on a timer, so the overwhelmingly common case is "neither side
@@ -543,6 +549,7 @@ class SyncRepositoryTest {
         assertEquals(0, cloud.uploadCount)
         assertTrue(cloud.files.containsKey(CLOUD_DB_PATH))
         assertEquals(1_000L, repo.lastSyncedAt())
+        assertFalse(tempSnapshotFile().exists())
     }
 
     @Test
@@ -562,6 +569,7 @@ class SyncRepositoryTest {
         assertEquals(1, cloud.downloadCount)
         assertEquals(1, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
     }
 
     @Test
@@ -597,6 +605,7 @@ class SyncRepositoryTest {
         // The live FTS index is never dropped (it's excluded on a snapshot copy), so it's still present.
         assertTrue(ftsManager.exists())
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
     }
 
     @Test
@@ -687,6 +696,7 @@ class SyncRepositoryTest {
         // The finally-block rebuild still runs even though the overall sync failed.
         assertTrue(ftsManager.exists())
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
     }
 
     @Test
@@ -718,6 +728,7 @@ class SyncRepositoryTest {
         assertIs<SchemaVersionException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
         // The merge-abort is user-visible via the notification center (the only signal for this path).
         val notes = notificationCenter.items.value
         assertEquals(1, notes.size)
@@ -741,6 +752,7 @@ class SyncRepositoryTest {
         assertIs<CloudDataIncompatibleException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
         // Surfaced to the notification center, with a reset action offered.
         val notes = notificationCenter.items.value
         assertEquals(1, notes.size)
@@ -761,6 +773,7 @@ class SyncRepositoryTest {
         assertIs<CloudDataIncompatibleException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
     }
 
     @Test
@@ -777,6 +790,7 @@ class SyncRepositoryTest {
         assertIs<CloudDataIncompatibleException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
     }
 
     @Test
@@ -793,6 +807,7 @@ class SyncRepositoryTest {
         assertIs<CloudDataIncompatibleException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
     }
 
     @Test
@@ -810,6 +825,7 @@ class SyncRepositoryTest {
         assertIs<CloudDataIncompatibleException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
         val notes = notificationCenter.items.value
         assertEquals(1, notes.size)
         assertEquals(AppNotificationAction.ResetCloudData, notes.first().action)
@@ -830,6 +846,7 @@ class SyncRepositoryTest {
         assertIs<CloudDataIncompatibleException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
         val notes = notificationCenter.items.value
         assertEquals(1, notes.size)
         assertEquals(AppNotificationAction.ResetCloudData, notes.first().action)
@@ -879,6 +896,7 @@ class SyncRepositoryTest {
         assertIs<CloudStorageException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
 
         val notes = notificationCenter.items.value
         assertEquals(1, notes.size)

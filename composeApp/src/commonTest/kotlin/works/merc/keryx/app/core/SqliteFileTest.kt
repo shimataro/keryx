@@ -1,5 +1,6 @@
 package works.merc.keryx.app.core
 
+import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -41,5 +42,48 @@ class SqliteFileTest {
     @Test
     fun headerFollowedByMoreDataIsAccepted() {
         assertTrue(looksLikeSqliteFile(validHeader + byteArrayOf(1, 2, 3)))
+    }
+
+    // --- the path-based overload, which is the form the sync flow uses now that the payload is
+    // streamed to disk instead of being held in memory ---
+
+    private fun fileWith(bytes: ByteArray): String =
+        File.createTempFile("keryx-sqlitefile-", ".bin").apply {
+            deleteOnExit()
+            writeBytes(bytes)
+        }.absolutePath
+
+    @Test
+    fun missingFileIsRejected() {
+        assertFalse(looksLikeSqliteFile("/definitely/not/a/real/path/keryx.db"))
+    }
+
+    @Test
+    fun emptyFileIsRejected() {
+        assertFalse(looksLikeSqliteFile(fileWith(byteArrayOf())))
+    }
+
+    @Test
+    fun fileWithTruncatedHeaderIsRejected() {
+        assertFalse(looksLikeSqliteFile(fileWith(validHeader.copyOf(15))))
+    }
+
+    @Test
+    fun fileWithWrongLeadingBytesIsRejected() {
+        val wrong = validHeader.copyOf()
+        wrong[0] = 0x00
+        assertFalse(looksLikeSqliteFile(fileWith(wrong)))
+    }
+
+    @Test
+    fun fileWithExactHeaderIsAccepted() {
+        assertTrue(looksLikeSqliteFile(fileWith(validHeader)))
+    }
+
+    @Test
+    fun fileLargerThanTheHeaderIsAcceptedWithoutReadingItAll() {
+        // A payload far bigger than any buffer the check uses: it must decide from the first 16
+        // bytes rather than loading the file, which is the whole point of the path-based form.
+        assertTrue(looksLikeSqliteFile(fileWith(validHeader + ByteArray(4 * 1024 * 1024))))
     }
 }

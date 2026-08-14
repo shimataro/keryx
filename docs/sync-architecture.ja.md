@@ -11,6 +11,16 @@
   （ライブの索引は決して DROP しない → 同期中の検索が `no such table` にならない。[db-schema.ja.md](db-schema.ja.md) の `articles_fts` 節）。
 - 競合解決はアップロード前にアプリ側でマージ（ATTACH DATABASE）する。
 - FTS5 インデックスはクラウドに含めない（コピー側で DROP）。マージで入った新記事はマージ後に**増分投入**する。
+- **DB をメモリに載せない。** `CloudStorage` はローカルのファイルパスで受け渡しする
+  （`download(path, destPath)` はレスポンスボディをそのままディスクへ、
+  `upload(path, sourcePath)` / `create` はファイルをそのまま送信へストリームする）。したがってピーク
+  メモリは 64KB バッファ数個分の固定量で、DB のサイズに比例しない。転送の両端はもともとファイルである
+  ——マージはダウンロードした DB をファイルとして ATTACH し、アップロード用スナップショットは
+  `VACUUM INTO` がファイルとして生成する。共通のストリーミングヘルパーは
+  `data/cloud/CloudFileTransfer.kt` にあり `kotlinx-io` で実装しているため、プラットフォーム固有コード
+  なしで `commonMain` に置ける。アップロード要否を決めるダイジェスト（後述）と SQLite ヘッダ検証
+  （`core/SqliteFile.kt` のパス版 `looksLikeSqliteFile`）もファイルから読む——ヘッダ検証は先頭 16 バイト
+  しか読まない。
 
 ## クラウド上のファイル構成
 
@@ -28,11 +38,12 @@
    もので、**追加のネットワーク往復は発生しない** — 3 プロバイダとも同じリクエストでリビジョンを既に受け取り
    ながら捨てていた（Dropbox `get_metadata` の `rev` / Drive の名前検索が返す `version` / Graph のアイテムの
    `eTag`）。
-2. クラウドから `keryx.db` をダウンロード（一時ファイルへ）。ただし**リビジョンが
+2. クラウドの `keryx.db` を一時ファイルへストリームする。ただし**リビジョンが
    `sync_state.cloud_file_rev` と一致する場合はスキップ**する（このデバイスが既にマージ済みのファイルその
    もので、再ダウンロードしても定義上ローカルに入っているバイト列を再マージするだけのため）。
-   - ダウンロードしたバイト列は、ディスクに書き込む前に SQLite の 16 バイトファイルヘッダと照合される
-     （`core/SqliteFile.kt` の `looksLikeSqliteFile`。アップロード側（手順5）と対称なチェック）。これに
+   - ダウンロードしたファイルは、マージャが開く前に SQLite の 16 バイトファイルヘッダと照合される
+     （`core/SqliteFile.kt` のパス版 `looksLikeSqliteFile`。先頭 16 バイトしか読まない。アップロード側
+     （手順5）と対称なチェック）。これに
      落ちるペイロード（ダウンロードの途中切断、HTML エラーページ、0 バイトなど非 SQLite ファイル）は、
      `DatabaseMerger` まで到達してマージ文の中で `no such table: cloud.folders` のような曖昧なエラーに
      なる前に、`CloudDataIncompatibleException` として即座に弾かれる。
@@ -42,8 +53,8 @@
    発火しないため、`watchAll` フロー（と索引済みの再検索）を再発火させて同期内容を再起動なしで UI に反映する。
 4. `sync_state.cloud_file_rev` を記録。
 5. `DatabaseSnapshot.exportForUpload()` で `VACUUM INTO` スナップショットを作り、その**コピー側で
-   `articles_fts` と `sync_state` を DROP**（ライブ DB は不変）。そのバイト列を `rev` を指定して
-   アップロード。ただし**スナップショットの SHA-256 が `sync_state.last_uploaded_snapshot_digest` と一致し、
+   `articles_fts` と `sync_state` を DROP**（ライブ DB は不変）。そのファイルを `rev` を指定して
+   ストリームアップロード。ただし**スナップショットの SHA-256 が `sync_state.last_uploaded_snapshot_digest` と一致し、
    かつ手順2でマージが走らなかった場合はスキップ**する（クラウドに既に同じバイト列があるため）。
    - `rev` 不一致（409 → `SyncConflictException`）なら再ダウンロードからリトライ（最大 3 回）。
 6. 成功したら `last_synced_at`、アップロードしたスナップショットのダイジェスト、および**そのアップロードが

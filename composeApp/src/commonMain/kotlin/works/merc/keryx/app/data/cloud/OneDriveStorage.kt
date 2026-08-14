@@ -58,7 +58,7 @@ class OneDriveStorage(
         }
     }
 
-    override suspend fun download(path: String): Result<CloudFile> = withToken { token ->
+    override suspend fun download(path: String, destPath: String): Result<CloudFileMeta> = withToken { token ->
         val meta = client.get(itemUrl(path)) { header("Authorization", "Bearer $token") }
         if (meta.status.value == 404) {
             return@withToken Result.Err(CloudStorageException("File not found: ${fileName(path)}"))
@@ -84,27 +84,29 @@ class OneDriveStorage(
         if (content.status.value !in 200..299) {
             return@withToken mapError(content.status.value, content.bodyAsText())
         }
-        Result.Ok(CloudFile(content.readRawBytes(), eTag))
+        content.writeBodyToFile(destPath)
+        // The eTag came from the item metadata fetched above, which is the read this download is
+        // based on — no extra request to learn what was just fetched.
+        Result.Ok(CloudFileMeta(eTag))
     }
 
     /**
      * Uploads file content to OneDrive, optionally requiring a matching revision.
      *
      * @param path The path of the file to upload.
-     * @param data The file content.
+     * @param sourcePath The path to the file to upload.
      * @param expectedRev The required current revision, or `null` to upload without revision checking.
      * @return A result indicating whether the upload succeeded or encountered a revision conflict.
      */
     override suspend fun upload(
         path: String,
-        data: ByteArray,
+        sourcePath: String,
         expectedRev: String?,
     ): Result<CloudFileMeta> = withToken { token ->
         val response = client.put("${itemUrl(path)}:/content") {
             header("Authorization", "Bearer $token")
             if (expectedRev != null) header("If-Match", expectedRev)
-            contentType(ContentType.Application.OctetStream)
-            setBody(data)
+            setBody(FileUploadContent(sourcePath))
         }
         // If-Match no longer matches — another device wrote first.
         response.metaOrConflictOr(conflictStatus = 412)
@@ -114,18 +116,17 @@ class OneDriveStorage(
      * Creates a file at the specified path without overwriting an existing file.
      *
      * @param path The file path within the OneDrive app folder.
-     * @param data The file content.
+     * @param sourcePath The path to the file to upload.
      * @return A successful result when the file is created, or a conflict result when a file already exists.
      */
-    override suspend fun create(path: String, data: ByteArray): Result<CloudFileMeta> = withToken { token ->
+    override suspend fun create(path: String, sourcePath: String): Result<CloudFileMeta> = withToken { token ->
         // conflictBehavior=fail is Graph's native create-only: an existing file yields 409
         // instead of being overwritten, which we surface as a conflict so the caller falls back
         // to the merge path. encodedParameters keeps the "@"/"." literal (already URL-safe).
         val response = client.put("${itemUrl(path)}:/content") {
             header("Authorization", "Bearer $token")
             url { encodedParameters.append("@microsoft.graph.conflictBehavior", "fail") }
-            contentType(ContentType.Application.OctetStream)
-            setBody(data)
+            setBody(FileUploadContent(sourcePath))
         }
         response.metaOrConflictOr(conflictStatus = 409)
     }

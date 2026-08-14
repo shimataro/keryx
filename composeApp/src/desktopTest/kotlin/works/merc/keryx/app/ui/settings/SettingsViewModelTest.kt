@@ -31,7 +31,6 @@ import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SYNC_STATE_LAST_SYNCED_AT
-import works.merc.keryx.app.data.cloud.CloudFile
 import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
@@ -93,9 +92,9 @@ import kotlin.test.assertTrue
 private class AlwaysFailingCloudStorage : CloudStorage {
     private fun <T> fail(): Result<T> = Result.Err(CloudAuthException("no token"))
     override suspend fun authenticate(): Result<Unit> = fail()
-    override suspend fun download(path: String): Result<CloudFile> = fail()
-    override suspend fun upload(path: String, data: ByteArray, expectedRev: String?): Result<CloudFileMeta> = fail()
-    override suspend fun create(path: String, data: ByteArray): Result<CloudFileMeta> = fail()
+    override suspend fun download(path: String, destPath: String): Result<CloudFileMeta> = fail()
+    override suspend fun upload(path: String, sourcePath: String, expectedRev: String?): Result<CloudFileMeta> = fail()
+    override suspend fun create(path: String, sourcePath: String): Result<CloudFileMeta> = fail()
     override suspend fun delete(path: String): Result<Unit> = fail()
     override suspend fun rename(from: String, to: String): Result<Unit> = fail()
     override suspend fun metadata(path: String): Result<CloudFileMeta?> = fail()
