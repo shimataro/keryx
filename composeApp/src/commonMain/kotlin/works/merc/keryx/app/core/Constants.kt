@@ -21,17 +21,35 @@ const val MILLIS_PER_HOUR = 60 * 60 * 1000L
 const val MILLIS_PER_MINUTE = 60_000L
 const val MILLIS_PER_SECOND = 1_000L
 
-/** Cloud file path/name for the synced DB (leading slash for Dropbox; the basename for Google Drive). */
+/**
+ * Legacy (pre-compression) cloud file path/name for the synced DB. No longer written — every
+ * upload/create goes to [CLOUD_DB_GZ_PATH] — but still read as a one-time fallback when the
+ * compressed file does not exist yet remotely (a cloud this device has not synced to since
+ * compression was added). See "Compressed Upload / Legacy Fallback" in sync-architecture.md.
+ *
+ * This fallback is a deliberately temporary bridge for the 0.x pre-release period. It is planned
+ * for removal once the app reaches its v1.0.0 release, at which point every device still running
+ * an older, [CLOUD_DB_GZ_PATH]-unaware build is expected to have upgraded; see the same doc
+ * section for the removal note.
+ */
 const val CLOUD_DB_PATH = "/keryx.db"
 
 /**
- * Prefix/suffix of the archive a cloud-data reset creates, e.g. `/keryx-20260811-103000.db.bak`
- * (see `cloudBackupPath`). Deliberately *not* derived from [CLOUD_DB_PATH]: the archive name must
- * not match Google Drive's `name = 'keryx.db'` lookup or OneDrive's basename addressing, or
- * `CloudStorage.exists(CLOUD_DB_PATH)` would end up seeing the archive too.
+ * Primary cloud file path/name for the synced DB. Always gzip-compressed (`platform/Gzip`) — the
+ * only path this app ever writes to. [CLOUD_DB_PATH] is read-only fallback for a cloud that has
+ * not been written to since compression was added.
+ */
+const val CLOUD_DB_GZ_PATH = "/keryx.db.gz"
+
+/**
+ * Prefix/suffix of the archive a cloud-data reset creates, e.g.
+ * `/keryx-20260811-103000.db.gz.bak` (see `cloudBackupPath`). Deliberately *not* derived from
+ * [CLOUD_DB_GZ_PATH]: the archive name must not match Google Drive's `name = 'keryx.db.gz'`
+ * lookup or OneDrive's basename addressing, or `CloudStorage.metadata(CLOUD_DB_GZ_PATH)` would end
+ * up seeing the archive too.
  */
 const val CLOUD_DB_BACKUP_PREFIX = "/keryx-"
-const val CLOUD_DB_BACKUP_SUFFIX = ".db.bak"
+const val CLOUD_DB_BACKUP_SUFFIX = ".db.gz.bak"
 
 // --- Sync / network ---
 const val SYNC_MAX_RETRY = 3
