@@ -62,10 +62,11 @@ class GoogleDriveStorageTest {
             { respond(foundFile(version = "r42"), HttpStatusCode.OK) },
             { respond(bytes, HttpStatusCode.OK) },
         )
-        val r = s.download(CLOUD_DB_PATH)
-        assertIs<Result.Ok<CloudFile>>(r)
+        val dest = downloadDestPath()
+        val r = s.download(CLOUD_DB_PATH, dest)
+        assertIs<Result.Ok<CloudFileMeta>>(r)
         assertEquals("r42", r.value.rev)
-        assertContentEquals(bytes, r.value.data)
+        assertContentEquals(bytes, bytesAt(dest))
         assertEquals(2, history.size)
         assertEquals("GET", history[0].method.value)
         assertEquals("/drive/v3/files", history[0].url.encodedPath)
@@ -77,7 +78,8 @@ class GoogleDriveStorageTest {
     @Test
     fun downloadFileNotFoundIsCloudStorageError() = runTest {
         val (s, history, verify) = storage("tok", { respond(notFound, HttpStatusCode.OK) })
-        val r = s.download(CLOUD_DB_PATH)
+        val dest = downloadDestPath()
+        val r = s.download(CLOUD_DB_PATH, dest)
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
         assertEquals(1, history.size)
@@ -173,7 +175,7 @@ class GoogleDriveStorageTest {
             { respond(notFound, HttpStatusCode.OK) },
             { respond("""{"id":"F1","version":"r1"}""", HttpStatusCode.OK) },
         )
-        val r = s.upload(CLOUD_DB_PATH, byteArrayOf(1))
+        val r = s.upload(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)))
         assertIs<Result.Ok<Unit>>(r)
         assertEquals(2, history.size)
         assertEquals("GET", history[0].method.value)
@@ -190,7 +192,7 @@ class GoogleDriveStorageTest {
             { respond(foundFile(version = "r1"), HttpStatusCode.OK) },
             { respond("""{"id":"F1","version":"r2"}""", HttpStatusCode.OK) },
         )
-        val r = s.upload(CLOUD_DB_PATH, byteArrayOf(1), expectedRev = "r1")
+        val r = s.upload(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)), expectedRev = "r1")
         assertIs<Result.Ok<Unit>>(r)
         assertEquals(2, history.size)
         assertEquals("GET", history[0].method.value)
@@ -203,7 +205,7 @@ class GoogleDriveStorageTest {
     @Test
     fun uploadConflictWhenRevMismatch() = runTest {
         val (s, history, verify) = storage("tok", { respond(foundFile(version = "r2"), HttpStatusCode.OK) })
-        val r = s.upload(CLOUD_DB_PATH, byteArrayOf(1), expectedRev = "r1")
+        val r = s.upload(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)), expectedRev = "r1")
         assertIs<Result.Err>(r)
         assertIs<SyncConflictException>(r.exception)
         assertEquals(1, history.size)
@@ -219,7 +221,7 @@ class GoogleDriveStorageTest {
             { respond(foundFile(version = "r-whatever"), HttpStatusCode.OK) },
             { respond("""{"id":"F1","version":"r-new"}""", HttpStatusCode.OK) },
         )
-        val r = s.upload(CLOUD_DB_PATH, byteArrayOf(1), expectedRev = null)
+        val r = s.upload(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)), expectedRev = null)
         assertIs<Result.Ok<Unit>>(r)
         assertEquals(2, history.size)
         assertEquals("GET", history[0].method.value)
@@ -260,7 +262,7 @@ class GoogleDriveStorageTest {
             { respond("""{"files":[{"id":"F1","version":"r1"}]}""", HttpStatusCode.OK) },
             { respond("""{"files":[{"id":"F1","version":"r1"}]}""", HttpStatusCode.OK) },
         )
-        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        val r = s.create(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)))
         assertIs<Result.Ok<Unit>>(r)
         assertEquals(4, history.size)
         assertEquals("GET", history[0].method.value)
@@ -287,7 +289,7 @@ class GoogleDriveStorageTest {
             { respond("""{"files":[{"id":"F1","version":"r-bumped"}]}""", HttpStatusCode.OK) },
             { respond("""{"files":[{"id":"F1","version":"r-bumped"}]}""", HttpStatusCode.OK) },
         )
-        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        val r = s.create(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)))
         assertIs<Result.Ok<CloudFileMeta>>(r)
         assertEquals("r-created", r.value.rev)
         verify()
@@ -304,7 +306,7 @@ class GoogleDriveStorageTest {
             { respond("""{"files":[{"id":"F1","version":"r1"}]}""", HttpStatusCode.OK) },
             { respond("""{"files":[{"id":"F1","version":"r1"}]}""", HttpStatusCode.OK) },
         )
-        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        val r = s.create(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)))
         assertIs<Result.Ok<Unit>>(r)
         // 1 findFile (create-only check) + 1 create + exactly 2 post-create listings.
         assertEquals(4, history.size)
@@ -324,7 +326,7 @@ class GoogleDriveStorageTest {
             { respond("""{"files":[{"id":"F1","version":"r1"},{"id":"F2","version":"r2"}]}""", HttpStatusCode.OK) },
             { respond("", HttpStatusCode.NoContent) },
         )
-        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        val r = s.create(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)))
         assertIs<Result.Err>(r)
         assertIs<SyncConflictException>(r.exception)
         assertEquals(5, history.size)
@@ -336,7 +338,7 @@ class GoogleDriveStorageTest {
     @Test
     fun createReturnsConflictWhenAlreadyExists() = runTest {
         val (s, history, verify) = storage("tok", { respond(foundFile(), HttpStatusCode.OK) })
-        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        val r = s.create(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)))
         assertIs<Result.Err>(r)
         assertIs<SyncConflictException>(r.exception)
         assertEquals(1, history.size)
@@ -354,7 +356,7 @@ class GoogleDriveStorageTest {
             { respond("""{"files":[{"id":"F1","version":"r1"},{"id":"F2","version":"r2"}]}""", HttpStatusCode.OK) },
             { respond("", HttpStatusCode.NoContent) },
         )
-        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        val r = s.create(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)))
         assertIs<Result.Ok<Unit>>(r)
         assertEquals(4, history.size)
         assertEquals("GET", history[0].method.value)
@@ -377,7 +379,7 @@ class GoogleDriveStorageTest {
             { respond("""{"files":[{"id":"F1","version":"r1"},{"id":"F2","version":"r2"}]}""", HttpStatusCode.OK) },
             { respond("", HttpStatusCode.NoContent) },
         )
-        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        val r = s.create(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)))
         assertIs<Result.Err>(r)
         assertIs<SyncConflictException>(r.exception)
         // The loser deletes its own just-created file (F2) so it does not linger as an orphan,
@@ -405,7 +407,7 @@ class GoogleDriveStorageTest {
             { respond("""{"files":[{"id":"F1","version":"r1"},{"id":"F2","version":"r2"}]}""", HttpStatusCode.OK) },
             { respondError(HttpStatusCode.InternalServerError) },
         )
-        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        val r = s.create(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)))
         assertIs<Result.Err>(r)
         assertIs<SyncConflictException>(r.exception)
         assertEquals(4, history.size)
@@ -422,7 +424,7 @@ class GoogleDriveStorageTest {
             { respond("""{"id":"F1","version":"r1"}""", HttpStatusCode.OK) },
             { respondError(HttpStatusCode.InternalServerError) },
         )
-        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        val r = s.create(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)))
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
         assertEquals(3, history.size)
@@ -444,7 +446,7 @@ class GoogleDriveStorageTest {
             { respond("""{"files":[{"id":"F1","version":"r1"},{"id":"F2","version":"r2"}]}""", HttpStatusCode.OK) },
             { respondError(HttpStatusCode.InternalServerError) },
         )
-        val r = s.create(CLOUD_DB_PATH, byteArrayOf(1))
+        val r = s.create(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)))
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
         assertEquals(4, history.size)
@@ -462,7 +464,8 @@ class GoogleDriveStorageTest {
     @Test
     fun missingTokenIsAuthError() = runTest {
         val (s, history, verify) = storage(token = null)
-        val r = s.download(CLOUD_DB_PATH)
+        val dest = downloadDestPath()
+        val r = s.download(CLOUD_DB_PATH, dest)
         assertIs<Result.Err>(r)
         assertIs<CloudAuthException>(r.exception)
         assertEquals(0, history.size)
@@ -472,7 +475,8 @@ class GoogleDriveStorageTest {
     @Test
     fun findFileUnauthorizedMapsToAuthError() = runTest {
         val (s, history, verify) = storage("tok", { respondError(HttpStatusCode.Unauthorized) })
-        val r = s.download(CLOUD_DB_PATH)
+        val dest = downloadDestPath()
+        val r = s.download(CLOUD_DB_PATH, dest)
         assertIs<Result.Err>(r)
         assertIs<CloudAuthException>(r.exception)
         assertEquals(1, history.size)
@@ -527,7 +531,8 @@ class GoogleDriveStorageTest {
             { respond(foundFile(), HttpStatusCode.OK) },
             { respondError(HttpStatusCode.InternalServerError) },
         )
-        val r = s.download(CLOUD_DB_PATH)
+        val dest = downloadDestPath()
+        val r = s.download(CLOUD_DB_PATH, dest)
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
         assertEquals(2, history.size)
@@ -545,7 +550,7 @@ class GoogleDriveStorageTest {
             { respond(notFound, HttpStatusCode.OK) },
             { respondError(HttpStatusCode.InternalServerError) },
         )
-        val r = s.upload(CLOUD_DB_PATH, byteArrayOf(1))
+        val r = s.upload(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)))
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
         assertEquals(2, history.size)
@@ -568,8 +573,8 @@ class GoogleDriveStorageTest {
                 respond(foundFile(version = "r42"), HttpStatusCode.OK)
             },
         )
-        var result: Result<CloudFile>? = null
-        val job = launch { result = s.download(CLOUD_DB_PATH) }
+        var result: Result<CloudFileMeta>? = null
+        val job = launch { result = s.download(CLOUD_DB_PATH, downloadDestPath()) }
         runCurrent()
         started.await()
         job.cancel()
@@ -580,7 +585,8 @@ class GoogleDriveStorageTest {
     @Test
     fun downloadNetworkExceptionIsCaughtAsCloudStorageError() = runTest {
         val (s, history, verify) = storage("tok", { throw IOException("boom") })
-        val r = s.download(CLOUD_DB_PATH)
+        val dest = downloadDestPath()
+        val r = s.download(CLOUD_DB_PATH, dest)
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
         assertEquals(1, history.size)
@@ -592,7 +598,7 @@ class GoogleDriveStorageTest {
     @Test
     fun uploadNetworkExceptionIsCaughtAsCloudStorageError() = runTest {
         val (s, history, verify) = storage("tok", { throw IOException("boom") })
-        val r = s.upload(CLOUD_DB_PATH, byteArrayOf(1))
+        val r = s.upload(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)))
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
         assertEquals(1, history.size)

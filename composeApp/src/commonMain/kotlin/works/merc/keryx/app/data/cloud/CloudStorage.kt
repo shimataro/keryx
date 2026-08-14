@@ -9,9 +9,6 @@ import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SyncConflictException
 
-/** A downloaded cloud file plus its revision (used for optimistic-concurrency upload). */
-class CloudFile(val data: ByteArray, val rev: String)
-
 /**
  * A cloud file's revision, without its contents.
  *
@@ -81,12 +78,22 @@ interface CloudStorage {
     /** Verifies the current credentials are valid. */
     suspend fun authenticate(): Result<Unit>
 
-    suspend fun download(path: String): Result<CloudFile>
+    /**
+     * Downloads [path] into the local file [destPath], replacing anything already there, and
+     * returns the downloaded revision.
+     *
+     * Takes a destination path rather than returning the bytes because the sync DB is the largest
+     * payload this app moves and always ends up on disk anyway — the merge attaches it as a file.
+     * Streaming straight there keeps peak memory independent of how big the database has grown.
+     */
+    suspend fun download(path: String, destPath: String): Result<CloudFileMeta>
 
     /**
-     * Uploads [data] to [path]. When [expectedRev] is non-null, the write fails
-     * with [works.merc.keryx.app.core.SyncConflictException] if the remote rev
-     * differs (another device wrote first).
+     * Uploads the local file [sourcePath] to [path]. When [expectedRev] is non-null, the write
+     * fails with [works.merc.keryx.app.core.SyncConflictException] if the remote rev differs
+     * (another device wrote first).
+     *
+     * Streams the file rather than taking its bytes, for the same reason as [download].
      *
      * Returns the revision **this write produced**. The caller records it as the revision it has
      * already merged, so its next sync recognises its own upload and does not download it back.
@@ -94,17 +101,17 @@ interface CloudStorage {
      * second request could observe another device's newer write instead, and storing that rev
      * would make the next sync skip a download whose contents were never merged.
      */
-    suspend fun upload(path: String, data: ByteArray, expectedRev: String? = null): Result<CloudFileMeta>
+    suspend fun upload(path: String, sourcePath: String, expectedRev: String? = null): Result<CloudFileMeta>
 
     /**
-     * Creates [path] with [data] only if it does not already exist. If the file
-     * is already present, fails with [works.merc.keryx.app.core.SyncConflictException]
+     * Creates [path] from the local file [sourcePath] only if it does not already exist. If the
+     * file is already present, fails with [works.merc.keryx.app.core.SyncConflictException]
      * rather than overwriting it — the safe primitive for the first-ever upload, so a
      * wrong "does not exist" reading can never destroy another device's data.
      *
      * Returns the created file's revision, for the same reason as [upload].
      */
-    suspend fun create(path: String, data: ByteArray): Result<CloudFileMeta>
+    suspend fun create(path: String, sourcePath: String): Result<CloudFileMeta>
 
     /**
      * Deletes [path]. Idempotent: succeeds with [Result.Ok] when the file is already absent.

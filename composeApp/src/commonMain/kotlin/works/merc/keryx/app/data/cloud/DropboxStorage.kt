@@ -45,12 +45,13 @@ class DropboxStorage(
     }
 
     /**
-     * Downloads a file and its Dropbox revision metadata.
+     * Streams a file to disk and returns its Dropbox revision.
      *
      * @param path The path of the file to download.
-     * @return A result containing the file data and revision, or a storage error.
+     * @param destPath The local file to write the contents to.
+     * @return A result containing the downloaded revision, or a storage error.
      */
-    override suspend fun download(path: String): Result<CloudFile> = withToken { token ->
+    override suspend fun download(path: String, destPath: String): Result<CloudFileMeta> = withToken { token ->
         val response = client.post("$contentBase/2/files/download") {
             header("Authorization", "Bearer $token")
             header("Dropbox-API-Arg", buildJsonObject { put("path", path) }.toString())
@@ -63,7 +64,10 @@ class DropboxStorage(
         val rev = (json.parseToJsonElement(resultHeader) as? JsonObject)
             ?.get("rev")?.jsonPrimitive?.content
             ?: return@withToken Result.Err(CloudStorageException("Missing rev in metadata"))
-        Result.Ok(CloudFile(response.readRawBytes(), rev))
+        // Read the rev before the body: the metadata rides in a header, so a failure to parse it
+        // costs nothing, whereas streaming first would write a file we then throw away.
+        response.writeBodyToFile(destPath)
+        Result.Ok(CloudFileMeta(rev))
     }
 
     /**
@@ -76,7 +80,7 @@ class DropboxStorage(
      */
     override suspend fun upload(
         path: String,
-        data: ByteArray,
+        sourcePath: String,
         expectedRev: String?,
     ): Result<CloudFileMeta> = withToken { token ->
         val mode = if (expectedRev != null) {
@@ -93,8 +97,7 @@ class DropboxStorage(
         val response = client.post("$contentBase/2/files/upload") {
             header("Authorization", "Bearer $token")
             header("Dropbox-API-Arg", arg)
-            contentType(ContentType.Application.OctetStream)
-            setBody(data)
+            setBody(FileUploadContent(sourcePath))
         }
         // A rev-guarded update that loses the race returns 409 (conflict).
         response.metaOrConflictOr(conflictStatus = 409)
@@ -107,7 +110,7 @@ class DropboxStorage(
      * @param data The file contents.
      * @return A successful result when the file is created, or an error result for failures including an existing file conflict.
      */
-    override suspend fun create(path: String, data: ByteArray): Result<CloudFileMeta> = withToken { token ->
+    override suspend fun create(path: String, sourcePath: String): Result<CloudFileMeta> = withToken { token ->
         // WriteMode "add" is create-only: if the file already exists Dropbox returns 409
         // (with autorename=false it does not silently create a copy), which we surface as a
         // conflict so the caller falls back to the merge path instead of overwriting.
@@ -120,8 +123,7 @@ class DropboxStorage(
         val response = client.post("$contentBase/2/files/upload") {
             header("Authorization", "Bearer $token")
             header("Dropbox-API-Arg", arg)
-            contentType(ContentType.Application.OctetStream)
-            setBody(data)
+            setBody(FileUploadContent(sourcePath))
         }
         response.metaOrConflictOr(conflictStatus = 409)
     }

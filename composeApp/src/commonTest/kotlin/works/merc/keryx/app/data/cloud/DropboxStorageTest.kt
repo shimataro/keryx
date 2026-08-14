@@ -35,16 +35,17 @@ class DropboxStorageTest {
     fun downloadReturnsBytesAndRev() = runTest {
         val bytes = byteArrayOf(1, 2, 3, 4)
         val s = storage { respond(bytes, HttpStatusCode.OK, headersOf("dropbox-api-result", """{"rev":"r42"}""")) }
-        val r = s.download(CLOUD_DB_PATH)
-        assertIs<Result.Ok<CloudFile>>(r)
+        val dest = downloadDestPath()
+        val r = s.download(CLOUD_DB_PATH, dest)
+        assertIs<Result.Ok<CloudFileMeta>>(r)
         assertEquals("r42", r.value.rev)
-        assertContentEquals(bytes, r.value.data)
+        assertContentEquals(bytes, bytesAt(dest))
     }
 
     @Test
     fun uploadConflictMapsToSyncConflict() = runTest {
         val s = storage { respondError(HttpStatusCode.Conflict) }
-        val r = s.upload(CLOUD_DB_PATH, byteArrayOf(1), expectedRev = "r1")
+        val r = s.upload(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)), expectedRev = "r1")
         assertIs<Result.Err>(r)
         assertIs<SyncConflictException>(r.exception)
     }
@@ -52,7 +53,7 @@ class DropboxStorageTest {
     @Test
     fun uploadSuccessReturnsTheWrittenRev() = runTest {
         val s = storage { respond("""{"rev":"r9"}""", HttpStatusCode.OK) }
-        val r = s.upload(CLOUD_DB_PATH, byteArrayOf(1))
+        val r = s.upload(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)))
         assertIs<Result.Ok<CloudFileMeta>>(r)
         assertEquals("r9", r.value.rev)
     }
@@ -134,7 +135,8 @@ class DropboxStorageTest {
     @Test
     fun missingTokenIsAuthError() = runTest {
         val s = storage(token = null) { respond("{}", HttpStatusCode.OK) }
-        val r = s.download(CLOUD_DB_PATH)
+        val dest = downloadDestPath()
+        val r = s.download(CLOUD_DB_PATH, dest)
         assertIs<Result.Err>(r)
         assertIs<CloudAuthException>(r.exception)
     }
@@ -142,7 +144,8 @@ class DropboxStorageTest {
     @Test
     fun unauthorizedMapsToAuthError() = runTest {
         val s = storage { respondError(HttpStatusCode.Unauthorized) }
-        val r = s.download(CLOUD_DB_PATH)
+        val dest = downloadDestPath()
+        val r = s.download(CLOUD_DB_PATH, dest)
         assertIs<Result.Err>(r)
         assertIs<CloudAuthException>(r.exception)
     }
@@ -150,7 +153,8 @@ class DropboxStorageTest {
     @Test
     fun downloadMissingResultHeaderIsCloudStorageError() = runTest {
         val s = storage { respond(byteArrayOf(1, 2, 3), HttpStatusCode.OK) }
-        val r = s.download(CLOUD_DB_PATH)
+        val dest = downloadDestPath()
+        val r = s.download(CLOUD_DB_PATH, dest)
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
         assertEquals("Missing Dropbox-API-Result header", r.exception.message)
@@ -161,7 +165,8 @@ class DropboxStorageTest {
         val s = storage {
             respond(byteArrayOf(1, 2, 3), HttpStatusCode.OK, headersOf("dropbox-api-result", """{"name":"keryx.db"}"""))
         }
-        val r = s.download(CLOUD_DB_PATH)
+        val dest = downloadDestPath()
+        val r = s.download(CLOUD_DB_PATH, dest)
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
         assertEquals("Missing rev in metadata", r.exception.message)
@@ -170,7 +175,7 @@ class DropboxStorageTest {
     @Test
     fun uploadUnauthorizedMapsToAuthError() = runTest {
         val s = storage { respondError(HttpStatusCode.Unauthorized) }
-        val r = s.upload(CLOUD_DB_PATH, byteArrayOf(1))
+        val r = s.upload(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)))
         assertIs<Result.Err>(r)
         assertIs<CloudAuthException>(r.exception)
     }
@@ -178,7 +183,7 @@ class DropboxStorageTest {
     @Test
     fun uploadForbiddenMapsToAuthError() = runTest {
         val s = storage { respondError(HttpStatusCode.Forbidden) }
-        val r = s.upload(CLOUD_DB_PATH, byteArrayOf(1))
+        val r = s.upload(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)))
         assertIs<Result.Err>(r)
         assertIs<CloudAuthException>(r.exception)
     }
@@ -186,7 +191,7 @@ class DropboxStorageTest {
     @Test
     fun uploadServerErrorMapsToCloudStorageError() = runTest {
         val s = storage { respondError(HttpStatusCode.InternalServerError) }
-        val r = s.upload(CLOUD_DB_PATH, byteArrayOf(1))
+        val r = s.upload(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)))
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
     }
@@ -209,8 +214,8 @@ class DropboxStorageTest {
             gate.await()
             respond(bytes, HttpStatusCode.OK, headersOf("dropbox-api-result", """{"rev":"r42"}"""))
         }
-        var result: Result<CloudFile>? = null
-        val job = launch { result = s.download(CLOUD_DB_PATH) }
+        var result: Result<CloudFileMeta>? = null
+        val job = launch { result = s.download(CLOUD_DB_PATH, downloadDestPath()) }
         runCurrent()
         started.await()
         job.cancel()
@@ -221,7 +226,8 @@ class DropboxStorageTest {
     @Test
     fun downloadNetworkExceptionIsCaughtAsCloudStorageError() = runTest {
         val s = storage { throw IOException("boom") }
-        val r = s.download(CLOUD_DB_PATH)
+        val dest = downloadDestPath()
+        val r = s.download(CLOUD_DB_PATH, dest)
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
     }
@@ -229,7 +235,7 @@ class DropboxStorageTest {
     @Test
     fun uploadNetworkExceptionIsCaughtAsCloudStorageError() = runTest {
         val s = storage { throw IOException("boom") }
-        val r = s.upload(CLOUD_DB_PATH, byteArrayOf(1))
+        val r = s.upload(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)))
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
     }

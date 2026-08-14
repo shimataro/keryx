@@ -8,6 +8,7 @@ koin = "4.2.2"
 coroutines = "1.11.0"
 serialization = "1.11.0"
 datetime = "0.8.0"
+kotlinx-io = "0.9.0"
 xmlutil = "1.0.1"
 coil = "3.5.0"
 lifecycle = "2.11.0"
@@ -65,6 +66,10 @@ kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "datetime" }
+# Multiplatform file IO, used to stream the sync DB between disk and the cloud without
+# materialising it in memory. Already on the classpath transitively via Ktor 3; declared
+# explicitly because production code depends on it directly.
+kotlinx-io-core = { module = "org.jetbrains.kotlinx:kotlinx-io-core", version.ref = "kotlinx-io" }
 
 # --- XML / OPML ---
 xmlutil-serialization = { module = "io.github.pdvrieze.xmlutil:serialization", version.ref = "xmlutil" }

@@ -105,7 +105,14 @@ Linux の SNI トレイ（`TrayPixmapTest`＝ビッグエンディアン ARGB32 
 リセット（`core/CloudBackupPathTest.kt`＝決定的で UTC 整形された退避パス、`CloudStorage.rename` は
 `DropboxStorageTest.kt`／`GoogleDriveStorageTest.kt`／`OneDriveStorageTest.kt` でプロバイダごとに
 （退避先の衝突・退避元の不在ケースを含めて）検証、`SyncRepositoryTest.kt` の `resetCloudData*` 系が
-リネームしてから作り直すフローとその削除フォールバックを検証）、変更がないときの転送スキップ
+リネームしてから作り直すフローとその削除フォールバックを検証）、クラウド転送のファイルストリーミング
+（`CloudFileTransferTest.kt`：レスポンスボディが複数チャンクにまたがっても宛先ファイルへそのまま
+書かれること、短いペイロードが既存の宛先ファイルに追記されず置き換わること、`FileUploadContent` が
+ファイルをストリームし——Drive の `multipart/related` 封筒を可能にする prefix/suffix で包む場合も
+含めて——正しい `contentLength` を報告すること。`ContentDigestTest.kt`：アップロードのスキップ判定に
+使うチャンク単位 SHA-256——最終チャンクの変更も検出されること、ファイルが無い場合は誤一致ではなく
+ダイジェスト無しを返すことを含む。`SqliteFileTest.kt`：パス版のヘッダ検証が、どのバッファよりも
+大きなファイルでも先頭16バイトだけで判定すること）、変更がないときの転送スキップ
 （`SyncRepositoryTest.kt`：双方とも変更が無い2回目の同期がペイロードを1バイトも転送せずメタデータ取得
 1回だけで済むこと、そのスキップの後にローカルを変更したら確実にアップロードされること、リモートの変更は
 従来どおりダウンロードしてマージすること、アップロード自身のレスポンスからリビジョンを記録するので自分の
