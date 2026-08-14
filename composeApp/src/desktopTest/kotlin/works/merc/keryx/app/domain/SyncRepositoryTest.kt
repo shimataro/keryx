@@ -450,6 +450,57 @@ class SyncRepositoryTest {
     }
 
     @Test
+    fun clearSyncFailureStateIsNotUndoneByAnInFlightSync() = runTest {
+        // Disconnecting while a sync is already past its upload: without the shared mutex, that
+        // sync's own setSyncState calls land *after* the clear and hand the next connection the old
+        // provider's revision — which is exactly what makes a sync skip a download it never merged.
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1")
+        val gate = CompletableDeferred<Unit>()
+        cloud.downloadGate = gate
+        val repo = newRepo(cloud)
+
+        val syncing = launch { repo.sync() }
+        runCurrent() // advance until sync() suspends inside the gated download, holding the mutex
+        val clearing = launch { repo.clearSyncFailureState() }
+        runCurrent() // the clear is now blocked on the mutex the sync holds
+        gate.complete(Unit)
+        syncing.join()
+        clearing.join()
+
+        cloud.downloadGate = null
+        val downloadsBefore = cloud.downloadCount
+        val uploadsBefore = cloud.uploadCount
+        assertIs<Result.Ok<Unit>>(repo.sync())
+
+        assertEquals(downloadsBefore + 1, cloud.downloadCount, "cleared revision must force a download")
+        assertEquals(uploadsBefore + 1, cloud.uploadCount, "cleared digest must force an upload")
+    }
+
+    @Test
+    fun clearSyncFailureStateIsNotUndoneByAFailingInFlightSync() = runTest {
+        // The same race for the two StateFlows: emitErrorNotification() writes lastSyncError, so it
+        // has to run inside the lock too, or a sync failing right after a disconnect leaves the
+        // settings screen showing a failure reason for a provider that is no longer connected.
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1")
+        cloud.queueUpload(Result.Err(CloudStorageException("boom")))
+        val gate = CompletableDeferred<Unit>()
+        cloud.downloadGate = gate
+        val repo = newRepo(cloud)
+
+        val syncing = launch { repo.sync() }
+        runCurrent()
+        val clearing = launch { repo.clearSyncFailureState() }
+        runCurrent()
+        gate.complete(Unit)
+        syncing.join()
+        clearing.join()
+
+        assertNull(repo.lastSyncError.value, "a sync failing after the clear must not restore the reason")
+    }
+
+    @Test
     fun uploadSnapshotExcludesSyncStateSoItDoesNotDriftOnItsOwn() = runTest {
         // last_synced_at is rewritten on every successful sync. If sync_state rode along in the
         // uploaded snapshot, the bytes would differ every cycle and the skip could never fire.

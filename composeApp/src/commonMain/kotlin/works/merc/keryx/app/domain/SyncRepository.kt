@@ -137,12 +137,19 @@ class SyncRepository(
      * stale one would in practice never match the next provider's — but "would never match" is a
      * weaker guarantee than "cannot", and a match here would skip a download that was never
      * merged. Reconnecting to the *same* provider re-establishes both on the first sync.
+     *
+     * Runs under [mutex] — the same lock [sync] holds across everything that writes these four
+     * fields. Without it, a sync already past its upload would re-write the revision and digest
+     * *after* this cleared them, handing the next connection markers describing the old provider's
+     * file: the very skipped-download-that-was-never-merged this method exists to prevent.
      */
-    fun clearSyncFailureState() {
-        _lastSyncError.value = null
-        _autoSyncSuspended.value = false
-        setSyncState(SYNC_STATE_CLOUD_FILE_REV, "")
-        setSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST, "")
+    suspend fun clearSyncFailureState() {
+        mutex.withLock {
+            _lastSyncError.value = null
+            _autoSyncSuspended.value = false
+            setSyncState(SYNC_STATE_CLOUD_FILE_REV, "")
+            setSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST, "")
+        }
     }
 
     /**
@@ -168,10 +175,17 @@ class SyncRepository(
             Log.info(TAG, "Automatic sync skipped: cloud data is unusable until it is reset")
             return Result.Ok(Unit)
         }
-        val result = activityCenter.trackSync { mutex.withLock { syncLocked() } }
-        updateAutoSyncGate(result)
-        emitErrorNotification(result)
-        return result
+        // The gate and the failure text are written inside the lock, not after it: they are two of
+        // the four fields clearSyncFailureState() clears, and it takes the same lock so a
+        // disconnect can never be undone by a sync that was already in flight.
+        return activityCenter.trackSync {
+            mutex.withLock {
+                val result = syncLocked()
+                updateAutoSyncGate(result)
+                emitErrorNotification(result)
+                result
+            }
+        }
     }
 
     /**
@@ -201,18 +215,19 @@ class SyncRepository(
      */
     suspend fun resetCloudData(): Result<Unit> {
         val cloud = cloudProvider() ?: return Result.Ok(Unit)
-        val result = activityCenter.trackSync {
+        // Gate and failure text written inside the lock, same reason as in sync().
+        return activityCenter.trackSync {
             mutex.withLock {
-                when (val archived = archiveCloudDb(cloud)) {
+                val result = when (val archived = archiveCloudDb(cloud)) {
                     is Result.Err -> archived
                     // The old file is out of the way (archived or deleted), so re-create it.
                     is Result.Ok -> createFresh(cloud)
                 }
+                updateAutoSyncGate(result)
+                emitErrorNotification(result)
+                result
             }
         }
-        updateAutoSyncGate(result)
-        emitErrorNotification(result)
-        return result
     }
 
     /**
