@@ -74,7 +74,7 @@ class DropboxStorage(
      * Uploads file data to Dropbox, optionally requiring a specific revision.
      *
      * @param path The Dropbox path for the file.
-     * @param data The file contents.
+     * @param sourcePath The path to the file to upload.
      * @param expectedRev The revision that must currently exist for the update to succeed, or `null` to overwrite.
      * @return A successful result, a conflict result when the expected revision is stale, or a mapped failure.
      */
@@ -107,7 +107,7 @@ class DropboxStorage(
      * Creates a new file at the specified path without overwriting an existing file.
      *
      * @param path The Dropbox path where the file will be created.
-     * @param data The file contents.
+     * @param sourcePath The path to the file to upload.
      * @return A successful result when the file is created, or an error result for failures including an existing file conflict.
      */
     override suspend fun create(path: String, sourcePath: String): Result<CloudFileMeta> = withToken { token ->

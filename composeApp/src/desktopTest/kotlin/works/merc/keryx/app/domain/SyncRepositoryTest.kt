@@ -363,6 +363,8 @@ class SyncRepositoryTest {
 
     private fun tempCloudDbFile(): File = File(tempDir, "cloud_keryx.db")
 
+    private fun tempSnapshotFile(): File = File(tempDir, "upload_keryx.db")
+
     @Test
     fun secondSyncWithNothingChangedTransfersNothing() = runTest {
         // The background loop syncs on a timer, so the overwhelmingly common case is "neither side
@@ -547,6 +549,7 @@ class SyncRepositoryTest {
         assertEquals(0, cloud.uploadCount)
         assertTrue(cloud.files.containsKey(CLOUD_DB_PATH))
         assertEquals(1_000L, repo.lastSyncedAt())
+        assertFalse(tempSnapshotFile().exists())
     }
 
     @Test
@@ -566,6 +569,7 @@ class SyncRepositoryTest {
         assertEquals(1, cloud.downloadCount)
         assertEquals(1, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
     }
 
     @Test
@@ -601,6 +605,7 @@ class SyncRepositoryTest {
         // The live FTS index is never dropped (it's excluded on a snapshot copy), so it's still present.
         assertTrue(ftsManager.exists())
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
     }
 
     @Test
@@ -691,6 +696,7 @@ class SyncRepositoryTest {
         // The finally-block rebuild still runs even though the overall sync failed.
         assertTrue(ftsManager.exists())
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
     }
 
     @Test
@@ -722,6 +728,7 @@ class SyncRepositoryTest {
         assertIs<SchemaVersionException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
         // The merge-abort is user-visible via the notification center (the only signal for this path).
         val notes = notificationCenter.items.value
         assertEquals(1, notes.size)
@@ -745,6 +752,7 @@ class SyncRepositoryTest {
         assertIs<CloudDataIncompatibleException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
         // Surfaced to the notification center, with a reset action offered.
         val notes = notificationCenter.items.value
         assertEquals(1, notes.size)
@@ -765,6 +773,7 @@ class SyncRepositoryTest {
         assertIs<CloudDataIncompatibleException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
     }
 
     @Test
@@ -781,6 +790,7 @@ class SyncRepositoryTest {
         assertIs<CloudDataIncompatibleException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
     }
 
     @Test
@@ -797,6 +807,7 @@ class SyncRepositoryTest {
         assertIs<CloudDataIncompatibleException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
     }
 
     @Test
@@ -814,6 +825,7 @@ class SyncRepositoryTest {
         assertIs<CloudDataIncompatibleException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
         val notes = notificationCenter.items.value
         assertEquals(1, notes.size)
         assertEquals(AppNotificationAction.ResetCloudData, notes.first().action)
@@ -834,6 +846,7 @@ class SyncRepositoryTest {
         assertIs<CloudDataIncompatibleException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
         val notes = notificationCenter.items.value
         assertEquals(1, notes.size)
         assertEquals(AppNotificationAction.ResetCloudData, notes.first().action)
@@ -883,6 +896,7 @@ class SyncRepositoryTest {
         assertIs<CloudStorageException>(result.exception)
         assertEquals(0, cloud.uploadCount)
         assertFalse(tempCloudDbFile().exists())
+        assertFalse(tempSnapshotFile().exists())
 
         val notes = notificationCenter.items.value
         assertEquals(1, notes.size)

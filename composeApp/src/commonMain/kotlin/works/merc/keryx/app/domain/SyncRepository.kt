@@ -462,7 +462,7 @@ class SyncRepository(
     /**
      * Merges downloaded cloud database data into the local database and updates affected search and query listeners.
      *
-     * @param data The downloaded cloud database contents.
+     * @param cloudDbPath The path to the downloaded cloud database file.
      * @return A successful result when the merge completes, or an error describing why it failed.
      * @throws CancellationException If the coroutine is cancelled during the merge.
      */

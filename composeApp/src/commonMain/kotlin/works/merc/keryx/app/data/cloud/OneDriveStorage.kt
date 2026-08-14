@@ -94,7 +94,7 @@ class OneDriveStorage(
      * Uploads file content to OneDrive, optionally requiring a matching revision.
      *
      * @param path The path of the file to upload.
-     * @param data The file content.
+     * @param sourcePath The path to the file to upload.
      * @param expectedRev The required current revision, or `null` to upload without revision checking.
      * @return A result indicating whether the upload succeeded or encountered a revision conflict.
      */
@@ -116,7 +116,7 @@ class OneDriveStorage(
      * Creates a file at the specified path without overwriting an existing file.
      *
      * @param path The file path within the OneDrive app folder.
-     * @param data The file content.
+     * @param sourcePath The path to the file to upload.
      * @return A successful result when the file is created, or a conflict result when a file already exists.
      */
     override suspend fun create(path: String, sourcePath: String): Result<CloudFileMeta> = withToken { token ->

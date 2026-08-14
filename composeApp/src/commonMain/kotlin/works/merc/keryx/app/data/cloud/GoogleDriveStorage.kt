@@ -120,7 +120,7 @@ class GoogleDriveStorage(
      * Creates a new file without overwriting an existing file.
      *
      * @param path The sync path identifying the file.
-     * @param data The file contents.
+     * @param sourcePath The path to the file to upload.
      * @return `Ok` when the file is created successfully, or an error if the file already exists or creation fails.
      */
     override suspend fun create(path: String, sourcePath: String): Result<CloudFileMeta> = withToken { token ->
