@@ -95,14 +95,14 @@ class GoogleDriveStorage(
         path: String,
         data: ByteArray,
         expectedRev: String?,
-    ): Result<Unit> = withToken { token ->
+    ): Result<CloudFileMeta> = withToken { token ->
         val name = fileName(path)
         val existing = when (val f = findFile(token, name)) {
             is Result.Err -> return@withToken f
             is Result.Ok -> f.value
         }
         if (existing == null) {
-            createFile(token, name, data).map { }
+            createFile(token, name, data).map { CloudFileMeta(it.version) }
         } else {
             // Best-effort optimistic concurrency: bail if the remote changed since download().
             if (expectedRev != null && existing.version != expectedRev) {
@@ -119,7 +119,7 @@ class GoogleDriveStorage(
      * @param data The file contents.
      * @return `Ok` when the file is created successfully, or an error if the file already exists or creation fails.
      */
-    override suspend fun create(path: String, data: ByteArray): Result<Unit> = withToken { token ->
+    override suspend fun create(path: String, data: ByteArray): Result<CloudFileMeta> = withToken { token ->
         val name = fileName(path)
         // Best-effort create-only: Drive has no atomic create-if-absent, so we check first and
         // fail with a conflict when the file already exists rather than overwriting it. The small
@@ -133,7 +133,7 @@ class GoogleDriveStorage(
         } else {
             when (val created = createFile(token, name, data)) {
                 is Result.Err -> created
-                is Result.Ok -> resolveCreateRace(token, name, created.value)
+                is Result.Ok -> resolveCreateRace(token, name, created.value.id)
             }
         }
     }
@@ -151,7 +151,7 @@ class GoogleDriveStorage(
      * @param createdId The ID of the file created by the current operation.
      * @return `Result.Ok` if the current file is retained and duplicates are deleted; a conflict error if another file wins.
      */
-    private suspend fun resolveCreateRace(token: String, name: String, createdId: String): Result<Unit> {
+    private suspend fun resolveCreateRace(token: String, name: String, createdId: String): Result<CloudFileMeta> {
         var rechecked = false
         while (true) {
             val listResult = listFilesByName(token, name)
@@ -184,7 +184,9 @@ class GoogleDriveStorage(
                     }
                 }
             }
-            return Result.Ok(Unit)
+            // The listing that decided the race already carries the winner's `version`, so the
+            // created file's rev needs no extra request.
+            return Result.Ok(CloudFileMeta(winner.version))
         }
     }
 
@@ -270,10 +272,12 @@ class GoogleDriveStorage(
         }
     }
 
-    override suspend fun exists(path: String): Result<Boolean> = withToken { token ->
+    override suspend fun metadata(path: String): Result<CloudFileMeta?> = withToken { token ->
         when (val f = findFile(token, fileName(path))) {
             is Result.Err -> f
-            is Result.Ok -> Result.Ok(f.value != null)
+            // `version` is already fetched by the same name lookup this call has always made (it
+            // is what upload() compares as the rev), so returning it costs no extra request.
+            is Result.Ok -> Result.Ok(f.value?.let { CloudFileMeta(it.version) })
         }
     }
 
@@ -314,8 +318,8 @@ class GoogleDriveStorage(
         }
     }
 
-    /** Creates the file in appDataFolder via a multipart/related upload (metadata + media). Returns the created file id. */
-    private suspend fun createFile(token: String, name: String, data: ByteArray): Result<String> {
+    /** Creates the file in appDataFolder via a multipart/related upload (metadata + media). Returns the created file's id and version. */
+    private suspend fun createFile(token: String, name: String, data: ByteArray): Result<DriveFile> {
         val boundary = "keryx-${Random.nextLong().toULong()}"
         val metadata = buildJsonObject {
             put("name", name)
@@ -343,14 +347,11 @@ class GoogleDriveStorage(
         if (response.status.value !in 200..299) {
             return mapError(response.status.value, response.bodyAsText())
         }
-        val id = (json.parseToJsonElement(response.bodyAsText()) as? JsonObject)
-            ?.get("id")?.jsonPrimitive?.content
-            ?: return Result.Err(CloudStorageException("File metadata missing id"))
-        return Result.Ok(id)
+        return parseDriveFile(response.bodyAsText())
     }
 
-    /** Overwrites the file's content with a simple media upload. */
-    private suspend fun updateFile(token: String, fileId: String, data: ByteArray): Result<Unit> {
+    /** Overwrites the file's content with a simple media upload. Returns the resulting version. */
+    private suspend fun updateFile(token: String, fileId: String, data: ByteArray): Result<CloudFileMeta> {
         val response = client.patch("$uploadBase/files/$fileId") {
             header("Authorization", "Bearer $token")
             url {
@@ -360,7 +361,28 @@ class GoogleDriveStorage(
             contentType(ContentType.Application.OctetStream)
             setBody(data)
         }
-        return okOrError(response)
+        if (response.status.value !in 200..299) {
+            return mapError(response.status.value, response.bodyAsText())
+        }
+        // `fields=id,version` is already requested, so the write's own response carries the new
+        // version — no follow-up lookup, which could otherwise pick up a racing device's write.
+        return parseDriveFile(response.bodyAsText()).map { CloudFileMeta(it.version) }
+    }
+
+    /**
+     * Parses a Drive file resource fetched with `fields=id,version`.
+     *
+     * @param body The JSON response body.
+     * @return The file's id and version, or an error when either field is absent.
+     */
+    private fun parseDriveFile(body: String): Result<DriveFile> {
+        val obj = json.parseToJsonElement(body) as? JsonObject
+            ?: return Result.Err(CloudStorageException("Malformed file metadata response"))
+        val id = obj["id"]?.jsonPrimitive?.content
+            ?: return Result.Err(CloudStorageException("File metadata missing id"))
+        val version = obj["version"]?.jsonPrimitive?.content
+            ?: return Result.Err(CloudStorageException("File metadata missing version"))
+        return Result.Ok(DriveFile(id, version))
     }
 
     /**

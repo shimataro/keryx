@@ -32,6 +32,14 @@ actual object DatabaseSnapshot {
         // up rows on the attached `cloud.*` side by anything but its own NOT EXISTS/EXISTS guards
         // against `main.*`, so they serve no purpose in an uploaded snapshot.
         //
+        // `sync_state` goes too. It is device-local bookkeeping (last_synced_at, the cloud file's
+        // rev, the uploaded-snapshot digest), declared a non-sync table in db-schema.md, and it
+        // appears in neither MergeSql nor DatabaseMerger's EXPECTED_SCHEMA — so no receiving
+        // device ever reads it out of this file. Removing it also makes the snapshot a pure
+        // function of the synced data: last_synced_at is rewritten on every successful sync, so
+        // leaving it in would change the bytes on every cycle and defeat SyncRepository's
+        // "identical to what we last uploaded" check.
+        //
         // DROP TABLE/INDEX alone does not shrink the file — the freed pages just join SQLite's
         // internal freelist — so a plain VACUUM follows to actually reclaim that space before the
         // bytes are read for upload. VACUUM (unlike VACUUM INTO) operates in place on this
@@ -40,6 +48,7 @@ actual object DatabaseSnapshot {
         DriverManager.getConnection("jdbc:sqlite:$destPath").use { conn ->
             conn.createStatement().use { st ->
                 st.execute("DROP TABLE IF EXISTS articles_fts")
+                st.execute("DROP TABLE IF EXISTS sync_state")
                 st.execute("DROP INDEX IF EXISTS idx_articles_feed_id")
                 st.execute("DROP INDEX IF EXISTS idx_articles_is_read")
                 st.execute("DROP INDEX IF EXISTS idx_articles_is_starred")

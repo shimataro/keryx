@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.client.statement.readRawBytes
 import io.ktor.http.ContentType
@@ -15,6 +16,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.core.SyncConflictException
 
 /**
  * [CloudStorage] backed by the Dropbox v2 REST API. [accessTokenProvider]
@@ -76,7 +78,7 @@ class DropboxStorage(
         path: String,
         data: ByteArray,
         expectedRev: String?,
-    ): Result<Unit> = withToken { token ->
+    ): Result<CloudFileMeta> = withToken { token ->
         val mode = if (expectedRev != null) {
             buildJsonObject { put(".tag", "update"); put("update", expectedRev) }
         } else {
@@ -95,7 +97,7 @@ class DropboxStorage(
             setBody(data)
         }
         // A rev-guarded update that loses the race returns 409 (conflict).
-        response.okOrConflictOr("Dropbox", conflictStatus = 409)
+        response.metaOrConflictOr(conflictStatus = 409)
     }
 
     /**
@@ -105,7 +107,7 @@ class DropboxStorage(
      * @param data The file contents.
      * @return A successful result when the file is created, or an error result for failures including an existing file conflict.
      */
-    override suspend fun create(path: String, data: ByteArray): Result<Unit> = withToken { token ->
+    override suspend fun create(path: String, data: ByteArray): Result<CloudFileMeta> = withToken { token ->
         // WriteMode "add" is create-only: if the file already exists Dropbox returns 409
         // (with autorename=false it does not silently create a copy), which we surface as a
         // conflict so the caller falls back to the merge path instead of overwriting.
@@ -121,26 +123,55 @@ class DropboxStorage(
             contentType(ContentType.Application.OctetStream)
             setBody(data)
         }
-        response.okOrConflictOr("Dropbox", conflictStatus = 409)
+        response.metaOrConflictOr(conflictStatus = 409)
     }
 
     /**
-     * Determines whether a file exists at the specified path.
+     * Maps a write response to the revision it produced, a sync conflict, or a storage error.
+     *
+     * A successful `files/upload` answers with the new FileMetadata, so the resulting `rev` is
+     * read straight from the write itself — no follow-up metadata request, which could otherwise
+     * observe another device's later write.
+     *
+     * @param conflictStatus The HTTP status Dropbox uses to report a lost rev guard.
+     * @return The written revision, a conflict, or a mapped storage error.
+     */
+    private suspend fun HttpResponse.metaOrConflictOr(conflictStatus: Int): Result<CloudFileMeta> = when {
+        status.value in 200..299 -> {
+            val rev = (json.parseToJsonElement(bodyAsText()) as? JsonObject)
+                ?.get("rev")?.jsonPrimitive?.content
+                ?: return Result.Err(CloudStorageException("Missing rev in upload response"))
+            Result.Ok(CloudFileMeta(rev))
+        }
+        status.value == conflictStatus -> Result.Err(SyncConflictException())
+        else -> mapError(status.value, bodyAsText())
+    }
+
+    /**
+     * Fetches a file's revision without its contents.
      *
      * @param path The Dropbox path to check.
-     * @return `true` if the file exists, `false` if the path is not found, or an error result for other failures.
+     * @return The file's metadata, `null` if the path is not found, or an error result for other failures.
      */
-    override suspend fun exists(path: String): Result<Boolean> = withToken { token ->
+    override suspend fun metadata(path: String): Result<CloudFileMeta?> = withToken { token ->
         val response = client.post("$apiBase/2/files/get_metadata") {
             header("Authorization", "Bearer $token")
             contentType(ContentType.Application.Json)
             setBody(buildJsonObject { put("path", path) }.toString())
         }
         when {
-            response.status.value in 200..299 -> Result.Ok(true)
+            response.status.value in 200..299 -> {
+                // `rev` is what an update-mode upload is guarded on, and what the caller compares
+                // against the last revision it merged. This is the same response that used to be
+                // read only for its status code.
+                val rev = (json.parseToJsonElement(response.bodyAsText()) as? JsonObject)
+                    ?.get("rev")?.jsonPrimitive?.content
+                    ?: return@withToken Result.Err(CloudStorageException("Missing rev in metadata"))
+                Result.Ok(CloudFileMeta(rev))
+            }
             response.status.value == 409 -> {
                 val body = response.bodyAsText()
-                if (body.contains("path/not_found")) Result.Ok(false) else mapError(409, body)
+                if (body.contains("path/not_found")) Result.Ok(null) else mapError(409, body)
             }
             else -> mapError(response.status.value, response.bodyAsText())
         }

@@ -50,19 +50,20 @@ class DropboxStorageTest {
     }
 
     @Test
-    fun uploadSuccess() = runTest {
-        val s = storage { respond("{}", HttpStatusCode.OK) }
+    fun uploadSuccessReturnsTheWrittenRev() = runTest {
+        val s = storage { respond("""{"rev":"r9"}""", HttpStatusCode.OK) }
         val r = s.upload(CLOUD_DB_PATH, byteArrayOf(1))
-        assertIs<Result.Ok<Unit>>(r)
+        assertIs<Result.Ok<CloudFileMeta>>(r)
+        assertEquals("r9", r.value.rev)
     }
 
     @Test
-    fun existsTrueAndFalse() = runTest {
-        val yes = storage { respond("""{".tag":"file"}""", HttpStatusCode.OK) }
-        assertEquals(true, (yes.exists(CLOUD_DB_PATH) as Result.Ok).value)
+    fun metadataReturnsRevOrNullWhenAbsent() = runTest {
+        val yes = storage { respond("""{".tag":"file","rev":"r7"}""", HttpStatusCode.OK) }
+        assertEquals("r7", (yes.metadata(CLOUD_DB_PATH) as Result.Ok<CloudFileMeta?>).value?.rev)
 
         val no = storage { respond("""{"error_summary":"path/not_found/..."}""", HttpStatusCode.Conflict) }
-        assertEquals(false, (no.exists(CLOUD_DB_PATH) as Result.Ok).value)
+        assertNull((no.metadata(CLOUD_DB_PATH) as Result.Ok<CloudFileMeta?>).value)
     }
 
     @Test
@@ -191,9 +192,9 @@ class DropboxStorageTest {
     }
 
     @Test
-    fun existsConflictWithOtherErrorTagSurfacesAsError() = runTest {
+    fun metadataConflictWithOtherErrorTagSurfacesAsError() = runTest {
         val s = storage { respond("""{"error_summary":"some_other_error/..."}""", HttpStatusCode.Conflict) }
-        val r = s.exists(CLOUD_DB_PATH)
+        val r = s.metadata(CLOUD_DB_PATH)
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
     }
@@ -234,9 +235,9 @@ class DropboxStorageTest {
     }
 
     @Test
-    fun existsNetworkExceptionIsCaughtAsCloudStorageError() = runTest {
+    fun metadataNetworkExceptionIsCaughtAsCloudStorageError() = runTest {
         val s = storage { throw IOException("boom") }
-        val r = s.exists(CLOUD_DB_PATH)
+        val r = s.metadata(CLOUD_DB_PATH)
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
     }

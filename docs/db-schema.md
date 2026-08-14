@@ -82,8 +82,20 @@ Indexes: `feed_id` / `is_read` / `is_starred` / `published_at DESC`.
 
 ### sync_state (KVS, non-sync)
 
-`key`(PK), `value`. Known keys: `last_synced_at` (Unix millis), `cloud_file_rev` (cloud file revision.
-Dropbox uses `rev`, Google Drive uses file resource's `version`).
+`key`(PK), `value`. Known keys: `last_synced_at` (Unix millis), `cloud_file_rev` (revision of the cloud
+file this device has already merged — Dropbox uses `rev`, Google Drive the file resource's `version`,
+OneDrive the DriveItem `eTag`), `last_uploaded_snapshot_digest` (hex SHA-256 of the snapshot this device
+last uploaded).
+
+The last two exist so a sync that has nothing to do transfers nothing: an unchanged `cloud_file_rev`
+skips the download, and an unchanged snapshot digest skips the upload (see "Skipping Unchanged
+Transfers" in [sync-architecture.md](sync-architecture.md)).
+
+This table is **excluded from the uploaded snapshot** (`DatabaseSnapshot.exportForUpload` drops it
+alongside `articles_fts`). It is device-local bookkeeping that no receiving device ever read — it appears
+in neither `MergeSql` nor `DatabaseMerger`'s expected schema — and dropping it is also what keeps the
+snapshot a pure function of the synced data, since `last_synced_at` would otherwise change its bytes on
+every successful sync and defeat the digest comparison above.
 
 > [!NOTE]
 > The issue that read/write to this table was unimplemented has been fixed; the current implementation actually records these values.

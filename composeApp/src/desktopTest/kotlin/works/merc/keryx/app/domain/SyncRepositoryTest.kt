@@ -28,6 +28,7 @@ import works.merc.keryx.app.core.SYNC_STATE_LAST_SYNCED_AT
 import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.core.SyncConflictException
 import works.merc.keryx.app.data.cloud.CloudFile
+import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.db.KeryxDatabase
@@ -53,6 +54,7 @@ import kotlin.test.assertTrue
 private class FakeCloudStorage : CloudStorage {
     val files = mutableMapOf<String, Pair<ByteArray, String>>()
     private var revCounter = 0
+    private var conflictCounter = 0
 
     var existsCount = 0
     var downloadCount = 0
@@ -61,23 +63,27 @@ private class FakeCloudStorage : CloudStorage {
     var deleteCount = 0
     var renameCount = 0
 
+    /** Payload bytes moved in each direction, so a test can assert a sync transferred nothing. */
+    var downloadedBytes = 0L
+    var uploadedBytes = 0L
+
     /** The destination of the last [rename] call, so a test can assert the archive name. */
     var lastRenameTo: String? = null
 
     /** When set, [download] suspends on this gate before returning, so a test can observe an in-flight sync. */
     var downloadGate: CompletableDeferred<Unit>? = null
 
-    private val existsQueue = ArrayDeque<Result<Boolean>>()
+    private val existsQueue = ArrayDeque<Result<CloudFileMeta?>>()
     private val downloadQueue = ArrayDeque<Result<CloudFile>>()
-    private val uploadQueue = ArrayDeque<Result<Unit>>()
-    private val createQueue = ArrayDeque<Result<Unit>>()
+    private val uploadQueue = ArrayDeque<Result<CloudFileMeta>>()
+    private val createQueue = ArrayDeque<Result<CloudFileMeta>>()
     private val deleteQueue = ArrayDeque<Result<Unit>>()
     private val renameQueue = ArrayDeque<Result<Unit>>()
 
-    fun queueExists(r: Result<Boolean>) = existsQueue.addLast(r)
+    fun queueExists(r: Result<CloudFileMeta?>) = existsQueue.addLast(r)
     fun queueDownload(r: Result<CloudFile>) = downloadQueue.addLast(r)
-    fun queueUpload(r: Result<Unit>) = uploadQueue.addLast(r)
-    fun queueCreate(r: Result<Unit>) = createQueue.addLast(r)
+    fun queueUpload(r: Result<CloudFileMeta>) = uploadQueue.addLast(r)
+    fun queueCreate(r: Result<CloudFileMeta>) = createQueue.addLast(r)
     fun queueDelete(r: Result<Unit>) = deleteQueue.addLast(r)
     fun queueRename(r: Result<Unit>) = renameQueue.addLast(r)
 
@@ -85,12 +91,15 @@ private class FakeCloudStorage : CloudStorage {
         files[path] = data to rev
     }
 
+    /** The revision currently stored at [path], or null when absent. */
+    fun revOf(path: String): String? = files[path]?.second
+
     override suspend fun authenticate(): Result<Unit> = Result.Ok(Unit)
 
-    override suspend fun exists(path: String): Result<Boolean> {
+    override suspend fun metadata(path: String): Result<CloudFileMeta?> {
         existsCount++
         existsQueue.removeFirstOrNull()?.let { return it }
-        return Result.Ok(files.containsKey(path))
+        return Result.Ok(files[path]?.let { CloudFileMeta(it.second) })
     }
 
     override suspend fun download(path: String): Result<CloudFile> {
@@ -98,25 +107,44 @@ private class FakeCloudStorage : CloudStorage {
         downloadGate?.await()
         downloadQueue.removeFirstOrNull()?.let { return it }
         val f = files[path] ?: return Result.Err(CloudStorageException("not found: $path"))
+        downloadedBytes += f.first.size
         return Result.Ok(CloudFile(f.first, f.second))
     }
 
-    override suspend fun upload(path: String, data: ByteArray, expectedRev: String?): Result<Unit> {
+    override suspend fun upload(path: String, data: ByteArray, expectedRev: String?): Result<CloudFileMeta> {
         uploadCount++
-        uploadQueue.removeFirstOrNull()?.let { return it }
+        uploadQueue.removeFirstOrNull()?.let { queued ->
+            // A rev-guarded write is only rejected because another writer got there first, so a
+            // queued conflict advances the stored revision the way a real backend would. Without
+            // that, the retry would see an unchanged rev and (correctly) skip re-downloading,
+            // which is not the situation a conflict actually represents.
+            if (queued is Result.Err && queued.exception is SyncConflictException) {
+                files[path]?.let { (bytes, _) ->
+                    // A distinct prefix, so the simulated competing revision can never coincide
+                    // with a rev a test seeded via put() (which does not advance revCounter).
+                    conflictCounter++
+                    files[path] = bytes to "conflicted$conflictCounter"
+                }
+            }
+            return queued
+        }
         revCounter++
-        files[path] = data to "r$revCounter"
-        return Result.Ok(Unit)
+        uploadedBytes += data.size
+        val rev = "r$revCounter"
+        files[path] = data to rev
+        return Result.Ok(CloudFileMeta(rev))
     }
 
-    override suspend fun create(path: String, data: ByteArray): Result<Unit> {
+    override suspend fun create(path: String, data: ByteArray): Result<CloudFileMeta> {
         createCount++
         createQueue.removeFirstOrNull()?.let { return it }
         // Create-only: refuse to overwrite an existing file, as the real backends do.
         if (files.containsKey(path)) return Result.Err(SyncConflictException())
         revCounter++
-        files[path] = data to "r$revCounter"
-        return Result.Ok(Unit)
+        uploadedBytes += data.size
+        val rev = "r$revCounter"
+        files[path] = data to rev
+        return Result.Ok(CloudFileMeta(rev))
     }
 
     override suspend fun delete(path: String): Result<Unit> {
@@ -332,6 +360,125 @@ class SyncRepositoryTest {
     private fun tempCloudDbFile(): File = File(tempDir, "cloud_keryx.db")
 
     @Test
+    fun secondSyncWithNothingChangedTransfersNothing() = runTest {
+        // The background loop syncs on a timer, so the overwhelmingly common case is "neither side
+        // changed". That must cost one metadata request and zero payload bytes, not a full
+        // download + merge + upload of the entire database.
+        val cloud = FakeCloudStorage()
+        val repo = newRepo(cloud)
+        assertIs<Result.Ok<Unit>>(repo.sync()) // first sync creates the cloud file
+        val bytesAfterFirst = cloud.downloadedBytes + cloud.uploadedBytes
+        assertTrue(bytesAfterFirst > 0)
+        val downloadsAfterFirst = cloud.downloadCount
+        val uploadsAfterFirst = cloud.uploadCount
+
+        assertIs<Result.Ok<Unit>>(repo.sync())
+
+        assertEquals(downloadsAfterFirst, cloud.downloadCount)
+        assertEquals(uploadsAfterFirst, cloud.uploadCount)
+        assertEquals(bytesAfterFirst, cloud.downloadedBytes + cloud.uploadedBytes)
+        assertEquals(2, cloud.existsCount) // one metadata request per sync, and nothing else
+    }
+
+    @Test
+    fun localChangeAfterAnUnchangedSyncIsStillUploaded() = runTest {
+        // The counterpart to the skip: the digest must only match when the data really is the
+        // same, so a local edit made after a skipped sync still reaches the cloud.
+        val cloud = FakeCloudStorage()
+        val repo = newRepo(cloud)
+        assertIs<Result.Ok<Unit>>(repo.sync())
+        assertIs<Result.Ok<Unit>>(repo.sync()) // skipped
+        val uploadsBefore = cloud.uploadCount
+
+        localDb.insertFeed("f2", now = 5)
+        assertIs<Result.Ok<Unit>>(repo.sync())
+
+        assertEquals(uploadsBefore + 1, cloud.uploadCount)
+    }
+
+    @Test
+    fun anUnchangedSyncStillDoesNotDownloadAfterOwnUpload() = runTest {
+        // The revision recorded after a successful upload must be the one that upload produced,
+        // not the pre-upload revision — otherwise this device would download its own writes back
+        // on the very next sync.
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1")
+        val repo = newRepo(cloud)
+        assertIs<Result.Ok<Unit>>(repo.sync()) // downloads r1, merges, uploads
+        assertEquals(1, cloud.downloadCount)
+
+        assertIs<Result.Ok<Unit>>(repo.sync())
+
+        assertEquals(1, cloud.downloadCount)
+        assertEquals(cloud.revOf(CLOUD_DB_PATH), localDb.sync_stateQueries.get(SYNC_STATE_CLOUD_FILE_REV).executeAsOneOrNull())
+    }
+
+    @Test
+    fun aRemoteChangeIsStillDownloadedAndMerged() = runTest {
+        // The skip is keyed on the revision, so another device's write must still be picked up.
+        val cloud = FakeCloudStorage()
+        val repo = newRepo(cloud)
+        assertIs<Result.Ok<Unit>>(repo.sync())
+        assertIs<Result.Ok<Unit>>(repo.sync()) // skipped
+        assertEquals(0, cloud.downloadCount)
+
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r-other-device")
+        assertIs<Result.Ok<Unit>>(repo.sync())
+
+        assertEquals(1, cloud.downloadCount)
+        // A merge can leave local rows the cloud lacks, so it always re-uploads afterwards.
+        assertEquals(1, cloud.uploadCount)
+    }
+
+    @Test
+    fun clearSyncFailureStateForcesTheNextSyncToTransferAgain() = runTest {
+        // Disconnecting tears down everything describing the current connection, the skip markers
+        // included: they describe one provider's file, and carrying them into the next connection
+        // could skip a download that was never merged.
+        val cloud = FakeCloudStorage()
+        val repo = newRepo(cloud)
+        assertIs<Result.Ok<Unit>>(repo.sync())
+        assertIs<Result.Ok<Unit>>(repo.sync()) // skipped: nothing changed
+        val uploadsBefore = cloud.uploadCount
+        val downloadsBefore = cloud.downloadCount
+
+        repo.clearSyncFailureState()
+        assertIs<Result.Ok<Unit>>(repo.sync())
+
+        assertEquals(downloadsBefore + 1, cloud.downloadCount)
+        assertEquals(uploadsBefore + 1, cloud.uploadCount)
+    }
+
+    @Test
+    fun uploadSnapshotExcludesSyncStateSoItDoesNotDriftOnItsOwn() = runTest {
+        // last_synced_at is rewritten on every successful sync. If sync_state rode along in the
+        // uploaded snapshot, the bytes would differ every cycle and the skip could never fire.
+        val cloud = FakeCloudStorage()
+        val repo = newRepo(cloud)
+        assertIs<Result.Ok<Unit>>(repo.sync())
+
+        val uploaded = File(tempDir, "uploaded.db")
+        uploaded.writeBytes(cloud.files.getValue(CLOUD_DB_PATH).first)
+        DriverManager.getConnection("jdbc:sqlite:${uploaded.absolutePath}").use { conn ->
+            conn.createStatement().use { st ->
+                st.executeQuery(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='sync_state'",
+                ).use { rs ->
+                    rs.next()
+                    assertEquals(0, rs.getInt(1))
+                }
+                // The synced tables are still there — only the device-local one was dropped.
+                st.executeQuery(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='feeds'",
+                ).use { rs ->
+                    rs.next()
+                    assertEquals(1, rs.getInt(1))
+                }
+            }
+        }
+    }
+
+    @Test
     fun firstSyncEverCreatesWithoutDownloadOrOverwrite() = runTest {
         val cloud = FakeCloudStorage()
         val repo = newRepo(cloud)
@@ -354,7 +501,7 @@ class SyncRepositoryTest {
         // clobber the existing data with a fresh upload.
         val cloud = FakeCloudStorage()
         cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r1")
-        cloud.queueExists(Result.Ok(false))
+        cloud.queueExists(Result.Ok(null))
         val repo = newRepo(cloud)
 
         val result = repo.sync()
@@ -983,6 +1130,9 @@ class SyncRepositoryTest {
         assertIs<Result.Ok<Unit>>(repo.resetCloudData())
         assertFalse(repo.autoSyncSuspended.value)
 
+        // Another device writes, so the resumed sync has a genuine reason to download: an
+        // unchanged revision would (correctly) be skipped and prove nothing about the gate.
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r99")
         val after = repo.sync(SyncTrigger.AUTOMATIC)
         assertIs<Result.Ok<Unit>>(after) // ran for real (fresh cloud data merges cleanly)
         assertEquals(2, cloud.downloadCount)
@@ -1000,6 +1150,9 @@ class SyncRepositoryTest {
         assertIs<Result.Ok<Unit>>(repo.sync(SyncTrigger.MANUAL))
         assertFalse(repo.autoSyncSuspended.value)
 
+        // Another device writes, so the resumed sync has a genuine reason to download: an
+        // unchanged revision would (correctly) be skipped and prove nothing about the gate.
+        cloud.put(CLOUD_DB_PATH, cloudDbBytes(), "r99")
         val after = repo.sync(SyncTrigger.AUTOMATIC)
         assertIs<Result.Ok<Unit>>(after)
         assertEquals(3, cloud.downloadCount)

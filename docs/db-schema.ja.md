@@ -104,8 +104,20 @@
 
 ### sync_state（KVS, 非同期）
 
-`key`(PK), `value`。既知キー: `last_synced_at`（Unix ミリ秒）, `cloud_file_rev`（クラウド上ファイルのリビジョン。
-Dropbox は `rev`、Google Drive は file resource の `version`）。
+`key`(PK), `value`。既知キー: `last_synced_at`（Unix ミリ秒）, `cloud_file_rev`（**このデバイスがマージ済みの**
+クラウドファイルのリビジョン。Dropbox は `rev`、Google Drive は file resource の `version`、OneDrive は
+DriveItem の `eTag`）, `last_uploaded_snapshot_digest`（このデバイスが最後にアップロードしたスナップショットの
+SHA-256 を hex 化したもの）。
+
+後者2つは「やることが無い同期が何も転送しない」ために存在する。`cloud_file_rev` が変わっていなければ
+ダウンロードを、スナップショットのダイジェストが変わっていなければアップロードをスキップする
+（[sync-architecture.ja.md](sync-architecture.ja.md) の「変更がないときの転送スキップ」参照）。
+
+このテーブルは**アップロード用スナップショットから除外される**（`DatabaseSnapshot.exportForUpload` が
+`articles_fts` と一緒に DROP する）。デバイスローカルな管理情報であり受信側が読むことは元々なく
+（`MergeSql` にも `DatabaseMerger` の期待スキーマにも登場しない）、除外することでスナップショットが
+同期対象データのみの関数になる — さもないと `last_synced_at` が同期成功のたびにバイト列を変え、
+上記のダイジェスト比較が成立しなくなる。
 
 > [!NOTE]
 > このテーブルへの読み書きが未実装だった問題を修正し、現在の実装では実際に記録する。

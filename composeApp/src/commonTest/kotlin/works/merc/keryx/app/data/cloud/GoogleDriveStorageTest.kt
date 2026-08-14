@@ -22,6 +22,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -229,16 +230,16 @@ class GoogleDriveStorageTest {
     }
 
     @Test
-    fun existsTrueAndFalse() = runTest {
+    fun metadataReturnsVersionOrNullWhenAbsent() = runTest {
         val (yes, yesHistory, yesVerify) = storage("tok", { respond(foundFile(), HttpStatusCode.OK) })
-        assertEquals(true, (yes.exists(CLOUD_DB_PATH) as Result.Ok).value)
+        assertNotNull((yes.metadata(CLOUD_DB_PATH) as Result.Ok<CloudFileMeta?>).value)
         assertEquals(1, yesHistory.size)
         assertEquals("GET", yesHistory[0].method.value)
         assertEquals("/drive/v3/files", yesHistory[0].url.encodedPath)
         yesVerify()
 
         val (no, noHistory, noVerify) = storage("tok", { respond(notFound, HttpStatusCode.OK) })
-        assertEquals(false, (no.exists(CLOUD_DB_PATH) as Result.Ok).value)
+        assertNull((no.metadata(CLOUD_DB_PATH) as Result.Ok<CloudFileMeta?>).value)
         assertEquals(1, noHistory.size)
         assertEquals("GET", noHistory[0].method.value)
         assertEquals("/drive/v3/files", noHistory[0].url.encodedPath)
@@ -461,7 +462,7 @@ class GoogleDriveStorageTest {
     @Test
     fun findFileMissingFilesArrayIsCloudStorageError() = runTest {
         val (s, history, verify) = storage("tok", { respond("{}", HttpStatusCode.OK) })
-        val r = s.exists(CLOUD_DB_PATH)
+        val r = s.metadata(CLOUD_DB_PATH)
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
         assertEquals("Missing files array in response", r.exception.message)
@@ -474,7 +475,7 @@ class GoogleDriveStorageTest {
     @Test
     fun findFileMissingIdIsCloudStorageError() = runTest {
         val (s, history, verify) = storage("tok", { respond("""{"files":[{"version":"r1"}]}""", HttpStatusCode.OK) })
-        val r = s.exists(CLOUD_DB_PATH)
+        val r = s.metadata(CLOUD_DB_PATH)
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
         assertEquals("File metadata missing id", r.exception.message)
@@ -487,7 +488,7 @@ class GoogleDriveStorageTest {
     @Test
     fun findFileMissingVersionIsCloudStorageError() = runTest {
         val (s, history, verify) = storage("tok", { respond("""{"files":[{"id":"F1"}]}""", HttpStatusCode.OK) })
-        val r = s.exists(CLOUD_DB_PATH)
+        val r = s.metadata(CLOUD_DB_PATH)
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
         assertEquals("File metadata missing version", r.exception.message)
@@ -579,9 +580,9 @@ class GoogleDriveStorageTest {
     }
 
     @Test
-    fun existsNetworkExceptionIsCaughtAsCloudStorageError() = runTest {
+    fun metadataNetworkExceptionIsCaughtAsCloudStorageError() = runTest {
         val (s, history, verify) = storage("tok", { throw IOException("boom") })
-        val r = s.exists(CLOUD_DB_PATH)
+        val r = s.metadata(CLOUD_DB_PATH)
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
         assertEquals(1, history.size)

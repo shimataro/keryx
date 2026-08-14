@@ -18,8 +18,14 @@ package works.merc.keryx.app.platform
 expect object DatabaseSnapshot {
     /**
      * Writes a consistent copy of the DB at [localDbPath] to [destPath] via
-     * `VACUUM INTO`, then drops `articles_fts` (and its shadow tables) from the
-     * copy. [destPath] must not already exist. Throws on SQL/IO error.
+     * `VACUUM INTO`, then drops `articles_fts` (and its shadow tables) and the
+     * device-local `sync_state` table from the copy. [destPath] must not already
+     * exist. Throws on SQL/IO error.
+     *
+     * Dropping `sync_state` also makes the output a pure function of the synced
+     * data, which is what lets [works.merc.keryx.app.domain.SyncRepository] detect
+     * that a snapshot is byte-identical to the one it last uploaded and skip the
+     * upload entirely.
      */
     fun exportForUpload(localDbPath: String, destPath: String)
 }
