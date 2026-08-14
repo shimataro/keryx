@@ -1,12 +1,20 @@
-.gradle/
-build/
-.kotlin/
-*.log
+/.gradle/
+/.kotlin/
+/build/
+/composeApp/build/
+
+# Claude Code
+/.claude/*.local.*
 
 # Local machine config (never commit)
 local.properties
 
 # IDE
-.idea/
-*.iml
+/.idea/
+/*.iml
+
+# temporary/cache files
 .DS_Store
+Thumbs.db
+*.tmp
+*.log
