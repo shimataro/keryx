@@ -817,6 +817,94 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun unstarringArticleUnderStarredFilterKeepsItPinnedInList() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isStarred = 1L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isStarred = 1L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+
+        vm.toggleStar(db.articlesQueries.getById("a2").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+
+        // a2 is now unstarred in the DB but stays visible in the Starred list because it's pinned.
+        assertEquals(0L, db.articlesQueries.getById("a2").executeAsOne().is_starred)
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+        assertEquals(0L, vm.articles.value.first { it.id == "a2" }.is_starred)
+    }
+
+    @Test
+    fun unstarringSelectedArticleUnderStarredFilterKeepsKeyboardNavigationWorking() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isStarred = 1L, publishedAt = 3L, createdAt = 3L)
+        db.insertArticle("a2", "f1", isStarred = 1L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a3", "f1", isStarred = 1L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        val a2 = db.articlesQueries.getById("a2").executeAsOne()
+        vm.selectArticle(a2.toListRow())
+        testScheduler.advanceUntilIdle()
+
+        vm.toggleStarSelected()
+        testScheduler.advanceUntilIdle()
+
+        // The unstarred, still-selected a2 stays in place rather than being spliced out.
+        assertEquals(listOf("a1", "a2", "a3"), vm.articles.value.map { it.id })
+
+        // Stepping past it lands on its actual neighbor, not a reset to the top of the list.
+        vm.selectNext()
+        testScheduler.advanceUntilIdle()
+        assertEquals("a3", vm.selectedArticle.value?.id)
+    }
+
+    @Test
+    fun switchingFilterAwayAndBackDropsTheUnstarredPin() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isStarred = 1L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isStarred = 1L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        vm.toggleStar(db.articlesQueries.getById("a2").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+
+        // The pin was reset by the filter switch; a2 is genuinely unstarred, so it's gone.
+        assertEquals(listOf("a1"), vm.articles.value.map { it.id })
+    }
+
+    @Test
+    fun restarringAnUnstarredPinnedArticleClearsThePin() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isStarred = 1L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isStarred = 1L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        vm.toggleStar(db.articlesQueries.getById("a2").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+
+        vm.toggleStar(vm.articles.value.first { it.id == "a2" })
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1L, db.articlesQueries.getById("a2").executeAsOne().is_starred)
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+    }
+
+    @Test
     fun toggleReadUpdatesDbAndRefreshesSelectedStateOnlyWhenSelected() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L)
