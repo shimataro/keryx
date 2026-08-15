@@ -75,13 +75,6 @@ private fun leafAt(items: List<NativeMenuEntry>, index: Int, childIndex: Int?): 
 }
 
 /**
- * `java.awt.MenuItem` has no checked state, so a checked entry is marked in its label instead.
- * Only the AWT backend needs this; Swing has a real checkbox item.
- */
-private fun awtLabel(entry: NativeMenuEntry): String =
-    if (entry is NativeCheckMenuItem && entry.checked) "✓ ${entry.label}" else entry.label
-
-/**
  * `java.awt.PopupMenu` backend, used on macOS and Windows where AWT maps it onto a genuine
  * platform menu (an `NSMenu` and a Win32 popup menu respectively).
  *
@@ -99,26 +92,11 @@ internal class AwtPopupHandle(
     private val menuItems: List<java.awt.MenuItem> = items.mapIndexed { index, entry ->
         when (entry) {
             is NativeMenuLeaf ->
-                java.awt.MenuItem().apply {
-                    addActionListener { leafAt(currentItems(), index, childIndex = null)?.onClick?.invoke() }
-                    // A bare (ctrl = false) shortcut — the rename/delete family — has no
-                    // MenuShortcut representation at all: the class always bakes in the platform's
-                    // primary modifier, so it can only show a modifier'd combo correctly. Those
-                    // items render with no native hint here; see NativeMenuShortcut's doc comment.
-                    if (entry is NativeMenuItem) {
-                        isEnabled = entry.enabled
-                        entry.shortcut?.takeIf { it.ctrl }?.let { shortcut = MenuShortcut(it.awtKeyCode(), it.shift) }
-                    }
-                }
+                awtLeaf(entry) { leafAt(currentItems(), index, childIndex = null)?.onClick?.invoke() }
             is NativeSubMenu ->
                 java.awt.Menu().apply {
                     entry.items.forEachIndexed { childIndex, child ->
-                        add(
-                            java.awt.MenuItem().apply {
-                                addActionListener { leafAt(currentItems(), index, childIndex)?.onClick?.invoke() }
-                                if (child is NativeMenuItem) isEnabled = child.enabled
-                            },
-                        )
+                        add(awtLeaf(child) { leafAt(currentItems(), index, childIndex)?.onClick?.invoke() })
                     }
                 }
             // A MenuItem labelled "-" is the exact idiom java.awt.Menu.addSeparator() itself uses
@@ -135,17 +113,52 @@ internal class AwtPopupHandle(
             // Never relabel a separator: it carries no state, and doing so would overwrite the
             // "-" marker the native peer relies on to render it as a separator.
             if (entry is NativeMenuSeparator) return@forEachIndexed
-            component.label = awtLabel(entry)
-            if (entry is NativeMenuItem) component.isEnabled = entry.enabled
+            syncLeaf(component, entry)
             if (entry is NativeSubMenu && component is java.awt.Menu) {
                 entry.items.forEachIndexed { childIndex, child ->
-                    component.getItem(childIndex)?.apply {
-                        label = awtLabel(child)
-                        if (child is NativeMenuItem) isEnabled = child.enabled
-                    }
+                    component.getItem(childIndex)?.let { syncLeaf(it, child) }
                 }
             }
         }
+    }
+
+    /**
+     * `java.awt.CheckboxMenuItem` (a `MenuItem` subclass) for a [NativeCheckMenuItem], so its
+     * checked state is drawn with the platform's own checkmark and gutter instead of being faked
+     * into the label text — that fake left unchecked siblings flush left while checked ones sat
+     * two characters in, which is the misalignment this fixes. A plain [java.awt.MenuItem]
+     * otherwise.
+     */
+    private fun awtLeaf(entry: NativeMenuLeaf, onClick: () -> Unit): java.awt.MenuItem {
+        val item = if (entry is NativeCheckMenuItem) java.awt.CheckboxMenuItem() else java.awt.MenuItem()
+        // A native checkbox menu item's peer reports selection as an ItemEvent, not an
+        // ActionEvent (unlike Swing's JCheckBoxMenuItem, which fires ActionEvent for both — see
+        // SwingPopupHandle.swingLeaf). A plain MenuItem only ever fires ActionEvent.
+        if (item is java.awt.CheckboxMenuItem) {
+            item.addItemListener { onClick() }
+        } else {
+            item.addActionListener { onClick() }
+        }
+        // A bare (ctrl = false) shortcut — the rename/delete family — has no MenuShortcut
+        // representation at all: the class always bakes in the platform's primary modifier, so it
+        // can only show a modifier'd combo correctly. Those items render with no native hint here;
+        // see NativeMenuShortcut's doc comment.
+        if (entry is NativeMenuItem) {
+            item.isEnabled = entry.enabled
+            entry.shortcut?.takeIf { it.ctrl }?.let { item.shortcut = MenuShortcut(it.awtKeyCode(), it.shift) }
+        }
+        return item
+    }
+
+    private fun syncLeaf(component: java.awt.MenuItem, entry: NativeMenuEntry) {
+        component.label = entry.label
+        // Set through the model, not re-derived from the label, so a click (which toggles the
+        // native item itself) is corrected back to the app's own state on the next sync — same
+        // reasoning as SwingPopupHandle.syncLeaf.
+        if (component is java.awt.CheckboxMenuItem && entry is NativeCheckMenuItem) {
+            component.state = entry.checked
+        }
+        if (entry is NativeMenuItem) component.isEnabled = entry.enabled
     }
 
     // An AWT PopupMenu is only showable once it belongs to a component's menu hierarchy.
