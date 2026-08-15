@@ -281,4 +281,57 @@ class NativeMenuTest {
 
         assertNull(handle.popupMenu.getItem(0).shortcut)
     }
+
+    @Test
+    fun awtCheckEntriesBecomeCheckboxMenuItemsAndFollowTheCheckedState() {
+        val checked = NativeCheckMenuItem("Tech", checked = true) {}
+        val unchecked = NativeCheckMenuItem("Design", checked = false) {}
+        val entries = listOf<NativeMenuEntry>(checked, unchecked)
+        val handle = AwtPopupHandle(entries) { entries }
+
+        handle.sync(entries)
+
+        val first = assertIs<java.awt.CheckboxMenuItem>(handle.popupMenu.getItem(0))
+        val second = assertIs<java.awt.CheckboxMenuItem>(handle.popupMenu.getItem(1))
+        assertTrue(first.state)
+        assertFalse(second.state)
+    }
+
+    @Test
+    fun awtCheckEntriesInsideASubMenuBecomeCheckboxMenuItemsAndFollowTheCheckedState() {
+        val entries = listOf<NativeMenuEntry>(
+            NativeSubMenu(
+                "Tags",
+                listOf(
+                    NativeCheckMenuItem("Tech", checked = true) {},
+                    NativeCheckMenuItem("Design", checked = false) {},
+                ),
+            ),
+        )
+        val handle = AwtPopupHandle(entries) { entries }
+
+        handle.sync(entries)
+
+        val submenu = assertIs<java.awt.Menu>(handle.popupMenu.getItem(0))
+        val first = assertIs<java.awt.CheckboxMenuItem>(submenu.getItem(0))
+        val second = assertIs<java.awt.CheckboxMenuItem>(submenu.getItem(1))
+        assertTrue(first.state)
+        assertFalse(second.state)
+    }
+
+    /**
+     * Regression guard for the old fake-checkmark implementation, which prepended "✓ " to a plain
+     * MenuItem's label instead of using a real CheckboxMenuItem — that left unchecked siblings
+     * flush left while checked ones sat two characters in.
+     */
+    @Test
+    fun awtSyncDoesNotEncodeTheCheckedStateIntoTheLabel() {
+        val checked = NativeCheckMenuItem("Tech", checked = true) {}
+        val entries = listOf<NativeMenuEntry>(checked)
+        val handle = AwtPopupHandle(entries) { entries }
+
+        handle.sync(entries)
+
+        assertEquals("Tech", handle.popupMenu.getItem(0).label)
+    }
 }
