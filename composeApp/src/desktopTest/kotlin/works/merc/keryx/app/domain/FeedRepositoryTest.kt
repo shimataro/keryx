@@ -242,6 +242,10 @@ class FeedRepositoryTest {
 
             listQuery.removeListener(listener)
             assertTrue(
+                observedFolderIds.isNotEmpty(),
+                "the feed-list listener observed nothing, so this test proved nothing",
+            )
+            assertTrue(
                 observedFolderIds.none { it == null },
                 "the new feed must never be observed without its chosen folder: $observedFolderIds",
             )
