@@ -8,7 +8,16 @@ mobile (Android/iOS) targets planned for later.
 
 ## Working language
 
-**Output language**: Always reply to the user **in the language they used in their request**.
+**Output language**: Always reply to the user in the language of their **most recent**
+message — switch immediately if they switch languages mid-conversation. If the latest
+message alone doesn't clearly signal a language (e.g. it's just a URL, file path, command,
+or very short), infer it from earlier messages in this conversation, or from what you
+already know about the user's usual language, before defaulting to English. This applies to
+the entire reply (explanations, summaries, headers, and Plan Mode plans), not just an
+opening/closing line. Quoting or discussing English source code, logs, or documentation is
+expected and does not change what language your own prose is written in — do not let it
+leak into your reply's language. Source code, log/exception text, and identifiers
+themselves stay in English regardless (see constraint #9 below).
 
 ## Documentation
 
@@ -144,8 +153,10 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
    so it is the single source of truth — there is no hardcoded Kotlin list.
 9. **Source code (comments, KDoc, log/exception messages, non-UI string
    literals) must be written in English**, regardless of the language used
-   elsewhere in the project (this file and `docs/*.md` are Japanese; UI text
-   is Japanese-only per constraint #3). Exceptions: (a) UI-facing strings
+   in conversation with the user (this file and `docs/*.md` are themselves
+   in English — see "Working language" above for reply language; `docs/*.ja.md`
+   are Japanese translations for readers, and UI text is Japanese-only per
+   constraint #3). Exceptions: (a) UI-facing strings
    still go through Compose Resources per #3 and stay Japanese there; (b)
    test assertions that must match actual rendered UI text (e.g.
    `onNodeWithText("...")` against a real `strings.xml` string) legitimately
