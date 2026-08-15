@@ -2,17 +2,21 @@ package works.merc.keryx.app.ui.article
 
 import androidx.compose.ui.graphics.Color
 import com.fleeksoft.ksoup.Ksoup
+import works.merc.keryx.app.data.remote.UrlResolver
 
 /**
- * Absolute href of every `<a>` tag in [html]. Used to tell a genuine outbound link click
- * apart from a SNS-embed widget's own internal requests when both report as a main-frame
- * navigation (see plan doc html-webview-os-wobbly-hammock.md).
+ * Absolute href of every `<a>` tag in [html], resolved against [baseUri] (the article's own URL)
+ * via [UrlResolver.resolve]. Used to tell a genuine outbound link click apart from a SNS-embed
+ * widget's own internal requests when both report as a main-frame navigation (see plan doc
+ * html-webview-os-wobbly-hammock.md). An absolute href resolves the same regardless of [baseUri];
+ * a relative href is dropped when it can't be resolved (no usable [baseUri]) rather than kept raw,
+ * since an unresolved relative string can never match the WebView's own absolutely-resolved
+ * navigation request.
  */
-fun extractLinks(html: String): Set<String> =
+fun extractLinks(html: String, baseUri: String = ""): Set<String> =
     Ksoup.parse(html).getElementsByTag("a")
-        .mapNotNull { element ->
-            element.attr("abs:href").ifBlank { element.attr("href") }.takeIf { it.isNotBlank() }
-        }
+        .mapNotNull { element -> element.attr("href").takeIf { it.isNotBlank() } }
+        .mapNotNull { href -> UrlResolver.resolve(baseUri, href) }
         .toSet()
 
 /**
@@ -36,9 +40,14 @@ data class ArticleHtmlTheme(
  * [title] and [meta] (author · date) are rendered as a header before the body so they scroll
  * together with it — this is what keeps a long title from permanently shrinking the content
  * area. They are plain feed text, so they are HTML-escaped; [body] stays raw (trusted rich HTML).
+ *
+ * [baseUrl], when non-blank, is the article's own URL and is emitted as a `<base href>` so
+ * relative `src`/`href` values inside [body] (relative images, links) resolve against the
+ * article's origin instead of failing to resolve at all. Left `null`/blank, no `<base>` tag is
+ * emitted — an empty `<base href="">` would resolve to the document's own (meaningless) URL.
  */
-fun wrapArticleHtml(theme: ArticleHtmlTheme, title: String, meta: String, body: String): String =
-    articleDocument(theme, articleHeader(title, meta) + body)
+fun wrapArticleHtml(theme: ArticleHtmlTheme, title: String, meta: String, body: String, baseUrl: String? = null): String =
+    articleDocument(theme, articleHeader(title, meta) + body, baseUrl = baseUrl)
 
 /**
  * Same header as [wrapArticleHtml], with a muted [message] where the body would be — for an
@@ -66,14 +75,16 @@ private fun articleHeader(title: String, meta: String): String = buildString {
  * in. The `<style>` block is identical across all callers — this is what guarantees the
  * placeholder and "no content" notice never flash a default white page in dark mode.
  */
-private fun articleDocument(theme: ArticleHtmlTheme, content: String, bodyClass: String = ""): String {
+private fun articleDocument(theme: ArticleHtmlTheme, content: String, bodyClass: String = "", baseUrl: String? = null): String {
     val fontPercent = (theme.fontScale * 100).toInt()
     val bodyTag = if (bodyClass.isBlank()) "<body>" else """<body class="$bodyClass">"""
+    val baseTag = baseUrl?.takeIf { it.isNotBlank() }?.let { """<base href="${escapeHtml(it)}" />""" }.orEmpty()
     return """
         <!doctype html>
         <html>
         <head>
         <meta charset="utf-8" />
+        $baseTag
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <style>
           html {

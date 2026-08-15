@@ -37,6 +37,21 @@ class UrlResolverTest {
     }
 
     @Test
+    fun originReturnsNullForBlankUrl() {
+        assertNull(UrlResolver.origin(""))
+    }
+
+    @Test
+    fun resolveReturnsNullForRelativeRefWithBlankBase() {
+        assertNull(UrlResolver.resolve("", "/foo"))
+    }
+
+    @Test
+    fun resolveKeepsAbsoluteUrlEvenWithBlankBase() {
+        assertEquals("https://a.com/x", UrlResolver.resolve("", "https://a.com/x"))
+    }
+
+    @Test
     fun hasSchemeDetectsExplicitScheme() {
         assertEquals(true, UrlResolver.hasScheme("https://example.com/feed"))
         assertEquals(true, UrlResolver.hasScheme("  http://example.com/feed  "))

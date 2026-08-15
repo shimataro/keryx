@@ -35,6 +35,10 @@ object UrlResolver {
 
     /** Returns the scheme://host[:port] origin of [url], or null. */
     fun origin(url: String): String? {
+        // Ktor's Url("") does not throw — it defaults to a "http://localhost" origin rather than
+        // an unparseable one, which would otherwise make a blank base silently resolve a relative
+        // ref against a made-up host instead of being rejected as unresolvable.
+        if (url.isBlank()) return null
         val u = runCatching { Url(url) }.getOrNull() ?: return null
         if (u.host.isBlank()) return null
         val scheme = u.protocol.name

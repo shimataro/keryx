@@ -36,7 +36,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = article,
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -55,7 +55,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = null,
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -71,7 +71,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = article,
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -90,7 +90,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = testArticle(url = ""),
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -105,7 +105,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = null,
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -122,12 +122,45 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = testArticle(content = "   ", summary = "fallback summary"),
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, body -> capturedBody = body; Box(Modifier.fillMaxSize()) },
+                reader = { _, body, _ -> capturedBody = body; Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
 
         assertEquals("fallback summary", capturedBody)
+    }
+
+    @Test
+    fun readerReceivesArticleUrlAsBaseUrl() = runDesktopComposeUiTest {
+        var capturedBaseUrl: String? = "unset"
+        val article = testArticle()
+
+        setContent {
+            ArticleDetailPaneContent(
+                article = article,
+                modifier = Modifier.size(400.dp, 500.dp),
+                reader = { _, _, baseUrl -> capturedBaseUrl = baseUrl; Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        assertEquals(article.url, capturedBaseUrl)
+    }
+
+    @Test
+    fun readerReceivesNullBaseUrlWhenNoArticleSelected() = runDesktopComposeUiTest {
+        var capturedBaseUrl: String? = "unset"
+
+        setContent {
+            ArticleDetailPaneContent(
+                article = null,
+                modifier = Modifier.size(400.dp, 500.dp),
+                reader = { _, _, baseUrl -> capturedBaseUrl = baseUrl; Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        assertEquals(null, capturedBaseUrl)
     }
 }
 
