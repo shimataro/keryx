@@ -3,6 +3,8 @@ name: evaluate-review
 description: Evaluate a GitHub PR review comment or review summary for technical validity. For a discussion (line) comment or a PR review with no associated comments, create an implementation plan for user approval; for a PR review with associated discussion comments, automatically fix and commit each one independently. Accepts multiple URLs, processed one at a time in the order given. Invoke with /evaluate-review <url> [<url> ...].
 ---
 
+# Evaluate Review
+
 > This skill involves **high-accuracy judgments** — deciding whether a reviewer's claim is
 > actually correct against this codebase, and auto-committing fixes for the ones that are.
 > **Run it in an opus session.** Skills inherit the caller session's model and cannot pin
