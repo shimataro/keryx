@@ -9,6 +9,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -193,6 +194,9 @@ class HomeViewModelTest {
         activityCenter: ActivityCenter = ActivityCenter(),
         newArticleNotifier: NewArticleNotifier = NewArticleNotifier(),
         tokenStorage: HomeViewModelTestTokenStorage = HomeViewModelTestTokenStorage(),
+        // Overridable so a test can pause a read/star write mid-flight (e.g. with a virtual-time
+        // StandardTestDispatcher) instead of the default Unconfined, which always runs it inline.
+        dbWriteDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
     ): HomeViewModel {
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the subscribe/refresh path's indexMissing() works.
@@ -233,8 +237,9 @@ class HomeViewModelTest {
             syncRepository, cloudSession, activityCenter, clock,
             newArticleNotifier, HomeViewModelTestNotificationMessages(),
             Dispatchers.Unconfined,
-            // dbWriteDispatcher: Unconfined so read/star writes run inline for deterministic assertions.
-            Dispatchers.Unconfined,
+            // dbWriteDispatcher: Unconfined by default so read/star writes run inline for
+            // deterministic assertions; overridable via the dbWriteDispatcher parameter above.
+            dbWriteDispatcher,
         ).also { createdViewModels += it }
     }
 
@@ -885,7 +890,7 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun restarringAnUnstarredPinnedArticleClearsThePin() = runTest {
+    fun restarringAnUnstarredPinnedArticleSettlesBackToTheUnpinnedRow() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isStarred = 1L, publishedAt = 2L, createdAt = 2L)
         db.insertArticle("a2", "f1", isStarred = 1L, publishedAt = 1L, createdAt = 1L)
@@ -900,6 +905,42 @@ class HomeViewModelTest {
         vm.toggleStar(vm.articles.value.first { it.id == "a2" })
         testScheduler.advanceUntilIdle()
 
+        assertEquals(1L, db.articlesQueries.getById("a2").executeAsOne().is_starred)
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+        assertEquals(1L, vm.articles.value.first { it.id == "a2" }.is_starred)
+    }
+
+    /**
+     * Regression guard for a "scrolls down by one row" UX glitch: re-starring updates the pin to
+     * the confirmed value (rather than clearing it) precisely so the article's presence in the
+     * merged list stays continuous across the write, which is what this test pins down by
+     * inspecting the list *before* the (here, deliberately delayed) DB write has completed. A
+     * naive eager-clear would drop the article from the list for this window, which is what trips
+     * a LazyColumn keyed by article id into shifting its scroll anchor to the next row.
+     */
+    @Test
+    fun restarringAnArticleNeverDropsItFromTheMergedListWhileTheWriteIsInFlight() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isStarred = 1L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isStarred = 1L, publishedAt = 1L, createdAt = 1L)
+        // A controllable (non-inline) write dispatcher, so the DB write triggered by the second
+        // toggleStar() call below stays queued until explicitly advanced, mirroring production
+        // where dbWriteDispatcher is genuinely asynchronous.
+        val vm = newViewModel(dbWriteDispatcher = StandardTestDispatcher(testScheduler))
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        vm.toggleStar(db.articlesQueries.getById("a2").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+
+        vm.toggleStar(vm.articles.value.first { it.id == "a2" })
+
+        // The write hasn't run yet (dbWriteDispatcher is still queued), but the merged list must
+        // already show a2 continuously via the updated pin.
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+
+        testScheduler.advanceUntilIdle()
         assertEquals(1L, db.articlesQueries.getById("a2").executeAsOne().is_starred)
         assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
     }

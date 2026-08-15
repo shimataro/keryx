@@ -643,8 +643,16 @@ class HomeViewModel(
         val starred = article.is_starred == 0L
         // Only the Starred filter's query excludes an unstarred article, so only pin there —
         // switching into Starred later already starts from a fresh, un-pinned query (selectFilter).
-        if (!starred && _filter.value == ArticleFilter.Starred) {
-            _pinnedUnstarredArticles.update { it + (article.id to article.copy(is_starred = 0L)) }
+        // Re-starring UPDATES the pin to the confirmed value rather than clearing it outright: the DB
+        // write below is dispatched asynchronously, so clearing the pin immediately would leave a gap
+        // — for at least one `articles` emission the article is in neither the raw query result (write
+        // not committed yet) nor the pin map (just cleared) — and a LazyColumn keyed by article id
+        // reacts to that gap by shifting its scroll anchor to the next row, so the re-starred article
+        // jumps out of view once it reappears. Leaving the pin in place is harmless: the `articles`
+        // combine's existingIds check already makes it inert the instant the raw query catches up, and
+        // it's cleared for good on the next filter switch, exactly like the unstarred-pin lifecycle.
+        if (_filter.value == ArticleFilter.Starred) {
+            _pinnedUnstarredArticles.update { it + (article.id to article.copy(is_starred = if (starred) 1L else 0L)) }
         } else if (starred) {
             _pinnedUnstarredArticles.update { it - article.id }
         }
