@@ -38,8 +38,13 @@ Run Keryx KMP's standard build flow in sequence.
   blocks toolchain download, pass `-Dorg.gradle.java.installations.auto-download=true`.
 - Configuration cache is disabled in `gradle.properties` (the `generateBuildConfig`
   task isn't config-cache-safe). Don't re-enable it without verifying that task.
-- Dropbox App Key: set `dropbox.app.key` in `local.properties` (git-ignored) or
-  pass `-PdropboxAppKey=...`; empty hides Dropbox from the UI.
+- Cloud API keys are build-time inputs, each resolved as
+  `-P<prop>` > env var > `local.properties` (git-ignored) > empty:
+  Dropbox (`dropboxAppKey` / `DROPBOX_APP_KEY` / `dropbox.app.key`), Google Drive
+  (client id **and** secret), OneDrive (`onedrive.client.id`). An empty key hides
+  that provider from the UI entirely — it is a feature, not a build failure. See
+  `docs/build.md` for how to obtain each one; `local.properties.example` lists the
+  exact property names.
 
 ## How to report
 

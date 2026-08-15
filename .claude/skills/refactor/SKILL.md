@@ -3,6 +3,13 @@ name: refactor
 description: Refactor the Keryx source code for internal quality — reduce duplication, split oversized files/functions/composables, remove dead code, clarify naming, hoist magic numbers, flatten deep nesting, and modernize non-idiomatic Kotlin — behavior-preservingly, keeping the test suite green and never altering the sync/merge/FTS/error-taxonomy invariants or feature behavior. Works across the whole codebase or a single given path. After a one-time scope approval, each approved batch is verified and committed independently (one commit per batch) with no further per-batch confirmation. Invoke explicitly with /refactor (optionally /refactor <path>), or when asked to "refactor the source code", "clean up the code", "reduce duplication", "improve code quality".
 ---
 
+# Refactor
+
+> This skill involves **high-accuracy judgments** — proving a change is genuinely
+> behavior-preserving, and not silently altering the sync / merge / FTS / error-taxonomy
+> invariants. **Run it in an opus session.** Skills inherit the caller session's model and
+> cannot pin one in frontmatter, so verify the session model is opus before executing.
+
 Improve the internal quality of Keryx's source **without changing observable
 behavior**. The existing test suite is the oracle: it must stay green from the
 first step to the last. Work in small, reviewable, independently-revertible
