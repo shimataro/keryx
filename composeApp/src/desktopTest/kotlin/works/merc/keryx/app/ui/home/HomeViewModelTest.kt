@@ -2650,6 +2650,51 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun subscribeFeedsFilesIntoTheSelectedFolder() {
+        db.insertFolder("d1", "Kotlin folder")
+        runBlocking {
+            val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            vm.selectFilter(ArticleFilter.Folder("d1"))
+
+            val outcome = vm.subscribeFeeds(listOf("https://ex.com/feed"))
+
+            assertEquals(1, outcome.successCount)
+            assertEquals("d1", db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne().folder_id)
+        }
+    }
+
+    @Test
+    fun subscribeFeedsFilesIntoTheFolderOfTheSelectedFeed() = runTest {
+        db.insertFolder("d1", "Kotlin folder")
+        db.insertFeed("f1", folderId = "d1")
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+
+        val outcome = vm.subscribeFeeds(listOf("https://ex.com/feed"))
+
+        assertEquals(1, outcome.successCount)
+        assertEquals("d1", db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne().folder_id)
+    }
+
+    @Test
+    fun subscribeFeedsLeavesNewFeedUnfiledWhenAnUnfiledFeedIsSelected() = runTest {
+        // f1 has no folder (folderId omitted), so the new feed must also land unfiled instead of
+        // inheriting some stale/unrelated folder id.
+        db.insertFeed("f1")
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+
+        val outcome = vm.subscribeFeeds(listOf("https://ex.com/feed"))
+
+        assertEquals(1, outcome.successCount)
+        assertNull(db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne().folder_id)
+    }
+
+    @Test
     fun addFeedCanSubscribeReflectsPreviewAndSelection() {
         val candidates = listOf(DiscoveredFeedLink("https://ex.com/a"), DiscoveredFeedLink("https://ex.com/b"))
         val single = AddFeedPreview.Single("https://ex.com/feed", "Feed", 1)

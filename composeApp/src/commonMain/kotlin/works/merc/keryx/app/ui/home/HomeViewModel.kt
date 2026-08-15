@@ -870,7 +870,19 @@ class HomeViewModel(
     suspend fun resolvePreview(rawUrl: String): AddFeedPreview = addFeedPreviewResolver.resolvePreview(rawUrl)
 
     /** @see AddFeedPreviewResolver.subscribeFeeds */
-    suspend fun subscribeFeeds(urls: List<String>): SubscribeOutcome = addFeedPreviewResolver.subscribeFeeds(urls)
+    suspend fun subscribeFeeds(urls: List<String>): SubscribeOutcome =
+        addFeedPreviewResolver.subscribeFeeds(urls, folderIdForNewFeed())
+
+    /**
+     * The folder a newly subscribed feed should be filed into, derived from the feed list's
+     * current selection: the selected folder itself, or the folder of the selected feed. Any
+     * other selection (all/starred/search/tag) yields `null` (no folder).
+     */
+    private fun folderIdForNewFeed(): String? = when (val f = _filter.value) {
+        is ArticleFilter.Folder -> f.folderId
+        is ArticleFilter.Feed -> feeds.value.firstOrNull { it.id == f.feedId }?.folder_id
+        else -> null
+    }
 
     /**
      * Unsubscribes from a feed and switches to the all-articles filter if it is selected.
