@@ -214,6 +214,14 @@ peer creation still works from inside the click's own call stack:
 - The feed row's "Tags" submenu shows a checkmark on every currently attached tag, and its
   "Move to folder" submenu shows a checkmark on the feed's current folder; toggling either updates
   the checkmark immediately.
+- Right-clicking a feed row (both under its folder and under an expanded tag) shows "Copy feed
+  URL", "Copy site URL", and "Open site", grouped with a separator on each side (matching the app
+  menu bar's Feed menu ordering — see below), and each does what it says. For a feed with no
+  discovered site URL, the latter two render grayed out (disabled) rather than being omitted, and
+  re-enable once a refresh discovers one — without needing to reopen the menu.
+- The separators in a feed row's menu render as real native dividers on every platform (a
+  dash-labelled item on macOS/Windows, a `JPopupMenu.Separator` on Linux) — not as a visible menu
+  item — and stay in place across a resync (e.g. toggling a tag) without the menu rebuilding.
 - Opening any of these menus while the article reader's WebView is visible renders the menu above
   the WebView, not behind it.
 - (Linux) After switching the in-app theme (light ↔ dark) with no restart: the menu bar and an
@@ -435,12 +443,16 @@ in order of how likely each is to be wrong):
   Close Window, Settings, Quit, Refresh All, Show Menu Bar, Search, Import/Export OPML, Unread Only), the
   `Ctrl+Shift+<letter>` Article/Feed items (Toggle Read, Toggle Star, Open in Browser, Copy URL, Refresh Feed),
   and the bare-key Feed items (Rename: F2, Delete: Delete — these two act on whatever feed list item is
-  selected, a feed *or* a folder *or* a tag, so their label follows the selected item's type).
+  selected, a feed *or* a folder *or* a tag, so their label follows the selected item's type). The Feed menu's
+  Copy Feed URL / Copy Site URL / Open Site items (no shortcut) sit between Move to Folder and Rename.
 - Select a **folder**, then a **tag**, and confirm the Feed menu's rename/delete pair is enabled with the
   matching wording ("フォルダー名を変更"/"フォルダーを削除", "タグ名を変更"/"タグを削除") and that **F2 and
   Delete still fire through the Global Menu path** with the in-window bar hidden — previously both items were
   greyed out (and the shortcuts therefore dead) unless a feed was selected. The feed-specific items above them
-  (Refresh Feed, Assign Tags, Move to Folder) stay disabled for a folder/tag selection, as before.
+  (Refresh Feed, Assign Tags, Move to Folder, Copy Feed URL, Copy Site URL, Open Site) stay disabled for a
+  folder/tag selection, as before.
+- Select a feed with no discovered site URL: Copy Feed URL stays enabled, but Copy Site URL and Open Site are
+  greyed out; selecting a feed that does have one enables all three.
 - Enable the titlebar "Application Menu" button instead: same check.
 - Dynamic state (enabled/disabled items, the "Unread only" checkbox check state) and every click action match the
   in-window menu exactly.

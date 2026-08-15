@@ -221,10 +221,10 @@ private fun SearchListPane(
 
 /**
  * Remembers a "copy URL to clipboard" action, shared by [SearchListPane]'s and
- * [ArticleListPaneContent]'s article rows.
+ * [ArticleListPaneContent]'s article rows, and by [FeedListPane]'s feed rows.
  */
 @Composable
-private fun rememberCopyUrlAction(): (String) -> Unit {
+internal fun rememberCopyUrlAction(): (String) -> Unit {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     return remember(clipboard, scope) {

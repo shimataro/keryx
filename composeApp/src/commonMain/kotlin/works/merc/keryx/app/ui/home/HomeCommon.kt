@@ -278,8 +278,8 @@ internal fun feedOperationsAvailable(feedRefreshing: Boolean, syncing: Boolean):
     !feedRefreshing && !syncing
 
 /** Whether [url] is present and non-blank — the single rule for when URL-dependent actions
- * (open in browser, copy URL) are available for an article. */
-internal fun hasUsableArticleUrl(url: String?): Boolean = !url.isNullOrBlank()
+ * (open in browser, copy URL) are available, for an article's URL or a feed's site URL alike. */
+internal fun hasUsableUrl(url: String?): Boolean = !url.isNullOrBlank()
 
 /**
  * The rendered `LazyColumn` index for one specific feed-list row instance, or `null` if it isn't

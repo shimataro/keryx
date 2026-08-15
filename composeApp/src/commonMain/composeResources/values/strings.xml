@@ -82,6 +82,8 @@
     <string name="home_rename_feed_menu">タイトルを変更</string>
     <string name="home_rename_feed">タイトルを変更</string>
     <string name="home_unsubscribe_menu">購読を削除</string>
+    <string name="home_copy_feed_url">フィード URL をコピー</string>
+    <string name="home_copy_site_url">サイト URL をコピー</string>
     <string name="home_menu_rename_folder">フォルダー名を変更</string>
     <string name="home_menu_delete_folder">フォルダーを削除</string>
     <string name="home_menu_rename_tag">タグ名を変更</string>

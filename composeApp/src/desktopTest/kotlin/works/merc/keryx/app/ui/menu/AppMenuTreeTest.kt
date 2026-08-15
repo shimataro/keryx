@@ -36,6 +36,7 @@ class AppMenuTreeTest {
         feedMenu = "Feed", refreshAll = "RefreshAll", syncNow = "SyncNow",
         feedRefresh = "FeedRefresh", feedAssignTags = "AssignTags", feedMoveToFolder = "MoveToFolder",
         feedNoFolder = "NoFolder", feedRename = "FeedRename", feedUnsubscribe = "FeedUnsubscribe",
+        feedCopyUrl = "FeedCopyUrl", feedCopySiteUrl = "FeedCopySiteUrl", feedOpenSite = "FeedOpenSite",
         helpMenu = "Help", website = "Website", projectPage = "ProjectPage", about = "About",
     )
 
@@ -53,6 +54,7 @@ class AppMenuTreeTest {
         toggleFeedTag = { tagId, attached -> toggledTagId = tagId; toggledTagAttached = attached },
         moveFeedToFolder = { movedToFolderId = it },
         renameSelectedFeed = {}, unsubscribeSelectedFeed = {},
+        copyFeedUrl = {}, copyFeedSiteUrl = {}, openFeedSite = {},
         openWebsite = {}, openProjectPage = {}, about = {},
     )
 
@@ -60,7 +62,7 @@ class AppMenuTreeTest {
         screen = Screen.Home, hasSelectedArticle = true, selectedArticleHasUrl = true,
         feedRefreshing = false, syncing = false, cloudConnected = true,
         filter = ArticleFilter.All, unreadOnly = true,
-        hasSelectedFeed = true, hasRenamableSelection = true,
+        hasSelectedFeed = true, hasRenamableSelection = true, selectedFeedHasSiteUrl = true,
     )
 
     private fun disabledUi() = computeMenuUiState(
@@ -135,6 +137,9 @@ class AppMenuTreeTest {
         assertEquals(ui.renameOrDeleteEnabled, root.menu("Feed").item("FeedUnsubscribe").enabled)
         assertEquals(ui.feedActionsEnabled, root.menu("Feed").submenu("AssignTags").enabled)
         assertEquals(ui.feedActionsEnabled, root.menu("Feed").submenu("MoveToFolder").enabled)
+        assertEquals(ui.feedActionsEnabled, root.menu("Feed").item("FeedCopyUrl").enabled)
+        assertEquals(ui.feedSiteUrlActionsEnabled, root.menu("Feed").item("FeedCopySiteUrl").enabled)
+        assertEquals(ui.feedSiteUrlActionsEnabled, root.menu("Feed").item("FeedOpenSite").enabled)
     }
 
     @Test
@@ -148,6 +153,9 @@ class AppMenuTreeTest {
         assertEquals(false, root.menu("Feed").item("FeedRefresh").enabled)
         assertEquals(false, root.menu("Feed").submenu("AssignTags").enabled)
         assertEquals(false, root.menu("Feed").submenu("MoveToFolder").enabled)
+        assertEquals(false, root.menu("Feed").item("FeedCopyUrl").enabled)
+        assertEquals(false, root.menu("Feed").item("FeedCopySiteUrl").enabled)
+        assertEquals(false, root.menu("Feed").item("FeedOpenSite").enabled)
     }
 
     @Test
@@ -165,6 +173,9 @@ class AppMenuTreeTest {
         assertEquals(false, root.menu("Feed").item("FeedUnsubscribe").enabled)
         assertEquals(false, root.menu("Feed").submenu("AssignTags").enabled)
         assertEquals(false, root.menu("Feed").submenu("MoveToFolder").enabled)
+        assertEquals(false, root.menu("Feed").item("FeedCopyUrl").enabled)
+        assertEquals(false, root.menu("Feed").item("FeedCopySiteUrl").enabled)
+        assertEquals(false, root.menu("Feed").item("FeedOpenSite").enabled)
     }
 
     @Test

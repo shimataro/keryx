@@ -6,6 +6,7 @@ import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
 import javax.swing.JCheckBoxMenuItem
 import javax.swing.JMenu
+import javax.swing.JPopupMenu
 import javax.swing.KeyStroke
 import javax.swing.SwingUtilities
 import javax.swing.UIManager
@@ -251,6 +252,45 @@ class NativeMenuTest {
         assertNull(item.accelerator)
     }
 
+    @Test
+    fun swingDisablesAnItemBuiltWithEnabledFalse() {
+        val handle = handleOf(NativeMenuItem("Open site", enabled = false) {})
+
+        val item = handle.popupMenu.getComponent(0) as javax.swing.JMenuItem
+        assertFalse(item.isEnabled)
+    }
+
+    @Test
+    fun swingSyncTogglesEnabledWithoutRebuildingTheWidget() {
+        val entries = listOf<NativeMenuEntry>(NativeMenuItem("Open site", enabled = false) {})
+        val handle = SwingPopupHandle(entries) { entries }
+        val item = handle.popupMenu.getComponent(0) as javax.swing.JMenuItem
+        assertFalse(item.isEnabled)
+
+        handle.sync(listOf(NativeMenuItem("Open site", enabled = true) {}))
+
+        assertTrue(item.isEnabled)
+    }
+
+    @Test
+    fun swingSeparatorEntryBecomesAJPopupMenuSeparator() {
+        val handle = handleOf(NativeMenuItem("Refresh") {}, NativeMenuSeparator, NativeMenuItem("Unsubscribe") {})
+
+        assertEquals(3, handle.popupMenu.componentCount)
+        assertIs<JPopupMenu.Separator>(handle.popupMenu.getComponent(1))
+    }
+
+    @Test
+    fun swingSyncLeavesTheSeparatorAloneAndStillUpdatesOtherItems() {
+        val entries = listOf<NativeMenuEntry>(NativeMenuItem("stale") {}, NativeMenuSeparator)
+        val handle = SwingPopupHandle(entries) { entries }
+
+        handle.sync(listOf(NativeMenuItem("fresh") {}, NativeMenuSeparator))
+
+        assertEquals("fresh", (handle.popupMenu.getComponent(0) as javax.swing.JMenuItem).text)
+        assertIs<JPopupMenu.Separator>(handle.popupMenu.getComponent(1))
+    }
+
     private fun awtHandleOf(vararg entries: NativeMenuEntry): AwtPopupHandle {
         val items = entries.toList()
         return AwtPopupHandle(items) { items }
@@ -280,5 +320,44 @@ class NativeMenuTest {
         val handle = awtHandleOf(NativeMenuItem("Refresh") {})
 
         assertNull(handle.popupMenu.getItem(0).shortcut)
+    }
+
+    @Test
+    fun awtDisablesAnItemBuiltWithEnabledFalse() {
+        val handle = awtHandleOf(NativeMenuItem("Open site", enabled = false) {})
+
+        assertFalse(handle.popupMenu.getItem(0).isEnabled)
+    }
+
+    @Test
+    fun awtSyncTogglesEnabledWithoutRebuildingTheWidget() {
+        val entries = listOf<NativeMenuEntry>(NativeMenuItem("Open site", enabled = false) {})
+        val handle = AwtPopupHandle(entries) { entries }
+        assertFalse(handle.popupMenu.getItem(0).isEnabled)
+
+        handle.sync(listOf(NativeMenuItem("Open site", enabled = true) {}))
+
+        assertTrue(handle.popupMenu.getItem(0).isEnabled)
+    }
+
+    @Test
+    fun awtSeparatorEntryBecomesAMenuItemWithADashLabel() {
+        // "-" is the exact idiom java.awt.Menu.addSeparator() itself uses; the native peer renders
+        // a MenuItem with that label as a separator rather than a real item.
+        val handle = awtHandleOf(NativeMenuItem("Refresh") {}, NativeMenuSeparator, NativeMenuItem("Unsubscribe") {})
+
+        assertEquals(3, handle.popupMenu.itemCount)
+        assertEquals("-", handle.popupMenu.getItem(1).label)
+    }
+
+    @Test
+    fun awtSyncLeavesTheSeparatorLabelAloneAndStillUpdatesOtherItems() {
+        val entries = listOf<NativeMenuEntry>(NativeMenuItem("stale") {}, NativeMenuSeparator)
+        val handle = AwtPopupHandle(entries) { entries }
+
+        handle.sync(listOf(NativeMenuItem("fresh") {}, NativeMenuSeparator))
+
+        assertEquals("fresh", handle.popupMenu.getItem(0).label)
+        assertEquals("-", handle.popupMenu.getItem(1).label)
     }
 }

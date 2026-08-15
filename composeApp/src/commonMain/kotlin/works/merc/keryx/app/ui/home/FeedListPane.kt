@@ -61,7 +61,9 @@ import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
+import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.NativeMenuItem
+import works.merc.keryx.app.platform.NativeMenuSeparator
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.platform.WindowChrome
 import works.merc.keryx.app.platform.WindowDragArea
@@ -71,10 +73,13 @@ import works.merc.keryx.app.resources.home_add_feed
 import works.merc.keryx.app.resources.home_add_folder
 import works.merc.keryx.app.resources.home_add_tag
 import works.merc.keryx.app.resources.home_all_feeds
+import works.merc.keryx.app.resources.home_copy_feed_url
+import works.merc.keryx.app.resources.home_copy_site_url
 import works.merc.keryx.app.resources.home_delete_tag_menu
 import works.merc.keryx.app.resources.home_edit_tag_menu
 import works.merc.keryx.app.resources.home_folder_name_duplicate
 import works.merc.keryx.app.resources.home_folders
+import works.merc.keryx.app.resources.home_open_site
 import works.merc.keryx.app.resources.home_refresh
 import works.merc.keryx.app.resources.home_refreshing
 import works.merc.keryx.app.resources.home_remove_feed_from_tag_menu
@@ -163,6 +168,9 @@ internal fun FeedListPane(
     LaunchedEffect(Unit) {
         vm.searchFocusRequests.collect { searchFocusRequester.requestFocus() }
     }
+    // Shared by every feed row's "copy feed URL"/"copy site URL" context-menu item, mirroring
+    // ArticleListPane's rememberCopyUrlAction() for article rows.
+    val copyUrl = rememberCopyUrlAction()
 
     var showAddTag by remember { mutableStateOf(false) }
     var confirmingDeleteTag by remember { mutableStateOf<Tags?>(null) }
@@ -474,6 +482,9 @@ internal fun FeedListPane(
                                 folders = folders,
                                 onMoveFeedToFolder = { moveFolderId -> vm.moveFeed(feed.id, moveFolderId) },
                                 onUnsubscribe = { confirmingUnsubscribeFeed = feed },
+                                onCopyFeedUrl = { copyUrl(feed.url) },
+                                onCopySiteUrl = { feed.site_url?.let(copyUrl) },
+                                onOpenSite = { feed.site_url?.let(BrowserOpener::open) },
                             )
                         }
                     }
@@ -591,6 +602,9 @@ internal fun FeedListPane(
                                     onRenameCommit = { vm.renameFeed(feed.id, it); inlineEdit = null },
                                     onRenameCancel = { inlineEdit = null },
                                     onRemoveFromTag = { vm.setFeedTag(feed.id, tag.id, false) },
+                                    onCopyFeedUrl = { copyUrl(feed.url) },
+                                    onCopySiteUrl = { feed.site_url?.let(copyUrl) },
+                                    onOpenSite = { feed.site_url?.let(BrowserOpener::open) },
                                 )
                             }
                         }
@@ -922,6 +936,9 @@ internal fun tagColorDotTestTag(tagId: String): String = "tag-color-dot-$tagId"
  * @param onRenameCommit Applies an edited title; a blank value resets it to the feed's own title.
  * @param onRenameCancel Abandons an in-progress title edit.
  * @param onRemoveFromTag Detaches the feed from the tag.
+ * @param onCopyFeedUrl Copies the feed's own (RSS/Atom) URL to the clipboard.
+ * @param onCopySiteUrl Copies the feed's website URL to the clipboard.
+ * @param onOpenSite Opens the feed's website in the external browser.
  */
 @Composable
 private fun TagFeedRow(
@@ -935,9 +952,16 @@ private fun TagFeedRow(
     onRenameCommit: (String) -> Unit,
     onRenameCancel: () -> Unit,
     onRemoveFromTag: () -> Unit,
+    onCopyFeedUrl: () -> Unit,
+    onCopySiteUrl: () -> Unit,
+    onOpenSite: () -> Unit,
 ) {
     val renameLabel = stringResource(Res.string.home_rename_feed)
     val removeLabel = stringResource(Res.string.home_remove_feed_from_tag_menu)
+    val copyFeedUrlLabel = stringResource(Res.string.home_copy_feed_url)
+    val copySiteUrlLabel = stringResource(Res.string.home_copy_site_url)
+    val openSiteLabel = stringResource(Res.string.home_open_site)
+    val siteUrlUsable = hasUsableUrl(feed.site_url)
     Row(
         Modifier.fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 2.dp)
@@ -947,7 +971,12 @@ private fun TagFeedRow(
             .nativeContextMenu(
                 items = {
                     listOf(
+                        NativeMenuItem(copyFeedUrlLabel) { onCopyFeedUrl() },
+                        NativeMenuItem(copySiteUrlLabel, enabled = siteUrlUsable) { onCopySiteUrl() },
+                        NativeMenuItem(openSiteLabel, enabled = siteUrlUsable) { onOpenSite() },
+                        NativeMenuSeparator,
                         NativeMenuItem(renameLabel, renameNativeShortcut) { onRename() },
+                        NativeMenuSeparator,
                         NativeMenuItem(removeLabel) { onRemoveFromTag() },
                     )
                 },

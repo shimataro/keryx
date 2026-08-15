@@ -34,6 +34,11 @@ data class MenuUiState(
      * keyboard focus. Not gated on the feed list pane holding focus, matching the feed row's own
      * context menu, which acts on the row regardless of pane focus. */
     val feedActionsEnabled: Boolean,
+    /** Copy site URL / open site for the selected feed — like [feedActionsEnabled] but
+     * additionally requires the feed to actually have a (non-blank) site URL, mirroring
+     * [urlActionsEnabled]'s relationship to [articleActionsEnabled]. "Copy feed URL" doesn't need
+     * this: a feed's own subscription URL is never blank, so it uses [feedActionsEnabled] directly. */
+    val feedSiteUrlActionsEnabled: Boolean,
     /** Rename/Delete — unlike [feedActionsEnabled] these act on whatever feed list item is
      * selected (feed, folder or tag: `resolveFeedListSelectionTarget` resolves it and
      * `FeedListPane` opens the matching dialog), so they only require *some* renamable selection.
@@ -66,6 +71,7 @@ fun computeMenuUiState(
     hasSelectedFeed: Boolean = false,
     textInputFocused: Boolean = false,
     hasRenamableSelection: Boolean = false,
+    selectedFeedHasSiteUrl: Boolean = false,
 ): MenuUiState {
     val onHome = screen == Screen.Home
     return MenuUiState(
@@ -83,5 +89,6 @@ fun computeMenuUiState(
         openSettingsEnabled = onHome,
         feedActionsEnabled = onHome && hasSelectedFeed && !textInputFocused,
         renameOrDeleteEnabled = onHome && hasRenamableSelection && !textInputFocused,
+        feedSiteUrlActionsEnabled = onHome && hasSelectedFeed && !textInputFocused && selectedFeedHasSiteUrl,
     )
 }

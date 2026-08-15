@@ -128,6 +128,9 @@ internal data class AppMenuLabels(
      * a feed (`AppMenuBar` picks the matching string per selection type). */
     val feedRename: String,
     val feedUnsubscribe: String,
+    val feedCopyUrl: String,
+    val feedCopySiteUrl: String,
+    val feedOpenSite: String,
     val helpMenu: String,
     val website: String,
     val projectPage: String,
@@ -159,6 +162,9 @@ internal data class AppMenuActions(
     val moveFeedToFolder: (folderId: String?) -> Unit,
     val renameSelectedFeed: () -> Unit,
     val unsubscribeSelectedFeed: () -> Unit,
+    val copyFeedUrl: () -> Unit,
+    val copyFeedSiteUrl: () -> Unit,
+    val openFeedSite: () -> Unit,
     val openWebsite: () -> Unit,
     val openProjectPage: () -> Unit,
     val about: () -> Unit,
@@ -293,8 +299,13 @@ internal fun buildAppMenuTree(
                 }
             },
         ),
+        AppMenuNode.Separator,
+        AppMenuNode.Item(labels.feedCopyUrl, ui.feedActionsEnabled, onClick = actions.copyFeedUrl),
+        AppMenuNode.Item(labels.feedCopySiteUrl, ui.feedSiteUrlActionsEnabled, onClick = actions.copyFeedSiteUrl),
+        AppMenuNode.Item(labels.feedOpenSite, ui.feedSiteUrlActionsEnabled, onClick = actions.openFeedSite),
         // Rename/Unsubscribe act on whatever feed list item is selected (feed, folder or tag), so
         // unlike the items above they use renameOrDeleteEnabled, not feedActionsEnabled.
+        AppMenuNode.Separator,
         AppMenuNode.Item(labels.feedRename, ui.renameOrDeleteEnabled, AppMenuShortcut.FeedRename, actions.renameSelectedFeed),
         AppMenuNode.Separator,
         AppMenuNode.Item(labels.feedUnsubscribe, ui.renameOrDeleteEnabled, AppMenuShortcut.FeedUnsubscribe, actions.unsubscribeSelectedFeed),

@@ -19,6 +19,7 @@ import java.awt.MenuShortcut
 import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
 import javax.swing.JCheckBoxMenuItem
+import javax.swing.JComponent
 import javax.swing.JMenu
 import javax.swing.JMenuItem
 import javax.swing.JPopupMenu
@@ -105,6 +106,7 @@ internal class AwtPopupHandle(
                     // primary modifier, so it can only show a modifier'd combo correctly. Those
                     // items render with no native hint here; see NativeMenuShortcut's doc comment.
                     if (entry is NativeMenuItem) {
+                        isEnabled = entry.enabled
                         entry.shortcut?.takeIf { it.ctrl }?.let { shortcut = MenuShortcut(it.awtKeyCode(), it.shift) }
                     }
                 }
@@ -118,6 +120,9 @@ internal class AwtPopupHandle(
                         )
                     }
                 }
+            // A MenuItem labelled "-" is the exact idiom java.awt.Menu.addSeparator() itself uses
+            // (`add(new MenuItem("-"))`); the native peer renders it as a separator, not a real item.
+            is NativeMenuSeparator -> java.awt.MenuItem("-")
         }
     }
 
@@ -126,7 +131,11 @@ internal class AwtPopupHandle(
     override fun sync(items: List<NativeMenuEntry>) {
         items.forEachIndexed { index, entry ->
             val component = menuItems.getOrNull(index) ?: return@forEachIndexed
+            // Never relabel a separator: it carries no state, and doing so would overwrite the
+            // "-" marker the native peer relies on to render it as a separator.
+            if (entry is NativeMenuSeparator) return@forEachIndexed
             component.label = awtLabel(entry)
+            if (entry is NativeMenuItem) component.isEnabled = entry.enabled
             if (entry is NativeSubMenu && component is java.awt.Menu) {
                 entry.items.forEachIndexed { childIndex, child ->
                     component.getItem(childIndex)?.label = awtLabel(child)
@@ -165,7 +174,9 @@ internal class SwingPopupHandle(
     // so a field called `components` would silently resolve to the popup's own — empty — child
     // array, adding nothing and leaving a menu that shows as a 0x0 nothing. AWT's PopupMenu is
     // not a Container, which is why only the Swing backend was ever affected.
-    private val menuItems: List<JMenuItem> = items.mapIndexed { index, entry ->
+    // JComponent, not JMenuItem: a separator is a JPopupMenu.Separator, which is a JComponent but
+    // not a JMenuItem.
+    private val menuItems: List<JComponent> = items.mapIndexed { index, entry ->
         when (entry) {
             is NativeMenuLeaf ->
                 swingLeaf(entry) { leafAt(currentItems(), index, childIndex = null)?.onClick?.invoke() }
@@ -179,6 +190,7 @@ internal class SwingPopupHandle(
                         add(swingLeaf(child) { leafAt(currentItems(), index, childIndex)?.onClick?.invoke() })
                     }
                 }
+            is NativeMenuSeparator -> JPopupMenu.Separator()
         }
     }
 
@@ -191,7 +203,8 @@ internal class SwingPopupHandle(
     override fun sync(items: List<NativeMenuEntry>) {
         items.forEachIndexed { index, entry ->
             val component = menuItems.getOrNull(index) ?: return@forEachIndexed
-            syncLeaf(component, entry)
+            // A separator's JPopupMenu.Separator carries no label/state, so it has nothing to sync.
+            if (component is JMenuItem) syncLeaf(component, entry)
             if (entry is NativeSubMenu && component is JMenu) {
                 entry.items.forEachIndexed { childIndex, child ->
                     component.getItem(childIndex)?.let { syncLeaf(it, child) }
@@ -209,6 +222,7 @@ internal class SwingPopupHandle(
         // JMenuBar's structure — never reaches it. Setting `accelerator` here is purely cosmetic:
         // it renders in Swing's own native accelerator column with no live global keybinding.
         if (entry is NativeMenuItem) {
+            item.isEnabled = entry.enabled
             entry.shortcut?.let { shortcut ->
                 // Linux only, so the primary modifier is always Ctrl — never Cmd.
                 var modifiers = 0
@@ -227,6 +241,7 @@ internal class SwingPopupHandle(
         if (component is JCheckBoxMenuItem && entry is NativeCheckMenuItem) {
             component.isSelected = entry.checked
         }
+        if (entry is NativeMenuItem) component.isEnabled = entry.enabled
     }
 
     // JPopupMenu.show takes the invoker directly, so unlike AWT there is nothing to add to the
@@ -275,6 +290,7 @@ private fun menuShape(items: List<NativeMenuEntry>): List<String> = items.map { 
     when (entry) {
         is NativeMenuLeaf -> leafKind(entry)
         is NativeSubMenu -> "sub:" + entry.items.joinToString(",") { leafKind(it) }
+        is NativeMenuSeparator -> "sep"
     }
 }
 
@@ -286,14 +302,18 @@ internal sealed interface MenuEntrySignature
 
 /**
  * What a leaf renders. [checked] is null for a plain item, so an entry's kind and its check state
- * are one unambiguous field rather than something encoded into text.
+ * are one unambiguous field rather than something encoded into text. [enabled] is always `true`
+ * for a [NativeCheckMenuItem] (only [NativeMenuItem] currently supports disabling).
  */
-internal data class LeafSignature(val label: String, val checked: Boolean?) : MenuEntrySignature
+internal data class LeafSignature(val label: String, val checked: Boolean?, val enabled: Boolean) : MenuEntrySignature
 
 internal data class SubMenuSignature(
     val label: String,
     val children: List<LeafSignature>,
 ) : MenuEntrySignature
+
+/** A separator carries no state, so every separator compares equal to every other. */
+internal data object SeparatorSignature : MenuEntrySignature
 
 /**
  * Creates a value-comparable representation of the menu's rendered content.
@@ -306,6 +326,7 @@ internal fun menuSignature(items: List<NativeMenuEntry>): List<MenuEntrySignatur
         when (entry) {
             is NativeMenuLeaf -> leafSignature(entry)
             is NativeSubMenu -> SubMenuSignature(entry.label, entry.items.map { leafSignature(it) })
+            is NativeMenuSeparator -> SeparatorSignature
         }
     }
 
@@ -316,7 +337,7 @@ internal fun menuSignature(items: List<NativeMenuEntry>): List<MenuEntrySignatur
      * @return The entry's rendered label and optional checked state.
      */
     private fun leafSignature(entry: NativeMenuLeaf): LeafSignature =
-    LeafSignature(entry.label, (entry as? NativeCheckMenuItem)?.checked)
+    LeafSignature(entry.label, (entry as? NativeCheckMenuItem)?.checked, (entry as? NativeMenuItem)?.enabled ?: true)
 
 /** Builds the backend appropriate to the current platform. */
 internal fun defaultPopupHandle(
