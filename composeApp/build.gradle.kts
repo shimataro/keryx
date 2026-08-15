@@ -335,6 +335,11 @@ compose.desktop {
                                 </array>
                             </dict>
                         </array>
+                        <key>NSAppTransportSecurity</key>
+                        <dict>
+                            <key>NSAllowsArbitraryLoadsInWebContent</key>
+                            <true/>
+                        </dict>
                         <key>UTImportedTypeDeclarations</key>
                         <array>
                             <dict>
