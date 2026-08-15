@@ -34,6 +34,7 @@ import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.ftsManagerIndexed
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -281,6 +282,68 @@ class FeedRepositoryTest {
                 firstFeed.sort_order != secondFeed.sort_order,
                 "both feeds got the same sort_order: ${firstFeed.sort_order}",
             )
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun subscribeFeedConcurrentSubscribesOfTheSameUrlDoNotRefileAnAlreadyPlacedFeed(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("folder-1", "Folder 1")
+            db.insertFolder("folder-2", "Folder 2")
+            val firstEntered = CountDownLatch(1)
+            val releaseFirst = CountDownLatch(1)
+            val firstClaimed = AtomicBoolean(false)
+            val faviconResolver = FaviconResolver(
+                HttpClient(MockEngine {
+                    if (firstClaimed.compareAndSet(false, true)) {
+                        firstEntered.countDown()
+                        releaseFirst.await(5, TimeUnit.SECONDS)
+                    }
+                    respond("", HttpStatusCode.NotFound)
+                }) {
+                    followRedirects = false
+                    expectSuccess = false
+                    install(HttpTimeout)
+                },
+            )
+            val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
+            val repo = newRepo(db, driver, fetcher, faviconResolver = faviconResolver)
+
+            // "first" reads `existing == null`, then blocks resolving its favicon — i.e. before it
+            // even attempts the mutex.
+            val firstResult = java.util.concurrent.atomic.AtomicReference<Result<Feeds>>()
+            val first = Thread {
+                runBlocking { firstResult.set(repo.subscribeFeed("https://ex.com/feed", folderId = "folder-1")) }
+            }.apply { start() }
+            assertTrue(firstEntered.await(5, TimeUnit.SECONDS), "first subscribeFeed never started")
+
+            // "second" also reads `existing == null` (first hasn't committed yet), then races through
+            // uncontested (its own favicon check isn't gated) and wins the mutex first.
+            val secondResult = java.util.concurrent.atomic.AtomicReference<Result<Feeds>>()
+            val second = Thread {
+                runBlocking { secondResult.set(repo.subscribeFeed("https://ex.com/feed", folderId = "folder-2")) }
+            }.apply { start() }
+            second.join(5_000)
+            assertFalse(second.isAlive, "second subscribeFeed did not finish within 5s")
+            assertIs<Result.Ok<Feeds>>(secondResult.get())
+
+            // Now let "first" resume: with the fix, it must re-read the row under the lock and see it
+            // already placed, so it must NOT re-file the feed into folder-1.
+            releaseFirst.countDown()
+            first.join(5_000)
+            assertFalse(first.isAlive, "first subscribeFeed did not finish within 5s")
+            assertIs<Result.Ok<Feeds>>(firstResult.get())
+
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+            assertEquals(
+                "folder-2",
+                feed.folder_id,
+                "the feed already placed by the second (winning) call must not be re-filed by the first",
+            )
+            assertEquals(1, db.feedsQueries.getAllIncludingDeleted().executeAsList().size)
         } finally {
             driver.close()
         }
