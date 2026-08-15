@@ -124,6 +124,49 @@ class FeedRepositoryTest {
     }
 
     @Test
+    fun subscribeFeedWithFolderIdFilesNewFeedIntoThatFolder(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("folder-1", "Folder 1")
+            // An existing feed already occupying slot 0 of folder-1, so the new feed's sort_order
+            // must be computed within that folder's group, not the "no folder" group.
+            db.insertFeed("existing", folderId = "folder-1", sortOrder = 0L)
+            val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
+            val repo = newRepo(db, driver, fetcher)
+
+            val result = repo.subscribeFeed("https://ex.com/feed", folderId = "folder-1")
+
+            assertIs<Result.Ok<Feeds>>(result)
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+            assertEquals("folder-1", feed.folder_id)
+            assertEquals(1L, feed.sort_order)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun subscribeFeedWithFolderIdDoesNotRefileAnExistingFeed(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("folder-1", "Folder 1")
+            val feedId = IdGenerator.feedId("https://ex.com/feed")
+            db.insertFeed(feedId, url = "https://ex.com/feed", folderId = "folder-1")
+            val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
+            val repo = newRepo(db, driver, fetcher)
+
+            // Re-subscribing with a different target folder must not move the already-subscribed feed.
+            val result = repo.subscribeFeed("https://ex.com/feed", folderId = null)
+
+            assertIs<Result.Ok<Feeds>>(result)
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+            assertEquals("folder-1", feed.folder_id)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun sameUrlSubscribedOnTwoDevicesGetsSameFeedId(): Unit = runBlocking {
         // Two devices independently subscribing the same feed url must store it under the SAME feed
         // id, otherwise the sync merge (matched by id) can't converge them — and neither feeds nor

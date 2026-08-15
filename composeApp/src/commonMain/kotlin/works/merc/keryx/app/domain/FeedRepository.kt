@@ -80,10 +80,12 @@ class FeedRepository(
      * Subscribes to a feed, storing its metadata and articles locally.
      *
      * @param url The feed URL to fetch and subscribe to.
+     * @param folderId The folder a brand-new feed should be filed into, or `null` for no folder.
+     *   Ignored when re-subscribing an existing feed, which keeps its prior folder.
      * @return A successful result containing the subscribed feed, or the fetch error.
      */
-    suspend fun subscribeFeed(url: String): Result<Feeds> {
-        val outcome = subscribeFeedWrite(url)
+    suspend fun subscribeFeed(url: String, folderId: String? = null): Result<Feeds> {
+        val outcome = subscribeFeedWrite(url, folderId)
         if (outcome.hadArticles) ftsManager.indexMissing()
         return outcome.result
     }
@@ -95,9 +97,11 @@ class FeedRepository(
      * Fetches a feed and persists its metadata and articles without indexing them.
      *
      * @param url The URL of the feed to subscribe to.
+     * @param folderId The folder a brand-new feed should be filed into, or `null` for no folder.
+     *   Ignored when re-subscribing an existing feed, which keeps its prior folder.
      * @return The subscription result, including the stored feed or fetch error and whether articles were fetched.
      */
-    internal suspend fun subscribeFeedWrite(url: String): FeedWriteOutcome {
+    internal suspend fun subscribeFeedWrite(url: String, folderId: String? = null): FeedWriteOutcome {
         val fetched = when (val r = feedFetcher.fetch(url)) {
             is Result.Ok -> r.value
             is Result.Err -> return FeedWriteOutcome(r, hadArticles = false)
@@ -111,13 +115,14 @@ class FeedRepository(
         val now = clock.nowMillis()
         val favicon = faviconResolver.resolve(fetched.siteUrl, effectiveUrl)
 
-        // sort_order: a brand-new feed starts at the end of the "no folder" group (new feeds
-        // always start with folder_id = null); a still-live feed being re-fetched keeps its
-        // existing position; a previously-unsubscribed feed being re-subscribed is re-numbered to
-        // the end of the group it used to belong to (its old relative position may no longer be
-        // meaningful after other feeds in that group moved around while it was unsubscribed).
+        // sort_order: a brand-new feed starts at the end of its target folder's group (the
+        // "no folder" group, unless the caller passed a folderId to file it into); a still-live
+        // feed being re-fetched keeps its existing position; a previously-unsubscribed feed being
+        // re-subscribed is re-numbered to the end of the group it used to belong to (its old
+        // relative position may no longer be meaningful after other feeds in that group moved
+        // around while it was unsubscribed).
         val sortOrder = when {
-            existing == null -> feeds.nextSortOrderInGroup(null).executeAsOne()
+            existing == null -> feeds.nextSortOrderInGroup(folderId).executeAsOne()
             existing.deleted_at == null -> existing.sort_order
             else -> feeds.nextSortOrderInGroup(existing.folder_id).executeAsOne()
         }
@@ -139,6 +144,10 @@ class FeedRepository(
             created_at = existing?.created_at ?: now,
             sort_order = sortOrder,
         )
+        // Files a brand-new feed into the folder selected in the feed list at add time. A
+        // re-subscribed feed (existing != null) keeps its prior folder instead — upsert never
+        // touches folder_id, so there's nothing to do for that case.
+        if (existing == null && folderId != null) feeds.updateFolder(folderId, now, now, feedId)
         // Re-subscribing (feed was soft-deleted) is a subscription-state change: stamp its
         // last-wins timestamp so it propagates over another device's refresh on the next sync.
         if (existing?.deleted_at != null) feeds.stampResubscribed(now, feedId)
