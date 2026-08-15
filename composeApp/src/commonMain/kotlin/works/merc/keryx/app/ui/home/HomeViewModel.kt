@@ -236,16 +236,29 @@ class HomeViewModel(
         combine(
             filteredArticles, unreadOnly, _newestFirst, _pinnedReadArticles, _pinnedUnstarredArticles,
         ) { list, unread, newest, pinnedRead, pinnedUnstarred ->
-            // Nothing pinned is the common case, and then the id set has no reader — skip
-            // building it rather than hashing every article's id on every emission.
-            val extra = if (pinnedRead.isEmpty() && pinnedUnstarred.isEmpty()) {
-                emptyList()
+            // Nothing pinned is the common case, and then neither a resolved copy nor the id set has
+            // a reader — skip building either rather than touching every row on every emission.
+            val resolvedList: List<ArticleListRow>
+            val extra: List<ArticleListRow>
+            if (pinnedRead.isEmpty() && pinnedUnstarred.isEmpty()) {
+                resolvedList = list
+                extra = emptyList()
             } else {
+                // A pinned article can already be present in `list` — its own optimistic write just
+                // hasn't reached the raw query result yet (dbWriteDispatcher runs it asynchronously).
+                // Without this, the row would show the pre-toggle field for that window, exactly the
+                // gap the pin exists to paper over (e.g. is_starred still 1 for an article just
+                // unstarred while browsing Starred). Per-field resolution (rather than picking one
+                // map's snapshot outright) covers an article pinned in both at once, e.g. read and
+                // then unstarred while browsing Starred + unread-only.
+                resolvedList = list.map { row ->
+                    row.copy(
+                        is_read = pinnedRead[row.id]?.is_read ?: row.is_read,
+                        is_starred = pinnedUnstarred[row.id]?.is_starred ?: row.is_starred,
+                    )
+                }
                 val existingIds = list.mapTo(HashSet(list.size)) { it.id }
-                // Per-field resolution (rather than picking one map's snapshot outright) covers an
-                // article pinned in both at once, e.g. read and then unstarred while browsing
-                // Starred + unread-only.
-                (pinnedRead.keys + pinnedUnstarred.keys).filter { it !in existingIds }.map { id ->
+                extra = (pinnedRead.keys + pinnedUnstarred.keys).filter { it !in existingIds }.map { id ->
                     val base = pinnedRead[id] ?: pinnedUnstarred.getValue(id)
                     base.copy(
                         is_read = pinnedRead[id]?.is_read ?: base.is_read,
@@ -253,11 +266,15 @@ class HomeViewModel(
                     )
                 }
             }
-            val merged = if (extra.isEmpty()) list else (list + extra).sortedWith(
+            val merged = if (extra.isEmpty()) resolvedList else (resolvedList + extra).sortedWith(
                 compareByDescending<ArticleListRow> { it.published_at ?: 0L }
                     .thenByDescending { it.created_at }
                     .thenByDescending { it.id }
             )
+            // Independent of the resolution above: every _pinnedReadArticles entry is is_read == 1
+            // by construction (see its declaration), so this OR is what keeps a just-marked-read
+            // article visible for its grace period under unread-only — id membership, not staleness,
+            // is what this needs.
             val filtered = if (unread) {
                 merged.filter { it.is_read == 0L || it.id in pinnedRead }
             } else {
@@ -649,8 +666,9 @@ class HomeViewModel(
         // not committed yet) nor the pin map (just cleared) — and a LazyColumn keyed by article id
         // reacts to that gap by shifting its scroll anchor to the next row, so the re-starred article
         // jumps out of view once it reappears. Leaving the pin in place is harmless: the `articles`
-        // combine's existingIds check already makes it inert the instant the raw query catches up, and
-        // it's cleared for good on the next filter switch, exactly like the unstarred-pin lifecycle.
+        // combine resolves this exact confirmed value onto the row once the raw query catches up, so
+        // nothing changes, and it's cleared for good on the next filter switch, exactly like the
+        // unstarred-pin lifecycle.
         if (_filter.value == ArticleFilter.Starred) {
             _pinnedUnstarredArticles.update { it + (article.id to article.copy(is_starred = if (starred) 1L else 0L)) }
         } else if (starred) {

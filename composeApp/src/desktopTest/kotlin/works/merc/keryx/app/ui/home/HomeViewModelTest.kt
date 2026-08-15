@@ -946,6 +946,53 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun unstarringArticleUnderStarredFilterResolvesTheFieldWhileTheWriteIsInFlight() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isStarred = 1L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isStarred = 1L, publishedAt = 1L, createdAt = 1L)
+        // A controllable (non-inline) write dispatcher, so the unstar write stays queued until
+        // explicitly advanced, mirroring production where dbWriteDispatcher is genuinely asynchronous.
+        val vm = newViewModel(dbWriteDispatcher = StandardTestDispatcher(testScheduler))
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+
+        vm.toggleStar(db.articlesQueries.getById("a2").executeAsOne().toListRow())
+
+        // The write hasn't landed yet, so a2 is still is_starred=1 in `list` (the raw query result) —
+        // the merge must still resolve the pin's field onto that already-present row, or the star icon
+        // would flash as still-starred until the write commits.
+        assertEquals(1L, db.articlesQueries.getById("a2").executeAsOne().is_starred)
+        assertEquals(0L, vm.articles.value.first { it.id == "a2" }.is_starred)
+
+        testScheduler.advanceUntilIdle()
+        assertEquals(0L, db.articlesQueries.getById("a2").executeAsOne().is_starred)
+        assertEquals(0L, vm.articles.value.first { it.id == "a2" }.is_starred)
+    }
+
+    @Test
+    fun markingArticleReadResolvesTheFieldWhileTheWriteIsInFlight() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        // watchArticles(All) doesn't filter by read state, so a1 stays present in `list` throughout —
+        // it's the row's own is_read field, not list membership, that would otherwise read stale.
+        val vm = newViewModel(dbWriteDispatcher = StandardTestDispatcher(testScheduler))
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        vm.toggleRead(vm.articles.value.first { it.id == "a1" })
+
+        // The write hasn't landed yet, but the merged list must resolve the pin's is_read onto the
+        // already-present row.
+        assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+        assertEquals(1L, vm.articles.value.first { it.id == "a1" }.is_read)
+
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+        assertEquals(1L, vm.articles.value.first { it.id == "a1" }.is_read)
+    }
+
+    @Test
     fun toggleReadUpdatesDbAndRefreshesSelectedStateOnlyWhenSelected() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L)
