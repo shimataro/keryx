@@ -112,10 +112,11 @@ internal class AwtPopupHandle(
                 }
             is NativeSubMenu ->
                 java.awt.Menu().apply {
-                    entry.items.indices.forEach { childIndex ->
+                    entry.items.forEachIndexed { childIndex, child ->
                         add(
                             java.awt.MenuItem().apply {
                                 addActionListener { leafAt(currentItems(), index, childIndex)?.onClick?.invoke() }
+                                if (child is NativeMenuItem) isEnabled = child.enabled
                             },
                         )
                     }
@@ -138,7 +139,10 @@ internal class AwtPopupHandle(
             if (entry is NativeMenuItem) component.isEnabled = entry.enabled
             if (entry is NativeSubMenu && component is java.awt.Menu) {
                 entry.items.forEachIndexed { childIndex, child ->
-                    component.getItem(childIndex)?.label = awtLabel(child)
+                    component.getItem(childIndex)?.apply {
+                        label = awtLabel(child)
+                        if (child is NativeMenuItem) isEnabled = child.enabled
+                    }
                 }
             }
         }

@@ -330,6 +330,30 @@ class NativeMenuTest {
     }
 
     @Test
+    fun awtDisablesASubMenuChildBuiltWithEnabledFalse() {
+        val handle = awtHandleOf(
+            NativeSubMenu("Move to folder", listOf(NativeMenuItem("News", enabled = false) {})),
+        )
+
+        val submenu = handle.popupMenu.getItem(0) as java.awt.Menu
+        assertFalse(submenu.getItem(0).isEnabled)
+    }
+
+    @Test
+    fun awtSyncTogglesSubMenuChildEnabledWithoutRebuildingTheWidget() {
+        val entries = listOf<NativeMenuEntry>(
+            NativeSubMenu("Move to folder", listOf(NativeMenuItem("News", enabled = false) {})),
+        )
+        val handle = AwtPopupHandle(entries) { entries }
+        val submenu = handle.popupMenu.getItem(0) as java.awt.Menu
+        assertFalse(submenu.getItem(0).isEnabled)
+
+        handle.sync(listOf(NativeSubMenu("Move to folder", listOf(NativeMenuItem("News", enabled = true) {}))))
+
+        assertTrue(submenu.getItem(0).isEnabled)
+    }
+
+    @Test
     fun awtSyncTogglesEnabledWithoutRebuildingTheWidget() {
         val entries = listOf<NativeMenuEntry>(NativeMenuItem("Open site", enabled = false) {})
         val handle = AwtPopupHandle(entries) { entries }
