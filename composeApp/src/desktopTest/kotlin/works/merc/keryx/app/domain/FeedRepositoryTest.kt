@@ -264,20 +264,26 @@ class FeedRepositoryTest {
             val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
             val repo = newRepo(db, driver, fetcher)
 
+            val firstResult = java.util.concurrent.atomic.AtomicReference<Result<Feeds>>()
+            val secondResult = java.util.concurrent.atomic.AtomicReference<Result<Feeds>>()
             val first = Thread {
-                runBlocking { repo.subscribeFeed("https://ex.com/first", folderId = "folder-1") }
+                runBlocking { firstResult.set(repo.subscribeFeed("https://ex.com/first", folderId = "folder-1")) }
             }.apply { start() }
             assertTrue(driver.firstReadEntered.await(5, TimeUnit.SECONDS), "first subscribeFeed never started")
 
             // Start the second call while the first is provably mid-read, and give it time to reach
             // the driver if the mutex isn't actually blocking it.
             val second = Thread {
-                runBlocking { repo.subscribeFeed("https://ex.com/second", folderId = "folder-1") }
+                runBlocking { secondResult.set(repo.subscribeFeed("https://ex.com/second", folderId = "folder-1")) }
             }.apply { start() }
             Thread.sleep(300)
             driver.releaseFirstRead.countDown()
             first.join(5_000)
             second.join(5_000)
+            assertFalse(first.isAlive, "first subscribeFeed did not finish within 5s")
+            assertFalse(second.isAlive, "second subscribeFeed did not finish within 5s")
+            assertIs<Result.Ok<Feeds>>(firstResult.get())
+            assertIs<Result.Ok<Feeds>>(secondResult.get())
 
             assertTrue(
                 !driver.secondReadOverlappedFirst.get(),
