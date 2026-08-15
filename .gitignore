@@ -3,11 +3,9 @@
 /build/
 /composeApp/build/
 
-# Claude Code
-/.claude/*.local.*
-
-# Local machine config (never commit)
+# Local settings
 local.properties
+*.local.*
 
 # IDE
 /.idea/

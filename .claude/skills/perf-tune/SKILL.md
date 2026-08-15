@@ -3,6 +3,11 @@ name: perf-tune
 description: Measurement-driven performance work on the Keryx source — reduce total work (CPU / SQL / IO / allocation), improve perceived speed (show what's ready, report progress, optimistic display), and fix concurrency/scheduling — while never weakening security, data integrity, or observable behavior. After a one-time gate approval (bulk for Green/Yellow, individual for each Red), each approved item is measured, verified, and committed independently (one commit per item) with no further per-item confirmation. Invoke explicitly with /perf-tune (optionally /perf-tune <path>), or when asked to "make it faster", "optimize performance", "speed up startup", "reduce memory", or "the app feels slow".
 ---
 
+> This skill involves **high-accuracy judgments** — interpreting measurements, and
+> deciding whether a change trades away durability, security, or observable behavior.
+> **Run it in an opus session.** Skills inherit the caller session's model and cannot
+> pin one in frontmatter, so verify the session model is opus before executing.
+
 Make Keryx faster **without ever trading away durability, security, or observable
 behavior**. Every change must be justified by a measurement taken before it, and
 confirmed by the same measurement after it. This is the deliberate optimization

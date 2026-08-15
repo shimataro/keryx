@@ -1,7 +1,7 @@
 # Keryx (Kotlin Multiplatform)
 
 A cross-platform RSS reader (Kotlin Multiplatform / Compose Multiplatform).
-Local-first, Dropbox / Google Drive sync, no account required.
+Local-first, Dropbox / Google Drive / OneDrive sync, no account required.
 
 It targets desktop (Windows/macOS/Linux) via Compose Multiplatform first, with
 mobile (Android/iOS) targets planned for later.
@@ -21,17 +21,25 @@ themselves stay in English regardless (see constraint #9 below).
 
 ## Documentation
 
+**Always loaded** (imported at session start):
+
 - @../docs/external-spec.md — External spec & technology choices
 - @../docs/app-architecture.md — App structure & key classes
 - @../docs/error-design.md — Error design & Result type
 - @../docs/db-schema.md — DB schema & local_settings
-- @../docs/sync-architecture.md — Sync architecture
 - @../docs/background-update.md — Background update
-- @../docs/build.md — Build & packaging
 - @../docs/setup.md — Development environment setup
-- @../docs/testing.md — Testing conventions
-- @../docs/known-issues.md — Known defects deliberately left unfixed (with the evidence, so
-  investigations aren't repeated)
+
+**Read on demand** — these are deliberately *not* imported (they would cost ~43k tokens
+every session). Read the relevant one before doing that kind of work; don't work from
+memory:
+
+- `docs/sync-architecture.md` — **read before changing sync, merge SQL, or cloud storage.**
+  `.claude/rules/sync-merge.md` auto-loads on those files and points back here.
+- `docs/testing.md` — read before writing tests or producing manual-QA steps
+- `docs/build.md` — read before build/packaging/release work or API-key setup
+- `docs/known-issues.md` — known defects deliberately left unfixed, with the evidence, so
+  investigations aren't repeated. Read before investigating a bug in an area it covers.
 - UI/Compose style guidelines → the **`ui-guidelines` skill** (invoke it when
   adding/modifying Compose under `ui/`: pane tones, divider policy, article
   card style, flat native-feel components, dialog/popup conventions)
@@ -115,7 +123,9 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
    (`indexMissing()`), never a full `'rebuild'`; the upload excludes it via a
    `VACUUM INTO` snapshot copy so concurrent searches never hit `no such table`.
    Full mechanism (daily rebuild heal, `ensureIndexed`, `busy_timeout`) →
-   `.claude/rules/fts-index.md` (auto-loads when you touch FTS / sync / driver code).
+   `.claude/rules/fts-index.md` (auto-loads when you *read* a file matching its
+   `paths:` — FTS / sync / driver code. Editing without reading first does not
+   trigger it, so read the rule yourself if in doubt).
 2. **The ATTACH-DATABASE merge runs through `platform/DatabaseMerger`, NOT the
    SQLDelight driver** (the JVM `JdbcSqliteDriver` opens a fresh connection per
    statement, so an `ATTACH` wouldn't survive to the next merge statement).
@@ -125,20 +135,25 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
    the only shipped locale for now, but the mechanism must be used for every
    string a user can see — including tray/notification text built outside
    composition (see `NotificationMessages` + `getString`).
-4. **Platform-specific code stays behind `commonMain` `expect` declarations**
-   (`AppDirs`, `FileIO`, `BrowserOpener`, `FilePicker`, `DatabaseDriverFactory`,
-   `DatabaseMerger`, `Pkce`, `CloudStorageAvailability`, `platformModule`).
+4. **Platform-specific code stays behind `commonMain` `expect` declarations** —
+   e.g. `AppDirs`, `FileIO`, `BrowserOpener`, `FilePicker`, `DatabaseDriverFactory`,
+   `DatabaseMerger`, `DatabaseSnapshot`, `Gzip`, `Pkce`, `CloudStorageAvailability`,
+   `platformModule`. That list is illustrative, not exhaustive: the real set is
+   whatever `commonMain` declares `expect` (mostly under `platform/`, currently ~28
+   declarations) — `grep -rn "expect " composeApp/src/commonMain` for the current one.
    Desktop implementations live in `desktopMain`. This keeps the door open for
    Android/iOS targets later.
 5. **Follow the design docs.** Do not change the sync algorithm, merge SQL
    semantics, error taxonomy, or feature scope on your own judgment. If
-   something in the docs seems wrong, ask before deviating.
+   something in the docs seems wrong, ask before deviating. `docs/sync-architecture.md`
+   is not imported into the session — **Read it before touching sync, merge SQL,
+   `DatabaseMerger`, `DatabaseSnapshot`, or any `data/cloud/` storage class.**
 6. **Riverpod does not exist here** — state management is androidx.lifecycle
    ViewModels resolved via Koin.
 7. **New features and bug fixes must come with tests.** Except for UI-only
    changes with no runtime logic (visual tweaks, layout), new or changed logic
    in `domain/`, `data/`, or ViewModels needs a corresponding test in
-   `commonTest/`/`desktopTest/`. See @../docs/testing.md for conventions;
+   `commonTest/`/`desktopTest/`. Read `docs/testing.md` for conventions;
    delegate the actual writing to the `test-writer` agent if useful.
 8. **Third-party libraries that require license attribution go in
    `THIRD-PARTY-LICENSES.md`** (repo root). When adding or removing a shipped

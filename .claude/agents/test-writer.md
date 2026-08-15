@@ -31,7 +31,7 @@ Place a new test under the same relative path as the code it targets.
 - The merge is tested via `platform/DatabaseMerger.merge(...)` on two `fileDb()`
   files (close the SQLDelight driver before merging on the raw connection).
 
-## Policy for Result<T> (@docs/error-design.md)
+## Policy for Result<T> (@../../docs/error-design.md)
 
 - Test both the success (`Result.Ok`) and failure (`Result.Err`) branches, and
   assert the specific `KeryxException` subtype for each expected error

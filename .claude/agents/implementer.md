@@ -9,7 +9,8 @@ RSS reader, Kotlin Multiplatform / Compose Multiplatform).
 
 ## Project overview
 
-- Local-first, no account required, multi-device sync via Dropbox
+- Local-first, no account required, multi-device sync via the user's own cloud
+  storage (Dropbox / Google Drive / OneDrive — one connected at a time)
 - Target now: desktop (Windows/macOS/Linux) via Compose Multiplatform. Android/iOS later.
 - State management: androidx.lifecycle ViewModel + Koin, DB: SQLDelight (SQLite, FTS5),
   HTTP: Ktor, i18n: Compose Resources, HTML/XML parsing: ksoup.
@@ -40,7 +41,7 @@ behind `commonMain` `expect` declarations, with `actual` in `desktopMain`.
   (pane tones, divider policy, layout stability, flat native-feel components,
   dialog/popup rules).
 
-## Error handling (@docs/error-design.md)
+## Error handling (@../../docs/error-design.md)
 
 - Exceptions for "unexpected" errors (DB failure, bugs); `Result<T>`
   (`Result.Ok`/`Result.Err`) for "expected" errors (network, sync conflict, bad input).
