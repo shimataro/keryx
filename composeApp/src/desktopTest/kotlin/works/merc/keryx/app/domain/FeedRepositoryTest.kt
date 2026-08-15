@@ -12,6 +12,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import app.cash.sqldelight.db.QueryResult
+import app.cash.sqldelight.db.SqlDriver
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.FEED_ERROR_REASON_GONE
@@ -29,6 +34,7 @@ import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.ftsManagerIndexed
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -59,6 +65,58 @@ private class FakeNotificationMessages : NotificationMessages {
     override suspend fun newArticles(count: Int): String = "new:$count"
     override suspend fun syncFailed(exception: works.merc.keryx.app.core.KeryxException): String = "syncFailed:${exception::class.simpleName}"
     override suspend fun opmlImported(added: Int, failed: Int): String = "opmlImported:$added/$failed"
+}
+
+/**
+ * Pauses the first `nextSortOrderInGroup` SELECT on a latch and records whether a second,
+ * overlapping call reaches the same statement while the first is still gated, so
+ * [FeedRepository]'s `subscribePlacementMutex` can be checked without depending on timing.
+ */
+private class GatedSortOrderDriver(private val delegate: SqlDriver) : SqlDriver {
+    val firstReadEntered = CountDownLatch(1)
+    val releaseFirstRead = CountDownLatch(1)
+    private val firstReadStarted = AtomicBoolean(false)
+    private val firstReadInFlight = AtomicBoolean(false)
+    val secondReadOverlappedFirst = AtomicBoolean(false)
+
+    override fun execute(
+        identifier: Int?,
+        sql: String,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ): QueryResult<Long> = delegate.execute(identifier, sql, parameters, binders)
+
+    override fun <R> executeQuery(
+        identifier: Int?,
+        sql: String,
+        mapper: (app.cash.sqldelight.db.SqlCursor) -> QueryResult<R>,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ): QueryResult<R> {
+        if (sql.contains("SELECT COALESCE(MAX(sort_order)")) {
+            if (firstReadStarted.compareAndSet(false, true)) {
+                firstReadInFlight.set(true)
+                firstReadEntered.countDown()
+                // Bounded: a failing assertion before releaseFirstRead.countDown() must not leave this
+                // non-daemon thread parked and hang the test worker.
+                releaseFirstRead.await(10, TimeUnit.SECONDS)
+                return delegate.executeQuery(identifier, sql, mapper, parameters, binders)
+                    .also { firstReadInFlight.set(false) }
+            } else if (firstReadInFlight.get()) {
+                secondReadOverlappedFirst.set(true)
+            }
+        }
+        return delegate.executeQuery(identifier, sql, mapper, parameters, binders)
+    }
+
+    override fun newTransaction() = delegate.newTransaction()
+    override fun currentTransaction() = delegate.currentTransaction()
+    override fun addListener(vararg queryKeys: String, listener: app.cash.sqldelight.Query.Listener) =
+        delegate.addListener(queryKeys = queryKeys, listener = listener)
+    override fun removeListener(vararg queryKeys: String, listener: app.cash.sqldelight.Query.Listener) =
+        delegate.removeListener(queryKeys = queryKeys, listener = listener)
+    override fun notifyListeners(vararg queryKeys: String) = delegate.notifyListeners(queryKeys = queryKeys)
+    override fun close() = delegate.close()
 }
 
 class FeedRepositoryTest {
@@ -118,6 +176,187 @@ class FeedRepositoryTest {
             assertEquals("etag-1", feed.etag)
             assertEquals(1, db.articlesQueries.watchAll().executeAsList().size)
             assertEquals(1, syncCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun subscribeFeedWithFolderIdFilesNewFeedIntoThatFolder(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("folder-1", "Folder 1")
+            // An existing feed already occupying slot 0 of folder-1, so the new feed's sort_order
+            // must be computed within that folder's group, not the "no folder" group.
+            db.insertFeed("existing", folderId = "folder-1", sortOrder = 0L)
+            val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
+            val repo = newRepo(db, driver, fetcher)
+
+            val result = repo.subscribeFeed("https://ex.com/feed", folderId = "folder-1")
+
+            assertIs<Result.Ok<Feeds>>(result)
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+            assertEquals("folder-1", feed.folder_id)
+            assertEquals(1L, feed.sort_order)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun subscribeFeedWithFolderIdDoesNotRefileAnExistingFeed(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("folder-1", "Folder 1")
+            db.insertFolder("folder-2", "Folder 2")
+            val feedId = IdGenerator.feedId("https://ex.com/feed")
+            db.insertFeed(feedId, url = "https://ex.com/feed", folderId = "folder-1")
+            val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
+            val repo = newRepo(db, driver, fetcher)
+
+            // Re-subscribing with a different target folder must not move the already-subscribed feed.
+            val result = repo.subscribeFeed("https://ex.com/feed", folderId = "folder-2")
+
+            assertIs<Result.Ok<Feeds>>(result)
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+            assertEquals("folder-1", feed.folder_id)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun subscribeFeedNeverExposesTheNewFeedWithoutItsChosenFolder(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("folder-1", "Folder 1")
+            val listQuery = db.feedsQueries.watchAll()
+            val observedFolderIds = mutableListOf<String?>()
+            val listener = app.cash.sqldelight.Query.Listener {
+                listQuery.executeAsList().forEach { observedFolderIds += it.folder_id }
+            }
+            listQuery.addListener(listener)
+
+            val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
+            newRepo(db, driver, fetcher).subscribeFeed("https://ex.com/feed", folderId = "folder-1")
+
+            listQuery.removeListener(listener)
+            assertTrue(
+                observedFolderIds.isNotEmpty(),
+                "the feed-list listener observed nothing, so this test proved nothing",
+            )
+            assertTrue(
+                observedFolderIds.none { it == null },
+                "the new feed must never be observed without its chosen folder: $observedFolderIds",
+            )
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun subscribeFeedSerializesSortOrderAllocationAcrossConcurrentCalls(): Unit = runBlocking {
+        val (rawDriver, _) = inMemoryDb()
+        val driver = GatedSortOrderDriver(rawDriver)
+        val db = works.merc.keryx.app.data.local.db.KeryxDatabase(driver)
+        try {
+            db.insertFolder("folder-1", "Folder 1")
+            val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
+            val repo = newRepo(db, driver, fetcher)
+
+            val firstResult = java.util.concurrent.atomic.AtomicReference<Result<Feeds>>()
+            val secondResult = java.util.concurrent.atomic.AtomicReference<Result<Feeds>>()
+            val first = Thread {
+                runBlocking { firstResult.set(repo.subscribeFeed("https://ex.com/first", folderId = "folder-1")) }
+            }.apply { start() }
+            assertTrue(driver.firstReadEntered.await(5, TimeUnit.SECONDS), "first subscribeFeed never started")
+
+            // Start the second call while the first is provably mid-read, and give it time to reach
+            // the driver if the mutex isn't actually blocking it.
+            val second = Thread {
+                runBlocking { secondResult.set(repo.subscribeFeed("https://ex.com/second", folderId = "folder-1")) }
+            }.apply { start() }
+            Thread.sleep(300)
+            driver.releaseFirstRead.countDown()
+            first.join(5_000)
+            second.join(5_000)
+            assertFalse(first.isAlive, "first subscribeFeed did not finish within 5s")
+            assertFalse(second.isAlive, "second subscribeFeed did not finish within 5s")
+            assertIs<Result.Ok<Feeds>>(firstResult.get())
+            assertIs<Result.Ok<Feeds>>(secondResult.get())
+
+            assertTrue(
+                !driver.secondReadOverlappedFirst.get(),
+                "the second call's sort-order read ran while the first was still in flight",
+            )
+            val firstFeed = db.feedsQueries.getByUrl("https://ex.com/first").executeAsOne()
+            val secondFeed = db.feedsQueries.getByUrl("https://ex.com/second").executeAsOne()
+            assertTrue(
+                firstFeed.sort_order != secondFeed.sort_order,
+                "both feeds got the same sort_order: ${firstFeed.sort_order}",
+            )
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun subscribeFeedConcurrentSubscribesOfTheSameUrlDoNotRefileAnAlreadyPlacedFeed(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("folder-1", "Folder 1")
+            db.insertFolder("folder-2", "Folder 2")
+            val firstEntered = CountDownLatch(1)
+            val releaseFirst = CountDownLatch(1)
+            val firstClaimed = AtomicBoolean(false)
+            val faviconResolver = FaviconResolver(
+                HttpClient(MockEngine {
+                    if (firstClaimed.compareAndSet(false, true)) {
+                        firstEntered.countDown()
+                        releaseFirst.await(5, TimeUnit.SECONDS)
+                    }
+                    respond("", HttpStatusCode.NotFound)
+                }) {
+                    followRedirects = false
+                    expectSuccess = false
+                    install(HttpTimeout)
+                },
+            )
+            val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
+            val repo = newRepo(db, driver, fetcher, faviconResolver = faviconResolver)
+
+            // "first" reads `existing == null`, then blocks resolving its favicon — i.e. before it
+            // even attempts the mutex.
+            val firstResult = java.util.concurrent.atomic.AtomicReference<Result<Feeds>>()
+            val first = Thread {
+                runBlocking { firstResult.set(repo.subscribeFeed("https://ex.com/feed", folderId = "folder-1")) }
+            }.apply { start() }
+            assertTrue(firstEntered.await(5, TimeUnit.SECONDS), "first subscribeFeed never started")
+
+            // "second" also reads `existing == null` (first hasn't committed yet), then races through
+            // uncontested (its own favicon check isn't gated) and wins the mutex first.
+            val secondResult = java.util.concurrent.atomic.AtomicReference<Result<Feeds>>()
+            val second = Thread {
+                runBlocking { secondResult.set(repo.subscribeFeed("https://ex.com/feed", folderId = "folder-2")) }
+            }.apply { start() }
+            second.join(5_000)
+            assertFalse(second.isAlive, "second subscribeFeed did not finish within 5s")
+            assertIs<Result.Ok<Feeds>>(secondResult.get())
+
+            // Now let "first" resume: with the fix, it must re-read the row under the lock and see it
+            // already placed, so it must NOT re-file the feed into folder-1.
+            releaseFirst.countDown()
+            first.join(5_000)
+            assertFalse(first.isAlive, "first subscribeFeed did not finish within 5s")
+            assertIs<Result.Ok<Feeds>>(firstResult.get())
+
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+            assertEquals(
+                "folder-2",
+                feed.folder_id,
+                "the feed already placed by the second (winning) call must not be re-filed by the first",
+            )
+            assertEquals(1, db.feedsQueries.getAllIncludingDeleted().executeAsList().size)
         } finally {
             driver.close()
         }

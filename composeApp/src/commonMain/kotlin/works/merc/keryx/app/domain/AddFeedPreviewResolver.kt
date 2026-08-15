@@ -82,9 +82,13 @@ class AddFeedPreviewResolver(private val feedRepository: FeedRepository) {
         }
     }
 
-    /** Subscribes to every URL in [urls], returning the success/failure tally and the first error. */
-    suspend fun subscribeFeeds(urls: List<String>): SubscribeOutcome {
-        val results = urls.map { feedRepository.subscribeFeed(it) }
+    /**
+     * Subscribes to every URL in [urls], returning the success/failure tally and the first error.
+     *
+     * @param folderId The folder brand-new feeds should be filed into, or `null` for no folder.
+     */
+    suspend fun subscribeFeeds(urls: List<String>, folderId: String? = null): SubscribeOutcome {
+        val results = urls.map { feedRepository.subscribeFeed(it, folderId) }
         val successCount = results.count { it is Result.Ok }
         return SubscribeOutcome(
             successCount = successCount,
