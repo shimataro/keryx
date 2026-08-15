@@ -206,13 +206,14 @@ class FeedRepositoryTest {
         val (driver, db) = inMemoryDb()
         try {
             db.insertFolder("folder-1", "Folder 1")
+            db.insertFolder("folder-2", "Folder 2")
             val feedId = IdGenerator.feedId("https://ex.com/feed")
             db.insertFeed(feedId, url = "https://ex.com/feed", folderId = "folder-1")
             val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
             val repo = newRepo(db, driver, fetcher)
 
             // Re-subscribing with a different target folder must not move the already-subscribed feed.
-            val result = repo.subscribeFeed("https://ex.com/feed", folderId = null)
+            val result = repo.subscribeFeed("https://ex.com/feed", folderId = "folder-2")
 
             assertIs<Result.Ok<Feeds>>(result)
             val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
