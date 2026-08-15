@@ -143,7 +143,9 @@ fun HomeScreen() {
     fun selectedFeedForMenu(): Feeds? =
         (vm.filter.value as? ArticleFilter.Feed)?.let { f -> feeds.find { it.id == f.feedId } }
     fun copySelectedFeedUrl() {
-        selectedFeedForMenu()?.url?.let { scope.launch { clipboard.setClipEntry(ClipboardEntries.ofText(it)) } }
+        selectedFeedForMenu()?.url?.takeIf { hasUsableUrl(it) }?.let {
+            scope.launch { clipboard.setClipEntry(ClipboardEntries.ofText(it)) }
+        }
     }
     fun copySelectedFeedSiteUrl() {
         selectedFeedForMenu()?.site_url?.takeIf { hasUsableUrl(it) }?.let {

@@ -219,7 +219,7 @@ internal fun FrameWindowScope.AppMenuBar(
         unsubscribeSelectedFeed = { menuController.send(MenuCommand.UnsubscribeFeed) },
         copyFeedUrl = { menuController.send(MenuCommand.CopyFeedUrl) },
         copyFeedSiteUrl = { menuController.send(MenuCommand.CopySiteUrl) },
-        openFeedSite = { selectedFeed?.site_url?.let(BrowserOpener::open) },
+        openFeedSite = { selectedFeed?.site_url?.takeIf { hasUsableUrl(it) }?.let(BrowserOpener::open) },
         openWebsite = { BrowserOpener.open(websiteUrl) },
         openProjectPage = { BrowserOpener.open(PROJECT_URL) },
         about = { menuController.send(MenuCommand.About) },
