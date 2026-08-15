@@ -25,7 +25,7 @@ cross-checking against the current source code**, then output recommended fixes 
 ## Investigation categories (output all six in this order)
 
 1. **Outdated / incorrect / ambiguous / redundant / missing** — descriptions inconsistent with source,
-   statements open to multiple interpretation, excessive duplication with other files, or missing items that should be documented.
+   statements open to multiple interpretations, excessive duplication with other files, or missing items that should be documented.
 2. **Files to add** — skills / agents / commands that are missing but should exist.
 3. **Files to remove** — files that no longer serve a purpose or are duplicated.
 4. **Should `CLAUDE.md` be split into `rules/`?** — If bloated, split via `@` imports; otherwise keep as-is.
