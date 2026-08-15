@@ -118,4 +118,18 @@ class NativeMenuSignatureTest {
 
         assertNotEquals(menuSignature(plain), menuSignature(checked))
     }
+
+    /**
+     * A separator carries no state, so two menus built with separators in the same positions must
+     * compare equal — otherwise every row with a separator would resync its native widgets on
+     * every recomposition, the same class of bug [equalContentGivesEqualSignaturesDespiteFreshLambdas]
+     * guards against for leaves.
+     */
+    @Test
+    fun separatorsInTheSamePositionsGiveEqualSignatures() {
+        val first = listOf(NativeMenuItem("Refresh") {}, NativeMenuSeparator, NativeMenuItem("Unsubscribe") {})
+        val second = listOf(NativeMenuItem("Refresh") {}, NativeMenuSeparator, NativeMenuItem("Unsubscribe") {})
+
+        assertEquals(menuSignature(first), menuSignature(second))
+    }
 }

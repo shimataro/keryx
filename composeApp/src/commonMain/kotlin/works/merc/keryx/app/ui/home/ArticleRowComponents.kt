@@ -226,19 +226,17 @@ internal fun ArticleRow(
             .clickable(onClick = onClick)
             .nativeContextMenu(
                 items = {
-                    buildList {
-                        add(NativeMenuItem(toggleStarLabel, NativeMenuShortcut(Key.S, ctrl = true, shift = true)) { onToggleStar() })
-                        add(NativeMenuItem(toggleReadLabel, NativeMenuShortcut(Key.U, ctrl = true, shift = true)) { onToggleRead() })
-                        if (hasUsableArticleUrl(article.url)) {
-                            add(NativeMenuItem(copyUrlLabel, NativeMenuShortcut(Key.C, ctrl = true, shift = true)) { onCopyUrl() })
-                            add(
-                                NativeMenuItem(
-                                    openInBrowserLabel,
-                                    NativeMenuShortcut(Key.O, ctrl = true, shift = true),
-                                ) { onOpenInBrowser() },
-                            )
-                        }
-                    }
+                    val urlUsable = hasUsableUrl(article.url)
+                    listOf(
+                        NativeMenuItem(toggleStarLabel, NativeMenuShortcut(Key.S, ctrl = true, shift = true)) { onToggleStar() },
+                        NativeMenuItem(toggleReadLabel, NativeMenuShortcut(Key.U, ctrl = true, shift = true)) { onToggleRead() },
+                        NativeMenuItem(copyUrlLabel, NativeMenuShortcut(Key.C, ctrl = true, shift = true), enabled = urlUsable) { onCopyUrl() },
+                        NativeMenuItem(
+                            openInBrowserLabel,
+                            NativeMenuShortcut(Key.O, ctrl = true, shift = true),
+                            enabled = urlUsable,
+                        ) { onOpenInBrowser() },
+                    )
                 },
                 onOpen = onClick,
             )

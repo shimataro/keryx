@@ -251,16 +251,23 @@ Modifier.nativeContextMenu(
             NativeMenuItem(someActionLabel) { onSomeAction() },
             NativeCheckMenuItem(tagLabel, checked = isAttached) { onToggleTag() },
             NativeSubMenu(moveLabel, items = folders.map { NativeCheckMenuItem(...) { ... } }),
+            NativeMenuSeparator,
+            NativeMenuItem(destructiveActionLabel) { onDestructiveAction() },
         )
     },
     onOpen = { if (!selected) onClick() },
 )
 ```
 
-- Entry types: `NativeMenuItem` (plain action), `NativeCheckMenuItem` (action
-  with an on/off state) and `NativeSubMenu` (nested). Use
+- Entry types: `NativeMenuItem` (plain action, optionally `enabled = false` to
+  gray it out rather than omit it), `NativeCheckMenuItem` (action with an
+  on/off state), `NativeSubMenu` (nested), and `NativeMenuSeparator` (a plain
+  `data object`, no parameters — a visual divider between groups). Use
   `NativeCheckMenuItem` for anything the user toggles — never mark the state in
-  the label text yourself; the platform draws its own checkmark.
+  the label text yourself; the platform draws its own checkmark. Order and
+  group a row's menu to match the equivalent app-menu-bar section when one
+  exists (see `AppMenuTree.kt`'s Feed menu), separators included, so the two
+  surfaces read as the same menu.
 - `onOpen` fires just before the menu shows; call sites typically use it to
   select the right-clicked row. An **empty** `items` list shows no menu and
   makes `onOpen` the only effect — that's how a pane background moves focus on

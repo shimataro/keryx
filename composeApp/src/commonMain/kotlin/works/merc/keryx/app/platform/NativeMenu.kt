@@ -33,6 +33,7 @@ data class NativeMenuShortcut(val key: Key, val ctrl: Boolean = false, val shift
 data class NativeMenuItem(
     override val label: String,
     val shortcut: NativeMenuShortcut? = null,
+    val enabled: Boolean = true,
     override val onClick: () -> Unit,
 ) : NativeMenuLeaf
 
@@ -49,6 +50,11 @@ data class NativeCheckMenuItem(
 
 /** A native context menu entry that expands into a nested submenu of [items]. */
 data class NativeSubMenu(override val label: String, val items: List<NativeMenuLeaf>) : NativeMenuEntry
+
+/** A visual separator between groups of items in a native context menu. */
+data object NativeMenuSeparator : NativeMenuEntry {
+    override val label: String = ""
+}
 
 /**
  * Attaches a real OS-native context menu (not a Compose-drawn popup) with the

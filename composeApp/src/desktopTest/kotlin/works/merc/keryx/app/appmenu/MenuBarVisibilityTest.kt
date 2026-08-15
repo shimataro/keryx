@@ -46,6 +46,7 @@ class MenuBarVisibilityTest {
         feedMenu = "Feed", refreshAll = "RefreshAll", syncNow = "SyncNow",
         feedRefresh = "FeedRefresh", feedAssignTags = "AssignTags", feedMoveToFolder = "MoveToFolder",
         feedNoFolder = "NoFolder", feedRename = "FeedRename", feedUnsubscribe = "FeedUnsubscribe",
+        feedCopyUrl = "FeedCopyUrl", feedCopySiteUrl = "FeedCopySiteUrl", feedOpenSite = "FeedOpenSite",
         helpMenu = "Help", website = "Website", projectPage = "ProjectPage", about = "About",
     )
 
@@ -56,6 +57,7 @@ class MenuBarVisibilityTest {
         copyUrl = {}, refreshAll = { refreshCalled = true }, sync = {},
         refreshSelectedFeed = {}, toggleFeedTag = { _, _ -> }, moveFeedToFolder = {},
         renameSelectedFeed = {}, unsubscribeSelectedFeed = {},
+        copyFeedUrl = {}, copyFeedSiteUrl = {}, openFeedSite = {},
         openWebsite = {}, openProjectPage = {}, about = {},
     )
 

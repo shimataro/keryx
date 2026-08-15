@@ -32,6 +32,7 @@ import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.DETAIL_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.FEED_LIST_PANE_WIDTH_DEFAULT
+import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.resources.Res
@@ -121,10 +122,10 @@ fun HomeScreen() {
     // Shared by the keyboard shortcuts and the menu bar (via MenuController). Read the current
     // selection at call time (vm.selectedArticle.value) so a command collected once stays correct.
     fun openSelectedInBrowser() {
-        vm.selectedArticle.value?.url?.takeIf { hasUsableArticleUrl(it) }?.let { BrowserOpener.open(it) }
+        vm.selectedArticle.value?.url?.takeIf { hasUsableUrl(it) }?.let { BrowserOpener.open(it) }
     }
     fun copySelectedUrl() {
-        vm.selectedArticle.value?.url?.takeIf { hasUsableArticleUrl(it) }?.let {
+        vm.selectedArticle.value?.url?.takeIf { hasUsableUrl(it) }?.let {
             scope.launch {
                 clipboard.setClipEntry(ClipboardEntries.ofText(it))
                 copyPulse++
@@ -137,6 +138,21 @@ fun HomeScreen() {
         vm.requestSearchFocus()
     }
 
+    // Same live-read-at-call-time pattern as openSelectedInBrowser/copySelectedUrl, resolving the
+    // selected feed the same way AppMenuBar does (filter.value against the already-collected feeds).
+    fun selectedFeedForMenu(): Feeds? =
+        (vm.filter.value as? ArticleFilter.Feed)?.let { f -> feeds.find { it.id == f.feedId } }
+    fun copySelectedFeedUrl() {
+        selectedFeedForMenu()?.url?.takeIf { hasUsableUrl(it) }?.let {
+            scope.launch { clipboard.setClipEntry(ClipboardEntries.ofText(it)) }
+        }
+    }
+    fun copySelectedFeedSiteUrl() {
+        selectedFeedForMenu()?.site_url?.takeIf { hasUsableUrl(it) }?.let {
+            scope.launch { clipboard.setClipEntry(ClipboardEntries.ofText(it)) }
+        }
+    }
+
     // Menu commands whose target state lives in this screen's composition.
     LaunchedEffect(Unit) {
         menuController.commands.collect { command ->
@@ -145,6 +161,8 @@ fun HomeScreen() {
                 MenuCommand.FocusSearch -> focusSearch()
                 MenuCommand.OpenInBrowser -> openSelectedInBrowser()
                 MenuCommand.CopyUrl -> copySelectedUrl()
+                MenuCommand.CopyFeedUrl -> copySelectedFeedUrl()
+                MenuCommand.CopySiteUrl -> copySelectedFeedSiteUrl()
                 else -> {}
             }
         }

@@ -21,6 +21,7 @@ class MenuUiStateTest {
         hasSelectedFeed: Boolean = false,
         textInputFocused: Boolean = false,
         hasRenamableSelection: Boolean = false,
+        selectedFeedHasSiteUrl: Boolean = false,
     ) = computeMenuUiState(
         screen = screen,
         hasSelectedArticle = hasSelectedArticle,
@@ -33,6 +34,7 @@ class MenuUiStateTest {
         hasSelectedFeed = hasSelectedFeed,
         textInputFocused = textInputFocused,
         hasRenamableSelection = hasRenamableSelection,
+        selectedFeedHasSiteUrl = selectedFeedHasSiteUrl,
     )
 
     // --- Screen gating ---
@@ -58,6 +60,7 @@ class MenuUiStateTest {
             cloudConnected = true,
             hasSelectedFeed = true,
             hasRenamableSelection = true,
+            selectedFeedHasSiteUrl = true,
         )
         assertFalse(ui.addItemsEnabled)
         assertFalse(ui.opmlEnabled)
@@ -72,6 +75,7 @@ class MenuUiStateTest {
         assertFalse(ui.urlActionsEnabled)
         assertFalse(ui.feedActionsEnabled)
         assertFalse(ui.renameOrDeleteEnabled)
+        assertFalse(ui.feedSiteUrlActionsEnabled)
     }
 
     // --- Article actions require a selection ---
@@ -174,6 +178,27 @@ class MenuUiStateTest {
         // KeyboardNav.kt's textInputFocused suppression, so this flag has to do that job instead.
         val ui = state(hasSelectedFeed = true, textInputFocused = true)
         assertFalse(ui.feedActionsEnabled)
+    }
+
+    // --- Feed site-URL actions (copy site URL / open site) additionally require a site URL ---
+
+    @Test
+    fun feed_site_url_actions_require_a_selected_feed_with_a_site_url() {
+        assertFalse(state(hasSelectedFeed = true, selectedFeedHasSiteUrl = false).feedSiteUrlActionsEnabled)
+        assertFalse(state(hasSelectedFeed = false, selectedFeedHasSiteUrl = true).feedSiteUrlActionsEnabled)
+        assertTrue(state(hasSelectedFeed = true, selectedFeedHasSiteUrl = true).feedSiteUrlActionsEnabled)
+    }
+
+    @Test
+    fun feed_site_url_actions_disabled_away_from_home_even_with_a_site_url() {
+        val ui = state(screen = Screen.Setup, hasSelectedFeed = true, selectedFeedHasSiteUrl = true)
+        assertFalse(ui.feedSiteUrlActionsEnabled)
+    }
+
+    @Test
+    fun feed_site_url_actions_disabled_while_the_search_field_has_focus() {
+        val ui = state(hasSelectedFeed = true, selectedFeedHasSiteUrl = true, textInputFocused = true)
+        assertFalse(ui.feedSiteUrlActionsEnabled)
     }
 
     // --- Rename/delete follow the selection, whatever its type ---

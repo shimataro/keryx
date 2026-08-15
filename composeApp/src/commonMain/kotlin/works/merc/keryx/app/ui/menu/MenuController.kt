@@ -21,6 +21,8 @@ enum class MenuCommand {
     CopyUrl,
     RenameFeed,
     UnsubscribeFeed,
+    CopyFeedUrl,
+    CopySiteUrl,
     About,
 }
 

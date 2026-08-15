@@ -288,11 +288,11 @@ class HomeCommonTest {
     }
 
     @Test
-    fun hasUsableArticleUrlRejectsNullEmptyAndBlank() {
-        assertEquals(false, hasUsableArticleUrl(null))
-        assertEquals(false, hasUsableArticleUrl(""))
-        assertEquals(false, hasUsableArticleUrl("   "))
-        assertEquals(true, hasUsableArticleUrl("https://example.com"))
+    fun hasUsableUrlRejectsNullEmptyAndBlank() {
+        assertEquals(false, hasUsableUrl(null))
+        assertEquals(false, hasUsableUrl(""))
+        assertEquals(false, hasUsableUrl("   "))
+        assertEquals(true, hasUsableUrl("https://example.com"))
     }
 
     @Test

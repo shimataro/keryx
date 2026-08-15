@@ -15,12 +15,15 @@ import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_assign_tags
+import works.merc.keryx.app.resources.home_copy_feed_url
+import works.merc.keryx.app.resources.home_copy_site_url
 import works.merc.keryx.app.resources.home_menu_delete_folder
 import works.merc.keryx.app.resources.home_menu_delete_tag
 import works.merc.keryx.app.resources.home_menu_rename_folder
 import works.merc.keryx.app.resources.home_menu_rename_tag
 import works.merc.keryx.app.resources.home_move_to_folder
 import works.merc.keryx.app.resources.home_no_folder
+import works.merc.keryx.app.resources.home_open_site
 import works.merc.keryx.app.resources.home_refresh
 import works.merc.keryx.app.resources.home_rename_feed
 import works.merc.keryx.app.resources.home_unsubscribe_menu
@@ -54,7 +57,7 @@ import works.merc.keryx.app.resources.menu_view_toggle_sort
 import works.merc.keryx.app.resources.menu_view_unread_only
 import works.merc.keryx.app.ui.home.FeedListSelectionTarget
 import works.merc.keryx.app.ui.home.HomeViewModel
-import works.merc.keryx.app.ui.home.hasUsableArticleUrl
+import works.merc.keryx.app.ui.home.hasUsableUrl
 import works.merc.keryx.app.ui.home.resolveFeedListSelectionTarget
 import works.merc.keryx.app.ui.menu.AppMenuActions
 import works.merc.keryx.app.ui.menu.AppMenuLabels
@@ -125,7 +128,7 @@ internal fun FrameWindowScope.AppMenuBar(
     val ui = computeMenuUiState(
         screen = screen,
         hasSelectedArticle = selected != null,
-        selectedArticleHasUrl = hasUsableArticleUrl(selected?.url),
+        selectedArticleHasUrl = hasUsableUrl(selected?.url),
         feedRefreshing = feedRefreshing,
         syncing = syncing,
         cloudConnected = cloudConnected,
@@ -134,6 +137,7 @@ internal fun FrameWindowScope.AppMenuBar(
         hasSelectedFeed = selectedFeed != null,
         textInputFocused = textInputFocused,
         hasRenamableSelection = selectionTarget != null,
+        selectedFeedHasSiteUrl = hasUsableUrl(selectedFeed?.site_url),
     )
 
     // Rename/delete wording follows the selected item's type. A `null` target falls back to the
@@ -180,6 +184,9 @@ internal fun FrameWindowScope.AppMenuBar(
         feedNoFolder = stringResource(Res.string.home_no_folder),
         feedRename = renameLabel,
         feedUnsubscribe = deleteLabel,
+        feedCopyUrl = stringResource(Res.string.home_copy_feed_url),
+        feedCopySiteUrl = stringResource(Res.string.home_copy_site_url),
+        feedOpenSite = stringResource(Res.string.home_open_site),
         helpMenu = stringResource(Res.string.menu_help),
         website = stringResource(Res.string.menu_help_website),
         projectPage = stringResource(Res.string.menu_help_project_page),
@@ -210,6 +217,9 @@ internal fun FrameWindowScope.AppMenuBar(
         moveFeedToFolder = { folderId -> selectedFeed?.let { homeVm.moveFeed(it.id, folderId) } },
         renameSelectedFeed = { menuController.send(MenuCommand.RenameFeed) },
         unsubscribeSelectedFeed = { menuController.send(MenuCommand.UnsubscribeFeed) },
+        copyFeedUrl = { menuController.send(MenuCommand.CopyFeedUrl) },
+        copyFeedSiteUrl = { menuController.send(MenuCommand.CopySiteUrl) },
+        openFeedSite = { selectedFeed?.site_url?.takeIf { hasUsableUrl(it) }?.let(BrowserOpener::open) },
         openWebsite = { BrowserOpener.open(websiteUrl) },
         openProjectPage = { BrowserOpener.open(PROJECT_URL) },
         about = { menuController.send(MenuCommand.About) },

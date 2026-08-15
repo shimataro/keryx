@@ -40,17 +40,21 @@ import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.platform.NativeCheckMenuItem
 import works.merc.keryx.app.platform.NativeMenuItem
+import works.merc.keryx.app.platform.NativeMenuSeparator
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.NativeSubMenu
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_assign_tags
+import works.merc.keryx.app.resources.home_copy_feed_url
+import works.merc.keryx.app.resources.home_copy_site_url
 import works.merc.keryx.app.resources.home_delete_folder_menu
 import works.merc.keryx.app.resources.home_edit_folder_menu
 import works.merc.keryx.app.resources.home_feed_error
 import works.merc.keryx.app.resources.home_feed_gone
 import works.merc.keryx.app.resources.home_move_to_folder
 import works.merc.keryx.app.resources.home_no_folder
+import works.merc.keryx.app.resources.home_open_site
 import works.merc.keryx.app.resources.home_refresh
 import works.merc.keryx.app.resources.home_rename_feed
 import works.merc.keryx.app.resources.home_unsubscribe_menu
@@ -325,6 +329,9 @@ internal fun NoFolderHeader(
  * @param editingName Whether the title is currently open for inline editing (see [InlineRenameField]).
  * @param onRenameCommit Applies an edited title; a blank value resets it to the feed's own title.
  * @param onRenameCancel Abandons an in-progress title edit.
+ * @param onCopyFeedUrl Copies the feed's own (RSS/Atom) URL to the clipboard.
+ * @param onCopySiteUrl Copies the feed's website URL to the clipboard.
+ * @param onOpenSite Opens the feed's website in the external browser.
  */
 @Composable
 internal fun FeedRow(
@@ -348,6 +355,9 @@ internal fun FeedRow(
     folders: List<Folders>,
     onMoveFeedToFolder: (folderId: String?) -> Unit,
     onUnsubscribe: () -> Unit,
+    onCopyFeedUrl: () -> Unit,
+    onCopySiteUrl: () -> Unit,
+    onOpenSite: () -> Unit,
 ) {
     val refreshLabel = stringResource(Res.string.home_refresh)
     val assignTagsLabel = stringResource(Res.string.home_assign_tags)
@@ -355,6 +365,10 @@ internal fun FeedRow(
     val moveToFolderLabel = stringResource(Res.string.home_move_to_folder)
     val noFolderLabel = stringResource(Res.string.home_no_folder)
     val unsubscribeLabel = stringResource(Res.string.home_unsubscribe_menu)
+    val copyFeedUrlLabel = stringResource(Res.string.home_copy_feed_url)
+    val copySiteUrlLabel = stringResource(Res.string.home_copy_site_url)
+    val openSiteLabel = stringResource(Res.string.home_open_site)
+    val siteUrlUsable = hasUsableUrl(feed.site_url)
     val belowBoundary = nextFeedId?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(folderId)
 
     Column(Modifier.fillMaxWidth()) {
@@ -394,7 +408,13 @@ internal fun FeedRow(
                                     }
                                 },
                             ),
+                            NativeMenuSeparator,
+                            NativeMenuItem(copyFeedUrlLabel) { onCopyFeedUrl() },
+                            NativeMenuItem(copySiteUrlLabel, enabled = siteUrlUsable) { onCopySiteUrl() },
+                            NativeMenuItem(openSiteLabel, enabled = siteUrlUsable) { onOpenSite() },
+                            NativeMenuSeparator,
                             NativeMenuItem(renameFeedLabel, renameNativeShortcut) { onRename() },
+                            NativeMenuSeparator,
                             NativeMenuItem(unsubscribeLabel, deleteNativeShortcut) { onUnsubscribe() },
                         )
                     },

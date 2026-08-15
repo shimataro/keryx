@@ -190,13 +190,10 @@ internal fun ArticleDetailPaneContent(
 
 /**
  * The detail pane's action toolbar. Always renders all four actions — star, mark unread, copy
- * URL, open in browser — rather than hiding them when [article] is `null`, per the "prefer
- * disabled over hidden" rule in `.claude/skills/ui-guidelines/SKILL.md`: with an unconditional
- * toolbar shape, the reader beneath it (see [ArticleDetailPaneContent]) never has to move.
- *
- * The copy/open-in-browser pair keeps its pre-existing behavior of disappearing entirely for a
- * selected article with a blank URL (unrelated to article selection, so left untouched), and is
- * additionally shown-but-disabled specifically for the no-selection case.
+ * URL, open in browser — rather than hiding them when [article] is `null` or lacks a usable URL,
+ * per the "prefer disabled over hidden" rule in `.claude/skills/ui-guidelines/SKILL.md`: with an
+ * unconditional toolbar shape, the reader beneath it (see [ArticleDetailPaneContent]) never has
+ * to move.
  */
 @Composable
 private fun ArticleDetailToolbar(
@@ -209,8 +206,7 @@ private fun ArticleDetailToolbar(
     val hasArticle = article != null
     val starred = article?.is_starred == 1L
     val url = article?.url.orEmpty()
-    val copyOpenVisible = article == null || hasUsableArticleUrl(article.url)
-    val copyOpenEnabled = hasArticle && hasUsableArticleUrl(article.url)
+    val copyOpenEnabled = hasArticle && hasUsableUrl(article.url)
 
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
@@ -230,31 +226,29 @@ private fun ArticleDetailToolbar(
             TooltipIconButton(tooltip = markUnreadTooltip, onClick = onMarkUnread, enabled = hasArticle) {
                 KeryxIcon(KeryxIcons.Circle, contentDescription = markUnreadTooltip)
             }
-            if (copyOpenVisible) {
-                val clipboard = LocalClipboard.current
-                val scope = rememberCoroutineScope()
-                val copyUrlTooltip = stringResource(
-                    if (showCopied) Res.string.article_url_copied else Res.string.article_copy_url,
+            val clipboard = LocalClipboard.current
+            val scope = rememberCoroutineScope()
+            val copyUrlTooltip = stringResource(
+                if (showCopied) Res.string.article_url_copied else Res.string.article_copy_url,
+            )
+            TooltipIconButton(
+                tooltip = copyUrlTooltip,
+                enabled = copyOpenEnabled,
+                onClick = {
+                    scope.launch {
+                        clipboard.setClipEntry(ClipboardEntries.ofText(url))
+                        onCopied()
+                    }
+                },
+            ) {
+                KeryxIcon(
+                    if (showCopied) KeryxIcons.CheckOutlined else KeryxIcons.ContentCopy,
+                    contentDescription = copyUrlTooltip,
                 )
-                TooltipIconButton(
-                    tooltip = copyUrlTooltip,
-                    enabled = copyOpenEnabled,
-                    onClick = {
-                        scope.launch {
-                            clipboard.setClipEntry(ClipboardEntries.ofText(url))
-                            onCopied()
-                        }
-                    },
-                ) {
-                    KeryxIcon(
-                        if (showCopied) KeryxIcons.CheckOutlined else KeryxIcons.ContentCopy,
-                        contentDescription = copyUrlTooltip,
-                    )
-                }
-                val openInBrowserTooltip = stringResource(Res.string.article_open_in_browser)
-                TooltipIconButton(tooltip = openInBrowserTooltip, enabled = copyOpenEnabled, onClick = { BrowserOpener.open(url) }) {
-                    KeryxIcon(KeryxIcons.PublicOutlined, contentDescription = openInBrowserTooltip)
-                }
+            }
+            val openInBrowserTooltip = stringResource(Res.string.article_open_in_browser)
+            TooltipIconButton(tooltip = openInBrowserTooltip, enabled = copyOpenEnabled, onClick = { BrowserOpener.open(url) }) {
+                KeryxIcon(KeryxIcons.PublicOutlined, contentDescription = openInBrowserTooltip)
             }
         }
     }
