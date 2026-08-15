@@ -12,6 +12,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import app.cash.sqldelight.db.QueryResult
+import app.cash.sqldelight.db.SqlDriver
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.FEED_ERROR_REASON_GONE
@@ -59,6 +64,56 @@ private class FakeNotificationMessages : NotificationMessages {
     override suspend fun newArticles(count: Int): String = "new:$count"
     override suspend fun syncFailed(exception: works.merc.keryx.app.core.KeryxException): String = "syncFailed:${exception::class.simpleName}"
     override suspend fun opmlImported(added: Int, failed: Int): String = "opmlImported:$added/$failed"
+}
+
+/**
+ * Pauses the first `nextSortOrderInGroup` SELECT on a latch and records whether a second,
+ * overlapping call reaches the same statement while the first is still gated, so
+ * [FeedRepository]'s `subscribePlacementMutex` can be checked without depending on timing.
+ */
+private class GatedSortOrderDriver(private val delegate: SqlDriver) : SqlDriver {
+    val firstReadEntered = CountDownLatch(1)
+    val releaseFirstRead = CountDownLatch(1)
+    private val firstReadStarted = AtomicBoolean(false)
+    private val firstReadInFlight = AtomicBoolean(false)
+    val secondReadOverlappedFirst = AtomicBoolean(false)
+
+    override fun execute(
+        identifier: Int?,
+        sql: String,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ): QueryResult<Long> = delegate.execute(identifier, sql, parameters, binders)
+
+    override fun <R> executeQuery(
+        identifier: Int?,
+        sql: String,
+        mapper: (app.cash.sqldelight.db.SqlCursor) -> QueryResult<R>,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ): QueryResult<R> {
+        if (sql.contains("SELECT COALESCE(MAX(sort_order)")) {
+            if (firstReadStarted.compareAndSet(false, true)) {
+                firstReadInFlight.set(true)
+                firstReadEntered.countDown()
+                releaseFirstRead.await()
+                return delegate.executeQuery(identifier, sql, mapper, parameters, binders)
+                    .also { firstReadInFlight.set(false) }
+            } else if (firstReadInFlight.get()) {
+                secondReadOverlappedFirst.set(true)
+            }
+        }
+        return delegate.executeQuery(identifier, sql, mapper, parameters, binders)
+    }
+
+    override fun newTransaction() = delegate.newTransaction()
+    override fun currentTransaction() = delegate.currentTransaction()
+    override fun addListener(vararg queryKeys: String, listener: app.cash.sqldelight.Query.Listener) =
+        delegate.addListener(queryKeys = queryKeys, listener = listener)
+    override fun removeListener(vararg queryKeys: String, listener: app.cash.sqldelight.Query.Listener) =
+        delegate.removeListener(queryKeys = queryKeys, listener = listener)
+    override fun notifyListeners(vararg queryKeys: String) = delegate.notifyListeners(queryKeys = queryKeys)
+    override fun close() = delegate.close()
 }
 
 class FeedRepositoryTest {
@@ -161,6 +216,71 @@ class FeedRepositoryTest {
             assertIs<Result.Ok<Feeds>>(result)
             val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
             assertEquals("folder-1", feed.folder_id)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun subscribeFeedNeverExposesTheNewFeedWithoutItsChosenFolder(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("folder-1", "Folder 1")
+            val listQuery = db.feedsQueries.watchAll()
+            val observedFolderIds = mutableListOf<String?>()
+            val listener = app.cash.sqldelight.Query.Listener {
+                listQuery.executeAsList().forEach { observedFolderIds += it.folder_id }
+            }
+            listQuery.addListener(listener)
+
+            val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
+            newRepo(db, driver, fetcher).subscribeFeed("https://ex.com/feed", folderId = "folder-1")
+
+            listQuery.removeListener(listener)
+            assertTrue(
+                observedFolderIds.none { it == null },
+                "the new feed must never be observed without its chosen folder: $observedFolderIds",
+            )
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun subscribeFeedSerializesSortOrderAllocationAcrossConcurrentCalls(): Unit = runBlocking {
+        val (rawDriver, _) = inMemoryDb()
+        val driver = GatedSortOrderDriver(rawDriver)
+        val db = works.merc.keryx.app.data.local.db.KeryxDatabase(driver)
+        try {
+            db.insertFolder("folder-1", "Folder 1")
+            val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
+            val repo = newRepo(db, driver, fetcher)
+
+            val first = Thread {
+                runBlocking { repo.subscribeFeed("https://ex.com/first", folderId = "folder-1") }
+            }.apply { start() }
+            assertTrue(driver.firstReadEntered.await(5, TimeUnit.SECONDS), "first subscribeFeed never started")
+
+            // Start the second call while the first is provably mid-read, and give it time to reach
+            // the driver if the mutex isn't actually blocking it.
+            val second = Thread {
+                runBlocking { repo.subscribeFeed("https://ex.com/second", folderId = "folder-1") }
+            }.apply { start() }
+            Thread.sleep(300)
+            driver.releaseFirstRead.countDown()
+            first.join(5_000)
+            second.join(5_000)
+
+            assertTrue(
+                !driver.secondReadOverlappedFirst.get(),
+                "the second call's sort-order read ran while the first was still in flight",
+            )
+            val firstFeed = db.feedsQueries.getByUrl("https://ex.com/first").executeAsOne()
+            val secondFeed = db.feedsQueries.getByUrl("https://ex.com/second").executeAsOne()
+            assertTrue(
+                firstFeed.sort_order != secondFeed.sort_order,
+                "both feeds got the same sort_order: ${firstFeed.sort_order}",
+            )
         } finally {
             driver.close()
         }

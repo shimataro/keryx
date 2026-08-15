@@ -8,7 +8,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
@@ -48,6 +50,16 @@ class FeedRepository(
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
     private val feeds get() = db.feedsQueries
+
+    // Guards subscribeFeedWrite's sort-order allocation + upsert + folder assignment. A
+    // db.transaction alone isn't enough: SQLite's deferred BEGIN means the nextSortOrderInGroup
+    // SELECT below doesn't take a write lock, so two overlapping transactions could still both
+    // read the same stale MAX before either writes. This mutex is the piece that actually
+    // serializes that read-then-write, the same way OpmlImporter's own mutex serializes concurrent
+    // import() runs against each other — but that lock doesn't cover a concurrent call through
+    // this class's other entry point (AddFeedPreviewResolver's "Add Feed" dialog path), so the
+    // two need their own shared guard here where they converge.
+    private val subscribePlacementMutex = Mutex()
 
     fun watchAllFeeds(): Flow<List<Feeds>> = feeds.watchAll().asFlow().mapToList(dispatcher)
 
@@ -121,36 +133,40 @@ class FeedRepository(
         // re-subscribed is re-numbered to the end of the group it used to belong to (its old
         // relative position may no longer be meaningful after other feeds in that group moved
         // around while it was unsubscribed).
-        val sortOrder = when {
-            existing == null -> feeds.nextSortOrderInGroup(folderId).executeAsOne()
-            existing.deleted_at == null -> existing.sort_order
-            else -> feeds.nextSortOrderInGroup(existing.folder_id).executeAsOne()
-        }
+        subscribePlacementMutex.withLock {
+            db.transaction {
+                val sortOrder = when {
+                    existing == null -> feeds.nextSortOrderInGroup(folderId).executeAsOne()
+                    existing.deleted_at == null -> existing.sort_order
+                    else -> feeds.nextSortOrderInGroup(existing.folder_id).executeAsOne()
+                }
 
-        feeds.upsert(
-            id = feedId,
-            url = effectiveUrl,
-            site_url = fetched.siteUrl,
-            title = fetched.title ?: effectiveUrl,
-            description = fetched.description,
-            favicon_url = favicon,
-            etag = fetched.etag,
-            last_modified = fetched.lastModified,
-            error_count = 0,
-            last_error = null,
-            custom_title = existing?.custom_title,
-            deleted_at = null,
-            updated_at = now,
-            created_at = existing?.created_at ?: now,
-            sort_order = sortOrder,
-        )
-        // Files a brand-new feed into the folder selected in the feed list at add time. A
-        // re-subscribed feed (existing != null) keeps its prior folder instead — upsert never
-        // touches folder_id, so there's nothing to do for that case.
-        if (existing == null && folderId != null) feeds.updateFolder(folderId, now, now, feedId)
-        // Re-subscribing (feed was soft-deleted) is a subscription-state change: stamp its
-        // last-wins timestamp so it propagates over another device's refresh on the next sync.
-        if (existing?.deleted_at != null) feeds.stampResubscribed(now, feedId)
+                feeds.upsert(
+                    id = feedId,
+                    url = effectiveUrl,
+                    site_url = fetched.siteUrl,
+                    title = fetched.title ?: effectiveUrl,
+                    description = fetched.description,
+                    favicon_url = favicon,
+                    etag = fetched.etag,
+                    last_modified = fetched.lastModified,
+                    error_count = 0,
+                    last_error = null,
+                    custom_title = existing?.custom_title,
+                    deleted_at = null,
+                    updated_at = now,
+                    created_at = existing?.created_at ?: now,
+                    sort_order = sortOrder,
+                )
+                // Files a brand-new feed into the folder selected in the feed list at add time. A
+                // re-subscribed feed (existing != null) keeps its prior folder instead — upsert never
+                // touches folder_id, so there's nothing to do for that case.
+                if (existing == null && folderId != null) feeds.updateFolder(folderId, now, now, feedId)
+                // Re-subscribing (feed was soft-deleted) is a subscription-state change: stamp its
+                // last-wins timestamp so it propagates over another device's refresh on the next sync.
+                if (existing?.deleted_at != null) feeds.stampResubscribed(now, feedId)
+            }
+        }
         articleRepository.upsertParsed(feedId, fetched.articles)
         syncScheduler.scheduleSync()
         return FeedWriteOutcome(
