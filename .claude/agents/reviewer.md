@@ -90,13 +90,14 @@ Detail: @../../docs/db-schema.md.
   no feed is left pointing at a deleted folder; FKs (feed→folder, article→feed,
   feed_tags) must not dangle.
 - Are logical-deletion semantics correct? `deleted_at IS NULL` = alive and
-  `watch*` queries filter it. Cache cleanup (`articles.softDeleteExpired`) is the
-  **only** writer of `articles.deleted_at`, and it never deletes a starred article;
-  a feed refresh (`upsert`) must not touch `deleted_at` at all, or it would revive
-  a deleted article. In the merge, deletion is last-write-wins on
-  `deleted_updated_at`, but a star newer than the deletion revives the article.
-  Re-subscription must clear `feeds.deleted_at` and stamp its per-field timestamp
-  so it wins over a concurrent refresh.
+  `watch*` queries filter it. Locally, cache cleanup (`articles.softDeleteExpired`)
+  is the only writer that creates a tombstone, and it never deletes a starred
+  article; a feed refresh (`upsert`) must not touch `deleted_at` at all, or it
+  would revive a deleted article. `MergeSql` also writes `deleted_at` during sync
+  — deletion propagates last-write-wins on `deleted_updated_at`, but a star newer
+  than the deletion revives (clears) it. Re-subscription must clear
+  `feeds.deleted_at` and stamp its per-field timestamp so it wins over a
+  concurrent refresh.
 - Do the parallel schema copies stay in sync? A column added to a `.sq` file
   must also land in `DatabaseMerger`'s schema validation and `MergeSql`'s
   explicit column lists, or merge/validation drifts silently.
