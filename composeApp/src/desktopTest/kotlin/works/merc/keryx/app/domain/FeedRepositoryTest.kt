@@ -97,7 +97,9 @@ private class GatedSortOrderDriver(private val delegate: SqlDriver) : SqlDriver 
             if (firstReadStarted.compareAndSet(false, true)) {
                 firstReadInFlight.set(true)
                 firstReadEntered.countDown()
-                releaseFirstRead.await()
+                // Bounded: a failing assertion before releaseFirstRead.countDown() must not leave this
+                // non-daemon thread parked and hang the test worker.
+                releaseFirstRead.await(10, TimeUnit.SECONDS)
                 return delegate.executeQuery(identifier, sql, mapper, parameters, binders)
                     .also { firstReadInFlight.set(false) }
             } else if (firstReadInFlight.get()) {
