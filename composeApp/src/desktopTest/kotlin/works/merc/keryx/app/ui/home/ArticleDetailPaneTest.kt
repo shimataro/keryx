@@ -85,7 +85,7 @@ class ArticleDetailPaneTest {
     }
 
     @Test
-    fun copyAndOpenAreHiddenForASelectedArticleWithNoUrl() = runDesktopComposeUiTest {
+    fun copyAndOpenAreDisabledForASelectedArticleWithNoUrl() = runDesktopComposeUiTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(url = ""),
@@ -95,8 +95,8 @@ class ArticleDetailPaneTest {
         }
         waitForIdle()
 
-        onNodeWithContentDescription("URL をコピー").assertDoesNotExist()
-        onNodeWithContentDescription("ブラウザーで開く").assertDoesNotExist()
+        onNodeWithContentDescription("URL をコピー").assertIsNotEnabled()
+        onNodeWithContentDescription("ブラウザーで開く").assertIsNotEnabled()
     }
 
     @Test
