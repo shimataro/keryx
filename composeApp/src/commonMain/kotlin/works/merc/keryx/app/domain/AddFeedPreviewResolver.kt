@@ -86,9 +86,18 @@ class AddFeedPreviewResolver(private val feedRepository: FeedRepository) {
      * Subscribes to every URL in [urls], returning the success/failure tally and the first error.
      *
      * @param folderId The folder brand-new feeds should be filed into, or `null` for no folder.
+     * @param afterFeedId The feed the first brand-new subscription should be inserted directly
+     *   after, or `null` to append it at the end of its group. Each subsequent URL in [urls] then
+     *   chains off the feed just subscribed before it, so a multi-URL batch lands in input order
+     *   right after [afterFeedId] rather than being reversed or piling up at the group's end.
      */
-    suspend fun subscribeFeeds(urls: List<String>, folderId: String? = null): SubscribeOutcome {
-        val results = urls.map { feedRepository.subscribeFeed(it, folderId) }
+    suspend fun subscribeFeeds(urls: List<String>, folderId: String? = null, afterFeedId: String? = null): SubscribeOutcome {
+        var insertAfter = afterFeedId
+        val results = urls.map { url ->
+            val result = feedRepository.subscribeFeed(url, folderId, insertAfter)
+            if (result is Result.Ok) insertAfter = result.value.id
+            result
+        }
         val successCount = results.count { it is Result.Ok }
         return SubscribeOutcome(
             successCount = successCount,

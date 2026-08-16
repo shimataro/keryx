@@ -2695,6 +2695,87 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun subscribeFeedsInsertsNewFeedDirectlyAfterTheSelectedFeedWithinItsFolder() = runTest {
+        db.insertFolder("d1", "Kotlin folder")
+        db.insertFeed("f1", folderId = "d1", sortOrder = 0L)
+        db.insertFeed("f2", folderId = "d1", sortOrder = 1L)
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+
+        val outcome = vm.subscribeFeeds(listOf("https://ex.com/feed"))
+
+        assertEquals(1, outcome.successCount)
+        val newFeed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+        assertEquals("d1", newFeed.folder_id)
+        val ordered = db.feedsQueries.getByFolder("d1").executeAsList()
+        assertEquals(listOf("f1", newFeed.id, "f2"), ordered.map { it.id })
+    }
+
+    @Test
+    fun subscribeFeedsInsertsNewFeedDirectlyAfterTheSelectedUnfiledFeed() = runTest {
+        db.insertFeed("f1", sortOrder = 0L)
+        db.insertFeed("f2", sortOrder = 1L)
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+
+        val outcome = vm.subscribeFeeds(listOf("https://ex.com/feed"))
+
+        assertEquals(1, outcome.successCount)
+        val newFeed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+        assertNull(newFeed.folder_id)
+        val ordered = db.feedsQueries.getByFolder(null).executeAsList()
+        assertEquals(listOf("f1", newFeed.id, "f2"), ordered.map { it.id })
+    }
+
+    @Test
+    fun subscribeFeedsInsertsMultipleNewFeedsDirectlyAfterTheSelectedFeedInInputOrder() = runTest {
+        db.insertFeed("f1", sortOrder = 0L)
+        db.insertFeed("f2", sortOrder = 1L)
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+
+        val outcome = vm.subscribeFeeds(listOf("https://ex.com/a", "https://ex.com/b"))
+
+        assertEquals(2, outcome.successCount)
+        val newFeedA = db.feedsQueries.getByUrl("https://ex.com/a").executeAsOne()
+        val newFeedB = db.feedsQueries.getByUrl("https://ex.com/b").executeAsOne()
+        assertNull(newFeedA.folder_id)
+        assertNull(newFeedB.folder_id)
+        val ordered = db.feedsQueries.getByFolder(null).executeAsList()
+        assertEquals(listOf("f1", newFeedA.id, newFeedB.id, "f2"), ordered.map { it.id })
+    }
+
+    @Test
+    fun subscribeFeedsKeepsChainingSuccessesAfterTheSelectedFeedAcrossAFailedSubscription() = runTest {
+        db.insertFeed("f1", sortOrder = 0L)
+        db.insertFeed("f2", sortOrder = 1L)
+        val vm = newViewModel(
+            feedFetcher = fetcherWith { request ->
+                if (request.url.host == "bad.com") respond("", HttpStatusCode.NotFound)
+                else respond(RSS, HttpStatusCode.OK)
+            },
+        )
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+
+        val outcome = vm.subscribeFeeds(listOf("https://ex.com/a", "https://bad.com/feed", "https://ex.com/b"))
+
+        assertEquals(2, outcome.successCount)
+        assertEquals(1, outcome.failCount)
+        val newFeedA = db.feedsQueries.getByUrl("https://ex.com/a").executeAsOne()
+        val newFeedB = db.feedsQueries.getByUrl("https://ex.com/b").executeAsOne()
+        val ordered = db.feedsQueries.getByFolder(null).executeAsList()
+        assertEquals(listOf("f1", newFeedA.id, newFeedB.id, "f2"), ordered.map { it.id })
+    }
+
+    @Test
     fun addFeedCanSubscribeReflectsPreviewAndSelection() {
         val candidates = listOf(DiscoveredFeedLink("https://ex.com/a"), DiscoveredFeedLink("https://ex.com/b"))
         val single = AddFeedPreview.Single("https://ex.com/feed", "Feed", 1)
