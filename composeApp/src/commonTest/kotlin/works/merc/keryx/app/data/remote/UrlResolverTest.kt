@@ -31,6 +31,16 @@ class UrlResolverTest {
     }
 
     @Test
+    fun resolvesTerminalDotSegmentWithTrailingSlash() {
+        assertEquals("https://example.com/article/", UrlResolver.resolve("https://example.com/article/1", "."))
+    }
+
+    @Test
+    fun resolvesTerminalDotDotSegmentWithTrailingSlash() {
+        assertEquals("https://example.com/a/", UrlResolver.resolve("https://example.com/a/b/c", ".."))
+    }
+
+    @Test
     fun resolvesQueryOnlyReferenceAgainstCurrentDocument() {
         assertEquals(
             "https://example.com/article/1?view=full",

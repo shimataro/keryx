@@ -40,6 +40,7 @@ object UrlResolver {
      * root segment (an excess `..` at the root is simply discarded, matching browser behavior).
      */
     private fun removeDotSegments(path: String): String {
+        val requiresTrailingSlash = path.endsWith("/") || path.endsWith("/.") || path.endsWith("/..")
         val output = mutableListOf<String>()
         for (segment in path.split("/")) {
             when (segment) {
@@ -48,7 +49,8 @@ object UrlResolver {
                 else -> output.add(segment)
             }
         }
-        return output.joinToString("/")
+        val normalized = output.joinToString("/")
+        return if (requiresTrailingSlash && !normalized.endsWith("/")) "$normalized/" else normalized
     }
 
     /** True if [url] (trimmed) already has an explicit scheme (e.g. "http://", "https://"). */
