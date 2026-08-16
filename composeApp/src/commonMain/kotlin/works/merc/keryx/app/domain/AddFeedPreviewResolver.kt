@@ -50,7 +50,10 @@ fun addFeedAlreadySubscribed(url: String, feeds: List<Feeds>): Boolean =
  * Preview/subscribe orchestration for the add-feed dialog, split out of `HomeViewModel` to keep
  * its surface smaller.
  */
-class AddFeedPreviewResolver(private val feedRepository: FeedRepository) {
+class AddFeedPreviewResolver(
+    private val feedRepository: FeedRepository,
+    private val tagRepository: TagRepository,
+) {
     /**
      * Previews [rawUrl] and maps the outcome for the add-feed dialog. Handles scheme resolution
      * (prepending `https://`, then retrying with `http://` when the user typed no scheme and the
@@ -95,12 +98,17 @@ class AddFeedPreviewResolver(private val feedRepository: FeedRepository) {
      *   new feed lands at the start of that folder; falls back to appending at the end of the group
      *   when the named feed isn't in it. Subsequent URLs chain off [afterFeedId] as above, so a
      *   multi-URL batch still lands in input order rather than reversed.
+     * @param tagId The tag to attach to brand-new subscriptions, or `null` to attach none. Unlike
+     *   the position anchors above — which only apply to the first URL and then chain — this
+     *   applies to *every* successfully subscribed feed in the batch, since a tag is a
+     *   classification rather than a position.
      */
     suspend fun subscribeFeeds(
         urls: List<String>,
         folderId: String? = null,
         afterFeedId: String? = null,
         beforeFeedId: String? = null,
+        tagId: String? = null,
     ): SubscribeOutcome {
         var insertAfter = afterFeedId
         var insertBefore = beforeFeedId
@@ -109,6 +117,7 @@ class AddFeedPreviewResolver(private val feedRepository: FeedRepository) {
             if (result is Result.Ok) {
                 insertAfter = result.value.id
                 insertBefore = null
+                if (tagId != null) tagRepository.setFeedTag(result.value.id, tagId, attached = true)
             }
             result
         }

@@ -2865,6 +2865,80 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun subscribeFeedsAttachesTheSelectedTagToTheNewFeed() = runTest {
+        db.insertTag("t1", "Kotlin")
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Tag("t1"))
+
+        val outcome = vm.subscribeFeeds(listOf("https://ex.com/feed"))
+
+        assertEquals(1, outcome.successCount)
+        val newFeed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+        val row = db.feed_tagsQueries.watchAllActive().executeAsList().single()
+        assertEquals(newFeed.id, row.feed_id)
+        assertEquals("t1", row.tag_id)
+    }
+
+    @Test
+    fun subscribeFeedsAttachesTheTagOfTheSelectedFeedRowNestedUnderThatTag() = runTest {
+        db.insertFeed("f1")
+        db.insertTag("t1", "Kotlin")
+        db.insertFeedTag("f1", "t1")
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInTag("f1", "t1"))
+
+        val outcome = vm.subscribeFeeds(listOf("https://ex.com/feed"))
+
+        assertEquals(1, outcome.successCount)
+        val newFeed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+        val tagged = db.feed_tagsQueries.watchAllActive().executeAsList()
+            .filter { it.tag_id == "t1" }
+            .map { it.feed_id }
+            .toSet()
+        assertEquals(setOf("f1", newFeed.id), tagged)
+    }
+
+    @Test
+    fun subscribeFeedsAttachesTheSelectedTagToEveryFeedInTheBatch() = runTest {
+        db.insertTag("t1", "Kotlin")
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Tag("t1"))
+
+        val outcome = vm.subscribeFeeds(listOf("https://ex.com/a", "https://ex.com/b"))
+
+        assertEquals(2, outcome.successCount)
+        val newFeedA = db.feedsQueries.getByUrl("https://ex.com/a").executeAsOne()
+        val newFeedB = db.feedsQueries.getByUrl("https://ex.com/b").executeAsOne()
+        val tagged = db.feed_tagsQueries.watchAllActive().executeAsList()
+            .filter { it.tag_id == "t1" }
+            .map { it.feed_id }
+            .toSet()
+        assertEquals(setOf(newFeedA.id, newFeedB.id), tagged)
+    }
+
+    @Test
+    fun subscribeFeedsAttachesNoTagWhenNoTagIsSelected() = runTest {
+        // A folder selection carries no tag context, so the new feed must stay untagged.
+        db.insertFolder("d1", "Kotlin folder")
+        db.insertTag("t1", "Kotlin")
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Folder("d1"))
+
+        val outcome = vm.subscribeFeeds(listOf("https://ex.com/feed"))
+
+        assertEquals(1, outcome.successCount)
+        assertTrue(db.feed_tagsQueries.watchAllActive().executeAsList().isEmpty())
+    }
+
+    @Test
     fun addFeedCanSubscribeReflectsPreviewAndSelection() {
         val candidates = listOf(DiscoveredFeedLink("https://ex.com/a"), DiscoveredFeedLink("https://ex.com/b"))
         val single = AddFeedPreview.Single("https://ex.com/feed", "Feed", 1)
