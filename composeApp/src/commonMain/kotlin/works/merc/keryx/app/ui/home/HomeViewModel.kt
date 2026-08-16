@@ -864,14 +864,20 @@ class HomeViewModel(
         }
     }
 
-    private val addFeedPreviewResolver = AddFeedPreviewResolver(feedRepository)
+    private val addFeedPreviewResolver = AddFeedPreviewResolver(feedRepository, tagRepository)
 
     /** @see AddFeedPreviewResolver.resolvePreview */
     suspend fun resolvePreview(rawUrl: String): AddFeedPreview = addFeedPreviewResolver.resolvePreview(rawUrl)
 
     /** @see AddFeedPreviewResolver.subscribeFeeds */
     suspend fun subscribeFeeds(urls: List<String>): SubscribeOutcome =
-        addFeedPreviewResolver.subscribeFeeds(urls, folderIdForNewFeed(), afterFeedIdForNewFeed())
+        addFeedPreviewResolver.subscribeFeeds(
+            urls,
+            folderIdForNewFeed(),
+            afterFeedIdForNewFeed(),
+            beforeFeedIdForNewFeed(),
+            tagIdForNewFeed(),
+        )
 
     /**
      * The folder a newly subscribed feed should be filed into, derived from the feed list's
@@ -892,6 +898,29 @@ class HomeViewModel(
      */
     private fun afterFeedIdForNewFeed(): String? = when (val f = _filter.value) {
         is ArticleFilter.Feed -> f.feedId
+        else -> null
+    }
+
+    /**
+     * The feed a newly subscribed feed should be inserted directly before: the current first feed
+     * in the target group (the selected folder, the selected feed's folder, or the "no folder" group
+     * when no folder/feed context is selected), or `null` if that group is empty. Only consulted when
+     * [afterFeedIdForNewFeed] is null or its target isn't in the group (see
+     * [FeedRepository.insertionSortOrderForNewFeed]), so this doesn't affect the "insert directly
+     * after the selected feed" behavior.
+     */
+    private fun beforeFeedIdForNewFeed(): String? =
+        feeds.value.filter { it.folder_id == folderIdForNewFeed() }.minByOrNull { it.sort_order }?.id
+
+    /**
+     * The tag a newly subscribed feed should be tagged with: the currently selected tag, whether
+     * selected directly or via a feed selected within an expanded tag's feed sub-list. `null` for
+     * any other selection (folder, feed outside a tag, starred, search, or nothing selected) — no
+     * tag is applied.
+     */
+    private fun tagIdForNewFeed(): String? = when (val selection = _selectedRowInstance.value) {
+        is FeedListRowSelection.Tag -> selection.tagId
+        is FeedListRowSelection.FeedInTag -> selection.tagId
         else -> null
     }
 

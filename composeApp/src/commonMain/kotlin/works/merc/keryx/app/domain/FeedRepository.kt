@@ -97,16 +97,46 @@ class FeedRepository(
      * @param afterFeedId The feed a brand-new feed should be inserted directly after, within its
      *   target group (folder or unfiled), or `null` to append it at the end of that group instead.
      *   Ignored when re-subscribing an existing feed, which keeps its prior position.
+     * @param beforeFeedId The feed a brand-new feed should be inserted directly *before*, within
+     *   its target group (folder or unfiled), or `null`. Only consulted when [afterFeedId] is null
+     *   or names a feed that isn't in that group; a [beforeFeedId] that isn't in the group falls
+     *   back to appending at the end. Ignored when re-subscribing an existing feed, which keeps its
+     *   prior position.
      * @return A successful result containing the subscribed feed, or the fetch error.
      */
-    suspend fun subscribeFeed(url: String, folderId: String? = null, afterFeedId: String? = null): Result<Feeds> {
-        val outcome = subscribeFeedWrite(url, folderId, afterFeedId)
+    suspend fun subscribeFeed(
+        url: String,
+        folderId: String? = null,
+        afterFeedId: String? = null,
+        beforeFeedId: String? = null,
+    ): Result<Feeds> = subscribeFeedTracked(url, folderId, afterFeedId, beforeFeedId).result
+
+    /** Result of [subscribeFeedTracked]: the subscribe result, plus whether it created a brand-new feed. */
+    data class FeedSubscription(val result: Result<Feeds>, val wasNewlyCreated: Boolean)
+
+    /**
+     * Like [subscribeFeed], but also reports whether this call created a brand-new feed, as opposed
+     * to returning an already-active or just-resubscribed one. Callers that place multiple feeds in
+     * one batch (e.g. [AddFeedPreviewResolver.subscribeFeeds]) need this to avoid treating every
+     * `Result.Ok` as "new" — a URL that resolves to a feed the user already has active must not be
+     * repositioned or (re-)tagged as if it were.
+     */
+    suspend fun subscribeFeedTracked(
+        url: String,
+        folderId: String? = null,
+        afterFeedId: String? = null,
+        beforeFeedId: String? = null,
+    ): FeedSubscription {
+        val outcome = subscribeFeedWrite(url, folderId, afterFeedId, beforeFeedId)
         if (outcome.hadArticles) ftsManager.indexMissing()
-        return outcome.result
+        return FeedSubscription(outcome.result, outcome.wasNewlyCreated)
     }
 
-    /** Outcome of [subscribeFeedWrite]: the subscribe result, plus whether the feed had articles. */
-    internal data class FeedWriteOutcome(val result: Result<Feeds>, val hadArticles: Boolean)
+    /**
+     * Outcome of [subscribeFeedWrite]: the subscribe result, whether the feed had articles, and
+     * whether the write created a brand-new feed (as opposed to an already-active or resubscribed one).
+     */
+    internal data class FeedWriteOutcome(val result: Result<Feeds>, val hadArticles: Boolean, val wasNewlyCreated: Boolean)
 
     /**
      * Fetches a feed and persists its metadata and articles without indexing them.
@@ -117,16 +147,22 @@ class FeedRepository(
      * @param afterFeedId The feed a brand-new feed should be inserted directly after, within its
      *   target group (folder or unfiled), or `null` to append it at the end of that group instead.
      *   Ignored when re-subscribing an existing feed, which keeps its prior position.
+     * @param beforeFeedId The feed a brand-new feed should be inserted directly *before*, within
+     *   its target group (folder or unfiled), or `null`. Only consulted when [afterFeedId] is null
+     *   or names a feed that isn't in that group; a [beforeFeedId] that isn't in the group falls
+     *   back to appending at the end. Ignored when re-subscribing an existing feed, which keeps its
+     *   prior position.
      * @return The subscription result, including the stored feed or fetch error and whether articles were fetched.
      */
     internal suspend fun subscribeFeedWrite(
         url: String,
         folderId: String? = null,
         afterFeedId: String? = null,
+        beforeFeedId: String? = null,
     ): FeedWriteOutcome {
         val fetched = when (val r = feedFetcher.fetch(url)) {
             is Result.Ok -> r.value
-            is Result.Err -> return FeedWriteOutcome(r, hadArticles = false)
+            is Result.Err -> return FeedWriteOutcome(r, hadArticles = false, wasNewlyCreated = false)
         }
         val effectiveUrl = fetched.redirectUrl ?: url
         val existing = feeds.getByUrl(effectiveUrl).executeAsOneOrNull()
@@ -137,20 +173,23 @@ class FeedRepository(
         val now = clock.nowMillis()
         val favicon = faviconResolver.resolve(fetched.siteUrl, effectiveUrl)
 
-        // sort_order: a brand-new feed is inserted right after afterFeedId within its target
-        // folder's group (the "no folder" group, unless the caller passed a folderId to file it
-        // into), or appended at the end of that group when afterFeedId is null or not found there;
+        // sort_order: a brand-new feed is inserted right after afterFeedId (or, failing that, right
+        // before beforeFeedId) within its target folder's group (the "no folder" group, unless the
+        // caller passed a folderId to file it into), or appended at the end of that group when
+        // neither anchor is given or found there;
         // a still-live feed being re-fetched keeps its existing position; a previously-unsubscribed
         // feed being re-subscribed is re-numbered to the end of the group it used to belong to (its
         // old relative position may no longer be meaningful after other feeds in that group moved
         // around while it was unsubscribed).
+        var wasNewlyCreated = false
         subscribePlacementMutex.withLock {
             db.transaction {
                 // Re-read under the lock: the snapshot taken before the fetch/favicon calls can be
                 // stale, so a concurrent subscribe of the same url may already have created the row.
                 val current = feeds.getByUrl(effectiveUrl).executeAsOneOrNull()
+                wasNewlyCreated = current == null
                 val sortOrder = when {
-                    current == null -> insertionSortOrderForNewFeed(feedId, folderId, afterFeedId, now)
+                    current == null -> insertionSortOrderForNewFeed(feedId, folderId, afterFeedId, beforeFeedId, now)
                     current.deleted_at == null -> current.sort_order
                     else -> feeds.nextSortOrderInGroup(current.folder_id).executeAsOne()
                 }
@@ -186,6 +225,7 @@ class FeedRepository(
         return FeedWriteOutcome(
             Result.Ok(feeds.getById(feedId).executeAsOne()),
             hadArticles = fetched.articles.isNotEmpty(),
+            wasNewlyCreated = wasNewlyCreated,
         )
     }
 
@@ -211,20 +251,33 @@ class FeedRepository(
     }
 
     /**
-     * The `sort_order` a brand-new feed should be inserted at, within [folderId]'s group. When
-     * [afterFeedId] is null, or names a feed no longer in that group (stale selection, race with a
-     * concurrent move), falls back to appending at the end. Otherwise renumbers the group so the
-     * new feed lands directly after [afterFeedId], writing [feeds.updateSortOrder] only for the
-     * siblings whose index actually shifted (same pattern as [moveFeed]) — the new feed's own row
-     * is inserted separately by the caller's `upsert`, using the returned value.
+     * The `sort_order` a brand-new feed should be inserted at, within [folderId]'s group.
+     * [afterFeedId] wins when it names a feed in that group (the new feed lands directly after it);
+     * otherwise [beforeFeedId], when it names a feed in that group, puts the new feed directly
+     * before it (how a folder selection places a new feed at the folder's start). When neither
+     * anchor is given, or neither is in that group any more (stale selection, race with a
+     * concurrent move), falls back to appending at the end. Otherwise renumbers the group around
+     * the resolved position, writing [feeds.updateSortOrder] only for the siblings whose index
+     * actually shifted (same pattern as [moveFeed]) — the new feed's own row is inserted separately
+     * by the caller's `upsert`, using the returned value.
      */
-    private fun insertionSortOrderForNewFeed(feedId: String, folderId: String?, afterFeedId: String?, now: Long): Long {
-        if (afterFeedId == null) return feeds.nextSortOrderInGroup(folderId).executeAsOne()
+    private fun insertionSortOrderForNewFeed(
+        feedId: String,
+        folderId: String?,
+        afterFeedId: String?,
+        beforeFeedId: String?,
+        now: Long,
+    ): Long {
+        if (afterFeedId == null && beforeFeedId == null) return feeds.nextSortOrderInGroup(folderId).executeAsOne()
         val group = feeds.getByFolder(folderId).executeAsList()
         val groupIds = group.map { it.id }
-        val afterIndex = groupIds.indexOf(afterFeedId)
-        if (afterIndex < 0) return feeds.nextSortOrderInGroup(folderId).executeAsOne()
-        val targetFeedId = groupIds.getOrNull(afterIndex + 1)
+        val afterIndex = afterFeedId?.let { groupIds.indexOf(it) } ?: -1
+        // The feed the new one is placed *before* (reorderIds' insertion target); null = append.
+        val targetFeedId = when {
+            afterIndex >= 0 -> groupIds.getOrNull(afterIndex + 1)
+            beforeFeedId != null && beforeFeedId in groupIds -> beforeFeedId
+            else -> return feeds.nextSortOrderInGroup(folderId).executeAsOne()
+        }
         val newOrder = reorderIds(groupIds, feedId, targetFeedId)
         val sortOrderOf = group.associate { it.id to it.sort_order }
         var newFeedSortOrder = 0L

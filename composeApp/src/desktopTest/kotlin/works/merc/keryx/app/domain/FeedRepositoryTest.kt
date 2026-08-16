@@ -1204,4 +1204,232 @@ class FeedRepositoryTest {
             driver.close()
         }
     }
+
+    @Test
+    fun subscribeFeedWithBeforeFeedIdInsertsNewFeedDirectlyBeforeItAndShiftsLaterSiblings(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Kotlin", now = 0L)
+            db.insertFeed("f1", folderId = "d1", now = 0L, sortOrder = 0L)
+            db.insertFeed("f2", folderId = "d1", now = 0L, sortOrder = 1L)
+            db.insertFeed("f3", folderId = "d1", now = 0L, sortOrder = 2L)
+            val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
+            val repo = newRepo(db, driver, fetcher, clock = Clock { 999L })
+
+            val result = repo.subscribeFeed("https://ex.com/feed", folderId = "d1", beforeFeedId = "f1")
+
+            assertIs<Result.Ok<Feeds>>(result)
+            val newFeed = result.value
+            assertEquals(0L, newFeed.sort_order)
+            val ordered = db.feedsQueries.getByFolder("d1").executeAsList()
+            assertEquals(listOf(newFeed.id, "f1", "f2", "f3"), ordered.map { it.id })
+
+            // Every existing sibling shifts down by one index, so all three get rewritten.
+            assertEquals(999L, db.feedsQueries.getById("f1").executeAsOne().updated_at)
+            assertEquals(999L, db.feedsQueries.getById("f2").executeAsOne().updated_at)
+            assertEquals(999L, db.feedsQueries.getById("f3").executeAsOne().updated_at)
+            assertEquals(listOf(1L, 2L, 3L), listOf("f1", "f2", "f3").map { db.feedsQueries.getById(it).executeAsOne().sort_order })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun subscribeFeedWithBeforeFeedIdInTheMiddleOfTheGroupLeavesEarlierSiblingsUntouched(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1", now = 0L, sortOrder = 0L)
+            db.insertFeed("f2", now = 0L, sortOrder = 1L)
+            db.insertFeed("f3", now = 0L, sortOrder = 2L)
+            val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
+            val repo = newRepo(db, driver, fetcher, clock = Clock { 999L })
+
+            val result = repo.subscribeFeed("https://ex.com/feed", beforeFeedId = "f2")
+
+            assertIs<Result.Ok<Feeds>>(result)
+            val newFeed = result.value
+            assertNull(newFeed.folder_id)
+            assertEquals(1L, newFeed.sort_order)
+            val ordered = db.feedsQueries.getByFolder(null).executeAsList()
+            assertEquals(listOf("f1", newFeed.id, "f2", "f3"), ordered.map { it.id })
+
+            // f1 keeps index 0, so it is left untouched; f2 and f3 shift down and get rewritten.
+            assertEquals(0L, db.feedsQueries.getById("f1").executeAsOne().updated_at)
+            assertEquals(999L, db.feedsQueries.getById("f2").executeAsOne().updated_at)
+            assertEquals(999L, db.feedsQueries.getById("f3").executeAsOne().updated_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun subscribeFeedWithBeforeFeedIdNotInTheTargetGroupFallsBackToAppendingAtTheEnd(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Kotlin", now = 0L)
+            db.insertFeed("f1", folderId = "d1", now = 0L, sortOrder = 0L)
+            db.insertFeed("f2", folderId = "d1", now = 0L, sortOrder = 1L)
+            // "foreign" belongs to the unfiled group, not d1, so beforeFeedId="foreign" can never
+            // resolve within d1's group and must fall back to appending, without erroring.
+            db.insertFeed("foreign", now = 0L, sortOrder = 0L)
+            val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
+            val repo = newRepo(db, driver, fetcher)
+
+            val result = repo.subscribeFeed("https://ex.com/feed", folderId = "d1", beforeFeedId = "foreign")
+
+            assertIs<Result.Ok<Feeds>>(result)
+            assertEquals(2L, result.value.sort_order)
+            val ordered = db.feedsQueries.getByFolder("d1").executeAsList()
+            assertEquals(listOf("f1", "f2", result.value.id), ordered.map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun subscribeFeedWithNullBeforeFeedIdAppendsExactlyLikeNoAnchorAtAll(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            // An empty folder yields no beforeFeedId at all, so this must be a plain append.
+            db.insertFolder("d1", "Kotlin", now = 0L)
+            val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
+            val repo = newRepo(db, driver, fetcher)
+
+            val result = repo.subscribeFeed("https://ex.com/feed", folderId = "d1", beforeFeedId = null)
+
+            assertIs<Result.Ok<Feeds>>(result)
+            assertEquals(0L, result.value.sort_order)
+            val ordered = db.feedsQueries.getByFolder("d1").executeAsList()
+            assertEquals(listOf(result.value.id), ordered.map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun subscribeFeedResubscribingALiveFeedWithBeforeFeedIdIgnoresItAndKeepsItsPosition(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1", now = 0L, sortOrder = 0L)
+            db.insertFeed("f2", now = 0L, sortOrder = 1L)
+            val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
+            val repo = newRepo(db, driver, fetcher)
+            repo.subscribeFeed("https://ex.com/feed")
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+            assertEquals(2L, feed.sort_order)
+
+            // Re-fetching a still-live feed with beforeFeedId set must not move it — re-subscribe
+            // semantics keep the existing position regardless of beforeFeedId.
+            val result = repo.subscribeFeed("https://ex.com/feed", beforeFeedId = "f1")
+
+            assertIs<Result.Ok<Feeds>>(result)
+            val refetched = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+            assertEquals(2L, refetched.sort_order)
+            assertNull(refetched.folder_id)
+            assertEquals(listOf("f1", "f2", refetched.id), db.feedsQueries.getByFolder(null).executeAsList().map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun subscribeFeedWithBothAnchorsPrefersAfterFeedIdOverBeforeFeedId(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Kotlin", now = 0L)
+            db.insertFeed("f1", folderId = "d1", now = 0L, sortOrder = 0L)
+            db.insertFeed("f2", folderId = "d1", now = 0L, sortOrder = 1L)
+            db.insertFeed("f3", folderId = "d1", now = 0L, sortOrder = 2L)
+            val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
+            val repo = newRepo(db, driver, fetcher)
+
+            // Both anchors resolve within the group: afterFeedId must win over beforeFeedId.
+            val result = repo.subscribeFeed("https://ex.com/feed", folderId = "d1", afterFeedId = "f1", beforeFeedId = "f3")
+
+            assertIs<Result.Ok<Feeds>>(result)
+            val ordered = db.feedsQueries.getByFolder("d1").executeAsList()
+            assertEquals(listOf("f1", result.value.id, "f2", "f3"), ordered.map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun subscribeFeedWithStaleAfterFeedIdFallsBackToBeforeFeedIdInsteadOfAppending(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Kotlin", now = 0L)
+            db.insertFeed("f1", folderId = "d1", now = 0L, sortOrder = 0L)
+            db.insertFeed("f2", folderId = "d1", now = 0L, sortOrder = 1L)
+            // "foreign" belongs to the unfiled group, not d1, so afterFeedId can never resolve there;
+            // beforeFeedId is still valid, so the new feed must land before it, not at the end.
+            db.insertFeed("foreign", now = 0L, sortOrder = 0L)
+            val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
+            val repo = newRepo(db, driver, fetcher)
+
+            val result = repo.subscribeFeed("https://ex.com/feed", folderId = "d1", afterFeedId = "foreign", beforeFeedId = "f2")
+
+            assertIs<Result.Ok<Feeds>>(result)
+            val ordered = db.feedsQueries.getByFolder("d1").executeAsList()
+            assertEquals(listOf("f1", result.value.id, "f2"), ordered.map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun subscribeFeedTrackedReportsWasNewlyCreatedTrueForABrandNewFeed(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
+            val repo = newRepo(db, driver, fetcher)
+
+            val subscription = repo.subscribeFeedTracked("https://ex.com/feed")
+
+            assertIs<Result.Ok<Feeds>>(subscription.result)
+            assertTrue(subscription.wasNewlyCreated)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun subscribeFeedTrackedReportsWasNewlyCreatedFalseForAnAlreadyActiveFeed(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
+            val repo = newRepo(db, driver, fetcher)
+            repo.subscribeFeed("https://ex.com/feed")
+
+            // Re-fetching a still-live feed is not a creation, even though the result is still Ok.
+            val subscription = repo.subscribeFeedTracked("https://ex.com/feed")
+
+            assertIs<Result.Ok<Feeds>>(subscription.result)
+            assertFalse(subscription.wasNewlyCreated)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun subscribeFeedTrackedReportsWasNewlyCreatedFalseForAResubscribedSoftDeletedFeed(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
+            val repo = newRepo(db, driver, fetcher)
+            repo.subscribeFeed("https://ex.com/feed")
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+            repo.unsubscribeFeed(feed.id)
+            assertNotNull(db.feedsQueries.getById(feed.id).executeAsOne().deleted_at)
+
+            // The row already exists (soft-deleted), so resubscribing must not report a creation.
+            val subscription = repo.subscribeFeedTracked("https://ex.com/feed")
+
+            assertIs<Result.Ok<Feeds>>(subscription.result)
+            assertFalse(subscription.wasNewlyCreated)
+            assertNull(db.feedsQueries.getById(feed.id).executeAsOne().deleted_at)
+        } finally {
+            driver.close()
+        }
+    }
 }

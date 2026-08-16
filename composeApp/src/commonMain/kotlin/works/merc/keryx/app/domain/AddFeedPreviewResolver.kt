@@ -4,6 +4,7 @@ import works.merc.keryx.app.core.DiscoveredFeedLink
 import works.merc.keryx.app.core.FeedDiscoveryException
 import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.core.valueOrNull
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.remote.UrlResolver
 
@@ -50,7 +51,10 @@ fun addFeedAlreadySubscribed(url: String, feeds: List<Feeds>): Boolean =
  * Preview/subscribe orchestration for the add-feed dialog, split out of `HomeViewModel` to keep
  * its surface smaller.
  */
-class AddFeedPreviewResolver(private val feedRepository: FeedRepository) {
+class AddFeedPreviewResolver(
+    private val feedRepository: FeedRepository,
+    private val tagRepository: TagRepository,
+) {
     /**
      * Previews [rawUrl] and maps the outcome for the add-feed dialog. Handles scheme resolution
      * (prepending `https://`, then retrying with `http://` when the user typed no scheme and the
@@ -89,14 +93,43 @@ class AddFeedPreviewResolver(private val feedRepository: FeedRepository) {
      * @param afterFeedId The feed the first brand-new subscription should be inserted directly
      *   after, or `null` to append it at the end of its group. Each subsequent URL in [urls] then
      *   chains off the feed just subscribed before it, so a multi-URL batch lands in input order
-     *   right after [afterFeedId] rather than being reversed or piling up at the group's end.
+     *   right after [afterFeedId] rather than being reversed or piling up at the group's end. A URL
+     *   that resolves to an already-active feed does not advance this chain (see below).
+     * @param beforeFeedId The feed the first brand-new subscription should be inserted directly
+     *   *before*, or `null`. Used when a folder — rather than a specific feed — is selected, so the
+     *   new feed lands at the start of that folder; falls back to appending at the end of the group
+     *   when the named feed isn't in it. Subsequent URLs chain off [afterFeedId] as above, so a
+     *   multi-URL batch still lands in input order rather than reversed.
+     * @param tagId The tag to attach to brand-new subscriptions, or `null` to attach none. Unlike
+     *   the position anchors above — which only apply to the first URL and then chain — this
+     *   applies to *every* newly created feed in the batch, since a tag is a classification rather
+     *   than a position.
+     *
+     * A URL that resolves to a feed the user is already actively subscribed to (or that a prior
+     * entry in this same batch just resubscribed) is left untouched: its own position and tags are
+     * preserved, it does not consume [afterFeedId]/[beforeFeedId] for the next URL, and it is not
+     * tagged with [tagId]. Otherwise a repeated or already-subscribed URL in the batch would bump
+     * later brand-new feeds off the selected insertion point and tag a feed the user never asked to
+     * classify.
      */
-    suspend fun subscribeFeeds(urls: List<String>, folderId: String? = null, afterFeedId: String? = null): SubscribeOutcome {
+    suspend fun subscribeFeeds(
+        urls: List<String>,
+        folderId: String? = null,
+        afterFeedId: String? = null,
+        beforeFeedId: String? = null,
+        tagId: String? = null,
+    ): SubscribeOutcome {
         var insertAfter = afterFeedId
+        var insertBefore = beforeFeedId
         val results = urls.map { url ->
-            val result = feedRepository.subscribeFeed(url, folderId, insertAfter)
-            if (result is Result.Ok) insertAfter = result.value.id
-            result
+            val subscription = feedRepository.subscribeFeedTracked(url, folderId, insertAfter, insertBefore)
+            val feed = subscription.result.valueOrNull
+            if (subscription.wasNewlyCreated && feed != null) {
+                insertAfter = feed.id
+                insertBefore = null
+                if (tagId != null) tagRepository.setFeedTag(feed.id, tagId, attached = true)
+            }
+            subscription.result
         }
         val successCount = results.count { it is Result.Ok }
         return SubscribeOutcome(
