@@ -81,6 +81,22 @@ the same theme colors). The toolbar above the reader is likewise always present,
 disabled rather than hidden when nothing is selected, keeping its Compose structure — and
 therefore the reader's measured bounds — identical across states.
 
+The reader treats feed-supplied HTML as fully trusted content by design: JavaScript is enabled
+(the WebView's default) and `wrapArticleHtml` inserts the feed body unescaped (see its KDoc in
+`ArticleWebViewHtml.kt` — "`[body]` stays raw"), which is what lets SNS-embed widgets (e.g. the
+X/Twitter embed referenced in `ArticleDetailPane.kt`'s link-interception comment) render in
+place. The only gate on outbound traffic is navigation: `RequestInterceptor` routes a genuine
+`<a>` link click to the system browser and lets every other request (image/script/iframe/XHR)
+load inside the WebView untouched. On macOS this additionally requires
+`NSAppTransportSecurity`/`NSAllowsArbitraryLoadsInWebContent` in `Info.plist`
+(`composeApp/build.gradle.kts`) for the WebView to load plain-HTTP resources at all — scoped to
+WebView content only (this app's own networking, via Ktor, is unaffected by ATS either way), but
+applying to every WebView request, not only `<img>` sources. This is accepted rather than
+narrowed: it does not open a new class of exposure given the trust decision above already
+predates it, and Windows (WebView2) / Linux (WebKitGTK) have no ATS-equivalent restriction in the
+first place, so the exception only brings macOS to parity with how the reader already behaves on
+the other two platforms.
+
 ### Desktop Tray (platform branch)
 
 `tray/KeryxTray.kt` picks one of three implementations:

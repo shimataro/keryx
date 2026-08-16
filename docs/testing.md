@@ -202,6 +202,14 @@ why the reader is always mounted:
   hiding them. The toolbar's position and height never change between any of these states.
 - Toggling light/dark theme (and the font-size setting) while an article is open re-renders the
   reader in the new theme/scale immediately (scroll resets to the top — expected).
+- (macOS) An article containing a plain `http://` (non-HTTPS) `<img>` — some older/less-maintained
+  feeds still serve these — renders the image instead of a broken-image icon. This exercises the
+  `NSAppTransportSecurity`/`NSAllowsArbitraryLoadsInWebContent` exception in `Info.plist`
+  (`composeApp/build.gradle.kts`), which WKWebView needs to load plain-HTTP resources at all
+  regardless of the hosting document's own origin. Packaging-only check: the exception only takes
+  effect in a packaged `.app` (`createDistributable`/`packageDmg`), same as every other
+  Info.plist-driven behavior in this project — `./gradlew :composeApp:run` uses no Info.plist at
+  all, so this cannot be verified under `run`.
 
 Native context menus (`nativeContextMenu`, backed by a real `JPopupMenu` on Linux and
 `java.awt.PopupMenu` on macOS/Windows — not a Compose-drawn popup) cannot be exercised by Compose

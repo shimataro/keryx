@@ -335,6 +335,25 @@ compose.desktop {
                                 </array>
                             </dict>
                         </array>
+                        <!--
+                          Lets the WKWebView-based article reader load plain-HTTP resources —
+                          some older/less-maintained feeds still serve <img> over http:// (see
+                          the manual check in docs/testing.md). Scope: this applies to every
+                          request WKWebView issues (script/iframe/XHR too, not only images); it
+                          does not affect this app's own networking (Ktor), which ATS never
+                          restricts. This is not a new trust boundary: the reader already
+                          renders feed-supplied HTML with JavaScript enabled and unsanitized
+                          (SNS-embed iframes rely on this — see "Article Reader" in
+                          docs/app-architecture.md), and Windows (WebView2) / Linux (WebKitGTK)
+                          have no ATS-equivalent restriction at all, so this exception only
+                          brings macOS to parity with how the reader already behaves on the
+                          other two platforms rather than opening a macOS-only gap.
+                        -->
+                        <key>NSAppTransportSecurity</key>
+                        <dict>
+                            <key>NSAllowsArbitraryLoadsInWebContent</key>
+                            <true/>
+                        </dict>
                         <key>UTImportedTypeDeclarations</key>
                         <array>
                             <dict>
