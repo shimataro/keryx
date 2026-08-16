@@ -109,14 +109,34 @@ class FeedRepository(
         folderId: String? = null,
         afterFeedId: String? = null,
         beforeFeedId: String? = null,
-    ): Result<Feeds> {
+    ): Result<Feeds> = subscribeFeedTracked(url, folderId, afterFeedId, beforeFeedId).result
+
+    /** Result of [subscribeFeedTracked]: the subscribe result, plus whether it created a brand-new feed. */
+    data class FeedSubscription(val result: Result<Feeds>, val wasNewlyCreated: Boolean)
+
+    /**
+     * Like [subscribeFeed], but also reports whether this call created a brand-new feed, as opposed
+     * to returning an already-active or just-resubscribed one. Callers that place multiple feeds in
+     * one batch (e.g. [AddFeedPreviewResolver.subscribeFeeds]) need this to avoid treating every
+     * `Result.Ok` as "new" — a URL that resolves to a feed the user already has active must not be
+     * repositioned or (re-)tagged as if it were.
+     */
+    suspend fun subscribeFeedTracked(
+        url: String,
+        folderId: String? = null,
+        afterFeedId: String? = null,
+        beforeFeedId: String? = null,
+    ): FeedSubscription {
         val outcome = subscribeFeedWrite(url, folderId, afterFeedId, beforeFeedId)
         if (outcome.hadArticles) ftsManager.indexMissing()
-        return outcome.result
+        return FeedSubscription(outcome.result, outcome.wasNewlyCreated)
     }
 
-    /** Outcome of [subscribeFeedWrite]: the subscribe result, plus whether the feed had articles. */
-    internal data class FeedWriteOutcome(val result: Result<Feeds>, val hadArticles: Boolean)
+    /**
+     * Outcome of [subscribeFeedWrite]: the subscribe result, whether the feed had articles, and
+     * whether the write created a brand-new feed (as opposed to an already-active or resubscribed one).
+     */
+    internal data class FeedWriteOutcome(val result: Result<Feeds>, val hadArticles: Boolean, val wasNewlyCreated: Boolean)
 
     /**
      * Fetches a feed and persists its metadata and articles without indexing them.
@@ -142,7 +162,7 @@ class FeedRepository(
     ): FeedWriteOutcome {
         val fetched = when (val r = feedFetcher.fetch(url)) {
             is Result.Ok -> r.value
-            is Result.Err -> return FeedWriteOutcome(r, hadArticles = false)
+            is Result.Err -> return FeedWriteOutcome(r, hadArticles = false, wasNewlyCreated = false)
         }
         val effectiveUrl = fetched.redirectUrl ?: url
         val existing = feeds.getByUrl(effectiveUrl).executeAsOneOrNull()
@@ -161,11 +181,13 @@ class FeedRepository(
         // feed being re-subscribed is re-numbered to the end of the group it used to belong to (its
         // old relative position may no longer be meaningful after other feeds in that group moved
         // around while it was unsubscribed).
+        var wasNewlyCreated = false
         subscribePlacementMutex.withLock {
             db.transaction {
                 // Re-read under the lock: the snapshot taken before the fetch/favicon calls can be
                 // stale, so a concurrent subscribe of the same url may already have created the row.
                 val current = feeds.getByUrl(effectiveUrl).executeAsOneOrNull()
+                wasNewlyCreated = current == null
                 val sortOrder = when {
                     current == null -> insertionSortOrderForNewFeed(feedId, folderId, afterFeedId, beforeFeedId, now)
                     current.deleted_at == null -> current.sort_order
@@ -203,6 +225,7 @@ class FeedRepository(
         return FeedWriteOutcome(
             Result.Ok(feeds.getById(feedId).executeAsOne()),
             hadArticles = fetched.articles.isNotEmpty(),
+            wasNewlyCreated = wasNewlyCreated,
         )
     }
 

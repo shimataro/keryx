@@ -2939,6 +2939,43 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun subscribeFeedsSkipsPositionAnchorForAnAlreadySubscribedFeedInTheBatch() = runTest {
+        // "existing" is already subscribed and sits at the folder's start. The batch re-lists its
+        // URL before a genuinely new one, under the same folder selection that would normally place
+        // a new feed at the start via beforeFeedId.
+        db.insertFolder("d1", "Kotlin folder")
+        db.insertFeed("existing", folderId = "d1", sortOrder = 0L, url = "https://ex.com/existing")
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Folder("d1"))
+
+        val outcome = vm.subscribeFeeds(listOf("https://ex.com/existing", "https://ex.com/new"))
+
+        assertEquals(2, outcome.successCount)
+        val newFeed = db.feedsQueries.getByUrl("https://ex.com/new").executeAsOne()
+        val ordered = db.feedsQueries.getByFolder("d1").executeAsList()
+        assertEquals(listOf(newFeed.id, "existing"), ordered.map { it.id })
+    }
+
+    @Test
+    fun subscribeFeedsDoesNotTagAnAlreadySubscribedFeedInTheBatch() = runTest {
+        db.insertFeed("existing", url = "https://ex.com/existing")
+        db.insertTag("t1", "Kotlin")
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Tag("t1"))
+
+        val outcome = vm.subscribeFeeds(listOf("https://ex.com/existing", "https://ex.com/new"))
+
+        assertEquals(2, outcome.successCount)
+        val newFeed = db.feedsQueries.getByUrl("https://ex.com/new").executeAsOne()
+        val tagged = db.feed_tagsQueries.watchAllActive().executeAsList().map { it.feed_id }.toSet()
+        assertEquals(setOf(newFeed.id), tagged)
+    }
+
+    @Test
     fun addFeedCanSubscribeReflectsPreviewAndSelection() {
         val candidates = listOf(DiscoveredFeedLink("https://ex.com/a"), DiscoveredFeedLink("https://ex.com/b"))
         val single = AddFeedPreview.Single("https://ex.com/feed", "Feed", 1)
