@@ -896,14 +896,15 @@ class HomeViewModel(
     }
 
     /**
-     * The feed a newly subscribed feed should be inserted directly before, when a folder (not a
-     * specific feed) is selected: the current first feed in that folder's sort order, or `null` if
-     * the folder is empty. Any other selection yields `null` (unchanged append-at-end / after-feed
-     * behavior).
+     * The feed a newly subscribed feed should be inserted directly before: the current first feed
+     * in the target group (the selected folder, the selected feed's folder, or the "no folder" group
+     * when no folder/feed context is selected), or `null` if that group is empty. Only consulted when
+     * [afterFeedIdForNewFeed] is null or its target isn't in the group (see
+     * [FeedRepository.insertionSortOrderForNewFeed]), so this doesn't affect the "insert directly
+     * after the selected feed" behavior.
      */
-    private fun beforeFeedIdForNewFeed(): String? = (_filter.value as? ArticleFilter.Folder)?.let { f ->
-        feeds.value.filter { it.folder_id == f.folderId }.minByOrNull { it.sort_order }?.id
-    }
+    private fun beforeFeedIdForNewFeed(): String? =
+        feeds.value.filter { it.folder_id == folderIdForNewFeed() }.minByOrNull { it.sort_order }?.id
 
     /**
      * Unsubscribes from a feed and switches to the all-articles filter if it is selected.
