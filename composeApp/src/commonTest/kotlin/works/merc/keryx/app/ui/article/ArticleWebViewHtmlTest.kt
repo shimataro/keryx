@@ -29,10 +29,27 @@ class ArticleWebViewHtmlTest {
     }
 
     @Test
-    fun extractLinksFallsBackToRawHrefWhenNoBaseUriToResolveRelativePath() {
-        // Ksoup.parse(html) is called without a base URI, so abs:href can't resolve a
-        // relative path and the code falls back to the raw href attribute.
-        assertEquals(setOf("/foo"), extractLinks("""<a href="/foo">link</a>"""))
+    fun extractLinksDropsRelativeHrefWhenNoBaseUriToResolveAgainst() {
+        // A relative href can't be resolved without a base URI, and an unresolved raw string
+        // could never match the WebView's own absolutely-resolved navigation request, so it's
+        // dropped rather than kept as-is.
+        assertEquals(emptySet(), extractLinks("""<a href="/foo">link</a>"""))
+    }
+
+    @Test
+    fun extractLinksResolvesRelativeHrefAgainstProvidedBaseUri() {
+        assertEquals(
+            setOf("https://example.com/foo"),
+            extractLinks("""<a href="/foo">link</a>""", baseUri = "https://example.com/article/1"),
+        )
+    }
+
+    @Test
+    fun extractLinksResolvesAbsoluteHrefRegardlessOfBaseUri() {
+        assertEquals(
+            setOf("https://a.com/x"),
+            extractLinks("""<a href="https://a.com/x">a</a>""", baseUri = "https://example.com/article/1"),
+        )
     }
 
     @Test
@@ -99,6 +116,26 @@ class ArticleWebViewHtmlTest {
         assertTrue(!result.contains("<b>"))
         // Body stays raw.
         assertTrue(result.contains("<p>body</p>"))
+    }
+
+    @Test
+    fun wrapArticleHtmlEmitsBaseHrefWhenUrlProvided() {
+        val result = wrapArticleHtml(theme, title = "", meta = "", body = "<p>body</p>", baseUrl = "https://example.com/article/1")
+        assertTrue(result.contains("""<base href="https://example.com/article/1" />"""))
+    }
+
+    @Test
+    fun wrapArticleHtmlOmitsBaseHrefWhenUrlIsNullOrBlank() {
+        val withNull = wrapArticleHtml(theme, title = "", meta = "", body = "<p>body</p>", baseUrl = null)
+        val withBlank = wrapArticleHtml(theme, title = "", meta = "", body = "<p>body</p>", baseUrl = "")
+        assertTrue(!withNull.contains("<base"))
+        assertTrue(!withBlank.contains("<base"))
+    }
+
+    @Test
+    fun wrapArticleHtmlEscapesBaseHrefUrl() {
+        val result = wrapArticleHtml(theme, title = "", meta = "", body = "<p>body</p>", baseUrl = """https://example.com/?a=1&b="2"""")
+        assertTrue(result.contains("""<base href="https://example.com/?a=1&amp;b=&quot;2&quot;" />"""))
     }
 
     @Test

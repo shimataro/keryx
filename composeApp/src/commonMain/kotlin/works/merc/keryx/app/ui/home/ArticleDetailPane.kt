@@ -121,7 +121,8 @@ internal fun ArticleDetailPaneContent(
     copyPulse: Int = 0,
     onToggleStar: () -> Unit = {},
     onMarkUnread: () -> Unit = {},
-    reader: @Composable (html: String, body: String) -> Unit = { html, body -> ArticleWebView(html, body) },
+    reader: @Composable (html: String, body: String, baseUrl: String?) -> Unit =
+        { html, body, baseUrl -> ArticleWebView(html, body, baseUrl) },
 ) {
     // Inline "copied" feedback for the toolbar copy button. Kept above any conditional so this
     // composable never leaves/re-enters composition — otherwise LaunchedEffect(copyPulse) would
@@ -159,11 +160,11 @@ internal fun ArticleDetailPaneContent(
         article?.let { articleMetaText(it.author, it.published_at) }.orEmpty()
     }
 
-    val html = remember(theme, article?.id, title, meta, body, placeholderText, noContentText) {
+    val html = remember(theme, article?.id, article?.url, title, meta, body, placeholderText, noContentText) {
         when {
             article == null -> articlePlaceholderHtml(theme, placeholderText)
             body.isNullOrBlank() -> articleNoContentHtml(theme, title, meta, noContentText)
-            else -> wrapArticleHtml(theme, title, meta, body)
+            else -> wrapArticleHtml(theme, title, meta, body, baseUrl = article.url)
         }
     }
 
@@ -183,7 +184,7 @@ internal fun ArticleDetailPaneContent(
             )
         }
         Box(Modifier.fillMaxSize().testTag(ARTICLE_READER_TEST_TAG)) {
-            reader(html, body.orEmpty())
+            reader(html, body.orEmpty(), article?.url)
         }
     }
 }
@@ -274,16 +275,19 @@ internal fun articleMetaText(author: String?, publishedAt: Long?): String =
  * [works.merc.keryx.app.ui.article.wrapArticleHtml] or one of its sibling builders); this
  * composable only owns the native WebView lifecycle. [body] is the raw article body HTML (not
  * the wrapped document) used to decide which link clicks should escape to the system browser.
+ * [baseUrl] is the article's own URL (same value [html]'s `<base href>` was built from, if any)
+ * used to resolve [body]'s relative `<a href>` values to the same absolute form the WebView
+ * itself will navigate to.
  */
 @Composable
-private fun ArticleWebView(html: String, body: String) {
+private fun ArticleWebView(html: String, body: String, baseUrl: String?) {
     // Only genuine outbound links from the article's own HTML are forwarded to the system
     // browser. A plain "any http(s) main-frame request" check would also catch SNS-embed
     // widgets' own internal requests (confirmed during the spike for the X/Twitter widget),
     // breaking the embed instead of letting it render in place.
     val knownLinks = remember { mutableStateOf(emptySet<String>()) }
-    LaunchedEffect(body) {
-        knownLinks.value = extractLinks(body)
+    LaunchedEffect(body, baseUrl) {
+        knownLinks.value = extractLinks(body, baseUrl.orEmpty())
     }
     val scope = rememberCoroutineScope()
     val interceptor = remember {
