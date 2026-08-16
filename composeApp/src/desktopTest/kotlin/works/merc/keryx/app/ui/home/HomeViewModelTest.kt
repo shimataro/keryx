@@ -2776,6 +2776,77 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun subscribeFeedsInsertsNewFeedAtTheStartOfTheSelectedFolder() = runTest {
+        db.insertFolder("d1", "Kotlin folder")
+        db.insertFeed("f1", folderId = "d1", sortOrder = 0L)
+        db.insertFeed("f2", folderId = "d1", sortOrder = 1L)
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Folder("d1"))
+
+        val outcome = vm.subscribeFeeds(listOf("https://ex.com/feed"))
+
+        assertEquals(1, outcome.successCount)
+        val newFeed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+        assertEquals("d1", newFeed.folder_id)
+        val ordered = db.feedsQueries.getByFolder("d1").executeAsList()
+        assertEquals(listOf(newFeed.id, "f1", "f2"), ordered.map { it.id })
+    }
+
+    @Test
+    fun subscribeFeedsAppendsIntoAnEmptySelectedFolder() = runTest {
+        db.insertFolder("d1", "Kotlin folder")
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Folder("d1"))
+
+        val outcome = vm.subscribeFeeds(listOf("https://ex.com/feed"))
+
+        assertEquals(1, outcome.successCount)
+        val newFeed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+        assertEquals("d1", newFeed.folder_id)
+        assertEquals(0L, newFeed.sort_order)
+    }
+
+    @Test
+    fun subscribeFeedsInsertsMultipleNewFeedsAtTheStartOfTheSelectedFolderInInputOrder() = runTest {
+        db.insertFolder("d1", "Kotlin folder")
+        db.insertFeed("f1", folderId = "d1", sortOrder = 0L)
+        db.insertFeed("f2", folderId = "d1", sortOrder = 1L)
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Folder("d1"))
+
+        val outcome = vm.subscribeFeeds(listOf("https://ex.com/a", "https://ex.com/b"))
+
+        assertEquals(2, outcome.successCount)
+        val newFeedA = db.feedsQueries.getByUrl("https://ex.com/a").executeAsOne()
+        val newFeedB = db.feedsQueries.getByUrl("https://ex.com/b").executeAsOne()
+        val ordered = db.feedsQueries.getByFolder("d1").executeAsList()
+        assertEquals(listOf(newFeedA.id, newFeedB.id, "f1", "f2"), ordered.map { it.id })
+    }
+
+    @Test
+    fun subscribeFeedsWithNoSelectionStillAppendsAtTheEndOfTheUnfiledGroup() = runTest {
+        db.insertFeed("f1", sortOrder = 0L)
+        db.insertFeed("f2", sortOrder = 1L)
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.All)
+
+        val outcome = vm.subscribeFeeds(listOf("https://ex.com/feed"))
+
+        assertEquals(1, outcome.successCount)
+        val newFeed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+        val ordered = db.feedsQueries.getByFolder(null).executeAsList()
+        assertEquals(listOf("f1", "f2", newFeed.id), ordered.map { it.id })
+    }
+
+    @Test
     fun addFeedCanSubscribeReflectsPreviewAndSelection() {
         val candidates = listOf(DiscoveredFeedLink("https://ex.com/a"), DiscoveredFeedLink("https://ex.com/b"))
         val single = AddFeedPreview.Single("https://ex.com/feed", "Feed", 1)

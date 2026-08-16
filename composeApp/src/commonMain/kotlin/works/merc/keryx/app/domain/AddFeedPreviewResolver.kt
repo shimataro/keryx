@@ -90,12 +90,26 @@ class AddFeedPreviewResolver(private val feedRepository: FeedRepository) {
      *   after, or `null` to append it at the end of its group. Each subsequent URL in [urls] then
      *   chains off the feed just subscribed before it, so a multi-URL batch lands in input order
      *   right after [afterFeedId] rather than being reversed or piling up at the group's end.
+     * @param beforeFeedId The feed the first brand-new subscription should be inserted directly
+     *   *before*, or `null`. Used when a folder — rather than a specific feed — is selected, so the
+     *   new feed lands at the start of that folder; falls back to appending at the end of the group
+     *   when the named feed isn't in it. Subsequent URLs chain off [afterFeedId] as above, so a
+     *   multi-URL batch still lands in input order rather than reversed.
      */
-    suspend fun subscribeFeeds(urls: List<String>, folderId: String? = null, afterFeedId: String? = null): SubscribeOutcome {
+    suspend fun subscribeFeeds(
+        urls: List<String>,
+        folderId: String? = null,
+        afterFeedId: String? = null,
+        beforeFeedId: String? = null,
+    ): SubscribeOutcome {
         var insertAfter = afterFeedId
+        var insertBefore = beforeFeedId
         val results = urls.map { url ->
-            val result = feedRepository.subscribeFeed(url, folderId, insertAfter)
-            if (result is Result.Ok) insertAfter = result.value.id
+            val result = feedRepository.subscribeFeed(url, folderId, insertAfter, insertBefore)
+            if (result is Result.Ok) {
+                insertAfter = result.value.id
+                insertBefore = null
+            }
             result
         }
         val successCount = results.count { it is Result.Ok }
