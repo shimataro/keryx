@@ -871,7 +871,7 @@ class HomeViewModel(
 
     /** @see AddFeedPreviewResolver.subscribeFeeds */
     suspend fun subscribeFeeds(urls: List<String>): SubscribeOutcome =
-        addFeedPreviewResolver.subscribeFeeds(urls, folderIdForNewFeed())
+        addFeedPreviewResolver.subscribeFeeds(urls, folderIdForNewFeed(), afterFeedIdForNewFeed())
 
     /**
      * The folder a newly subscribed feed should be filed into, derived from the feed list's
@@ -881,6 +881,17 @@ class HomeViewModel(
     private fun folderIdForNewFeed(): String? = when (val f = _filter.value) {
         is ArticleFilter.Folder -> f.folderId
         is ArticleFilter.Feed -> feeds.value.firstOrNull { it.id == f.feedId }?.folder_id
+        else -> null
+    }
+
+    /**
+     * The feed a newly subscribed feed should be inserted directly after, derived from the feed
+     * list's current selection: the selected feed itself, whether it's filed in a folder or
+     * unfiled. Any other selection (folder/all/starred/search/tag) yields `null`, which appends
+     * the new feed to the end of its target group instead (unchanged from before this feature).
+     */
+    private fun afterFeedIdForNewFeed(): String? = when (val f = _filter.value) {
+        is ArticleFilter.Feed -> f.feedId
         else -> null
     }
 
