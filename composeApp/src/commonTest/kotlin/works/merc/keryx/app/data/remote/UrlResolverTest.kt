@@ -26,6 +26,19 @@ class UrlResolverTest {
     }
 
     @Test
+    fun resolvesParentRelativeWithDotSegments() {
+        assertEquals("https://example.com/next", UrlResolver.resolve("https://example.com/article/1", "../next"))
+    }
+
+    @Test
+    fun resolvesQueryOnlyReferenceAgainstCurrentDocument() {
+        assertEquals(
+            "https://example.com/article/1?view=full",
+            UrlResolver.resolve("https://example.com/article/1", "?view=full"),
+        )
+    }
+
+    @Test
     fun originStripsPathAndKeepsPort() {
         assertEquals("https://b.com", UrlResolver.origin("https://b.com/blog/post"))
         assertEquals("http://b.com:8080", UrlResolver.origin("http://b.com:8080/x"))

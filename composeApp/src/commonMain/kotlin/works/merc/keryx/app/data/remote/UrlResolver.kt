@@ -14,14 +14,41 @@ object UrlResolver {
 
         val origin = origin(base) ?: return null
         val b = runCatching { Url(base) }.getOrNull() ?: return null
-        return when {
-            r.startsWith("//") -> "${b.protocol.name}:$r"
-            r.startsWith("/") -> "$origin$r"
+        if (r.startsWith("//")) return "${b.protocol.name}:$r"
+
+        val fragmentIdx = r.indexOf('#')
+        val withoutFragment = if (fragmentIdx >= 0) r.substring(0, fragmentIdx) else r
+        val fragment = if (fragmentIdx >= 0) r.substring(fragmentIdx) else ""
+        val queryIdx = withoutFragment.indexOf('?')
+        val rPath = if (queryIdx >= 0) withoutFragment.substring(0, queryIdx) else withoutFragment
+        val rQuery = if (queryIdx >= 0) withoutFragment.substring(queryIdx) else null
+
+        val (targetPath, targetQuery) = when {
+            rPath.isEmpty() -> b.encodedPath to (rQuery ?: b.encodedQuery.let { if (it.isEmpty()) "" else "?$it" })
+            rPath.startsWith("/") -> removeDotSegments(rPath) to (rQuery ?: "")
             else -> {
                 val dir = b.encodedPath.substringBeforeLast('/', "")
-                "$origin$dir/$r"
+                removeDotSegments("$dir/$rPath") to (rQuery ?: "")
             }
         }
+        return "$origin$targetPath$targetQuery$fragment"
+    }
+
+    /**
+     * RFC 3986 §5.2.4 dot-segment removal, applied to an already-merged absolute [path]. Drops
+     * `.` segments and pops the preceding segment on `..`, without popping past the leading
+     * root segment (an excess `..` at the root is simply discarded, matching browser behavior).
+     */
+    private fun removeDotSegments(path: String): String {
+        val output = mutableListOf<String>()
+        for (segment in path.split("/")) {
+            when (segment) {
+                "." -> Unit
+                ".." -> if (output.size > 1 || (output.size == 1 && output[0].isNotEmpty())) output.removeAt(output.lastIndex)
+                else -> output.add(segment)
+            }
+        }
+        return output.joinToString("/")
     }
 
     /** True if [url] (trimmed) already has an explicit scheme (e.g. "http://", "https://"). */
