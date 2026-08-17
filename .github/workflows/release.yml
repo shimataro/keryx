@@ -35,6 +35,11 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$version" == *-* ]]; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up JDK 25
         uses: actions/setup-java@v5
@@ -48,8 +53,17 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Package DMG
-        run: ./gradlew :composeApp:packageDmg -PappVersion=${{ steps.version.outputs.version }}
+      # packageDmg is skipped for a pre-release tag (see package-windows' packageMsi for the same
+      # reasoning), so createDistributable — normally pulled in transitively by packageDmg — is
+      # requested explicitly to still produce the app bundle for the "Zip non-packaged app bundle"
+      # step below.
+      - name: Package App bundle (+ Dmg for stable releases)
+        run: |
+          tasks=(:composeApp:createDistributable)
+          if [ "${{ steps.version.outputs.is_prerelease }}" != "true" ]; then
+            tasks+=(:composeApp:packageDmg)
+          fi
+          ./gradlew "${tasks[@]}" -PappVersion=${{ steps.version.outputs.version }}
         env:
           DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
           GOOGLE_DRIVE_CLIENT_ID: ${{ secrets.GOOGLE_DRIVE_CLIENT_ID }}
@@ -60,6 +74,7 @@ jobs:
       # room for an x86_64 (or universal) build alongside it later.
       - name: Rename artifact
         id: artifact
+        if: steps.version.outputs.is_prerelease != 'true'
         run: |
           src=$(find composeApp/build/compose/binaries/main/dmg -maxdepth 1 -name '*.dmg' | head -n 1)
           if [ -z "$src" ]; then
@@ -77,7 +92,12 @@ jobs:
           (cd "$(dirname "$src")" && zip -r "$OLDPWD/$dest" "$(basename "$src")")
 
       - name: Attach to release
-        run: gh release upload "$RELEASE_TAG" '${{ steps.artifact.outputs.path }}' 'Keryx-${{ steps.version.outputs.version }}-macos-arm64.zip' --clobber
+        run: |
+          assets=("Keryx-${{ steps.version.outputs.version }}-macos-arm64.zip")
+          if [ "${{ steps.version.outputs.is_prerelease }}" != "true" ]; then
+            assets+=("${{ steps.artifact.outputs.path }}")
+          fi
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
@@ -111,6 +131,11 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$version" == *-* ]]; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up JDK 25
         uses: actions/setup-java@v5
@@ -132,9 +157,15 @@ jobs:
       # createDistributable must be requested explicitly: packageDeb/packageRpm build directly
       # from the JLink runtime image and never depend on it (unlike packageDmg on macOS, which
       # does), so without it composeApp/build/compose/binaries/main/app never gets created and
-      # the "Zip non-packaged app image" step below has nothing to zip.
-      - name: Package Deb + Rpm + App image
-        run: ./gradlew :composeApp:createDistributable :composeApp:packageDeb :composeApp:packageRpm -PappVersion=${{ steps.version.outputs.version }}
+      # the "Zip non-packaged app image" step below has nothing to zip. packageDeb/packageRpm are
+      # skipped for a pre-release tag (see package-windows' packageMsi for the same reasoning).
+      - name: Package App image (+ Deb/Rpm for stable releases)
+        run: |
+          tasks=(:composeApp:createDistributable)
+          if [ "${{ steps.version.outputs.is_prerelease }}" != "true" ]; then
+            tasks+=(:composeApp:packageDeb :composeApp:packageRpm)
+          fi
+          ./gradlew "${tasks[@]}" -PappVersion=${{ steps.version.outputs.version }}
         env:
           DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
           GOOGLE_DRIVE_CLIENT_ID: ${{ secrets.GOOGLE_DRIVE_CLIENT_ID }}
@@ -145,6 +176,7 @@ jobs:
       # room for an arm64 build alongside it later (same reasoning as the macOS arm64 tag).
       - name: Rename artifacts
         id: artifact
+        if: steps.version.outputs.is_prerelease != 'true'
         run: |
           deb_src=$(find composeApp/build/compose/binaries/main/deb -maxdepth 1 -name '*.deb' | head -n 1)
           if [ -z "$deb_src" ]; then
@@ -169,7 +201,12 @@ jobs:
           (cd "$(dirname "$src")" && zip -r "$OLDPWD/$dest" "$(basename "$src")")
 
       - name: Attach to release
-        run: gh release upload "$RELEASE_TAG" ${{ steps.artifact.outputs.paths }} 'Keryx-${{ steps.version.outputs.version }}-linux-x86_64.zip' --clobber
+        run: |
+          assets=("Keryx-${{ steps.version.outputs.version }}-linux-x86_64.zip")
+          if [ "${{ steps.version.outputs.is_prerelease }}" != "true" ]; then
+            assets+=(${{ steps.artifact.outputs.paths }})
+          fi
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
