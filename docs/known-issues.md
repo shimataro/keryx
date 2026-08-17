@@ -1002,3 +1002,105 @@ branch was needed: the property is applied identically on macOS/Linux, which is 
 since it just replaces an already-writable implicit default with an explicit one.
 `webViewDataDirectory(cacheDir: String): String`, the path-joining logic, is covered by
 `ArticleReaderDataDirectoryTest.kt` in `commonTest`.
+
+## Windows: context menus opened in the wrong place with their labels overlapping
+
+**Status**: Resolved — by moving Windows off `java.awt.PopupMenu` onto `javax.swing.JPopupMenu`,
+for both the context menus (`platform/NativeMenu.desktop.kt`'s `defaultPopupHandle`) and the tray
+menu (the new `tray/WindowsTray.kt`, replacing Compose's `Tray()` there). macOS stays on AWT, where
+it is a real `NSMenu`.
+
+### Symptom
+
+On Windows, right-clicking an article row or a feed row opened the context menu **up and to the
+left** of the cursor, and its entries were painted on top of each other — the box was wide enough
+for the labels but only a fraction of the height needed for them, so consecutive labels overlapped.
+Both symptoms scaled with the desktop's display-scaling setting and disappeared at 100%. Not
+reproducible on macOS or Linux.
+
+### Diagnosis
+
+Both symptoms are the same underlying JDK defect: the Windows AWT menu peer never converts between
+Java's user space (logical, 96-DPI-relative) and device pixels.
+
+**Position** — `awt_PopupMenu.cpp`'s `AwtPopupMenu::Show` takes the x/y straight off the Java
+`Event` and hands them to Win32 APIs that work in device pixels, with no `ScaleUpX`/`ScaleUpY`
+anywhere in the function:
+
+```cpp
+pt.x = env->GetIntField(event, AwtEvent::xID);   // Java user space
+pt.y = env->GetIntField(event, AwtEvent::yID);
+::MapWindowPoints(awtOrigin->GetHWnd(), 0, (LPPOINT)&pt, 1);   // device pixels
+::TrackPopupMenu(GetHMenu(), flags, pt.x, pt.y, 0, awtOrigin->GetHWnd(), NULL);
+```
+
+The omission is specific to this path, not a convention: `awt_Component.cpp` does
+`ReshapeNoScale(ScaleUpX(x), ScaleUpY(y), ...)`, and `WFontMetrics`'s natives `ScaleDownX` their
+results on the way back to Java. The menu therefore lands at `windowOrigin + clickOffset / scale`,
+so the error grows with distance from the window's origin. Solving `menu = origin + (click −
+origin) / S` against the two reported screenshots gives a consistent `S = 2.0` horizontally and
+vertically, with one shared origin — i.e. the reporter's desktop was at 200% scaling.
+
+**Overlap** — `awt_MenuItem.cpp`'s `AwtMenuItem::MeasureSelf` mixes the two spaces within one
+struct:
+
+```cpp
+int height = JNU_CallMethodByName(env, 0, fontMetrics, "getHeight", "()I").i;
+measureInfo.itemHeight  = height;          // user space
+measureInfo.itemHeight += measureInfo.itemHeight/3;
+measureInfo.itemWidth   = size.cx;         // getMFStringSize -> device pixels
+```
+
+`FontMetrics.getHeight()` is `ScaleDownY`'d on the way out of `awt_Font.cpp`, so `itemHeight` — which
+Windows reads as device pixels — is `1 / scale` too small, while `DrawSelf` paints with an HFONT
+whose `lfHeight` *is* `ScaleUpY`'d (`awt_Font.cpp`, `CreateHFont_sub`). Width comes from
+`getMFStringSize`, which is already in device pixels. That asymmetry is exactly the reported
+picture: **wide enough, but only a fraction as tall as its own glyphs.**
+
+Upstream: [JDK-8259913](https://bugs.openjdk.org/browse/JDK-8259913) *AWT menu items are not scaled
+correctly on Windows HiDPI displays* (unresolved). It is filed against 300%+, but the arithmetic
+above breaks at every scale over 100%, proportionally.
+
+The decisive cross-check was inside a single screenshot: the app's own menu bar rendered perfectly
+at the same DPI, because Compose Desktop's `MenuBar` builds a `javax.swing.JMenuBar` (confirmed by
+disassembling `ui-desktop`: `MenuBarScope.setContent(javax.swing.JMenuBar, ...)`). Swing paints
+through Java2D with the transform applied and is correct at any scale; AWT's menu peer is not.
+
+### Ruled out
+
+- **A bug in Keryx's own coordinate conversion** (`Modifier.nativeContextMenu`'s
+  `(elementPosition + localPosition) / density.density`). That division is the documented contract
+  of `java.awt.PopupMenu.show`, which takes coordinates in the invoker's user space; Compose
+  Desktop's pointer positions are `userSpace × density`. It is also why macOS is fine — AppKit is
+  point-based, so `NSMenu` consumes exactly what this produces. No app-side arithmetic change was
+  needed or made.
+- **Compensating for the scale factor in Keryx** (multiplying x/y back up before `show`). Rejected:
+  it could only fix the position. The overlapping labels happen inside the JDK's owner-draw measure
+  callback, which no Java-side call can reach. Shrinking the menu font to make the rows fit was
+  rejected for the same reason — it trades one rendering defect for another.
+- **The `java.awt.CheckboxMenuItem` change** that introduced real check gutters. It was a suspect
+  because the feed-row menu is full of them, but the overlap reproduces just as well on the tag-row
+  menu, which has none.
+
+### How this was resolved
+
+`defaultPopupHandle` now selects `AwtPopupHandle` **only on macOS**; Windows joins Linux on
+`SwingPopupHandle`. The selection is a `macOs` parameter defaulting to the process constant purely
+so `NativeMenuTest` can pin the mapping on any CI host. Two behaviours follow the backend and are
+intentional: separators become a real `JPopupMenu.Separator` instead of a `"-"`-labelled
+`MenuItem`, and modifier-less shortcuts (F2 / Delete) — which `java.awt.MenuShortcut` structurally
+cannot express — now render in the accelerator column. `forceHeavyweight` becomes load-bearing on
+Windows in a way it was not on Linux: FlatLaf forces heavyweight popups there anyway, but Windows
+takes the system-L&F branch in `installLookAndFeel`, so that one line is what keeps the menu from
+being drawn behind the article reader's WebView.
+
+The tray was fixed in the same pass, because Compose's `Tray()` builds a `java.awt.PopupMenu` of its
+own (also confirmed by disassembly) and so squashed its two entries identically. `WindowsTray`
+drives a raw `TrayIcon` and opens a `WindowsTrayMenu` (Swing) on right-click, the same shape
+`MacTray` already uses to bypass `Tray()` for an unrelated reason. `TrayIcon.addActionListener` is
+kept wired to `onTrayAction` so `shouldHideOnTrayAction`'s heuristic sees exactly the events it did
+before, and notifications go out through `TrayIcon.displayMessage`, which is what
+`TrayState.sendNotification` called anyway. Its invoker frame differs from `MacTray`'s in one way
+worth keeping: it is focusable and hidden between uses, because an AWT `PopupMenu` runs its own
+native modal loop and dismisses itself, whereas a `JPopupMenu` closes on an outside click only if
+its owning window can hold — and lose — focus.

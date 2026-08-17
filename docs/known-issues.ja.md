@@ -972,3 +972,102 @@ WebView2 生成呼び出しを EDT 上で無限に再試行し続ける —— �
 macOS/Linux にも同一に適用され、既に書き込み可能な暗黙のデフォルトを明示的な値に置き換えるだけなので
 無害である。パス結合ロジック `webViewDataDirectory(cacheDir: String): String` は `commonTest` の
 `ArticleReaderDataDirectoryTest.kt` でカバーしている。
+
+## Windows: コンテキストメニューが誤った位置に開き、項目のラベルが重なって描画される
+
+**状態**: 解決済み —— Windows を `java.awt.PopupMenu` から `javax.swing.JPopupMenu` に移した。
+コンテキストメニュー(`platform/NativeMenu.desktop.kt` の `defaultPopupHandle`)とトレイメニュー
+(Compose の `Tray()` を置き換える新規の `tray/WindowsTray.kt`)の両方が対象。macOS は本物の `NSMenu`
+になるため AWT のまま据え置いた。
+
+### 症状
+
+Windows で記事行やフィード行を右クリックすると、コンテキストメニューがカーソルの**左上方向**にずれて
+開き、さらに各項目が互いに重なって描画された。枠の幅はラベルに対して十分なのに高さだけが必要量に
+まったく足りず、隣り合うラベルが重なる。どちらの症状もデスクトップの表示スケール設定に比例して悪化し、
+100% では発生しなかった。macOS / Linux では再現しない。
+
+### 診断
+
+2つの症状は同一の JDK の不具合に由来する。Windows の AWT メニューピアが、Java のユーザー空間
+(論理座標、96 DPI 基準)とデバイスピクセルの間の変換をまったく行っていない。
+
+**位置** —— `awt_PopupMenu.cpp` の `AwtPopupMenu::Show` は、Java の `Event` から x/y をそのまま取り出し、
+デバイスピクセルで動作する Win32 API に渡している。この関数には `ScaleUpX`/`ScaleUpY` が一切ない:
+
+```cpp
+pt.x = env->GetIntField(event, AwtEvent::xID);   // Java のユーザー空間
+pt.y = env->GetIntField(event, AwtEvent::yID);
+::MapWindowPoints(awtOrigin->GetHWnd(), 0, (LPPOINT)&pt, 1);   // デバイスピクセル
+::TrackPopupMenu(GetHMenu(), flags, pt.x, pt.y, 0, awtOrigin->GetHWnd(), NULL);
+```
+
+これは JDK 全体の流儀ではなく、この経路だけの欠落である。`awt_Component.cpp` は
+`ReshapeNoScale(ScaleUpX(x), ScaleUpY(y), ...)` と正しく変換しているし、`WFontMetrics` のネイティブ実装は
+Java に返す際に `ScaleDownX` を通している。結果としてメニューは
+`ウィンドウ原点 + クリックオフセット ÷ スケール` に出るため、原点から遠いほどズレが大きくなる。報告された
+スクリーンショット2枚に対して `menu = origin + (click − origin) / S` を解くと、縦横とも、かつ共通の原点で
+`S = 2.0` に整合する —— つまり報告者のデスクトップは表示スケール 200% だった。
+
+**重なり** —— `awt_MenuItem.cpp` の `AwtMenuItem::MeasureSelf` が、1つの構造体の中で2つの座標空間を
+混在させている:
+
+```cpp
+int height = JNU_CallMethodByName(env, 0, fontMetrics, "getHeight", "()I").i;
+measureInfo.itemHeight  = height;          // ユーザー空間
+measureInfo.itemHeight += measureInfo.itemHeight/3;
+measureInfo.itemWidth   = size.cx;         // getMFStringSize -> デバイスピクセル
+```
+
+`FontMetrics.getHeight()` は `awt_Font.cpp` から返る時点で `ScaleDownY` 済みなので、Windows が
+デバイスピクセルとして解釈する `itemHeight` は `1 / スケール` に縮んでいる。一方 `DrawSelf` が描画に使う
+HFONT は `lfHeight` が `ScaleUpY` 済み(`awt_Font.cpp` の `CreateHFont_sub`)である。幅は
+`getMFStringSize` 由来で最初からデバイスピクセルなので正しい。この非対称が、報告された見た目
+**「幅は足りているが、文字の高さに対して行の高さがまったく足りない」**そのものである。
+
+上流: [JDK-8259913](https://bugs.openjdk.org/browse/JDK-8259913) *AWT menu items are not scaled
+correctly on Windows HiDPI displays*(未解決)。300% 以上に対して起票されているが、上記の算術は 100% を
+超えるすべてのスケールでスケールに比例して破綻する。
+
+切り分けの決め手は1枚のスクリーンショットの中にあった。同じ DPI でアプリ自身のメニューバーは正常に
+描画されている。Compose Desktop の `MenuBar` が `javax.swing.JMenuBar` を構築するためである
+(`ui-desktop` の逆アセンブルで確認: `MenuBarScope.setContent(javax.swing.JMenuBar, ...)`)。Swing は
+変換行列が適用された Java2D 経由で描画するのでどのスケールでも正しく、AWT のメニューピアはそうではない。
+
+### 除外した仮説
+
+- **Keryx 自身の座標変換のバグ**(`Modifier.nativeContextMenu` の
+  `(elementPosition + localPosition) / density.density`)。この除算は `java.awt.PopupMenu.show` の
+  仕様どおりである —— 同メソッドはインボーカのユーザー空間の座標を取り、Compose Desktop のポインタ座標は
+  `ユーザー空間 × density` だからである。macOS で問題が出ないのも同じ理由で、AppKit はポイント基準
+  なので `NSMenu` はこの値をそのまま正しく消費する。アプリ側の計算に変更は不要であり、実際に変更して
+  いない。
+- **Keryx 側でスケール係数を打ち消す**(`show` の前に x/y を掛け戻す)。却下 —— 直せるのは位置だけである。
+  ラベルの重なりは JDK のオーナードロー計測コールバックの内部で起きており、Java 側のどの呼び出しからも
+  手が届かない。行に収まるようメニューのフォントを縮める案も同じ理由で却下した —— 描画上の不具合を
+  別の不具合に置き換えるだけである。
+- **本物のチェック用ガターを導入した `java.awt.CheckboxMenuItem` 化**。フィード行のメニューが
+  チェック項目だらけなので疑ったが、チェック項目を1つも持たないタグ行のメニューでも同じように再現する。
+
+### 解決方法
+
+`defaultPopupHandle` は `AwtPopupHandle` を **macOS でのみ**選ぶようになり、Windows は Linux と同じ
+`SwingPopupHandle` に合流した。この選択はプロセス定数を既定値とする `macOs` 引数になっているが、これは
+`NativeMenuTest` がどの CI ホストでも対応関係を固定できるようにするためだけのものである。バックエンドに
+追随して変わる挙動が2つあるが、いずれも意図的なものである。セパレータが `"-"` ラベルの `MenuItem` では
+なく本物の `JPopupMenu.Separator` になること、そして `java.awt.MenuShortcut` では構造的に表現できない
+修飾キーなしのショートカット(F2 / Delete)がアクセラレータ列に表示されるようになることである。
+`forceHeavyweight` は Linux では必須ではなかったが Windows では必須になる —— Linux では FlatLaf が
+どのみちポップアップを heavyweight に強制するのに対し、Windows は `installLookAndFeel` のシステム L&F
+分岐を通るため、この1行だけが記事リーダーの WebView の背後にメニューが隠れるのを防いでいる。
+
+トレイも同じ対応の中で修正した。Compose の `Tray()` は内部で独自に `java.awt.PopupMenu` を構築しており
+(これも逆アセンブルで確認)、2項目が同様に潰れていたためである。`WindowsTray` は生の `TrayIcon` を駆動し、
+右クリックで `WindowsTrayMenu`(Swing)を開く —— これは `MacTray` が別の理由で `Tray()` を迂回している
+のと同じ形である。`TrayIcon.addActionListener` は `onTrayAction` に従来どおり接続してあるので
+`shouldHideOnTrayAction` のヒューリスティックは以前とまったく同じイベントを受け取るし、通知は
+`TrayIcon.displayMessage` 経由で出る —— これは `TrayState.sendNotification` が内部で呼んでいたものと同一
+である。インボーカ用の Frame だけは `MacTray` のものと1点異なり、記録に値する: フォーカスを取れるように
+してあり、使用時以外は非表示にしている。AWT の `PopupMenu` は自前のネイティブなモーダルループを持ち
+自分で閉じるのに対し、`JPopupMenu` は所有ウィンドウがフォーカスを保持し、かつ失える場合にのみ、外側の
+クリックで閉じるからである。
