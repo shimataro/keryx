@@ -45,11 +45,15 @@ cp local.properties.example local.properties   # 任意: Dropbox App Key を設�
     （DMG のボリュームアイコン設定。`hdiutil` 自体は OS 標準）
 - **Windows**
   - WiX Toolset v3 / v4 / v5（`PATH` に追加） — `packageMsi` に必要
-    （jpackage の Windows インストーラー生成。CI ではまだビルドしていない。`build.md` 参照）
+    （jpackage の Windows インストーラー生成）。GitHub ホストの `windows-latest` ランナーには
+    WiX Toolset v3.14.1 がプリインストール済みのため、`ci.yml` と `release.yml` のどちらも
+    追加のインストール手順なしでビルドできる。詳細は `build.md` 参照
 
-`fakeroot`/`rpm` も WiX も `ubuntu-latest` や素の Windows 環境には既定で入っていない。リリース
+`fakeroot`/`rpm` は `ubuntu-latest` に既定で入っていない。リリース
 ワークフローはパッケージング直前に `apt-get` で `fakeroot rpm` をインストールしている
-（`.github/workflows/release.yml`）。
+（`.github/workflows/release.yml`）。Xcode Command Line Tools と WiX Toolset は
+`macos-latest` / `windows-latest` の各ランナーイメージにそれぞれプリインストール済み —
+ローカルの開発機ではこの3つのうち足りないものを手動でセットアップする必要がある。
 
 ## よくある問題
 

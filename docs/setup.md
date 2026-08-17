@@ -45,11 +45,15 @@ following, per OS:
     `packageDmg` (sets the DMG volume icon; `hdiutil` itself ships with the OS)
 - **Windows**
   - WiX Toolset v3, v4, or v5, on `PATH` — required for `packageMsi` (jpackage's Windows
-    installer step; not yet built by CI, see [build.md](build.md))
+    installer step). GitHub-hosted `windows-latest` runners ship WiX Toolset v3.14.1
+    preinstalled, so both `ci.yml` and `release.yml` build it with no separate install
+    step — see [build.md](build.md).
 
-None of these are installed by default on `ubuntu-latest` or a fresh Windows machine; the release
-workflow installs `fakeroot rpm` via `apt-get` right before packaging
-(`.github/workflows/release.yml`).
+`fakeroot`/`rpm` are not installed by default on `ubuntu-latest`; the release workflow installs
+them via `apt-get` right before packaging (`.github/workflows/release.yml`). Xcode Command Line
+Tools and WiX Toolset already come preinstalled on the `macos-latest` and `windows-latest` runner
+images respectively — a local dev machine still needs whichever of these three it's missing set up
+manually.
 
 ## Common Issues
 
