@@ -93,10 +93,14 @@ internal class SingleInstanceCoordinator(private val appDataDir: File) {
     /** Returns false if no running instance could be reached (stale/missing port file, connection refused). */
     fun signalRunningInstance(uri: String? = null): Boolean {
         val portFile = File(appDataDir, PORT_FILE_NAME)
-        if (!portFile.exists()) return false
+        if (!portFile.exists()) {
+            Log.warn(TAG, "No activation port file at ${portFile.path}; cannot forward to a running instance")
+            return false
+        }
         val port = try {
             portFile.readText().trim().toInt()
         } catch (e: NumberFormatException) {
+            Log.warn(TAG, "Activation port file at ${portFile.path} is unreadable", e)
             return false
         }
         return try {
@@ -108,6 +112,7 @@ internal class SingleInstanceCoordinator(private val appDataDir: File) {
             }
             true
         } catch (e: IOException) {
+            Log.warn(TAG, "Could not reach the running instance's activation socket on port $port", e)
             false
         }
     }
