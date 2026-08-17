@@ -882,3 +882,93 @@ Compose 再 measure → ウィンドウリサイズ → `componentResized` → �
 **既に表示されているダイアログ**が、内容の変化でサイズを変える場合（フィード追加の候補リスト、設定の
 タブ切替）は、仕様どおり画面上でリサイズされる —— 上記の見送った対処法を参照。この場合に変わったのは、
 新たに露出する領域とボタン行の interop の穴が、L&F 既定ではなくダイアログ自身の色で塗られる点だけである。
+
+## Windows: 記事リーダーの WebView が一度も描画されず、どこかをクリックするとアプリがフリーズする
+
+**Status**: 解決済み —— リーダーの WebView（`ArticleDetailPane.kt` の `ArticleWebView`）に、書き込み
+可能な `desktopWebSettings.dataDirectory` を明示的に設定することで解決した。Windows だけに絞らず
+デスクトップ 3 OS 共通で適用している。ライブラリ側がこのパラメータを OS 分岐なしに一律で読むためで、
+macOS/Linux でこれまで問題が出ていなかったのは、たまたまそれぞれの暗黙のデフォルトが書き込み可能な
+場所に解決していたに過ぎない。
+
+### 症状
+
+Windows で、記事詳細ペインの幅とほぼ同じ幅の白い矩形がフィード一覧ペインの位置に表示され、本来の
+リーダー領域自体は空白のままだった —— 記事本文はおろか、リーダーが自身の中に HTML として描く
+「記事が選択されていません」のプレースホルダすら出ない。この状態でウィンドウのどこかをクリックすると、
+以降アプリが完全に応答しなくなった。macOS / Linux では再現しない。
+
+### 診断
+
+`WRYWEBVIEW_LOG=1`（`io.github.kdroidfilter:composewebview` 自身が持つ環境変数ゲート付きログ）を
+付けて実行したところ、見えている症状よりも一段階手前の、本当の失敗が判明した:
+
+```text
+[WryWebViewPanel] createIfNeeded handle=459234 parentIsWindow=true size=280x291
+Exception in thread "AWT-EventQueue-0" io.github.kdroidfilter.webview.wry.WebViewException$WryException:
+v1=WebView2 error: WindowsError(Error { code: HRESULT(0x80070005), message: "Access Denied." })
+        at ... NativeBindings.createWebview-E7Fn0XA(WryWebViewPanel.kt:787)
+        at ... WryWebViewPanel.createIfNeeded(WryWebViewPanel.kt:398)
+        at ... WryWebViewPanel.scheduleCreateIfNeeded$lambda$0(WryWebViewPanel.kt:589)
+        at java.desktop/javax.swing.Timer.fireActionPerformed(Timer.java:289)
+        ...
+        at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:90)
+```
+
+ネイティブの WebView2 サーフェス自体が一度も生成されていなかった —— 位置がズレていたのではない。
+位置を設定する呼び出し（`WryWebViewPanel.updateBounds()` の `setBounds`）自体が一度も走っていない。
+`webviewId` が null の間は早期リターンするためである。白い矩形の正体は、ライブラリがネイティブ
+サーフェスを乗せるために使う素の `java.awt.Canvas` だった（Windows だけ `SkikoInterop.createHost()`
+が Skiko の `HardwareLayer` ではなく素の `Canvas` を返す。WebView2 はトップレベルウィンドウの HWND を
+親にして自前で位置をミラーリングする方式のためで、`resolveParentHandle()`/`boundsInParent()` 参照）。
+そこには何も描画されていなかった。
+
+**根本原因**: `PlatformWebSettings.DesktopWebSettings.dataDirectory` はデフォルト `null` で、Keryx の
+`ArticleWebView` はこれを一度も設定していなかった。明示的なディレクトリがないと、WebView2 は実行
+ファイルの隣に自分のデータフォルダを作ろうとする —— 今回は `C:\Program Files\Java\jdk-25.0.4\bin\java.exe`
+（起動ログの `Acquired single-instance lock; running as primary instance from ...` 行より）—— これは
+一般ユーザーが書き込めない場所であるため `HRESULT(0x80070005)` になる。これは上流の
+[kdroidFilter/ComposeNativeWebview#31](https://github.com/kdroidFilter/ComposeNativeWebview/issues/31)
+と完全に一致する —— 例外クラス、呼び出しチェーン、HRESULT すべて同一で、コントリビューターのコメントも
+同じ修正（`dataDirectory` に書き込み可能なパスを設定する）を確認している。`dataDirectory` はライブラリ
+内で OS 分岐されておらず（`WebViewDesktop.kt` の `defaultWebViewFactory` がどの分岐でも同じ値を
+`NativeWebView(...)` に渡す）、macOS/Linux で問題が出ていなかったのは、それぞれのプラットフォームの
+暗黙のデフォルトディレクトリがたまたま書き込み可能だったからにすぎない。
+
+この一つの原因でフリーズも説明できる。`WryWebViewPanel.createIfNeeded()` の非 macOS 経路は
+`NativeBindings.createWebview(...)` の呼び出しを `catch (e: RuntimeException)` で囲んでいるが、
+ライブラリの jar に対して `javap` を実行したところ `WebViewException` は `RuntimeException` ではなく
+`java.lang.Exception` を直接継承していることが確認できた —— つまりこの `catch` 節は実際には機能せず、
+例外は uncaught のまま EDT まで届く（上記の `Exception in thread "AWT-EventQueue-0"` は AWT 自身の
+デフォルト未捕捉ハンドラの出力そのもの）。例外が `createIfNeeded()` を中断させ `stopCreateTimer()` に
+到達できないため、`scheduleCreateIfNeeded()` の 100ms 間隔の `javax.swing.Timer` は止まらず、失敗する
+WebView2 生成呼び出しを EDT 上で無限に再試行し続ける —— これは EDT が新しい入力に応答しなくなるという
+症状と整合する。
+
+### 除外した仮説
+
+- **Windows 固有の位置(bounds)のバグ** —— `WRYWEBVIEW_LOG=1` が使える前、見えている症状だけから
+  立てた最初の仮説。Windows だけ `WryWebViewPanel` がネイティブサーフェスの位置をトップレベルウィンドウの
+  HWND に対して手動でミラーリングしており（`resolveParentHandle()` が `parentIsWindow=true` を返し、
+  `boundsInParent()` が `convertPoint(host, 0, 0, window) - window.insets` をミラーする）、Compose の
+  interop とネイティブ位置とのレースに見えたため。ログで `updateBounds()`/`setBounds` が一度も走って
+  いないことが判明した時点で除外 —— ネイティブサーフェス自体が存在しないので、ズレる位置がそもそも
+  ない。`dataDirectory` の修正後の再検証ログで、`createIfNeeded success`、正しいペイン相対位置での
+  `setBounds` の 1 回だけの発火、クリックしてもフリーズしないことを確認し、解消を確認した。
+
+### 解決方法
+
+`ArticleWebView` は `rememberWebViewStateWithHTMLData(...)` の直後、`WebView(...)` コンポーザブルに
+到達する前に、`remember(webViewState) { ... }` の中で
+`webViewState.webSettings.desktopWebSettings.dataDirectory` を `AppDirs.cacheDir()` 配下の
+`webview` サブディレクトリに設定するようにした。これは `LaunchedEffect` ではなく同期的に、かつ
+`WebView(...)` が最初にコンポーズされる前に行う必要がある —— 内部の `WryWebViewPanel` の
+`dataDirectory` フィールドは `private final` で、`ActualWebView` の
+`remember(state, factory) { factory(...) }` がネイティブパネルを構築する際に一度だけキャプチャされ、
+以後読み直されないためである。ディレクトリ自体の作成はネイティブライブラリ側に任せ(Keryx 側では
+`mkdirs()` を呼ばない)、再起動をまたいで永続させる —— 上流が提案した修正(毎回タイムスタンプ付きの
+一時ディレクトリを新規作成する)とは異なり、埋め込みコンテンツ(SNS 埋め込みなど)の Cookie/
+ローカルストレージが再起動のたびに捨てられることなく残る。OS 分岐は不要だった —— このプロパティは
+macOS/Linux にも同一に適用され、既に書き込み可能な暗黙のデフォルトを明示的な値に置き換えるだけなので
+無害である。パス結合ロジック `webViewDataDirectory(cacheDir: String): String` は `commonTest` の
+`ArticleReaderDataDirectoryTest.kt` でカバーしている。

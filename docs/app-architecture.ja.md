@@ -94,6 +94,13 @@ WebView **内部**の HTML として描画する（`ui/article/ArticleWebViewHtm
 同様に常時表示し、未選択時はボタンを非表示にせず無効化する — これによりツールバーの Compose
 構造（ひいてはリーダーの計測済みバウンズ）が状態間で常に同一に保たれる。
 
+`ArticleWebView` は `webSettings.desktopWebSettings.dataDirectory` も明示的に設定しており、
+`AppDirs.cacheDir()` 配下の `webview` サブディレクトリを、デスクトップ 3 OS すべてに同一に適用している
+（OS 分岐なし）。デフォルトの `null` のままだと WebView2 は実行ファイルの隣に自分のデータフォルダを
+作ろうとし、その場所が書き込み不可の場合は Access Denied で失敗する — 調査の詳細は
+[known-issues.md](known-issues.ja.md) 参照（この生成失敗の例外が uncaught のまま伝播し、ライブラリの
+生成リトライタイマが止まらなくなることが、クリック時にアプリ全体がフリーズする原因でもあった）。
+
 ### デスクトップトレイ（プラットフォーム分岐）
 
 `tray/KeryxTray.kt` が 3 実装のいずれかを選ぶ。

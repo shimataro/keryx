@@ -202,6 +202,10 @@ why the reader is always mounted:
   hiding them. The toolbar's position and height never change between any of these states.
 - Toggling light/dark theme (and the font-size setting) while an article is open re-renders the
   reader in the new theme/scale immediately (scroll resets to the top — expected).
+- (Windows) On startup, the reader renders in its correct pane position (no stray blank/misplaced
+  rectangle) and clicking anywhere in the window never freezes the app — the regression check for
+  the WebView2 `dataDirectory` Access Denied bug in `known-issues.md`. Running with
+  `WRYWEBVIEW_LOG=1` set should show no `WebViewException` in the console.
 
 Native context menus (`nativeContextMenu`, backed by a real `JPopupMenu` on Linux and
 `java.awt.PopupMenu` on macOS/Windows — not a Compose-drawn popup) cannot be exercised by Compose

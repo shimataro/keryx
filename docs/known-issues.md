@@ -910,3 +910,95 @@ A dialog that is **already visible** and then changes size because its content d
 candidate list, a Settings tab switch) still resizes on screen, by design — see the rejected
 workaround above. What changed for that case is only that the newly exposed area, and the button
 row's interop hole, now paint the dialog's own color instead of the Look & Feel's default.
+
+## Windows: the article reader's WebView never rendered, and clicking anywhere froze the app
+
+**Status**: Resolved — by setting an explicit, writable `desktopWebSettings.dataDirectory` for the
+reader's WebView (`ArticleWebView` in `ArticleDetailPane.kt`), applied on all three desktop
+platforms rather than gated to Windows, since the library reads the same parameter uniformly and
+macOS/Linux were only unaffected because their own implicit defaults happened to already be
+writable.
+
+### Symptom
+
+On Windows, a white rectangle roughly the width of the article-detail pane appeared over the feed
+list pane instead, and the reader area itself stayed blank — no article content, not even the "no
+article selected" placeholder the reader renders as HTML inside itself. Clicking anywhere in the
+window after that point stopped the app responding entirely. Not reproducible on macOS or Linux.
+
+### Diagnosis
+
+Running with `WRYWEBVIEW_LOG=1` (`io.github.kdroidfilter:composewebview`'s own env-gated logging)
+surfaced the real failure, one level below where the visible symptom suggested:
+
+```text
+[WryWebViewPanel] createIfNeeded handle=459234 parentIsWindow=true size=280x291
+Exception in thread "AWT-EventQueue-0" io.github.kdroidfilter.webview.wry.WebViewException$WryException:
+v1=WebView2 error: WindowsError(Error { code: HRESULT(0x80070005), message: "Access Denied." })
+        at ... NativeBindings.createWebview-E7Fn0XA(WryWebViewPanel.kt:787)
+        at ... WryWebViewPanel.createIfNeeded(WryWebViewPanel.kt:398)
+        at ... WryWebViewPanel.scheduleCreateIfNeeded$lambda$0(WryWebViewPanel.kt:589)
+        at java.desktop/javax.swing.Timer.fireActionPerformed(Timer.java:289)
+        ...
+        at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:90)
+```
+
+The native WebView2 surface was never created at all — the position was never wrong, because no
+positioning call (`WryWebViewPanel.updateBounds()`'s `setBounds`) ever ran; it early-returns while
+`webviewId` is null. The white rectangle was the plain `java.awt.Canvas` the library hosts the
+native surface in (Windows is the one platform where `SkikoInterop.createHost()` returns a bare
+`Canvas` rather than a Skiko `HardwareLayer`, since WebView2 is positioned by mirroring the
+top-level window's HWND rather than parented directly — see `resolveParentHandle()`/
+`boundsInParent()`), with nothing ever drawn into it.
+
+**Root cause**: `PlatformWebSettings.DesktopWebSettings.dataDirectory` defaults to `null`, and
+Keryx's `ArticleWebView` never set it. With no explicit directory, WebView2 tries to create its own
+data folder next to the host executable — here `C:\Program Files\Java\jdk-25.0.4\bin\java.exe`
+(from the startup log's `Acquired single-instance lock; running as primary instance from ...`
+line), a location a standard user cannot write to, hence `HRESULT(0x80070005)`. This matches
+upstream [kdroidFilter/ComposeNativeWebview#31](https://github.com/kdroidFilter/ComposeNativeWebview/issues/31)
+exactly — same exception class, same call chain, same HRESULT — including a contributor comment
+confirming the same fix (set `dataDirectory` to a writable path). `dataDirectory` is not
+OS-conditional in the library (`WebViewDesktop.kt`'s `defaultWebViewFactory` passes it to
+`NativeWebView(...)` on every branch), so macOS/Linux were only unaffected because their platforms'
+own implicit default directories happened to already be writable.
+
+That single cause explains the freeze too. `WryWebViewPanel.createIfNeeded()`'s non-macOS path
+wraps `NativeBindings.createWebview(...)` in `catch (e: RuntimeException)`, but `javap` on the
+library jar confirms `WebViewException` extends `java.lang.Exception` directly, not
+`RuntimeException` — so that catch clause never actually catches it, and the exception reaches the
+EDT uncaught (the "Exception in thread AWT-EventQueue-0" above is AWT's own default uncaught-handler
+output). Because the exception aborts `createIfNeeded()` before `stopCreateTimer()` runs,
+`scheduleCreateIfNeeded()`'s 100ms `javax.swing.Timer` never stops, and keeps retrying the failing
+WebView2 creation call indefinitely on the EDT, which is consistent with the EDT becoming
+unresponsive to new input.
+
+### Ruled out
+
+- **A Windows-specific bounds/positioning bug** — the initial hypothesis, based on the visible
+  symptom alone, before `WRYWEBVIEW_LOG=1` was available: Windows is the only platform where
+  `WryWebViewPanel` mirrors the native surface's position manually against the top-level window's
+  HWND (`resolveParentHandle()` returns `parentIsWindow=true`, and `boundsInParent()` mirrors
+  `convertPoint(host, 0, 0, window) - window.insets`), which looked like a plausible source of a
+  Compose-interop-vs-native-position race. Ruled out once the log showed `updateBounds()`/
+  `setBounds` never ran at all — there was no position to be wrong, because there was no native
+  surface. Verified fixed after the `dataDirectory` change: the retested log shows
+  `createIfNeeded success`, `setBounds` firing once with the correct pane-relative position, and no
+  freeze on click.
+
+### How this was resolved
+
+`ArticleWebView` now sets `webViewState.webSettings.desktopWebSettings.dataDirectory` to
+`AppDirs.cacheDir()` + a `webview` subdirectory, via `remember(webViewState) { ... }` right after
+`rememberWebViewStateWithHTMLData(...)` and before the `WebView(...)` composable is reached.
+This has to run synchronously (not from a `LaunchedEffect`) and before the first composition of
+`WebView(...)`: the underlying `WryWebViewPanel`'s `dataDirectory` field is `private final`,
+captured once when `ActualWebView`'s `remember(state, factory) { factory(...) }` constructs the
+native panel, and never re-read afterward. The directory is left for the native library to create
+(no `mkdirs()` on the Keryx side) and persists across restarts — unlike the fix suggested upstream,
+which uses a fresh timestamped temp directory on every launch — so cookies/local storage for
+embedded content (e.g. SNS embeds) survive a restart instead of being thrown away each time. No OS
+branch was needed: the property is applied identically on macOS/Linux, which is harmless there
+since it just replaces an already-writable implicit default with an explicit one.
+`webViewDataDirectory(cacheDir: String): String`, the path-joining logic, is covered by
+`ArticleReaderDataDirectoryTest.kt` in `commonTest`.

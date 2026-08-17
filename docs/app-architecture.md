@@ -81,6 +81,14 @@ the same theme colors). The toolbar above the reader is likewise always present,
 disabled rather than hidden when nothing is selected, keeping its Compose structure — and
 therefore the reader's measured bounds — identical across states.
 
+`ArticleWebView` also sets `webSettings.desktopWebSettings.dataDirectory` explicitly, to
+`AppDirs.cacheDir()` plus a `webview` subdirectory, applied identically on all three desktop
+platforms (no OS branch). Left at its `null` default, WebView2 tries to create its data folder next
+to the host executable, which fails with Access Denied whenever that location isn't user-writable —
+see [known-issues.md](known-issues.md) for the investigation (an uncaught exception from the failed
+creation also left the library's creation-retry timer running forever, which was the cause of an
+app-wide freeze on click).
+
 ### Desktop Tray (platform branch)
 
 `tray/KeryxTray.kt` picks one of three implementations:

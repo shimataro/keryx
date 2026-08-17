@@ -304,6 +304,10 @@ Linux の SNI トレイでは `SniConnection`（接続・バス名取得・expor
   続けること。ツールバーの位置と高さはこれらどの状態でも変わらないこと。
 - 記事を開いた状態でライト／ダークテーマ（および文字サイズ設定）を切り替えると、リーダーが
   即座に新しいテーマ／スケールで再描画されること（スクロールが先頭に戻るのは想定どおり）。
+- （Windows）起動時にリーダーが正しいペイン位置に描画されること（空白／位置ズレした矩形が
+  残らないこと）、ウインドウのどこをクリックしてもアプリがフリーズしないこと —— `known-issues.md`
+  に記載した WebView2 の `dataDirectory` 未設定による Access Denied バグの回帰確認。
+  `WRYWEBVIEW_LOG=1` を付けて起動し、コンソールに `WebViewException` が出ないことを確認する。
 
 ネイティブなコンテキストメニュー（`nativeContextMenu`。Linux では実際の `JPopupMenu`、macOS/Windows
 では `java.awt.PopupMenu` によるもので、Compose 描画のポップアップではない）は Compose UI テストで
