@@ -189,6 +189,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
 
       # The tag is the single source of truth for the released version: `v0.1.0` -> `0.1.0`.
       # An optional SemVer-style pre-release suffix (`-beta.1`, `-rc.2`, ...) is accepted here for
