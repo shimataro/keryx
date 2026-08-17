@@ -92,10 +92,10 @@ Linux — on Linux because AWT's popup ignores the Look & Feel entirely, and on 
 JDK's AWT menu peer ignores display scaling, so above 100% it opens away from the cursor and paints
 its own labels on top of each other (see `known-issues.md`). The tray menu follows the same split,
 which is why Windows has its own `WindowsTray` instead of Compose's `Tray()`. The OPML
-import/export file dialog follows the same split: `java.awt.FileDialog` on macOS / Windows and a
-`javax.swing.JFileChooser` on Linux, where AWT's own file dialog routes through GTK native code
-that can crash the app (see `app-architecture.md` and `known-issues.md`). The UI
-font is the OS's own: SF Pro on macOS, Segoe UI on Windows, and on Linux the font resolved by
+import/export file dialog follows a different split: `java.awt.FileDialog` on macOS **and
+Windows**, and `javax.swing.JFileChooser` only on Linux, where AWT's own file dialog routes
+through GTK native code that can crash the app (see `app-architecture.md` and `known-issues.md`).
+The UI font is the OS's own: SF Pro on macOS, Segoe UI on Windows, and on Linux the font resolved by
 the Look & Feel, then the desktop's configured font from XSettings, falling back to Adwaita Sans /
 Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
 
