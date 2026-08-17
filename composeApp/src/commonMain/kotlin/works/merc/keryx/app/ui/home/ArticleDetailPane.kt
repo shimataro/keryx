@@ -39,6 +39,7 @@ import io.github.kdroidfilter.webview.wry.WryWebViewPanel
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.data.local.db.Articles
+import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.WindowDragArea
@@ -305,6 +306,19 @@ private fun ArticleWebView(html: String, body: String, baseUrl: String?) {
     val navigator = rememberWebViewNavigator(scope, interceptor)
     val webViewState = rememberWebViewStateWithHTMLData(data = html)
 
+    // Without an explicit data directory, WebView2 tries to create its own data folder next to
+    // the host executable, which fails with HRESULT(0x80070005) Access Denied when that
+    // location isn't user-writable (e.g. java.exe under Program Files during `gradlew run`, or
+    // a per-machine install under Program Files) — see docs/known-issues.md. The failed creation
+    // throws WebViewException, which extends Exception rather than RuntimeException, so the
+    // library's own `catch (e: RuntimeException)` around the native call doesn't catch it; it
+    // propagates uncaught and the library's creation retry timer never gets a chance to stop
+    // itself, retrying indefinitely. Setting this is harmless on macOS/Linux, which already
+    // resolve a writable default, so no OS branch is needed.
+    remember(webViewState) {
+        webViewState.webSettings.desktopWebSettings.dataDirectory = webViewDataDirectory(AppDirs.cacheDir())
+    }
+
     // Workaround: this (beta) library's rememberWebViewStateWithHTMLData doesn't reliably
     // navigate past its initial "about:blank" on desktop — confirmed during the spike. Push
     // the HTML manually once the WebView reports it's idle. Guarded on the rendered *document*
@@ -360,3 +374,12 @@ private fun ArticleWebView(html: String, body: String, baseUrl: String?) {
  */
 internal fun shouldLoadArticleHtml(loadingState: LoadingState, loadedHtml: String?, html: String): Boolean =
     loadingState is LoadingState.Finished && loadedHtml != html
+
+/**
+ * The directory the reader's native WebView should store its browsing data (cookies, local
+ * storage, WebView2's own profile) in, given the app's [cacheDir]. Trims any trailing path
+ * separator from [cacheDir] so the joined path never doubles up a slash regardless of whether
+ * the caller's directory string already ends with one.
+ */
+internal fun webViewDataDirectory(cacheDir: String): String =
+    cacheDir.trimEnd('/', '\\') + "/webview"
