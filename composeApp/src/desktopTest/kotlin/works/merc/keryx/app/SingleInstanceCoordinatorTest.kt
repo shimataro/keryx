@@ -79,6 +79,7 @@ class SingleInstanceCoordinatorTest {
 
     /** Same white-box capture pattern as `core.LogTest`: attach a handler to the JUL logger [Log] writes to. */
     private fun withCapturedLogRecords(block: () -> Unit): List<LogRecord> {
+        val previousLogDir = System.getProperty("keryx.log.dir")
         System.setProperty("keryx.log.dir", System.getProperty("java.io.tmpdir"))
         val logger = Logger.getLogger(Log.LOGGER_NAME)
         val captured = mutableListOf<LogRecord>()
@@ -93,6 +94,11 @@ class SingleInstanceCoordinatorTest {
             block()
         } finally {
             logger.removeHandler(handler)
+            if (previousLogDir == null) {
+                System.clearProperty("keryx.log.dir")
+            } else {
+                System.setProperty("keryx.log.dir", previousLogDir)
+            }
         }
         return captured
     }
