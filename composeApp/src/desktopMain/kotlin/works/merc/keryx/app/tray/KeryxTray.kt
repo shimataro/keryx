@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.drawUnreadDot
 import works.merc.keryx.app.platform.isMacOs
+import works.merc.keryx.app.platform.isWindows
 import works.merc.keryx.app.rememberDrawableImage
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.tray_hide
@@ -31,7 +32,10 @@ import java.awt.image.BufferedImage
  *   opening the menu).
  * - Linux uses [LinuxTray] whenever [sniConnection] is non-null, because AWT's X11 tray cannot
  *   draw a transparent icon (see the KDoc there).
- * - Everything else - and Linux without a StatusNotifierWatcher - uses Compose's own `Tray()`.
+ * - Windows uses [WindowsTray], because the `java.awt.PopupMenu` behind Compose's `Tray()` is
+ *   drawn by a JDK peer that ignores display scaling, overlapping the menu's own labels above
+ *   100% (see the KDoc there).
+ * - Linux without a StatusNotifierWatcher uses Compose's own `Tray()`.
  *
  * The icon asset follows the same split: the outlined glyph where the icon is composited with
  * real alpha at a reasonable size (macOS, Linux SNI), the full-colour one everywhere else.
@@ -50,10 +54,11 @@ import java.awt.image.BufferedImage
  * window"), and was confirmed to add nothing even when it does fire (the window merely
  * backgrounded already comes to front via macOS's own default click-to-activate behavior,
  * independent of any app code) - so [MacTray] doesn't take this parameter at all.
- * @param onTrayAction Invoked for Compose's own `Tray()` `onAction` (Windows, and Linux without
- * an SNI host) - the fallback path where a notification click and an icon click share the same
- * single hook, so it cannot simply be [onToggle]. The call site in `main.kt` decides between hide
- * and activate via [shouldHideOnTrayAction]'s focus-plus-notification-recency heuristic.
+ * @param onTrayAction Invoked for the AWT `TrayIcon` action event (Windows, via [WindowsTray], and
+ * Linux without an SNI host, via Compose's own `Tray()` `onAction`) - the path where a
+ * notification click and an icon click share the same single hook, so it cannot simply be
+ * [onToggle]. The call site in `main.kt` decides between hide and activate via
+ * [shouldHideOnTrayAction]'s focus-plus-notification-recency heuristic.
  * @param newArticleNotifications Source of new-article notification messages.
  */
 @Composable
@@ -123,6 +128,22 @@ internal fun ApplicationScope.KeryxTray(
             )
         }
 
+        isWindows -> {
+            val trayBadgedImage = remember(trayBaseImage, unreadCount) {
+                trayBaseImage?.let { drawUnreadDot(it, unreadCount) }
+            }
+            WindowsTray(
+                image = trayBadgedImage,
+                tooltip = tooltip,
+                toggleLabel = toggleLabel,
+                quitLabel = quitLabel,
+                onToggle = onToggle,
+                onQuit = onQuit,
+                onTrayAction = onTrayAction,
+                newArticleNotifications = newArticleNotifications,
+            )
+        }
+
         isTraySupported -> {
             val trayState = rememberTrayState()
             val trayBadgedImage = remember(trayBaseImage, unreadCount) {
@@ -142,8 +163,8 @@ internal fun ApplicationScope.KeryxTray(
                         Item(quitLabel, onClick = onQuit)
                     },
                 )
-                // MacTray and LinuxTray consume newArticleNotifications themselves. Compose's
-                // Tray() is the only thing that turns a queued TrayState notification into an
+                // MacTray, LinuxTray and WindowsTray consume newArticleNotifications themselves.
+                // Compose's Tray() is the only thing that turns a queued TrayState notification into an
                 // actual OS notification, and TrayState's channel is RENDEZVOUS - anything sent
                 // while no Tray() is composed is dropped. Collecting here keeps the subscription
                 // alive exactly as long as the sink is.

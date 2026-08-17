@@ -3,6 +3,8 @@ package works.merc.keryx.app
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.REG_EXE_TIMEOUT_MS
 import works.merc.keryx.app.platform.osName
+import java.io.File
+import java.io.IOException
 
 private const val LOG_TAG = "UriScheme"
 
@@ -88,20 +90,25 @@ internal fun registerWindowsUriScheme(
     runCommand: (List<String>) -> Int = { args -> runProcessWithTimeout(args, REG_EXE_TIMEOUT_MS) },
 ) {
     val reg = "reg.exe"
+    val (importCommand, regFile) = try {
+        buildShellOpenCommandImport(
+            "HKEY_CURRENT_USER\\Software\\Classes\\keryx\\shell\\open\\command",
+            launcherPath,
+        )
+    } catch (e: IOException) {
+        Log.warn(LOG_TAG, "Could not prepare the Windows URI scheme registry file", e)
+        return
+    }
     val commands = listOf(
         listOf(reg, "add", "HKEY_CURRENT_USER\\Software\\Classes\\keryx", "/ve", "/d", "URL:keryx Protocol", "/f"),
         listOf(reg, "add", "HKEY_CURRENT_USER\\Software\\Classes\\keryx", "/v", "URL Protocol", "/d", "", "/f"),
-        listOf(
-            reg,
-            "add",
-            "HKEY_CURRENT_USER\\Software\\Classes\\keryx\\shell\\open\\command",
-            "/ve",
-            "/d",
-            "\"$launcherPath\" \"%1\"",
-            "/f",
-        ),
+        importCommand,
     )
-    runRegistryCommands(commands, "Windows URI scheme", runCommand)
+    try {
+        runRegistryCommands(commands, "Windows URI scheme", runCommand)
+    } finally {
+        regFile.delete()
+    }
 }
 
 /**
@@ -117,20 +124,55 @@ internal fun registerWindowsOpmlAssociation(
 ) {
     val reg = "reg.exe"
     val progId = "Keryx.opml"
+    val (importCommand, regFile) = try {
+        buildShellOpenCommandImport(
+            "HKEY_CURRENT_USER\\Software\\Classes\\$progId\\shell\\open\\command",
+            launcherPath,
+        )
+    } catch (e: IOException) {
+        Log.warn(LOG_TAG, "Could not prepare the Windows .opml association registry file", e)
+        return
+    }
     val commands = listOf(
         listOf(reg, "add", "HKEY_CURRENT_USER\\Software\\Classes\\.opml", "/ve", "/d", progId, "/f"),
         listOf(reg, "add", "HKEY_CURRENT_USER\\Software\\Classes\\$progId", "/ve", "/d", "OPML Document", "/f"),
-        listOf(
-            reg,
-            "add",
-            "HKEY_CURRENT_USER\\Software\\Classes\\$progId\\shell\\open\\command",
-            "/ve",
-            "/d",
-            "\"$launcherPath\" \"%1\"",
-            "/f",
-        ),
+        importCommand,
     )
-    runRegistryCommands(commands, "Windows .opml association", runCommand)
+    try {
+        runRegistryCommands(commands, "Windows .opml association", runCommand)
+    } finally {
+        regFile.delete()
+    }
+}
+
+/**
+ * Builds the `reg.exe import <tempfile>` command that writes [launcherPath] as the default value
+ * of [commandKey] (a `...\shell\open\command` key), via a temporary `.reg` file rather than
+ * `reg.exe add ... /d "\"<path>\" \"%1\""` directly.
+ *
+ * `ProcessBuilder`'s Windows argument encoding has a long-standing legacy heuristic (JDK-7032109 /
+ * JDK-8250568 / JDK-8282989): a command-line argument whose first *and* last characters are both
+ * `"` is treated as "already quoted" and passed through without escaping its interior. The `/d`
+ * value needed here — `"<launcherPath>" "%1"` — starts and ends with `"`, so it hits exactly that
+ * heuristic: the embedded `" "` in the middle reaches the actual Windows command line unescaped,
+ * and `reg.exe`'s own argv parser then splits it into two separate arguments instead of one, which
+ * `reg.exe add /d` rejects (a silent `exit 1`, logged by [runRegistryCommands] with no detail since
+ * `reg.exe`'s stderr isn't captured). A `.reg` file has its own, unambiguous escaping syntax that
+ * this code controls directly, sidestepping `ProcessBuilder`'s Windows command-line reconstruction
+ * — and therefore that heuristic — entirely.
+ *
+ * @return The `reg.exe import` command to run, paired with the temp file it reads from (the caller
+ * deletes it once the command has run).
+ */
+private fun buildShellOpenCommandImport(commandKey: String, launcherPath: String): Pair<List<String>, File> {
+    val escapedPath = launcherPath.replace("\\", "\\\\").replace("\"", "\\\"")
+    val regFileText = "Windows Registry Editor Version 5.00\r\n\r\n[$commandKey]\r\n@=\"\\\"$escapedPath\\\" \\\"%1\\\"\"\r\n"
+    val tempFile = File.createTempFile("keryx-uri-scheme-", ".reg")
+    // reg.exe needs a UTF-16LE .reg file with a BOM to parse non-ASCII content correctly — the
+    // install path can contain non-ASCII characters, since packageMsi's dirChooser lets the user
+    // pick any install directory.
+    tempFile.writeBytes(byteArrayOf(0xFF.toByte(), 0xFE.toByte()) + regFileText.toByteArray(Charsets.UTF_16LE))
+    return listOf("reg.exe", "import", tempFile.path) to tempFile
 }
 
 /**

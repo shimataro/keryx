@@ -123,7 +123,10 @@ fun main(args: Array<String>) {
         // argv, so incomingArg is null here and only a plain activation is forwarded — see the
         // diagnostic note in docs/sync-architecture.md.
         Log.info(LOG_TAG, "Single-instance lock held by another instance; forwarding activation (hasArg=${incomingArg != null}) and exiting")
-        singleInstanceCoordinator.signalRunningInstance(incomingArg)
+        val forwarded = singleInstanceCoordinator.signalRunningInstance(incomingArg)
+        if (!forwarded) {
+            Log.warn(LOG_TAG, "Failed to forward activation (hasArg=${incomingArg != null}) to the running instance")
+        }
         return
     }
     Log.info(LOG_TAG, "Acquired single-instance lock; running as primary instance from ${currentExecutablePath()}")

@@ -1,11 +1,19 @@
 package works.merc.keryx.app
 
+import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class UriSchemeRegistrationTest {
+    /** Reads a `reg.exe import <path>` command's temp `.reg` file back as text, stripping the UTF-16LE BOM. */
+    private fun regFileTextFor(importCommand: List<String>): String {
+        val path = importCommand.last()
+        val bytes = File(path).readBytes()
+        return String(bytes, 2, bytes.size - 2, Charsets.UTF_16LE)
+    }
+
     @Test
     fun macOsNeedsNoRuntimeRegistration() {
         assertEquals(UriSchemeRegistration.NONE, uriSchemeRegistrationFor("Mac OS X"))
@@ -65,22 +73,27 @@ class UriSchemeRegistrationTest {
     @Test
     fun windowsRegistrationWritesUnderTheCurrentUserHive() {
         val recordedCommands = mutableListOf<List<String>>()
+        var importedRegFileText: String? = null
         registerWindowsUriScheme(launcherPath = "C:\\Program Files\\Keryx\\Keryx.exe") { command ->
             recordedCommands.add(command)
+            if (command.first() == "reg.exe" && command.getOrNull(1) == "import") {
+                importedRegFileText = regFileTextFor(command)
+            }
             0
         }
 
         assertEquals(3, recordedCommands.size)
         for (command in recordedCommands) {
-            assertTrue(command.any { it.contains("HKEY_CURRENT_USER\\Software\\Classes\\keryx") })
             assertTrue(command.none { it.contains("HKEY_CLASSES_ROOT") })
         }
         assertTrue(
-            recordedCommands.any { it.contains("HKEY_CURRENT_USER\\Software\\Classes\\keryx\\shell\\open\\command") },
+            recordedCommands.take(2).all { it.any { arg -> arg.contains("HKEY_CURRENT_USER\\Software\\Classes\\keryx") } },
         )
-        assertTrue(
-            recordedCommands.any { command -> command.any { it == "\"C:\\Program Files\\Keryx\\Keryx.exe\" \"%1\"" } },
-        )
+        // The shell\open\command write goes through a .reg file import (see buildShellOpenCommandImport) —
+        // ProcessBuilder's Windows quoting mishandles a "\"<path>\" \"%1\"" argument passed directly.
+        val regText = checkNotNull(importedRegFileText) { "expected a reg.exe import command" }
+        assertTrue(regText.contains("[HKEY_CURRENT_USER\\Software\\Classes\\keryx\\shell\\open\\command]"))
+        assertTrue(regText.contains("@=\"\\\"C:\\\\Program Files\\\\Keryx\\\\Keryx.exe\\\" \\\"%1\\\"\""))
     }
 
     @Test
@@ -97,8 +110,12 @@ class UriSchemeRegistrationTest {
     @Test
     fun windowsOpmlAssociationWritesUnderTheCurrentUserHiveViaADedicatedProgId() {
         val recordedCommands = mutableListOf<List<String>>()
+        var importedRegFileText: String? = null
         registerWindowsOpmlAssociation(launcherPath = "C:\\Program Files\\Keryx\\Keryx.exe") { command ->
             recordedCommands.add(command)
+            if (command.first() == "reg.exe" && command.getOrNull(1) == "import") {
+                importedRegFileText = regFileTextFor(command)
+            }
             0
         }
 
@@ -112,12 +129,9 @@ class UriSchemeRegistrationTest {
         assertTrue(
             recordedCommands.any { command -> command.any { it == "Keryx.opml" } },
         )
-        assertTrue(
-            recordedCommands.any { it.contains("HKEY_CURRENT_USER\\Software\\Classes\\Keryx.opml\\shell\\open\\command") },
-        )
-        assertTrue(
-            recordedCommands.any { command -> command.any { it == "\"C:\\Program Files\\Keryx\\Keryx.exe\" \"%1\"" } },
-        )
+        val regText = checkNotNull(importedRegFileText) { "expected a reg.exe import command" }
+        assertTrue(regText.contains("[HKEY_CURRENT_USER\\Software\\Classes\\Keryx.opml\\shell\\open\\command]"))
+        assertTrue(regText.contains("@=\"\\\"C:\\\\Program Files\\\\Keryx\\\\Keryx.exe\\\" \\\"%1\\\"\""))
     }
 
     @Test
