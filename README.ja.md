@@ -21,7 +21,7 @@
 
 ## 対応プラットフォーム
 
-現在 Windows / macOS / Linux に対応。Android・iOS/iPadOS/macOS のネイティブアプリは今後対応予定。
+現在 Windows / macOS / Linux に対応。Android・iOS/iPadOS 向けのネイティブアプリは今後対応予定で、macOS も同じ取り組みの一環として将来ネイティブアプリのラインナップに加わる予定。
 
 ## ダウンロード
 
