@@ -101,11 +101,14 @@ app-wide freeze on click).
 | Linux (no SNI host) | Compose `Tray()` | Works as-is. |
 
 `MacTray` and `WindowsTray` both bypass `Tray()` by driving a raw `TrayIcon`, but for unrelated
-reasons and with one deliberate difference: `MacTray`'s invoker frame is permanently shown and
+reasons and with two deliberate differences. `MacTray`'s invoker frame is permanently shown and
 non-focusable, because an AWT `PopupMenu` runs its own native modal loop, whereas `WindowsTray`'s is
 focusable and hidden between uses, because a `JPopupMenu` only closes on an outside click if its
-owning window can hold — and lose — focus. Both consume `newArticleNotifications` themselves, since
-only Compose's `Tray()` turns a queued `TrayState` notification into a real OS one.
+owning window can hold — and lose — focus. And `MacTray` positions the menu from the event's own
+`xOnScreen`/`yOnScreen`, while `WindowsTray` goes through `trayMenuAnchor` and `MouseInfo` instead:
+a `TrayIcon` MouseEvent carries *device* pixels on Windows but *points* on macOS, and
+`Window.setLocation` wants user space on both. Both consume `newArticleNotifications` themselves,
+since only Compose's `Tray()` turns a queued `TrayState` notification into a real OS one.
 
 **Why Linux needs SNI.** `sun.awt.X11.XTrayIconPeer.IconCanvas.paint()` fills the whole 24x24 canvas
 with the component background *before* drawing the icon, and `sun.awt.X11.XSystemTrayPeer` never reads

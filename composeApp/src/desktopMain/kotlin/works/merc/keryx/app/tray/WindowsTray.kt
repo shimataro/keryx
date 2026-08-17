@@ -10,6 +10,8 @@ import androidx.compose.ui.window.isTraySupported
 import kotlinx.coroutines.flow.SharedFlow
 import java.awt.Component
 import java.awt.Image
+import java.awt.MouseInfo
+import java.awt.Point
 import java.awt.SystemTray
 import java.awt.TrayIcon
 import java.awt.Window
@@ -76,6 +78,32 @@ internal class WindowsTrayMenu(
         popupMenu.show(invoker, x, y)
     }
 }
+
+/**
+ * Where to park [WindowsTray]'s invoker window so its menu opens at the pointer.
+ *
+ * **`MouseInfo`, not the event's own screen coordinates.** A `TrayIcon`'s `MouseEvent` reports
+ * *device* pixels on Windows: `AwtTrayIcon::WmAwtTrayNotify` takes a raw `::GetCursorPos()` result
+ * and hands it to `SendMouseEvent`, which stores it as both the component-relative and the
+ * on-screen pair with no `ScaleDownX/Y` anywhere in between. `java.awt.Window.setLocation` takes
+ * *user space* (`awt_Component.cpp` scales it up again internally), so feeding it the event's
+ * numbers parks the window `scale` times too far out — off-screen entirely near the tray, which is
+ * what left the menu clipped against the right edge. `MouseInfo` is the same cursor position run
+ * through `AwtWin32GraphicsDevice::ScaleDownAbsX/Y`, i.e. divided per monitor about that monitor's
+ * own origin, so it is both the right space and correct when monitors have different scale
+ * factors. This is a second, separate instance of the JDK omission that moved the menus themselves
+ * off AWT — see `known-issues.md`. macOS needs none of it: `CTrayIcon` reports points throughout,
+ * which is why [MacTray]'s equivalent arithmetic is correct as written.
+ *
+ * @param pointerLocation The pointer position from `MouseInfo`, in AWT user space; `null` when
+ * there is none to be had (headless, or no pointer on any screen).
+ * @param eventX The event's own on-screen x, used only as a last resort.
+ * @param eventY The event's own on-screen y, used only as a last resort.
+ * @return The point to place the invoker window at. A misplaced menu beats no menu, so the
+ * event's coordinates are still better than refusing to open.
+ */
+internal fun trayMenuAnchor(pointerLocation: Point?, eventX: Int, eventY: Int): Point =
+    pointerLocation ?: Point(eventX, eventY)
 
 /**
  * Windows-only replacement for the Compose `Tray()` composable.
@@ -171,10 +199,11 @@ internal fun WindowsTray(
                 // isPopupTrigger is the platform-correct test; BUTTON3 is kept as a belt-and-braces
                 // fallback because TrayIcon's events do not come from a real component peer.
                 if (!e.isPopupTrigger && e.button != MouseEvent.BUTTON3) return
-                // TrayIcon's MouseEvent x/y are already screen-absolute. Park the invoker under
-                // the cursor and open at its origin, so the menu lands exactly where the click
-                // did; JPopupMenu flips it back on-screen by itself near the taskbar.
-                invokerFrame.setLocation(e.xOnScreen, e.yOnScreen)
+                // Park the invoker under the cursor and open at its origin, so the menu lands
+                // where the click did; JPopupMenu flips it back on-screen by itself near the
+                // taskbar. See trayMenuAnchor for why the event's own coordinates are not it.
+                invokerFrame.location =
+                    trayMenuAnchor(MouseInfo.getPointerInfo()?.location, e.xOnScreen, e.yOnScreen)
                 invokerFrame.isVisible = true
                 menu.show(invokerFrame, 0, 0)
                 invokerFrame.toFront()

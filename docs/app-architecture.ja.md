@@ -113,11 +113,15 @@ WebView **内部**の HTML として描画する（`ui/article/ArticleWebViewHtm
 | Linux（SNI ホスト無し） | Compose `Tray()` | そのままで問題ない。 |
 
 `MacTray` と `WindowsTray` はどちらも生の `TrayIcon` を駆動して `Tray()` を迂回するが、理由は無関係で
-あり、意図的な差異が 1 つある。`MacTray` のインボーカ用 Frame は常時表示・フォーカス不可である
+あり、意図的な差異が 2 つある。1 つは、`MacTray` のインボーカ用 Frame は常時表示・フォーカス不可である
 （AWT の `PopupMenu` は自前のネイティブなモーダルループを持つため）のに対し、`WindowsTray` のそれは
 フォーカス可能で使用時以外は非表示である（`JPopupMenu` は所有ウィンドウがフォーカスを保持し、かつ
-失える場合にのみ外側クリックで閉じるため）。両者とも `newArticleNotifications` を自分で消費する
-（キューされた `TrayState` 通知を実際の OS 通知に変えるのは Compose の `Tray()` だけであるため）。
+失える場合にのみ外側クリックで閉じるため）。もう 1 つは、`MacTray` がイベント自身の
+`xOnScreen`／`yOnScreen` からメニュー位置を決めるのに対し、`WindowsTray` は `trayMenuAnchor` を通して
+`MouseInfo` を使うこと。`TrayIcon` の MouseEvent は Windows では**デバイスピクセル**、macOS では
+**ポイント**を運ぶ一方、`Window.setLocation` はどちらでもユーザー空間を要求するためである。両者とも
+`newArticleNotifications` を自分で消費する（キューされた `TrayState` 通知を実際の OS 通知に変えるのは
+Compose の `Tray()` だけであるため）。
 
 **Linux で SNI が必要な理由**: `sun.awt.X11.XTrayIconPeer.IconCanvas.paint()` はアイコン描画の *前* に
 24x24 のキャンバス全面をコンポーネント背景色で塗り潰し、さらに `sun.awt.X11.XSystemTrayPeer` は

@@ -1071,3 +1071,29 @@ correctly on Windows HiDPI displays*(未解決)。300% 以上に対して起票�
 してあり、使用時以外は非表示にしている。AWT の `PopupMenu` は自前のネイティブなモーダルループを持ち
 自分で閉じるのに対し、`JPopupMenu` は所有ウィンドウがフォーカスを保持し、かつ失える場合にのみ、外側の
 クリックで閉じるからである。
+
+### トレイにはもう1つ修正が必要だった: `TrayIcon` 自身の座標
+
+ウィジェットを差し替えたことでトレイメニューの**描画**は直ったが、**位置**は直らなかった。アイコンが
+どれだけ左にあっても、メニューは画面右端に張り付いて見切れたままだった。これは同じ不具合パターンの
+3 箇所目であり、メニューのバックエンドとは無関係な原因なので、独立して記録しておく価値がある。
+
+`AwtTrayIcon::WmAwtTrayNotify` は素の `::GetCursorPos()` の結果 —— デバイスピクセル —— を
+`SendMouseEvent` に渡し、`SendMouseEvent` はそれをコンポーネント相対の座標対と画面座標対の**両方**に
+格納している(`x, y, // no client area coordinates` / `x, y`)。この経路のどこにも `ScaleDownX/Y` は
+現れない。したがって **Windows では `TrayIcon` の `MouseEvent.getXOnScreen()` はデバイスピクセル**で
+あり、一方 `java.awt.Window.setLocation` はユーザー空間を取り内部でスケールアップし直す。イベントの
+数値をそのままインボーカウィンドウの配置に使うと、スケール倍だけ遠くに置かれることになる —— トレイは
+そもそも画面右下にあるので画面外へ完全に飛び出し、その後 `JPopupMenu` 自身の画面内補正がメニューを
+端に張り付かせていた。
+
+修正は、位置を `MouseInfo` から取ること(`WindowsTray.kt` の `trayMenuAnchor`)。
+`Java_sun_awt_windows_WMouseInfoPeer_fillPointWithCoords` は同じ `::GetCursorPos()` を読むが、
+その下のモニタを `MonitorFromPoint` で解決したうえで
+`AwtWin32GraphicsDevice::ScaleDownAbsX/Y(pt)` を返す —— これはモニタ自身の原点を基準にした
+モニタ単位の除算である(`screen + ClipRound((x - screen) / scaleX)`)。`setLocation` が求める空間で
+あると同時に、モニタごとにスケールが異なる場合も正しいので、アプリ側でスケール係数を導出する必要が
+まったくない。
+
+macOS ではこれらは一切不要である。`CTrayIcon` は一貫してポイントで報告するため、`MacTray` の
+構造的に同一な `e.xOnScreen - origin.x` の演算はそのままで正しく、手を入れていない。

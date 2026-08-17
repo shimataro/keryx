@@ -245,6 +245,12 @@ The tray menu is also a native widget outside Compose's reach (a `JPopupMenu` dr
 `WindowsTray` on Windows, a `java.awt.PopupMenu` on macOS via `MacTray`, `com.canonical.dbusmenu` on
 Linux SNI), so confirm by hand:
 
+- Right-clicking the tray icon opens the menu **at the cursor**, sitting above the taskbar — not
+  pinned to a screen edge or clipped off it. Check this from both an icon shown directly in the
+  notification area and one inside the overflow flyout, since the two sit at very different
+  distances from the screen's right edge. This is the regression check for the tray's own
+  device-pixel coordinates (see `known-issues.md`); with more than one monitor at different scale
+  factors, check it on each.
 - Right-clicking the tray icon opens the menu with the show/hide entry reflecting the window's
   current visibility, and both entries do what they say.
 - Clicking outside the open tray menu dismisses it, leaving no stray window behind and no entry in

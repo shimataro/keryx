@@ -1104,3 +1104,29 @@ before, and notifications go out through `TrayIcon.displayMessage`, which is wha
 worth keeping: it is focusable and hidden between uses, because an AWT `PopupMenu` runs its own
 native modal loop and dismisses itself, whereas a `JPopupMenu` closes on an outside click only if
 its owning window can hold — and lose — focus.
+
+### The tray needed a second fix: `TrayIcon`'s own coordinates
+
+Swapping the widgets fixed the tray menu's *rendering* but not its *position* — it still opened
+clipped against the right screen edge, however far left the icon actually was. This is the same
+defect pattern in a third place, and it is worth recording separately, because nothing about the
+menu backend caused it.
+
+`AwtTrayIcon::WmAwtTrayNotify` takes a raw `::GetCursorPos()` result — device pixels — and passes it
+to `SendMouseEvent`, which stores it as *both* the component-relative and the on-screen coordinate
+pair (`x, y, // no client area coordinates` / `x, y`). No `ScaleDownX/Y` appears anywhere on that
+path, so **`TrayIcon`'s `MouseEvent.getXOnScreen()` is in device pixels on Windows**, while
+`java.awt.Window.setLocation` takes user space and scales it back up internally. Parking the invoker
+window at the event's own numbers therefore placed it `scale` times too far out — past the screen
+edge entirely, since the tray already sits at the bottom right, after which `JPopupMenu`'s own
+on-screen correction pinned the menu to the edge.
+
+The fix is to take the position from `MouseInfo` instead (`trayMenuAnchor` in `WindowsTray.kt`).
+`Java_sun_awt_windows_WMouseInfoPeer_fillPointWithCoords` reads the same `::GetCursorPos()` but
+resolves the monitor under it with `MonitorFromPoint` and returns
+`AwtWin32GraphicsDevice::ScaleDownAbsX/Y(pt)` — a per-monitor divide about that monitor's own origin
+(`screen + ClipRound((x - screen) / scaleX)`). That is both the space `setLocation` wants and
+correct when monitors have different scale factors, so no scale factor has to be derived app-side.
+
+macOS needs none of this: `CTrayIcon` reports points throughout, which is why `MacTray`'s
+structurally identical `e.xOnScreen - origin.x` arithmetic is correct as written and was left alone.
