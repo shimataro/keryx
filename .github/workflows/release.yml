@@ -207,6 +207,11 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$version" == *-* ]]; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up JDK 25
         uses: actions/setup-java@v5
@@ -223,9 +228,18 @@ jobs:
       # createDistributable must be requested explicitly: packageMsi is not guaranteed to depend
       # on it (unlike packageDmg on macOS), so without it the "Zip non-packaged app image" step
       # below has nothing to zip. windows-latest ships WiX Toolset v3.14.1 preinstalled, so no
-      # separate WiX install step is needed here.
-      - name: Package Msi + App image
-        run: ./gradlew :composeApp:createDistributable :composeApp:packageMsi -PappVersion=${{ steps.version.outputs.version }}
+      # separate WiX install step is needed here. packageMsi is skipped for a pre-release tag:
+      # MSI's ProductVersion must be purely numeric (see appPackageVersion in build.gradle.kts), so
+      # every pre-release of a given target version would collapse to the same ProductVersion under
+      # the fixed upgradeUuid, and WiX would not recognize a later pre-release or the final release
+      # as an upgrade of an earlier one.
+      - name: Package App image (+ Msi for stable releases)
+        run: |
+          tasks=(:composeApp:createDistributable)
+          if [ "${{ steps.version.outputs.is_prerelease }}" != "true" ]; then
+            tasks+=(:composeApp:packageMsi)
+          fi
+          ./gradlew "${tasks[@]}" -PappVersion=${{ steps.version.outputs.version }}
         env:
           DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
           GOOGLE_DRIVE_CLIENT_ID: ${{ secrets.GOOGLE_DRIVE_CLIENT_ID }}
@@ -236,6 +250,7 @@ jobs:
       # reasoning as the macOS arm64 / Linux x86_64 tags).
       - name: Rename artifact
         id: artifact
+        if: steps.version.outputs.is_prerelease != 'true'
         run: |
           src=$(find composeApp/build/compose/binaries/main/msi -maxdepth 1 -name '*.msi' | head -n 1)
           if [ -z "$src" ]; then
@@ -253,7 +268,12 @@ jobs:
           (cd "$(dirname "$src")" && zip -r "$OLDPWD/$dest" "$(basename "$src")")
 
       - name: Attach to release
-        run: gh release upload "$RELEASE_TAG" '${{ steps.artifact.outputs.path }}' 'Keryx-${{ steps.version.outputs.version }}-windows-x86_64.zip' --clobber
+        run: |
+          assets=("Keryx-${{ steps.version.outputs.version }}-windows-x86_64.zip")
+          if [ "${{ steps.version.outputs.is_prerelease }}" != "true" ]; then
+            assets+=("${{ steps.artifact.outputs.path }}")
+          fi
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
