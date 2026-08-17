@@ -4,6 +4,7 @@ import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.REG_EXE_TIMEOUT_MS
 import works.merc.keryx.app.platform.osName
 import java.io.File
+import java.io.IOException
 
 private const val LOG_TAG = "UriScheme"
 
@@ -89,10 +90,15 @@ internal fun registerWindowsUriScheme(
     runCommand: (List<String>) -> Int = { args -> runProcessWithTimeout(args, REG_EXE_TIMEOUT_MS) },
 ) {
     val reg = "reg.exe"
-    val (importCommand, regFile) = buildShellOpenCommandImport(
-        "HKEY_CURRENT_USER\\Software\\Classes\\keryx\\shell\\open\\command",
-        launcherPath,
-    )
+    val (importCommand, regFile) = try {
+        buildShellOpenCommandImport(
+            "HKEY_CURRENT_USER\\Software\\Classes\\keryx\\shell\\open\\command",
+            launcherPath,
+        )
+    } catch (e: IOException) {
+        Log.warn(LOG_TAG, "Could not prepare the Windows URI scheme registry file", e)
+        return
+    }
     val commands = listOf(
         listOf(reg, "add", "HKEY_CURRENT_USER\\Software\\Classes\\keryx", "/ve", "/d", "URL:keryx Protocol", "/f"),
         listOf(reg, "add", "HKEY_CURRENT_USER\\Software\\Classes\\keryx", "/v", "URL Protocol", "/d", "", "/f"),
@@ -118,10 +124,15 @@ internal fun registerWindowsOpmlAssociation(
 ) {
     val reg = "reg.exe"
     val progId = "Keryx.opml"
-    val (importCommand, regFile) = buildShellOpenCommandImport(
-        "HKEY_CURRENT_USER\\Software\\Classes\\$progId\\shell\\open\\command",
-        launcherPath,
-    )
+    val (importCommand, regFile) = try {
+        buildShellOpenCommandImport(
+            "HKEY_CURRENT_USER\\Software\\Classes\\$progId\\shell\\open\\command",
+            launcherPath,
+        )
+    } catch (e: IOException) {
+        Log.warn(LOG_TAG, "Could not prepare the Windows .opml association registry file", e)
+        return
+    }
     val commands = listOf(
         listOf(reg, "add", "HKEY_CURRENT_USER\\Software\\Classes\\.opml", "/ve", "/d", progId, "/f"),
         listOf(reg, "add", "HKEY_CURRENT_USER\\Software\\Classes\\$progId", "/ve", "/d", "OPML Document", "/f"),
