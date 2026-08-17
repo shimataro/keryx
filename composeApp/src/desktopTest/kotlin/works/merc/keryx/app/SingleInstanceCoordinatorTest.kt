@@ -68,6 +68,15 @@ class SingleInstanceCoordinatorTest {
         assertTrue(records.any { it.level == Level.WARNING && it.message.contains("[SingleInstance]") })
     }
 
+    @Test
+    fun signalRunningInstanceFailsWhenThePortFileContainsAnOutOfRangeValue() {
+        assertTrue(first.tryAcquireLock())
+        first.startActivationListener {}
+        File(appDataDir, "keryx.port").writeText("99999")
+
+        assertFalse(second.signalRunningInstance())
+    }
+
     /** Same white-box capture pattern as `core.LogTest`: attach a handler to the JUL logger [Log] writes to. */
     private fun withCapturedLogRecords(block: () -> Unit): List<LogRecord> {
         System.setProperty("keryx.log.dir", System.getProperty("java.io.tmpdir"))

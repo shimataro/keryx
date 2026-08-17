@@ -99,8 +99,15 @@ internal class SingleInstanceCoordinator(private val appDataDir: File) {
         }
         val port = try {
             portFile.readText().trim().toInt()
+        } catch (e: IOException) {
+            Log.warn(TAG, "Activation port file at ${portFile.path} is unreadable", e)
+            return false
         } catch (e: NumberFormatException) {
             Log.warn(TAG, "Activation port file at ${portFile.path} is unreadable", e)
+            return false
+        }
+        if (port !in 1..65535) {
+            Log.warn(TAG, "Activation port file at ${portFile.path} contains an out-of-range port: $port")
             return false
         }
         return try {
