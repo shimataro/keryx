@@ -21,7 +21,7 @@ A local-first, cross-platform RSS reader
 
 ## Supported Platforms
 
-Currently available for macOS and Linux. Windows, and native apps for Android, iOS, iPadOS, and macOS, are planned for the future.
+Currently available for Windows, macOS, and Linux. Native apps for Android and iOS/iPadOS are planned for the future, with macOS eventually joining that native lineup as well.
 
 ## Download
 
@@ -40,6 +40,10 @@ Download the latest release from the [Releases page](https://github.com/shimatar
 >
 > Alternatively, right-click the app and choose "Open" instead of double-clicking. See
 > [Signing & Notarization](docs/build.md#signing--notarization-future) for background.
+>
+> **Windows**: Until a code-signing certificate is in place, the `.msi` is unsigned, so
+> Windows SmartScreen shows a "Windows protected your PC" warning on first run. Click
+> "More info", then "Run anyway" to continue.
 
 ## Development Documentation
 
@@ -50,7 +54,7 @@ Download the latest release from the [Releases page](https://github.com/shimatar
 ## Roadmap
 
 - Platform support
-  - [ ] Windows
+  - [x] Windows
   - [x] macOS
   - [x] Linux ( `.deb` )
   - [x] Linux ( `.rpm` )

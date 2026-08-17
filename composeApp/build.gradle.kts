@@ -396,6 +396,10 @@ compose.desktop {
                 iconFile.set(project.file("icons/keryx.ico"))
                 menuGroup = "Keryx"
                 dirChooser = true
+                // Fixed GUID so Windows Installer recognizes successive MSI releases as upgrades
+                // of the same product instead of unrelated installs (jpackage/WiX MajorUpgrade).
+                // Do not change this value once released.
+                upgradeUuid = "a9b7a997-b367-49da-b40e-7e6e4ea66c60"
             }
             linux {
                 iconFile.set(project.file("icons/keryx.png"))
