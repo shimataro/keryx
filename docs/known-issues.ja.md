@@ -882,3 +882,218 @@ Compose 再 measure → ウィンドウリサイズ → `componentResized` → �
 **既に表示されているダイアログ**が、内容の変化でサイズを変える場合（フィード追加の候補リスト、設定の
 タブ切替）は、仕様どおり画面上でリサイズされる —— 上記の見送った対処法を参照。この場合に変わったのは、
 新たに露出する領域とボタン行の interop の穴が、L&F 既定ではなくダイアログ自身の色で塗られる点だけである。
+
+## Windows: 記事リーダーの WebView が一度も描画されず、どこかをクリックするとアプリがフリーズする
+
+**Status**: 解決済み —— リーダーの WebView（`ArticleDetailPane.kt` の `ArticleWebView`）に、書き込み
+可能な `desktopWebSettings.dataDirectory` を明示的に設定することで解決した。Windows だけに絞らず
+デスクトップ 3 OS 共通で適用している。ライブラリ側がこのパラメータを OS 分岐なしに一律で読むためで、
+macOS/Linux でこれまで問題が出ていなかったのは、たまたまそれぞれの暗黙のデフォルトが書き込み可能な
+場所に解決していたに過ぎない。
+
+### 症状
+
+Windows で、記事詳細ペインの幅とほぼ同じ幅の白い矩形がフィード一覧ペインの位置に表示され、本来の
+リーダー領域自体は空白のままだった —— 記事本文はおろか、リーダーが自身の中に HTML として描く
+「記事が選択されていません」のプレースホルダすら出ない。この状態でウィンドウのどこかをクリックすると、
+以降アプリが完全に応答しなくなった。macOS / Linux では再現しない。
+
+### 診断
+
+`WRYWEBVIEW_LOG=1`（`io.github.kdroidfilter:composewebview` 自身が持つ環境変数ゲート付きログ）を
+付けて実行したところ、見えている症状よりも一段階手前の、本当の失敗が判明した:
+
+```text
+[WryWebViewPanel] createIfNeeded handle=459234 parentIsWindow=true size=280x291
+Exception in thread "AWT-EventQueue-0" io.github.kdroidfilter.webview.wry.WebViewException$WryException:
+v1=WebView2 error: WindowsError(Error { code: HRESULT(0x80070005), message: "Access Denied." })
+        at ... NativeBindings.createWebview-E7Fn0XA(WryWebViewPanel.kt:787)
+        at ... WryWebViewPanel.createIfNeeded(WryWebViewPanel.kt:398)
+        at ... WryWebViewPanel.scheduleCreateIfNeeded$lambda$0(WryWebViewPanel.kt:589)
+        at java.desktop/javax.swing.Timer.fireActionPerformed(Timer.java:289)
+        ...
+        at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:90)
+```
+
+ネイティブの WebView2 サーフェス自体が一度も生成されていなかった —— 位置がズレていたのではない。
+位置を設定する呼び出し（`WryWebViewPanel.updateBounds()` の `setBounds`）自体が一度も走っていない。
+`webviewId` が null の間は早期リターンするためである。白い矩形の正体は、ライブラリがネイティブ
+サーフェスを乗せるために使う素の `java.awt.Canvas` だった（Windows だけ `SkikoInterop.createHost()`
+が Skiko の `HardwareLayer` ではなく素の `Canvas` を返す。WebView2 はトップレベルウィンドウの HWND を
+親にして自前で位置をミラーリングする方式のためで、`resolveParentHandle()`/`boundsInParent()` 参照）。
+そこには何も描画されていなかった。
+
+**根本原因**: `PlatformWebSettings.DesktopWebSettings.dataDirectory` はデフォルト `null` で、Keryx の
+`ArticleWebView` はこれを一度も設定していなかった。明示的なディレクトリがないと、WebView2 は実行
+ファイルの隣に自分のデータフォルダを作ろうとする —— 今回は `C:\Program Files\Java\jdk-25.0.4\bin\java.exe`
+（起動ログの `Acquired single-instance lock; running as primary instance from ...` 行より）—— これは
+一般ユーザーが書き込めない場所であるため `HRESULT(0x80070005)` になる。これは上流の
+[kdroidFilter/ComposeNativeWebview#31](https://github.com/kdroidFilter/ComposeNativeWebview/issues/31)
+と完全に一致する —— 例外クラス、呼び出しチェーン、HRESULT すべて同一で、コントリビューターのコメントも
+同じ修正（`dataDirectory` に書き込み可能なパスを設定する）を確認している。`dataDirectory` はライブラリ
+内で OS 分岐されておらず（`WebViewDesktop.kt` の `defaultWebViewFactory` がどの分岐でも同じ値を
+`NativeWebView(...)` に渡す）、macOS/Linux で問題が出ていなかったのは、それぞれのプラットフォームの
+暗黙のデフォルトディレクトリがたまたま書き込み可能だったからにすぎない。
+
+この一つの原因でフリーズも説明できる。`WryWebViewPanel.createIfNeeded()` の非 macOS 経路は
+`NativeBindings.createWebview(...)` の呼び出しを `catch (e: RuntimeException)` で囲んでいるが、
+ライブラリの jar に対して `javap` を実行したところ `WebViewException` は `RuntimeException` ではなく
+`java.lang.Exception` を直接継承していることが確認できた —— つまりこの `catch` 節は実際には機能せず、
+例外は uncaught のまま EDT まで届く（上記の `Exception in thread "AWT-EventQueue-0"` は AWT 自身の
+デフォルト未捕捉ハンドラの出力そのもの）。例外が `createIfNeeded()` を中断させ `stopCreateTimer()` に
+到達できないため、`scheduleCreateIfNeeded()` の 100ms 間隔の `javax.swing.Timer` は止まらず、失敗する
+WebView2 生成呼び出しを EDT 上で無限に再試行し続ける —— これは EDT が新しい入力に応答しなくなるという
+症状と整合する。
+
+### 除外した仮説
+
+- **Windows 固有の位置(bounds)のバグ** —— `WRYWEBVIEW_LOG=1` が使える前、見えている症状だけから
+  立てた最初の仮説。Windows だけ `WryWebViewPanel` がネイティブサーフェスの位置をトップレベルウィンドウの
+  HWND に対して手動でミラーリングしており（`resolveParentHandle()` が `parentIsWindow=true` を返し、
+  `boundsInParent()` が `convertPoint(host, 0, 0, window) - window.insets` をミラーする）、Compose の
+  interop とネイティブ位置とのレースに見えたため。ログで `updateBounds()`/`setBounds` が一度も走って
+  いないことが判明した時点で除外 —— ネイティブサーフェス自体が存在しないので、ズレる位置がそもそも
+  ない。`dataDirectory` の修正後の再検証ログで、`createIfNeeded success`、正しいペイン相対位置での
+  `setBounds` の 1 回だけの発火、クリックしてもフリーズしないことを確認し、解消を確認した。
+
+### 解決方法
+
+`ArticleWebView` は `rememberWebViewStateWithHTMLData(...)` の直後、`WebView(...)` コンポーザブルに
+到達する前に、`remember(webViewState) { ... }` の中で
+`webViewState.webSettings.desktopWebSettings.dataDirectory` を `AppDirs.cacheDir()` 配下の
+`webview` サブディレクトリに設定するようにした。これは `LaunchedEffect` ではなく同期的に、かつ
+`WebView(...)` が最初にコンポーズされる前に行う必要がある —— 内部の `WryWebViewPanel` の
+`dataDirectory` フィールドは `private final` で、`ActualWebView` の
+`remember(state, factory) { factory(...) }` がネイティブパネルを構築する際に一度だけキャプチャされ、
+以後読み直されないためである。ディレクトリ自体の作成はネイティブライブラリ側に任せ(Keryx 側では
+`mkdirs()` を呼ばない)、再起動をまたいで永続させる —— 上流が提案した修正(毎回タイムスタンプ付きの
+一時ディレクトリを新規作成する)とは異なり、埋め込みコンテンツ(SNS 埋め込みなど)の Cookie/
+ローカルストレージが再起動のたびに捨てられることなく残る。OS 分岐は不要だった —— このプロパティは
+macOS/Linux にも同一に適用され、既に書き込み可能な暗黙のデフォルトを明示的な値に置き換えるだけなので
+無害である。パス結合ロジック `webViewDataDirectory(cacheDir: String): String` は `commonTest` の
+`ArticleReaderDataDirectoryTest.kt` でカバーしている。
+
+## Windows: コンテキストメニューが誤った位置に開き、項目のラベルが重なって描画される
+
+**状態**: 解決済み —— Windows を `java.awt.PopupMenu` から `javax.swing.JPopupMenu` に移した。
+コンテキストメニュー(`platform/NativeMenu.desktop.kt` の `defaultPopupHandle`)とトレイメニュー
+(Compose の `Tray()` を置き換える新規の `tray/WindowsTray.kt`)の両方が対象。macOS は本物の `NSMenu`
+になるため AWT のまま据え置いた。
+
+### 症状
+
+Windows で記事行やフィード行を右クリックすると、コンテキストメニューがカーソルの**左上方向**にずれて
+開き、さらに各項目が互いに重なって描画された。枠の幅はラベルに対して十分なのに高さだけが必要量に
+まったく足りず、隣り合うラベルが重なる。どちらの症状もデスクトップの表示スケール設定に比例して悪化し、
+100% では発生しなかった。macOS / Linux では再現しない。
+
+### 診断
+
+2つの症状は同一の JDK の不具合に由来する。Windows の AWT メニューピアが、Java のユーザー空間
+(論理座標、96 DPI 基準)とデバイスピクセルの間の変換をまったく行っていない。
+
+**位置** —— `awt_PopupMenu.cpp` の `AwtPopupMenu::Show` は、Java の `Event` から x/y をそのまま取り出し、
+デバイスピクセルで動作する Win32 API に渡している。この関数には `ScaleUpX`/`ScaleUpY` が一切ない:
+
+```cpp
+pt.x = env->GetIntField(event, AwtEvent::xID);   // Java のユーザー空間
+pt.y = env->GetIntField(event, AwtEvent::yID);
+::MapWindowPoints(awtOrigin->GetHWnd(), 0, (LPPOINT)&pt, 1);   // デバイスピクセル
+::TrackPopupMenu(GetHMenu(), flags, pt.x, pt.y, 0, awtOrigin->GetHWnd(), NULL);
+```
+
+これは JDK 全体の流儀ではなく、この経路だけの欠落である。`awt_Component.cpp` は
+`ReshapeNoScale(ScaleUpX(x), ScaleUpY(y), ...)` と正しく変換しているし、`WFontMetrics` のネイティブ実装は
+Java に返す際に `ScaleDownX` を通している。結果としてメニューは
+`ウィンドウ原点 + クリックオフセット ÷ スケール` に出るため、原点から遠いほどズレが大きくなる。報告された
+スクリーンショット2枚に対して `menu = origin + (click − origin) / S` を解くと、縦横とも、かつ共通の原点で
+`S = 2.0` に整合する —— つまり報告者のデスクトップは表示スケール 200% だった。
+
+**重なり** —— `awt_MenuItem.cpp` の `AwtMenuItem::MeasureSelf` が、1つの構造体の中で2つの座標空間を
+混在させている:
+
+```cpp
+int height = JNU_CallMethodByName(env, 0, fontMetrics, "getHeight", "()I").i;
+measureInfo.itemHeight  = height;          // ユーザー空間
+measureInfo.itemHeight += measureInfo.itemHeight/3;
+measureInfo.itemWidth   = size.cx;         // getMFStringSize -> デバイスピクセル
+```
+
+`FontMetrics.getHeight()` は `awt_Font.cpp` から返る時点で `ScaleDownY` 済みなので、Windows が
+デバイスピクセルとして解釈する `itemHeight` は `1 / スケール` に縮んでいる。一方 `DrawSelf` が描画に使う
+HFONT は `lfHeight` が `ScaleUpY` 済み(`awt_Font.cpp` の `CreateHFont_sub`)である。幅は
+`getMFStringSize` 由来で最初からデバイスピクセルなので正しい。この非対称が、報告された見た目
+**「幅は足りているが、文字の高さに対して行の高さがまったく足りない」**そのものである。
+
+上流: [JDK-8259913](https://bugs.openjdk.org/browse/JDK-8259913) *AWT menu items are not scaled
+correctly on Windows HiDPI displays*(未解決)。300% 以上に対して起票されているが、上記の算術は 100% を
+超えるすべてのスケールでスケールに比例して破綻する。
+
+切り分けの決め手は1枚のスクリーンショットの中にあった。同じ DPI でアプリ自身のメニューバーは正常に
+描画されている。Compose Desktop の `MenuBar` が `javax.swing.JMenuBar` を構築するためである
+(`ui-desktop` の逆アセンブルで確認: `MenuBarScope.setContent(javax.swing.JMenuBar, ...)`)。Swing は
+変換行列が適用された Java2D 経由で描画するのでどのスケールでも正しく、AWT のメニューピアはそうではない。
+
+### 除外した仮説
+
+- **Keryx 自身の座標変換のバグ**(`Modifier.nativeContextMenu` の
+  `(elementPosition + localPosition) / density.density`)。この除算は `java.awt.PopupMenu.show` の
+  仕様どおりである —— 同メソッドはインボーカのユーザー空間の座標を取り、Compose Desktop のポインタ座標は
+  `ユーザー空間 × density` だからである。macOS で問題が出ないのも同じ理由で、AppKit はポイント基準
+  なので `NSMenu` はこの値をそのまま正しく消費する。アプリ側の計算に変更は不要であり、実際に変更して
+  いない。
+- **Keryx 側でスケール係数を打ち消す**(`show` の前に x/y を掛け戻す)。却下 —— 直せるのは位置だけである。
+  ラベルの重なりは JDK のオーナードロー計測コールバックの内部で起きており、Java 側のどの呼び出しからも
+  手が届かない。行に収まるようメニューのフォントを縮める案も同じ理由で却下した —— 描画上の不具合を
+  別の不具合に置き換えるだけである。
+- **本物のチェック用ガターを導入した `java.awt.CheckboxMenuItem` 化**。フィード行のメニューが
+  チェック項目だらけなので疑ったが、チェック項目を1つも持たないタグ行のメニューでも同じように再現する。
+
+### 解決方法
+
+`defaultPopupHandle` は `AwtPopupHandle` を **macOS でのみ**選ぶようになり、Windows は Linux と同じ
+`SwingPopupHandle` に合流した。この選択はプロセス定数を既定値とする `macOs` 引数になっているが、これは
+`NativeMenuTest` がどの CI ホストでも対応関係を固定できるようにするためだけのものである。バックエンドに
+追随して変わる挙動が2つあるが、いずれも意図的なものである。セパレータが `"-"` ラベルの `MenuItem` では
+なく本物の `JPopupMenu.Separator` になること、そして `java.awt.MenuShortcut` では構造的に表現できない
+修飾キーなしのショートカット(F2 / Delete)がアクセラレータ列に表示されるようになることである。
+`forceHeavyweight` は Linux では必須ではなかったが Windows では必須になる —— Linux では FlatLaf が
+どのみちポップアップを heavyweight に強制するのに対し、Windows は `installLookAndFeel` のシステム L&F
+分岐を通るため、この1行だけが記事リーダーの WebView の背後にメニューが隠れるのを防いでいる。
+
+トレイも同じ対応の中で修正した。Compose の `Tray()` は内部で独自に `java.awt.PopupMenu` を構築しており
+(これも逆アセンブルで確認)、2項目が同様に潰れていたためである。`WindowsTray` は生の `TrayIcon` を駆動し、
+右クリックで `WindowsTrayMenu`(Swing)を開く —— これは `MacTray` が別の理由で `Tray()` を迂回している
+のと同じ形である。`TrayIcon.addActionListener` は `onTrayAction` に従来どおり接続してあるので
+`shouldHideOnTrayAction` のヒューリスティックは以前とまったく同じイベントを受け取るし、通知は
+`TrayIcon.displayMessage` 経由で出る —— これは `TrayState.sendNotification` が内部で呼んでいたものと同一
+である。インボーカ用の Frame だけは `MacTray` のものと1点異なり、記録に値する: フォーカスを取れるように
+してあり、使用時以外は非表示にしている。AWT の `PopupMenu` は自前のネイティブなモーダルループを持ち
+自分で閉じるのに対し、`JPopupMenu` は所有ウィンドウがフォーカスを保持し、かつ失える場合にのみ、外側の
+クリックで閉じるからである。
+
+### トレイにはもう1つ修正が必要だった: `TrayIcon` 自身の座標
+
+ウィジェットを差し替えたことでトレイメニューの**描画**は直ったが、**位置**は直らなかった。アイコンが
+どれだけ左にあっても、メニューは画面右端に張り付いて見切れたままだった。これは同じ不具合パターンの
+3 箇所目であり、メニューのバックエンドとは無関係な原因なので、独立して記録しておく価値がある。
+
+`AwtTrayIcon::WmAwtTrayNotify` は素の `::GetCursorPos()` の結果 —— デバイスピクセル —— を
+`SendMouseEvent` に渡し、`SendMouseEvent` はそれをコンポーネント相対の座標対と画面座標対の**両方**に
+格納している(`x, y, // no client area coordinates` / `x, y`)。この経路のどこにも `ScaleDownX/Y` は
+現れない。したがって **Windows では `TrayIcon` の `MouseEvent.getXOnScreen()` はデバイスピクセル**で
+あり、一方 `java.awt.Window.setLocation` はユーザー空間を取り内部でスケールアップし直す。イベントの
+数値をそのままインボーカウィンドウの配置に使うと、スケール倍だけ遠くに置かれることになる —— トレイは
+そもそも画面右下にあるので画面外へ完全に飛び出し、その後 `JPopupMenu` 自身の画面内補正がメニューを
+端に張り付かせていた。
+
+修正は、位置を `MouseInfo` から取ること(`WindowsTray.kt` の `trayMenuAnchor`)。
+`Java_sun_awt_windows_WMouseInfoPeer_fillPointWithCoords` は同じ `::GetCursorPos()` を読むが、
+その下のモニタを `MonitorFromPoint` で解決したうえで
+`AwtWin32GraphicsDevice::ScaleDownAbsX/Y(pt)` を返す —— これはモニタ自身の原点を基準にした
+モニタ単位の除算である(`screen + ClipRound((x - screen) / scaleX)`)。`setLocation` が求める空間で
+あると同時に、モニタごとにスケールが異なる場合も正しいので、アプリ側でスケール係数を導出する必要が
+まったくない。
+
+macOS ではこれらは一切不要である。`CTrayIcon` は一貫してポイントで報告するため、`MacTray` の
+構造的に同一な `e.xOnScreen - origin.x` の演算はそのままで正しく、手を入れていない。

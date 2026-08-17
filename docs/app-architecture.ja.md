@@ -94,15 +94,34 @@ WebView **内部**の HTML として描画する（`ui/article/ArticleWebViewHtm
 同様に常時表示し、未選択時はボタンを非表示にせず無効化する — これによりツールバーの Compose
 構造（ひいてはリーダーの計測済みバウンズ）が状態間で常に同一に保たれる。
 
+`ArticleWebView` は `webSettings.desktopWebSettings.dataDirectory` も明示的に設定しており、
+`AppDirs.cacheDir()` 配下の `webview` サブディレクトリを、デスクトップ 3 OS すべてに同一に適用している
+（OS 分岐なし）。デフォルトの `null` のままだと WebView2 は実行ファイルの隣に自分のデータフォルダを
+作ろうとし、その場所が書き込み不可の場合は Access Denied で失敗する — 調査の詳細は
+[known-issues.md](known-issues.ja.md) 参照（この生成失敗の例外が uncaught のまま伝播し、ライブラリの
+生成リトライタイマが止まらなくなることが、クリック時にアプリ全体がフリーズする原因でもあった）。
+
 ### デスクトップトレイ（プラットフォーム分岐）
 
-`tray/KeryxTray.kt` が 3 実装のいずれかを選ぶ。
+`tray/KeryxTray.kt` が 4 実装のいずれかを選ぶ。
 
 | プラットフォーム | 実装 | 理由 |
 | --- | --- | --- |
 | macOS | `MacTray`（生の AWT `TrayIcon`） | Compose の `Tray()` は `TrayIcon.setPopupMenu()` を使い、macOS では左右どちらのクリックでもメニューが開いてしまうため。 |
 | Linux（SNI ホストあり） | `LinuxTray`（D-Bus StatusNotifierItem） | AWT は X11 で透過トレイアイコンを描画できないため（下記）。 |
-| Windows / Linux（SNI ホスト無し） | Compose `Tray()` | そのままで問題ない。 |
+| Windows | `WindowsTray`（生の AWT `TrayIcon` + `JPopupMenu`） | `Tray()` のメニューは `java.awt.PopupMenu` であり、JDK の Windows ピアは表示スケール 100% 超でラベルを重ねて描画するため。コンテキストメニューを AWT から移したのと同じ不具合（下記「ネイティブコンテキストメニュー」参照）。 |
+| Linux（SNI ホスト無し） | Compose `Tray()` | そのままで問題ない。 |
+
+`MacTray` と `WindowsTray` はどちらも生の `TrayIcon` を駆動して `Tray()` を迂回するが、理由は無関係で
+あり、意図的な差異が 2 つある。1 つは、`MacTray` のインボーカ用 Frame は常時表示・フォーカス不可である
+（AWT の `PopupMenu` は自前のネイティブなモーダルループを持つため）のに対し、`WindowsTray` のそれは
+フォーカス可能で使用時以外は非表示である（`JPopupMenu` は所有ウィンドウがフォーカスを保持し、かつ
+失える場合にのみ外側クリックで閉じるため）。もう 1 つは、`MacTray` がイベント自身の
+`xOnScreen`／`yOnScreen` からメニュー位置を決めるのに対し、`WindowsTray` は `trayMenuAnchor` を通して
+`MouseInfo` を使うこと。`TrayIcon` の MouseEvent は Windows では**デバイスピクセル**、macOS では
+**ポイント**を運ぶ一方、`Window.setLocation` はどちらでもユーザー空間を要求するためである。両者とも
+`newArticleNotifications` を自分で消費する（キューされた `TrayState` 通知を実際の OS 通知に変えるのは
+Compose の `Tray()` だけであるため）。
 
 **Linux で SNI が必要な理由**: `sun.awt.X11.XTrayIconPeer.IconCanvas.paint()` はアイコン描画の *前* に
 24x24 のキャンバス全面をコンポーネント背景色で塗り潰し、さらに `sun.awt.X11.XSystemTrayPeer` は
@@ -137,10 +156,31 @@ AWT のバルーンを置き換える。その `image-data` ヒントは SNI ピ
 これら一式は `expect`/`actual` ではなく `desktopMain` に置く。`main.kt` からしか到達せず、ViewModel や
 Repository は触れず、Linux のパネルプロトコルにモバイル側の対応物が無いため。
 
+### ネイティブコンテキストメニュー（プラットフォーム分岐）
+
+`platform/NativeMenu.desktop.kt` の `defaultPopupHandle` が、すべての `Modifier.nativeContextMenu`
+呼び出し箇所（記事行、フィード／フォルダー／タグ行）を 2 つの実装のどちらかで裏打ちする。
+
+| プラットフォーム | 実装 | 理由 |
+| --- | --- | --- |
+| macOS | `AwtPopupHandle`（`java.awt.PopupMenu`） | AWT が本物の `NSMenu` に写像し、かつ AppKit はポイント基準なので、モディファイアが算出する Dp 空間の座標をデバイスピクセルへ変換する必要がない。 |
+| Windows / Linux | `SwingPopupHandle`（`javax.swing.JPopupMenu`） | Linux では AWT の `PopupMenu` が Swing の Look & Feel を無視する heavyweight な XAWT ウィジェットで、Motif 世代の見た目のままになるため。Windows では JDK の AWT メニューピアが Java のユーザー空間とデバイスピクセルの変換を一切行わず、メニューが `ウィンドウ原点 + クリックオフセット ÷ スケール` に開き、行の高さがそこに描かれる文字の `1 / スケール` にしかならずラベルが重なるため。いずれも `known-issues.md` に詳述。 |
+
+`defaultPopupHandle` の `macOs` 引数（既定値はプロセス定数）は、`NativeMenuTest` がどの CI ホストでも
+対応関係を固定できるようにするためだけのものである。アプリではなく選択されたバックエンドに追随して
+変わる挙動が 2 つある。セパレータが Swing 経路では `JPopupMenu.Separator`、AWT 経路では `"-"` ラベルの
+`MenuItem` になること、そして修飾キーなしのショートカット（F2 / Delete）がアクセラレータ列に表示される
+のは Swing 経路だけであること（`java.awt.MenuShortcut` は常にプラットフォームの主修飾キーを含んでしまい、
+構造的に表現できない）。`forceHeavyweight`（`isLightWeightPopupEnabled = false`）は Swing のポップアップが
+記事リーダーの WebView の背後に描画されるのを防ぐためのもので、Linux では FlatLaf があるので冗長だが、
+`installLookAndFeel` のシステム L&F 分岐を通る Windows では必須である。
+
 ### ネイティブファイルダイアログ（プラットフォーム分岐）
 
 `platform/FilePicker.desktop.kt` の `defaultFilePickerBackend` は 2 つの実装のどちらかを選ぶ。
-`NativeMenu.desktop.kt` の `defaultPopupHandle` と同じ Linux は Swing・他は AWT という分岐である。
+`NativeMenu.desktop.kt` の `defaultPopupHandle` と同じ Linux は Swing・他は AWT という分岐だが、
+ファイルダイアログは Windows を AWT 側に残す点だけが異なる。Windows の `java.awt.FileDialog` は本物の
+`GetOpenFileName` パネルであり、メニューピアのようなスケーリングの問題が無いためである。
 
 | プラットフォーム | 実装 | 理由 |
 | --- | --- | --- |

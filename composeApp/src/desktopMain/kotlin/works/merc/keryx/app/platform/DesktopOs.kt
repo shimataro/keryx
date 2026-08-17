@@ -12,14 +12,18 @@ actual val isMacOs = osName.contains("mac")
 
 /**
  * Whether this desktop JVM is running on Windows. Gates the integrations the OS only offers there
- * (registering the `keryx://` URI scheme in the registry).
+ * (registering the `keryx://` URI scheme in the registry) and the tray implementation that avoids
+ * AWT's non-HiDPI-aware menus (`tray/WindowsTray.kt`).
  */
 internal val isWindows = osName.contains("win")
 
 /**
  * Whether this desktop JVM is running on Linux. Gates the look-and-feel substitutions that only
- * Linux needs: AWT's heavyweight `PopupMenu` and Java's GTK2-era Swing Look & Feel both look
- * dated against a modern GTK/Qt desktop, whereas macOS (Aqua / NSMenu) and Windows (Win32 menus)
- * already render natively.
+ * Linux needs: Java's GTK2-era Swing Look & Feel looks dated against a modern GTK/Qt desktop,
+ * whereas macOS (Aqua) and Windows both have a usable system Look & Feel.
+ *
+ * Note that the *context menu* backend is no longer one of these: it is chosen by [isMacOs]
+ * instead, because AWT's `PopupMenu` is only genuinely native on macOS. On Windows it is drawn by
+ * a JDK peer that ignores display scaling entirely — see `platform/NativeMenu.desktop.kt`.
  */
 internal val isLinux = osName.contains("linux") || osName.contains("nix") || osName.contains("nux")

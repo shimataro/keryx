@@ -437,4 +437,18 @@ class NativeMenuTest {
 
         assertEquals("Tech", handle.popupMenu.getItem(0).label)
     }
+
+    /**
+     * Pins which backend each platform gets. macOS is the only one left on `java.awt.PopupMenu`:
+     * there it is a real `NSMenu`, whereas the JDK's Windows menu peer ignores display scaling
+     * (mispositioned menu, overlapping labels — see [SwingPopupHandle]) and the X11 one ignores
+     * the Look & Feel. `macOs` is a parameter precisely so this holds on any CI host.
+     */
+    @Test
+    fun macOsGetsTheAwtBackendAndEveryOtherPlatformGetsSwing() {
+        val entries = listOf<NativeMenuEntry>(NativeMenuItem("Refresh") {})
+
+        assertIs<AwtPopupHandle>(defaultPopupHandle(entries, { entries }, macOs = true))
+        assertIs<SwingPopupHandle>(defaultPopupHandle(entries, { entries }, macOs = false))
+    }
 }

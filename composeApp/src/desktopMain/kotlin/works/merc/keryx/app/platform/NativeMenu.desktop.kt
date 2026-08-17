@@ -75,12 +75,17 @@ private fun leafAt(items: List<NativeMenuEntry>, index: Int, childIndex: Int?): 
 }
 
 /**
- * `java.awt.PopupMenu` backend, used on macOS and Windows where AWT maps it onto a genuine
- * platform menu (an `NSMenu` and a Win32 popup menu respectively).
+ * `java.awt.PopupMenu` backend, used on macOS, where AWT maps it onto a genuine `NSMenu`.
+ *
+ * Windows used to share this backend — AWT does hand its items to a real Win32 `TrackPopupMenu`
+ * there — but the JDK's Windows menu peer is not HiDPI-aware, so above 100% display scaling it
+ * both mispositions the menu and paints its items on top of each other. See [SwingPopupHandle]
+ * and `known-issues.md`. macOS is unaffected because AppKit is point-based, so the Dp-space
+ * coordinates [nativeContextMenu] passes need no device-pixel conversion at all.
  *
  * Internal rather than private so tests can check what actually ended up in the menu (mirrors
- * [SwingPopupHandle]) — load-bearing since [defaultPopupHandle] only picks this backend on
- * macOS/Windows, so a Linux CI runner would otherwise never construct or exercise it at all.
+ * [SwingPopupHandle]) — load-bearing since [defaultPopupHandle] only picks this backend on macOS,
+ * so a Linux or Windows CI runner would otherwise never construct or exercise it at all.
  */
 internal class AwtPopupHandle(
     items: List<NativeMenuEntry>,
@@ -176,10 +181,22 @@ internal class AwtPopupHandle(
 }
 
 /**
- * `javax.swing.JPopupMenu` backend, used on Linux. AWT's `PopupMenu` there is a heavyweight XAWT
- * widget that ignores the Swing Look & Feel entirely, so it keeps its Motif-era appearance no
- * matter how the rest of the app is themed; a `JPopupMenu` picks up FlatLaf (see
- * `ui/theme/DesktopLookAndFeel.kt`) and matches the Compose UI around it.
+ * `javax.swing.JPopupMenu` backend, used everywhere except macOS. Both platforms that pick it do
+ * so because AWT's own `PopupMenu` is unusable there, for unrelated reasons:
+ *
+ * - **Linux**: AWT's `PopupMenu` is a heavyweight XAWT widget that ignores the Swing Look & Feel
+ *   entirely, so it keeps its Motif-era appearance no matter how the rest of the app is themed; a
+ *   `JPopupMenu` picks up FlatLaf (see `ui/theme/DesktopLookAndFeel.kt`) and matches the Compose
+ *   UI around it.
+ * - **Windows**: the JDK's Windows menu peer never converts between Java's user space and device
+ *   pixels, so every display scale above 100% breaks it twice over. `AwtPopupMenu::Show` feeds the
+ *   user-space x/y straight into `MapWindowPoints`/`TrackPopupMenu` without `ScaleUpX/ScaleUpY`,
+ *   putting the menu at `windowOrigin + clickOffset / scale`; and `AwtMenuItem::MeasureSelf` fills
+ *   `MEASUREITEMSTRUCT.itemHeight` from `FontMetrics.getHeight()` (user space) while the items are
+ *   drawn with an HFONT whose `lfHeight` *is* scaled up, so every row ends up `1 / scale` as tall
+ *   as its own glyphs and the labels overlap. Upstream: JDK-8259913 (unresolved). Swing paints
+ *   through Java2D with the transform applied, so it is correct at any scale — the app's own
+ *   `MenuBar` (a `javax.swing.JMenuBar`) already proved that on the same screen.
  */
 internal class SwingPopupHandle(
     items: List<NativeMenuEntry>,
@@ -241,7 +258,8 @@ internal class SwingPopupHandle(
         if (entry is NativeMenuItem) {
             item.isEnabled = entry.enabled
             entry.shortcut?.let { shortcut ->
-                // Linux only, so the primary modifier is always Ctrl — never Cmd.
+                // Never macOS (see defaultPopupHandle), so the primary modifier is always Ctrl —
+                // never Cmd.
                 var modifiers = 0
                 if (shortcut.ctrl) modifiers = modifiers or InputEvent.CTRL_DOWN_MASK
                 if (shortcut.shift) modifiers = modifiers or InputEvent.SHIFT_DOWN_MASK
@@ -291,9 +309,11 @@ internal class SwingPopupHandle(
  * interop limitation that makes every dialog in this app a separate window (see `KeryxDialogs`).
  */
 private fun forceHeavyweight(popup: JPopupMenu) {
-    // Only load-bearing on the fallback path. Under FlatLaf this is already guaranteed: with
-    // Popup.dropShadowPainted on (its default), FlatPopupFactory forces heavy weight for every
-    // popup on Linux, overriding this hint either way.
+    // Load-bearing on Windows and on the Linux fallback path. Under FlatLaf this is already
+    // guaranteed: with Popup.dropShadowPainted on (its default), FlatPopupFactory forces heavy
+    // weight for every popup on Linux, overriding this hint either way — but Windows never
+    // installs FlatLaf at all (`DesktopLookAndFeel.installLookAndFeel` takes the system L&F
+    // branch there), so this line is the only thing keeping the menu out from behind the WebView.
     popup.isLightWeightPopupEnabled = false
 }
 
@@ -356,12 +376,23 @@ internal fun menuSignature(items: List<NativeMenuEntry>): List<MenuEntrySignatur
     private fun leafSignature(entry: NativeMenuLeaf): LeafSignature =
     LeafSignature(entry.label, (entry as? NativeCheckMenuItem)?.checked, (entry as? NativeMenuItem)?.enabled ?: true)
 
-/** Builds the backend appropriate to the current platform. */
+/**
+ * Builds the backend appropriate to the current platform: [AwtPopupHandle] on macOS, where AWT's
+ * `PopupMenu` is a real `NSMenu`, and [SwingPopupHandle] everywhere else, where it is either
+ * unthemed (Linux) or outright broken above 100% display scaling (Windows). See both KDocs.
+ *
+ * @param items The menu entries the widgets are built from.
+ * @param currentItems Provides the latest entries when a click has to be resolved to an action.
+ * @param macOs Whether this is macOS. A parameter, defaulting to the process constant, purely so
+ * a test can pin the mapping on any host — no production call site passes it.
+ * @return The popup backend for this platform.
+ */
 internal fun defaultPopupHandle(
     items: List<NativeMenuEntry>,
     currentItems: () -> List<NativeMenuEntry>,
+    macOs: Boolean = isMacOs,
 ): NativePopupHandle =
-    if (isLinux) SwingPopupHandle(items, currentItems) else AwtPopupHandle(items, currentItems)
+    if (macOs) AwtPopupHandle(items, currentItems) else SwingPopupHandle(items, currentItems)
 
 /**
  * Owns one call site's native menu and builds it **on the first right-click**, not on composition.
@@ -379,8 +410,10 @@ internal fun defaultPopupHandle(
 internal class LazyNativePopup(
     private val window: NativeWindowHandle?,
     private val currentItems: () -> List<NativeMenuEntry>,
+    // A lambda rather than `::defaultPopupHandle`: that function's third parameter is defaulted,
+    // and spelling the adaptation out keeps the platform constant out of this type.
     private val factory: (List<NativeMenuEntry>, () -> List<NativeMenuEntry>) -> NativePopupHandle =
-        ::defaultPopupHandle,
+        { entries, current -> defaultPopupHandle(entries, current) },
 ) {
     private var handle: NativePopupHandle? = null
     private var builtShape: List<String>? = null

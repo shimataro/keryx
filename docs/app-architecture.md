@@ -81,15 +81,34 @@ the same theme colors). The toolbar above the reader is likewise always present,
 disabled rather than hidden when nothing is selected, keeping its Compose structure — and
 therefore the reader's measured bounds — identical across states.
 
+`ArticleWebView` also sets `webSettings.desktopWebSettings.dataDirectory` explicitly, to
+`AppDirs.cacheDir()` plus a `webview` subdirectory, applied identically on all three desktop
+platforms (no OS branch). Left at its `null` default, WebView2 tries to create its data folder next
+to the host executable, which fails with Access Denied whenever that location isn't user-writable —
+see [known-issues.md](known-issues.md) for the investigation (an uncaught exception from the failed
+creation also left the library's creation-retry timer running forever, which was the cause of an
+app-wide freeze on click).
+
 ### Desktop Tray (platform branch)
 
-`tray/KeryxTray.kt` picks one of three implementations:
+`tray/KeryxTray.kt` picks one of four implementations:
 
 | Platform | Implementation | Why |
 | --- | --- | --- |
 | macOS | `MacTray` (raw AWT `TrayIcon`) | Compose's `Tray()` wires the menu through `TrayIcon.setPopupMenu()`, which opens it on *any* click on macOS. |
 | Linux (SNI host present) | `LinuxTray` (D-Bus StatusNotifierItem) | AWT cannot draw a transparent tray icon on X11 — see below. |
-| Windows / Linux (no SNI host) | Compose `Tray()` | Works as-is. |
+| Windows | `WindowsTray` (raw AWT `TrayIcon` + `JPopupMenu`) | `Tray()`'s menu is a `java.awt.PopupMenu`, which the JDK's Windows peer paints with overlapping labels above 100% display scaling — the same defect that moved the context menus off AWT (see "Native context menus" below). |
+| Linux (no SNI host) | Compose `Tray()` | Works as-is. |
+
+`MacTray` and `WindowsTray` both bypass `Tray()` by driving a raw `TrayIcon`, but for unrelated
+reasons and with two deliberate differences. `MacTray`'s invoker frame is permanently shown and
+non-focusable, because an AWT `PopupMenu` runs its own native modal loop, whereas `WindowsTray`'s is
+focusable and hidden between uses, because a `JPopupMenu` only closes on an outside click if its
+owning window can hold — and lose — focus. And `MacTray` positions the menu from the event's own
+`xOnScreen`/`yOnScreen`, while `WindowsTray` goes through `trayMenuAnchor` and `MouseInfo` instead:
+a `TrayIcon` MouseEvent carries *device* pixels on Windows but *points* on macOS, and
+`Window.setLocation` wants user space on both. Both consume `newArticleNotifications` themselves,
+since only Compose's `Tray()` turns a queued `TrayState` notification into a real OS one.
 
 **Why Linux needs SNI.** `sun.awt.X11.XTrayIconPeer.IconCanvas.paint()` fills the whole 24x24 canvas
 with the component background *before* drawing the icon, and `sun.awt.X11.XSystemTrayPeer` never reads
@@ -125,10 +144,32 @@ All of this lives in `desktopMain` rather than behind an `expect`/`actual` pair:
 from `main.kt`, no ViewModel or Repository touches it, and a Linux panel protocol has no mobile
 counterpart.
 
+### Native context menus (platform branch)
+
+`platform/NativeMenu.desktop.kt`'s `defaultPopupHandle` backs every `Modifier.nativeContextMenu`
+call site (article rows, feed / folder / tag rows) with one of two implementations:
+
+| Platform | Implementation | Why |
+| --- | --- | --- |
+| macOS | `AwtPopupHandle` (`java.awt.PopupMenu`) | AWT maps it onto a genuine `NSMenu`, and AppKit is point-based, so the Dp-space coordinates the modifier computes need no device-pixel conversion. |
+| Windows / Linux | `SwingPopupHandle` (`javax.swing.JPopupMenu`) | On Linux, AWT's `PopupMenu` is a heavyweight XAWT widget that ignores the Swing Look & Feel, keeping a Motif-era appearance. On Windows, the JDK's AWT menu peer never converts between Java user space and device pixels: the menu opens at `windowOrigin + clickOffset / scale`, and its rows measure `1 / scale` as tall as the glyphs drawn into them, so the labels overlap. Both are detailed in `known-issues.md`. |
+
+`macOs` is a parameter of `defaultPopupHandle` (defaulting to the process constant) only so
+`NativeMenuTest` can pin the mapping on any CI host. Two behaviours follow the chosen backend
+rather than the app: separators are a `JPopupMenu.Separator` on the Swing path and a `"-"`-labelled
+`MenuItem` on the AWT one, and modifier-less shortcuts (F2 / Delete) render in the accelerator
+column only on the Swing path — `java.awt.MenuShortcut` always bakes in the platform's primary
+modifier and structurally cannot express them. `forceHeavyweight`
+(`isLightWeightPopupEnabled = false`) is what keeps a Swing popup from being drawn behind the
+article reader's WebView; it is redundant under FlatLaf on Linux but load-bearing on Windows, which
+takes `installLookAndFeel`'s system-L&F branch instead.
+
 ### Native file dialogs (platform branch)
 
 `platform/FilePicker.desktop.kt`'s `defaultFilePickerBackend` picks one of two implementations, the
-same Linux-Swing-vs-AWT split as `NativeMenu.desktop.kt`'s `defaultPopupHandle`:
+same Linux-Swing-vs-AWT split as `NativeMenu.desktop.kt`'s `defaultPopupHandle` — except that the
+file dialog keeps Windows on the AWT side, because `java.awt.FileDialog` there is a real
+`GetOpenFileName` panel with none of the menu peer's scaling problems:
 
 | Platform | Implementation | Why |
 | --- | --- | --- |

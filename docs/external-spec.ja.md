@@ -92,10 +92,13 @@ Compose が描画していない面 — アプリケーションメニューバ�
 macOS と Windows はシステム標準を使い、Linux は Keryx 自身の teal テーマに合わせて配色した
 FlatLaf を使う（Java の Linux 向けシステム L&F は GTK2 世代のエミュレーションで、現代の
 デスクトップでは古く見えるため）。ライト/ダークはアプリのテーマ設定に再起動なしで追従する。
-コンテキストメニューは macOS / Windows では `java.awt.PopupMenu`（本物の `NSMenu` /
-Win32 メニュー）、Linux では `javax.swing.JPopupMenu`（AWT のポップアップは Look & Feel を
-完全に無視するため）。OPML インポート/エクスポートのファイルダイアログも同じ分岐で、
-macOS / Windows は `java.awt.FileDialog`、Linux は `javax.swing.JFileChooser` を使う
+コンテキストメニューは macOS では `java.awt.PopupMenu`（本物の `NSMenu`）、Windows と Linux では
+`javax.swing.JPopupMenu` を使う。Linux は AWT のポップアップが Look & Feel を完全に無視するため、
+Windows は JDK の AWT メニューピアが表示スケールを一切考慮せず、100% を超えるとカーソルから離れた
+位置に開いたうえラベル同士が重なって描画されるため（`known-issues.md` を参照）。トレイメニューも
+同じ分岐に従っており、Windows が Compose の `Tray()` ではなく独自の `WindowsTray` を持つのはこのため。
+OPML インポート/エクスポートのファイルダイアログは上記とは異なる分岐で、
+macOS **と Windows** は `java.awt.FileDialog`、Linux のみ `javax.swing.JFileChooser` を使う
 （AWT 自身のファイルダイアログはアプリをクラッシュさせうる GTK ネイティブコードを経由するため。
 `app-architecture.md` と `known-issues.md` を参照）。UI フォントは OS 標準で、macOS は SF Pro、Windows は Segoe UI、
 Linux は Look & Feel が解決したフォント、次にデスクトップの設定フォント（XSettings から取得）、
