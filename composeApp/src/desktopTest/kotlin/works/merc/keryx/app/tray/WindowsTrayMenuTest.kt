@@ -35,20 +35,20 @@ class WindowsTrayMenuTest {
     fun setLabelsPushesBothLabelsOntoTheWidgets() {
         val menu = menuOf()
 
-        menu.setLabels(toggle = "隠す", quit = "終了")
+        menu.setLabels(toggle = "Hide", quit = "Quit")
 
-        assertEquals("隠す", (menu.popupMenu.getComponent(0) as JMenuItem).text)
-        assertEquals("終了", (menu.popupMenu.getComponent(1) as JMenuItem).text)
+        assertEquals("Hide", (menu.popupMenu.getComponent(0) as JMenuItem).text)
+        assertEquals("Quit", (menu.popupMenu.getComponent(1) as JMenuItem).text)
     }
 
     @Test
     fun setLabelsReplacesTheToggleLabelWhenTheWindowVisibilityFlips() {
         val menu = menuOf()
 
-        menu.setLabels(toggle = "隠す", quit = "終了")
-        menu.setLabels(toggle = "表示", quit = "終了")
+        menu.setLabels(toggle = "Hide", quit = "Quit")
+        menu.setLabels(toggle = "Show", quit = "Quit")
 
-        assertEquals("表示", (menu.popupMenu.getComponent(0) as JMenuItem).text)
+        assertEquals("Show", (menu.popupMenu.getComponent(0) as JMenuItem).text)
     }
 
     @Test
