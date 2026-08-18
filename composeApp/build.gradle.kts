@@ -439,6 +439,11 @@ tasks.withType<JavaExec>().configureEach {
 }
 tasks.withType<Test>().configureEach {
     jvmArgs("--enable-native-access=ALL-UNNAMED")
+    // Now that values-en/strings.xml exists alongside the Japanese default, Compose Resources
+    // resolution genuinely depends on the JVM's locale (previously inert, since only one locale
+    // existed). Several tests assert literal resource text; pin to Japanese so results don't
+    // depend on the host's own locale (e.g. CI runners typically default to English).
+    jvmArgs("-Duser.language=ja", "-Duser.country=JP")
 }
 
 // The `run` task is registered lazily by the Compose/KMP desktop plugins, so other

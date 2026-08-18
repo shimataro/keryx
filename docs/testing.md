@@ -78,6 +78,14 @@ windows (only the pure `chooseDialogOwner` selection it delegates to is tested).
 
 Launch with `./gradlew :composeApp:run` and visually verify 3-pane UI, theme switching, feed addition, and search. `FeedListDragTest.kt` now covers the drag mechanics end to end (reorder, threshold gating, folder/tag drop, right-click guard, ghost lifecycle, Escape), but the actual pixel rendering — colors, animation smoothness, the ghost's appearance over real content — is inherently visual, so confirm the following by hand too:
 
+Also relaunch once with the English locale forced —
+`JAVA_TOOL_OPTIONS="-Duser.language=en -Duser.country=US" ./gradlew :composeApp:run`
+(or switch the OS display language) — and confirm labels render in English throughout, including
+the plural strings at a count of 1 and at 2+ (Add Feed's article-count preview and success/failure
+text, the OPML import result, the tray's new-articles notification), and that Settings' "Website"
+link opens the `/en/` page. `StringsXmlParityTest` catches a forgotten translation at the resource
+level, but only this manual pass catches wording that reads oddly in context.
+
 - Pressing down on a feed row / folder header and moving less than the
   drag-start threshold (`Modifier.feedListReorderDrag` in
   `FeedListDragGestures.kt`) does not start a drag — the row still

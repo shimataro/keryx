@@ -66,7 +66,7 @@
   - [x] [Google Drive](https://drive.google.com/)
   - [x] [OneDrive](https://onedrive.live.com/)
 - 多言語対応
-  - [ ] 英語
+  - [x] 英語
   - [x] 日本語
 
 ## その他
