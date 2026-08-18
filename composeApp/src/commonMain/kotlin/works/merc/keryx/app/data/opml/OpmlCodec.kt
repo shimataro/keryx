@@ -3,6 +3,7 @@ package works.merc.keryx.app.data.opml
 import com.fleeksoft.ksoup.Ksoup
 import com.fleeksoft.ksoup.nodes.Element
 import com.fleeksoft.ksoup.parser.Parser
+import works.merc.keryx.app.core.APP_NAME
 
 /** Imports/exports OPML 2.0 subscription lists. */
 object OpmlCodec {
@@ -78,7 +79,7 @@ object OpmlCodec {
      * document. A non-null folder name wraps its feeds in a folder `<outline>`; a null one emits
      * them at the top level. Grouping and ordering are the caller's concern.
      */
-    fun export(groups: List<Pair<String?, List<ExportFeed>>>, title: String = "Keryx Subscriptions"): String = buildString {
+    fun export(groups: List<Pair<String?, List<ExportFeed>>>, title: String = "$APP_NAME Subscriptions"): String = buildString {
         append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
         append("<opml version=\"2.0\">\n")
         append("  <head>\n    <title>").append(escape(title)).append("</title>\n  </head>\n")

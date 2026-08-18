@@ -1,0 +1,297 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  English locale override. Every key in values/strings.xml (the Japanese default/fallback)
+  is translated here in full — see that file's own header comment for the fallback mechanism.
+-->
+<resources>
+    <string name="app_name">Keryx</string>
+
+    <!-- common -->
+    <string name="common_cancel">Cancel</string>
+    <string name="common_save">Save</string>
+    <string name="common_delete">Delete</string>
+    <string name="common_create">Create</string>
+    <string name="common_add">Add</string>
+    <string name="common_ok">OK</string>
+    <string name="common_back">Back</string>
+    <string name="common_abort">Abort</string>
+
+    <!-- setup -->
+    <string name="setup_title">Welcome to Keryx</string>
+    <string name="setup_choose_mode">Choose how to sync (you can change this later)</string>
+    <string name="setup_local_only">Use locally only</string>
+    <string name="setup_local_desc">Use this device only</string>
+    <string name="setup_dropbox">Sync with Dropbox</string>
+    <string name="setup_dropbox_desc">Share subscriptions and read state across devices</string>
+    <string name="setup_dropbox_wip">Dropbox integration is coming soon</string>
+    <string name="setup_google_drive">Sync with Google Drive</string>
+    <string name="setup_google_drive_desc">Share subscriptions and read state across devices</string>
+    <string name="setup_onedrive">Sync with OneDrive</string>
+    <string name="setup_onedrive_desc">Share subscriptions and read state across devices</string>
+    <string name="setup_connecting">Connecting to cloud storage...</string>
+    <string name="setup_abort_connect_confirm_title">Abort the connection?</string>
+    <string name="setup_abort_connect_confirm_body">Nothing has been saved yet.</string>
+    <string name="oauth_loopback_success">Authentication complete. You can close this tab and return to the app.</string>
+    <string name="setup_auth_failed">Authentication failed</string>
+    <string name="setup_cloud_has_data">Existing data was found in Dropbox. Import it?</string>
+    <string name="setup_import_and_start">Import and start</string>
+    <string name="setup_skip_import">Skip and start</string>
+
+    <!-- home -->
+    <string name="home_add_feed">Add feed</string>
+    <string name="home_add_feed_hint">Enter feed URL</string>
+    <string name="home_add_feed_confirm">Confirm</string>
+    <string name="home_add_feed_subscribe">Subscribe</string>
+    <plurals name="home_add_feed_article_count">
+        <item quantity="one">%1$d article</item>
+        <item quantity="other">%1$d articles</item>
+    </plurals>
+    <string name="home_add_feed_links_found">Feed links found</string>
+    <string name="home_add_feed_select_links">Select the feeds to subscribe to</string>
+    <string name="home_add_feed_select_all">Select all</string>
+    <string name="home_add_feed_clear_all">Clear all</string>
+    <string name="home_add_feed_selected_count">%1$d / %2$d selected</string>
+    <string name="home_add_feed_subscribed">Added %1$d feed(s)</string>
+    <plurals name="home_add_feed_partial">
+        <item quantity="one">%1$d feed added, %2$d failed</item>
+        <item quantity="other">%1$d feeds added, %2$d failed</item>
+    </plurals>
+    <string name="home_add_feed_type_rss">RSS</string>
+    <string name="home_add_feed_type_atom">Atom</string>
+    <string name="home_add_feed_loading_preview">Checking…</string>
+    <string name="home_add_feed_loading_subscribe">Subscribing…</string>
+    <string name="home_all_feeds">All Feeds</string>
+    <string name="home_starred">Starred</string>
+    <string name="home_tags">Tags</string>
+    <string name="home_add_tag">Add tag</string>
+    <string name="home_edit_tags">Edit tags</string>
+    <string name="home_new_tag_hint">Enter tag name</string>
+    <string name="home_tag_name_duplicate">A tag with this name already exists</string>
+    <string name="home_tag_color">Color</string>
+    <string name="home_delete_tag_confirm">Delete the tag “%1$s”?</string>
+    <string name="home_tag_deleted">Tag deleted</string>
+    <string name="home_edit_tag_menu">Edit</string>
+    <string name="home_edit_tag">Edit tag</string>
+    <string name="home_delete_tag_menu">Delete</string>
+    <string name="home_assign_tags">Assign tags</string>
+    <string name="home_remove_feed_from_tag_menu">Remove from tag</string>
+    <string name="home_folders">Folders</string>
+    <string name="home_add_folder">Add folder</string>
+    <string name="home_new_folder_hint">Enter folder name</string>
+    <string name="home_folder_name_duplicate">A folder with this name already exists</string>
+    <string name="home_delete_folder_confirm">Delete the folder “%1$s”? Its feeds won’t be deleted — they’ll move to “No Folder”.</string>
+    <string name="home_edit_folder_menu">Edit</string>
+    <string name="home_delete_folder_menu">Delete</string>
+    <string name="home_move_to_folder">Move to folder</string>
+    <string name="home_no_folder">No Folder</string>
+    <string name="home_rename_feed_menu">Rename</string>
+    <string name="home_rename_feed">Rename</string>
+    <string name="home_unsubscribe_menu">Unsubscribe</string>
+    <string name="home_copy_feed_url">Copy feed URL</string>
+    <string name="home_copy_site_url">Copy site URL</string>
+    <string name="home_menu_rename_folder">Rename folder</string>
+    <string name="home_menu_delete_folder">Delete folder</string>
+    <string name="home_menu_rename_tag">Rename tag</string>
+    <string name="home_menu_delete_tag">Delete tag</string>
+    <string name="home_unsubscribe_title">Unsubscribe from “%1$s”?</string>
+    <string name="home_unsubscribe_body">Starred articles will remain available.</string>
+    <string name="home_refresh">Refresh</string>
+    <string name="home_refreshing">Checking for new articles…</string>
+    <string name="home_feed_error">Feed error</string>
+    <string name="home_feed_gone">Feed not found (it may have been removed)</string>
+    <string name="home_feed_error_count">Failed %1$d time(s) in a row</string>
+    <string name="home_feed_error_refresh_now">Refresh now</string>
+    <string name="home_mark_all_read">Mark all as read</string>
+    <string name="home_no_feeds">No feeds yet\nUse the “+” button to add one</string>
+    <string name="home_no_articles">No articles</string>
+    <string name="home_unread_only">Unread only</string>
+    <string name="home_sort_newest">Newest first</string>
+    <string name="home_sort_oldest">Oldest first</string>
+    <string name="home_sort_disabled_search">Search results are sorted by relevance</string>
+    <string name="home_already_subscribed">You’re already subscribed to this feed</string>
+    <string name="home_sync">Sync</string>
+    <string name="home_syncing">Syncing…</string>
+    <string name="home_notifications">Notifications</string>
+    <string name="home_open_site">Open site</string>
+    <string name="home_no_article_selected">Select an article</string>
+    <string name="home_search">Search articles</string>
+    <string name="home_search_placeholder">Search articles…</string>
+    <string name="home_search_too_short">Enter at least 3 characters</string>
+    <string name="home_search_no_results">No matching articles</string>
+    <string name="home_search_hint">↑↓ to navigate · Enter to open</string>
+    <string name="home_search_clear">Clear</string>
+
+    <!-- article -->
+    <string name="article_mark_as_unread">Mark as unread</string>
+    <string name="article_mark_as_read">Mark as read</string>
+    <string name="article_open_in_browser">Open in browser</string>
+    <string name="article_star">Star</string>
+    <string name="article_unstar">Unstar</string>
+    <string name="article_no_content">No content</string>
+    <string name="article_no_title">Untitled</string>
+    <string name="article_copy_url">Copy URL</string>
+    <string name="article_url_copied">URL copied</string>
+    <string name="article_prev">Previous article</string>
+    <string name="article_next">Next article</string>
+
+    <!-- settings -->
+    <string name="settings_tab_general">General</string>
+    <string name="settings_tab_notifications">Notifications</string>
+    <string name="settings_tab_data">Data</string>
+    <string name="settings_theme">Theme</string>
+    <string name="settings_theme_system">Match system</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_cache">Article cache retention</string>
+    <string name="settings_days7">7 days</string>
+    <string name="settings_days30">30 days</string>
+    <string name="settings_days90">90 days</string>
+    <string name="settings_unlimited">Unlimited</string>
+    <string name="settings_read_timeout">Feed read timeout</string>
+    <string name="settings_seconds10">10 seconds</string>
+    <string name="settings_seconds30">30 seconds</string>
+    <string name="settings_seconds60">60 seconds</string>
+    <string name="settings_data_management">Data Management</string>
+    <string name="settings_import_opml">Import OPML</string>
+    <string name="settings_export_opml">Export OPML</string>
+    <string name="file_filter_opml">OPML files</string>
+    <string name="file_overwrite_title">Confirm Overwrite</string>
+    <string name="file_overwrite_message">This file already exists. Replace it?</string>
+    <string name="file_overwrite_replace">Replace</string>
+    <plurals name="settings_import_success">
+        <item quantity="one">Added %1$d feed</item>
+        <item quantity="other">Added %1$d feeds</item>
+    </plurals>
+    <plurals name="settings_import_failed">
+        <item quantity="one">Failed to add %1$d feed</item>
+        <item quantity="other">Failed to add %1$d feeds</item>
+    </plurals>
+    <string name="settings_export_success">Exported</string>
+    <string name="settings_import_cancelled">Cancelled</string>
+    <string name="settings_export_error">Export failed</string>
+    <string name="settings_import_error">Import failed</string>
+    <string name="settings_refresh_interval">Feed refresh interval</string>
+    <string name="settings_refresh_min15">15 minutes</string>
+    <string name="settings_refresh_min30">30 minutes</string>
+    <string name="settings_refresh_hour1">1 hour</string>
+    <string name="settings_refresh_hour3">3 hours</string>
+    <string name="settings_refresh_manual">Manual only</string>
+    <string name="settings_desktop">Desktop</string>
+    <string name="settings_notification_enabled">Enable new article notifications</string>
+    <string name="settings_start_minimized">Start minimized to tray</string>
+    <string name="settings_cloud_sync">Cloud Sync</string>
+    <string name="settings_cloud_sync_hint">Only one cloud storage can be connected at a time.</string>
+    <string name="settings_dropbox_disconnect">Disconnect</string>
+    <string name="settings_dropbox_connect">Connect</string>
+    <string name="settings_google_drive_connect">Connect</string>
+    <string name="settings_google_drive_disconnect">Disconnect</string>
+    <string name="settings_onedrive_connect">Connect</string>
+    <string name="settings_onedrive_disconnect">Disconnect</string>
+    <string name="settings_cloud_disconnect_confirm_title">Disconnect from %1$s?</string>
+    <string name="settings_cloud_disconnect_confirm_body">Your local data will remain untouched.</string>
+    <string name="settings_cloud_abort_connect_confirm_title">Abort the connection to %1$s?</string>
+    <string name="settings_cloud_abort_connect_confirm_body">Nothing has been saved yet.</string>
+    <string name="settings_cloud_switch_confirm_title">Switch to %1$s?</string>
+    <string name="settings_cloud_switch_confirm_body">This will disconnect %1$s.</string>
+    <string name="settings_cloud_switch_confirm_action">Switch</string>
+    <string name="settings_cloud_reset">Reset sync data</string>
+    <string name="settings_cloud_reset_confirm_title">Reset the cloud sync data?</string>
+    <string name="settings_cloud_reset_confirm_body">The cloud sync data will be renamed for safekeeping (keryx-&lt;date-time&gt;.db.bak) and rebuilt from this device’s data. If it can’t be renamed, it will be deleted instead. Safekept data is not removed automatically. Any unsynced changes on other devices may be lost.</string>
+    <string name="settings_cloud_reset_confirm_action">Reset</string>
+    <string name="settings_last_synced">Last synced: %1$s</string>
+    <string name="settings_font_size">Font size</string>
+    <string name="settings_font_small">Small</string>
+    <string name="settings_font_medium">Medium</string>
+    <string name="settings_font_large">Large</string>
+    <string name="settings_font_xlarge">Extra large</string>
+    <string name="settings_article_list">Article List</string>
+    <string name="settings_article_list_all">All</string>
+    <string name="settings_article_list_unread_only">Unread only</string>
+    <string name="settings_updates">Updates</string>
+    <string name="settings_version">Version %1$s</string>
+    <string name="settings_website">Website</string>
+    <string name="settings_project_page">Project Page</string>
+    <string name="settings_licenses">Open Source Licenses</string>
+    <!-- Official website URL. Locale-dependent: the Japanese default points to /ja/; this
+         override points to the English (/en/) page. -->
+    <string name="website_url">https://keryx.merc.works/en/</string>
+    <string name="settings_update_check_interval">Update check interval</string>
+    <string name="settings_update_check_startup_only">On startup only</string>
+    <string name="settings_update_check_daily">Daily</string>
+    <string name="settings_update_check_3days">Every 3 days</string>
+    <string name="settings_update_check_weekly">Weekly</string>
+    <string name="settings_update_check_now">Check for updates</string>
+    <string name="settings_update_check_up_to_date">You’re up to date</string>
+    <string name="settings_update_check_available">Version %1$s is available</string>
+    <string name="settings_update_check_failed">Couldn’t check for updates</string>
+    <string name="settings_update_open_release_page">Open release page</string>
+
+    <!-- feed notifications -->
+    <string name="feed_gone_title">Feed removed</string>
+    <string name="feed_gone_message">“%1$s” has been removed (HTTP 410 Gone). We recommend unsubscribing from it.</string>
+    <plurals name="feed_new_articles">
+        <item quantity="one">%1$d new article</item>
+        <item quantity="other">%1$d new articles</item>
+    </plurals>
+    <string name="feed_url_changed">The URL for “%1$s” has changed</string>
+    <string name="update_available_notification">Version %1$s is now available</string>
+    <string name="notification_app_translocated">Keryx is running from a temporary location. If Dropbox integration and similar features fail, move Keryx to the Applications folder and relaunch it.</string>
+    <string name="notification_app_translocated_detail">macOS uses a mechanism called App Translocation to run apps launched directly from a disk image (DMG) or the Downloads folder from a random temporary location each time.\n\nBecause this changes Keryx’s actual path, the OS can’t deliver keryx:// links to it, which can prevent Dropbox or OneDrive integration (OAuth authentication) from completing.\n\nFix: copy Keryx.app to the Applications folder and launch it from there.</string>
+
+    <!-- tray -->
+    <string name="tray_show">Show</string>
+    <string name="tray_hide">Hide</string>
+    <string name="tray_quit">Quit</string>
+
+    <!-- application menu bar -->
+    <string name="menu_file">File</string>
+    <string name="menu_file_add_feed">Add Feed…</string>
+    <string name="menu_file_add_folder">Add Folder…</string>
+    <string name="menu_file_add_tag">Add Tag…</string>
+    <string name="menu_file_import_opml">Import OPML…</string>
+    <string name="menu_file_export_opml">Export OPML…</string>
+    <string name="menu_file_close_window">Close Window</string>
+    <string name="menu_file_quit">Quit Keryx</string>
+    <string name="menu_view">View</string>
+    <string name="menu_view_search">Search…</string>
+    <string name="menu_view_unread_only">Show Unread Only</string>
+    <string name="menu_view_toggle_sort">Toggle Sort Order</string>
+    <string name="menu_view_mark_all_read">Mark All as Read</string>
+    <string name="menu_view_show_menu_bar">Show Menu Bar</string>
+    <string name="menu_article">Article</string>
+    <string name="menu_article_toggle_read">Toggle Read/Unread</string>
+    <string name="menu_article_toggle_star">Star</string>
+    <string name="menu_article_open_in_browser">Open in Browser</string>
+    <string name="menu_article_copy_url">Copy URL</string>
+    <string name="menu_feed">Feed</string>
+    <string name="menu_feed_refresh_all">Refresh All</string>
+    <string name="menu_feed_sync_now">Sync Now</string>
+    <string name="menu_settings">Settings…</string>
+    <string name="menu_help">Help</string>
+    <string name="menu_help_website">Open Website</string>
+    <string name="menu_help_project_page">Open Project Page</string>
+    <string name="menu_help_about">About Keryx</string>
+
+    <!-- notification center -->
+    <string name="notification_empty">No notifications</string>
+    <string name="notification_dismiss_all">Dismiss All</string>
+    <string name="notification_dismiss">Dismiss this notification</string>
+    <string name="notification_level_error">Error</string>
+    <string name="notification_level_warning">Warning</string>
+    <string name="notification_level_info">Info</string>
+    <string name="notification_detail_title">Details</string>
+
+    <!-- errors -->
+    <string name="error_feed_timeout">Fetching the feed timed out</string>
+    <string name="error_feed_fetch">Failed to fetch the feed</string>
+    <string name="error_feed_parse">Couldn’t parse the feed format</string>
+    <string name="error_cloud_auth">Cloud storage authentication failed</string>
+    <string name="error_cloud_storage">Sync failed. Please try again later</string>
+    <string name="error_sync_conflict">Couldn’t resolve a sync conflict</string>
+    <string name="error_schema_version">The cloud sync data is an unsupported version. Update the app, or delete the cloud sync data.</string>
+    <string name="error_cloud_data_incompatible">The cloud sync data is corrupted or in an unsupported format. Automatic sync is suspended until you reset it. Reset the sync data to rebuild it (the original data will be kept as a backup).</string>
+    <string name="error_feed_gone">Feed removed</string>
+    <string name="error_feed_not_found">Feed not found</string>
+    <string name="error_invalid_url">Invalid feed URL</string>
+    <string name="error_generic">An error occurred</string>
+</resources>

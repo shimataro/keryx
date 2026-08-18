@@ -1,5 +1,6 @@
 package works.merc.keryx.app
 
+import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.REG_EXE_TIMEOUT_MS
 import works.merc.keryx.app.platform.osName
@@ -123,7 +124,7 @@ internal fun registerWindowsOpmlAssociation(
     runCommand: (List<String>) -> Int = { args -> runProcessWithTimeout(args, REG_EXE_TIMEOUT_MS) },
 ) {
     val reg = "reg.exe"
-    val progId = "Keryx.opml"
+    val progId = "$APP_NAME.opml"
     val (importCommand, regFile) = try {
         buildShellOpenCommandImport(
             "HKEY_CURRENT_USER\\Software\\Classes\\$progId\\shell\\open\\command",

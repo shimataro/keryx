@@ -132,4 +132,51 @@ class AddFeedDialogContentTest {
         onNodeWithText("Feed").assertIsDisplayed()
         onNodeWithText("記事 3 件").assertIsDisplayed()
     }
+
+    @Test
+    fun showsArticleCountAtSingularQuantity() = runDesktopComposeUiTest {
+        // Japanese has only a CLDR "other" bucket, so this exercises the plural quantity/formatArgs
+        // plumbing (home_add_feed_article_count is now a <plurals> resource) rather than wording.
+        setContent {
+            AddFeedDialogContent(
+                url = "https://ex.com/feed",
+                onUrlChange = {},
+                alreadySubscribed = false,
+                phase = null,
+                preview = AddFeedPreview.Single("https://ex.com/feed", "Feed", 1),
+                selectedCandidates = emptySet(),
+                onToggleCandidate = { _, _ -> },
+                onSelectAll = {},
+                onClearAll = {},
+                errorException = null,
+                onSubmit = {},
+            )
+        }
+        waitForIdle()
+
+        onNodeWithText("記事 1 件").assertIsDisplayed()
+    }
+
+    @Test
+    fun showsPartialResultText() = runDesktopComposeUiTest {
+        setContent {
+            AddFeedDialogContent(
+                url = "https://ex.com",
+                onUrlChange = {},
+                alreadySubscribed = false,
+                phase = null,
+                preview = AddFeedPreview.Multiple(candidates),
+                selectedCandidates = emptySet(),
+                onToggleCandidate = { _, _ -> },
+                onSelectAll = {},
+                onClearAll = {},
+                errorException = null,
+                onSubmit = {},
+                partialResult = 3 to 1,
+            )
+        }
+        waitForIdle()
+
+        onNodeWithText("3 件追加、1 件失敗しました").assertIsDisplayed()
+    }
 }

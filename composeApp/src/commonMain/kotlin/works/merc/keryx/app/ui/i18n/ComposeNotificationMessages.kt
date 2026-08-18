@@ -1,5 +1,6 @@
 package works.merc.keryx.app.ui.i18n
 
+import org.jetbrains.compose.resources.getPluralString
 import org.jetbrains.compose.resources.getString
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudDataIncompatibleException
@@ -30,8 +31,12 @@ import works.merc.keryx.app.resources.settings_import_success
  * @return The localized import result message.
  */
 internal suspend fun opmlImportedText(added: Int, failed: Int): String {
-    val addedText = getString(Res.string.settings_import_success, added)
-    return if (failed > 0) "$addedText / ${getString(Res.string.settings_import_failed, failed)}" else addedText
+    val addedText = getPluralString(Res.plurals.settings_import_success, added, added)
+    return if (failed > 0) {
+        "$addedText / ${getPluralString(Res.plurals.settings_import_failed, failed, failed)}"
+    } else {
+        addedText
+    }
 }
 
 /** [NotificationMessages] backed by Compose string resources (system-locale aware). */
@@ -55,7 +60,7 @@ class ComposeNotificationMessages : NotificationMessages {
         getString(Res.string.feed_url_changed, feedTitle)
 
     override suspend fun newArticles(count: Int): String =
-        getString(Res.string.feed_new_articles, count)
+        getPluralString(Res.plurals.feed_new_articles, count, count)
 
     /**
      * Provides a localized message describing a synchronization failure.

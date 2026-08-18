@@ -66,7 +66,7 @@ Download the latest release from the [Releases page](https://github.com/shimatar
   - [x] [Google Drive](https://drive.google.com/)
   - [x] [OneDrive](https://onedrive.live.com/)
 - Multilingual UI
-  - [ ] English
+  - [x] English
   - [x] Japanese
 
 ## Other

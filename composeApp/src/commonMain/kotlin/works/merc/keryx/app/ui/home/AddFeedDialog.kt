@@ -30,6 +30,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.DiscoveredFeedLink
 import works.merc.keryx.app.core.DiscoveredFeedType
@@ -264,7 +265,11 @@ internal fun AddFeedDialogContent(
                 Spacer(Modifier.height(12.dp))
                 Text(preview.title, style = MaterialTheme.typography.titleSmall)
                 Text(
-                    stringResource(Res.string.home_add_feed_article_count, preview.articleCount),
+                    pluralStringResource(
+                        Res.plurals.home_add_feed_article_count,
+                        preview.articleCount,
+                        preview.articleCount,
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -287,7 +292,7 @@ internal fun AddFeedDialogContent(
         partialResult?.let { (success, failed) ->
             Spacer(Modifier.height(8.dp))
             Text(
-                stringResource(Res.string.home_add_feed_partial, success, failed),
+                pluralStringResource(Res.plurals.home_add_feed_partial, success, success, failed),
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
             )

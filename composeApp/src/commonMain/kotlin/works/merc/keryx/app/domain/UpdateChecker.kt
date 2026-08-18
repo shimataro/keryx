@@ -12,6 +12,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.MILLIS_PER_HOUR
 import works.merc.keryx.app.core.compareReleaseVersions
@@ -126,7 +127,7 @@ class UpdateChecker(
     private fun HttpRequestBuilder.applyGitHubHeaders() {
         // GitHub's API rejects requests with no User-Agent (403) — Ktor doesn't send one by
         // default, so this must be set explicitly.
-        header(HttpHeaders.UserAgent, "Keryx/$currentVersion")
+        header(HttpHeaders.UserAgent, "$APP_NAME/$currentVersion")
         header(HttpHeaders.Accept, "application/vnd.github+json")
     }
 }
