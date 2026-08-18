@@ -41,6 +41,7 @@ import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.painterResource
 import org.koin.core.context.startKoin
 import org.koin.mp.KoinPlatform
+import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.core.WINDOW_DEFAULT_HEIGHT
@@ -108,7 +109,7 @@ fun main(args: Array<String>) {
     // (Windows/Linux), capture it before single-instance coordination.
     val incomingArg = args.firstOrNull { classifyLaunchArg(it) != null }
     // Must be set before any AWT/Compose initialization, otherwise macOS falls back to the main class name.
-    System.setProperty("apple.awt.application.name", "Keryx")
+    System.setProperty("apple.awt.application.name", APP_NAME)
     // Render the application menu bar (AppMenuBar) in the macOS system menu bar rather than inside the
     // window — the window uses a merged/transparent title bar (apple.awt.fullWindowContent), so an
     // in-window menu bar would be out of place. Must also be set before AWT initializes.
@@ -421,7 +422,7 @@ fun main(args: Array<String>) {
         CompositionLocalProvider(LocalWindowExceptionHandlerFactory provides exceptionHandlerFactory) {
         Window(
             onCloseRequest = { windowVisible = false },
-            title = "Keryx",
+            title = APP_NAME,
             state = windowState,
             visible = windowVisible,
             icon = windowBadgedPainter ?: painterResource(Res.drawable.tray_icon),

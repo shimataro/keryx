@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import kotlinx.coroutines.flow.SharedFlow
+import works.merc.keryx.app.core.APP_NAME
 import java.awt.Frame
 import java.awt.Image
 import java.awt.MenuItem
@@ -130,7 +131,7 @@ internal fun MacTray(
     // Tray() entirely on macOS, it must consume newArticleNotifications itself.
     LaunchedEffect(trayIcon) {
         newArticleNotifications.collect { message ->
-            trayIcon.displayMessage("Keryx", message, TrayIcon.MessageType.NONE)
+            trayIcon.displayMessage(APP_NAME, message, TrayIcon.MessageType.NONE)
         }
     }
 }

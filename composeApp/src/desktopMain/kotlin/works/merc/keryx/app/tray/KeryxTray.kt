@@ -12,6 +12,7 @@ import androidx.compose.ui.window.isTraySupported
 import androidx.compose.ui.window.rememberTrayState
 import kotlinx.coroutines.flow.SharedFlow
 import org.jetbrains.compose.resources.stringResource
+import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.drawUnreadDot
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.isWindows
@@ -86,7 +87,7 @@ internal fun ApplicationScope.KeryxTray(
         if (isMacOs || sniConnection != null) Res.drawable.tray_icon_outlined else Res.drawable.tray_icon
     val trayBaseImage = rememberDrawableImage(trayIconResource)
 
-    val tooltip = if (unreadCount > 0) "Keryx ($unreadCount)" else "Keryx"
+    val tooltip = if (unreadCount > 0) "$APP_NAME ($unreadCount)" else APP_NAME
     val showLabel = stringResource(Res.string.tray_show)
     val hideLabel = stringResource(Res.string.tray_hide)
     val quitLabel = stringResource(Res.string.tray_quit)
@@ -170,7 +171,7 @@ internal fun ApplicationScope.KeryxTray(
                 // alive exactly as long as the sink is.
                 LaunchedEffect(Unit) {
                     newArticleNotifications.collect { message ->
-                        trayState.sendNotification(Notification("Keryx", message))
+                        trayState.sendNotification(Notification(APP_NAME, message))
                     }
                 }
             }

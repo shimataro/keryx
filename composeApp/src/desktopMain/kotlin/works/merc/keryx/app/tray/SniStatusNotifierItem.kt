@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import org.freedesktop.dbus.DBusPath
 import org.freedesktop.dbus.types.Variant
+import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.core.Log
 import java.util.concurrent.atomic.AtomicReference
 
@@ -37,7 +38,7 @@ internal class SniStatusNotifierItem(
     val activations: SharedFlow<Unit> = _activations
 
     private val iconPixmaps = AtomicReference<List<SniPixmap>>(emptyList())
-    private val toolTipTitle = AtomicReference("Keryx")
+    private val toolTipTitle = AtomicReference(APP_NAME)
 
     /**
  * Gets the DBus object path for this item.
@@ -107,7 +108,7 @@ override fun getObjectPath(): String = objectPath
         return mapOf(
             "Category" to Variant("ApplicationStatus"),
             "Id" to Variant("keryx"),
-            "Title" to Variant("Keryx"),
+            "Title" to Variant(APP_NAME),
             "Status" to Variant("Active"),
             "WindowId" to Variant(0),
             "IconName" to Variant(""),

@@ -69,6 +69,13 @@ val appVersion: String =
         ?: System.getenv("APP_VERSION")
         ?: "0.0.0"
 
+// Single source of truth for the app's display name within this build script. Mirrors (but is a
+// separate literal from) core/Constants.kt's APP_NAME: this script evaluates before composeApp's
+// own commonMain is compiled, so it cannot reference that Kotlin constant directly. Every
+// packaging-metadata spot below (packageName, vendor, the macOS Dock-name jvmArg, the Windows
+// Start Menu group, the Info.plist patch path, the DMG volume name) reads from this one val.
+val appName = "Keryx"
+
 // jpackage's packaging metadata (CFBundleVersion, RPM %version, MSI ProductVersion) must stay
 // purely numeric MAJOR.MINOR.PATCH — unlike BuildConfig.VERSION, it cannot carry a SemVer
 // pre-release suffix (`-beta.1`, `-rc.2`, ...). Stripped from appVersion by dropping everything
@@ -271,15 +278,15 @@ compose.desktop {
         mainClass = "works.merc.keryx.app.MainKt"
         // macOS: without this, native AWT dialogs (FileDialog) ignore the OS dark mode setting.
         jvmArgs("-Dapple.awt.application.appearance=system")
-        jvmArgs("-Dapple.awt.application.name=Keryx")
+        jvmArgs("-Dapple.awt.application.name=$appName")
         jvmArgs("--enable-native-access=ALL-UNNAMED")
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb, TargetFormat.Rpm)
-            packageName = "Keryx"
+            packageName = appName
             packageVersion = appPackageVersion
             description = "Local-first, cross-platform RSS reader"
-            vendor = "Keryx"
+            vendor = appName
             // java.sql: sqlite-jdbc, java.naming: keyring, java.desktop: AWT tray,
             // jdk.httpserver: OAuth loopback callback server,
             // jdk.security.auth: dbus-java's SASL EXTERNAL auth resolves the uid through
@@ -394,7 +401,7 @@ compose.desktop {
             }
             windows {
                 iconFile.set(project.file("icons/keryx.ico"))
-                menuGroup = "Keryx"
+                menuGroup = appName
                 dirChooser = true
                 // Fixed GUID so Windows Installer recognizes successive MSI releases as upgrades
                 // of the same product instead of unrelated installs (jpackage/WiX MajorUpgrade).
@@ -458,7 +465,7 @@ afterEvaluate {
     tasks.findByName("createDistributable")?.doLast {
         if (macOsPackageVersion != appVersion) {
             restoreMacOsShortVersion(
-                file("build/compose/binaries/main/app/Keryx.app/Contents/Info.plist"),
+                file("build/compose/binaries/main/app/$appName.app/Contents/Info.plist"),
                 appVersion,
             )
         }
@@ -470,7 +477,7 @@ afterEvaluate {
         val dmgDir = file("build/compose/binaries/main/dmg")
         val dmgFile = dmgDir.listFiles { _, name -> name.endsWith(".dmg") }?.singleOrNull()
             ?: return@doLast
-        val volumeName = "Keryx"
+        val volumeName = appName
         val rwDmg = File("${dmgFile.absolutePath}.rw.dmg")
         val iconFile = file("icons/keryx.icns")
 

@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.withContext
 import org.freedesktop.dbus.types.UInt32
+import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.drawUnreadDot
 import java.awt.image.BufferedImage
@@ -88,7 +89,7 @@ internal fun LinuxTray(
         item.updateIcon(pixmaps)
     }
     LaunchedEffect(item, unreadCount) {
-        item.updateToolTip(if (unreadCount > 0) "Keryx ($unreadCount)" else "Keryx")
+        item.updateToolTip(if (unreadCount > 0) "$APP_NAME ($unreadCount)" else APP_NAME)
     }
     LaunchedEffect(menu, toggleLabel, quitLabel) {
         menu.updateState(TrayMenuState(toggleLabel, quitLabel))
@@ -111,7 +112,7 @@ internal fun LinuxTray(
 
     LaunchedEffect(notifier) {
         newArticleNotifications.collect { message ->
-            withContext(Dispatchers.IO) { notifier.notify(summary = "Keryx", body = message) }
+            withContext(Dispatchers.IO) { notifier.notify(summary = APP_NAME, body = message) }
         }
     }
 

@@ -2,6 +2,7 @@ package works.merc.keryx.app.tray
 
 import org.freedesktop.dbus.types.UInt32
 import org.freedesktop.dbus.types.Variant
+import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.core.Log
 import java.awt.image.BufferedImage
 
@@ -37,7 +38,7 @@ internal class LinuxNotifier(
             ?: emptyMap()
         runCatching {
             notifications.Notify(
-                appName = "Keryx",
+                appName = APP_NAME,
                 // 0 = never replace an earlier notification, so successive "N new articles"
                 // notices stack the way the AWT balloons did.
                 replacesId = UInt32(0),

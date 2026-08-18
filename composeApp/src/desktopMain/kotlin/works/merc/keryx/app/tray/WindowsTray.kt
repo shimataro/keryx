@@ -8,6 +8,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.window.isTraySupported
 import kotlinx.coroutines.flow.SharedFlow
+import works.merc.keryx.app.core.APP_NAME
 import java.awt.Component
 import java.awt.Image
 import java.awt.MouseInfo
@@ -226,7 +227,7 @@ internal fun WindowsTray(
     // consume newArticleNotifications itself — exactly as MacTray and LinuxTray do.
     LaunchedEffect(trayIcon) {
         newArticleNotifications.collect { message ->
-            trayIcon.displayMessage("Keryx", message, TrayIcon.MessageType.NONE)
+            trayIcon.displayMessage(APP_NAME, message, TrayIcon.MessageType.NONE)
         }
     }
 }
