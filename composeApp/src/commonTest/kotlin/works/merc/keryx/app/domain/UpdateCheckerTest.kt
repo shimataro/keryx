@@ -5,11 +5,13 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.respondError
 import io.ktor.client.request.HttpRequestData
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.core.compareReleaseVersions
 import works.merc.keryx.app.core.isBelowStable
 import works.merc.keryx.app.core.isNewer
@@ -58,6 +60,18 @@ class UpdateCheckerTest {
         UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo").check()
         assertEquals(1, history.size)
         assertEquals("/repos/owner/repo/releases/latest", history[0].url.encodedPath)
+    }
+
+    @Test
+    fun requestIncludesUserAgentWithAppNameAndVersion() = runTest {
+        val history = mutableListOf<HttpRequestData>()
+        val client = HttpClient(MockEngine { request ->
+            history.add(request)
+            respond("""{"tag_name":"v1.0.0","html_url":"https://ex.com/1.0.0"}""")
+        }) { expectSuccess = false }
+        UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo").check()
+        assertEquals(1, history.size)
+        assertEquals("$APP_NAME/1.0.0", history[0].headers[HttpHeaders.UserAgent])
     }
 
     @Test
