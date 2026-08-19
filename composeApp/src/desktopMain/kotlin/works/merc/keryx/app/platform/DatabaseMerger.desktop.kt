@@ -11,6 +11,7 @@ import works.merc.keryx.app.domain.MergeFailureClassifier
 import works.merc.keryx.app.domain.MergeSchema
 import works.merc.keryx.app.domain.SqliteFailureCategory
 import java.sql.DriverManager
+import java.sql.SQLException
 import java.util.Properties
 
 actual object DatabaseMerger {
@@ -147,9 +148,11 @@ actual object DatabaseMerger {
      *
      * @param dbPath The path to the database to validate.
      * @param schemaVersion The schema version whose structure is required.
-     * @return `true` if the database contains all required tables and columns, `false` if it does
-     * not, or `null` if [schemaVersion] has no registered expectation in
-     * [MergeSchema.EXPECTED_SCHEMAS].
+     * @return `true` if the database contains all required tables and columns, `false` if
+     * inspection completes and finds one missing, or `null` if [schemaVersion] has no registered
+     * expectation in [MergeSchema.EXPECTED_SCHEMAS], or if opening the database or inspecting its
+     * tables fails — a failed inspection says nothing about whether the schema itself is valid, so
+     * it must not be conflated with a completed inspection that finds it invalid.
      */
     actual fun validateSchema(dbPath: String, schemaVersion: Long): Boolean? {
         val expectedTables = MergeSchema.EXPECTED_SCHEMAS[schemaVersion] ?: return null
@@ -168,8 +171,8 @@ actual object DatabaseMerger {
                     requiredColumns.all { it.lowercase() in actualColumns }
                 }
             }
-        } catch (_: Throwable) {
-            false
+        } catch (_: SQLException) {
+            null
         }
     }
 
