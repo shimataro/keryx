@@ -114,8 +114,13 @@ actual object DatabaseMerger {
             validateCloudSchema = { validateSchema(cloudDbPath, localSchemaVersion) },
         ) ?: return e
         // The classified exception's own message is the diagnosis; the original failure's message
-        // carries the SQL-level detail behind it.
-        Log.warn(TAG, "${classified.message}: ${e.message}")
+        // carries the SQL-level detail behind it. category/resultCode are logged explicitly
+        // because e.message may come from a wrapper exception (see findSqliteCause) that omits
+        // the underlying SQLite result code.
+        Log.warn(
+            TAG,
+            "${classified.message} (category=$category, code=${sqliteCause.resultCode.name}): ${e.message}",
+        )
         return classified
     }
 
