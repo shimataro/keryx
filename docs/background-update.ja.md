@@ -66,8 +66,10 @@ while (true) {
 ## 起動時タスク（`runStartupTasks`）
 
 `runStartupTasks` 自体はデスクトップ専用のオーケストレーション（`desktopMain/StartupTasks.kt`）—
-macOS の translocated インストールの警告もデスクトップ固有の関心事として行っている — だが、下記の
-2・3 は commonMain の `domain/StartupMaintenanceTasks.kt` にあるプラットフォーム非依存の関数に委譲する。
+macOS の translocated インストールの警告（デスクトップ固有の関心事）も、ステップ2（初回同期）を
+`SyncRepository` 経由で直接実行するのもこの中で行っている — だが、フィード更新通知・アップデート通知・
+FTS 再構築（下記のステップ3）は commonMain の `domain/StartupMaintenanceTasks.kt` にある
+プラットフォーム非依存の関数に委譲する。
 
 1. キャッシュ削除（前回から 24 時間以上経過時）。
 2. Dropbox 接続済みなら初回同期。

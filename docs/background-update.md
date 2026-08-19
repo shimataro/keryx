@@ -62,8 +62,10 @@ nothing changed now writes nothing and triggers no re-query.
 ## Startup Tasks (`runStartupTasks`)
 
 `runStartupTasks` itself is desktop-only orchestration (`desktopMain/StartupTasks.kt`) — it also warns
-about a macOS-translocated app install, a desktop-specific concern — but steps 2 and 3 below delegate
-to the platform-independent functions in commonMain's `domain/StartupMaintenanceTasks.kt`:
+about a macOS-translocated app install, a desktop-specific concern, and runs step 2 (initial sync)
+directly through `SyncRepository` — but feed refresh notification, update notification, and FTS
+rebuilding (step 3 below) delegate to the platform-independent functions in commonMain's
+`domain/StartupMaintenanceTasks.kt`:
 
 1. Cache cleanup (if 24+ hours since last run).
 2. If Dropbox is connected, initial sync.
