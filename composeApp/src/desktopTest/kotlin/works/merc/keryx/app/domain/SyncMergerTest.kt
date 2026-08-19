@@ -1002,10 +1002,12 @@ class SyncMergerTest {
     }
 
     @Test
-    fun validateSchemaReturnsFalseForCorruptFile() {
+    fun validateSchemaIsUndeterminedForCorruptFile() {
         val file = java.io.File.createTempFile("corrupt", ".db")
         file.writeBytes(byteArrayOf(1, 2, 3, 4))
-        assertEquals(false, DatabaseMerger.validateSchema(file.absolutePath, KeryxDatabase.Schema.version))
+        // Not a valid SQLite header, so opening it throws before any table can be inspected —
+        // undetermined (null), never false: a failed inspection says nothing about the schema.
+        assertNull(DatabaseMerger.validateSchema(file.absolutePath, KeryxDatabase.Schema.version))
         file.delete()
     }
 
