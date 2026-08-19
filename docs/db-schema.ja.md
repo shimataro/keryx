@@ -14,7 +14,8 @@
   バージョン 2 は `1.sqm` で `articles.deleted_at` / `deleted_updated_at` を追加する（SQLDelight は最大の
   マイグレーションファイル + 1 でバージョンを導出）。スキーマを変える場合は `.sqm` ファイル
   （`<移行元バージョン>.sqm`）を追加すればバージョンは自動で上がる。あわせて
-  `DatabaseMerger.EXPECTED_SCHEMA` / `validateSchema` を新バージョンに追随させること。
+  `domain/MergeSchema.EXPECTED_SCHEMAS`（`DatabaseMerger.validateSchema` が参照する期待スキーマ）を
+  新バージョンに追随させること。
 
 ## テーブル一覧
 

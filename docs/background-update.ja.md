@@ -13,7 +13,12 @@
 ## デスクトップ実装（`desktopMain/main.kt` + `StartupTasks.kt`）
 
 `main()` でアプリスコープのコルーチンを起動し、`refreshIntervalMinutes` の間隔でループする。以下は
-要約で、各周回のエラー処理と、独立した間隔で走るアップデート確認は省略している。
+要約で、各周回のエラー処理と、独立した間隔で走るアップデート確認は省略している。`backgroundUpdateLoop`
+自体はデスクトップ専用（単純なコルーチンループ。Android での将来の対応物は `WorkManager` の
+`PeriodicWorkRequest` — 上のプラットフォーム方針の表を参照）だが、毎周回呼び出す3関数
+`refreshFeedsAndNotify` / `checkForUpdateAndNotify` / `maybeRebuildFtsIndex` はプラットフォーム非依存で
+commonMain の `domain/StartupMaintenanceTasks.kt` にあるため、将来の Android 側の worker は重複実装せず
+同じ実装を呼べる。
 
 ```kotlin
 while (true) {
@@ -59,6 +64,10 @@ while (true) {
 1 フィードずつコミットされるため、更新の進行に合わせてリストに逐次表示される。
 
 ## 起動時タスク（`runStartupTasks`）
+
+`runStartupTasks` 自体はデスクトップ専用のオーケストレーション（`desktopMain/StartupTasks.kt`）—
+macOS の translocated インストールの警告もデスクトップ固有の関心事として行っている — だが、下記の
+2・3 は commonMain の `domain/StartupMaintenanceTasks.kt` にあるプラットフォーム非依存の関数に委譲する。
 
 1. キャッシュ削除（前回から 24 時間以上経過時）。
 2. Dropbox 接続済みなら初回同期。

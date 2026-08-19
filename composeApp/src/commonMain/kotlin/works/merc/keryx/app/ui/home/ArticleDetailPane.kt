@@ -31,11 +31,11 @@ import io.github.kdroidfilter.webview.request.RequestInterceptor
 import io.github.kdroidfilter.webview.request.WebRequest
 import io.github.kdroidfilter.webview.request.WebRequestInterceptResult
 import io.github.kdroidfilter.webview.web.LoadingState
+import io.github.kdroidfilter.webview.web.NativeWebView
 import io.github.kdroidfilter.webview.web.WebView
 import io.github.kdroidfilter.webview.web.WebViewNavigator
 import io.github.kdroidfilter.webview.web.rememberWebViewNavigator
 import io.github.kdroidfilter.webview.web.rememberWebViewStateWithHTMLData
-import io.github.kdroidfilter.webview.wry.WryWebViewPanel
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.data.local.db.Articles
@@ -43,6 +43,7 @@ import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.WindowDragArea
+import works.merc.keryx.app.platform.setNativeWebViewVisible
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_copy_url
 import works.merc.keryx.app.resources.article_mark_as_unread
@@ -340,14 +341,15 @@ private fun ArticleWebView(html: String, body: String, baseUrl: String?) {
     // the panel from the moment it's created and only reveal it once this composable's own
     // layout position is known, giving Compose's own bounds sync a frame to catch up first.
     // Revealed once, not on every article switch, since the panel is reused after creation.
-    val nativePanel = remember { mutableStateOf<WryWebViewPanel?>(null) }
+    val nativePanel = remember { mutableStateOf<NativeWebView?>(null) }
     val hasPositioned = remember { mutableStateOf(false) }
     val revealed = remember { mutableStateOf(false) }
     LaunchedEffect(hasPositioned.value, nativePanel.value) {
-        if (hasPositioned.value && nativePanel.value != null && !revealed.value) {
+        val panel = nativePanel.value
+        if (hasPositioned.value && panel != null && !revealed.value) {
             withFrameNanos {}
             revealed.value = true
-            nativePanel.value?.isVisible = true
+            setNativeWebViewVisible(panel, true)
         }
     }
 
@@ -360,7 +362,7 @@ private fun ArticleWebView(html: String, body: String, baseUrl: String?) {
         },
         navigator = navigator,
         onCreated = { panel ->
-            panel.isVisible = false
+            setNativeWebViewVisible(panel, false)
             nativePanel.value = panel
         },
     )

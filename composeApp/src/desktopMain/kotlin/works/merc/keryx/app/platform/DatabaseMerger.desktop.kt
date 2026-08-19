@@ -7,6 +7,9 @@ import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.SQLITE_BUSY_TIMEOUT_MS
 import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.domain.MergeFailureClassifier
+import works.merc.keryx.app.domain.MergeSchema
+import works.merc.keryx.app.domain.SqliteFailureCategory
 import java.sql.DriverManager
 import java.util.Properties
 
@@ -93,43 +96,36 @@ actual object DatabaseMerger {
 
     /**
      * Classifies a merge failure as a permanently-unusable cloud DB
-     * ([CloudDataIncompatibleException]) or leaves it unchanged (transient / an app bug), using
-     * SQLite's error code — not message text, which is locale- and driver-version-fragile — found
-     * by walking the cause chain for a [SQLiteException].
+     * ([CloudDataIncompatibleException]) or leaves it unchanged (transient / an app bug).
      *
-     * Deliberately conservative: an error this cannot recognize is returned unchanged, so a miss
-     * never regresses behavior — the caller's own catch-all already reports it as a transient
-     * [works.merc.keryx.app.core.CloudStorageException].
+     * This side only talks to the JDBC driver: it walks the cause chain for a [SQLiteException]
+     * and reduces its error code — not message text, which is locale- and driver-version-fragile —
+     * to a driver-independent [SqliteFailureCategory]. The classification policy itself lives in
+     * [MergeFailureClassifier] (`commonMain`), so another target's driver only has to produce the
+     * same category.
      */
     private fun classifyMergeFailure(e: Throwable, cloudDbPath: String, localSchemaVersion: Long): Throwable {
         val sqliteCause = e.findSqliteCause() ?: return e
-        val primaryCode = sqliteCause.resultCode.code and 0xFF
-        return when (primaryCode) {
-            // Not a database / corrupt / bad format / empty-but-expected-populated, or a
-            // UNIQUE/NOT NULL/FOREIGN KEY violation: MergeSql's NOT EXISTS/EXISTS guards already
-            // rule out every collision with main's own rows, so the only way a merge statement can
-            // still hit a constraint is the cloud DB's own row set violating it (e.g. a duplicate
-            // url inside the cloud DB, or a NULL where the cloud's schema allowed one) — data this
-            // app's schema cannot represent, i.e. exactly what CloudDataIncompatibleException means.
-            SQLITE_NOTADB, SQLITE_CORRUPT, SQLITE_FORMAT, SQLITE_EMPTY, SQLITE_CONSTRAINT -> {
-                Log.warn(TAG, "Cloud DB unusable (${sqliteCause.resultCode.name}): ${e.message}")
-                CloudDataIncompatibleException("Cloud DB unusable (${sqliteCause.resultCode.name})")
-            }
-            // Ambiguous: "no such table"/"no such column" is what a foreign/legacy cloud schema
-            // looks like, but it is also what a broken *local* schema looks like (a dropped table
-            // from an unrelated app bug). Disambiguate against the downloaded cloud file itself.
-            SQLITE_ERROR -> when (validateSchema(cloudDbPath, localSchemaVersion)) {
-                false -> {
-                    Log.warn(TAG, "Cloud DB schema is incompatible: ${e.message}")
-                    CloudDataIncompatibleException("Cloud DB schema is incompatible")
-                }
-                // true (cloud schema looks fine) or null (undetermined) both mean this cannot be
-                // confidently pinned on the cloud — leave it as a transient/app-bug failure.
-                true, null -> e
-            }
-            else -> e
-        }
+        val category = sqliteCause.failureCategory()
+        val classified = MergeFailureClassifier.classify(
+            category = category,
+            errorCodeName = sqliteCause.resultCode.name,
+            validateCloudSchema = { validateSchema(cloudDbPath, localSchemaVersion) },
+        ) ?: return e
+        // The classified exception's own message is the diagnosis; the original failure's message
+        // carries the SQL-level detail behind it.
+        Log.warn(TAG, "${classified.message}: ${e.message}")
+        return classified
     }
+
+    /** Reduces this JDBC exception's SQLite *primary* result code to a platform-independent category. */
+    private fun SQLiteException.failureCategory(): SqliteFailureCategory =
+        when (resultCode.code and 0xFF) {
+            SQLITE_NOTADB, SQLITE_CORRUPT, SQLITE_FORMAT, SQLITE_EMPTY, SQLITE_CONSTRAINT ->
+                SqliteFailureCategory.CORRUPT_OR_CONSTRAINT
+            SQLITE_ERROR -> SqliteFailureCategory.STATEMENT_ERROR
+            else -> SqliteFailureCategory.OTHER
+        }
 
     /**
      * Walks the cause chain looking for the [SQLiteException] that explains [this], since
@@ -152,10 +148,11 @@ actual object DatabaseMerger {
      * @param dbPath The path to the database to validate.
      * @param schemaVersion The schema version whose structure is required.
      * @return `true` if the database contains all required tables and columns, `false` if it does
-     * not, or `null` if [schemaVersion] has no registered expectation in [EXPECTED_SCHEMAS].
+     * not, or `null` if [schemaVersion] has no registered expectation in
+     * [MergeSchema.EXPECTED_SCHEMAS].
      */
     actual fun validateSchema(dbPath: String, schemaVersion: Long): Boolean? {
-        val expectedTables = EXPECTED_SCHEMAS[schemaVersion] ?: return null
+        val expectedTables = MergeSchema.EXPECTED_SCHEMAS[schemaVersion] ?: return null
         return try {
             DriverManager.getConnection("jdbc:sqlite:$dbPath").use { connection ->
                 expectedTables.all { (tableName, requiredColumns) ->
@@ -175,45 +172,6 @@ actual object DatabaseMerger {
             false
         }
     }
-
-    /**
-     * Expected tables and columns for schema version 2.
-     * Keep in sync with [MergeSql] and the `.sq` schema files.
-     */
-    private val EXPECTED_SCHEMA_V2 = mapOf(
-        "folders" to setOf(
-            "id", "name", "sort_order", "deleted_at", "updated_at", "created_at",
-        ),
-        "feeds" to setOf(
-            "id", "url", "site_url", "title", "description", "favicon_url", "etag",
-            "last_modified", "error_count", "last_error", "custom_title", "folder_id",
-            "deleted_at", "updated_at", "created_at", "sort_order",
-            "folder_updated_at", "sort_order_updated_at", "custom_title_updated_at", "deleted_updated_at",
-        ),
-        "tags" to setOf(
-            "id", "name", "color", "sort_order", "deleted_at", "updated_at", "created_at",
-        ),
-        "articles" to setOf(
-            "id", "feed_id", "guid", "url", "title", "summary", "content", "author",
-            "published_at", "thumbnail_url", "is_read", "read_at", "is_starred",
-            "starred_at", "cached_at", "search_text", "updated_at", "created_at",
-            "deleted_at", "deleted_updated_at",
-        ),
-        "feed_tags" to setOf(
-            "feed_id", "tag_id", "deleted_at", "updated_at",
-        ),
-        "global_settings" to setOf(
-            "key", "value", "updated_at",
-        ),
-    )
-
-    /**
-     * Registered expected schemas by [works.merc.keryx.app.data.local.db.KeryxDatabase.Schema.version].
-     * A version missing here makes [validateSchema] return `null` (undetermined) rather than
-     * `false` — an unregistered version must never be treated as "definitely incompatible", which
-     * would offer a destructive cloud-data reset for what is really just a forgotten registration.
-     */
-    private val EXPECTED_SCHEMAS: Map<Long, Map<String, Set<String>>> = mapOf(2L to EXPECTED_SCHEMA_V2)
 
     /**
      * If the downloaded cloud DB is older than the local schema, run the SQLDelight migrations on

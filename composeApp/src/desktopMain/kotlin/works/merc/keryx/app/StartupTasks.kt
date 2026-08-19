@@ -11,27 +11,23 @@ import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.MILLIS_PER_DAY
 import works.merc.keryx.app.core.MILLIS_PER_MINUTE
 import works.merc.keryx.app.core.SystemClock
-import works.merc.keryx.app.data.local.FtsManager
-import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.CloudSession
-import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.IdGenerator
-import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.NotificationMessages
 import works.merc.keryx.app.domain.OpmlImporter
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncTrigger
-import works.merc.keryx.app.domain.UpdateChecker
-import works.merc.keryx.app.domain.UpdateStatus
+import works.merc.keryx.app.domain.checkForUpdateAndNotify
+import works.merc.keryx.app.domain.maybeRebuildFtsIndex
+import works.merc.keryx.app.domain.refreshFeedsAndNotify
 import works.merc.keryx.app.domain.shouldCheckForUpdate
 import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.notification_app_translocated
 import works.merc.keryx.app.resources.notification_app_translocated_detail
-import works.merc.keryx.app.resources.update_available_notification
 
 private const val LOG_TAG = "StartupTasks"
 
@@ -60,31 +56,6 @@ internal suspend fun runStartupTasks(koin: Koin) {
 }
 
 /**
- * Rebuilds the full FTS index when the application is idle and at least 24 hours have passed since the previous rebuild.
- */
-private suspend fun maybeRebuildFtsIndex(koin: Koin) {
-    val activityCenter = koin.get<ActivityCenter>()
-    if (activityCenter.syncing.value || activityCenter.feedRefreshing.value) return
-    val settingsRepository = koin.get<SettingsRepository>()
-    val now = SystemClock.nowMillis()
-    val last = settingsRepository.getLocalSettings().lastFtsRebuiltAt
-    if (last != null && now - last < MILLIS_PER_DAY) return
-    koin.get<FtsManager>().rebuildIndex()
-    settingsRepository.mutateLocalSettings { it.copy(lastFtsRebuiltAt = now) }
-}
-
-/**
- * Refreshes all feeds and processes notifications for newly fetched articles according to the local notification setting.
- */
-private suspend fun refreshFeedsAndNotify(koin: Koin) {
-    val settingsRepository = koin.get<SettingsRepository>()
-    val results = koin.get<ActivityCenter>().trackFeedRefresh { koin.get<FeedRepository>().refreshAll() }
-    koin.get<NewArticleNotifier>().notifyIfEnabled(
-        results, settingsRepository.getLocalSettings().notificationEnabled, koin.get<NotificationMessages>(),
-    )
-}
-
-/**
  * Runs periodic background maintenance tasks.
  *
  * Feed refreshing and synchronization occur when the configured refresh interval is positive.
@@ -106,31 +77,6 @@ internal suspend fun backgroundUpdateLoop(koin: Koin) {
             }
             maybeRebuildFtsIndex(koin)
         }.onFailure { if (it is CancellationException) throw it else Log.error(LOG_TAG, "Background update cycle failed", it) }
-    }
-}
-
-/**
- * Checks for an available application update and notifies the user when one is found.
- *
- * @param koin The dependency injection container used to resolve update and notification services.
- */
-private suspend fun checkForUpdateAndNotify(koin: Koin) {
-    val settingsRepository = koin.get<SettingsRepository>()
-    val status = koin.get<UpdateChecker>().check()
-    settingsRepository.mutateLocalSettings { it.copy(lastUpdateCheckAt = SystemClock.nowMillis()) }
-    if (status is UpdateStatus.Available) {
-        val message = getString(Res.string.update_available_notification, status.version)
-        koin.get<NotificationCenter>().add(
-            AppNotification(
-                id = IdGenerator.newId(),
-                level = AppNotificationLevel.INFO,
-                message = message,
-                timestampMillis = SystemClock.nowMillis(),
-                // Acting on the notification goes straight to the release page — the only useful
-                // next step for "a new version exists".
-                action = AppNotificationAction.OpenUrl(status.url),
-            ),
-        )
     }
 }
 

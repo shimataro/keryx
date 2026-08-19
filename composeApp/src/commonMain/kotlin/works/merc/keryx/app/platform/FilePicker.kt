@@ -17,21 +17,46 @@ data class SaveFileRequest(
     val overwriteCancelLabel: String,
 )
 
+/**
+ * A file the user picked through [FilePicker]: a read/write handle, opaque to the caller, that
+ * never exposes how the file is addressed.
+ *
+ * On desktop this resolves to an absolute filesystem path. It deliberately is not a path in the
+ * contract, because Android's Storage Access Framework (`ActivityResultContracts.OpenDocument` /
+ * `CreateDocument`) hands back a `content://` `Uri` that no `java.io.File` can open — so an Android
+ * target would resolve the same handle through a `ContentResolver` instead.
+ */
+interface PickedFile {
+    /**
+     * Reads the whole file as text.
+     *
+     * @return The file's contents, or `null` if it could not be read.
+     */
+    suspend fun readText(): String?
+
+    /**
+     * Writes text to the file, replacing any existing contents.
+     *
+     * @param text The text to write.
+     */
+    suspend fun writeText(text: String)
+}
+
 /** Native open/save file dialogs (desktop). */
 expect object FilePicker {
     /**
      * Shows a dialog for selecting a file to open.
      *
      * @param request The open-dialog title, allowed extensions, and filter label.
-     * @return The selected file path, or `null` if the dialog is cancelled.
+     * @return A handle to the selected file, or `null` if the dialog is cancelled.
      */
-    suspend fun pickOpenFile(request: OpenFileRequest): String?
+    suspend fun pickOpenFile(request: OpenFileRequest): PickedFile?
 
     /**
      * Shows a save dialog for the specified request.
      *
      * @param request The save-dialog configuration, including the title and default filename.
-     * @return The selected file path, or `null` if the dialog is cancelled.
+     * @return A handle to the selected file, or `null` if the dialog is cancelled.
      */
-    suspend fun pickSaveFile(request: SaveFileRequest): String?
+    suspend fun pickSaveFile(request: SaveFileRequest): PickedFile?
 }

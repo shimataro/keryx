@@ -10,7 +10,8 @@ internal sealed interface LaunchArg {
 }
 
 /**
- * Classifies a raw launch argument (from `argv` or forwarded via [SingleInstanceCoordinator]).
+ * Classifies a raw launch argument (from `argv` or forwarded via the platform's
+ * single-instance coordinator).
  *
  * @param arg The raw argument to classify.
  * @return The recognized [LaunchArg], or `null` if [arg] doesn't match anything Keryx handles.
