@@ -37,11 +37,14 @@ dashboard, or Google's official Android version distribution data), drop the bun
    already there — raising `minSdk` is what makes that assumption safe rather than merely
    convenient.)
 2. Before swapping the factory, add an instrumentation test that runs on a real device/emulator
-   at the target API level and executes the production `articles_fts` `CREATE VIRTUAL TABLE`
-   statement (`tokenize='trigram'`) through `FrameworkSQLiteOpenHelperFactory`. Treat a
-   successful `CREATE VIRTUAL TABLE` as the FTS5 runtime gate — do not rely on
-   `PRAGMA compile_options`, which the AOSP build's `SQLITE_OMIT_COMPILEOPTION_DIAGS` flag makes
-   unreliable. If the probe fails, keep the bundled driver, or revise this exit criteria.
+   at **API 34 specifically — the new minimum supported API — not merely a newer target**, since
+   SQLite version and FTS5 availability can differ by device build even at the same API level. If
+   OEM variants are supported, include representative OEM devices in this test matrix. The test
+   must execute the production `articles_fts` `CREATE VIRTUAL TABLE` statement
+   (`tokenize='trigram'`) through `FrameworkSQLiteOpenHelperFactory`. Treat a successful
+   `CREATE VIRTUAL TABLE` as the FTS5 runtime gate — do not rely on `PRAGMA compile_options`,
+   which the AOSP build's `SQLITE_OMIT_COMPILEOPTION_DIAGS` flag makes unreliable. If the probe
+   fails on any tested device, keep the bundled driver, or revise this exit criteria.
 3. Swap the `SupportSQLiteOpenHelper.Factory` implementation from the bundled-SQLite one to
    `androidx.sqlite:sqlite-framework`'s `FrameworkSQLiteOpenHelperFactory`, which wraps the
    device's own `SQLiteOpenHelper` directly.
