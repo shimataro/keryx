@@ -20,13 +20,14 @@ composeApp/src/
     data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce(expect), TokenStorage, OAuthTokens
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, CloudSession, NotificationCenter, MergeSql, IdGenerator, CloudConnectFlow
+    domain/       Feed/Article/Tag/Settings/SyncRepository, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, OAuthCallbackParams, StartupMaintenanceTasks（refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex）
     di/           AppModule（+ expect platformModule）
     platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot（すべて expect）
     ui/           theme/, navigation/, setup/, home/（3ペイン + 検索 + 通知センター）, article/, settings/, i18n/
+    LaunchArg.kt  起動時の引数（`keryx://` URI か `.opml` パスか）を分類する — プラットフォーム非依存、パッケージ直下
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq（7 テーブル）
   commonMain/composeResources/  values/strings.xml, drawable/
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（起動時/バックグラウンドタスク関数群）+ 各 expect の actual（DatabaseDriverFactory, AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, Pkce, PlatformModule）+ OAuthConnectFlow, OAuthRedirectTransport（CustomUri/Loopback）, OAuthUriParser, LaunchArg, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）, DesktopOs（isMacOs/isWindows/isLinux）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf）
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ 各 expect の actual（DatabaseDriverFactory, AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, Pkce, PlatformModule）+ LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）, DesktopOs（isMacOs/isWindows/isLinux）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf）
     tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray + StatusNotifierItem/dbusmenu の D-Bus オブジェクト
   commonTest/ + desktopTest/
 ```
@@ -64,6 +65,15 @@ ATTACH DATABASE マージは**専用の JDBC コネクション 1 本**で行う
 ファイル DB に対してステートメントごとに新しいコネクションを開くため、`ATTACH` が後続のマージ文に
 見えない。`DatabaseMerger` が attach → バージョン確認 → マージ（トランザクション）→ detach を
 1 コネクションで完結させる。
+
+プラットフォーム固有なのは SQLite ドライバとのやりとりだけである。判定*ロジック*自体は `commonMain` に
+ある: `domain/MergeFailureClassifier`（純粋関数。失敗カテゴリ + エラーコード名 + 遅延評価のスキーマ検証
+コールバック → `CloudDataIncompatibleException?`）と `domain/MergeSchema`（スキーマバージョンごとの期待
+テーブル/カラム。純粋なデータ）。デスクトップの `actual` が担うのは、原因チェーンを辿って
+`org.sqlite.SQLiteException` を見つけ、`resultCode.code and 0xFF` を `SqliteFailureCategory` へ変換し、
+判定結果をログに出し、`validateSchema` で `MergeSchema.EXPECTED_SCHEMAS` に対して `PRAGMA table_info` を
+実行することだけ。将来の Android の `actual`（その `SQLiteException` は数値コードを公開しない）も、
+同じカテゴリを与えるだけで済む。
 
 ### CloudSession / SyncRepository
 

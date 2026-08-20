@@ -34,7 +34,7 @@ actual object DatabaseSnapshot {
         //
         // `sync_state` goes too. It is device-local bookkeeping (last_synced_at, the cloud file's
         // rev, the uploaded-snapshot digest), declared a non-sync table in db-schema.md, and it
-        // appears in neither MergeSql nor DatabaseMerger's EXPECTED_SCHEMA — so no receiving
+        // appears in neither MergeSql nor MergeSchema.EXPECTED_SCHEMAS — so no receiving
         // device ever reads it out of this file. Removing it also makes the snapshot a pure
         // function of the synced data: last_synced_at is rewritten on every successful sync, so
         // leaving it in would change the bytes on every cycle and defeat SyncRepository's

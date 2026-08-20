@@ -20,13 +20,14 @@ composeApp/src/
     data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce(expect), TokenStorage, OAuthTokens
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, IdGenerator, CloudConnectFlow
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, StartupMaintenanceTasks (refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex)
     di/           AppModule (+ expect platformModule)
     platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot (all expect)
     ui/           theme/, navigation/, setup/, home/ (3-pane + search + notification center), article/, settings/, i18n/
+    LaunchArg.kt  Classifies a raw launch argument (`keryx://` URI vs `.opml` path) — platform-independent, package root
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq (7 tables)
   commonMain/composeResources/  values/strings.xml, drawable/
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (startup/background-task functions) + actual implementations of each expect (DatabaseDriverFactory, AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, Pkce, PlatformModule) + OAuthConnectFlow, OAuthRedirectTransport (CustomUri/Loopback), OAuthUriParser, LaunchArg, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage), DesktopOs (isMacOs/isWindows/isLinux), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux)
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of each expect (DatabaseDriverFactory, AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, Pkce, PlatformModule) + LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage), DesktopOs (isMacOs/isWindows/isLinux), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux)
     tray/      KeryxTray (platform branch), MacTray, LinuxTray + the StatusNotifierItem/dbusmenu D-Bus objects
   commonTest/ + desktopTest/
 ```
@@ -51,11 +52,20 @@ The package root is `works.merc.keryx.app` (reverse DNS of `keryx.merc.works`).
 ### FtsManager / FtsSearch
 
 Manages `articles_fts` (FTS5 trigram, `content='articles'`) via raw SQL. Not included in the SQLDelight schema.
-**Never DROP the live DB's `articles_fts`** (excluded from upload via `VACUUM INTO` snapshot copy (`DatabaseSnapshot`), dropping it on the copy side, so concurrent searches never hit `no such table`). Hot paths (feed refresh, sync merge) incrementally index new rows via `FtsManager.indexMissing()` — never a full `'rebuild'`, which is O(all indexed text) and would block/zero-out concurrent searches. The whole index is only rebuilt in the rare healing pass: a once-per-24h idle pass in `StartupTasks.kt` (`maybeRebuildFtsIndex`, gated on `lastFtsRebuiltAt` + `ActivityCenter` idle), which re-indexes content that incremental indexing left stale. On startup, `FtsManager.ensureIndexed()` creates the table on first run and backfills any missing rows. `busy_timeout` (set in `DatabaseDriverFactory`) lets a search wait out, rather than error on, the brief write lock of an incremental insert or a rebuild.
+**Never DROP the live DB's `articles_fts`** (excluded from upload via `VACUUM INTO` snapshot copy (`DatabaseSnapshot`), dropping it on the copy side, so concurrent searches never hit `no such table`). Hot paths (feed refresh, sync merge) incrementally index new rows via `FtsManager.indexMissing()` — never a full `'rebuild'`, which is O(all indexed text) and would block/zero-out concurrent searches. The whole index is only rebuilt in the rare healing pass: a once-per-24h idle pass (`maybeRebuildFtsIndex` in commonMain's `domain/StartupMaintenanceTasks.kt`, gated on `lastFtsRebuiltAt` + `ActivityCenter` idle, called from desktop's `StartupTasks.kt`), which re-indexes content that incremental indexing left stale. On startup, `FtsManager.ensureIndexed()` creates the table on first run and backfills any missing rows. `busy_timeout` (set in `DatabaseDriverFactory`) lets a search wait out, rather than error on, the brief write lock of an incremental insert or a rebuild.
 
 ### DatabaseMerger (expect / actual) — Key to Sync Merge
 
 ATTACH DATABASE merge runs through `platform/DatabaseMerger`, NOT the SQLDelight driver. SQLDelight's JVM `JdbcSqliteDriver` opens a fresh connection per statement for file DBs, so an `ATTACH` on one call is invisible to the merge statements on the next. `DatabaseMerger` does the whole attach → version check → merge → detach on a single dedicated JDBC connection.
+
+Only the SQLite-driver conversation is platform-specific. The decision *policy* lives in
+`commonMain`: `domain/MergeFailureClassifier` (a pure function — failure category + error-code name
++ a lazy schema-validation callback → `CloudDataIncompatibleException?`) and `domain/MergeSchema`
+(the expected tables/columns per schema version, plain data). The desktop `actual` only walks the
+cause chain for an `org.sqlite.SQLiteException`, reduces `resultCode.code and 0xFF` to a
+`SqliteFailureCategory`, logs the verdict, and runs `PRAGMA table_info` for `validateSchema` against
+`MergeSchema.EXPECTED_SCHEMAS`. A future Android `actual` — whose `SQLiteException` exposes no
+numeric code — has to supply the same category and nothing else.
 
 ### CloudSession / SyncRepository
 

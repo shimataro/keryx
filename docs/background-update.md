@@ -14,7 +14,12 @@
 
 `main()` launches an app-scope coroutine that runs `backgroundUpdateLoop` (`StartupTasks.kt`), looping
 at `refreshIntervalMinutes` intervals. The sketch below is abridged — per-cycle error handling and the
-separately-scheduled update check are omitted.
+separately-scheduled update check are omitted. `backgroundUpdateLoop` itself is desktop-only (a plain
+coroutine loop; Android's future equivalent is a `WorkManager` `PeriodicWorkRequest`, see the Platform
+Strategy table above), but the three functions it calls each cycle — `refreshFeedsAndNotify`,
+`checkForUpdateAndNotify`, `maybeRebuildFtsIndex` — are platform-independent and live in commonMain's
+`domain/StartupMaintenanceTasks.kt`, so a future Android worker can call the same implementations
+instead of duplicating them.
 
 ```kotlin
 while (true) {
@@ -55,6 +60,12 @@ nothing changed now writes nothing and triggers no re-query.
 `FeedRepository.refreshAll` fetches feeds' network data **concurrently** (bounded to `REFRESH_FETCH_CONCURRENCY` simultaneous fetches), then applies each feed's DB writes **serially** in feed order. A large subscription list therefore refreshes in roughly the time of its slowest fetches rather than the sum of every fetch. DB writes stay single-threaded — the JVM SQLite driver opens a fresh connection per statement, so concurrent writes could contend — and each feed's articles are still committed one feed at a time, so they appear incrementally in the list as the refresh progresses.
 
 ## Startup Tasks (`runStartupTasks`)
+
+`runStartupTasks` itself is desktop-only orchestration (`desktopMain/StartupTasks.kt`) — it also warns
+about a macOS-translocated app install, a desktop-specific concern, and runs step 2 (initial sync)
+directly through `SyncRepository` — but feed refresh notification, update notification, and FTS
+rebuilding (step 3 below) delegate to the platform-independent functions in commonMain's
+`domain/StartupMaintenanceTasks.kt`:
 
 1. Cache cleanup (if 24+ hours since last run).
 2. If Dropbox is connected, initial sync.

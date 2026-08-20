@@ -244,6 +244,15 @@ cause の循環に備えて深さ上限あり）。`SchemaVersionException` は�
 挙動を後退させることはなく、`SyncRepository` 自身の catch-all が一時的な `CloudStorageException` として
 扱う。
 
+2 層の分担は次のとおり: デスクトップの `actual` が担うのは `resultCode.code and 0xFF` をドライバ非依存の
+`SqliteFailureCategory`（`CORRUPT_OR_CONSTRAINT` / `STATEMENT_ERROR` / `OTHER`）へ落とすことと、判定結果の
+ログ出力だけ。下表の判定ロジック本体は `commonMain` の `domain/MergeFailureClassifier.classify` にあり、
+（カテゴリ、エラーコード名、遅延評価される `validateSchema` コールバック）から
+`CloudDataIncompatibleException` または `null`（= 元の失敗をそのまま再 throw）を返す純粋関数である。
+`validateSchema` コールバックはダウンロード済みファイルを開き直すため、曖昧な `STATEMENT_ERROR` の場合に
+のみ呼ばれる。分類そのものにプラットフォーム固有の要素は無いので、数値エラーコードを公開しないドライバ
+（Android の `android.database.sqlite.SQLiteException`）を持つターゲットでも、同じカテゴリを与えるだけで済む。
+
 | SQLite の主エラーコード | 分類 |
 | --- | --- |
 | `SQLITE_NOTADB`、`SQLITE_CORRUPT`、`SQLITE_FORMAT`、`SQLITE_EMPTY` | **永続** → `CloudDataIncompatibleException`。ファイル自体が壊れている。 |
@@ -292,7 +301,9 @@ main（ローカル）側に既に存在する不整合が、マージの `UPDAT
 
 `DatabaseMerger.validateSchema(dbPath, schemaVersion)` は **nullable な** `Boolean` を返す —
 登録済みのスキーマバージョンに対するテーブル・カラムの有無なら `true`/`false`、`schemaVersion` が
-デスクトップ actual 側の `EXPECTED_SCHEMAS` マップに未登録なら `null`。これは意図的に安全側へ倒す
+`commonMain` の `domain/MergeSchema.EXPECTED_SCHEMAS` に未登録なら `null`（期待スキーマの表は全
+プラットフォーム共通の純粋なデータで、それをファイルと突き合わせる `PRAGMA table_info` の実処理だけが
+各 `actual` にある）。これは意図的に安全側へ倒す
 方向のフェイルセーフである — バージョンを上げた（`KeryxDatabase.Schema.version`）際に対応する
 期待スキーマの登録を忘れると、`validateSchema` は `false` ではなく `true` から `null` へ*劣化*し、
 呼び出し側はすべて `null` を `true` と同様に扱う — 判定不能な結果を使って破壊的なクラウドデータリセットを

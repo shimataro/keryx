@@ -4,12 +4,6 @@ import java.net.URI
 import java.net.URLDecoder
 
 /**
- * Parsed query parameters from an OAuth custom-scheme redirect URI
- * (e.g. `keryx://oauth2/callback?code=abc&state=xyz`).
- */
-data class OAuthCallbackParams(val code: String?, val state: String?, val error: String?)
-
-/**
  * Parses a custom-scheme redirect URI into structured OAuth callback parameters.
  * Extracts the query string from the URI and decodes key/value pairs.
  */

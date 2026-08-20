@@ -31,7 +31,6 @@ import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.domain.UpdateStatus
-import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.platform.FileSelector
 import works.merc.keryx.app.platform.OpenFileRequest
 import works.merc.keryx.app.platform.PlatformFileSelector
@@ -311,13 +310,13 @@ class SettingsViewModel(
                     overwriteReplaceLabel = getString(Res.string.file_overwrite_replace),
                     overwriteCancelLabel = getString(Res.string.common_cancel),
                 )
-                val path = fileSelector.pickSaveFile(request)
-                if (path == null) {
+                val target = fileSelector.pickSaveFile(request)
+                if (target == null) {
                     opmlResult = OpmlResult.Cancelled
                     return@launch
                 }
                 opmlResult = try {
-                    withContext(dispatcher) { FileIO.writeText(path, buildOpmlDocument()) }
+                    withContext(dispatcher) { target.writeText(buildOpmlDocument()) }
                     OpmlResult.Exported
                 } catch (e: CancellationException) {
                     throw e
@@ -370,13 +369,13 @@ class SettingsViewModel(
                     extensions = listOf("opml", "xml"),
                     filterLabel = getString(Res.string.file_filter_opml),
                 )
-                val path = fileSelector.pickOpenFile(request)
-                if (path == null) {
+                val source = fileSelector.pickOpenFile(request)
+                if (source == null) {
                     opmlResult = OpmlResult.Cancelled
                     return@launch
                 }
                 opmlResult = try {
-                    val outcome = withContext(dispatcher) { FileIO.readText(path)?.let { opmlImporter.import(it) } }
+                    val outcome = withContext(dispatcher) { source.readText()?.let { opmlImporter.import(it) } }
                     if (outcome == null) OpmlResult.ImportFailed else OpmlResult.Imported(outcome.added, outcome.failed)
                 } catch (e: CancellationException) {
                     throw e

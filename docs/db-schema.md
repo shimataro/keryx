@@ -13,7 +13,8 @@ Target: local SQLite (managed by SQLDelight). `.sq` files are located at
 - Schema version is managed by `PRAGMA user_version` (currently 2). `DatabaseDriverFactory` drives create/migrate.
   Version 2 adds `articles.deleted_at` / `deleted_updated_at` via `1.sqm` (SQLDelight derives the version from the
   highest migration file + 1). When the schema changes, add a `.sqm` file (`<from-version>.sqm`) and the version bumps
-  automatically; `DatabaseMerger.EXPECTED_SCHEMA` / `validateSchema` must be updated to the new version in lockstep.
+  automatically; `domain/MergeSchema.EXPECTED_SCHEMAS` (which `DatabaseMerger.validateSchema` checks against) must be
+  updated to the new version in lockstep.
 
 ## Table List
 

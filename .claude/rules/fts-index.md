@@ -5,7 +5,8 @@ paths:
   - "**/DatabaseSnapshot*.kt"      # VACUUM INTO snapshot drops articles_fts on the copy side
   - "**/SyncRepository.kt"         # indexMissing() after merge
   - "**/FeedRepository.kt"         # indexMissing() after refresh
-  - "**/StartupTasks.kt"           # maybeRebuildFtsIndex (daily idle heal)
+  - "**/StartupTasks.kt"           # desktop orchestration that calls maybeRebuildFtsIndex
+  - "**/StartupMaintenanceTasks.kt" # maybeRebuildFtsIndex itself (daily idle heal, commonMain)
   - "**/main.kt"                   # ensureIndexed() called at startup, before application {}
   - "**/*.sq"                      # do NOT add articles_fts to a .sq file
 ---
@@ -21,9 +22,9 @@ never hits `no such table`. Hot paths (feed refresh, sync merge) index new
 rows incrementally via `FtsManager.indexMissing()` — never a full `'rebuild'`,
 which is O(all indexed text) and would block/zero-out concurrent searches. The
 whole index is only rebuilt in the rare healing pass: a once-per-24h idle pass
-in `StartupTasks.kt` (`maybeRebuildFtsIndex`, gated on `lastFtsRebuiltAt` +
-`ActivityCenter` idle), which re-indexes content that incremental indexing
-left stale. On startup, `FtsManager.ensureIndexed()` creates the table on first
+(`maybeRebuildFtsIndex` in commonMain's `domain/StartupMaintenanceTasks.kt`, gated on
+`lastFtsRebuiltAt` + `ActivityCenter` idle, called from desktop's `StartupTasks.kt`),
+which re-indexes content that incremental indexing left stale. On startup, `FtsManager.ensureIndexed()` creates the table on first
 run and backfills any missing rows. `busy_timeout` (set in
 `DatabaseDriverFactory`) lets a search wait out, rather than error on, the brief
 write lock of an incremental insert or a rebuild.

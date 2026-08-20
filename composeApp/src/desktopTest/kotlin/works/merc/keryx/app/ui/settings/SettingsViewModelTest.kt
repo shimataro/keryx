@@ -68,6 +68,8 @@ import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.platform.FileSelector
 import works.merc.keryx.app.platform.OpenFileRequest
+import works.merc.keryx.app.platform.PathPickedFile
+import works.merc.keryx.app.platform.PickedFile
 import works.merc.keryx.app.platform.SaveFileRequest
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.settings_export_opml
@@ -100,7 +102,11 @@ private class AlwaysFailingCloudStorage : CloudStorage {
     override suspend fun metadata(path: String): Result<CloudFileMeta?> = fail()
 }
 
-/** A [FileSelector] fake: returns fixed paths (or null, i.e. "cancelled") and records what it was asked for. */
+/**
+ * A [FileSelector] fake: hands back a handle to a fixed path (or null, i.e. "cancelled") and records
+ * what it was asked for. The handle is the production [PathPickedFile], so reads and writes still go
+ * to a real file on disk — which is what these tests assert on.
+ */
 private class FakeFileSelector(
     private val openPath: String? = null,
     private val savePath: String? = null,
@@ -110,22 +116,22 @@ private class FakeFileSelector(
     var lastSaveRequest: SaveFileRequest? = null
         private set
 
-    override suspend fun pickOpenFile(request: OpenFileRequest): String? {
+    override suspend fun pickOpenFile(request: OpenFileRequest): PickedFile? {
         lastOpenRequest = request
-        return openPath
+        return openPath?.let(::PathPickedFile)
     }
 
-    override suspend fun pickSaveFile(request: SaveFileRequest): String? {
+    override suspend fun pickSaveFile(request: SaveFileRequest): PickedFile? {
         lastSaveRequest = request
-        return savePath
+        return savePath?.let(::PathPickedFile)
     }
 }
 
 /** A [FileSelector] whose open pick suspends until the test resolves [openDeferred] — for exercising the in-flight state of a still-running import. */
 private class SuspendingFileSelector : FileSelector {
-    val openDeferred = CompletableDeferred<String?>()
-    override suspend fun pickOpenFile(request: OpenFileRequest): String? = openDeferred.await()
-    override suspend fun pickSaveFile(request: SaveFileRequest): String? = error("not used by this test")
+    val openDeferred = CompletableDeferred<PickedFile?>()
+    override suspend fun pickOpenFile(request: OpenFileRequest): PickedFile? = openDeferred.await()
+    override suspend fun pickSaveFile(request: SaveFileRequest): PickedFile? = error("not used by this test")
 }
 
 /**

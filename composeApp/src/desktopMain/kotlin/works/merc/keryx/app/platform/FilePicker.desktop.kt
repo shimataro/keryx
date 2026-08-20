@@ -226,22 +226,45 @@ private fun resolveDialogOwner(): Window? = chooseDialogOwner(
     Frame.getFrames().filter { it.isShowing },
 )
 
+/**
+ * The desktop [PickedFile]: every backend above resolves to an absolute filesystem path, so reading
+ * and writing is plain [FileIO]. The path stays inside this class — callers only ever see the
+ * [PickedFile] contract, which an Android target can satisfy with a `content://` Uri instead.
+ */
+internal class PathPickedFile(private val path: String) : PickedFile {
+    /**
+     * Reads the file at this location as text.
+     *
+     * @return The file's contents, or `null` if it could not be read.
+     */
+    override suspend fun readText(): String? = FileIO.readText(path)
+
+    /**
+     * Writes text to the file at this location, replacing any existing contents.
+     *
+     * @param text The text to write.
+     */
+    override suspend fun writeText(text: String) = FileIO.writeText(path, text)
+}
+
 actual object FilePicker {
     /**
          * Opens a file selection dialog using the requested title and extension filters.
          *
          * @param request The open-file dialog configuration.
-         * @return The absolute path of the selected file, or `null` if the dialog is canceled.
+         * @return A handle to the selected file, or `null` if the dialog is canceled.
          */
-        actual suspend fun pickOpenFile(request: OpenFileRequest): String? =
+        actual suspend fun pickOpenFile(request: OpenFileRequest): PickedFile? =
         withContext(Dispatchers.Swing) { defaultFilePickerBackend().pickOpen(request, resolveDialogOwner()) }
+            ?.let(::PathPickedFile)
 
     /**
-         * Opens a save-file dialog and returns the selected path.
+         * Opens a save-file dialog and returns a handle to the selected file.
          *
          * @param request The save-file request containing the dialog title and default filename.
-         * @return The selected file path, or `null` if selection is canceled.
+         * @return A handle to the selected file, or `null` if selection is canceled.
          */
-        actual suspend fun pickSaveFile(request: SaveFileRequest): String? =
+        actual suspend fun pickSaveFile(request: SaveFileRequest): PickedFile? =
         withContext(Dispatchers.Swing) { defaultFilePickerBackend().pickSave(request, resolveDialogOwner()) }
+            ?.let(::PathPickedFile)
 }
