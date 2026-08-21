@@ -1,7 +1,7 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -217,13 +217,11 @@ internal fun ArticleRow(
     val openInBrowserLabel = strings.openInBrowser
     val noTitleFallback = strings.noTitleFallback
     val testTag = remember(article.id) { "article-${article.id}" }
+    val rowInteraction = remember { MutableInteractionSource() }
     Row(
         Modifier.testTag(testTag)
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 2.dp)
-            .clip(MaterialTheme.shapes.small)
-            .background(selectionBackground(selected, focused))
-            .clickable(onClick = onClick)
+            .listRowClickable(rowInteraction, onClick)
             .nativeContextMenu(
                 items = {
                     val urlUsable = hasUsableUrl(article.url)
@@ -240,6 +238,7 @@ internal fun ArticleRow(
                 },
                 onOpen = onClick,
             )
+            .listRowSurface(selectionBackground(selected, focused), rowInteraction)
             .padding(horizontal = 8.dp, vertical = 10.dp)
             .heightIn(min = rowHeight),
         verticalAlignment = Alignment.CenterVertically,

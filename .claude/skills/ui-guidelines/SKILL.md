@@ -56,6 +56,20 @@ content whose position must stay fixed (e.g. a title `Text`).
   that are conceptually never relevant in the current context (e.g. a
   Dropbox-only menu item when `CloudStorageAvailability.dropboxAvailable`
   is `false`), not for elements that are merely temporarily inactive.
+- **A reserved-but-empty slot still costs layout space — for something purely
+  decorative that never needs to report its own size or receive input, draw
+  it instead of laying it out.** Real incident: the feed list's drag
+  insertion marker used to be a `Box` reserving 2dp of height as a sibling
+  inside the row, on or off. That slot's space belonged entirely to whichever
+  row's layout contained it, so the *visual* gap between two rows (their own
+  margins plus the reserved slot) could only ever split unevenly, never
+  at its true midpoint — a click just past one row's highlight, closer to it
+  than to its neighbor, could still resolve to the neighbor. Fixed by
+  `insertionMarkers` (`ui/home/FeedListDragAndDrop.kt`), a draw-only
+  modifier that paints directly into the row's own existing margin — no
+  layout slot, on or off, so the fix in the previous bullet's spirit
+  (reserve unconditionally) does not apply here: the *right* fix for a
+  draw-only element is to not lay it out at all.
 
 ## Pane structure & tonal roles
 
@@ -95,19 +109,69 @@ only to the pane that sits in the window's top-left corner — currently
   `HorizontalDivider()` — that's a different kind of boundary (grouping
   unrelated list sections), not a fixed-row/scroll-area boundary.
 - **Between individual rows in a list** (e.g. article rows): no divider.
-  Separate rows with padding and the selection-highlight background
-  (`selectionBackground`) instead. The highlight itself is an inset rounded
-  rectangle, not a pane-edge-to-pane-edge block: `Modifier.fillMaxWidth()`,
-  then `.padding(horizontal = 8.dp, vertical = 2.dp)` (the outer margin) →
-  `.clip(MaterialTheme.shapes.small)` → `.background(selectionBackground(...))`
-  → the row's existing interactive modifiers (`clickable` /
-  `dragAndDropSource` / `dragAndDropTarget`) → the row's inner content
-  padding (reduced by 8dp horizontally from its pre-inset value, to keep icon
-  positions roughly stable). `clip`/`background` must sit before the
-  interactive modifiers so click/drag hit-testing matches the rounded inset,
-  not the full row width. For `ArticleRow`, the `.heightIn(min = rowHeight)`
-  call must stay *after* the inner content padding (see Article card style
-  below) — the outer margin doesn't affect that ordering.
+  Separate rows with the selection-highlight background (`selectionBackground`)
+  instead. The highlight is a rounded rectangle inset by
+  `LIST_ROW_HORIZONTAL_MARGIN` / `LIST_ROW_VERTICAL_MARGIN`, while the
+  **clickable/drag band is the row's whole reported bounds** — full width,
+  margin included, no outer-margin dead strip and no unclickable wedge under
+  the rounded corners — so every list row is a **single composable with a single
+  modifier chain**: `FeedRow`/`FolderGroupHeader` no longer need a wrapping
+  `Column` to lay out their drag insertion marker as a sibling `Box`, now that
+  the marker is painted rather than laid out (see `insertionMarkers`
+  below). This used to be the other way around (`clip`/`background` before
+  the interactive modifiers, so hit-testing matched the rounded inset) until
+  that was found to leave real dead zones — the outer margin and the four
+  rounded corners — permanently unclickable, and for the old `Column`-wrapped
+  rows, worse: any point outside a padded descendant's own bounds, even
+  squarely inside the wrapping `Column`'s reported bounds (confirmed
+  empirically — see `listRowClickable`'s KDoc). Use the two helpers in
+  [ListRowChrome.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/ListRowChrome.kt)
+  instead of hand-rolling the chain:
+  - `Modifier.fillMaxWidth().listRowClickable(interactionSource, onClick)` —
+    the click/drag hit area, applied with **nothing** before it in the chain
+    (no padding, no clip) so it covers the row's entire reported bounds.
+    Passes `indication = null` deliberately; press feedback is `listRowSurface`'s
+    job, confined to the inset highlight.
+  - `.nativeContextMenu(...)`, then — for a feed-list row that can be a drag
+    insertion boundary — `.insertionMarkers(top, bottom)`
+    (`ui/home/FeedListDragAndDrop.kt`), then
+    `.listRowSurface(background, interactionSource, decoration)` — the row's
+    standard `LIST_ROW_HORIZONTAL_MARGIN`/`LIST_ROW_VERTICAL_MARGIN` outer
+    margin, `MaterialTheme.shapes.small` clip, `background`, an optional
+    `decoration` (e.g. a drop-target border), then the shared
+    `interactionSource`'s flat press feedback via `Modifier.indication` —
+    then the row's own inner content padding. `insertionMarkers` must sit
+    *before* `listRowSurface`: it paints into the margin `listRowSurface`'s
+    leading `padding` reserves, which applying it afterwards would inset it
+    away from, and whose `decoration` slot is clipped to the rounded rect
+    regardless.
+  - For `ArticleRow`, the `.heightIn(min = rowHeight)` call must stay *after*
+    the inner content padding (see Article card style below).
+
+  **`LIST_ROW_VERTICAL_MARGIN` (1dp) is the single value the space between two
+  rows is expressed in** — three things follow from it at once, so change it
+  only deliberately:
+
+  - the **visible gap** between two rows is twice it (2dp of pane color between
+    two highlights);
+  - the **hit boundary** is that gap's midpoint, because each row's `clickable`
+    covers its own band *including* its own margin — so a click anywhere in the
+    gap selects the **nearer** row and no strip ever selects nothing;
+  - the **drag insertion marker** is exactly it thick per side, so the two rows
+    touching a boundary together fill the gap with one line centred on the very
+    boundary the click resolves against.
+
+  `insertionMarkers` therefore takes its thickness *from* the margin rather than
+  carrying its own, and draws with `drawWithContent` (after the content) so
+  nothing the row paints can hide it. Both rows touching a boundary paint their
+  own side, which makes the line a literal picture of where a click will go: its
+  upper half selects the row above, its lower half the row below.
+
+  Clicking *precisely* on a highlight's edge still tends to select the
+  neighbour. That is macOS's own behaviour and shrinking the margin does not fix
+  it (it was tried down to zero) — see
+  [known-issues.md](../../../docs/known-issues.md) for the measurements and
+  everything ruled out, rather than re-investigating it.
 
 ## Sticky section headers in scrollable lists
 
@@ -550,9 +614,9 @@ theme/shape/indication/icon choices:
     hand-computed focused/unfocused-pane dimming → native `List` row selection already dims the same way.
   - `SettingsScreen`'s `SwitchRow` — now uses `FlatSwitch` (`ui/common/FlatToggles.kt`), consistent with
     the app's other flat controls → SwiftUI's native `Toggle` on a future SwiftUI port.
-  - The drag-and-drop insertion-line system in `FeedListDragAndDrop.kt` (`InsertionLine`, `DropBoundary`,
-    `RowHalf`, `resolveHalf`) — hand-computed row-half hit-testing and a manually drawn insertion line
-    (explicitly modeled on macOS Notes' reorder UI) → SwiftUI `List`'s native `.onMove`/`.onInsert`
+  - The drag-and-drop insertion-marker system in `FeedListDragAndDrop.kt` (`insertionMarkers`,
+    `DropBoundary`, `RowHalf`, `resolveRowHalf`) — hand-computed row-half hit-testing and a manually
+    drawn insertion line (explicitly modeled on macOS Notes' reorder UI) → SwiftUI `List`'s native `.onMove`/`.onInsert`
     reordering, which draws insertion indicators and row-shift animation for free.
   - `homeKeyboardShortcuts` (`ui/home/KeyboardNav.kt`) — an `onPreviewKeyEvent` key trap for app
     shortcuts (⌘/Ctrl+F, J/K, U, S, arrow-key pane nav) that's invisible from outside the app → SwiftUI's
