@@ -1,14 +1,12 @@
 package works.merc.keryx.app.ui.home
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,11 +22,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -102,6 +104,12 @@ internal fun dropTargetContentColorOrNull(
 internal fun dropTargetBorderModifier(isDropTarget: Boolean, color: Color): Modifier =
     if (isDropTarget) Modifier.border(2.dp, color, MaterialTheme.shapes.small) else Modifier
 
+/** Test tag on a [FeedRow]'s whole clickable band. */
+internal fun feedRowTestTag(feedId: String): String = "feed-row-$feedId"
+
+/** Test tag on a [FolderGroupHeader]'s whole clickable band. */
+internal fun folderRowTestTag(folderId: String): String = "folder-row-$folderId"
+
 /** How long a dragged feed must be held over a collapsed folder header before the folder opens by
  * itself, so the feeds inside it become reachable drop targets without letting go of the drag
  * (the spring-loaded folder of Finder / Explorer). Long enough not to fire while merely passing
@@ -121,20 +129,76 @@ internal sealed interface DropBoundary {
 }
 
 /**
- * Displays a horizontal insertion marker aligned with the surrounding row content.
+ * A drag insertion marker to draw at one edge (top or bottom) of a list row's band, via
+ * [insertionMarkers].
  *
- * @param indented Whether to indent the marker for a folder item.
- * @param visible Whether to display the marker in the primary color.
+ * @param indented Whether the marker aligns with an indented (folder-nested feed) row.
+ */
+internal data class InsertionMarker(val indented: Boolean)
+
+/**
+ * Where an indented feed row's own content starts, inside the row's [listRowSurface] margin — the
+ * single value that indent is expressed in. `FeedRow` (nested in a folder) and `TagFeedRow` (nested
+ * under a tag) apply it as their leading padding, and an [InsertionMarker] with
+ * [InsertionMarker.indented] set takes its left edge *from here* rather than carrying its own
+ * number, so the marker and the row title it lines up with can only ever move together.
+ */
+internal val FEED_ROW_INDENT = 36.dp
+
+/**
+ * Draws drag insertion markers at this row's top and/or bottom edge, `null` for an edge that is
+ * not the current drop boundary.
+ *
+ * **A boundary is drawn by both of the rows that touch it**, each painting half of
+ * [LIST_ROW_GUIDE_THICKNESS] on its own side, so the line straddles the boundary instead of sitting
+ * inside one of them. That makes the marker a literal picture of where a click will go: its upper
+ * half is the region that selects the row above, its lower half the row below. It does *not* fill
+ * the whole gap between the two rows — each row keeps its highlight [LIST_ROW_GUIDE_CLEARANCE] clear
+ * of the line, which is the outer part of its own [LIST_ROW_VERTICAL_MARGIN] that this paints into.
+ * Callers must light up *both* edges of a boundary (see `FeedRow`, which draws its bottom edge for
+ * whatever boundary follows it, not only when it is the last row in its group). Where the far side
+ * has no row to pair with — a collapsed folder, or the end of the list — only one half shows, which
+ * still reads as a drop indicator.
+ *
+ * Drawn **after** the content (`drawWithContent`, not `drawBehind`) so nothing the row paints can
+ * hide it. The margin it paints into is outside the row's own highlight, so drawing on top covers
+ * nothing meaningful.
+ *
+ * This used to be a real `Box` composed as a layout sibling above/below the row's content (inside
+ * a wrapping `Column`), taking up fixed layout space regardless of visibility (so toggling one
+ * on/off never shifted anything else — the usual "reserve the slot, vary only its content" rule).
+ * But a *reserved slot* still costs layout space, and — critically — that space belonged entirely
+ * to whichever row's `Column` contained it, so the gap between two rows could only ever split
+ * unevenly, never at its true midpoint: a click just past one row's highlight, closer to it than
+ * to its neighbor, could still resolve to the neighbor. Painting instead of laying out fixed that,
+ * and also removed the `Column` wrapper `FeedRow`/`FolderGroupHeader` needed only to lay the old
+ * `Box` out as a sibling — see `listRowClickable`'s KDoc.
+ *
+ * Must sit *before* [listRowSurface] in the modifier chain: the marker is drawn in the margin
+ * [listRowSurface]'s leading `padding` reserves, so applying it afterwards would inset it away —
+ * and [listRowSurface]'s `decoration` slot is clipped to the inset rounded rect regardless.
  */
 @Composable
-private fun InsertionLine(indented: Boolean, visible: Boolean) {
-    Box(
-        Modifier.fillMaxWidth()
-            .padding(horizontal = 8.dp)
-            .padding(start = if (indented) 36.dp else 0.dp)
-            .height(2.dp)
-            .background(if (visible) MaterialTheme.colorScheme.primary else Color.Transparent),
-    )
+internal fun Modifier.insertionMarkers(top: InsertionMarker? = null, bottom: InsertionMarker? = null): Modifier {
+    val color = MaterialTheme.colorScheme.primary
+    val horizontalMargin = LIST_ROW_HORIZONTAL_MARGIN
+    val halfGuideThickness = LIST_ROW_GUIDE_THICKNESS / 2f
+    return drawWithContent {
+        drawContent()
+        val thicknessPx = halfGuideThickness.toPx()
+        val horizontalMarginPx = horizontalMargin.toPx()
+        val indentPx = FEED_ROW_INDENT.toPx()
+        val right = size.width - horizontalMarginPx
+
+        fun draw(marker: InsertionMarker, atTop: Boolean) {
+            val left = horizontalMarginPx + if (marker.indented) indentPx else 0f
+            val y = if (atTop) 0f else size.height - thicknessPx
+            drawRect(color = color, topLeft = Offset(left, y), size = Size((right - left).coerceAtLeast(0f), thicknessPx))
+        }
+
+        top?.let { draw(it, atTop = true) }
+        bottom?.let { draw(it, atTop = false) }
+    }
 }
 
 /**
@@ -202,75 +266,82 @@ internal fun FolderGroupHeader(
         onToggleCollapse()
     }
 
-    Column(Modifier.fillMaxWidth()) {
-        InsertionLine(indented = false, visible = activeBoundaryState.value == DropBoundary.BeforeFolder(folder.id))
-        Row(
-            Modifier.fillMaxWidth()
-                .padding(start = 8.dp, top = 2.dp, end = 8.dp, bottom = 2.dp)
-                .clip(MaterialTheme.shapes.small)
-                .background(dropTargetBackground(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.secondaryContainer, isDragSource))
-                .then(dropTargetBorderModifier(isFeedDragHighlight, MaterialTheme.colorScheme.secondary))
-                .nativeContextMenu(
-                    items = {
-                        listOf(
-                            NativeMenuItem(editFolderLabel, renameNativeShortcut) { onEdit() },
-                            NativeMenuItem(deleteFolderLabel, deleteNativeShortcut) { onDelete() },
-                        )
-                    },
-                    onOpen = { if (!selected) onClick() },
-                )
-                .padding(end = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    val rowInteraction = remember { MutableInteractionSource() }
+    val currentBoundary = activeBoundaryState.value
+    val topMarker = InsertionMarker(indented = false).takeIf { currentBoundary == DropBoundary.BeforeFolder(folder.id) }
+    // The feed-zone half is drawn whether or not the folder is open: expanded, the first feed row
+    // below paints the matching half from its own top edge (both indented, so they line up);
+    // collapsed or empty, this is the only half there is. `AppendFolders` stays gated on being the
+    // last folder — that boundary only exists there. See `insertionMarkers`.
+    val bottomMarker = when {
+        currentBoundary == feedZoneBoundary -> InsertionMarker(indented = true)
+        nextFolderId == null && currentBoundary == DropBoundary.AppendFolders -> InsertionMarker(indented = false)
+        else -> null
+    }
+    Row(
+        Modifier.fillMaxWidth()
+            .testTag(folderRowTestTag(folder.id))
+            .listRowClickable(rowInteraction, onClick)
+            .nativeContextMenu(
+                items = {
+                    listOf(
+                        NativeMenuItem(editFolderLabel, renameNativeShortcut) { onEdit() },
+                        NativeMenuItem(deleteFolderLabel, deleteNativeShortcut) { onDelete() },
+                    )
+                },
+                onOpen = { if (!selected) onClick() },
+            )
+            .insertionMarkers(top = topMarker, bottom = bottomMarker)
+            .listRowSurface(
+                dropTargetBackground(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.secondaryContainer, isDragSource),
+                rowInteraction,
+                decoration = dropTargetBorderModifier(isFeedDragHighlight, MaterialTheme.colorScheme.secondary),
+            )
+            .padding(end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CompositionLocalProvider(
+            LocalContentColor provides (
+                dropTargetContentColorOrNull(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.onSecondaryContainer, isDragSource)
+                    ?: LocalContentColor.current
+                ),
         ) {
-            CompositionLocalProvider(
-                LocalContentColor provides (
-                    dropTargetContentColorOrNull(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.onSecondaryContainer, isDragSource)
-                        ?: LocalContentColor.current
-                    ),
+            KeryxIcon(
+                if (collapsed) KeryxIcons.ChevronRight else KeryxIcons.ExpandMore,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp).clickable(onClick = onToggleCollapse),
+            )
+            Spacer(Modifier.width(4.dp))
+            Row(
+                Modifier.weight(1f).padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 KeryxIcon(
-                    if (collapsed) KeryxIcons.ChevronRight else KeryxIcons.ExpandMore,
+                    KeryxIcons.Folder,
                     contentDescription = null,
-                    modifier = Modifier.size(20.dp).clickable(onClick = onToggleCollapse),
+                    tint = dropTargetContentColorOrNull(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.onSecondaryContainer, isDragSource)
+                        ?: MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
                 )
-                Spacer(Modifier.width(4.dp))
-                Row(
-                    Modifier.weight(1f).clickable(onClick = onClick).padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    KeryxIcon(
-                        KeryxIcons.Folder,
-                        contentDescription = null,
-                        tint = dropTargetContentColorOrNull(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.onSecondaryContainer, isDragSource)
-                            ?: MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    // Same weighted slot either way, so the chevron/folder icon on the left and the
-                    // count badge on the right never move when editing starts or ends.
-                    if (editingName) {
-                        Box(Modifier.weight(1f)) {
-                            InlineRenameField(
-                                value = folder.name,
-                                onCommit = onRenameCommit,
-                                onCancel = onRenameCancel,
-                                blockingError = nameError,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                    } else {
-                        Text(folder.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.width(8.dp))
+                // Same weighted slot either way, so the chevron/folder icon on the left and the
+                // count badge on the right never move when editing starts or ends.
+                if (editingName) {
+                    Box(Modifier.weight(1f)) {
+                        InlineRenameField(
+                            value = folder.name,
+                            onCommit = onRenameCommit,
+                            onCancel = onRenameCancel,
+                            blockingError = nameError,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
+                } else {
+                    Text(folder.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            if (count > 0) CountBadge(count, selected, focused, isFeedDragHighlight, isDragSource)
         }
-        if (collapsed || isEmpty) {
-            InsertionLine(indented = true, visible = activeBoundaryState.value == feedZoneBoundary)
-        }
-        if (nextFolderId == null) {
-            InsertionLine(indented = false, visible = activeBoundaryState.value == DropBoundary.AppendFolders)
-        }
+        if (count > 0) CountBadge(count, selected, focused, isFeedDragHighlight, isDragSource)
     }
 }
 
@@ -289,27 +360,27 @@ internal fun NoFolderHeader(
         is DropBoundary.AppendFeeds -> boundary.folderId == null
         else -> false
     }
-    Column(Modifier.fillMaxWidth()) {
-        Text(
-            stringResource(Res.string.home_no_folder),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 2.dp)
-                .clip(MaterialTheme.shapes.small)
-                .background(
-                    dropTargetBackground(
-                        isFeedDragHighlight,
-                        selected = false,
-                        focused = false,
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    ),
-                )
-                .then(dropTargetBorderModifier(isFeedDragHighlight, MaterialTheme.colorScheme.secondary))
-                .padding(start = 8.dp, top = 8.dp, bottom = 4.dp),
-        )
-        if (isEmpty) InsertionLine(indented = false, visible = activeBoundaryState.value == feedZoneBoundary)
-    }
+    Text(
+        stringResource(Res.string.home_no_folder),
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth()
+            // Not gated on `isEmpty`: when the group has feeds, the first one below paints the
+            // matching half from its own top edge (also un-indented, so they line up).
+            .insertionMarkers(
+                bottom = InsertionMarker(indented = false).takeIf { activeBoundaryState.value == feedZoneBoundary },
+            )
+            .listRowSurface(
+                dropTargetBackground(
+                    isFeedDragHighlight,
+                    selected = false,
+                    focused = false,
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                ),
+                decoration = dropTargetBorderModifier(isFeedDragHighlight, MaterialTheme.colorScheme.secondary),
+            )
+            .padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
+    )
 }
 
 /**
@@ -370,101 +441,102 @@ internal fun FeedRow(
     val openSiteLabel = stringResource(Res.string.home_open_site)
     val siteUrlUsable = hasUsableUrl(feed.site_url)
     val belowBoundary = nextFeedId?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(folderId)
+    val rowInteraction = remember { MutableInteractionSource() }
+    val currentBoundary = activeBoundaryState.value
+    // Both edges, not just the last row's: the row after this one paints the other half of
+    // `belowBoundary` from its own top edge, and the two halves together make one line centred on
+    // the boundary — see `insertionMarkers`.
+    val topMarker = InsertionMarker(indented).takeIf { currentBoundary == DropBoundary.BeforeFeed(feed.id) }
+    val bottomMarker = InsertionMarker(indented).takeIf { currentBoundary == belowBoundary }
 
-    Column(Modifier.fillMaxWidth()) {
-        InsertionLine(indented, visible = activeBoundaryState.value == DropBoundary.BeforeFeed(feed.id))
-        Row(
-            Modifier.fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 2.dp)
-                .clip(MaterialTheme.shapes.small)
-                .background(selectionBackground(selectionTone, focused))
-                .clickable(onClick = onClick)
-                .nativeContextMenu(
-                    items = {
-                        listOf(
-                            NativeMenuItem(refreshLabel, NativeMenuShortcut(Key.R, ctrl = true, shift = true)) { onRefresh() },
-                            NativeSubMenu(
-                                label = assignTagsLabel,
-                                items = tags.map { tag ->
-                                    NativeCheckMenuItem(tag.name, checked = tag.id in attachedTagIds) {
-                                        onToggleFeedTag(tag.id, tag.id !in attachedTagIds)
-                                    }
-                                },
-                            ),
-                            NativeSubMenu(
-                                label = moveToFolderLabel,
-                                items = buildList {
+    Row(
+        Modifier.fillMaxWidth()
+            .testTag(feedRowTestTag(feed.id))
+            .listRowClickable(rowInteraction, onClick)
+            .nativeContextMenu(
+                items = {
+                    listOf(
+                        NativeMenuItem(refreshLabel, NativeMenuShortcut(Key.R, ctrl = true, shift = true)) { onRefresh() },
+                        NativeSubMenu(
+                            label = assignTagsLabel,
+                            items = tags.map { tag ->
+                                NativeCheckMenuItem(tag.name, checked = tag.id in attachedTagIds) {
+                                    onToggleFeedTag(tag.id, tag.id !in attachedTagIds)
+                                }
+                            },
+                        ),
+                        NativeSubMenu(
+                            label = moveToFolderLabel,
+                            items = buildList {
+                                add(
+                                    NativeCheckMenuItem(noFolderLabel, checked = feed.folder_id == null) {
+                                        onMoveFeedToFolder(null)
+                                    },
+                                )
+                                folders.forEach { folder ->
                                     add(
-                                        NativeCheckMenuItem(noFolderLabel, checked = feed.folder_id == null) {
-                                            onMoveFeedToFolder(null)
+                                        NativeCheckMenuItem(folder.name, checked = feed.folder_id == folder.id) {
+                                            onMoveFeedToFolder(folder.id)
                                         },
                                     )
-                                    folders.forEach { folder ->
-                                        add(
-                                            NativeCheckMenuItem(folder.name, checked = feed.folder_id == folder.id) {
-                                                onMoveFeedToFolder(folder.id)
-                                            },
-                                        )
-                                    }
-                                },
-                            ),
-                            NativeMenuSeparator,
-                            NativeMenuItem(copyFeedUrlLabel) { onCopyFeedUrl() },
-                            NativeMenuItem(copySiteUrlLabel, enabled = siteUrlUsable) { onCopySiteUrl() },
-                            NativeMenuItem(openSiteLabel, enabled = siteUrlUsable) { onOpenSite() },
-                            NativeMenuSeparator,
-                            NativeMenuItem(renameFeedLabel, renameNativeShortcut) { onRename() },
-                            NativeMenuSeparator,
-                            NativeMenuItem(unsubscribeLabel, deleteNativeShortcut) { onUnsubscribe() },
-                        )
-                    },
-                    // A secondary-toned (or unselected) row is not the one currently focused, so a
-                    // right-click on it promotes it first, exactly as the old `!selected` check did.
-                    onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
+                                }
+                            },
+                        ),
+                        NativeMenuSeparator,
+                        NativeMenuItem(copyFeedUrlLabel) { onCopyFeedUrl() },
+                        NativeMenuItem(copySiteUrlLabel, enabled = siteUrlUsable) { onCopySiteUrl() },
+                        NativeMenuItem(openSiteLabel, enabled = siteUrlUsable) { onOpenSite() },
+                        NativeMenuSeparator,
+                        NativeMenuItem(renameFeedLabel, renameNativeShortcut) { onRename() },
+                        NativeMenuSeparator,
+                        NativeMenuItem(unsubscribeLabel, deleteNativeShortcut) { onUnsubscribe() },
+                    )
+                },
+                // A secondary-toned (or unselected) row is not the one currently focused, so a
+                // right-click on it promotes it first, exactly as the old `!selected` check did.
+                onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
+            )
+            .insertionMarkers(top = topMarker, bottom = bottomMarker)
+            .listRowSurface(selectionBackground(selectionTone, focused), rowInteraction)
+            .padding(start = if (indented) FEED_ROW_INDENT else 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        FeedAvatar(feed.displayTitle(), feed.favicon_url)
+        Spacer(Modifier.width(12.dp))
+        // Same weighted slot either way, so the favicon on the left and the error indicator /
+        // count badge on the right never move when editing starts or ends. A blank value is
+        // meaningful here (it clears `custom_title`), so it commits rather than being rejected,
+        // and the placeholder shows the feed's own title it would fall back to.
+        if (editingName) {
+            Box(Modifier.weight(1f)) {
+                InlineRenameField(
+                    value = feed.custom_title ?: feed.title,
+                    onCommit = onRenameCommit,
+                    onCancel = onRenameCancel,
+                    placeholder = feed.title,
+                    allowBlank = true,
+                    modifier = Modifier.fillMaxWidth(),
                 )
-                .padding(start = if (indented) 36.dp else 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            FeedAvatar(feed.displayTitle(), feed.favicon_url)
-            Spacer(Modifier.width(12.dp))
-            // Same weighted slot either way, so the favicon on the left and the error indicator /
-            // count badge on the right never move when editing starts or ends. A blank value is
-            // meaningful here (it clears `custom_title`), so it commits rather than being rejected,
-            // and the placeholder shows the feed's own title it would fall back to.
-            if (editingName) {
-                Box(Modifier.weight(1f)) {
-                    InlineRenameField(
-                        value = feed.custom_title ?: feed.title,
-                        onCommit = onRenameCommit,
-                        onCancel = onRenameCancel,
-                        placeholder = feed.title,
-                        allowBlank = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            } else {
-                CompositionLocalProvider(LocalContentColor provides (selectionContentColorOrNull(selectionTone, focused) ?: LocalContentColor.current)) {
-                    Text(
-                        feed.displayTitle(),
-                        Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
             }
-            // A 410-Gone feed deliberately keeps error_count at 0 (it is permanent, not a retry
-            // candidate), so it is recognized by its last_error marker instead — otherwise a
-            // disappeared feed would look completely normal here once its notification is dismissed.
-            val gone = feed.last_error == FEED_ERROR_REASON_GONE
-            if (feed.error_count > 0 || gone) {
-                FeedErrorIndicator(gone)
-                Spacer(Modifier.width(4.dp))
+        } else {
+            CompositionLocalProvider(LocalContentColor provides (selectionContentColorOrNull(selectionTone, focused) ?: LocalContentColor.current)) {
+                Text(
+                    feed.displayTitle(),
+                    Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-            if (count > 0) CountBadge(count, selectionTone == RowSelectionTone.PRIMARY, focused)
         }
-        if (nextFeedId == null) {
-            InsertionLine(indented, visible = activeBoundaryState.value == belowBoundary)
+        // A 410-Gone feed deliberately keeps error_count at 0 (it is permanent, not a retry
+        // candidate), so it is recognized by its last_error marker instead — otherwise a
+        // disappeared feed would look completely normal here once its notification is dismissed.
+        val gone = feed.last_error == FEED_ERROR_REASON_GONE
+        if (feed.error_count > 0 || gone) {
+            FeedErrorIndicator(gone)
+            Spacer(Modifier.width(4.dp))
         }
+        if (count > 0) CountBadge(count, selectionTone == RowSelectionTone.PRIMARY, focused)
     }
 }
 

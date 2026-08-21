@@ -1130,3 +1130,93 @@ correct when monitors have different scale factors, so no scale factor has to be
 
 macOS needs none of this: `CTrayIcon` reports points throughout, which is why `MacTray`'s
 structurally identical `e.xOnScreen - origin.x` arithmetic is correct as written and was left alone.
+
+## macOS: clicking exactly at a list row's edge selects the neighbouring row
+
+**Status**: not fixed — it is macOS's own behaviour, reproduced with the same aim in Apple's Notes
+app. The app-side geometry it was first blamed on was measured and found exact. The genuine
+hit-area defects the investigation *did* uncover are fixed — see "What was actually fixed" below.
+
+### Symptom
+
+Aim at the very bottom edge of a selected feed / folder / tag / article row — close enough that the
+cursor visibly overlaps the selection highlight — and click: the row *below* is selected instead.
+Since rows are separated by a 4dp gap, the newly selected row's highlight then begins a visible
+distance below where the click appeared to land, which reads as the selection jumping past the
+click. Reported repeatedly as "clicking inside the highlight selects the item underneath".
+
+That distance grew when the gap went from 2dp to 4dp (a drag insertion marker no longer fills the
+gap, so `LIST_ROW_GUIDE_CLEARANCE` now holds it clear of both highlights — see the `ui-guidelines`
+skill). The cause below is unchanged and lives in the OS, so this is a slightly more visible
+symptom of the same thing, not a new defect.
+
+### Diagnosis
+
+Both halves of the obvious explanation — "the highlight and the hit area disagree" and "the
+pointer coordinates are offset" — were measured directly, and both are exact.
+
+**The highlight matches the band.** A temporary test captured the rendered pane and read back
+pixels: at density 2.0 the three article bands were `[48, 126)`, `[126, 204)`, `[204, 282)` — that
+is, adjacent bands are contiguous with no unaccounted-for space between them — and the selected
+row's highlight painted rows 126..203 of that middle band, i.e. every pixel of it.
+
+**The coordinates match too.** A temporary AWT `MouseMotionAdapter` on the window logged the raw
+event Y alongside the Y that Compose's pointer input received for the same motion. The difference
+was **0**, at both the top and the bottom of the pane, at density 2.0. There is no offset to
+correct.
+
+**What is left is the cursor itself.** macOS draws the arrow cursor as a black glyph with a white
+outline, and the hotspot is the tip of the *black* glyph — so the point the eye reads as "the tip"
+sits 1–2 physical pixels *above* the real hotspot. Aiming to just touch an edge therefore puts the
+hotspot just past it. This matches every observed detail: it happens at the edge and nowhere else,
+it is independent of scroll position, and the size of the effect does not change with the gap.
+
+**It reproduces in a native app.** The same aim in Apple's Notes app selects the neighbouring note
+the same way. Whatever the exact per-pixel cause, matching it is not a defect in this app.
+
+### What was actually fixed
+
+The investigation started from this report and did find three real defects, all fixed and pinned by
+`ListRowHitAreaTest` (`composeApp/src/desktopTest/.../ui/home/`):
+
+- **Dead zones inside the row.** `clip`/`background` used to come *before* the interactive
+  modifiers, so hit-testing was clipped to the inset rounded rectangle: the outer margin and the
+  four rounded corners selected nothing at all. Worse, for rows that were wrapped in a `Column`
+  (to lay the drag insertion marker out as a sibling), any point outside a padded descendant's own
+  bounds was dead even though it was squarely inside the `Column`'s reported bounds. Fixed by
+  `listRowClickable` / `listRowSurface` (`ui/home/ListRowChrome.kt`), which split the hit area
+  (the row's whole band) from the painted highlight (inset and clipped).
+- **The gap between two rows split unevenly.** The insertion marker reserved a layout slot, and
+  that space belonged entirely to whichever row's layout contained it, so a click closer to one
+  row's highlight than to its neighbour's could still resolve to the neighbour. Fixed by painting
+  the marker into the row's own margin instead of laying it out (`insertionMarkers`), which puts
+  the hit boundary at the gap's true midpoint.
+- **Row heights varied with state.** A folder header's band changed height depending on whether it
+  was collapsed or the last folder, and a feed row's on whether it was last in its group.
+
+Between them these removed every click that selected *nothing*, which was the other half of the
+original report. What remains is only the edge case above.
+
+### Ruled out
+
+- **`apple.awt.fullWindowContent` / `transparentTitleBar`.** Suspected of shifting the window's
+  content coordinate origin relative to what AppKit hit-tests. Disabled experimentally — the title
+  bar came back and the behaviour was unchanged.
+- **The feed list's drag machinery.** `FeedListDragController` resolves boundaries and row halves
+  for drop placement only; it never calls `selectFilter`. Selection is entirely each row's own
+  `listRowClickable`, so `bandAt` / `resolveHitBand` / `resolveRowHalf` cannot influence it.
+- **Modifier order, asymmetric padding, and the gap split.** `ListRowHitAreaTest` sweeps 1px at a
+  time across each boundary (article↔article, folder header↔first feed, feed↔feed, tag-nested
+  feed↔feed) and asserts that adjacent bands are contiguous and that the resolution flips exactly
+  at the shared boundary.
+- **Shrinking the gap.** Tried at 6dp, 4dp, 2dp, and 0dp (highlight filling the whole band, no
+  margin at all). Each step narrowed the window in which the effect occurs but none removed it —
+  consistent with the cause being where the click lands, not where the rows are.
+- **Switching UI framework.** A SwiftUI/AppKit port would not help: Notes is native and behaves the
+  same way, and the cursor hotspot is decided by the OS.
+
+### Why this is not worked around
+
+Compensating would mean biasing each row's hit area upwards relative to its highlight. That trades
+one edge for the other: clicking near the *top* of a highlight would then select the row above.
+There is no bias that fixes both edges, and the platform's own apps do not apply one.

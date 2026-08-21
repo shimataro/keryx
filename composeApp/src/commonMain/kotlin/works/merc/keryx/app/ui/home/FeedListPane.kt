@@ -36,7 +36,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -742,12 +741,11 @@ private fun SidebarRow(
     focused: Boolean,
     onClick: () -> Unit,
 ) {
+    val rowInteraction = remember { MutableInteractionSource() }
     Row(
         Modifier.fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 2.dp)
-            .clip(MaterialTheme.shapes.small)
-            .background(selectionBackground(selected, focused))
-            .clickable(onClick = onClick)
+            .listRowClickable(rowInteraction, onClick)
+            .listRowSurface(selectionBackground(selected, focused), rowInteraction)
             .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -815,12 +813,11 @@ private fun TagRow(
     val colorLabel = stringResource(Res.string.home_tag_color)
     var showColorPicker by remember { mutableStateOf(false) }
     val contentColor = dropTargetContentColorOrNull(isDropTarget, selected, focused, MaterialTheme.colorScheme.onTertiaryContainer)
+    val rowInteraction = remember { MutableInteractionSource() }
     Row(
-        Modifier.fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 2.dp)
-            .clip(MaterialTheme.shapes.small)
-            .background(dropTargetBackground(isDropTarget, selected, focused, MaterialTheme.colorScheme.tertiaryContainer))
-            .then(dropTargetBorderModifier(isDropTarget, MaterialTheme.colorScheme.tertiary))
+        Modifier.testTag(tagRowTestTag(tag.id))
+            .fillMaxWidth()
+            .listRowClickable(rowInteraction, onClick)
             .nativeContextMenu(
                 items = {
                     listOf(
@@ -829,6 +826,11 @@ private fun TagRow(
                     )
                 },
                 onOpen = { if (!selected) onClick() },
+            )
+            .listRowSurface(
+                dropTargetBackground(isDropTarget, selected, focused, MaterialTheme.colorScheme.tertiaryContainer),
+                rowInteraction,
+                decoration = dropTargetBorderModifier(isDropTarget, MaterialTheme.colorScheme.tertiary),
             )
             .padding(start = 8.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -841,7 +843,7 @@ private fun TagRow(
             )
             Spacer(Modifier.width(4.dp))
             Row(
-                Modifier.weight(1f).clickable(onClick = onClick).padding(vertical = 4.dp),
+                Modifier.weight(1f).padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Anchors the color popover; sized by the click target inside it.
@@ -920,6 +922,9 @@ private const val TAG_COLOR_DOT_HIT_PADDING_DP = 4
 /** Test tag on a tag row's color dot, which opens its color popover. */
 internal fun tagColorDotTestTag(tagId: String): String = "tag-color-dot-$tagId"
 
+/** Test tag on a [TagRow] itself, distinguishing its clickable band from its color dot. */
+internal fun tagRowTestTag(tagId: String): String = "tag-row-$tagId"
+
 /**
  * Renders a feed attached to an expanded tag.
  *
@@ -962,12 +967,10 @@ private fun TagFeedRow(
     val copySiteUrlLabel = stringResource(Res.string.home_copy_site_url)
     val openSiteLabel = stringResource(Res.string.home_open_site)
     val siteUrlUsable = hasUsableUrl(feed.site_url)
+    val rowInteraction = remember { MutableInteractionSource() }
     Row(
         Modifier.fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 2.dp)
-            .clip(MaterialTheme.shapes.small)
-            .background(selectionBackground(selectionTone, focused))
-            .clickable(onClick = onClick)
+            .listRowClickable(rowInteraction, onClick)
             .nativeContextMenu(
                 items = {
                     listOf(
@@ -984,7 +987,8 @@ private fun TagFeedRow(
                 // right-click on it promotes it first, exactly as the old `!selected` check did.
                 onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
             )
-            .padding(start = 36.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            .listRowSurface(selectionBackground(selectionTone, focused), rowInteraction)
+            .padding(start = FEED_ROW_INDENT, end = 8.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FeedAvatar(feed.displayTitle(), feed.favicon_url)
