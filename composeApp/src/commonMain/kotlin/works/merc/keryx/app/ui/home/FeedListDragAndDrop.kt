@@ -136,9 +136,14 @@ internal sealed interface DropBoundary {
  */
 internal data class InsertionMarker(val indented: Boolean)
 
-/** The horizontal indent [InsertionMarker.indented] applies, matching `FeedRow`/`TagFeedRow`'s own
- * indented content start. */
-private val INSERTION_MARKER_INDENT = 36.dp
+/**
+ * Where an indented feed row's own content starts, inside the row's [listRowSurface] margin — the
+ * single value that indent is expressed in. `FeedRow` (nested in a folder) and `TagFeedRow` (nested
+ * under a tag) apply it as their leading padding, and an [InsertionMarker] with
+ * [InsertionMarker.indented] set takes its left edge *from here* rather than carrying its own
+ * number, so the marker and the row title it lines up with can only ever move together.
+ */
+internal val FEED_ROW_INDENT = 36.dp
 
 /**
  * Draws drag insertion markers at this row's top and/or bottom edge, `null` for an edge that is
@@ -180,7 +185,7 @@ internal fun Modifier.insertionMarkers(top: InsertionMarker? = null, bottom: Ins
         drawContent()
         val thicknessPx = thickness.toPx()
         val horizontalMarginPx = horizontalMargin.toPx()
-        val indentPx = INSERTION_MARKER_INDENT.toPx()
+        val indentPx = FEED_ROW_INDENT.toPx()
         val right = size.width - horizontalMarginPx
 
         fun draw(marker: InsertionMarker, atTop: Boolean) {
@@ -491,7 +496,7 @@ internal fun FeedRow(
             )
             .insertionMarkers(top = topMarker, bottom = bottomMarker)
             .listRowSurface(selectionBackground(selectionTone, focused), rowInteraction)
-            .padding(start = if (indented) 36.dp else 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            .padding(start = if (indented) FEED_ROW_INDENT else 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FeedAvatar(feed.displayTitle(), feed.favicon_url)

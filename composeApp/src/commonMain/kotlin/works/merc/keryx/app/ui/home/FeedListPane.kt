@@ -988,7 +988,7 @@ private fun TagFeedRow(
                 onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
             )
             .listRowSurface(selectionBackground(selectionTone, focused), rowInteraction)
-            .padding(start = 36.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            .padding(start = FEED_ROW_INDENT, end = 8.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FeedAvatar(feed.displayTitle(), feed.favicon_url)
