@@ -586,6 +586,46 @@ class ListRowHitAreaTest {
         )
     }
 
+    /**
+     * At a boundary where no other row will ever paint the opposing half (the very top/bottom of
+     * the whole list, a collapsed/empty folder's own feed-zone edge, etc. — see
+     * [InsertionMarker.unpaired]), the lone row paints the *full* [LIST_ROW_GUIDE_THICKNESS] itself
+     * instead of half, so the line reads the same thickness everywhere. That consumes the row's
+     * entire margin, including what would otherwise be [LIST_ROW_GUIDE_CLEARANCE] — there being no
+     * highlight on the far side left to protect.
+     */
+    @Test
+    fun anUnpairedInsertionMarkerPaintsTheFullGuideThicknessWithNoClearance() = runDesktopComposeUiTest {
+        var fullGuidePx = 0
+        setContent {
+            with(LocalDensity.current) {
+                fullGuidePx = LIST_ROW_GUIDE_THICKNESS.roundToPx()
+            }
+            MaterialTheme(colorScheme = lightColorScheme(primary = PROBE_MARKER)) {
+                Box(Modifier.size(120.dp, 120.dp).background(PROBE_PANE)) {
+                    ProbeRow(PROBE_UPPER, bottom = InsertionMarker(indented = false, unpaired = true))
+                }
+            }
+        }
+        waitForIdle()
+
+        val band = onNodeWithTag(PROBE_UPPER).fetchSemanticsNode().boundsInRoot
+        val edge = band.bottom.toInt()
+        val column = probeColumn(band.center.x.toInt())
+
+        assertEquals("marker", column[edge - 1], "the marker must be painted into the row's margin")
+        assertEquals(
+            (edge - fullGuidePx)..(edge - 1),
+            column.runAround(edge - 1),
+            "an unpaired marker must be the full LIST_ROW_GUIDE_THICKNESS, not half",
+        )
+        assertEquals(
+            "highlight",
+            column[edge - fullGuidePx - 1],
+            "the row's highlight must sit directly against the full-thickness marker, with no clearance left over",
+        )
+    }
+
     private val PROBE_UPPER = "probe-upper"
     private val PROBE_PANE = Color.Black
     private val PROBE_HIGHLIGHT = Color.White

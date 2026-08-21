@@ -133,8 +133,14 @@ internal sealed interface DropBoundary {
  * [insertionMarkers].
  *
  * @param indented Whether the marker aligns with an indented (folder-nested feed) row.
+ * @param unpaired Whether no other row will ever paint the opposing half of this same boundary —
+ *   e.g. the very top/bottom of the whole list, a collapsed/empty folder's own feed-zone edge, the
+ *   last folder's `AppendFolders` edge, a folder's own `BeforeFolder` edge (no preceding folder
+ *   ever checks for it), or the last feed of any folder followed by another folder. When `true`,
+ *   [insertionMarkers] paints the *full* [LIST_ROW_GUIDE_THICKNESS] here instead of half, since
+ *   there is nothing on the far side to complete the line.
  */
-internal data class InsertionMarker(val indented: Boolean)
+internal data class InsertionMarker(val indented: Boolean, val unpaired: Boolean = false)
 
 /**
  * Where an indented feed row's own content starts, inside the row's [listRowSurface] margin — the
@@ -157,8 +163,11 @@ internal val FEED_ROW_INDENT = 36.dp
  * of the line, which is the outer part of its own [LIST_ROW_VERTICAL_MARGIN] that this paints into.
  * Callers must light up *both* edges of a boundary (see `FeedRow`, which draws its bottom edge for
  * whatever boundary follows it, not only when it is the last row in its group). Where the far side
- * has no row to pair with — a collapsed folder, or the end of the list — only one half shows, which
- * still reads as a drop indicator.
+ * can never paint a matching half — the very top/bottom of the whole list, a collapsed or empty
+ * folder's own feed-zone edge, a folder's `BeforeFolder` edge, the last folder's `AppendFolders`
+ * edge, or the last feed of a folder followed by another folder — the caller marks that edge
+ * [InsertionMarker.unpaired] so the full [LIST_ROW_GUIDE_THICKNESS] is painted there instead of
+ * half, keeping the line the same thickness everywhere.
  *
  * Drawn **after** the content (`drawWithContent`, not `drawBehind`) so nothing the row paints can
  * hide it. The margin it paints into is outside the row's own highlight, so drawing on top covers
@@ -183,15 +192,18 @@ internal fun Modifier.insertionMarkers(top: InsertionMarker? = null, bottom: Ins
     val color = MaterialTheme.colorScheme.primary
     val horizontalMargin = LIST_ROW_HORIZONTAL_MARGIN
     val halfGuideThickness = LIST_ROW_GUIDE_THICKNESS / 2f
+    val fullGuideThickness = LIST_ROW_GUIDE_THICKNESS
     return drawWithContent {
         drawContent()
-        val thicknessPx = halfGuideThickness.toPx()
+        val halfThicknessPx = halfGuideThickness.toPx()
+        val fullThicknessPx = fullGuideThickness.toPx()
         val horizontalMarginPx = horizontalMargin.toPx()
         val indentPx = FEED_ROW_INDENT.toPx()
         val right = size.width - horizontalMarginPx
 
         fun draw(marker: InsertionMarker, atTop: Boolean) {
             val left = horizontalMarginPx + if (marker.indented) indentPx else 0f
+            val thicknessPx = if (marker.unpaired) fullThicknessPx else halfThicknessPx
             val y = if (atTop) 0f else size.height - thicknessPx
             drawRect(color = color, topLeft = Offset(left, y), size = Size((right - left).coerceAtLeast(0f), thicknessPx))
         }
@@ -268,14 +280,18 @@ internal fun FolderGroupHeader(
 
     val rowInteraction = remember { MutableInteractionSource() }
     val currentBoundary = activeBoundaryState.value
-    val topMarker = InsertionMarker(indented = false).takeIf { currentBoundary == DropBoundary.BeforeFolder(folder.id) }
-    // The feed-zone half is drawn whether or not the folder is open: expanded, the first feed row
-    // below paints the matching half from its own top edge (both indented, so they line up);
-    // collapsed or empty, this is the only half there is. `AppendFolders` stays gated on being the
-    // last folder — that boundary only exists there. See `insertionMarkers`.
+    // Always unpaired: no folder ever checks the boundary before the *next* folder from its own
+    // bottom edge, so a folder's own top edge is the only place `BeforeFolder` is ever painted.
+    val topMarker = InsertionMarker(indented = false, unpaired = true).takeIf { currentBoundary == DropBoundary.BeforeFolder(folder.id) }
+    // The feed-zone half is drawn whether or not the folder is open: expanded and non-empty, the
+    // first feed row below paints the matching half from its own top edge (both indented, so they
+    // line up), so this stays paired (half thickness). Collapsed or empty, no feed row exists to
+    // pair with it, so it's unpaired (full thickness) instead. `AppendFolders` stays gated on being
+    // the last folder — that boundary only exists there, and is always unpaired (no row ever
+    // checks for it from the other side). See `insertionMarkers`.
     val bottomMarker = when {
-        currentBoundary == feedZoneBoundary -> InsertionMarker(indented = true)
-        nextFolderId == null && currentBoundary == DropBoundary.AppendFolders -> InsertionMarker(indented = false)
+        currentBoundary == feedZoneBoundary -> InsertionMarker(indented = true, unpaired = collapsed || isEmpty)
+        nextFolderId == null && currentBoundary == DropBoundary.AppendFolders -> InsertionMarker(indented = false, unpaired = true)
         else -> null
     }
     Row(
@@ -365,10 +381,11 @@ internal fun NoFolderHeader(
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.fillMaxWidth()
-            // Not gated on `isEmpty`: when the group has feeds, the first one below paints the
-            // matching half from its own top edge (also un-indented, so they line up).
+            // Paired (half thickness) when the group has feeds: the first one below paints the
+            // matching half from its own top edge (also un-indented, so they line up). Unpaired
+            // (full thickness) when empty — no feed row exists to pair with it.
             .insertionMarkers(
-                bottom = InsertionMarker(indented = false).takeIf { activeBoundaryState.value == feedZoneBoundary },
+                bottom = InsertionMarker(indented = false, unpaired = isEmpty).takeIf { activeBoundaryState.value == feedZoneBoundary },
             )
             .listRowSurface(
                 dropTargetBackground(
@@ -395,6 +412,9 @@ internal fun NoFolderHeader(
  * @param indented Whether to indent the row within a folder.
  * @param nextFeedId The ID of the following feed, or `null` when this is the last feed.
  * @param folderId The containing folder's ID, or `null` for feeds without a folder.
+ * @param isFirstInList Whether this is the very first row of the entire feed list — only possible
+ *   when there are no folders at all (otherwise the first folder's header always precedes every
+ *   feed row). Paints a full-thickness top marker instead of half, since nothing precedes it.
  * @param activeBoundaryState The currently active insertion boundary.
  * @param onRename Starts inline editing of the feed's display title.
  * @param editingName Whether the title is currently open for inline editing (see [InlineRenameField]).
@@ -413,6 +433,7 @@ internal fun FeedRow(
     indented: Boolean,
     nextFeedId: String?,
     folderId: String?,
+    isFirstInList: Boolean = false,
     activeBoundaryState: State<DropBoundary?>,
     onClick: () -> Unit,
     onRename: () -> Unit,
@@ -443,11 +464,14 @@ internal fun FeedRow(
     val belowBoundary = nextFeedId?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(folderId)
     val rowInteraction = remember { MutableInteractionSource() }
     val currentBoundary = activeBoundaryState.value
-    // Both edges, not just the last row's: the row after this one paints the other half of
-    // `belowBoundary` from its own top edge, and the two halves together make one line centred on
-    // the boundary — see `insertionMarkers`.
-    val topMarker = InsertionMarker(indented).takeIf { currentBoundary == DropBoundary.BeforeFeed(feed.id) }
-    val bottomMarker = InsertionMarker(indented).takeIf { currentBoundary == belowBoundary }
+    // Both edges, not just the last row's: for any feed but the last in its group, the row after
+    // this one paints the other half of `belowBoundary` from its own top edge, and the two halves
+    // together make one line centred on the boundary — see `insertionMarkers`. The last feed in a
+    // group is unpaired instead: nothing after it (the next folder's header, or the end of the
+    // list) ever checks for `belowBoundary`, so it paints the full thickness itself.
+    val isLastInList = nextFeedId == null
+    val topMarker = InsertionMarker(indented, unpaired = isFirstInList).takeIf { currentBoundary == DropBoundary.BeforeFeed(feed.id) }
+    val bottomMarker = InsertionMarker(indented, unpaired = isLastInList).takeIf { currentBoundary == belowBoundary }
 
     Row(
         Modifier.fillMaxWidth()
