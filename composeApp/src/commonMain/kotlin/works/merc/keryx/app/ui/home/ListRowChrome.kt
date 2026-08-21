@@ -17,24 +17,48 @@ import androidx.compose.ui.unit.dp
 internal val LIST_ROW_HORIZONTAL_MARGIN = 8.dp
 
 /**
- * Vertical margin between a list row's band and its painted highlight — the single value the
- * spec for the space between two rows is expressed in. Two adjacent rows each contribute one,
- * so:
+ * Total thickness of the horizontal guide line drawn at a boundary between two list rows —
+ * currently only the drag insertion marker (`insertionMarkers` in `FeedListDragAndDrop.kt`).
+ * The two rows touching a boundary paint **half of this each**, on their own side of it, so the
+ * line is always centred on the very boundary a click resolves against.
+ */
+internal val LIST_ROW_GUIDE_THICKNESS = 2.dp
+
+/**
+ * Pane-colored clearance between a list row's painted highlight and the guide line, so the two
+ * never touch. One sits on each side of the guide.
  *
- * - The **visible gap between two rows is twice this** (2dp), the pane color showing between two
- *   highlights.
- * - The **hit boundary is the gap's midpoint**, because each row's `clickable` covers its own
- *   band including its own margin (see [listRowClickable]). Clicking anywhere in the gap therefore
- *   selects the *nearer* row and there is no dead strip that selects nothing.
- * - A drag insertion marker is exactly this thick per side, painted into the margin, so the two
- *   rows touching a boundary together fill the gap with one line centred on the very boundary the
- *   click resolves against — see `insertionMarkers` in `FeedListDragAndDrop.kt`.
+ * It is part of [LIST_ROW_VERTICAL_MARGIN] and therefore reserved *whether or not* a guide is
+ * currently drawn — a row's highlight must not move between resting and being dragged over.
+ */
+internal val LIST_ROW_GUIDE_CLEARANCE = 1.dp
+
+/**
+ * Vertical margin between a list row's band and its painted highlight — a **derived** value, not
+ * a chosen one: exactly what one row has to give up to hold its half of the guide line plus its
+ * clearance from it. Change [LIST_ROW_GUIDE_THICKNESS] / [LIST_ROW_GUIDE_CLEARANCE] and this
+ * follows. Two adjacent rows each contribute one, so:
+ *
+ * - The **visible gap between two rows is twice this** (4dp), stacked as
+ *   [LIST_ROW_GUIDE_CLEARANCE] + [LIST_ROW_GUIDE_THICKNESS] + [LIST_ROW_GUIDE_CLEARANCE]. With no
+ *   guide drawn, all of it is pane color showing between the two highlights.
+ * - The **hit boundary is the gap's midpoint**, which is also the guide line's centre, because
+ *   each row's `clickable` covers its own band including its own margin (see [listRowClickable]).
+ *   Clicking anywhere in the gap — clearance or guide — therefore selects the *nearer* row, and
+ *   there is no dead strip that selects nothing.
+ * - A drag insertion marker is half of [LIST_ROW_GUIDE_THICKNESS] per side, painted into the outer
+ *   part of the margin, so the two rows touching a boundary together make one line centred on that
+ *   boundary while each keeps its highlight [LIST_ROW_GUIDE_CLEARANCE] clear of it — see
+ *   `insertionMarkers` in `FeedListDragAndDrop.kt`.
  *
  * Note that clicking *precisely* on a highlight's edge still tends to select the neighbour, and
  * shrinking this value does not fix that (it was tried down to zero). That is macOS's own
  * behaviour, not this app's geometry — see `docs/known-issues.md`.
+ *
+ * Declared *after* the two constants above deliberately: Kotlin initializes a file's top-level
+ * properties in declaration order, so a forward reference here would silently read 0.dp.
  */
-internal val LIST_ROW_VERTICAL_MARGIN = 1.dp
+internal val LIST_ROW_VERTICAL_MARGIN = LIST_ROW_GUIDE_CLEARANCE + LIST_ROW_GUIDE_THICKNESS / 2f
 
 /**
  * The click/drag hit area for a list row (feed/folder/tag/article) is the row's whole layout
@@ -51,8 +75,8 @@ internal val LIST_ROW_VERTICAL_MARGIN = 1.dp
  * own padded content area (confirmed empirically). This is also why every list row is a single
  * composable with a single modifier chain — a wrapping `Column` used to exist around `FeedRow`
  * and `FolderGroupHeader` purely to lay out the drag insertion marker as a sibling `Box`; it is
- * gone now that the marker draws into this row's own [LIST_ROW_VERTICAL_MARGIN] instead of
- * claiming layout space (see `insertionMarkers` in `FeedListDragAndDrop.kt`).
+ * gone now that the marker draws into the outer part of this row's own [LIST_ROW_VERTICAL_MARGIN]
+ * instead of claiming layout space (see `insertionMarkers` in `FeedListDragAndDrop.kt`).
  *
  * Pass `indication = null` deliberately here so the press feedback [listRowSurface] paints stays
  * confined to the inset highlight instead of flashing edge-to-edge; pair this with [listRowSurface]

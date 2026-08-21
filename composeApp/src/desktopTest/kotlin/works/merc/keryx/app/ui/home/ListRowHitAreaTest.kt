@@ -67,6 +67,11 @@ class ListRowHitAreaTest {
      * for why: two adjacent `LazyColumn` items are contiguous by construction, and each row's own
      * `listRowClickable` covers its item's full reported bounds (`ListRowChrome.kt`), so there is
      * no third region that could belong to neither.
+     *
+     * The swept range is derived from [LIST_ROW_VERTICAL_MARGIN] rather than being a fixed pixel
+     * count, so it covers the *whole* visible gap (both rows' margins — clearance plus guide) plus
+     * one pixel into each highlight, at any density. A hardcoded radius would silently stop short
+     * of the highlights once the margin grew, or once the test ran at density 2.
      */
     private fun androidx.compose.ui.test.ComposeUiTest.assertGapSplitsExactlyAtTheSharedBoundary(
         x: Float,
@@ -77,7 +82,8 @@ class ListRowHitAreaTest {
         resolvesToB: () -> Boolean,
     ) {
         assertEquals(aBounds.bottom, bBounds.top, "the two rows must be vertically contiguous with no gap for this sweep to be meaningful")
-        for (y in (aBounds.bottom - 3).toInt()..(bBounds.top + 3).toInt()) {
+        val radius = with(density) { LIST_ROW_VERTICAL_MARGIN.roundToPx() } + 1
+        for (y in (aBounds.bottom.toInt() - radius)..(bBounds.top.toInt() + radius)) {
             click(x, y.toFloat())
             waitForIdle()
             val expectA = y < aBounds.bottom
@@ -567,20 +573,28 @@ class ListRowHitAreaTest {
     }
 
     /**
-     * A drag insertion marker fills exactly that gap — half painted by each of the two rows
+     * A drag insertion marker sits in the middle of that gap — half painted by each of the two rows
      * touching the boundary (`insertionMarkers`) — so the line the user sees is a picture of where
-     * a click will go: its upper half selects the row above, its lower half the row below.
+     * a click will go: its upper half selects the row above, its lower half the row below. It
+     * deliberately does *not* fill the gap: `LIST_ROW_GUIDE_CLEARANCE` of pane color stays between
+     * the line and each row's highlight, which is the whole point of the margin being wider than
+     * the marker.
      *
-     * Marker thickness and row margin are deliberately the same constant, and nothing else couples
-     * them: a change to one that forgot the other would leave the gap partly unpainted, or push the
-     * marker over a highlight, and no hit-testing test above can see either — both are purely about
-     * drawing.
+     * Nothing but this test couples the three constants: a change to one that forgot the others
+     * would leave the marker off-centre, touching a highlight, or overlapping one, and no
+     * hit-testing test above can see any of it — they are purely about drawing.
      */
     @Test
-    fun aDropBoundarysInsertionMarkerFillsTheGapAndNeitherRowsHighlight() = runDesktopComposeUiTest {
+    fun aDropBoundarysInsertionMarkerIsCentredOnTheBoundaryAndClearOfBothHighlights() = runDesktopComposeUiTest {
         var marginPx = 0
+        var clearancePx = 0
+        var halfGuidePx = 0
         setContent {
-            with(LocalDensity.current) { marginPx = LIST_ROW_VERTICAL_MARGIN.roundToPx() }
+            with(LocalDensity.current) {
+                marginPx = LIST_ROW_VERTICAL_MARGIN.roundToPx()
+                clearancePx = LIST_ROW_GUIDE_CLEARANCE.roundToPx()
+                halfGuidePx = (LIST_ROW_GUIDE_THICKNESS / 2f).roundToPx()
+            }
             MarkerProbeHost(marked = true)
         }
         waitForIdle()
@@ -588,11 +602,31 @@ class ListRowHitAreaTest {
         val band = onNodeWithTag(PROBE_UPPER).fetchSemanticsNode().boundsInRoot
         val boundary = band.bottom.toInt()
         val column = probeColumn(band.center.x.toInt())
+
+        // Read outwards from the boundary: guide, then clearance, then each row's highlight.
         assertEquals("marker", column[boundary - 1], "the marker must be painted into the row's margin")
         assertEquals(
-            (boundary - marginPx)..(boundary + marginPx - 1),
+            (boundary - halfGuidePx)..(boundary + halfGuidePx - 1),
             column.runAround(boundary - 1),
-            "the marker must fill the whole gap and stop at each row's highlight — no pane showing through, no overlap",
+            "the marker must be exactly LIST_ROW_GUIDE_THICKNESS thick, centred on the shared boundary",
+        )
+        assertEquals(
+            (boundary - marginPx)..(boundary - halfGuidePx - 1),
+            column.runAround(boundary - halfGuidePx - 1),
+            "the upper row's highlight must stay LIST_ROW_GUIDE_CLEARANCE clear of the marker",
+        )
+        assertEquals(
+            (boundary + halfGuidePx)..(boundary + marginPx - 1),
+            column.runAround(boundary + halfGuidePx),
+            "the lower row's highlight must stay LIST_ROW_GUIDE_CLEARANCE clear of the marker",
+        )
+        assertEquals("pane", column[boundary - halfGuidePx - 1], "the clearance must show the pane, not the highlight")
+        assertEquals("highlight", column[boundary - marginPx - 1], "the upper row's highlight must resume right after its clearance")
+        assertEquals("highlight", column[boundary + marginPx], "the lower row's highlight must start right after its clearance")
+        assertEquals(
+            marginPx - halfGuidePx,
+            clearancePx,
+            "the margin must be exactly the marker's half plus the clearance — otherwise the two are no longer derived from one another",
         )
     }
 

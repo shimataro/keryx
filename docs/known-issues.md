@@ -1141,9 +1141,14 @@ hit-area defects the investigation *did* uncover are fixed — see "What was act
 
 Aim at the very bottom edge of a selected feed / folder / tag / article row — close enough that the
 cursor visibly overlaps the selection highlight — and click: the row *below* is selected instead.
-Since rows are separated by a 2dp gap, the newly selected row's highlight then begins a visible
+Since rows are separated by a 4dp gap, the newly selected row's highlight then begins a visible
 distance below where the click appeared to land, which reads as the selection jumping past the
 click. Reported repeatedly as "clicking inside the highlight selects the item underneath".
+
+That distance grew when the gap went from 2dp to 4dp (a drag insertion marker no longer fills the
+gap, so `LIST_ROW_GUIDE_CLEARANCE` now holds it clear of both highlights — see the `ui-guidelines`
+skill). The cause below is unchanged and lives in the OS, so this is a slightly more visible
+symptom of the same thing, not a new defect.
 
 ### Diagnosis
 

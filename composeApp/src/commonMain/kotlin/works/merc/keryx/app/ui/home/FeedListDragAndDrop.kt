@@ -149,14 +149,16 @@ internal val FEED_ROW_INDENT = 36.dp
  * Draws drag insertion markers at this row's top and/or bottom edge, `null` for an edge that is
  * not the current drop boundary.
  *
- * **A boundary is drawn by both of the rows that touch it**, each painting one
- * [LIST_ROW_VERTICAL_MARGIN] on its own side, so the line exactly fills the gap between the two
- * rows and straddles the boundary instead of sitting inside one of them. That makes the marker a
- * literal picture of where a click will go: its upper half is the region that selects the row
- * above, its lower half the row below. Callers must therefore light up *both* edges of a boundary
- * (see `FeedRow`, which draws its bottom edge for whatever boundary follows it, not only when it is
- * the last row in its group). Where the far side has no row to pair with — a collapsed folder, or
- * the end of the list — only one half shows, which still reads as a drop indicator.
+ * **A boundary is drawn by both of the rows that touch it**, each painting half of
+ * [LIST_ROW_GUIDE_THICKNESS] on its own side, so the line straddles the boundary instead of sitting
+ * inside one of them. That makes the marker a literal picture of where a click will go: its upper
+ * half is the region that selects the row above, its lower half the row below. It does *not* fill
+ * the whole gap between the two rows — each row keeps its highlight [LIST_ROW_GUIDE_CLEARANCE] clear
+ * of the line, which is the outer part of its own [LIST_ROW_VERTICAL_MARGIN] that this paints into.
+ * Callers must light up *both* edges of a boundary (see `FeedRow`, which draws its bottom edge for
+ * whatever boundary follows it, not only when it is the last row in its group). Where the far side
+ * has no row to pair with — a collapsed folder, or the end of the list — only one half shows, which
+ * still reads as a drop indicator.
  *
  * Drawn **after** the content (`drawWithContent`, not `drawBehind`) so nothing the row paints can
  * hide it. The margin it paints into is outside the row's own highlight, so drawing on top covers
@@ -180,10 +182,10 @@ internal val FEED_ROW_INDENT = 36.dp
 internal fun Modifier.insertionMarkers(top: InsertionMarker? = null, bottom: InsertionMarker? = null): Modifier {
     val color = MaterialTheme.colorScheme.primary
     val horizontalMargin = LIST_ROW_HORIZONTAL_MARGIN
-    val thickness = LIST_ROW_VERTICAL_MARGIN
+    val halfGuideThickness = LIST_ROW_GUIDE_THICKNESS / 2f
     return drawWithContent {
         drawContent()
-        val thicknessPx = thickness.toPx()
+        val thicknessPx = halfGuideThickness.toPx()
         val horizontalMarginPx = horizontalMargin.toPx()
         val indentPx = FEED_ROW_INDENT.toPx()
         val right = size.width - horizontalMarginPx

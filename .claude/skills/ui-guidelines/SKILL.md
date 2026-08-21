@@ -148,24 +148,44 @@ only to the pane that sits in the window's top-left corner — currently
   - For `ArticleRow`, the `.heightIn(min = rowHeight)` call must stay *after*
     the inner content padding (see Article card style below).
 
-  **`LIST_ROW_VERTICAL_MARGIN` (1dp) is the single value the space between two
-  rows is expressed in** — three things follow from it at once, so change it
-  only deliberately:
+  **The space between two rows is expressed in two chosen values —
+  `LIST_ROW_GUIDE_THICKNESS` (2dp) and `LIST_ROW_GUIDE_CLEARANCE` (1dp) — from
+  which `LIST_ROW_VERTICAL_MARGIN` is *derived*, not chosen:**
 
-  - the **visible gap** between two rows is twice it (2dp of pane color between
-    two highlights);
-  - the **hit boundary** is that gap's midpoint, because each row's `clickable`
-    covers its own band *including* its own margin — so a click anywhere in the
-    gap selects the **nearer** row and no strip ever selects nothing;
-  - the **drag insertion marker** is exactly it thick per side, so the two rows
-    touching a boundary together fill the gap with one line centred on the very
-    boundary the click resolves against.
+  ```kotlin
+  LIST_ROW_VERTICAL_MARGIN = LIST_ROW_GUIDE_CLEARANCE + LIST_ROW_GUIDE_THICKNESS / 2f  // 2dp
+  ```
 
-  `insertionMarkers` therefore takes its thickness *from* the margin rather than
-  carrying its own, and draws with `drawWithContent` (after the content) so
-  nothing the row paints can hide it. Both rows touching a boundary paint their
-  own side, which makes the line a literal picture of where a click will go: its
-  upper half selects the row above, its lower half the row below.
+  It is exactly what one row has to give up to hold its half of the guide line
+  plus its clearance from it, so changing either chosen value carries the margin
+  with it. (Declaration order matters: Kotlin initializes a file's top-level
+  properties in order, so the derived one must come last or it silently reads
+  0dp.) Three things follow at once, so change any of them only deliberately:
+
+  - the **visible gap** between two rows is twice the margin (4dp), stacked as
+    clearance + guide + clearance; with no guide drawn, all of it is pane color
+    between the two highlights;
+  - the **hit boundary** is that gap's midpoint — which is also the guide line's
+    centre — because each row's `clickable` covers its own band *including* its
+    own margin, so a click anywhere in the gap (clearance or guide) selects the
+    **nearer** row and no strip ever selects nothing;
+  - the **drag insertion marker** is half the guide thickness per side, so the
+    two rows touching a boundary together make one 2dp line centred on the very
+    boundary the click resolves against, while each keeps its highlight one
+    clearance clear of it.
+
+  `insertionMarkers` therefore takes its thickness from
+  `LIST_ROW_GUIDE_THICKNESS` rather than carrying its own, paints into the
+  *outer* part of the margin (the clearance is the inner part), and draws with
+  `drawWithContent` (after the content) so nothing the row paints can hide it.
+  Both rows touching a boundary paint their own side, which makes the line a
+  literal picture of where a click will go: its upper half selects the row above,
+  its lower half the row below. Note it deliberately does **not** fill the gap —
+  a marker flush against both highlights is what the clearance exists to prevent.
+
+  There is no always-visible rule between rows: the guide line appears only
+  while a drag is looking for a drop position. Row separation at rest is the
+  selection highlight and the gap, per the bullets above.
 
   Clicking *precisely* on a highlight's edge still tends to select the
   neighbour. That is macOS's own behaviour and shrinking the margin does not fix
