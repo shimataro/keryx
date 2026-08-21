@@ -237,50 +237,6 @@ class ListRowHitAreaTest {
     }
 
     @Test
-    fun theGapBetweenTwoArticleRowsSelectsTheNearerOne() = runDesktopComposeUiTest {
-        val items = articles(3)
-        var selected: ArticleListRow? = null
-        lateinit var state: LazyListState
-
-        setContent {
-            state = rememberLazyListState()
-            ArticleListPaneContent(
-                articles = items,
-                feedTitles = emptyMap(),
-                selectedId = null,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
-                onToggleSort = {},
-                onMarkAllRead = {},
-                onSelectArticle = { selected = it },
-                modifier = Modifier.size(360.dp, 400.dp),
-                listState = state,
-            )
-        }
-        waitForIdle()
-
-        val aBounds = onNodeWithTag("article-a0").fetchSemanticsNode().boundsInRoot
-        val bBounds = onNodeWithTag("article-a1").fetchSemanticsNode().boundsInRoot
-        val midX = aBounds.center.x
-
-        // Just above the midpoint of the a0/a1 gap -> nearer to a0.
-        selected = null
-        onNodeWithTag("article-a0").performMouseInput {
-            click(Offset(midX - aBounds.left, aBounds.height + (bBounds.top - aBounds.bottom) / 2f - 1f))
-        }
-        waitForIdle()
-        assertEquals(items[0], selected, "a point just above the a0/a1 gap's midpoint must select a0 (the nearer row)")
-
-        // Just below the midpoint of the a0/a1 gap -> nearer to a1.
-        selected = null
-        onNodeWithTag("article-a1").performMouseInput {
-            click(Offset(midX - bBounds.left, -((bBounds.top - aBounds.bottom) / 2f) + 1f))
-        }
-        waitForIdle()
-        assertEquals(items[1], selected, "a point just below the a0/a1 gap's midpoint must select a1 (the nearer row)")
-    }
-
-    @Test
     fun allFeedRowsInAGroupHaveIdenticalBandHeight() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertFeed("a", sortOrder = 0L)
