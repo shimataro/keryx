@@ -41,9 +41,7 @@ class FileTokenStorage(
                 // freshly-written token file was group/world-readable (umask-dependent): writeText into
                 // an already-existing file preserves its permissions rather than recreating it.
                 if (!tmp.exists()) tmp.createNewFile()
-                val restricted = tmp.setReadable(false, false) && tmp.setReadable(true, true) &&
-                    tmp.setWritable(false, false) && tmp.setWritable(true, true)
-                if (!restricted) {
+                if (!restrictToOwnerOnly(tmp)) {
                     throw IOException("Failed to restrict token file to owner-only permissions: $tmp")
                 }
                 tmp.writeText(json.encodeToString(tokens))
@@ -53,6 +51,30 @@ class FileTokenStorage(
                 throw e
             }
         }.onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Token file could not be written", e) }
+    }
+
+    /**
+     * On a POSIX filesystem, denies read/write to non-owners (defense against a permissive
+     * umask) and confirms the owner itself retains access. `java.io.File`'s boolean permission
+     * API cannot express "deny to non-owner" on a non-POSIX filesystem (Windows/NTFS) —
+     * `setReadable(false, false)`/`setWritable(false, false)` are unsupported there and always
+     * return false — so on that path this only confirms the owner retains access; the
+     * owner-only guarantee itself then comes from Windows' own per-user ACL inheritance on
+     * %APPDATA%/%LOCALAPPDATA%.
+     */
+    private fun restrictToOwnerOnly(target: File): Boolean {
+        val isPosix = try {
+            Files.getPosixFilePermissions(target.toPath())
+            true
+        } catch (_: UnsupportedOperationException) {
+            false
+        }
+        return if (isPosix) {
+            target.setReadable(false, false) && target.setReadable(true, true) &&
+                target.setWritable(false, false) && target.setWritable(true, true)
+        } else {
+            target.setReadable(true, true) && target.setWritable(true, true)
+        }
     }
 
     override fun load(): OAuthTokens? =
