@@ -973,7 +973,10 @@ internal fun newHomeViewModel(
 @OptIn(ExperimentalTestApi::class)
 internal fun ComposeUiTest.closeHomeViewModelFixture(vm: HomeViewModel, fixture: HomeViewModelFixture, driver: SqlDriver) {
     vm.viewModelScope.cancel()
-    fixture.close()
-    waitForIdle()
-    driver.close()
+    try {
+        fixture.close()
+        waitForIdle()
+    } finally {
+        driver.close()
+    }
 }
