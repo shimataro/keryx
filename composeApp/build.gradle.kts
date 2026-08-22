@@ -5,6 +5,8 @@ import java.util.Properties
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
+    // No version here: the root project already puts AGP on the build classpath.
+    id("com.android.kotlin.multiplatform.library")
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlinSerialization)
@@ -92,6 +94,23 @@ val appPackageVersion: String = appVersion.substringBefore('-')
 val isZeroMajorVersion = appPackageVersion.substringBefore('.').toIntOrNull() == 0
 val macOsPackageVersion = if (isZeroMajorVersion) "1.0.0" else appPackageVersion
 
+// Android's versionCode is a single monotonically-increasing integer, so MAJOR.MINOR.PATCH is
+// folded into one number two decimal digits per component (1.2.3 -> 10203, 0.1.2 -> 102). This
+// caps MINOR and PATCH at 99 each, which is well beyond anything this project's tagging produces.
+// Derived from appPackageVersion (already stripped of any pre-release suffix) so a `-beta.1` build
+// and its final release share a versionCode — Play would reject a re-upload at the same code, but
+// pre-release builds are not published there (see release.yml, which skips installers for them).
+val androidVersionCode: Int = appPackageVersion.split('.')
+    .map { it.toIntOrNull() ?: 0 }
+    .let { parts ->
+        val major = parts.getOrElse(0) { 0 }
+        val minor = parts.getOrElse(1) { 0 }
+        val patch = parts.getOrElse(2) { 0 }
+        major * 10000 + minor * 100 + patch
+    }
+    // versionCode must be >= 1; the local-dev "0.0.0" default would otherwise fold to 0.
+    .coerceAtLeast(1)
+
 val generatedBuildConfigDir = layout.buildDirectory.dir("generated/buildConfig/kotlin")
 
 abstract class GenerateBuildConfigTask : DefaultTask() {
@@ -164,6 +183,35 @@ kotlin {
         }
     }
 
+    // Android's D8/R8 cannot read Java 25 bytecode, so this target compiles to 17 while the
+    // desktop target above stays on 25. jvmToolchain(25) still applies — that selects the JDK
+    // that *runs* the compiler, which is independent of the bytecode level it emits.
+    android {
+        namespace = "works.merc.keryx.app"
+        compileSdk = 37
+        // 26 (Android 8.0) is what lets Pkce's java.util.Base64 usage be shared from
+        // jvmCommonMain rather than needing an android.util.Base64 actual of its own. The
+        // bundled SQLite (see .claude/rules/android-sqlite-bundling.md) supports 21, so it is
+        // not what sets this floor.
+        minSdk = 26
+
+        // Without this, Compose Resources generates nothing for androidMain at all (every
+        // *ForAndroidMain resource task reports NO-SOURCE) and the app crashes at runtime with
+        // MissingResourceException the first time any commonMain code reads a string resource —
+        // confirmed on-device. See https://youtrack.jetbrains.com/issue/CMP-9547 (Compose
+        // Multiplatform resources aren't packaged into the Android APK under AGP 9's
+        // com.android.kotlin.multiplatform.library plugin without this opt-in).
+        androidResources.enable = true
+
+        compilations.configureEach {
+            compileTaskProvider.configure {
+                compilerOptions {
+                    jvmTarget.set(JvmTarget.JVM_17)
+                }
+            }
+        }
+    }
+
     sourceSets {
         commonMain.dependencies {
             implementation(libs.compose.runtime)
@@ -200,8 +248,32 @@ kotlin {
             implementation(libs.composewebview)
         }
 
-        getByName("desktopMain") {
+        // Shared by desktop and Android: the JVM-library-backed actuals (java.io.File,
+        // java.util.zip, java.security.MessageDigest, java.util.Base64) that work verbatim on
+        // both. Anything needing an Android Context (AppDirs) or an Android-idiomatic API (Log)
+        // stays in each target's own source set instead.
+        val jvmCommonMain by creating {
+            dependsOn(commonMain.get())
             kotlin.srcDir(generatedBuildConfigDir)
+        }
+        getByName("desktopMain").dependsOn(jvmCommonMain)
+        getByName("androidMain").dependsOn(jvmCommonMain)
+
+        getByName("androidMain") {
+            dependencies {
+                implementation(libs.androidx.core.ktx)
+                implementation(libs.androidx.activity.compose)
+                implementation(libs.ktor.client.okhttp)
+
+                // The bundled SQLite that backs articles_fts's trigram tokenizer. See
+                // .claude/rules/android-sqlite-bundling.md for why this is required and the
+                // conditions under which it can be dropped.
+                implementation(libs.sqldelight.driver.android)
+                implementation(libs.requery.sqlite.android)
+            }
+        }
+
+        getByName("desktopMain") {
             dependencies {
                 implementation(compose.desktop.currentOs)
                 implementation(libs.kotlinx.coroutines.swing)

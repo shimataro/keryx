@@ -1,0 +1,68 @@
+import java.util.Properties
+
+plugins {
+    alias(libs.plugins.androidApplication)
+    alias(libs.plugins.composeMultiplatform)
+    alias(libs.plugins.composeCompiler)
+}
+
+// Same resolution order as composeApp/build.gradle.kts's appVersion (kept in this module too,
+// duplicated rather than shared, since there is no buildSrc/convention-plugin setup yet — revisit
+// if a third module ever needs the same logic). Only versionName/versionCode need it here;
+// androidApp has no OAuth-client-key BuildConfig of its own (composeApp's is what the app reads).
+val localProperties = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+val appVersion: String =
+    (project.findProperty("appVersion") as String?)
+        ?: System.getenv("APP_VERSION")
+        ?: "0.0.0"
+
+// See composeApp/build.gradle.kts's androidVersionCode for the folding scheme (1.2.3 -> 10203).
+val androidVersionCode: Int = appVersion.substringBefore('-').split('.')
+    .map { it.toIntOrNull() ?: 0 }
+    .let { parts ->
+        val major = parts.getOrElse(0) { 0 }
+        val minor = parts.getOrElse(1) { 0 }
+        val patch = parts.getOrElse(2) { 0 }
+        major * 10000 + minor * 100 + patch
+    }
+    .coerceAtLeast(1)
+
+android {
+    namespace = "works.merc.keryx.app.android"
+    compileSdk = 37
+
+    defaultConfig {
+        applicationId = "works.merc.keryx"
+        // Kept in lockstep with composeApp's androidLibrary minSdk (see
+        // .claude/rules/android-sqlite-bundling.md for why 26).
+        minSdk = 26
+        targetSdk = 37
+        versionCode = androidVersionCode
+        versionName = appVersion
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation(project(":composeApp"))
+
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.compose.runtime)
+    implementation(libs.compose.foundation)
+    implementation(libs.compose.material3)
+    implementation(libs.compose.ui)
+
+    // KeryxApplication.kt talks to Koin/Ktor/coroutines types directly (starting Koin, resolving
+    // the shared HttpClient/CoroutineScope/FtsManager) — composeApp's own dependency on these is
+    // `implementation`-scoped in its Gradle module, so it isn't exposed transitively here.
+    implementation(libs.koin.core)
+    implementation(libs.ktor.client.core)
+    implementation(libs.kotlinx.coroutines.core)
+}

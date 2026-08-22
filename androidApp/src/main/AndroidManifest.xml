@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Feed fetching, cloud sync (Phase 4), and the update checker all need network access. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android 13+ (API 33) requires this to post the new-article notification (Phase 3);
+         declared now so the manifest doesn't need revisiting when that Phase lands. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:name=".KeryxApplication"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <!-- singleTask: the desktop target's equivalent concern is SingleInstanceCoordinator
+                 (desktopMain/SingleInstanceCoordinator.kt) — here the OS enforces it natively, so
+                 no app-level single-instance code is needed (see app-architecture.md). -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

@@ -26,13 +26,33 @@ composeApp/src/
     ui/           theme/, navigation/, setup/, home/ (3-pane + search + notification center), article/, settings/, i18n/
     LaunchArg.kt  Classifies a raw launch argument (`keryx://` URI vs `.opml` path) — platform-independent, package root
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq (7 tables)
-  commonMain/composeResources/  values/strings.xml, drawable/
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of each expect (DatabaseDriverFactory, AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, Pkce, PlatformModule) + LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage), DesktopOs (isMacOs/isWindows/isLinux), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux)
+  commonMain/composeResources/  values/strings.xml, drawable/ (icons are Android Vector Drawable XML,
+    not SVG — Compose Multiplatform's SVG decoder is desktop/iOS-only and crashes on Android at
+    runtime; VectorDrawable XML is the one image format `painterResource` renders on every target)
+  jvmCommonMain/kotlin/…/  actuals shared by desktop and Android, needing no platform API either
+    target lacks: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage, AppInfo,
+    CloudStorageAvailability (the last two just read the shared generated BuildConfig)
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of each expect not covered by jvmCommonMain (DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule) + LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage), DesktopOs (isMacOs/isWindows/isLinux), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux)
     tray/      KeryxTray (platform branch), MacTray, LinuxTray + the StatusNotifierItem/dbusmenu D-Bus objects
+  androidMain/kotlin/…/  actual implementations not covered by jvmCommonMain: DatabaseDriverFactory
+    (bundled SQLite, see below), AppDirs/BrowserOpener/ClipboardEntries (via AndroidAppContext, a
+    static Context holder set once from KeryxApplication.onCreate), PlatformModule (Ktor OkHttp
+    engine, CloudSession with no providers yet — see Provider/DI below), KeryxTextField/KeryxAlertDialog/
+    KeryxTabDialog (plain M3), FilePicker/DatabaseMerger/DatabaseSnapshot (Phase-4 stubs that throw —
+    unreachable while CloudSession has no providers), nativeContextMenu (currently a no-op — see its
+    KDoc for why long-press isn't wired yet)
   commonTest/ + desktopTest/
 ```
 
 The package root is `works.merc.keryx.app` (reverse DNS of `keryx.merc.works`).
+
+A separate root-level module, `androidApp` (`com.android.application`, not part of the Kotlin
+Multiplatform source-set layout above), holds only `AndroidManifest.xml`, `KeryxApplication`
+(process-wide setup: `AndroidAppContext.init`, `startKoin`, `configureImageLoader`, an
+`ensureIndexed()` FTS backfill), and `MainActivity` (`setContent { App() }`). It exists because AGP
+9's `com.android.application` plugin cannot be applied to the same module as the Kotlin Multiplatform
+plugin — `composeApp` is instead an Android library via `com.android.kotlin.multiplatform.library`,
+and `androidApp` depends on it to produce the installable APK.
 
 ## Layer Responsibilities
 
@@ -48,6 +68,17 @@ The package root is `works.merc.keryx.app` (reverse DNS of `keryx.merc.works`).
 ### DatabaseDriverFactory (expect / actual)
 
 `expect class DatabaseDriverFactory { fun create(): SqlDriver }` in `commonMain`. The desktop `actual` creates a `JdbcSqliteDriver`, checks `PRAGMA user_version`, and manually drives `KeryxDatabase.Schema` create / migrate (because SQLDelight's JVM driver does not auto-track schema version).
+
+The Android `actual` creates an `AndroidSqliteDriver`, which drives `Schema.create`/`migrate`
+automatically via its own `onCreate`/`onUpgrade` callbacks — no manual `PRAGMA user_version`
+handling needed, unlike desktop. It uses `com.github.requery:sqlite-android`'s bundled SQLite
+(`RequerySQLiteOpenHelperFactory`, an `androidx.sqlite.db.SupportSQLiteOpenHelper.Factory`) rather
+than the device's own SQLite: AOSP's SQLite build omits FTS5 entirely, so `articles_fts`'s
+`tokenize='trigram'` cannot work against the system SQLite at any API level. See
+`.claude/rules/android-sqlite-bundling.md` for the full rationale and exit criteria.
+`busy_timeout`/`foreign_keys` are set from `AndroidSqliteDriver.Callback.onConfigure`; note that
+`PRAGMA busy_timeout=N` returns the new value as a result row, so it must go through
+`SupportSQLiteDatabase.query`, not `execSQL` (which requery rejects for statements returning rows).
 
 ### FtsManager / FtsSearch
 

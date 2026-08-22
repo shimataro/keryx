@@ -6,17 +6,25 @@
 
 - **JDK 25 or later** (`JAVA_HOME`). On macOS, Temurin or Homebrew openjdk is recommended.
 - IDE: IntelliJ IDEA / Android Studio (with Kotlin Multiplatform plugin) is recommended.
+- **Android SDK Platform 37** (`compileSdk`) and build-tools, installed via Android Studio's SDK
+  Manager or `sdkmanager`. Point `local.properties`' `sdk.dir` at the SDK location (AGP reads this
+  key itself; it doesn't go through this project's own `-P`/env-var/`local.properties` resolution
+  chain used for the OAuth keys below), or set the `ANDROID_HOME` environment variable instead.
+  A target-scoped task like `:composeApp:compileKotlinDesktop` or `:composeApp:desktopTest` works
+  fine without it, but the root `./gradlew build` aggregates every subproject including
+  `:androidApp`, so it fails immediately at configuration time without a resolvable SDK — see
+  Common Issues below.
 
 ## First-time Setup
 
 ```bash
 git clone <repo>
 cd kmp
-cp local.properties.example local.properties   # Optional: configure Dropbox App Key
+cp local.properties.example local.properties   # Then add sdk.dir (see Prerequisites); the OAuth keys are optional
 ./gradlew build
 ```
 
-If `build` passes, code generation for SQLDelight / Compose Resources / BuildConfig, compilation, and tests are all verified.
+If `build` passes, code generation for SQLDelight / Compose Resources / BuildConfig, compilation, and tests are all verified — for both the desktop and Android targets, since `build` now also compiles and assembles `:androidApp`.
 
 ## Data Directory
 
@@ -57,6 +65,13 @@ manually.
 
 ## Common Issues
 
+- **`SDK location not found` (at Gradle configuration time)**: `composeApp` itself now configures
+  an Android library target (`com.android.kotlin.multiplatform.library`), so any task that touches
+  its `build` lifecycle — the root `./gradlew build`, or even `:composeApp:build` alone — needs the
+  Android SDK, not just `:androidApp`. Set `sdk.dir` in `local.properties` (see Prerequisites
+  above) or the `ANDROID_HOME` environment variable. Desktop-only work can avoid this by scoping to
+  a specific desktop task instead, e.g. `:composeApp:compileKotlinDesktop` or
+  `:composeApp:desktopTest`, neither of which resolves the Android SDK.
 - **`UnsupportedClassVersionError` (at runtime)**: The JVM that launched `./gradlew` is older than 25. Set `JAVA_HOME` to JDK 25+.
 - **Toolchain download blocked**: Add `-Dorg.gradle.java.installations.auto-download=true`.
 - **(Linux) `./gradlew build` hangs or fails in Compose UI tests on a headless machine**:

@@ -2,6 +2,7 @@
 /.kotlin/
 /build/
 /composeApp/build/
+/androidApp/build/
 
 # Local settings
 local.properties

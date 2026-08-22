@@ -26,13 +26,32 @@ composeApp/src/
     ui/           theme/, navigation/, setup/, home/（3ペイン + 検索 + 通知センター）, article/, settings/, i18n/
     LaunchArg.kt  起動時の引数（`keryx://` URI か `.opml` パスか）を分類する — プラットフォーム非依存、パッケージ直下
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq（7 テーブル）
-  commonMain/composeResources/  values/strings.xml, drawable/
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ 各 expect の actual（DatabaseDriverFactory, AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, Pkce, PlatformModule）+ LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）, DesktopOs（isMacOs/isWindows/isLinux）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf）
+  commonMain/composeResources/  values/strings.xml, drawable/（アイコンは SVG ではなく Android
+    Vector Drawable XML — Compose Multiplatform の SVG デコーダはデスクトップ/iOS 専用で Android では
+    実行時にクラッシュするため。VectorDrawable XML は `painterResource` が全ターゲットで描画できる唯一の画像形式）
+  jvmCommonMain/kotlin/…/  デスクトップと Android の両方が共有する actual（どちらのプラットフォーム
+    API にも依存しない）: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage, AppInfo,
+    CloudStorageAvailability（後者2つは共有生成 BuildConfig を読むだけ）
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ jvmCommonMain がカバーしない expect の actual（DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule）+ LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）, DesktopOs（isMacOs/isWindows/isLinux）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf）
     tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray + StatusNotifierItem/dbusmenu の D-Bus オブジェクト
+  androidMain/kotlin/…/  jvmCommonMain がカバーしない expect の actual: DatabaseDriverFactory（バンドル
+    SQLite、後述）, AppDirs/BrowserOpener/ClipboardEntries（AndroidAppContext 経由 — KeryxApplication.onCreate
+    で一度だけ設定される静的 Context ホルダ）, PlatformModule（Ktor OkHttp エンジン、プロバイダ未登録の
+    CloudSession — 下記 Provider/DI 参照）, KeryxTextField/KeryxAlertDialog/KeryxTabDialog（素の M3）,
+    FilePicker/DatabaseMerger/DatabaseSnapshot（フェーズ4までのスタブ。例外を投げるが CloudSession に
+    プロバイダが無い間は到達不能）, nativeContextMenu（現状 no-op — 理由は KDoc 参照）
   commonTest/ + desktopTest/
 ```
 
 パッケージルートは `works.merc.keryx.app`（`keryx.merc.works` の逆順 DNS）。
+
+ルート直下の別モジュール `androidApp`（`com.android.application`。上記の Kotlin Multiplatform
+ソースセット構成には含まれない）は `AndroidManifest.xml`、`KeryxApplication`（プロセス全体の初期化:
+`AndroidAppContext.init`、`startKoin`、`configureImageLoader`、FTS バックフィルの `ensureIndexed()`）、
+`MainActivity`（`setContent { App() }`）のみを持つ。これが別モジュールになっているのは、AGP 9 の
+`com.android.application` プラグインが Kotlin Multiplatform プラグインと同一モジュールで併用できない
+ため — `composeApp` は代わりに `com.android.kotlin.multiplatform.library` による Android ライブラリで、
+`androidApp` がそれに依存してインストール可能な APK を生成する。
 
 ## レイヤーの責務
 
@@ -50,6 +69,17 @@ composeApp/src/
 `commonMain` に `expect class DatabaseDriverFactory { fun create(): SqlDriver }`。desktop の `actual` は
 `JdbcSqliteDriver` を生成し、`PRAGMA user_version` を見て `KeryxDatabase.Schema` の create / migrate を
 自前で駆動する（SQLDelight の JVM ドライバはスキーマバージョンを自動追跡しないため）。
+
+Android の `actual` は `AndroidSqliteDriver` を生成する。こちらは `onCreate`/`onUpgrade` コールバックで
+`Schema.create`/`migrate` を自動的に駆動するため、desktop のような `PRAGMA user_version` の手動管理は
+不要。端末標準の SQLite ではなく `com.github.requery:sqlite-android` のバンドル SQLite
+（`RequerySQLiteOpenHelperFactory`、`androidx.sqlite.db.SupportSQLiteOpenHelper.Factory` の実装）を
+使う — AOSP の SQLite ビルドは FTS5 自体を含んでいないため、`articles_fts` の `tokenize='trigram'` は
+どの API レベルでも端末標準の SQLite では動作しない。詳細な理由と撤退条件は
+`.claude/rules/android-sqlite-bundling.md` を参照。`busy_timeout`/`foreign_keys` は
+`AndroidSqliteDriver.Callback.onConfigure` から設定する。なお `PRAGMA busy_timeout=N` は結果行として
+新しい値を返すため、`execSQL` ではなく `SupportSQLiteDatabase.query` を経由する必要がある点に注意
+（requery は結果行を返す文を `execSQL` に渡すと拒否する）。
 
 ### FtsManager / FtsSearch
 

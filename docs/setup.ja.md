@@ -6,18 +6,26 @@
 
 - **JDK 25 以上**（`JAVA_HOME`）。macOS なら Temurin / Homebrew の openjdk 等。
 - IDE: IntelliJ IDEA / Android Studio（Kotlin Multiplatform プラグイン）推奨。
+- **Android SDK Platform 37**（`compileSdk`）と build-tools。Android Studio の SDK Manager か
+  `sdkmanager` で導入する。`local.properties` の `sdk.dir` に SDK の場所を指定する（AGP がこのキー
+  自体を直接読むため、下記 OAuth キーで使う `-P`/環境変数/`local.properties` の解決チェーンとは別系統）か、
+  環境変数 `ANDROID_HOME` を設定してもよい。`:composeApp:compileKotlinDesktop` や
+  `:composeApp:desktopTest` のようなターゲット限定タスクは SDK が無くても動くが、ルートの
+  `./gradlew build` は `:androidApp` を含む全サブプロジェクトを集約するため、SDK が解決できないと
+  設定段階で即座に失敗する — 詳細は後述の「よくある問題」を参照。
 
 ## 初回
 
 ```bash
 git clone <repo>
 cd kmp
-cp local.properties.example local.properties   # 任意: Dropbox App Key を設定
+cp local.properties.example local.properties   # sdk.dir を追記する（前提を参照）。OAuth キーは任意
 ./gradlew build
 ```
 
 `build` が通れば SQLDelight / Compose Resources / BuildConfig のコード生成、コンパイル、テストまで
-一通り確認できる。
+一通り確認できる — `build` は `:androidApp` のコンパイル・アセンブルも行うため、デスクトップと
+Android の両ターゲットについて確認できる。
 
 ## データディレクトリ
 
@@ -57,6 +65,13 @@ cp local.properties.example local.properties   # 任意: Dropbox App Key を設�
 
 ## よくある問題
 
+- **`SDK location not found`（Gradle の設定段階）**: `composeApp` 自体が Android ライブラリ
+  ターゲット（`com.android.kotlin.multiplatform.library`）を構成するようになったため、その
+  `build` ライフサイクルに触れるタスク——ルートの `./gradlew build`、あるいは `:composeApp:build`
+  単体でも——は `:androidApp` だけでなく Android SDK を必要とする。`local.properties` の
+  `sdk.dir`（前提を参照）か環境変数 `ANDROID_HOME` を設定する。デスクトップだけの作業なら
+  `:composeApp:compileKotlinDesktop` や `:composeApp:desktopTest` のような特定タスクに絞ることで
+  Android SDK の解決を避けられる。
 - **`UnsupportedClassVersionError`（実行時）**: `./gradlew` を起動した JVM が 25 未満。
   `JAVA_HOME` を JDK 25+ に設定する。
 - **ツールチェーンのダウンロードがブロックされる**:

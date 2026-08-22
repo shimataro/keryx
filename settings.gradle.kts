@@ -24,3 +24,7 @@ plugins {
 }
 
 include(":composeApp")
+// The Android application module (AndroidManifest, MainActivity, KeryxApplication). Separate
+// from :composeApp because AGP 9's com.android.application plugin cannot coexist with the Kotlin
+// Multiplatform plugin in the same module — see the plan doc's "実装中に判明した構造変更".
+include(":androidApp")
