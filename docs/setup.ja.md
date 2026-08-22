@@ -41,8 +41,9 @@ Android の両ターゲットについて確認できる。
 
 ## パッケージング前提条件
 
-`./gradlew build` / `:composeApp:run` は JDK 以外に何も要らない（ヘッドレスな Linux 環境での Xvfb は
-除く — 後述）。ネイティブパッケージング系タスク（`createDistributable`, `packageDmg`, `packageMsi`,
+`:composeApp:run` は JDK 以外に何も要らない（ヘッドレスな Linux 環境での Xvfb は除く — 後述）。
+ルートの `./gradlew build` は前提のとおり Android SDK の解決も追加で必要になる。
+ネイティブパッケージング系タスク（`createDistributable`, `packageDmg`, `packageMsi`,
 `packageDeb`, `packageRpm` — 詳細は [build.md](build.md)）は OS ごとに以下も必要。
 
 - **Linux**

@@ -106,6 +106,11 @@ val androidVersionCode: Int = appPackageVersion.split('.')
         val major = parts.getOrElse(0) { 0 }
         val minor = parts.getOrElse(1) { 0 }
         val patch = parts.getOrElse(2) { 0 }
+        // Each component must fit the two decimal digits reserved for it, or two distinct
+        // versions could fold to the same versionCode (e.g. 1.100.0 and 2.0.0 both -> 20000).
+        require(minor in 0..99 && patch in 0..99) {
+            "androidVersionCode encoding requires MINOR and PATCH in 0..99, got $appPackageVersion"
+        }
         major * 10000 + minor * 100 + patch
     }
     // versionCode must be >= 1; the local-dev "0.0.0" default would otherwise fold to 0.

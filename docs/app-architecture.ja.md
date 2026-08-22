@@ -8,7 +8,8 @@
 - Koin で依存性注入、androidx.lifecycle ViewModel で状態管理
 - SQLDelight でローカル DB を型安全に管理
 - 同期処理は Repository 層に閉じ込め、UI 層は同期の存在を意識しない
-- プラットフォーム固有コードは `commonMain` の `expect` + `desktopMain` の `actual` に集約
+- プラットフォーム固有コードは `commonMain` の `expect` + プラットフォームごとの `actual`
+  （`desktopMain` / `androidMain`）に集約
 
 ## ディレクトリー構成
 
@@ -242,6 +243,21 @@ KDE/GNOME 純正のダイアログ（かつサンドボックスに適合した�
 バックは不要になる見込みである。ポータルバックエンドが無い環境では `JFileChooser` にフォールバック
 する。検出は `KeryxTray` が SNI と AWT を選び分けるのと同じく、起動時にセッションバス上の
 `org.freedesktop.portal.Desktop` の有無を確認する方式になる。
+
+### アイコンセット
+
+`ui/common/KeryxIcons.kt` が全 UI 呼び出し箇所の唯一の間接参照点になっており（意味的な名前 →
+`composeResources/drawable/` 配下のバンドル Android Vector Drawable XML）、現在は Tabler Icons
+（MIT）を使用している（デスクトップ3OS共通でMac寄りの見た目に寄せるため。詳細は `ui-guidelines`
+skill）。Android のネイティブな視覚言語は Material Design であるため、Android ターゲットだけ
+Material 系アイコン（Material Symbols）に差し替えることを検討する余地がある — `KeryxIcons` を
+`expect`/`actual` に分割すればプラットフォームごとに個別のアイコンセットを出し分けられるが、
+現時点ではまだ着手していない。iOS/iPadOS/macOS がいずれネイティブ SwiftUI 化された場合
+（`external-spec.md` §2 の想定どおり）、そちらは Kotlin の `KeryxIcons` とは無関係の別コードベース
+になるため、SF Symbols を `Image(systemName:)` で直接使えばよく、Kotlin 側に追加の差し替え機構は
+不要。つまり将来「SwiftUI = SF Symbols / Android = Material / Windows・Linux = 現行の Tabler」
+という3分岐になっても、Kotlin 側で実質必要になるのは上記の Android 用 `expect`/`actual` 分割だけ
+である。
 
 ## ドメインモデルの方針
 

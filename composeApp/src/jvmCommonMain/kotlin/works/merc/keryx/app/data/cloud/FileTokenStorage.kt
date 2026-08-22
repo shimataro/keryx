@@ -5,6 +5,8 @@ import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.platform.AppDirs
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 /**
  * Fallback token storage used when no OS secret store is available (e.g. a
@@ -28,14 +30,24 @@ class FileTokenStorage(
         // in-memory session still works, only cross-restart persistence is lost.
         runCatching {
             file.parentFile?.mkdirs()
-            // Restrict the file to owner-only *before* writing the refresh token into it. Creating
-            // it empty first and tightening permissions up front closes the brief window in which a
-            // freshly-written token file was group/world-readable (umask-dependent): writeText into
-            // an already-existing file preserves its permissions rather than recreating it.
-            if (!file.exists()) file.createNewFile()
-            file.setReadable(false, false); file.setReadable(true, true)
-            file.setWritable(false, false); file.setWritable(true, true)
-            file.writeText(json.encodeToString(tokens))
+            // Write to a sibling temp file, then atomically replace the target. writeText()
+            // straight into the token file would truncate it first, so a crash or failed write
+            // mid-way left a corrupt file that load() rejects, forcing the user to re-authorize.
+            val tmp = File(file.parentFile, "${file.name}.tmp")
+            try {
+                // Restrict the file to owner-only *before* writing the refresh token into it. Creating
+                // it empty first and tightening permissions up front closes the brief window in which a
+                // freshly-written token file was group/world-readable (umask-dependent): writeText into
+                // an already-existing file preserves its permissions rather than recreating it.
+                if (!tmp.exists()) tmp.createNewFile()
+                tmp.setReadable(false, false); tmp.setReadable(true, true)
+                tmp.setWritable(false, false); tmp.setWritable(true, true)
+                tmp.writeText(json.encodeToString(tokens))
+                Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            } catch (e: Exception) {
+                tmp.delete()
+                throw e
+            }
         }.onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Token file could not be written", e) }
     }
 
@@ -48,7 +60,12 @@ class FileTokenStorage(
             }
 
     override fun clear() {
-        runCatching { file.delete() }
-            .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Token file delete failed", e) }
+        runCatching {
+            // File.delete() returns false rather than throwing when it fails, which runCatching
+            // alone would not observe — a lingering token file would then be reported as cleared.
+            if (file.exists() && !file.delete()) {
+                Log.warn(TOKEN_STORAGE_LOG_TAG, "Token file delete returned false")
+            }
+        }.onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Token file delete failed", e) }
     }
 }
