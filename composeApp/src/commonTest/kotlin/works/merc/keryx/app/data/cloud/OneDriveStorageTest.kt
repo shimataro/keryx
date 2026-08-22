@@ -11,6 +11,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.OutgoingContent
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -33,6 +34,7 @@ import kotlin.test.assertTrue
  * pre-authenticated `@microsoft.graph.downloadUrl`. The client mirrors production DI
  * (`followRedirects=false`) so the manual single-redirect follow is exercised.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class OneDriveStorageTest {
 
     private fun storage(
