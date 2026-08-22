@@ -25,7 +25,7 @@ import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
-import androidx.compose.ui.test.runDesktopComposeUiTest
+import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import app.cash.sqldelight.db.SqlDriver
@@ -39,6 +39,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import org.koin.compose.KoinApplication
+import org.koin.dsl.koinConfiguration
 import org.koin.dsl.module
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
@@ -157,7 +158,7 @@ class FeedListDragTest {
     ): FeedDragOverlayState {
         setContent {
             KoinApplication(
-                application = {
+                configuration = koinConfiguration {
                     modules(
                         module {
                             single { menuController }

@@ -22,11 +22,12 @@ import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
-import androidx.compose.ui.test.runDesktopComposeUiTest
+import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.cancel
 import org.koin.compose.KoinApplication
+import org.koin.dsl.koinConfiguration
 import org.koin.dsl.module
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.KeryxDatabase
@@ -97,7 +98,7 @@ class FeedListInlineRenameTest {
 
     private fun ComposeUiTest.setInlineRenameContent(vm: HomeViewModel, menuController: MenuController = testMenuController) {
         setContent {
-            KoinApplication(application = { modules(module { single { menuController } }) }) {
+            KoinApplication(configuration = koinConfiguration { modules(module { single { menuController } }) }) {
                 InlineRenameTestHost(vm)
             }
         }

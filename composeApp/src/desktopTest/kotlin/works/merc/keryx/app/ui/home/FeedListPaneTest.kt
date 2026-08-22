@@ -16,7 +16,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.runDesktopComposeUiTest
+import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CompletableDeferred
@@ -25,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import org.koin.compose.KoinApplication
+import org.koin.dsl.koinConfiguration
 import org.koin.dsl.module
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.cloud.OAuthTokens
@@ -51,7 +52,7 @@ class FeedListPaneTest {
 
     @Composable
     private fun FeedListPaneTestHost(vm: HomeViewModel, height: Dp) {
-        KoinApplication(application = { modules(module { single { testMenuController } }) }) {
+        KoinApplication(configuration = koinConfiguration { modules(module { single { testMenuController } }) }) {
             Box(Modifier.testTag(ROOT_TEST_TAG).size(320.dp, height)) {
                 FeedListPane(
                     vm = vm,

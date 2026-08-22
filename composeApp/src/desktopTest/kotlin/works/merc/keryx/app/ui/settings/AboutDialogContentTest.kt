@@ -3,7 +3,7 @@ package works.merc.keryx.app.ui.settings
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.runDesktopComposeUiTest
+import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import works.merc.keryx.app.core.AppInfo
 import kotlin.test.Test
 

@@ -28,10 +28,11 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performMouseInput
-import androidx.compose.ui.test.runDesktopComposeUiTest
+import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import org.koin.compose.KoinApplication
+import org.koin.dsl.koinConfiguration
 import org.koin.dsl.module
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.cancel
@@ -715,7 +716,7 @@ class ListRowHitAreaTest {
 
     @Composable
     private fun FeedListHitAreaTestHost(vm: HomeViewModel, height: Dp) {
-        KoinApplication(application = { modules(module { single { testMenuController } }) }) {
+        KoinApplication(configuration = koinConfiguration { modules(module { single { testMenuController } }) }) {
             Box(Modifier.size(320.dp, height)) {
                 FeedListPane(
                     vm = vm,
