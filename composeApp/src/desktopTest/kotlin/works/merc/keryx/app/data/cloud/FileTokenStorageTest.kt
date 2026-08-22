@@ -24,11 +24,13 @@ class FileTokenStorageTest {
 
     @AfterTest
     fun cleanup() {
-        // A permission-manipulating test may still hold the directory read-only if it failed
-        // before its own finally block ran; restore write access so cleanup can actually delete.
+        // A permission-manipulating test may still hold the directory read-only, or the token
+        // file itself read-only (Windows), if it failed before its own finally block ran;
+        // restore write access so cleanup can actually delete.
         runCatching {
             Files.setPosixFilePermissions(Paths.get(dir), PosixFilePermission.values().toSet())
         }
+        File(FileIO.join(dir, ".dropbox_tokens.json")).setWritable(true)
         FileIO.delete(FileIO.join(dir, ".dropbox_tokens.json"))
     }
 
@@ -49,19 +51,37 @@ class FileTokenStorageTest {
         return captured
     }
 
-    /** POSIX-only: makes the token directory read-only, runs [block], then restores permissions. */
-    private fun withReadOnlyDir(block: () -> Unit) {
+    /**
+     * Forces a delete/replace of the token file to fail, runs [block], then undoes it.
+     * POSIX (Linux/macOS): strips write permission from the containing directory, since it's
+     * the directory's permissions — not the file's own — that gate unlink/rename there.
+     * Windows: NTFS exposes no POSIX permission view, but marking the token file itself
+     * read-only makes DeleteFile/MoveFileEx fail with ERROR_ACCESS_DENIED, the Windows-native
+     * equivalent failure.
+     */
+    private fun withReadOnlyTokenTarget(block: () -> Unit) {
         val path = Paths.get(dir)
         val original = try {
             Files.getPosixFilePermissions(path)
         } catch (_: UnsupportedOperationException) {
-            return // non-POSIX filesystem: nothing to test
+            withReadOnlyTokenFile(block)
+            return
         }
         Files.setPosixFilePermissions(path, setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_EXECUTE))
         try {
             block()
         } finally {
             Files.setPosixFilePermissions(path, original)
+        }
+    }
+
+    private fun withReadOnlyTokenFile(block: () -> Unit) {
+        val tokenFile = File(FileIO.join(dir, ".dropbox_tokens.json"))
+        tokenFile.setReadOnly()
+        try {
+            block()
+        } finally {
+            tokenFile.setWritable(true)
         }
     }
 
@@ -144,7 +164,7 @@ class FileTokenStorageTest {
         // through (here: the directory becomes unwritable) must never truncate the existing file.
         storage.save(OAuthTokens(accessToken = "original"))
 
-        withReadOnlyDir {
+        withReadOnlyTokenTarget {
             storage.save(OAuthTokens(accessToken = "replacement")) // must not throw
         }
 
@@ -156,7 +176,7 @@ class FileTokenStorageTest {
         storage.save(OAuthTokens(accessToken = "access-123"))
 
         val records = mutableListOf<LogRecord>()
-        withReadOnlyDir {
+        withReadOnlyTokenTarget {
             records += withCapturedLogRecords { storage.clear() } // must not throw
         }
 
