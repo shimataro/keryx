@@ -5,6 +5,7 @@ import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.platform.AppDirs
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
@@ -40,8 +41,11 @@ class FileTokenStorage(
                 // freshly-written token file was group/world-readable (umask-dependent): writeText into
                 // an already-existing file preserves its permissions rather than recreating it.
                 if (!tmp.exists()) tmp.createNewFile()
-                tmp.setReadable(false, false); tmp.setReadable(true, true)
-                tmp.setWritable(false, false); tmp.setWritable(true, true)
+                val restricted = tmp.setReadable(false, false) && tmp.setReadable(true, true) &&
+                    tmp.setWritable(false, false) && tmp.setWritable(true, true)
+                if (!restricted) {
+                    throw IOException("Failed to restrict token file to owner-only permissions: $tmp")
+                }
                 tmp.writeText(json.encodeToString(tokens))
                 Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
             } catch (e: Exception) {
