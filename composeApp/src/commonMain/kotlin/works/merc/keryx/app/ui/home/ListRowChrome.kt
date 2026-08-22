@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /** The horizontal inset a list row's highlight keeps from the pane edge — see [listRowSurface]. */
@@ -98,14 +99,29 @@ internal fun Modifier.listRowClickable(
  * A drag insertion marker must be drawn *before* this in the chain (see `insertionMarkers` in
  * `FeedListDragAndDrop.kt`) — `decoration` and everything after it is clipped to the inset rounded
  * rect, so a marker routed through this function could never reach the band's own top/bottom edge.
+ *
+ * @param extraBottomMargin Extra bottom margin beyond the standard [LIST_ROW_VERTICAL_MARGIN],
+ *   for a row whose bottom insertion marker is unpaired with no possible partner (see
+ *   `InsertionMarker.unpaired`) *and* has no later row to borrow margin from either — currently
+ *   only `NoFolderHeader` when its group is empty, since it is always the last feed/folder row.
+ *   [LIST_ROW_GUIDE_THICKNESS] `/ 2f` is exactly the extra space a paired boundary's *other* row
+ *   would otherwise have contributed, so passing that keeps the guide the same 2dp-thick,
+ *   1dp-clearance line every paired boundary has, without changing `insertionMarkers`' drawing
+ *   code at all — only how much of this row's own margin the guide has to sit inside.
  */
 @Composable
 internal fun Modifier.listRowSurface(
     background: Color,
     interactionSource: MutableInteractionSource? = null,
     decoration: Modifier = Modifier,
+    extraBottomMargin: Dp = 0.dp,
 ): Modifier = this
-    .padding(horizontal = LIST_ROW_HORIZONTAL_MARGIN, vertical = LIST_ROW_VERTICAL_MARGIN)
+    .padding(
+        start = LIST_ROW_HORIZONTAL_MARGIN,
+        end = LIST_ROW_HORIZONTAL_MARGIN,
+        top = LIST_ROW_VERTICAL_MARGIN,
+        bottom = LIST_ROW_VERTICAL_MARGIN + extraBottomMargin,
+    )
     .clip(MaterialTheme.shapes.small)
     .background(background)
     .then(decoration)

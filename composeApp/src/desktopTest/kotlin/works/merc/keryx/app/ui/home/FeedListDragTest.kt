@@ -11,12 +11,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.MouseButton
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.pressKey
@@ -72,6 +76,8 @@ import works.merc.keryx.app.ui.menu.MenuController
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
+import kotlin.test.assertTrue
 
 /**
  * End-to-end Compose UI tests for the hand-rolled (non-OS-level) feed-list reorder/attach drag: a
@@ -94,6 +100,21 @@ class FeedListDragTest {
      * [performMouseInput] positions are expressed in when invoked on the drag-host node itself. */
     private fun localOf(nodeCenterInRoot: Offset, hostBoundsInRoot: Rect): Offset =
         Offset(nodeCenterInRoot.x - hostBoundsInRoot.left, nodeCenterInRoot.y - hostBoundsInRoot.top)
+
+    /** The pixels at [x] spanning [edge]'s full `LIST_ROW_VERTICAL_MARGIN` band on both sides —
+     * i.e. the entire gap a drag insertion marker could paint into around that boundary. */
+    private fun androidx.compose.ui.test.ComposeUiTest.bandAround(edge: Int, x: Int): List<Color> {
+        val marginPx = with(density) { LIST_ROW_VERTICAL_MARGIN.roundToPx() }
+        val pixels = onRoot().captureToImage().toPixelMap()
+        return (edge - marginPx until edge + marginPx).map { y -> pixels[x, y] }
+    }
+
+    /** The absolute y positions, within [before]/[after] (both taken via [bandAround] for the same
+     * [edge]), where the color changed — i.e. where a guide newly appeared or disappeared. */
+    private fun guideYs(edge: Int, before: List<Color>, after: List<Color>): List<Int> {
+        val marginPx = before.size / 2
+        return before.indices.filter { before[it] != after[it] }.map { edge - marginPx + it }
+    }
 
     @Composable
     private fun FeedListDragTestHost(vm: HomeViewModel, dragOverlay: FeedDragOverlayState) {
@@ -296,6 +317,272 @@ class FeedListDragTest {
 
             assertEquals("folder1", db.feedsQueries.getById("a").executeAsOne().folder_id)
         } finally {
+            vm.viewModelScope.cancel()
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    /**
+     * `FolderGroupHeader`'s feed-zone insertion marker is always paired (half thickness, with its
+     * own `LIST_ROW_GUIDE_CLEARANCE`) whether the folder is collapsed or expanded — the matching
+     * half comes from whatever row follows it (`precedingFeedZoneBoundary`, on a collapsed/empty
+     * folder's next sibling) or from the real first feed row (once expanded) — so this header's own
+     * drawing never changes and the spring-loaded auto-expand this test holds out for never moves
+     * the guide. Captures the same pixel strip straddling the header's bottom edge before and after
+     * the folder actually expands mid-drag, and asserts they are pixel-identical. Also asserts the
+     * guide itself is visually distinct from the clearance right next to it, so a regression back to
+     * painting the full thickness flush against the header (no clearance) would be caught even
+     * though that too stays pixel-identical across the transition.
+     */
+    @Test
+    fun holdingADragOverACollapsedFolderThenAutoExpandingDoesNotMoveTheInsertionGuide() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFolder("d1", "Folder One", sortOrder = 0L)
+        db.insertFeed("f1", folderId = "d1", sortOrder = 0L)
+        db.insertFeed("a", sortOrder = 1L)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        vm.toggleFolderCollapsed("d1")
+        try {
+            setFeedListDragContent(vm)
+            waitForIdle()
+
+            val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val folderBounds = onNodeWithTag(folderRowTestTag("d1"), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val start = localOf(aBounds.center, hostBounds)
+            val target = localOf(folderBounds.center, hostBounds)
+            val stripX = folderBounds.center.x.toInt()
+            val edge = folderBounds.bottom.toInt()
+            val halfGuidePx = with(density) { (LIST_ROW_GUIDE_THICKNESS / 2f).roundToPx() }
+
+            fun edgeStrip() = onRoot().captureToImage().toPixelMap().let { pixels ->
+                (edge - 4 until edge + 4).map { y -> pixels[stripX, y] }
+            }
+
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput {
+                moveTo(start)
+                press()
+                moveTo(start + Offset(0f, dragThresholdCrossPx))
+                moveTo(target)
+            }
+            waitForIdle()
+            val beforeExpand = edgeStrip()
+
+            val pixelsBeforeExpand = onRoot().captureToImage().toPixelMap()
+            assertNotEquals(
+                pixelsBeforeExpand[stripX, edge - 1],
+                pixelsBeforeExpand[stripX, edge - halfGuidePx - 1],
+                "the guide must sit LIST_ROW_GUIDE_CLEARANCE clear of the folder's own highlight, not flush against it",
+            )
+
+            waitUntil(timeoutMillis = 2000) { "d1" !in vm.collapsedFolderIds.value }
+            waitForIdle()
+            val afterExpand = edgeStrip()
+
+            assertEquals(beforeExpand, afterExpand, "the insertion guide must not move when the collapsed folder auto-expands mid-drag")
+        } finally {
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput { release() }
+            vm.viewModelScope.cancel()
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    /**
+     * Regression test for a bug in the first implementation of `precedingFeedZoneBoundary`: it was
+     * carried across the folder loop in `FeedListPane.kt` as a plain `var`, captured by each
+     * `item { ... }` content lambda. Those lambdas don't run until LazyColumn actually composes that
+     * row — *after* the whole loop has finished — so every row saw the *same*, final value of the
+     * `var` rather than its own predecessor's. With two folders (the first collapsed, the second
+     * expanded), that final value was `null` (assigned while processing the second, expanded
+     * folder), so nothing ever painted the matching half of the first folder's own guide, and it
+     * stayed 1dp thick instead of 2dp.
+     */
+    @Test
+    fun aCollapsedFolderFollowedByAnExpandedOneStillGetsAFullThicknessGuide() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFolder("d1", "Folder One", sortOrder = 0L)
+        db.insertFeed("f1", folderId = "d1", sortOrder = 0L)
+        db.insertFolder("d2", "Folder Two", sortOrder = 1L)
+        db.insertFeed("f2", folderId = "d2", sortOrder = 0L)
+        db.insertFeed("a", sortOrder = 2L)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        vm.toggleFolderCollapsed("d1")
+        try {
+            setFeedListDragContent(vm)
+            waitForIdle()
+
+            val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val d1Bounds = onNodeWithTag(folderRowTestTag("d1"), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val start = localOf(aBounds.center, hostBounds)
+            val target = localOf(d1Bounds.center, hostBounds)
+            val stripX = d1Bounds.center.x.toInt()
+            val edge = d1Bounds.bottom.toInt()
+            val halfGuidePx = with(density) { (LIST_ROW_GUIDE_THICKNESS / 2f).roundToPx() }
+
+            val baseline = bandAround(edge, stripX)
+
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput {
+                moveTo(start)
+                press()
+                moveTo(start + Offset(0f, dragThresholdCrossPx))
+                moveTo(target)
+            }
+            waitForIdle()
+            val duringDrag = bandAround(edge, stripX)
+
+            assertEquals(
+                (edge - halfGuidePx until edge + halfGuidePx).toList(),
+                guideYs(edge, baseline, duringDrag),
+                "the guide below a collapsed folder must be the full LIST_ROW_GUIDE_THICKNESS, centred on the boundary",
+            )
+        } finally {
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput { release() }
+            vm.viewModelScope.cancel()
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    /**
+     * Sibling regression test to [aCollapsedFolderFollowedByAnExpandedOneStillGetsAFullThicknessGuide]
+     * for the other symptom of the same `var`-capture bug: when the *last* folder is the one that's
+     * collapsed, the final value every row's `item { ... }` lambda saw was that folder's own
+     * feed-zone boundary — not `null`. Since a feed drag hovering that folder makes that exact
+     * boundary the active one, *every* folder header (and the sticky "Folders" label above the very
+     * first one) wrongly matched it too, each painting a spurious top-edge guide of its own.
+     */
+    @Test
+    fun draggingOverACollapsedFolderPaintsNoGuideOnOtherRows() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFolder("d1", "Folder One", sortOrder = 0L)
+        db.insertFeed("f1", folderId = "d1", sortOrder = 0L)
+        db.insertFolder("d2", "Folder Two", sortOrder = 1L)
+        db.insertFeed("f2", folderId = "d2", sortOrder = 0L)
+        db.insertFeed("a", sortOrder = 2L)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        vm.toggleFolderCollapsed("d2")
+        try {
+            setFeedListDragContent(vm)
+            waitForIdle()
+
+            val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val d1Bounds = onNodeWithTag(folderRowTestTag("d1"), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val d2Bounds = onNodeWithTag(folderRowTestTag("d2"), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val start = localOf(aBounds.center, hostBounds)
+            val target = localOf(d2Bounds.center, hostBounds)
+            val d1StripX = d1Bounds.center.x.toInt()
+            val d1Top = d1Bounds.top.toInt()
+            val d2StripX = d2Bounds.center.x.toInt()
+            val d2Top = d2Bounds.top.toInt()
+            val d2Bottom = d2Bounds.bottom.toInt()
+            val halfGuidePx = with(density) { (LIST_ROW_GUIDE_THICKNESS / 2f).roundToPx() }
+
+            val baselineD1Top = bandAround(d1Top, d1StripX)
+            val baselineD2Top = bandAround(d2Top, d2StripX)
+            val baselineD2Bottom = bandAround(d2Bottom, d2StripX)
+
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput {
+                moveTo(start)
+                press()
+                moveTo(start + Offset(0f, dragThresholdCrossPx))
+                moveTo(target)
+            }
+            waitForIdle()
+            onNodeWithTag(FEED_DRAG_GHOST_TEST_TAG, useUnmergedTree = true).assertExists()
+
+            assertTrue(
+                guideYs(d1Top, baselineD1Top, bandAround(d1Top, d1StripX)).isEmpty(),
+                "the first folder's own top edge (right below the sticky \"Folders\" label) must show no guide",
+            )
+            assertTrue(
+                guideYs(d2Top, baselineD2Top, bandAround(d2Top, d2StripX)).isEmpty(),
+                "the collapsed folder being hovered must not also paint a spurious guide at its own top edge",
+            )
+            assertEquals(
+                (d2Bottom - halfGuidePx until d2Bottom + halfGuidePx).toList(),
+                guideYs(d2Bottom, baselineD2Bottom, bandAround(d2Bottom, d2StripX)),
+                "sanity check: the drag must actually be painting the real guide below the collapsed folder",
+            )
+        } finally {
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput { release() }
+            vm.viewModelScope.cancel()
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    /**
+     * When the "no folder" section is empty, its own feed-zone marker is unpaired (no feed row
+     * exists below it, and — being always the last feed/folder row — none ever will), so
+     * `listRowSurface`'s `extraBottomMargin` reserves the other side's half on `NoFolderHeader`'s
+     * own margin instead, keeping the guide the same 1dp-clearance line a non-empty group's paired
+     * marker has (see the comment on `NoFolderHeader`'s `insertionMarkers` call).
+     *
+     * Checks two independent things: that the guide still actually appears (a pixel spot-check,
+     * same style as the collapsed-folder tests above), and — since the extra margin itself is only
+     * 1px wide here, too thin to reliably tell apart from screenshot anti-aliasing at the adjacent
+     * highlight/border edges — that `NoFolderHeader`'s own measured height grows by exactly
+     * `LIST_ROW_GUIDE_THICKNESS / 2` once its group is empty, which is a precise, deterministic
+     * semantics-tree measurement rather than a pixel comparison. The drop this test itself performs
+     * conveniently supplies the "non-empty" comparison point for free: releasing onto the "no
+     * folder" section moves `f1` there, so measuring again right after `release()` needs no second
+     * fixture.
+     */
+    @Test
+    fun draggingOntoAnEmptyNoFolderSectionKeepsClearanceFromItsHighlight() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFolder("d1", "Folder One", sortOrder = 0L)
+        db.insertFeed("f1", folderId = "d1", sortOrder = 0L)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            setFeedListDragContent(vm)
+            waitForIdle()
+
+            val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val f1Bounds = onNodeWithText("Feed f1", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val noFolderBoundsWhenEmpty = onNodeWithTag(NO_FOLDER_HEADER_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val start = localOf(f1Bounds.center, hostBounds)
+            val target = localOf(noFolderBoundsWhenEmpty.center, hostBounds)
+            val stripX = noFolderBoundsWhenEmpty.center.x.toInt()
+            val edge = noFolderBoundsWhenEmpty.bottom.toInt()
+
+            fun pixelAt(y: Int) = onRoot().captureToImage().toPixelMap()[stripX, y]
+            val baselineAtGuide = pixelAt(edge - 1)
+
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput {
+                moveTo(start)
+                press()
+                moveTo(start + Offset(0f, dragThresholdCrossPx))
+                moveTo(target)
+            }
+            waitForIdle()
+            assertNotEquals(baselineAtGuide, pixelAt(edge - 1), "the guide must actually appear once hovering starts")
+
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput { release() }
+            waitForIdle()
+            assertEquals(null, db.feedsQueries.getById("f1").executeAsOne().folder_id, "sanity check: f1 must have actually moved into the \"no folder\" group")
+
+            val noFolderBoundsWhenNonEmpty = onNodeWithTag(NO_FOLDER_HEADER_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val extraMarginPx = with(density) { (LIST_ROW_GUIDE_THICKNESS / 2f).roundToPx() }
+            assertEquals(
+                noFolderBoundsWhenNonEmpty.height + extraMarginPx,
+                noFolderBoundsWhenEmpty.height,
+                "an empty \"no folder\" section must reserve exactly LIST_ROW_GUIDE_THICKNESS / 2 more height " +
+                    "than a non-empty one, to hold its unpaired marker's missing clearance",
+            )
+        } finally {
+            // The drag was already released above (needed mid-test to compare against the
+            // non-empty state) — the test input dispatcher rejects a second release with nothing
+            // pressed, so cleanup here is just the fixture/database, unlike every other test in
+            // this file.
             vm.viewModelScope.cancel()
             fixture.close()
             driver.close()

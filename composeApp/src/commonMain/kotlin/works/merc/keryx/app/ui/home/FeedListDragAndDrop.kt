@@ -110,6 +110,13 @@ internal fun feedRowTestTag(feedId: String): String = "feed-row-$feedId"
 /** Test tag on a [FolderGroupHeader]'s whole clickable band. */
 internal fun folderRowTestTag(folderId: String): String = "folder-row-$folderId"
 
+/** Test tag on [NoFolderHeader]'s whole band — there is only ever one, unlike
+ * [feedRowTestTag]/[folderRowTestTag]. Needed (unlike a plain `onNodeWithText` lookup on its
+ * label) because that would resolve to the unmerged text node's own intrinsic bounds, not the
+ * full row band `insertionMarkers`/`listRowSurface` measure — the same reason [FeedRow] and
+ * [FolderGroupHeader] carry a tag instead of being located by their own label text. */
+internal const val NO_FOLDER_HEADER_TEST_TAG = "no-folder-row"
+
 /** How long a dragged feed must be held over a collapsed folder header before the folder opens by
  * itself, so the feeds inside it become reachable drop targets without letting go of the drag
  * (the spring-loaded folder of Finder / Explorer). Long enough not to fire while merely passing
@@ -225,6 +232,11 @@ internal fun Modifier.insertionMarkers(top: InsertionMarker? = null, bottom: Ins
  * @param firstFeedId The first feed in the folder, or `null` if the folder is empty.
  * @param nextFolderId The ID of the following folder, or `null` if this is the last folder.
  * @param feedIdsInFolder The IDs of feeds contained in the folder.
+ * @param precedingFeedZoneBoundary The feed-zone boundary of the immediately preceding folder,
+ *   only when that folder is collapsed or empty (so no feed row of its own exists to paint the
+ *   matching half of its own feed-zone marker) — `null` otherwise. This header then paints that
+ *   half from its own top edge, using its own top margin, so the preceding folder's guide reads
+ *   the same 2dp-thick, 1dp-clearance line whether it is collapsed or expanded.
  * @param activeBoundaryState The currently highlighted insertion boundary.
  * @param onToggleCollapse Toggles the folder's collapsed state.
  * @param onClick Selects the folder.
@@ -246,6 +258,7 @@ internal fun FolderGroupHeader(
     firstFeedId: String?,
     nextFolderId: String?,
     feedIdsInFolder: Set<String>,
+    precedingFeedZoneBoundary: DropBoundary? = null,
     activeBoundaryState: State<DropBoundary?>,
     onToggleCollapse: () -> Unit,
     onClick: () -> Unit,
@@ -282,15 +295,21 @@ internal fun FolderGroupHeader(
     val currentBoundary = activeBoundaryState.value
     // Always unpaired: no folder ever checks the boundary before the *next* folder from its own
     // bottom edge, so a folder's own top edge is the only place `BeforeFolder` is ever painted.
-    val topMarker = InsertionMarker(indented = false, unpaired = true).takeIf { currentBoundary == DropBoundary.BeforeFolder(folder.id) }
-    // The feed-zone half is drawn whether or not the folder is open: expanded and non-empty, the
-    // first feed row below paints the matching half from its own top edge (both indented, so they
-    // line up), so this stays paired (half thickness). Collapsed or empty, no feed row exists to
-    // pair with it, so it's unpaired (full thickness) instead. `AppendFolders` stays gated on being
-    // the last folder — that boundary only exists there, and is always unpaired (no row ever
-    // checks for it from the other side). See `insertionMarkers`.
+    // The second branch is unrelated to that — see `precedingFeedZoneBoundary`.
+    val topMarker = when {
+        currentBoundary == DropBoundary.BeforeFolder(folder.id) -> InsertionMarker(indented = false, unpaired = true)
+        precedingFeedZoneBoundary != null && currentBoundary == precedingFeedZoneBoundary -> InsertionMarker(indented = true)
+        else -> null
+    }
+    // Always paired (half thickness, with its own LIST_ROW_GUIDE_CLEARANCE), regardless of
+    // collapse state: whether the matching half comes from the actual first feed row (expanded) or
+    // from whatever row follows this one pairing on `precedingFeedZoneBoundary` (collapsed or
+    // empty — see that KDoc), this header's own drawing never changes, so the spring-loaded
+    // auto-expand below never visibly moves the guide. `AppendFolders` stays gated on being the
+    // last folder — that boundary only exists there — and is always unpaired (no row ever checks
+    // for it from the other side). See `insertionMarkers`.
     val bottomMarker = when {
-        currentBoundary == feedZoneBoundary -> InsertionMarker(indented = true, unpaired = collapsed || isEmpty)
+        currentBoundary == feedZoneBoundary -> InsertionMarker(indented = true)
         nextFolderId == null && currentBoundary == DropBoundary.AppendFolders -> InsertionMarker(indented = false, unpaired = true)
         else -> null
     }
@@ -362,11 +381,18 @@ internal fun FolderGroupHeader(
 }
 
 /** The "no folder" section label, including the highlight/insertion-line rendering for a drag
- * hovering it (drop handling is centralized in `FeedListPane`'s outer `Box`). */
+ * hovering it (drop handling is centralized in `FeedListPane`'s outer `Box`).
+ *
+ * @param precedingFeedZoneBoundary The last real folder's own feed-zone boundary, only when that
+ *   folder is collapsed or empty — see `FolderGroupHeader`'s parameter of the same name. This
+ *   section is always the last one rendered, so it is the only possible "next row" for the very
+ *   last folder.
+ */
 @Composable
 internal fun NoFolderHeader(
     firstFeedId: String?,
     feedIdsInNoFolder: Set<String>,
+    precedingFeedZoneBoundary: DropBoundary? = null,
     activeBoundaryState: State<DropBoundary?>,
 ) {
     val isEmpty = firstFeedId == null
@@ -381,10 +407,18 @@ internal fun NoFolderHeader(
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.fillMaxWidth()
+            .testTag(NO_FOLDER_HEADER_TEST_TAG)
             // Paired (half thickness) when the group has feeds: the first one below paints the
             // matching half from its own top edge (also un-indented, so they line up). Unpaired
-            // (full thickness) when empty — no feed row exists to pair with it.
+            // (full thickness) when empty — no feed row exists to pair with it, and (being always
+            // the last feed/folder row) none ever will, so `listRowSurface`'s `extraBottomMargin`
+            // reserves the other row's half on this row's own side instead, keeping the guide
+            // 1dp clear of the highlight the same way a paired boundary is. `top` is unrelated: it
+            // pairs with the last folder's own feed-zone marker when that folder is collapsed or
+            // empty — see `precedingFeedZoneBoundary`.
             .insertionMarkers(
+                top = InsertionMarker(indented = true)
+                    .takeIf { precedingFeedZoneBoundary != null && activeBoundaryState.value == precedingFeedZoneBoundary },
                 bottom = InsertionMarker(indented = false, unpaired = isEmpty).takeIf { activeBoundaryState.value == feedZoneBoundary },
             )
             .listRowSurface(
@@ -395,6 +429,7 @@ internal fun NoFolderHeader(
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
                 ),
                 decoration = dropTargetBorderModifier(isFeedDragHighlight, MaterialTheme.colorScheme.secondary),
+                extraBottomMargin = (LIST_ROW_GUIDE_THICKNESS / 2f).takeIf { isEmpty } ?: 0.dp,
             )
             .padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
     )

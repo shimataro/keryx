@@ -496,13 +496,29 @@ internal fun FeedListPane(
                         }
                     }
 
-                    groupFeedsByFolder(feeds, folders).forEach { (folder, feedsInFolder) ->
+                    val folderGroups = groupFeedsByFolder(feeds, folders)
+                    folderGroups.forEachIndexed { index, (folder, feedsInFolder) ->
+                        // The feed-zone boundary of the immediately preceding group's folder, only
+                        // when that folder is collapsed or empty and therefore has no feed row of
+                        // its own to paint the matching half of its own marker (see
+                        // `FolderGroupHeader`'s `precedingFeedZoneBoundary` parameter). Derived
+                        // fresh per iteration rather than carried in a `var` across the `forEach`:
+                        // every `item { ... }` content lambda below is deferred until LazyColumn
+                        // actually composes that row, which happens after this whole loop has
+                        // finished running — a captured `var` would have already reached its final
+                        // value by then, so every row would see the *same* (usually wrong) boundary.
+                        val previousFolder = folderGroups.getOrNull(index - 1)?.first
+                        val previousFeeds = folderGroups.getOrNull(index - 1)?.second.orEmpty()
+                        val precedingFeedZoneBoundary = previousFolder
+                            ?.takeIf { it.id in collapsedFolderIds || previousFeeds.isEmpty() }
+                            ?.let { dropIndexState.value.feedZoneBoundaryFor(it.id) }
                         if (folder == null) {
                             if (folders.isNotEmpty()) {
                                 item(key = "no-folder-header", contentType = "folder-header") {
                                     NoFolderHeader(
                                         firstFeedId = feedsInFolder.firstOrNull()?.id,
                                         feedIdsInNoFolder = feedsInFolder.mapTo(mutableSetOf()) { it.id },
+                                        precedingFeedZoneBoundary = precedingFeedZoneBoundary,
                                         activeBoundaryState = activeBoundaryState,
                                     )
                                 }
@@ -521,6 +537,7 @@ internal fun FeedListPane(
                                     firstFeedId = feedsInFolder.firstOrNull()?.id,
                                     nextFolderId = nextFolderId,
                                     feedIdsInFolder = feedsInFolder.mapTo(mutableSetOf()) { it.id },
+                                    precedingFeedZoneBoundary = precedingFeedZoneBoundary,
                                     activeBoundaryState = activeBoundaryState,
                                     onToggleCollapse = { vm.toggleFolderCollapsed(folder.id) },
                                     onClick = { vm.selectFilter(ArticleFilter.Folder(folder.id)); onActivated() },
