@@ -347,8 +347,11 @@ measurement. A candidate without one is not proposed.
 
 Label each candidate with its axis and its Green/Yellow/Red tier, then prioritize
 by benefit ÷ risk. Every Red carries its integrity and sync-compatibility impact.
-Every axis-2 candidate states **both sides of the trade**. Optionally run the
-**`reviewer` agent** first to surface constraint-adjacent risk.
+Every axis-2 candidate states **both sides of the trade**. Optionally surface
+constraint-adjacent risk first by launching **`review-data-integrity`**,
+**`review-sync-merge`**, and **`review-security`** in parallel. Do **not** call
+`review-performance` — you are the performance analysis; what you need from review
+is whether the ground you are about to touch is load-bearing.
 
 ### Step 4 — Confirm scope (the single gate)
 
@@ -434,9 +437,13 @@ CLAUDE.md "Documentation").
 
 ### Step 8 — Constraint review + closing summary
 
-Optionally run the **`reviewer` agent** over the accumulated changes
-(`git diff "$BASE_SHA" HEAD`, using the `BASE_SHA` captured in Step 1) to
-catch any architecture/constraint violation across everything just applied —
+Optionally review the accumulated changes (`git diff "$BASE_SHA" HEAD`, using the
+`BASE_SHA` captured in Step 1) for invariants broken by the optimization. Launch
+**`review-data-integrity`**, **`review-sync-merge`**, **`review-concurrency`**, and
+**`review-security`** in parallel — `review-concurrency` matters here specifically
+because performance work reorders, parallelizes, and caches. Again not
+`review-performance`, and not the `reviewer` orchestrator. This catches any
+architecture/constraint violation across everything just applied —
 by this point every item has already committed itself independently in
 Step 5, so a plain `git diff` against a clean working tree would show
 nothing. There is no aggregate commit message to produce here — finish by

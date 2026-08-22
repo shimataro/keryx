@@ -187,8 +187,11 @@ on top of failing tests.
 ### Step 2 — Inventory candidates
 
 Survey the in-scope files with read-only tools (Grep / Read, plus compiler
-warnings from a build). Optionally run the **`reviewer` agent** to surface smells
-and constraint-adjacent risks. Group findings into small, **independent** batches
+warnings from a build). Optionally run the **`review-quality` agent** to surface
+smells (dead code, duplication, oversized units, naming, non-idiomatic Kotlin).
+Call it directly rather than going through the `reviewer` orchestrator — you know
+which perspective you need, and skipping the dispatch layer keeps this cheap.
+Group findings into small, **independent** batches
 by the target categories above, and **prioritize** (highest clarity gain / lowest
 risk first).
 
@@ -300,8 +303,14 @@ re-read of every doc.
 
 ### Step 7 — Constraint review + closing summary
 
-Optionally run the **`reviewer` agent** over the accumulated diff (`git diff`) to
-catch any architecture/constraint violation before finishing. Each batch already
+Optionally review the accumulated diff (`git diff`) for constraint violations
+before finishing. Launch these four specialist agents **in parallel, in one
+message** — not the `reviewer` orchestrator, whose dispatch table would also pull
+in perspectives a behavior-preserving refactor cannot affect:
+**`review-architecture`**, **`review-data-integrity`**, **`review-sync-merge`**,
+**`review-verification`**. Their responsibilities are mutually exclusive (see
+`.claude/etc/review/common.md`), so sorting the combined findings by severity is
+enough — no deduplication needed. Each batch already
 committed itself independently in Step 4, so there is no aggregate commit
 message to produce here — finish by outputting the closing summary (see
 `## How to report`).
