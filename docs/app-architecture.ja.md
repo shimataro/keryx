@@ -8,8 +8,8 @@
 - Koin で依存性注入、androidx.lifecycle ViewModel で状態管理
 - SQLDelight でローカル DB を型安全に管理
 - 同期処理は Repository 層に閉じ込め、UI 層は同期の存在を意識しない
-- プラットフォーム固有コードは `commonMain` の `expect` + プラットフォームごとの `actual`
-  （`desktopMain` / `androidMain`）に集約
+- 共有のプラットフォーム抽象は `commonMain` で宣言し、可能な場合は `jvmCommonMain` に実装する。
+  それ以外はターゲットごとのソースセット（`desktopMain` / `androidMain`）に実装する。
 
 ## ディレクトリー構成
 

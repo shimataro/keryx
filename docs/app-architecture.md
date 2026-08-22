@@ -8,8 +8,9 @@
 - Dependency injection with Koin, state management with androidx.lifecycle ViewModel
 - Type-safe local DB management with SQLDelight
 - Sync processing is confined to the Repository layer; the UI layer is unaware of sync
-- Platform-specific code is consolidated behind `commonMain` `expect` + per-platform `actual`
-  (`desktopMain` / `androidMain`)
+- Shared platform abstractions are declared in `commonMain` and implemented in
+  `jvmCommonMain` when possible, or in target-specific source sets
+  (`desktopMain` / `androidMain`) otherwise.
 
 ## Directory Structure
 
