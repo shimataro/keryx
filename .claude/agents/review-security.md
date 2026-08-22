@@ -30,7 +30,8 @@ You review Keryx (a cross-platform RSS reader, Kotlin Multiplatform / Compose Mu
 - Log *wording* or logging style → `review-quality`.
 - Whether the merge SQL is semantically correct → `review-sync-merge`. You only care whether remote
   content reaches a raw SQL string.
-- Missing tests for a security fix → mention it inside your finding's 提案, never as a separate finding.
+- Missing tests for a security fix → mention it inside your finding's **Suggestion**, never as a
+  separate finding.
 
 ## Checklist
 

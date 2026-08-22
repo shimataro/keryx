@@ -30,7 +30,7 @@ finding, it is a bug you are proposing.
 
 State the cost concretely — what grows, and with what. "This is O(all article text) and the list
 query re-runs on every write to `feeds`" is a finding; "this could be optimized" is not. Where you
-cannot establish the cost, use 確信度 `低` and say what measurement would settle it.
+cannot establish the cost, use confidence `Low` and say what measurement would settle it.
 
 ## Checklist — total work
 

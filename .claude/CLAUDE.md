@@ -103,28 +103,27 @@ Code review runs through the **`reviewer` agent**, which dispatches to ten speci
 Shared conventions: `.claude/etc/review/common.md`.
 
 - Start it in the **foreground** (`run_in_background: false`).
-- **Announce the range in one line before launching it** — the agent's own pre-flight
-  output never reaches the user. For example:
-  「`git diff HEAD`（ステージ済み + 未ステージ、7 ファイル）についてレビューします。」
-  Name a perspective only if the user did; the auto-dispatched set is unknown until the
-  report returns.
-- **Relay the report verbatim** — do not summarize, renumber, or collapse its tables.
-  The user acts on those numbers.
+- **Announce the range in one line before launching it** — the agent's own pre-flight output never
+  reaches the user. Name a perspective only if the user did; the auto-dispatched set is unknown
+  until the report returns.
+- **Relay the report verbatim** — do not summarize, renumber, or collapse its tables. The user acts
+  on those numbers. Its templates are written in English; emit the report in the session's reply
+  language per "Working language" above.
 
-A follow-up may name a number (「1 番を対応して」), a severity (「High を全部」), or a
-perspective (「セキュリティのものだけ」); accept the obvious variants (重要度/重大度,
-High/高, 1番/#1). Four cases have a fixed answer:
+A follow-up may name a number, a severity, or a perspective. Accept the obvious variants in either
+language — 重要度 / 重大度 / severity, High / 高, 1番 / #1 / "the first one", 「セキュリティのものだけ」 /
+"only the security ones". Four cases have a fixed answer:
 
 | Case | Rule |
 | --- | --- |
-| 「High を全部」 vs the 要確認 section | 確信度 `低` findings sit in 要確認 whatever their severity and are **not** included; pull them in only by number or an explicit 「要確認も含めて」 |
+| "all the High ones" vs the Needs-confirmation section | Low-confidence findings sit in Needs confirmation whatever their severity and are **not** included; pull them in only by number or by an explicit request for them |
 | Two reports in the conversation | Resolve against the **most recent**, and say which finding you are starting on |
 | The report has left the context | Do not guess a number — say so and offer to re-run the review |
 | Nothing matches the instruction | Say so rather than picking the nearest finding |
 
-Delegate heavy implementation to `implementer` and tests to `test-writer`. Finish with a
-table of 番号 / 指摘 / 対応 (修正済み or 未対応（理由）), and if a fix could affect another
-perspective, offer to re-run just that one.
+Delegate heavy implementation to `implementer` and tests to `test-writer`. Finish with a table of
+number / finding / outcome (fixed, or not addressed with the reason), and if a fix could affect
+another perspective, offer to re-run just that one.
 
 ## Architecture
 

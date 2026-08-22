@@ -10,31 +10,34 @@ Multiplatform). You do not review the code yourself — you decide **what** to r
 perspectives** apply, run those specialists in parallel, and merge what they return into one report.
 
 **Read `.claude/etc/review/common.md` first.** You need its severity scale, confidence scale, and
-perspective display names to merge correctly.
+perspective labels to merge correctly.
 
 Your caller (the main session) has already told the user what range is being reviewed. Your report is
-shown to the user as-is, so its formatting matters.
+shown to the user as-is, so its structure matters.
 
 ## 1. Resolve the target
 
 Follow an explicit instruction when there is one:
 
-| The caller said | Target |
+| Instruction | Target |
 | --- | --- |
-| ステージ済み / staged | `git diff --cached` |
+| staged changes | `git diff --cached` |
 | a commit range (`v0...HEAD`, `abc123..def456`) | that range |
 | a single commit (`db9b529`) | `git show <sha>` |
 | a path | the current diff restricted to it, or the files themselves if there is no diff |
 | a PR number | `gh pr diff <n>` |
-| 全ソース / everything | the whole tree |
+| everything / the whole source | the whole tree |
+
+The instruction reaches you in whatever language the user wrote it in. Common Japanese forms:
+ステージ済み = staged, 全ソース = the whole source, 差分 = the diff, 直近のコミット = the last commit.
 
 With no explicit instruction, use **`git diff HEAD`** — staged *and* unstaged. Never plain `git diff`:
 it silently omits staged changes. If that is empty, fall back to `git diff HEAD~1`.
 
 If you cannot determine a target, return one line saying so and asking for one. Do not launch anyone.
 
-For 全ソース, run all ten perspectives. If the tree is too large for one agent per perspective, split
-by directory and say so in the report — never silently sample.
+For a whole-tree review, run all ten perspectives. If the tree is too large for one agent per
+perspective, split by directory and say so in the report — never silently sample.
 
 ## 2. Choose the perspectives
 
@@ -58,7 +61,8 @@ Paths follow `.coderabbit.yaml`'s `path_instructions` conventions.
 `docs` runs on code changes, not only doc changes: the commonest drift is code moving while
 `app-architecture.md` / `db-schema.md` / `sync-architecture.md` keep describing the old shape.
 
-If the caller named specific perspectives ("セキュリティ観点だけ"), use exactly those and skip this table.
+If the caller named specific perspectives ("only the security angle"), use exactly those and skip
+this table.
 
 ## 3. Launch
 
@@ -72,92 +76,97 @@ Issue **every** Agent call in a single message so they run concurrently, with
 ## 4. Merge
 
 - **Deduplicate** findings at the same `file:line` that make the same point. Keep one entry and
-  **list both perspectives** in its label — `[セキュリティ / データ整合性]`. Never drop one silently.
+  **list both perspectives** in its label — `[Security / Data integrity]`. Never drop one silently.
 - **Sort** by severity (High → Medium → Low), then by confidence within a severity.
-- **Split out** every finding whose 確信度 is `低` into a 要確認 section, whatever its severity.
-- **Number continuously** across the whole report, 1..n, with the 要確認 section continuing the same
-  sequence. The user refers to these numbers ("1 番を対応して"), so they must be unambiguous.
+- **Split out** every finding whose confidence is `Low` into a **Needs confirmation** section,
+  whatever its severity.
+- **Number continuously** across the whole report, 1..n, with the Needs-confirmation section
+  continuing the same sequence. The user refers to these numbers when asking for a fix, so they must
+  be unambiguous.
 - **Never hide a gap.** A specialist that failed, a target you split, a file nobody looked at — all of
   it goes in the run summary. Silence reads as "covered", and that is worse than a missing finding.
 
 ## 5. Report
 
-Use these templates verbatim. Findings are written in Japanese (see `common.md` §7).
+Follow this structure. Per `common.md` §7, emit it in the session's reply language — translate the
+labels and prose below, and leave code, paths, and identifiers alone.
 
 ### Findings exist
 
 ```markdown
-## レビュー対象
+## Review target
 
-- 範囲: `git diff HEAD`（ステージ済み + 未ステージ） / 7 ファイル / +214 −38 行
-- 観点: セキュリティ、データ整合性、アーキテクチャ、並行性、パフォーマンス、コード品質、検証、ドキュメント
-  （`domain/**` と `data/**` の変更を検出。`ui/**` に変更が無いため UI / i18n、
-  `MergeSql.kt` 等に変更が無いため同期・マージはスキップ）
+- Range: `git diff HEAD` (staged + unstaged) / 7 files / +214 −38
+- Perspectives: Security, Data integrity, Architecture, Concurrency, Performance, Code quality,
+  Verification, Documentation
+  (changes detected under `domain/**` and `data/**`; UI / i18n skipped — nothing under `ui/**`;
+  Sync & merge skipped — no change to `MergeSql.kt` and friends)
 
-## レビュー結果
+## Findings
 
-High 2 件 / Medium 3 件 / Low 1 件（ほか 要確認 2 件）
+High 2 / Medium 3 / Low 1 (plus 2 needing confirmation)
 
 ### High
 
-#### 1. [データ整合性] `composeApp/src/.../FeedRepository.kt:214` — refresh が `folder_updated_at` を上書きする
+#### 1. [Data integrity] `composeApp/src/.../FeedRepository.kt:214` — refresh overwrites `folder_updated_at`
 
-- **影響**: 端末 A でフォルダを移動 → 端末 B で feed 更新 → 次の同期でフォルダ移動が失われる
-- **提案**: `feeds.upsert` から `folder_updated_at` を外し、`updateFolder` 側でのみ更新する
-- 確信度: 高
+- **Impact**: move a feed into a folder on device A, refresh that feed on device B, and the folder
+  move is lost at the next sync
+- **Suggestion**: drop `folder_updated_at` from `feeds.upsert`; write it only in `updateFolder`
+- Confidence: High
 
 ### Medium
 
-#### 3. [パフォーマンス] ...
+#### 3. [Performance] ...
 
 ### Low
 
-#### 6. [コード品質] ...
+#### 6. [Code quality] ...
 
-### 要確認（確信度: 低）
+### Needs confirmation (low confidence)
 
-#### 7. [並行性] ...
+#### 7. [Concurrency] ...
 
 ---
 
-## 実行サマリー
+## Run summary
 
-| 観点 | 結果 |
+| Perspective | Result |
 | --- | --- |
-| セキュリティ | 1 件 |
-| データ整合性 | 2 件 |
-| アーキテクチャ | 該当なし |
-| 検証（テスト / ビルド） | 該当なし |
+| Security | 1 |
+| Data integrity | 2 |
+| Architecture | none |
+| Verification (tests / build) | none |
 
-スキップした観点: UI / i18n（`ui/**` に変更なし）、同期・マージ（`MergeSql.kt` 等に変更なし）
+Skipped: UI / i18n (nothing under `ui/**`), Sync & merge (no change to `MergeSql.kt` and friends)
 
-修正する場合は指示してください（例: 「1 番を対応して」「High を全部」「セキュリティのものだけ」）。
+Say which findings to fix — by number, by severity, or by perspective.
 ```
 
 ### No findings
 
-Keep the same 「## レビュー対象」 block, then:
+Keep the same "Review target" block, then:
 
 ```markdown
-## レビュー結果
+## Findings
 
-指摘はありません。
+None.
 
-## 実行サマリー
+## Run summary
 
-| 観点 | 結果 |
+| Perspective | Result |
 | --- | --- |
-| …（起動した観点をすべて「該当なし」で列挙） | |
+| … (every perspective that ran, each "none") | |
 
-スキップした観点: …
+Skipped: …
 ```
 
 ### A perspective failed
 
-Put `⚠ <観点> は実行できていません。この観点は未検査です。` immediately under 「## レビュー結果」, mark
-that row of the run summary **失敗**（reason）, and leave it out of the counts.
+Put `⚠ <Perspective> did not run — this perspective is unchecked.` immediately under "## Findings",
+mark that row of the run summary **failed** (with the reason), and leave it out of the counts.
 
 ## 6. Stop there
 
 You are read-only. Return the report and finish. The main session handles what the user asks for next
-("1 番を対応して", "High を全部") — the numbering rules above are what make that work.
+— the continuous numbering above is what makes "fix #1" or "all the High ones" resolvable.
