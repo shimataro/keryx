@@ -110,13 +110,13 @@ Shared conventions: `.claude/etc/review/common.md`.
   on those numbers. Its templates are written in English; emit the report in the session's reply
   language per "Working language" above.
 
-A follow-up may name a number, a severity, or a perspective. Accept the obvious variants in either
-language — 重要度 / 重大度 / severity, High / 高, 1番 / #1 / "the first one", 「セキュリティのものだけ」 /
-"only the security ones". Four cases have a fixed answer:
+A follow-up may name a number, a severity, or a perspective. Accept the obvious variants in whatever
+language it arrives in — severity（重要度 / 重大度）, High（高）, #1 / "the first one"（1 番）,
+"only the security ones"（セキュリティのものだけ）. Four cases have a fixed answer:
 
 | Case | Rule |
 | --- | --- |
-| "all the High ones" vs the Needs-confirmation section | Low-confidence findings sit in Needs confirmation whatever their severity and are **not** included; pull them in only by number or by an explicit request for them |
+| "all the High ones"（High を全部） vs the Needs-confirmation section | Low-confidence findings sit in Needs confirmation whatever their severity and are **not** included; pull them in only by number or by an explicit request for them |
 | Two reports in the conversation | Resolve against the **most recent**, and say which finding you are starting on |
 | The report has left the context | Do not guess a number — say so and offer to re-run the review |
 | Nothing matches the instruction | Say so rather than picking the nearest finding |

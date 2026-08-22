@@ -72,6 +72,11 @@ language", plus `CLAUDE.local.md` where present), so the English labels and pros
 are translated when the report is emitted. Code, identifiers, log text, file paths, and quoted source
 are never translated.
 
+Where a term names something the user might actually type — a review target, a way of selecting
+findings — gloss it inline as `English（日本語）`. English stays the primary form; the gloss exists so
+the instruction is recognized whatever language it arrives in, and another language can be added the
+same way without restructuring the sentence.
+
 ## 8. Perspective labels
 
 The orchestrator labels each finding and each row of the run summary with these names. Refer to your

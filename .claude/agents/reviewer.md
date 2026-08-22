@@ -21,15 +21,17 @@ Follow an explicit instruction when there is one:
 
 | Instruction | Target |
 | --- | --- |
-| staged changes | `git diff --cached` |
-| a commit range (`v0...HEAD`, `abc123..def456`) | that range |
-| a single commit (`db9b529`) | `git show <sha>` |
-| a path | the current diff restricted to it, or the files themselves if there is no diff |
-| a PR number | `gh pr diff <n>` |
-| everything / the whole source | the whole tree |
+| staged changes（ステージ済み） | `git diff --cached` |
+| the current diff（差分 / 変更分） | `git diff HEAD` |
+| a commit range（コミット範囲）— `v0...HEAD`, `abc123..def456` | that range |
+| a single commit（単一コミット）— `db9b529` | `git show <sha>` |
+| the last commit（直近のコミット） | `git show HEAD` |
+| a path（パス指定） | the current diff restricted to it, or the files themselves if there is no diff |
+| a PR number（PR 番号） | `gh pr diff <n>` |
+| everything / the whole source（全ソース / 全体） | the whole tree |
 
-The instruction reaches you in whatever language the user wrote it in. Common Japanese forms:
-ステージ済み = staged, 全ソース = the whole source, 差分 = the diff, 直近のコミット = the last commit.
+The instruction arrives in whatever language the user writes in; the glosses above are there so it is
+recognized either way.
 
 With no explicit instruction, use **`git diff HEAD`** — staged *and* unstaged. Never plain `git diff`:
 it silently omits staged changes. If that is empty, fall back to `git diff HEAD~1`.
@@ -61,8 +63,8 @@ Paths follow `.coderabbit.yaml`'s `path_instructions` conventions.
 `docs` runs on code changes, not only doc changes: the commonest drift is code moving while
 `app-architecture.md` / `db-schema.md` / `sync-architecture.md` keep describing the old shape.
 
-If the caller named specific perspectives ("only the security angle"), use exactly those and skip
-this table.
+If the caller named specific perspectives — "only the security angle"（セキュリティ観点だけ）— use
+exactly those and skip this table.
 
 ## 3. Launch
 
@@ -169,4 +171,5 @@ mark that row of the run summary **failed** (with the reason), and leave it out 
 ## 6. Stop there
 
 You are read-only. Return the report and finish. The main session handles what the user asks for next
-— the continuous numbering above is what makes "fix #1" or "all the High ones" resolvable.
+— the continuous numbering above is what makes "fix #1"（1 番を対応して）or "all the High ones"
+（High を全部）resolvable.
