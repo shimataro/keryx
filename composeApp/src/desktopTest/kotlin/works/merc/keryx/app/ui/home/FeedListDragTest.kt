@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.MouseButton
 import androidx.compose.ui.test.captureToImage
@@ -203,9 +204,7 @@ class FeedListDragTest {
             val order = db.feedsQueries.getByFolder(null).executeAsList().map { it.id }
             assertEquals(listOf("c", "a", "b"), order)
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -250,9 +249,7 @@ class FeedListDragTest {
 
             assertEquals(listOf("a", "b"), db.feedsQueries.getByFolder(null).executeAsList().map { it.id })
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -284,9 +281,7 @@ class FeedListDragTest {
             assertEquals(listOf("a", "b", "c"), order, "a sub-threshold move must not reorder anything")
             assertEquals(ArticleFilter.Feed("a"), vm.filter.value, "the row's own click must still register as a selection")
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -318,9 +313,7 @@ class FeedListDragTest {
 
             assertEquals("folder1", db.feedsQueries.getById("a").executeAsOne().folder_id)
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -385,9 +378,7 @@ class FeedListDragTest {
             assertEquals(beforeExpand, afterExpand, "the insertion guide must not move when the collapsed folder auto-expands mid-drag")
         } finally {
             onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput { release() }
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -443,9 +434,7 @@ class FeedListDragTest {
             )
         } finally {
             onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput { release() }
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -513,9 +502,7 @@ class FeedListDragTest {
             )
         } finally {
             onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput { release() }
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -584,9 +571,7 @@ class FeedListDragTest {
             // non-empty state) — the test input dispatcher rejects a second release with nothing
             // pressed, so cleanup here is just the fixture/database, unlike every other test in
             // this file.
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -624,9 +609,7 @@ class FeedListDragTest {
                 "attaching a tag must not move the feed out of its folder",
             )
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -678,9 +661,7 @@ class FeedListDragTest {
             val order = db.feedsQueries.getByFolder(null).executeAsList().map { it.id }
             assertEquals(listOf("b", "c", "a"), order, "the drag must still complete despite the mid-drag right-click")
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -719,9 +700,7 @@ class FeedListDragTest {
             waitForIdle()
             onNodeWithTag(FEED_DRAG_GHOST_TEST_TAG, useUnmergedTree = true).assertDoesNotExist()
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -768,9 +747,7 @@ class FeedListDragTest {
 
             assertEquals(listOf("a", "b", "c"), db.feedsQueries.getByFolder(null).executeAsList().map { it.id })
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -804,9 +781,7 @@ class FeedListDragTest {
             val order = db.foldersQueries.watchAll().executeAsList().map { it.id }
             assertEquals(listOf("d2", "d1"), order)
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -839,9 +814,7 @@ class FeedListDragTest {
 
             onNodeWithText("「Feed a」の購読を削除しますか？").assertDoesNotExist()
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -865,9 +838,7 @@ class FeedListDragTest {
             onNodeWithTag(INLINE_RENAME_FIELD_TEST_TAG, useUnmergedTree = true).assertDoesNotExist()
             onNodeWithText("「Feed a」の購読を削除しますか？").assertDoesNotExist()
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 }
@@ -986,4 +957,23 @@ internal fun newHomeViewModel(
         Dispatchers.Unconfined, Dispatchers.Unconfined,
     )
     return HomeViewModelFixture(vm, syncScope, listOf(fetcherClient, faviconClient, authClient), settingsRepository)
+}
+
+/**
+ * Tears down a [HomeViewModelFixture] for reuse across every drag/rename/hit-area test's `finally`
+ * block. [HomeViewModel] observes SQLDelight query flows via `stateIn(viewModelScope, ...)`, and
+ * `viewModelScope`'s dispatcher resolves to the real AWT EventDispatchThread on desktop — so a
+ * query-change notification from a gesture performed just before teardown can already be queued as
+ * a pending `InvocationEvent` when [vm]'s scope is cancelled. Cancellation is cooperative and does
+ * not retract that queued event, so closing [driver] immediately after `cancel()` races it: the
+ * queued event later resumes on the closed connection and throws `stmt pointer is closed`.
+ * [ComposeUiTest.waitForIdle] drains the EDT queue first, so any such pending resumption runs
+ * against the still-open [driver] instead.
+ */
+@OptIn(ExperimentalTestApi::class)
+internal fun ComposeUiTest.closeHomeViewModelFixture(vm: HomeViewModel, fixture: HomeViewModelFixture, driver: SqlDriver) {
+    vm.viewModelScope.cancel()
+    fixture.close()
+    waitForIdle()
+    driver.close()
 }

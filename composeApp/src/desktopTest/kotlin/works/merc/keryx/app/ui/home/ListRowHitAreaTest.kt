@@ -34,8 +34,6 @@ import androidx.compose.ui.unit.dp
 import org.koin.compose.KoinApplication
 import org.koin.dsl.koinConfiguration
 import org.koin.dsl.module
-import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.cancel
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.ArticleListRow
@@ -155,9 +153,7 @@ class ListRowHitAreaTest {
                 resolvesToB = { vm.filter.value == ArticleFilter.Feed("f1") },
             )
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -192,9 +188,7 @@ class ListRowHitAreaTest {
                 resolvesToB = { vm.filter.value == ArticleFilter.Feed("b") },
             )
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -265,9 +259,7 @@ class ListRowHitAreaTest {
                 "feed rows must all have the same band height regardless of their position in the group: $heights",
             )
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -300,9 +292,7 @@ class ListRowHitAreaTest {
                     "expandedNotLast=$expandedNotLast last=$last collapsedNotLast=$collapsedNotLast",
             )
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -339,9 +329,7 @@ class ListRowHitAreaTest {
                 )
             }
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -375,9 +363,7 @@ class ListRowHitAreaTest {
                 resolvesToB = { vm.filter.value == ArticleFilter.Feed("b") },
             )
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -403,9 +389,7 @@ class ListRowHitAreaTest {
             waitForIdle()
             assertEquals(ArticleFilter.Folder("d1"), vm.filter.value, "clicking the folder header's badge column must select the folder")
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -440,9 +424,7 @@ class ListRowHitAreaTest {
             waitForIdle()
             assertEquals(ArticleFilter.Folder("d1"), vm.filter.value, "a point below the chevron, inside the row band, must select the folder")
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -466,9 +448,7 @@ class ListRowHitAreaTest {
             assertTrue("d1" in vm.collapsedFolderIds.value, "clicking the chevron itself must toggle the folder's collapsed state")
             assertEquals(ArticleFilter.All, vm.filter.value, "clicking the chevron itself must not also select the folder")
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -498,9 +478,7 @@ class ListRowHitAreaTest {
             waitForIdle()
             assertEquals(ArticleFilter.Tag("t1"), vm.filter.value, "clicking the tag row's inner trailing 8dp must select the tag")
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 

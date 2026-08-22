@@ -24,8 +24,6 @@ import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.cancel
 import org.koin.compose.KoinApplication
 import org.koin.dsl.koinConfiguration
 import org.koin.dsl.module
@@ -165,9 +163,7 @@ class FeedListInlineRenameTest {
             editor().assertDoesNotExist()
             onNodeWithText("Renamed", useUnmergedTree = true).assertExists()
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -189,9 +185,7 @@ class FeedListInlineRenameTest {
             editor().assertDoesNotExist()
             onNodeWithText("Feed a", useUnmergedTree = true).assertExists()
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -212,9 +206,7 @@ class FeedListInlineRenameTest {
             assertNull(db.customTitleOf("a"))
             editor().assertDoesNotExist()
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -234,9 +226,7 @@ class FeedListInlineRenameTest {
             assertEquals("Renamed by blur", db.customTitleOf("a"))
             editor().assertDoesNotExist()
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -261,9 +251,7 @@ class FeedListInlineRenameTest {
             assertNull(db.customTitleOf("a"), "a blank title clears custom_title")
             onNodeWithText("Feed a", useUnmergedTree = true).assertExists()
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -289,9 +277,7 @@ class FeedListInlineRenameTest {
             assertEquals("Beta", db.folderNameOf("d2"), "blur on an invalid value reverts rather than commits")
             editor().assertDoesNotExist()
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -311,9 +297,7 @@ class FeedListInlineRenameTest {
             assertEquals("Alpha", db.folderNameOf("d1"))
             editor().assertIsDisplayed()
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -337,9 +321,7 @@ class FeedListInlineRenameTest {
             assertEquals("Renamed tag", tag.name)
             assertEquals("#43A047", tag.color, "renaming must not touch the color")
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -362,9 +344,7 @@ class FeedListInlineRenameTest {
             assertEquals("Tag One", tag.name, "picking a color must not touch the name")
             onNodeWithTag(tagColorSwatchTestTag("#1E88E5"), useUnmergedTree = true).assertDoesNotExist()
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -390,9 +370,7 @@ class FeedListInlineRenameTest {
             assertEquals("Renamed tag", tag.name)
             assertEquals("#E53935", tag.color)
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -423,9 +401,7 @@ class FeedListInlineRenameTest {
             pressEnter()
             assertEquals("From the menu", db.customTitleOf("a"))
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -458,9 +434,7 @@ class FeedListInlineRenameTest {
             editor().assertDoesNotExist()
             onNodeWithText("Renamed via tag row", useUnmergedTree = true).assertExists()
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -492,9 +466,7 @@ class FeedListInlineRenameTest {
             pressEnter()
             assertEquals("From the menu via tag row", db.customTitleOf("a"))
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -522,9 +494,7 @@ class FeedListInlineRenameTest {
 
             assertEquals("Renamed via folder row", db.customTitleOf("a"))
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -561,9 +531,7 @@ class FeedListInlineRenameTest {
             editor().performKeyInput { pressKey(Key.Escape) }
             waitForIdle()
         } finally {
-            vm.viewModelScope.cancel()
-            fixture.close()
-            driver.close()
+            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 }
