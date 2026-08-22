@@ -1,6 +1,5 @@
 package works.merc.keryx.app.tray
 
-import org.freedesktop.dbus.types.Variant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -73,10 +72,10 @@ class TrayMenuModelTest {
     @Test
     fun `leaf properties use the D-Bus types dbusmenu expects`() {
         val properties = menuItemProperties(MENU_QUIT_ID, hidden)
-        assertEquals("s", (properties.getValue("label") as Variant<*>).sig)
-        assertEquals("s", (properties.getValue("type") as Variant<*>).sig)
-        assertEquals("b", (properties.getValue("enabled") as Variant<*>).sig)
-        assertEquals("b", (properties.getValue("visible") as Variant<*>).sig)
+        assertEquals("s", properties.getValue("label").sig)
+        assertEquals("s", properties.getValue("type").sig)
+        assertEquals("b", properties.getValue("enabled").sig)
+        assertEquals("b", properties.getValue("visible").sig)
     }
 
     @Test

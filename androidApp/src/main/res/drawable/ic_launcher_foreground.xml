@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Hand-translated from design/icons/svg/app_icon_foreground.svg (the RSS "broadcast" glyph,
+     already scoped to the adaptive-icon safe zone within its 1024x1024 viewport — see
+     design/icons/make_desktop_icons.sh for the sibling desktop-icon pipeline this mirrors). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <!-- The vertical pill (rx=ry=width/2 in the source SVG, i.e. a stadium shape) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M289.25,362.5 A60.5,60.5 0 0 1 410.25,362.5 L410.25,661.5 A60.5,60.5 0 0 1 289.25,661.5 Z" />
+    <!-- The dot -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M350.85,512 A59.4,59.4 0 1 0 469.65,512 A59.4,59.4 0 1 0 350.85,512 Z" />
+    <!-- Inner broadcast arc -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="77"
+        android:pathData="M518.76,403.49 A153.45,153.45 0 0 1 518.76,620.51" />
+    <!-- Outer broadcast arc -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="77"
+        android:pathData="M612.48,309.77 A286,286 0 0 1 612.48,714.23" />
+</vector>

@@ -30,3 +30,6 @@ its respective license.
 | FlatLaf | Apache-2.0 | <https://github.com/JFormDesigner/FlatLaf> |
 | Tabler Icons | MIT | <https://github.com/tabler/tabler-icons> |
 | SLF4J | MIT | <https://github.com/qos-ch/slf4j> |
+| sqlite-android (requery) | Apache-2.0 | <https://github.com/requery/sqlite-android> |
+| AndroidX Core | Apache-2.0 | <https://github.com/androidx/androidx> |
+| AndroidX Activity | Apache-2.0 | <https://github.com/androidx/androidx> |

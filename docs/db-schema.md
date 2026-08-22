@@ -112,8 +112,14 @@ CREATE VIRTUAL TABLE articles_fts USING fts5(
 INSERT INTO articles_fts(articles_fts) VALUES('rebuild');
 ```
 
-External content mode keeps only the index, referencing `articles.search_text` for body text. **Never DROP `articles_fts` on the live DB** (exclusion from upload is done by dropping it on the `VACUUM INTO` snapshot copy side. See "FTS5 handling" in [sync-architecture.md](sync-architecture.md)). After feed refresh / sync merge, `FtsManager.indexMissing()` **incrementally indexes only unindexed new articles** (do not use full `'rebuild'` on every hot path because it is O(total indexed text) and heavy). Full rebuild (`rebuildIndex()` = `'rebuild'`) is only done in the daily idle pass (`local_settings.lastFtsRebuiltAt` 24h gate + `ActivityCenter` idle) in `main.kt`, rebuilding stale existing rows (body text updated since incremental indexing). `'rebuild'` is atomic + `busy_timeout` wait, so running searches do not regress to zero results.
+External content mode keeps only the index, referencing `articles.search_text` for body text. **Never DROP `articles_fts` on the live DB** (exclusion from upload is done by dropping it on the `VACUUM INTO` snapshot copy side. See "FTS5 handling" in [sync-architecture.md](sync-architecture.md)). After feed refresh / sync merge, `FtsManager.indexMissing()` **incrementally indexes only unindexed new articles** (do not use full `'rebuild'` on every hot path because it is O(total indexed text) and heavy). Full rebuild (`rebuildIndex()` = `'rebuild'`) is only done in the daily idle pass (`local_settings.lastFtsRebuiltAt` 24h gate + `ActivityCenter` idle), rebuilding stale existing rows (body text updated since incremental indexing). `'rebuild'` is atomic + `busy_timeout` wait, so running searches do not regress to zero results.
 **On startup, call `FtsManager.ensureIndexed()` to create the table on first run and backfill any missing rows**.
+
+`tokenize='trigram'` needs SQLite ≥3.34, which AOSP's own SQLite build never provides (it omits
+FTS5 entirely, at any API level) — Android's `DatabaseDriverFactory` actual uses a bundled SQLite
+instead. See `.claude/rules/android-sqlite-bundling.md` for the rationale and exit criteria. This
+was verified against a real `articles_fts` table (created, populated, and queried with `MATCH`)
+pulled from a device during Android bring-up.
 
 ## local_settings.json (outside keryx.db, non-sync)
 

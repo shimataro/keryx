@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android's own launcher-label resource system (this module's plain res/), separate from
+         composeApp's Compose Resources (composeApp/.../composeResources) that the app's own UI
+         reads from. Mirrors core/Constants.kt's APP_NAME / the composeResources app_name string
+         (see CLAUDE.md constraint #3 for why UI text itself must never be hardcoded like this —
+         this file is the one required exception, since the launcher label is read by the OS
+         before the app process (and its resource loader) even starts). -->
+    <string name="app_name">Keryx</string>
+</resources>

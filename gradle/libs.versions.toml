@@ -1,4 +1,5 @@
 [versions]
+agp = "9.3.1"
 kotlin = "2.4.10"
 compose-multiplatform = "1.11.1"
 sqldelight = "2.3.2"
@@ -32,6 +33,12 @@ dbusjava = "4.2.1"
 # compose-material3 to the version that release aligns to.
 compose-material3 = "1.9.0"
 
+androidx-activity-compose = "1.13.0"
+androidx-core-ktx = "1.19.0"
+# Not on Maven Central — see requery-sqlite-android below. JitPack is already configured in
+# settings.gradle.kts for java-keyring's transitive secret-service dependency.
+requery-sqlite-android = "3.49.0"
+
 [libraries]
 # Compose Multiplatform direct dependencies
 compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "compose-multiplatform" }
@@ -44,16 +51,28 @@ compose-ui-test = { module = "org.jetbrains.compose.ui:ui-test", version.ref = "
 
 # --- SQLDelight (local DB) ---
 sqldelight-driver-jdbc-sqlite = { module = "app.cash.sqldelight:sqlite-driver", version.ref = "sqldelight" }
+sqldelight-driver-android = { module = "app.cash.sqldelight:android-driver", version.ref = "sqldelight" }
 sqldelight-coroutines-extensions = { module = "app.cash.sqldelight:coroutines-extensions", version.ref = "sqldelight" }
 sqldelight-dialect-sqlite338 = { module = "app.cash.sqldelight:sqlite-3-38-dialect", version.ref = "sqldelight" }
 sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite-jdbc" }
+# Bundled SQLite for Android: AOSP's own SQLite build omits FTS5 entirely, so articles_fts's
+# `tokenize='trigram'` cannot work against the device's system SQLite at any API level. See
+# .claude/rules/android-sqlite-bundling.md. Ships app.cash.sqldelight:android-driver's required
+# androidx.sqlite.db.SupportSQLiteOpenHelper.Factory (RequerySQLiteOpenHelperFactory), verified by
+# inspecting the AAR: SQLite 3.49.0, FTS5 enabled, trigram tokenizer registered.
+requery-sqlite-android = { module = "com.github.requery:sqlite-android", version.ref = "requery-sqlite-android" }
 
 # --- Ktor (HTTP: feed fetch + Dropbox REST) ---
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
 ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
+ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
 ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor" }
 ktor-serialization-kotlinx-json = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktor" }
 ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
+
+# --- Android-only ---
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity-compose" }
+androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidx-core-ktx" }
 
 # --- Koin (dependency injection) ---
 koin-core = { module = "io.insert-koin:koin-core", version.ref = "koin" }
@@ -113,6 +132,9 @@ slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 
 [plugins]
+androidApplication = { id = "com.android.application", version.ref = "agp" }
+androidKmpLibrary = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
+kotlinAndroid = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
 composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "compose-multiplatform" }
 composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
