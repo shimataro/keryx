@@ -63,8 +63,15 @@ matters for a hand-edited or migrated `local_settings.json`.
 `SyncRepository.sync(SyncTrigger.AUTOMATIC)`, then `checkForUpdateAndNotify`, `maybeRebuildFtsIndex`.
 On Android, `CloudSession` currently has Dropbox/OneDrive providers only (no Google Drive — see
 [sync-architecture.md](sync-architecture.md)'s "Google Drive on Android"), so `sync()` is a genuine
-no-op only when the user hasn't connected either of those. A caught exception returns
-`Result.retry()`, deferring to `WorkManager`'s own backoff policy.
+no-op when the user hasn't connected either of those, or — even when connected — while
+`autoSyncSuspended` is true (a prior `CloudDataIncompatibleException` gates further
+`SyncTrigger.AUTOMATIC` attempts until a reset or a successful manual sync; see
+`SyncRepository.sync`'s own KDoc). A caught exception (an unexpected failure, not `sync()`'s own
+`Result` type) returns `Result.retry()`, deferring to `WorkManager`'s own backoff policy; `sync()`
+returning a `Result.Err` instead is handled separately — `Result.retry()` only for the category
+`error-design.md`'s auto-retry table marks retryable (`CloudStorageException`), leaving the
+permanent failures it marks non-retryable (`CloudAuthException`/`SchemaVersionException`/
+`CloudDataIncompatibleException`) for the next regularly-scheduled run instead.
 
 `MainActivity.onCreate` calls `runAndroidStartupTasks` (`AndroidStartupTasks.kt`) — the Android
 counterpart to desktop's `runStartupTasks`, minus the macOS-specific translocation warning (which

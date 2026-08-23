@@ -62,8 +62,15 @@ while (true) {
 `SyncRepository.sync(SyncTrigger.AUTOMATIC)` → `checkForUpdateAndNotify` → `maybeRebuildFtsIndex`。
 Android の `CloudSession` は現状 Dropbox/OneDrive のみプロバイダーを持つ（Google Drive 非対応の理由は
 [sync-architecture.ja.md](sync-architecture.ja.md) の「Android で Google Drive が未対応な理由」参照）
-ため、ユーザーがそのどちらとも連携していない場合に限り `sync()` は本当の no-op になる。捕捉した
-例外は `Result.retry()` を返し、リトライは `WorkManager` 自身のバックオフ方針に委ねる。
+ため、ユーザーがそのどちらとも連携していない場合、あるいは連携済みでも `autoSyncSuspended` が
+真の間（直前の `CloudDataIncompatibleException` により、リセットまたは手動同期成功まで
+`SyncTrigger.AUTOMATIC` の試行がゲートされる状態。`SyncRepository.sync` 自身の KDoc 参照）は
+`sync()` が本当の no-op になる。捕捉した例外（`sync()` 自身の `Result` 型ではなく予期しない失敗）は
+`Result.retry()` を返し、リトライは `WorkManager` 自身のバックオフ方針に委ねる。`sync()` が
+`Result.Err` を返した場合は別途扱われ、`error-design.md` のオートリトライ表がリトライ可能と定める
+分類（`CloudStorageException`）に限り `Result.retry()` とし、リトライ不可と定める恒久的な失敗
+（`CloudAuthException`/`SchemaVersionException`/`CloudDataIncompatibleException`）は次回の
+定期実行に委ねる。
 
 `MainActivity.onCreate` から `runAndroidStartupTasks`（`AndroidStartupTasks.kt`）を呼ぶ —
 デスクトップの `runStartupTasks` に相当するが、macOS 固有の translocation 警告（Android には該当
