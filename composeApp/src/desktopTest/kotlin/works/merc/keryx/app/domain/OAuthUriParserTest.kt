@@ -41,4 +41,14 @@ class OAuthUriParserTest {
         assertNull(params.state)
         assertNull(params.error)
     }
+
+    @Test
+    fun encodedPlusSignSurvivesAsALiteralPlus() {
+        // A raw `+` in the query would itself mean space, so a value containing a literal `+`
+        // arrives percent-encoded as `%2B`. Decoding via uri.query (which already percent-decodes)
+        // and then URLDecoder.decode would double-decode it into a space instead.
+        val params = parseOAuthUri("keryx://oauth2/callback?code=abc%2Bdef")
+
+        assertEquals("abc+def", params.code)
+    }
 }
