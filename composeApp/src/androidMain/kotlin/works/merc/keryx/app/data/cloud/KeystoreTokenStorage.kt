@@ -60,6 +60,13 @@ class KeystoreTokenStorage(
         }
         if (result.isFailure) {
             Log.warn(TOKEN_STORAGE_LOG_TAG, "Keystore token save failed, falling back to file storage", result.exceptionOrNull())
+            // A previously-successful encrypted save may have left `file` holding now-stale
+            // tokens (e.g. a refresh-token rotation whose new tokens only made it into
+            // `fallback` below). load() prefers `file` when it exists, so leaving it behind would
+            // silently keep serving the old, since-rotated tokens after a restart.
+            if (file.exists() && !file.delete()) {
+                Log.warn(TOKEN_STORAGE_LOG_TAG, "Stale encrypted token file delete returned false")
+            }
             fallback.save(tokens)
         } else {
             // A previous run may have written the plaintext fallback before Keystore became
