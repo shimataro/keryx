@@ -78,20 +78,28 @@ object AndroidFilePickerHost {
      * Launches the SAF "open document" picker for any MIME type — [OpenFileRequest.extensions]
      * cannot be honored here (SAF filters by MIME, and `.opml` has no widely registered MIME type;
      * see [FilePicker]'s own KDoc) — and suspends until the user picks a file or cancels.
+     *
+     * Resolves to `null` immediately, without touching [openLauncher], if a request is already in
+     * flight — SAF only supports one outstanding request per launcher, and launching a second one
+     * on top of it (rather than rejecting it) would leave the *first* request's eventual real
+     * result racing to complete the *second* caller's deferred instead of its own.
      */
     internal suspend fun launchOpen(): Uri? {
         val launcher = openLauncher ?: return null
-        pendingOpen?.complete(null)
+        if (pendingOpen != null) return null
         val deferred = CompletableDeferred<Uri?>()
         pendingOpen = deferred
         launcher.launch(arrayOf("*/*"))
         return deferred.await()
     }
 
-    /** Launches the SAF "create document" picker defaulting to [defaultName]. */
+    /**
+     * Launches the SAF "create document" picker defaulting to [defaultName]. See [launchOpen]'s
+     * KDoc for why a concurrent request is rejected rather than replacing the in-flight one.
+     */
     internal suspend fun launchCreate(defaultName: String): Uri? {
         val launcher = createLauncher ?: return null
-        pendingCreate?.complete(null)
+        if (pendingCreate != null) return null
         val deferred = CompletableDeferred<Uri?>()
         pendingCreate = deferred
         launcher.launch(defaultName)
