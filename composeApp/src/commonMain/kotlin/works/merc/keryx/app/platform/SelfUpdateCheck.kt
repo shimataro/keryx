@@ -8,3 +8,12 @@ package works.merc.keryx.app.platform
  * package name — see that function's KDoc for why this is a UX call, not a store-policy one.
  */
 expect val selfUpdateCheckSupported: Boolean
+
+/**
+ * DI-friendly wrapper around [selfUpdateCheckSupported], the same way [works.merc.keryx.app.core.Clock]
+ * wraps [works.merc.keryx.app.core.SystemClock] — lets [works.merc.keryx.app.domain.checkForUpdateAndNotify]
+ * resolve this through Koin instead of reading the platform value directly, so a test can override it.
+ */
+fun interface SelfUpdateCheckSupport {
+    fun isSupported(): Boolean
+}

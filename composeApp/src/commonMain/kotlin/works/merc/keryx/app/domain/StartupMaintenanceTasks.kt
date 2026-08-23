@@ -9,7 +9,7 @@ import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.MILLIS_PER_DAY
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.data.local.FtsManager
-import works.merc.keryx.app.platform.selfUpdateCheckSupported
+import works.merc.keryx.app.platform.SelfUpdateCheckSupport
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.update_available_notification
 
@@ -44,7 +44,7 @@ internal suspend fun refreshFeedsAndNotify(koin: Koin) {
  * @param koin The dependency injection container used to resolve update and notification services.
  */
 internal suspend fun checkForUpdateAndNotify(koin: Koin) {
-    if (!selfUpdateCheckSupported) return
+    if (!koin.get<SelfUpdateCheckSupport>().isSupported()) return
     val settingsRepository = koin.get<SettingsRepository>()
     val status = koin.get<UpdateChecker>().check()
     settingsRepository.mutateLocalSettings { it.copy(lastUpdateCheckAt = SystemClock.nowMillis()) }

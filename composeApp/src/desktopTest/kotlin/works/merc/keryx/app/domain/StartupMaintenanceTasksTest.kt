@@ -13,6 +13,7 @@ import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
+import works.merc.keryx.app.platform.SelfUpdateCheckSupport
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -127,5 +128,20 @@ class StartupMaintenanceTasksTest {
         } finally {
             driver.close()
         }
+    }
+
+    @Test
+    fun checkForUpdateAndNotifySkipsWhenSelfUpdateCheckIsUnsupported() = runTest {
+        val koin = koinApplication {
+            modules(
+                module {
+                    single<SelfUpdateCheckSupport> { SelfUpdateCheckSupport { false } }
+                },
+            )
+        }.koin
+        // No SettingsRepository/UpdateChecker/NotificationCenter registered: if the guard failed
+        // to short-circuit, resolving any of them here would throw and fail this test.
+
+        checkForUpdateAndNotify(koin)
     }
 }

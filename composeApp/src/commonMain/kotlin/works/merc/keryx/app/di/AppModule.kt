@@ -30,6 +30,8 @@ import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.domain.UpdateChecker
+import works.merc.keryx.app.platform.SelfUpdateCheckSupport
+import works.merc.keryx.app.platform.selfUpdateCheckSupported
 import works.merc.keryx.app.ui.home.HomeViewModel
 import works.merc.keryx.app.ui.home.NotificationCenterViewModel
 import works.merc.keryx.app.ui.i18n.ComposeNotificationMessages
@@ -79,6 +81,7 @@ val appModule: Module = module {
     single { FeedFetcher(get()) { get<SettingsRepository>().getReadTimeoutSeconds() } }
     single { FaviconResolver(get()) }
     single { UpdateChecker(client = get(), currentVersion = AppInfo.version, repoSlug = AppInfo.updateRepo) }
+    single<SelfUpdateCheckSupport> { SelfUpdateCheckSupport { selfUpdateCheckSupported } }
 
     single { SettingsRepository(get(), get(), get(), get()) }
     single { ArticleRepository(get(), get(), get(), get()) }
