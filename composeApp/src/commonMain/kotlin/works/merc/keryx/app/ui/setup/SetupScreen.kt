@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.Image
@@ -85,7 +86,9 @@ fun SetupScreen(onComplete: () -> Unit) {
     var confirmingAbortConnect by remember { mutableStateOf(false) }
 
     val scrollState = rememberScrollState()
-    Box(Modifier.fillMaxSize()) {
+    // safeDrawingPadding() keeps this content clear of the status/navigation bars on Android
+    // (MainActivity draws edge-to-edge); it's a no-op on desktop, which reports no such insets.
+    Box(Modifier.fillMaxSize().safeDrawingPadding()) {
         Column(
             modifier = Modifier.fillMaxSize().verticalScroll(scrollState).padding(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,

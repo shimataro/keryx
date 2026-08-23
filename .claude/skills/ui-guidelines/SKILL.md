@@ -79,7 +79,13 @@ not in global chrome:
 
 - Feed-management icons (add feed / refresh all / cloud sync) — top of
   `FeedListPane`
-- Settings — bottom-left of `FeedListPane`
+- Settings — reached through the native application menu bar (macOS
+  Preferences…/AppMenuBar/KDE Global Menu — see `MenuCommand.OpenSettings`).
+  On platforms with no such menu (Android — `platform/PlatformOs.kt`'s
+  `hasNativeAppMenu == false`), `FeedListToolbarRow` grows its own settings
+  icon button at the top of `FeedListPane` instead, sending the same command;
+  About gets the equivalent treatment as an `ActionLinkRow` at the bottom of
+  `GeneralTab`
 - Article-related icons (search / notifications / sort / mark all read) —
   header row of `ArticleListPane`
 
@@ -93,6 +99,29 @@ for the base color scheme and each pane file for where the tone is applied.
 The macOS traffic-light inset (`WindowChrome.titleBarInsetDp`) is applied
 only to the pane that sits in the window's top-left corner — currently
 `FeedListPane`'s header row.
+
+## Adaptive pane layout & touch affordances
+
+`ui/home/HomePaneLayout.kt`'s `paneLayoutFor` resolves how many of the 3 panes fit side by side at
+the current width (`PaneLayout.Triple`/`Dual`/`Single`), derived from the same per-pane minimum
+widths this file already uses for tonal roles — not an independent breakpoint. Desktop always
+resolves `Triple` (`WINDOW_MIN_WIDTH >= TRIPLE_PANE_MIN_WIDTH`); narrower widths (phones) resolve
+`Single`, showing one pane at a time as a hierarchical stack with its own back button
+(`ArticleListPane`/`ArticleDetailPane`'s `onNavigateUp`) and — on Android — the OS back
+gesture/button (`platform/BackHandler`). Nothing about the panes' own internal layout (tonal
+roles, dividers, row chrome) changes between layouts; only how many are mounted at once does.
+
+**Touch input on the feed list.** A mouse can drag a draggable row (a folder header, or a feed row
+inside a folder group — tag rows and tag-nested feed copies were never drag sources) from anywhere
+on it, because a click and a drag-start are already unambiguous with a precise pointer. Touch has
+no such distinction — a press-and-move could equally mean "reorder this row" or "scroll the list" —
+so on a touch-primary platform (`platform/PlatformOs.kt`'s `isTouchPrimary`), dragging only starts
+from a dedicated trailing handle (`ui/home/FeedListRowParts.kt`'s `DragHandle`, a fixed ≡-dot icon;
+gating logic in `ui/home/FeedListDragGestures.kt`'s `feedListReorderDrag`). Everywhere else on the
+row falls through to the `LazyColumn`'s own scroll gesture untouched. Long-press for the row's
+context menu (`nativeContextMenu`) and drag-from-handle for reordering are deliberately different
+gestures on the same row — see `platform/NativeMenu.android.kt`'s KDoc for how the two coexist
+without one stealing the other's press.
 
 ## Divider policy
 
@@ -232,13 +261,13 @@ rather than a plain `item(...)` for any such header, following
   not — in ascending index order, so a pinned header's band is always
   resolved before any row hidden behind it, with no extra code needed.
 
-**Desktop only.** This convention targets the current Compose Multiplatform
-desktop 3-pane layout. Android/iOS mobile targets (see `external-spec.md` §2)
-are only planned, not yet built, and a phone-sized layout may not reuse this
-same sidebar/list structure at all — defer whether/how sticky section headers
-apply on mobile until that layout is actually designed, the same way
-`app-architecture.md` already defers the Android icon-set question to when
-Android work begins.
+**Desktop only.** `FeedListPane`'s sticky "フォルダー"/"タグ" headers keep this
+behavior at every `PaneLayout` (see "Adaptive pane layout & touch
+affordances" below) — narrowing the window doesn't change how that list
+scrolls, only how many *other* panes are visible alongside it. iOS is still
+only planned (see `external-spec.md` §2); defer whether/how sticky section
+headers apply there until that platform's own layout is designed, the same
+way `app-architecture.md` defers the Android icon-set question.
 
 ## Article card style
 

@@ -10,6 +10,13 @@ internal val osName = System.getProperty("os.name")?.lowercase() ?: ""
  */
 actual val isMacOs = osName.contains("mac")
 
+/** A desktop OS's primary pointer is always a precise mouse/trackpad, never touch. */
+actual val isTouchPrimary = false
+
+/** Every desktop OS gets a native application menu (see `AppMenuBar.kt`, `main.kt`'s
+ * `setAboutHandler`/`setPreferencesHandler` on macOS). */
+actual val hasNativeAppMenu = true
+
 /**
  * Whether this desktop JVM is running on Windows. Gates the integrations the OS only offers there
  * (registering the `keryx://` URI scheme in the registry) and the tray implementation that avoids

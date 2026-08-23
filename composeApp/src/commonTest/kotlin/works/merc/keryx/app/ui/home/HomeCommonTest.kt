@@ -216,6 +216,56 @@ class HomeCommonTest {
         )
     }
 
+    // --- articleListTitle ---
+
+    @Test
+    fun articleListTitleResolvesEachFilterVariantToItsDisplayName() {
+        val feeds = listOf(feed("f1"))
+        val folders = listOf(folder("d1"))
+        val tags = listOf(tag("t1"))
+
+        assertEquals(
+            "All",
+            articleListTitle(ArticleFilter.All, feeds, folders, tags, "All", "Starred", "Search"),
+        )
+        assertEquals(
+            "Starred",
+            articleListTitle(ArticleFilter.Starred, feeds, folders, tags, "All", "Starred", "Search"),
+        )
+        assertEquals(
+            "Search",
+            articleListTitle(ArticleFilter.Search, feeds, folders, tags, "All", "Starred", "Search"),
+        )
+        assertEquals(
+            "Feed f1",
+            articleListTitle(ArticleFilter.Feed("f1"), feeds, folders, tags, "All", "Starred", "Search"),
+        )
+        assertEquals(
+            "Folder d1",
+            articleListTitle(ArticleFilter.Folder("d1"), feeds, folders, tags, "All", "Starred", "Search"),
+        )
+        assertEquals(
+            "Tag t1",
+            articleListTitle(ArticleFilter.Tag("t1"), feeds, folders, tags, "All", "Starred", "Search"),
+        )
+    }
+
+    @Test
+    fun articleListTitleFallsBackToAllLabelForAMissingFeedTagOrFolder() {
+        assertEquals(
+            "All",
+            articleListTitle(ArticleFilter.Feed("gone"), emptyList(), emptyList(), emptyList(), "All", "Starred", "Search"),
+        )
+        assertEquals(
+            "All",
+            articleListTitle(ArticleFilter.Folder("gone"), emptyList(), emptyList(), emptyList(), "All", "Starred", "Search"),
+        )
+        assertEquals(
+            "All",
+            articleListTitle(ArticleFilter.Tag("gone"), emptyList(), emptyList(), emptyList(), "All", "Starred", "Search"),
+        )
+    }
+
     @Test
     fun nextFeedListRowTreatsAFeedsFolderRowAndItsTagNestedRowAsDifferentPositions() {
         val tags = listOf(tag("t1"))

@@ -112,7 +112,6 @@ const val SYNC_STATE_LAST_UPLOADED_DIGEST = "last_uploaded_snapshot_digest"
 // --- Window / pane sizing (desktop) ---
 const val WINDOW_DEFAULT_WIDTH = 1280
 const val WINDOW_DEFAULT_HEIGHT = 800
-const val WINDOW_MIN_WIDTH = 720 // must be >= sum of pane minimums (700) + divider slack
 const val WINDOW_MIN_HEIGHT = 400
 const val FEED_LIST_PANE_WIDTH_DEFAULT = 260
 const val ARTICLE_LIST_PANE_WIDTH_DEFAULT = 360
@@ -121,6 +120,32 @@ const val FEED_LIST_PANE_MAX_WIDTH = 480
 const val ARTICLE_LIST_PANE_MIN_WIDTH = 240
 const val ARTICLE_LIST_PANE_MAX_WIDTH = 600
 const val DETAIL_PANE_MIN_WIDTH = 280
+
+/** Width of a [works.merc.keryx.app.ui.home.ResizableDivider] between two panes. */
+const val PANE_DIVIDER_WIDTH = 8
+
+/**
+ * Minimum width at which all three home panes (feed list / article list / article detail) fit
+ * side by side — the sum of each pane's own minimum width plus one divider between each pair.
+ * [works.merc.keryx.app.ui.home.paneLayoutFor] resolves to
+ * [works.merc.keryx.app.ui.home.PaneLayout.Triple] at or above this width, [DUAL_PANE_MIN_WIDTH]
+ * up to it, and [works.merc.keryx.app.ui.home.PaneLayout.Single] below that.
+ *
+ * [WINDOW_MIN_WIDTH] is deliberately `>=` this value: the article reader's WebView must stay
+ * composed for the pane's whole lifetime (see `ArticleDetailPane`'s KDoc and `known-issues.md`),
+ * so the desktop window — which can never narrow below [WINDOW_MIN_WIDTH] — must never resolve to
+ * anything but [works.merc.keryx.app.ui.home.PaneLayout.Triple]. `HomeScreenPaneLayoutTest`
+ * pins this at [WINDOW_MIN_WIDTH].
+ */
+const val TRIPLE_PANE_MIN_WIDTH =
+    FEED_LIST_PANE_MIN_WIDTH + ARTICLE_LIST_PANE_MIN_WIDTH + DETAIL_PANE_MIN_WIDTH + PANE_DIVIDER_WIDTH * 2
+
+/** Minimum width at which the article list and article detail panes fit side by side (see
+ * [TRIPLE_PANE_MIN_WIDTH]). */
+const val DUAL_PANE_MIN_WIDTH = ARTICLE_LIST_PANE_MIN_WIDTH + DETAIL_PANE_MIN_WIDTH + PANE_DIVIDER_WIDTH
+
+/** Must be `>= TRIPLE_PANE_MIN_WIDTH` — see [TRIPLE_PANE_MIN_WIDTH]'s KDoc. */
+const val WINDOW_MIN_WIDTH = 720
 
 /** Debounce for re-running search as the user types, so every keystroke doesn't trigger an FTS query. */
 const val SEARCH_DEBOUNCE_MS = 250L

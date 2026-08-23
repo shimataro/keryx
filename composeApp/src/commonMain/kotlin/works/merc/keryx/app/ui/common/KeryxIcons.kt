@@ -21,6 +21,7 @@ import works.merc.keryx.app.resources.ic_computer_outlined
 import works.merc.keryx.app.resources.ic_content_copy_outlined
 import works.merc.keryx.app.resources.ic_create_new_folder_outlined
 import works.merc.keryx.app.resources.ic_delete_sweep_outlined
+import works.merc.keryx.app.resources.ic_drag_handle_outlined
 import works.merc.keryx.app.resources.ic_done_all_outlined
 import works.merc.keryx.app.resources.ic_error_filled
 import works.merc.keryx.app.resources.ic_error_outlined
@@ -68,6 +69,7 @@ object KeryxIcons {
     val CreateNewFolder: DrawableResource = Res.drawable.ic_create_new_folder_outlined
     val DeleteSweep: DrawableResource = Res.drawable.ic_delete_sweep_outlined
     val DoneAll: DrawableResource = Res.drawable.ic_done_all_outlined
+    val DragHandle: DrawableResource = Res.drawable.ic_drag_handle_outlined
     val ExpandMore: DrawableResource = Res.drawable.ic_expand_more_outlined
     val FileDownload: DrawableResource = Res.drawable.ic_file_download_outlined
     val FileUpload: DrawableResource = Res.drawable.ic_file_upload_outlined

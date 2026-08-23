@@ -66,6 +66,7 @@ import works.merc.keryx.app.platform.NativeMenuSeparator
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.platform.WindowChrome
 import works.merc.keryx.app.platform.WindowDragArea
+import works.merc.keryx.app.platform.hasNativeAppMenu
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_add_feed
@@ -92,6 +93,7 @@ import works.merc.keryx.app.resources.home_syncing
 import works.merc.keryx.app.resources.home_tag_color
 import works.merc.keryx.app.resources.home_tag_name_duplicate
 import works.merc.keryx.app.resources.home_tags
+import works.merc.keryx.app.resources.menu_settings
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.KeryxTextField
@@ -134,6 +136,10 @@ internal const val FEED_LIST_DRAG_HOST_TEST_TAG = "feed-list-drag-host"
  * @param deleteSelectedRequestId Bumped by the keyboard delete shortcut (Delete/Backspace); on
  *   change, opens the unsubscribe/delete confirmation for whichever feed/folder/tag the current
  *   filter selects.
+ * @param onSelectionAdvance Called after a filter selection (a quick filter, feed, folder, or
+ *   tag row), in addition to [onActivated] — see `HomeScreen`'s pane-layout wiring. No-op at
+ *   [PaneLayout.Triple], where every pane is already visible and there is nowhere to advance to.
+ * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
  */
 @Composable
 internal fun FeedListPane(
@@ -146,6 +152,8 @@ internal fun FeedListPane(
     onTextInputFocusChange: (Boolean) -> Unit = {},
     renameSelectedRequestId: Int = 0,
     deleteSelectedRequestId: Int = 0,
+    onSelectionAdvance: () -> Unit = {},
+    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
     val feeds by vm.feeds.collectAsStateSafe(emptyList())
     val tags by vm.tags.collectAsStateSafe(emptyList())
@@ -376,7 +384,7 @@ internal fun FeedListPane(
             count = totalUnread,
             selected = filter == ArticleFilter.All,
             focused = focused,
-            onClick = { vm.selectFilter(ArticleFilter.All); onActivated() },
+            onClick = { vm.selectFilter(ArticleFilter.All); onActivated(); onSelectionAdvance() },
         )
         SidebarRow(
             icon = { KeryxIcon(KeryxIcons.Star, null) },
@@ -384,7 +392,7 @@ internal fun FeedListPane(
             count = starredUnread,
             selected = filter == ArticleFilter.Starred,
             focused = focused,
-            onClick = { vm.selectFilter(ArticleFilter.Starred); onActivated() },
+            onClick = { vm.selectFilter(ArticleFilter.Starred); onActivated(); onSelectionAdvance() },
         )
         SidebarRow(
             icon = { KeryxIcon(KeryxIcons.Search, null) },
@@ -392,7 +400,7 @@ internal fun FeedListPane(
             count = searchUnread,
             selected = filter == ArticleFilter.Search,
             focused = focused,
-            onClick = { vm.selectFilter(ArticleFilter.Search); vm.requestSearchFocus(); onActivated() },
+            onClick = { vm.selectFilter(ArticleFilter.Search); vm.requestSearchFocus(); onActivated(); onSelectionAdvance() },
         )
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
 
@@ -418,7 +426,7 @@ internal fun FeedListPane(
                     // The drag gesture watches the *Initial* pointer pass on this ancestor Box, so
                     // without this gate a press-and-sweep to select text inside an open inline
                     // editor would be stolen from the field and turned into a row drag.
-                    .feedListReorderDrag(dragController, enabled = inlineEdit == null),
+                    .feedListReorderDrag(dragController, enabled = inlineEdit == null, isTouchPrimary = isTouchPrimary),
             ) {
                 // Every slot below carries an explicit key and contentType. This list interleaves
                 // several structurally different row kinds, and an unkeyed `item {}` falls back to an
@@ -477,7 +485,7 @@ internal fun FeedListPane(
                                 folderId = folderId,
                                 isFirstInList = isFirstInList && index == 0,
                                 activeBoundaryState = activeBoundaryState,
-                                onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id), instance); onActivated() },
+                                onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id), instance); onActivated(); onSelectionAdvance() },
                                 onRename = { inlineEdit = InlineEditTarget.Feed(feed.id) },
                                 editingName = inlineEdit == InlineEditTarget.Feed(feed.id),
                                 onRenameCommit = { vm.renameFeed(feed.id, it); inlineEdit = null },
@@ -540,7 +548,7 @@ internal fun FeedListPane(
                                     precedingFeedZoneBoundary = precedingFeedZoneBoundary,
                                     activeBoundaryState = activeBoundaryState,
                                     onToggleCollapse = { vm.toggleFolderCollapsed(folder.id) },
-                                    onClick = { vm.selectFilter(ArticleFilter.Folder(folder.id)); onActivated() },
+                                    onClick = { vm.selectFilter(ArticleFilter.Folder(folder.id)); onActivated(); onSelectionAdvance() },
                                     onEdit = { inlineEdit = InlineEditTarget.Folder(folder.id) },
                                     onDelete = { confirmingDeleteFolder = folder },
                                     editingName = inlineEdit == InlineEditTarget.Folder(folder.id),
@@ -590,7 +598,7 @@ internal fun FeedListPane(
                                 focused = focused,
                                 isDropTarget = tag.id == hoveredAttachTagId,
                                 onToggleExpanded = { vm.toggleTagExpanded(tag.id) },
-                                onClick = { vm.selectFilter(ArticleFilter.Tag(tag.id)); onActivated() },
+                                onClick = { vm.selectFilter(ArticleFilter.Tag(tag.id)); onActivated(); onSelectionAdvance() },
                                 onEdit = { inlineEdit = InlineEditTarget.Tag(tag.id) },
                                 onDelete = { confirmingDeleteTag = tag },
                                 editingName = inlineEdit == InlineEditTarget.Tag(tag.id),
@@ -620,7 +628,7 @@ internal fun FeedListPane(
                                     count = unreadByFeed[feed.id] ?: 0L,
                                     selectionTone = toneFor(instance),
                                     focused = focused,
-                                    onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id), instance); onActivated() },
+                                    onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id), instance); onActivated(); onSelectionAdvance() },
                                     onRename = { inlineEdit = InlineEditTarget.Feed(feed.id, tag.id) },
                                     editingName = inlineEdit == InlineEditTarget.Feed(feed.id, tag.id),
                                     onRenameCommit = { vm.renameFeed(feed.id, it); inlineEdit = null },
@@ -714,6 +722,16 @@ private fun FeedListToolbarRow(
             Modifier.fillMaxWidth().padding(top = WindowChrome.titleBarInsetDp.dp, start = 4.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Desktop's only entry point to Settings is the native application menu bar
+            // (AppMenuBar / macOS Preferences… / KDE Global Menu). Android has none of those, so
+            // this pane needs its own button — see `platform/PlatformOs.kt`'s `hasNativeAppMenu` KDoc.
+            if (!hasNativeAppMenu) {
+                val menuController = koinInject<MenuController>()
+                val settingsTooltip = stringResource(Res.string.menu_settings)
+                TooltipIconButton(tooltip = settingsTooltip, onClick = { menuController.send(MenuCommand.OpenSettings) }) {
+                    KeryxIcon(KeryxIcons.Tune, settingsTooltip)
+                }
+            }
             Spacer(Modifier.weight(1f))
             ToolbarIconGroup {
                 val addFeedTooltip = stringResource(Res.string.home_add_feed)

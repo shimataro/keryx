@@ -80,7 +80,23 @@ On first launch, choose local-only / cloud sync (Dropbox / Google Drive / OneDri
 ## 9. UI Direction
 
 Material 3 base + custom theme (teal). Light / dark / system support. 3-pane layout
-(feed list / article list / article detail) + keyboard navigation.
+(feed list / article list / article detail) + keyboard navigation, adapting down to fewer
+simultaneous panes on narrower widths (see below).
+
+### Adaptive layout (width) and touch input (Android)
+
+The 3-pane layout is desktop's steady state — the window can never narrow below the width all
+three panes need, so it always shows all three. On a phone-width screen, the app instead shows one
+pane at a time as a hierarchical stack (feed list → article list → article detail), each with its
+own back control; a tablet-width screen shows two. Nothing about a pane's own content changes
+between these — only how many are on screen together.
+
+Where a mouse and a touchscreen need different affordances, both are supported without changing
+the underlying action: reordering a feed or folder is a plain click-and-drag with a mouse, and a
+drag from a dedicated handle icon with touch (touch needs a distinct starting gesture so the rest
+of the row can still be scrolled normally); a right-click context menu on desktop is a long-press
+menu on Android, and settings — reached from the desktop application menu — get their own toolbar
+entry point on Android, which has no menu bar.
 
 The surfaces that are not drawn by Compose — the application menu bar, context menus, and the
 dialog button row — are real Swing/AWT widgets, so they follow the platform's Look & Feel.

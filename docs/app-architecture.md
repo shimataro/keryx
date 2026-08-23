@@ -34,15 +34,19 @@ composeApp/src/
   jvmCommonMain/kotlin/…/  actuals shared by desktop and Android, needing no platform API either
     target lacks: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage, AppInfo,
     CloudStorageAvailability (the last two just read the shared generated BuildConfig)
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of each expect not covered by jvmCommonMain (DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule) + LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage), DesktopOs (isMacOs/isWindows/isLinux), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux)
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of each expect not covered by jvmCommonMain (DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule) + LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage), DesktopOs (isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux)
     tray/      KeryxTray (platform branch), MacTray, LinuxTray + the StatusNotifierItem/dbusmenu D-Bus objects
   androidMain/kotlin/…/  actual implementations not covered by jvmCommonMain: DatabaseDriverFactory
     (bundled SQLite, see below), AppDirs/BrowserOpener/ClipboardEntries (via AndroidAppContext, a
     static Context holder set once from KeryxApplication.onCreate), PlatformModule (Ktor OkHttp
     engine, CloudSession with no providers yet — see Provider/DI below), KeryxTextField/KeryxAlertDialog/
-    KeryxTabDialog (plain M3), FilePicker/DatabaseMerger/DatabaseSnapshot (Phase-4 stubs that throw —
-    unreachable while CloudSession has no providers), nativeContextMenu (currently a no-op — see its
-    KDoc for why long-press isn't wired yet)
+    KeryxTabDialog (plain M3, safe-drawing-padded for edge-to-edge), FilePicker/DatabaseMerger/
+    DatabaseSnapshot (Phase-4 stubs that throw — unreachable while CloudSession has no providers),
+    nativeContextMenu (a real long-press `DropdownMenu`, added in the adaptive-layout phase — see its
+    KDoc for the tap-vs-long-press disambiguation), BackHandler (delegates to
+    `androidx.activity.compose.BackHandler`), PlatformOs (isTouchPrimary = true, hasNativeAppMenu =
+    false — Android has no menu bar, so `FeedListToolbarRow`/`GeneralTab` grow their own Settings/
+    About entry points instead)
   commonTest/ + desktopTest/
 ```
 
@@ -189,8 +193,19 @@ counterpart.
 
 ### Native context menus (platform branch)
 
-`platform/NativeMenu.desktop.kt`'s `defaultPopupHandle` backs every `Modifier.nativeContextMenu`
-call site (article rows, feed / folder / tag rows) with one of two implementations:
+`platform/NativeMenu.android.kt`'s `nativeContextMenu` backs the same call sites (article rows,
+feed / folder / tag rows) with a long-press-triggered Material 3 `DropdownMenu` instead: a
+self-contained `awaitEachGesture` loop that never consumes the initial *down* — only once the
+press survives `viewConfiguration.longPressTimeoutMillis` with no up and no consumption elsewhere
+(e.g. a `LazyColumn` scroll claiming the gesture) does it treat this as a long press and start
+consuming the rest of the gesture, so `ui/home/ListRowChrome.kt`'s `listRowClickable` (chained
+right before it, and therefore the *more outer* node — Compose's pointer-input `Main` pass resumes
+nested nodes before their ancestors for the same event) never also fires `onClick` for the same
+press. `NativeSubMenu` drills into its own items in place (a leading "back" row swaps the top level
+for the submenu's own items) rather than opening a nested popup.
+
+`platform/NativeMenu.desktop.kt`'s `defaultPopupHandle` backs the same call sites on desktop with
+one of two implementations, triggered by a right-click instead of a long-press:
 
 | Platform | Implementation | Why |
 | --- | --- | --- |
@@ -275,3 +290,25 @@ bound to the SELECT column order (guarded by
 ## Navigation
 
 A simple stack navigator in `ui/navigation/Navigator.kt` switches between Setup / Home / Settings. Article view is a pane inside Home (not a root route).
+
+### Home's adaptive pane layout
+
+`ui/home/HomePaneLayout.kt` resolves how many of the three home panes (feed list / article list /
+article detail) `HomeScreen` renders side by side, purely as a function of the available width:
+`PaneLayout.Triple` (all three — desktop always resolves here, since `WINDOW_MIN_WIDTH` is
+guaranteed `>= TRIPLE_PANE_MIN_WIDTH`, see that constant's KDoc in `core/Constants.kt`),
+`PaneLayout.Dual` (article list + one neighbor), or `PaneLayout.Single` (one pane, phone width).
+The navigation stack itself is always three deep (`HomePane.FeedList` → `ArticleList` →
+`ArticleDetail`); a narrower layout just shows fewer of those three at once. `HomePane.ordinal + 1`
+doubles as the stack's current depth, so `HomeScreen` needs no separate depth state — selecting a
+filter or an article advances it (`onSelectionAdvance`, a no-op at `Triple`), and `platform/BackHandler`
+(a real back-gesture/button interception on Android, a no-op on desktop) pops it by one.
+`PaneLayout.Dual` is a two-pane *sliding window* over that stack, not a plain adjacent pair: the
+article list stays one of the two panes shown at every depth, so drilling into an article swaps the
+feed list out for the detail pane rather than sliding the list itself off-screen.
+
+This is why the article reader's WebView being unconditionally composed (see "Article Reader"
+below) is safe on desktop specifically: desktop can only ever resolve `Triple`, where all three
+panes — including the one hosting the WebView — stay mounted for the app's whole lifetime.
+`Single`/`Dual` do unmount it when its pane isn't among those currently shown, which is fine on
+Android (no heavyweight AWT interop concern there).

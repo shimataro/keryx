@@ -23,6 +23,7 @@ import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
+import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.isMacOs
 
@@ -200,6 +201,31 @@ fun groupFeedsByFolder(feeds: List<Feeds>, folders: List<Folders>): List<Pair<Fo
  */
 fun feedsForTag(feeds: List<Feeds>, feedTagMap: Map<String, Set<String>>, tagId: String): List<Feeds> =
     feeds.filter { tagId in (feedTagMap[it.id] ?: emptySet()) }
+
+/**
+ * The display title for the article list pane's current [filter] — shown in its top bar only when
+ * the pane is rendered alone (a narrow [PaneLayout], see `ArticleListTopBar`'s `onNavigateUp`/
+ * `title` parameters), since the feed list pane's own selection already conveys this at
+ * [PaneLayout.Triple]/[PaneLayout.Dual]. Falls back to [allLabel] for a feed/tag/folder id that no
+ * longer exists (e.g. deleted on another device and not yet synced here), matching
+ * `groupFeedsByFolder`'s own defensive "no folder" treatment.
+ */
+fun articleListTitle(
+    filter: ArticleFilter,
+    feeds: List<Feeds>,
+    folders: List<Folders>,
+    tags: List<Tags>,
+    allLabel: String,
+    starredLabel: String,
+    searchLabel: String,
+): String = when (filter) {
+    ArticleFilter.All -> allLabel
+    ArticleFilter.Starred -> starredLabel
+    ArticleFilter.Search -> searchLabel
+    is ArticleFilter.Feed -> feeds.find { it.id == filter.feedId }?.displayTitle() ?: allLabel
+    is ArticleFilter.Folder -> folders.find { it.id == filter.folderId }?.name ?: allLabel
+    is ArticleFilter.Tag -> tags.find { it.id == filter.tagId }?.name ?: allLabel
+}
 
 /**
  * Builds the visual row order used by the feed pane's keyboard navigation.

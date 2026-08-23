@@ -24,6 +24,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
@@ -119,7 +120,11 @@ class FeedListDragTest {
     }
 
     @Composable
-    private fun FeedListDragTestHost(vm: HomeViewModel, dragOverlay: FeedDragOverlayState) {
+    private fun FeedListDragTestHost(
+        vm: HomeViewModel,
+        dragOverlay: FeedDragOverlayState,
+        isTouchPrimary: Boolean = false,
+    ) {
         // Mirrors HomeScreen.kt's own request-id wiring for the keyboard rename/delete shortcuts,
         // so tests can drive them end to end (real F2/Delete key presses -> real FeedListPane
         // dialogs) exactly like a user would, rather than poking FeedListPane's private state.
@@ -147,6 +152,7 @@ class FeedListDragTest {
                 onActivated = {},
                 renameSelectedRequestId = renameSelectedRequestId,
                 deleteSelectedRequestId = deleteSelectedRequestId,
+                isTouchPrimary = isTouchPrimary,
             )
             FeedDragGhost(dragOverlay)
         }
@@ -156,6 +162,7 @@ class FeedListDragTest {
         vm: HomeViewModel,
         dragOverlay: FeedDragOverlayState = FeedDragOverlayState(),
         menuController: MenuController = testMenuController,
+        isTouchPrimary: Boolean = false,
     ): FeedDragOverlayState {
         setContent {
             KoinApplication(
@@ -167,7 +174,7 @@ class FeedListDragTest {
                     )
                 },
             ) {
-                FeedListDragTestHost(vm, dragOverlay)
+                FeedListDragTestHost(vm, dragOverlay, isTouchPrimary)
             }
         }
         return dragOverlay
@@ -203,6 +210,78 @@ class FeedListDragTest {
 
             val order = db.feedsQueries.getByFolder(null).executeAsList().map { it.id }
             assertEquals(listOf("c", "a", "b"), order)
+        } finally {
+            closeHomeViewModelFixture(vm, fixture, driver)
+        }
+    }
+
+    @Test
+    fun touchPressAwayFromTheHandleNeverStartsAReorder() = runDesktopComposeUiTest {
+        // With isTouchPrimary, feedListReorderDrag only starts from the row's trailing handle
+        // band — everywhere else on the row must fall through untouched so the LazyColumn's own
+        // scroll gesture can claim it instead (see feedListReorderDrag's KDoc). A press+move on
+        // the row's own title text (comfortably left of the 44dp band) exercises exactly that.
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("a", sortOrder = 0L)
+        db.insertFeed("b", sortOrder = 1L)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            setFeedListDragContent(vm, isTouchPrimary = true)
+            waitForIdle()
+
+            val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val bBounds = onNodeWithText("Feed b", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val start = localOf(aBounds.center, hostBounds)
+            val target = localOf(bBounds.center, hostBounds)
+
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performTouchInput {
+                down(start)
+                moveTo(start + Offset(0f, dragThresholdCrossPx))
+                moveTo(target)
+                up()
+            }
+            waitForIdle()
+
+            val order = db.feedsQueries.getByFolder(null).executeAsList().map { it.id }
+            assertEquals(listOf("a", "b"), order)
+        } finally {
+            closeHomeViewModelFixture(vm, fixture, driver)
+        }
+    }
+
+    @Test
+    fun touchPressOnTheHandleReordersTheFeed() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("a", sortOrder = 0L)
+        db.insertFeed("b", sortOrder = 1L)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            setFeedListDragContent(vm, isTouchPrimary = true)
+            waitForIdle()
+
+            val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val bBounds = onNodeWithText("Feed b", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            // Comfortably inside the trailing 44dp handle band, regardless of exactly where the
+            // title text itself sits.
+            val handleX = hostBounds.right - with(density) { 10.dp.toPx() }
+            val start = localOf(Offset(handleX, aBounds.center.y), hostBounds)
+            // Bottom quarter of "b"'s row resolves to its AFTER boundary (see resolveRowHalf).
+            val target = localOf(Offset(handleX, bBounds.top + bBounds.height * 0.75f), hostBounds)
+
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performTouchInput {
+                down(start)
+                moveTo(start + Offset(0f, dragThresholdCrossPx))
+                moveTo(target)
+                up()
+            }
+            waitForIdle()
+
+            val order = db.feedsQueries.getByFolder(null).executeAsList().map { it.id }
+            assertEquals(listOf("b", "a"), order)
         } finally {
             closeHomeViewModelFixture(vm, fixture, driver)
         }

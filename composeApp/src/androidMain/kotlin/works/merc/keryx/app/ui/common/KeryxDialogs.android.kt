@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -83,6 +84,11 @@ actual fun KeryxAlertDialog(
  * equivalent; this only needs to host the same tab-switching behavior in a shape that fits a phone
  * or tablet screen. Revisit alongside the Settings screen's own adaptive-layout work (Phase 2) —
  * a full-screen Settings destination may replace this dialog wrapper entirely.
+ *
+ * The `Dialog` window draws behind the system bars edge-to-edge like the rest of the app (see
+ * `MainActivity`'s `enableEdgeToEdge()`), so its content applies its own `safeDrawingPadding()`
+ * rather than relying on the window to inset it — the tonal background still fills the full
+ * window behind the status/navigation bars.
  */
 @Composable
 actual fun KeryxTabDialog(
@@ -100,7 +106,7 @@ actual fun KeryxTabDialog(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.surfaceContainerLow,
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
                 KeryxDialogTabBar(
                     tabs = tabs,
                     selectedTabId = selectedTabId,
