@@ -38,13 +38,20 @@ composeApp/src/
   androidMain/kotlin/…/  jvmCommonMain がカバーしない expect の actual: DatabaseDriverFactory（バンドル
     SQLite、後述）, AppDirs/BrowserOpener/ClipboardEntries（AndroidAppContext 経由 — KeryxApplication.onCreate
     で一度だけ設定される静的 Context ホルダ）, PlatformModule（Ktor OkHttp エンジン、プロバイダ未登録の
-    CloudSession — 下記 Provider/DI 参照）, KeryxTextField/KeryxAlertDialog/KeryxTabDialog（素の M3。
+    CloudSession — 下記 Provider/DI 参照。加えて AndroidNotificationSink、下記「バックグラウンド更新」参照）,
+    KeryxTextField/KeryxAlertDialog/KeryxTabDialog（素の M3。
     KeryxTabDialog はエッジツーエッジ対応で safe-drawing padding 済み）,
     FilePicker/DatabaseMerger/DatabaseSnapshot（フェーズ4までのスタブ。例外を投げるが CloudSession に
     プロバイダが無い間は到達不能）, nativeContextMenu（適応レイアウトのフェーズで実装した実際の
     長押し DropdownMenu — タップと長押しの判別は KDoc 参照）, BackHandler（`androidx.activity.compose.BackHandler`
     へ委譲）, PlatformOs（isTouchPrimary = true, hasNativeAppMenu = false — Android にはメニューバーが
-    無いため、FeedListToolbarRow/GeneralTab が独自の設定/バージョン情報導線を持つ）
+    無いため、FeedListToolbarRow/GeneralTab が独自の設定/バージョン情報導線を持つ）,
+    SelfUpdateCheck（インストール元パッケージ名に基づく判定、下記「バックグラウンド更新」参照）,
+    NotificationPermission（`POST_NOTIFICATIONS` 用に `rememberLauncherForActivityResult` をラップ）+
+    AndroidStartupTasks.kt（`runAndroidStartupTasks`。`:androidApp` の `MainActivity` から呼ばれる）+
+    background/（`FeedRefreshWorker` + `BackgroundRefresh.kt` の `startBackgroundRefresh`。
+    `WorkManager` ベース — Android のバックグラウンド/通知の全体像は
+    [background-update.ja.md](background-update.ja.md) を参照）
   commonTest/ + desktopTest/
 ```
 
@@ -52,8 +59,9 @@ composeApp/src/
 
 ルート直下の別モジュール `androidApp`（`com.android.application`。上記の Kotlin Multiplatform
 ソースセット構成には含まれない）は `AndroidManifest.xml`、`KeryxApplication`（プロセス全体の初期化:
-`AndroidAppContext.init`、`startKoin`、`configureImageLoader`、FTS バックフィルの `ensureIndexed()`）、
-`MainActivity`（`setContent { App() }`）のみを持つ。これが別モジュールになっているのは、AGP 9 の
+`AndroidAppContext.init`、`startKoin`、`configureImageLoader`、FTS バックフィルの `ensureIndexed()`、
+`startBackgroundRefresh`）、`MainActivity`（`setContent { App() }`、続けて
+`runAndroidStartupTasks`）のみを持つ。これが別モジュールになっているのは、AGP 9 の
 `com.android.application` プラグインが Kotlin Multiplatform プラグインと同一モジュールで併用できない
 ため — `composeApp` は代わりに `com.android.kotlin.multiplatform.library` による Android ライブラリで、
 `androidApp` がそれに依存してインストール可能な APK を生成する。

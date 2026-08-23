@@ -55,7 +55,7 @@ val appModule: Module = module {
     single { NotificationCenter() }
     single { ActivityCenter() }
     single { MenuController() }
-    single { NewArticleNotifier() }
+    single { NewArticleNotifier(get()) }
     single<NotificationMessages> { ComposeNotificationMessages() }
 
     // Long-lived scope for debounced sync + background work.

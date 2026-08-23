@@ -8,10 +8,8 @@ import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Log
-import works.merc.keryx.app.core.MILLIS_PER_DAY
 import works.merc.keryx.app.core.MILLIS_PER_MINUTE
 import works.merc.keryx.app.core.SystemClock
-import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.IdGenerator
 import works.merc.keryx.app.domain.NotificationCenter
@@ -21,6 +19,7 @@ import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncTrigger
 import works.merc.keryx.app.domain.checkForUpdateAndNotify
+import works.merc.keryx.app.domain.cleanUpArticleCacheIfDue
 import works.merc.keryx.app.domain.maybeRebuildFtsIndex
 import works.merc.keryx.app.domain.refreshFeedsAndNotify
 import works.merc.keryx.app.domain.shouldCheckForUpdate
@@ -37,15 +36,14 @@ private const val LOG_TAG = "StartupTasks"
 internal suspend fun runStartupTasks(koin: Koin) {
     runCatching {
         warnIfAppTranslocated(koin)
-        val settingsRepository = koin.get<SettingsRepository>()
-        val settings = settingsRepository.getLocalSettings()
-        val now = SystemClock.nowMillis()
-        val last = settings.lastCacheCleanupAt
-        if (last == null || now - last >= MILLIS_PER_DAY) {
-            val days = settingsRepository.getCacheRetentionDays()
-            koin.get<ArticleRepository>().deleteExpiredArticles(days)
-            settingsRepository.mutateLocalSettings { it.copy(lastCacheCleanupAt = now) }
-        }
+        // Every step below eventually calls SettingsRepository.mutateLocalSettings (to record its
+        // own "last ran at" timestamp), which persists local_settings.json in the background —
+        // the same file whose mere *existence* is isSetupComplete()'s signal that setup finished
+        // (SetupViewModel calls flush() at that point deliberately). Running any of this before
+        // setup completes could race that check and make a fresh install skip the Setup screen
+        // entirely. None of it is useful pre-setup anyway (no feeds to refresh, no sync configured).
+        if (!koin.get<SettingsRepository>().isSetupComplete()) return@runCatching
+        cleanUpArticleCacheIfDue(koin)
         if (koin.get<CloudSession>().isConnected()) {
             koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
         }
@@ -67,6 +65,9 @@ internal suspend fun backgroundUpdateLoop(koin: Koin) {
         val minutes = settingsRepository.getLocalSettings().refreshIntervalMinutes
         delay(if (minutes <= 0) MILLIS_PER_MINUTE else minutes * MILLIS_PER_MINUTE)
         runCatching {
+            // See runStartupTasks's own comment: nothing here should touch local_settings.json
+            // before setup completes.
+            if (!settingsRepository.isSetupComplete()) return@runCatching
             if (minutes > 0) {
                 refreshFeedsAndNotify(koin)
                 koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)

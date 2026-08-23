@@ -39,14 +39,20 @@ composeApp/src/
   androidMain/kotlin/…/  actual implementations not covered by jvmCommonMain: DatabaseDriverFactory
     (bundled SQLite, see below), AppDirs/BrowserOpener/ClipboardEntries (via AndroidAppContext, a
     static Context holder set once from KeryxApplication.onCreate), PlatformModule (Ktor OkHttp
-    engine, CloudSession with no providers yet — see Provider/DI below), KeryxTextField/KeryxAlertDialog/
+    engine, CloudSession with no providers yet — see Provider/DI below — plus AndroidNotificationSink,
+    see "Background Update" below), KeryxTextField/KeryxAlertDialog/
     KeryxTabDialog (plain M3, safe-drawing-padded for edge-to-edge), FilePicker/DatabaseMerger/
     DatabaseSnapshot (Phase-4 stubs that throw — unreachable while CloudSession has no providers),
     nativeContextMenu (a real long-press `DropdownMenu`, added in the adaptive-layout phase — see its
     KDoc for the tap-vs-long-press disambiguation), BackHandler (delegates to
     `androidx.activity.compose.BackHandler`), PlatformOs (isTouchPrimary = true, hasNativeAppMenu =
     false — Android has no menu bar, so `FeedListToolbarRow`/`GeneralTab` grow their own Settings/
-    About entry points instead)
+    About entry points instead), SelfUpdateCheck (installer-package-based, see "Background Update"),
+    NotificationPermission (wraps `rememberLauncherForActivityResult` for `POST_NOTIFICATIONS`) +
+    AndroidStartupTasks.kt (`runAndroidStartupTasks`, called from `:androidApp`'s `MainActivity`) +
+    background/ (`FeedRefreshWorker` + `BackgroundRefresh.kt`'s `startBackgroundRefresh`,
+    `WorkManager`-based — see [background-update.md](background-update.md) for the whole Android
+    background/notification story)
   commonTest/ + desktopTest/
 ```
 
@@ -55,7 +61,8 @@ The package root is `works.merc.keryx.app` (reverse DNS of `keryx.merc.works`).
 A separate root-level module, `androidApp` (`com.android.application`, not part of the Kotlin
 Multiplatform source-set layout above), holds only `AndroidManifest.xml`, `KeryxApplication`
 (process-wide setup: `AndroidAppContext.init`, `startKoin`, `configureImageLoader`, an
-`ensureIndexed()` FTS backfill), and `MainActivity` (`setContent { App() }`). It exists because AGP
+`ensureIndexed()` FTS backfill, `startBackgroundRefresh`), and `MainActivity`
+(`setContent { App() }`, then `runAndroidStartupTasks`). It exists because AGP
 9's `com.android.application` plugin cannot be applied to the same module as the Kotlin Multiplatform
 plugin — `composeApp` is instead an Android library via `com.android.kotlin.multiplatform.library`,
 and `androidApp` depends on it to produce the installable APK.

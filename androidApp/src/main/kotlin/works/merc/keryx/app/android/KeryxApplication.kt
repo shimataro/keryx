@@ -6,6 +6,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import org.koin.core.context.startKoin
 import org.koin.mp.KoinPlatform
+import works.merc.keryx.app.background.startBackgroundRefresh
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.di.appModule
 import works.merc.keryx.app.di.configureImageLoader
@@ -42,5 +43,10 @@ class KeryxApplication : Application() {
         koin.get<CoroutineScope>().launch {
             koin.get<FtsManager>().ensureIndexed()
         }
+
+        // Keeps WorkManager's periodic feed-refresh job in sync with the refresh-interval
+        // setting for the rest of the process's life — see that function's own KDoc for why this
+        // belongs in Application.onCreate rather than MainActivity.
+        startBackgroundRefresh(koin)
     }
 }

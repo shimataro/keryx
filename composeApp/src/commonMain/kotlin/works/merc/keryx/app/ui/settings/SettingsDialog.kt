@@ -8,6 +8,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
+import works.merc.keryx.app.platform.selfUpdateCheckSupported
 import works.merc.keryx.app.ui.common.KeryxDialogTab
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.KeryxTabDialog
@@ -46,7 +47,12 @@ fun SettingsDialog(onDismiss: () -> Unit, initialTabId: String = "general", tabR
             add(KeryxDialogTab("cloud_sync", stringResource(Res.string.settings_cloud_sync), KeryxIcons.Cloud))
         }
         add(KeryxDialogTab("data", stringResource(Res.string.settings_tab_data), KeryxIcons.Storage))
-        add(KeryxDialogTab("updates", stringResource(Res.string.settings_updates), KeryxIcons.Update))
+        // Hidden where there's an app-store update mechanism to defer to instead (see
+        // selfUpdateCheckSupported's KDoc) — checkForUpdateAndNotify is gated the same way, so this
+        // tab would otherwise always show "up to date" without ever being able to find anything.
+        if (selfUpdateCheckSupported) {
+            add(KeryxDialogTab("updates", stringResource(Res.string.settings_updates), KeryxIcons.Update))
+        }
     }
 
     var selectedTabId by rememberSelectedTabId(initialTabId, tabRequestToken, tabs)

@@ -97,4 +97,32 @@ class NewArticleNotifierTest {
 
         job.cancel()
     }
+
+    /**
+     * [OsNotificationSink] is how a `WorkManager`-run background refresh on Android reaches the OS
+     * — see the class's own KDoc for why it can't rely on collecting [NewArticleNotifier.trayEvents]
+     * the way desktop's `main.kt` does. This asserts it's actually called, independent of
+     * [trayEvents][NewArticleNotifier.trayEvents] still working too (the previous tests never pass
+     * a sink, so they also cover the default no-op not throwing).
+     */
+    @Test
+    fun notifyAlsoPostsThroughTheSink() = runTest {
+        val posted = mutableListOf<String>()
+        val notifier = NewArticleNotifier(sink = { message -> posted.add(message) })
+
+        notifier.notify("3 new articles available")
+
+        assertEquals(listOf("3 new articles available"), posted)
+    }
+
+    @Test
+    fun notifyIfEnabledDoesNotPostThroughTheSinkWhenNotificationsDisabled() = runTest {
+        val posted = mutableListOf<String>()
+        val notifier = NewArticleNotifier(sink = { message -> posted.add(message) })
+
+        val results = mapOf("f1" to Result.Ok(4))
+        notifier.notifyIfEnabled(results, notificationEnabled = false, messages = NewArticleNotifierTestNotificationMessages())
+
+        assertTrue(posted.isEmpty())
+    }
 }
