@@ -1,9 +1,11 @@
 ---
 paths:
   - "**/PlatformModule.desktop.kt"    # where each provider's OAuthConnectFlow transport is wired
+  - "**/PlatformModule.android.kt"    # same wiring on Android (Dropbox/OneDrive only)
   - "**/OAuthRedirectTransport*.kt"   # CustomUri (keryx://) vs Loopback (127.0.0.1) transports
   - "**/OAuthConnectFlow*.kt"         # the shared, provider-agnostic PKCE orchestrator
   - "**/CloudStorageAvailability*.kt" # CloudStorageType enum + per-provider availability
+  - "**/AndroidOAuthCallback.kt"      # Android's keryx:// redirect dispatch into the callback flow
 ---
 
 # Design policy: OAuth redirect transport — prefer the custom URI scheme
@@ -37,9 +39,20 @@ registration deliberately no-ops unless the process is a packaged launcher, sinc
 JDK's own `java` binary as the handler would outlive the Gradle run. This is the same known
 constraint already documented for Dropbox and is accepted.
 
-## Current wiring (as of the OneDrive addition)
+## Current wiring (as of the Android Dropbox/OneDrive addition)
 
-- Dropbox — custom URI (`CustomUriRedirectTransport`).
-- OneDrive — custom URI (`CustomUriRedirectTransport`); Microsoft Identity platform supports
-  custom schemes.
-- Google Drive — loopback (`LoopbackRedirectTransport`); Google's Desktop-app client requires it.
+- Dropbox — custom URI (`CustomUriRedirectTransport`) on both desktop and Android.
+- OneDrive — custom URI (`CustomUriRedirectTransport`) on both desktop and Android; Microsoft
+  Identity platform supports custom schemes.
+- Google Drive — loopback (`LoopbackRedirectTransport`) on desktop only; Google's Desktop-app
+  client requires it. **Not available on Android at all** — Google's own OAuth policy deprecates
+  both the custom-URI-scheme and loopback redirects for its Android/Chrome-app client type (this is
+  a Google-specific policy decision, not a general Android restriction: Dropbox/OneDrive's custom-
+  URI redirects work identically on Android). See `docs/sync-architecture.md`'s "Google Drive on
+  Android" for the full investigation and why the platform's suggested replacement
+  (Play services `AuthorizationClient`) is deferred rather than adopted.
+- Android registers the shared `keryx://oauth2/callback` scheme declaratively via an
+  `AndroidManifest.xml` `intent-filter` on `MainActivity` (no runtime registration step, unlike
+  Windows/Linux), and forwards the redirect through `dispatchOAuthCallbackIfPresent` into the same
+  `MutableSharedFlow<OAuthCallbackParams>` shape desktop uses — see `AndroidOAuthCallback.kt`
+  and `di/PlatformModule.android.kt`.

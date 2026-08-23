@@ -3,6 +3,7 @@ paths:
   - "**/DatabaseDriverFactory.android.kt"  # picks the SupportSQLiteOpenHelper.Factory
   - "**/DatabaseMerger.android.kt"
   - "**/DatabaseSnapshot.android.kt"
+  - "**/AndroidSqliteSupport.kt"           # NoOpDatabaseErrorHandler + busy_timeout/user_version helpers shared by both
   - "**/libs.versions.toml"                # bundled-SQLite dependency declaration
 ---
 
@@ -27,6 +28,17 @@ for this reason.
 selection confined to a single seam (DI, or inside `DatabaseDriverFactory.android.kt`) so it can
 be swapped without touching `DatabaseMerger`, `DatabaseSnapshot`, `FtsManager`, or any SQL —
 none of them care which factory produced the `SqlDriver`.
+
+`DatabaseMerger.android.kt`/`DatabaseSnapshot.android.kt` are now real implementations (Dropbox/
+OneDrive cloud sync), not stubs — both open their own dedicated
+`io.requery.android.database.sqlite.SQLiteDatabase` connection directly (mirroring the desktop
+actual's dedicated JDBC connection), so the exit-criteria swap in step 3 below only has to change
+`DatabaseDriverFactory.android.kt`'s factory choice and the low-level open/error-handler calls in
+`platform/AndroidSqliteSupport.kt` — the merge/snapshot control flow itself doesn't reference the
+factory at all. `NoOpDatabaseErrorHandler` (in that same file) is required on every connection
+either class opens: passing `null` gets the library's default handler, which deletes a database
+file it judges corrupt — confirmed by disassembling the AAR — an unacceptable side effect for a
+merge running against the local DB or a downloaded cloud file.
 
 ## Exit criteria
 

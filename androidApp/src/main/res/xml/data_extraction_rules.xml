@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ (API 31+) backup/transfer rules. Excludes the cloud-sync OAuth refresh tokens
+  (data/cloud/KeystoreTokenStorage.kt's encrypted files, plus data/cloud/FileTokenStorage.kt's
+  plaintext fallback used when the Android Keystore is unavailable) from both a cloud backup and a
+  device-to-device transfer.
+
+  The Keystore-encrypted files (*.enc) cannot usefully be restored anyway — the AES key backing
+  them never leaves the device's Keystore (see KeystoreTokenStorage's own KDoc), so a decrypt on a
+  different device would just fail — but the plaintext fallback files genuinely could be restored
+  as-is, and OAuth refresh tokens are exactly the kind of long-lived credential that should never
+  ride along in a backup regardless. Keep this list in sync with every provider's
+  ".{CloudStorageType.id}_tokens.{enc,json}" pair when a new cloud provider is added.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path=".dropbox_tokens.enc" />
+        <exclude domain="file" path=".dropbox_tokens.json" />
+        <exclude domain="file" path=".onedrive_tokens.enc" />
+        <exclude domain="file" path=".onedrive_tokens.json" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path=".dropbox_tokens.enc" />
+        <exclude domain="file" path=".dropbox_tokens.json" />
+        <exclude domain="file" path=".onedrive_tokens.enc" />
+        <exclude domain="file" path=".onedrive_tokens.json" />
+    </device-transfer>
+</data-extraction-rules>

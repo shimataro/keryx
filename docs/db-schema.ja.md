@@ -5,6 +5,14 @@
 対象: ローカル SQLite（SQLDelight 管理）。`.sq` ファイルは
 `composeApp/src/commonMain/sqldelight/works/merc/keryx/app/data/local/db/` にある。
 
+実ファイルの実体パスはプラットフォームによって異なる: デスクトップの `JdbcSqliteDriver` は
+`AppDirs.appDataDir()/keryx.db` を直接開くが、Android の `AndroidSqliteDriver` は
+`Context.getDatabasePath("keryx.db")` — `<dataDir>/databases/keryx.db` に置く。これは
+`AppDirs.appDataDir()`（`Context.filesDir`、すなわち `<dataDir>/files`）とは別のディレクトリである。
+`platform/DatabaseFile.kt` の `databaseFilePath()` がプラットフォームごとの実値を解決する唯一の
+`expect` 関数であり、`DatabaseMerger`/`DatabaseSnapshot`（どちらもドライバ経由ではなくパスで動作する）
+は自前で `AppDirs.appDataDir()` とファイル名を組み立てるのではなく、常にこれを経由しなければならない。
+
 ## 設計方針
 
 - 全テーブルは SQLDelight（`.sq`）で管理。`articles_fts` のみ生 SQL（`FtsManager`）で別途作成する。

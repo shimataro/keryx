@@ -19,7 +19,6 @@ import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.CloudStorageException
-import works.merc.keryx.app.core.DB_FILE_NAME
 import works.merc.keryx.app.core.cloudBackupPath
 import works.merc.keryx.app.core.looksLikeSqliteFile
 import works.merc.keryx.app.core.KeryxException
@@ -43,6 +42,7 @@ import works.merc.keryx.app.platform.DatabaseMerger
 import works.merc.keryx.app.platform.Gzip
 import works.merc.keryx.app.platform.DatabaseSnapshot
 import works.merc.keryx.app.platform.FileIO
+import works.merc.keryx.app.platform.databaseFilePath
 
 /**
  * Who asked for a sync. Only [AUTOMATIC] is subject to the unusable-cloud-DB gate
@@ -71,7 +71,7 @@ class SyncRepository(
     private val activityCenter: ActivityCenter,
     private val notificationCenter: NotificationCenter,
     private val notificationMessages: NotificationMessages,
-    private val localDbPath: String = FileIO.join(AppDirs.appDataDir(), DB_FILE_NAME),
+    private val localDbPath: String = databaseFilePath(),
     private val tempDir: String = AppDirs.tempDir(),
 ) : SyncScheduler {
 

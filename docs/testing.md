@@ -6,6 +6,7 @@
 
 - `commonTest/` — Pure logic and Ktor `MockEngine` tests (parsers, fetchers, URL resolvers, OPML, Dropbox storage/auth, local settings). Runs on the desktop target, so `expect` declarations resolve to desktop `actual`s (`FileIO` / `AppDirs` available with temp directories).
 - `desktopTest/` — Tests requiring the actual SQLDelight driver (`JdbcSqliteDriver`) (schema, article upsert, ATTACH merge). Helpers are in `DbTestSupport.kt` (`inMemoryDb()`, `fileDb()`, `insertFeed()`). This directory also contains Compose UI tests that render actual Composables (`androidx.compose.ui.test.runDesktopComposeUiTest`, no JUnit4 rule needed) (e.g. `ArticleListPaneTest.kt`). Requires the actual Skia/AWT renderer, so placed in `desktopTest` rather than `commonTest`.
+- `androidDeviceTest/` — Instrumented tests for `DatabaseMerger`/`DatabaseSnapshot`'s Android actuals, which open the bundled `requery` SQLite (a native library) directly and therefore cannot run as a plain JVM unit test the way `desktopTest` does — see `.claude/rules/android-sqlite-bundling.md`. Needs a connected device or running emulator; there is no `androidUnitTest`/`androidHostTest` source set in this module, since none of `composeApp`'s Android-specific logic is JVM-testable without either a device or Robolectric (not currently a dependency). Helpers are in `AndroidDbTestSupport.kt` (`createSchemaDbFile()`, mirroring `DbTestSupport.kt`'s `fileDb()` but driven through a real `AndroidSqliteDriver` so the schema is installed the same way production creates it). Scoped narrowly to what is genuinely Android-specific — the schema-version guard, the migration path, exception-*class*-based failure classification (Android's `SQLiteException` carries no numeric result code, unlike the JDBC driver desktop's `DatabaseMerger` reads `resultCode` from), and the `NoOpDatabaseErrorHandler` regression (the bundled SQLite's default error handler deletes a database file it judges corrupt, confirmed by disassembling the AAR) — not a full port of `desktopTest`'s merge/snapshot suites, since the merge SQL itself (`MergeSql`) is pure and already covered there.
 
 New tests are placed at the same relative path as the code under test.
 
@@ -43,6 +44,20 @@ upgrade has fixed the bug.
 ```bash
 ./gradlew :composeApp:desktopTest
 ```
+
+Android's instrumented `androidDeviceTest` suite (`DatabaseMerger`/`DatabaseSnapshot` against the
+real bundled SQLite) needs a connected device or a running emulator:
+
+```bash
+$ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
+./gradlew :composeApp:connectedAndroidDeviceTest
+```
+
+(the task name comes from AGP 9's `com.android.kotlin.multiplatform.library` plugin's own
+`withDeviceTestBuilder` DSL — run `./gradlew :composeApp:tasks --all | grep -i device` if it's
+renamed in a future AGP release). It is not wired into `ci.yml` — the desktop UI tests already run
+under `xvfb` there, but an Android emulator is a separate CI concern this project hasn't taken on
+yet — so it only runs locally today.
 
 The suite covers parser, fetcher redirect/304/404/410/timeout/discovery, OPML, Dropbox storage/auth, PKCE, OAuth loopback server, merge (last-write-wins / OR merge / collision guard / FK guard), schema, local settings, article upsert, URL resolver, datetime parser, Result, Repository layer (Article/Feed/Tag/Settings), CloudSession, NotificationCenter, IdGenerator, SyncRepository, ViewModel layer (Home/Settings/Setup/NotificationCenter, including `SettingsViewModel`'s OPML
 import/export paths — the built document/read file round-tripping through the picked path, the

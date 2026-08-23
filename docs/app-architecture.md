@@ -24,7 +24,7 @@ composeApp/src/
     data/opml/    OpmlCodec
     domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, StartupMaintenanceTasks (refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex)
     di/           AppModule (+ expect platformModule)
-    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot (all expect)
+    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile (all expect)
     ui/           theme/, navigation/, setup/, home/ (3-pane + search + notification center), article/, settings/, i18n/
     LaunchArg.kt  Classifies a raw launch argument (`keryx://` URI vs `.opml` path) — platform-independent, package root
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq (7 tables)
@@ -37,13 +37,27 @@ composeApp/src/
   desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of each expect not covered by jvmCommonMain (DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule) + LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage), DesktopOs (isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux)
     tray/      KeryxTray (platform branch), MacTray, LinuxTray + the StatusNotifierItem/dbusmenu D-Bus objects
   androidMain/kotlin/…/  actual implementations not covered by jvmCommonMain: DatabaseDriverFactory
-    (bundled SQLite, see below), AppDirs/BrowserOpener/ClipboardEntries (via AndroidAppContext, a
+    (bundled SQLite, see below), DatabaseFile (`databaseFilePath()` — `Context.getDatabasePath`,
+    a different directory than AppDirs.appDataDir()/`Context.filesDir`; see db-schema.md),
+    AppDirs/BrowserOpener/ClipboardEntries (via AndroidAppContext, a
     static Context holder set once from KeryxApplication.onCreate), PlatformModule (Ktor OkHttp
-    engine, CloudSession with no providers yet — see Provider/DI below — plus AndroidNotificationSink,
-    see "Background Update" below), KeryxTextField/KeryxAlertDialog/
-    KeryxTabDialog (plain M3, safe-drawing-padded for edge-to-edge), FilePicker/DatabaseMerger/
-    DatabaseSnapshot (Phase-4 stubs that throw — unreachable while CloudSession has no providers),
-    nativeContextMenu (a real long-press `DropdownMenu`, added in the adaptive-layout phase — see its
+    engine, CloudSession with Dropbox/OneDrive providers — see Provider/DI below — plus
+    AndroidNotificationSink, see "Background Update" below), CloudStorageAvailability (Dropbox/
+    OneDrive real, Google Drive fixed `false` — see sync-architecture.md's "Google Drive on
+    Android" for why), KeryxTextField/KeryxAlertDialog/
+    KeryxTabDialog (plain M3, safe-drawing-padded for edge-to-edge), DatabaseMerger/DatabaseSnapshot
+    (real implementations against a dedicated `io.requery.android.database.sqlite.SQLiteDatabase`
+    connection — the Android equivalent of the desktop actual's dedicated JDBC connection; see
+    "DatabaseMerger" below), AndroidSqliteSupport.kt (`NoOpDatabaseErrorHandler` — the bundled
+    SQLite's default handler deletes a database file it judges corrupt, confirmed by disassembling
+    the AAR — plus `setBusyTimeout()`/`userVersion()` shared by both), FilePicker (Storage Access
+    Framework `OpenDocument`/`CreateDocument`, routed through AndroidFilePickerHost since this
+    `expect object` cannot itself hold an `ActivityResultLauncher`), KeystoreTokenStorage
+    (AES-256/GCM key held in the Android Keystore per cloud provider; see sync-architecture.md's
+    "Token Storage"), AndroidOAuthCallback.kt (`dispatchOAuthCallbackIfPresent`, called from
+    `:androidApp`'s `MainActivity` for the `keryx://` OAuth redirect — the Android counterpart of
+    desktop's `main.kt` URI routing), nativeContextMenu (a real long-press `DropdownMenu`, added in
+    the adaptive-layout phase — see its
     KDoc for the tap-vs-long-press disambiguation), BackHandler (delegates to
     `androidx.activity.compose.BackHandler`), PlatformOs (isTouchPrimary = true, hasNativeAppMenu =
     false — Android has no menu bar, so `FeedListToolbarRow`/`GeneralTab` grow their own Settings/
@@ -53,7 +67,9 @@ composeApp/src/
     background/ (`FeedRefreshWorker` + `BackgroundRefresh.kt`'s `startBackgroundRefresh`,
     `WorkManager`-based — see [background-update.md](background-update.md) for the whole Android
     background/notification story)
-  commonTest/ + desktopTest/
+  commonTest/ + desktopTest/ + androidDeviceTest/ (instrumented tests for DatabaseMerger/
+    DatabaseSnapshot's Android actuals — needs a real device/emulator to load the bundled SQLite
+    native library; see testing.md)
 ```
 
 The package root is `works.merc.keryx.app` (reverse DNS of `keryx.merc.works`).
@@ -108,12 +124,27 @@ Only the SQLite-driver conversation is platform-specific. The decision *policy* 
 (the expected tables/columns per schema version, plain data). The desktop `actual` only walks the
 cause chain for an `org.sqlite.SQLiteException`, reduces `resultCode.code and 0xFF` to a
 `SqliteFailureCategory`, logs the verdict, and runs `PRAGMA table_info` for `validateSchema` against
-`MergeSchema.EXPECTED_SCHEMAS`. A future Android `actual` — whose `SQLiteException` exposes no
-numeric code — has to supply the same category and nothing else.
+`MergeSchema.EXPECTED_SCHEMAS`. The Android `actual` supplies the same category by a different
+route — its `android.database.sqlite.SQLiteException` exposes no numeric result code (unlike the
+JDBC driver desktop reads), so it switches on the thrown exception's own subclass instead
+(`SQLiteConstraintException`/`SQLiteDatabaseCorruptException` → `CORRUPT_OR_CONSTRAINT`, a handful
+of other named subclasses → `OTHER`, a plain `SQLiteException` → `STATEMENT_ERROR`, matching the
+ambiguity `validateSchema` exists to resolve) — and otherwise does the same attach → version check
+→ merge → detach sequence on a dedicated `io.requery.android.database.sqlite.SQLiteDatabase`
+connection, opened with `NoOpDatabaseErrorHandler` rather than the library's default (which deletes
+a database file it judges corrupt — confirmed by disassembling the bundled AAR; see
+`platform/AndroidSqliteSupport.kt`).
 
 ### CloudSession / SyncRepository
 
-`CloudSession` provides the current `CloudStorage` (Dropbox / Google Drive) and handles automatic access-token refresh. `SyncRepository` implements the download → merge (`DatabaseMerger`) → incremental index of new articles (`indexMissing`) → `VACUUM INTO` snapshot generation (`DatabaseSnapshot`, excludes `articles_fts` on the copy side) → upload (rev check) flow, along with debouncing (`SyncScheduler`). The live DB's FTS is untouched.
+`CloudSession` provides the current `CloudStorage` (Dropbox / Google Drive / OneDrive on desktop;
+Dropbox / OneDrive on Android — see sync-architecture.md's "Google Drive on Android") and handles
+automatic access-token refresh. `SyncRepository` implements the download → merge (`DatabaseMerger`)
+→ incremental index of new articles (`indexMissing`) → `VACUUM INTO` snapshot generation
+(`DatabaseSnapshot`, excludes `articles_fts` on the copy side) → upload (rev check) flow, along
+with debouncing (`SyncScheduler`). The live DB's FTS is untouched. `SyncRepository`'s `localDbPath`
+defaults to `platform/DatabaseFile.kt`'s `databaseFilePath()`, the single `expect` function that
+resolves the live DB's real path per platform (see `db-schema.md`).
 
 ### Provider / DI (Koin)
 

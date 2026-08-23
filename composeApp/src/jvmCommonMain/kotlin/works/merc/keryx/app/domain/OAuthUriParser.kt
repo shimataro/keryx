@@ -9,7 +9,7 @@ import java.net.URLDecoder
  */
 fun parseOAuthUri(uriString: String): OAuthCallbackParams {
     val uri = URI(uriString)
-    val queryMap = parseQuery(uri.query)
+    val queryMap = parseQuery(uri.rawQuery)
     return OAuthCallbackParams(
         code = queryMap["code"],
         state = queryMap["state"],
