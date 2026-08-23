@@ -5,6 +5,7 @@ import org.koin.core.Koin
 import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
+import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.MILLIS_PER_DAY
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.data.local.FtsManager
@@ -18,7 +19,7 @@ import works.merc.keryx.app.resources.update_available_notification
  */
 internal suspend fun cleanUpArticleCacheIfDue(koin: Koin) {
     val settingsRepository = koin.get<SettingsRepository>()
-    val now = SystemClock.nowMillis()
+    val now = koin.get<Clock>().nowMillis()
     val last = settingsRepository.getLocalSettings().lastCacheCleanupAt
     if (last != null && now - last < MILLIS_PER_DAY) return
     val days = settingsRepository.getCacheRetentionDays()

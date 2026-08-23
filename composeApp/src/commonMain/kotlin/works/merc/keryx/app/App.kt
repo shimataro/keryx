@@ -44,10 +44,12 @@ fun App() {
         // Keep the menu bar's screen-gating (see AppMenuBar) in sync with the active destination.
         LaunchedEffect(navigator.current) { menuController.currentScreen.value = navigator.current }
 
-        // Requests Android's POST_NOTIFICATIONS once Home is reached, if the user's own
-        // notification setting is already on — a no-op on desktop and on an Android version/state
-        // with nothing to request (see the expect's KDoc). NotificationsTab.kt requests it again
-        // when the user flips the toggle on, covering the case where it starts off.
+        // Requests Android's POST_NOTIFICATIONS whenever the user's own notification setting is on
+        // while Home is showing — a no-op on desktop and on an Android version/state with nothing
+        // to request (see the expect's KDoc). This is the single requester for both cases: the
+        // setting already on when Home is first reached, and the user flipping it on later from
+        // NotificationsTab (the Settings dialog is a modeless overlay on Home, so navigator.current
+        // stays Home while it's open, and settings.notificationEnabled — a key here — changes too).
         // Keyed on navigator.current (live navigation state), not setupComplete: that's a
         // remember{} snapshot taken once at first composition specifically to pick the *initial*
         // screen, so it never flips to true within the same session — a user who completes setup
