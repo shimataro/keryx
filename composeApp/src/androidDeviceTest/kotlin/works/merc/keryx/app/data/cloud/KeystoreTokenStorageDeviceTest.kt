@@ -26,10 +26,15 @@ import kotlin.test.assertTrue
  */
 class KeystoreTokenStorageDeviceTest {
     private val cleanup = mutableListOf<File>()
+    private val keyAliasesToCleanup = mutableListOf<String>()
 
     @AfterTest
     fun tearDown() {
         cleanup.forEach { it.deleteRecursively() }
+        if (keyAliasesToCleanup.isNotEmpty()) {
+            val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            keyAliasesToCleanup.forEach { alias -> runCatching { keyStore.deleteEntry(alias) } }
+        }
     }
 
     private fun tempDir(name: String): File =
@@ -54,6 +59,7 @@ class KeystoreTokenStorageDeviceTest {
         // save()'s `getKey(alias, null) as SecretKey?` then throws ClassCastException, forcing
         // encryption — and therefore the whole save() — to fail.
         val keyAlias = "keryx_token_$account"
+        keyAliasesToCleanup += keyAlias
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         val spec = KeyGenParameterSpec.Builder(keyAlias, KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY)
             .setDigests(KeyProperties.DIGEST_SHA256)
