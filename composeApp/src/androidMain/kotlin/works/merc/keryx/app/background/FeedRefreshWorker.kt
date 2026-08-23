@@ -5,7 +5,9 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.CancellationException
 import org.koin.mp.KoinPlatform
+import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.errorOrNull
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
@@ -40,12 +42,19 @@ class FeedRefreshWorker(context: Context, params: WorkerParameters) : CoroutineW
         if (!startupMaintenanceMutex.tryLock()) return Result.success()
         return try {
             refreshFeedsAndNotify(koin)
+            // Retry only the failure category error-design.md documents as auto-retryable
+            // (CloudStorageException) — CloudAuthException/SchemaVersionException/
+            // CloudDataIncompatibleException are permanent until the user acts, and retrying them
+            // would just burn battery on a doomed repeat attempt (already recorded in the
+            // notification center by SyncRepository itself).
+            var retrySync = false
             if (koin.get<CloudSession>().isConnected()) {
-                koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
+                val syncResult = koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
+                retrySync = syncResult.errorOrNull is CloudStorageException
             }
             checkForUpdateAndNotify(koin)
             maybeRebuildFtsIndex(koin)
-            Result.success()
+            if (retrySync) Result.retry() else Result.success()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
