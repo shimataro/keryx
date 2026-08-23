@@ -379,7 +379,7 @@ single-instance 経由で実行中インスタンスへ転送する。
 `MainActivity` に `intent-filter`（`VIEW`/`DEFAULT`/`BROWSABLE`、`scheme="keryx"` `host="oauth2"`）を
 持たせるだけで、Windows/Linux のような起動時登録処理は不要。`MainActivity.onCreate`/`onNewIntent` が
 リダイレクトのデータ URI を `dispatchOAuthCallbackIfPresent` に渡し、これがデスクトップの `main.kt` と
-同じ commonMain の `classifyLaunchArg`/`parseOAuthUri` で分類したうえで、同じ形の
+同じ `classifyLaunchArg`（commonMain）/ `parseOAuthUri`（jvmCommonMain）で分類したうえで、同じ形の
 `MutableSharedFlow<OAuthCallbackParams>`（Android 自身の `platformModule` に登録された別インスタンス）
 へ流し込む。`launchMode="singleTask"` により、既に起動中のインスタンスは新規 `onCreate` ではなく
 `onNewIntent` でリダイレクトを受け取る。ディスパッチ成功後は intent のデータをクリアしておく —
