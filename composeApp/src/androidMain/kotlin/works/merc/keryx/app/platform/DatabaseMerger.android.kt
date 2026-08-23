@@ -156,7 +156,11 @@ actual object DatabaseMerger {
     actual fun validateSchema(dbPath: String, schemaVersion: Long): Boolean? {
         val expectedTables = MergeSchema.EXPECTED_SCHEMAS[schemaVersion] ?: return null
         return try {
-            SQLiteDatabase.openOrCreateDatabase(dbPath, null, NoOpDatabaseErrorHandler).use { db ->
+            // Non-creating: this is only ever called with the downloaded cloud file (see
+            // classifyMergeFailure's validateCloudSchema), and openOrCreateDatabase would
+            // silently create an empty file for a genuinely-missing one, making a transient
+            // "file not found" look exactly like "cloud schema is missing tables" below.
+            SQLiteDatabase.openDatabase(dbPath, null, SQLiteDatabase.OPEN_READWRITE, NoOpDatabaseErrorHandler).use { db ->
                 expectedTables.all { (tableName, requiredColumns) ->
                     val actualColumns = buildSet {
                         db.rawQuery("PRAGMA table_info($tableName)", null).use { cursor ->
@@ -180,7 +184,10 @@ actual object DatabaseMerger {
      * A cloud DB newer than the local schema is rejected (the caller must update the app).
      */
     private fun migrateCloudIfOlder(cloudDbPath: String, localSchemaVersion: Long) {
-        val cloudVersion = SQLiteDatabase.openOrCreateDatabase(cloudDbPath, null, NoOpDatabaseErrorHandler).use { db ->
+        // Non-creating, same reason as validateSchema above: a missing cloud file must surface as
+        // a failure here, not silently become an empty (version 0) database that the merge below
+        // then fails against with a misleading "no such table".
+        val cloudVersion = SQLiteDatabase.openDatabase(cloudDbPath, null, SQLiteDatabase.OPEN_READWRITE, NoOpDatabaseErrorHandler).use { db ->
             db.userVersion()
         }
         if (cloudVersion > localSchemaVersion) {
@@ -194,7 +201,7 @@ actual object DatabaseMerger {
             // file open at once here: requery's own in-process lock table treats a second open as
             // contention, which can surface as `database is locked` well before SQLite's own
             // busy_timeout would apply (that's a cross-*process* mechanism; this is same-process).
-            val db = SQLiteDatabase.openOrCreateDatabase(cloudDbPath, null, NoOpDatabaseErrorHandler)
+            val db = SQLiteDatabase.openDatabase(cloudDbPath, null, SQLiteDatabase.OPEN_READWRITE, NoOpDatabaseErrorHandler)
             val driver = AndroidSqliteDriver(db)
             try {
                 KeryxDatabase.Schema.migrate(driver, cloudVersion, localSchemaVersion)
