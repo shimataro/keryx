@@ -86,6 +86,24 @@ class DatabaseMergerDeviceTest {
     }
 
     @Test
+    fun replayingMergeWithSameCloudSnapshotMakesNoFurtherChanges() {
+        val localFile = createSchemaDbFile().also { cleanup += it }
+        val cloudFile = createSchemaDbFile().also { cleanup += it }
+        seedFolder(cloudFile.absolutePath, "cloud-folder", "From Cloud")
+
+        repeat(2) {
+            DatabaseMerger.merge(
+                localDbPath = localFile.absolutePath,
+                cloudDbPath = cloudFile.absolutePath,
+                localSchemaVersion = SCHEMA_VERSION,
+                mergeStatements = listOf(folderMergeStatement),
+            )
+        }
+
+        assertEquals(setOf("From Cloud"), folderNames(localFile.absolutePath))
+    }
+
+    @Test
     fun olderCloudSchemaIsMigratedInPlaceThenMerged() {
         val localFile = createSchemaDbFile().also { cleanup += it }
         val cloudFile = createSchemaDbFile().also { cleanup += it }

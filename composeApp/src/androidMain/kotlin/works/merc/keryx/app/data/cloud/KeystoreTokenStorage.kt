@@ -6,6 +6,8 @@ import kotlinx.serialization.json.Json
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.platform.AndroidAppContext
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -56,7 +58,18 @@ class KeystoreTokenStorage(
             val iv = cipher.iv
             check(iv.size == GCM_IV_LENGTH_BYTES) { "Unexpected GCM IV length: ${iv.size}" }
             file.parentFile?.mkdirs()
-            file.writeBytes(iv + ciphertext)
+            // Write to a sibling temp file, then atomically replace the target — the same idiom
+            // FileTokenStorage.save() uses. file.writeBytes() straight into the token file would
+            // truncate it first, so a process death mid-write left a truncated file that load()
+            // discards, forcing the user to reconnect.
+            val tmp = File(file.parentFile, "${file.name}.tmp")
+            try {
+                tmp.writeBytes(iv + ciphertext)
+                Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            } catch (e: Exception) {
+                tmp.delete()
+                throw e
+            }
         }
         if (result.isFailure) {
             Log.warn(TOKEN_STORAGE_LOG_TAG, "Keystore token save failed, falling back to file storage", result.exceptionOrNull())
