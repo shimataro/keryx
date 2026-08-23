@@ -1,6 +1,7 @@
 package works.merc.keryx.app
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
 import org.koin.core.Koin
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.domain.CloudSession
@@ -14,6 +15,17 @@ import works.merc.keryx.app.domain.refreshFeedsAndNotify
 import java.util.concurrent.atomic.AtomicBoolean
 
 private const val LOG_TAG = "AndroidStartupTasks"
+
+/**
+ * Serializes Android's two independent maintenance entry points — [runAndroidStartupTasks]
+ * (Activity) and `FeedRefreshWorker` (`WorkManager`) — so a periodic wakeup landing while the
+ * Activity's own startup sequence is still running does not duplicate
+ * `refreshFeedsAndNotify`/`sync`/`checkForUpdateAndNotify`/`maybeRebuildFtsIndex` work. A
+ * process-wide singleton (not a per-call `Mutex()`) since both entry points must contend on the
+ * *same* lock instance; `internal` (not `private`) so `background/FeedRefreshWorker.kt` — a
+ * different package in the same androidMain source set — can share it.
+ */
+internal val startupMaintenanceMutex = Mutex()
 
 // Guards runAndroidStartupTasks to once per process: MainActivity.onCreate runs again on
 // configuration changes (rotation) that recreate the Activity without restarting the process, and
@@ -50,13 +62,22 @@ suspend fun runAndroidStartupTasks(koin: Koin) {
     // compareAndSet, not a plain assignment: two concurrent callers could otherwise both pass the
     // check above and both run the tasks below.
     if (!startupTasksRan.compareAndSet(false, true)) return
-    runCatching {
-        cleanUpArticleCacheIfDue(koin)
-        if (koin.get<CloudSession>().isConnected()) {
-            koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
-        }
-        refreshFeedsAndNotify(koin)
-        checkForUpdateAndNotify(koin)
-        maybeRebuildFtsIndex(koin)
-    }.onFailure { if (it is CancellationException) throw it else Log.error(LOG_TAG, "Startup tasks failed", it) }
+    // FeedRefreshWorker may already be running the same sequence (WorkManager woke the process
+    // right as this Activity started) — skip rather than duplicate refresh/sync/update-check/FTS
+    // work; this only ever runs once per process anyway (the guard above), so the worker's next
+    // periodic run will acquire the lock normally.
+    if (!startupMaintenanceMutex.tryLock()) return
+    try {
+        runCatching {
+            cleanUpArticleCacheIfDue(koin)
+            if (koin.get<CloudSession>().isConnected()) {
+                koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
+            }
+            refreshFeedsAndNotify(koin)
+            checkForUpdateAndNotify(koin)
+            maybeRebuildFtsIndex(koin)
+        }.onFailure { if (it is CancellationException) throw it else Log.error(LOG_TAG, "Startup tasks failed", it) }
+    } finally {
+        startupMaintenanceMutex.unlock()
+    }
 }
