@@ -51,7 +51,9 @@ Details are in [sync-architecture.md](sync-architecture.md).
 
 ## 6. Setup Flow
 
-On first launch, choose local-only / cloud sync (Dropbox / Google Drive / OneDrive). When cloud is selected, after OAuth authentication, if existing data exists in the cloud it is automatically merged (imported) during the initial sync.
+On first launch, choose local-only / cloud sync (Dropbox / Google Drive / OneDrive — Android offers
+only Dropbox / OneDrive, see §4). When cloud is selected, after OAuth authentication, if existing
+data exists in the cloud it is automatically merged (imported) during the initial sync.
 
 ## 7. Basic Features
 

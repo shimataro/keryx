@@ -52,8 +52,9 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
 
 ## 6. セットアップフロー
 
-初回起動でローカルのみ / クラウド同期（Dropbox・Google Drive・OneDrive）を選択する。クラウド選択時は OAuth 認証後、
-クラウドに既存データがあれば初回同期で自動的にマージ（インポート）される。
+初回起動でローカルのみ / クラウド同期（Dropbox・Google Drive・OneDrive。Android では Dropbox・OneDrive
+のみ、§4 参照）を選択する。クラウド選択時は OAuth 認証後、クラウドに既存データがあれば初回同期で自動的に
+マージ（インポート）される。
 
 ## 7. 基本機能
 
