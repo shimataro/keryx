@@ -1,11 +1,20 @@
 package works.merc.keryx.app.ui.home
 
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MIN_WIDTH
+import works.merc.keryx.app.core.ARTICLE_LIST_PANE_WIDTH_DEFAULT
+import works.merc.keryx.app.core.DETAIL_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.DUAL_PANE_MIN_WIDTH
+import works.merc.keryx.app.core.FEED_LIST_PANE_MIN_WIDTH
+import works.merc.keryx.app.core.FEED_LIST_PANE_WIDTH_DEFAULT
+import works.merc.keryx.app.core.PANE_DIVIDER_WIDTH
 import works.merc.keryx.app.core.TRIPLE_PANE_MIN_WIDTH
+import works.merc.keryx.app.core.WINDOW_DEFAULT_WIDTH
 import works.merc.keryx.app.core.WINDOW_MIN_WIDTH
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class HomePaneLayoutTest {
 
@@ -69,4 +78,70 @@ class HomePaneLayoutTest {
         // Only drilling into an article (depth 3) swaps the feed list out for the detail pane.
         assertEquals(listOf(HomePane.ArticleList, HomePane.ArticleDetail), visiblePanes(PaneLayout.Dual, 3))
     }
+
+    // --- triplePaneWidths ---
+
+    /** The width `HomeScreen`'s Triple branch has left for the two sized panes at [windowWidth]. */
+    private fun availableForPanes(windowWidth: Int): Dp =
+        (windowWidth - PANE_DIVIDER_WIDTH * 2 - DETAIL_PANE_MIN_WIDTH).dp
+
+    @Test
+    fun triplePaneWidthsNeverDropsBelowPaneMinimumsAtTheTripleThreshold() {
+        // The exact width at which paneLayoutFor first resolves Triple: there is nothing left over
+        // above the two minimums, so both panes must sit exactly on their own floor. Scaling both
+        // preferences by one shared factor used to land the feed pane at ~176dp here, below its
+        // own FEED_LIST_PANE_MIN_WIDTH.
+        val widths = triplePaneWidths(
+            availableForPanes(TRIPLE_PANE_MIN_WIDTH),
+            FEED_LIST_PANE_WIDTH_DEFAULT.dp,
+            ARTICLE_LIST_PANE_WIDTH_DEFAULT.dp,
+        )
+
+        assertEquals(FEED_LIST_PANE_MIN_WIDTH.dp, widths.feedWidth)
+        assertEquals(ARTICLE_LIST_PANE_MIN_WIDTH.dp, widths.articleWidth)
+    }
+
+    @Test
+    fun triplePaneWidthsUsesFullPreferenceWhenThereIsSlack() {
+        val widths = triplePaneWidths(
+            availableForPanes(WINDOW_DEFAULT_WIDTH),
+            FEED_LIST_PANE_WIDTH_DEFAULT.dp,
+            ARTICLE_LIST_PANE_WIDTH_DEFAULT.dp,
+        )
+
+        assertEquals(FEED_LIST_PANE_WIDTH_DEFAULT.dp, widths.feedWidth)
+        assertEquals(ARTICLE_LIST_PANE_WIDTH_DEFAULT.dp, widths.articleWidth)
+    }
+
+    @Test
+    fun triplePaneWidthsDistributesExcessProportionallyAboveMinimums() {
+        // Halfway between "both at their minimum" and "both at their preference": each pane keeps
+        // its own minimum plus half of what its preference asked for on top of it.
+        val minimumsTotal = (FEED_LIST_PANE_MIN_WIDTH + ARTICLE_LIST_PANE_MIN_WIDTH).dp
+        val preferencesTotal = (FEED_LIST_PANE_WIDTH_DEFAULT + ARTICLE_LIST_PANE_WIDTH_DEFAULT).dp
+        val available = (minimumsTotal + preferencesTotal) / 2f
+
+        val widths = triplePaneWidths(available, FEED_LIST_PANE_WIDTH_DEFAULT.dp, ARTICLE_LIST_PANE_WIDTH_DEFAULT.dp)
+
+        assertTrue(widths.feedWidth >= FEED_LIST_PANE_MIN_WIDTH.dp, "feed pane below its minimum: ${widths.feedWidth}")
+        assertTrue(widths.articleWidth >= ARTICLE_LIST_PANE_MIN_WIDTH.dp, "article pane below its minimum: ${widths.articleWidth}")
+        assertEquals(available.value, (widths.feedWidth + widths.articleWidth).value, 0.01f)
+        assertEquals(
+            (FEED_LIST_PANE_MIN_WIDTH + (FEED_LIST_PANE_WIDTH_DEFAULT - FEED_LIST_PANE_MIN_WIDTH) / 2f),
+            widths.feedWidth.value,
+            0.01f,
+        )
+    }
+
+    @Test
+    fun triplePaneWidthsClampsToTheMinimumsWhenTheWindowIsNarrowerThanThey() {
+        // Never reached on desktop (WINDOW_MIN_WIDTH >= TRIPLE_PANE_MIN_WIDTH), but a transient
+        // pre-layout frame reports maxWidth == 0 — the result must still be a usable, non-negative
+        // pair rather than shrinking below the minimums or going negative.
+        val widths = triplePaneWidths(0.dp, FEED_LIST_PANE_WIDTH_DEFAULT.dp, ARTICLE_LIST_PANE_WIDTH_DEFAULT.dp)
+
+        assertEquals(FEED_LIST_PANE_MIN_WIDTH.dp, widths.feedWidth)
+        assertEquals(ARTICLE_LIST_PANE_MIN_WIDTH.dp, widths.articleWidth)
+    }
+
 }

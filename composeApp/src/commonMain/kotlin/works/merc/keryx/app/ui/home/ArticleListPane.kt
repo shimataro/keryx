@@ -76,10 +76,15 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  * @param onSelectionAdvance Called after an article is selected, in addition to [onActivated] —
  *   see `HomeScreen`'s pane-layout wiring. No-op at [PaneLayout.Triple], where every pane is
  *   already visible and there is nowhere to advance to.
- * @param onNavigateUp Renders a leading back button in the top bar when non-null — this pane is
- *   being shown alone or paired at a narrow [PaneLayout] and needs its own way back to the feed
- *   list. `null` (the default) omits the slot entirely rather than rendering it disabled, since a
- *   [PaneLayout.Triple] pane is never navigated away from.
+ * @param onNavigateUp Renders the pane's own leading back-button-and-title row when non-null — this
+ *   pane is being shown alone or paired at a narrow [PaneLayout] and needs its own way back to the
+ *   feed list. `null` (the default) omits that row entirely rather than rendering it disabled,
+ *   since a [PaneLayout.Triple] pane is never navigated away from — the row's presence therefore
+ *   depends only on the layout, never on the navigation stack's current depth.
+ * @param navigateUpEnabled Whether going back is possible *right now* (false at [PaneLayout.Dual]
+ *   while the feed list is still on screen beside this pane). Only the back button's enabled state
+ *   depends on it — the row itself stays laid out either way, so nothing below it moves as the user
+ *   drills in and back out (see the `ui-guidelines` skill's "Layout stability under state changes").
  */
 @Composable
 fun ArticleListPane(
@@ -90,6 +95,7 @@ fun ArticleListPane(
     notifVm: NotificationCenterViewModel? = null,
     onSelectionAdvance: () -> Unit = {},
     onNavigateUp: (() -> Unit)? = null,
+    navigateUpEnabled: Boolean = true,
 ) {
     val filter by vm.filter.collectAsStateSafe(ArticleFilter.All)
     val feeds by vm.feeds.collectAsStateSafe(emptyList())
@@ -107,7 +113,7 @@ fun ArticleListPane(
         )
     }
     if (filter is ArticleFilter.Search) {
-        SearchListPane(vm, focused, onActivated, modifier, notifVm, onNavigateUp, title, onSelectionAdvance)
+        SearchListPane(vm, focused, onActivated, modifier, notifVm, onNavigateUp, navigateUpEnabled, title, onSelectionAdvance)
         return
     }
 
@@ -149,6 +155,7 @@ fun ArticleListPane(
         onActivated = onActivated,
         notifVm = notifVm,
         onNavigateUp = onNavigateUp,
+        navigateUpEnabled = navigateUpEnabled,
         title = title,
     )
 }
@@ -170,6 +177,7 @@ private fun SearchListPane(
     modifier: Modifier = Modifier,
     notifVm: NotificationCenterViewModel? = null,
     onNavigateUp: (() -> Unit)? = null,
+    navigateUpEnabled: Boolean = true,
     title: String? = null,
     onSelectionAdvance: () -> Unit = {},
 ) {
@@ -209,6 +217,7 @@ private fun SearchListPane(
             sortEnabled = false,
             notifVm = notifVm,
             onNavigateUp = onNavigateUp,
+            navigateUpEnabled = navigateUpEnabled,
             title = title,
         )
 
@@ -276,6 +285,12 @@ internal fun rememberCopyUrlAction(): (String) -> Unit {
  * above the controls row rather than folded into it: the controls row is unchanged from
  * [PaneLayout.Triple]/[PaneLayout.Dual] so the unread-only toggle stays reachable at every width
  * instead of being dropped for space.
+ *
+ * That row is laid out for the whole time the pane stays at a narrow layout, and only the back
+ * button's `enabled` state follows [navigateUpEnabled] — at [PaneLayout.Dual] the feed list slides
+ * in and out beside this pane as the user drills into an article and back, and hiding the row for
+ * the half of that cycle where there is nothing to go back to would move the controls row (and the
+ * whole list under it) up and down each time.
  */
 @Composable
 internal fun ArticleListTopBar(
@@ -287,6 +302,7 @@ internal fun ArticleListTopBar(
     sortEnabled: Boolean = true,
     notifVm: NotificationCenterViewModel? = null,
     onNavigateUp: (() -> Unit)? = null,
+    navigateUpEnabled: Boolean = true,
     title: String? = null,
 ) {
     WindowDragArea(Modifier.fillMaxWidth()) {
@@ -297,7 +313,7 @@ internal fun ArticleListTopBar(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val backLabel = stringResource(Res.string.common_back)
-                TooltipIconButton(tooltip = backLabel, onClick = onNavigateUp) {
+                TooltipIconButton(tooltip = backLabel, onClick = onNavigateUp, enabled = navigateUpEnabled) {
                     // No dedicated "back" asset — mirror the existing chevron (same trick
                     // ArticleListTopBar's own sort icon already uses to flip vertically below).
                     KeryxIcon(KeryxIcons.ChevronRight, contentDescription = backLabel, modifier = Modifier.graphicsLayer(scaleX = -1f))
@@ -378,6 +394,7 @@ internal fun ArticleListPaneContent(
     onActivated: () -> Unit = {},
     notifVm: NotificationCenterViewModel? = null,
     onNavigateUp: (() -> Unit)? = null,
+    navigateUpEnabled: Boolean = true,
     title: String? = null,
 ) {
     LaunchedEffect(selectedId, articles.isNotEmpty()) {
@@ -402,6 +419,7 @@ internal fun ArticleListPaneContent(
             sortEnabled = true,
             notifVm = notifVm,
             onNavigateUp = onNavigateUp,
+            navigateUpEnabled = navigateUpEnabled,
             title = title,
         )
 

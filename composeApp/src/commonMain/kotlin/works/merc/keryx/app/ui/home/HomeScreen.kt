@@ -32,6 +32,7 @@ import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.DETAIL_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.FEED_LIST_PANE_WIDTH_DEFAULT
+import works.merc.keryx.app.core.PANE_DIVIDER_WIDTH
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.platform.BackHandler
 import works.merc.keryx.app.platform.BrowserOpener
@@ -233,17 +234,13 @@ fun HomeScreen() {
                 BackHandler(enabled = layout != PaneLayout.Triple && focusedPane.ordinal > 0) { goBack() }
 
                 if (layout == PaneLayout.Triple) {
-                    val dividerWidth = 8.dp
+                    val dividerWidth = PANE_DIVIDER_WIDTH.dp
                     // coerceAtLeast(0.dp): with WINDOW_MIN_WIDTH >= the pane-minimum sum, this
                     // shouldn't go negative in steady state, but a transient pre-layout frame
                     // (maxWidth == 0) must not produce a negative Dp, which Modifier.width() rejects.
                     val availableForPanes = (maxWidth - dividerWidth * 2 - DETAIL_PANE_MIN_WIDTH.dp).coerceAtLeast(0.dp)
-                    val rawFeedWidth = feedListPaneWidth.dp
-                    val rawArticleWidth = articleListPaneWidth.dp
-                    val rawTotal = rawFeedWidth + rawArticleWidth
-                    val scale = if (rawTotal > availableForPanes && rawTotal > 0.dp) availableForPanes / rawTotal else 1f
-                    val displayedFeedWidth = rawFeedWidth * scale
-                    val displayedArticleWidth = rawArticleWidth * scale
+                    val (displayedFeedWidth, displayedArticleWidth) =
+                        triplePaneWidths(availableForPanes, feedListPaneWidth.dp, articleListPaneWidth.dp)
 
                     Row(Modifier.fillMaxSize()) {
                         FeedListPane(
@@ -305,10 +302,15 @@ fun HomeScreen() {
                                     modifier = paneModifier,
                                     notifVm = notifVm,
                                     onSelectionAdvance = { setFocusedPane(HomePane.ArticleDetail) },
-                                    // Needs its own way back to the feed list exactly when the feed
-                                    // list isn't also on screen (Single always; Dual once drilled
-                                    // into an article, per visiblePanes' sliding window).
-                                    onNavigateUp = if (HomePane.FeedList !in visible) ::goBack else null,
+                                    // Every narrow layout gives this pane its own back-button row
+                                    // (the Triple branch above passes none at all), and only the
+                                    // button's enabled state tracks whether there is anywhere to go
+                                    // back to — the feed list isn't also on screen (Single always;
+                                    // Dual once drilled into an article, per visiblePanes' sliding
+                                    // window). Hiding the row instead would shift the controls row
+                                    // and the whole list under it every time Dual slides.
+                                    onNavigateUp = ::goBack,
+                                    navigateUpEnabled = HomePane.FeedList !in visible,
                                 )
                                 HomePane.ArticleDetail -> ArticleDetailPane(
                                     vm,

@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.MouseButton
@@ -81,6 +82,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
+import kotlin.test.fail
 
 /**
  * End-to-end Compose UI tests for the hand-rolled (non-OS-level) feed-list reorder/attach drag: a
@@ -282,6 +284,157 @@ class FeedListDragTest {
 
             val order = db.feedsQueries.getByFolder(null).executeAsList().map { it.id }
             assertEquals(listOf("b", "a"), order)
+        } finally {
+            closeHomeViewModelFixture(vm, fixture, driver)
+        }
+    }
+
+    // --- Reorder via the row's custom accessibility actions (the DragHandle's screen-reader
+    // counterpart: the handle itself is decorative, and its drag is raw pointer input no assistive
+    // technology can perform — see FeedListRowParts.kt's reorderAccessibilityActions).
+
+    /** The labels of the custom accessibility actions exposed by the row tagged [testTag]. */
+    private fun ComposeUiTest.customActionLabels(testTag: String): List<String> =
+        onNodeWithTag(testTag, useUnmergedTree = true).fetchSemanticsNode()
+            .config.getOrElse(SemanticsActions.CustomActions) { emptyList() }
+            .map { it.label }
+
+    /** Invokes the custom accessibility action labelled [label] on the row tagged [testTag]. */
+    private fun ComposeUiTest.performCustomAction(testTag: String, label: String) {
+        val actions = onNodeWithTag(testTag, useUnmergedTree = true).fetchSemanticsNode()
+            .config.getOrElse(SemanticsActions.CustomActions) { emptyList() }
+        val action = actions.firstOrNull { it.label == label }
+            ?: fail("no custom action \"$label\" on $testTag (has ${actions.map { it.label }})")
+        assertTrue(action.action(), "custom action \"$label\" reported failure")
+    }
+
+    @Test
+    fun theMoveDownAccessibilityActionReordersAFeedWithinItsGroup() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("a", sortOrder = 0L)
+        db.insertFeed("b", sortOrder = 1L)
+        db.insertFeed("c", sortOrder = 2L)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            setFeedListDragContent(vm, isTouchPrimary = true)
+            waitForIdle()
+
+            performCustomAction(feedRowTestTag("a"), "下に移動")
+            waitForIdle()
+
+            assertEquals(listOf("b", "a", "c"), db.feedsQueries.getByFolder(null).executeAsList().map { it.id })
+        } finally {
+            closeHomeViewModelFixture(vm, fixture, driver)
+        }
+    }
+
+    @Test
+    fun theMoveUpAccessibilityActionReordersAFeedWithinItsGroup() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("a", sortOrder = 0L)
+        db.insertFeed("b", sortOrder = 1L)
+        db.insertFeed("c", sortOrder = 2L)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            setFeedListDragContent(vm, isTouchPrimary = true)
+            waitForIdle()
+
+            performCustomAction(feedRowTestTag("c"), "上に移動")
+            waitForIdle()
+
+            assertEquals(listOf("a", "c", "b"), db.feedsQueries.getByFolder(null).executeAsList().map { it.id })
+        } finally {
+            closeHomeViewModelFixture(vm, fixture, driver)
+        }
+    }
+
+    /**
+     * A feed's reorder scope is its own folder group, exactly like a drag's (see
+     * `FeedListDropIndex`): moving the last feed of a folder "down" is not a move into the next
+     * group, it is simply unavailable — as is moving the first one "up".
+     */
+    @Test
+    fun aFeedAtEitherEndOfItsGroupExposesNoActionInThatDirection() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFolder("d1", "Folder One", sortOrder = 0L)
+        db.insertFeed("f1", folderId = "d1", sortOrder = 0L)
+        db.insertFeed("f2", folderId = "d1", sortOrder = 1L)
+        db.insertFeed("a", sortOrder = 0L)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            setFeedListDragContent(vm, isTouchPrimary = true)
+            waitForIdle()
+
+            assertEquals(listOf("下に移動"), customActionLabels(feedRowTestTag("f1")))
+            assertEquals(listOf("上に移動"), customActionLabels(feedRowTestTag("f2")))
+            // The only feed of the "no folder" group: neither direction has a sibling to swap with,
+            // even though other feed rows sit above it on screen.
+            assertEquals(emptyList(), customActionLabels(feedRowTestTag("a")))
+        } finally {
+            closeHomeViewModelFixture(vm, fixture, driver)
+        }
+    }
+
+    @Test
+    fun theMoveDownAccessibilityActionReordersAFolder() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFolder("d1", "Alpha", sortOrder = 0L)
+        db.insertFolder("d2", "Beta", sortOrder = 1L)
+        db.insertFolder("d3", "Gamma", sortOrder = 2L)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            setFeedListDragContent(vm, isTouchPrimary = true)
+            waitForIdle()
+
+            assertEquals(listOf("下に移動"), customActionLabels(folderRowTestTag("d1")))
+            performCustomAction(folderRowTestTag("d1"), "下に移動")
+            waitForIdle()
+
+            assertEquals(listOf("d2", "d1", "d3"), db.foldersQueries.watchAll().executeAsList().map { it.id })
+        } finally {
+            closeHomeViewModelFixture(vm, fixture, driver)
+        }
+    }
+
+    @Test
+    fun theMoveUpAccessibilityActionReordersAFolder() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFolder("d1", "Alpha", sortOrder = 0L)
+        db.insertFolder("d2", "Beta", sortOrder = 1L)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            setFeedListDragContent(vm, isTouchPrimary = true)
+            waitForIdle()
+
+            assertEquals(listOf("上に移動"), customActionLabels(folderRowTestTag("d2")))
+            performCustomAction(folderRowTestTag("d2"), "上に移動")
+            waitForIdle()
+
+            assertEquals(listOf("d2", "d1"), db.foldersQueries.watchAll().executeAsList().map { it.id })
+        } finally {
+            closeHomeViewModelFixture(vm, fixture, driver)
+        }
+    }
+
+    /** Gated exactly like the visual [DragHandle] the actions stand in for. */
+    @Test
+    fun noReorderActionsAreExposedWhereTouchIsNotThePrimaryInput() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("a", sortOrder = 0L)
+        db.insertFeed("b", sortOrder = 1L)
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            setFeedListDragContent(vm, isTouchPrimary = false)
+            waitForIdle()
+
+            assertEquals(emptyList(), customActionLabels(feedRowTestTag("a")))
+            assertEquals(emptyList(), customActionLabels(feedRowTestTag("b")))
         } finally {
             closeHomeViewModelFixture(vm, fixture, driver)
         }

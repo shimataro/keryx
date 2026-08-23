@@ -469,6 +469,10 @@ internal fun FeedListPane(
                         folderId: String?,
                         isFirstInList: Boolean = false,
                     ) {
+                        // This group *is* the reorder scope for every feed in it (the same one
+                        // `FeedListDropIndex` resolves a drop within), so the accessibility
+                        // move-up/move-down actions below need no ordering of their own.
+                        val feedIdsInGroup = feedsInFolder.map { it.id }
                         itemsIndexed(
                             feedsInFolder,
                             key = { _, feed -> "feed-${feed.id}" },
@@ -500,10 +504,21 @@ internal fun FeedListPane(
                                 onCopyFeedUrl = { copyUrl(feed.url) },
                                 onCopySiteUrl = { feed.site_url?.let(copyUrl) },
                                 onOpenSite = { feed.site_url?.let(BrowserOpener::open) },
+                                isTouchPrimary = isTouchPrimary,
+                                // Same mutation the drop of a real drag applies (see
+                                // FeedListDragController.end), just with the landing position
+                                // resolved from the group's own order instead of a pointer.
+                                onMoveUp = reorderTargetWithinScope(feedIdsInGroup, index, -1)?.let { target ->
+                                    { vm.moveFeed(feed.id, folderId, target.insertBeforeId) }
+                                },
+                                onMoveDown = reorderTargetWithinScope(feedIdsInGroup, index, 1)?.let { target ->
+                                    { vm.moveFeed(feed.id, folderId, target.insertBeforeId) }
+                                },
                             )
                         }
                     }
 
+                    val folderIds = folders.map { it.id }
                     val folderGroups = groupFeedsByFolder(feeds, folders)
                     folderGroups.forEachIndexed { index, (folder, feedsInFolder) ->
                         // The feed-zone boundary of the immediately preceding group's folder, only
@@ -534,7 +549,8 @@ internal fun FeedListPane(
                             feedItems(feedsInFolder, indented = false, folderId = null, isFirstInList = folders.isEmpty())
                         } else {
                             val collapsed = folder.id in collapsedFolderIds
-                            val nextFolderId = folders.getOrNull(folders.indexOf(folder) + 1)?.id
+                            val folderIndex = folders.indexOf(folder)
+                            val nextFolderId = folders.getOrNull(folderIndex + 1)?.id
                             item(key = "folder-${folder.id}", contentType = "folder-header") {
                                 FolderGroupHeader(
                                     folder = folder,
@@ -558,6 +574,16 @@ internal fun FeedListPane(
                                         if (folders.any { it.id != folder.id && it.name == name }) folderNameDuplicateError else null
                                     },
                                     isDragSource = folder.id == draggedFeedFolderId,
+                                    isTouchPrimary = isTouchPrimary,
+                                    // A folder's reorder scope is the top-level folder order, so
+                                    // these resolve against `folders` — the same list
+                                    // FeedListDropIndex.nextFolderId is built from.
+                                    onMoveUp = reorderTargetWithinScope(folderIds, folderIndex, -1)?.let { target ->
+                                        { vm.reorderFolders(folder.id, target.insertBeforeId) }
+                                    },
+                                    onMoveDown = reorderTargetWithinScope(folderIds, folderIndex, 1)?.let { target ->
+                                        { vm.reorderFolders(folder.id, target.insertBeforeId) }
+                                    },
                                 )
                             }
                             if (!collapsed) {

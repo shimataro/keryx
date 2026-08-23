@@ -2,7 +2,9 @@ package works.merc.keryx.app.ui.home
 
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.DUAL_PANE_MIN_WIDTH
+import works.merc.keryx.app.core.FEED_LIST_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.TRIPLE_PANE_MIN_WIDTH
 
 /**
@@ -25,6 +27,33 @@ fun paneLayoutFor(availableWidth: Dp): PaneLayout = when {
     availableWidth >= TRIPLE_PANE_MIN_WIDTH.dp -> PaneLayout.Triple
     availableWidth >= DUAL_PANE_MIN_WIDTH.dp -> PaneLayout.Dual
     else -> PaneLayout.Single
+}
+
+/** The widths the feed list and article list panes are laid out at, per [triplePaneWidths]. */
+internal data class TriplePaneWidths(val feedWidth: Dp, val articleWidth: Dp)
+
+/**
+ * Fits the two persisted pane-width preferences into the width left over for them at
+ * [PaneLayout.Triple] ([availableForPanes] — the window minus the dividers and the detail pane's
+ * own minimum), **without either pane ever going below its own minimum**.
+ *
+ * Each pane's minimum ([FEED_LIST_PANE_MIN_WIDTH] / [ARTICLE_LIST_PANE_MIN_WIDTH]) is reserved
+ * first, and only what each preference asks for *above* its minimum competes for whatever width is
+ * left, proportionally. Scaling both preferences by one shared factor instead — as this used to —
+ * gives away width in proportion to a pane's total size rather than to its slack, so at
+ * [TRIPLE_PANE_MIN_WIDTH] exactly (where nothing is left over) the narrower pane was pushed below
+ * its minimum: with the default 260dp/360dp preferences the feed pane landed at ~176dp, under its
+ * own 180dp floor.
+ */
+internal fun triplePaneWidths(availableForPanes: Dp, feedPreference: Dp, articlePreference: Dp): TriplePaneWidths {
+    val minFeed = FEED_LIST_PANE_MIN_WIDTH.dp
+    val minArticle = ARTICLE_LIST_PANE_MIN_WIDTH.dp
+    val extraAvailable = (availableForPanes - minFeed - minArticle).coerceAtLeast(0.dp)
+    val feedExtra = (feedPreference - minFeed).coerceAtLeast(0.dp)
+    val articleExtra = (articlePreference - minArticle).coerceAtLeast(0.dp)
+    val extraTotal = feedExtra + articleExtra
+    val extraScale = if (extraTotal > extraAvailable && extraTotal > 0.dp) extraAvailable / extraTotal else 1f
+    return TriplePaneWidths(minFeed + feedExtra * extraScale, minArticle + articleExtra * extraScale)
 }
 
 /**

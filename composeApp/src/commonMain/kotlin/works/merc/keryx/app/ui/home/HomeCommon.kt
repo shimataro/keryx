@@ -204,9 +204,9 @@ fun feedsForTag(feeds: List<Feeds>, feedTagMap: Map<String, Set<String>>, tagId:
 
 /**
  * The display title for the article list pane's current [filter] — shown in its top bar only when
- * the pane is rendered alone (a narrow [PaneLayout], see `ArticleListTopBar`'s `onNavigateUp`/
+ * the pane is rendered at a narrow [PaneLayout] (see `ArticleListTopBar`'s `onNavigateUp`/
  * `title` parameters), since the feed list pane's own selection already conveys this at
- * [PaneLayout.Triple]/[PaneLayout.Dual]. Falls back to [allLabel] for a feed/tag/folder id that no
+ * [PaneLayout.Triple]. Falls back to [allLabel] for a feed/tag/folder id that no
  * longer exists (e.g. deleted on another device and not yet synced here), matching
  * `groupFeedsByFolder`'s own defensive "no folder" treatment.
  */
@@ -285,6 +285,34 @@ fun nextFeedListRow(
     val next = (index + delta).coerceIn(0, orderedRows.lastIndex)
     val target = orderedRows.getOrNull(next) ?: return null
     return target.takeIf { it != current }
+}
+
+/**
+ * Where a moved feed-list row lands, expressed exactly the way the drag-and-drop path already
+ * expresses a resolved drop: the id to insert it *before*, or `null` to append it at the end of its
+ * scope (see `reorderIds`, and `HomeViewModel.moveFeed`/`reorderFolders`, whose target parameters
+ * this is passed straight to).
+ */
+internal data class ReorderTarget(val insertBeforeId: String?)
+
+/**
+ * The [ReorderTarget] for moving the row at [index] of [orderedIds] by [delta] positions **within
+ * its own reorder scope** — the sibling feeds of one folder group, or the top-level folder order.
+ * This is the scope-bounded counterpart of [nextFeedListRow], which walks the *visual* row order
+ * ([buildOrderedFeedListRows]) across scopes and so can't answer "what would moving this one
+ * position do".
+ *
+ * Returns `null` — as opposed to a [ReorderTarget] holding `null`, which means "append at the end"
+ * — when the move isn't possible at all: already at the first/last position in scope, or [index]
+ * outside [orderedIds]. Call sites turn that into an omitted accessibility action.
+ */
+internal fun reorderTargetWithinScope(orderedIds: List<String>, index: Int, delta: Int): ReorderTarget? {
+    if (index !in orderedIds.indices) return null
+    val landsAt = index + delta
+    if (landsAt !in orderedIds.indices) return null
+    // Moving up, the row goes immediately before whatever now sits at `landsAt`; moving down, it
+    // goes after it — i.e. before that row's own successor, or at the very end when there is none.
+    return if (delta < 0) ReorderTarget(orderedIds[landsAt]) else ReorderTarget(orderedIds.getOrNull(landsAt + 1))
 }
 
 /**

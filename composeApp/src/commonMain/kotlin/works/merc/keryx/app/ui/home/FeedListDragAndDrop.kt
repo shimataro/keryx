@@ -45,7 +45,6 @@ import works.merc.keryx.app.platform.NativeMenuItem
 import works.merc.keryx.app.platform.NativeMenuSeparator
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.NativeSubMenu
-import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_assign_tags
@@ -248,6 +247,12 @@ internal fun Modifier.insertionMarkers(top: InsertionMarker? = null, bottom: Ins
  * @param onRenameCancel Abandons an in-progress name edit.
  * @param nameError Produces a validation message for an edited name, or `null` when valid.
  * @param isDragSource Whether the folder contains the feed currently being dragged.
+ * @param isTouchPrimary Whether this platform's reorder gesture starts from the row's own
+ *   [DragHandle] — which is then also given its assistive-technology counterpart, see
+ *   [reorderAccessibilityActions]. Overridable for tests only, like `FeedListPane`'s own parameter.
+ * @param onMoveUp Moves this folder one position up in the folder order, or `null` when it is
+ *   already the first one (see [reorderTargetWithinScope]).
+ * @param onMoveDown Moves this folder one position down, or `null` when it is already the last one.
  */
 @Composable
 internal fun FolderGroupHeader(
@@ -270,6 +275,9 @@ internal fun FolderGroupHeader(
     onRenameCancel: () -> Unit = {},
     nameError: (String) -> String? = { null },
     isDragSource: Boolean = false,
+    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
+    onMoveUp: (() -> Unit)? = null,
+    onMoveDown: (() -> Unit)? = null,
 ) {
     val editFolderLabel = stringResource(Res.string.home_edit_folder_menu)
     val deleteFolderLabel = stringResource(Res.string.home_delete_folder_menu)
@@ -317,6 +325,7 @@ internal fun FolderGroupHeader(
     Row(
         Modifier.fillMaxWidth()
             .testTag(folderRowTestTag(folder.id))
+            .reorderAccessibilityActions(isTouchPrimary, onMoveUp, onMoveDown)
             .listRowClickable(rowInteraction, onClick)
             .nativeContextMenu(
                 items = {
@@ -460,6 +469,13 @@ internal fun NoFolderHeader(
  * @param onCopyFeedUrl Copies the feed's own (RSS/Atom) URL to the clipboard.
  * @param onCopySiteUrl Copies the feed's website URL to the clipboard.
  * @param onOpenSite Opens the feed's website in the external browser.
+ * @param isTouchPrimary Whether this platform's reorder gesture starts from the row's own
+ *   [DragHandle] — which is then also given its assistive-technology counterpart, see
+ *   [reorderAccessibilityActions]. Overridable for tests only, like `FeedListPane`'s own parameter.
+ * @param onMoveUp Moves this feed one position up among the feeds of its own group, or `null` when
+ *   it is already the first one there (see [reorderTargetWithinScope]).
+ * @param onMoveDown Moves this feed one position down in the same group, or `null` when it is
+ *   already the last one there.
  */
 @Composable
 internal fun FeedRow(
@@ -487,6 +503,9 @@ internal fun FeedRow(
     onCopyFeedUrl: () -> Unit,
     onCopySiteUrl: () -> Unit,
     onOpenSite: () -> Unit,
+    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
+    onMoveUp: (() -> Unit)? = null,
+    onMoveDown: (() -> Unit)? = null,
 ) {
     val refreshLabel = stringResource(Res.string.home_refresh)
     val assignTagsLabel = stringResource(Res.string.home_assign_tags)
@@ -513,6 +532,7 @@ internal fun FeedRow(
     Row(
         Modifier.fillMaxWidth()
             .testTag(feedRowTestTag(feed.id))
+            .reorderAccessibilityActions(isTouchPrimary, onMoveUp, onMoveDown)
             .listRowClickable(rowInteraction, onClick)
             .nativeContextMenu(
                 items = {

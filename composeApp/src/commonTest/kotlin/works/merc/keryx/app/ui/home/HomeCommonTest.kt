@@ -216,6 +216,41 @@ class HomeCommonTest {
         )
     }
 
+    // --- reorderTargetWithinScope ---
+
+    @Test
+    fun reorderTargetWithinScopeMovesUpToJustBeforeThePrecedingSibling() {
+        val ids = listOf("a", "b", "c")
+
+        assertEquals(ReorderTarget("a"), reorderTargetWithinScope(ids, index = 1, delta = -1))
+        assertEquals(ReorderTarget("b"), reorderTargetWithinScope(ids, index = 2, delta = -1))
+    }
+
+    @Test
+    fun reorderTargetWithinScopeMovesDownToJustBeforeTheSiblingAfterTheNextOne() {
+        val ids = listOf("a", "b", "c")
+
+        // "a" moving down lands after "b", i.e. before "c".
+        assertEquals(ReorderTarget("c"), reorderTargetWithinScope(ids, index = 0, delta = 1))
+        // "b" moving down lands after the last one, i.e. appended (a null target — see reorderIds).
+        assertEquals(ReorderTarget(null), reorderTargetWithinScope(ids, index = 1, delta = 1))
+    }
+
+    @Test
+    fun reorderTargetWithinScopeReportsNoMoveAtEitherEndOfTheScope() {
+        val ids = listOf("a", "b")
+
+        assertNull(reorderTargetWithinScope(ids, index = 0, delta = -1))
+        assertNull(reorderTargetWithinScope(ids, index = 1, delta = 1))
+        assertNull(reorderTargetWithinScope(ids, index = 0, delta = -1))
+        // A lone item has no sibling to swap with in either direction.
+        assertNull(reorderTargetWithinScope(listOf("a"), index = 0, delta = 1))
+        assertNull(reorderTargetWithinScope(listOf("a"), index = 0, delta = -1))
+        // Out-of-range positions (a row whose data changed under it) are a no-op, not a crash.
+        assertNull(reorderTargetWithinScope(ids, index = 5, delta = -1))
+        assertNull(reorderTargetWithinScope(emptyList(), index = 0, delta = 1))
+    }
+
     // --- articleListTitle ---
 
     @Test
