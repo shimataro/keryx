@@ -50,6 +50,9 @@ class KeystoreTokenStorageDeviceTest {
         val fallback = FileTokenStorage(dirOverride = fallbackDir.absolutePath, fileName = ".${account}_tokens.json")
         val storage = KeystoreTokenStorage(fallback = fallback, account = account, dirOverride = encryptedDir.absolutePath)
 
+        val keyAlias = "keryx_token_$account"
+        keyAliasesToCleanup += keyAlias
+
         val oldTokens = OAuthTokens(accessToken = "old-access", refreshToken = "old-refresh")
         storage.save(oldTokens)
         val encryptedFile = File(encryptedDir, ".${account}_tokens.enc")
@@ -58,8 +61,6 @@ class KeystoreTokenStorageDeviceTest {
         // Overwrite the Keystore entry at the same alias with an asymmetric key pair: the next
         // save()'s `getKey(alias, null) as SecretKey?` then throws ClassCastException, forcing
         // encryption — and therefore the whole save() — to fail.
-        val keyAlias = "keryx_token_$account"
-        keyAliasesToCleanup += keyAlias
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         val spec = KeyGenParameterSpec.Builder(keyAlias, KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY)
             .setDigests(KeyProperties.DIGEST_SHA256)
