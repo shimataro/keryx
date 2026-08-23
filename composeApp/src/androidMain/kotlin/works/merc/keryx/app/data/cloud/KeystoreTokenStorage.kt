@@ -57,28 +57,21 @@ class KeystoreTokenStorage(
             val ciphertext = cipher.doFinal(plaintext)
             val iv = cipher.iv
             check(iv.size == GCM_IV_LENGTH_BYTES) { "Unexpected GCM IV length: ${iv.size}" }
-            file.parentFile?.mkdirs()
-            // Write to a sibling temp file, then atomically replace the target — the same idiom
-            // FileTokenStorage.save() uses. file.writeBytes() straight into the token file would
-            // truncate it first, so a process death mid-write left a truncated file that load()
-            // discards, forcing the user to reconnect.
-            val tmp = File(file.parentFile, "${file.name}.tmp")
-            try {
-                tmp.writeBytes(iv + ciphertext)
-                Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-            } catch (e: Exception) {
-                tmp.delete()
-                throw e
-            }
+            atomicWrite(iv + ciphertext)
         }
         if (result.isFailure) {
             Log.warn(TOKEN_STORAGE_LOG_TAG, "Keystore token save failed, falling back to file storage", result.exceptionOrNull())
             // A previously-successful encrypted save may have left `file` holding now-stale
-            // tokens (e.g. a refresh-token rotation whose new tokens only made it into
-            // `fallback` below). load() prefers `file` when it exists, so leaving it behind would
-            // silently keep serving the old, since-rotated tokens after a restart.
-            if (file.exists() && !file.delete()) {
-                Log.warn(TOKEN_STORAGE_LOG_TAG, "Stale encrypted token file delete returned false")
+            // tokens that are still perfectly decryptable. load() always prefers `file` when it
+            // exists and decrypts, so leaving it in place would silently keep serving those old,
+            // since-rotated tokens forever — even though fallback.save() below just wrote the
+            // fresh ones. File.delete() is not guaranteed to succeed on every Android storage
+            // backend, so invalidate the content atomically instead: an empty file is at or under
+            // GCM_IV_LENGTH_BYTES, which load() already treats as "truncated, discard" and cleans
+            // up on its own next read.
+            if (file.exists()) {
+                runCatching { atomicWrite(ByteArray(0)) }
+                    .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Failed to invalidate stale encrypted token file", e) }
             }
             fallback.save(tokens)
         } else {
@@ -86,6 +79,22 @@ class KeystoreTokenStorage(
             // available again; clear it so a stale plaintext copy doesn't linger once encrypted
             // storage is working.
             fallback.clear()
+        }
+    }
+
+    // Write to a sibling temp file, then atomically replace the target — the same idiom
+    // FileTokenStorage.save() uses. file.writeBytes() straight into the token file would
+    // truncate it first, so a process death mid-write left a truncated file that load()
+    // discards, forcing the user to reconnect.
+    private fun atomicWrite(bytes: ByteArray) {
+        file.parentFile?.mkdirs()
+        val tmp = File(file.parentFile, "${file.name}.tmp")
+        try {
+            tmp.writeBytes(bytes)
+            Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        } catch (e: Exception) {
+            tmp.delete()
+            throw e
         }
     }
 
