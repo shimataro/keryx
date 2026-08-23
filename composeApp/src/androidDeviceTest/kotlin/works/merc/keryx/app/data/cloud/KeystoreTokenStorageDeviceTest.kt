@@ -65,6 +65,7 @@ class KeystoreTokenStorageDeviceTest {
         storage.save(newTokens)
 
         assertEquals(newTokens, storage.load(), "load() must return the fresh fallback tokens, not the stale encrypted ones")
+        assertTrue(encryptedFile.exists(), "the stale encrypted file must remain in place (zeroed out), not be deleted")
         assertEquals(0L, encryptedFile.length(), "the stale encrypted file must be invalidated, not left holding decryptable old tokens")
     }
 }
