@@ -61,7 +61,11 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
 - デスクトップ通知・タスクトレイ常駐（閉じるとトレイに収納）・通知センター。
   Linux ではトレイに D-Bus の `org.kde.StatusNotifierItem` + `com.canonical.dbusmenu`、通知に
   `org.freedesktop.Notifications` を使い、StatusNotifierItem ホストが居ない環境では AWT の
-  システムトレイにフォールバックする。
+  システムトレイにフォールバックする。Android では新着記事の通知を `NotificationManagerCompat`
+  経由で投稿し（Android 13+ では OS の通知権限をリクエスト）、バックグラウンド更新は `WorkManager` で
+  設定した間隔に概ね従って実行される。アプリ内の「アップデートを確認」は、サイドロードではなく
+  ストア（現状は Google Play のみ）からインストールされた場合には非表示になる — そのストアが既に
+  アプリを自動更新するため。
 
 ### フィード URL 変更・消滅時の挙動
 

@@ -5,11 +5,27 @@ import org.koin.core.Koin
 import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
+import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.MILLIS_PER_DAY
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.data.local.FtsManager
+import works.merc.keryx.app.platform.SelfUpdateCheckSupport
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.update_available_notification
+
+/**
+ * Soft-deletes expired cached articles once per day (gated on [works.merc.keryx.app.data.local.db.LocalSettings.lastCacheCleanupAt],
+ * mirroring [maybeRebuildFtsIndex]'s own 24h gate).
+ */
+internal suspend fun cleanUpArticleCacheIfDue(koin: Koin) {
+    val settingsRepository = koin.get<SettingsRepository>()
+    val now = koin.get<Clock>().nowMillis()
+    val last = settingsRepository.getLocalSettings().lastCacheCleanupAt
+    if (last != null && now - last < MILLIS_PER_DAY) return
+    val days = settingsRepository.getCacheRetentionDays()
+    koin.get<ArticleRepository>().deleteExpiredArticles(days)
+    settingsRepository.mutateLocalSettings { it.copy(lastCacheCleanupAt = now) }
+}
 
 /**
  * Refreshes all feeds and processes notifications for newly fetched articles according to the local notification setting.
@@ -28,6 +44,7 @@ internal suspend fun refreshFeedsAndNotify(koin: Koin) {
  * @param koin The dependency injection container used to resolve update and notification services.
  */
 internal suspend fun checkForUpdateAndNotify(koin: Koin) {
+    if (!koin.get<SelfUpdateCheckSupport>().isSupported()) return
     val settingsRepository = koin.get<SettingsRepository>()
     val status = koin.get<UpdateChecker>().check()
     settingsRepository.mutateLocalSettings { it.copy(lastUpdateCheckAt = SystemClock.nowMillis()) }

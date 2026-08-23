@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import org.koin.compose.koinInject
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.platform.rememberNotificationPermissionRequester
 import works.merc.keryx.app.ui.home.HomeScreen
 import works.merc.keryx.app.ui.home.NotificationCenterViewModel
 import works.merc.keryx.app.ui.menu.MenuCommand
@@ -42,6 +43,21 @@ fun App() {
 
         // Keep the menu bar's screen-gating (see AppMenuBar) in sync with the active destination.
         LaunchedEffect(navigator.current) { menuController.currentScreen.value = navigator.current }
+
+        // Requests Android's POST_NOTIFICATIONS whenever the user's own notification setting is on
+        // while Home is showing — a no-op on desktop and on an Android version/state with nothing
+        // to request (see the expect's KDoc). This is the single requester for both cases: the
+        // setting already on when Home is first reached, and the user flipping it on later from
+        // NotificationsTab (the Settings dialog is a modeless overlay on Home, so navigator.current
+        // stays Home while it's open, and settings.notificationEnabled — a key here — changes too).
+        // Keyed on navigator.current (live navigation state), not setupComplete: that's a
+        // remember{} snapshot taken once at first composition specifically to pick the *initial*
+        // screen, so it never flips to true within the same session — a user who completes setup
+        // and lands on Home right now would otherwise never trigger this until the next cold start.
+        val requestNotificationPermission = rememberNotificationPermissionRequester()
+        LaunchedEffect(navigator.current, settings.notificationEnabled) {
+            if (navigator.current == Screen.Home && settings.notificationEnabled) requestNotificationPermission()
+        }
 
         // Menu commands whose target lives in App's own composition (the About/Settings dialogs).
         // Both dialogs are modeless windows shown over Home, tracked by boolean state here.

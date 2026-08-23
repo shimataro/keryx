@@ -33,3 +33,4 @@ its respective license.
 | sqlite-android (requery) | Apache-2.0 | <https://github.com/requery/sqlite-android> |
 | AndroidX Core | Apache-2.0 | <https://github.com/androidx/androidx> |
 | AndroidX Activity | Apache-2.0 | <https://github.com/androidx/androidx> |
+| AndroidX WorkManager | Apache-2.0 | <https://github.com/androidx/androidx> |

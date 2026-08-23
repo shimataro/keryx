@@ -8,6 +8,9 @@ import org.koin.dsl.module
 import works.merc.keryx.app.core.CONNECTION_TIMEOUT_MS
 import works.merc.keryx.app.core.REQUEST_TIMEOUT_MS
 import works.merc.keryx.app.domain.CloudSession
+import works.merc.keryx.app.domain.OsNotificationSink
+import works.merc.keryx.app.platform.AndroidAppContext
+import works.merc.keryx.app.platform.AndroidNotificationSink
 
 /**
  * Android `platformModule`. Cloud sync itself is Phase 4 work (Custom Tabs OAuth,
@@ -19,6 +22,8 @@ import works.merc.keryx.app.domain.CloudSession
  * `DatabaseMerger`/`DatabaseSnapshot` actuals.
  */
 actual val platformModule: Module = module {
+    single<OsNotificationSink> { AndroidNotificationSink(AndroidAppContext.application) }
+
     single {
         HttpClient(OkHttp) {
             // Statuses are handled explicitly everywhere (feed redirects, cloud errors).

@@ -236,6 +236,8 @@
         <item quantity="other">%1$d new articles</item>
     </plurals>
     <string name="feed_url_changed">The URL for “%1$s” has changed</string>
+    <string name="notification_channel_new_articles_name">New articles</string>
+    <string name="notification_channel_new_articles_description">Notifies you when new articles are fetched</string>
     <string name="update_available_notification">Version %1$s is now available</string>
     <string name="notification_app_translocated">Keryx is running from a temporary location. If Dropbox integration and similar features fail, move Keryx to the Applications folder and relaunch it.</string>
     <string name="notification_app_translocated_detail">macOS uses a mechanism called App Translocation to run apps launched directly from a disk image (DMG) or the Downloads folder from a random temporary location each time.\n\nBecause this changes Keryx’s actual path, the OS can’t deliver keryx:// links to it, which can prevent Dropbox or OneDrive integration (OAuth authentication) from completing.\n\nFix: copy Keryx.app to the Applications folder and launch it from there.</string>

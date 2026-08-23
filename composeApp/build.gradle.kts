@@ -268,6 +268,7 @@ kotlin {
             dependencies {
                 implementation(libs.androidx.core.ktx)
                 implementation(libs.androidx.activity.compose)
+                implementation(libs.androidx.work)
                 implementation(libs.ktor.client.okhttp)
 
                 // The bundled SQLite that backs articles_fts's trigram tokenizer. See

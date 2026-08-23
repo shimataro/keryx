@@ -58,7 +58,11 @@ On first launch, choose local-only / cloud sync (Dropbox / Google Drive / OneDri
 - Desktop notifications, task tray residence (close minimizes to tray), notification center.
   On Linux the tray uses the D-Bus `org.kde.StatusNotifierItem` + `com.canonical.dbusmenu` protocols
   and notifications use `org.freedesktop.Notifications`, falling back to the AWT system tray when no
-  StatusNotifierItem host is running.
+  StatusNotifierItem host is running. On Android, new-article notifications are posted through
+  `NotificationManagerCompat` (requesting the OS notification permission on Android 13+) and
+  background refresh runs on `WorkManager`, at roughly the interval configured in Settings; the
+  in-app "check for update" is hidden when the app was installed from an app store (currently just
+  Google Play) rather than sideloaded, since that store already auto-updates the app.
 
 ### Behavior on Feed URL Change / Disappearance
 

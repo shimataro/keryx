@@ -27,6 +27,7 @@ import works.merc.keryx.app.domain.CustomUriRedirectTransport
 import works.merc.keryx.app.domain.LoopbackRedirectTransport
 import works.merc.keryx.app.domain.OAuthCallbackParams
 import works.merc.keryx.app.domain.OAuthConnectFlow
+import works.merc.keryx.app.domain.OsNotificationSink
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.resources.Res
@@ -47,6 +48,11 @@ private fun providerTokenStorage(type: CloudStorageType, macOs: Boolean): TokenS
 }
 
 actual val platformModule: Module = module {
+    // No-op: main.kt collects NewArticleNotifier.trayEvents itself for the whole process
+    // lifetime and posts tray notifications from there (see that flow's own KDoc). Posting again
+    // through this sink would show every new-article notification twice.
+    single<OsNotificationSink> { OsNotificationSink { } }
+
     single {
         HttpClient(CIO) {
             // Statuses are handled explicitly everywhere (feed redirects, cloud errors).
