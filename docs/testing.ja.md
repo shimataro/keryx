@@ -13,6 +13,20 @@
   （`androidx.compose.ui.test.runDesktopComposeUiTest`、JUnit4 ルール不要）も置く
   （例: `ArticleListPaneTest.kt`）。実 Skia/AWT レンダラが必要なため `commonTest` ではなく
   `desktopTest` に置く。
+- `androidDeviceTest/` — `DatabaseMerger`/`DatabaseSnapshot` の Android 実装向け計装テスト。
+  バンドルされた `requery` SQLite（ネイティブライブラリ）を直接開くため、`desktopTest` のような
+  プレーンな JVM ユニットテストとしては実行できない（`.claude/rules/android-sqlite-bundling.md`
+  参照）。実機または起動中のエミュレータが必要。`composeApp` には `androidUnitTest`/`androidHostTest`
+  ソースセットは存在しない — デバイスか Robolectric（現状未導入の依存）のどちらか無しには JVM 上で
+  テストできない Android 固有ロジックが無いため。ヘルパーは `AndroidDbTestSupport.kt`
+  （`createSchemaDbFile()`。`DbTestSupport.kt` の `fileDb()` に相当するが、本番と同じスキーマ導入経路
+  である実際の `AndroidSqliteDriver` 経由で作成する）。範囲は Android 固有の差異が出うる箇所に絞る
+  — スキーマバージョンガード、マイグレーション経路、例外**クラス**ベースの失敗分類（Android の
+  `SQLiteException` は数値エラーコードを持たない。デスクトップの `DatabaseMerger` は JDBC ドライバの
+  `resultCode` を読む点と対照的）、および `NoOpDatabaseErrorHandler` の回帰確認（バンドル SQLite の
+  既定エラーハンドラは破損と判定した DB ファイルを削除する。AAR の逆アセンブルで確認済み）——
+  `desktopTest` のマージ/スナップショット系スイート全体を移植するものではない。マージ SQL 自体
+  （`MergeSql`）は純粋ロジックであり、既に `desktopTest` 側でカバーされているため。
 
 新しいテストは対象コードと同じ相対パスに置く。
 
@@ -60,6 +74,20 @@
 ```bash
 ./gradlew :composeApp:desktopTest
 ```
+
+Android の計装テストスイート `androidDeviceTest`（実際のバンドル SQLite に対する
+`DatabaseMerger`/`DatabaseSnapshot` の検証）には実機または起動中のエミュレータが必要:
+
+```bash
+$ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
+./gradlew :composeApp:connectedAndroidDeviceTest
+```
+
+（タスク名は AGP 9 の `com.android.kotlin.multiplatform.library` プラグイン自身の
+`withDeviceTestBuilder` DSL に由来する — 将来の AGP リリースで名称が変わった場合は
+`./gradlew :composeApp:tasks --all | grep -i device` で確認する）。`ci.yml` には組み込んでいない
+— デスクトップの UI テストは `xvfb` 上で既に CI で動いているが、Android エミュレータはこのプロジェクト
+がまだ導入していない別種の CI 課題のため、現状はローカル実行のみ。
 
 スイートはパーサ、フェッチャのリダイレクト/304/404/410/タイムアウト/ディスカバリ、
 OPML、Dropbox ストレージ/認証、PKCE、OAuth ループバックサーバ、マージ（後勝ち・OR マージ・衝突ガード・

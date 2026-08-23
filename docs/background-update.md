@@ -58,19 +58,22 @@ matters for a hand-edited or migrated `local_settings.json`.
 
 `background/FeedRefreshWorker.kt` (a `CoroutineWorker`, instantiated by `WorkManager`'s own
 `WorkerFactory` via reflection — dependencies are resolved from `KoinPlatform.getKoin()` inside
-`doWork()` rather than constructor-injected) runs exactly the same three commonMain functions
-desktop's `backgroundUpdateLoop` calls each cycle: `refreshFeedsAndNotify`, `checkForUpdateAndNotify`,
-`maybeRebuildFtsIndex`. It does not call `SyncRepository.sync()` — cloud sync is Phase 4 work, and
-`CloudSession(providers = emptyMap())` on Android would make it a no-op that only wastes a wakeup
-anyway. A caught exception returns `Result.retry()`, deferring to `WorkManager`'s own backoff policy.
+`doWork()` rather than constructor-injected) runs exactly the same sequence desktop's
+`backgroundUpdateLoop` runs each cycle: `refreshFeedsAndNotify`, then (if `CloudSession.isConnected()`)
+`SyncRepository.sync(SyncTrigger.AUTOMATIC)`, then `checkForUpdateAndNotify`, `maybeRebuildFtsIndex`.
+On Android, `CloudSession` currently has Dropbox/OneDrive providers only (no Google Drive — see
+[sync-architecture.md](sync-architecture.md)'s "Google Drive on Android"), so `sync()` is a genuine
+no-op only when the user hasn't connected either of those. A caught exception returns
+`Result.retry()`, deferring to `WorkManager`'s own backoff policy.
 
 `MainActivity.onCreate` calls `runAndroidStartupTasks` (`AndroidStartupTasks.kt`) — the Android
-counterpart to desktop's `runStartupTasks`, minus the macOS-specific translocation warning and the
-initial cloud sync (again Phase 4). It runs `cleanUpArticleCacheIfDue` (see below), then the same
-three functions `FeedRefreshWorker` runs. This deliberately lives in the *Activity*, not
+counterpart to desktop's `runStartupTasks`, minus the macOS-specific translocation warning (which
+has no Android equivalent). It runs `cleanUpArticleCacheIfDue` (see below), then — same gate and
+position as desktop's `runStartupTasks` — the initial cloud sync, then the same three maintenance
+functions `FeedRefreshWorker` runs. This deliberately lives in the *Activity*, not
 `Application.onCreate`: the latter also runs when `WorkManager` wakes the process to run
 `FeedRefreshWorker`, and running the full startup sequence on every background wakeup would
-duplicate the refresh/update-check/FTS work the worker itself just did. A process-local guard
+duplicate the refresh/sync/update-check/FTS work the worker itself just did. A process-local guard
 (`startupTasksRan`) keeps it to once per process even though `onCreate` re-runs on configuration
 changes (e.g. rotation) that recreate the Activity without restarting the process.
 
@@ -119,14 +122,16 @@ nothing changed now writes nothing and triggers no re-query.
 ## Startup Tasks (`runStartupTasks` / `runAndroidStartupTasks`)
 
 `runStartupTasks` itself is desktop-only orchestration (`desktopMain/StartupTasks.kt`) — it also warns
-about a macOS-translocated app install, a desktop-specific concern, and runs step 2 (initial sync)
-directly through `SyncRepository` — but cache cleanup, feed refresh notification, update notification,
-and FTS rebuilding (steps 1 and 3 below) delegate to the platform-independent functions in commonMain's
-`domain/StartupMaintenanceTasks.kt`. Android's `runAndroidStartupTasks` (see above) calls the same
-step 1 and step 3 functions directly, skipping step 2 (Phase 4 work there):
+about a macOS-translocated app install, a desktop-specific concern — but cache cleanup, feed refresh
+notification, update notification, and FTS rebuilding (steps 1 and 3 below) delegate to the
+platform-independent functions in commonMain's `domain/StartupMaintenanceTasks.kt`. Android's
+`runAndroidStartupTasks` (see above) calls the same step 1 and step 3 functions directly and runs
+step 2 itself too, the same way desktop does — both call `SyncRepository.sync()` inline, guarded on
+`CloudSession.isConnected()`, rather than through a `StartupMaintenanceTasks` function:
 
 1. Cache cleanup (`cleanUpArticleCacheIfDue`, if 24+ hours since last run).
-2. If Dropbox is connected, initial sync (desktop only for now).
+2. If a cloud provider is connected, initial sync (`SyncRepository.sync(SyncTrigger.AUTOMATIC)`) —
+   Dropbox / Google Drive / OneDrive on desktop, Dropbox / OneDrive on Android.
 3. FTS full rebuild (`maybeRebuildFtsIndex`, only if 24+ hours since last run **and** idle; see below).
 4. FTS initial creation + unindexed row incremental insertion is done by `FtsManager.ensureIndexed()`: on desktop, blocked on with `runBlocking` before `application {}` (acceptable there, since it only delays showing the first window). `KeryxApplication.onCreate` instead launches it fire-and-forget on the shared app-scope `CoroutineScope` — blocking `Application.onCreate` would delay every Android cold start instead of just the first window, and a search performed in the brief window before it completes just returns fewer/no hits rather than failing.
 

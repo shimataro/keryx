@@ -17,7 +17,7 @@
 | プラットフォーム | 対応 |
 | --- | --- |
 | Windows / macOS / Linux | ✅（Compose Multiplatform、現行） |
-| Android | 予定（Jetpack Compose） |
+| Android | ✅（Compose Multiplatform、現行。クラウド同期は Dropbox / OneDrive に対応 — Google Drive は当面デスクトップのみ。§4 参照） |
 | iOS / iPadOS / macOS | 予定（最初は Compose、その後 SwiftUI ネイティブ UI） |
 
 ## 3. 対応フォーマット
@@ -32,6 +32,11 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
 - 同期対象: 購読リスト・既読状態・スター・タグ構造・グローバル設定。
 - 非同期対象: デバイスローカル設定・クラウド認証情報。
 - インポート / エクスポートは OPML。
+- **Android は Dropbox と OneDrive のみ対応**（どちらもデスクトップと同じ `keryx://oauth2/callback`
+  カスタム URI リダイレクトを使う PKCE パブリッククライアント）。Google Drive のデスクトップ向け
+  OAuth 構成（ループバックリダイレクト + `client_secret` を使う「デスクトップアプリ」クライアント）は
+  Android には流用できない — 調査内容は [sync-architecture.ja.md](sync-architecture.ja.md) の
+  「クラウド認証」を参照 — そのため Android のセットアップ/設定では選択肢として出さない。
 
 ## 5. 競合解決ポリシー
 

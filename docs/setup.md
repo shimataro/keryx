@@ -14,6 +14,10 @@
   fine without it, but the root `./gradlew build` aggregates every subproject including
   `:androidApp`, so it fails immediately at configuration time without a resolvable SDK — see
   Common Issues below.
+- A **connected Android device or running emulator** is only needed to run the `androidDeviceTest`
+  instrumented suite (`DatabaseMerger`/`DatabaseSnapshot`'s Android actuals against the real
+  bundled SQLite — see [testing.md](testing.md)); building, `./gradlew build`, and every other
+  test task work without one.
 
 ## First-time Setup
 

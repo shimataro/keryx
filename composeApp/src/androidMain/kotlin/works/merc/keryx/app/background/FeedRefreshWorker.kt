@@ -6,7 +6,10 @@ import androidx.work.WorkerParameters
 import kotlinx.coroutines.CancellationException
 import org.koin.mp.KoinPlatform
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.domain.SyncRepository
+import works.merc.keryx.app.domain.SyncTrigger
 import works.merc.keryx.app.domain.checkForUpdateAndNotify
 import works.merc.keryx.app.domain.maybeRebuildFtsIndex
 import works.merc.keryx.app.domain.refreshFeedsAndNotify
@@ -15,15 +18,13 @@ private const val LOG_TAG = "FeedRefreshWorker"
 
 /**
  * `WorkManager`'s periodic entry point for background feed refresh — the Android equivalent of
- * one iteration of desktop's `backgroundUpdateLoop` (`refreshFeedsAndNotify` /
- * `checkForUpdateAndNotify` / `maybeRebuildFtsIndex`, the same three `internal` commonMain
- * functions desktop's `StartupTasks.kt` calls). `WorkManager` instantiates this itself via its
- * default `WorkerFactory` (reflection over the `(Context, WorkerParameters)` constructor), so
- * dependencies are resolved from [KoinPlatform.getKoin] inside [doWork] instead of being
- * constructor-injected — mirroring how `KeryxApplication.onCreate` already resolves Koin.
- *
- * Sync (`SyncRepository.sync()`) is deliberately not called here — see `background/BackgroundRefresh.kt`'s
- * own KDoc for why (Phase 4 scope).
+ * one iteration of desktop's `backgroundUpdateLoop` (`refreshFeedsAndNotify` / `sync` /
+ * `checkForUpdateAndNotify` / `maybeRebuildFtsIndex`, the same three commonMain maintenance
+ * functions plus `SyncRepository.sync()` desktop's `StartupTasks.kt` calls). `WorkManager`
+ * instantiates this itself via its default `WorkerFactory` (reflection over the
+ * `(Context, WorkerParameters)` constructor), so dependencies are resolved from
+ * [KoinPlatform.getKoin] inside [doWork] instead of being constructor-injected — mirroring how
+ * `KeryxApplication.onCreate` already resolves Koin.
  */
 class FeedRefreshWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
@@ -34,6 +35,9 @@ class FeedRefreshWorker(context: Context, params: WorkerParameters) : CoroutineW
         if (!koin.get<SettingsRepository>().isSetupComplete()) return Result.success()
         return try {
             refreshFeedsAndNotify(koin)
+            if (koin.get<CloudSession>().isConnected()) {
+                koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
+            }
             checkForUpdateAndNotify(koin)
             maybeRebuildFtsIndex(koin)
             Result.success()

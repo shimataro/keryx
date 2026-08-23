@@ -13,6 +13,10 @@
   `:composeApp:desktopTest` のようなターゲット限定タスクは SDK が無くても動くが、ルートの
   `./gradlew build` は `:androidApp` を含む全サブプロジェクトを集約するため、SDK が解決できないと
   設定段階で即座に失敗する — 詳細は後述の「よくある問題」を参照。
+- **実機または起動中の Android エミュレータ**は `androidDeviceTest` 計装スイート
+  （`DatabaseMerger`/`DatabaseSnapshot` の Android 実装を実際のバンドル SQLite に対して検証する。
+  [testing.ja.md](testing.ja.md) 参照）を実行する場合にのみ必要。ビルド・`./gradlew build`・その他の
+  テストタスクはいずれも実機/エミュレータ無しで動く。
 
 ## 初回
 

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Pre-Android-12 (below API 31) counterpart of data_extraction_rules.xml — see that file's own
+  comment for why these files are excluded. android:fullBackupContent points here; this format
+  predates the cloud-backup/device-transfer split introduced in API 31.
+-->
+<full-backup-content>
+    <exclude domain="file" path=".dropbox_tokens.enc" />
+    <exclude domain="file" path=".dropbox_tokens.json" />
+    <exclude domain="file" path=".onedrive_tokens.enc" />
+    <exclude domain="file" path=".onedrive_tokens.json" />
+</full-backup-content>

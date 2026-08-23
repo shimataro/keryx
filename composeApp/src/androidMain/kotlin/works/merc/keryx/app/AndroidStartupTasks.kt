@@ -3,7 +3,10 @@ package works.merc.keryx.app
 import kotlinx.coroutines.CancellationException
 import org.koin.core.Koin
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.domain.SyncRepository
+import works.merc.keryx.app.domain.SyncTrigger
 import works.merc.keryx.app.domain.checkForUpdateAndNotify
 import works.merc.keryx.app.domain.cleanUpArticleCacheIfDue
 import works.merc.keryx.app.domain.maybeRebuildFtsIndex
@@ -23,10 +26,9 @@ private const val LOG_TAG = "AndroidStartupTasks"
 private val startupTasksRan = AtomicBoolean(false)
 
 /**
- * Runs the same maintenance sequence as desktop's `runStartupTasks` (cache cleanup, feed refresh,
- * update check, FTS repair) — everything except the macOS-specific translocation warning and the
- * initial cloud sync, which is Phase 4 work here (`CloudSession(providers = emptyMap())` makes
- * `SyncRepository.sync()` a no-op on this platform regardless).
+ * Runs the same maintenance sequence as desktop's `runStartupTasks` (cache cleanup, initial cloud
+ * sync, feed refresh, update check, FTS repair) — everything except the macOS-specific
+ * translocation warning, which has no Android equivalent.
  *
  * Called from `MainActivity.onCreate`, not `KeryxApplication.onCreate`: the latter also runs when
  * `WorkManager` wakes the process to run `FeedRefreshWorker`, and running the full startup
@@ -50,6 +52,9 @@ suspend fun runAndroidStartupTasks(koin: Koin) {
     if (!startupTasksRan.compareAndSet(false, true)) return
     runCatching {
         cleanUpArticleCacheIfDue(koin)
+        if (koin.get<CloudSession>().isConnected()) {
+            koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
+        }
         refreshFeedsAndNotify(koin)
         checkForUpdateAndNotify(koin)
         maybeRebuildFtsIndex(koin)

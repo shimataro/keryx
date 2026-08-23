@@ -10,6 +10,8 @@
     <application
         android:name=".KeryxApplication"
         android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
@@ -25,6 +27,17 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Dropbox / OneDrive OAuth redirect (see domain/OAuthRedirectTransport.kt's
+                 CustomUriRedirectTransport, shared with desktop's keryx:// registration). Both
+                 providers redirect to this same URI and are disambiguated by the `state`
+                 parameter — see cloud-oauth-transport.md. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="keryx" android:host="oauth2" />
             </intent-filter>
         </activity>
     </application>

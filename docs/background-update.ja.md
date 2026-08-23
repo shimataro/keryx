@@ -57,20 +57,22 @@ while (true) {
 
 `background/FeedRefreshWorker.kt`（`CoroutineWorker`。`WorkManager` 自身の `WorkerFactory` が
 リフレクションでインスタンス化するため、依存関係はコンストラクタ注入ではなく `doWork()` 内で
-`KoinPlatform.getKoin()` から解決する）は、デスクトップの `backgroundUpdateLoop` が毎周回呼ぶのと
-まったく同じ3つの commonMain 関数 `refreshFeedsAndNotify` / `checkForUpdateAndNotify` /
-`maybeRebuildFtsIndex` を実行する。`SyncRepository.sync()` は呼ばない — クラウド同期はフェーズ4の
-作業であり、Android の `CloudSession(providers = emptyMap())` ではどのみち no-op になって起床を
-無駄にするだけだからである。捕捉した例外は `Result.retry()` を返し、リトライは `WorkManager` 自身の
-バックオフ方針に委ねる。
+`KoinPlatform.getKoin()` から解決する）は、デスクトップの `backgroundUpdateLoop` が毎周回実行する
+のとまったく同じ手順を実行する: `refreshFeedsAndNotify` → （`CloudSession.isConnected()` が真なら）
+`SyncRepository.sync(SyncTrigger.AUTOMATIC)` → `checkForUpdateAndNotify` → `maybeRebuildFtsIndex`。
+Android の `CloudSession` は現状 Dropbox/OneDrive のみプロバイダーを持つ（Google Drive 非対応の理由は
+[sync-architecture.ja.md](sync-architecture.ja.md) の「Android で Google Drive が未対応な理由」参照）
+ため、ユーザーがそのどちらとも連携していない場合に限り `sync()` は本当の no-op になる。捕捉した
+例外は `Result.retry()` を返し、リトライは `WorkManager` 自身のバックオフ方針に委ねる。
 
 `MainActivity.onCreate` から `runAndroidStartupTasks`（`AndroidStartupTasks.kt`）を呼ぶ —
-デスクトップの `runStartupTasks` に相当するが、macOS 固有の translocation 警告と初回クラウド同期
-（これもフェーズ4）を除く。`cleanUpArticleCacheIfDue`（後述）を実行してから、`FeedRefreshWorker` と
+デスクトップの `runStartupTasks` に相当するが、macOS 固有の translocation 警告（Android には該当
+概念がない）を除く。`cleanUpArticleCacheIfDue`（後述）を実行し、続けてデスクトップの
+`runStartupTasks` と同じ位置・同じゲートで初回クラウド同期を行ってから、`FeedRefreshWorker` と
 同じ3関数を実行する。これは意図的に `Application.onCreate` ではなく **Activity** 側に置いている:
 後者は `WorkManager` が `FeedRefreshWorker` を実行するためにプロセスを起こしたときにも走るため、
-バックグラウンド起床のたびに起動時処理一式を実行すると、Worker 自身が直前に行った更新/更新確認/FTS
-処理と重複してしまう。プロセス内ガード（`startupTasksRan`）により、画面回転など Activity だけが
+バックグラウンド起床のたびに起動時処理一式を実行すると、Worker 自身が直前に行った更新/同期/更新確認/
+FTS 処理と重複してしまう。プロセス内ガード（`startupTasksRan`）により、画面回転など Activity だけが
 再生成される設定変更で `onCreate` が再度走ってもプロセス内で1回に保たれる。
 
 新着記事の OS 通知は `domain/OsNotificationSink.kt`（`fun interface`）経由で届く。Android は
@@ -123,14 +125,16 @@ Play 以外からの実行可能コードのダウンロードであり、この
 ## 起動時タスク（`runStartupTasks` / `runAndroidStartupTasks`）
 
 `runStartupTasks` 自体はデスクトップ専用のオーケストレーション（`desktopMain/StartupTasks.kt`）—
-macOS の translocated インストールの警告（デスクトップ固有の関心事）も、ステップ2（初回同期）を
-`SyncRepository` 経由で直接実行するのもこの中で行っている — だが、キャッシュ削除・フィード更新通知・
-アップデート通知・FTS 再構築（下記のステップ1・3）は commonMain の `domain/StartupMaintenanceTasks.kt`
-にあるプラットフォーム非依存の関数に委譲する。Android の `runAndroidStartupTasks`（前述）は同じ
-ステップ1・3の関数を直接呼び、ステップ2は（フェーズ4の作業のため）省いている:
+macOS の translocated インストールの警告（デスクトップ固有の関心事）はこの中で行っている — だが、
+キャッシュ削除・フィード更新通知・アップデート通知・FTS 再構築（下記のステップ1・3）は commonMain の
+`domain/StartupMaintenanceTasks.kt` にあるプラットフォーム非依存の関数に委譲する。Android の
+`runAndroidStartupTasks`（前述）は同じステップ1・3の関数を直接呼び、ステップ2もデスクトップと同じ
+やり方で自ら実行する — どちらも `StartupMaintenanceTasks` の関数を経由せず、
+`CloudSession.isConnected()` でガードしたうえで `SyncRepository.sync()` を直接呼ぶ:
 
 1. キャッシュ削除（`cleanUpArticleCacheIfDue`。前回から 24 時間以上経過時）。
-2. Dropbox 接続済みなら初回同期（今のところデスクトップのみ）。
+2. クラウドプロバイダーに接続済みなら初回同期（`SyncRepository.sync(SyncTrigger.AUTOMATIC)`）——
+   デスクトップは Dropbox / Google Drive / OneDrive、Android は Dropbox / OneDrive。
 3. FTS 全再構築（`maybeRebuildFtsIndex`、前回から 24 時間以上 かつ アイドル時のみ。下記）。
 4. FTS の初回作成・未索引行の増分投入は `FtsManager.ensureIndexed()` が担う: デスクトップでは
    `application {}` の前に `runBlocking` でブロックして待つ（最初のウィンドウ表示が遅れるだけなので

@@ -215,6 +215,32 @@ kotlin {
                 }
             }
         }
+
+        // Instrumented ("device") tests for DatabaseMerger/DatabaseSnapshot's Android actuals —
+        // requery's bundled SQLite is a native library that only loads on a real device/emulator,
+        // so these can't run as a plain JVM unit test the way desktopTest does. Opt-in only
+        // (disabled by default in AGP 9's KMP library plugin): see docs/testing.md for how to run
+        // them and .claude/CLAUDE.md's testing conventions for what belongs here vs. desktopTest.
+        //
+        // withDeviceTestBuilder (not the separate top-level withDeviceTest{}) is what actually
+        // enables the androidDeviceTest source set/compilation; calling both throws ("Android
+        // device tests have already been enabled ... You can create only one component of type
+        // android (device, DEVICE_TEST)"). withDeviceTestBuilder's own return value is what lets
+        // instrumentationRunner/execution be configured, via HasConfigurableValue.configure.
+        //
+        // sourceSetTreeName is deliberately its own unique tree ("deviceTest"), not the
+        // conventional "test" tree commonTest/desktopTest share — confirmed on-device that
+        // "test" pulls the *entire* commonTest source set into the instrumented compilation, and
+        // several commonTest tests (e.g. StringsXmlParityTest, which reads
+        // composeResources/values/strings.xml by a JVM-relative java.io.File path) fail outright
+        // in an Android instrumentation process, which has no such working directory. A distinct
+        // tree name keeps androidDeviceTest scoped to its own sources plus commonMain/androidMain.
+        withDeviceTestBuilder {
+            sourceSetTreeName = "deviceTest"
+        }.configure {
+            instrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+            execution = "HOST"
+        }
     }
 
     sourceSets {
@@ -326,6 +352,18 @@ kotlin {
                 implementation(libs.sqldelight.driver.jdbc.sqlite)
                 implementation(libs.sqlite.jdbc)
                 implementation(libs.compose.ui.test)
+            }
+        }
+
+        // See android { withDeviceTestBuilder { ... } } above for why this exists — a real
+        // device/emulator is required to load requery's bundled SQLite native library.
+        getByName("androidDeviceTest") {
+            dependencies {
+                implementation(libs.kotlin.test)
+                implementation(libs.kotlinx.coroutines.test)
+                implementation(libs.androidx.test.runner)
+                implementation(libs.androidx.test.junit)
+                implementation(libs.requery.sqlite.android)
             }
         }
     }

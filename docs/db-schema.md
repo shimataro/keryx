@@ -5,6 +5,14 @@
 Target: local SQLite (managed by SQLDelight). `.sq` files are located at
 `composeApp/src/commonMain/sqldelight/works/merc/keryx/app/data/local/db/`.
 
+The live file's actual path differs by platform: desktop's `JdbcSqliteDriver` opens
+`AppDirs.appDataDir()/keryx.db` directly, but Android's `AndroidSqliteDriver` places it at
+`Context.getDatabasePath("keryx.db")` — `<dataDir>/databases/keryx.db`, a different directory than
+`AppDirs.appDataDir()` (`Context.filesDir`, i.e. `<dataDir>/files`). `platform/DatabaseFile.kt`'s
+`databaseFilePath()` is the single `expect` function that resolves the real value per platform;
+`DatabaseMerger`/`DatabaseSnapshot` (both work by path, not through the driver) must always go
+through it rather than composing `AppDirs.appDataDir()` with the filename themselves.
+
 ## Design Philosophy
 
 - All tables are managed by SQLDelight (`.sq`). `articles_fts` is created/maintained separately via raw SQL (`FtsManager`).

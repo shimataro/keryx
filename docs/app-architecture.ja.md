@@ -23,7 +23,7 @@ composeApp/src/
     data/opml/    OpmlCodec
     domain/       Feed/Article/Tag/Settings/SyncRepository, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, OAuthCallbackParams, StartupMaintenanceTasks（refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex）
     di/           AppModule（+ expect platformModule）
-    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot（すべて expect）
+    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile（すべて expect）
     ui/           theme/, navigation/, setup/, home/（3ペイン + 検索 + 通知センター）, article/, settings/, i18n/
     LaunchArg.kt  起動時の引数（`keryx://` URI か `.opml` パスか）を分類する — プラットフォーム非依存、パッケージ直下
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq（7 テーブル）
@@ -36,13 +36,26 @@ composeApp/src/
   desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ jvmCommonMain がカバーしない expect の actual（DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule）+ LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）, DesktopOs（isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf）
     tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray + StatusNotifierItem/dbusmenu の D-Bus オブジェクト
   androidMain/kotlin/…/  jvmCommonMain がカバーしない expect の actual: DatabaseDriverFactory（バンドル
-    SQLite、後述）, AppDirs/BrowserOpener/ClipboardEntries（AndroidAppContext 経由 — KeryxApplication.onCreate
-    で一度だけ設定される静的 Context ホルダ）, PlatformModule（Ktor OkHttp エンジン、プロバイダ未登録の
-    CloudSession — 下記 Provider/DI 参照。加えて AndroidNotificationSink、下記「バックグラウンド更新」参照）,
+    SQLite、後述）, DatabaseFile（`databaseFilePath()` — `Context.getDatabasePath` で、
+    AppDirs.appDataDir()/`Context.filesDir` とは別ディレクトリになる。db-schema.ja.md 参照）,
+    AppDirs/BrowserOpener/ClipboardEntries（AndroidAppContext 経由 — KeryxApplication.onCreate
+    で一度だけ設定される静的 Context ホルダ）, PlatformModule（Ktor OkHttp エンジン、Dropbox/OneDrive
+    プロバイダを登録した CloudSession — 下記 Provider/DI 参照。加えて AndroidNotificationSink、下記
+    「バックグラウンド更新」参照）, CloudStorageAvailability（Dropbox/OneDrive は実判定、Google Drive は
+    `false` 固定 — 理由は sync-architecture.ja.md の「Android で Google Drive が未対応な理由」参照）,
     KeryxTextField/KeryxAlertDialog/KeryxTabDialog（素の M3。
     KeryxTabDialog はエッジツーエッジ対応で safe-drawing padding 済み）,
-    FilePicker/DatabaseMerger/DatabaseSnapshot（フェーズ4までのスタブ。例外を投げるが CloudSession に
-    プロバイダが無い間は到達不能）, nativeContextMenu（適応レイアウトのフェーズで実装した実際の
+    DatabaseMerger/DatabaseSnapshot（専用の `io.requery.android.database.sqlite.SQLiteDatabase`
+    接続に対する実装 — デスクトップ実装の専用 JDBC 接続に相当。下記「DatabaseMerger」参照）,
+    AndroidSqliteSupport.kt（`NoOpDatabaseErrorHandler` — バンドル SQLite の既定ハンドラは破損と
+    判定した DB ファイルを削除する。AAR の逆アセンブルで確認済み。加えて両者が共有する
+    `setBusyTimeout()`/`userVersion()`）, FilePicker（Storage Access Framework の
+    `OpenDocument`/`CreateDocument`。この `expect object` は自身では `ActivityResultLauncher` を
+    持てないため AndroidFilePickerHost 経由）, KeystoreTokenStorage（クラウドプロバイダーごとに
+    Android Keystore 保持の AES-256/GCM 鍵。sync-architecture.ja.md の「トークン保存先」参照）,
+    AndroidOAuthCallback.kt（`dispatchOAuthCallbackIfPresent`。`keryx://` OAuth リダイレクト用に
+    `:androidApp` の `MainActivity` から呼ばれる — デスクトップの `main.kt` の URI ルーティングに相当）,
+    nativeContextMenu（適応レイアウトのフェーズで実装した実際の
     長押し DropdownMenu — タップと長押しの判別は KDoc 参照）, BackHandler（`androidx.activity.compose.BackHandler`
     へ委譲）, PlatformOs（isTouchPrimary = true, hasNativeAppMenu = false — Android にはメニューバーが
     無いため、FeedListToolbarRow/GeneralTab が独自の設定/バージョン情報導線を持つ）,
@@ -52,7 +65,9 @@ composeApp/src/
     background/（`FeedRefreshWorker` + `BackgroundRefresh.kt` の `startBackgroundRefresh`。
     `WorkManager` ベース — Android のバックグラウンド/通知の全体像は
     [background-update.ja.md](background-update.ja.md) を参照）
-  commonTest/ + desktopTest/
+  commonTest/ + desktopTest/ + androidDeviceTest/（DatabaseMerger/DatabaseSnapshot の Android 実装向け
+    計装テスト — バンドル SQLite ネイティブライブラリの読み込みに実機/エミュレータが必要。
+    testing.ja.md 参照）
 ```
 
 パッケージルートは `works.merc.keryx.app`（`keryx.merc.works` の逆順 DNS）。
@@ -115,15 +130,27 @@ ATTACH DATABASE マージは**専用の JDBC コネクション 1 本**で行う
 テーブル/カラム。純粋なデータ）。デスクトップの `actual` が担うのは、原因チェーンを辿って
 `org.sqlite.SQLiteException` を見つけ、`resultCode.code and 0xFF` を `SqliteFailureCategory` へ変換し、
 判定結果をログに出し、`validateSchema` で `MergeSchema.EXPECTED_SCHEMAS` に対して `PRAGMA table_info` を
-実行することだけ。将来の Android の `actual`（その `SQLiteException` は数値コードを公開しない）も、
-同じカテゴリを与えるだけで済む。
+実行することだけ。Android の `actual` は別経路で同じカテゴリを供給する — その
+`android.database.sqlite.SQLiteException` は（デスクトップが読む JDBC ドライバの数値コードと違い）
+数値コードを公開しないため、投げられた例外自身のサブクラスで分岐する
+（`SQLiteConstraintException`/`SQLiteDatabaseCorruptException` → `CORRUPT_OR_CONSTRAINT`、
+いくつかの named サブクラス → `OTHER`、素の `SQLiteException` → `STATEMENT_ERROR`。ここは
+`validateSchema` が解消すべき曖昧さそのものと一致する） — それ以外は同じ attach → バージョン確認 →
+マージ → detach の手順を、専用の `io.requery.android.database.sqlite.SQLiteDatabase` 接続上で、
+ライブラリの既定ではなく `NoOpDatabaseErrorHandler` を指定して開いて実行する（既定ハンドラは破損と
+判定した DB ファイルを削除する — バンドル AAR の逆アセンブルで確認済み。`platform/AndroidSqliteSupport.kt`
+参照）。
 
 ### CloudSession / SyncRepository
 
-`CloudSession` が現在の `CloudStorage`（Dropbox / Google Drive）を提供し、アクセストークンの自動リフレッシュを担う。
+`CloudSession` が現在の `CloudStorage`（デスクトップは Dropbox / Google Drive / OneDrive、Android は
+Dropbox / OneDrive — sync-architecture.ja.md の「Android で Google Drive が未対応な理由」参照）を
+提供し、アクセストークンの自動リフレッシュを担う。
 `SyncRepository` はダウンロード → マージ（`DatabaseMerger`）→ 新記事の増分索引（`indexMissing`）→
 `VACUUM INTO` スナップショット生成（`DatabaseSnapshot`、コピー側で `articles_fts` を除外）→ アップロード
 （rev チェック）、のフローとデバウンス（`SyncScheduler`）を実装する。ライブ DB の FTS は触らない。
+`SyncRepository` の `localDbPath` の既定値は `platform/DatabaseFile.kt` の `databaseFilePath()`
+— プラットフォームごとにライブ DB の実パスを解決する唯一の `expect` 関数（db-schema.ja.md 参照）。
 
 ### Provider / DI（Koin）
 

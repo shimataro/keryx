@@ -17,7 +17,7 @@ A lightweight, simple RSS reader that provides the same feed subscription experi
 | Platform | Support |
 | --- | --- |
 | Windows / macOS / Linux | ✅ (Compose Multiplatform, current) |
-| Android | Planned (Jetpack Compose) |
+| Android | ✅ (Compose Multiplatform, current; cloud sync supports Dropbox / OneDrive — Google Drive is desktop-only for now, see §4) |
 | iOS / iPadOS / macOS | Planned (initially Compose, then native SwiftUI) |
 
 ## 3. Supported Formats
@@ -31,6 +31,11 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
 - Sync targets: subscription list, read state, stars, tag structure, global settings.
 - Non-sync targets: device-local settings, cloud authentication info.
 - Import / export is OPML.
+- **Android supports Dropbox and OneDrive only** (both are PKCE public clients using the same
+  `keryx://oauth2/callback` custom-URI redirect as desktop). Google Drive's desktop OAuth
+  configuration (a "Desktop app" client using loopback redirect + `client_secret`) cannot be reused
+  on Android — see "Cloud Authentication" in [sync-architecture.md](sync-architecture.md) for the
+  investigation — so it is not offered as a setup/settings option there.
 
 ## 5. Conflict Resolution Policy
 

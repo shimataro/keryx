@@ -27,9 +27,9 @@ private const val FEED_REFRESH_WORK_NAME = "feed_refresh"
  * Called once from `KeryxApplication.onCreate` — not from `MainActivity`, since a schedule change
  * must take effect even if the app is only ever opened through this one setting change and never
  * revisits the Activity that shows the setting (unlikely, but this scope has no reason to depend
- * on an Activity existing at all). Deliberately does not call `SyncRepository.sync()` — cloud sync
- * is Phase 4 work, and `CloudSession(providers = emptyMap())` on Android would make it a no-op
- * that only wastes a wakeup.
+ * on an Activity existing at all). This function only maintains the `WorkManager` schedule itself;
+ * cloud sync runs inside `FeedRefreshWorker.doWork()` (once per periodic wakeup, gated on
+ * `CloudSession.isConnected()`), not here.
  */
 fun startBackgroundRefresh(koin: Koin) {
     val settingsRepository = koin.get<SettingsRepository>()
