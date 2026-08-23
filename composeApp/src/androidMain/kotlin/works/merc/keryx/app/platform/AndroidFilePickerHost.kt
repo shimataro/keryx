@@ -37,16 +37,29 @@ object AndroidFilePickerHost {
     }
 
     /**
-     * Called from `MainActivity.onDestroy`. Resolves any still-pending request to `null` (the
-     * Activity — and its launchers — are gone, so the request can never complete otherwise).
+     * Called from `MainActivity.onDestroy`. Always clears the launcher references (they belong to
+     * the dying Activity instance either way), but only resolves a still-pending request to
+     * `null` when [retainPending] is `false` — i.e. permanent destruction, not a configuration
+     * change. A configuration change (e.g. rotation) destroys and recreates `MainActivity` around
+     * an in-flight SAF picker that keeps running independently; `ActivityResultRegistry` is
+     * designed to redeliver that pending result to the recreated Activity's freshly re-registered
+     * launcher (`onOpenResult`/`onCreateResult`), so completing the deferred here would both tell
+     * the original caller "cancelled" prematurely and leave nothing to complete when the real
+     * result later arrives.
+     *
+     * @param retainPending `true` while the Activity is only being recreated for a configuration
+     * change (`ComponentActivity.isChangingConfigurations`); `false` on permanent destruction,
+     * where the request truly can never complete otherwise.
      */
-    fun detach() {
+    fun detach(retainPending: Boolean) {
         openLauncher = null
         createLauncher = null
-        pendingOpen?.complete(null)
-        pendingOpen = null
-        pendingCreate?.complete(null)
-        pendingCreate = null
+        if (!retainPending) {
+            pendingOpen?.complete(null)
+            pendingOpen = null
+            pendingCreate?.complete(null)
+            pendingCreate = null
+        }
     }
 
     /** Called from `MainActivity`'s `OpenDocument` `ActivityResultCallback`. */

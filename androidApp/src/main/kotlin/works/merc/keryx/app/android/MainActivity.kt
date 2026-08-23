@@ -59,7 +59,10 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        AndroidFilePickerHost.detach()
+        // A configuration change (rotation, etc.) destroys and recreates this Activity around an
+        // in-flight SAF picker that is still running independently — see AndroidFilePickerHost's
+        // own KDoc for why a still-pending request must survive that, not just permanent finish.
+        AndroidFilePickerHost.detach(retainPending = isChangingConfigurations)
         super.onDestroy()
     }
 
