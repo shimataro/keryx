@@ -3,10 +3,10 @@ package works.merc.keryx.app.ui.home
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -21,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
@@ -53,6 +54,7 @@ import works.merc.keryx.app.resources.article_open_in_browser
 import works.merc.keryx.app.resources.article_star
 import works.merc.keryx.app.resources.article_unstar
 import works.merc.keryx.app.resources.article_url_copied
+import works.merc.keryx.app.resources.common_back
 import works.merc.keryx.app.resources.home_no_article_selected
 import works.merc.keryx.app.ui.article.ArticleHtmlTheme
 import works.merc.keryx.app.ui.article.articleNoContentHtml
@@ -83,6 +85,7 @@ fun ArticleDetailPane(
     modifier: Modifier = Modifier,
     onActivated: () -> Unit = {},
     copyPulse: Int = 0,
+    onNavigateUp: (() -> Unit)? = null,
 ) {
     val article by vm.selectedArticle.collectAsStateSafe(null)
 
@@ -93,6 +96,7 @@ fun ArticleDetailPane(
         copyPulse = copyPulse,
         onToggleStar = { vm.toggleStarSelected() },
         onMarkUnread = { vm.markSelectedUnread() },
+        onNavigateUp = onNavigateUp,
     )
 }
 
@@ -123,6 +127,7 @@ internal fun ArticleDetailPaneContent(
     copyPulse: Int = 0,
     onToggleStar: () -> Unit = {},
     onMarkUnread: () -> Unit = {},
+    onNavigateUp: (() -> Unit)? = null,
     reader: @Composable (html: String, body: String, baseUrl: String?) -> Unit =
         { html, body, baseUrl -> ArticleWebView(html, body, baseUrl) },
 ) {
@@ -183,6 +188,7 @@ internal fun ArticleDetailPaneContent(
                 onToggleStar = onToggleStar,
                 onMarkUnread = onMarkUnread,
                 onCopied = { showCopied = true },
+                onNavigateUp = onNavigateUp,
             )
         }
         Box(Modifier.fillMaxSize().testTag(ARTICLE_READER_TEST_TAG)) {
@@ -197,6 +203,11 @@ internal fun ArticleDetailPaneContent(
  * per the "prefer disabled over hidden" rule in `.claude/skills/ui-guidelines/SKILL.md`: with an
  * unconditional toolbar shape, the reader beneath it (see [ArticleDetailPaneContent]) never has
  * to move.
+ *
+ * [onNavigateUp], when non-null, adds a leading back button (this pane is shown alone or paired
+ * at a narrow [PaneLayout] — see `ArticleDetailPane`'s KDoc). The action group stays pinned to the
+ * trailing edge via a leading `Spacer(weight(1f))` rather than a fixed end arrangement, so its
+ * position doesn't move whether or not the back button is present.
  */
 @Composable
 private fun ArticleDetailToolbar(
@@ -205,6 +216,7 @@ private fun ArticleDetailToolbar(
     onToggleStar: () -> Unit,
     onMarkUnread: () -> Unit,
     onCopied: () -> Unit,
+    onNavigateUp: (() -> Unit)? = null,
 ) {
     val hasArticle = article != null
     val starred = article?.is_starred == 1L
@@ -214,8 +226,14 @@ private fun ArticleDetailToolbar(
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.End,
     ) {
+        if (onNavigateUp != null) {
+            val backLabel = stringResource(Res.string.common_back)
+            TooltipIconButton(tooltip = backLabel, onClick = onNavigateUp) {
+                KeryxIcon(KeryxIcons.ChevronRight, contentDescription = backLabel, modifier = Modifier.graphicsLayer(scaleX = -1f))
+            }
+        }
+        Spacer(Modifier.weight(1f))
         ToolbarIconGroup {
             val starTooltip = stringResource(if (starred) Res.string.article_unstar else Res.string.article_star)
             TooltipIconButton(tooltip = starTooltip, onClick = onToggleStar, enabled = hasArticle) {

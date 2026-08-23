@@ -33,14 +33,18 @@ composeApp/src/
   jvmCommonMain/kotlin/…/  デスクトップと Android の両方が共有する actual（どちらのプラットフォーム
     API にも依存しない）: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage, AppInfo,
     CloudStorageAvailability（後者2つは共有生成 BuildConfig を読むだけ）
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ jvmCommonMain がカバーしない expect の actual（DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule）+ LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）, DesktopOs（isMacOs/isWindows/isLinux）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf）
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ jvmCommonMain がカバーしない expect の actual（DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule）+ LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）, DesktopOs（isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf）
     tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray + StatusNotifierItem/dbusmenu の D-Bus オブジェクト
   androidMain/kotlin/…/  jvmCommonMain がカバーしない expect の actual: DatabaseDriverFactory（バンドル
     SQLite、後述）, AppDirs/BrowserOpener/ClipboardEntries（AndroidAppContext 経由 — KeryxApplication.onCreate
     で一度だけ設定される静的 Context ホルダ）, PlatformModule（Ktor OkHttp エンジン、プロバイダ未登録の
-    CloudSession — 下記 Provider/DI 参照）, KeryxTextField/KeryxAlertDialog/KeryxTabDialog（素の M3）,
+    CloudSession — 下記 Provider/DI 参照）, KeryxTextField/KeryxAlertDialog/KeryxTabDialog（素の M3。
+    KeryxTabDialog はエッジツーエッジ対応で safe-drawing padding 済み）,
     FilePicker/DatabaseMerger/DatabaseSnapshot（フェーズ4までのスタブ。例外を投げるが CloudSession に
-    プロバイダが無い間は到達不能）, nativeContextMenu（現状 no-op — 理由は KDoc 参照）
+    プロバイダが無い間は到達不能）, nativeContextMenu（適応レイアウトのフェーズで実装した実際の
+    長押し DropdownMenu — タップと長押しの判別は KDoc 参照）, BackHandler（`androidx.activity.compose.BackHandler`
+    へ委譲）, PlatformOs（isTouchPrimary = true, hasNativeAppMenu = false — Android にはメニューバーが
+    無いため、FeedListToolbarRow/GeneralTab が独自の設定/バージョン情報導線を持つ）
   commonTest/ + desktopTest/
 ```
 
@@ -199,8 +203,19 @@ Repository は触れず、Linux のパネルプロトコルにモバイル側の
 
 ### ネイティブコンテキストメニュー（プラットフォーム分岐）
 
-`platform/NativeMenu.desktop.kt` の `defaultPopupHandle` が、すべての `Modifier.nativeContextMenu`
-呼び出し箇所（記事行、フィード／フォルダー／タグ行）を 2 つの実装のどちらかで裏打ちする。
+`platform/NativeMenu.android.kt` の `nativeContextMenu` は、同じ呼び出し箇所（記事行、
+フィード／フォルダー／タグ行）を長押しで開く Material 3 `DropdownMenu` で裏打ちする。実装は
+自前の `awaitEachGesture` ループで、最初の押下（down）は消費しない。押下が
+`viewConfiguration.longPressTimeoutMillis` の間、離されも（up）どこか他所で消費されもせずに
+（例えば `LazyColumn` のスクロールに奪われる、など）生き残った場合にのみ長押しと判定し、そこから
+残りのジェスチャーを消費し始める — こうすることで、直前でチェーンされている
+`ui/home/ListRowChrome.kt` の `listRowClickable`（より外側のノード。Compose のポインタ入力
+`Main` パスは同一イベントに対して祖先より先に子孫のノードを再開するため）が同じ押下に対して
+`onClick` を重ねて発火することがない。`NativeSubMenu` はネストしたポップアップを開くのではなく
+その場でドリルダウンする（先頭の「戻る」行がトップレベルをサブメニュー自身の項目に差し替える）。
+
+`platform/NativeMenu.desktop.kt` の `defaultPopupHandle` は、同じ呼び出し箇所をデスクトップでは
+長押しではなく右クリックで開き、2 つの実装のどちらかで裏打ちする。
 
 | プラットフォーム | 実装 | 理由 |
 | --- | --- | --- |
@@ -285,3 +300,25 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 
 `ui/navigation/Navigator.kt` の単純なスタック型ナビゲータで Setup / Home / Settings を切り替える。
 記事ビューは Home 内のペイン（ルートではない）。
+
+### Home の適応的ペインレイアウト
+
+`ui/home/HomePaneLayout.kt` は、Home の3ペイン（フィード一覧・記事一覧・記事詳細）のうち
+いくつを横並びで表示するかを、利用可能な幅だけから解決する: `PaneLayout.Triple`（3ペインすべて —
+デスクトップは `WINDOW_MIN_WIDTH` が常に `TRIPLE_PANE_MIN_WIDTH` 以上であるため常にここに解決される。
+`core/Constants.kt` の当該定数の KDoc 参照）、`PaneLayout.Dual`（記事一覧 + どちらか一方の隣接ペイン）、
+`PaneLayout.Single`（1ペインのみ、スマートフォン幅）のいずれか。ナビゲーションスタック自体は常に
+3段（`HomePane.FeedList` → `ArticleList` → `ArticleDetail`）であり、狭いレイアウトはそのうち表示する
+段数を減らしているに過ぎない。`HomePane.ordinal + 1` がそのままスタックの現在の深さを兼ねるため、
+`HomeScreen` は別途深さの状態を持つ必要がない — フィルターや記事の選択で深さが進み
+（`onSelectionAdvance`。`Triple` では no-op）、`platform/BackHandler`（Android では実際の戻る
+ジェスチャー/ボタンを横取りし、デスクトップでは no-op）が1段戻す。`PaneLayout.Dual` は、そのスタック上を
+スライドする2ペインの窓であり、単純な隣接ペア表示ではない: 記事一覧はどの深さでも表示される2ペインの
+一方であり続けるため、記事にドリルインするとフィード一覧が記事詳細ペインに入れ替わる形になり、
+一覧自体が画面外にスライドすることはない。
+
+これが、記事リーダーの WebView を無条件にコンポーズし続けること（下記「記事リーダー」参照）が
+デスクトップにおいて安全である理由でもある: デスクトップは常に `Triple` にしか解決されないため、
+WebView をホストするペインを含む3ペインすべてがアプリのライフタイム全体でマウントされ続ける。
+`Single`/`Dual` は、対象のペインが現在表示されていない場合にそれをアンマウントするが、これは
+Android では（重量級 AWT インターロップの懸念が無いため）問題ない。

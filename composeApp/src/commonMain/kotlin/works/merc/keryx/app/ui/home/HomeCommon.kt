@@ -23,6 +23,7 @@ import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
+import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.isMacOs
 
@@ -202,6 +203,31 @@ fun feedsForTag(feeds: List<Feeds>, feedTagMap: Map<String, Set<String>>, tagId:
     feeds.filter { tagId in (feedTagMap[it.id] ?: emptySet()) }
 
 /**
+ * The display title for the article list pane's current [filter] — shown in its top bar only when
+ * the pane is rendered at a narrow [PaneLayout] (see `ArticleListTopBar`'s `onNavigateUp`/
+ * `title` parameters), since the feed list pane's own selection already conveys this at
+ * [PaneLayout.Triple]. Falls back to [allLabel] for a feed/tag/folder id that no
+ * longer exists (e.g. deleted on another device and not yet synced here), matching
+ * `groupFeedsByFolder`'s own defensive "no folder" treatment.
+ */
+fun articleListTitle(
+    filter: ArticleFilter,
+    feeds: List<Feeds>,
+    folders: List<Folders>,
+    tags: List<Tags>,
+    allLabel: String,
+    starredLabel: String,
+    searchLabel: String,
+): String = when (filter) {
+    ArticleFilter.All -> allLabel
+    ArticleFilter.Starred -> starredLabel
+    ArticleFilter.Search -> searchLabel
+    is ArticleFilter.Feed -> feeds.find { it.id == filter.feedId }?.displayTitle() ?: allLabel
+    is ArticleFilter.Folder -> folders.find { it.id == filter.folderId }?.name ?: allLabel
+    is ArticleFilter.Tag -> tags.find { it.id == filter.tagId }?.name ?: allLabel
+}
+
+/**
  * Builds the visual row order used by the feed pane's keyboard navigation.
  *
  * Collapsed folders contribute only their own row; expanded folders contribute their feed rows too.
@@ -259,6 +285,34 @@ fun nextFeedListRow(
     val next = (index + delta).coerceIn(0, orderedRows.lastIndex)
     val target = orderedRows.getOrNull(next) ?: return null
     return target.takeIf { it != current }
+}
+
+/**
+ * Where a moved feed-list row lands, expressed exactly the way the drag-and-drop path already
+ * expresses a resolved drop: the id to insert it *before*, or `null` to append it at the end of its
+ * scope (see `reorderIds`, and `HomeViewModel.moveFeed`/`reorderFolders`, whose target parameters
+ * this is passed straight to).
+ */
+internal data class ReorderTarget(val insertBeforeId: String?)
+
+/**
+ * The [ReorderTarget] for moving the row at [index] of [orderedIds] by [delta] positions **within
+ * its own reorder scope** — the sibling feeds of one folder group, or the top-level folder order.
+ * This is the scope-bounded counterpart of [nextFeedListRow], which walks the *visual* row order
+ * ([buildOrderedFeedListRows]) across scopes and so can't answer "what would moving this one
+ * position do".
+ *
+ * Returns `null` — as opposed to a [ReorderTarget] holding `null`, which means "append at the end"
+ * — when the move isn't possible at all: already at the first/last position in scope, or [index]
+ * outside [orderedIds]. Call sites turn that into an omitted accessibility action.
+ */
+internal fun reorderTargetWithinScope(orderedIds: List<String>, index: Int, delta: Int): ReorderTarget? {
+    if (index !in orderedIds.indices) return null
+    val landsAt = index + delta
+    if (landsAt !in orderedIds.indices) return null
+    // Moving up, the row goes immediately before whatever now sits at `landsAt`; moving down, it
+    // goes after it — i.e. before that row's own successor, or at the very end when there is none.
+    return if (delta < 0) ReorderTarget(orderedIds[landsAt]) else ReorderTarget(orderedIds.getOrNull(landsAt + 1))
 }
 
 /**

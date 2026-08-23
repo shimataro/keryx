@@ -83,6 +83,8 @@
     <string name="home_edit_folder_menu">Edit</string>
     <string name="home_delete_folder_menu">Delete</string>
     <string name="home_move_to_folder">Move to folder</string>
+    <string name="home_move_up">Move up</string>
+    <string name="home_move_down">Move down</string>
     <string name="home_no_folder">No Folder</string>
     <string name="home_rename_feed_menu">Rename</string>
     <string name="home_rename_feed">Rename</string>

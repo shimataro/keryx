@@ -32,7 +32,9 @@ import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.DETAIL_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.FEED_LIST_PANE_WIDTH_DEFAULT
+import works.merc.keryx.app.core.PANE_DIVIDER_WIDTH
 import works.merc.keryx.app.data.local.db.Feeds
+import works.merc.keryx.app.platform.BackHandler
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.resources.Res
@@ -45,8 +47,6 @@ import works.merc.keryx.app.resources.settings_cloud_reset_confirm_title
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
-
-enum class HomePane { FeedList, ArticleList, ArticleDetail }
 
 /**
  * Renders the home screen and coordinates feed selection, article actions, pane focus, keyboard shortcuts, menu commands, feed subscriptions, and pending notification actions.
@@ -104,6 +104,14 @@ fun HomeScreen() {
         if (pane == focusedPane) return
         focusedPane = pane
         vm.setFocusedPane(pane)
+    }
+
+    // At a narrow PaneLayout, focusedPane doubles as the navigation stack's depth cursor (see
+    // HomePane's KDoc) — one step back is just the previous ordinal, with no separate depth state
+    // to keep in sync. A no-op at depth 1 (feed list): nothing before it to go back to.
+    fun goBack() {
+        val previous = focusedPane.ordinal - 1
+        if (previous >= 0) setFocusedPane(HomePane.entries[previous])
     }
 
     // Mirrors that focus state into MenuController (composition-local state -> StateFlow, same
@@ -218,49 +226,102 @@ fun HomeScreen() {
                 ),
         ) {
             BoxWithConstraints(Modifier.fillMaxSize()) {
-                val dividerWidth = 8.dp
-                // coerceAtLeast(0.dp): with WINDOW_MIN_WIDTH >= the pane-minimum sum, this
-                // shouldn't go negative in steady state, but a transient pre-layout frame
-                // (maxWidth == 0) must not produce a negative Dp, which Modifier.width() rejects.
-                val availableForPanes = (maxWidth - dividerWidth * 2 - DETAIL_PANE_MIN_WIDTH.dp).coerceAtLeast(0.dp)
-                val rawFeedWidth = feedListPaneWidth.dp
-                val rawArticleWidth = articleListPaneWidth.dp
-                val rawTotal = rawFeedWidth + rawArticleWidth
-                val scale = if (rawTotal > availableForPanes && rawTotal > 0.dp) availableForPanes / rawTotal else 1f
-                val displayedFeedWidth = rawFeedWidth * scale
-                val displayedArticleWidth = rawArticleWidth * scale
+                val layout = paneLayoutFor(maxWidth)
+                // BackHandler is always called (its own `enabled` gates the actual interception);
+                // at PaneLayout.Triple this is always disabled — desktop's WINDOW_MIN_WIDTH never
+                // resolves to anything else (see TRIPLE_PANE_MIN_WIDTH's KDoc) — so the app's
+                // default (OS back gesture / Alt+F4-equivalent) is left alone there.
+                BackHandler(enabled = layout != PaneLayout.Triple && focusedPane.ordinal > 0) { goBack() }
 
-                Row(Modifier.fillMaxSize()) {
-                    FeedListPane(
-                        vm,
-                        focused = focusedPane == HomePane.FeedList && keyboardNavActive,
-                        dragOverlay = dragOverlay,
-                        onActivated = { setFocusedPane(HomePane.FeedList) },
-                        modifier = Modifier.width(displayedFeedWidth),
-                        onAddFeedClick = { showAddFeed = true },
-                        onTextInputFocusChange = { textInputFocused = it },
-                        renameSelectedRequestId = feedListRenameRequestId,
-                        deleteSelectedRequestId = feedListDeleteRequestId,
-                    )
-                    ResizableDivider(onDrag = { deltaPx ->
-                        vm.setFeedListPaneWidth(feedListPaneWidth + with(density) { deltaPx.toDp().value })
-                    })
-                    ArticleListPane(
-                        vm,
-                        focused = focusedPane == HomePane.ArticleList && keyboardNavActive,
-                        onActivated = { setFocusedPane(HomePane.ArticleList) },
-                        modifier = Modifier.width(displayedArticleWidth),
-                        notifVm = notifVm,
-                    )
-                    ResizableDivider(onDrag = { deltaPx ->
-                        vm.setArticleListPaneWidth(articleListPaneWidth + with(density) { deltaPx.toDp().value })
-                    })
-                    ArticleDetailPane(
-                        vm,
-                        modifier = Modifier.weight(1f),
-                        onActivated = { setFocusedPane(HomePane.ArticleDetail) },
-                        copyPulse = copyPulse,
-                    )
+                if (layout == PaneLayout.Triple) {
+                    val dividerWidth = PANE_DIVIDER_WIDTH.dp
+                    // coerceAtLeast(0.dp): with WINDOW_MIN_WIDTH >= the pane-minimum sum, this
+                    // shouldn't go negative in steady state, but a transient pre-layout frame
+                    // (maxWidth == 0) must not produce a negative Dp, which Modifier.width() rejects.
+                    val availableForPanes = (maxWidth - dividerWidth * 2 - DETAIL_PANE_MIN_WIDTH.dp).coerceAtLeast(0.dp)
+                    val (displayedFeedWidth, displayedArticleWidth) =
+                        triplePaneWidths(availableForPanes, feedListPaneWidth.dp, articleListPaneWidth.dp)
+
+                    Row(Modifier.fillMaxSize()) {
+                        FeedListPane(
+                            vm,
+                            focused = focusedPane == HomePane.FeedList && keyboardNavActive,
+                            dragOverlay = dragOverlay,
+                            onActivated = { setFocusedPane(HomePane.FeedList) },
+                            modifier = Modifier.width(displayedFeedWidth),
+                            onAddFeedClick = { showAddFeed = true },
+                            onTextInputFocusChange = { textInputFocused = it },
+                            renameSelectedRequestId = feedListRenameRequestId,
+                            deleteSelectedRequestId = feedListDeleteRequestId,
+                        )
+                        ResizableDivider(onDrag = { deltaPx ->
+                            vm.setFeedListPaneWidth(feedListPaneWidth + with(density) { deltaPx.toDp().value })
+                        })
+                        ArticleListPane(
+                            vm,
+                            focused = focusedPane == HomePane.ArticleList && keyboardNavActive,
+                            onActivated = { setFocusedPane(HomePane.ArticleList) },
+                            modifier = Modifier.width(displayedArticleWidth),
+                            notifVm = notifVm,
+                        )
+                        ResizableDivider(onDrag = { deltaPx ->
+                            vm.setArticleListPaneWidth(articleListPaneWidth + with(density) { deltaPx.toDp().value })
+                        })
+                        ArticleDetailPane(
+                            vm,
+                            modifier = Modifier.weight(1f),
+                            onActivated = { setFocusedPane(HomePane.ArticleDetail) },
+                            copyPulse = copyPulse,
+                        )
+                    }
+                } else {
+                    // Single/Dual: no resizable dividers (nothing to drag on a phone/narrow window)
+                    // and no persisted pane widths — visible panes just split the width evenly.
+                    // See HomePaneLayout.kt's visiblePanes for what's shown at each depth.
+                    val visible = visiblePanes(layout, focusedPane.ordinal + 1)
+                    Row(Modifier.fillMaxSize()) {
+                        val paneModifier = if (visible.size > 1) Modifier.weight(1f) else Modifier.fillMaxSize()
+                        visible.forEach { pane ->
+                            when (pane) {
+                                HomePane.FeedList -> FeedListPane(
+                                    vm,
+                                    focused = focusedPane == HomePane.FeedList && keyboardNavActive,
+                                    dragOverlay = dragOverlay,
+                                    onActivated = { setFocusedPane(HomePane.FeedList) },
+                                    modifier = paneModifier,
+                                    onAddFeedClick = { showAddFeed = true },
+                                    onTextInputFocusChange = { textInputFocused = it },
+                                    renameSelectedRequestId = feedListRenameRequestId,
+                                    deleteSelectedRequestId = feedListDeleteRequestId,
+                                    onSelectionAdvance = { setFocusedPane(HomePane.ArticleList) },
+                                )
+                                HomePane.ArticleList -> ArticleListPane(
+                                    vm,
+                                    focused = focusedPane == HomePane.ArticleList && keyboardNavActive,
+                                    onActivated = { setFocusedPane(HomePane.ArticleList) },
+                                    modifier = paneModifier,
+                                    notifVm = notifVm,
+                                    onSelectionAdvance = { setFocusedPane(HomePane.ArticleDetail) },
+                                    // Every narrow layout gives this pane its own back-button row
+                                    // (the Triple branch above passes none at all), and only the
+                                    // button's enabled state tracks whether there is anywhere to go
+                                    // back to — the feed list isn't also on screen (Single always;
+                                    // Dual once drilled into an article, per visiblePanes' sliding
+                                    // window). Hiding the row instead would shift the controls row
+                                    // and the whole list under it every time Dual slides.
+                                    onNavigateUp = ::goBack,
+                                    navigateUpEnabled = HomePane.FeedList !in visible,
+                                )
+                                HomePane.ArticleDetail -> ArticleDetailPane(
+                                    vm,
+                                    modifier = paneModifier,
+                                    onActivated = { setFocusedPane(HomePane.ArticleDetail) },
+                                    copyPulse = copyPulse,
+                                    onNavigateUp = ::goBack,
+                                )
+                            }
+                        }
+                    }
                 }
             }
             // Last child of the root Box, so the floating drag chip paints above every pane.

@@ -47,13 +47,17 @@ import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.platform.WindowDragArea
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.resources.Res
+import works.merc.keryx.app.resources.common_back
+import works.merc.keryx.app.resources.home_all_feeds
 import works.merc.keryx.app.resources.home_mark_all_read
 import works.merc.keryx.app.resources.home_no_articles
 import works.merc.keryx.app.resources.home_search_no_results
 import works.merc.keryx.app.resources.home_search_too_short
 import works.merc.keryx.app.resources.home_sort_disabled_search
+import works.merc.keryx.app.resources.home_search
 import works.merc.keryx.app.resources.home_sort_newest
 import works.merc.keryx.app.resources.home_sort_oldest
+import works.merc.keryx.app.resources.home_starred
 import works.merc.keryx.app.resources.home_unread_only
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
@@ -69,6 +73,18 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  * @param onActivated Called when the pane becomes active.
  * @param modifier Modifier applied to the pane.
  * @param notifVm Optional view model providing notifications for the toolbar.
+ * @param onSelectionAdvance Called after an article is selected, in addition to [onActivated] —
+ *   see `HomeScreen`'s pane-layout wiring. No-op at [PaneLayout.Triple], where every pane is
+ *   already visible and there is nowhere to advance to.
+ * @param onNavigateUp Renders the pane's own leading back-button-and-title row when non-null — this
+ *   pane is being shown alone or paired at a narrow [PaneLayout] and needs its own way back to the
+ *   feed list. `null` (the default) omits that row entirely rather than rendering it disabled,
+ *   since a [PaneLayout.Triple] pane is never navigated away from — the row's presence therefore
+ *   depends only on the layout, never on the navigation stack's current depth.
+ * @param navigateUpEnabled Whether going back is possible *right now* (false at [PaneLayout.Dual]
+ *   while the feed list is still on screen beside this pane). Only the back button's enabled state
+ *   depends on it — the row itself stays laid out either way, so nothing below it moves as the user
+ *   drills in and back out (see the `ui-guidelines` skill's "Layout stability under state changes").
  */
 @Composable
 fun ArticleListPane(
@@ -77,15 +93,31 @@ fun ArticleListPane(
     onActivated: () -> Unit,
     modifier: Modifier = Modifier,
     notifVm: NotificationCenterViewModel? = null,
+    onSelectionAdvance: () -> Unit = {},
+    onNavigateUp: (() -> Unit)? = null,
+    navigateUpEnabled: Boolean = true,
 ) {
     val filter by vm.filter.collectAsStateSafe(ArticleFilter.All)
+    val feeds by vm.feeds.collectAsStateSafe(emptyList())
+    val folders by vm.folders.collectAsStateSafe(emptyList())
+    val tags by vm.tags.collectAsStateSafe(emptyList())
+    val title = onNavigateUp?.let {
+        articleListTitle(
+            filter = filter,
+            feeds = feeds,
+            folders = folders,
+            tags = tags,
+            allLabel = stringResource(Res.string.home_all_feeds),
+            starredLabel = stringResource(Res.string.home_starred),
+            searchLabel = stringResource(Res.string.home_search),
+        )
+    }
     if (filter is ArticleFilter.Search) {
-        SearchListPane(vm, focused, onActivated, modifier, notifVm)
+        SearchListPane(vm, focused, onActivated, modifier, notifVm, onNavigateUp, navigateUpEnabled, title, onSelectionAdvance)
         return
     }
 
     val articles by vm.articles.collectAsStateSafe(emptyList())
-    val feeds by vm.feeds.collectAsStateSafe(emptyList())
     val selected by vm.selectedArticle.collectAsStateSafe(null)
     val unreadOnly by vm.unreadOnly.collectAsStateSafe(false)
     val newestFirst by vm.newestFirst.collectAsStateSafe(true)
@@ -115,13 +147,16 @@ fun ArticleListPane(
         onToggleUnreadOnly = { vm.setUnreadOnly(!unreadOnly) },
         onToggleSort = { vm.toggleSort() },
         onMarkAllRead = { vm.markAllRead() },
-        onSelectArticle = { vm.selectArticle(it); onActivated() },
+        onSelectArticle = { vm.selectArticle(it); onActivated(); onSelectionAdvance() },
         onToggleRead = { vm.toggleRead(it) },
         onToggleStar = { vm.toggleStar(it) },
         modifier = modifier,
         listState = listState,
         onActivated = onActivated,
         notifVm = notifVm,
+        onNavigateUp = onNavigateUp,
+        navigateUpEnabled = navigateUpEnabled,
+        title = title,
     )
 }
 
@@ -141,6 +176,10 @@ private fun SearchListPane(
     onActivated: () -> Unit,
     modifier: Modifier = Modifier,
     notifVm: NotificationCenterViewModel? = null,
+    onNavigateUp: (() -> Unit)? = null,
+    navigateUpEnabled: Boolean = true,
+    title: String? = null,
+    onSelectionAdvance: () -> Unit = {},
 ) {
     val query by vm.searchQuery.collectAsStateSafe("")
     val results by vm.searchResults.collectAsStateSafe(emptyList())
@@ -177,6 +216,9 @@ private fun SearchListPane(
             onMarkAllRead = { vm.markAllRead() },
             sortEnabled = false,
             notifVm = notifVm,
+            onNavigateUp = onNavigateUp,
+            navigateUpEnabled = navigateUpEnabled,
+            title = title,
         )
 
         Box(Modifier.fillMaxSize()) {
@@ -202,7 +244,7 @@ private fun SearchListPane(
                                 focused = focused,
                                 rowHeight = rowMetrics.rowHeight,
                                 faviconSize = rowMetrics.faviconSize,
-                                onClick = { vm.selectArticle(article); onActivated() },
+                                onClick = { vm.selectArticle(article); onActivated(); onSelectionAdvance() },
                                 onToggleRead = { vm.toggleRead(article) },
                                 onToggleStar = { vm.toggleStar(article) },
                                 onCopyUrl = { copyUrl(article.url) },
@@ -233,10 +275,22 @@ internal fun rememberCopyUrlAction(): (String) -> Unit {
 }
 
 /**
- * The top button row shared by the normal article list ([ArticleListPaneContent]) and the search
- * scope ([SearchListPane]): unread-only toggle, notifications bell, sort, mark-all-read. When
+ * The top bar shared by the normal article list ([ArticleListPaneContent]) and the search scope
+ * ([SearchListPane]): unread-only toggle, notifications bell, sort, mark-all-read. When
  * [sortEnabled] is false (search scope, where results stay pinned to FTS5 relevance rank), the
  * sort button is disabled and its tooltip explains why instead of showing the usual "sort by ...".
+ *
+ * When [onNavigateUp] is non-null (this pane is shown alone or paired at a narrow
+ * [PaneLayout] — see `ArticleListPane`'s KDoc), a leading back-button-and-[title] row is added
+ * above the controls row rather than folded into it: the controls row is unchanged from
+ * [PaneLayout.Triple]/[PaneLayout.Dual] so the unread-only toggle stays reachable at every width
+ * instead of being dropped for space.
+ *
+ * That row is laid out for the whole time the pane stays at a narrow layout, and only the back
+ * button's `enabled` state follows [navigateUpEnabled] — at [PaneLayout.Dual] the feed list slides
+ * in and out beside this pane as the user drills into an article and back, and hiding the row for
+ * the half of that cycle where there is nothing to go back to would move the controls row (and the
+ * whole list under it) up and down each time.
  */
 @Composable
 internal fun ArticleListTopBar(
@@ -247,37 +301,62 @@ internal fun ArticleListTopBar(
     onMarkAllRead: () -> Unit,
     sortEnabled: Boolean = true,
     notifVm: NotificationCenterViewModel? = null,
+    onNavigateUp: (() -> Unit)? = null,
+    navigateUpEnabled: Boolean = true,
+    title: String? = null,
 ) {
     WindowDragArea(Modifier.fillMaxWidth()) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        ToggleChip(
-            label = stringResource(Res.string.home_unread_only),
-            checked = unreadOnly,
-            onCheckedChange = { onToggleUnreadOnly() },
-        )
-        Spacer(Modifier.weight(1f))
-        ToolbarIconGroup {
-            if (notifVm != null) {
-                NotificationsBell(notifVm)
-            }
-            val sortTooltip = if (sortEnabled) {
-                stringResource(if (newestFirst) Res.string.home_sort_oldest else Res.string.home_sort_newest)
-            } else {
-                stringResource(Res.string.home_sort_disabled_search)
-            }
-            TooltipIconButton(tooltip = sortTooltip, onClick = onToggleSort, enabled = sortEnabled) {
-                KeryxIcon(
-                    KeryxIcons.Sort,
-                    contentDescription = sortTooltip,
-                    modifier = Modifier.graphicsLayer(scaleY = if (sortEnabled && !newestFirst) -1f else 1f),
+    Column(Modifier.fillMaxWidth()) {
+        if (onNavigateUp != null) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val backLabel = stringResource(Res.string.common_back)
+                TooltipIconButton(tooltip = backLabel, onClick = onNavigateUp, enabled = navigateUpEnabled) {
+                    // No dedicated "back" asset — mirror the existing chevron (same trick
+                    // ArticleListTopBar's own sort icon already uses to flip vertically below).
+                    KeryxIcon(KeryxIcons.ChevronRight, contentDescription = backLabel, modifier = Modifier.graphicsLayer(scaleX = -1f))
+                }
+                Text(
+                    title.orEmpty(),
+                    modifier = Modifier.weight(1f).padding(start = 4.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.titleMedium,
                 )
             }
-            val markAllReadTooltip = stringResource(Res.string.home_mark_all_read)
-            TooltipIconButton(tooltip = markAllReadTooltip, onClick = onMarkAllRead) {
-                KeryxIcon(KeryxIcons.DoneAll, contentDescription = markAllReadTooltip)
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ToggleChip(
+                label = stringResource(Res.string.home_unread_only),
+                checked = unreadOnly,
+                onCheckedChange = { onToggleUnreadOnly() },
+            )
+            Spacer(Modifier.weight(1f))
+            ToolbarIconGroup {
+                if (notifVm != null) {
+                    NotificationsBell(notifVm)
+                }
+                val sortTooltip = if (sortEnabled) {
+                    stringResource(if (newestFirst) Res.string.home_sort_oldest else Res.string.home_sort_newest)
+                } else {
+                    stringResource(Res.string.home_sort_disabled_search)
+                }
+                TooltipIconButton(tooltip = sortTooltip, onClick = onToggleSort, enabled = sortEnabled) {
+                    KeryxIcon(
+                        KeryxIcons.Sort,
+                        contentDescription = sortTooltip,
+                        modifier = Modifier.graphicsLayer(scaleY = if (sortEnabled && !newestFirst) -1f else 1f),
+                    )
+                }
+                val markAllReadTooltip = stringResource(Res.string.home_mark_all_read)
+                TooltipIconButton(tooltip = markAllReadTooltip, onClick = onMarkAllRead) {
+                    KeryxIcon(KeryxIcons.DoneAll, contentDescription = markAllReadTooltip)
+                }
             }
         }
     }
@@ -314,6 +393,9 @@ internal fun ArticleListPaneContent(
     focused: Boolean = true,
     onActivated: () -> Unit = {},
     notifVm: NotificationCenterViewModel? = null,
+    onNavigateUp: (() -> Unit)? = null,
+    navigateUpEnabled: Boolean = true,
+    title: String? = null,
 ) {
     LaunchedEffect(selectedId, articles.isNotEmpty()) {
         val index = articles.indexOfFirst { it.id == selectedId }
@@ -336,6 +418,9 @@ internal fun ArticleListPaneContent(
             onMarkAllRead = onMarkAllRead,
             sortEnabled = true,
             notifVm = notifVm,
+            onNavigateUp = onNavigateUp,
+            navigateUpEnabled = navigateUpEnabled,
+            title = title,
         )
 
         if (articles.isEmpty()) {

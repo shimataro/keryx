@@ -341,6 +341,75 @@ class ArticleListPaneTest {
         assertEquals(1, toggleUnreadCount)
     }
 
+    /**
+     * At [PaneLayout.Dual] the feed list slides in and out beside this pane as the user drills into
+     * an article and back, which flips whether there is anywhere to navigate up to. The
+     * back-button-and-title row must stay laid out across that flip — only the button's `enabled`
+     * state may follow it — or the controls row below (and the whole article list under that) jumps
+     * by the row's height every time. See the `ui-guidelines` skill, "Layout stability under state
+     * changes": prefer disabled over hidden.
+     */
+    @Test
+    fun articleListTopBarKeepsTheControlsRowInPlaceWhenNavigateUpBecomesUnavailable() = runDesktopComposeUiTest {
+        var navigateUpEnabled by mutableStateOf(true)
+        var backCount = 0
+
+        setContent {
+            ArticleListTopBar(
+                unreadOnly = false,
+                onToggleUnreadOnly = {},
+                newestFirst = true,
+                onToggleSort = {},
+                onMarkAllRead = {},
+                onNavigateUp = { backCount++ },
+                navigateUpEnabled = navigateUpEnabled,
+                title = "Feed a",
+            )
+        }
+        waitForIdle()
+
+        val boundsWhenEnabled = onNodeWithText("未読のみ").fetchSemanticsNode().boundsInRoot
+        onNodeWithContentDescription("戻る").assertIsEnabled()
+        onNodeWithContentDescription("戻る").performClick()
+        waitForIdle()
+        assertEquals(1, backCount)
+
+        navigateUpEnabled = false
+        waitForIdle()
+
+        assertEquals(
+            boundsWhenEnabled,
+            onNodeWithText("未読のみ").fetchSemanticsNode().boundsInRoot,
+            "the controls row must not move when navigating up becomes unavailable",
+        )
+        onNodeWithContentDescription("戻る").assertIsNotEnabled()
+        onNodeWithContentDescription("戻る").performClick()
+        waitForIdle()
+        assertEquals(1, backCount, "a disabled back button must not invoke onNavigateUp")
+    }
+
+    /**
+     * The row is omitted entirely only where it is conceptually never relevant — a
+     * [PaneLayout.Triple] pane, which passes no `onNavigateUp` at all — not merely where navigating
+     * up is temporarily unavailable (covered above).
+     */
+    @Test
+    fun articleListTopBarOmitsTheNavigationRowWhenNoNavigateUpIsGivenAtAll() = runDesktopComposeUiTest {
+        setContent {
+            ArticleListTopBar(
+                unreadOnly = false,
+                onToggleUnreadOnly = {},
+                newestFirst = true,
+                onToggleSort = {},
+                onMarkAllRead = {},
+            )
+        }
+        waitForIdle()
+
+        onNodeWithContentDescription("戻る").assertDoesNotExist()
+        onNodeWithText("未読のみ").assertIsDisplayed()
+    }
+
     @Test
     fun articleListPaneUnreadOnlyEnabledForStarredFilter() {
         val (driver, db) = inMemoryDb()
