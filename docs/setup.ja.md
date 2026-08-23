@@ -87,6 +87,12 @@ Android の両ターゲットについて確認できる。
   `xvfb-run -a --server-args="-screen 0 1920x1080x24" ./gradlew build`）で実行している。ディスプレイの
   無い環境（SSH セッション、コンテナ等）ではローカルでも同様にする。
 - **Dropbox 連携が表示されない**: `DROPBOX_APP_KEY` が未設定（仕様どおり非表示）。`build.md` を参照。
+- **（Android エミュレータ）Dropbox / OneDrive 連携で画面は開くがタップに反応しない**: AVD に実用的な
+  ブラウザーが入っておらず、暗黙的な `ACTION_VIEW` インテントが Chrome ではなく
+  **WebView Browser Tester**（WebView の動作確認用アプリで、実用的なブラウザーではない）に解決されて
+  しまっている。OAuth のページ自体は表示できるが、操作には正しく反応しない。AVD を
+  **Google Play** 搭載のシステムイメージ（"Google APIs" のみのものは Play Store を含まず Chrome も
+  無いため不可）で作り直すか、既存の AVD に実ブラウザーの APK を追加インストールする。
 - **`./gradlew :composeApp:run` で Dropbox / OneDrive 連携が完了しない（全デスクトップ OS 共通）**:
   これらのリダイレクト URI はカスタムスキーム `keryx://` で、接続ボタンが disabled のまま
   タイムアウトする。理由は OS ごとに異なる。macOS: LaunchServices が `keryx://` を
