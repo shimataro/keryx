@@ -33,6 +33,7 @@ private fun <T> SegmentedButtonRow(
                 onClick = { onSelect(value) },
                 shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
                 label = { Text(label) },
+                icon = {},
                 modifier = uniformMinHeight?.let { Modifier.heightIn(min = it) } ?: Modifier,
             )
         }
