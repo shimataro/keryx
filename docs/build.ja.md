@@ -192,16 +192,25 @@ URI がプロセスに届かないからである。代わりにアプリが初�
   `keryx-opml.xml` を削除しただけでは、データベースを再構築するまでコンパイル済みの MIME
   キャッシュが削除済みのタイプを指したままになる。
 - **Android**: 上記デスクトップ3OSと異なり起動時の登録処理は一切無く、
-  `androidApp/src/main/AndroidManifest.xml` 内の `MainActivity` に対する2つ目の `ACTION_VIEW`
-  intent-filter として宣言するだけで完結する — このマニフェスト宣言だけで、システムの
-  「アプリで開く」選択画面に Keryx が現れるようになる。macOS や Linux と同様、OPML には
+  `androidApp/src/main/AndroidManifest.xml` 内の `MainActivity` に対する、さらに2つの
+  `ACTION_VIEW` intent-filter として宣言するだけで完結する — このマニフェスト宣言だけで、
+  システムの「アプリで開く」選択画面に Keryx が現れるようになる。macOS や Linux と同様、OPML には
   標準化された単一の MIME タイプが存在せず、Android のコンテンツプロバイダーは素の `.opml`
   ファイルを XML 系のタイプではなく `application/octet-stream` として報告することが多い —
-  そのため MIME だけで絞り込むと実際のファイルの大半を取りこぼす。そこでこのフィルターは、
-  MIME ベースの `<data>` タグ（`application/x-opml+xml` / `text/x-opml` / `text/xml` /
-  `application/xml` — 上記 Linux 節と同じ識別子）と、拡張子ベースのフォールバック
-  （`scheme="content"` + `host="*"` + `mimeType="*/*"` + `pathPattern=".*\\.opml"`、報告される
-  MIME タイプに関わらず `content://` URI のパスで判定する）を組み合わせている。`host="*"` は
+  そのため MIME だけで絞り込むと実際のファイルの大半を取りこぼす。MIME ベースのフィルター
+  （`application/x-opml+xml` / `text/x-opml` / `text/xml` / `application/xml` — 上記 Linux 節と
+  同じ識別子）と、拡張子ベースのフォールバックフィルター（`scheme="content"` + `host="*"` +
+  `mimeType="*/*"` + `pathPattern=".*\\.opml"`、報告される MIME タイプに関わらず `content://`
+  URI のパスで判定する）は、**2つの独立した intent-filter** として宣言している（1つのフィルター内に
+  `<data>` タグをまとめてはいない）: Android は同一 `<intent-filter>` 内にある複数の `<data>`
+  要素の scheme / host / mimeType / pathPattern を、それぞれ1つの共有マッチ集合にまとめてしまう
+  （`IntentFilter.matchData`）ため、いずれか1つの `<data>` タグに `pathPattern` を宣言すると、
+  同じフィルター内の他の `<data>` タグの単純な MIME タイプ指定にまで、その `pathPattern` が
+  暗黙に適用されてしまう — その結果、MIME タイプは一致していても `content://` のパスが
+  `.opml` という拡張子で終わっていない場合（SAF のドキュメント ID は不透明な値であることが多く、
+  これはむしろ一般的なケースである）にマッチ自体が失敗し、MIME ベースのタグが実質的に無意味に
+  なってしまう。フィルターを分離しておくことで、MIME タイプだけでのマッチが `.opml` という
+  拡張子の有無に左右されなくなる。フォールバック側フィルターの `host="*"` は
   飾りではなく必須の指定である — `IntentFilter.matchData` は、フィルターに host が宣言されている
   場合に限って `pathPattern` を評価するため、host が無いとこのフォールバックは実際の
   `content://` URI に対して一切マッチしなくなる（その URI の本当の authority は配信元の

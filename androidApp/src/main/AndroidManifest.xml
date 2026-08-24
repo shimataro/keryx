@@ -44,33 +44,49 @@
                  attachment, another feed reader's export) — the Android counterpart of desktop's
                  file-association registrations (see build.md's ".opml file association").
                  There is no standardized MIME type for OPML (build.md's Linux/macOS sections
-                 already document the same ambiguity across desktop feed readers), so this filter
-                 combines every MIME type seen in the wild with an extension-based fallback: many
-                 content providers report a plain .opml file as application/octet-stream, which
-                 the MIME-only data specs below would miss entirely. AndroidOpmlOpen.kt handles the
-                 read; see its own KDoc for why it, not this filter, is what excludes the keryx://
-                 OAuth case sharing the same MainActivity/ACTION_VIEW handling.
-                 No BROWSABLE category here (unlike the OAuth filter above): BROWSABLE marks a
-                 filter as reachable from a web browser following a link; this filter is meant for
-                 a file manager or mail client resolving a local/content file, not a web link, so
-                 DEFAULT alone is right.
-                 The last <data> (the extension fallback) needs android:host="*" even though a
-                 content:// URI's real authority is whatever provider served it (e.g.
-                 com.android.externalstorage.documents) and can't be enumerated here: per
-                 IntentFilter.matchData's own source, a pathPattern is only ever evaluated when the
-                 filter also declares a host (mDataAuthorities) — with none, matching bails out
-                 before the pattern is checked (logged as "Cannot match path, no authority"), so
-                 the fallback would silently never fire. "*" is IntentFilter's documented wildcard
-                 for "any host" (AuthorityEntry treats a leading '*' as a suffix match against "",
-                 which every string ends with), which is what actually makes the pattern apply
-                 regardless of which provider's content:// URI it is. -->
+                 already document the same ambiguity across desktop feed readers), so this is
+                 split into two intent-filters below rather than one: Android pools every <data>
+                 element's scheme/host/mimeType/pathPattern within a single <intent-filter> into
+                 one shared match set (IntentFilter.matchData), so a host/pathPattern declared on
+                 one <data> tag would silently apply to every other <data> tag's plain MIME type
+                 in the same filter too — an intent whose MIME type matched but whose content://
+                 path lacked a literal ".opml" suffix (the common case, since SAF document IDs are
+                 often opaque) would then fail to match the filter at all, defeating the MIME-only
+                 tags entirely. Keeping them in separate filters is what makes each alternative
+                 actually independent. AndroidOpmlOpen.kt handles the read; see its own KDoc for
+                 why it, not either filter, is what excludes the keryx:// OAuth case sharing the
+                 same MainActivity/ACTION_VIEW handling.
+                 No BROWSABLE category on either filter (unlike the OAuth filter above): BROWSABLE
+                 marks a filter as reachable from a web browser following a link; these filters
+                 are meant for a file manager or mail client resolving a local/content file, not a
+                 web link, so DEFAULT alone is right. -->
             <intent-filter>
+                <!-- MIME-type match: many content providers report a plain .opml file as one of
+                     these types. No scheme/host/pathPattern declared here (see comment above for
+                     why not) — matching stays on MIME type alone. -->
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/x-opml+xml" />
                 <data android:mimeType="text/x-opml" />
                 <data android:mimeType="text/xml" />
                 <data android:mimeType="application/xml" />
+            </intent-filter>
+            <intent-filter>
+                <!-- Extension-based fallback: many content providers report a plain .opml file as
+                     application/octet-stream instead, which the MIME-only filter above would miss
+                     entirely — this matches on the content:// URI's path regardless of the
+                     reported MIME type. android:host="*" is required, not decorative: per
+                     IntentFilter.matchData's own source, a pathPattern is only ever evaluated when
+                     the filter also declares a host (mDataAuthorities) — with none, matching
+                     bails out before the pattern is checked (logged as "Cannot match path, no
+                     authority"), so this filter would silently never fire. "*" is IntentFilter's
+                     documented wildcard for "any host" (AuthorityEntry treats a leading '*' as a
+                     suffix match against "", which every string ends with), which is what
+                     actually makes the pattern apply regardless of which provider's content://
+                     URI it is (the real authority, e.g. com.android.externalstorage.documents,
+                     can't be enumerated up front). -->
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
                 <data
                     android:scheme="content"
                     android:host="*"
