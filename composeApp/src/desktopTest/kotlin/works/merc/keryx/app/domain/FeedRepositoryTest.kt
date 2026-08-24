@@ -28,6 +28,7 @@ import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.CountingSqlDriver
+import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFolder
@@ -256,7 +257,17 @@ class FeedRepositoryTest {
 
     @Test
     fun subscribeFeedSerializesSortOrderAllocationAcrossConcurrentCalls(): Unit = runBlocking {
-        val (rawDriver, _) = inMemoryDb()
+        // A file-backed DB, not inMemoryDb(): SQLDelight's JdbcSqliteDriver pins ALL callers of an
+        // IN_MEMORY driver to one shared physical JDBC connection (there's no other way to keep the
+        // in-memory data visible across statements), so once this test's two real Threads are both
+        // mid-transaction on it, a second BEGIN issued while the first hasn't committed yet throws
+        // "cannot start a transaction within a transaction" — a single-connection JDBC artifact, not
+        // a real race, since subscribePlacementMutex already serializes the sort-order-critical
+        // section and articleRepository.upsertParsed's own (separate, per-feed) transaction has no
+        // shared invariant to protect. A file-backed driver gives each transaction its own
+        // connection, exactly like production, so genuinely overlapping transactions are resolved by
+        // SQLite's own locking + busy_timeout instead of colliding on one Connection object.
+        val (_, rawDriver, _) = fileDb()
         val driver = GatedSortOrderDriver(rawDriver)
         val db = works.merc.keryx.app.data.local.db.KeryxDatabase(driver)
         try {
