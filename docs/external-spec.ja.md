@@ -155,7 +155,7 @@ Linux は Look & Feel が解決したフォント、次にデスクトップの�
 
 | レイヤー | 採用技術 |
 | --- | --- |
-| UI | Compose Multiplatform（Material 3） |
+| UI | Compose Multiplatform（Android は Material 3、他プラットフォームはプラットフォーム固有 UI — §9 参照） |
 | 状態管理 | androidx.lifecycle ViewModel + Koin |
 | DB | SQLDelight（SQLite）+ FTS5（生 SQL） |
 | HTTP | Ktor client（CIO） |

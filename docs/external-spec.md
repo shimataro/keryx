@@ -151,7 +151,7 @@ Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
 
 | Layer | Technology |
 | --- | --- |
-| UI | Compose Multiplatform (Material 3) |
+| UI | Compose Multiplatform (Material 3 on Android; platform-specific UI elsewhere — see §9) |
 | State management | androidx.lifecycle ViewModel + Koin |
 | DB | SQLDelight (SQLite) + FTS5 (raw SQL) |
 | HTTP | Ktor client (CIO) |
