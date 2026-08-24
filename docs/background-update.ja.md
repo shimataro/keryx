@@ -23,7 +23,7 @@ worker は重複実装せず同じ実装を呼んでいる。
 ```kotlin
 while (true) {
     val minutes = settings.refreshIntervalMinutes
-    delay(if (minutes <= 0) 60_000L else minutes * 60_000L)  // 「手動のみ」（minutes <= 0）は 1 分ごとに起床
+    delay(if (minutes <= 0) 60_000L else minutes * 60_000L)  // 「手動」（minutes <= 0）は 1 分ごとに起床
     if (minutes > 0) {
         refreshFeedsAndNotify()   // 全フィード更新（ETag / Last-Modified 差分取得）→ 新着があり通知が
                                   // 有効なら NewArticleNotifier.notifyBackground(newArticles(newCount))
@@ -50,7 +50,7 @@ while (true) {
 同期し続ける — そのため設定変更は再起動なしに即座に反映される。設定値からスケジュールへの写像は
 純粋関数 `domain/BackgroundRefreshSchedule.kt` の `backgroundRefreshSchedule`（commonMain に置き、
 単体テスト済み — このモジュールには Android 固有クラスをテストする `androidUnitTest` ソースセットが
-無いため）: 「手動のみ」（`<= 0`）はジョブを完全にキャンセルし、`WorkManager` 自体の最短間隔
+無いため）: 「手動」（`<= 0`）はジョブを完全にキャンセルし、`WorkManager` 自体の最短間隔
 （`PeriodicWorkRequest.MIN_PERIODIC_INTERVAL_MILLIS`、15分）を下回る正の値はそれに切り上げる
 （無効化はしない）。アプリの UI 自体は15分未満の値を提示しないため、これは手動編集や移行された
 `local_settings.json` の場合にのみ関係する。

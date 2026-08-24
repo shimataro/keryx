@@ -9,6 +9,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 
 /** Slot ids for [SegmentedControl]'s two subcomposition passes — see its own KDoc. */
@@ -50,7 +51,7 @@ private fun <T> SegmentedButtonRow(
  * The [SubcomposeLayout] exists to give every button the tallest one's height. M3's own row does
  * not do this: `SingleChoiceSegmentedButtonRow` hardcodes `verticalAlignment =
  * Alignment.CenterVertically` with no parameter to override it, so a button whose label wraps to
- * two lines (e.g. "Match system" beside "Light"/"Dark" at phone width) is simply taller than its
+ * two lines (e.g. "System" beside "Light"/"Dark" at phone width) is simply taller than its
  * single-line siblings, which then float centered in a ragged row. The component is designed
  * around a fixed-height control — `OutlinedSegmentedButtonTokens.ContainerHeight` is 40dp — so
  * wrapping labels are outside what it accounts for, and neither Material 3's guidelines nor the
@@ -84,15 +85,30 @@ private fun <T> SegmentedButtonRow(
 @Composable
 actual fun <T> SegmentedControl(options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) {
     SubcomposeLayout { constraints ->
+        // SingleChoiceSegmentedButtonRow uses width(IntrinsicSize.Min), so without intervention
+        // it shrinks to the narrowest width that satisfies its intrinsic measurement. For long
+        // labels this squeezes text vertically. Force the row to use the full available width so
+        // each segment shares the parent width equally.
+        val fullWidthConstraints = if (constraints.maxWidth == Constraints.Infinity) {
+            constraints
+        } else {
+            constraints.copy(minWidth = constraints.maxWidth)
+        }
+
         val natural = subcompose(SegmentedControlPass.Measure) {
             SegmentedButtonRow(options, selected, onSelect, uniformMinHeight = null)
-        }.first().measure(constraints)
+        }.first().measure(fullWidthConstraints)
 
         val uniform = subcompose(SegmentedControlPass.Place) {
             SegmentedButtonRow(options, selected, onSelect, uniformMinHeight = natural.height.toDp())
-        }.first().measure(constraints)
+        }.first().measure(fullWidthConstraints)
 
-        layout(uniform.width, uniform.height) { uniform.place(0, 0) }
+        layout(
+            width = if (constraints.maxWidth == Constraints.Infinity) uniform.width else constraints.maxWidth,
+            height = uniform.height,
+        ) {
+            uniform.place(0, 0)
+        }
     }
 }
 

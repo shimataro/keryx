@@ -140,7 +140,7 @@
     <string name="settings_tab_notifications">通知</string>
     <string name="settings_tab_data">データ</string>
     <string name="settings_theme">テーマ</string>
-    <string name="settings_theme_system">システムに合わせる</string>
+    <string name="settings_theme_system">システム</string>
     <string name="settings_theme_light">ライト</string>
     <string name="settings_theme_dark">ダーク</string>
     <string name="settings_cache">記事のキャッシュ保持期間</string>
@@ -174,7 +174,7 @@
     <string name="settings_refresh_min30">30分</string>
     <string name="settings_refresh_hour1">1時間</string>
     <string name="settings_refresh_hour3">3時間</string>
-    <string name="settings_refresh_manual">手動のみ</string>
+    <string name="settings_refresh_manual">手動</string>
     <string name="settings_desktop">デスクトップ</string>
     <string name="settings_notification_enabled">新着通知を有効にする</string>
     <string name="settings_start_minimized">起動時にトレイに収納する</string>
