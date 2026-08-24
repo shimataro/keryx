@@ -767,10 +767,13 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   - `Snackbar`/`SnackbarHost` (OPML import/export results, URL-copied toast) — weaker candidate than the
     others since SwiftUI has no 1:1 Snackbar equivalent; a SwiftUI port would need a bespoke transient
     banner view rather than a drop-in native replacement.
-  - The Settings dialog's tab switcher (`KeryxDialogTabBar` in `ui/common/KeryxDialogs.kt`, used by
-    `KeryxTabDialog`) — a flat Compose-drawn icon-over-label tab row, deliberately *not* styled to
-    mimic macOS's native toolbar/segmented-control chrome → a native NSToolbar-style preferences tab
-    switcher on a future SwiftUI port. Two rounds of AWT/Swing interop (`SwingPanel` +
+  - **Desktop only.** The Settings dialog's tab switcher (`KeryxDialogTabBar`, desktop-only in
+    `KeryxDialogs.desktop.kt`, used by desktop's `KeryxTabDialog` actual) — a flat Compose-drawn
+    icon-over-label tab row, deliberately *not* styled to mimic macOS's native
+    toolbar/segmented-control chrome → a native NSToolbar-style preferences tab switcher on a
+    future SwiftUI port. Android's `KeryxTabDialog` actual already uses a genuine M3
+    `PrimaryScrollableTabRow`/`Tab` for this, so it needs no equivalent migration. Two rounds of
+    AWT/Swing interop (`SwingPanel` +
     `JToggleButton`s with Aqua `JButton.buttonType` client properties) were tried and dropped before
     landing on the Compose version: `"segmented"` reads as a cramped joined pill unsuited to this
     layout, and `"toolbarItem"` (the semantically correct type — Apple's own docs describe it as "a

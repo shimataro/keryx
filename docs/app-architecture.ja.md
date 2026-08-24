@@ -43,12 +43,14 @@ composeApp/src/
     プロバイダを登録した CloudSession — 下記 Provider/DI 参照。加えて AndroidNotificationSink、下記
     「バックグラウンド更新」参照）, CloudStorageAvailability（Dropbox/OneDrive は実判定、Google Drive は
     `false` 固定 — 理由は sync-architecture.ja.md の「Android で Google Drive が未対応な理由」参照）,
-    KeryxTextField/KeryxAlertDialog/KeryxTabDialog/KeryxIcons/FlatButtons/FlatToggles/
-    SegmentedControl（素の M3。KeryxTabDialog はエッジツーエッジ対応で safe-drawing padding 済み。
-    後の4つも同様に `expect`/`actual` 分割されており、Android 側は Material Symbols（アイコン）や
-    M3 の `Button`/`FilledTonalButton`/`TextButton`/`Switch`/`Checkbox`/
-    `SingleChoiceSegmentedButtonRow`+`SegmentedButton`/`FilterChip`（コンポーネント）をそのまま使う —
-    詳細は下記「アイコンセット」参照）,
+    KeryxTextField/KeryxAlertDialog/KeryxIcons/FlatButtons/FlatToggles/
+    SegmentedControl（素の M3。後の4つも同様に `expect`/`actual` 分割されており、Android 側は
+    Material Symbols（アイコン）や M3 の `Button`/`FilledTonalButton`/`TextButton`/`Switch`/
+    `Checkbox`/`SingleChoiceSegmentedButtonRow`+`SegmentedButton`/`FilterChip`（コンポーネント）を
+    そのまま使う — 詳細は下記「アイコンセット」参照）,
+    KeryxTabDialog（ほぼ全画面のモーダル `Dialog`。エッジツーエッジ対応で safe-drawing padding 済み。
+    タブ切り替え部分はデスクトップ側の自前タブバーとは異なり、本物の M3
+    `PrimaryScrollableTabRow`/`Tab` — 詳細は `ui-guidelines` スキル参照）,
     PlatformTheme（`platformShapes` は M3 既定の `Shapes()`、`ProvidePlatformInteraction` は
     no-op — `LocalIndication`/`LocalRippleConfiguration` を M3 既定のままにすることで、あらゆる
     `clickable` と M3 部品が本物のリップルを持つようになる。external-spec.ja.md の「UI 方針」参照）、

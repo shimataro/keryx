@@ -45,11 +45,14 @@ composeApp/src/
     AndroidNotificationSink, see "Background Update" below), CloudStorageAvailability (Dropbox/
     OneDrive real, Google Drive fixed `false` — see sync-architecture.md's "Google Drive on
     Android" for why), KeryxTextField/KeryxAlertDialog/
-    KeryxTabDialog/KeryxIcons/FlatButtons/FlatToggles/SegmentedControl (plain M3, safe-drawing-padded
-    for edge-to-edge — the last four are `expect`/`actual` split the same way, with Material Symbols
-    (icons) or M3's own `Button`/`FilledTonalButton`/`TextButton`/`Switch`/`Checkbox`/
+    KeryxIcons/FlatButtons/FlatToggles/SegmentedControl (plain M3 — the last four are
+    `expect`/`actual` split the same way, with Material Symbols (icons) or M3's own
+    `Button`/`FilledTonalButton`/`TextButton`/`Switch`/`Checkbox`/
     `SingleChoiceSegmentedButtonRow`+`SegmentedButton`/`FilterChip` (components) as the Android side —
-    see "Icon set" below), PlatformTheme (`platformShapes` = M3's own default `Shapes()`,
+    see "Icon set" below), KeryxTabDialog (a modal, near-fullscreen `Dialog`, safe-drawing-padded
+    for edge-to-edge, whose tab switcher is a genuine M3 `PrimaryScrollableTabRow`/`Tab` — unlike
+    desktop's own hand-rolled tab bar, see the `ui-guidelines` skill), PlatformTheme
+    (`platformShapes` = M3's own default `Shapes()`,
     `ProvidePlatformInteraction` a no-op — leaving `LocalIndication`/`LocalRippleConfiguration` at
     their M3 defaults is what gives every `clickable` and M3 component a real ripple; see "UI
     Direction" in external-spec.md), `ListRowChrome.android.kt`'s `listRowSurface` (a pill-shaped
