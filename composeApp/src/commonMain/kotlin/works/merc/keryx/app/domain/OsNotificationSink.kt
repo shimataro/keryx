@@ -11,8 +11,10 @@ package works.merc.keryx.app.domain
  * direct [NewArticleNotifier.notify] call with no count of its own). Android's binding forwards
  * this to `NotificationCompat.Builder.setNumber`, which is *not* the same thing as the icon-level
  * "badge" a desktop OS shows — Android has no API to set an app-icon badge count independent of an
- * active notification (see `AndroidNotificationSink`'s own KDoc); `setNumber` only affects the count
- * shown in the icon's long-press menu.
+ * active notification (see `AndroidNotificationSink`'s own KDoc). On launchers that support it,
+ * `setNumber` may be shown as the active notification's badge count; it also affects the count
+ * shown in the icon's long-press menu — but it never creates an independent, persistent app-icon
+ * badge the way desktop's `IconBadge.kt` does.
  */
 fun interface OsNotificationSink {
     suspend fun post(message: String, count: Int)

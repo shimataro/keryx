@@ -33,12 +33,13 @@ private const val NEW_ARTICLES_CHANNEL_ID = "new_articles"
  * (`desktopMain/IconBadge.kt`'s `drawUnreadBadge`, a persistent digit composited onto the app icon
  * itself): Android's launcher notification dot is tied to the presence of an *active* notification
  * — `NotificationChannelCompat.setShowBadge` (left at its default `true` here) only turns that dot
- * on or off per channel, and `setNumber` below only affects the count shown in the icon's
- * long-press menu, not any digit drawn on the icon itself. There is no public API to set an
- * icon-level badge count independent of an active notification (unlike iOS's
- * `setApplicationIconBadgeNumber`), so posting one persistent, undismissable notification just to
- * keep a badge alive would fight the platform's own notification model. See `background-update.md`
- * for the full comparison against desktop.
+ * on or off per channel, and `setNumber` below only affects the *active* notification's badge count
+ * on launchers that support one, plus the count shown in the icon's long-press menu — never an
+ * independent digit drawn on the icon itself. There is no public API to set an icon-level badge
+ * count independent of an active notification (unlike iOS's `setApplicationIconBadgeNumber`), so
+ * posting one persistent, undismissable notification just to keep a badge alive would fight the
+ * platform's own notification model. See `background-update.md` for the full comparison against
+ * desktop.
  */
 class AndroidNotificationSink(private val context: Context) : OsNotificationSink {
     override suspend fun post(message: String, count: Int) {
@@ -66,9 +67,10 @@ class AndroidNotificationSink(private val context: Context) : OsNotificationSink
             .setContentText(message)
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
-            // Only affects the icon's long-press menu, not any on-icon digit — see this class's
-            // own KDoc. A count <= 0 (e.g. a direct notify() call with no count of its own) leaves
-            // the system's own default (one notification = "1") rather than showing "0".
+            // Affects this notification's badge count on launchers that support one, plus the
+            // icon's long-press menu — never an on-icon digit; see this class's own KDoc. A count
+            // <= 0 (e.g. a direct notify() call with no count of its own) leaves the system's own
+            // default (one notification = "1") rather than showing "0".
             .apply { if (count > 0) setNumber(count) }
             .build()
 
