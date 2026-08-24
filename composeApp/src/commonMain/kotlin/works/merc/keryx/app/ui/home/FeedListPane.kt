@@ -345,7 +345,7 @@ internal fun FeedListPane(
         modifier
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
             .fillMaxSize()
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onActivated)
+            .paneActivation(onActivated)
             .nativeContextMenu(items = { emptyList() }, onOpen = onActivated),
     ) {
         FeedListToolbarRow(

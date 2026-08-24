@@ -1,12 +1,16 @@
 package works.merc.keryx.app.ui.home
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -50,6 +54,29 @@ internal val deleteNativeShortcut = NativeMenuShortcut(Key.Delete)
  * Whether a row's selection highlight should be visibly painted at all — see [LocalRowSelectionVisible].
  */
 internal val LocalRowSelectionVisible = staticCompositionLocalOf { true }
+
+/**
+ * Click-to-focus for a pane's background — on a mouse+keyboard platform there is no OS-level
+ * click-to-focus for the panes inside this one window, so a plain click anywhere in a pane's
+ * empty background is this app's only way to move keyboard focus onto it.
+ *
+ * Dropped entirely on a touch-primary platform ([isTouchPrimary]): touch has no keyboard focus to
+ * move in the first place, so keeping this modifier there would only add an unlabeled, full-size
+ * accessibility click node sitting behind every other control in the pane.
+ *
+ * @param isTouchPrimary Overridable for tests only (mirrors `feedListReorderDrag`'s own
+ *   `isTouchPrimary` parameter) — production call sites always use the platform default from
+ *   `platform/PlatformOs.kt`.
+ */
+@Composable
+internal fun Modifier.paneActivation(
+    onActivated: () -> Unit,
+    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
+): Modifier = if (isTouchPrimary) {
+    this
+} else {
+    this.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onActivated)
+}
 
 /**
  * Background for a selectable row: full-strength when its pane is focused, dimmed when the

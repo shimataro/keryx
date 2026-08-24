@@ -1,8 +1,6 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -205,7 +203,7 @@ private fun SearchListPane(
         modifier
             .background(MaterialTheme.colorScheme.surfaceContainer)
             .fillMaxSize()
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onActivated)
+            .paneActivation(onActivated)
             .nativeContextMenu(items = { emptyList() }, onOpen = onActivated),
     ) {
         ArticleListTopBar(
@@ -405,7 +403,7 @@ internal fun ArticleListPaneContent(
         modifier
             .background(MaterialTheme.colorScheme.surfaceContainer)
             .fillMaxSize()
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onActivated)
+            .paneActivation(onActivated)
             .nativeContextMenu(items = { emptyList() }, onOpen = onActivated),
     ) {
         ArticleListTopBar(

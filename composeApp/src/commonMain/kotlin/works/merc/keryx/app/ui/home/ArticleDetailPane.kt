@@ -1,8 +1,6 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -178,7 +176,7 @@ internal fun ArticleDetailPaneContent(
         modifier
             .background(surface)
             .fillMaxSize()
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onActivated),
+            .paneActivation(onActivated),
     ) {
         WindowDragArea(Modifier.fillMaxWidth()) {
             ArticleDetailToolbar(
