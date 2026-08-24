@@ -8,7 +8,8 @@
 - Koin で依存性注入、androidx.lifecycle ViewModel で状態管理
 - SQLDelight でローカル DB を型安全に管理
 - 同期処理は Repository 層に閉じ込め、UI 層は同期の存在を意識しない
-- プラットフォーム固有コードは `commonMain` の `expect` + `desktopMain` の `actual` に集約
+- 共有のプラットフォーム抽象は `commonMain` で宣言し、可能な場合は `jvmCommonMain` に実装する。
+  それ以外はターゲットごとのソースセット（`desktopMain` / `androidMain`）に実装する。
 
 ## ディレクトリー構成
 
@@ -20,19 +21,73 @@ composeApp/src/
     data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce(expect), TokenStorage, OAuthTokens
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, OAuthCallbackParams, StartupMaintenanceTasks（refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex）
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler（importOpmlAndNotify。デスクトップと Android の「`.opml` ファイル関連付け」で共有）, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, OAuthCallbackParams, StartupMaintenanceTasks（refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex）
     di/           AppModule（+ expect platformModule）
-    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot（すべて expect）
+    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile（すべて expect）
     ui/           theme/, navigation/, setup/, home/（3ペイン + 検索 + 通知センター）, article/, settings/, i18n/
     LaunchArg.kt  起動時の引数（`keryx://` URI か `.opml` パスか）を分類する — プラットフォーム非依存、パッケージ直下
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq（7 テーブル）
-  commonMain/composeResources/  values/strings.xml, drawable/
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ 各 expect の actual（DatabaseDriverFactory, AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, Pkce, PlatformModule）+ LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）, DesktopOs（isMacOs/isWindows/isLinux）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf）
+  commonMain/composeResources/  values/strings.xml, drawable/（アイコンは SVG ではなく Android
+    Vector Drawable XML — Compose Multiplatform の SVG デコーダはデスクトップ/iOS 専用で Android では
+    実行時にクラッシュするため。VectorDrawable XML は `painterResource` が全ターゲットで描画できる唯一の画像形式）
+  jvmCommonMain/kotlin/…/  デスクトップと Android の両方が共有する actual（どちらのプラットフォーム
+    API にも依存しない）: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage, AppInfo,
+    CloudStorageAvailability（後者2つは共有生成 BuildConfig を読むだけ）
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ jvmCommonMain がカバーしない expect の actual（DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule）+ LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）, DesktopOs（isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf）
     tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray + StatusNotifierItem/dbusmenu の D-Bus オブジェクト
-  commonTest/ + desktopTest/
+  androidMain/kotlin/…/  jvmCommonMain がカバーしない expect の actual: DatabaseDriverFactory（バンドル
+    SQLite、後述）, DatabaseFile（`databaseFilePath()` — `Context.getDatabasePath` で、
+    AppDirs.appDataDir()/`Context.filesDir` とは別ディレクトリになる。db-schema.ja.md 参照）,
+    AppDirs/BrowserOpener/ClipboardEntries（AndroidAppContext 経由 — KeryxApplication.onCreate
+    で一度だけ設定される静的 Context ホルダ）, PlatformModule（Ktor OkHttp エンジン、Dropbox/OneDrive
+    プロバイダを登録した CloudSession — 下記 Provider/DI 参照。加えて AndroidNotificationSink、下記
+    「バックグラウンド更新」参照）, CloudStorageAvailability（Dropbox/OneDrive は実判定、Google Drive は
+    `false` 固定 — 理由は sync-architecture.ja.md の「Android で Google Drive が未対応な理由」参照）,
+    KeryxTextField/KeryxAlertDialog/KeryxTabDialog/KeryxIcons/FlatButtons/FlatToggles/
+    SegmentedControl（素の M3。KeryxTabDialog はエッジツーエッジ対応で safe-drawing padding 済み。
+    後の4つも同様に `expect`/`actual` 分割されており、Android 側は Material Symbols（アイコン）や
+    M3 の `Button`/`FilledTonalButton`/`TextButton`/`Switch`/`Checkbox`/
+    `SingleChoiceSegmentedButtonRow`+`SegmentedButton`/`FilterChip`（コンポーネント）をそのまま使う —
+    詳細は下記「アイコンセット」参照）,
+    DatabaseMerger/DatabaseSnapshot（専用の `io.requery.android.database.sqlite.SQLiteDatabase`
+    接続に対する実装 — デスクトップ実装の専用 JDBC 接続に相当。下記「DatabaseMerger」参照）,
+    AndroidSqliteSupport.kt（`NoOpDatabaseErrorHandler` — バンドル SQLite の既定ハンドラは破損と
+    判定した DB ファイルを削除する。AAR の逆アセンブルで確認済み。加えて両者が共有する
+    `setBusyTimeout()`/`userVersion()`）, FilePicker（Storage Access Framework の
+    `OpenDocument`/`CreateDocument`。この `expect object` は自身では `ActivityResultLauncher` を
+    持てないため AndroidFilePickerHost 経由）, KeystoreTokenStorage（クラウドプロバイダーごとに
+    Android Keystore 保持の AES-256/GCM 鍵。sync-architecture.ja.md の「トークン保存先」参照）,
+    AndroidOAuthCallback.kt（`dispatchOAuthCallbackIfPresent`。`keryx://` OAuth リダイレクト用に
+    `:androidApp` の `MainActivity` から呼ばれる — デスクトップの `main.kt` の URI ルーティングに相当）,
+    AndroidOpmlOpen.kt（`handleOpmlOpenIfPresent`。`.opml` の「Keryx で開く」`ACTION_VIEW` インテント用に
+    同じ `MainActivity` から呼ばれる — デスクトップの `.opml` ファイル関連付けに相当。
+    `platform/FilePicker.android.kt` の `readTextFromUri` で `content://` `Uri` を読み取り、
+    commonMain の `domain/OpmlOpenHandler.kt` に委譲する）,
+    nativeContextMenu（適応レイアウトのフェーズで実装した実際の
+    長押し DropdownMenu — タップと長押しの判別は KDoc 参照）, BackHandler（`androidx.activity.compose.BackHandler`
+    へ委譲）, PlatformOs（isTouchPrimary = true, hasNativeAppMenu = false — Android にはメニューバーが
+    無いため、FeedListToolbarRow/GeneralTab が独自の設定/バージョン情報導線を持つ）,
+    SelfUpdateCheck（インストール元パッケージ名に基づく判定、下記「バックグラウンド更新」参照）,
+    NotificationPermission（`POST_NOTIFICATIONS` 用に `rememberLauncherForActivityResult` をラップ）+
+    AndroidStartupTasks.kt（`runAndroidStartupTasks`。`:androidApp` の `MainActivity` から呼ばれる）+
+    background/（`FeedRefreshWorker` + `BackgroundRefresh.kt` の `startBackgroundRefresh`。
+    `WorkManager` ベース — Android のバックグラウンド/通知の全体像は
+    [background-update.ja.md](background-update.ja.md) を参照）
+  commonTest/ + desktopTest/ + androidDeviceTest/（DatabaseMerger/DatabaseSnapshot の Android 実装向け
+    計装テスト — バンドル SQLite ネイティブライブラリの読み込みに実機/エミュレータが必要。
+    testing.ja.md 参照）
 ```
 
 パッケージルートは `works.merc.keryx.app`（`keryx.merc.works` の逆順 DNS）。
+
+ルート直下の別モジュール `androidApp`（`com.android.application`。上記の Kotlin Multiplatform
+ソースセット構成には含まれない）は `AndroidManifest.xml`、`KeryxApplication`（プロセス全体の初期化:
+`AndroidAppContext.init`、`startKoin`、`configureImageLoader`、FTS バックフィルの `ensureIndexed()`、
+`startBackgroundRefresh`）、`MainActivity`（`setContent { App() }`、続けて
+`runAndroidStartupTasks`）のみを持つ。これが別モジュールになっているのは、AGP 9 の
+`com.android.application` プラグインが Kotlin Multiplatform プラグインと同一モジュールで併用できない
+ため — `composeApp` は代わりに `com.android.kotlin.multiplatform.library` による Android ライブラリで、
+`androidApp` がそれに依存してインストール可能な APK を生成する。
 
 ## レイヤーの責務
 
@@ -50,6 +105,17 @@ composeApp/src/
 `commonMain` に `expect class DatabaseDriverFactory { fun create(): SqlDriver }`。desktop の `actual` は
 `JdbcSqliteDriver` を生成し、`PRAGMA user_version` を見て `KeryxDatabase.Schema` の create / migrate を
 自前で駆動する（SQLDelight の JVM ドライバはスキーマバージョンを自動追跡しないため）。
+
+Android の `actual` は `AndroidSqliteDriver` を生成する。こちらは `onCreate`/`onUpgrade` コールバックで
+`Schema.create`/`migrate` を自動的に駆動するため、desktop のような `PRAGMA user_version` の手動管理は
+不要。端末標準の SQLite ではなく `com.github.requery:sqlite-android` のバンドル SQLite
+（`RequerySQLiteOpenHelperFactory`、`androidx.sqlite.db.SupportSQLiteOpenHelper.Factory` の実装）を
+使う — AOSP の SQLite ビルドは FTS5 自体を含んでいないため、`articles_fts` の `tokenize='trigram'` は
+どの API レベルでも端末標準の SQLite では動作しない。詳細な理由と撤退条件は
+`.claude/rules/android-sqlite-bundling.md` を参照。`busy_timeout`/`foreign_keys` は
+`AndroidSqliteDriver.Callback.onConfigure` から設定する。なお `PRAGMA busy_timeout=N` は結果行として
+新しい値を返すため、`execSQL` ではなく `SupportSQLiteDatabase.query` を経由する必要がある点に注意
+（requery は結果行を返す文を `execSQL` に渡すと拒否する）。
 
 ### FtsManager / FtsSearch
 
@@ -72,15 +138,27 @@ ATTACH DATABASE マージは**専用の JDBC コネクション 1 本**で行う
 テーブル/カラム。純粋なデータ）。デスクトップの `actual` が担うのは、原因チェーンを辿って
 `org.sqlite.SQLiteException` を見つけ、`resultCode.code and 0xFF` を `SqliteFailureCategory` へ変換し、
 判定結果をログに出し、`validateSchema` で `MergeSchema.EXPECTED_SCHEMAS` に対して `PRAGMA table_info` を
-実行することだけ。将来の Android の `actual`（その `SQLiteException` は数値コードを公開しない）も、
-同じカテゴリを与えるだけで済む。
+実行することだけ。Android の `actual` は別経路で同じカテゴリを供給する — その
+`android.database.sqlite.SQLiteException` は（デスクトップが読む JDBC ドライバの数値コードと違い）
+数値コードを公開しないため、投げられた例外自身のサブクラスで分岐する
+（`SQLiteConstraintException`/`SQLiteDatabaseCorruptException` → `CORRUPT_OR_CONSTRAINT`、
+いくつかの named サブクラス → `OTHER`、素の `SQLiteException` → `STATEMENT_ERROR`。ここは
+`validateSchema` が解消すべき曖昧さそのものと一致する） — それ以外は同じ attach → バージョン確認 →
+マージ → detach の手順を、専用の `io.requery.android.database.sqlite.SQLiteDatabase` 接続上で、
+ライブラリの既定ではなく `NoOpDatabaseErrorHandler` を指定して開いて実行する（既定ハンドラは破損と
+判定した DB ファイルを削除する — バンドル AAR の逆アセンブルで確認済み。`platform/AndroidSqliteSupport.kt`
+参照）。
 
 ### CloudSession / SyncRepository
 
-`CloudSession` が現在の `CloudStorage`（Dropbox / Google Drive）を提供し、アクセストークンの自動リフレッシュを担う。
+`CloudSession` が現在の `CloudStorage`（デスクトップは Dropbox / Google Drive / OneDrive、Android は
+Dropbox / OneDrive — sync-architecture.ja.md の「Android で Google Drive が未対応な理由」参照）を
+提供し、アクセストークンの自動リフレッシュを担う。
 `SyncRepository` はダウンロード → マージ（`DatabaseMerger`）→ 新記事の増分索引（`indexMissing`）→
 `VACUUM INTO` スナップショット生成（`DatabaseSnapshot`、コピー側で `articles_fts` を除外）→ アップロード
 （rev チェック）、のフローとデバウンス（`SyncScheduler`）を実装する。ライブ DB の FTS は触らない。
+`SyncRepository` の `localDbPath` の既定値は `platform/DatabaseFile.kt` の `databaseFilePath()`
+— プラットフォームごとにライブ DB の実パスを解決する唯一の `expect` 関数（db-schema.ja.md 参照）。
 
 ### Provider / DI（Koin）
 
@@ -168,8 +246,19 @@ Repository は触れず、Linux のパネルプロトコルにモバイル側の
 
 ### ネイティブコンテキストメニュー（プラットフォーム分岐）
 
-`platform/NativeMenu.desktop.kt` の `defaultPopupHandle` が、すべての `Modifier.nativeContextMenu`
-呼び出し箇所（記事行、フィード／フォルダー／タグ行）を 2 つの実装のどちらかで裏打ちする。
+`platform/NativeMenu.android.kt` の `nativeContextMenu` は、同じ呼び出し箇所（記事行、
+フィード／フォルダー／タグ行）を長押しで開く Material 3 `DropdownMenu` で裏打ちする。実装は
+自前の `awaitEachGesture` ループで、最初の押下（down）は消費しない。押下が
+`viewConfiguration.longPressTimeoutMillis` の間、離されも（up）どこか他所で消費されもせずに
+（例えば `LazyColumn` のスクロールに奪われる、など）生き残った場合にのみ長押しと判定し、そこから
+残りのジェスチャーを消費し始める — こうすることで、直前でチェーンされている
+`ui/home/ListRowChrome.kt` の `listRowClickable`（より外側のノード。Compose のポインタ入力
+`Main` パスは同一イベントに対して祖先より先に子孫のノードを再開するため）が同じ押下に対して
+`onClick` を重ねて発火することがない。`NativeSubMenu` はネストしたポップアップを開くのではなく
+その場でドリルダウンする（先頭の「戻る」行がトップレベルをサブメニュー自身の項目に差し替える）。
+
+`platform/NativeMenu.desktop.kt` の `defaultPopupHandle` は、同じ呼び出し箇所をデスクトップでは
+長押しではなく右クリックで開き、2 つの実装のどちらかで裏打ちする。
 
 | プラットフォーム | 実装 | 理由 |
 | --- | --- | --- |
@@ -213,6 +302,20 @@ KDE/GNOME 純正のダイアログ（かつサンドボックスに適合した�
 する。検出は `KeryxTray` が SNI と AWT を選び分けるのと同じく、起動時にセッションバス上の
 `org.freedesktop.portal.Desktop` の有無を確認する方式になる。
 
+### アイコンセット
+
+`ui/common/KeryxIcons.kt` が全 UI 呼び出し箇所の唯一の間接参照点になっており（意味的な名前 →
+`composeResources/drawable/` 配下のバンドル Android Vector Drawable XML）、`expect`/`actual`
+でプラットフォームごとに分割されている — 2つのターゲットが意図的に異なるアイコンセットを
+バンドルしているため。デスクトップ側の `actual` は Tabler Icons（MIT）を使用する
+（デスクトップ3OS共通で macOS 寄りの見た目に近づけるための選択。詳細は `ui-guidelines` skill）。
+Android 側の `actual` は Material Symbols Outlined（Apache-2.0）を使用し、Android 自身のネイティブな
+視覚言語に合わせている。`KeryxIcon(...)`（`Icon` のラッパー composable）は引き続き単一の
+`commonMain` 定義のままで、`KeryxIcons` オブジェクトが選ぶアイコンだけがプラットフォームごとに
+異なる。iOS/iPadOS/macOS がいずれネイティブ SwiftUI 化された場合（`external-spec.md` §2 の
+想定どおり）、そちらは Kotlin の `KeryxIcons` とは無関係の別コードベースになるため、SF Symbols を
+`Image(systemName:)` で直接使えばよく、Kotlin 側に追加の差し替え機構は不要である。
+
 ## ドメインモデルの方針
 
 SQLDelight の生成クラス（`Feeds` / `Articles` / …）をそのまま各層で使う。列名は snake_case のまま
@@ -239,3 +342,25 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 
 `ui/navigation/Navigator.kt` の単純なスタック型ナビゲータで Setup / Home / Settings を切り替える。
 記事ビューは Home 内のペイン（ルートではない）。
+
+### Home の適応的ペインレイアウト
+
+`ui/home/HomePaneLayout.kt` は、Home の3ペイン（フィード一覧・記事一覧・記事詳細）のうち
+いくつを横並びで表示するかを、利用可能な幅だけから解決する: `PaneLayout.Triple`（3ペインすべて —
+デスクトップは `WINDOW_MIN_WIDTH` が常に `TRIPLE_PANE_MIN_WIDTH` 以上であるため常にここに解決される。
+`core/Constants.kt` の当該定数の KDoc 参照）、`PaneLayout.Dual`（記事一覧 + どちらか一方の隣接ペイン）、
+`PaneLayout.Single`（1ペインのみ、スマートフォン幅）のいずれか。ナビゲーションスタック自体は常に
+3段（`HomePane.FeedList` → `ArticleList` → `ArticleDetail`）であり、狭いレイアウトはそのうち表示する
+段数を減らしているに過ぎない。`HomePane.ordinal + 1` がそのままスタックの現在の深さを兼ねるため、
+`HomeScreen` は別途深さの状態を持つ必要がない — フィルターや記事の選択で深さが進み
+（`onSelectionAdvance`。`Triple` では no-op）、`platform/BackHandler`（Android では実際の戻る
+ジェスチャー/ボタンを横取りし、デスクトップでは no-op）が1段戻す。`PaneLayout.Dual` は、そのスタック上を
+スライドする2ペインの窓であり、単純な隣接ペア表示ではない: 記事一覧はどの深さでも表示される2ペインの
+一方であり続けるため、記事にドリルインするとフィード一覧が記事詳細ペインに入れ替わる形になり、
+一覧自体が画面外にスライドすることはない。
+
+これが、記事リーダーの WebView を無条件にコンポーズし続けること（下記「記事リーダー」参照）が
+デスクトップにおいて安全である理由でもある: デスクトップは常に `Triple` にしか解決されないため、
+WebView をホストするペインを含む3ペインすべてがアプリのライフタイム全体でマウントされ続ける。
+`Single`/`Dual` は、対象のペインが現在表示されていない場合にそれをアンマウントするが、これは
+Android では（重量級 AWT インターロップの懸念が無いため）問題ない。

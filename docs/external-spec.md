@@ -17,7 +17,7 @@ A lightweight, simple RSS reader that provides the same feed subscription experi
 | Platform | Support |
 | --- | --- |
 | Windows / macOS / Linux | ✅ (Compose Multiplatform, current) |
-| Android | Planned (Jetpack Compose) |
+| Android | ✅ (Compose Multiplatform, current; cloud sync supports Dropbox / OneDrive — Google Drive is desktop-only for now, see §4) |
 | iOS / iPadOS / macOS | Planned (initially Compose, then native SwiftUI) |
 
 ## 3. Supported Formats
@@ -31,6 +31,11 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
 - Sync targets: subscription list, read state, stars, tag structure, global settings.
 - Non-sync targets: device-local settings, cloud authentication info.
 - Import / export is OPML.
+- **Android supports Dropbox and OneDrive only** (both are PKCE public clients using the same
+  `keryx://oauth2/callback` custom-URI redirect as desktop). Google Drive's desktop OAuth
+  configuration (a "Desktop app" client using loopback redirect + `client_secret`) cannot be reused
+  on Android — see "Cloud Authentication" in [sync-architecture.md](sync-architecture.md) for the
+  investigation — so it is not offered as a setup/settings option there.
 
 ## 5. Conflict Resolution Policy
 
@@ -46,11 +51,15 @@ Details are in [sync-architecture.md](sync-architecture.md).
 
 ## 6. Setup Flow
 
-On first launch, choose local-only / cloud sync (Dropbox / Google Drive / OneDrive). When cloud is selected, after OAuth authentication, if existing data exists in the cloud it is automatically merged (imported) during the initial sync.
+On first launch, choose local-only / cloud sync (Dropbox / Google Drive / OneDrive — Android offers
+only Dropbox / OneDrive, see §4). When cloud is selected, after OAuth authentication, if existing
+data exists in the cloud it is automatically merged (imported) during the initial sync.
 
 ## 7. Basic Features
 
-- Subscribe to feeds by URL, categorize with tags, OPML import/export
+- Subscribe to feeds by URL, categorize with tags, OPML import/export. An `.opml` file can also be
+  imported by opening it directly from another app — file-association double-click on desktop,
+  "open with Keryx" from a file manager or mail attachment on Android
 - Feed health management: 301/308 auto-updates the subscription URL (notification), 410 Gone shows a warning in the notification center, consecutive errors show an indicator in the feed list
 - Article list / article view (reader view). **Articles are marked as read the instant they are selected**. An action to mark as unread is available.
 - Stars (persistent), open in external browser
@@ -58,7 +67,11 @@ On first launch, choose local-only / cloud sync (Dropbox / Google Drive / OneDri
 - Desktop notifications, task tray residence (close minimizes to tray), notification center.
   On Linux the tray uses the D-Bus `org.kde.StatusNotifierItem` + `com.canonical.dbusmenu` protocols
   and notifications use `org.freedesktop.Notifications`, falling back to the AWT system tray when no
-  StatusNotifierItem host is running.
+  StatusNotifierItem host is running. On Android, new-article notifications are posted through
+  `NotificationManagerCompat` (requesting the OS notification permission on Android 13+) and
+  background refresh runs on `WorkManager`, at roughly the interval configured in Settings; the
+  in-app "check for update" is hidden when the app was installed from an app store (currently just
+  Google Play) rather than sideloaded, since that store already auto-updates the app.
 
 ### Behavior on Feed URL Change / Disappearance
 
@@ -80,7 +93,23 @@ On first launch, choose local-only / cloud sync (Dropbox / Google Drive / OneDri
 ## 9. UI Direction
 
 Material 3 base + custom theme (teal). Light / dark / system support. 3-pane layout
-(feed list / article list / article detail) + keyboard navigation.
+(feed list / article list / article detail) + keyboard navigation, adapting down to fewer
+simultaneous panes on narrower widths (see below).
+
+### Adaptive layout (width) and touch input (Android)
+
+The 3-pane layout is desktop's steady state — the window can never narrow below the width all
+three panes need, so it always shows all three. On a phone-width screen, the app instead shows one
+pane at a time as a hierarchical stack (feed list → article list → article detail), each with its
+own back control; a tablet-width screen shows two. Nothing about a pane's own content changes
+between these — only how many are on screen together.
+
+Where a mouse and a touchscreen need different affordances, both are supported without changing
+the underlying action: reordering a feed or folder is a plain click-and-drag with a mouse, and a
+drag from a dedicated handle icon with touch (touch needs a distinct starting gesture so the rest
+of the row can still be scrolled normally); a right-click context menu on desktop is a long-press
+menu on Android, and settings — reached from the desktop application menu — get their own toolbar
+entry point on Android, which has no menu bar.
 
 The surfaces that are not drawn by Compose — the application menu bar, context menus, and the
 dialog button row — are real Swing/AWT widgets, so they follow the platform's Look & Feel.

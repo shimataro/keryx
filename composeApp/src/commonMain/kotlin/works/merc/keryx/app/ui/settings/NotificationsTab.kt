@@ -20,6 +20,7 @@ import works.merc.keryx.app.resources.settings_notification_enabled
 @Composable
 internal fun NotificationsTabContent(vm: SettingsViewModel) {
     val settings by vm.localSettings.collectAsState()
+    // The permission request itself happens in App.kt, keyed on this same setting — see its KDoc.
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         SettingsCard {
             SwitchRow(

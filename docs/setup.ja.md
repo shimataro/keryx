@@ -6,18 +6,30 @@
 
 - **JDK 25 以上**（`JAVA_HOME`）。macOS なら Temurin / Homebrew の openjdk 等。
 - IDE: IntelliJ IDEA / Android Studio（Kotlin Multiplatform プラグイン）推奨。
+- **Android SDK Platform 37**（`compileSdk`）と build-tools。Android Studio の SDK Manager か
+  `sdkmanager` で導入する。`local.properties` の `sdk.dir` に SDK の場所を指定する（AGP がこのキー
+  自体を直接読むため、下記 OAuth キーで使う `-P`/環境変数/`local.properties` の解決チェーンとは別系統）か、
+  環境変数 `ANDROID_HOME` を設定してもよい。`:composeApp:compileKotlinDesktop` や
+  `:composeApp:desktopTest` のようなターゲット限定タスクは SDK が無くても動くが、ルートの
+  `./gradlew build` は `:androidApp` を含む全サブプロジェクトを集約するため、SDK が解決できないと
+  設定段階で即座に失敗する — 詳細は後述の「よくある問題」を参照。
+- **実機または起動中の Android エミュレータ**は `androidDeviceTest` 計装スイート
+  （`DatabaseMerger`/`DatabaseSnapshot` の Android 実装を実際のバンドル SQLite に対して検証する。
+  [testing.ja.md](testing.ja.md) 参照）を実行する場合にのみ必要。ビルド・`./gradlew build`・その他の
+  テストタスクはいずれも実機/エミュレータ無しで動く。
 
 ## 初回
 
 ```bash
 git clone <repo>
 cd kmp
-cp local.properties.example local.properties   # 任意: Dropbox App Key を設定
+cp local.properties.example local.properties   # sdk.dir を追記する（前提を参照）。OAuth キーは任意
 ./gradlew build
 ```
 
 `build` が通れば SQLDelight / Compose Resources / BuildConfig のコード生成、コンパイル、テストまで
-一通り確認できる。
+一通り確認できる — `build` は `:androidApp` のコンパイル・アセンブルも行うため、デスクトップと
+Android の両ターゲットについて確認できる。
 
 ## データディレクトリ
 
@@ -33,8 +45,9 @@ cp local.properties.example local.properties   # 任意: Dropbox App Key を設�
 
 ## パッケージング前提条件
 
-`./gradlew build` / `:composeApp:run` は JDK 以外に何も要らない（ヘッドレスな Linux 環境での Xvfb は
-除く — 後述）。ネイティブパッケージング系タスク（`createDistributable`, `packageDmg`, `packageMsi`,
+`:composeApp:run` は JDK 以外に何も要らない（ヘッドレスな Linux 環境での Xvfb は除く — 後述）。
+ルートの `./gradlew build` は前提のとおり Android SDK の解決も追加で必要になる。
+ネイティブパッケージング系タスク（`createDistributable`, `packageDmg`, `packageMsi`,
 `packageDeb`, `packageRpm` — 詳細は [build.md](build.md)）は OS ごとに以下も必要。
 
 - **Linux**
@@ -57,6 +70,13 @@ cp local.properties.example local.properties   # 任意: Dropbox App Key を設�
 
 ## よくある問題
 
+- **`SDK location not found`（Gradle の設定段階）**: `composeApp` 自体が Android ライブラリ
+  ターゲット（`com.android.kotlin.multiplatform.library`）を構成するようになったため、その
+  `build` ライフサイクルに触れるタスク——ルートの `./gradlew build`、あるいは `:composeApp:build`
+  単体でも——は `:androidApp` だけでなく Android SDK を必要とする。`local.properties` の
+  `sdk.dir`（前提を参照）か環境変数 `ANDROID_HOME` を設定する。デスクトップだけの作業なら
+  `:composeApp:compileKotlinDesktop` や `:composeApp:desktopTest` のような特定タスクに絞ることで
+  Android SDK の解決を避けられる。
 - **`UnsupportedClassVersionError`（実行時）**: `./gradlew` を起動した JVM が 25 未満。
   `JAVA_HOME` を JDK 25+ に設定する。
 - **ツールチェーンのダウンロードがブロックされる**:
@@ -67,6 +87,12 @@ cp local.properties.example local.properties   # 任意: Dropbox App Key を設�
   `xvfb-run -a --server-args="-screen 0 1920x1080x24" ./gradlew build`）で実行している。ディスプレイの
   無い環境（SSH セッション、コンテナ等）ではローカルでも同様にする。
 - **Dropbox 連携が表示されない**: `DROPBOX_APP_KEY` が未設定（仕様どおり非表示）。`build.md` を参照。
+- **（Android エミュレータ）Dropbox / OneDrive 連携で画面は開くがタップに反応しない**: AVD に実用的な
+  ブラウザーが入っておらず、暗黙的な `ACTION_VIEW` インテントが Chrome ではなく
+  **WebView Browser Tester**（WebView の動作確認用アプリで、実用的なブラウザーではない）に解決されて
+  しまっている。OAuth のページ自体は表示できるが、操作には正しく反応しない。AVD を
+  **Google Play** 搭載のシステムイメージ（"Google APIs" のみのものは Play Store を含まず Chrome も
+  無いため不可）で作り直すか、既存の AVD に実ブラウザーの APK を追加インストールする。
 - **`./gradlew :composeApp:run` で Dropbox / OneDrive 連携が完了しない（全デスクトップ OS 共通）**:
   これらのリダイレクト URI はカスタムスキーム `keryx://` で、接続ボタンが disabled のまま
   タイムアウトする。理由は OS ごとに異なる。macOS: LaunchServices が `keryx://` を

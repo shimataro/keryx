@@ -6,6 +6,12 @@
 #   2. Environment variable
 #   3. `local.properties` value
 #   4. Default (empty string or noted below)
+#
+# sdk.dir is the one exception: it is read directly by the Android Gradle Plugin (AGP) itself,
+# not through the -P/env-var/local.properties chain above. It's required for `./gradlew build`
+# to succeed at all (composeApp configures an Android library target), but not for a
+# desktop-scoped task like `:composeApp:desktopTest` — see docs/setup.md.
+# sdk.dir=/path/to/Android/sdk
 
 # Dropbox OAuth App Key.
 #   Gradle property: -PdropboxAppKey=...

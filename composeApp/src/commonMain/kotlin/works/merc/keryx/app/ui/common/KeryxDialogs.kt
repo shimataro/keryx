@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.common
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -91,6 +93,12 @@ expect fun KeryxTabDialog(
  * (see the `ui-guidelines` skill's "Other native-migration candidates") rather than approximated via
  * fragile OS-version-dependent Swing tuning. Plain `Modifier.selectable` gets this dialog's tabs
  * `FlatIndication`'s press feedback and standard Compose keyboard focus/traversal for free.
+ *
+ * Horizontally scrollable: desktop's fixed dialog width comfortably fits every tab today (see
+ * `KERYX_TAB_DIALOG_WIDTH`'s KDoc), so the scroll never engages there, but Android's `KeryxTabDialog`
+ * is a full-screen-width `Dialog` — on a phone-width screen, 5 tabs (Cloud Sync and Updates both
+ * present) don't fit, and a plain non-scrolling `Row` would run the trailing tab(s) off the physical
+ * screen edge with no way to reach them.
  */
 @Composable
 internal fun KeryxDialogTabBar(
@@ -98,7 +106,10 @@ internal fun KeryxDialogTabBar(
     selectedTabId: String,
     onSelectTab: (String) -> Unit,
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(24.dp),
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+    ) {
         tabs.forEach { tab ->
             val selected = tab.id == selectedTabId
             val contentColor = if (selected) {

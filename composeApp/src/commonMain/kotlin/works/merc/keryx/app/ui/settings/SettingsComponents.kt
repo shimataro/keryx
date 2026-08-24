@@ -111,6 +111,32 @@ internal fun LinkRow(label: String, url: String) {
 }
 
 /**
+ * A tappable text row sharing [LinkRow]'s visual language (primary color, underline-on-hover, hand
+ * cursor) for an in-app action rather than opening a URL — no destination tooltip, since there's
+ * no URL to preview. Used for Settings/About entry points that have no native application menu
+ * bar to live in (see `platform/PlatformOs.kt`'s `hasNativeAppMenu`).
+ *
+ * @param label The text displayed for the action.
+ * @param onClick Called when the row is tapped.
+ */
+@Composable
+internal fun ActionLinkRow(label: String, onClick: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val hovered by interactionSource.collectIsHoveredAsState()
+    Text(
+        label,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.primary,
+        textDecoration = if (hovered) TextDecoration.Underline else null,
+        modifier = Modifier
+            .hoverable(interactionSource)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .clickable(interactionSource = interactionSource, onClick = onClick)
+            .padding(vertical = 4.dp),
+    )
+}
+
+/**
  * Displays a labeled switch row.
  *
  * @param label The text displayed beside the switch.

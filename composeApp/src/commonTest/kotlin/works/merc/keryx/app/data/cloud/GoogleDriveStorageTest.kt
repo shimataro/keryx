@@ -9,6 +9,7 @@ import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.OutgoingContent
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -31,6 +32,7 @@ import kotlin.test.assertTrue
  * multi-request flows (e.g. [GoogleDriveStorage.download]) are mocked with a queue
  * of canned responses served in call order.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class GoogleDriveStorageTest {
 
     private fun storage(

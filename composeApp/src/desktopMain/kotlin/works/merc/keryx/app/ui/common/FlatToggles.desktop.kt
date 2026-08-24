@@ -1,0 +1,94 @@
+package works.merc.keryx.app.ui.common
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.dp
+
+@Composable
+actual fun FlatSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier,
+    enabled: Boolean,
+) {
+    val trackShape = RoundedCornerShape(percent = 50)
+    Box(
+        modifier
+            .alpha(if (enabled) 1f else 0.38f)
+            .size(width = 40.dp, height = 24.dp)
+            .clip(trackShape)
+            .then(
+                if (checked) {
+                    Modifier.background(MaterialTheme.colorScheme.primary, trackShape)
+                } else {
+                    Modifier
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest, trackShape)
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, trackShape)
+                },
+            )
+            .toggleable(value = checked, enabled = enabled, onValueChange = onCheckedChange, role = Role.Switch)
+            .padding(horizontal = 3.dp),
+        contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
+    ) {
+        Box(
+            Modifier
+                .size(18.dp)
+                .clip(CircleShape)
+                .background(
+                    if (checked) {
+                        MaterialTheme.colorScheme.onPrimary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    CircleShape,
+                ),
+        )
+    }
+}
+
+@Composable
+actual fun FlatCheckbox(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier,
+    enabled: Boolean,
+) {
+    val shape = MaterialTheme.shapes.extraSmall
+    Box(
+        modifier
+            .alpha(if (enabled) 1f else 0.38f)
+            .size(20.dp)
+            .clip(shape)
+            .then(
+                if (checked) {
+                    Modifier.background(MaterialTheme.colorScheme.primary, shape)
+                } else {
+                    Modifier.border(1.5.dp, MaterialTheme.colorScheme.outlineVariant, shape)
+                },
+            )
+            .toggleable(value = checked, enabled = enabled, onValueChange = onCheckedChange, role = Role.Checkbox),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (checked) {
+            KeryxIcon(
+                KeryxIcons.CheckFilled,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+    }
+}

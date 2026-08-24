@@ -82,6 +82,8 @@
     <string name="home_edit_folder_menu">編集</string>
     <string name="home_delete_folder_menu">削除</string>
     <string name="home_move_to_folder">フォルダーに移動</string>
+    <string name="home_move_up">上に移動</string>
+    <string name="home_move_down">下に移動</string>
     <string name="home_no_folder">フォルダーなし</string>
     <string name="home_rename_feed_menu">タイトルを変更</string>
     <string name="home_rename_feed">タイトルを変更</string>
@@ -230,6 +232,8 @@
         <item quantity="other">新着記事が %1$d 件あります</item>
     </plurals>
     <string name="feed_url_changed">「%1$s」の URL が変更されました</string>
+    <string name="notification_channel_new_articles_name">新着記事</string>
+    <string name="notification_channel_new_articles_description">新しい記事を取得したときに通知します</string>
     <string name="update_available_notification">新しいバージョン %1$s が利用可能です</string>
     <string name="notification_app_translocated">Keryx が一時的な場所で実行されています。Dropbox 連携などが失敗する場合は、Keryx を「アプリケーション」フォルダへ移動してから起動し直してください。</string>
     <string name="notification_app_translocated_detail">macOS は、ディスクイメージ（DMG）や「ダウンロード」フォルダから直接起動されたアプリを、App Translocation という仕組みによって毎回ランダムな一時的な場所にコピーして実行します。\n\nこのとき Keryx の実体のパスが変わるため、OS が keryx:// のリンクを Keryx に届けられず、Dropbox や OneDrive の連携（OAuth 認証）が完了しないことがあります。\n\n対処方法: Keryx.app を「アプリケーション」フォルダにコピーし、コピーしたものから起動し直してください。</string>

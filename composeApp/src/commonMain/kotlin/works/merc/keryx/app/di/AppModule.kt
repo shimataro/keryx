@@ -30,6 +30,9 @@ import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.domain.UpdateChecker
+import works.merc.keryx.app.platform.SelfUpdateCheckSupport
+import works.merc.keryx.app.platform.databaseFilePath
+import works.merc.keryx.app.platform.selfUpdateCheckSupported
 import works.merc.keryx.app.ui.home.HomeViewModel
 import works.merc.keryx.app.ui.home.NotificationCenterViewModel
 import works.merc.keryx.app.ui.i18n.ComposeNotificationMessages
@@ -55,7 +58,7 @@ val appModule: Module = module {
     single { NotificationCenter() }
     single { ActivityCenter() }
     single { MenuController() }
-    single { NewArticleNotifier() }
+    single { NewArticleNotifier(get()) }
     single<NotificationMessages> { ComposeNotificationMessages() }
 
     // Long-lived scope for debounced sync + background work.
@@ -72,6 +75,10 @@ val appModule: Module = module {
             activityCenter = get(),
             notificationCenter = get(),
             notificationMessages = get(),
+            // Explicit rather than relying on the constructor default: the default composes
+            // AppDirs.appDataDir()/keryx.db, which only matches the real DB file on desktop —
+            // see databaseFilePath()'s own KDoc for why Android needs a different path.
+            localDbPath = databaseFilePath(),
         )
     }
     single<SyncScheduler> { get<SyncRepository>() }
@@ -79,6 +86,7 @@ val appModule: Module = module {
     single { FeedFetcher(get()) { get<SettingsRepository>().getReadTimeoutSeconds() } }
     single { FaviconResolver(get()) }
     single { UpdateChecker(client = get(), currentVersion = AppInfo.version, repoSlug = AppInfo.updateRepo) }
+    single<SelfUpdateCheckSupport> { SelfUpdateCheckSupport { selfUpdateCheckSupported } }
 
     single { SettingsRepository(get(), get(), get(), get()) }
     single { ArticleRepository(get(), get(), get(), get()) }

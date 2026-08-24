@@ -5,6 +5,14 @@
 対象: ローカル SQLite（SQLDelight 管理）。`.sq` ファイルは
 `composeApp/src/commonMain/sqldelight/works/merc/keryx/app/data/local/db/` にある。
 
+実ファイルの実体パスはプラットフォームによって異なる: デスクトップの `JdbcSqliteDriver` は
+`AppDirs.appDataDir()/keryx.db` を直接開くが、Android の `AndroidSqliteDriver` は
+`Context.getDatabasePath("keryx.db")` — `<dataDir>/databases/keryx.db` に置く。これは
+`AppDirs.appDataDir()`（`Context.filesDir`、すなわち `<dataDir>/files`）とは別のディレクトリである。
+`platform/DatabaseFile.kt` の `databaseFilePath()` がプラットフォームごとの実値を解決する唯一の
+`expect` 関数であり、`DatabaseMerger`/`DatabaseSnapshot`（どちらもドライバ経由ではなくパスで動作する）
+は自前で `AppDirs.appDataDir()` とファイル名を組み立てるのではなく、常にこれを経由しなければならない。
+
 ## 設計方針
 
 - 全テーブルは SQLDelight（`.sq`）で管理。`articles_fts` のみ生 SQL（`FtsManager`）で別途作成する。
@@ -141,6 +149,12 @@ DROP して行う。[sync-architecture.ja.md](sync-architecture.ja.md) の「FTS
 重くスケールしないため使わない）。全再構築は日次アイドル pass（`local_settings.lastFtsRebuiltAt`
 の 24h ゲート）でのみ行い、増分投入以降に本文が更新されて古くなった既存行の作り直しを担う。
 **起動時に `FtsManager.ensureIndexed()` を呼び、テーブルが無ければ作成し、索引に未登録の記事があれば増分投入する**。
+
+`tokenize='trigram'` は SQLite ≥3.34 を必要とするが、AOSP 自身の SQLite ビルドはこれを提供しない
+（どの API レベルでも FTS5 自体を含んでいない）— Android の `DatabaseDriverFactory` actual はバンドル
+SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundling.md` を参照。これは Android の
+実機で実際に `articles_fts` テーブルを作成・投入し、`MATCH` クエリを実行した DB ファイルを取り出して
+検証済み。
 
 ## local_settings.json（keryx.db 外・非同期）
 

@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Feed fetching, cloud sync (Phase 4), and the update checker all need network access. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android 13+ (API 33) requires this to post the new-article notification (Phase 3);
+         declared now so the manifest doesn't need revisiting when that Phase lands. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:name=".KeryxApplication"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <!-- singleTask: the desktop target's equivalent concern is SingleInstanceCoordinator
+                 (desktopMain/SingleInstanceCoordinator.kt) — here the OS enforces it natively, so
+                 no app-level single-instance code is needed (see app-architecture.md). -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Dropbox / OneDrive OAuth redirect (see domain/OAuthRedirectTransport.kt's
+                 CustomUriRedirectTransport, shared with desktop's keryx:// registration). Both
+                 providers redirect to this same URI and are disambiguated by the `state`
+                 parameter — see cloud-oauth-transport.md. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="keryx" android:host="oauth2" />
+            </intent-filter>
+
+            <!-- "Open with Keryx" for an .opml file from another app (a file manager, a mail
+                 attachment, another feed reader's export) — the Android counterpart of desktop's
+                 file-association registrations (see build.md's ".opml file association").
+                 There is no standardized MIME type for OPML (build.md's Linux/macOS sections
+                 already document the same ambiguity across desktop feed readers), so this is
+                 split into two intent-filters below rather than one: Android pools every <data>
+                 element's scheme/host/mimeType/pathPattern within a single <intent-filter> into
+                 one shared match set (IntentFilter.matchData), so a host/pathPattern declared on
+                 one <data> tag would silently apply to every other <data> tag's plain MIME type
+                 in the same filter too — an intent whose MIME type matched but whose content://
+                 path lacked a literal ".opml" suffix (the common case, since SAF document IDs are
+                 often opaque) would then fail to match the filter at all, defeating the MIME-only
+                 tags entirely. Keeping them in separate filters is what makes each alternative
+                 actually independent. AndroidOpmlOpen.kt handles the read; see its own KDoc for
+                 why it, not either filter, is what excludes the keryx:// OAuth case sharing the
+                 same MainActivity/ACTION_VIEW handling.
+                 No BROWSABLE category on either filter (unlike the OAuth filter above): BROWSABLE
+                 marks a filter as reachable from a web browser following a link; these filters
+                 are meant for a file manager or mail client resolving a local/content file, not a
+                 web link, so DEFAULT alone is right. -->
+            <intent-filter>
+                <!-- MIME-type match: many content providers report a plain .opml file as one of
+                     these types. No scheme/host/pathPattern declared here (see comment above for
+                     why not) — matching stays on MIME type alone. -->
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/x-opml+xml" />
+                <data android:mimeType="text/x-opml" />
+                <data android:mimeType="text/xml" />
+                <data android:mimeType="application/xml" />
+            </intent-filter>
+            <intent-filter>
+                <!-- Extension-based fallback: many content providers report a plain .opml file as
+                     application/octet-stream instead, which the MIME-only filter above would miss
+                     entirely — this matches on the content:// URI's path regardless of the
+                     reported MIME type. android:host="*" is required, not decorative: per
+                     IntentFilter.matchData's own source, a pathPattern is only ever evaluated when
+                     the filter also declares a host (mDataAuthorities) — with none, matching
+                     bails out before the pattern is checked (logged as "Cannot match path, no
+                     authority"), so this filter would silently never fire. "*" is IntentFilter's
+                     documented wildcard for "any host" (AuthorityEntry treats a leading '*' as a
+                     suffix match against "", which every string ends with), which is what
+                     actually makes the pattern apply regardless of which provider's content://
+                     URI it is (the real authority, e.g. com.android.externalstorage.documents,
+                     can't be enumerated up front). -->
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data
+                    android:scheme="content"
+                    android:host="*"
+                    android:mimeType="*/*"
+                    android:pathPattern=".*\\.opml" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

@@ -79,7 +79,13 @@ not in global chrome:
 
 - Feed-management icons (add feed / refresh all / cloud sync) — top of
   `FeedListPane`
-- Settings — bottom-left of `FeedListPane`
+- Settings — reached through the native application menu bar (macOS
+  Preferences…/AppMenuBar/KDE Global Menu — see `MenuCommand.OpenSettings`).
+  On platforms with no such menu (Android — `platform/PlatformOs.kt`'s
+  `hasNativeAppMenu == false`), `FeedListToolbarRow` grows its own settings
+  icon button at the top of `FeedListPane` instead, sending the same command;
+  About gets the equivalent treatment as an `ActionLinkRow` at the bottom of
+  `GeneralTab`
 - Article-related icons (search / notifications / sort / mark all read) —
   header row of `ArticleListPane`
 
@@ -93,6 +99,29 @@ for the base color scheme and each pane file for where the tone is applied.
 The macOS traffic-light inset (`WindowChrome.titleBarInsetDp`) is applied
 only to the pane that sits in the window's top-left corner — currently
 `FeedListPane`'s header row.
+
+## Adaptive pane layout & touch affordances
+
+`ui/home/HomePaneLayout.kt`'s `paneLayoutFor` resolves how many of the 3 panes fit side by side at
+the current width (`PaneLayout.Triple`/`Dual`/`Single`), derived from the same per-pane minimum
+widths this file already uses for tonal roles — not an independent breakpoint. Desktop always
+resolves `Triple` (`WINDOW_MIN_WIDTH >= TRIPLE_PANE_MIN_WIDTH`); narrower widths (phones) resolve
+`Single`, showing one pane at a time as a hierarchical stack with its own back button
+(`ArticleListPane`/`ArticleDetailPane`'s `onNavigateUp`) and — on Android — the OS back
+gesture/button (`platform/BackHandler`). Nothing about the panes' own internal layout (tonal
+roles, dividers, row chrome) changes between layouts; only how many are mounted at once does.
+
+**Touch input on the feed list.** A mouse can drag a draggable row (a folder header, or a feed row
+inside a folder group — tag rows and tag-nested feed copies were never drag sources) from anywhere
+on it, because a click and a drag-start are already unambiguous with a precise pointer. Touch has
+no such distinction — a press-and-move could equally mean "reorder this row" or "scroll the list" —
+so on a touch-primary platform (`platform/PlatformOs.kt`'s `isTouchPrimary`), dragging only starts
+from a dedicated trailing handle (`ui/home/FeedListRowParts.kt`'s `DragHandle`, a fixed ≡-dot icon;
+gating logic in `ui/home/FeedListDragGestures.kt`'s `feedListReorderDrag`). Everywhere else on the
+row falls through to the `LazyColumn`'s own scroll gesture untouched. Long-press for the row's
+context menu (`nativeContextMenu`) and drag-from-handle for reordering are deliberately different
+gestures on the same row — see `platform/NativeMenu.android.kt`'s KDoc for how the two coexist
+without one stealing the other's press.
 
 ## Divider policy
 
@@ -232,13 +261,13 @@ rather than a plain `item(...)` for any such header, following
   not — in ascending index order, so a pinned header's band is always
   resolved before any row hidden behind it, with no extra code needed.
 
-**Desktop only.** This convention targets the current Compose Multiplatform
-desktop 3-pane layout. Android/iOS mobile targets (see `external-spec.md` §2)
-are only planned, not yet built, and a phone-sized layout may not reuse this
-same sidebar/list structure at all — defer whether/how sticky section headers
-apply on mobile until that layout is actually designed, the same way
-`app-architecture.md` already defers the Android icon-set question to when
-Android work begins.
+**Desktop only.** `FeedListPane`'s sticky "フォルダー"/"タグ" headers keep this
+behavior at every `PaneLayout` (see "Adaptive pane layout & touch
+affordances" below) — narrowing the window doesn't change how that list
+scrolls, only how many *other* panes are visible alongside it. iOS is still
+only planned (see `external-spec.md` §2); defer whether/how sticky section
+headers apply there until that platform's own layout is designed, the same
+way `app-architecture.md` defers the Android icon-set question.
 
 ## Article card style
 
@@ -527,42 +556,57 @@ theme/shape/indication/icon choices:
   `outlineVariant` border, for actions that still need clear button affordance
   like OPML import/export, Dropbox disconnect, update check, setup cards), and
   `FlatTextButton` (bare, inline) over M3's `Button`/`FilledTonalButton`/
-  `TextButton` — they're built on plain `Modifier.clickable` so they pick up
-  `FlatIndication` directly rather than relying on the `RippleConfiguration`
-  fallback. A solid fill (not a transparent outline) is what makes a secondary
-  action read as a tactile button rather than a link, so there is intentionally
-  no transparent "outlined" flat button.
+  `TextButton` at a **`commonMain` call site** — they're `expect`/`actual`
+  (like `KeryxTextField`/`KeryxDialogs` below), and the desktop `actual`s are
+  built on plain `Modifier.clickable` so they pick up `FlatIndication`
+  directly rather than relying on the `RippleConfiguration` fallback. A solid
+  fill (not a transparent outline) is what makes a secondary action read as a
+  tactile button rather than a link, so there is intentionally no transparent
+  "outlined" flat button. The Android `actual`s delegate straight to M3's own
+  `Button`/`FilledTonalButton`/`TextButton` — see the `KeryxTextField`
+  bullet below for why that's the right call on that platform.
 - **`SegmentedControl<T>` / `ToggleChip`**
-  (`ui/common/SegmentedControl.kt`): the replacement for Material3's
-  `FilterChip` for both "pick one of N" (`SegmentedControl`, used by
-  `SettingsScreen`'s theme/font-size/cache/timeout/refresh-interval rows) and
-  standalone boolean toggles (`ToggleChip`, used by `ArticleListPane`'s
-  "unread only"). Both render as a bordered (`outlineVariant`) block that,
-  when selected/checked, fills solid with `primary` and switches its label to
-  `onPrimary`, using `Modifier.selectable`/`Modifier.toggleable` rather than
-  `FilterChip`'s pill shape. The label is always `FontWeight.Bold` (selected
-  and unselected alike) rather than only bolding on selection —
-  `ToggleChip` sits before a `weight(1f)` `Spacer` in `ArticleListPane`'s
-  header row, so a selection-only weight change would shift the icons after
-  it by a few px each time it's toggled; keeping the weight constant avoids
-  that jitter, and the solid fill + `onPrimary` contrast already reads as
-  clearly selected on its own. Reach for these, not `FilterChip`, for any new
-  chip-like selection/toggle UI.
-- **`FlatSwitch` / `FlatCheckbox`** (`ui/common/FlatToggles.kt`): flat replacements
-  for M3's `Switch`/`Checkbox`, built on plain `Modifier.toggleable` (no ripple) with
-  the same tokens as `SegmentedControl` (hairline `outlineVariant` border, `primary`
-  fill when on, `onPrimary` content). `FlatSwitch` is a pill track with a snapping
-  thumb (no slide animation, matching the app's immediate on/off convention);
-  `FlatCheckbox` is a rounded square that fills `primary` + shows a `Check` when
-  checked. Don't use M3's `Switch`/`Checkbox` directly at a call site. Count badges
-  overlaid on an icon (e.g. the notification bell in `ArticleListPane`) likewise use a
-  plain `Box`/`Text` pill (`error` fill, `onError` text) instead of M3's
-  `BadgedBox`/`Badge`.
+  (`ui/common/SegmentedControl.kt`, expect/actual): the replacement for
+  Material3's `FilterChip` for both "pick one of N" (`SegmentedControl`, used
+  by `SettingsScreen`'s theme/font-size/cache/timeout/refresh-interval rows)
+  and standalone boolean toggles (`ToggleChip`, used by `ArticleListPane`'s
+  "unread only"), **at a `commonMain` call site** — reach for these, not
+  `FilterChip`, there. The desktop `actual`s render as a bordered
+  (`outlineVariant`) block that, when selected/checked, fills solid with
+  `primary` and switches its label to `onPrimary`, using
+  `Modifier.selectable`/`Modifier.toggleable` rather than `FilterChip`'s pill
+  shape. The label is always `FontWeight.Bold` (selected and unselected
+  alike) rather than only bolding on selection — `ToggleChip` sits before a
+  `weight(1f)` `Spacer` in `ArticleListPane`'s header row, so a
+  selection-only weight change would shift the icons after it by a few px
+  each time it's toggled; keeping the weight constant avoids that jitter, and
+  the solid fill + `onPrimary` contrast already reads as clearly selected on
+  its own. The Android `actual`s delegate to M3's own
+  `SingleChoiceSegmentedButtonRow`+`SegmentedButton` and `FilterChip` — see
+  the `KeryxTextField` bullet below for why.
+- **`FlatSwitch` / `FlatCheckbox`** (`ui/common/FlatToggles.kt`, expect/actual):
+  the replacement for M3's `Switch`/`Checkbox` **at a `commonMain` call site** —
+  don't call M3's `Switch`/`Checkbox` directly there. The desktop `actual`s are
+  built on plain `Modifier.toggleable` (no ripple) with the same tokens as
+  `SegmentedControl` (hairline `outlineVariant` border, `primary` fill when on,
+  `onPrimary` content): `FlatSwitch` is a pill track with a snapping thumb (no
+  slide animation, matching the app's immediate on/off convention);
+  `FlatCheckbox` is a rounded square that fills `primary` + shows a `Check`
+  when checked. The Android `actual`s delegate to M3's own `Switch`/`Checkbox`
+  — see the `KeryxTextField` bullet below for why that's the right call on
+  that platform. Count badges overlaid on an icon (e.g. the notification bell
+  in `ArticleListPane`) likewise use a plain `Box`/`Text` pill (`error` fill,
+  `onError` text) instead of M3's `BadgedBox`/`Badge`.
 - **`KeryxTextField`** (`ui/common/KeryxTextField.kt`, expect/actual): the
   replacement for M3's `OutlinedTextField` for every text input — a flat,
-  thin-bordered field on desktop, M3 on a future Android `actual`. See the Text
-  input dialogs section above; don't use `OutlinedTextField`/`BasicTextField`
-  directly at a call site.
+  thin-bordered field on desktop, plain M3 on Android (same "why fight the
+  platform" reasoning `KeryxDialogs`/`KeryxIcons`/`FlatButtons`/
+  `FlatToggles`/`SegmentedControl`'s Android `actual`s follow: Android's own
+  users expect M3's native look, touch-target sizing, and accessibility
+  behavior for standard controls, where desktop's macOS-leaning flat
+  aesthetic is the one that's out of place). See the Text input dialogs
+  section above; don't use `OutlinedTextField`/`BasicTextField` directly at a
+  call site.
 - **Icon set — chrome vs. semantic state**: action/chrome icons (add, refresh,
   cloud sync, settings, folder/tag management, search, notifications, sort,
   mark-all-read, mark-unread, open-in-browser, back, close) use the
@@ -571,15 +615,18 @@ theme/shape/indication/icon choices:
   `Folder`, `ErrorFilled`, `PublicFilled`, `Article` — use the `XFilled` entry,
   since they're meant to read as "on/set" indicators, not as clickable chrome.
   Follow this split for any new icon: ask "is this a button, or a status
-  marker?" Assets are Tabler Icons (MIT) svgs bundled under
-  `composeResources/drawable/`, referenced only through `ui/common/KeryxIcons.kt`
-  — never add a raw `painterResource(Res.drawable.ic_*)` call at a UI call
-  site. Tabler (thin stroke, rounded terminals) was picked over Material
-  Design's stock glyphs for a closer-to-macOS feel; it is not literal SF
-  Symbols, since Apple's license restricts those to Apple-platform apps and
-  this app also ships Windows/Linux builds. **When remapping `KeryxIcons` to a
-  different icon set later** (e.g. an Android `actual` using Material icons,
-  or any other re-skin), don't just match each icon by semantic name — grep
+  marker?" `KeryxIcons` (`ui/common/KeryxIcons.kt`) is `expect`/`actual`:
+  the desktop `actual` bundles Tabler Icons (MIT) svgs (thin stroke, rounded
+  terminals — picked over Material Design's stock glyphs for a
+  closer-to-macOS feel; not literal SF Symbols, since Apple's license
+  restricts those to Apple-platform apps and this app also ships
+  Windows/Linux builds), while the Android `actual` bundles Material Symbols
+  Outlined (Apache-2.0), matching Android's own native visual language. Both
+  live under their own source set's `composeResources/drawable/` and are
+  referenced only through `ui/common/KeryxIcons.kt` — never add a raw
+  `painterResource(Res.drawable.ic_*)` call at a UI call site.
+  **When remapping either `actual` to a different icon set later**
+  (or adding a new one), don't just match each icon by semantic name — grep
   for `graphicsLayer`/`rotate`/`scaleX`/`scaleY` modifiers applied around each
   `KeryxIcon(...)` call site first. A handful of icons are transformed at
   their call site to represent state with a single asset (e.g.
@@ -588,11 +635,21 @@ theme/shape/indication/icon choices:
   differently-shaped glyph (e.g. a symmetric double-arrow instead of a
   directional bars+arrow icon) silently breaks the transform without
   breaking compilation or tests, which is exactly what happened when Tabler's
-  `arrows-sort` initially replaced the directional Material "sort" glyph.
-  Where practical, prefer swapping between two distinct icon assets for a
+  `arrows-sort` initially replaced the directional Material "sort" glyph
+  (confirmed still safe for the Material-ized Android `actual`: Material
+  Symbols' own `sort` glyph is the same three-different-length-bars shape, so
+  the flip still reads correctly there too). Where practical, prefer swapping
+  between two distinct icon assets for a
   two-state icon (as the folder/tag expand chevron already does, picking
   between `ExpandMore`/`ChevronRight`) over transforming one shared asset —
-  it's immune to this class of mistake by construction.
+  it's immune to this class of mistake by construction. `KeryxIcons.ArrowBack`
+  is the other concrete instance of this fix: `ChevronRight` used to double as
+  a flipped (`scaleX = -1f`) "back" icon at three call sites
+  (`ArticleListPane`/`ArticleDetailPane`'s back buttons,
+  `NativeMenu.android.kt`'s submenu-back row) on top of its real job as the
+  unflipped tree-expand chevron. `ArrowBack` gives "back" its own dedicated
+  entry (Android = Material's `arrow_back`, desktop = Tabler's `arrow-left`),
+  so `ChevronRight` now means only one thing and no call site transforms it.
 - **Flat surface pattern**: `NotificationCenterSheet`, `SetupScreen`'s
   `OptionCard`, and `TooltipIconButton`'s tooltip all use the same look for a
   "raised" panel instead of M3's tonal-elevation `Card`:

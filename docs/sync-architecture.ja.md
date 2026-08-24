@@ -375,6 +375,20 @@ Desktop Entry 仕様上 URI がプロセスに渡らず、ブラウザーはス�
 エラーを出す。いずれも OS が URL をコマンドライン引数としてアプリを起動し、`main.kt` が
 single-instance 経由で実行中インスタンスへ転送する。
 
+**Android** は同じ `keryx://oauth2/callback` スキームを宣言的に登録する — `AndroidManifest.xml` の
+`MainActivity` に `intent-filter`（`VIEW`/`DEFAULT`/`BROWSABLE`、`scheme="keryx"` `host="oauth2"`）を
+持たせるだけで、Windows/Linux のような起動時登録処理は不要。`MainActivity.onCreate`/`onNewIntent` が
+リダイレクトのデータ URI を `dispatchOAuthCallbackIfPresent` に渡し、これがデスクトップの `main.kt` と
+同じ `classifyLaunchArg`（commonMain）/ `parseOAuthUri`（jvmCommonMain）で分類したうえで、同じ形の
+`MutableSharedFlow<OAuthCallbackParams>`（Android 自身の `platformModule` に登録された別インスタンス）
+へ流し込む。`launchMode="singleTask"` により、既に起動中のインスタンスは新規 `onCreate` ではなく
+`onNewIntent` でリダイレクトを受け取る。ディスパッチ成功後は intent のデータをクリアしておく —
+そうしないと、後で回転などによる構成変更で `onCreate` が同じ `Intent` を再度受け取ったときに
+同じリダイレクトを二重処理してしまう。デスクトップと異なり、Android のカスタム URI スキームの
+`intent-filter` はアプリが排他的に専有できるものではない（別アプリが同じスキームを宣言しうる）ため、
+コード交換自体を実際に守っているのは（全プロバイダーで既に必須の）PKCE である——横取りされても
+一致する `code_verifier` が無ければ意味を成さない。
+
 > [!NOTE]
 > **カスタム URI プロバイダーは全デスクトップ OS 共通**: `./gradlew :composeApp:run` では
 > Dropbox / OneDrive 連携を完了できない。macOS では `keryx://` を LaunchServices がパッケージ版
@@ -384,13 +398,34 @@ single-instance 経由で実行中インスタンスへ転送する。
 > Gradle 実行終了後も残ってしまうため。連携を行う/確認する場合は `createDistributable` でビルドした
 > アプリを起動する（詳細は [setup.ja.md](setup.ja.md)）。
 > Google Drive はループバック受信のため、この制約はなく `gradlew run` でも連携を完了できる。
+> Android にはどちらの制約もない——`installDebug` でもリリースパイプライン経由でも、マニフェスト宣言の
+> `intent-filter` は同じように機能する。
+
+### Android で Google Drive が未対応な理由
+
+デスクトップの Google Drive 構成——ループバックリダイレクト + 毎回のトークン交換/リフレッシュで
+`client_secret` を送る「デスクトップアプリ」OAuth クライアント——は Android には流用できない。
+Google の現行ドキュメントが明確にしているのは、これが**Google 自身の OAuth クライアント種別に関する
+ポリシー上の判断**であって、Android 一般の制約ではないという点である（Dropbox と OneDrive はどちらも
+Android でカスタム URI スキームのリダイレクト + PKCE を使っており、Dropbox はこれを公式に推奨してさえ
+いる）: カスタム URI スキームのリダイレクトは Google の Android/Chrome アプリ向けクライアント種別では
+廃止（理由はアプリなりすましのリスク）、ループバックリダイレクトも同じクライアント種別では別途廃止と
+されている。Android から Google ユーザーデータへアクセスする Google 自身の推奨経路である Play services
+の `AuthorizationClient` に切り替えても、Play services へのランタイム依存が増える（この
+アプリの「アカウント不要・ローカルファースト」という方針と相性が悪い）うえ、リフレッシュトークンを
+得るにはやはりサーバー側での `client_secret` 交換が必要になる（`AuthorizationResult.getServerAuthCode()`
+が返す認可コードはバックエンドでの引き換えを前提としており、APK に埋め込む想定ではない）。どちらの
+トレードオフも小さな追加では済まないため、Android の Google Drive 対応は Dropbox/OneDrive を追加した
+フェーズには含めず、独立した将来の調査課題として先送りする。`core/CloudStorageAvailability.android.kt`
+は `googleDriveAvailable = false` を固定しており、その KDoc からここへリンクしている。
 
 ### トークン保存先
 
 **プロバイダーごとに別インスタンス**の `TokenStorage` を DI（`platformModule`）で構築する（1 インスタンスを
-複数プロバイダーで共有しない。`SecurityCliTokenStorage` は結果をインスタンスにキャッシュするため共有すると壊れる）。
+複数プロバイダーで共有しない。`SecurityCliTokenStorage`/`KeystoreTokenStorage` は結果をインスタンスに
+キャッシュするため共有すると壊れる）。
 Keychain のアカウント名とフォールバックファイル名は `CloudStorageType.id` から導出する（Dropbox は `"dropbox"` で
-従来のハードコード値と一致するため既存トークンの移行は不要。Google Drive は `"google_drive"`）。`KEYCHAIN_SERVICE` は
+従来のハードコード値と一致するため既存トークンの移行は不要。Google Drive は `"google_drive"`、OneDrive は `"onedrive"`）。`KEYCHAIN_SERVICE` は
 両者共通。
 
 - Windows/Linux: OS セキュアストレージ（java-keyring — Credential Manager / Secret Service, `KeyringTokenStorage`）。
@@ -403,6 +438,19 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
   セッション）では login keychain に永続化されるが、`gradlew run`（launchd 直下の Gradle daemon 配下の
   切り離しセッション）では `security add` が成功を返しても永続化しないため file に保存される。**読み取りは
   どちらのセッションからでも可能**（一度パッケージ版で連携すれば以降 `gradlew run` でも接続を引き継げる）。
+- **Android**: `KeystoreTokenStorage` が Android Keystore 保持の AES-256/GCM 鍵（プロバイダーごとに
+  `CloudStorageType.id` 由来の別エイリアス。鍵の実体は端末が対応していれば Keystore/TEE から一切
+  出ない）でトークン JSON を暗号化し、`IV || 暗号文` を `Context.filesDir` 配下の
+  `.{CloudStorageType.id}_tokens.enc` に書く。鍵は `setUserAuthenticationRequired(false)` で生成する —
+  定期実行される `WorkManager` のバックグラウンド同期は端末ロック中でもトークンを復号できる必要があり、
+  通常のトランザクションごとの秘密情報とは異なる要件のため。復号失敗（Keystore のリセット、
+  ハードウェア鍵を引き継げない端末/OS 移行など）はクラッシュとしてではなく「トークン未保存」と全く
+  同様に扱い、復号不能なファイルは残さず削除する。Keystore 自体が使えない端末は、デスクトップが
+  最終手段として使うのと同じ平文の `FileTokenStorage` にフォールバックする。`.enc` ファイルと平文
+  フォールバックの `.json` ファイルはどちらも Android の自動バックアップ/デバイス間転送から除外している
+  （`AndroidManifest.xml` の `dataExtractionRules`/`fullBackupContent`）——長寿命の OAuth リフレッシュ
+  トークンをバックアップに乗せるべきではなく、また Keystore 暗号化されたファイルはそもそも別端末に
+  復元しても役に立たないため。
 
 ### 今後の課題（未対応）
 

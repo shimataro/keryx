@@ -216,6 +216,91 @@ class HomeCommonTest {
         )
     }
 
+    // --- reorderTargetWithinScope ---
+
+    @Test
+    fun reorderTargetWithinScopeMovesUpToJustBeforeThePrecedingSibling() {
+        val ids = listOf("a", "b", "c")
+
+        assertEquals(ReorderTarget("a"), reorderTargetWithinScope(ids, index = 1, delta = -1))
+        assertEquals(ReorderTarget("b"), reorderTargetWithinScope(ids, index = 2, delta = -1))
+    }
+
+    @Test
+    fun reorderTargetWithinScopeMovesDownToJustBeforeTheSiblingAfterTheNextOne() {
+        val ids = listOf("a", "b", "c")
+
+        // "a" moving down lands after "b", i.e. before "c".
+        assertEquals(ReorderTarget("c"), reorderTargetWithinScope(ids, index = 0, delta = 1))
+        // "b" moving down lands after the last one, i.e. appended (a null target — see reorderIds).
+        assertEquals(ReorderTarget(null), reorderTargetWithinScope(ids, index = 1, delta = 1))
+    }
+
+    @Test
+    fun reorderTargetWithinScopeReportsNoMoveAtEitherEndOfTheScope() {
+        val ids = listOf("a", "b")
+
+        assertNull(reorderTargetWithinScope(ids, index = 0, delta = -1))
+        assertNull(reorderTargetWithinScope(ids, index = 1, delta = 1))
+        assertNull(reorderTargetWithinScope(ids, index = 0, delta = -1))
+        // A lone item has no sibling to swap with in either direction.
+        assertNull(reorderTargetWithinScope(listOf("a"), index = 0, delta = 1))
+        assertNull(reorderTargetWithinScope(listOf("a"), index = 0, delta = -1))
+        // Out-of-range positions (a row whose data changed under it) are a no-op, not a crash.
+        assertNull(reorderTargetWithinScope(ids, index = 5, delta = -1))
+        assertNull(reorderTargetWithinScope(emptyList(), index = 0, delta = 1))
+    }
+
+    // --- articleListTitle ---
+
+    @Test
+    fun articleListTitleResolvesEachFilterVariantToItsDisplayName() {
+        val feeds = listOf(feed("f1"))
+        val folders = listOf(folder("d1"))
+        val tags = listOf(tag("t1"))
+
+        assertEquals(
+            "All",
+            articleListTitle(ArticleFilter.All, feeds, folders, tags, "All", "Starred", "Search"),
+        )
+        assertEquals(
+            "Starred",
+            articleListTitle(ArticleFilter.Starred, feeds, folders, tags, "All", "Starred", "Search"),
+        )
+        assertEquals(
+            "Search",
+            articleListTitle(ArticleFilter.Search, feeds, folders, tags, "All", "Starred", "Search"),
+        )
+        assertEquals(
+            "Feed f1",
+            articleListTitle(ArticleFilter.Feed("f1"), feeds, folders, tags, "All", "Starred", "Search"),
+        )
+        assertEquals(
+            "Folder d1",
+            articleListTitle(ArticleFilter.Folder("d1"), feeds, folders, tags, "All", "Starred", "Search"),
+        )
+        assertEquals(
+            "Tag t1",
+            articleListTitle(ArticleFilter.Tag("t1"), feeds, folders, tags, "All", "Starred", "Search"),
+        )
+    }
+
+    @Test
+    fun articleListTitleFallsBackToAllLabelForAMissingFeedTagOrFolder() {
+        assertEquals(
+            "All",
+            articleListTitle(ArticleFilter.Feed("gone"), emptyList(), emptyList(), emptyList(), "All", "Starred", "Search"),
+        )
+        assertEquals(
+            "All",
+            articleListTitle(ArticleFilter.Folder("gone"), emptyList(), emptyList(), emptyList(), "All", "Starred", "Search"),
+        )
+        assertEquals(
+            "All",
+            articleListTitle(ArticleFilter.Tag("gone"), emptyList(), emptyList(), emptyList(), "All", "Starred", "Search"),
+        )
+    }
+
     @Test
     fun nextFeedListRowTreatsAFeedsFolderRowAndItsTagNestedRowAsDifferentPositions() {
         val tags = listOf(tag("t1"))

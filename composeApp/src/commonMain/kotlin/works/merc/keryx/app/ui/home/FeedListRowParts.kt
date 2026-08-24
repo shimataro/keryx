@@ -3,6 +3,7 @@ package works.merc.keryx.app.ui.home
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
@@ -16,9 +17,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import org.jetbrains.compose.resources.painterResource
+import org.jetbrains.compose.resources.stringResource
+import works.merc.keryx.app.resources.Res
+import works.merc.keryx.app.resources.home_move_down
+import works.merc.keryx.app.resources.home_move_up
+import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 
 // Small leaf composables used to build the rows of FeedListPane (feed avatar + unread-count badge).
@@ -102,4 +111,56 @@ internal fun CountBadge(
         color = dropTargetContentColorOrNull(isDropTarget, selected, focused, onContainerColor, isDragSource)
             ?: MaterialTheme.colorScheme.onSurfaceVariant,
     )
+}
+
+/**
+ * A touch-only drag affordance appended to the end of a draggable row (a folder header, or a feed
+ * row inside a folder group — tag-nested feed copies and tag rows themselves aren't drag sources,
+ * see `FeedListDragController.sourceAt`). `ui/home/FeedListDragGestures.kt`'s
+ * `feedListReorderDrag` gates a touch press's *start* position to this handle's band when
+ * `isTouchPrimary`, so the rest of the row stays a plain scrollable surface instead of hijacking
+ * every touch into a drag attempt (mouse users keep the old "drag from anywhere on the row"
+ * convention, since a precise pointer doesn't have this ambiguity with scrolling). Call sites
+ * render this only when `isTouchPrimary`; it draws no gesture handling of its own.
+ */
+@Composable
+internal fun DragHandle() {
+    KeryxIcon(
+        KeryxIcons.DragHandle,
+        contentDescription = null,
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 8.dp).size(20.dp),
+    )
+}
+
+/**
+ * The assistive-technology counterpart of [DragHandle], applied to the whole row band rather than
+ * to the handle icon (which is purely decorative, and whose drag is raw pointer input —
+ * `feedListReorderDrag` — that a screen reader cannot perform at all): a "move up" / "move down"
+ * custom action per direction that is actually available, running the same
+ * `HomeViewModel.moveFeed`/`reorderFolders` mutation a completed drop would.
+ *
+ * Both labels are shared by feed and folder rows — the direction, not the kind of row being moved,
+ * is what the label has to say. A direction whose callback is `null` (the row is already first or
+ * last **within its own reorder scope** — see `reorderTargetWithinScope`) exposes no action for
+ * that direction at all, rather than one that would do nothing.
+ *
+ * @param enabled Gated by the caller on `isTouchPrimary`, exactly like [DragHandle] itself: these
+ *   actions exist for the platform whose reorder gesture starts from that handle.
+ */
+@Composable
+internal fun Modifier.reorderAccessibilityActions(
+    enabled: Boolean,
+    onMoveUp: (() -> Unit)?,
+    onMoveDown: (() -> Unit)?,
+): Modifier {
+    val moveUpLabel = stringResource(Res.string.home_move_up)
+    val moveDownLabel = stringResource(Res.string.home_move_down)
+    if (!enabled) return this
+    val actions = buildList {
+        onMoveUp?.let { move -> add(CustomAccessibilityAction(moveUpLabel) { move(); true }) }
+        onMoveDown?.let { move -> add(CustomAccessibilityAction(moveDownLabel) { move(); true }) }
+    }
+    if (actions.isEmpty()) return this
+    return this.semantics { customActions = actions }
 }

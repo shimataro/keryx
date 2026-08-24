@@ -8,7 +8,9 @@
 - Dependency injection with Koin, state management with androidx.lifecycle ViewModel
 - Type-safe local DB management with SQLDelight
 - Sync processing is confined to the Repository layer; the UI layer is unaware of sync
-- Platform-specific code is consolidated behind `commonMain` `expect` + `desktopMain` `actual`
+- Shared platform abstractions are declared in `commonMain` and implemented in
+  `jvmCommonMain` when possible, or in target-specific source sets
+  (`desktopMain` / `androidMain`) otherwise.
 
 ## Directory Structure
 
@@ -20,19 +22,74 @@ composeApp/src/
     data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce(expect), TokenStorage, OAuthTokens
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, StartupMaintenanceTasks (refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex)
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, StartupMaintenanceTasks (refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex)
     di/           AppModule (+ expect platformModule)
-    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot (all expect)
+    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile (all expect)
     ui/           theme/, navigation/, setup/, home/ (3-pane + search + notification center), article/, settings/, i18n/
     LaunchArg.kt  Classifies a raw launch argument (`keryx://` URI vs `.opml` path) — platform-independent, package root
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq (7 tables)
-  commonMain/composeResources/  values/strings.xml, drawable/
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of each expect (DatabaseDriverFactory, AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, Pkce, PlatformModule) + LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage), DesktopOs (isMacOs/isWindows/isLinux), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux)
+  commonMain/composeResources/  values/strings.xml, drawable/ (icons are Android Vector Drawable XML,
+    not SVG — Compose Multiplatform's SVG decoder is desktop/iOS-only and crashes on Android at
+    runtime; VectorDrawable XML is the one image format `painterResource` renders on every target)
+  jvmCommonMain/kotlin/…/  actuals shared by desktop and Android, needing no platform API either
+    target lacks: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage, AppInfo,
+    CloudStorageAvailability (the last two just read the shared generated BuildConfig)
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of each expect not covered by jvmCommonMain (DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule) + LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage), DesktopOs (isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux)
     tray/      KeryxTray (platform branch), MacTray, LinuxTray + the StatusNotifierItem/dbusmenu D-Bus objects
-  commonTest/ + desktopTest/
+  androidMain/kotlin/…/  actual implementations not covered by jvmCommonMain: DatabaseDriverFactory
+    (bundled SQLite, see below), DatabaseFile (`databaseFilePath()` — `Context.getDatabasePath`,
+    a different directory than AppDirs.appDataDir()/`Context.filesDir`; see db-schema.md),
+    AppDirs/BrowserOpener/ClipboardEntries (via AndroidAppContext, a
+    static Context holder set once from KeryxApplication.onCreate), PlatformModule (Ktor OkHttp
+    engine, CloudSession with Dropbox/OneDrive providers — see Provider/DI below — plus
+    AndroidNotificationSink, see "Background Update" below), CloudStorageAvailability (Dropbox/
+    OneDrive real, Google Drive fixed `false` — see sync-architecture.md's "Google Drive on
+    Android" for why), KeryxTextField/KeryxAlertDialog/
+    KeryxTabDialog/KeryxIcons/FlatButtons/FlatToggles/SegmentedControl (plain M3, safe-drawing-padded
+    for edge-to-edge — the last four are `expect`/`actual` split the same way, with Material Symbols
+    (icons) or M3's own `Button`/`FilledTonalButton`/`TextButton`/`Switch`/`Checkbox`/
+    `SingleChoiceSegmentedButtonRow`+`SegmentedButton`/`FilterChip` (components) as the Android side —
+    see "Icon set" below), DatabaseMerger/DatabaseSnapshot
+    (real implementations against a dedicated `io.requery.android.database.sqlite.SQLiteDatabase`
+    connection — the Android equivalent of the desktop actual's dedicated JDBC connection; see
+    "DatabaseMerger" below), AndroidSqliteSupport.kt (`NoOpDatabaseErrorHandler` — the bundled
+    SQLite's default handler deletes a database file it judges corrupt, confirmed by disassembling
+    the AAR — plus `setBusyTimeout()`/`userVersion()` shared by both), FilePicker (Storage Access
+    Framework `OpenDocument`/`CreateDocument`, routed through AndroidFilePickerHost since this
+    `expect object` cannot itself hold an `ActivityResultLauncher`), KeystoreTokenStorage
+    (AES-256/GCM key held in the Android Keystore per cloud provider; see sync-architecture.md's
+    "Token Storage"), AndroidOAuthCallback.kt (`dispatchOAuthCallbackIfPresent`, called from
+    `:androidApp`'s `MainActivity` for the `keryx://` OAuth redirect — the Android counterpart of
+    desktop's `main.kt` URI routing), AndroidOpmlOpen.kt (`handleOpmlOpenIfPresent`, called from the
+    same `MainActivity` for an `.opml` "open with Keryx" `ACTION_VIEW` intent — the Android
+    counterpart of desktop's `.opml` file association; reads the `content://` `Uri` via
+    `platform/FilePicker.android.kt`'s `readTextFromUri`, then delegates to commonMain's
+    `domain/OpmlOpenHandler.kt`), nativeContextMenu (a real long-press `DropdownMenu`, added in
+    the adaptive-layout phase — see its
+    KDoc for the tap-vs-long-press disambiguation), BackHandler (delegates to
+    `androidx.activity.compose.BackHandler`), PlatformOs (isTouchPrimary = true, hasNativeAppMenu =
+    false — Android has no menu bar, so `FeedListToolbarRow`/`GeneralTab` grow their own Settings/
+    About entry points instead), SelfUpdateCheck (installer-package-based, see "Background Update"),
+    NotificationPermission (wraps `rememberLauncherForActivityResult` for `POST_NOTIFICATIONS`) +
+    AndroidStartupTasks.kt (`runAndroidStartupTasks`, called from `:androidApp`'s `MainActivity`) +
+    background/ (`FeedRefreshWorker` + `BackgroundRefresh.kt`'s `startBackgroundRefresh`,
+    `WorkManager`-based — see [background-update.md](background-update.md) for the whole Android
+    background/notification story)
+  commonTest/ + desktopTest/ + androidDeviceTest/ (instrumented tests for DatabaseMerger/
+    DatabaseSnapshot's Android actuals — needs a real device/emulator to load the bundled SQLite
+    native library; see testing.md)
 ```
 
 The package root is `works.merc.keryx.app` (reverse DNS of `keryx.merc.works`).
+
+A separate root-level module, `androidApp` (`com.android.application`, not part of the Kotlin
+Multiplatform source-set layout above), holds only `AndroidManifest.xml`, `KeryxApplication`
+(process-wide setup: `AndroidAppContext.init`, `startKoin`, `configureImageLoader`, an
+`ensureIndexed()` FTS backfill, `startBackgroundRefresh`), and `MainActivity`
+(`setContent { App() }`, then `runAndroidStartupTasks`). It exists because AGP
+9's `com.android.application` plugin cannot be applied to the same module as the Kotlin Multiplatform
+plugin — `composeApp` is instead an Android library via `com.android.kotlin.multiplatform.library`,
+and `androidApp` depends on it to produce the installable APK.
 
 ## Layer Responsibilities
 
@@ -49,6 +106,17 @@ The package root is `works.merc.keryx.app` (reverse DNS of `keryx.merc.works`).
 
 `expect class DatabaseDriverFactory { fun create(): SqlDriver }` in `commonMain`. The desktop `actual` creates a `JdbcSqliteDriver`, checks `PRAGMA user_version`, and manually drives `KeryxDatabase.Schema` create / migrate (because SQLDelight's JVM driver does not auto-track schema version).
 
+The Android `actual` creates an `AndroidSqliteDriver`, which drives `Schema.create`/`migrate`
+automatically via its own `onCreate`/`onUpgrade` callbacks — no manual `PRAGMA user_version`
+handling needed, unlike desktop. It uses `com.github.requery:sqlite-android`'s bundled SQLite
+(`RequerySQLiteOpenHelperFactory`, an `androidx.sqlite.db.SupportSQLiteOpenHelper.Factory`) rather
+than the device's own SQLite: AOSP's SQLite build omits FTS5 entirely, so `articles_fts`'s
+`tokenize='trigram'` cannot work against the system SQLite at any API level. See
+`.claude/rules/android-sqlite-bundling.md` for the full rationale and exit criteria.
+`busy_timeout`/`foreign_keys` are set from `AndroidSqliteDriver.Callback.onConfigure`; note that
+`PRAGMA busy_timeout=N` returns the new value as a result row, so it must go through
+`SupportSQLiteDatabase.query`, not `execSQL` (which requery rejects for statements returning rows).
+
 ### FtsManager / FtsSearch
 
 Manages `articles_fts` (FTS5 trigram, `content='articles'`) via raw SQL. Not included in the SQLDelight schema.
@@ -64,12 +132,27 @@ Only the SQLite-driver conversation is platform-specific. The decision *policy* 
 (the expected tables/columns per schema version, plain data). The desktop `actual` only walks the
 cause chain for an `org.sqlite.SQLiteException`, reduces `resultCode.code and 0xFF` to a
 `SqliteFailureCategory`, logs the verdict, and runs `PRAGMA table_info` for `validateSchema` against
-`MergeSchema.EXPECTED_SCHEMAS`. A future Android `actual` — whose `SQLiteException` exposes no
-numeric code — has to supply the same category and nothing else.
+`MergeSchema.EXPECTED_SCHEMAS`. The Android `actual` supplies the same category by a different
+route — its `android.database.sqlite.SQLiteException` exposes no numeric result code (unlike the
+JDBC driver desktop reads), so it switches on the thrown exception's own subclass instead
+(`SQLiteConstraintException`/`SQLiteDatabaseCorruptException` → `CORRUPT_OR_CONSTRAINT`, a handful
+of other named subclasses → `OTHER`, a plain `SQLiteException` → `STATEMENT_ERROR`, matching the
+ambiguity `validateSchema` exists to resolve) — and otherwise does the same attach → version check
+→ merge → detach sequence on a dedicated `io.requery.android.database.sqlite.SQLiteDatabase`
+connection, opened with `NoOpDatabaseErrorHandler` rather than the library's default (which deletes
+a database file it judges corrupt — confirmed by disassembling the bundled AAR; see
+`platform/AndroidSqliteSupport.kt`).
 
 ### CloudSession / SyncRepository
 
-`CloudSession` provides the current `CloudStorage` (Dropbox / Google Drive) and handles automatic access-token refresh. `SyncRepository` implements the download → merge (`DatabaseMerger`) → incremental index of new articles (`indexMissing`) → `VACUUM INTO` snapshot generation (`DatabaseSnapshot`, excludes `articles_fts` on the copy side) → upload (rev check) flow, along with debouncing (`SyncScheduler`). The live DB's FTS is untouched.
+`CloudSession` provides the current `CloudStorage` (Dropbox / Google Drive / OneDrive on desktop;
+Dropbox / OneDrive on Android — see sync-architecture.md's "Google Drive on Android") and handles
+automatic access-token refresh. `SyncRepository` implements the download → merge (`DatabaseMerger`)
+→ incremental index of new articles (`indexMissing`) → `VACUUM INTO` snapshot generation
+(`DatabaseSnapshot`, excludes `articles_fts` on the copy side) → upload (rev check) flow, along
+with debouncing (`SyncScheduler`). The live DB's FTS is untouched. `SyncRepository`'s `localDbPath`
+defaults to `platform/DatabaseFile.kt`'s `databaseFilePath()`, the single `expect` function that
+resolves the live DB's real path per platform (see `db-schema.md`).
 
 ### Provider / DI (Koin)
 
@@ -156,8 +239,19 @@ counterpart.
 
 ### Native context menus (platform branch)
 
-`platform/NativeMenu.desktop.kt`'s `defaultPopupHandle` backs every `Modifier.nativeContextMenu`
-call site (article rows, feed / folder / tag rows) with one of two implementations:
+`platform/NativeMenu.android.kt`'s `nativeContextMenu` backs the same call sites (article rows,
+feed / folder / tag rows) with a long-press-triggered Material 3 `DropdownMenu` instead: a
+self-contained `awaitEachGesture` loop that never consumes the initial *down* — only once the
+press survives `viewConfiguration.longPressTimeoutMillis` with no up and no consumption elsewhere
+(e.g. a `LazyColumn` scroll claiming the gesture) does it treat this as a long press and start
+consuming the rest of the gesture, so `ui/home/ListRowChrome.kt`'s `listRowClickable` (chained
+right before it, and therefore the *more outer* node — Compose's pointer-input `Main` pass resumes
+nested nodes before their ancestors for the same event) never also fires `onClick` for the same
+press. `NativeSubMenu` drills into its own items in place (a leading "back" row swaps the top level
+for the submenu's own items) rather than opening a nested popup.
+
+`platform/NativeMenu.desktop.kt`'s `defaultPopupHandle` backs the same call sites on desktop with
+one of two implementations, triggered by a right-click instead of a long-press:
 
 | Platform | Implementation | Why |
 | --- | --- | --- |
@@ -203,19 +297,19 @@ confirmation via GTK, so a portal-backed dialog likely would too, needing none o
 `JFileChooser` when no portal backend is present, detected the same way `KeryxTray` picks SNI vs.
 AWT: probing for `org.freedesktop.portal.Desktop` on the session bus at startup.
 
-### アイコンセット
+### Icon set
 
-`ui/common/KeryxIcons.kt` が全 UI 呼び出し箇所の唯一の間接参照点になっており（意味的な名前 →
-`composeResources/drawable/` 配下のバンドル SVG）、現在は Tabler Icons（MIT）を使用している（デスクトップ
-3OS 共通で Mac 寄りの見た目に寄せるため。詳細は `ui-guidelines` skill）。将来 Android 対応に着手する際は、
-Android のネイティブな視覚言語は Material Design であるため、Android ターゲットだけ Material 系アイコン
-（Material Symbols）に差し替えることを検討する余地がある — `KeryxIcons` を `expect`/`actual` に分割すれば
-プラットフォームごとに個別のアイコンセットを出し分けられる。ただし Android ターゲット自体がまだ存在しない
-現時点では検証しようがないため、着手は Android 対応開始時まで先送りする。iOS/iPadOS/macOS がいずれ
-ネイティブ SwiftUI 化された場合（`external-spec.md` §2 の想定どおり）、そちらは Kotlin の `KeryxIcons` とは
-無関係の別コードベースになるため、SF Symbols を `Image(systemName:)` で直接使えばよく、Kotlin 側に追加の
-差し替え機構は不要。つまり将来「SwiftUI = SF Symbols / Android = Material / Windows・Linux = 現行の Tabler」
-という3分岐になっても、Kotlin 側で実質必要になるのは上記の Android 用 `expect`/`actual` 分割だけである。
+`ui/common/KeryxIcons.kt` is the sole indirection point for every UI call site (semantic name →
+bundled Android Vector Drawable XML under `composeResources/drawable/`), and it is `expect`/`actual`
+per platform since the two targets intentionally bundle different icon sets: the desktop `actual`
+uses Tabler Icons (MIT) — chosen for a thin-stroke, rounded-terminal look closer to macOS's own
+iconography than Material Design's (see the `ui-guidelines` skill for the full rationale) — while the
+Android `actual` uses Material Symbols Outlined (Apache-2.0), matching Android's own native visual
+language. `KeryxIcon(...)` (the `Icon` wrapper composable) stays a single `commonMain` definition;
+only the `KeryxIcons` object's icon selection differs per platform. If iOS/iPadOS/macOS is ever
+rewritten as native SwiftUI (per `external-spec.md` §2's plan), that becomes a separate codebase
+unrelated to Kotlin's `KeryxIcons`, so it can use SF Symbols via `Image(systemName:)` directly with no
+additional Kotlin-side switching mechanism needed.
 
 ## Domain Model Policy
 
@@ -242,3 +336,25 @@ bound to the SELECT column order (guarded by
 ## Navigation
 
 A simple stack navigator in `ui/navigation/Navigator.kt` switches between Setup / Home / Settings. Article view is a pane inside Home (not a root route).
+
+### Home's adaptive pane layout
+
+`ui/home/HomePaneLayout.kt` resolves how many of the three home panes (feed list / article list /
+article detail) `HomeScreen` renders side by side, purely as a function of the available width:
+`PaneLayout.Triple` (all three — desktop always resolves here, since `WINDOW_MIN_WIDTH` is
+guaranteed `>= TRIPLE_PANE_MIN_WIDTH`, see that constant's KDoc in `core/Constants.kt`),
+`PaneLayout.Dual` (article list + one neighbor), or `PaneLayout.Single` (one pane, phone width).
+The navigation stack itself is always three deep (`HomePane.FeedList` → `ArticleList` →
+`ArticleDetail`); a narrower layout just shows fewer of those three at once. `HomePane.ordinal + 1`
+doubles as the stack's current depth, so `HomeScreen` needs no separate depth state — selecting a
+filter or an article advances it (`onSelectionAdvance`, a no-op at `Triple`), and `platform/BackHandler`
+(a real back-gesture/button interception on Android, a no-op on desktop) pops it by one.
+`PaneLayout.Dual` is a two-pane *sliding window* over that stack, not a plain adjacent pair: the
+article list stays one of the two panes shown at every depth, so drilling into an article swaps the
+feed list out for the detail pane rather than sliding the list itself off-screen.
+
+This is why the article reader's WebView being unconditionally composed (see "Article Reader"
+below) is safe on desktop specifically: desktop can only ever resolve `Triple`, where all three
+panes — including the one hosting the WebView — stay mounted for the app's whole lifetime.
+`Single`/`Dual` do unmount it when its pane isn't among those currently shown, which is fine on
+Android (no heavyweight AWT interop concern there).

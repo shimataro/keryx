@@ -11,8 +11,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.stringResource
+import org.koin.compose.koinInject
+import works.merc.keryx.app.platform.hasNativeAppMenu
 import works.merc.keryx.app.ui.common.SegmentedControl
+import works.merc.keryx.app.ui.menu.MenuCommand
+import works.merc.keryx.app.ui.menu.MenuController
 import works.merc.keryx.app.resources.Res
+import works.merc.keryx.app.resources.menu_help_about
 import works.merc.keryx.app.resources.settings_font_large
 import works.merc.keryx.app.resources.settings_font_medium
 import works.merc.keryx.app.resources.settings_font_size
@@ -31,7 +36,9 @@ import works.merc.keryx.app.resources.settings_theme_light
 import works.merc.keryx.app.resources.settings_theme_system
 
 /**
- * General tab: theme / font size / refresh interval / start-minimized.
+ * General tab: theme / font size / refresh interval / start-minimized / (Android only) an About
+ * entry point — desktop reaches About through the native application menu bar instead (see
+ * `platform/PlatformOs.kt`'s `hasNativeAppMenu`).
  *
  * @param vm The view model that provides current settings and handles setting changes.
  */
@@ -84,6 +91,15 @@ internal fun GeneralTabContent(vm: SettingsViewModel) {
                 label = stringResource(Res.string.settings_start_minimized),
                 checked = settings.startMinimized,
                 onChange = { vm.setStartMinimized(it) },
+            )
+        }
+
+        if (!hasNativeAppMenu) {
+            val menuController = koinInject<MenuController>()
+            Spacer(Modifier.height(16.dp))
+            ActionLinkRow(
+                label = stringResource(Res.string.menu_help_about),
+                onClick = { menuController.send(MenuCommand.About) },
             )
         }
     }
