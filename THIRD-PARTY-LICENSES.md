@@ -29,6 +29,7 @@ its respective license.
 | Compose WebView | Apache-2.0 | <https://github.com/kdroidFilter/ComposeNativeWebView> |
 | FlatLaf | Apache-2.0 | <https://github.com/JFormDesigner/FlatLaf> |
 | Tabler Icons | MIT | <https://github.com/tabler/tabler-icons> |
+| Material Symbols | Apache-2.0 | <https://github.com/google/material-design-icons> |
 | SLF4J | MIT | <https://github.com/qos-ch/slf4j> |
 | sqlite-android (requery) | Apache-2.0 | <https://github.com/requery/sqlite-android> |
 | AndroidX Core | Apache-2.0 | <https://github.com/androidx/androidx> |
