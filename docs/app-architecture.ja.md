@@ -43,8 +43,12 @@ composeApp/src/
     プロバイダを登録した CloudSession — 下記 Provider/DI 参照。加えて AndroidNotificationSink、下記
     「バックグラウンド更新」参照）, CloudStorageAvailability（Dropbox/OneDrive は実判定、Google Drive は
     `false` 固定 — 理由は sync-architecture.ja.md の「Android で Google Drive が未対応な理由」参照）,
-    KeryxTextField/KeryxAlertDialog/KeryxTabDialog（素の M3。
-    KeryxTabDialog はエッジツーエッジ対応で safe-drawing padding 済み）,
+    KeryxTextField/KeryxAlertDialog/KeryxTabDialog/KeryxIcons/FlatButtons/FlatToggles/
+    SegmentedControl（素の M3。KeryxTabDialog はエッジツーエッジ対応で safe-drawing padding 済み。
+    後の4つも同様に `expect`/`actual` 分割されており、Android 側は Material Symbols（アイコン）や
+    M3 の `Button`/`FilledTonalButton`/`TextButton`/`Switch`/`Checkbox`/
+    `SingleChoiceSegmentedButtonRow`+`SegmentedButton`/`FilterChip`（コンポーネント）をそのまま使う —
+    詳細は下記「アイコンセット」参照）,
     DatabaseMerger/DatabaseSnapshot（専用の `io.requery.android.database.sqlite.SQLiteDatabase`
     接続に対する実装 — デスクトップ実装の専用 JDBC 接続に相当。下記「DatabaseMerger」参照）,
     AndroidSqliteSupport.kt（`NoOpDatabaseErrorHandler` — バンドル SQLite の既定ハンドラは破損と
@@ -301,17 +305,16 @@ KDE/GNOME 純正のダイアログ（かつサンドボックスに適合した�
 ### アイコンセット
 
 `ui/common/KeryxIcons.kt` が全 UI 呼び出し箇所の唯一の間接参照点になっており（意味的な名前 →
-`composeResources/drawable/` 配下のバンドル Android Vector Drawable XML）、現在は Tabler Icons
-（MIT）を使用している（デスクトップ3OS共通でMac寄りの見た目に寄せるため。詳細は `ui-guidelines`
-skill）。Android のネイティブな視覚言語は Material Design であるため、Android ターゲットだけ
-Material 系アイコン（Material Symbols）に差し替えることを検討する余地がある — `KeryxIcons` を
-`expect`/`actual` に分割すればプラットフォームごとに個別のアイコンセットを出し分けられるが、
-現時点ではまだ着手していない。iOS/iPadOS/macOS がいずれネイティブ SwiftUI 化された場合
-（`external-spec.md` §2 の想定どおり）、そちらは Kotlin の `KeryxIcons` とは無関係の別コードベース
-になるため、SF Symbols を `Image(systemName:)` で直接使えばよく、Kotlin 側に追加の差し替え機構は
-不要。つまり将来「SwiftUI = SF Symbols / Android = Material / Windows・Linux = 現行の Tabler」
-という3分岐になっても、Kotlin 側で実質必要になるのは上記の Android 用 `expect`/`actual` 分割だけ
-である。
+`composeResources/drawable/` 配下のバンドル Android Vector Drawable XML）、`expect`/`actual`
+でプラットフォームごとに分割されている — 2つのターゲットが意図的に異なるアイコンセットを
+バンドルしているため。デスクトップ側の `actual` は Tabler Icons（MIT）を使用する
+（デスクトップ3OS共通で macOS 寄りの見た目に近づけるための選択。詳細は `ui-guidelines` skill）。
+Android 側の `actual` は Material Symbols Outlined（Apache-2.0）を使用し、Android 自身のネイティブな
+視覚言語に合わせている。`KeryxIcon(...)`（`Icon` のラッパー composable）は引き続き単一の
+`commonMain` 定義のままで、`KeryxIcons` オブジェクトが選ぶアイコンだけがプラットフォームごとに
+異なる。iOS/iPadOS/macOS がいずれネイティブ SwiftUI 化された場合（`external-spec.md` §2 の
+想定どおり）、そちらは Kotlin の `KeryxIcons` とは無関係の別コードベースになるため、SF Symbols を
+`Image(systemName:)` で直接使えばよく、Kotlin 側に追加の差し替え機構は不要である。
 
 ## ドメインモデルの方針
 

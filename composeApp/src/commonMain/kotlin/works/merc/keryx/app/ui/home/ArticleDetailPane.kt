@@ -21,7 +21,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
@@ -230,7 +229,7 @@ private fun ArticleDetailToolbar(
         if (onNavigateUp != null) {
             val backLabel = stringResource(Res.string.common_back)
             TooltipIconButton(tooltip = backLabel, onClick = onNavigateUp) {
-                KeryxIcon(KeryxIcons.ChevronRight, contentDescription = backLabel, modifier = Modifier.graphicsLayer(scaleX = -1f))
+                KeryxIcon(KeryxIcons.ArrowBack, contentDescription = backLabel)
             }
         }
         Spacer(Modifier.weight(1f))

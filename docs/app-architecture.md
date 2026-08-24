@@ -45,7 +45,11 @@ composeApp/src/
     AndroidNotificationSink, see "Background Update" below), CloudStorageAvailability (Dropbox/
     OneDrive real, Google Drive fixed `false` — see sync-architecture.md's "Google Drive on
     Android" for why), KeryxTextField/KeryxAlertDialog/
-    KeryxTabDialog (plain M3, safe-drawing-padded for edge-to-edge), DatabaseMerger/DatabaseSnapshot
+    KeryxTabDialog/KeryxIcons/FlatButtons/FlatToggles/SegmentedControl (plain M3, safe-drawing-padded
+    for edge-to-edge — the last four are `expect`/`actual` split the same way, with Material Symbols
+    (icons) or M3's own `Button`/`FilledTonalButton`/`TextButton`/`Switch`/`Checkbox`/
+    `SingleChoiceSegmentedButtonRow`+`SegmentedButton`/`FilterChip` (components) as the Android side —
+    see "Icon set" below), DatabaseMerger/DatabaseSnapshot
     (real implementations against a dedicated `io.requery.android.database.sqlite.SQLiteDatabase`
     connection — the Android equivalent of the desktop actual's dedicated JDBC connection; see
     "DatabaseMerger" below), AndroidSqliteSupport.kt (`NoOpDatabaseErrorHandler` — the bundled
@@ -293,19 +297,19 @@ confirmation via GTK, so a portal-backed dialog likely would too, needing none o
 `JFileChooser` when no portal backend is present, detected the same way `KeryxTray` picks SNI vs.
 AWT: probing for `org.freedesktop.portal.Desktop` on the session bus at startup.
 
-### アイコンセット
+### Icon set
 
-`ui/common/KeryxIcons.kt` が全 UI 呼び出し箇所の唯一の間接参照点になっており（意味的な名前 →
-`composeResources/drawable/` 配下のバンドル Android Vector Drawable XML）、現在は Tabler Icons
-（MIT）を使用している（デスクトップ3OS共通でMac寄りの見た目に寄せるため。詳細は `ui-guidelines` skill）。
-Android のネイティブな視覚言語は Material Design であるため、Android ターゲットだけ Material 系アイコン
-（Material Symbols）に差し替えることを検討する余地がある — `KeryxIcons` を `expect`/`actual` に分割すれば
-プラットフォームごとに個別のアイコンセットを出し分けられるが、現時点ではまだ着手していない。iOS/iPadOS/macOS
-がいずれネイティブ SwiftUI 化された場合（`external-spec.md` §2 の想定どおり）、そちらは Kotlin の
-`KeryxIcons` とは無関係の別コードベースになるため、SF Symbols を `Image(systemName:)` で直接使えばよく、
-Kotlin 側に追加の差し替え機構は不要。つまり将来「SwiftUI = SF Symbols / Android = Material /
-Windows・Linux = 現行の Tabler」という3分岐になっても、Kotlin 側で実質必要になるのは上記の Android 用
-`expect`/`actual` 分割だけである。
+`ui/common/KeryxIcons.kt` is the sole indirection point for every UI call site (semantic name →
+bundled Android Vector Drawable XML under `composeResources/drawable/`), and it is `expect`/`actual`
+per platform since the two targets intentionally bundle different icon sets: the desktop `actual`
+uses Tabler Icons (MIT) — chosen for a thin-stroke, rounded-terminal look closer to macOS's own
+iconography than Material Design's (see the `ui-guidelines` skill for the full rationale) — while the
+Android `actual` uses Material Symbols Outlined (Apache-2.0), matching Android's own native visual
+language. `KeryxIcon(...)` (the `Icon` wrapper composable) stays a single `commonMain` definition;
+only the `KeryxIcons` object's icon selection differs per platform. If iOS/iPadOS/macOS is ever
+rewritten as native SwiftUI (per `external-spec.md` §2's plan), that becomes a separate codebase
+unrelated to Kotlin's `KeryxIcons`, so it can use SF Symbols via `Image(systemName:)` directly with no
+additional Kotlin-side switching mechanism needed.
 
 ## Domain Model Policy
 

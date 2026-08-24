@@ -18,7 +18,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
@@ -118,11 +117,7 @@ private fun NativeMenuContent(items: List<NativeMenuEntry>, onDismiss: () -> Uni
         DropdownMenuItem(
             text = { Text(submenu.label) },
             leadingIcon = {
-                KeryxIcon(
-                    KeryxIcons.ChevronRight,
-                    contentDescription = null,
-                    modifier = Modifier.graphicsLayer(scaleX = -1f),
-                )
+                KeryxIcon(KeryxIcons.ArrowBack, contentDescription = null)
             },
             onClick = { openSubMenu = null },
         )

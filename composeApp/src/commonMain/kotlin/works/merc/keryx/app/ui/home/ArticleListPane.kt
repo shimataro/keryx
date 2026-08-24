@@ -314,9 +314,7 @@ internal fun ArticleListTopBar(
             ) {
                 val backLabel = stringResource(Res.string.common_back)
                 TooltipIconButton(tooltip = backLabel, onClick = onNavigateUp, enabled = navigateUpEnabled) {
-                    // No dedicated "back" asset — mirror the existing chevron (same trick
-                    // ArticleListTopBar's own sort icon already uses to flip vertically below).
-                    KeryxIcon(KeryxIcons.ChevronRight, contentDescription = backLabel, modifier = Modifier.graphicsLayer(scaleX = -1f))
+                    KeryxIcon(KeryxIcons.ArrowBack, contentDescription = backLabel)
                 }
                 Text(
                     title.orEmpty(),
