@@ -13,13 +13,12 @@ import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.IdGenerator
 import works.merc.keryx.app.domain.NotificationCenter
-import works.merc.keryx.app.domain.NotificationMessages
-import works.merc.keryx.app.domain.OpmlImporter
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncTrigger
 import works.merc.keryx.app.domain.checkForUpdateAndNotify
 import works.merc.keryx.app.domain.cleanUpArticleCacheIfDue
+import works.merc.keryx.app.domain.importOpmlAndNotify
 import works.merc.keryx.app.domain.maybeRebuildFtsIndex
 import works.merc.keryx.app.domain.refreshFeedsAndNotify
 import works.merc.keryx.app.domain.shouldCheckForUpdate
@@ -91,20 +90,7 @@ internal suspend fun handleOpenedOpmlFile(koin: Koin, path: String) {
         Log.warn(LOG_TAG, "Could not read the opened OPML file")
         return
     }
-    val outcome = runCatching { koin.get<OpmlImporter>().import(xml) }
-        .getOrElse {
-            Log.warn(LOG_TAG, "Failed to import the opened OPML file", it)
-            return
-        }
-    val message = koin.get<NotificationMessages>().opmlImported(outcome.added, outcome.failed)
-    koin.get<NotificationCenter>().add(
-        AppNotification(
-            id = IdGenerator.newId(),
-            level = AppNotificationLevel.INFO,
-            message = message,
-            timestampMillis = SystemClock.nowMillis(),
-        ),
-    )
+    importOpmlAndNotify(koin, xml)
     activationRequests.tryEmit(Unit)
 }
 

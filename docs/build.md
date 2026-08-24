@@ -184,6 +184,28 @@ per platform:
   `update-mime-database` against `$XDG_DATA_HOME/mime` (default `~/.local/share/mime`) afterward —
   deleting `keryx-opml.xml` alone leaves the compiled MIME cache pointing at the removed type until
   the database is rebuilt.
+- **Android**: declared entirely in `androidApp/src/main/AndroidManifest.xml` as a second
+  `ACTION_VIEW` intent-filter on `MainActivity` — unlike the three desktop OSes above, there is no
+  startup-time registration step; the manifest declaration alone is what makes Keryx appear in the
+  system's "Open with" chooser. As on macOS and Linux, there is no single standardized OPML MIME
+  type, and Android content providers commonly report a plain `.opml` file as
+  `application/octet-stream` rather than any XML-flavored type — so MIME matching alone would miss
+  most real files. The filter therefore combines MIME-based `<data>` tags (`application/x-opml+xml`,
+  `text/x-opml`, `text/xml`, `application/xml` — the same identifiers the Linux section above
+  already lists) with an extension-based fallback (`scheme="content"`, `host="*"`, `mimeType="*/*"`,
+  `pathPattern=".*\\.opml"`) that matches on the `content://` URI's path regardless of the reported
+  MIME type. The `host="*"` is required, not decorative: `IntentFilter.matchData` only evaluates a
+  `pathPattern` at all when the filter also declares a host, so without one the fallback would
+  silently never match any real `content://` URI (whose actual authority is the serving provider,
+  e.g. `com.android.externalstorage.documents`, and can't be enumerated up front) —
+  `"*"` is `IntentFilter`'s documented wildcard for "any host". `AndroidOpmlOpen.kt`'s
+  `handleOpmlOpenIfPresent` reads the incoming `content://` `Uri`
+  via `ContentResolver` and excludes the `keryx://` OAuth redirect, which shares the same
+  `MainActivity`/`ACTION_VIEW` handling through a separate intent-filter. Accepting `text/xml`/
+  `application/xml` means Keryx also appears in the chooser for unrelated XML files — the same
+  trade-off the Linux section's `text/x-opml` fallback already accepts — and malformed input is
+  handled the same way as the other platforms: `OpmlImporter.import`'s failure is caught rather than
+  propagated.
 
 ## Release (CD)
 
