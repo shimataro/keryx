@@ -5,6 +5,7 @@ import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.FocusInteraction
 import androidx.compose.foundation.interaction.HoverInteraction
+import androidx.compose.foundation.interaction.Interaction
 import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,6 +39,22 @@ actual val platformShapes: Shapes = Shapes(
 )
 
 /**
+ * Applies one [interaction] to a running press count. Clamped at zero on every decrement: a
+ * `Release`/`Cancel`/drag `Cancel` can arrive without its matching start (e.g. a gesture that
+ * begins before this node attaches), and an unclamped counter would go negative, requiring two
+ * presses to turn [pressCount] positive again instead of one.
+ */
+internal fun nextPressCount(pressCount: Int, interaction: Interaction): Int = when (interaction) {
+    is PressInteraction.Press -> pressCount + 1
+    is PressInteraction.Release, is PressInteraction.Cancel -> (pressCount - 1).coerceAtLeast(0)
+    is DragInteraction.Start -> pressCount + 1
+    is DragInteraction.Stop, is DragInteraction.Cancel -> (pressCount - 1).coerceAtLeast(0)
+    is HoverInteraction.Enter, is HoverInteraction.Exit -> pressCount
+    is FocusInteraction.Focus, is FocusInteraction.Unfocus -> pressCount
+    else -> pressCount
+}
+
+/**
  * Flat press feedback: an immediate, non-animated `onSurface` low-alpha overlay while pressed —
  * no Material ripple animation. Applied via [LocalIndication] so every `clickable` / `selectable` /
  * `toggleable` etc. picks it up without per-call-site overrides.
@@ -53,14 +70,7 @@ private class FlatIndicationNode(
         coroutineScope.launch {
             var pressCount = 0
             source.interactions.collect { interaction ->
-                when (interaction) {
-                    is PressInteraction.Press -> pressCount++
-                    is PressInteraction.Release, is PressInteraction.Cancel -> pressCount--
-                    is DragInteraction.Start -> pressCount++
-                    is DragInteraction.Stop, is DragInteraction.Cancel -> pressCount--
-                    is HoverInteraction.Enter, is HoverInteraction.Exit -> Unit
-                    is FocusInteraction.Focus, is FocusInteraction.Unfocus -> Unit
-                }
+                pressCount = nextPressCount(pressCount, interaction)
                 val isPressed = pressCount > 0
                 if (pressed != isPressed) {
                     pressed = isPressed
