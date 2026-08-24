@@ -16,9 +16,9 @@ import works.merc.keryx.app.domain.parseOAuthUri
  * `:composeApp` like `commonMain`'s `LaunchArg.kt`, so it can see `classifyLaunchArg`/`LaunchArg`
  * directly despite their `internal` visibility.
  *
- * Only [LaunchArg.OAuthCallback] applies here: unlike desktop's `.opml` file-association launch
- * arg (a filesystem path forwarded on argv), Android's OPML import/export goes through the SAF
- * file picker instead (`platform/AndroidFilePickerHost.kt`), never a launch intent.
+ * Only [LaunchArg.OAuthCallback] applies here — an `.opml` open (Android's counterpart to
+ * desktop's file-association launch arg) is a separate `ACTION_VIEW` intent-filter, handled by
+ * `handleOpmlOpenIfPresent` (`AndroidOpmlOpen.kt`) instead.
  *
  * @return `true` if [uri] was a `keryx://` callback and was dispatched (or was recognized but
  * malformed), so the caller can decide whether to clear the intent's data (avoiding reprocessing

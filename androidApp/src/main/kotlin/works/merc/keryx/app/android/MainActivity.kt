@@ -12,6 +12,7 @@ import org.koin.core.Koin
 import org.koin.mp.KoinPlatform
 import works.merc.keryx.app.App
 import works.merc.keryx.app.dispatchOAuthCallbackIfPresent
+import works.merc.keryx.app.handleOpmlOpenIfPresent
 import works.merc.keryx.app.platform.AndroidFilePickerHost
 import works.merc.keryx.app.runAndroidStartupTasks
 
@@ -49,7 +50,7 @@ class MainActivity : ComponentActivity() {
         AndroidFilePickerHost.attach(openDocumentLauncher, createDocumentLauncher)
 
         val koin = KoinPlatform.getKoin()
-        dispatchIncomingOAuthCallback(koin)
+        dispatchIncomingViewIntent(koin)
 
         // See runAndroidStartupTasks's own KDoc for why this runs from the Activity rather than
         // Application.onCreate (which also runs when WorkManager wakes the process for
@@ -67,26 +68,30 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * `singleTask` (see `AndroidManifest.xml`) means a `keryx://` OAuth redirect reaches an
-     * already-running instance here rather than via a fresh [onCreate].
+     * `singleTask` (see `AndroidManifest.xml`) means a `keryx://` OAuth redirect or an `.opml`
+     * "open with Keryx" reaches an already-running instance here rather than via a fresh
+     * [onCreate].
      */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        dispatchIncomingOAuthCallback(KoinPlatform.getKoin())
+        dispatchIncomingViewIntent(KoinPlatform.getKoin())
     }
 
     /**
-     * Forwards this Activity's current intent data to [dispatchOAuthCallbackIfPresent], then
-     * clears it on success. The clear matters because a screen rotation recreates the Activity
-     * with the *same* [getIntent] object (no new [onNewIntent] call) — without clearing the data,
-     * a rotation right after completing a connection would resubmit the same one-time
-     * authorization code into the callback flow for no reason (harmless — nothing is still
-     * listening for that `state` by then — but pointless work worth skipping).
+     * Forwards this Activity's current intent to [dispatchOAuthCallbackIfPresent] and
+     * [handleOpmlOpenIfPresent] (the two `ACTION_VIEW` cases `AndroidManifest.xml` declares
+     * intent-filters for), then clears the intent's data if either claimed it. The clear matters
+     * because a screen rotation recreates the Activity with the *same* [getIntent] object (no new
+     * [onNewIntent] call) — without clearing the data, a rotation right after handling one of
+     * these would resubmit it. For the OAuth case that's harmless but pointless (nothing is still
+     * listening for that `state` by then); for the OPML case it would re-import the same file and
+     * duplicate real data, so this clearing is required rather than just a courtesy.
      */
-    private fun dispatchIncomingOAuthCallback(koin: Koin) {
-        if (dispatchOAuthCallbackIfPresent(koin, intent?.data?.toString())) {
-            intent?.data = null
-        }
+    private fun dispatchIncomingViewIntent(koin: Koin) {
+        val current = intent ?: return
+        val handled = dispatchOAuthCallbackIfPresent(koin, current.data?.toString()) ||
+            handleOpmlOpenIfPresent(koin, current)
+        if (handled) current.data = null
     }
 }

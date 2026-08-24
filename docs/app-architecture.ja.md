@@ -21,7 +21,7 @@ composeApp/src/
     data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce(expect), TokenStorage, OAuthTokens
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, OAuthCallbackParams, StartupMaintenanceTasks（refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex）
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler（importOpmlAndNotify。デスクトップと Android の「`.opml` ファイル関連付け」で共有）, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, OAuthCallbackParams, StartupMaintenanceTasks（refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex）
     di/           AppModule（+ expect platformModule）
     platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile（すべて expect）
     ui/           theme/, navigation/, setup/, home/（3ペイン + 検索 + 通知センター）, article/, settings/, i18n/
@@ -55,6 +55,10 @@ composeApp/src/
     Android Keystore 保持の AES-256/GCM 鍵。sync-architecture.ja.md の「トークン保存先」参照）,
     AndroidOAuthCallback.kt（`dispatchOAuthCallbackIfPresent`。`keryx://` OAuth リダイレクト用に
     `:androidApp` の `MainActivity` から呼ばれる — デスクトップの `main.kt` の URI ルーティングに相当）,
+    AndroidOpmlOpen.kt（`handleOpmlOpenIfPresent`。`.opml` の「Keryx で開く」`ACTION_VIEW` インテント用に
+    同じ `MainActivity` から呼ばれる — デスクトップの `.opml` ファイル関連付けに相当。
+    `platform/FilePicker.android.kt` の `readTextFromUri` で `content://` `Uri` を読み取り、
+    commonMain の `domain/OpmlOpenHandler.kt` に委譲する）,
     nativeContextMenu（適応レイアウトのフェーズで実装した実際の
     長押し DropdownMenu — タップと長押しの判別は KDoc 参照）, BackHandler（`androidx.activity.compose.BackHandler`
     へ委譲）, PlatformOs（isTouchPrimary = true, hasNativeAppMenu = false — Android にはメニューバーが

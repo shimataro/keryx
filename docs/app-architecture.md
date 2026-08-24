@@ -22,7 +22,7 @@ composeApp/src/
     data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce(expect), TokenStorage, OAuthTokens
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, StartupMaintenanceTasks (refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex)
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, StartupMaintenanceTasks (refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex)
     di/           AppModule (+ expect platformModule)
     platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile (all expect)
     ui/           theme/, navigation/, setup/, home/ (3-pane + search + notification center), article/, settings/, i18n/
@@ -56,7 +56,11 @@ composeApp/src/
     (AES-256/GCM key held in the Android Keystore per cloud provider; see sync-architecture.md's
     "Token Storage"), AndroidOAuthCallback.kt (`dispatchOAuthCallbackIfPresent`, called from
     `:androidApp`'s `MainActivity` for the `keryx://` OAuth redirect — the Android counterpart of
-    desktop's `main.kt` URI routing), nativeContextMenu (a real long-press `DropdownMenu`, added in
+    desktop's `main.kt` URI routing), AndroidOpmlOpen.kt (`handleOpmlOpenIfPresent`, called from the
+    same `MainActivity` for an `.opml` "open with Keryx" `ACTION_VIEW` intent — the Android
+    counterpart of desktop's `.opml` file association; reads the `content://` `Uri` via
+    `platform/FilePicker.android.kt`'s `readTextFromUri`, then delegates to commonMain's
+    `domain/OpmlOpenHandler.kt`), nativeContextMenu (a real long-press `DropdownMenu`, added in
     the adaptive-layout phase — see its
     KDoc for the tap-vs-long-press disambiguation), BackHandler (delegates to
     `androidx.activity.compose.BackHandler`), PlatformOs (isTouchPrimary = true, hasNativeAppMenu =

@@ -6,16 +6,25 @@ import works.merc.keryx.app.core.Log
 private const val TAG = "AndroidFilePicker"
 
 /**
+ * Reads the full text content of a `content://` [uri] via [android.content.ContentResolver], the
+ * only API that can open a `content://` Uri this app doesn't itself own. Shared by
+ * [ContentUriPickedFile] (a file picked through the SAF pickers below) and `AndroidOpmlOpen.kt`
+ * (an `.opml` opened via an incoming `ACTION_VIEW` intent) — both resolve to a `content://` Uri and
+ * need identical read handling.
+ */
+internal suspend fun readTextFromUri(uri: Uri): String? = runCatching {
+    AndroidAppContext.application.contentResolver.openInputStream(uri)
+        ?.use { it.readBytes().decodeToString() }
+}.onFailure { e -> Log.warn(TAG, "Failed to read from $uri", e) }.getOrNull()
+
+/**
  * A [PickedFile] backed by a SAF `content://` [Uri] rather than a filesystem path — see
  * [PickedFile]'s own KDoc for why the interface is deliberately path-agnostic. Every read/write
  * goes through [android.content.ContentResolver], the only API that can open a `content://` Uri
  * this app doesn't itself own.
  */
 private class ContentUriPickedFile(private val uri: Uri) : PickedFile {
-    override suspend fun readText(): String? = runCatching {
-        AndroidAppContext.application.contentResolver.openInputStream(uri)
-            ?.use { it.readBytes().decodeToString() }
-    }.onFailure { e -> Log.warn(TAG, "Failed to read the picked file", e) }.getOrNull()
+    override suspend fun readText(): String? = readTextFromUri(uri)
 
     override suspend fun writeText(text: String) {
         runCatching {

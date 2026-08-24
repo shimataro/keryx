@@ -184,6 +184,35 @@ per platform:
   `update-mime-database` against `$XDG_DATA_HOME/mime` (default `~/.local/share/mime`) afterward —
   deleting `keryx-opml.xml` alone leaves the compiled MIME cache pointing at the removed type until
   the database is rebuilt.
+- **Android**: declared entirely in `androidApp/src/main/AndroidManifest.xml` as two more
+  `ACTION_VIEW` intent-filters on `MainActivity` — unlike the three desktop OSes above, there is no
+  startup-time registration step; the manifest declaration alone is what makes Keryx appear in the
+  system's "Open with" chooser. As on macOS and Linux, there is no single standardized OPML MIME
+  type, and Android content providers commonly report a plain `.opml` file as
+  `application/octet-stream` rather than any XML-flavored type — so MIME matching alone would miss
+  most real files. A MIME-based filter (`application/x-opml+xml`, `text/x-opml`, `text/xml`,
+  `application/xml` — the same identifiers the Linux section above already lists) and an
+  extension-based fallback filter (`scheme="content"`, `host="*"`, `mimeType="*/*"`,
+  `pathPattern=".*\\.opml"`, matching on the `content://` URI's path regardless of the reported MIME
+  type) are declared as **two separate intent-filters**, not combined `<data>` tags within one:
+  Android pools every `<data>` element's scheme/host/mimeType/pathPattern within a single
+  `<intent-filter>` into one shared match set (`IntentFilter.matchData`), so a `pathPattern`
+  declared on one `<data>` tag would silently apply to every other `<data>` tag's plain MIME type in
+  the same filter too — an intent whose MIME type matched but whose `content://` path lacked a
+  literal `.opml` suffix (the common case, since SAF document IDs are often opaque) would then fail
+  to match the filter at all, defeating the MIME-based tags entirely. Splitting them keeps a
+  plain-MIME match independent of the `.opml` suffix. The fallback filter's `host="*"` is required,
+  not decorative: `IntentFilter.matchData` only evaluates a `pathPattern` at all when the filter also
+  declares a host, so without one the fallback would silently never match any real `content://` URI
+  (whose actual authority is the serving provider, e.g. `com.android.externalstorage.documents`, and
+  can't be enumerated up front) — `"*"` is `IntentFilter`'s documented wildcard for "any host".
+  `AndroidOpmlOpen.kt`'s `handleOpmlOpenIfPresent` reads the incoming `content://` `Uri`
+  via `ContentResolver` and excludes the `keryx://` OAuth redirect, which shares the same
+  `MainActivity`/`ACTION_VIEW` handling through a separate intent-filter. Accepting `text/xml`/
+  `application/xml` means Keryx also appears in the chooser for unrelated XML files — the same
+  trade-off the Linux section's `text/x-opml` fallback already accepts — and malformed input is
+  handled the same way as the other platforms: `OpmlImporter.import`'s failure is caught rather than
+  propagated.
 
 ## Release (CD)
 

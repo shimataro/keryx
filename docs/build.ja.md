@@ -146,6 +146,84 @@ URI がプロセスに届かないからである。代わりにアプリが初�
 > 登録がパッケージ版ランチャー以外を意図的にスキップするため）。連携の動作確認は `createDistributable` で
 > ビルドしたアプリを起動して行う（詳細は [setup.ja.md](setup.ja.md) の「よくある問題」）。
 
+### `.opml` ファイル関連付け
+
+`.opml` ファイルをダブルクリック（または「Keryx で開く」）すると Keryx が起動し、購読を
+インポートする（`FeedRepository.importOpml`、結果は通知センターに表示 — 詳細は
+[app-architecture.ja.md](app-architecture.ja.md)）。登録の仕組みは上記の `keryx://` スキームと
+同様で、プラットフォームごとに以下のとおり:
+
+- **macOS**: `CFBundleURLTypes` と同じ `infoPlist { extraKeysRawXml }` ブロック内の
+  `CFBundleDocumentTypes` でビルド時に宣言する。`LSHandlerRank` は `Alternate` ではなく
+  `Default` にしており、単純なダブルクリックで（「このアプリケーションで開く」サブメニューに
+  追加されるだけでなく）Keryx が直接起動するようにしている。macOS には OPML 用の組み込み
+  システム UTI が存在せず、サードパーティ製フィードリーダーのエコシステムでも統一されていない —
+  NetNewsWire は `org.opml.opml`（OPML 自体が Apple の UTI システムより古いため、事実上の標準に
+  最も近い）、Reeder は `com.reederapp.opml`、Overcast は `unofficial.opml` を使う。以前のバージョンの
+  本アプリは独自の UTI（`works.merc.keryx.opml`）をエクスポートしていたが、これだと他のアプリが
+  既に `.opml` 拡張子をこれらいずれかの識別子に紐付け済みの Mac では、Finder の「このアプリケーションで
+  開く」メニューに Keryx が現れなくなってしまう — ファイルはその拡張子に既に紐付いている UTI の
+  ほうに解決され、後から競合するエクスポート宣言をしてもその紐付けには勝てない。そのため
+  `LSItemContentTypes` には既知の3識別子すべてを列挙し、（Keryx はこれらの識別子の所有者ではなく
+  利用者であるため）`UTExportedTypeDeclarations` ではなく `UTImportedTypeDeclarations` で宣言する —
+  これにより、ユーザーのマシン上で `.opml` に紐付いている識別子が3つのうちどれであっても
+  Keryx がハンドラーとして提示される。
+- **Windows**: 起動時に（`registerWindowsOpmlAssociation`）専用の `Keryx.opml` ProgID
+  （`HKEY_CURRENT_USER\Software\Classes\.opml` → `Keryx.opml` → `shell\open\command`）で登録する。
+  URI スキームと同じ、ユーザー単位で管理者権限不要の仕組み。
+- **Linux**: 起動時に（`LinuxOpmlAssociationRegistrar`）*2つ目の* ユーザーレベル `.desktop`
+  エントリ（`keryx-opml-handler.desktop`、`Exec=... %f` — URI ではなく素のローカルパス）と、
+  `*.opml` グロブを `application/x-opml+xml` に対応付ける shared-mime-info パッケージ XML
+  （`$XDG_DATA_HOME/mime/packages/keryx-opml.xml`）を書き出す。このMIMEタイプがディストリビューションの
+  `shared-mime-info` パッケージにあらかじめ定義されている保証が無いため。macOS と同様、Linux の
+  フィードリーダー間でも OPML の MIME タイプは統一されていないため、`.desktop` エントリの
+  `MimeType=` にはもう一つの候補である `text/x-opml`（`OPML_MIME_TYPE_ALT`）も列挙する —
+  ただしこちらは `.desktop` エントリのみで、Keryx 自身の shared-mime-info パッケージには含めない。
+  こうすることで、既にインストール済みの別のリーダーのパッケージが `.opml` をこちらの MIME タイプに
+  紐付けている場合でも、Keryx 自身が `.opml` に対する2つ目の競合するグロブ対応付けを主張することなく、
+  Keryx を候補として使えるようにしている。URI スキームと同じゲート: パッケージ版ランチャーからのみ
+  登録するため、`./gradlew :composeApp:run` ではこれらのファイルは作成されない。`keryx://` スキームの
+  `keryx-url-handler.desktop` と `mimeapps.list` エントリと同様、これらのファイルもユーザーのホーム
+  配下にあり、**パッケージをアンインストールしても削除されない** — 同じ「残存関連付け」のリスク
+  （存在しないランチャーを指したままのエントリ）があり、同じ手動クリーンアップが必要:
+  `keryx-opml-handler.desktop` と `keryx-opml.xml` を削除し、`mimeapps.list` から
+  `application/x-opml+xml` と `text/x-opml` の行を取り除く。加えて `$XDG_DATA_HOME/mime`
+  （既定 `~/.local/share/mime`）に対して `update-mime-database` を再実行すること —
+  `keryx-opml.xml` を削除しただけでは、データベースを再構築するまでコンパイル済みの MIME
+  キャッシュが削除済みのタイプを指したままになる。
+- **Android**: 上記デスクトップ3OSと異なり起動時の登録処理は一切無く、
+  `androidApp/src/main/AndroidManifest.xml` 内の `MainActivity` に対する、さらに2つの
+  `ACTION_VIEW` intent-filter として宣言するだけで完結する — このマニフェスト宣言だけで、
+  システムの「アプリで開く」選択画面に Keryx が現れるようになる。macOS や Linux と同様、OPML には
+  標準化された単一の MIME タイプが存在せず、Android のコンテンツプロバイダーは素の `.opml`
+  ファイルを XML 系のタイプではなく `application/octet-stream` として報告することが多い —
+  そのため MIME だけで絞り込むと実際のファイルの大半を取りこぼす。MIME ベースのフィルター
+  （`application/x-opml+xml` / `text/x-opml` / `text/xml` / `application/xml` — 上記 Linux 節と
+  同じ識別子）と、拡張子ベースのフォールバックフィルター（`scheme="content"` + `host="*"` +
+  `mimeType="*/*"` + `pathPattern=".*\\.opml"`、報告される MIME タイプに関わらず `content://`
+  URI のパスで判定する）は、**2つの独立した intent-filter** として宣言している（1つのフィルター内に
+  `<data>` タグをまとめてはいない）: Android は同一 `<intent-filter>` 内にある複数の `<data>`
+  要素の scheme / host / mimeType / pathPattern を、それぞれ1つの共有マッチ集合にまとめてしまう
+  （`IntentFilter.matchData`）ため、いずれか1つの `<data>` タグに `pathPattern` を宣言すると、
+  同じフィルター内の他の `<data>` タグの単純な MIME タイプ指定にまで、その `pathPattern` が
+  暗黙に適用されてしまう — その結果、MIME タイプは一致していても `content://` のパスが
+  `.opml` という拡張子で終わっていない場合（SAF のドキュメント ID は不透明な値であることが多く、
+  これはむしろ一般的なケースである）にマッチ自体が失敗し、MIME ベースのタグが実質的に無意味に
+  なってしまう。フィルターを分離しておくことで、MIME タイプだけでのマッチが `.opml` という
+  拡張子の有無に左右されなくなる。フォールバック側フィルターの `host="*"` は
+  飾りではなく必須の指定である — `IntentFilter.matchData` は、フィルターに host が宣言されている
+  場合に限って `pathPattern` を評価するため、host が無いとこのフォールバックは実際の
+  `content://` URI に対して一切マッチしなくなる（その URI の本当の authority は配信元の
+  プロバイダー次第で、例えば `com.android.externalstorage.documents` のように事前には列挙できない）
+  — `"*"` は `IntentFilter` が公式にドキュメント化している「任意の host」を表すワイルドカードである。
+  `AndroidOpmlOpen.kt` の
+  `handleOpmlOpenIfPresent` が着信した `content://` `Uri` を `ContentResolver` 経由で読み取り、
+  同じ `MainActivity`/`ACTION_VIEW` の処理を共有するが別の intent-filter を持つ `keryx://` の
+  OAuth リダイレクトは除外する。`text/xml`/`application/xml` を受け入れることで、無関係な XML
+  ファイルの「開く」候補にも Keryx が並んでしまうが、これは上記 Linux 節の `text/x-opml`
+  フォールバックが既に受け入れているのと同じトレードオフである。不正な入力の扱いも他プラットフォーム
+  と同様: `OpmlImporter.import` の失敗は伝播させず、その場で握りつぶす。
+
 ## リリース（CD）
 
 `.github/workflows/release.yml` がパッケージをビルドし、GitHub Release に添付する。

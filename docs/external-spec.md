@@ -57,7 +57,9 @@ data exists in the cloud it is automatically merged (imported) during the initia
 
 ## 7. Basic Features
 
-- Subscribe to feeds by URL, categorize with tags, OPML import/export
+- Subscribe to feeds by URL, categorize with tags, OPML import/export. An `.opml` file can also be
+  imported by opening it directly from another app — file-association double-click on desktop,
+  "open with Keryx" from a file manager or mail attachment on Android
 - Feed health management: 301/308 auto-updates the subscription URL (notification), 410 Gone shows a warning in the notification center, consecutive errors show an indicator in the feed list
 - Article list / article view (reader view). **Articles are marked as read the instant they are selected**. An action to mark as unread is available.
 - Stars (persistent), open in external browser
