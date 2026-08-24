@@ -1,6 +1,5 @@
 package works.merc.keryx.app.ui.settings
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -14,7 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipBox
@@ -32,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.ui.common.FlatSwitch
 import works.merc.keryx.app.ui.common.FlatTooltipContent
+import works.merc.keryx.app.ui.common.KeryxRaisedSurface
 
 // Shared building blocks for the settings tabs (SettingsDialog + *Tab files).
 
@@ -47,13 +46,7 @@ import works.merc.keryx.app.ui.common.FlatTooltipContent
  */
 @Composable
 internal fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        tonalElevation = 0.dp,
-    ) {
+    KeryxRaisedSurface(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),

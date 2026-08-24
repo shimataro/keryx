@@ -11,6 +11,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -233,6 +234,11 @@ fun HomeScreen() {
                 // default (OS back gesture / Alt+F4-equivalent) is left alone there.
                 BackHandler(enabled = layout != PaneLayout.Triple && focusedPane.ordinal > 0) { goBack() }
 
+                // Single: tapping a row navigates away from it (drills into the article list, or
+                // the article detail), so a lingering selection highlight there would mark a row
+                // the user can no longer see — see LocalRowSelectionVisible's own KDoc. Dual/Triple
+                // keep it: the selected row's pane stays on screen alongside the pane it opened.
+                CompositionLocalProvider(LocalRowSelectionVisible provides (layout != PaneLayout.Single)) {
                 if (layout == PaneLayout.Triple) {
                     val dividerWidth = PANE_DIVIDER_WIDTH.dp
                     // coerceAtLeast(0.dp): with WINDOW_MIN_WIDTH >= the pane-minimum sum, this
@@ -322,6 +328,7 @@ fun HomeScreen() {
                             }
                         }
                     }
+                }
                 }
             }
             // Last child of the root Box, so the floating drag chip paints above every pane.

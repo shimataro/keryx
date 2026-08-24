@@ -814,7 +814,7 @@ private fun SidebarRow(
     Row(
         Modifier.fillMaxWidth()
             .listRowClickable(rowInteraction, onClick)
-            .listRowSurface(selectionBackground(selected, focused), rowInteraction)
+            .listRowSurface(selectionBackground(selected, focused), ListRowKind.NavItem, rowInteraction)
             .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -898,6 +898,7 @@ private fun TagRow(
             )
             .listRowSurface(
                 dropTargetBackground(isDropTarget, selected, focused, MaterialTheme.colorScheme.tertiaryContainer),
+                ListRowKind.NavItem,
                 rowInteraction,
                 decoration = dropTargetBorderModifier(isDropTarget, MaterialTheme.colorScheme.tertiary),
             )
@@ -1056,7 +1057,7 @@ private fun TagFeedRow(
                 // right-click on it promotes it first, exactly as the old `!selected` check did.
                 onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
             )
-            .listRowSurface(selectionBackground(selectionTone, focused), rowInteraction)
+            .listRowSurface(selectionBackground(selectionTone, focused), ListRowKind.NavItem, rowInteraction)
             .padding(start = FEED_ROW_INDENT, end = 8.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

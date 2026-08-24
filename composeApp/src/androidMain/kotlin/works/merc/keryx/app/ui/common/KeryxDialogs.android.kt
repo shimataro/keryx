@@ -15,7 +15,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.isUnspecified
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -28,6 +27,11 @@ import androidx.compose.ui.window.DialogProperties
  * [modal] is unused: unlike desktop's macOS-style non-modal "About" panel, an Android dialog is
  * always modal at the window-manager level — there is no non-blocking dialog concept to opt out
  * into, and a modal About screen is the ordinary, expected pattern on this platform.
+ *
+ * [containerColor] and [tonalElevation] are also unused: they exist so desktop callers can opt into
+ * the app's own flat surface pattern (`surfaceContainerLow` + no elevation — see the `ui-guidelines`
+ * skill), but on Android a dialog surface is exactly where M3's own tonal elevation reads as native.
+ * Not passing either to [AlertDialog] lets `AlertDialogDefaults`' own values apply.
  */
 @Composable
 actual fun KeryxAlertDialog(
@@ -70,10 +74,7 @@ actual fun KeryxAlertDialog(
             }
         },
         text = text,
-        // Unspecified is this function's own "let the caller's design language decide" sentinel
-        // (see the commonMain KDoc); mirrors the desktop actual's fallback exactly.
-        containerColor = if (containerColor.isUnspecified) MaterialTheme.colorScheme.surface else containerColor,
-        tonalElevation = tonalElevation,
+        // containerColor/tonalElevation deliberately NOT forwarded — see this function's own KDoc.
     )
 }
 

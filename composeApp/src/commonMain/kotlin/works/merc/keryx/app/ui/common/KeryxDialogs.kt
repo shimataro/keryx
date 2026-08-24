@@ -92,7 +92,9 @@ expect fun KeryxTabDialog(
  * JDK-8250953). Native macOS chrome for this control is deferred to a future SwiftUI port instead
  * (see the `ui-guidelines` skill's "Other native-migration candidates") rather than approximated via
  * fragile OS-version-dependent Swing tuning. Plain `Modifier.selectable` gets this dialog's tabs
- * `FlatIndication`'s press feedback and standard Compose keyboard focus/traversal for free.
+ * the platform's own press feedback for free — flat on desktop, a real M3 ripple on Android (see
+ * `ui/theme/PlatformTheme.kt`'s `ProvidePlatformInteraction`) — and standard Compose keyboard
+ * focus/traversal.
  *
  * Horizontally scrollable: desktop's fixed dialog width comfortably fits every tab today (see
  * `KERYX_TAB_DIALOG_WIDTH`'s KDoc), so the scroll never engages there, but Android's `KeryxTabDialog`

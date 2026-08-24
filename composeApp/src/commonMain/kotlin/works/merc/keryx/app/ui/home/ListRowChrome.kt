@@ -1,15 +1,10 @@
 package works.merc.keryx.app.ui.home
 
-import androidx.compose.foundation.LocalIndication
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -89,16 +84,33 @@ internal fun Modifier.listRowClickable(
 ): Modifier = clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
 
 /**
- * The inset rounded-rectangle selection surface a list row paints inside its (wider) clickable band
- * — see [listRowClickable]. Applies the row's standard [LIST_ROW_HORIZONTAL_MARGIN] /
- * [LIST_ROW_VERTICAL_MARGIN] outer margin, clips to [MaterialTheme.shapes]' `small` radius, paints
- * [background], then [decoration] (e.g. a drop-target border), then the app's flat press feedback
- * via [interactionSource] — `null` for a row that carries no selection state of its own (e.g.
- * `NoFolderHeader`, which only ever shows a drop-target highlight and is never clicked).
+ * Which native row idiom a list row should follow — see [listRowSurface]'s own KDoc and the
+ * `ui-guidelines` skill's "Platform-native list rows" section for the full rationale. Desktop's
+ * `actual` ignores this entirely (its one, macOS-leaning row style applies regardless), so this
+ * distinction is Android-only in practice.
+ */
+internal enum class ListRowKind {
+    /** A feed/folder/tag row — Android's equivalent of a navigation-drawer item. */
+    NavItem,
+
+    /** An article row — Android's equivalent of a plain content list item. */
+    ListItem,
+}
+
+/**
+ * The selection surface a list row paints inside its (wider) clickable band — see
+ * [listRowClickable]. Applies the row's standard [LIST_ROW_HORIZONTAL_MARGIN] /
+ * [LIST_ROW_VERTICAL_MARGIN] outer margin, paints [background], then [decoration] (e.g. a
+ * drop-target border), then the platform's own press feedback via [interactionSource] — `null` for
+ * a row that carries no selection state of its own (e.g. `NoFolderHeader`, which only ever shows a
+ * drop-target highlight and is never clicked). [kind] only matters on Android — desktop's `actual`
+ * always applies the same macOS-leaning inset/rounded style regardless of it (see `ListRowKind`'s
+ * own KDoc).
  *
  * A drag insertion marker must be drawn *before* this in the chain (see `insertionMarkers` in
- * `FeedListDragAndDrop.kt`) — `decoration` and everything after it is clipped to the inset rounded
- * rect, so a marker routed through this function could never reach the band's own top/bottom edge.
+ * `FeedListDragAndDrop.kt`) — `decoration` and everything after it is clipped on the platforms that
+ * clip at all, so a marker routed through this function could never reach the band's own top/bottom
+ * edge.
  *
  * @param extraBottomMargin Extra bottom margin beyond the standard [LIST_ROW_VERTICAL_MARGIN],
  *   for a row whose bottom insertion marker is unpaired with no possible partner (see
@@ -107,22 +119,14 @@ internal fun Modifier.listRowClickable(
  *   [LIST_ROW_GUIDE_THICKNESS] `/ 2f` is exactly the extra space a paired boundary's *other* row
  *   would otherwise have contributed, so passing that keeps the guide the same 2dp-thick,
  *   1dp-clearance line every paired boundary has, without changing `insertionMarkers`' drawing
- *   code at all — only how much of this row's own margin the guide has to sit inside.
+ *   code at all — only how much of this row's own margin the guide has to sit inside. Only
+ *   `NavItem` rows are ever drag targets, so this only has an effect there.
  */
 @Composable
-internal fun Modifier.listRowSurface(
+internal expect fun Modifier.listRowSurface(
     background: Color,
+    kind: ListRowKind,
     interactionSource: MutableInteractionSource? = null,
     decoration: Modifier = Modifier,
     extraBottomMargin: Dp = 0.dp,
-): Modifier = this
-    .padding(
-        start = LIST_ROW_HORIZONTAL_MARGIN,
-        end = LIST_ROW_HORIZONTAL_MARGIN,
-        top = LIST_ROW_VERTICAL_MARGIN,
-        bottom = LIST_ROW_VERTICAL_MARGIN + extraBottomMargin,
-    )
-    .clip(MaterialTheme.shapes.small)
-    .background(background)
-    .then(decoration)
-    .let { if (interactionSource != null) it.indication(interactionSource, LocalIndication.current) else it }
+): Modifier

@@ -49,6 +49,17 @@ composeApp/src/
     M3 の `Button`/`FilledTonalButton`/`TextButton`/`Switch`/`Checkbox`/
     `SingleChoiceSegmentedButtonRow`+`SegmentedButton`/`FilterChip`（コンポーネント）をそのまま使う —
     詳細は下記「アイコンセット」参照）,
+    PlatformTheme（`platformShapes` は M3 既定の `Shapes()`、`ProvidePlatformInteraction` は
+    no-op — `LocalIndication`/`LocalRippleConfiguration` を M3 既定のままにすることで、あらゆる
+    `clickable` と M3 部品が本物のリップルを持つようになる。external-spec.ja.md の「UI 方針」参照）、
+    `ListRowChrome.android.kt` の `listRowSurface`（`ListRowKind.NavItem` 行は
+    `NavigationDrawerItem` 風のピル形ハイライト、`ListRowKind.ListItem` 行はフルブリード —
+    詳細は同ファイル自身の KDoc）、TooltipIconButton/ToolbarIconGroup/FlatTooltipContent
+    （それぞれ、独自のネイティブな長押しトリガーを持つ素の M3 `IconButton` + `TooltipBox`、
+    デスクトップの macOS ツールバー風カプセルの代わりの装飾なし `Row`、M3 自身の `PlainTooltip`）、
+    KeryxRaisedSurface（デスクトップのヘアライン枠フラットカードの代わりに、明確に色調の異なる
+    `colorScheme.surfaceContainerHigh` トーナルコンテナ）、KeryxBadgedIcon（デスクトップの
+    自作ピルの代わりに M3 自身の `BadgedBox`/`Badge` — `NotificationsBell` が使用）,
     DatabaseMerger/DatabaseSnapshot（専用の `io.requery.android.database.sqlite.SQLiteDatabase`
     接続に対する実装 — デスクトップ実装の専用 JDBC 接続に相当。下記「DatabaseMerger」参照）,
     AndroidSqliteSupport.kt（`NoOpDatabaseErrorHandler` — バンドル SQLite の既定ハンドラは破損と
@@ -73,6 +84,13 @@ composeApp/src/
     background/（`FeedRefreshWorker` + `BackgroundRefresh.kt` の `startBackgroundRefresh`。
     `WorkManager` ベース — Android のバックグラウンド/通知の全体像は
     [background-update.ja.md](background-update.ja.md) を参照）
+  androidMain/res/  `works.merc.keryx.app.R` を生成する通常の AGP リソースディレクトリ
+    （`values/`、`drawable/` など）— 上記 `commonMain/composeResources/`（Compose Multiplatform
+    自身の仕組みで、リソース ID ではなく型付きの `Res.drawable.*` アクセサーを生成する）とは別物。
+    `:composeApp` は `:androidApp` 自身の `res/` に依存できないため、生の `@DrawableRes Int` が
+    必要な Android リソース（例: `NotificationCompat.Builder.setSmallIcon`）はここに置く必要がある
+    — 現状は `drawable/ic_stat_keryx.xml`（`AndroidNotificationSink.kt` が投稿するステータスバー/
+    通知ドットのアイコン。background-update.ja.md 参照）のみ
   commonTest/ + desktopTest/ + androidDeviceTest/（DatabaseMerger/DatabaseSnapshot の Android 実装向け
     計装テスト — バンドル SQLite ネイティブライブラリの読み込みに実機/エミュレータが必要。
     testing.ja.md 参照）

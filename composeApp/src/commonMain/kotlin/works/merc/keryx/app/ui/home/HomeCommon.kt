@@ -6,6 +6,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -46,13 +47,24 @@ internal val renameNativeShortcut = NativeMenuShortcut(if (isMacOs) Key.Enter el
 internal val deleteNativeShortcut = NativeMenuShortcut(Key.Delete)
 
 /**
+ * Whether a row's selection highlight should be visibly painted at all — see [LocalRowSelectionVisible].
+ */
+internal val LocalRowSelectionVisible = staticCompositionLocalOf { true }
+
+/**
  * Background for a selectable row: full-strength when its pane is focused, dimmed when the
  * item is selected but its pane isn't the logically-focused one, transparent otherwise. Matches
  * the "on" color of [works.merc.keryx.app.ui.common.ToggleChip]/`SegmentedControl` so selection
  * highlighting reads consistently across the app.
+ *
+ * Returns [Color.Transparent] whenever [LocalRowSelectionVisible] reads `false` — set by `HomeScreen`
+ * at [PaneLayout.Single], where "selected" doesn't mean "on screen" the way it does at [PaneLayout.Dual]/
+ * [PaneLayout.Triple]: tapping a row navigates away from it, so a lingering highlight on a row the
+ * user can no longer see would read as stale rather than as "your place."
  */
 @Composable
 fun selectionBackground(selected: Boolean, focused: Boolean): Color = when {
+    !LocalRowSelectionVisible.current -> Color.Transparent
     selected && focused -> MaterialTheme.colorScheme.primary
     selected -> MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
     else -> Color.Transparent
@@ -61,11 +73,13 @@ fun selectionBackground(selected: Boolean, focused: Boolean): Color = when {
 /**
  * Content color to pair with an opaque [selectionBackground] (`selected && focused` only) — null
  * otherwise, so callers fall back to each element's normal color (the 0.4-alpha background still
- * has enough contrast with the default text/icon colors).
+ * has enough contrast with the default text/icon colors). Also `null` whenever
+ * [LocalRowSelectionVisible] reads `false`, matching [selectionBackground] never painting an opaque
+ * background there either.
  */
 @Composable
 fun selectionContentColorOrNull(selected: Boolean, focused: Boolean): Color? =
-    if (selected && focused) MaterialTheme.colorScheme.onPrimary else null
+    if (LocalRowSelectionVisible.current && selected && focused) MaterialTheme.colorScheme.onPrimary else null
 
 /**
  * Alpha of the [RowSelectionTone.SECONDARY] tint — deliberately well below the 0.4 alpha of an
@@ -85,22 +99,30 @@ enum class RowSelectionTone { NONE, SECONDARY, PRIMARY }
 /**
  * Background for a row that can render as more than one instance (see [RowSelectionTone]). [PRIMARY]
  * matches the boolean [selectionBackground] exactly, so a feed with no duplicates looks unchanged.
+ * Gated on [LocalRowSelectionVisible] the same way the boolean overload is — see that overload's
+ * own KDoc.
  */
 @Composable
-fun selectionBackground(tone: RowSelectionTone, focused: Boolean): Color = when (tone) {
-    RowSelectionTone.PRIMARY ->
+fun selectionBackground(tone: RowSelectionTone, focused: Boolean): Color = when {
+    !LocalRowSelectionVisible.current -> Color.Transparent
+    tone == RowSelectionTone.PRIMARY ->
         if (focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-    RowSelectionTone.SECONDARY -> MaterialTheme.colorScheme.primary.copy(alpha = SECONDARY_SELECTION_ALPHA)
-    RowSelectionTone.NONE -> Color.Transparent
+    tone == RowSelectionTone.SECONDARY -> MaterialTheme.colorScheme.primary.copy(alpha = SECONDARY_SELECTION_ALPHA)
+    else -> Color.Transparent
 }
 
 /**
  * Content color to pair with the tone-aware [selectionBackground] — only the opaque
- * `PRIMARY && focused` background needs one, exactly as in the boolean overload.
+ * `PRIMARY && focused` background needs one, exactly as in the boolean overload. Also gated on
+ * [LocalRowSelectionVisible].
  */
 @Composable
 fun selectionContentColorOrNull(tone: RowSelectionTone, focused: Boolean): Color? =
-    if (tone == RowSelectionTone.PRIMARY && focused) MaterialTheme.colorScheme.onPrimary else null
+    if (LocalRowSelectionVisible.current && tone == RowSelectionTone.PRIMARY && focused) {
+        MaterialTheme.colorScheme.onPrimary
+    } else {
+        null
+    }
 
 /**
  * One specific *rendered row instance* of the feed list, as opposed to [ArticleFilter], which only

@@ -85,11 +85,12 @@ duplicate the refresh/sync/update-check/FTS work the worker itself just did. A p
 changes (e.g. rotation) that recreate the Activity without restarting the process.
 
 New-article notifications reach the OS through `domain/OsNotificationSink.kt`, a `fun interface`
-Android binds (in `platformModule`) to `platform/AndroidNotificationSink.kt`, a
-`NotificationManagerCompat` poster — a different path from desktop's `NewArticleNotifier.trayEvents`
-collection (see that class's own KDoc for why: a `WorkManager`-woken process has no guarantee a
-`trayEvents` collector is already attached by the time a refresh finishes, since `trayEvents` has
-replay 0 and silently drops anything emitted before a collector exists). `AndroidNotificationSink`
+(`post(message: String, count: Int)`) Android binds (in `platformModule`) to
+`platform/AndroidNotificationSink.kt`, a `NotificationManagerCompat` poster — a different path from
+desktop's `NewArticleNotifier.trayEvents` collection (see that class's own KDoc for why: a
+`WorkManager`-woken process has no guarantee a `trayEvents` collector is already attached by the
+time a refresh finishes, since `trayEvents` has replay 0 and silently drops anything emitted before
+a collector exists; desktop's own binding is a no-op for the same reason). `AndroidNotificationSink`
 guards every post on `NotificationManagerCompat.areNotificationsEnabled()`, which alone covers both
 the Android 13+ `POST_NOTIFICATIONS` runtime permission and a user-level app/channel block — the
 permission itself is requested via `platform/NotificationPermission.kt`'s
@@ -99,6 +100,23 @@ setting on. Once a user denies the system dialog a second time ("don't ask again
 stops showing it for subsequent programmatic requests — the setting can still be left on, it just
 won't produce a notification until the user grants it from OS settings directly; this app does not
 build a "please open your device settings" flow for that case.
+
+The posted notification's small icon is `composeApp/src/androidMain/res/drawable/ic_stat_keryx.xml`
+— a monochrome, alpha-only VectorDrawable silhouette of the Keryx logo mark (converted by hand from
+`design/icons/svg/app_icon_foreground.svg`, since VectorDrawable has no `<rect>`/`<circle>`
+primitives), living in `:composeApp`'s own `androidMain/res/` (a conventional AGP resource
+directory generating `works.merc.keryx.app.R`, distinct from Compose Multiplatform's own
+`composeResources/`) — `:composeApp` cannot depend on `:androidApp`'s resources, so this could not
+live alongside the launcher icon in `androidApp/src/main/res/`. The `count` parameter passed to
+`OsNotificationSink.post` is forwarded to `NotificationCompat.Builder.setNumber`, which only affects
+the count shown in the launcher icon's long-press menu — **not** any digit drawn on the icon itself.
+There is no Android API to set an app-icon badge count independent of an active notification (unlike
+iOS's `setApplicationIconBadgeNumber`), so unlike desktop's `IconBadge.kt` (`drawUnreadBadge`, which
+composites the total unread count directly onto the Dock/taskbar/window icon), Android relies
+entirely on the OS's own notification dot — tied to whether a notification is currently active, not
+to the unread count — plus the long-press count above. This is a deliberate asymmetry, not a gap to
+close: posting one persistent, undismissable notification just to keep an icon-level badge alive
+would fight Android's own notification model. See `external-spec.md` §7 for the user-facing summary.
 
 The in-app "check for update" (`checkForUpdateAndNotify`, and the Updates settings tab) is gated on
 `platform/SelfUpdateCheck.kt`'s `selfUpdateCheckSupported`, backed by

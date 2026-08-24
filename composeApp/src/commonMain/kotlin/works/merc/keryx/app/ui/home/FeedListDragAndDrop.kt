@@ -339,6 +339,7 @@ internal fun FolderGroupHeader(
             .insertionMarkers(top = topMarker, bottom = bottomMarker)
             .listRowSurface(
                 dropTargetBackground(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.secondaryContainer, isDragSource),
+                ListRowKind.NavItem,
                 rowInteraction,
                 decoration = dropTargetBorderModifier(isFeedDragHighlight, MaterialTheme.colorScheme.secondary),
             )
@@ -439,6 +440,7 @@ internal fun NoFolderHeader(
                     focused = false,
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
                 ),
+                kind = ListRowKind.NavItem,
                 decoration = dropTargetBorderModifier(isFeedDragHighlight, MaterialTheme.colorScheme.secondary),
                 extraBottomMargin = (LIST_ROW_GUIDE_THICKNESS / 2f).takeIf { isEmpty } ?: 0.dp,
             )
@@ -578,7 +580,7 @@ internal fun FeedRow(
                 onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
             )
             .insertionMarkers(top = topMarker, bottom = bottomMarker)
-            .listRowSurface(selectionBackground(selectionTone, focused), rowInteraction)
+            .listRowSurface(selectionBackground(selectionTone, focused), ListRowKind.NavItem, rowInteraction)
             .padding(start = if (indented) FEED_ROW_INDENT else 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

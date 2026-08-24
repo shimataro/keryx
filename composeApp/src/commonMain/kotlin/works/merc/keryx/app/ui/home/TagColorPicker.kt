@@ -1,6 +1,5 @@
 package works.merc.keryx.app.ui.home
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -16,7 +15,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -35,6 +33,7 @@ import androidx.compose.ui.window.PopupProperties
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_tag_color
+import works.merc.keryx.app.ui.common.KeryxRaisedSurface
 
 /**
  * Selectable tag colors. Chosen to stay clear of the app's Teal-based theme palette
@@ -108,12 +107,7 @@ internal fun TagColorPickerPopup(
         onDismissRequest = onDismissRequest,
         properties = PopupProperties(focusable = true, dismissOnClickOutside = true),
     ) {
-        Surface(
-            shape = MaterialTheme.shapes.small,
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            tonalElevation = 0.dp,
-        ) {
+        KeryxRaisedSurface(shape = MaterialTheme.shapes.small) {
             Column(Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
                 TagColorPicker(selected = selected, onSelect = onSelect)
             }
