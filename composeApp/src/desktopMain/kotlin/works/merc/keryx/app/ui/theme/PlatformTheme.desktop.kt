@@ -39,20 +39,24 @@ actual val platformShapes: Shapes = Shapes(
 )
 
 /**
- * Applies one [interaction] to a running press count. Clamped at zero on every decrement: a
- * `Release`/`Cancel`/drag `Cancel` can arrive without its matching start (e.g. a gesture that
- * begins before this node attaches), and an unclamped counter would go negative, requiring two
- * presses to turn [pressCount] positive again instead of one.
+ * Applies one [interaction] to a running list of active press/drag identities, mirroring how
+ * Compose Foundation's own `collectIsPressedAsState`/`collectIsDraggedAsState` track state: by
+ * identity, not by count. A `Release`/`Cancel`/`Stop` only removes the specific
+ * [PressInteraction.Press] (or [DragInteraction.Start]) instance it names — never any other — so a
+ * stray termination event for an interaction this node never itself observed as started (e.g. a
+ * gesture that began before this node attached) cannot clear feedback for a different, still-active
+ * press.
  */
-internal fun nextPressCount(pressCount: Int, interaction: Interaction): Int = when (interaction) {
-    is PressInteraction.Press -> pressCount + 1
-    is PressInteraction.Release, is PressInteraction.Cancel -> (pressCount - 1).coerceAtLeast(0)
-    is DragInteraction.Start -> pressCount + 1
-    is DragInteraction.Stop, is DragInteraction.Cancel -> (pressCount - 1).coerceAtLeast(0)
-    is HoverInteraction.Enter, is HoverInteraction.Exit -> pressCount
-    is FocusInteraction.Focus, is FocusInteraction.Unfocus -> pressCount
-    else -> pressCount
-}
+internal fun nextActiveInteractions(active: List<Interaction>, interaction: Interaction): List<Interaction> =
+    when (interaction) {
+        is PressInteraction.Press -> active + interaction
+        is PressInteraction.Release -> active - interaction.press
+        is PressInteraction.Cancel -> active - interaction.press
+        is DragInteraction.Start -> active + interaction
+        is DragInteraction.Stop -> active - interaction.start
+        is DragInteraction.Cancel -> active - interaction.start
+        else -> active
+    }
 
 /**
  * Flat press feedback: an immediate, non-animated `onSurface` low-alpha overlay while pressed —
@@ -68,10 +72,10 @@ private class FlatIndicationNode(
 
     override fun onAttach() {
         coroutineScope.launch {
-            var pressCount = 0
+            var activeInteractions = emptyList<Interaction>()
             source.interactions.collect { interaction ->
-                pressCount = nextPressCount(pressCount, interaction)
-                val isPressed = pressCount > 0
+                activeInteractions = nextActiveInteractions(activeInteractions, interaction)
+                val isPressed = activeInteractions.isNotEmpty()
                 if (pressed != isPressed) {
                     pressed = isPressed
                     invalidateDraw()

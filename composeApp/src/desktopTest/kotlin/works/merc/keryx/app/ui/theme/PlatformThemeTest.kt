@@ -11,7 +11,7 @@ import kotlin.test.assertEquals
 class PlatformThemeTest {
 
     private fun countAfter(interactions: List<Interaction>): Int =
-        interactions.fold(0) { count, interaction -> nextPressCount(count, interaction) }
+        interactions.fold(emptyList<Interaction>()) { active, interaction -> nextActiveInteractions(active, interaction) }.size
 
     @Test
     fun pressIncrementsCount() {
@@ -54,6 +54,22 @@ class PlatformThemeTest {
     }
 
     @Test
+    fun unmatchedReleaseDoesNotClearFeedbackForADifferentActivePress() {
+        val strayPress = PressInteraction.Press(androidx.compose.ui.geometry.Offset.Zero)
+        val activePress = PressInteraction.Press(androidx.compose.ui.geometry.Offset.Zero)
+        assertEquals(
+            1,
+            countAfter(
+                listOf(
+                    PressInteraction.Release(strayPress),
+                    activePress,
+                    PressInteraction.Release(strayPress),
+                ),
+            ),
+        )
+    }
+
+    @Test
     fun dragStartAndStopBehaveLikePress() {
         val drag = DragInteraction.Start()
         assertEquals(1, countAfter(listOf(drag)))
@@ -64,6 +80,22 @@ class PlatformThemeTest {
     fun unmatchedDragCancelDoesNotGoNegative() {
         val drag = DragInteraction.Start()
         assertEquals(0, countAfter(listOf(DragInteraction.Cancel(drag))))
+    }
+
+    @Test
+    fun unmatchedDragCancelDoesNotClearFeedbackForADifferentActiveDrag() {
+        val strayDrag = DragInteraction.Start()
+        val activeDrag = DragInteraction.Start()
+        assertEquals(
+            1,
+            countAfter(
+                listOf(
+                    DragInteraction.Cancel(strayDrag),
+                    activeDrag,
+                    DragInteraction.Cancel(strayDrag),
+                ),
+            ),
+        )
     }
 
     @Test
