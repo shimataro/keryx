@@ -419,6 +419,16 @@ Android でカスタム URI スキームのリダイレクト + PKCE を使っ�
 フェーズには含めず、独立した将来の調査課題として先送りする。`core/CloudStorageAvailability.android.kt`
 は `googleDriveAvailable = false` を固定しており、その KDoc からここへリンクしている。
 
+#### 将来の検討事項（Android での Google Drive）
+
+Android での Google Drive 対応は、Android 一般の制約ではなく Google 自身の OAuth クライアント種別のポリシーによってブロックされている。検討した経路とその障壁は以下の通り:
+
+- **Play services `AuthorizationClient`** — Android から Google ユーザーデータへアクセスする Google の推奨経路。`AuthorizationResult.getServerAuthCode()` が返す認可コードは、バックエンドサーバーでの `client_secret` 交換を前提としており、APK に直接埋め込む想定ではない（埋め込めば抽出可能）。また Play services へのランタイム依存が増え、Keryx の「ローカルファースト・アカウント不要」という方針と相性が悪い。さらに `WorkManager` のバックグラウンド同期では `Activity` context がないため、`AuthorizationClient` の呼び出しが困難。
+- **「Web application」OAuth クライアント種別** — リダイレクト URI が `https://` に限定され、カスタム URI スキーム（`keryx://`）が使えないため、ネイティブアプリの OAuth フローとして機能しない。
+- **「Desktop app」OAuth クライアント種別（デスクトップで使用中）** — ループバックリダイレクトは Android/Chrome アプリ向けクライアントでは廃止とされており、`client_secret` を埋め込みクライアントから送信することは推奨されていない上、モバイル APK ではセキュリティリスクとなる。
+
+Google がバックエンドサーバー不要のネイティブ Android アプリ向け OAuth フロー（例: カスタム URI スキームをサポートした Google Drive 向けの真の PKCE パブリッククライアント）を提供するか、あるいは Keryx がバックエンドでのトークン交換サービスを含むアーキテクチャを採用するまで、Android での Google Drive 対応は**将来の検討事項**として保留される。近い将来に計画される機能ではない。
+
 ### トークン保存先
 
 **プロバイダーごとに別インスタンス**の `TokenStorage` を DI（`platformModule`）で構築する（1 インスタンスを
