@@ -58,24 +58,27 @@ data object NativeMenuSeparator : NativeMenuEntry {
 
 /**
  * Attaches a real OS-native context menu (not a Compose-drawn popup) with the
- * given [items] to this element, triggered by a right-click (on mobile
- * targets this would become long-press instead). The number of top-level
- * `items` — and the number of children of any [NativeSubMenu] among them —
- * is expected to be stable for a given call site across ordinary
- * recompositions (menus don't grow/shrink on every recomposition); it may
- * still change when the underlying data it reflects changes (e.g. the user
- * adds a folder), which is handled by rebuilding the native menu.
+ * given [items] to this element. On desktop it is triggered by a right-click;
+ * on Android it is triggered by a long-press.
+ *
+ * The number of top-level `items` — and the number of children of any
+ * [NativeSubMenu] among them — is expected to be stable for a given call site
+ * across ordinary recompositions (menus don't grow/shrink on every
+ * recomposition); it may still change when the underlying data it reflects
+ * changes (e.g. the user adds a folder), which is handled by rebuilding the
+ * native menu.
  *
  * [items] is only evaluated when a right-click actually happens — the native
  * widgets are built lazily on that first click, never on composition. Adding
  * this modifier to a `LazyColumn` row therefore costs nothing until the user
  * opens the menu on that row.
  *
- * [onOpen] is invoked right before the menu is shown; callers typically use it
- * to select the right-clicked row, so right-click behaves like left-click
- * selection. If [items] is empty, no menu is shown and [onOpen] is the only
- * effect — useful for a pane background where a right-click should just move
- * focus without selecting anything.
+ * [onOpen] is invoked right before the menu is shown on desktop
+ * (secondary-mouse-button click). Callers typically use it to select the
+ * right-clicked row, so right-click behaves like left-click selection. On
+ * Android (long-press trigger) [onOpen] is intentionally ignored: a long-press
+ * opens the menu without selecting the item. If [items] is empty, no menu is
+ * shown and [onOpen] is the only desktop effect; on Android it is also ignored.
  */
 @Composable
 expect fun Modifier.nativeContextMenu(

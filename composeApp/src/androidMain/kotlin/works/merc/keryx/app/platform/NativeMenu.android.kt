@@ -72,18 +72,22 @@ actual fun Modifier.nativeContextMenu(
     return this.pointerInput(Unit) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
+            val touchSlop = viewConfiguration.touchSlop
             val stillDownAtTimeout = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
                 while (true) {
                     val event = awaitPointerEvent()
                     val change = event.changes.firstOrNull { it.id == down.id } ?: return@withTimeoutOrNull
                     if (change.changedToUpIgnoreConsumed() || change.isConsumed) return@withTimeoutOrNull
+                    if ((change.position - down.position).getDistance() >= touchSlop) return@withTimeoutOrNull
                 }
             } == null
             if (stillDownAtTimeout) {
                 val resolvedItems = currentItems()
                 if (resolvedItems.isNotEmpty()) {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    currentOnOpen()
+                    // Note: currentOnOpen() is intentionally NOT called on Android.
+                    // onOpen is a desktop hook for "right-click selects the row first";
+                    // a long-press here should only show the menu without selecting the item.
                     pressOffset = down.position
                     menuItems = resolvedItems
                     expanded = true

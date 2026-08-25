@@ -1,0 +1,123 @@
+package works.merc.keryx.app.android
+
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.unit.dp
+import org.junit.Rule
+import org.junit.Test
+import works.merc.keryx.app.platform.NativeMenuItem
+import works.merc.keryx.app.platform.nativeContextMenu
+import kotlin.test.assertFalse
+
+/**
+ * Gesture policy tests for the Android [nativeContextMenu] actual (long-press triggered
+ * [DropdownMenu]). These live in androidApp because Compose Multiplatform's Android instrumented
+ * test runner needs a real Android application module to host [createComposeRule].
+ */
+class NativeMenuAndroidGestureTest {
+
+    @get:Rule
+    val composeTestRule = createComposeRule()
+
+    @Test
+    fun longPressOpensMenuWithoutInvokingOnOpen() {
+        var opened = false
+        composeTestRule.setContent {
+            Box(
+                Modifier
+                    .size(200.dp)
+                    .testTag("menu-host")
+                    .nativeContextMenu(
+                        items = { listOf(NativeMenuItem("Test action") {}) },
+                        onOpen = { opened = true },
+                    )
+            )
+        }
+
+        composeTestRule.onNodeWithTag("menu-host").performTouchInput { longClick() }
+
+        composeTestRule.onNodeWithText("Test action").assertIsDisplayed()
+        assertFalse(opened, "long-press must not invoke onOpen on Android")
+    }
+
+    @Test
+    fun shortTapDoesNotOpenMenu() {
+        var opened = false
+        composeTestRule.setContent {
+            Box(
+                Modifier
+                    .size(200.dp)
+                    .testTag("menu-host")
+                    .nativeContextMenu(
+                        items = { listOf(NativeMenuItem("Test action") {}) },
+                        onOpen = { opened = true },
+                    )
+            )
+        }
+
+        composeTestRule.onNodeWithTag("menu-host").performClick()
+
+        composeTestRule.onNodeWithText("Test action").assertDoesNotExist()
+        assertFalse(opened, "short tap must not invoke onOpen")
+    }
+
+    @Test
+    fun swipeBeyondTouchSlopDoesNotOpenMenu() {
+        var opened = false
+        composeTestRule.setContent {
+            Box(
+                Modifier
+                    .size(400.dp)
+                    .testTag("menu-host")
+                    .nativeContextMenu(
+                        items = { listOf(NativeMenuItem("Test action") {}) },
+                        onOpen = { opened = true },
+                    )
+            )
+        }
+
+        composeTestRule.onNodeWithTag("menu-host").performTouchInput { swipeDown() }
+
+        composeTestRule.onNodeWithText("Test action").assertDoesNotExist()
+        assertFalse(opened, "swipe must not invoke onOpen")
+    }
+
+    @Test
+    fun smallWiggleWithinSlopStillOpensMenu() {
+        var opened = false
+        composeTestRule.setContent {
+            Box(
+                Modifier
+                    .size(200.dp)
+                    .testTag("menu-host")
+                    .nativeContextMenu(
+                        items = { listOf(NativeMenuItem("Test action") {}) },
+                        onOpen = { opened = true },
+                    )
+            )
+        }
+
+        composeTestRule.onNodeWithTag("menu-host").performTouchInput {
+            down(center)
+            // Wiggle a few pixels, well inside the typical touch slop, while keeping the pointer
+            // down past the long-press timeout.
+            advanceEventTime(50)
+            moveBy(Offset(3f, 3f))
+            advanceEventTime(400)
+        }
+
+        composeTestRule.onNodeWithText("Test action").assertIsDisplayed()
+        assertFalse(opened, "small wiggle inside slop must not invoke onOpen")
+    }
+}
