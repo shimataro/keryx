@@ -633,7 +633,7 @@ class ListRowHitAreaTest {
             Modifier.fillMaxWidth()
                 .testTag(tag)
                 .insertionMarkers(top = top, bottom = bottom)
-                .listRowSurface(PROBE_HIGHLIGHT)
+                .listRowSurface(PROBE_HIGHLIGHT, ListRowKind.NavItem)
                 .height(40.dp),
         )
     }

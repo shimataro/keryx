@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Keryx logo mark as a monochrome, alpha-only silhouette for the status bar and notification
+     dot — the same glyph as design/icons/svg/app_icon_foreground.svg, converted from its rect/circle
+     primitives to stroke/fill paths (VectorDrawable has no <rect>/<circle> element). The system
+     always renders a status-bar small icon as a flat white silhouette using this shape's alpha
+     channel regardless of the colors below, so android:tint (applied at each call site) is what
+     actually determines the on-screen color — see AndroidNotificationSink.kt. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <!-- The vertical bar (originally a 121x420 rect with rx=ry=60.5, i.e. a full stadium/capsule —
+         equivalent to a round-capped stroke of that same width). -->
+    <path
+        android:pathData="M349.75,362.5 L349.75,661.5"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="121"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"/>
+    <!-- The dot (originally a filled circle at 410.25,512 r=59.4), drawn as two half-arcs since
+         VectorDrawable path data has no direct circle primitive. -->
+    <path
+        android:pathData="M350.85,512 A59.4,59.4 0 1,1 469.65,512 A59.4,59.4 0 1,1 350.85,512 Z"
+        android:fillColor="#FFFFFFFF"/>
+    <!-- The two broadcast arcs. -->
+    <path
+        android:pathData="M518.76,403.49 A153.45,153.45 0 0,1 518.76,620.51"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="77"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"/>
+    <path
+        android:pathData="M612.48,309.77 A286,286 0 0,1 612.48,714.23"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="77"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"/>
+</vector>

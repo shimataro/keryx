@@ -67,11 +67,17 @@ data exists in the cloud it is automatically merged (imported) during the initia
 - Desktop notifications, task tray residence (close minimizes to tray), notification center.
   On Linux the tray uses the D-Bus `org.kde.StatusNotifierItem` + `com.canonical.dbusmenu` protocols
   and notifications use `org.freedesktop.Notifications`, falling back to the AWT system tray when no
-  StatusNotifierItem host is running. On Android, new-article notifications are posted through
+  StatusNotifierItem host is running. Desktop also composites the unread count directly onto the
+  Dock/taskbar/window icon as a digit badge. On Android, new-article notifications are posted through
   `NotificationManagerCompat` (requesting the OS notification permission on Android 13+) and
   background refresh runs on `WorkManager`, at roughly the interval configured in Settings; the
   in-app "check for update" is hidden when the app was installed from an app store (currently just
-  Google Play) rather than sideloaded, since that store already auto-updates the app.
+  Google Play) rather than sideloaded, since that store already auto-updates the app. Android has no
+  equivalent of the digit badge — the platform has no API to set an app-icon badge count independent
+  of an active notification (unlike iOS's `setApplicationIconBadgeNumber`) — so the app icon instead
+  shows the OS's own notification dot (tied to the presence of an active notification) plus a
+  long-press count via `setNumber` on launchers that support it, a deliberate asymmetry rather than an oversight; see
+  `background-update.md` for the full comparison.
 
 ### Behavior on Feed URL Change / Disappearance
 
@@ -92,9 +98,17 @@ data exists in the cloud it is automatically merged (imported) during the initia
 
 ## 9. UI Direction
 
-Material 3 base + custom theme (teal). Light / dark / system support. 3-pane layout
-(feed list / article list / article detail) + keyboard navigation, adapting down to fewer
-simultaneous panes on narrower widths (see below).
+**Each platform follows its own native UI idiom rather than one shared design system.** macOS gets
+a flat, SF-leaning look; Android gets Material 3's own components, shapes, and ripple feedback; iOS
+will eventually get native SwiftUI. **Windows and Linux are the deliberate exception**: Java/Swing's
+own platform integration is too limited to give either OS a comparably native treatment (see the
+Look & Feel, context-menu, and file-dialog specifics below, and `docs/known-issues.md`), so both
+share macOS's flat look instead of getting one of their own. Material 3 with the app's own teal
+color scheme is Android's concrete instantiation of this principle, not a universal baseline the
+other platforms deviate from — where this document says "Material 3", read it as Android-specific
+unless stated otherwise. Light / dark / system support. 3-pane layout (feed list / article list /
+article detail) + keyboard navigation, adapting down to fewer simultaneous panes on narrower widths
+(see below).
 
 ### Adaptive layout (width) and touch input (Android)
 
@@ -109,7 +123,10 @@ the underlying action: reordering a feed or folder is a plain click-and-drag wit
 drag from a dedicated handle icon with touch (touch needs a distinct starting gesture so the rest
 of the row can still be scrolled normally); a right-click context menu on desktop is a long-press
 menu on Android, and settings — reached from the desktop application menu — get their own toolbar
-entry point on Android, which has no menu bar.
+entry point on Android, which has no menu bar. List rows (feeds, folders, tags, articles) grow to a
+taller, M3-minimum touch density on Android, and the pane divider between panes (reachable at a
+tablet-width landscape viewport) becomes a fixed, non-draggable line there — a mouse has room for a
+thinner target and a draggable divider that touch does not.
 
 The surfaces that are not drawn by Compose — the application menu bar, context menus, and the
 dialog button row — are real Swing/AWT widgets, so they follow the platform's Look & Feel.
@@ -137,7 +154,7 @@ Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
 
 | Layer | Technology |
 | --- | --- |
-| UI | Compose Multiplatform (Material 3) |
+| UI | Compose Multiplatform (Material 3 on Android; platform-specific UI elsewhere — see §9) |
 | State management | androidx.lifecycle ViewModel + Koin |
 | DB | SQLDelight (SQLite) + FTS5 (raw SQL) |
 | HTTP | Ktor client (CIO) |

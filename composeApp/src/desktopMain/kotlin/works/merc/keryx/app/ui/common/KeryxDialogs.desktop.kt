@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.common
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,9 +14,12 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeightIn
 import androidx.compose.foundation.layout.requiredWidthIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
@@ -38,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.SwingPanel
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.toArgb
@@ -49,6 +54,8 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
@@ -59,6 +66,7 @@ import androidx.compose.ui.window.DialogState
 import androidx.compose.ui.window.DialogWindow
 import androidx.compose.ui.window.DialogWindowScope
 import androidx.compose.ui.window.WindowDecoration
+import org.jetbrains.compose.resources.painterResource
 import org.koin.compose.koinInject
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.domain.SettingsRepository
@@ -879,6 +887,68 @@ actual fun KeryxTabDialog(
                 ) {
                     content(selectedTabId)
                 }
+            }
+        }
+    }
+}
+
+/**
+ * The [KeryxTabDialog] tab bar: a flat, borderless row of icon-over-label tabs in the app's own
+ * design language, not a native macOS toolbar/segmented-control mimicry. Two rounds of AWT/Swing
+ * interop (Aqua's `"segmented"` and `"toolbarItem"` `JButton.buttonType`s) were tried and dropped —
+ * `"segmented"` reads as a cramped joined pill unsuited to this layout, and `"toolbarItem"` doesn't
+ * reliably indicate a `JToggleButton`'s selected state under Aqua (a known, still-open JDK bug,
+ * JDK-8250953). Native macOS chrome for this control is deferred to a future SwiftUI port instead
+ * (see the `ui-guidelines` skill's "Other native-migration candidates") rather than approximated via
+ * fragile OS-version-dependent Swing tuning. Plain `Modifier.selectable` gets this dialog's tabs
+ * the platform's own flat press feedback for free (via `ui/theme/PlatformTheme.kt`'s desktop
+ * `FlatIndication`, see the `ui-guidelines` skill's "Press feedback and shapes") and standard
+ * Compose keyboard focus/traversal.
+ *
+ * Desktop-only: Android's [KeryxTabDialog] uses a genuine M3 `PrimaryScrollableTabRow`/`Tab`
+ * instead (see `KeryxDialogs.android.kt`), since a self-rolled `Row` never actually looks native
+ * there the way it does here, mimicking macOS's own System Settings tab switcher.
+ *
+ * Horizontally scrollable: this dialog's fixed width ([KERYX_TAB_DIALOG_WIDTH]) comfortably fits
+ * every tab at the default font scale, so the scroll never actually engages in practice — but the
+ * font-size setting's `fontSizeScale` scales every `sp` value via `LocalDensity`, so "Large"/"Extra
+ * Large" can still push five icon+label tabs past the fixed width. `horizontalScroll` is the
+ * safety net for that case, not the normal layout path.
+ */
+@Composable
+private fun KeryxDialogTabBar(
+    tabs: List<KeryxDialogTab>,
+    selectedTabId: String,
+    onSelectTab: (String) -> Unit,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(24.dp),
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+    ) {
+        tabs.forEach { tab ->
+            val selected = tab.id == selectedTabId
+            val contentColor = if (selected) {
+                MaterialTheme.colorScheme.onSecondaryContainer
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            }
+            Column(
+                modifier = Modifier
+                    .clip(MaterialTheme.shapes.medium)
+                    .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                    .selectable(selected = selected, onClick = { onSelectTab(tab.id) }, role = Role.Tab)
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Icon(painterResource(tab.icon), contentDescription = null, tint = contentColor, modifier = Modifier.size(32.dp))
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    tab.label,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                    color = contentColor,
+                    maxLines = 1,
+                )
             }
         }
     }

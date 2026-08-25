@@ -108,7 +108,7 @@ class NewArticleNotifierTest {
     @Test
     fun notifyAlsoPostsThroughTheSink() = runTest {
         val posted = mutableListOf<String>()
-        val notifier = NewArticleNotifier(sink = { message -> posted.add(message) })
+        val notifier = NewArticleNotifier(sink = { message, _ -> posted.add(message) })
 
         notifier.notify("3 new articles available")
 
@@ -118,11 +118,38 @@ class NewArticleNotifierTest {
     @Test
     fun notifyIfEnabledDoesNotPostThroughTheSinkWhenNotificationsDisabled() = runTest {
         val posted = mutableListOf<String>()
-        val notifier = NewArticleNotifier(sink = { message -> posted.add(message) })
+        val notifier = NewArticleNotifier(sink = { message, _ -> posted.add(message) })
 
         val results = mapOf("f1" to Result.Ok(4))
         notifier.notifyIfEnabled(results, notificationEnabled = false, messages = NewArticleNotifierTestNotificationMessages())
 
         assertTrue(posted.isEmpty())
+    }
+
+    /**
+     * The sink's `count` is what Android's `AndroidNotificationSink` forwards to
+     * `NotificationCompat.Builder.setNumber` — see `OsNotificationSink.post`'s own KDoc. This must
+     * be the summed new-article count, not e.g. the number of feeds that contributed to it.
+     */
+    @Test
+    fun notifyIfEnabledPostsThroughTheSinkWithTheSummedCount() = runTest {
+        val postedCounts = mutableListOf<Int>()
+        val notifier = NewArticleNotifier(sink = { _, count -> postedCounts.add(count) })
+
+        val results = mapOf("f1" to Result.Ok(2), "f2" to Result.Ok(3))
+        notifier.notifyIfEnabled(results, notificationEnabled = true, messages = NewArticleNotifierTestNotificationMessages())
+
+        assertEquals(listOf(5), postedCounts)
+    }
+
+    /** A direct [NewArticleNotifier.notify] call with no count of its own posts `0` — see its KDoc. */
+    @Test
+    fun notifyWithNoCountArgumentPostsZeroThroughTheSink() = runTest {
+        val postedCounts = mutableListOf<Int>()
+        val notifier = NewArticleNotifier(sink = { _, count -> postedCounts.add(count) })
+
+        notifier.notify("3 new articles available")
+
+        assertEquals(listOf(0), postedCounts)
     }
 }

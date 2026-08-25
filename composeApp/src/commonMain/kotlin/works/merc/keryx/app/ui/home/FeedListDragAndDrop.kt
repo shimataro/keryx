@@ -1,12 +1,12 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -339,10 +339,12 @@ internal fun FolderGroupHeader(
             .insertionMarkers(top = topMarker, bottom = bottomMarker)
             .listRowSurface(
                 dropTargetBackground(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.secondaryContainer, isDragSource),
+                ListRowKind.NavItem,
                 rowInteraction,
                 decoration = dropTargetBorderModifier(isFeedDragHighlight, MaterialTheme.colorScheme.secondary),
             )
-            .padding(end = 8.dp),
+            .padding(end = 8.dp)
+            .heightIn(min = listRowMinHeight(isTouchPrimary)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CompositionLocalProvider(
@@ -351,11 +353,7 @@ internal fun FolderGroupHeader(
                     ?: LocalContentColor.current
                 ),
         ) {
-            KeryxIcon(
-                if (collapsed) KeryxIcons.ChevronRight else KeryxIcons.ExpandMore,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp).clickable(onClick = onToggleCollapse),
-            )
+            ExpandCollapseChevron(expanded = !collapsed, onToggle = onToggleCollapse)
             Spacer(Modifier.width(4.dp))
             Row(
                 Modifier.weight(1f).padding(vertical = 8.dp),
@@ -439,6 +437,7 @@ internal fun NoFolderHeader(
                     focused = false,
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
                 ),
+                kind = ListRowKind.NavItem,
                 decoration = dropTargetBorderModifier(isFeedDragHighlight, MaterialTheme.colorScheme.secondary),
                 extraBottomMargin = (LIST_ROW_GUIDE_THICKNESS / 2f).takeIf { isEmpty } ?: 0.dp,
             )
@@ -578,8 +577,9 @@ internal fun FeedRow(
                 onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
             )
             .insertionMarkers(top = topMarker, bottom = bottomMarker)
-            .listRowSurface(selectionBackground(selectionTone, focused), rowInteraction)
-            .padding(start = if (indented) FEED_ROW_INDENT else 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            .listRowSurface(selectionBackground(selectionTone, focused), ListRowKind.NavItem, rowInteraction)
+            .padding(start = if (indented) FEED_ROW_INDENT else 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp)
+            .heightIn(min = listRowMinHeight(isTouchPrimary)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FeedAvatar(feed.displayTitle(), feed.favicon_url)
