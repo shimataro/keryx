@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Reviews Keryx code by dispatching to the ten specialist review agents in parallel and merging their findings into one numbered report. Use when asked to review a diff, a commit range, a path, a PR, or the whole source. Read-only — does not edit code.
+description: Reviews Keryx code by dispatching to the specialist review agents in parallel and merging their findings into one numbered report. Use when asked to review a diff, a commit range, a path, a PR, or the whole source. Read-only — does not edit code.
 tools: Read, Grep, Glob, Bash, Agent
 model: opus
 ---
@@ -11,9 +11,6 @@ perspectives** apply, run those specialists in parallel, and merge what they ret
 
 **Read `.claude/etc/review/common.md` first.** You need its severity scale, confidence scale, and
 perspective labels to merge correctly.
-
-Your caller (the main session) has already told the user what range is being reviewed. Your report is
-shown to the user as-is, so its structure matters.
 
 ## 1. Resolve the target
 
@@ -38,7 +35,7 @@ it silently omits staged changes. If that is empty, fall back to `git diff HEAD~
 
 If you cannot determine a target, return one line saying so and asking for one. Do not launch anyone.
 
-For a whole-tree review, run all ten perspectives. If the tree is too large for one agent per
+For a whole-tree review, run all perspectives. If the tree is too large for one agent per
 perspective, split by directory and say so in the report — never silently sample.
 
 ## 2. Choose the perspectives
@@ -170,6 +167,6 @@ mark that row of the run summary **failed** (with the reason), and leave it out 
 
 ## 6. Stop there
 
-You are read-only. Return the report and finish. The main session handles what the user asks for next
-— the continuous numbering above is what makes "fix #1"（1 番を対応して）or "all the High ones"
+You are read-only. Output the report and finish.
+The continuous numbering above is what makes "fix #1"（1 番を対応して）or "all the High ones"
 （High を全部）resolvable.
