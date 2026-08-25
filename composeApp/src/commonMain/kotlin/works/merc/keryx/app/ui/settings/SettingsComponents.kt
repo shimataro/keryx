@@ -1,36 +1,20 @@
 package works.merc.keryx.app.ui.settings
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.hoverable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TooltipAnchorPosition
-import androidx.compose.material3.TooltipBox
-import androidx.compose.material3.TooltipDefaults
-import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.PointerIcon
-import androidx.compose.ui.input.pointer.pointerHoverIcon
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.ui.common.FlatSwitch
-import works.merc.keryx.app.ui.common.FlatTooltipContent
 import works.merc.keryx.app.ui.common.KeryxRaisedSurface
+import works.merc.keryx.app.ui.common.KeryxSettingRow
 
 // Shared building blocks for the settings tabs (SettingsDialog + *Tab files).
 
@@ -72,65 +56,36 @@ internal fun Section(title: String, content: @Composable () -> Unit) {
 }
 
 /**
- * A tappable text row that opens [url] in the external browser (rendered in the theme's primary
- * color). On hover it underlines, switches to a hand cursor, and shows the destination [url] in a
- * tooltip, so it reads clearly as a link.
+ * A tappable row that opens [url] in the external browser — a thin [KeryxSettingRow] wrapper (see
+ * its own KDoc for the platform-native affordance each `actual` gives this: hover-underline +
+ * tooltip on desktop, a real `ListItem` tap target on Android).
  *
  * @param label The text displayed for the link.
- * @param url The external URL to open and display in the tooltip.
+ * @param url The external URL to open, and to show as the desktop tooltip / Android supporting text.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun LinkRow(label: String, url: String) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val hovered by interactionSource.collectIsHoveredAsState()
-    TooltipBox(
-        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
-        tooltip = { FlatTooltipContent(url) },
-        state = rememberTooltipState(),
-    ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.primary,
-            textDecoration = if (hovered) TextDecoration.Underline else null,
-            modifier = Modifier
-                .hoverable(interactionSource)
-                .pointerHoverIcon(PointerIcon.Hand)
-                .clickable(interactionSource = interactionSource) { BrowserOpener.open(url) }
-                .padding(vertical = 4.dp),
-        )
-    }
+    KeryxSettingRow(label = label, supporting = url, onClick = { BrowserOpener.open(url) })
 }
 
 /**
- * A tappable text row sharing [LinkRow]'s visual language (primary color, underline-on-hover, hand
- * cursor) for an in-app action rather than opening a URL — no destination tooltip, since there's
- * no URL to preview. Used for Settings/About entry points that have no native application menu
- * bar to live in (see `platform/PlatformOs.kt`'s `hasNativeAppMenu`).
+ * A tappable row sharing [LinkRow]'s visual language for an in-app action rather than opening a
+ * URL — no destination tooltip/supporting text, since there's nothing to preview. Used for
+ * Settings/About entry points that have no native application menu bar to live in (see
+ * `platform/PlatformOs.kt`'s `hasNativeAppMenu`).
  *
  * @param label The text displayed for the action.
  * @param onClick Called when the row is tapped.
  */
 @Composable
 internal fun ActionLinkRow(label: String, onClick: () -> Unit) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val hovered by interactionSource.collectIsHoveredAsState()
-    Text(
-        label,
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.primary,
-        textDecoration = if (hovered) TextDecoration.Underline else null,
-        modifier = Modifier
-            .hoverable(interactionSource)
-            .pointerHoverIcon(PointerIcon.Hand)
-            .clickable(interactionSource = interactionSource, onClick = onClick)
-            .padding(vertical = 4.dp),
-    )
+    KeryxSettingRow(label = label, onClick = onClick)
 }
 
 /**
- * Displays a labeled switch row.
+ * Displays a labeled switch row. Tapping the switch always toggles it; on Android, tapping
+ * anywhere in the row does too (a real `ListItem`'s own tap target) — desktop keeps its previous
+ * behavior of only the switch itself being interactive (see [KeryxSettingRow]'s desktop `actual`).
  *
  * @param label The text displayed beside the switch.
  * @param checked Whether the switch is selected.
@@ -138,8 +93,9 @@ internal fun ActionLinkRow(label: String, onClick: () -> Unit) {
  */
 @Composable
 internal fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, Modifier.weight(1f))
-        FlatSwitch(checked = checked, onCheckedChange = onChange)
-    }
+    KeryxSettingRow(
+        label = label,
+        onClick = { onChange(!checked) },
+        trailing = { FlatSwitch(checked = checked, onCheckedChange = onChange) },
+    )
 }
