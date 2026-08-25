@@ -3,6 +3,8 @@ package works.merc.keryx.app.ui.home
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -12,6 +14,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.data.local.db.Articles
@@ -161,6 +164,44 @@ class ArticleDetailPaneTest {
         waitForIdle()
 
         assertEquals(null, capturedBaseUrl)
+    }
+
+    @Test
+    fun copyingTheUrlShowsASnackbarWhenAHostIsProvided() = runDesktopComposeUiTest {
+        val snackbarHostState = SnackbarHostState()
+        setContent {
+            CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {
+                ArticleDetailPaneContent(
+                    article = testArticle(),
+                    modifier = Modifier.size(400.dp, 500.dp),
+                    reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
+                )
+            }
+        }
+        waitForIdle()
+
+        onNodeWithContentDescription("URL をコピー").performClick()
+        waitForIdle()
+
+        assertEquals("URL をコピーしました", snackbarHostState.currentSnackbarData?.visuals?.message)
+    }
+
+    @Test
+    fun copyingTheUrlDoesNotCrashWithNoHostProvided() = runDesktopComposeUiTest {
+        // LocalSnackbarHostState defaults to null (desktop's own steady state — see its KDoc).
+        setContent {
+            ArticleDetailPaneContent(
+                article = testArticle(),
+                modifier = Modifier.size(400.dp, 500.dp),
+                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        onNodeWithContentDescription("URL をコピー").performClick()
+        waitForIdle()
+
+        onNodeWithContentDescription("URL をコピーしました").assertExists()
     }
 }
 

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
@@ -64,6 +65,16 @@ internal val deleteNativeShortcut = NativeMenuShortcut(Key.Delete)
  * Whether a row's selection highlight should be visibly painted at all — see [LocalRowSelectionVisible].
  */
 internal val LocalRowSelectionVisible = staticCompositionLocalOf { true }
+
+/**
+ * The [SnackbarHostState] backing `HomeScreen`'s `Scaffold(snackbarHost = ...)`, or `null` on
+ * desktop, which per the `ui-guidelines` skill has no in-app snackbar convention (its previous
+ * transient toasts were replaced by inline expressions — see that skill's Notification Center
+ * section). `null` is also the value in any preview/test composition that never provides one.
+ * A composable that wants to show a snackbar (e.g. `ArticleDetailPane`'s URL-copied feedback)
+ * should treat a `null` value here as "do nothing" rather than crash.
+ */
+internal val LocalSnackbarHostState = staticCompositionLocalOf<SnackbarHostState?> { null }
 
 /**
  * Click-to-focus for a pane's background — on a mouse+keyboard platform there is no OS-level

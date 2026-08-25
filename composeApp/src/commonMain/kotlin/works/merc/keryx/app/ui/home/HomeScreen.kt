@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -18,6 +20,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -25,6 +28,8 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
@@ -38,6 +43,7 @@ import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.platform.BackHandler
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.ClipboardEntries
+import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.resources.common_ok
@@ -177,7 +183,11 @@ fun HomeScreen() {
         }
     }
 
+    // Desktop has no in-app snackbar convention (see LocalSnackbarHostState's own KDoc), so the
+    // host is only created — and provided — on a touch-primary platform.
+    val snackbarHostState = if (isTouchPrimary) remember { SnackbarHostState() } else null
     Scaffold { padding ->
+        CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {
         Box(
             Modifier.padding(padding).fillMaxSize()
                 .focusRequester(focusRequester)
@@ -334,7 +344,23 @@ fun HomeScreen() {
             // Last child of the root Box, so the floating drag chip paints above every pane.
             FeedDragGhost(dragOverlay)
         }
+        }
         LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    }
+
+    // A plain Scaffold(snackbarHost = ...) composes the SnackbarHost in the same layer as every
+    // other pane content — including the article reader's native WebView, which (like desktop's
+    // heavyweight AWT WebView — see app-architecture.md's "Article Reader") always composites
+    // above ordinary Compose content in the same window. A Popup instead renders through its own
+    // separate window-level layer, the same mechanism KeryxAnchoredPanel/NotificationsBell already
+    // rely on to draw above regular content, so the snackbar stays visible with an article open.
+    if (snackbarHostState != null) {
+        Popup(
+            alignment = Alignment.BottomCenter,
+            properties = PopupProperties(focusable = false, dismissOnClickOutside = false),
+        ) {
+            SnackbarHost(snackbarHostState, modifier = Modifier.padding(bottom = 24.dp))
+        }
     }
 
     if (showAddFeed) {

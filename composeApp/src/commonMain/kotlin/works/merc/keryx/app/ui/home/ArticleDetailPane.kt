@@ -41,6 +41,7 @@ import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.WindowDragArea
+import works.merc.keryx.app.platform.platformShowsOwnCopyConfirmation
 import works.merc.keryx.app.platform.setNativeWebViewVisible
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_copy_url
@@ -138,6 +139,17 @@ internal fun ArticleDetailPaneContent(
             delay(COPIED_FEEDBACK_MS)
             showCopied = false
         }
+    }
+    // Android also reports the copy via a Snackbar (desktop has no in-app snackbar convention —
+    // see LocalSnackbarHostState's own KDoc, so this is a no-op there) — except on API 33+, where
+    // the system already shows its own clipboard-copy confirmation and this would just duplicate
+    // it (see platformShowsOwnCopyConfirmation's own KDoc). A second, independent effect so
+    // showSnackbar's own (much longer) suspend-until-dismissed duration never delays the ✓ icon
+    // reset above.
+    val snackbarHostState = LocalSnackbarHostState.current
+    val copiedMessage = stringResource(Res.string.article_url_copied)
+    LaunchedEffect(showCopied) {
+        if (showCopied && !platformShowsOwnCopyConfirmation) snackbarHostState?.showSnackbar(copiedMessage)
     }
     // Keyboard ⌘/Ctrl+Shift+C copies the selected article (shown in this pane), so mirror the
     // button's feedback here. Initial copyPulse == 0 is skipped; only increments from HomeScreen
