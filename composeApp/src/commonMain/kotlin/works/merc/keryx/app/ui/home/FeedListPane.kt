@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -902,9 +903,11 @@ private fun TagRow(
                 rowInteraction,
                 decoration = dropTargetBorderModifier(isDropTarget, MaterialTheme.colorScheme.tertiary),
             )
-            .padding(start = 8.dp, end = 8.dp),
+            .padding(start = 8.dp, end = 8.dp)
+            .heightIn(min = listRowMinHeight()),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        val isTouchPrimary = works.merc.keryx.app.platform.isTouchPrimary
         CompositionLocalProvider(LocalContentColor provides (contentColor ?: LocalContentColor.current)) {
             ExpandCollapseChevron(expanded = expanded, onToggle = onToggleExpanded)
             Spacer(Modifier.width(4.dp))
@@ -915,15 +918,22 @@ private fun TagRow(
                 // Anchors the color popover; sized by the click target inside it.
                 Box {
                     Box(
-                        // The click target is deliberately larger than the dot it contains: it
-                        // absorbs the 8dp gap that used to be a Spacer here plus 4dp above and
-                        // below, so the geometry of the row is unchanged while the hit area is not
-                        // a 10dp circle. (A full Material 48dp touch target would change the row's
-                        // height, which belongs to a mobile density pass, not here.)
+                        // Desktop: the click target is deliberately larger than the dot it
+                        // contains, absorbing the 8dp gap that used to be a Spacer here plus 4dp
+                        // above and below, so the geometry of the row is unchanged while the hit
+                        // area is not a 10dp circle. Touch: a full Material 48dp touch target
+                        // instead — safe now that the row's own listRowMinHeight() floor keeps
+                        // this from stretching the row taller than its neighbors.
                         Modifier
                             .testTag(tagColorDotTestTag(tag.id))
                             .clickable(onClickLabel = colorLabel) { showColorPicker = true }
-                            .padding(top = 4.dp, bottom = 4.dp, end = 8.dp),
+                            .then(
+                                if (isTouchPrimary) {
+                                    Modifier.size(TAG_COLOR_DOT_TOUCH_TARGET_DP.dp)
+                                } else {
+                                    Modifier.padding(top = 4.dp, bottom = 4.dp, end = 8.dp)
+                                },
+                            ),
                         contentAlignment = Alignment.Center,
                     ) {
                         // Fixed-size slot so swapping the dot for the "+" badge never shifts the tag name.
@@ -950,7 +960,11 @@ private fun TagRow(
                             selected = tag.color,
                             onSelect = { showColorPicker = false; onSelectColor(it) },
                             onDismissRequest = { showColorPicker = false },
-                            anchorOffsetY = (TAG_MARKER_SIZE_DP + TAG_COLOR_DOT_HIT_PADDING_DP * 2).dp,
+                            anchorOffsetY = if (isTouchPrimary) {
+                                TAG_COLOR_DOT_TOUCH_TARGET_DP.dp
+                            } else {
+                                (TAG_MARKER_SIZE_DP + TAG_COLOR_DOT_HIT_PADDING_DP * 2).dp
+                            },
                         )
                     }
                 }
@@ -982,8 +996,13 @@ private const val TAG_MARKER_SIZE_DP = 16
 private const val TAG_COLOR_DOT_SIZE_DP = 10
 
 /** Vertical slack added around the marker slot to widen the color dot's click target without
- * changing the row's height (the row's own text is taller than the resulting box). */
+ * changing the row's height (the row's own text is taller than the resulting box). Desktop only —
+ * see [TAG_COLOR_DOT_TOUCH_TARGET_DP] for touch. */
 private const val TAG_COLOR_DOT_HIT_PADDING_DP = 4
+
+/** The color dot's click target on a touch-primary platform — a full Material touch target,
+ * safe now that [listRowMinHeight] keeps the row itself at least this tall. */
+private const val TAG_COLOR_DOT_TOUCH_TARGET_DP = 48
 
 /** Test tag on a tag row's color dot, which opens its color popover. */
 internal fun tagColorDotTestTag(tagId: String): String = "tag-color-dot-$tagId"

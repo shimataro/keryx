@@ -220,7 +220,7 @@ internal fun ArticleRow(
             )
             .listRowSurface(selectionBackground(selected, focused), ListRowKind.ListItem, rowInteraction)
             .padding(horizontal = 8.dp, vertical = 10.dp)
-            .heightIn(min = rowHeight),
+            .heightIn(min = maxOf(rowHeight, listRowMinHeight())),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.width(8.dp).height(rowHeight)) {

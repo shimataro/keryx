@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -342,7 +343,8 @@ internal fun FolderGroupHeader(
                 rowInteraction,
                 decoration = dropTargetBorderModifier(isFeedDragHighlight, MaterialTheme.colorScheme.secondary),
             )
-            .padding(end = 8.dp),
+            .padding(end = 8.dp)
+            .heightIn(min = listRowMinHeight(isTouchPrimary)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CompositionLocalProvider(
@@ -576,7 +578,8 @@ internal fun FeedRow(
             )
             .insertionMarkers(top = topMarker, bottom = bottomMarker)
             .listRowSurface(selectionBackground(selectionTone, focused), ListRowKind.NavItem, rowInteraction)
-            .padding(start = if (indented) FEED_ROW_INDENT else 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            .padding(start = if (indented) FEED_ROW_INDENT else 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp)
+            .heightIn(min = listRowMinHeight(isTouchPrimary)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FeedAvatar(feed.displayTitle(), feed.favicon_url)

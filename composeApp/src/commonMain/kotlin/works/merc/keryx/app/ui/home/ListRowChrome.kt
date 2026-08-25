@@ -13,6 +13,26 @@ import androidx.compose.ui.unit.dp
 internal val LIST_ROW_HORIZONTAL_MARGIN = 8.dp
 
 /**
+ * The mobile density floor for an interactive list row (feed / folder / tag / article) —
+ * M3's own `NavigationDrawerItem` minimum height on a touch-primary platform, `0.dp` (no floor,
+ * the row's intrinsic content height applies) everywhere else.
+ *
+ * Deliberately independent of [LIST_ROW_VERTICAL_MARGIN]/[LIST_ROW_HORIZONTAL_MARGIN]/
+ * [LIST_ROW_GUIDE_THICKNESS] — those govern the *gap* between two rows and the drag insertion
+ * marker's geometry, which must stay put regardless of a row's own content height (see
+ * [LIST_ROW_VERTICAL_MARGIN]'s own KDoc). Apply via `Modifier.heightIn(min = listRowMinHeight())`
+ * *after* a row's inner content padding, the same placement `ArticleRow`'s own `rowHeight` floor
+ * already uses — never before it, or the padding would be measured against the still-unfloored
+ * height. `NoFolderHeader` is deliberately excluded: it is a plain section label with no click
+ * target or touch-sized child of its own, not an interactive row this floor is meant for.
+ *
+ * @param isTouchPrimary Overridable for tests only (mirrors `feedListReorderDrag`'s own
+ *   `isTouchPrimary` parameter) — production call sites always use the platform default.
+ */
+internal fun listRowMinHeight(isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary): Dp =
+    if (isTouchPrimary) 56.dp else 0.dp
+
+/**
  * Total thickness of the horizontal guide line drawn at a boundary between two list rows —
  * currently only the drag insertion marker (`insertionMarkers` in `FeedListDragAndDrop.kt`).
  * The two rows touching a boundary paint **half of this each**, on their own side of it, so the
