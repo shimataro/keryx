@@ -97,6 +97,7 @@ import works.merc.keryx.app.resources.home_tags
 import works.merc.keryx.app.resources.menu_settings
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
+import works.merc.keryx.app.ui.common.KeryxPaneTopBar
 import works.merc.keryx.app.ui.common.KeryxTextField
 import works.merc.keryx.app.ui.common.SmallSpinner
 import works.merc.keryx.app.ui.common.ToolbarIconGroup
@@ -745,21 +746,24 @@ private fun FeedListToolbarRow(
     val refreshing by vm.feedRefreshing.collectAsStateSafe(false)
     val syncing by vm.syncing.collectAsStateSafe(false)
     WindowDragArea(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.fillMaxWidth().padding(top = WindowChrome.titleBarInsetDp.dp, start = 4.dp, end = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        KeryxPaneTopBar(
+            modifier = Modifier.padding(top = WindowChrome.titleBarInsetDp.dp, start = 4.dp, end = 4.dp),
             // Desktop's only entry point to Settings is the native application menu bar
             // (AppMenuBar / macOS Preferences… / KDE Global Menu). Android has none of those, so
             // this pane needs its own button — see `platform/PlatformOs.kt`'s `hasNativeAppMenu` KDoc.
-            if (!hasNativeAppMenu) {
+            navigationIcon = if (hasNativeAppMenu) {
+                null
+            } else {
                 val menuController = koinInject<MenuController>()
                 val settingsTooltip = stringResource(Res.string.menu_settings)
-                TooltipIconButton(tooltip = settingsTooltip, onClick = { menuController.send(MenuCommand.OpenSettings) }) {
-                    KeryxIcon(KeryxIcons.Tune, settingsTooltip)
+                val icon: @Composable () -> Unit = {
+                    TooltipIconButton(tooltip = settingsTooltip, onClick = { menuController.send(MenuCommand.OpenSettings) }) {
+                        KeryxIcon(KeryxIcons.Tune, settingsTooltip)
+                    }
                 }
-            }
-            Spacer(Modifier.weight(1f))
+                icon
+            },
+        ) {
             ToolbarIconGroup {
                 val addFeedTooltip = stringResource(Res.string.home_add_feed)
                 TooltipIconButton(tooltip = addFeedTooltip, onClick = onAddFeedClick) {

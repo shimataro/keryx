@@ -59,6 +59,7 @@ import works.merc.keryx.app.resources.home_starred
 import works.merc.keryx.app.resources.home_unread_only
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
+import works.merc.keryx.app.ui.common.KeryxPaneTopBar
 import works.merc.keryx.app.ui.common.ToggleChip
 import works.merc.keryx.app.ui.common.ToolbarIconGroup
 import works.merc.keryx.app.ui.common.TooltipIconButton
@@ -306,22 +307,16 @@ internal fun ArticleListTopBar(
     WindowDragArea(Modifier.fillMaxWidth()) {
     Column(Modifier.fillMaxWidth()) {
         if (onNavigateUp != null) {
-            Row(
-                Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                val backLabel = stringResource(Res.string.common_back)
-                TooltipIconButton(tooltip = backLabel, onClick = onNavigateUp, enabled = navigateUpEnabled) {
-                    KeryxIcon(KeryxIcons.ArrowBack, contentDescription = backLabel)
-                }
-                Text(
-                    title.orEmpty(),
-                    modifier = Modifier.weight(1f).padding(start = 4.dp),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.titleMedium,
-                )
-            }
+            val backLabel = stringResource(Res.string.common_back)
+            KeryxPaneTopBar(
+                modifier = Modifier.padding(start = 4.dp, end = 8.dp, top = 4.dp),
+                title = title.orEmpty(),
+                navigationIcon = {
+                    TooltipIconButton(tooltip = backLabel, onClick = onNavigateUp, enabled = navigateUpEnabled) {
+                        KeryxIcon(KeryxIcons.ArrowBack, contentDescription = backLabel)
+                    }
+                },
+            )
         }
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),

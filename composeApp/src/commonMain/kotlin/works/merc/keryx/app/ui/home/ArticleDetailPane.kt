@@ -60,6 +60,7 @@ import works.merc.keryx.app.ui.article.extractLinks
 import works.merc.keryx.app.ui.article.wrapArticleHtml
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
+import works.merc.keryx.app.ui.common.KeryxPaneTopBar
 import works.merc.keryx.app.ui.common.ToolbarIconGroup
 import works.merc.keryx.app.ui.common.TooltipIconButton
 
@@ -220,17 +221,20 @@ private fun ArticleDetailToolbar(
     val url = article?.url.orEmpty()
     val copyOpenEnabled = hasArticle && hasUsableUrl(article.url)
 
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (onNavigateUp != null) {
+    KeryxPaneTopBar(
+        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        navigationIcon = if (onNavigateUp == null) {
+            null
+        } else {
             val backLabel = stringResource(Res.string.common_back)
-            TooltipIconButton(tooltip = backLabel, onClick = onNavigateUp) {
-                KeryxIcon(KeryxIcons.ArrowBack, contentDescription = backLabel)
+            val icon: @Composable () -> Unit = {
+                TooltipIconButton(tooltip = backLabel, onClick = onNavigateUp) {
+                    KeryxIcon(KeryxIcons.ArrowBack, contentDescription = backLabel)
+                }
             }
-        }
-        Spacer(Modifier.weight(1f))
+            icon
+        },
+    ) {
         ToolbarIconGroup {
             val starTooltip = stringResource(if (starred) Res.string.article_unstar else Res.string.article_star)
             TooltipIconButton(tooltip = starTooltip, onClick = onToggleStar, enabled = hasArticle) {
