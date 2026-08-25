@@ -17,7 +17,7 @@
 | プラットフォーム | 対応 |
 | --- | --- |
 | Windows / macOS / Linux | ✅（Compose Multiplatform、現行） |
-| Android | ✅（Compose Multiplatform、現行。クラウド同期は Dropbox / OneDrive に対応 — Google Drive は当面デスクトップのみ。§4 参照） |
+| Android | ✅（Compose Multiplatform、現行。クラウド同期は Dropbox / OneDrive に対応 — Google Drive の Android 対応は将来の検討事項。§4 および [sync-architecture.ja.md](sync-architecture.ja.md) 参照） |
 | iOS / iPadOS / macOS | 予定（最初は Compose、その後 SwiftUI ネイティブ UI） |
 
 ## 3. 対応フォーマット
@@ -36,7 +36,7 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
   カスタム URI リダイレクトを使う PKCE パブリッククライアント）。Google Drive のデスクトップ向け
   OAuth 構成（ループバックリダイレクト + `client_secret` を使う「デスクトップアプリ」クライアント）は
   Android には流用できない — 調査内容は [sync-architecture.ja.md](sync-architecture.ja.md) の
-  「クラウド認証」を参照 — そのため Android のセットアップ/設定では選択肢として出さない。
+  「クラウド認証」と「将来の検討事項（Android での Google Drive）」を参照 — そのため Android のセットアップ/設定では選択肢として出さない。
 
 ## 5. 競合解決ポリシー
 
@@ -53,7 +53,7 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
 ## 6. セットアップフロー
 
 初回起動でローカルのみ / クラウド同期（Dropbox・Google Drive・OneDrive。Android では Dropbox・OneDrive
-のみ、§4 参照）を選択する。クラウド選択時は OAuth 認証後、クラウドに既存データがあれば初回同期で自動的に
+を利用可能。Google Drive の Android 対応は将来の検討事項、§4 参照）を選択する。クラウド選択時は OAuth 認証後、クラウドに既存データがあれば初回同期で自動的に
 マージ（インポート）される。
 
 ## 7. 基本機能

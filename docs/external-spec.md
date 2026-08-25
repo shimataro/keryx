@@ -17,7 +17,7 @@ A lightweight, simple RSS reader that provides the same feed subscription experi
 | Platform | Support |
 | --- | --- |
 | Windows / macOS / Linux | ✅ (Compose Multiplatform, current) |
-| Android | ✅ (Compose Multiplatform, current; cloud sync supports Dropbox / OneDrive — Google Drive is desktop-only for now, see §4) |
+| Android | ✅ (Compose Multiplatform, current; cloud sync supports Dropbox / OneDrive — Google Drive on Android is a future consideration, see §4 and [sync-architecture.md](sync-architecture.md)) |
 | iOS / iPadOS / macOS | Planned (initially Compose, then native SwiftUI) |
 
 ## 3. Supported Formats
@@ -35,7 +35,7 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
   `keryx://oauth2/callback` custom-URI redirect as desktop). Google Drive's desktop OAuth
   configuration (a "Desktop app" client using loopback redirect + `client_secret`) cannot be reused
   on Android — see "Cloud Authentication" in [sync-architecture.md](sync-architecture.md) for the
-  investigation — so it is not offered as a setup/settings option there.
+  investigation and "Future Consideration (Google Drive on Android)" for the evaluated paths — so it is not offered as a setup/settings option there.
 
 ## 5. Conflict Resolution Policy
 
@@ -52,7 +52,7 @@ Details are in [sync-architecture.md](sync-architecture.md).
 ## 6. Setup Flow
 
 On first launch, choose local-only / cloud sync (Dropbox / Google Drive / OneDrive — Android offers
-only Dropbox / OneDrive, see §4). When cloud is selected, after OAuth authentication, if existing
+Dropbox / OneDrive; Google Drive on Android is a future consideration, see §4). When cloud is selected, after OAuth authentication, if existing
 data exists in the cloud it is automatically merged (imported) during the initial sync.
 
 ## 7. Basic Features
