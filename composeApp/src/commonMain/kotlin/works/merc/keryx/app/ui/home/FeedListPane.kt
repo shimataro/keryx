@@ -820,7 +820,8 @@ private fun SidebarRow(
         Modifier.fillMaxWidth()
             .listRowClickable(rowInteraction, onClick)
             .listRowSurface(selectionBackground(selected, focused), ListRowKind.NavItem, rowInteraction)
-            .padding(horizontal = 8.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = 8.dp)
+            .heightIn(min = listRowMinHeight()),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CompositionLocalProvider(LocalContentColor provides (selectionContentColorOrNull(selected, focused) ?: LocalContentColor.current)) {
@@ -1077,7 +1078,8 @@ private fun TagFeedRow(
                 onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
             )
             .listRowSurface(selectionBackground(selectionTone, focused), ListRowKind.NavItem, rowInteraction)
-            .padding(start = FEED_ROW_INDENT, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            .padding(start = FEED_ROW_INDENT, end = 8.dp, top = 4.dp, bottom = 4.dp)
+            .heightIn(min = listRowMinHeight()),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FeedAvatar(feed.displayTitle(), feed.favicon_url)
