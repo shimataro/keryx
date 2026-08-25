@@ -35,10 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
 import kotlinx.datetime.TimeZone
 import coil3.compose.AsyncImage
 import org.jetbrains.compose.resources.stringResource
@@ -55,6 +52,7 @@ import works.merc.keryx.app.resources.article_open_in_browser
 import works.merc.keryx.app.resources.article_star
 import works.merc.keryx.app.resources.article_unstar
 import works.merc.keryx.app.resources.home_notifications
+import works.merc.keryx.app.ui.common.KeryxAnchoredPanel
 import works.merc.keryx.app.ui.common.KeryxBadgedIcon
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
@@ -69,18 +67,16 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
 internal fun NotificationsBell(notifVm: NotificationCenterViewModel) {
     val notifications by notifVm.items.collectAsStateSafe(emptyList())
     var showNotifications by remember { mutableStateOf(false) }
-    val density = LocalDensity.current
     Box {
         val notificationsTooltip = stringResource(Res.string.home_notifications)
         TooltipIconButton(tooltip = notificationsTooltip, onClick = { showNotifications = !showNotifications }) {
             KeryxBadgedIcon(KeryxIcons.Notifications, contentDescription = notificationsTooltip, count = notifications.size)
         }
         if (showNotifications) {
-            Popup(
-                alignment = Alignment.TopEnd,
-                offset = IntOffset(x = 0, y = with(density) { 48.dp.roundToPx() }),
+            KeryxAnchoredPanel(
                 onDismissRequest = { showNotifications = false },
-                properties = PopupProperties(focusable = true, dismissOnClickOutside = true),
+                alignment = Alignment.TopEnd,
+                anchorOffsetY = 48.dp,
             ) {
                 // Close the popover once a notification's action leads somewhere, so the destination
                 // (feed list selection / settings dialog / explanation dialog) is actually visible.

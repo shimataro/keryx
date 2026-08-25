@@ -21,18 +21,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_tag_color
+import works.merc.keryx.app.ui.common.KeryxAnchoredPanel
 import works.merc.keryx.app.ui.common.KeryxRaisedSurface
 
 /**
@@ -85,13 +82,14 @@ internal fun TagColorPicker(selected: String?, onSelect: (String?) -> Unit) {
 internal fun tagColorSwatchTestTag(hex: String?): String = "tag-color-swatch-${hex ?: "none"}"
 
 /**
- * Hosts [TagColorPicker]'s swatches in a lightweight anchored popover, opened from a tag row's color
- * dot. A `Popup` rather than a dialog: it is non-modal, anchored to the control that opened it, and
- * dismissed by clicking outside — and picking a swatch applies immediately, so there is nothing to
- * confirm and nothing to block the rest of the window for.
+ * Hosts [TagColorPicker]'s swatches in a [KeryxAnchoredPanel] opened from a tag row's color dot —
+ * a non-modal anchored popover on desktop, a `ModalBottomSheet` on Android (see that composable's
+ * own KDoc): picking a swatch applies immediately, so there is nothing to confirm and nothing to
+ * block the rest of the window for. The `KeryxRaisedSurface` wrap is desktop-only, matching
+ * `NotificationCenterSheet`'s own split — Android's `ModalBottomSheet` already supplies a container.
  *
- * @param anchorOffsetY How far below the anchor's top edge the popover is placed (i.e. the anchor's
- *   own height), so it opens just under the dot rather than over it.
+ * @param anchorOffsetY How far below the anchor's top edge the popover is placed on desktop (i.e.
+ *   the anchor's own height), so it opens just under the dot rather than over it.
  */
 @Composable
 internal fun TagColorPickerPopup(
@@ -100,23 +98,28 @@ internal fun TagColorPickerPopup(
     onDismissRequest: () -> Unit,
     anchorOffsetY: Dp,
 ) {
-    val density = LocalDensity.current
-    Popup(
-        alignment = Alignment.TopStart,
-        offset = IntOffset(x = 0, y = with(density) { anchorOffsetY.roundToPx() }),
-        onDismissRequest = onDismissRequest,
-        properties = PopupProperties(focusable = true, dismissOnClickOutside = true),
-    ) {
-        KeryxRaisedSurface(shape = MaterialTheme.shapes.small) {
+    val isTouchPrimary = works.merc.keryx.app.platform.isTouchPrimary
+    KeryxAnchoredPanel(onDismissRequest = onDismissRequest, anchorOffsetY = anchorOffsetY) {
+        val body: @Composable () -> Unit = {
             Column(Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
                 TagColorPicker(selected = selected, onSelect = onSelect)
             }
         }
+        if (isTouchPrimary) {
+            body()
+        } else {
+            KeryxRaisedSurface(shape = MaterialTheme.shapes.small) { body() }
+        }
     }
 }
 
+/** Diameter of the drawn swatch circle — unchanged on every platform; only the click target grows. */
+private val SWATCH_VISIBLE_SIZE = 24.dp
+
 /**
- * Displays a selectable circular color swatch.
+ * Displays a selectable circular color swatch. On a touch-primary platform the click target grows
+ * to a full 48dp Material touch target around the still-24dp drawn circle (desktop keeps the
+ * click target exactly at the circle's own bounds, as before).
  *
  * @param color The swatch fill color.
  * @param hex The color value this swatch selects, or `null` for the "no color" swatch.
@@ -125,21 +128,28 @@ internal fun TagColorPickerPopup(
  */
 @Composable
 private fun ColorSwatch(color: Color, hex: String?, isSelected: Boolean, onClick: () -> Unit) {
+    val isTouchPrimary = works.merc.keryx.app.platform.isTouchPrimary
     Box(
         Modifier
             .testTag(tagColorSwatchTestTag(hex))
-            .size(24.dp)
-            .clip(CircleShape)
-            .then(
-                if (isSelected) {
-                    Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
-                } else {
-                    Modifier
-                },
-            )
-            .background(color, CircleShape)
+            .size(if (isTouchPrimary) 48.dp else SWATCH_VISIBLE_SIZE)
             .selectable(selected = isSelected, onClick = onClick),
-    )
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .size(SWATCH_VISIBLE_SIZE)
+                .clip(CircleShape)
+                .then(
+                    if (isSelected) {
+                        Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                    } else {
+                        Modifier
+                    },
+                )
+                .background(color, CircleShape),
+        )
+    }
 }
 
 /**
