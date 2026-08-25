@@ -111,10 +111,11 @@ class NativeMenuAndroidGestureTest {
         composeTestRule.onNodeWithTag("menu-host").performTouchInput {
             down(center)
             // Wiggle a few pixels, well inside the typical touch slop, while keeping the pointer
-            // down past the long-press timeout.
+            // down well past the long-press timeout so the menu reliably opens regardless of the
+            // device's configured threshold.
             advanceEventTime(50)
             moveBy(Offset(3f, 3f))
-            advanceEventTime(400)
+            advanceEventTime(600)
         }
 
         composeTestRule.onNodeWithText("Test action").assertIsDisplayed()
