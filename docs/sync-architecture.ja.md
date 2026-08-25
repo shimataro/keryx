@@ -424,7 +424,7 @@ Android でカスタム URI スキームのリダイレクト + PKCE を使っ�
 Android での Google Drive 対応は、Android 一般の制約ではなく Google 自身の OAuth クライアント種別のポリシーによってブロックされている。検討した経路とその障壁は以下の通り:
 
 - **Play services `AuthorizationClient`** — Android から Google ユーザーデータへアクセスする Google の推奨経路。`AuthorizationResult.getServerAuthCode()` が返す認可コードは、バックエンドサーバーでの `client_secret` 交換を前提としており、APK に直接埋め込む想定ではない（埋め込めば抽出可能）。また Play services へのランタイム依存が増え、Keryx の「ローカルファースト・アカウント不要」という方針と相性が悪い。さらに `WorkManager` のバックグラウンド同期には `Activity` がないため、既存の認可がない場合に `AuthorizationClient.authorize()` が要求する対話的な `PendingIntent` の解決を起動できない。ただし、すでに付与されている認可であれば `Context` から引き続き使用できる。
-- **「Web application」OAuth クライアント種別** — リダイレクト URI が `https://` に限定され、カスタム URI スキーム（`keryx://`）が使えないため、ネイティブアプリの OAuth フローとして機能しない。
+- **「Web application」OAuth クライアント種別** — 通常は `https://` のリダイレクト URI に限定されるが、`http://localhost` やループバックアドレスは文書化された例外として許可されている。それでもカスタム URI スキーム（`keryx://`）は使えず、Google のループバックポリシーが Android/Chrome アプリ向けクライアント種別でこのフローを禁止しているため、ネイティブ Android アプリの OAuth フローとして機能しない。
 - **「Desktop app」OAuth クライアント種別（デスクトップで使用中）** — ループバックリダイレクトは Android/Chrome アプリ向けクライアントでは廃止とされており、`client_secret` を埋め込みクライアントから送信することは推奨されていない上、モバイル APK ではセキュリティリスクとなる。
 
 Google がバックエンドサーバー不要のネイティブ Android アプリ向け OAuth フロー（例: カスタム URI スキームをサポートした Google Drive 向けの真の PKCE パブリッククライアント）を提供するか、あるいは Keryx がバックエンドでのトークン交換サービスを含むアーキテクチャを採用するまで、Android での Google Drive 対応は**将来の検討事項**として保留される。近い将来に計画される機能ではない。
