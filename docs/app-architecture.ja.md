@@ -62,6 +62,14 @@ composeApp/src/
     KeryxRaisedSurface（デスクトップのヘアライン枠フラットカードの代わりに、明確に色調の異なる
     `colorScheme.surfaceContainerHigh` トーナルコンテナ）、KeryxBadgedIcon（デスクトップの
     自作ピルの代わりに M3 自身の `BadgedBox`/`Badge` — `NotificationsBell` が使用）,
+    KeryxSettingRow（行全体がタップ対象になる本物の M3 `ListItem` — `SettingsComponents.kt` の
+    `LinkRow`/`ActionLinkRow`/`SwitchRow` を支える）, KeryxAnchoredPanel（本物の M3
+    `ModalBottomSheet` — `NotificationsBell` の通知ポップオーバーと `TagColorPickerPopup` を
+    支える。単なる作法の一致ではなく必須の対応でもある — 素の `Popup` のままだと、デスクトップの
+    ヘビーウェイト WebView が素の Compose オーバーレイの手前に来るのと同じ理由で、記事リーダーの
+    `WebView` の背後に隠れてしまう。下記「Article Reader」参照）, KeryxPaneTopBar（本物の M3
+    `TopAppBar` — 3ペインそれぞれ自身のヘッダー行を支え、アプリ全体で共有される単一のバーでは
+    ない）,
     DatabaseMerger/DatabaseSnapshot（専用の `io.requery.android.database.sqlite.SQLiteDatabase`
     接続に対する実装 — デスクトップ実装の専用 JDBC 接続に相当。下記「DatabaseMerger」参照）,
     AndroidSqliteSupport.kt（`NoOpDatabaseErrorHandler` — バンドル SQLite の既定ハンドラは破損と

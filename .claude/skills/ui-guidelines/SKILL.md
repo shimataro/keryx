@@ -135,6 +135,16 @@ context menu (`nativeContextMenu`) and drag-from-handle for reordering are delib
 gestures on the same row — see `platform/NativeMenu.android.kt`'s KDoc for how the two coexist
 without one stealing the other's press.
 
+**Touch density.** Each pane's own click-to-focus background (a mouse-only affordance — see
+`ui/home/HomeCommon.kt`'s `paneActivation`) and every interactive list row's minimum height
+(`ui/home/ListRowChrome.kt`'s `listRowMinHeight`, matching M3's `NavigationDrawerItem` minimum —
+`56.dp` on a touch-primary platform, `0.dp`/no floor elsewhere) are both gated the same way as the
+drag handle above: a plain `isTouchPrimary` check, applied via `Modifier.heightIn(min = ...)`
+*after* a row's own content padding, never touching `LIST_ROW_VERTICAL_MARGIN` (the drag insertion
+marker's geometry depends on it — see the Divider policy section above). A row's individual
+touch-only elements (the tag color dot, the folder/tag expand chevron) grow their own click target
+to a full 48dp the same way, independent of their drawn/visible size.
+
 ## Divider policy
 
 - **Between panes**: keep `ResizableDivider`, but de-emphasize it — idle
@@ -710,6 +720,41 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   unflipped tree-expand chevron. `ArrowBack` gives "back" its own dedicated
   entry (Android = Material's `arrow_back`, desktop = Tabler's `arrow-left`),
   so `ChevronRight` now means only one thing and no call site transforms it.
+- **`KeryxSettingRow`** (`ui/common/KeryxSettingRow.kt`, expect/actual): the replacement for
+  `SettingsComponents.kt`'s `LinkRow`/`ActionLinkRow`/`SwitchRow` (now thin wrappers around it) **at
+  a `commonMain` call site** — don't hand-roll a hover-styled `Text` row there. Desktop's `actual`
+  reproduces the former exact look: primary-colored text with underline + hand cursor on hover
+  (`onClick` given, no `trailing`), or a plain-colored label beside a `trailing` control with only
+  that control interactive (`SwitchRow`'s case) — hover has no touch equivalent, so this is the one
+  `KeryxSettingRow` shape Android's `actual` doesn't reproduce. Android's `actual` is a real M3
+  `ListItem`, whose own tap target covers the *whole row* when `onClick` is given (including the
+  `SwitchRow` case — Android's `ListItem` doesn't distinguish "trailing control only"), and
+  `supporting` (a hover tooltip on desktop) renders as `ListItem`'s own `supportingContent` line.
+- **`KeryxAnchoredPanel`** (`ui/common/KeryxAnchoredPanel.kt`, expect/actual): the replacement for a
+  raw `androidx.compose.ui.window.Popup` at a `commonMain` call site — see "Popup vs. Dialog" below
+  for when a Popup (vs. a Dialog) is the right choice in the first place; this is what backs that
+  choice on each platform once it is. Desktop's `actual` is the former `Popup` call, unchanged.
+  Android's `actual` is a real M3 `ModalBottomSheet` — besides matching Android's own idiom for a
+  lightweight overlay, this is *necessary* there: `NotificationCenterSheet`/`TagColorPickerPopup`
+  can be opened while an article is showing, and Android's `WebView` (embedded via `AndroidView`,
+  the platform's own approximation of desktop's heavyweight-AWT z-order problem — see "Nothing
+  Compose-drawn can appear..." below) composites above a bare `Popup` the same way desktop's WebView
+  does above a bare Compose overlay; `ModalBottomSheet`'s own dedicated window layer avoids this.
+  Content passed to `KeryxAnchoredPanel` should have **no `KeryxRaisedSurface`/shadow/width
+  wrapping of its own** — desktop's bare `Popup` supplies no container (the content must still
+  provide the flat-surface wrapping itself there), but `ModalBottomSheet` already supplies one, so
+  callers gate their own surface wrapping behind `isTouchPrimary` (see `NotificationCenterSheet`/
+  `TagColorPickerPopup` for the pattern).
+- **`KeryxPaneTopBar`** (`ui/common/KeryxPaneTopBar.kt`, expect/actual): the replacement for a
+  hand-rolled `navigationIcon`/title/trailing-`actions` `Row` at a `commonMain` call site — see
+  `FeedListToolbarRow`, `ArticleListTopBar`'s back+title row, and `ArticleDetailToolbar`, all now
+  built on this. This does **not** create a shared top bar across the 3 panes (see "Pane structure
+  & tonal roles" above) — each pane still calls it separately with its own `actions`. Desktop's
+  `actual` is a plain `Row` reproducing each former call site's exact layout; because the three
+  differed in padding, `KeryxPaneTopBar` applies none of its own — a caller supplies padding (and
+  keeps `WindowDragArea`/`WindowChrome.titleBarInsetDp` wrapped *around* the call, since neither is
+  shared across all three panes either) via its own `modifier`. Android's `actual` is a real M3
+  `TopAppBar`.
 - **Raised surfaces — `KeryxRaisedSurface`** (`ui/common/KeryxSurface.kt`, expect/actual): the
   container `NotificationCenterSheet`, `SetupScreen`'s `OptionCard`, `TagColorPicker`'s popup, and
   `SettingsCard` all use for a "raised" panel instead of M3's tonal-elevation `Card` **at a
@@ -746,6 +791,11 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   real thing during a future SwiftUI port rather than porting the Compose approximation as-is:
   - `ResizableDivider` (`ui/home/ResizableDivider.kt`) — hand-built pane divider with manual
     hover/cursor/drag handling → native `NSSplitView`/SwiftUI `NavigationSplitView`/`HSplitView` divider.
+    Already `isTouchPrimary`-aware (not just a SwiftUI-port target): on Android, where a tablet-width
+    landscape viewport can reach `PaneLayout.Triple` the same as desktop, it renders as a plain static
+    divider with no hover/drag affordances at all — M3 has no touch-oriented pane-splitter idiom, and
+    8dp is well under any usable touch target. Pane widths stay at whatever `local_settings` last
+    recorded there.
   - `WindowChrome.titleBarInsetDp` (`platform/WindowChrome.kt`) — manual inset math to dodge the
     traffic-light buttons → disappears entirely with a native full-size-content-view + unified toolbar.
   - The inline article search — `ArticleListPane`'s search `KeryxTextField` bound to
@@ -764,9 +814,12 @@ side, Android's own Material 3 ripple/shapes/components on the other:
     shortcuts (⌘/Ctrl+F, J/K, U, S, arrow-key pane nav) that's invisible from outside the app → SwiftUI's
     menu-bar `Commands`/`.keyboardShortcut()`, which register real, discoverable menu items with standard
     key-equivalent conflict resolution.
-  - `Snackbar`/`SnackbarHost` (OPML import/export results, URL-copied toast) — weaker candidate than the
+  - `Snackbar`/`SnackbarHost` (OPML import/export results) — weaker candidate than the
     others since SwiftUI has no 1:1 Snackbar equivalent; a SwiftUI port would need a bespoke transient
-    banner view rather than a drop-in native replacement.
+    banner view rather than a drop-in native replacement. (The URL-copied feedback is no longer purely
+    an inline-icon affair — see `LocalSnackbarHostState`'s own KDoc: Android now also reports it via a
+    real M3 `Snackbar`, below API 33 only, where the OS itself doesn't already show a clipboard-copy
+    confirmation. Desktop still has none, per this app's no-in-app-snackbar convention.)
   - **Desktop only.** The Settings dialog's tab switcher (`KeryxDialogTabBar`, desktop-only in
     `KeryxDialogs.desktop.kt`, used by desktop's `KeryxTabDialog` actual) — a flat Compose-drawn
     icon-over-label tab row, deliberately *not* styled to mimic macOS's native
@@ -802,22 +855,28 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   `PlainTooltip`.
 - **Popup vs. Dialog**: non-modal, anchored info panels (no scrim, dismiss on
   outside click, positioned relative to the control that opened them) use
-  `androidx.compose.ui.window.Popup` — `NotificationCenterSheet`, opened from
+  `KeryxAnchoredPanel` (see above) — `NotificationCenterSheet`, opened from
   `ArticleListPane`'s bell icon, is the first example (a `Box` around the
   `TooltipIconButton` holds local `showNotifications` state and anchors the
-  `Popup` with `alignment = Alignment.TopEnd` + a small `y` offset). The tag
+  panel with `alignment = Alignment.TopEnd` + a small `anchorOffsetY`, desktop-only
+  positioning — see `KeryxAnchoredPanel`'s own KDoc). The tag
   color picker is the second: `TagColorPickerPopup`
   (`ui/home/TagColorPicker.kt`), anchored to the tag row's own color dot, which
   is clickable at all times and independent of whether that row is being
   renamed — picking a swatch applies immediately, so there is nothing to
   confirm and nothing to block the window for. Note the container and the
-  swatches are deliberately separate composables, so a phone-width
-  `ModalBottomSheet` could host the same swatches later. Anything
+  swatches are deliberately separate composables, so both share the same
+  swatches with no changes needed there. Both render as a real M3
+  `ModalBottomSheet` on Android (`KeryxAnchoredPanel`'s Android `actual`) —
+  matching that platform's own idiom for this kind of lightweight overlay, and
+  necessary for `NotificationCenterSheet` specifically (see `KeryxAnchoredPanel`'s
+  own entry above for why a bare `Popup` there would end up behind the article
+  reader's `WebView` on Android). Anything
   that demands full attention and blocks the rest of the UI (confirmations,
   text-prompt forms, the add-feed flow) stays an `AlertDialog`/`Dialog`
   — see `TextPromptDialog`, the various `AlertDialog` usages
   in `FeedListDialogs.kt`. (Search is neither — it's an inline field in
-  `ArticleListPane`, see the Flat surface / migration notes above.) Don't reach for `Popup` for anything that should block
+  `ArticleListPane`, see the Flat surface / migration notes above.) Don't reach for `KeryxAnchoredPanel` for anything that should block
   interaction with the rest of the window, and don't reach for `Dialog` for
   something that's meant to feel like a lightweight, dismissable overlay.
 - **Nothing Compose-drawn can appear over the article detail pane's content area**: the article
@@ -835,3 +894,10 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   would change the row's child count, and while that happens not to move this particular row's
   height today (all its children are fixed-size icons), don't rely on that; keep the structure
   literally unconditional. Do not reintroduce an early return that skips composing the WebView.
+  **Android's `WebView` (embedded via `AndroidView`) has the same limitation**: it composites above
+  ordinary Compose content in the same Activity window, so a plain `Scaffold(snackbarHost = ...)`
+  drawn as regular Compose content is invisible whenever an article is open. `HomeScreen.kt`'s
+  Snackbar host works around this by rendering through a `Popup` instead (which attaches its own
+  window-level layer, above the WebView) rather than `Scaffold`'s own slot — see
+  `LocalSnackbarHostState`'s own KDoc. Any future Android-side "float something over the current
+  pane" UI needs the same `Popup`/`KeryxAnchoredPanel`-style treatment, not a plain Compose overlay.

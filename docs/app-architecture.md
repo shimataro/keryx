@@ -63,7 +63,13 @@ composeApp/src/
     `PlainTooltip`, respectively), KeryxRaisedSurface (a distinctly-tinted
     `colorScheme.surfaceContainerHigh` tonal container instead of desktop's hairline-bordered flat
     card), KeryxBadgedIcon (M3's own `BadgedBox`/`Badge` instead of desktop's hand-rolled pill —
-    used by `NotificationsBell`), DatabaseMerger/DatabaseSnapshot
+    used by `NotificationsBell`), KeryxSettingRow (a real M3 `ListItem`, whose own tap target covers
+    the whole row — backs `SettingsComponents.kt`'s `LinkRow`/`ActionLinkRow`/`SwitchRow`),
+    KeryxAnchoredPanel (a real M3 `ModalBottomSheet` — backs `NotificationsBell`'s notification
+    popover and `TagColorPickerPopup`; necessary, not just idiomatic, since a bare `Popup` there
+    would composite behind the article reader's `WebView` the same way a bare Compose overlay does
+    on desktop, see "Article Reader" below), KeryxPaneTopBar (a real M3 `TopAppBar` — backs each of
+    the 3 panes' own header row, not a shared app-wide bar), DatabaseMerger/DatabaseSnapshot
     (real implementations against a dedicated `io.requery.android.database.sqlite.SQLiteDatabase`
     connection — the Android equivalent of the desktop actual's dedicated JDBC connection; see
     "DatabaseMerger" below), AndroidSqliteSupport.kt (`NoOpDatabaseErrorHandler` — the bundled
