@@ -3,6 +3,8 @@ package works.merc.keryx.app.ui.home
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -10,12 +12,14 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.number
@@ -23,6 +27,7 @@ import kotlinx.datetime.toLocalDateTime
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 import androidx.compose.ui.input.key.Key
+import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.Feeds
@@ -31,6 +36,11 @@ import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.isMacOs
+import works.merc.keryx.app.resources.Res
+import works.merc.keryx.app.resources.home_collapse
+import works.merc.keryx.app.resources.home_expand
+import works.merc.keryx.app.ui.common.KeryxIcon
+import works.merc.keryx.app.ui.common.KeryxIcons
 
 /** [collectAsState] for a [StateFlow] — the `initial` documents the value type. */
 @Composable
@@ -76,6 +86,44 @@ internal fun Modifier.paneActivation(
     this
 } else {
     this.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onActivated)
+}
+
+/**
+ * The expand/collapse chevron used by [TagRow] and `FolderGroupHeader` — a two-asset toggle
+ * (never a single flipped/rotated asset, per the `ui-guidelines` skill's icon-set section) with an
+ * `onClickLabel` for accessibility, since the icon's own `contentDescription` is `null` (the label
+ * would otherwise be announced twice, once for the icon and once for the click action).
+ *
+ * On a touch-primary platform the click target grows to a 48dp box around the (still 20dp) icon —
+ * unlike the tag color dot's own 8dp-margin-absorbing trick, there's no spare margin here to
+ * absorb, so this relies on the row's own [LIST_ROW_MIN_HEIGHT] density pass to keep the row from
+ * being forced taller than its neighbors just by this one control.
+ *
+ * @param isTouchPrimary Overridable for tests only (mirrors `feedListReorderDrag`'s own
+ *   `isTouchPrimary` parameter) — production call sites always use the platform default.
+ */
+@Composable
+internal fun ExpandCollapseChevron(
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
+) {
+    val label = stringResource(if (expanded) Res.string.home_collapse else Res.string.home_expand)
+    val icon = if (expanded) KeryxIcons.ExpandMore else KeryxIcons.ChevronRight
+    if (isTouchPrimary) {
+        Box(
+            Modifier.size(48.dp).clickable(onClickLabel = label, onClick = onToggle),
+            contentAlignment = Alignment.Center,
+        ) {
+            KeryxIcon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
+        }
+    } else {
+        KeryxIcon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp).clickable(onClickLabel = label, onClick = onToggle),
+        )
+    }
 }
 
 /**

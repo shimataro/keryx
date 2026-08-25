@@ -75,6 +75,8 @@
     <string name="home_delete_tag_menu">Delete</string>
     <string name="home_assign_tags">Assign tags</string>
     <string name="home_remove_feed_from_tag_menu">Remove from tag</string>
+    <string name="home_expand">Expand</string>
+    <string name="home_collapse">Collapse</string>
     <string name="home_folders">Folders</string>
     <string name="home_add_folder">Add folder</string>
     <string name="home_new_folder_hint">Enter folder name</string>

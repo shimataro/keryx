@@ -906,11 +906,7 @@ private fun TagRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CompositionLocalProvider(LocalContentColor provides (contentColor ?: LocalContentColor.current)) {
-            KeryxIcon(
-                if (expanded) KeryxIcons.ExpandMore else KeryxIcons.ChevronRight,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp).clickable(onClick = onToggleExpanded),
-            )
+            ExpandCollapseChevron(expanded = expanded, onToggle = onToggleExpanded)
             Spacer(Modifier.width(4.dp))
             Row(
                 Modifier.weight(1f).padding(vertical = 4.dp),

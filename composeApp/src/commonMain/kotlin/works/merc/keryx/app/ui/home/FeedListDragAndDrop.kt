@@ -1,7 +1,6 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -352,11 +351,7 @@ internal fun FolderGroupHeader(
                     ?: LocalContentColor.current
                 ),
         ) {
-            KeryxIcon(
-                if (collapsed) KeryxIcons.ChevronRight else KeryxIcons.ExpandMore,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp).clickable(onClick = onToggleCollapse),
-            )
+            ExpandCollapseChevron(expanded = !collapsed, onToggle = onToggleCollapse)
             Spacer(Modifier.width(4.dp))
             Row(
                 Modifier.weight(1f).padding(vertical = 8.dp),
