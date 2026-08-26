@@ -48,10 +48,10 @@ Paths follow `.coderabbit.yaml`'s `path_instructions` conventions.
 | `composeApp/src/**/domain/**`, `composeApp/src/**/data/**`, `composeApp/src/**/*ViewModel.kt` | architecture, data-integrity, concurrency, performance, docs |
 | `**/domain/MergeSql.kt`, `**/domain/SyncRepository.kt`, `**/platform/DatabaseMerger*.kt`, `**/platform/DatabaseSnapshot*.kt`, `composeApp/src/**/data/cloud/**`, `**/Fts*.kt`, `**/CloudFileTransfer*.kt`, `**/Gzip*.kt` | sync-merge |
 | `composeApp/src/**/sqldelight/**/*.sq`, `**/*.sqm`, `**/domain/MergeSchema.kt`, `**/DatabaseDriverFactory*.kt` | data-integrity, sync-merge, verification, docs |
-| `composeApp/src/**/ui/**`, `composeApp/src/**/tray/**`, `composeApp/src/**/appmenu/**`, `**/platform/NativeMenu*.kt`, `**/composeResources/values*/strings.xml` | ui |
+| `composeApp/src/**/ui/**`, `composeApp/src/**/tray/**`, `composeApp/src/**/appmenu/**`, `**/platform/NativeMenu*.kt`, `**/composeResources/values*/strings.xml` | ui, docs |
 | a diff that adds or changes **user-visible text** — judged by content, not path: a new `Res.string.`, `getString(`, `stringResource(`, or a literal reaching a display path. `**/domain/NotificationMessages.kt` is the one outside `ui/` that gets missed | ui |
 | `composeApp/src/commonMain/**` gaining a platform API (`java.io`, `java.awt`, `java.sql`, `javax.swing`, Ktor CIO) | architecture |
-| `composeApp/src/**/platform/**` | architecture, docs |
+| `composeApp/src/**/platform/**` | architecture, concurrency, docs |
 | `docs/**`, `README.md`, `THIRD-PARTY-LICENSES.md` | docs |
 | `gradle/libs.versions.toml`, `**/build.gradle.kts` | docs, verification, security |
 | `.github/workflows/**` | verification |
@@ -59,6 +59,14 @@ Paths follow `.coderabbit.yaml`'s `path_instructions` conventions.
 
 `docs` runs on code changes, not only doc changes: the commonest drift is code moving while
 `app-architecture.md` / `db-schema.md` / `sync-architecture.md` keep describing the old shape.
+
+**No row matches.** If a changed path matches no row above — most notably `.claude/**`, which owns
+no row here on purpose — launch no specialist for it. Never let that read as a clean pass: report it
+the same way a failed perspective is reported (see step 5's "A perspective failed"), naming the
+unmatched paths explicitly, and — for `.claude/**` specifically — point at the **`audit-claude-config`**
+skill, which owns that configuration (`.claude/etc/review/common.md` §3 leaves `.claude/` config to it;
+`review-docs`'s own "Not yours" list says the same). A target that is *entirely* unmatched paths has no
+findings to report and no perspective that ran; say so plainly instead of emitting an empty report.
 
 If the caller named specific perspectives — "only the security angle"（セキュリティ観点だけ）— use
 exactly those and skip this table.
@@ -158,6 +166,24 @@ None.
 | … (every perspective that ran, each "none") | |
 
 Skipped: …
+```
+
+### No perspective matched
+
+When every changed path falls outside step 2's table (a `.claude/**`-only change is the common case),
+no specialist runs at all. Do not emit the "No findings" template above — it would read as "reviewed,
+clean" when nothing was actually reviewed. Instead:
+
+```markdown
+## Findings
+
+⚠ No perspective matched this target — it is unreviewed, not clean.
+
+## Run summary
+
+Skipped: `.claude/**` (owned by the `audit-claude-config` skill, not this reviewer)
+
+Run `/audit-claude-config` instead.
 ```
 
 ### A perspective failed

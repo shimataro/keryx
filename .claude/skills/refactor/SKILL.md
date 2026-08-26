@@ -191,6 +191,9 @@ warnings from a build). Optionally run the **`review-quality` agent** to surface
 smells (dead code, duplication, oversized units, naming, non-idiomatic Kotlin).
 Call it directly rather than going through the `reviewer` orchestrator — you know
 which perspective you need, and skipping the dispatch layer keeps this cheap.
+This call is an **internal candidate inventory**, not the user-facing report —
+it does not follow `reviewer`'s numbering/dedup contract; that contract applies
+later, at Step 7, to the findings that actually get reported to the user.
 Group findings into small, **independent** batches
 by the target categories above, and **prioritize** (highest clarity gain / lowest
 risk first).
@@ -295,11 +298,12 @@ affected docs and **update the stale references in place**:
 - `docs/db-schema.md` / `docs/sync-architecture.md` — only if a named class/flow
   moved.
 
-**Doc edits follow the doc's own language — Japanese** for `docs/*.md` and
-`CLAUDE.md` (source code stays English, #9). **Do NOT edit `README.md` or
-`docs/external-spec.md`** — behavior is unchanged and `README.md` is user-facing
-only (see CLAUDE.md "Documentation"). This is a targeted pass, not a full
-re-read of every doc.
+**Doc edits follow the doc's own language.** `.claude/CLAUDE.md` and `docs/*.md`
+are English (source code stays English too, #9); only their `docs/*.ja.md`
+counterparts are Japanese. **Do NOT edit `README.md` or `docs/external-spec.md`**
+— behavior is unchanged and `README.md` is user-facing only (see
+`.claude/CLAUDE.md` "Documentation"). This is a targeted pass, not a full re-read
+of every doc.
 
 ### Step 7 — Constraint review + closing summary
 
@@ -310,7 +314,11 @@ in perspectives a behavior-preserving refactor cannot affect:
 **`review-architecture`**, **`review-data-integrity`**, **`review-sync-merge`**,
 **`review-verification`**. Their responsibilities are mutually exclusive (see
 `.claude/etc/review/common.md`), so sorting the combined findings by severity is
-enough — no deduplication needed. Each batch already
+enough — no deduplication needed. Number the combined findings continuously,
+1..n, across all four perspectives, the same reason `reviewer.md` §4 numbers its
+report — so a follow-up can name a finding by number. If one of the four fails to
+run, report it as `unchecked` in the closing summary rather than silently
+omitting its row. Each batch already
 committed itself independently in Step 4, so there is no aggregate commit
 message to produce here — finish by outputting the closing summary (see
 `## How to report`).

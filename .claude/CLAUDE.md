@@ -125,6 +125,12 @@ Delegate heavy implementation to `implementer` and tests to `test-writer`. Finis
 number / finding / outcome (fixed, or not addressed with the reason), and if a fix could affect
 another perspective, offer to re-run just that one.
 
+**Exception — direct dispatch.** The `refactor` and `perf-tune` skills call specific `review-*`
+specialists directly instead of going through `reviewer`: each already knows exactly which
+perspectives its own work can affect, so the dispatch layer above would only add cost. They still
+follow the shape of `reviewer`'s report contract (continuous numbering, reporting an unchecked
+perspective) at the point they define it — see each skill's own constraint-review step.
+
 ## Architecture
 
 Layered: UI (Compose) → ViewModel (androidx.lifecycle + Koin) → Repository → DataSource (SQLDelight / Ktor)
@@ -205,9 +211,10 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
    literals) must be written in English**, regardless of the language used
    in conversation with the user (this file and `docs/*.md` are themselves
    in English — see "Working language" above for reply language; `docs/*.ja.md`
-   are Japanese translations for readers, and UI text is Japanese-only per
-   constraint #3). Exceptions: (a) UI-facing strings
-   still go through Compose Resources per #3 and stay Japanese there; (b)
+   are Japanese translations for readers, and UI text goes through the localized
+   resource files per constraint #3). Exceptions: (a) UI-facing strings
+   still go through Compose Resources per #3 and are localized there (both
+   shipped locales); (b)
    test assertions that must match actual rendered UI text (e.g.
    `onNodeWithText("...")` against a real `strings.xml` string) legitimately
    contain the Japanese string being asserted against — that's not a
