@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -96,6 +97,7 @@ import works.merc.keryx.app.resources.home_tags
 import works.merc.keryx.app.resources.menu_settings
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
+import works.merc.keryx.app.ui.common.KeryxPaneTopBar
 import works.merc.keryx.app.ui.common.KeryxTextField
 import works.merc.keryx.app.ui.common.SmallSpinner
 import works.merc.keryx.app.ui.common.ToolbarIconGroup
@@ -345,7 +347,7 @@ internal fun FeedListPane(
         modifier
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
             .fillMaxSize()
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onActivated)
+            .paneActivation(onActivated)
             .nativeContextMenu(items = { emptyList() }, onOpen = onActivated),
     ) {
         FeedListToolbarRow(
@@ -744,21 +746,24 @@ private fun FeedListToolbarRow(
     val refreshing by vm.feedRefreshing.collectAsStateSafe(false)
     val syncing by vm.syncing.collectAsStateSafe(false)
     WindowDragArea(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.fillMaxWidth().padding(top = WindowChrome.titleBarInsetDp.dp, start = 4.dp, end = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        KeryxPaneTopBar(
+            modifier = Modifier.padding(top = WindowChrome.titleBarInsetDp.dp, start = 4.dp, end = 4.dp),
             // Desktop's only entry point to Settings is the native application menu bar
             // (AppMenuBar / macOS Preferences… / KDE Global Menu). Android has none of those, so
             // this pane needs its own button — see `platform/PlatformOs.kt`'s `hasNativeAppMenu` KDoc.
-            if (!hasNativeAppMenu) {
+            navigationIcon = if (hasNativeAppMenu) {
+                null
+            } else {
                 val menuController = koinInject<MenuController>()
                 val settingsTooltip = stringResource(Res.string.menu_settings)
-                TooltipIconButton(tooltip = settingsTooltip, onClick = { menuController.send(MenuCommand.OpenSettings) }) {
-                    KeryxIcon(KeryxIcons.Tune, settingsTooltip)
+                val icon: @Composable () -> Unit = {
+                    TooltipIconButton(tooltip = settingsTooltip, onClick = { menuController.send(MenuCommand.OpenSettings) }) {
+                        KeryxIcon(KeryxIcons.Tune, settingsTooltip)
+                    }
                 }
-            }
-            Spacer(Modifier.weight(1f))
+                icon
+            },
+        ) {
             ToolbarIconGroup {
                 val addFeedTooltip = stringResource(Res.string.home_add_feed)
                 TooltipIconButton(tooltip = addFeedTooltip, onClick = onAddFeedClick) {
@@ -814,8 +819,9 @@ private fun SidebarRow(
     Row(
         Modifier.fillMaxWidth()
             .listRowClickable(rowInteraction, onClick)
-            .listRowSurface(selectionBackground(selected, focused), rowInteraction)
-            .padding(horizontal = 8.dp, vertical = 8.dp),
+            .listRowSurface(selectionBackground(selected, focused), ListRowKind.NavItem, rowInteraction)
+            .padding(horizontal = 8.dp, vertical = 8.dp)
+            .heightIn(min = listRowMinHeight()),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CompositionLocalProvider(LocalContentColor provides (selectionContentColorOrNull(selected, focused) ?: LocalContentColor.current)) {
@@ -898,18 +904,17 @@ private fun TagRow(
             )
             .listRowSurface(
                 dropTargetBackground(isDropTarget, selected, focused, MaterialTheme.colorScheme.tertiaryContainer),
+                ListRowKind.NavItem,
                 rowInteraction,
                 decoration = dropTargetBorderModifier(isDropTarget, MaterialTheme.colorScheme.tertiary),
             )
-            .padding(start = 8.dp, end = 8.dp),
+            .padding(start = 8.dp, end = 8.dp)
+            .heightIn(min = listRowMinHeight()),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        val isTouchPrimary = works.merc.keryx.app.platform.isTouchPrimary
         CompositionLocalProvider(LocalContentColor provides (contentColor ?: LocalContentColor.current)) {
-            KeryxIcon(
-                if (expanded) KeryxIcons.ExpandMore else KeryxIcons.ChevronRight,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp).clickable(onClick = onToggleExpanded),
-            )
+            ExpandCollapseChevron(expanded = expanded, onToggle = onToggleExpanded)
             Spacer(Modifier.width(4.dp))
             Row(
                 Modifier.weight(1f).padding(vertical = 4.dp),
@@ -918,15 +923,22 @@ private fun TagRow(
                 // Anchors the color popover; sized by the click target inside it.
                 Box {
                     Box(
-                        // The click target is deliberately larger than the dot it contains: it
-                        // absorbs the 8dp gap that used to be a Spacer here plus 4dp above and
-                        // below, so the geometry of the row is unchanged while the hit area is not
-                        // a 10dp circle. (A full Material 48dp touch target would change the row's
-                        // height, which belongs to a mobile density pass, not here.)
+                        // Desktop: the click target is deliberately larger than the dot it
+                        // contains, absorbing the 8dp gap that used to be a Spacer here plus 4dp
+                        // above and below, so the geometry of the row is unchanged while the hit
+                        // area is not a 10dp circle. Touch: a full Material 48dp touch target
+                        // instead — safe now that the row's own listRowMinHeight() floor keeps
+                        // this from stretching the row taller than its neighbors.
                         Modifier
                             .testTag(tagColorDotTestTag(tag.id))
                             .clickable(onClickLabel = colorLabel) { showColorPicker = true }
-                            .padding(top = 4.dp, bottom = 4.dp, end = 8.dp),
+                            .then(
+                                if (isTouchPrimary) {
+                                    Modifier.size(TAG_COLOR_DOT_TOUCH_TARGET_DP.dp)
+                                } else {
+                                    Modifier.padding(top = 4.dp, bottom = 4.dp, end = 8.dp)
+                                },
+                            ),
                         contentAlignment = Alignment.Center,
                     ) {
                         // Fixed-size slot so swapping the dot for the "+" badge never shifts the tag name.
@@ -953,7 +965,11 @@ private fun TagRow(
                             selected = tag.color,
                             onSelect = { showColorPicker = false; onSelectColor(it) },
                             onDismissRequest = { showColorPicker = false },
-                            anchorOffsetY = (TAG_MARKER_SIZE_DP + TAG_COLOR_DOT_HIT_PADDING_DP * 2).dp,
+                            anchorOffsetY = if (isTouchPrimary) {
+                                TAG_COLOR_DOT_TOUCH_TARGET_DP.dp
+                            } else {
+                                (TAG_MARKER_SIZE_DP + TAG_COLOR_DOT_HIT_PADDING_DP * 2).dp
+                            },
                         )
                     }
                 }
@@ -985,8 +1001,13 @@ private const val TAG_MARKER_SIZE_DP = 16
 private const val TAG_COLOR_DOT_SIZE_DP = 10
 
 /** Vertical slack added around the marker slot to widen the color dot's click target without
- * changing the row's height (the row's own text is taller than the resulting box). */
+ * changing the row's height (the row's own text is taller than the resulting box). Desktop only —
+ * see [TAG_COLOR_DOT_TOUCH_TARGET_DP] for touch. */
 private const val TAG_COLOR_DOT_HIT_PADDING_DP = 4
+
+/** The color dot's click target on a touch-primary platform — a full Material touch target,
+ * safe now that [listRowMinHeight] keeps the row itself at least this tall. */
+private const val TAG_COLOR_DOT_TOUCH_TARGET_DP = 48
 
 /** Test tag on a tag row's color dot, which opens its color popover. */
 internal fun tagColorDotTestTag(tagId: String): String = "tag-color-dot-$tagId"
@@ -1056,8 +1077,9 @@ private fun TagFeedRow(
                 // right-click on it promotes it first, exactly as the old `!selected` check did.
                 onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
             )
-            .listRowSurface(selectionBackground(selectionTone, focused), rowInteraction)
-            .padding(start = FEED_ROW_INDENT, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            .listRowSurface(selectionBackground(selectionTone, focused), ListRowKind.NavItem, rowInteraction)
+            .padding(start = FEED_ROW_INDENT, end = 8.dp, top = 4.dp, bottom = 4.dp)
+            .heightIn(min = listRowMinHeight()),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FeedAvatar(feed.displayTitle(), feed.favicon_url)

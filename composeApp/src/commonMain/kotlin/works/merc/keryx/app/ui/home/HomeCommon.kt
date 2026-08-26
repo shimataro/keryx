@@ -1,16 +1,26 @@
 package works.merc.keryx.app.ui.home
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.number
@@ -18,6 +28,7 @@ import kotlinx.datetime.toLocalDateTime
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 import androidx.compose.ui.input.key.Key
+import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.Feeds
@@ -26,6 +37,11 @@ import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.isMacOs
+import works.merc.keryx.app.resources.Res
+import works.merc.keryx.app.resources.home_collapse
+import works.merc.keryx.app.resources.home_expand
+import works.merc.keryx.app.ui.common.KeryxIcon
+import works.merc.keryx.app.ui.common.KeryxIcons
 
 /** [collectAsState] for a [StateFlow] — the `initial` documents the value type. */
 @Composable
@@ -46,13 +62,95 @@ internal val renameNativeShortcut = NativeMenuShortcut(if (isMacOs) Key.Enter el
 internal val deleteNativeShortcut = NativeMenuShortcut(Key.Delete)
 
 /**
+ * Whether a row's selection highlight should be visibly painted at all — see [LocalRowSelectionVisible].
+ */
+internal val LocalRowSelectionVisible = staticCompositionLocalOf { true }
+
+/**
+ * The [SnackbarHostState] backing `HomeScreen`'s `Scaffold(snackbarHost = ...)`, or `null` on
+ * desktop, which per the `ui-guidelines` skill has no in-app snackbar convention (its previous
+ * transient toasts were replaced by inline expressions — see that skill's Notification Center
+ * section). `null` is also the value in any preview/test composition that never provides one.
+ * A composable that wants to show a snackbar (e.g. `ArticleDetailPane`'s URL-copied feedback)
+ * should treat a `null` value here as "do nothing" rather than crash.
+ */
+internal val LocalSnackbarHostState = staticCompositionLocalOf<SnackbarHostState?> { null }
+
+/**
+ * Click-to-focus for a pane's background — on a mouse+keyboard platform there is no OS-level
+ * click-to-focus for the panes inside this one window, so a plain click anywhere in a pane's
+ * empty background is this app's only way to move keyboard focus onto it.
+ *
+ * Dropped entirely on a touch-primary platform ([isTouchPrimary]): touch has no keyboard focus to
+ * move in the first place, so keeping this modifier there would only add an unlabeled, full-size
+ * accessibility click node sitting behind every other control in the pane.
+ *
+ * @param isTouchPrimary Overridable for tests only (mirrors `feedListReorderDrag`'s own
+ *   `isTouchPrimary` parameter) — production call sites always use the platform default from
+ *   `platform/PlatformOs.kt`.
+ */
+@Composable
+internal fun Modifier.paneActivation(
+    onActivated: () -> Unit,
+    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
+): Modifier = if (isTouchPrimary) {
+    this
+} else {
+    this.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onActivated)
+}
+
+/**
+ * The expand/collapse chevron used by [TagRow] and `FolderGroupHeader` — a two-asset toggle
+ * (never a single flipped/rotated asset, per the `ui-guidelines` skill's icon-set section) with an
+ * `onClickLabel` for accessibility, since the icon's own `contentDescription` is `null` (the label
+ * would otherwise be announced twice, once for the icon and once for the click action).
+ *
+ * On a touch-primary platform the click target grows to a 48dp box around the (still 20dp) icon —
+ * unlike the tag color dot's own 8dp-margin-absorbing trick, there's no spare margin here to
+ * absorb, so this relies on the row's own [LIST_ROW_MIN_HEIGHT] density pass to keep the row from
+ * being forced taller than its neighbors just by this one control.
+ *
+ * @param isTouchPrimary Overridable for tests only (mirrors `feedListReorderDrag`'s own
+ *   `isTouchPrimary` parameter) — production call sites always use the platform default.
+ */
+@Composable
+internal fun ExpandCollapseChevron(
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
+) {
+    val label = stringResource(if (expanded) Res.string.home_collapse else Res.string.home_expand)
+    val icon = if (expanded) KeryxIcons.ExpandMore else KeryxIcons.ChevronRight
+    if (isTouchPrimary) {
+        Box(
+            Modifier.size(48.dp).clickable(onClickLabel = label, onClick = onToggle),
+            contentAlignment = Alignment.Center,
+        ) {
+            KeryxIcon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
+        }
+    } else {
+        KeryxIcon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp).clickable(onClickLabel = label, onClick = onToggle),
+        )
+    }
+}
+
+/**
  * Background for a selectable row: full-strength when its pane is focused, dimmed when the
  * item is selected but its pane isn't the logically-focused one, transparent otherwise. Matches
  * the "on" color of [works.merc.keryx.app.ui.common.ToggleChip]/`SegmentedControl` so selection
  * highlighting reads consistently across the app.
+ *
+ * Returns [Color.Transparent] whenever [LocalRowSelectionVisible] reads `false` — set by `HomeScreen`
+ * at [PaneLayout.Single], where "selected" doesn't mean "on screen" the way it does at [PaneLayout.Dual]/
+ * [PaneLayout.Triple]: tapping a row navigates away from it, so a lingering highlight on a row the
+ * user can no longer see would read as stale rather than as "your place."
  */
 @Composable
 fun selectionBackground(selected: Boolean, focused: Boolean): Color = when {
+    !LocalRowSelectionVisible.current -> Color.Transparent
     selected && focused -> MaterialTheme.colorScheme.primary
     selected -> MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
     else -> Color.Transparent
@@ -61,11 +159,13 @@ fun selectionBackground(selected: Boolean, focused: Boolean): Color = when {
 /**
  * Content color to pair with an opaque [selectionBackground] (`selected && focused` only) — null
  * otherwise, so callers fall back to each element's normal color (the 0.4-alpha background still
- * has enough contrast with the default text/icon colors).
+ * has enough contrast with the default text/icon colors). Also `null` whenever
+ * [LocalRowSelectionVisible] reads `false`, matching [selectionBackground] never painting an opaque
+ * background there either.
  */
 @Composable
 fun selectionContentColorOrNull(selected: Boolean, focused: Boolean): Color? =
-    if (selected && focused) MaterialTheme.colorScheme.onPrimary else null
+    if (LocalRowSelectionVisible.current && selected && focused) MaterialTheme.colorScheme.onPrimary else null
 
 /**
  * Alpha of the [RowSelectionTone.SECONDARY] tint — deliberately well below the 0.4 alpha of an
@@ -85,22 +185,30 @@ enum class RowSelectionTone { NONE, SECONDARY, PRIMARY }
 /**
  * Background for a row that can render as more than one instance (see [RowSelectionTone]). [PRIMARY]
  * matches the boolean [selectionBackground] exactly, so a feed with no duplicates looks unchanged.
+ * Gated on [LocalRowSelectionVisible] the same way the boolean overload is — see that overload's
+ * own KDoc.
  */
 @Composable
-fun selectionBackground(tone: RowSelectionTone, focused: Boolean): Color = when (tone) {
-    RowSelectionTone.PRIMARY ->
+fun selectionBackground(tone: RowSelectionTone, focused: Boolean): Color = when {
+    !LocalRowSelectionVisible.current -> Color.Transparent
+    tone == RowSelectionTone.PRIMARY ->
         if (focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-    RowSelectionTone.SECONDARY -> MaterialTheme.colorScheme.primary.copy(alpha = SECONDARY_SELECTION_ALPHA)
-    RowSelectionTone.NONE -> Color.Transparent
+    tone == RowSelectionTone.SECONDARY -> MaterialTheme.colorScheme.primary.copy(alpha = SECONDARY_SELECTION_ALPHA)
+    else -> Color.Transparent
 }
 
 /**
  * Content color to pair with the tone-aware [selectionBackground] — only the opaque
- * `PRIMARY && focused` background needs one, exactly as in the boolean overload.
+ * `PRIMARY && focused` background needs one, exactly as in the boolean overload. Also gated on
+ * [LocalRowSelectionVisible].
  */
 @Composable
 fun selectionContentColorOrNull(tone: RowSelectionTone, focused: Boolean): Color? =
-    if (tone == RowSelectionTone.PRIMARY && focused) MaterialTheme.colorScheme.onPrimary else null
+    if (LocalRowSelectionVisible.current && tone == RowSelectionTone.PRIMARY && focused) {
+        MaterialTheme.colorScheme.onPrimary
+    } else {
+        null
+    }
 
 /**
  * One specific *rendered row instance* of the feed list, as opposed to [ArticleFilter], which only

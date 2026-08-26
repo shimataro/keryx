@@ -45,11 +45,31 @@ composeApp/src/
     AndroidNotificationSink, see "Background Update" below), CloudStorageAvailability (Dropbox/
     OneDrive real, Google Drive fixed `false` — see sync-architecture.md's "Google Drive on
     Android" for why), KeryxTextField/KeryxAlertDialog/
-    KeryxTabDialog/KeryxIcons/FlatButtons/FlatToggles/SegmentedControl (plain M3, safe-drawing-padded
-    for edge-to-edge — the last four are `expect`/`actual` split the same way, with Material Symbols
-    (icons) or M3's own `Button`/`FilledTonalButton`/`TextButton`/`Switch`/`Checkbox`/
+    KeryxIcons/FlatButtons/FlatToggles/SegmentedControl (plain M3 — the last four are
+    `expect`/`actual` split the same way, with Material Symbols (icons) or M3's own
+    `Button`/`FilledTonalButton`/`TextButton`/`Switch`/`Checkbox`/
     `SingleChoiceSegmentedButtonRow`+`SegmentedButton`/`FilterChip` (components) as the Android side —
-    see "Icon set" below), DatabaseMerger/DatabaseSnapshot
+    see "Icon set" below), KeryxTabDialog (a modal, near-fullscreen `Dialog`, safe-drawing-padded
+    for edge-to-edge, whose tab switcher is a genuine M3 `PrimaryScrollableTabRow`/`Tab` — unlike
+    desktop's own hand-rolled tab bar, see the `ui-guidelines` skill), PlatformTheme
+    (`platformShapes` = M3's own default `Shapes()`,
+    `ProvidePlatformInteraction` a no-op — leaving `LocalIndication`/`LocalRippleConfiguration` at
+    their M3 defaults is what gives every `clickable` and M3 component a real ripple; see "UI
+    Direction" in external-spec.md), `ListRowChrome.android.kt`'s `listRowSurface` (a pill-shaped
+    `NavigationDrawerItem`-style highlight for `ListRowKind.NavItem` rows, full-bleed for
+    `ListRowKind.ListItem` rows — see that file's own KDoc), TooltipIconButton/ToolbarIconGroup/
+    FlatTooltipContent (a plain M3 `IconButton` + `TooltipBox` with its own native long-press
+    trigger, an unadorned `Row` instead of desktop's macOS-toolbar-style capsule, and M3's own
+    `PlainTooltip`, respectively), KeryxRaisedSurface (a distinctly-tinted
+    `colorScheme.surfaceContainerHigh` tonal container instead of desktop's hairline-bordered flat
+    card), KeryxBadgedIcon (M3's own `BadgedBox`/`Badge` instead of desktop's hand-rolled pill —
+    used by `NotificationsBell`), KeryxSettingRow (a real M3 `ListItem`, whose own tap target covers
+    the whole row — backs `SettingsComponents.kt`'s `LinkRow`/`ActionLinkRow`/`SwitchRow`),
+    KeryxAnchoredPanel (a real M3 `ModalBottomSheet` — backs `NotificationsBell`'s notification
+    popover and `TagColorPickerPopup`; necessary, not just idiomatic, since a bare `Popup` there
+    would composite behind the article reader's `WebView` the same way a bare Compose overlay does
+    on desktop, see "Article Reader" below), KeryxPaneTopBar (a real M3 `TopAppBar` — backs each of
+    the 3 panes' own header row, not a shared app-wide bar), DatabaseMerger/DatabaseSnapshot
     (real implementations against a dedicated `io.requery.android.database.sqlite.SQLiteDatabase`
     connection — the Android equivalent of the desktop actual's dedicated JDBC connection; see
     "DatabaseMerger" below), AndroidSqliteSupport.kt (`NoOpDatabaseErrorHandler` — the bundled
@@ -75,6 +95,13 @@ composeApp/src/
     background/ (`FeedRefreshWorker` + `BackgroundRefresh.kt`'s `startBackgroundRefresh`,
     `WorkManager`-based — see [background-update.md](background-update.md) for the whole Android
     background/notification story)
+  androidMain/res/  a conventional AGP resource directory (`values/`, `drawable/`, …) generating
+    `works.merc.keryx.app.R` — distinct from `commonMain/composeResources/` above (Compose
+    Multiplatform's own mechanism, generating typed `Res.drawable.*` accessors instead of resource
+    IDs). `:composeApp` cannot depend on `:androidApp`'s own `res/`, so any Android resource a raw
+    `@DrawableRes Int` is needed for (e.g. `NotificationCompat.Builder.setSmallIcon`) has to live
+    here instead — currently just `drawable/ic_stat_keryx.xml`, the status-bar/notification-dot
+    icon `AndroidNotificationSink.kt` posts with (see background-update.md)
   commonTest/ + desktopTest/ + androidDeviceTest/ (instrumented tests for DatabaseMerger/
     DatabaseSnapshot's Android actuals — needs a real device/emulator to load the bundled SQLite
     native library; see testing.md)
