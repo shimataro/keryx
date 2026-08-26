@@ -68,10 +68,13 @@ data object NativeMenuSeparator : NativeMenuEntry {
  * changes (e.g. the user adds a folder), which is handled by rebuilding the
  * native menu.
  *
- * [items] is only evaluated when a right-click actually happens — the native
- * widgets are built lazily on that first click, never on composition. Adding
+ * [items] is only evaluated once the triggering gesture actually completes
+ * (the right-click on desktop, the confirmed long-press on Android) — the
+ * native widgets are built lazily at that point, never on composition. Adding
  * this modifier to a `LazyColumn` row therefore costs nothing until the user
- * opens the menu on that row.
+ * opens the menu on that row. On Android, a gesture that is consumed as a
+ * long-press but resolves to an empty [items] still consumes the rest of that
+ * gesture (see the Android `actual`'s own KDoc) — the menu just never appears.
  *
  * [onOpen] is invoked right before the menu is shown on desktop
  * (secondary-mouse-button click). Callers typically use it to select the
