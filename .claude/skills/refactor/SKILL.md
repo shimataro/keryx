@@ -299,8 +299,9 @@ affected docs and **update the stale references in place**:
   moved.
 
 **Doc edits follow the doc's own language.** `.claude/CLAUDE.md` and `docs/*.md`
-are English (source code stays English too, #9); only their `docs/*.ja.md`
-counterparts are Japanese. **Do NOT edit `README.md` or `docs/external-spec.md`**
+files other than `docs/*.ja.md` are English (source code stays English too, #9).
+Only `docs/*.ja.md` files are Japanese. **Do NOT edit `README.md` or
+`docs/external-spec.md`**
 — behavior is unchanged and `README.md` is user-facing only (see
 `.claude/CLAUDE.md` "Documentation"). This is a targeted pass, not a full re-read
 of every doc.
