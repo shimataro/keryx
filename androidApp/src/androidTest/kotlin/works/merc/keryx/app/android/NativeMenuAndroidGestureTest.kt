@@ -96,7 +96,9 @@ class NativeMenuAndroidGestureTest {
             advanceEventTime(50)
             moveBy(Offset(0f, 200f))
             advanceEventTime(600)
+            up()
         }
+        composeTestRule.waitForIdle()
 
         composeTestRule.onNodeWithText("Test action").assertDoesNotExist()
         assertFalse(opened, "a move beyond touch slop must not invoke onOpen")
@@ -125,7 +127,9 @@ class NativeMenuAndroidGestureTest {
             advanceEventTime(50)
             moveBy(Offset(3f, 3f))
             advanceEventTime(600)
+            up()
         }
+        composeTestRule.waitForIdle()
 
         composeTestRule.onNodeWithText("Test action").assertIsDisplayed()
         assertFalse(opened, "small wiggle inside slop must not invoke onOpen")
