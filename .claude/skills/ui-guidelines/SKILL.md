@@ -439,9 +439,13 @@ Modifier.nativeContextMenu(
   exists (see `AppMenuTree.kt`'s Feed menu), separators included, so the two
   surfaces read as the same menu.
 - `onOpen` fires just before the menu shows; call sites typically use it to
-  select the right-clicked row. An **empty** `items` list shows no menu and
-  makes `onOpen` the only effect — that's how a pane background moves focus on
-  right-click without selecting anything.
+  select the right-clicked row. On Android, `onOpen` is intentionally ignored:
+  a long-press only opens the menu and never selects the row. Keep any side
+  effects inside `onOpen` desktop-only (e.g. row selection), not required for
+  the action to work on Android. An **empty** `items` list shows no menu and
+  makes `onOpen` the only effect on desktop — that's how a pane background
+  moves focus on right-click without selecting anything. On Android, an empty
+  `items` list also shows no menu and simply consumes the long-press gesture.
 - The menu's **shape** (the kind of each entry, plus each submenu's child
   count) is expected to be stable per call site across ordinary
   recompositions. It may still change when the underlying data does (a folder
