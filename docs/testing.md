@@ -78,8 +78,8 @@ $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
 
 Like `androidDeviceTest`, this is not part of `./gradlew build` — AGP's `build` lifecycle for an
 application module only runs `lintAnalyzeDebugAndroidTest` (static analysis) on the `androidTest`
-source set, not `compileDebugAndroidTestKotlin`/`assembleDebugAndroidTest` — so a broken
-instrumented test here is caught only by running this command locally, not by CI.
+source set, not `compileDebugAndroidTestKotlin`/`assembleDebugAndroidTest`. A dedicated
+`android-instrumented-test` job in `.github/workflows/ci.yml` runs this suite on every push.
 
 The suite covers parser, fetcher redirect/304/404/410/timeout/discovery, OPML, Dropbox storage/auth, PKCE, OAuth loopback server, merge (last-write-wins / OR merge / collision guard / FK guard), schema, local settings, article upsert, URL resolver, datetime parser, Result, Repository layer (Article/Feed/Tag/Settings), CloudSession, NotificationCenter, IdGenerator, SyncRepository, ViewModel layer (Home/Settings/Setup/NotificationCenter, including `SettingsViewModel`'s OPML
 import/export paths — the built document/read file round-tripping through the picked path, the

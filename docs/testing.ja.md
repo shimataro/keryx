@@ -109,8 +109,8 @@ $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
 `androidDeviceTest` と同様、これも `./gradlew build` には含まれない — アプリケーションモジュールの
 AGP の `build` ライフサイクルは `androidTest` ソースセットに対して静的解析タスクの
 `lintAnalyzeDebugAndroidTest` のみを実行し、`compileDebugAndroidTestKotlin` /
-`assembleDebugAndroidTest` は実行しないため、ここでの計装テストの破損はこのコマンドをローカルで
-実行して初めて検知できる（CI では検知できない）。
+`assembleDebugAndroidTest` は実行しない。ただし `.github/workflows/ci.yml` の
+`android-instrumented-test` ジョブがプッシュごとにこのスイートを実行している。
 
 スイートはパーサ、フェッチャのリダイレクト/304/404/410/タイムアウト/ディスカバリ、
 OPML、Dropbox ストレージ/認証、PKCE、OAuth ループバックサーバ、マージ（後勝ち・OR マージ・衝突ガード・
