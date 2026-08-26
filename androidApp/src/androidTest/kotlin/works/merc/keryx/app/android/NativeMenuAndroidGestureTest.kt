@@ -12,7 +12,6 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.unit.dp
 import org.junit.Rule
 import org.junit.Test
@@ -87,10 +86,19 @@ class NativeMenuAndroidGestureTest {
             )
         }
 
-        composeTestRule.onNodeWithTag("menu-host").performTouchInput { swipeDown() }
+        composeTestRule.onNodeWithTag("menu-host").performTouchInput {
+            down(center)
+            // Keep the pointer down (unlike a plain swipeDown(), which lifts well before the
+            // long-press timeout) while moving well past touch slop, so this actually exercises
+            // the slop-cancels-the-long-press branch instead of the changedToUp branch a quick
+            // swipe would hit first.
+            advanceEventTime(50)
+            moveBy(Offset(0f, 200f))
+            advanceEventTime(600)
+        }
 
         composeTestRule.onNodeWithText("Test action").assertDoesNotExist()
-        assertFalse(opened, "swipe must not invoke onOpen")
+        assertFalse(opened, "a move beyond touch slop must not invoke onOpen")
     }
 
     @Test
