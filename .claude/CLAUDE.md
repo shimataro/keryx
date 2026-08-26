@@ -94,6 +94,43 @@ workaround as a complete fix. (This concerns *bug fixing*; behavior-preserving
 refactors and perf work still follow the small, independently-revertible-batch
 discipline of the `refactor` / `perf-tune` skills.)
 
+## Review
+
+Code review runs through the **`reviewer` agent**, which dispatches to ten specialists
+(`review-security`, `review-data-integrity`, `review-sync-merge`, `review-concurrency`,
+`review-architecture`, `review-performance`, `review-ui`, `review-quality`,
+`review-verification`, `review-docs`) and merges their findings into one numbered report.
+Shared conventions: `.claude/etc/review/common.md`.
+
+- Start it in the **foreground** (`run_in_background: false`).
+- **Announce the range in one line before launching it** — the agent's own pre-flight output never
+  reaches the user. Name a perspective only if the user did; the auto-dispatched set is unknown
+  until the report returns.
+- **Relay the report verbatim** — do not summarize, renumber, or collapse its tables. The user acts
+  on those numbers. Its templates are written in English; emit the report in the session's reply
+  language per "Working language" above.
+
+A follow-up may name a number, a severity, or a perspective. Accept the obvious variants in whatever
+language it arrives in — severity（重要度 / 重大度）, High（高）, #1 / "the first one"（1 番）,
+"only the security ones"（セキュリティのものだけ）. Four cases have a fixed answer:
+
+| Case | Rule |
+| --- | --- |
+| "all the High ones"（High を全部） vs the Needs-confirmation section | Low-confidence findings sit in Needs confirmation whatever their severity and are **not** included; pull them in only by number or by an explicit request for them |
+| Two reports in the conversation | Resolve against the **most recent**, and say which finding you are starting on |
+| The report has left the context | Do not guess a number — say so and offer to re-run the review |
+| Nothing matches the instruction | Say so rather than picking the nearest finding |
+
+Delegate heavy implementation to `implementer` and tests to `test-writer`. Finish with a table of
+number / finding / outcome (fixed, or not addressed with the reason), and if a fix could affect
+another perspective, offer to re-run just that one.
+
+**Exception — direct dispatch.** The `refactor` and `perf-tune` skills call specific `review-*`
+specialists directly instead of going through `reviewer`: each already knows exactly which
+perspectives its own work can affect, so the dispatch layer above would only add cost. They still
+follow the shape of `reviewer`'s report contract (continuous numbering, reporting an unchecked
+perspective) at the point they define it — see each skill's own constraint-review step.
+
 ## Architecture
 
 Layered: UI (Compose) → ViewModel (androidx.lifecycle + Koin) → Repository → DataSource (SQLDelight / Ktor)
@@ -131,10 +168,14 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
    statement, so an `ATTACH` wouldn't survive to the next merge statement).
    Details → `.claude/rules/sync-merge.md`.
 3. **No hardcoded user-facing strings.** All UI text goes through Compose
-   Multiplatform resources (`composeResources/values/strings.xml`). Japanese is
-   the only shipped locale for now, but the mechanism must be used for every
-   string a user can see — including tray/notification text built outside
-   composition (see `NotificationMessages` + `getString`).
+   Multiplatform resources. Two locales ship: `composeResources/values/strings.xml`
+   (Japanese — the default, and the fallback for any unsupported language) and
+   `composeResources/values-en/strings.xml` (English). **The two must define the
+   same key set**; a key added to one and not the other is a bug. The mechanism
+   applies to every string a user can see — including tray/notification text built
+   outside composition (see `NotificationMessages` + `getString`). Note that a
+   hardcoded *English* literal is now as much a violation as a Japanese one, so
+   grepping for Japanese characters no longer finds every case.
 4. **Platform-specific code stays behind `commonMain` `expect` declarations** —
    e.g. `AppDirs`, `FileIO`, `BrowserOpener`, `FilePicker`, `DatabaseDriverFactory`,
    `DatabaseMerger`, `DatabaseSnapshot`, `Gzip`, `Pkce`, `CloudStorageAvailability`,
@@ -170,9 +211,10 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
    literals) must be written in English**, regardless of the language used
    in conversation with the user (this file and `docs/*.md` are themselves
    in English — see "Working language" above for reply language; `docs/*.ja.md`
-   are Japanese translations for readers, and UI text is Japanese-only per
-   constraint #3). Exceptions: (a) UI-facing strings
-   still go through Compose Resources per #3 and stay Japanese there; (b)
+   are Japanese translations for readers, and UI text goes through the localized
+   resource files per constraint #3). Exceptions: (a) UI-facing strings
+   still go through Compose Resources per #3 and are localized there (both
+   shipped locales); (b)
    test assertions that must match actual rendered UI text (e.g.
    `onNodeWithText("...")` against a real `strings.xml` string) legitimately
    contain the Japanese string being asserted against — that's not a
