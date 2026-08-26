@@ -45,9 +45,11 @@ import works.merc.keryx.app.ui.common.KeryxIcons
  * fires `onClick` for the same press.
  *
  * [items] is evaluated once the long press is confirmed (matching the `expect`'s contract that it
- * is "only evaluated when a right-click actually happens"), and the resulting menu is anchored via
- * a zero-size `Box` offset to the press position, hosting the [DropdownMenu] — the standard way to
- * position an M3 dropdown at an arbitrary point rather than at a real anchor composable's bounds.
+ * is "only evaluated once the triggering gesture actually completes"), and the resulting menu is
+ * anchored via a zero-size `Box` offset to the press position, hosting the [DropdownMenu] — the
+ * standard way to position an M3 dropdown at an arbitrary point rather than at a real anchor
+ * composable's bounds. [onOpen] (desktop's "right-click selects the row" hook) is deliberately
+ * never invoked here — see the `expect` declaration's own KDoc for why.
  */
 @Composable
 actual fun Modifier.nativeContextMenu(
@@ -59,7 +61,6 @@ actual fun Modifier.nativeContextMenu(
     var pressOffset by remember { mutableStateOf(Offset.Zero) }
     val haptics = LocalHapticFeedback.current
     val currentItems by rememberUpdatedState(items)
-    val currentOnOpen by rememberUpdatedState(onOpen)
 
     if (expanded) {
         Box(Modifier.offset { IntOffset(pressOffset.x.toInt(), pressOffset.y.toInt()) }) {
@@ -85,9 +86,7 @@ actual fun Modifier.nativeContextMenu(
                 val resolvedItems = currentItems()
                 if (resolvedItems.isNotEmpty()) {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    // Note: currentOnOpen() is intentionally NOT called on Android.
-                    // onOpen is a desktop hook for "right-click selects the row first";
-                    // a long-press here should only show the menu without selecting the item.
+                    // onOpen is deliberately not invoked here — see this function's own KDoc.
                     pressOffset = down.position
                     menuItems = resolvedItems
                     expanded = true
