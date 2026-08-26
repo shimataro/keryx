@@ -41,9 +41,15 @@ androidx-work = "2.11.2"
 # the bundled SQLite native library).
 androidx-test-runner = "1.7.0"
 androidx-test-junit = "1.3.0"
-# Used by androidApp's androidTest Compose UI tests. Aligned to the AndroidX Compose version
-# bundled with Compose Multiplatform 1.11.1.
-androidx-compose-ui-test = "1.7.0"
+# Used by androidApp's androidTest Compose UI tests. androidx.compose.ui:* is an "atomic group" —
+# Gradle's own version alignment forces every androidx.compose.ui module to the strictly-versioned
+# release Compose Multiplatform 1.11.1 pulls in transitively (currently 1.11.2) regardless of what
+# is pinned here, so this value only matters for readability; kept equal to that resolved version
+# rather than the plugin's own compose-multiplatform version number (1.11.1) to avoid the two
+# looking like they should already match. Confirm with
+# `./gradlew :androidApp:dependencyInsight --configuration debugAndroidTestRuntimeClasspath
+# --dependency androidx.compose.ui:ui-test-junit4` after bumping compose-multiplatform.
+androidx-compose-ui-test = "1.11.2"
 # Used by androidApp's androidTest Compose UI tests. Aligned to AndroidX Test 1.5.0 to stay
 # compatible with the rest of the project's AndroidX stack (concurrent-futures 1.1.0).
 androidx-test-runner-android = "1.5.2"
