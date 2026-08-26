@@ -104,6 +104,29 @@ class NativeMenuAndroidGestureTest {
     }
 
     @Test
+    fun emptyItemsListConsumesLongPressWithoutOpeningMenu() {
+        var opened = false
+        composeTestRule.setContent {
+            Box(
+                Modifier
+                    .size(200.dp)
+                    .testTag("menu-host")
+                    .nativeContextMenu(
+                        items = { emptyList() },
+                        onOpen = { opened = true },
+                    )
+            )
+        }
+
+        composeTestRule.onNodeWithTag("menu-host").performTouchInput { longClick() }
+        composeTestRule.waitForIdle()
+
+        // No menu is shown for an empty items list, but the long-press gesture is still consumed
+        // so that chained clickables (e.g. listRowClickable) do not also fire.
+        assertFalse(opened, "empty items must not invoke onOpen on Android")
+    }
+
+    @Test
     fun smallWiggleWithinSlopStillOpensMenu() {
         var opened = false
         composeTestRule.setContent {
