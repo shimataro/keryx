@@ -459,9 +459,12 @@ captured in Step 1) for invariants broken by the optimization. Launch
 matters here specifically because performance work reorders, parallelizes, and
 caches, and `review-architecture` catches a layering/constraint violation the
 per-item Step 3 gate could still miss once items are combined. Again not
-`review-performance`, and not the `reviewer` orchestrator. Number this step's
-findings continuously, 1..n, across all five perspectives — the same reason
-`reviewer.md` §4 numbers its report: so a follow-up can name a finding by number.
+`review-performance`, and not the `reviewer` orchestrator.
+**Deduplicate** findings at the same `file:line` that make the same point. Keep one
+entry and **list both perspectives** in its label — `[Architecture / Concurrency]`.
+Never drop one silently. Then **number** this step's findings continuously, 1..n,
+across all five perspectives — the same reason `reviewer.md` §4 numbers its report:
+so a follow-up can name a finding by number.
 If any of the five specialists fails to run, say so in the closing summary as
 `unchecked`, the same way Step 3 reports a blocked gate — by this point every item
 has already committed itself independently in Step 5, so a plain `git diff` against
