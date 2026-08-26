@@ -61,12 +61,17 @@ Paths follow `.coderabbit.yaml`'s `path_instructions` conventions.
 `app-architecture.md` / `db-schema.md` / `sync-architecture.md` keep describing the old shape.
 
 **No row matches.** If a changed path matches no row above — most notably `.claude/**`, which owns
-no row here on purpose — launch no specialist for it. Never let that read as a clean pass: report it
-the same way a failed perspective is reported (see step 5's "A perspective failed"), naming the
-unmatched paths explicitly, and — for `.claude/**` specifically — point at the **`audit-claude-config`**
-skill, which owns that configuration (`.claude/etc/review/common.md` §3 leaves `.claude/` config to it;
-`review-docs`'s own "Not yours" list says the same). A target that is *entirely* unmatched paths has no
-findings to report and no perspective that ran; say so plainly instead of emitting an empty report.
+no row here on purpose — treat it as unchecked, not as a clean pass.
+
+- When the target contains **both matched and unmatched paths**, launch specialists for the matched
+  paths normally. In the report, list the unmatched paths explicitly under "Run summary" as
+  `Unchecked: <paths>` and, when any of them are under `.claude/**`, point the user at the
+  **`audit-claude-config`** skill, which owns that configuration
+  (`.claude/etc/review/common.md` §3 leaves `.claude/` config to it; `review-docs`'s own
+  "Not yours" list says the same). Do not apply the `.claude/**` audit direction to paths that
+  did match a row.
+- When the target is **entirely** unmatched paths, no specialist runs and there are no findings to
+  report; say so plainly instead of emitting an empty report (see "No perspective matched" below).
 
 If the caller named specific perspectives — "only the security angle"（セキュリティ観点だけ）— use
 exactly those and skip this table.
