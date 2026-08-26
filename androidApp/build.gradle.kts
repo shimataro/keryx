@@ -73,8 +73,8 @@ dependencies {
 
     // Instrumented Compose UI tests for androidApp.
     androidTestImplementation(libs.kotlin.test)
-    androidTestImplementation(libs.androidx.test.runner.android)
-    androidTestImplementation(libs.androidx.test.junit.android)
+    androidTestImplementation(libs.androidx.test.runner.app.android.test)
+    androidTestImplementation(libs.androidx.test.junit.app.android.test)
     androidTestImplementation(libs.compose.ui.test.junit4)
     debugImplementation(libs.compose.ui.test.manifest)
 }
