@@ -275,7 +275,12 @@ consuming the rest of the gesture, so `ui/home/ListRowChrome.kt`'s `listRowClick
 right before it, and therefore the *more outer* node — Compose's pointer-input `Main` pass resumes
 nested nodes before their ancestors for the same event) never also fires `onClick` for the same
 press. `NativeSubMenu` drills into its own items in place (a leading "back" row swaps the top level
-for the submenu's own items) rather than opening a nested popup.
+for the submenu's own items) rather than opening a nested popup. Two behaviours are Android-specific,
+unlike the desktop backends below: a confirmed long-press never invokes `onOpen` (desktop's
+right-click-selects-the-row hook — an Android long-press only opens the menu, never selects the
+row), and the same `awaitEachGesture` loop cancels the long-press once the pointer moves past
+`viewConfiguration.touchSlop`, so a `LazyColumn` scroll that starts as a slow drag on a row cannot
+be mistaken for a long-press-and-hold.
 
 `platform/NativeMenu.desktop.kt`'s `defaultPopupHandle` backs the same call sites on desktop with
 one of two implementations, triggered by a right-click instead of a long-press:
