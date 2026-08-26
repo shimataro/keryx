@@ -461,7 +461,7 @@ caches, and `review-architecture` catches a layering/constraint violation the
 per-item Step 3 gate could still miss once items are combined. Again not
 `review-performance`, and not the `reviewer` orchestrator.
 **Deduplicate** findings at the same `file:line` that make the same point. Keep one
-entry and **list both perspectives** in its label — `[Architecture / Concurrency]`.
+entry and list **every contributing perspective** in its label — `[Architecture / Concurrency / Security]`.
 Never drop one silently. Then **number** this step's findings continuously, 1..n,
 across all five perspectives — the same reason `reviewer.md` §4 numbers its report:
 so a follow-up can name a finding by number.
