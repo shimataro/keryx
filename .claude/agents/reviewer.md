@@ -170,8 +170,8 @@ Skipped: …
 
 ### No perspective matched
 
-When every changed path falls outside step 2's table (a `.claude/**`-only change is the common case),
-no specialist runs at all. Do not emit the "No findings" template above — it would read as "reviewed,
+When every changed path falls outside step 2's table, no specialist runs at all.
+Do not emit the "No findings" template above — it would read as "reviewed,
 clean" when nothing was actually reviewed. Instead:
 
 ```markdown
@@ -181,9 +181,14 @@ clean" when nothing was actually reviewed. Instead:
 
 ## Run summary
 
-Skipped: `.claude/**` (owned by the `audit-claude-config` skill, not this reviewer)
+Skipped: `<actual unmatched paths>` (list the real paths that matched no row).
 
-Run `/audit-claude-config` instead.
+If any skipped path is under `.claude/**`, note that it is owned by the
+`audit-claude-config` skill, not this reviewer, and direct the user to run
+`/audit-claude-config`.
+
+If none of the skipped paths are under `.claude/**`, report that no perspective
+owns these paths.
 ```
 
 ### A perspective failed
