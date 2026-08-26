@@ -28,6 +28,15 @@
   `desktopTest` のマージ/スナップショット系スイート全体を移植するものではない。マージ SQL 自体
   （`MergeSql`）は純粋ロジックであり、既に `desktopTest` 側でカバーされているため。
 
+- `androidApp/src/androidTest/` — `androidx.compose.ui.test.junit4.v2.createComposeRule` を
+  ホストできる、実際の Android アプリケーションモジュールを必要とする計装 Compose UI テスト
+  （例: `nativeContextMenu` の Android `actual` の長押しジェスチャ方針を検証する
+  `NativeMenuAndroidGestureTest.kt`）。`composeApp` 自体は Android **ライブラリ**モジュール
+  （`com.android.kotlin.multiplatform.library`）でありアプリケーションではない——その計装テスト
+  （上記の `androidDeviceTest`）は Compose UI ツリーを必要としないネイティブドライバ寄りの範囲に
+  絞っているため、Compose を実際にレンダリングするテストは、実際に Android アプリケーションである
+  唯一のモジュールであるこちらに置く。
+
 新しいテストは対象コードと同じ相対パスに置く。
 
 ## 規約
@@ -88,6 +97,20 @@ $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
 `./gradlew :composeApp:tasks --all | grep -i device` で確認する）。`ci.yml` には組み込んでいない
 — デスクトップの UI テストは `xvfb` 上で既に CI で動いているが、Android エミュレータはこのプロジェクト
 がまだ導入していない別種の CI 課題のため、現状はローカル実行のみ。
+
+`androidApp` 自身の計装テストスイート（Compose UI のジェスチャテスト。上記の
+`androidApp/src/androidTest/` を参照）は、通常の `com.android.application` のタスク命名を使う:
+
+```bash
+$ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
+./gradlew :androidApp:connectedDebugAndroidTest
+```
+
+`androidDeviceTest` と同様、これも `./gradlew build` には含まれない — アプリケーションモジュールの
+AGP の `build` ライフサイクルは `androidTest` ソースセットに対して静的解析タスクの
+`lintAnalyzeDebugAndroidTest` のみを実行し、`compileDebugAndroidTestKotlin` /
+`assembleDebugAndroidTest` は実行しない。ただし `.github/workflows/ci.yml` の
+`android-instrumented-test` ジョブがプッシュごとにこのスイートを実行している。
 
 スイートはパーサ、フェッチャのリダイレクト/304/404/410/タイムアウト/ディスカバリ、
 OPML、Dropbox ストレージ/認証、PKCE、OAuth ループバックサーバ、マージ（後勝ち・OR マージ・衝突ガード・
@@ -376,6 +399,19 @@ Linux の SNI トレイでは `SniConnection`（接続・バス名取得・expor
 - （Linux）アプリ内テーマ（ライト↔ダーク）を再起動なしで切り替えた際、メニューバーと開いている
   ダイアログのボタン列は即座に再スタイルされ、切替後に新しく開いたコンテキストメニューも新テーマを
   反映すること。
+
+（Android）`nativeContextMenu` の Android `actual` は長押しで開く Material 3 `DropdownMenu` で、
+ジェスチャ方針そのものは `NativeMenuAndroidGestureTest.kt` の計装テスト（長押しで選択せずに開くこと、
+短いタップやスクロール相当の移動では開かないこと。上記の `androidApp/src/androidTest/` を参照）で
+カバーされている。それらのテストでは検証できない、実アプリ UI に対する end-to-end の確認は実機または
+エミュレータで目視確認する:
+
+- 記事行を長押しするとメニューが表示され、その記事が既読にならず、（Single/Dual レイアウトで）
+  ペインも遷移しないこと——同じ行への単純なタップとは異なること。
+- 記事行を押し下げたまま指を離さずゆっくり縦にドラッグすると、通常のドラッグとしてリストが
+  スクロールし、メニューは開かず、行も選択されないこと。
+- フィード行・フォルダーヘッダー・タグ行を長押しするとメニューが正しいアクションとともに表示され、
+  長押しそのものの副作用として行の選択が変わらないこと。
 
 **表示スケール**。上記の確認はすべて、**100% 以外の表示スケール**でも実施すること。特に Windows では
 200%、続いて 150% で行う。AWT のメニューバックエンドは、まさにこの設定でメニューを誤った位置に開き

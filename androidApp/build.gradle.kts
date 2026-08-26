@@ -70,4 +70,13 @@ dependencies {
     implementation(libs.koin.core)
     implementation(libs.ktor.client.core)
     implementation(libs.kotlinx.coroutines.core)
+
+    // Instrumented Compose UI tests for androidApp. These are not inherited from composeApp's
+    // androidDeviceTest dependencies (test-scoped dependencies do not propagate across modules),
+    // so they must be declared explicitly here.
+    androidTestImplementation(libs.kotlin.test)
+    androidTestImplementation(libs.androidx.test.runner.app.android.test)
+    androidTestImplementation(libs.androidx.test.junit.app.android.test)
+    androidTestImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(libs.compose.ui.test.manifest)
 }

@@ -45,9 +45,11 @@ import works.merc.keryx.app.ui.common.KeryxIcons
  * fires `onClick` for the same press.
  *
  * [items] is evaluated once the long press is confirmed (matching the `expect`'s contract that it
- * is "only evaluated when a right-click actually happens"), and the resulting menu is anchored via
- * a zero-size `Box` offset to the press position, hosting the [DropdownMenu] — the standard way to
- * position an M3 dropdown at an arbitrary point rather than at a real anchor composable's bounds.
+ * is "only evaluated once the triggering gesture actually completes"), and the resulting menu is
+ * anchored via a zero-size `Box` offset to the press position, hosting the [DropdownMenu] — the
+ * standard way to position an M3 dropdown at an arbitrary point rather than at a real anchor
+ * composable's bounds. [onOpen] (desktop's "right-click selects the row" hook) is deliberately
+ * never invoked here — see the `expect` declaration's own KDoc for why.
  */
 @Composable
 actual fun Modifier.nativeContextMenu(
@@ -59,7 +61,6 @@ actual fun Modifier.nativeContextMenu(
     var pressOffset by remember { mutableStateOf(Offset.Zero) }
     val haptics = LocalHapticFeedback.current
     val currentItems by rememberUpdatedState(items)
-    val currentOnOpen by rememberUpdatedState(onOpen)
 
     if (expanded) {
         Box(Modifier.offset { IntOffset(pressOffset.x.toInt(), pressOffset.y.toInt()) }) {
@@ -72,18 +73,20 @@ actual fun Modifier.nativeContextMenu(
     return this.pointerInput(Unit) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
+            val touchSlop = viewConfiguration.touchSlop
             val stillDownAtTimeout = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
                 while (true) {
                     val event = awaitPointerEvent()
                     val change = event.changes.firstOrNull { it.id == down.id } ?: return@withTimeoutOrNull
                     if (change.changedToUpIgnoreConsumed() || change.isConsumed) return@withTimeoutOrNull
+                    if ((change.position - down.position).getDistance() >= touchSlop) return@withTimeoutOrNull
                 }
             } == null
             if (stillDownAtTimeout) {
                 val resolvedItems = currentItems()
                 if (resolvedItems.isNotEmpty()) {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    currentOnOpen()
+                    // onOpen is deliberately not invoked here — see this function's own KDoc.
                     pressOffset = down.position
                     menuItems = resolvedItems
                     expanded = true

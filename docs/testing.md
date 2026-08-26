@@ -8,6 +8,15 @@
 - `desktopTest/` — Tests requiring the actual SQLDelight driver (`JdbcSqliteDriver`) (schema, article upsert, ATTACH merge). Helpers are in `DbTestSupport.kt` (`inMemoryDb()`, `fileDb()`, `insertFeed()`). This directory also contains Compose UI tests that render actual Composables (`androidx.compose.ui.test.runDesktopComposeUiTest`, no JUnit4 rule needed) (e.g. `ArticleListPaneTest.kt`). Requires the actual Skia/AWT renderer, so placed in `desktopTest` rather than `commonTest`.
 - `androidDeviceTest/` — Instrumented tests for `DatabaseMerger`/`DatabaseSnapshot`'s Android actuals, which open the bundled `requery` SQLite (a native library) directly and therefore cannot run as a plain JVM unit test the way `desktopTest` does — see `.claude/rules/android-sqlite-bundling.md`. Needs a connected device or running emulator; there is no `androidUnitTest`/`androidHostTest` source set in this module, since none of `composeApp`'s Android-specific logic is JVM-testable without either a device or Robolectric (not currently a dependency). Helpers are in `AndroidDbTestSupport.kt` (`createSchemaDbFile()`, mirroring `DbTestSupport.kt`'s `fileDb()` but driven through a real `AndroidSqliteDriver` so the schema is installed the same way production creates it). Scoped narrowly to what is genuinely Android-specific — the schema-version guard, the migration path, exception-*class*-based failure classification (Android's `SQLiteException` carries no numeric result code, unlike the JDBC driver desktop's `DatabaseMerger` reads `resultCode` from), and the `NoOpDatabaseErrorHandler` regression (the bundled SQLite's default error handler deletes a database file it judges corrupt, confirmed by disassembling the AAR) — not a full port of `desktopTest`'s merge/snapshot suites, since the merge SQL itself (`MergeSql`) is pure and already covered there.
 
+- `androidApp/src/androidTest/` — Instrumented Compose UI tests that need a real Android
+  application module to host `androidx.compose.ui.test.junit4.v2.createComposeRule` (e.g.
+  `NativeMenuAndroidGestureTest.kt`, covering the long-press gesture policy of `nativeContextMenu`'s
+  Android `actual`). `composeApp` itself is an Android *library* module
+  (`com.android.kotlin.multiplatform.library`), not an application — its own instrumented tests
+  (`androidDeviceTest` above) are scoped to native-driver concerns that don't need a Compose UI
+  tree, so a Compose-rendering test lives here instead, in the one module that is an actual Android
+  application.
+
 New tests are placed at the same relative path as the code under test.
 
 ## Conventions
@@ -58,6 +67,19 @@ $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
 renamed in a future AGP release). It is not wired into `ci.yml` — the desktop UI tests already run
 under `xvfb` there, but an Android emulator is a separate CI concern this project hasn't taken on
 yet — so it only runs locally today.
+
+`androidApp`'s own instrumented suite (Compose UI gesture tests, see `androidApp/src/androidTest/`
+above) uses the regular `com.android.application` task naming instead:
+
+```bash
+$ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
+./gradlew :androidApp:connectedDebugAndroidTest
+```
+
+Like `androidDeviceTest`, this is not part of `./gradlew build` — AGP's `build` lifecycle for an
+application module only runs `lintAnalyzeDebugAndroidTest` (static analysis) on the `androidTest`
+source set, not `compileDebugAndroidTestKotlin`/`assembleDebugAndroidTest`. A dedicated
+`android-instrumented-test` job in `.github/workflows/ci.yml` runs this suite on every push.
 
 The suite covers parser, fetcher redirect/304/404/410/timeout/discovery, OPML, Dropbox storage/auth, PKCE, OAuth loopback server, merge (last-write-wins / OR merge / collision guard / FK guard), schema, local settings, article upsert, URL resolver, datetime parser, Result, Repository layer (Article/Feed/Tag/Settings), CloudSession, NotificationCenter, IdGenerator, SyncRepository, ViewModel layer (Home/Settings/Setup/NotificationCenter, including `SettingsViewModel`'s OPML
 import/export paths — the built document/read file round-tripping through the picked path, the
@@ -256,6 +278,19 @@ peer creation still works from inside the click's own call stack:
 - (Linux) After switching the in-app theme (light ↔ dark) with no restart: the menu bar and an
   open dialog's button row restyle immediately, and a context menu opened afterward picks up the
   new theme.
+
+(Android) `nativeContextMenu`'s Android `actual` is a long-press-triggered Material 3
+`DropdownMenu`, covered by `NativeMenuAndroidGestureTest.kt`'s instrumented tests for the gesture
+policy itself (long-press opens without selecting, a short tap or a scroll-sized move does not open
+it — see `androidApp/src/androidTest/` above). What those tests cannot cover end to end against the
+real app UI, so confirm manually on a device or emulator:
+
+- Long-pressing an article row shows the menu, and the article is **not** marked read and the pane
+  does not advance (Single/Dual layout) — unlike a plain tap on the same row.
+- Pressing down on an article row and slowly dragging it vertically before releasing scrolls the
+  list as a normal drag; the menu does not open and the row is not activated.
+- Long-pressing a feed row, a folder header, and a tag row shows the menu with the correct actions,
+  and the row's selection does not change as a side effect of the long-press itself.
 
 **Display scaling.** Every check above must also be run at a **non-100% display scale**, on Windows
 in particular — 200% first, then 150%. The AWT menu backend was mispositioning menus and painting
