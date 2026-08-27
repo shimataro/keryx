@@ -181,7 +181,6 @@
     <string name="settings_refresh_hour1">1時間</string>
     <string name="settings_refresh_hour3">3時間</string>
     <string name="settings_refresh_manual">手動</string>
-    <string name="settings_desktop">デスクトップ</string>
     <string name="settings_notification_enabled">新着通知を有効にする</string>
     <string name="settings_start_minimized">起動時にトレイに収納する</string>
     <string name="settings_cloud_sync">クラウド同期</string>
@@ -209,9 +208,6 @@
     <string name="settings_font_medium">標準</string>
     <string name="settings_font_large">大</string>
     <string name="settings_font_xlarge">特大</string>
-    <string name="settings_article_list">記事一覧</string>
-    <string name="settings_article_list_all">すべて</string>
-    <string name="settings_article_list_unread_only">未読のみ</string>
     <string name="settings_updates">アップデート</string>
     <string name="settings_version">バージョン %1$s</string>
     <string name="settings_website">ウェブサイト</string>
