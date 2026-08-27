@@ -123,10 +123,11 @@ the underlying action: reordering a feed or folder is a plain click-and-drag wit
 drag from a dedicated handle icon with touch (touch needs a distinct starting gesture so the rest
 of the row can still be scrolled normally); a right-click context menu on desktop is a long-press
 menu on Android, and settings — reached from the desktop application menu — get their own toolbar
-entry point on Android, which has no menu bar. List rows (feeds, folders, tags, articles) grow to a
-taller, M3-minimum touch density on Android, and the pane divider between panes (reachable at a
-tablet-width landscape viewport) becomes a fixed, non-draggable line there — a mouse has room for a
-thinner target and a draggable divider that touch does not.
+entry point on Android, which has no menu bar; the settings screen itself also carries its own back
+arrow there, since its near-fullscreen dialog otherwise leaves no other tappable way out. List rows
+(feeds, folders, tags, articles) grow to a taller, M3-minimum touch density on Android, and the pane
+divider between panes (reachable at a tablet-width landscape viewport) becomes a fixed, non-draggable
+line there — a mouse has room for a thinner target and a draggable divider that touch does not.
 
 The surfaces that are not drawn by Compose — the application menu bar, context menus, and the
 dialog button row — are real Swing/AWT widgets, so they follow the platform's Look & Feel.

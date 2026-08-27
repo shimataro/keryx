@@ -49,8 +49,8 @@ composeApp/src/
     `Checkbox`/`SingleChoiceSegmentedButtonRow`+`SegmentedButton`/`FilterChip`（コンポーネント）を
     そのまま使う — 詳細は下記「アイコンセット」参照）,
     KeryxTabDialog（ほぼ全画面のモーダル `Dialog`。エッジツーエッジ対応で safe-drawing padding 済み。
-    タブ切り替え部分はデスクトップ側の自前タブバーとは異なり、本物の M3
-    `PrimaryScrollableTabRow`/`Tab` — 詳細は `ui-guidelines` スキル参照）,
+    本物の M3 `TopAppBar`（戻る矢印＋画面名）を、デスクトップ側の自前タブバーとは異なる本物の M3
+    `PrimaryScrollableTabRow`/`Tab` の上に載せる — 詳細は `ui-guidelines` スキル参照）,
     PlatformTheme（`platformShapes` は M3 既定の `Shapes()`、`ProvidePlatformInteraction` は
     no-op — `LocalIndication`/`LocalRippleConfiguration` を M3 既定のままにすることで、あらゆる
     `clickable` と M3 部品が本物のリップルを持つようになる。external-spec.ja.md の「UI 方針」参照）、

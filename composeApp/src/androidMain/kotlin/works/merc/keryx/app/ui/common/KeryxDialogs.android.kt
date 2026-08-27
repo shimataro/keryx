@@ -9,11 +9,14 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -21,6 +24,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import org.jetbrains.compose.resources.stringResource
+import works.merc.keryx.app.resources.Res
+import works.merc.keryx.app.resources.common_back
 
 /**
  * Android [KeryxAlertDialog]: a plain M3 [AlertDialog] — none of the desktop actual's `DialogWindow`
@@ -82,41 +88,54 @@ actual fun KeryxAlertDialog(
 }
 
 /**
- * Android [KeryxTabDialog]: a near-fullscreen, modal [Dialog] hosting a genuine M3
- * `PrimaryScrollableTabRow`/`Tab` above the selected tab's content — `Primary` because this tab
- * row is the screen's own main navigation (there is no separate `TopAppBar` above it), and
- * `Scrollable` so a tab's full label is never truncated by an equal-width division: tab count
- * varies (4–5, depending on which cloud providers and update-check mechanism this build has), and
- * `fontSizeScale` (see `SettingsViewModel`) can push even a fixed set of labels past what a single
- * screen width holds at "Large"/"Extra Large". `Tab`'s own default M3 layout already stacks the
- * icon above the label, and its `indicator`/ripple/selection colors need no manual wiring, unlike
- * the desktop actual's hand-rolled tab bar (`KeryxDialogTabBar` in `KeryxDialogs.desktop.kt`,
- * desktop-only since this Android actual stopped sharing it). The desktop actual's
- * macOS-System-Settings styling (traffic-light-adjacent title mirroring, fixed small window size,
- * non-blocking modeless window) has no Android equivalent; this only needs to host the same
- * tab-switching behavior in a shape that fits a phone or tablet screen. Revisit alongside the
- * Settings screen's own adaptive-layout work (Phase 2) — a full-screen Settings destination may
- * replace this dialog wrapper entirely.
+ * Android [KeryxTabDialog]: a near-fullscreen, modal [Dialog] hosting a real M3 `TopAppBar`
+ * (back arrow + [title]) above a genuine `PrimaryScrollableTabRow`/`Tab` — `Primary` because M3
+ * groups primary tabs directly under a top app bar (secondary tabs are for a row that shares
+ * space with other content), and `Scrollable` so a tab's full label is never truncated by an
+ * equal-width division: tab count varies (4–5, depending on which cloud providers and
+ * update-check mechanism this build has), and `fontSizeScale` (see `SettingsViewModel`) can push
+ * even a fixed set of labels past what a single screen width holds at "Large"/"Extra Large".
+ * `Tab`'s own default M3 layout already stacks the icon above the label, and its
+ * `indicator`/ripple/selection colors need no manual wiring, unlike the desktop actual's
+ * hand-rolled tab bar (`KeryxDialogTabBar` in `KeryxDialogs.desktop.kt`, desktop-only since this
+ * Android actual stopped sharing it). The desktop actual's macOS-System-Settings styling
+ * (traffic-light-adjacent title mirroring, fixed small window size, non-blocking modeless window)
+ * has no Android equivalent; this only needs to host the same tab-switching behavior in a shape
+ * that fits a phone or tablet screen. Revisit alongside the Settings screen's own adaptive-layout
+ * work (Phase 2) — a full-screen Settings destination may replace this dialog wrapper entirely,
+ * though this `TopAppBar` already gives the user the same back-arrow-and-title experience a route
+ * would, so that swap would be an internal refactor rather than a user-visible change.
+ *
+ * The back arrow's `onClick` is [onDismissRequest] itself — the same dismiss path the system back
+ * gesture/button already goes through — because the `Dialog`'s own `Surface` fills the entire
+ * screen, leaving no outside area for `DialogProperties.dismissOnClickOutside` (left at its
+ * default `true`) to ever actually catch a tap. Built directly on M3's `TopAppBar`/`IconButton`
+ * rather than through `KeryxPaneTopBar`/`TooltipIconButton`: both of those exist to replace a
+ * hand-rolled bar at a **`commonMain`** call site shared across platforms (see their own KDoc),
+ * but this call site is already Android-only, so routing through an expect/actual layer would
+ * just reproduce this same `TopAppBar`/`IconButton` pair one indirection away.
  *
  * `PrimaryScrollableTabRow`/`Tab` rendering is delegated to the shared [KeryxDialogTabs]
  * helper so the icon/label logic stays in one place; only the surrounding container is
- * Android-specific. `PrimaryScrollableTabRow`'s default bottom `HorizontalDivider()` and
- * container/content colors are left as-is rather than overridden to match the surrounding
- * `surfaceContainerLow` — same reasoning as [KeryxAlertDialog]'s Android `actual` ignoring
- * `containerColor`/`tonalElevation`: M3's own defaults are what reads as native chrome here, not
- * desktop's flat surface pattern.
+ * Android-specific. Both the `TopAppBar` and `PrimaryScrollableTabRow`'s default colors (and the
+ * latter's bottom `HorizontalDivider()`) are left as-is rather than overridden to match the
+ * surrounding `surfaceContainerLow` — same reasoning as [KeryxAlertDialog]'s Android `actual`
+ * ignoring `containerColor`/`tonalElevation`: M3's own defaults are what reads as native chrome
+ * here, not desktop's flat surface pattern.
  *
  * The `Dialog` window draws behind the system bars edge-to-edge like the rest of the app (see
  * `MainActivity`'s `enableEdgeToEdge()`), so its content applies its own `safeDrawingPadding()`
  * rather than relying on the window to inset it — the tonal background still fills the full
  * window behind the status/navigation bars.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 actual fun KeryxTabDialog(
     onDismissRequest: () -> Unit,
     tabs: List<KeryxDialogTab>,
     selectedTabId: String,
     onSelectTab: (String) -> Unit,
+    title: String?,
     content: @Composable (String) -> Unit,
 ) {
     Dialog(
@@ -128,6 +147,15 @@ actual fun KeryxTabDialog(
             color = MaterialTheme.colorScheme.surfaceContainerLow,
         ) {
             Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
+                val backLabel = stringResource(Res.string.common_back)
+                TopAppBar(
+                    title = { if (title != null) Text(title) },
+                    navigationIcon = {
+                        IconButton(onClick = onDismissRequest) {
+                            KeryxIcon(KeryxIcons.ArrowBack, contentDescription = backLabel)
+                        }
+                    },
+                )
                 // rememberSelectedTabId (SettingsDialog.kt) always resolves selectedTabId to one
                 // of tabs' ids, and tabs' shape is fixed for the dialog's whole lifetime (it only
                 // depends on build-time constants — availableCloudTypes, selfUpdateCheckSupported)
