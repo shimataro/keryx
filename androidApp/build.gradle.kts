@@ -53,6 +53,37 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    signingConfigs {
+        create("release") {
+            val keystorePath = System.getenv("ANDROID_RELEASE_KEYSTORE_PATH")
+                ?: (project.findProperty("androidReleaseKeystorePath") as? String)
+                ?: localProperties.getProperty("android.release.keystore.path")
+            val keystorePassword = System.getenv("ANDROID_RELEASE_KEYSTORE_PASSWORD")
+                ?: (project.findProperty("androidReleaseKeystorePassword") as? String)
+                ?: localProperties.getProperty("android.release.keystore.password")
+            val keyAlias = System.getenv("ANDROID_RELEASE_KEY_ALIAS")
+                ?: (project.findProperty("androidReleaseKeyAlias") as? String)
+                ?: localProperties.getProperty("android.release.key.alias")
+            val keyPassword = System.getenv("ANDROID_RELEASE_KEY_PASSWORD")
+                ?: (project.findProperty("androidReleaseKeyPassword") as? String)
+                ?: localProperties.getProperty("android.release.key.password")
+
+            if (keystorePath != null && keystorePassword != null && keyAlias != null && keyPassword != null) {
+                storeFile = File(keystorePath)
+                storePassword = keystorePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.findByName("release")?.takeIf { it.storeFile != null }
+                ?: signingConfigs.getByName("debug")
+        }
+    }
 }
 
 dependencies {

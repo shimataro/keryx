@@ -217,7 +217,7 @@ per platform:
 ## Release (CD)
 
 `.github/workflows/release.yml` builds the packages and attaches them to the GitHub Release.
-**macOS, Linux, and Windows (x86_64, plus macOS arm64) for now** (cross-compilation is not
+**macOS, Linux, Windows (x86_64, plus macOS arm64), and Android (universal APK/AAB)** (cross-compilation is not
 supported, so each platform needs its own runner).
 
 Flow:
@@ -230,6 +230,7 @@ Flow:
    - `:composeApp:packageDmg` (macOS runner), attached as `Keryx-<version>-macos-arm64.dmg` **and `Keryx-<version>-macos-arm64.zip`**. **For a pre-release tag, `packageDmg` is skipped and only the `.zip` is attached** (same reasoning as the Windows MSI case below).
    - `:composeApp:packageDeb :composeApp:packageRpm` (Linux runner, after installing `fakeroot`/`rpm` for jpackage), attached as `Keryx-<version>-linux-x86_64.deb`, `Keryx-<version>-linux-x86_64.rpm` **and `Keryx-<version>-linux-x86_64.zip`**. **For a pre-release tag, `packageDeb`/`packageRpm` are skipped and only the `.zip` is attached** (same reasoning as the Windows MSI case below).
    - `:composeApp:createDistributable :composeApp:packageMsi` (Windows runner — `windows-latest` ships WiX Toolset v3.14.1 preinstalled, so no separate WiX setup step is needed), attached as `Keryx-<version>-windows-x86_64.msi` **and `Keryx-<version>-windows-x86_64.zip`**. **For a pre-release tag, `packageMsi` is skipped and only the `.zip` is attached** — MSI's `ProductVersion` must be purely numeric (see below), so every pre-release of a given target version would collapse to the same `ProductVersion` under the fixed `upgradeUuid`, and WiX would not recognize a later pre-release or the eventual final release as an upgrade of an earlier one.
+   - `:androidApp:assembleRelease` and `:androidApp:bundleRelease` (Ubuntu runner), attached as `Keryx-<version>-android-universal.apk` and `Keryx-<version>-android-universal.aab`. Unlike the desktop installers, Android packages are built and attached for pre-release tags too, because Android has no equivalent version-metadata restriction and testers need a signed APK.
 
    The `.zip` files are archives of the non-packaged app bundle/image produced by `:composeApp:createDistributable`, for users who prefer not to use an installer package. The `deploy-pages` job (which triggers the Cloudflare Pages deploy hook) waits on all three packaging jobs before running.
 
@@ -277,6 +278,8 @@ Finder's displayed version, and the release asset name are all `1.2.0-beta.1`, w
 Set `DROPBOX_APP_KEY` / `GOOGLE_DRIVE_CLIENT_ID` / `GOOGLE_DRIVE_CLIENT_SECRET` / `ONEDRIVE_CLIENT_ID` as
 **repository secrets**. If they are unset the build still succeeds, but the released app has the corresponding
 cloud integration hidden entirely (see `CloudStorageAvailability`).
+
+For Android release signing, set `ANDROID_RELEASE_KEYSTORE_BASE64`, `ANDROID_RELEASE_KEYSTORE_PASSWORD`, `ANDROID_RELEASE_KEY_ALIAS`, and `ANDROID_RELEASE_KEY_PASSWORD` as repository secrets. The keystore is a Base64-encoded PKCS12/JKS file; the workflow decodes it at build time. To keep the same signing key on GitHub Releases and Google Play, generate the keystore locally and import it into Google Play Console as the "existing app signing key" when creating the app. Without these secrets the release build falls back to the debug signing configuration.
 
 > [!IMPORTANT]
 > **The released DMG is unsigned** (ad-hoc), so Gatekeeper blocks it on open. See the
