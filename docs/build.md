@@ -225,14 +225,14 @@ Flow:
 1. Publish a GitHub Release with a `vMAJOR.MINOR.PATCH` tag, optionally with a SemVer-style
    pre-release suffix (e.g. `v0.1.0`, `v1.2.0-beta.1`).
 2. The workflow triggers on `release: published`, strips the leading `v`, and passes the result as `-PappVersion`.
-3. Three independent jobs run in parallel:
+3. Four independent jobs run in parallel:
 
    - `:composeApp:packageDmg` (macOS runner), attached as `Keryx-<version>-macos-arm64.dmg` **and `Keryx-<version>-macos-arm64.zip`**. **For a pre-release tag, `packageDmg` is skipped and only the `.zip` is attached** (same reasoning as the Windows MSI case below).
    - `:composeApp:packageDeb :composeApp:packageRpm` (Linux runner, after installing `fakeroot`/`rpm` for jpackage), attached as `Keryx-<version>-linux-x86_64.deb`, `Keryx-<version>-linux-x86_64.rpm` **and `Keryx-<version>-linux-x86_64.zip`**. **For a pre-release tag, `packageDeb`/`packageRpm` are skipped and only the `.zip` is attached** (same reasoning as the Windows MSI case below).
    - `:composeApp:createDistributable :composeApp:packageMsi` (Windows runner — `windows-latest` ships WiX Toolset v3.14.1 preinstalled, so no separate WiX setup step is needed), attached as `Keryx-<version>-windows-x86_64.msi` **and `Keryx-<version>-windows-x86_64.zip`**. **For a pre-release tag, `packageMsi` is skipped and only the `.zip` is attached** — MSI's `ProductVersion` must be purely numeric (see below), so every pre-release of a given target version would collapse to the same `ProductVersion` under the fixed `upgradeUuid`, and WiX would not recognize a later pre-release or the eventual final release as an upgrade of an earlier one.
    - `:androidApp:assembleRelease` and `:androidApp:bundleRelease` (Ubuntu runner), attached as `Keryx-<version>-android-universal.apk` and `Keryx-<version>-android-universal.aab`. Unlike the desktop installers, Android packages are built and attached for pre-release tags too, because Android has no equivalent version-metadata restriction and testers need a signed APK.
 
-   The `.zip` files are archives of the non-packaged app bundle/image produced by `:composeApp:createDistributable`, for users who prefer not to use an installer package. The `deploy-pages` job (which triggers the Cloudflare Pages deploy hook) waits on all three packaging jobs before running.
+   The `.zip` files are archives of the non-packaged app bundle/image produced by `:composeApp:createDistributable`, for users who prefer not to use an installer package. The `deploy-pages` job (which triggers the Cloudflare Pages deploy hook) waits on all four packaging jobs before running.
 
 The **tag is the single source of truth for the version**. `appVersion` in `composeApp/build.gradle.kts` resolves
 `-PappVersion` > `APP_VERSION` env var > the literal in the file, and drives `BuildConfig.VERSION` (shown in the
