@@ -818,7 +818,7 @@ class FeedListDragTest {
 
     @Test
     fun droppingAFeedOnATagRowAttachesTheTagWithoutMovingIt() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
+        val (_, driver, db) = fileDb(foreignKeys = true)
         db.insertFolder("folder1", "Folder One", sortOrder = 0L)
         db.insertFeed("a", sortOrder = 0L, folderId = "folder1")
         db.insertTag("tag1", "Tag One", sortOrder = 0L)
