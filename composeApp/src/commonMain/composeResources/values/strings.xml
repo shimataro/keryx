@@ -142,6 +142,7 @@
     <string name="article_next">次の記事</string>
 
     <!-- settings -->
+    <string name="settings_title">設定</string>
     <string name="settings_tab_general">一般</string>
     <string name="settings_tab_notifications">通知</string>
     <string name="settings_tab_data">データ</string>

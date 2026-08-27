@@ -50,8 +50,9 @@ composeApp/src/
     `Button`/`FilledTonalButton`/`TextButton`/`Switch`/`Checkbox`/
     `SingleChoiceSegmentedButtonRow`+`SegmentedButton`/`FilterChip` (components) as the Android side —
     see "Icon set" below), KeryxTabDialog (a modal, near-fullscreen `Dialog`, safe-drawing-padded
-    for edge-to-edge, whose tab switcher is a genuine M3 `PrimaryScrollableTabRow`/`Tab` — unlike
-    desktop's own hand-rolled tab bar, see the `ui-guidelines` skill), PlatformTheme
+    for edge-to-edge, topped by a real M3 `TopAppBar` (back arrow + the screen's own name) above a
+    genuine `PrimaryScrollableTabRow`/`Tab` — unlike desktop's own hand-rolled tab bar, see the
+    `ui-guidelines` skill), PlatformTheme
     (`platformShapes` = M3's own default `Shapes()`,
     `ProvidePlatformInteraction` a no-op — leaving `LocalIndication`/`LocalRippleConfiguration` at
     their M3 defaults is what gives every `clickable` and M3 component a real ripple; see "UI

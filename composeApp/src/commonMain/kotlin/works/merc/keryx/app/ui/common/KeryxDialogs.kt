@@ -86,8 +86,14 @@ internal fun KeryxDialogTabs(
  * `KeryxDialogs.*.kt` for the details.
  *
  * Has no button row: the caller's content applies its changes immediately. Desktop closes it via
- * the native close box or Escape; Android via the system back gesture/button or an outside tap.
+ * the native close box or Escape; Android via the system back gesture/button, or a back arrow in
+ * a `TopAppBar` above the tab row (added because the near-fullscreen `Dialog` leaves no tappable
+ * area outside its own content — see [KeryxTabDialog]'s Android `actual` for why "outside tap"
+ * alone isn't a real dismiss path there).
  *
+ * @param title The screen's own name. Rendered as the Android `actual`'s `TopAppBar` title;
+ *   desktop's `actual` ignores it, since it already mirrors the selected tab's own label as the
+ *   native window title instead (see that `actual`'s KDoc).
  * @param content receives the currently selected tab's [KeryxDialogTab.id] and renders that tab.
  */
 @Composable
@@ -96,5 +102,6 @@ expect fun KeryxTabDialog(
     tabs: List<KeryxDialogTab>,
     selectedTabId: String,
     onSelectTab: (String) -> Unit,
+    title: String? = null,
     content: @Composable (String) -> Unit,
 )

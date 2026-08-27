@@ -143,6 +143,7 @@
     <string name="article_next">Next article</string>
 
     <!-- settings -->
+    <string name="settings_title">Settings</string>
     <string name="settings_tab_general">General</string>
     <string name="settings_tab_notifications">Notifications</string>
     <string name="settings_tab_data">Data</string>

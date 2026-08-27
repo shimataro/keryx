@@ -17,6 +17,7 @@ import works.merc.keryx.app.resources.settings_cloud_sync
 import works.merc.keryx.app.resources.settings_tab_data
 import works.merc.keryx.app.resources.settings_tab_general
 import works.merc.keryx.app.resources.settings_tab_notifications
+import works.merc.keryx.app.resources.settings_title
 import works.merc.keryx.app.resources.settings_updates
 
 /**
@@ -62,6 +63,7 @@ fun SettingsDialog(onDismiss: () -> Unit, initialTabId: String = "general", tabR
         tabs = tabs,
         selectedTabId = selectedTabId,
         onSelectTab = { selectedTabId = it },
+        title = stringResource(Res.string.settings_title),
     ) { tabId ->
         when (tabId) {
             "general" -> GeneralTabContent(vm)

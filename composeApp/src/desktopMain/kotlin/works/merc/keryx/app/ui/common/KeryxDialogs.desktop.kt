@@ -845,6 +845,10 @@ actual fun KeryxAlertDialog(
  * @param tabs The tabs available for selection.
  * @param selectedTabId The identifier of the selected tab.
  * @param onSelectTab Called with the identifier of the tab selected by the user.
+ * @param title Unused here: this actual already mirrors the selected tab's own label as the
+ *   native window title (see below) instead of showing a fixed screen name — see the Android
+ *   `actual`, which has no native window chrome to put a title in and renders this directly in
+ *   its own `TopAppBar`.
  * @param content Composable content rendered for the selected tab.
  */
 @Composable
@@ -853,9 +857,11 @@ actual fun KeryxTabDialog(
     tabs: List<KeryxDialogTab>,
     selectedTabId: String,
     onSelectTab: (String) -> Unit,
+    title: String?,
     content: @Composable (String) -> Unit,
 ) {
     // The window title (and, on macOS, the merged-title-bar row) mirrors the selected tab's label.
+    // `title` (the fixed screen name) is intentionally unused here — see this function's KDoc.
     val selectedLabel = tabs.firstOrNull { it.id == selectedTabId }?.label
     DesktopModalWindow(
         title = selectedLabel,
