@@ -37,7 +37,7 @@ class NativeMenuDesktopGestureTest {
             )
         }
 
-        onNodeWithTag("menu-host").assertExists().performMouseInput { rightClick() }
+        onNodeWithTag("menu-host").performMouseInput { rightClick() }
         waitForIdle()
 
         assertTrue(opened, "right-click must invoke onOpen on desktop")
