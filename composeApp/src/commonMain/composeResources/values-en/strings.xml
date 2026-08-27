@@ -16,6 +16,10 @@
     <string name="common_back">Back</string>
     <string name="common_abort">Abort</string>
 
+    <!-- accessibility -->
+    <string name="accessibility_checked">Checked</string>
+    <string name="accessibility_unchecked">Not checked</string>
+
     <!-- setup -->
     <string name="setup_title">Welcome to Keryx</string>
     <string name="setup_choose_mode">Choose how to sync (you can change this later)</string>

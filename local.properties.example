@@ -6,12 +6,6 @@
 #   2. Environment variable
 #   3. `local.properties` value
 #   4. Default (empty string or noted below)
-#
-# sdk.dir is the one exception: it is read directly by the Android Gradle Plugin (AGP) itself,
-# not through the -P/env-var/local.properties chain above. It's required for `./gradlew build`
-# to succeed at all (composeApp configures an Android library target), but not for a
-# desktop-scoped task like `:composeApp:desktopTest` — see docs/setup.md.
-# sdk.dir=/path/to/Android/sdk
 
 # Dropbox OAuth App Key.
 #   Gradle property: -PdropboxAppKey=...
@@ -53,3 +47,30 @@ onedrive.client.id=
 #   Environment variable: UPDATE_REPO
 #   Default: shimataro/keryx
 update.repo=
+
+# sdk.dir is the one exception: it is read directly by the Android Gradle Plugin (AGP) itself,
+# not through the -P/env-var/local.properties chain above. It's required for `./gradlew build`
+# to succeed at all (composeApp configures an Android library target), but not for a
+# desktop-scoped task like `:composeApp:desktopTest` — see docs/setup.md.
+# sdk.dir=/path/to/Android/sdk
+
+# Android release signing configuration.
+#   Environment variables: ANDROID_RELEASE_KEYSTORE_PATH
+#                          ANDROID_RELEASE_KEYSTORE_PASSWORD
+#                          ANDROID_RELEASE_KEY_ALIAS
+#                          ANDROID_RELEASE_KEY_PASSWORD
+#   Gradle properties: -PandroidReleaseKeystorePath=...
+#                      -PandroidReleaseKeystorePassword=...
+#                      -PandroidReleaseKeyAlias=...
+#                      -PandroidReleaseKeyPassword=...
+#   Default: (empty)
+# Leave empty (or omit) at your own risk: a release build then fails AGP's signing
+# validation (`validateSigningRelease`) instead of falling back to debug signing.
+# Use an absolute path for android.release.keystore.path; relative paths are
+# resolved against the androidApp module directory, not the repository root.
+# See docs/build.md for how to generate a release keystore and register it
+# in GitHub Actions / Google Play Console.
+android.release.keystore.path=
+android.release.keystore.password=
+android.release.key.alias=keryx-release
+android.release.key.password=
