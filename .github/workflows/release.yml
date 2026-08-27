@@ -321,6 +321,100 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
 
+  package-android:
+    name: Package (Android universal)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+
+      # The tag is the single source of truth for the released version: `v0.1.0` -> `0.1.0`.
+      - name: Resolve version from tag
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          tag="$RELEASE_TAG"
+          version="${tag#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]; then
+            echo "::error::Tag '$tag' does not yield a compatible version (got '$version')."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v6
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      # `ubuntu-latest` (Ubuntu 24.04) already ships Android SDK Command Line Tools 12.0,
+      # Build-tools 37.0.0, Platform-Tools 37.0.1, and SDK Platforms 34-37, so this step
+      # is strictly optional. Kept for resilience against future runner-image changes.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Decode release keystore
+        id: keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          keystore_path="$RUNNER_TEMP/keryx-release.keystore"
+          echo "$KEYSTORE_BASE64" | base64 -d > "$keystore_path"
+          chmod 600 "$keystore_path"
+          echo "path=$keystore_path" >> "$GITHUB_OUTPUT"
+
+      - name: Build Android release packages
+        run: ./gradlew :androidApp:assembleRelease :androidApp:bundleRelease -PappVersion=${{ steps.version.outputs.version }}
+        env:
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          GOOGLE_DRIVE_CLIENT_ID: ${{ secrets.GOOGLE_DRIVE_CLIENT_ID }}
+          GOOGLE_DRIVE_CLIENT_SECRET: ${{ secrets.GOOGLE_DRIVE_CLIENT_SECRET }}
+          ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
+          ANDROID_RELEASE_KEYSTORE_PATH: ${{ steps.keystore.outputs.path }}
+          ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+
+      - name: Rename artifacts
+        id: artifact
+        run: |
+          apk_src=$(find androidApp/build/outputs/apk/release -maxdepth 1 -name '*.apk' | head -n 1)
+          aab_src=$(find androidApp/build/outputs/bundle/release -maxdepth 1 -name '*.aab' | head -n 1)
+          if [ -z "$apk_src" ]; then
+            echo "::error::No APK produced under androidApp/build/outputs/apk/release."
+            exit 1
+          fi
+          if [ -z "$aab_src" ]; then
+            echo "::error::No AAB produced under androidApp/build/outputs/bundle/release."
+            exit 1
+          fi
+          apk_dest="Keryx-${{ steps.version.outputs.version }}-android-universal.apk"
+          aab_dest="Keryx-${{ steps.version.outputs.version }}-android-universal.aab"
+          mv "$apk_src" "$apk_dest"
+          mv "$aab_src" "$aab_dest"
+          echo "apk=$apk_dest" >> "$GITHUB_OUTPUT"
+          echo "aab=$aab_dest" >> "$GITHUB_OUTPUT"
+
+      - name: Attach to release
+        run: gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.apk }}" "${{ steps.artifact.outputs.aab }}" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+
   deploy-pages:
     name: Update "https://keryx.merc.works" (trigger Cloudflare Pages deploy hook)
     runs-on: ubuntu-latest
@@ -329,6 +423,7 @@ jobs:
       - package-macos
       - package-linux
       - package-windows
+      - package-android
     permissions: {}
 
     steps:

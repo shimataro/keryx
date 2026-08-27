@@ -22,11 +22,15 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.withTimeoutOrNull
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
+import works.merc.keryx.app.ui.i18n.checkedStateDescription
+import works.merc.keryx.app.ui.i18n.uncheckedStateDescription
 
 /**
  * Android `actual`: a real long-press context menu (a Material 3 [DropdownMenu]), replacing the
@@ -134,16 +138,20 @@ private fun NativeMenuContent(items: List<NativeMenuEntry>, onDismiss: () -> Uni
                 enabled = entry.enabled,
                 onClick = { entry.onClick(); onDismiss() },
             )
-            is NativeCheckMenuItem -> DropdownMenuItem(
-                text = { Text(entry.label) },
-                leadingIcon = {
-                    // Fixed-size slot so the checkmark's presence never shifts the label (ui-guidelines).
-                    Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
-                        if (entry.checked) KeryxIcon(KeryxIcons.CheckOutlined, contentDescription = null)
-                    }
-                },
-                onClick = { entry.onClick(); onDismiss() },
-            )
+            is NativeCheckMenuItem -> {
+                val stateDescription = if (entry.checked) checkedStateDescription() else uncheckedStateDescription()
+                DropdownMenuItem(
+                    text = { Text(entry.label) },
+                    modifier = Modifier.semantics { this.stateDescription = stateDescription },
+                    leadingIcon = {
+                        // Fixed-size slot so the checkmark's presence never shifts the label (ui-guidelines).
+                        Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                            if (entry.checked) KeryxIcon(KeryxIcons.CheckOutlined, contentDescription = null)
+                        }
+                    },
+                    onClick = { entry.onClick(); onDismiss() },
+                )
+            }
             is NativeSubMenu -> DropdownMenuItem(
                 text = { Text(entry.label) },
                 trailingIcon = { KeryxIcon(KeryxIcons.ChevronRight, contentDescription = null) },

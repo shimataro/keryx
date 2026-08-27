@@ -17,6 +17,10 @@
     <string name="common_back">戻る</string>
     <string name="common_abort">中止</string>
 
+    <!-- accessibility -->
+    <string name="accessibility_checked">選択済み</string>
+    <string name="accessibility_unchecked">未選択</string>
+
     <!-- setup -->
     <string name="setup_title">Keryx へようこそ</string>
     <string name="setup_choose_mode">同期方法を選んでください（後からでも変更できます）</string>
