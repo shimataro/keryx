@@ -162,7 +162,11 @@ keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
 ./gradlew build
 ```
 
-If `build` passes, code generation for SQLDelight / Compose Resources / BuildConfig, compilation, and tests are all verified — for both the desktop and Android targets, since `build` now also compiles and assembles `:androidApp`.
+If `build` passes, code generation for SQLDelight / Compose Resources / BuildConfig, compilation,
+and every test task `build` runs are all verified — for both the desktop and Android targets,
+since `build` now also compiles and assembles `:androidApp`. This does not include the
+separately-executed `androidDeviceTest` instrumented suite, which needs a real device/emulator
+(see Prerequisites above).
 
 For desktop-only work, a target-scoped task like `./gradlew :composeApp:desktopTest` avoids
 needing either the Android SDK or a release signing keystore.

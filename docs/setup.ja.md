@@ -160,9 +160,10 @@ keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
 ./gradlew build
 ```
 
-`build` が通れば SQLDelight / Compose Resources / BuildConfig のコード生成、コンパイル、テストまで
-一通り確認できる — `build` は `:androidApp` のコンパイル・アセンブルも行うため、デスクトップと
-Android の両ターゲットについて確認できる。
+`build` が通れば SQLDelight / Compose Resources / BuildConfig のコード生成、コンパイル、`build`
+が実行するテストまで一通り確認できる — `build` は `:androidApp` のコンパイル・アセンブルも行う
+ため、デスクトップと Android の両ターゲットについて確認できる。ただし別途実行する
+`androidDeviceTest` 計装スイート（実機/エミュレータが必要。前提を参照）はこれに含まれない。
 
 デスクトップの作業だけであれば、`./gradlew :composeApp:desktopTest` のようなターゲット限定
 タスクを使うことで、Android SDK もリリース署名キーストアも用意せずに済む。
