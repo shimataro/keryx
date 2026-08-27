@@ -30,12 +30,14 @@ Download the latest release from the [Releases page](https://github.com/shimatar
 > [!IMPORTANT]
 > **macOS**: Until an officially signed release is available, downloaded `.dmg` / `.zip` files
 > are blocked by Gatekeeper as unsigned. Before opening the `.dmg` or extracting the `.zip`,
-> clear the quarantine attribute on the downloaded file itself (this also keeps the app inside
-> from inheriting it once opened/extracted):
+> clear the quarantine attribute on the downloaded file itself:
 >
 > ```bash
-> xattr -d com.apple.quarantine ~/Downloads/Keryx-*.dmg   # .dmg
-> xattr -d com.apple.quarantine ~/Downloads/Keryx-*.zip   # .zip
+> # .dmg
+> xattr -d com.apple.quarantine ~/Downloads/Keryx-*.dmg
+>
+> # .zip
+> xattr -d com.apple.quarantine ~/Downloads/Keryx-*.zip 
 > ```
 >
 > Alternatively, right-click the app and choose "Open" instead of double-clicking. See
