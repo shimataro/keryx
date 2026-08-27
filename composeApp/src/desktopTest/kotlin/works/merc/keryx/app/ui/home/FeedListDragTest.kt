@@ -67,6 +67,7 @@ import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.domain.TagRepository
+import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
@@ -184,7 +185,15 @@ class FeedListDragTest {
 
     @Test
     fun dragsAFeedAboveAnotherAndPersistsTheNewOrder() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
+        // A file-backed DB, not inMemoryDb(): this drop reaches FeedRepository.moveFeed's
+        // db.transaction {} on a non-EDT thread (Dispatchers.Unconfined) while HomeViewModel's
+        // stateIn reads the same connection from the real AWT EDT. inMemoryDb() pins every caller
+        // to one shared JDBC connection with no synchronization on SQLDelight's own transaction
+        // bookkeeping, so the two can race — see fileDb()'s KDoc and
+        // FeedRepositoryTest.subscribeFeedSerializesSortOrderAllocationAcrossConcurrentCalls for
+        // the same failure mode. Every other test in this file that completes a drop/reorder
+        // shares this risk and uses fileDb() too.
+        val (_, driver, db) = fileDb(foreignKeys = true)
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
         db.insertFeed("c", sortOrder = 2L)
@@ -255,7 +264,7 @@ class FeedListDragTest {
 
     @Test
     fun touchPressOnTheHandleReordersTheFeed() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
+        val (_, driver, db) = fileDb(foreignKeys = true)
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
         val fixture = newHomeViewModel(driver, db)
@@ -310,7 +319,7 @@ class FeedListDragTest {
 
     @Test
     fun theMoveDownAccessibilityActionReordersAFeedWithinItsGroup() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
+        val (_, driver, db) = fileDb(foreignKeys = true)
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
         db.insertFeed("c", sortOrder = 2L)
@@ -331,7 +340,7 @@ class FeedListDragTest {
 
     @Test
     fun theMoveUpAccessibilityActionReordersAFeedWithinItsGroup() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
+        val (_, driver, db) = fileDb(foreignKeys = true)
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
         db.insertFeed("c", sortOrder = 2L)
@@ -380,7 +389,7 @@ class FeedListDragTest {
 
     @Test
     fun theMoveDownAccessibilityActionReordersAFolder() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
+        val (_, driver, db) = fileDb(foreignKeys = true)
         db.insertFolder("d1", "Alpha", sortOrder = 0L)
         db.insertFolder("d2", "Beta", sortOrder = 1L)
         db.insertFolder("d3", "Gamma", sortOrder = 2L)
@@ -402,7 +411,7 @@ class FeedListDragTest {
 
     @Test
     fun theMoveUpAccessibilityActionReordersAFolder() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
+        val (_, driver, db) = fileDb(foreignKeys = true)
         db.insertFolder("d1", "Alpha", sortOrder = 0L)
         db.insertFolder("d2", "Beta", sortOrder = 1L)
         val fixture = newHomeViewModel(driver, db)
@@ -519,7 +528,7 @@ class FeedListDragTest {
 
     @Test
     fun droppingAFeedOnAFolderHeaderMovesItIntoThatFolder() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
+        val (_, driver, db) = fileDb(foreignKeys = true)
         db.insertFolder("folder1", "Folder One", sortOrder = 0L)
         db.insertFeed("a", sortOrder = 0L)
         val fixture = newHomeViewModel(driver, db)
@@ -563,7 +572,7 @@ class FeedListDragTest {
      */
     @Test
     fun holdingADragOverACollapsedFolderThenAutoExpandingDoesNotMoveTheInsertionGuide() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
+        val (_, driver, db) = fileDb(foreignKeys = true)
         db.insertFolder("d1", "Folder One", sortOrder = 0L)
         db.insertFeed("f1", folderId = "d1", sortOrder = 0L)
         db.insertFeed("a", sortOrder = 1L)
@@ -626,7 +635,7 @@ class FeedListDragTest {
      */
     @Test
     fun aCollapsedFolderFollowedByAnExpandedOneStillGetsAFullThicknessGuide() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
+        val (_, driver, db) = fileDb(foreignKeys = true)
         db.insertFolder("d1", "Folder One", sortOrder = 0L)
         db.insertFeed("f1", folderId = "d1", sortOrder = 0L)
         db.insertFolder("d2", "Folder Two", sortOrder = 1L)
@@ -680,7 +689,7 @@ class FeedListDragTest {
      */
     @Test
     fun draggingOverACollapsedFolderPaintsNoGuideOnOtherRows() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
+        val (_, driver, db) = fileDb(foreignKeys = true)
         db.insertFolder("d1", "Folder One", sortOrder = 0L)
         db.insertFeed("f1", folderId = "d1", sortOrder = 0L)
         db.insertFolder("d2", "Folder Two", sortOrder = 1L)
@@ -757,7 +766,7 @@ class FeedListDragTest {
      */
     @Test
     fun draggingOntoAnEmptyNoFolderSectionKeepsClearanceFromItsHighlight() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
+        val (_, driver, db) = fileDb(foreignKeys = true)
         db.insertFolder("d1", "Folder One", sortOrder = 0L)
         db.insertFeed("f1", folderId = "d1", sortOrder = 0L)
         val fixture = newHomeViewModel(driver, db)
@@ -847,7 +856,7 @@ class FeedListDragTest {
 
     @Test
     fun aRightClickDuringADragDoesNotOpenTheContextMenuAndDoesNotAbortTheDrag() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
+        val (_, driver, db) = fileDb(foreignKeys = true)
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
         db.insertFeed("c", sortOrder = 2L)
@@ -899,7 +908,7 @@ class FeedListDragTest {
 
     @Test
     fun theDragGhostAppearsOnlyWhileDragging() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
+        val (_, driver, db) = fileDb(foreignKeys = true)
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
         val fixture = newHomeViewModel(driver, db)
@@ -985,7 +994,7 @@ class FeedListDragTest {
 
     @Test
     fun dragsAFolderOntoAnotherFolderToReorder() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
+        val (_, driver, db) = fileDb(foreignKeys = true)
         db.insertFolder("d1", "Alpha", sortOrder = 0L)
         db.insertFolder("d2", "Beta", sortOrder = 1L)
         val fixture = newHomeViewModel(driver, db)
