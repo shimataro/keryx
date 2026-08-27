@@ -1348,3 +1348,82 @@ original report. What remains is only the edge case above.
 Compensating would mean biasing each row's hit area upwards relative to its highlight. That trades
 one edge for the other: clicking near the *top* of a highlight would then select the row above.
 There is no bias that fixes both edges, and the platform's own apps do not apply one.
+
+## A concurrent write can fail a read-then-write transaction with a non-retryable SQLITE_BUSY
+
+**Status**: not fixed — the affected call sites are narrow and unobserved in production; a real fix
+touches the core data-access layer. Worked around in the one test it made flaky.
+
+### Symptom
+
+Under concurrent writers, `FeedRepository.subscribeFeedWrite`'s `feeds.upsert` can throw
+`org.sqlite.SQLiteException: [SQLITE_BUSY] The database file is locked`. This is an *uncaught*
+exception on the calling thread, not a `Result.Err` — `subscribeFeedWrite` has no `try`/`catch`
+around its `db.transaction {}` block, so the exception propagates past `FeedRepository` entirely.
+
+First observed via a CI-only flake in
+`FeedRepositoryTest.subscribeFeedSerializesSortOrderAllocationAcrossConcurrentCalls` (two real
+`Thread`s calling `subscribeFeed` concurrently against a file-backed DB), then reproduced locally
+(1 failure in 30 runs) with the same stack trace.
+
+### Diagnosis
+
+`subscribeFeedWrite`'s `db.transaction {}` reads before it writes (`feeds.getByUrl` /
+`feeds.nextSortOrderInGroup`, then `feeds.upsert`). SQLDelight's `JdbcSqliteDriver` always issues a
+plain `BEGIN TRANSACTION` (SQLite's default *deferred* mode), so the transaction starts by taking
+only a SHARED lock at the read and has to **upgrade** to RESERVED at the write.
+
+SQLite's own lock-upgrade rule (documented behavior of `sqlite3_busy_handler`) is: if granting the
+upgrade could deadlock against another connection that is itself waiting to upgrade, SQLite returns
+`SQLITE_BUSY` **immediately, without invoking the busy handler**. `busy_timeout` (this app's
+`SQLITE_BUSY_TIMEOUT_MS`, applied via `sqlite_connection_properties()`) only governs waiting to
+*acquire* a lock that has no conflicting upgrade in progress — it does not apply here.
+
+The two overlapping writers in the failing test: the first `subscribeFeedWrite` call holds RESERVED
+inside `subscribePlacementMutex.withLock { db.transaction { ... } } }`, but the *next* thing that
+call does after releasing the mutex — `articleRepository.upsertParsed(feedId, fetched.articles)`, a
+separate per-feed `db.transaction {}` — can still be mid-flight, still holding a lock, when the
+second call's own transaction tries to upgrade its SHARED read lock to RESERVED for its write.
+
+### Ruled out
+
+- **`busy_timeout` does not help.** It is set (`SQLITE_BUSY_TIMEOUT_MS = 5_000`), yet the failing
+  test run completed in well under a second — no waiting occurred, consistent with a failed lock
+  *upgrade* bypassing the busy handler rather than a slow acquisition timing out.
+- **Switching to WAL mode would not remove this**, only narrow the window: WAL still serializes
+  writers, and a writer that needs to upgrade past another writer's held lock fails with
+  `SQLITE_BUSY_SNAPSHOT` for the same underlying reason.
+
+### What a real fix would need
+
+A `ConnectionManager`/`JdbcDriver` that issues `BEGIN IMMEDIATE TRANSACTION` instead of a plain
+`BEGIN`, so a transaction that is going to write takes its write lock up front instead of upgrading
+into it later — turning the failure mode into an ordinary, retryable "wait for the lock" case that
+`busy_timeout` already covers. `app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver` is a
+`class` (not `open`), and its transaction begin/end/rollback come from a private
+`connectionManager(url, properties)` factory, so this cannot be done by subclassing — it needs a
+purpose-built `JdbcDriver` implementation in `desktopMain`, reimplementing
+`ThreadedConnectionManager`'s per-thread connection handling and the listener bookkeeping
+`JdbcSqliteDriver` itself does. Because every transaction would become a writer up front, this needs
+separate evaluation of its interaction with FTS incremental indexing and the sync merge before it
+could be applied — out of scope for a CI-flake fix.
+
+### Where this can happen
+
+Confirmed by inspection (not by triggering each one) — a transaction reads before it writes:
+
+- `FeedRepository.subscribeFeedWrite` (`FeedRepository.kt`, the `db.transaction {}` covering
+  `getByUrl`/`nextSortOrderInGroup` then `upsert`) — the one this was observed against.
+- `FeedRepository.moveFeedsOutOfFolder` (reads `nextSortOrderInGroup` then writes per feed in the
+  same transaction), reachable directly and via `FolderRepository.deleteFolder`'s transaction.
+
+`FeedRepository.moveFeed` and `FolderRepository.reorderFolders` read their ordering *before*
+opening `db.transaction {}`, so they don't have this shape. Neither does the feed-refresh apply
+transaction (`FeedRepository.kt`, around `applyFetch`), which only writes.
+
+### How the test was worked around
+
+`FeedRepositoryTest.subscribeFeedSerializesSortOrderAllocationAcrossConcurrentCalls` now subscribes
+a feed with no `<item>`s. With nothing for `articleRepository.upsertParsed` to insert, the first
+call's post-mutex work is read-only, so there is no longer a second writer left to race the upgrade.
+See `docs/testing.md`'s note on concurrent-write tests for the general pattern.

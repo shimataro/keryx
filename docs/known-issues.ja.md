@@ -1310,3 +1310,90 @@ macOS ではこれらは一切不要である。`CTrayIcon` は一貫してポ�
 補正するには、各行の当たり判定をハイライトに対して上へずらすことになる。これは一方の端を他方と
 交換するだけである: 今度はハイライトの**上端**付近をクリックすると上の行が選ばれる。両端を同時に
 成立させるずらし方は存在せず、プラットフォーム純正のアプリもそのような補正を入れていない。
+
+## 並行書き込みにより read→write トランザクションがリトライ不能な SQLITE_BUSY で失敗する
+
+**状態**: 未修正 — 該当箇所は限定的で本番では未観測。本当の修正はデータアクセス層の中核に触れる。
+これが flaky にしていたテスト側では回避済み。
+
+### 症状
+
+並行する書き込みの下で、`FeedRepository.subscribeFeedWrite` の `feeds.upsert` が
+`org.sqlite.SQLiteException: [SQLITE_BUSY] The database file is locked` を投げることがある。
+これは `Result.Err` ではなく呼び出し元スレッドの**捕捉されない例外**である —
+`subscribeFeedWrite` の `db.transaction {}` は `try`/`catch` で囲まれておらず、例外は
+`FeedRepository` の外まで伝播する。
+
+CI でのみ発生する `FeedRepositoryTest.subscribeFeedSerializesSortOrderAllocationAcrossConcurrentCalls`
+の flaky（実スレッド 2 本で `subscribeFeed` をファイルバック DB に対して並行実行するテスト）として
+最初に見つかり、その後ローカルでも同じスタックトレースで再現した（30 回中 1 回）。
+
+### 診断
+
+`subscribeFeedWrite` の `db.transaction {}` は write の前に read を行う
+（`feeds.getByUrl` / `feeds.nextSortOrderInGroup` の後に `feeds.upsert`）。SQLDelight の
+`JdbcSqliteDriver` は常に素の `BEGIN TRANSACTION`（SQLite のデフォルトである deferred モード）を
+発行するため、トランザクションは read の時点では SHARED ロックしか取らず、write の際に
+RESERVED へ**昇格**する必要がある。
+
+SQLite 自身のロック昇格ルール（`sqlite3_busy_handler` の公式ドキュメントに記載された挙動）は次のとおり:
+その昇格を許可すると、別の接続が自分自身の昇格待ちでデッドロックし得る場合、SQLite は
+**busy handler を呼び出すことなく即座に** `SQLITE_BUSY` を返す。`busy_timeout`（このアプリの
+`SQLITE_BUSY_TIMEOUT_MS`。`sqlite_connection_properties()` 経由で適用）は、他の昇格と衝突していない
+ロックの**取得**を待つ場合にのみ効き、この経路には効かない。
+
+失敗したテストにおける並行書き込み元は次の 2 つ: 1 本目の `subscribeFeedWrite` は
+`subscribePlacementMutex.withLock { db.transaction { ... } } }` の中で RESERVED を保持するが、
+mutex を解放した**直後**にその呼び出しが行う次の処理 —
+`articleRepository.upsertParsed(feedId, fetched.articles)`（フィードごとの別トランザクション）—
+がまだ進行中でロックを保持している間に、2 本目の呼び出しが自分の SHARED read ロックを RESERVED へ
+昇格させようとする、という重なりである。
+
+### 除外した仮説
+
+- **`busy_timeout` では解決しない。** 設定はされている（`SQLITE_BUSY_TIMEOUT_MS = 5_000`）が、
+  失敗したテスト実行は 1 秒未満で完了しており、待機は一切発生していない。これは「取得が遅れて
+  タイムアウトした」のではなく「ロック**昇格**が busy handler を経由せず即座に失敗した」ことと
+  整合する。
+- **WAL モードへの切り替えでも解消しない。** 窓が狭まるだけである。WAL でも書き込み側同士は
+  直列化され、他の書き込み側が保持するロックを追い越して昇格しようとする書き込み側は同じ理由で
+  `SQLITE_BUSY_SNAPSHOT` になる。
+
+### 本当の修正に必要なこと
+
+素の `BEGIN` の代わりに `BEGIN IMMEDIATE TRANSACTION` を発行する `ConnectionManager`/`JdbcDriver`
+が必要になる。書き込みを行うことが分かっているトランザクションが、後から昇格するのではなく
+最初から書き込みロックを取ることで、失敗モードが `busy_timeout` で既にカバーされている
+通常のリトライ可能な「ロック待ち」に変わる。
+`app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver` は（`open` でない）`class` であり、
+トランザクションの begin/end/rollback は private な `connectionManager(url, properties)`
+ファクトリに由来するため、サブクラス化では実現できない —
+`desktopMain` に独自の `JdbcDriver` 実装を書き、`JdbcSqliteDriver` 自身が行っている
+`ThreadedConnectionManager` 相当のスレッドごとのコネクション管理とリスナー管理を再実装する
+必要がある。すべてのトランザクションが最初から書き込み側になる副作用があるため、FTS の
+差分インデックスや同期マージとの相互作用を別途評価する必要がある — CI の flaky 修正の
+スコープを超える。
+
+### どこで起こり得るか
+
+コード上の確認による（実際に発生させて確認したものではない）— トランザクションが write の前に
+read を行っている箇所:
+
+- `FeedRepository.subscribeFeedWrite`（`FeedRepository.kt`。`getByUrl`/`nextSortOrderInGroup` の後に
+  `upsert` を行う `db.transaction {}`）— 今回観測された箇所。
+- `FeedRepository.moveFeedsOutOfFolder`（同一トランザクション内で `nextSortOrderInGroup` を読んでから
+  フィードごとに書き込む）。直接呼ばれる経路に加え、`FolderRepository.deleteFolder` の
+  トランザクション経由でも到達する。
+
+`FeedRepository.moveFeed` と `FolderRepository.reorderFolders` は並び順の read を
+`db.transaction {}` を開く**前**に済ませているため、この形状には当てはまらない。
+フィード更新の反映トランザクション（`FeedRepository.kt` の `applyFetch` 周辺）も write のみで
+該当しない。
+
+### テスト側でどう回避したか
+
+`FeedRepositoryTest.subscribeFeedSerializesSortOrderAllocationAcrossConcurrentCalls` は、
+`<item>` を持たないフィードを購読するようにした。`articleRepository.upsertParsed` が挿入する
+記事が無くなるため、1 本目の呼び出しが mutex 解放後に行う処理は読み取りのみになり、
+昇格と競合し得る 2 本目の書き込み側が存在しなくなる。並行書き込みテストの一般的な指針は
+`docs/testing.md` の該当箇所を参照。
