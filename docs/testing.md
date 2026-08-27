@@ -387,7 +387,15 @@ Dialog auto-sizing (`DialogWindow` OS window behavior) cannot be auto-tested, so
 - Type continuously in a rename dialog so its supporting text appears and disappears: no judder, and
   the native button row does not flicker or re-lay-out per keystroke (it now revalidates only when a
   button *label* changes, not when the confirm button's enabled state does).
-- Settings: switch tabs repeatedly. The height follows each tab and the **top edge never moves**.
+- Settings: switch tabs repeatedly, including between the tallest (general) and the shortest
+  (notifications) tab. **The window must not resize at all** — same height on every tab, no movement
+  of any edge, and no frame where the tab labels or the card sit displaced within the window before
+  snapping back. The dialog's tab-content area is a fixed height precisely so this cannot happen; a
+  resize reappearing here means something has reintroduced per-tab sizing (see `known-issues.md`,
+  where forcing the resize to paint correctly is recorded as having made it permanently worse).
+- Settings, tallest tab: the general tab's content must fit **without scrolling** at font size
+  "中"（1.0）. If it scrolls, `KERYX_TAB_DIALOG_CONTENT_HEIGHT` needs bumping — cosmetic, not a
+  correctness bug. At "大"/"特大" the taller tabs are expected to scroll.
 - Switch the in-app theme light ↔ dark while running, then reopen each dialog: the *native* window
   background follows too — visible as the tone behind and around the native button row, and in any
   surplus area — not just the Compose-drawn card.

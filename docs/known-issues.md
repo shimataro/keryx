@@ -907,9 +907,137 @@ could run: Compose re-measure → window resize → `componentResized` → anoth
 ### Residual limitation
 
 A dialog that is **already visible** and then changes size because its content did (the add-feed
-candidate list, a Settings tab switch) still resizes on screen, by design — see the rejected
-workaround above. What changed for that case is only that the newly exposed area, and the button
-row's interop hole, now paint the dialog's own color instead of the Look & Feel's default.
+candidate list, a text-prompt dialog's supporting text) still resizes on screen, by design — see the
+rejected workaround above. What changed for that case is only that the newly exposed area, and the
+button row's interop hole, now paint the dialog's own color instead of the Look & Feel's default.
+That such a resize also briefly displaces the content on macOS was a separate defect — see the entry
+below, which removed the Settings dialog's own tab-switch resize entirely rather than trying to make
+a resize artifact-free.
+
+## macOS: switching Settings tabs jumped the content up toward the window's top edge
+
+**Status**: Resolved — by giving `KeryxTabDialog`'s tab-content area a **fixed height**
+(`KERYX_TAB_DIALOG_CONTENT_HEIGHT` in `ui/common/KeryxDialogs.desktop.kt`), so switching tabs no
+longer resizes the OS window at all. Fourth in the same family as the three entries above, and
+specifically what the previous entry's "Residual limitation" left open: those were about the size a
+dialog ends up at and what is on screen while it opens, this one about what is on screen while an
+*already visible* dialog resizes. Kept in full because the obvious repair was tried first and made
+the defect permanent instead of fixing it, and because the evidence is skiko's native code read out
+of the shipped dylib, which would otherwise have to be re-derived.
+
+### Symptom
+
+Switching tabs in the Settings dialog flickered: the tab labels — and the whole card with them —
+appeared shifted up toward the window's top edge for an instant, then dropped back into place.
+Reported on macOS. Not on the dialog's initial open (covered by the invisible-until-fitted gate
+above), only on a tab switch of an already-visible dialog, and most visible between the two tabs
+whose heights differ most.
+
+### Diagnosis
+
+The dialog's height used to follow the selected tab's content, and the order of operations is forced
+by construction:
+
+1. The tab switches, and the new tab's content is composed, measured and **drawn into a window that
+   is still the previous tab's height**.
+2. `onSizeChanged` / `onGloballyPositioned` publish that content height, so the drift guard's
+   `snapshotFlow` collector runs only *after* that frame.
+3. The guard computes the new target and applies it with `setBounds`.
+
+So the resize always trails a frame drawn for the wrong window height. What makes that visible on
+macOS is where the Skia surface lives. Disassembling the shipped `libskiko-macos-arm64.dylib`
+(0.144.6) shows `createMetalDevice` adding an `AWTMetalLayer` (a `CAMetalLayer`) as a **sublayer of
+the AWT content view's layer**, with `autoresizingMask = kCALayerWidthSizable|kCALayerHeightSizable`
+and `contentsGravity = kCAGravityTopLeft`, and `resizeLayers` — which sets `layer.frame` and
+`drawableSize`, and is the only thing in skiko that ever touches that frame — reached exclusively
+from `MetalRedrawer.syncBounds`, which derives the frame from **Java-side** AWT bounds
+(`y = rootPane.height - globalPosition.y - layer.height`).
+
+Meanwhile `setBounds` reaches the real NSWindow asynchronously: `LWWindowPeer.setBounds` only
+forwards to the platform window, deliberately leaving its own bounds stale ("Native system could
+constraint bounds, so the peer would be updated in the callback"), and `CPlatformWindow.setBounds`
+executes `nativeSetNSWindowBounds` off the EDT. `syncBounds` has exactly four call sites in all of
+skiko — `backedLayer.reshape`, a showing-state flip, redrawer re-creation, and a DIRECT3D-only branch
+of `SkiaLayer.reshape` — and **none of them observes the native resize**; the layer's frame is only
+ever recomputed from an AWT layout pass. Between the window changing size on screen and the next
+layout pass, the layer's geometry therefore belongs to the previous size, and its top-pinned contents
+can sit above the window's top edge. That is the jump.
+
+### The obvious repair makes it permanent — do not retry
+
+Forcing the layout pass right after the resize (`window.validate()` then `window.renderImmediately()`,
+directly after `applyWindowGeometry`) is what skiko itself does in `SkiaLayer.reshape` — and it is
+fenced off there for a reason: that pair runs only `if (renderApi == GraphicsApi.DIRECT3D &&
+isShowing)`, under a comment noting it "actually causes the reverse glitch". On Metal the reverse
+glitch is not transient:
+
+- `validate()` runs while the NSWindow is still the old size, so `syncBounds` sets the layer's frame
+  to the new height inside a still-old superlayer — i.e. a **negative top margin** of Δ.
+- CALayer springs-and-struts preserve both Y margins, so when the native resize lands the layer's
+  height absorbs Δ **again**: the frame becomes `newH + Δ` while `drawableSize` stays `newH`. With
+  `kCAGravityTopLeft` the contents end up pinned Δ above the window's top edge, with a Δ-tall band of
+  bare window background at the bottom.
+- Nothing repairs it. AWT *does* post `COMPONENT_RESIZED` when the native resize lands (the peer's own
+  bounds were still stale, so `notifyReshape` skips its "everything is in sync" early return), and
+  `java.awt.Window.dispatchEventImpl` does `invalidate(); validate();` — but every Java-side bound
+  already holds its final value, so `Container.validateTree` does not recurse into the (valid)
+  children, `SkiaLayer.doLayout` never runs again, and `syncBounds` is never called again.
+
+Observed exactly that way: the tab bar and the macOS merged title row cut off above the window's top
+edge, a background-coloured band at the bottom, a different offset on each switch, and no recovery
+short of switching tabs again or reopening the dialog. It turned a one-frame flicker into a defect
+that persisted for as long as the tab was shown.
+
+`renderImmediately()` cannot help on its own either: it only draws (`SkiaLayer.renderImmediately` →
+`Redrawer.renderImmediately`, i.e. `update()` + `performDraw()` in `MetalRedrawer`) and re-syncs
+neither the layer's frame nor the scene's size. Its documented contract is the one-shot frame drawn
+while a window is displayable but not yet visible — which is the only way this file still uses it
+(the `presentable` gate above).
+
+### Ruled out
+
+- **The Material 3 tab-bar migration** (`SecondaryScrollableTabRow`, commit `6fb2c15`) — the first
+  suspect, since the report followed it. `ScrollableTabRowImpl` derives its height from a `max` over
+  *all* tabs' intrinsic heights, so the row is a constant 72dp whichever tab is selected, and its
+  `onLaidOut` scrolls the tab row, never the window. The per-tab height fit it appears to interact
+  with predates the repo's first commit.
+- **The macOS merged title row vanishing for a frame** — it is exactly 28dp, and the report was about
+  the tab labels moving to the top, so this looked promising. It cannot happen: the row is drawn
+  whenever `selectedLabel != null`, and `SettingsDialog`'s `onSelectTab` can only ever pass an id that
+  is in `tabs`.
+- **A second resize path** — Compose's own `SwingDialog.update` → `setSizeSafely` does re-run on every
+  tab switch (the window title follows the selected tab), but it requests the size the guard has just
+  applied, so `Component.reshape` early-returns and no native call happens.
+- **Animating the resize** — every step has the same one-frame-late layer, so it smears the artifact
+  rather than removing it.
+- **Hiding the window across the resize** — rejected in the entry above: a disappear/reappear is worse
+  than the jump.
+
+### How this was resolved
+
+`KeryxTabDialog`'s tab-content area now has a fixed height (`KERYX_TAB_DIALOG_CONTENT_HEIGHT`, 416dp
+— the tallest tab's natural content height at `fontScale = 1.0`, plus slack), so every tab measures
+the same and the window is never resized on a tab switch. Since the artifact is inseparable from
+resizing an already-visible window, and forcing the ordering makes it worse, removing the resize is
+the only fix available from application code.
+
+The trade-off is deliberate: the shortest tab (notifications, under 100dp of content) shows most of
+the area as the dialog's own background. Content taller than the area — a tab that grows later, or a
+large `fontSizeScale` — scrolls in the `verticalScroll` that was already there, so outgrowing the
+constant degrades gracefully rather than breaking, and bumping it is a cosmetic follow-up.
+
+Growing the window to the tallest tab *visited so far* was considered and rejected as no better in
+practice: `general` is both the tallest tab and the one the dialog opens on, so the window would
+reach the same height on the first frame anyway, while still resizing in the notification-deep-link
+case.
+
+### Residual limitation
+
+Every other dialog still resizes while visible — the add-feed dialog when its candidate list appears,
+a text-prompt dialog when its supporting text comes and goes — and can still show the same one-frame
+displacement on macOS. It is much less noticeable there (those resizes happen once, in response to
+typing, rather than repeatedly on a two-click tab switch), and this fix does not generalize to them:
+they have no fixed set of states to size for.
 
 ## Windows: the article reader's WebView never rendered, and clicking anywhere froze the app
 

@@ -163,8 +163,9 @@ private val MAC_TITLE_BAR_HEIGHT = 28.dp
 private val MAC_TRAFFIC_LIGHT_PADDING = 72.dp
 
 /**
- * Fixed width of [KeryxTabDialog]'s window content. Unlike its height (which auto-fits per tab, see
- * [KeryxTabDialog]), width stays fixed for the same reason [KERYX_ALERT_DIALOG_WIDTH] does:
+ * Fixed width of [KeryxTabDialog]'s window content. Its height is fixed too (see
+ * [KERYX_TAB_DIALOG_CONTENT_HEIGHT]), but for an unrelated reason; the width is fixed for the same
+ * reason [KERYX_ALERT_DIALOG_WIDTH] is:
  * `SettingsDialog.kt`'s `SwitchRow` uses `Modifier.fillMaxWidth()` + `Text(Modifier.weight(1f))` to
  * push a switch to the trailing edge, and `weight()` has no well-defined intrinsic width — letting
  * the outer `Column` auto-fit width too would measure that row against whatever (not-yet-converged)
@@ -173,6 +174,34 @@ private val MAC_TRAFFIC_LIGHT_PADDING = 72.dp
  * 5-tab bar (icon + Japanese label per tab) and the OPML import/export button pair.
  */
 private val KERYX_TAB_DIALOG_WIDTH = 640.dp
+
+/**
+ * Fixed height of [KeryxTabDialog]'s scrollable tab-content area, which is what keeps the dialog's
+ * OS window the same height on every tab — the window is sized from measured content, so a constant
+ * content height means no resize at all when the user switches tabs.
+ *
+ * That is the point of it: on macOS a resize of an already-visible dialog cannot be made artifact-free
+ * from application code. skiko sets the Skia surface's `CAMetalLayer` frame only from an AWT layout
+ * pass (`MetalRedrawer.syncBounds`, four call sites, none of which observes the native resize), while
+ * `setBounds` reaches the real NSWindow asynchronously. The layer therefore lags the window by a frame
+ * — its top-pinned contents (`kCAGravityTopLeft`) sit above the window's top edge while it does, which
+ * is the tab labels visibly jumping up and back. Forcing the layout pass early instead
+ * (`validate()` + `renderImmediately()` right after `setBounds`) makes it *permanent* rather than
+ * fixing it: the frame is then computed against the pre-resize view, and CALayer autoresizing adds the
+ * delta a second time when the native resize lands. Both directions are recorded in
+ * `docs/known-issues.md`; removing the resize is the only fix available here.
+ *
+ * The value fits the tallest tab's natural content height at `fontScale = 1.0` — currently `general`
+ * at 399dp (32dp of padding + three 101dp sections + an 8dp spacer + a 40dp card, plus this area's own
+ * 16dp bottom padding) — with a little slack. Shorter tabs simply show more of the dialog's own
+ * background below their content. If a tab ever outgrows this, its content scrolls (that is what
+ * `verticalScroll` below is for) rather than anything breaking, so bumping this constant is a cosmetic
+ * follow-up, not a correctness fix. A large `fontSizeScale` setting scrolls the taller tabs for the
+ * same reason. `Modifier.height` enforces the incoming constraints, so a screen too short for this
+ * (see [MAX_HEIGHT_FRACTION]) shrinks the area instead of overflowing — equally for every tab, which
+ * is what matters.
+ */
+private val KERYX_TAB_DIALOG_CONTENT_HEIGHT = 416.dp
 
 /**
  * Safety net for [DesktopModalWindow]'s "stay invisible until fitted" gate: however the fit goes,
@@ -206,9 +235,9 @@ private data class DialogThemePrefs(val themeMode: String, val fontScale: Double
  * @param modal Whether the dialog blocks interaction with its owner window.
  * @param initialWidth The dialog's initial and maximum content width.
  * @param repositionOnResize Whether to recompute [DialogState.position] when the content's fitted
- *   size changes. `false` keeps the dialog anchored to its initially computed position, which is
- *   useful for tabbed dialogs whose height varies per tab but whose top edge should stay stable
- *   when the user zaps between tabs.
+ *   size changes. `false` keeps the dialog anchored to its initially computed position, so a
+ *   content-driven resize moves only the bottom edge — what [KeryxTabDialog] wants, since a
+ *   settings window that re-centres itself would drag its tab bar away from under the cursor.
  * @param containerColor The color [content] paints its own card with, or [Color.Unspecified] to use
  *   the theme's `surface`. Used for the full-bleed background *and* the native window's own
  *   background, so no area the card doesn't cover can show a different tone.
@@ -873,24 +902,19 @@ actual fun KeryxTabDialog(
                     )
                 }
 
-                // Tab-content area sizes to its own natural height — DesktopModalWindow's existing
-                // content-driven auto-fit (the same mechanism KeryxAlertDialog's `text` slot uses)
-                // then resizes the window to match, so the window's height genuinely follows each
-                // tab's content (a deliberate reversal of an earlier fixed-height decision — see
-                // KERYX_TAB_DIALOG_WIDTH's KDoc for why width alone stays fixed). heightIn(max=...)
-                // + verticalScroll is only a safety net for content taller than the screen allows
-                // (e.g. a large font-scale setting), not the normal per-tab sizing mechanism.
-                val maxHeightDp = LocalDialogMaxContentHeight.current
+                // Tab-content area of a FIXED height, so every tab measures the same and
+                // DesktopModalWindow's content-driven fit never resizes this window on a tab switch
+                // — see KERYX_TAB_DIALOG_CONTENT_HEIGHT for why that matters on macOS, and
+                // KERYX_TAB_DIALOG_WIDTH for the (unrelated) reason the width is fixed too. Content
+                // taller than the area scrolls; shorter content leaves the dialog's own background
+                // visible below it.
                 Column(
                     Modifier
                         .width(KERYX_TAB_DIALOG_WIDTH)
-                        .let { if (maxHeightDp != null) it.heightIn(max = maxHeightDp) else it }
+                        .height(KERYX_TAB_DIALOG_CONTENT_HEIGHT)
                         .verticalScroll(rememberScrollState())
                         // Bottom breathing room independent of each tab's own content padding, so
-                        // the last row never sits flush against the window's bottom edge — a small
-                        // buffer against the auto-fit height calculation's own rounding (see
-                        // MAC_TITLE_BAR_HEIGHT/DECORATION_HEIGHT_ALLOWANCE, both deliberate estimates
-                        // rather than exact measurements).
+                        // the last row never sits flush against the window's bottom edge.
                         .padding(bottom = 16.dp),
                 ) {
                     content(selectedTabId)
