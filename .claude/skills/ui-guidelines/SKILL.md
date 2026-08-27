@@ -824,21 +824,20 @@ side, Android's own Material 3 ripple/shapes/components on the other:
     an inline-icon affair — see `LocalSnackbarHostState`'s own KDoc: Android now also reports it via a
     real M3 `Snackbar`, below API 33 only, where the OS itself doesn't already show a clipboard-copy
     confirmation. Desktop still has none, per this app's no-in-app-snackbar convention.)
-  - **Desktop only.** The Settings dialog's tab switcher (`KeryxDialogTabBar`, desktop-only in
-    `KeryxDialogs.desktop.kt`, used by desktop's `KeryxTabDialog` actual) — a flat Compose-drawn
-    icon-over-label tab row, deliberately *not* styled to mimic macOS's native
-    toolbar/segmented-control chrome → a native NSToolbar-style preferences tab switcher on a
-    future SwiftUI port. Android's `KeryxTabDialog` actual already uses a genuine M3
-    `PrimaryScrollableTabRow`/`Tab` for this, so it needs no equivalent migration. Two rounds of
-    AWT/Swing interop (`SwingPanel` +
-    `JToggleButton`s with Aqua `JButton.buttonType` client properties) were tried and dropped before
-    landing on the Compose version: `"segmented"` reads as a cramped joined pill unsuited to this
-    layout, and `"toolbarItem"` (the semantically correct type — Apple's own docs describe it as "a
-    button that displays an icon with a label underneath ... intended for use on the window frame")
-    doesn't reliably indicate a `JToggleButton`'s selected state under Aqua, a known, still-open JDK
-    bug (JDK-8250953). Don't re-attempt native Aqua chrome for this control — treat it the same as
-    `ToolbarIconGroup`/`ResizableDivider`/etc. above, a SwiftUI-port target, not a
-    Compose-Swing-interop target.
+  - **Desktop only.** The Settings dialog's tab switcher (desktop's `KeryxTabDialog`
+    actual in `KeryxDialogs.desktop.kt`) now uses Material3's
+    `SecondaryScrollableTabRow`/`Tab` via the shared `KeryxDialogTabs` helper, making
+    it a standard Compose Multiplatform component just like Android's `KeryxTabDialog`
+    actual uses `PrimaryScrollableTabRow`/`Tab` — only the surrounding dialog shape
+    and tab-row variant differ by platform. The previous hand-rolled flat
+    `KeryxDialogTabBar` was removed. On a future SwiftUI port, replace this with a
+    native NSToolbar-style preferences tab switcher rather than porting the Compose
+    approximation as-is. Two earlier rounds of AWT/Swing interop (`SwingPanel` +
+    `JToggleButton`s with Aqua `JButton.buttonType` client properties) were abandoned:
+    `"segmented"` read as a cramped joined pill and `"toolbarItem"` didn't reliably
+    indicate selected state under Aqua (JDK-8250953). Treat the current M3 tab row the
+    same as `ToolbarIconGroup`/`ResizableDivider`/etc. above: a SwiftUI-port target,
+    not a Compose-Swing-interop target.
 - **`TooltipIconButton` and its tooltip trigger** (`ui/common/TooltipIconButton.kt`, expect/actual):
   every icon button with a tooltip goes through this **at a `commonMain` call site** — don't
   hand-roll `IconButton` + `TooltipBox` there. Desktop's `actual` re-implements M3's `IconButton`

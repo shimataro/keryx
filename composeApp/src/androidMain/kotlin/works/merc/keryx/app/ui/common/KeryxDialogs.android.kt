@@ -10,14 +10,12 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -98,10 +96,13 @@ actual fun KeryxAlertDialog(
  * Settings screen's own adaptive-layout work (Phase 2) — a full-screen Settings destination may
  * replace this dialog wrapper entirely.
  *
- * `PrimaryScrollableTabRow`'s default bottom `HorizontalDivider()` and container/content colors
- * are left as-is rather than overridden to match the surrounding `surfaceContainerLow` — same
- * reasoning as [KeryxAlertDialog]'s Android `actual` ignoring `containerColor`/`tonalElevation`:
- * M3's own defaults are what reads as native chrome here, not desktop's flat surface pattern.
+ * `PrimaryScrollableTabRow`/`Tab` rendering is delegated to the shared [KeryxDialogTabs]
+ * helper so the icon/label logic stays in one place; only the surrounding container is
+ * Android-specific. `PrimaryScrollableTabRow`'s default bottom `HorizontalDivider()` and
+ * container/content colors are left as-is rather than overridden to match the surrounding
+ * `surfaceContainerLow` — same reasoning as [KeryxAlertDialog]'s Android `actual` ignoring
+ * `containerColor`/`tonalElevation`: M3's own defaults are what reads as native chrome here, not
+ * desktop's flat surface pattern.
  *
  * The `Dialog` window draws behind the system bars edge-to-edge like the rest of the app (see
  * `MainActivity`'s `enableEdgeToEdge()`), so its content applies its own `safeDrawingPadding()`
@@ -131,14 +132,11 @@ actual fun KeryxTabDialog(
                 // — so this index is never -1 in practice.
                 val selectedIndex = tabs.indexOfFirst { it.id == selectedTabId }
                 PrimaryScrollableTabRow(selectedTabIndex = selectedIndex) {
-                    tabs.forEach { tab ->
-                        Tab(
-                            selected = tab.id == selectedTabId,
-                            onClick = { onSelectTab(tab.id) },
-                            text = { Text(tab.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            icon = { KeryxIcon(tab.icon, contentDescription = null) },
-                        )
-                    }
+                    KeryxDialogTabs(
+                        tabs = tabs,
+                        selectedTabId = selectedTabId,
+                        onSelectTab = onSelectTab,
+                    )
                 }
                 content(selectedTabId)
             }

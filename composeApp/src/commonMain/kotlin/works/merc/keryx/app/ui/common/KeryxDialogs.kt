@@ -1,7 +1,11 @@
 package works.merc.keryx.app.ui.common
 
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.Tab
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import org.jetbrains.compose.resources.DrawableResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -42,15 +46,44 @@ expect fun KeryxAlertDialog(
 data class KeryxDialogTab(val id: String, val label: String, val icon: DrawableResource)
 
 /**
+ * Renders the tab children for a Material3 [androidx.compose.material3.TabRow] or
+ * [androidx.compose.material3.ScrollableTabRow] in both Android and Desktop `actual`s.
+ *
+ * Kept in [commonMain] so the icon/label rendering and truncation behavior stay identical across
+ * platforms; only the surrounding container (`PrimaryScrollableTabRow` on Android,
+ * `SecondaryScrollableTabRow` on Desktop) differs.
+ */
+@Composable
+internal fun KeryxDialogTabs(
+    tabs: List<KeryxDialogTab>,
+    selectedTabId: String,
+    onSelectTab: (String) -> Unit,
+    selectedContentColor: Color = LocalContentColor.current,
+    unselectedContentColor: Color = LocalContentColor.current,
+) {
+    tabs.forEach { tab ->
+        Tab(
+            selected = tab.id == selectedTabId,
+            onClick = { onSelectTab(tab.id) },
+            text = { Text(tab.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            icon = { KeryxIcon(tab.icon, contentDescription = null) },
+            selectedContentColor = selectedContentColor,
+            unselectedContentColor = unselectedContentColor,
+        )
+    }
+}
+
+/**
  * A dialog with tab-based navigation: a row of tabs up top and a content area below that shows
  * whichever tab is currently selected — see [KeryxDialogTab] for what each tab carries. The two
  * `actual`s differ in how "native" is expressed here, not just in tab-bar style: desktop's is a
  * modeless, macOS-System-Preferences-style `DialogWindow` (see [KeryxAlertDialog] for why a real
- * `DialogWindow` rather than a Compose `Popup`) with a flat, hand-rolled tab bar, whose selected
- * tab's label is mirrored as the window title next to the traffic lights on macOS — the main
- * window stays interactive while it is open, matching the real macOS System Settings window.
- * Android's is a modal, near-fullscreen `Dialog` hosting a genuine M3 `PrimaryScrollableTabRow`/
- * `Tab`. See each platform's own `KeryxDialogs.*.kt` for the details.
+ * `DialogWindow` rather than a Compose `Popup`) with a Material3 `SecondaryScrollableTabRow`/
+ * `Tab` tab bar (rendered by [KeryxDialogTabs]), whose selected tab's label is mirrored as the
+ * window title next to the traffic lights on macOS — the main window stays interactive while it
+ * is open, matching the real macOS System Settings window. Android's is a modal, near-fullscreen
+ * `Dialog` hosting a genuine M3 `PrimaryScrollableTabRow`/`Tab`. See each platform's own
+ * `KeryxDialogs.*.kt` for the details.
  *
  * Has no button row: the caller's content applies its changes immediately. Desktop closes it via
  * the native close box or Escape; Android via the system back gesture/button or an outside tap.
