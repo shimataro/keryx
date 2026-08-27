@@ -80,8 +80,10 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.findByName("release")?.takeIf { it.storeFile != null }
-                ?: signingConfigs.getByName("debug")
+            // Do NOT fall back to the debug signing config. If the release signing
+            // properties are missing, AGP fails during validateSigningRelease instead
+            // of silently producing a debug-signed (or unsigned) release artifact.
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }
