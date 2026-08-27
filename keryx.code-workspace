@@ -11,10 +11,10 @@
 	"extensions": {
 		"recommendations": [
 			"editorconfig.editorconfig",
-			"vscjava.vscode-gradle",
+			"jetbrains.kotlin-server",
 			"redhat.vscode-xml",
-			"fwcd.kotlin",
 			"tamasfe.even-better-toml",
+			"vscjava.vscode-gradle",
 		],
 	},
 }

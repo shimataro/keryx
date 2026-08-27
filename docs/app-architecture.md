@@ -34,7 +34,7 @@ composeApp/src/
   jvmCommonMain/kotlin/…/  actuals shared by desktop and Android, needing no platform API either
     target lacks: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage, AppInfo,
     CloudStorageAvailability (the last two just read the shared generated BuildConfig)
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of each expect not covered by jvmCommonMain (DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule) + LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage), DesktopOs (isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux)
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of each expect not covered by jvmCommonMain (DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule) + LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage), DesktopOs (isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux)
     tray/      KeryxTray (platform branch), MacTray, LinuxTray + the StatusNotifierItem/dbusmenu D-Bus objects
   androidMain/kotlin/…/  actual implementations not covered by jvmCommonMain: DatabaseDriverFactory
     (bundled SQLite, see below), DatabaseFile (`databaseFilePath()` — `Context.getDatabasePath`,
@@ -88,8 +88,8 @@ composeApp/src/
     `domain/OpmlOpenHandler.kt`), nativeContextMenu (a real long-press `DropdownMenu`, added in
     the adaptive-layout phase — see its
     KDoc for the tap-vs-long-press disambiguation), BackHandler (delegates to
-    `androidx.activity.compose.BackHandler`), PlatformOs (isTouchPrimary = true, hasNativeAppMenu =
-    false — Android has no menu bar, so `FeedListToolbarRow`/`GeneralTab` grow their own Settings/
+    `androidx.activity.compose.BackHandler`), PlatformOs (isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android has no menu bar or system tray,
+    so `FeedListToolbarRow`/`GeneralTab` grow their own Settings/
     About entry points instead), SelfUpdateCheck (installer-package-based, see "Background Update"),
     NotificationPermission (wraps `rememberLauncherForActivityResult` for `POST_NOTIFICATIONS`) +
     AndroidStartupTasks.kt (`runAndroidStartupTasks`, called from `:androidApp`'s `MainActivity`) +

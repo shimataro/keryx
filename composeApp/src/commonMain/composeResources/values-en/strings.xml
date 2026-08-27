@@ -185,7 +185,6 @@
     <string name="settings_refresh_hour1">1h</string>
     <string name="settings_refresh_hour3">3h</string>
     <string name="settings_refresh_manual">Manual</string>
-    <string name="settings_desktop">Desktop</string>
     <string name="settings_notification_enabled">Enable new article notifications</string>
     <string name="settings_start_minimized">Start minimized to tray</string>
     <string name="settings_cloud_sync">Cloud Sync</string>
@@ -213,9 +212,6 @@
     <string name="settings_font_medium">Medium</string>
     <string name="settings_font_large">Large</string>
     <string name="settings_font_xlarge">XL</string>
-    <string name="settings_article_list">Article List</string>
-    <string name="settings_article_list_all">All</string>
-    <string name="settings_article_list_unread_only">Unread only</string>
     <string name="settings_updates">Updates</string>
     <string name="settings_version">Version %1$s</string>
     <string name="settings_website">Website</string>

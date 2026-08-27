@@ -17,6 +17,9 @@ actual val isTouchPrimary = false
  * `setAboutHandler`/`setPreferencesHandler` on macOS). */
 actual val hasNativeAppMenu = true
 
+/** Every desktop OS gets a system tray (see `tray/KeryxTray.kt`). */
+actual val hasSystemTray = true
+
 /** No desktop OS shows its own clipboard-copy confirmation. */
 actual val platformShowsOwnCopyConfirmation = false
 
