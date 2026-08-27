@@ -205,9 +205,9 @@ to debug signing when signing credentials are missing. So the root `./gradlew bu
 even for desktop-only work — unless an Android release signing keystore is in place.
 
 Generate a development keystore per Prerequisites' "Software Required to Build" and set the four
-`local.properties` values (`android.release.keystore.path` / `.password` /
-`android.release.key.alias` / `.password`), or scope to a target-limited task like
-`:composeApp:desktopTest` instead.
+`local.properties` values (`android.release.keystore.path` / `android.release.keystore.password` /
+`android.release.key.alias` / `android.release.key.password`), or scope to a target-limited task
+like `:composeApp:desktopTest` instead.
 
 ### `UnsupportedClassVersionError` (at runtime)
 

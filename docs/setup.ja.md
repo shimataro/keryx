@@ -202,8 +202,9 @@ debug 署名へフォールバックしない設計になっている。その�
 失敗する。
 
 前提の「ビルドに必要なソフトウェア」に沿って開発用キーストアを生成し、`local.properties` に
-4つの値（`android.release.keystore.path` / `.password` / `android.release.key.alias` /
-`.password`）を設定するか、`:composeApp:desktopTest` のようなターゲット限定タスクに絞る。
+4つの値（`android.release.keystore.path` / `android.release.keystore.password` /
+`android.release.key.alias` / `android.release.key.password`）を設定するか、
+`:composeApp:desktopTest` のようなターゲット限定タスクに絞る。
 
 ### `UnsupportedClassVersionError`（実行時エラー）
 
