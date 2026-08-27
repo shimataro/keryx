@@ -888,7 +888,7 @@ Compose 再 measure → ウィンドウリサイズ → `componentResized` → �
 
 ## macOS: 設定のタブを切り替えると内容がウインドウ上端側へ跳ねる
 
-**Status**: 解決済み —— `KeryxTabDialog` のタブ内容領域を**固定高**にすることで解決した
+**ステータス**: 解決済み —— `KeryxTabDialog` のタブ内容領域を**固定高**にすることで解決した
 （`ui/common/KeryxDialogs.desktop.kt` の `KERYX_TAB_DIALOG_CONTENT_HEIGHT`）。タブを切り替えても
 OS ウインドウのリサイズが一切起きなくなる。上の3項目と同じ系統の4件目であり、とりわけ直前の項目の
 「残存する制約」が残していた不具合そのものである —— 先行3件が「ダイアログが最終的にどのサイズに
