@@ -369,9 +369,12 @@ jobs:
 
       - name: Decode release keystore
         id: keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
         run: |
           keystore_path="$RUNNER_TEMP/keryx-release.keystore"
-          echo "${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}" | base64 -d > "$keystore_path"
+          echo "$KEYSTORE_BASE64" | base64 -d > "$keystore_path"
+          chmod 600 "$keystore_path"
           echo "path=$keystore_path" >> "$GITHUB_OUTPUT"
 
       - name: Build Android release packages
