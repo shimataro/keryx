@@ -60,7 +60,7 @@ matters for a hand-edited or migrated `local_settings.json`.
 `WorkerFactory` via reflection — dependencies are resolved from `KoinPlatform.getKoin()` inside
 `doWork()` rather than constructor-injected) runs exactly the same sequence desktop's
 `backgroundUpdateLoop` runs each cycle: `refreshFeedsAndNotify`, then (if `CloudSession.isConnected()`)
-`SyncRepository.sync(SyncTrigger.AUTOMATIC)`, then `checkForUpdateAndNotify`, `maybeRebuildFtsIndex`.
+`SyncRepository.sync(SyncTrigger.AUTOMATIC)`, then `checkForUpdateAndNotify` if `shouldCheckForUpdate` says it is due, then `maybeRebuildFtsIndex`.
 On Android, `CloudSession` currently has Dropbox/OneDrive providers only (no Google Drive — see
 [sync-architecture.md](sync-architecture.md)'s "Google Drive on Android"), so `sync()` is a genuine
 no-op when the user hasn't connected either of those, or — even when connected — while

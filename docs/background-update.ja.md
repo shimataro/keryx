@@ -59,7 +59,7 @@ while (true) {
 リフレクションでインスタンス化するため、依存関係はコンストラクタ注入ではなく `doWork()` 内で
 `KoinPlatform.getKoin()` から解決する）は、デスクトップの `backgroundUpdateLoop` が毎周回実行する
 のとまったく同じ手順を実行する: `refreshFeedsAndNotify` → （`CloudSession.isConnected()` が真なら）
-`SyncRepository.sync(SyncTrigger.AUTOMATIC)` → `checkForUpdateAndNotify` → `maybeRebuildFtsIndex`。
+`SyncRepository.sync(SyncTrigger.AUTOMATIC)` → `shouldCheckForUpdate` が true の場合のみ `checkForUpdateAndNotify` → `maybeRebuildFtsIndex`。
 Android の `CloudSession` は現状 Dropbox/OneDrive のみプロバイダーを持つ（Google Drive 非対応の理由は
 [sync-architecture.ja.md](sync-architecture.ja.md) の「Android で Google Drive が未対応な理由」参照）
 ため、ユーザーがそのどちらとも連携していない場合、あるいは連携済みでも `autoSyncSuspended` が
