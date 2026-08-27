@@ -281,6 +281,12 @@ cloud integration hidden entirely (see `CloudStorageAvailability`).
 
 For Android release signing, set `ANDROID_RELEASE_KEYSTORE_BASE64`, `ANDROID_RELEASE_KEYSTORE_PASSWORD`, `ANDROID_RELEASE_KEY_ALIAS`, and `ANDROID_RELEASE_KEY_PASSWORD` as repository secrets. The keystore is a Base64-encoded PKCS12/JKS file; the workflow decodes it at build time. To keep the same signing key on GitHub Releases and Google Play, generate the keystore locally and import it into Google Play Console as the "existing app signing key" when creating the app. Without these secrets the release build fails AGP's signing validation (`validateSigningRelease`) rather than falling back to debug signing — all four secrets are required for the release workflow to succeed.
 
+`ci.yml`'s ordinary build job never receives these secrets — deliberately, since it runs on every
+push. But AGP wires `assembleRelease`/`validateSigningRelease` into `:androidApp`'s default `build`
+task regardless of whether the artifact is ever consumed, so plain `./gradlew build` still needs
+*some* keystore to satisfy validation; that job generates a throwaway one on the fly with
+`keytool`, discarded with the runner and never uploaded anywhere.
+
 > [!IMPORTANT]
 > **The released DMG is unsigned** (ad-hoc), so Gatekeeper blocks it on open. See the
 > [Download](../README.md#download) section for the workaround; "Signing & Notarization" below

@@ -293,6 +293,13 @@ UI に一切現れない内部的なビルド識別子。中間成果物は `Ker
 
 Android のリリース署名には、`ANDROID_RELEASE_KEYSTORE_BASE64`、`ANDROID_RELEASE_KEYSTORE_PASSWORD`、`ANDROID_RELEASE_KEY_ALIAS`、`ANDROID_RELEASE_KEY_PASSWORD` をリポジトリの Secrets に設定する。keystore は Base64 エンコードした PKCS12/JKS ファイルであり、ワークフローがビルド時に復元する。GitHub Releases と Google Play で同じ署名キーを使いたい場合は、ローカルで生成した keystore を Google Play Console でアプリ作成時に「既存のアプリ署名キー」としてインポートする。これらの Secrets が未設定の場合、release ビルドは debug 署名設定にフォールバックせず、AGP の署名検証（`validateSigningRelease`）で失敗する — release ワークフローの成功には4つすべての Secrets が必須。
 
+`ci.yml` の通常のビルドジョブは、push のたびに実行される都合上、意図的にこれらの Secrets を
+受け取らない。しかし AGP は成果物が実際に使われるかどうかに関わらず `assembleRelease`/
+`validateSigningRelease` を `:androidApp` のデフォルトの `build` タスクに組み込むため、
+単なる `./gradlew build` でも検証を通すには何らかの keystore が必要になる。そのジョブでは
+`keytool` でその場限りの使い捨て keystore を生成しており、ランナーの終了とともに破棄され、
+どこにもアップロードされない。
+
 > [!IMPORTANT]
 > **リリースされる DMG は未署名**（ad-hoc）のため、開く際に Gatekeeper にブロックされる。回避方法は
 > README の[ダウンロード](../README.ja.md#ダウンロード)節を参照。恒久的な解消に必要な作業は下記
