@@ -1,28 +1,12 @@
 package works.merc.keryx.app.ui.common
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import org.jetbrains.compose.resources.DrawableResource
-import org.jetbrains.compose.resources.painterResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -62,16 +46,54 @@ expect fun KeryxAlertDialog(
 data class KeryxDialogTab(val id: String, val label: String, val icon: DrawableResource)
 
 /**
- * A modeless dialog window (see [KeryxAlertDialog] for why a real `DialogWindow` rather than a
- * Compose `Popup`) with a macOS System-Preferences-style tab switcher: an icon+label toolbar tab
- * bar at the top, the selected tab's label mirrored as the window title (next to the traffic
- * lights on macOS), and a fixed-size content area below that top-aligns whichever tab's content is
- * requested. Unlike [KeryxAlertDialog], this window does not block its owner — the
- * main window stays interactive while it is open (matching the real macOS System Settings window).
+ * Renders the tab children for a Material3 [androidx.compose.material3.TabRow] or
+ * [androidx.compose.material3.ScrollableTabRow] in both Android and Desktop `actual`s.
  *
- * Has no button row: the caller's content applies its changes immediately. The window is closed via
- * the native close box or Escape.
+ * Kept in [commonMain] so the icon/label rendering and truncation behavior stay identical across
+ * platforms; only the surrounding container (`PrimaryScrollableTabRow` on Android,
+ * `SecondaryScrollableTabRow` on Desktop) differs.
+ */
+@Composable
+internal fun KeryxDialogTabs(
+    tabs: List<KeryxDialogTab>,
+    selectedTabId: String,
+    onSelectTab: (String) -> Unit,
+    selectedContentColor: Color = LocalContentColor.current,
+    unselectedContentColor: Color = LocalContentColor.current,
+) {
+    tabs.forEach { tab ->
+        Tab(
+            selected = tab.id == selectedTabId,
+            onClick = { onSelectTab(tab.id) },
+            text = { Text(tab.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            icon = { KeryxIcon(tab.icon, contentDescription = null) },
+            selectedContentColor = selectedContentColor,
+            unselectedContentColor = unselectedContentColor,
+        )
+    }
+}
+
+/**
+ * A dialog with tab-based navigation: a row of tabs up top and a content area below that shows
+ * whichever tab is currently selected — see [KeryxDialogTab] for what each tab carries. The two
+ * `actual`s differ in how "native" is expressed here, not just in tab-bar style: desktop's is a
+ * modeless, macOS-System-Preferences-style `DialogWindow` (see [KeryxAlertDialog] for why a real
+ * `DialogWindow` rather than a Compose `Popup`) with a Material3 `SecondaryScrollableTabRow`/
+ * `Tab` tab bar (rendered by [KeryxDialogTabs]), whose selected tab's label is mirrored as the
+ * window title next to the traffic lights on macOS — the main window stays interactive while it
+ * is open, matching the real macOS System Settings window. Android's is a modal, near-fullscreen
+ * `Dialog` hosting a genuine M3 `PrimaryScrollableTabRow`/`Tab`. See each platform's own
+ * `KeryxDialogs.*.kt` for the details.
  *
+ * Has no button row: the caller's content applies its changes immediately. Desktop closes it via
+ * the native close box or Escape; Android via the system back gesture/button, or a back arrow in
+ * a `TopAppBar` above the tab row (added because the near-fullscreen `Dialog` leaves no tappable
+ * area outside its own content — see [KeryxTabDialog]'s Android `actual` for why "outside tap"
+ * alone isn't a real dismiss path there).
+ *
+ * @param title The screen's own name. Rendered as the Android `actual`'s `TopAppBar` title;
+ *   desktop's `actual` ignores it, since it already mirrors the selected tab's own label as the
+ *   native window title instead (see that `actual`'s KDoc).
  * @param content receives the currently selected tab's [KeryxDialogTab.id] and renders that tab.
  */
 @Composable
@@ -80,61 +102,6 @@ expect fun KeryxTabDialog(
     tabs: List<KeryxDialogTab>,
     selectedTabId: String,
     onSelectTab: (String) -> Unit,
+    title: String? = null,
     content: @Composable (String) -> Unit,
 )
-
-/**
- * The [KeryxTabDialog] tab bar: a flat, borderless row of icon-over-label tabs in the app's own
- * design language, not a native macOS toolbar/segmented-control mimicry. Two rounds of AWT/Swing
- * interop (Aqua's `"segmented"` and `"toolbarItem"` `JButton.buttonType`s) were tried and dropped —
- * `"segmented"` reads as a cramped joined pill unsuited to this layout, and `"toolbarItem"` doesn't
- * reliably indicate a `JToggleButton`'s selected state under Aqua (a known, still-open JDK bug,
- * JDK-8250953). Native macOS chrome for this control is deferred to a future SwiftUI port instead
- * (see the `ui-guidelines` skill's "Other native-migration candidates") rather than approximated via
- * fragile OS-version-dependent Swing tuning. Plain `Modifier.selectable` gets this dialog's tabs
- * `FlatIndication`'s press feedback and standard Compose keyboard focus/traversal for free.
- *
- * Horizontally scrollable: desktop's fixed dialog width comfortably fits every tab today (see
- * `KERYX_TAB_DIALOG_WIDTH`'s KDoc), so the scroll never engages there, but Android's `KeryxTabDialog`
- * is a full-screen-width `Dialog` — on a phone-width screen, 5 tabs (Cloud Sync and Updates both
- * present) don't fit, and a plain non-scrolling `Row` would run the trailing tab(s) off the physical
- * screen edge with no way to reach them.
- */
-@Composable
-internal fun KeryxDialogTabBar(
-    tabs: List<KeryxDialogTab>,
-    selectedTabId: String,
-    onSelectTab: (String) -> Unit,
-) {
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(24.dp),
-        modifier = Modifier.horizontalScroll(rememberScrollState()),
-    ) {
-        tabs.forEach { tab ->
-            val selected = tab.id == selectedTabId
-            val contentColor = if (selected) {
-                MaterialTheme.colorScheme.onSecondaryContainer
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            }
-            Column(
-                modifier = Modifier
-                    .clip(MaterialTheme.shapes.medium)
-                    .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
-                    .selectable(selected = selected, onClick = { onSelectTab(tab.id) }, role = Role.Tab)
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Icon(painterResource(tab.icon), contentDescription = null, tint = contentColor, modifier = Modifier.size(32.dp))
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    tab.label,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                    color = contentColor,
-                    maxLines = 1,
-                )
-            }
-        }
-    }
-}

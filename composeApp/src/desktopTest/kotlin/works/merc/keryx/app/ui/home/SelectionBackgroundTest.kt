@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
@@ -145,5 +146,89 @@ class SelectionBackgroundTest {
         assertNull(contentColorFor(RowSelectionTone.SECONDARY, focused = true).first)
         assertNull(contentColorFor(RowSelectionTone.SECONDARY, focused = false).first)
         assertNull(contentColorFor(RowSelectionTone.NONE, focused = true).first)
+    }
+
+    // --- LocalRowSelectionVisible (PaneLayout.Single suppresses the highlight entirely) ---
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun booleanBackgroundIsTransparentWhenSelectionVisibilityIsSuppressedEvenIfSelectedAndFocused() {
+        var actual = Color.Unspecified
+        runDesktopComposeUiTest {
+            setContent {
+                MaterialTheme {
+                    CompositionLocalProvider(LocalRowSelectionVisible provides false) {
+                        actual = selectionBackground(selected = true, focused = true)
+                    }
+                }
+            }
+        }
+        assertEquals(Color.Transparent, actual)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun booleanContentColorIsNullWhenSelectionVisibilityIsSuppressedEvenIfSelectedAndFocused() {
+        var actual: Color? = Color.Unspecified
+        runDesktopComposeUiTest {
+            setContent {
+                MaterialTheme {
+                    CompositionLocalProvider(LocalRowSelectionVisible provides false) {
+                        actual = selectionContentColorOrNull(selected = true, focused = true)
+                    }
+                }
+            }
+        }
+        assertNull(actual)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun toneBackgroundIsTransparentWhenSelectionVisibilityIsSuppressedEvenForAFocusedPrimaryRow() {
+        var actual = Color.Unspecified
+        runDesktopComposeUiTest {
+            setContent {
+                MaterialTheme {
+                    CompositionLocalProvider(LocalRowSelectionVisible provides false) {
+                        actual = selectionBackground(RowSelectionTone.PRIMARY, focused = true)
+                    }
+                }
+            }
+        }
+        assertEquals(Color.Transparent, actual)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun toneContentColorIsNullWhenSelectionVisibilityIsSuppressedEvenForAFocusedPrimaryRow() {
+        var actual: Color? = Color.Unspecified
+        runDesktopComposeUiTest {
+            setContent {
+                MaterialTheme {
+                    CompositionLocalProvider(LocalRowSelectionVisible provides false) {
+                        actual = selectionContentColorOrNull(RowSelectionTone.PRIMARY, focused = true)
+                    }
+                }
+            }
+        }
+        assertNull(actual)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun booleanBackgroundStillHighlightsWhenSelectionVisibilityIsTheDefault() {
+        // The default (no provider in the tree, as production HomeScreen leaves it at
+        // PaneLayout.Dual/Triple) must behave exactly as before this CompositionLocal existed.
+        var actual = Color.Unspecified
+        var primary = Color.Unspecified
+        runDesktopComposeUiTest {
+            setContent {
+                MaterialTheme {
+                    primary = MaterialTheme.colorScheme.primary
+                    actual = selectionBackground(selected = true, focused = true)
+                }
+            }
+        }
+        assertEquals(primary, actual)
     }
 }

@@ -6,12 +6,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
@@ -37,10 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
 import kotlinx.datetime.TimeZone
 import coil3.compose.AsyncImage
 import org.jetbrains.compose.resources.stringResource
@@ -57,6 +52,8 @@ import works.merc.keryx.app.resources.article_open_in_browser
 import works.merc.keryx.app.resources.article_star
 import works.merc.keryx.app.resources.article_unstar
 import works.merc.keryx.app.resources.home_notifications
+import works.merc.keryx.app.ui.common.KeryxAnchoredPanel
+import works.merc.keryx.app.ui.common.KeryxBadgedIcon
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.TooltipIconButton
@@ -70,37 +67,16 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
 internal fun NotificationsBell(notifVm: NotificationCenterViewModel) {
     val notifications by notifVm.items.collectAsStateSafe(emptyList())
     var showNotifications by remember { mutableStateOf(false) }
-    val density = LocalDensity.current
     Box {
         val notificationsTooltip = stringResource(Res.string.home_notifications)
         TooltipIconButton(tooltip = notificationsTooltip, onClick = { showNotifications = !showNotifications }) {
-            Box(contentAlignment = Alignment.TopEnd) {
-                KeryxIcon(KeryxIcons.Notifications, contentDescription = notificationsTooltip)
-                if (notifications.isNotEmpty()) {
-                    Box(
-                        Modifier
-                            .offset(x = 6.dp, y = (-4).dp)
-                            .defaultMinSize(minWidth = 16.dp, minHeight = 16.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.error, CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            notifications.size.toString(),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onError,
-                            modifier = Modifier.padding(horizontal = 4.dp),
-                        )
-                    }
-                }
-            }
+            KeryxBadgedIcon(KeryxIcons.Notifications, contentDescription = notificationsTooltip, count = notifications.size)
         }
         if (showNotifications) {
-            Popup(
-                alignment = Alignment.TopEnd,
-                offset = IntOffset(x = 0, y = with(density) { 48.dp.roundToPx() }),
+            KeryxAnchoredPanel(
                 onDismissRequest = { showNotifications = false },
-                properties = PopupProperties(focusable = true, dismissOnClickOutside = true),
+                alignment = Alignment.TopEnd,
+                anchorOffsetY = 48.dp,
             ) {
                 // Close the popover once a notification's action leads somewhere, so the destination
                 // (feed list selection / settings dialog / explanation dialog) is actually visible.
@@ -238,9 +214,9 @@ internal fun ArticleRow(
                 },
                 onOpen = onClick,
             )
-            .listRowSurface(selectionBackground(selected, focused), rowInteraction)
+            .listRowSurface(selectionBackground(selected, focused), ListRowKind.ListItem, rowInteraction)
             .padding(horizontal = 8.dp, vertical = 10.dp)
-            .heightIn(min = rowHeight),
+            .heightIn(min = maxOf(rowHeight, listRowMinHeight())),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.width(8.dp).height(rowHeight)) {

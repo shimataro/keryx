@@ -17,6 +17,12 @@ actual val isTouchPrimary = false
  * `setAboutHandler`/`setPreferencesHandler` on macOS). */
 actual val hasNativeAppMenu = true
 
+/** Every desktop OS gets a system tray (see `tray/KeryxTray.kt`). */
+actual val hasSystemTray = true
+
+/** No desktop OS shows its own clipboard-copy confirmation. */
+actual val platformShowsOwnCopyConfirmation = false
+
 /**
  * Whether this desktop JVM is running on Windows. Gates the integrations the OS only offers there
  * (registering the `keryx://` URI scheme in the registry) and the tray implementation that avoids

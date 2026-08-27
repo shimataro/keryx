@@ -361,8 +361,8 @@ kotlin {
             dependencies {
                 implementation(libs.kotlin.test)
                 implementation(libs.kotlinx.coroutines.test)
-                implementation(libs.androidx.test.runner)
-                implementation(libs.androidx.test.junit)
+                implementation(libs.androidx.test.runner.device.test)
+                implementation(libs.androidx.test.junit.device.test)
                 implementation(libs.requery.sqlite.android)
             }
         }

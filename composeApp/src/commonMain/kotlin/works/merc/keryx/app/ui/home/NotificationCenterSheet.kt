@@ -1,6 +1,5 @@
 package works.merc.keryx.app.ui.home
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -16,7 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -45,19 +43,24 @@ import works.merc.keryx.app.resources.notification_level_warning
 import works.merc.keryx.app.resources.settings_cloud_reset
 import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.KeryxIcon
+import works.merc.keryx.app.ui.common.KeryxRaisedSurface
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.TooltipIconButton
 
 /**
- * Non-modal notification panel, shown as an anchored [androidx.compose.ui.window.Popup] from
- * `ArticleListPane`'s bell icon rather than an `AlertDialog` — there's no scrim, so it reads as a
- * transient popover instead of a blocking dialog. See `.claude/skills/ui-guidelines/SKILL.md` for the
- * Popup-vs-Dialog usage split.
+ * Notification panel, hosted by [works.merc.keryx.app.ui.common.KeryxAnchoredPanel] from
+ * `ArticleListPane`'s bell icon — a non-modal anchored popover on desktop, a `ModalBottomSheet` on
+ * Android (see that composable's own KDoc, and `.claude/skills/ui-guidelines/SKILL.md`'s
+ * Popup-vs-Dialog section for why this is a popover, not an `AlertDialog`, in the first place).
+ *
+ * The `KeryxRaisedSurface`/shadow/width wrapping is desktop-only: a bare `Popup` supplies no
+ * container of its own, but Android's `ModalBottomSheet` already does, so doubling it here would
+ * nest two visible surfaces on that platform.
  *
  * Every notification carries a next action ([AppNotificationAction]). All but the destructive
  * "reset cloud data" one are invoked by clicking the row itself; [onNavigated] then lets the caller
- * dismiss the popover, both so the destination is visible and because this popup dismisses on focus
- * loss (anything it opened would go with it).
+ * dismiss the popover, both so the destination is visible and because a desktop popup dismisses on
+ * focus loss (anything it opened would go with it).
  *
  * @param vm The view model providing notifications and handling notification actions.
  * @param onNavigated Called after any row action, so the caller can close the popover.
@@ -66,13 +69,9 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
 fun NotificationCenterSheet(vm: NotificationCenterViewModel, onNavigated: () -> Unit = {}) {
     val items by vm.items.collectAsStateSafe(emptyList())
     val shape = MaterialTheme.shapes.medium
+    val isTouchPrimary = works.merc.keryx.app.platform.isTouchPrimary
 
-    Surface(
-        modifier = Modifier.widthIn(min = 280.dp, max = 360.dp).shadow(4.dp, shape = shape),
-        shape = shape,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-    ) {
+    val body = @Composable {
         Column(Modifier.padding(16.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 val clearTooltip = stringResource(Res.string.notification_dismiss_all)
@@ -102,6 +101,15 @@ fun NotificationCenterSheet(vm: NotificationCenterViewModel, onNavigated: () -> 
                 }
             }
         }
+    }
+
+    if (isTouchPrimary) {
+        body()
+    } else {
+        KeryxRaisedSurface(
+            modifier = Modifier.widthIn(min = 280.dp, max = 360.dp).shadow(4.dp, shape = shape),
+            shape = shape,
+        ) { body() }
     }
 }
 

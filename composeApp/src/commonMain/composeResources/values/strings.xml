@@ -17,6 +17,10 @@
     <string name="common_back">戻る</string>
     <string name="common_abort">中止</string>
 
+    <!-- accessibility -->
+    <string name="accessibility_checked">選択済み</string>
+    <string name="accessibility_unchecked">未選択</string>
+
     <!-- setup -->
     <string name="setup_title">Keryx へようこそ</string>
     <string name="setup_choose_mode">同期方法を選んでください（後からでも変更できます）</string>
@@ -74,6 +78,8 @@
     <string name="home_delete_tag_menu">削除</string>
     <string name="home_assign_tags">タグを設定</string>
     <string name="home_remove_feed_from_tag_menu">タグから外す</string>
+    <string name="home_expand">展開する</string>
+    <string name="home_collapse">折りたたむ</string>
     <string name="home_folders">フォルダー</string>
     <string name="home_add_folder">フォルダーを追加</string>
     <string name="home_new_folder_hint">フォルダー名を入力</string>
@@ -136,11 +142,12 @@
     <string name="article_next">次の記事</string>
 
     <!-- settings -->
+    <string name="settings_title">設定</string>
     <string name="settings_tab_general">一般</string>
     <string name="settings_tab_notifications">通知</string>
     <string name="settings_tab_data">データ</string>
     <string name="settings_theme">テーマ</string>
-    <string name="settings_theme_system">システムに合わせる</string>
+    <string name="settings_theme_system">システム</string>
     <string name="settings_theme_light">ライト</string>
     <string name="settings_theme_dark">ダーク</string>
     <string name="settings_cache">記事のキャッシュ保持期間</string>
@@ -174,8 +181,7 @@
     <string name="settings_refresh_min30">30分</string>
     <string name="settings_refresh_hour1">1時間</string>
     <string name="settings_refresh_hour3">3時間</string>
-    <string name="settings_refresh_manual">手動のみ</string>
-    <string name="settings_desktop">デスクトップ</string>
+    <string name="settings_refresh_manual">手動</string>
     <string name="settings_notification_enabled">新着通知を有効にする</string>
     <string name="settings_start_minimized">起動時にトレイに収納する</string>
     <string name="settings_cloud_sync">クラウド同期</string>
@@ -203,9 +209,6 @@
     <string name="settings_font_medium">標準</string>
     <string name="settings_font_large">大</string>
     <string name="settings_font_xlarge">特大</string>
-    <string name="settings_article_list">記事一覧</string>
-    <string name="settings_article_list_all">すべて</string>
-    <string name="settings_article_list_unread_only">未読のみ</string>
     <string name="settings_updates">アップデート</string>
     <string name="settings_version">バージョン %1$s</string>
     <string name="settings_website">ウェブサイト</string>

@@ -1,15 +1,27 @@
 ---
 name: ui-guidelines
-description: Keryx UI/Compose style guidelines. Read when adding or modifying Compose under `ui/` (home / common / settings / setup / article) or `platform/NativeMenu`. Defines pane tonal roles, divider policy, article card style, layout stability, flat native-feel components (buttons / toggles / text fields / overflow menus), dialog/popup conventions, and icon usage rules.
+description: Keryx UI/Compose style guidelines. Read when adding or modifying Compose under `ui/` (home / common / settings / setup / article) or `platform/NativeMenu`. Defines pane tonal roles, divider policy, article card style, layout stability, platform-native components (buttons / toggles / text fields / list rows / overflow menus / theme), dialog/popup conventions, and icon usage rules.
 ---
 
 # UI Guidelines (Compose Multiplatform)
 
 Style conventions for Keryx's Compose UI. Follow these when adding or modifying
 UI anywhere under `ui/` — the Home screen's 3-pane layout and list rows
-(`ui/home/`), the shared flat controls (`ui/common/`), settings (`ui/settings/`),
+(`ui/home/`), the shared controls (`ui/common/`), settings (`ui/settings/`),
 setup (`ui/setup/`), the article reader (`ui/article/`), and the native
 overflow menu (`platform/NativeMenu`).
+
+**The governing principle is "each platform follows its own native UI idiom"** — see
+`external-spec.md` §9. Desktop (macOS, and Windows/Linux sharing its look for the Java/Swing
+reasons documented there) gets a flat, hairline-bordered, non-ripple aesthetic; Android gets
+Material 3's own shapes, ripple, and components; iOS will eventually get native SwiftUI. Most of
+this document was originally written when Keryx was desktop-only, so **most rules below describe
+the desktop `actual` specifically**, not a shared app-wide style — where a rule doesn't already say
+"on Android" or "the Android `actual`", assume it's a desktop-only convention and check the
+component's own `expect`/`actual` split (grep the component name) before assuming the same rule
+applies verbatim on Android. Do not read "flat", "no ripple", or "hairline border" anywhere below
+as a target for Android; those phrases describe desktop's own choice, not a default the Android
+`actual` is deviating from.
 
 ## Layout stability under state changes
 
@@ -123,6 +135,16 @@ context menu (`nativeContextMenu`) and drag-from-handle for reordering are delib
 gestures on the same row — see `platform/NativeMenu.android.kt`'s KDoc for how the two coexist
 without one stealing the other's press.
 
+**Touch density.** Each pane's own click-to-focus background (a mouse-only affordance — see
+`ui/home/HomeCommon.kt`'s `paneActivation`) and every interactive list row's minimum height
+(`ui/home/ListRowChrome.kt`'s `listRowMinHeight`, matching M3's `NavigationDrawerItem` minimum —
+`56.dp` on a touch-primary platform, `0.dp`/no floor elsewhere) are both gated the same way as the
+drag handle above: a plain `isTouchPrimary` check, applied via `Modifier.heightIn(min = ...)`
+*after* a row's own content padding, never touching `LIST_ROW_VERTICAL_MARGIN` (the drag insertion
+marker's geometry depends on it — see the Divider policy section above). A row's individual
+touch-only elements (the tag color dot, the folder/tag expand chevron) grow their own click target
+to a full 48dp the same way, independent of their drawn/visible size.
+
 ## Divider policy
 
 - **Between panes**: keep `ResizableDivider`, but de-emphasize it — idle
@@ -164,15 +186,19 @@ without one stealing the other's press.
   - `.nativeContextMenu(...)`, then — for a feed-list row that can be a drag
     insertion boundary — `.insertionMarkers(top, bottom)`
     (`ui/home/FeedListDragAndDrop.kt`), then
-    `.listRowSurface(background, interactionSource, decoration)` — the row's
-    standard `LIST_ROW_HORIZONTAL_MARGIN`/`LIST_ROW_VERTICAL_MARGIN` outer
-    margin, `MaterialTheme.shapes.small` clip, `background`, an optional
-    `decoration` (e.g. a drop-target border), then the shared
-    `interactionSource`'s flat press feedback via `Modifier.indication` —
-    then the row's own inner content padding. `insertionMarkers` must sit
-    *before* `listRowSurface`: it paints into the margin `listRowSurface`'s
-    leading `padding` reserves, which applying it afterwards would inset it
-    away from, and whose `decoration` slot is clipped to the rounded rect
+    `.listRowSurface(background, kind, interactionSource, decoration)` — `kind`
+    is a `ListRowKind` (`NavItem` for feed/folder/tag rows, `ListItem` for
+    article rows) that only matters on Android; see "Platform-native list
+    rows" below for what each `expect`/`actual` does with it. On desktop this
+    is still the row's standard `LIST_ROW_HORIZONTAL_MARGIN`/
+    `LIST_ROW_VERTICAL_MARGIN` outer margin, `MaterialTheme.shapes.small`
+    clip, `background`, an optional `decoration` (e.g. a drop-target border),
+    then the shared `interactionSource`'s flat press feedback via
+    `Modifier.indication` — then the row's own inner content padding.
+    `insertionMarkers` must sit *before* `listRowSurface`: it paints into the
+    margin `listRowSurface`'s leading `padding` reserves, which applying it
+    afterwards would inset it away from, and whose `decoration` slot is
+    clipped to the rounded rect
     regardless.
   - For `ArticleRow`, the `.heightIn(min = rowHeight)` call must stay *after*
     the inner content padding (see Article card style below).
@@ -221,6 +247,37 @@ without one stealing the other's press.
   it (it was tried down to zero) — see
   [known-issues.md](../../../docs/known-issues.md) for the measurements and
   everything ruled out, rather than re-investigating it.
+
+## Platform-native list rows
+
+`listRowSurface` (see above) is `expect`/`actual` and takes a `ListRowKind` — `NavItem` for
+feed/folder/tag rows, `ListItem` for article rows — because the two platforms don't just differ in
+color/shape here, they follow genuinely different native row idioms:
+
+- **Desktop**: one look regardless of `kind` — the inset, rounded-rectangle highlight described
+  throughout the Divider policy section above. Desktop has no equivalent split between "nav item"
+  and "content list item" chrome, so the desktop `actual` ignores `kind` entirely.
+- **Android**: `NavItem` keeps the same inset (`LIST_ROW_HORIZONTAL_MARGIN`/`LIST_ROW_VERTICAL_MARGIN`
+  are unchanged — the drag insertion marker's geometry, per the Divider policy section above, depends
+  on the vertical one specifically) but clips to a full pill (`CircleShape`) instead of a lightly
+  rounded rectangle, matching M3's `NavigationDrawerItem`. `ListItem` is full-bleed — no horizontal
+  inset, no corner clip — matching M3's plain `ListItem`; article rows are never a drag target, so
+  nothing depends on the exact vertical spacing there the way `NavItem`'s does.
+
+**When adding a new list row**, decide which `ListRowKind` it is by asking the same question M3
+asks: does this row represent a navigation/filter target (a feed, folder, tag — something you tap to
+change what's showing), or a content item in a list (an article — something you tap to open)? Pass
+`kind` explicitly; it has no default (see `listRowSurface`'s own KDoc for why — a forgotten `kind`
+should be a compile error, not a silently wrong Android row style).
+
+`selectionBackground`/`selectionContentColorOrNull` (`ui/home/HomeCommon.kt`) — the color functions
+list rows pass into `listRowSurface`'s `background` parameter — additionally read
+`LocalRowSelectionVisible`, a `CompositionLocal` `HomeScreen` sets to `false` at `PaneLayout.Single`
+(see "Adaptive pane layout & touch affordances" above): on a phone-width screen, tapping a row
+navigates *away* from it (drills into the article list or the article detail), so a lingering
+highlight there would mark a row the user can no longer see, unlike at `Dual`/`Triple` where the
+selected row's pane stays on screen alongside whichever pane it opened. This is desktop-and-Android
+shared logic (desktop is unaffected — it never resolves `Single`), not a per-platform `actual`.
 
 ## Sticky section headers in scrollable lists
 
@@ -382,9 +439,13 @@ Modifier.nativeContextMenu(
   exists (see `AppMenuTree.kt`'s Feed menu), separators included, so the two
   surfaces read as the same menu.
 - `onOpen` fires just before the menu shows; call sites typically use it to
-  select the right-clicked row. An **empty** `items` list shows no menu and
-  makes `onOpen` the only effect — that's how a pane background moves focus on
-  right-click without selecting anything.
+  select the right-clicked row. On Android, `onOpen` is intentionally ignored:
+  a long-press only opens the menu and never selects the row. Keep any side
+  effects inside `onOpen` desktop-only (e.g. row selection), not required for
+  the action to work on Android. An **empty** `items` list shows no menu and
+  makes `onOpen` the only effect on desktop — that's how a pane background
+  moves focus on right-click without selecting anything. On Android, an empty
+  `items` list also shows no menu and simply consumes the long-press gesture.
 - The menu's **shape** (the kind of each entry, plus each submenu's child
   count) is expected to be stable per call site across ordinary
   recompositions. It may still change when the underlying data does (a folder
@@ -513,15 +574,17 @@ should follow the same rules:
 Creating still uses a dialog (`FeedListDialogs.kt`'s add folder / add tag): there is no row to edit
 in place yet, and a new tag picks its name and color at once.
 
-## Native-feel restyle (flat press feedback, icon set, popovers)
+## Native-feel restyle (per-platform press feedback, icon set, popovers)
 
 The app does not embed AWT/Swing widgets via `SwingPanel` for ordinary controls
 (e.g. `Switch`/dropdowns) — JetBrains Compose Multiplatform has unresolved
 z-order/overdraw/crash bugs for `SwingPanel` inside scrollable containers, and
 every candidate control here lives inside one (`SettingsScreen`'s
 `verticalScroll` `Column`, `FeedListPane`/`ArticleListPane`'s `LazyColumn`).
+This whole constraint — and everything under it about Swing interop — is desktop-only; Android has
+no AWT/Swing layer at all.
 
-Three native-widget exceptions exist, all outside scrollable containers, and
+Three native-widget exceptions exist on desktop, all outside scrollable containers, and
 **none of them is a pattern to extend**:
 
 - `platform/NativeMenu.kt` — shows a menu on demand rather than embedding a
@@ -533,24 +596,31 @@ Three native-widget exceptions exist, all outside scrollable containers, and
   separate `DialogWindow`: a heavyweight panel always paints over in-window
   Compose `Popup`s.
 
-For everything else the native *feel* comes entirely from Compose-side
-theme/shape/indication/icon choices:
+For everything else, each platform's native *feel* comes entirely from Compose-side
+theme/shape/indication/icon choices — desktop's flat/hairline-border/no-ripple aesthetic on one
+side, Android's own Material 3 ripple/shapes/components on the other:
 
-- **Flat press feedback, no ripple**: `KeryxTheme.kt` provides a custom
-  `IndicationNodeFactory` (`FlatIndication`) via
-  `CompositionLocalProvider(LocalIndication provides ...)`, applied once for
-  the whole app. It draws an immediate, non-animated `onSurface`-ish low-alpha
-  rectangle overlay while pressed — no ripple spread/fade. Don't add
-  per-call-site `indication = rememberRipple(...)` (or any other indication)
-  overrides going forward; if a control needs a different feel, change
-  `FlatIndication` itself so the app stays consistent. `LocalIndication` only
-  affects plain `Modifier.clickable`/`selectable`/`toggleable` call sites,
-  though — M3 components (`Button`/`IconButton`/`Switch`/`Checkbox`/…)
-  hardcode `ripple()` internally and never consult it. `KeryxTheme.kt` also
-  provides `CompositionLocalProvider(LocalRippleConfiguration provides ...)`
-  with every `RippleAlpha` channel zeroed, as a global safety net for those
-  components (there's no public API to disable the ripple *animation* itself,
-  but zero alpha makes it invisible). For buttons specifically, prefer
+- **Press feedback and shapes — `ui/theme/PlatformTheme.kt`** (`expect`/`actual`): the single
+  seam that switches the whole app's interaction feel and corner-radius scale at once. Desktop's
+  `actual` provides a custom `IndicationNodeFactory` (`FlatIndication`) via
+  `CompositionLocalProvider(LocalIndication provides ...)` — an immediate, non-animated
+  `onSurface`-ish low-alpha rectangle overlay while pressed, no ripple spread/fade — plus
+  `platformShapes`, a tighter corner-radius scale than M3's default. Android's `actual` provides
+  neither override: leaving `LocalIndication`/`LocalRippleConfiguration`/`platformShapes` at their
+  M3 defaults is exactly what gives every `clickable` and M3 component (`Button`/`IconButton`/
+  `Switch`/`Checkbox`/…) its own real ripple and M3's own shape scale — a real ripple is what
+  "native" means on Android, the same way flat, non-animated press feedback is what "native" means
+  on desktop. `KeryxTheme.kt` (`commonMain`) composes `ProvidePlatformInteraction` around
+  `MaterialTheme(shapes = platformShapes, …)`; **don't add per-call-site `indication = ripple(...)`
+  overrides on desktop** — if a desktop control needs a different feel, change `FlatIndication`
+  itself in `PlatformTheme.desktop.kt` so the app stays consistent there. `LocalIndication` only
+  affects plain `Modifier.clickable`/`selectable`/`toggleable` call sites — M3 components hardcode
+  `ripple()` internally and never consult it, which is why desktop's `PlatformTheme.desktop.kt`
+  *also* provides `CompositionLocalProvider(LocalRippleConfiguration provides ...)` with every
+  `RippleAlpha` channel zeroed, as a global safety net for those (there's no public API to disable
+  the ripple *animation* itself, but zero alpha makes it invisible); Android's `actual` skips this
+  entirely, since a visible M3 ripple on those components is exactly the point there. For buttons
+  specifically, prefer
   `ui/common/FlatButtons.kt`'s `FlatButton` (primary/filled — `primary` fill),
   `FlatTonalButton` (secondary — `secondaryContainer` fill + hairline
   `outlineVariant` border, for actions that still need clear button affordance
@@ -594,9 +664,13 @@ theme/shape/indication/icon choices:
   `FlatCheckbox` is a rounded square that fills `primary` + shows a `Check`
   when checked. The Android `actual`s delegate to M3's own `Switch`/`Checkbox`
   — see the `KeryxTextField` bullet below for why that's the right call on
-  that platform. Count badges overlaid on an icon (e.g. the notification bell
-  in `ArticleListPane`) likewise use a plain `Box`/`Text` pill (`error` fill,
-  `onError` text) instead of M3's `BadgedBox`/`Badge`.
+  that platform. `KeryxBadgedIcon` (`ui/common/KeryxBadge.kt`, expect/actual) —
+  the count badge overlaid on an icon (currently only the notification bell in
+  `ArticleListPane`) — follows the same split: desktop's `actual` draws a
+  hand-rolled `Box`/`Text` pill (`error` fill, `onError` text), Android's
+  `actual` uses M3's own `BadgedBox`/`Badge`. Don't add a raw `Box`/`Text` pill
+  or a raw `BadgedBox`/`Badge` at a `commonMain` call site — use
+  `KeryxBadgedIcon`.
 - **`KeryxTextField`** (`ui/common/KeryxTextField.kt`, expect/actual): the
   replacement for M3's `OutlinedTextField` for every text input — a flat,
   thin-bordered field on desktop, plain M3 on Android (same "why fight the
@@ -650,37 +724,82 @@ theme/shape/indication/icon choices:
   unflipped tree-expand chevron. `ArrowBack` gives "back" its own dedicated
   entry (Android = Material's `arrow_back`, desktop = Tabler's `arrow-left`),
   so `ChevronRight` now means only one thing and no call site transforms it.
-- **Flat surface pattern**: `NotificationCenterSheet`, `SetupScreen`'s
-  `OptionCard`, and `TooltipIconButton`'s tooltip all use the same look for a
-  "raised" panel instead of M3's tonal-elevation `Card`:
-  `Surface(shape = MaterialTheme.shapes.<small|medium>, color =
-  MaterialTheme.colorScheme.surfaceContainerLow (or surfaceContainerHighest
-  for the tooltip), border = BorderStroke(1.dp,
-  MaterialTheme.colorScheme.outlineVariant), tonalElevation = 0.dp)` — a flat
-  fill plus a hairline border reads as native chrome; M3's default tonal
-  elevation (mixing primary into the surface color to fake a shadow) doesn't.
-  `AlertDialog` usages follow the same spirit even though they keep the
-  scrim: pass `containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-  tonalElevation = 0.dp` (no border needed — the scrim already separates it).
-  `Snackbar` similarly gets `containerColor =
-  MaterialTheme.colorScheme.surfaceContainerHighest` instead of M3's default
-  `inverseSurface`, so it doesn't look like a different color system.
-- **Icon grouping (`ToolbarIconGroup`)**: related toolbar icons (e.g. add feed/refresh/cloud sync,
-  search/notifications, sort/mark-all-read, star/mark-unread, copy-url/open-in-browser) are clustered
-  into a rounded capsule via `ToolbarIconGroup` (`ui/common/TooltipIconButton.kt`), separated from other
-  clusters in the same row by an 8dp `Spacer`. It renders with the same "flat surface pattern" tokens as
-  everything else here (`surfaceContainerHighest` fill + `outlineVariant` 1.dp border, `tonalElevation =
-  0.dp`) — this is a stand-in for a native grouped-toolbar look (e.g. macOS's glass/blur toolbar
-  clustering), adopted because Compose Multiplatform has no native glass/blur primitive. When this app
-  gets a native SwiftUI UI (iOS/iPadOS/macOS, see `external-spec.md`), replace `ToolbarIconGroup`'s
-  usages with SwiftUI's native toolbar grouping (glass effect included) rather than trying to fake glass
-  in Compose. Only wrap icons in `ToolbarIconGroup` where the cluster always has 2+ icons — a single icon
-  in a capsule reads as visual noise, so lone icons (e.g. the settings icon) stay bare.
-- **Other native-migration candidates**: besides `ToolbarIconGroup`, these are Compose-side hand-rolled
+- **`KeryxSettingRow`** (`ui/common/KeryxSettingRow.kt`, expect/actual): the replacement for
+  `SettingsComponents.kt`'s `LinkRow`/`ActionLinkRow`/`SwitchRow` (now thin wrappers around it) **at
+  a `commonMain` call site** — don't hand-roll a hover-styled `Text` row there. Desktop's `actual`
+  reproduces the former exact look: primary-colored text with underline + hand cursor on hover
+  (`onClick` given, no `trailing`), or a plain-colored label beside a `trailing` control with only
+  that control interactive (`SwitchRow`'s case) — hover has no touch equivalent, so this is the one
+  `KeryxSettingRow` shape Android's `actual` doesn't reproduce. Android's `actual` is a real M3
+  `ListItem`, whose own tap target covers the *whole row* when `onClick` is given (including the
+  `SwitchRow` case — Android's `ListItem` doesn't distinguish "trailing control only"), and
+  `supporting` (a hover tooltip on desktop) renders as `ListItem`'s own `supportingContent` line.
+- **`KeryxAnchoredPanel`** (`ui/common/KeryxAnchoredPanel.kt`, expect/actual): the replacement for a
+  raw `androidx.compose.ui.window.Popup` at a `commonMain` call site — see "Popup vs. Dialog" below
+  for when a Popup (vs. a Dialog) is the right choice in the first place; this is what backs that
+  choice on each platform once it is. Desktop's `actual` is the former `Popup` call, unchanged.
+  Android's `actual` is a real M3 `ModalBottomSheet` — besides matching Android's own idiom for a
+  lightweight overlay, this is *necessary* there: `NotificationCenterSheet`/`TagColorPickerPopup`
+  can be opened while an article is showing, and Android's `WebView` (embedded via `AndroidView`,
+  the platform's own approximation of desktop's heavyweight-AWT z-order problem — see "Nothing
+  Compose-drawn can appear..." below) composites above a bare `Popup` the same way desktop's WebView
+  does above a bare Compose overlay; `ModalBottomSheet`'s own dedicated window layer avoids this.
+  Content passed to `KeryxAnchoredPanel` should have **no `KeryxRaisedSurface`/shadow/width
+  wrapping of its own** — desktop's bare `Popup` supplies no container (the content must still
+  provide the flat-surface wrapping itself there), but `ModalBottomSheet` already supplies one, so
+  callers gate their own surface wrapping behind `isTouchPrimary` (see `NotificationCenterSheet`/
+  `TagColorPickerPopup` for the pattern).
+- **`KeryxPaneTopBar`** (`ui/common/KeryxPaneTopBar.kt`, expect/actual): the replacement for a
+  hand-rolled `navigationIcon`/title/trailing-`actions` `Row` at a `commonMain` call site — see
+  `FeedListToolbarRow`, `ArticleListTopBar`'s back+title row, and `ArticleDetailToolbar`, all now
+  built on this. This does **not** create a shared top bar across the 3 panes (see "Pane structure
+  & tonal roles" above) — each pane still calls it separately with its own `actions`. Desktop's
+  `actual` is a plain `Row` reproducing each former call site's exact layout; because the three
+  differed in padding, `KeryxPaneTopBar` applies none of its own — a caller supplies padding (and
+  keeps `WindowDragArea`/`WindowChrome.titleBarInsetDp` wrapped *around* the call, since neither is
+  shared across all three panes either) via its own `modifier`. Android's `actual` is a real M3
+  `TopAppBar`.
+- **Raised surfaces — `KeryxRaisedSurface`** (`ui/common/KeryxSurface.kt`, expect/actual): the
+  container `NotificationCenterSheet`, `SetupScreen`'s `OptionCard`, `TagColorPicker`'s popup, and
+  `SettingsCard` all use for a "raised" panel instead of M3's tonal-elevation `Card` **at a
+  `commonMain` call site** — don't build a raw `Surface(...)` with these tokens by hand there.
+  Desktop's `actual` is the flat surface pattern: `Surface(shape = shape, color =
+  MaterialTheme.colorScheme.surfaceContainerLow, border = BorderStroke(1.dp,
+  MaterialTheme.colorScheme.outlineVariant), tonalElevation = 0.dp)` — a flat fill plus a hairline
+  border reads as native chrome there; M3's default tonal elevation (mixing primary into the
+  surface color to fake a shadow) doesn't. Android's `actual` instead uses a distinctly-tinted
+  tonal container tier (`MaterialTheme.colorScheme.surfaceContainerHigh`), no border — M3's own
+  elevation idiom is a tonal-container color step, not a hairline border, and a bordered card reads
+  as desktop chrome there. `KeryxAlertDialog` follows the same split for its own `containerColor`/
+  `tonalElevation` parameters: desktop's `actual` honors whatever the caller passes (typically
+  `surfaceContainerLow` / `0.dp`, matching the flat pattern — no border needed there since the scrim
+  already separates the dialog), but Android's `actual` **ignores both** and lets `AlertDialogDefaults`'
+  own values apply, for the same reason `KeryxRaisedSurface` does.
+- **Icon grouping — `ToolbarIconGroup`** (`ui/common/TooltipIconButton.kt`, expect/actual): related
+  toolbar icons (e.g. add feed/refresh/cloud sync, search/notifications, sort/mark-all-read,
+  star/mark-unread, copy-url/open-in-browser) are clustered via `ToolbarIconGroup`, separated from
+  other clusters in the same row by an 8dp `Spacer`. Desktop's `actual` renders the cluster as a
+  rounded capsule with the flat surface pattern's tokens (`surfaceContainerHighest` fill +
+  `outlineVariant` 1.dp border, `tonalElevation = 0.dp`) — a stand-in for a native grouped-toolbar
+  look (e.g. macOS's glass/blur toolbar clustering), adopted because Compose Multiplatform has no
+  native glass/blur primitive; when this app gets a native SwiftUI UI (iOS/iPadOS/macOS, see
+  `external-spec.md`), replace that usage with SwiftUI's native toolbar grouping (glass effect
+  included) rather than trying to fake glass in Compose. **Android's `actual` renders no capsule at
+  all** — a plain, unadorned `Row` — since M3's own toolbars don't wrap their icons in a container;
+  wrapping one there would itself be the non-native choice. Only wrap icons in `ToolbarIconGroup`
+  where the cluster always has 2+ icons — a single icon in a desktop capsule reads as visual noise,
+  so lone icons (e.g. the settings icon) stay bare (this consideration doesn't apply to Android,
+  which never draws a capsule regardless of cluster size).
+- **Other native-migration candidates**: besides desktop's `ToolbarIconGroup` capsule, these are Compose-side hand-rolled
   approximations of something with a genuine native macOS/SwiftUI equivalent — worth swapping for the
   real thing during a future SwiftUI port rather than porting the Compose approximation as-is:
   - `ResizableDivider` (`ui/home/ResizableDivider.kt`) — hand-built pane divider with manual
     hover/cursor/drag handling → native `NSSplitView`/SwiftUI `NavigationSplitView`/`HSplitView` divider.
+    Already `isTouchPrimary`-aware (not just a SwiftUI-port target): on Android, where a tablet-width
+    landscape viewport can reach `PaneLayout.Triple` the same as desktop, it renders as a plain static
+    divider with no hover/drag affordances at all — M3 has no touch-oriented pane-splitter idiom, and
+    8dp is well under any usable touch target. Pane widths stay at whatever `local_settings` last
+    recorded there.
   - `WindowChrome.titleBarInsetDp` (`platform/WindowChrome.kt`) — manual inset math to dodge the
     traffic-light buttons → disappears entirely with a native full-size-content-view + unified toolbar.
   - The inline article search — `ArticleListPane`'s search `KeryxTextField` bound to
@@ -699,44 +818,68 @@ theme/shape/indication/icon choices:
     shortcuts (⌘/Ctrl+F, J/K, U, S, arrow-key pane nav) that's invisible from outside the app → SwiftUI's
     menu-bar `Commands`/`.keyboardShortcut()`, which register real, discoverable menu items with standard
     key-equivalent conflict resolution.
-  - `Snackbar`/`SnackbarHost` (OPML import/export results, URL-copied toast) — weaker candidate than the
+  - `Snackbar`/`SnackbarHost` (OPML import/export results) — weaker candidate than the
     others since SwiftUI has no 1:1 Snackbar equivalent; a SwiftUI port would need a bespoke transient
-    banner view rather than a drop-in native replacement.
-  - The Settings dialog's tab switcher (`KeryxDialogTabBar` in `ui/common/KeryxDialogs.kt`, used by
-    `KeryxTabDialog`) — a flat Compose-drawn icon-over-label tab row, deliberately *not* styled to
-    mimic macOS's native toolbar/segmented-control chrome → a native NSToolbar-style preferences tab
-    switcher on a future SwiftUI port. Two rounds of AWT/Swing interop (`SwingPanel` +
-    `JToggleButton`s with Aqua `JButton.buttonType` client properties) were tried and dropped before
-    landing on the Compose version: `"segmented"` reads as a cramped joined pill unsuited to this
-    layout, and `"toolbarItem"` (the semantically correct type — Apple's own docs describe it as "a
-    button that displays an icon with a label underneath ... intended for use on the window frame")
-    doesn't reliably indicate a `JToggleButton`'s selected state under Aqua, a known, still-open JDK
-    bug (JDK-8250953). Don't re-attempt native Aqua chrome for this control — treat it the same as
-    `ToolbarIconGroup`/`ResizableDivider`/etc. above, a SwiftUI-port target, not a
-    Compose-Swing-interop target.
-- **Icon hover feedback**: `TooltipIconButton` shows a subtle circular highlight on hover
+    banner view rather than a drop-in native replacement. (The URL-copied feedback is no longer purely
+    an inline-icon affair — see `LocalSnackbarHostState`'s own KDoc: Android now also reports it via a
+    real M3 `Snackbar`, below API 33 only, where the OS itself doesn't already show a clipboard-copy
+    confirmation. Desktop still has none, per this app's no-in-app-snackbar convention.)
+  - **Desktop only.** The Settings dialog's tab switcher (desktop's `KeryxTabDialog`
+    actual in `KeryxDialogs.desktop.kt`) now uses Material3's
+    `SecondaryScrollableTabRow`/`Tab` via the shared `KeryxDialogTabs` helper, making
+    it a standard Compose Multiplatform component just like Android's `KeryxTabDialog`
+    actual uses `PrimaryScrollableTabRow`/`Tab` — only the surrounding dialog shape
+    and tab-row variant differ by platform. The previous hand-rolled flat
+    `KeryxDialogTabBar` was removed. On a future SwiftUI port, replace this with a
+    native NSToolbar-style preferences tab switcher rather than porting the Compose
+    approximation as-is. Two earlier rounds of AWT/Swing interop (`SwingPanel` +
+    `JToggleButton`s with Aqua `JButton.buttonType` client properties) were abandoned:
+    `"segmented"` read as a cramped joined pill and `"toolbarItem"` didn't reliably
+    indicate selected state under Aqua (JDK-8250953). Treat the current M3 tab row the
+    same as `ToolbarIconGroup`/`ResizableDivider`/etc. above: a SwiftUI-port target,
+    not a Compose-Swing-interop target.
+- **`TooltipIconButton` and its tooltip trigger** (`ui/common/TooltipIconButton.kt`, expect/actual):
+  every icon button with a tooltip goes through this **at a `commonMain` call site** — don't
+  hand-roll `IconButton` + `TooltipBox` there. Desktop's `actual` re-implements M3's `IconButton`
+  with plain `Modifier`s so pressing it uses `FlatIndication` (see "Press feedback and shapes"
+  above) instead of M3's hardcoded ripple, and shows a subtle circular highlight on hover
   (`MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)`, no animation, same immediate on/off
   convention as `FlatIndication`/`ResizableDivider`), using `hoverable` on the same
-  `MutableInteractionSource` passed to its `clickable`. Don't add a separate hover mechanism per call
-  site — extend `TooltipIconButton` itself if the feel needs to change everywhere.
+  `MutableInteractionSource` passed to its `clickable`. Android's `actual` is a plain M3
+  `IconButton` (a real ripple, no hover mechanism — hover has no touch equivalent) inside the same
+  `TooltipBox` desktop uses; `TooltipBox` already triggers its tooltip on long-press on a
+  touch-primary platform — matching Android's own tooltip convention — with no extra gesture code
+  needed on either `actual`'s part. Don't add a separate hover mechanism per call
+  site — extend the desktop `actual` itself if that platform's feel needs to change everywhere.
+  Its tooltip content is `FlatTooltipContent` (also `ui/common/TooltipIconButton.kt`,
+  expect/actual — shared with `LinkRow` and the feed-gone indicator's own `TooltipBox` calls, which
+  are otherwise untouched by this split): desktop's `actual` is the flat surface pattern (see
+  "Raised surfaces" above, `surfaceContainerHighest` variant); Android's `actual` is M3's own
+  `PlainTooltip`.
 - **Popup vs. Dialog**: non-modal, anchored info panels (no scrim, dismiss on
   outside click, positioned relative to the control that opened them) use
-  `androidx.compose.ui.window.Popup` — `NotificationCenterSheet`, opened from
+  `KeryxAnchoredPanel` (see above) — `NotificationCenterSheet`, opened from
   `ArticleListPane`'s bell icon, is the first example (a `Box` around the
   `TooltipIconButton` holds local `showNotifications` state and anchors the
-  `Popup` with `alignment = Alignment.TopEnd` + a small `y` offset). The tag
+  panel with `alignment = Alignment.TopEnd` + a small `anchorOffsetY`, desktop-only
+  positioning — see `KeryxAnchoredPanel`'s own KDoc). The tag
   color picker is the second: `TagColorPickerPopup`
   (`ui/home/TagColorPicker.kt`), anchored to the tag row's own color dot, which
   is clickable at all times and independent of whether that row is being
   renamed — picking a swatch applies immediately, so there is nothing to
   confirm and nothing to block the window for. Note the container and the
-  swatches are deliberately separate composables, so a phone-width
-  `ModalBottomSheet` could host the same swatches later. Anything
+  swatches are deliberately separate composables, so both share the same
+  swatches with no changes needed there. Both render as a real M3
+  `ModalBottomSheet` on Android (`KeryxAnchoredPanel`'s Android `actual`) —
+  matching that platform's own idiom for this kind of lightweight overlay, and
+  necessary for `NotificationCenterSheet` specifically (see `KeryxAnchoredPanel`'s
+  own entry above for why a bare `Popup` there would end up behind the article
+  reader's `WebView` on Android). Anything
   that demands full attention and blocks the rest of the UI (confirmations,
   text-prompt forms, the add-feed flow) stays an `AlertDialog`/`Dialog`
   — see `TextPromptDialog`, the various `AlertDialog` usages
   in `FeedListDialogs.kt`. (Search is neither — it's an inline field in
-  `ArticleListPane`, see the Flat surface / migration notes above.) Don't reach for `Popup` for anything that should block
+  `ArticleListPane`, see the Flat surface / migration notes above.) Don't reach for `KeryxAnchoredPanel` for anything that should block
   interaction with the rest of the window, and don't reach for `Dialog` for
   something that's meant to feel like a lightweight, dismissable overlay.
 - **Nothing Compose-drawn can appear over the article detail pane's content area**: the article
@@ -754,3 +897,10 @@ theme/shape/indication/icon choices:
   would change the row's child count, and while that happens not to move this particular row's
   height today (all its children are fixed-size icons), don't rely on that; keep the structure
   literally unconditional. Do not reintroduce an early return that skips composing the WebView.
+  **Android's `WebView` (embedded via `AndroidView`) has the same limitation**: it composites above
+  ordinary Compose content in the same Activity window, so a plain `Scaffold(snackbarHost = ...)`
+  drawn as regular Compose content is invisible whenever an article is open. `HomeScreen.kt`'s
+  Snackbar host works around this by rendering through a `Popup` instead (which attaches its own
+  window-level layer, above the WebView) rather than `Scaffold`'s own slot — see
+  `LocalSnackbarHostState`'s own KDoc. Any future Android-side "float something over the current
+  pane" UI needs the same `Popup`/`KeryxAnchoredPanel`-style treatment, not a plain Compose overlay.

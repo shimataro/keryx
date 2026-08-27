@@ -1,12 +1,13 @@
 ---
 name: audit-claude-config
-description: Audit configuration under `.claude/`. Inspect CLAUDE.md, rules, skills (SKILL.md), subagents (agents/*.md), and settings(.local).json for outdated / incorrect / ambiguous / redundant / missing descriptions, files to add or remove, content that should be split from CLAUDE.md into rules/, role changes (rules↔skills↔agents), and model assignments, then output recommended fixes with rationale. Invoke explicitly with /audit-claude-config. Also triggered by phrases like "review .claude", "audit settings/rules/skills/subagents".
+description: Audit configuration under `.claude/`. Inspect CLAUDE.md, rules, skills (SKILL.md), subagents (agents/*.md), etc/ shared fragments, and settings(.local).json for outdated / incorrect / ambiguous / redundant / missing descriptions, files to add or remove, content that should be split from CLAUDE.md into rules/, role changes (rules↔skills↔agents), and model assignments, then output recommended fixes with rationale. Invoke explicitly with /audit-claude-config. Also triggered by phrases like "review .claude", "audit settings/rules/skills/subagents".
 ---
 
 # .claude Configuration Audit
 
 Inspect everything under `.claude/` (`CLAUDE.md`, `rules/`, `skills/*/SKILL.md`, `agents/*.md`,
-`settings.json`, `settings.local.json`) **following Claude Code official best practices and
+`etc/**` shared fragments, `settings.json`, `settings.local.json`) **following Claude Code official
+best practices and
 cross-checking against the current source code**, then output recommended fixes with rationale.
 
 > This skill involves **high-accuracy judgments**. **Run it in an opus session.**
@@ -39,6 +40,14 @@ cross-checking against the current source code**, then output recommended fixes 
   You can verify whether it actually reaches by checking if the file body is injected into the session
   context at the top of the conversation (this skill has previously detected a broken import because
   `ui-guidelines.md` was missing even though `docs/*.md` were expanded).
+- **`@` imports do not work in `agents/*.md`.** They are expanded in `CLAUDE.md`, but an agent
+  definition's own `@path` is not — an agent that needs a document must be told to `Read` it by path.
+  Flag any `@` import found in `.claude/agents/`: it is silently doing nothing. (Detected when
+  `reviewer.md`'s `@../../docs/sync-architecture.md` turned out never to reach the agent, while
+  `app-architecture.md` appeared only because `CLAUDE.md` imports it.)
+- **Shared fragments under `.claude/etc/`** are not auto-loaded and are not `@`-imported either;
+  they reach an agent only because the agent is instructed to read them. Check that every file in
+  `.claude/etc/` still has at least one reader, and that each reader names the correct path.
 - **Verify existence of described symbols**: gradle task names, class names, file paths, constants, etc.
   should be checked with `grep`/`find` against the current source (e.g. `generateCommonMainKeryxDatabaseInterface`,
   `LICENSES_URL`, count of `.sq`/`.sqm` files).

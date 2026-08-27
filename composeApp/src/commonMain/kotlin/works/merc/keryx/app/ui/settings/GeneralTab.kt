@@ -13,6 +13,7 @@ import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import works.merc.keryx.app.platform.hasNativeAppMenu
+import works.merc.keryx.app.platform.hasSystemTray
 import works.merc.keryx.app.ui.common.SegmentedControl
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
@@ -85,13 +86,15 @@ internal fun GeneralTabContent(vm: SettingsViewModel) {
             )
         }
 
-        Spacer(Modifier.height(8.dp))
-        SettingsCard {
-            SwitchRow(
-                label = stringResource(Res.string.settings_start_minimized),
-                checked = settings.startMinimized,
-                onChange = { vm.setStartMinimized(it) },
-            )
+        if (hasSystemTray) {
+            Spacer(Modifier.height(8.dp))
+            SettingsCard {
+                SwitchRow(
+                    label = stringResource(Res.string.settings_start_minimized),
+                    checked = settings.startMinimized,
+                    onChange = { vm.setStartMinimized(it) },
+                )
+            }
         }
 
         if (!hasNativeAppMenu) {

@@ -17,7 +17,7 @@
 | プラットフォーム | 対応 |
 | --- | --- |
 | Windows / macOS / Linux | ✅（Compose Multiplatform、現行） |
-| Android | ✅（Compose Multiplatform、現行。クラウド同期は Dropbox / OneDrive に対応 — Google Drive は当面デスクトップのみ。§4 参照） |
+| Android | ✅（Compose Multiplatform、現行。クラウド同期は Dropbox / OneDrive に対応 — Google Drive の Android 対応は将来の検討事項。§4 および [sync-architecture.ja.md](sync-architecture.ja.md) 参照） |
 | iOS / iPadOS / macOS | 予定（最初は Compose、その後 SwiftUI ネイティブ UI） |
 
 ## 3. 対応フォーマット
@@ -36,7 +36,7 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
   カスタム URI リダイレクトを使う PKCE パブリッククライアント）。Google Drive のデスクトップ向け
   OAuth 構成（ループバックリダイレクト + `client_secret` を使う「デスクトップアプリ」クライアント）は
   Android には流用できない — 調査内容は [sync-architecture.ja.md](sync-architecture.ja.md) の
-  「クラウド認証」を参照 — そのため Android のセットアップ/設定では選択肢として出さない。
+  「クラウド認証」と「将来の検討事項（Android での Google Drive）」を参照 — そのため Android のセットアップ/設定では選択肢として出さない。
 
 ## 5. 競合解決ポリシー
 
@@ -53,7 +53,7 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
 ## 6. セットアップフロー
 
 初回起動でローカルのみ / クラウド同期（Dropbox・Google Drive・OneDrive。Android では Dropbox・OneDrive
-のみ、§4 参照）を選択する。クラウド選択時は OAuth 認証後、クラウドに既存データがあれば初回同期で自動的に
+を利用可能。Google Drive の Android 対応は将来の検討事項、§4 参照）を選択する。クラウド選択時は OAuth 認証後、クラウドに既存データがあれば初回同期で自動的に
 マージ（インポート）される。
 
 ## 7. 基本機能
@@ -69,11 +69,16 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
 - デスクトップ通知・タスクトレイ常駐（閉じるとトレイに収納）・通知センター。
   Linux ではトレイに D-Bus の `org.kde.StatusNotifierItem` + `com.canonical.dbusmenu`、通知に
   `org.freedesktop.Notifications` を使い、StatusNotifierItem ホストが居ない環境では AWT の
-  システムトレイにフォールバックする。Android では新着記事の通知を `NotificationManagerCompat`
+  システムトレイにフォールバックする。デスクトップでは未読数を Dock/タスクバー/ウィンドウアイコンに
+  直接数字バッジとして合成表示する。Android では新着記事の通知を `NotificationManagerCompat`
   経由で投稿し（Android 13+ では OS の通知権限をリクエスト）、バックグラウンド更新は `WorkManager` で
   設定した間隔に概ね従って実行される。アプリ内の「アップデートを確認」は、サイドロードではなく
   ストア（現状は Google Play のみ）からインストールされた場合には非表示になる — そのストアが既に
-  アプリを自動更新するため。
+  アプリを自動更新するため。Android には数字バッジに相当する仕組みが無い — アクティブな通知と
+  独立してアプリアイコンのバッジ数を設定する API がプラットフォームに存在しない（iOS の
+  `setApplicationIconBadgeNumber` に相当するものが無い）ため、代わりに OS 自身の通知ドット
+  （アクティブな通知の有無に連動）と、対応ランチャーでは長押しで見える件数（`setNumber` 経由）を表示する。これは
+  見落としではなく意図的な非対称であり、詳細は `background-update.ja.md` を参照。
 
 ### フィード URL 変更・消滅時の挙動
 
@@ -96,9 +101,17 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
 
 ## 9. UI 方針
 
-Material 3 ベース + カスタムテーマ（teal）。ライト/ダーク/システム対応。3ペインレイアウト
-（フィード一覧・記事一覧・記事詳細）+ キーボードナビゲーション。狭い幅では同時に表示するペイン数を
-減らして適応する（後述）。
+**各プラットフォームは、単一の共通デザインシステムではなく、それぞれ自身のネイティブな UI 作法に従う。**
+macOS はフラットで SF 寄りの見た目、Android は Material 3 自身のコンポーネント・形状・リップル
+フィードバック、iOS は将来的にネイティブ SwiftUI になる。**Windows と Linux は意図的な例外**である —
+Java/Swing 自身のプラットフォーム統合機能は両 OS を同程度にネイティブ化するには力不足なため
+（後述の Look & Feel・コンテキストメニュー・ファイルダイアログの詳細、および
+`docs/known-issues.ja.md` を参照）、両者は独自のネイティブ化を持つ代わりに macOS のフラットな
+見た目を共用する。アプリ独自のティール配色を伴う Material 3 は、この原則の Android における
+具体的な実装であって、他のプラットフォームがそこから逸脱する側の共通ベースラインではない —
+本ドキュメントで「Material 3」と書かれている箇所は、特に断りが無い限り Android 固有の記述として
+読むこと。ライト/ダーク/システム対応。3ペインレイアウト（フィード一覧・記事一覧・記事詳細）+
+キーボードナビゲーション。狭い幅では同時に表示するペイン数を減らして適応する（後述）。
 
 ### 幅による適応レイアウトとタッチ入力（Android）
 
@@ -113,7 +126,11 @@ Material 3 ベース + カスタムテーマ（teal）。ライト/ダーク/シ
 からのドラッグになる（タッチでは開始ジェスチャーを区別しないと、行の他の部分を通常どおりスクロール
 できなくなるため）。デスクトップの右クリックコンテキストメニューはAndroidでは長押しメニューになり、
 デスクトップのアプリケーションメニューから開く設定は、メニューバーを持たないAndroidでは独自の
-ツールバー導線を持つ。
+ツールバー導線を持つ。設定画面自体もそこでは独自の戻る矢印を持つ — ほぼ全画面のダイアログのため、
+それ以外にタップで抜け出す手段がないからだ。リスト行（フィード・フォルダー・タグ・記事）はAndroidではM3の最小タッチ
+密度に合わせて背が高くなり、ペイン間の分割線（タブレット幅の横向きレイアウトで到達可能）は
+そこでは固定され、ドラッグできなくなる — マウスには細いターゲットとドラッグ可能な分割線の余地が
+あるが、タッチにはない。
 
 Compose が描画していない面 — アプリケーションメニューバー・コンテキストメニュー・ダイアログの
 ボタン列 — は実際の Swing/AWT ウィジェットなので、プラットフォームの Look & Feel に従う。
@@ -142,7 +159,7 @@ Linux は Look & Feel が解決したフォント、次にデスクトップの�
 
 | レイヤー | 採用技術 |
 | --- | --- |
-| UI | Compose Multiplatform（Material 3） |
+| UI | Compose Multiplatform（Android は Material 3、他プラットフォームはプラットフォーム固有 UI — §9 参照） |
 | 状態管理 | androidx.lifecycle ViewModel + Koin |
 | DB | SQLDelight（SQLite）+ FTS5（生 SQL） |
 | HTTP | Ktor client（CIO） |

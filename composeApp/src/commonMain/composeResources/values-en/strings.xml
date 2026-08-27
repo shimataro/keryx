@@ -16,6 +16,10 @@
     <string name="common_back">Back</string>
     <string name="common_abort">Abort</string>
 
+    <!-- accessibility -->
+    <string name="accessibility_checked">Checked</string>
+    <string name="accessibility_unchecked">Not checked</string>
+
     <!-- setup -->
     <string name="setup_title">Welcome to Keryx</string>
     <string name="setup_choose_mode">Choose how to sync (you can change this later)</string>
@@ -75,6 +79,8 @@
     <string name="home_delete_tag_menu">Delete</string>
     <string name="home_assign_tags">Assign tags</string>
     <string name="home_remove_feed_from_tag_menu">Remove from tag</string>
+    <string name="home_expand">Expand</string>
+    <string name="home_collapse">Collapse</string>
     <string name="home_folders">Folders</string>
     <string name="home_add_folder">Add folder</string>
     <string name="home_new_folder_hint">Enter folder name</string>
@@ -137,22 +143,23 @@
     <string name="article_next">Next article</string>
 
     <!-- settings -->
+    <string name="settings_title">Settings</string>
     <string name="settings_tab_general">General</string>
     <string name="settings_tab_notifications">Notifications</string>
     <string name="settings_tab_data">Data</string>
     <string name="settings_theme">Theme</string>
-    <string name="settings_theme_system">Match system</string>
+    <string name="settings_theme_system">System</string>
     <string name="settings_theme_light">Light</string>
     <string name="settings_theme_dark">Dark</string>
     <string name="settings_cache">Article cache retention</string>
     <string name="settings_days7">7 days</string>
     <string name="settings_days30">30 days</string>
     <string name="settings_days90">90 days</string>
-    <string name="settings_unlimited">Unlimited</string>
+    <string name="settings_unlimited">Forever</string>
     <string name="settings_read_timeout">Feed read timeout</string>
-    <string name="settings_seconds10">10 seconds</string>
-    <string name="settings_seconds30">30 seconds</string>
-    <string name="settings_seconds60">60 seconds</string>
+    <string name="settings_seconds10">10s</string>
+    <string name="settings_seconds30">30s</string>
+    <string name="settings_seconds60">60s</string>
     <string name="settings_data_management">Data Management</string>
     <string name="settings_import_opml">Import OPML</string>
     <string name="settings_export_opml">Export OPML</string>
@@ -173,12 +180,11 @@
     <string name="settings_export_error">Export failed</string>
     <string name="settings_import_error">Import failed</string>
     <string name="settings_refresh_interval">Feed refresh interval</string>
-    <string name="settings_refresh_min15">15 minutes</string>
-    <string name="settings_refresh_min30">30 minutes</string>
-    <string name="settings_refresh_hour1">1 hour</string>
-    <string name="settings_refresh_hour3">3 hours</string>
-    <string name="settings_refresh_manual">Manual only</string>
-    <string name="settings_desktop">Desktop</string>
+    <string name="settings_refresh_min15">15m</string>
+    <string name="settings_refresh_min30">30m</string>
+    <string name="settings_refresh_hour1">1h</string>
+    <string name="settings_refresh_hour3">3h</string>
+    <string name="settings_refresh_manual">Manual</string>
     <string name="settings_notification_enabled">Enable new article notifications</string>
     <string name="settings_start_minimized">Start minimized to tray</string>
     <string name="settings_cloud_sync">Cloud Sync</string>
@@ -205,10 +211,7 @@
     <string name="settings_font_small">Small</string>
     <string name="settings_font_medium">Medium</string>
     <string name="settings_font_large">Large</string>
-    <string name="settings_font_xlarge">Extra large</string>
-    <string name="settings_article_list">Article List</string>
-    <string name="settings_article_list_all">All</string>
-    <string name="settings_article_list_unread_only">Unread only</string>
+    <string name="settings_font_xlarge">XL</string>
     <string name="settings_updates">Updates</string>
     <string name="settings_version">Version %1$s</string>
     <string name="settings_website">Website</string>
@@ -218,9 +221,9 @@
          override points to the English (/en/) page. -->
     <string name="website_url">https://keryx.merc.works/en/</string>
     <string name="settings_update_check_interval">Update check interval</string>
-    <string name="settings_update_check_startup_only">On startup only</string>
+    <string name="settings_update_check_startup_only">Startup</string>
     <string name="settings_update_check_daily">Daily</string>
-    <string name="settings_update_check_3days">Every 3 days</string>
+    <string name="settings_update_check_3days">3 days</string>
     <string name="settings_update_check_weekly">Weekly</string>
     <string name="settings_update_check_now">Check for updates</string>
     <string name="settings_update_check_up_to_date">You’re up to date</string>

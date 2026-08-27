@@ -7,6 +7,7 @@ import kotlinx.coroutines.CancellationException
 import org.koin.mp.KoinPlatform
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.core.errorOrNull
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.SettingsRepository
@@ -15,6 +16,7 @@ import works.merc.keryx.app.domain.SyncTrigger
 import works.merc.keryx.app.domain.checkForUpdateAndNotify
 import works.merc.keryx.app.domain.maybeRebuildFtsIndex
 import works.merc.keryx.app.domain.refreshFeedsAndNotify
+import works.merc.keryx.app.domain.shouldCheckForUpdate
 import works.merc.keryx.app.startupMaintenanceMutex
 
 private const val LOG_TAG = "FeedRefreshWorker"
@@ -32,10 +34,11 @@ private const val LOG_TAG = "FeedRefreshWorker"
 class FeedRefreshWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val koin = KoinPlatform.getKoin()
+        val settingsRepository = koin.get<SettingsRepository>()
         // Guards against the same local_settings.json-existence race AndroidStartupTasks.kt's
         // runAndroidStartupTasks documents — WorkManager's own 15-minute floor makes this
         // exceedingly unlikely to actually fire pre-setup, but the guard costs nothing to keep.
-        if (!koin.get<SettingsRepository>().isSetupComplete()) return Result.success()
+        if (!settingsRepository.isSetupComplete()) return Result.success()
         // runAndroidStartupTasks may already be running the same sequence (the Activity started
         // right as this periodic wakeup fired) — skip rather than duplicate the work; the next
         // periodic run will acquire the lock normally.
@@ -52,7 +55,13 @@ class FeedRefreshWorker(context: Context, params: WorkerParameters) : CoroutineW
                 val syncResult = koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
                 retrySync = syncResult.errorOrNull is CloudStorageException
             }
-            checkForUpdateAndNotify(koin)
+            // Mirrors desktop's backgroundUpdateLoop (StartupTasks.kt), which only rechecks for an
+            // update once the user's configured interval has elapsed — unlike this worker's own
+            // refresh cadence, which WorkManager floors at 15 minutes regardless of that setting.
+            val settings = settingsRepository.getLocalSettings()
+            if (shouldCheckForUpdate(SystemClock.nowMillis(), settings.lastUpdateCheckAt, settings.updateCheckIntervalHours)) {
+                checkForUpdateAndNotify(koin)
+            }
             maybeRebuildFtsIndex(koin)
             if (retrySync) Result.retry() else Result.success()
         } catch (e: CancellationException) {

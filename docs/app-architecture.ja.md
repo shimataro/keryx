@@ -33,7 +33,7 @@ composeApp/src/
   jvmCommonMain/kotlin/…/  デスクトップと Android の両方が共有する actual（どちらのプラットフォーム
     API にも依存しない）: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage, AppInfo,
     CloudStorageAvailability（後者2つは共有生成 BuildConfig を読むだけ）
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ jvmCommonMain がカバーしない expect の actual（DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule）+ LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）, DesktopOs（isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf）
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ jvmCommonMain がカバーしない expect の actual（DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule）+ LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）, DesktopOs（isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf）
     tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray + StatusNotifierItem/dbusmenu の D-Bus オブジェクト
   androidMain/kotlin/…/  jvmCommonMain がカバーしない expect の actual: DatabaseDriverFactory（バンドル
     SQLite、後述）, DatabaseFile（`databaseFilePath()` — `Context.getDatabasePath` で、
@@ -43,12 +43,33 @@ composeApp/src/
     プロバイダを登録した CloudSession — 下記 Provider/DI 参照。加えて AndroidNotificationSink、下記
     「バックグラウンド更新」参照）, CloudStorageAvailability（Dropbox/OneDrive は実判定、Google Drive は
     `false` 固定 — 理由は sync-architecture.ja.md の「Android で Google Drive が未対応な理由」参照）,
-    KeryxTextField/KeryxAlertDialog/KeryxTabDialog/KeryxIcons/FlatButtons/FlatToggles/
-    SegmentedControl（素の M3。KeryxTabDialog はエッジツーエッジ対応で safe-drawing padding 済み。
-    後の4つも同様に `expect`/`actual` 分割されており、Android 側は Material Symbols（アイコン）や
-    M3 の `Button`/`FilledTonalButton`/`TextButton`/`Switch`/`Checkbox`/
-    `SingleChoiceSegmentedButtonRow`+`SegmentedButton`/`FilterChip`（コンポーネント）をそのまま使う —
-    詳細は下記「アイコンセット」参照）,
+    KeryxTextField/KeryxAlertDialog/KeryxIcons/FlatButtons/FlatToggles/
+    SegmentedControl（素の M3。後の4つも同様に `expect`/`actual` 分割されており、Android 側は
+    Material Symbols（アイコン）や M3 の `Button`/`FilledTonalButton`/`TextButton`/`Switch`/
+    `Checkbox`/`SingleChoiceSegmentedButtonRow`+`SegmentedButton`/`FilterChip`（コンポーネント）を
+    そのまま使う — 詳細は下記「アイコンセット」参照）,
+    KeryxTabDialog（ほぼ全画面のモーダル `Dialog`。エッジツーエッジ対応で safe-drawing padding 済み。
+    本物の M3 `TopAppBar`（戻る矢印＋画面名）を、デスクトップ側の自前タブバーとは異なる本物の M3
+    `PrimaryScrollableTabRow`/`Tab` の上に載せる — 詳細は `ui-guidelines` スキル参照）,
+    PlatformTheme（`platformShapes` は M3 既定の `Shapes()`、`ProvidePlatformInteraction` は
+    no-op — `LocalIndication`/`LocalRippleConfiguration` を M3 既定のままにすることで、あらゆる
+    `clickable` と M3 部品が本物のリップルを持つようになる。external-spec.ja.md の「UI 方針」参照）、
+    `ListRowChrome.android.kt` の `listRowSurface`（`ListRowKind.NavItem` 行は
+    `NavigationDrawerItem` 風のピル形ハイライト、`ListRowKind.ListItem` 行はフルブリード —
+    詳細は同ファイル自身の KDoc）、TooltipIconButton/ToolbarIconGroup/FlatTooltipContent
+    （それぞれ、独自のネイティブな長押しトリガーを持つ素の M3 `IconButton` + `TooltipBox`、
+    デスクトップの macOS ツールバー風カプセルの代わりの装飾なし `Row`、M3 自身の `PlainTooltip`）、
+    KeryxRaisedSurface（デスクトップのヘアライン枠フラットカードの代わりに、明確に色調の異なる
+    `colorScheme.surfaceContainerHigh` トーナルコンテナ）、KeryxBadgedIcon（デスクトップの
+    自作ピルの代わりに M3 自身の `BadgedBox`/`Badge` — `NotificationsBell` が使用）,
+    KeryxSettingRow（行全体がタップ対象になる本物の M3 `ListItem` — `SettingsComponents.kt` の
+    `LinkRow`/`ActionLinkRow`/`SwitchRow` を支える）, KeryxAnchoredPanel（本物の M3
+    `ModalBottomSheet` — `NotificationsBell` の通知ポップオーバーと `TagColorPickerPopup` を
+    支える。単なる作法の一致ではなく必須の対応でもある — 素の `Popup` のままだと、デスクトップの
+    ヘビーウェイト WebView が素の Compose オーバーレイの手前に来るのと同じ理由で、記事リーダーの
+    `WebView` の背後に隠れてしまう。下記「Article Reader」参照）, KeryxPaneTopBar（本物の M3
+    `TopAppBar` — 3ペインそれぞれ自身のヘッダー行を支え、アプリ全体で共有される単一のバーでは
+    ない）,
     DatabaseMerger/DatabaseSnapshot（専用の `io.requery.android.database.sqlite.SQLiteDatabase`
     接続に対する実装 — デスクトップ実装の専用 JDBC 接続に相当。下記「DatabaseMerger」参照）,
     AndroidSqliteSupport.kt（`NoOpDatabaseErrorHandler` — バンドル SQLite の既定ハンドラは破損と
@@ -65,7 +86,7 @@ composeApp/src/
     commonMain の `domain/OpmlOpenHandler.kt` に委譲する）,
     nativeContextMenu（適応レイアウトのフェーズで実装した実際の
     長押し DropdownMenu — タップと長押しの判別は KDoc 参照）, BackHandler（`androidx.activity.compose.BackHandler`
-    へ委譲）, PlatformOs（isTouchPrimary = true, hasNativeAppMenu = false — Android にはメニューバーが
+    へ委譲）, PlatformOs（isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android にはメニューバーやシステムトレイが
     無いため、FeedListToolbarRow/GeneralTab が独自の設定/バージョン情報導線を持つ）,
     SelfUpdateCheck（インストール元パッケージ名に基づく判定、下記「バックグラウンド更新」参照）,
     NotificationPermission（`POST_NOTIFICATIONS` 用に `rememberLauncherForActivityResult` をラップ）+
@@ -73,6 +94,13 @@ composeApp/src/
     background/（`FeedRefreshWorker` + `BackgroundRefresh.kt` の `startBackgroundRefresh`。
     `WorkManager` ベース — Android のバックグラウンド/通知の全体像は
     [background-update.ja.md](background-update.ja.md) を参照）
+  androidMain/res/  `works.merc.keryx.app.R` を生成する通常の AGP リソースディレクトリ
+    （`values/`、`drawable/` など）— 上記 `commonMain/composeResources/`（Compose Multiplatform
+    自身の仕組みで、リソース ID ではなく型付きの `Res.drawable.*` アクセサーを生成する）とは別物。
+    `:composeApp` は `:androidApp` 自身の `res/` に依存できないため、生の `@DrawableRes Int` が
+    必要な Android リソース（例: `NotificationCompat.Builder.setSmallIcon`）はここに置く必要がある
+    — 現状は `drawable/ic_stat_keryx.xml`（`AndroidNotificationSink.kt` が投稿するステータスバー/
+    通知ドットのアイコン。background-update.ja.md 参照）のみ
   commonTest/ + desktopTest/ + androidDeviceTest/（DatabaseMerger/DatabaseSnapshot の Android 実装向け
     計装テスト — バンドル SQLite ネイティブライブラリの読み込みに実機/エミュレータが必要。
     testing.ja.md 参照）
@@ -256,6 +284,11 @@ Repository は触れず、Linux のパネルプロトコルにモバイル側の
 `Main` パスは同一イベントに対して祖先より先に子孫のノードを再開するため）が同じ押下に対して
 `onClick` を重ねて発火することがない。`NativeSubMenu` はネストしたポップアップを開くのではなく
 その場でドリルダウンする（先頭の「戻る」行がトップレベルをサブメニュー自身の項目に差し替える）。
+以下のデスクトップ実装とは異なり、Android には固有の挙動が 2 つある: 長押しが確定しても
+`onOpen`（デスクトップの「右クリックで行を選択する」フック）は一切呼ばれない — Android の
+長押しはメニューを開くだけで、行の選択は行わない。また同じ `awaitEachGesture` ループは、
+指が `viewConfiguration.touchSlop` を超えて動いた時点で長押し判定を打ち切るため、行の上で
+始まったゆっくりしたドラッグ（`LazyColumn` のスクロール）が長押しと誤認されることもない。
 
 `platform/NativeMenu.desktop.kt` の `defaultPopupHandle` は、同じ呼び出し箇所をデスクトップでは
 長押しではなく右クリックで開き、2 つの実装のどちらかで裏打ちする。

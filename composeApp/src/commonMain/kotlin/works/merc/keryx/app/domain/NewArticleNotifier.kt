@@ -23,7 +23,7 @@ import works.merc.keryx.app.core.valueOrNull
  * the bell is reserved for things worth looking back at (warnings, errors, a new app version), each
  * of which offers a next action.
  */
-class NewArticleNotifier(private val sink: OsNotificationSink = OsNotificationSink { }) {
+class NewArticleNotifier(private val sink: OsNotificationSink = OsNotificationSink { _, _ -> }) {
     private val _trayEvents = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val trayEvents: SharedFlow<String> = _trayEvents
 
@@ -31,10 +31,12 @@ class NewArticleNotifier(private val sink: OsNotificationSink = OsNotificationSi
      * Publishes a message for display through the OS tray event stream and [sink].
      *
      * @param message The message to publish.
+     * @param count The new-article count this message represents, forwarded to [sink] — see
+     * [OsNotificationSink.post]'s own KDoc. Defaults to `0` for a caller with no count of its own.
      */
-    suspend fun notify(message: String) {
+    suspend fun notify(message: String, count: Int = 0) {
         _trayEvents.tryEmit(message)
-        sink.post(message)
+        sink.post(message, count)
     }
 
     /**
@@ -51,7 +53,7 @@ class NewArticleNotifier(private val sink: OsNotificationSink = OsNotificationSi
     ) {
         val newCount = results.values.sumOf { it.valueOrNull ?: 0 }
         if (newCount > 0 && notificationEnabled) {
-            notify(messages.newArticles(newCount))
+            notify(messages.newArticles(newCount), newCount)
         }
     }
 }

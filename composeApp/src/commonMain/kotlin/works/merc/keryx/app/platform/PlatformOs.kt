@@ -23,3 +23,21 @@ expect val isTouchPrimary: Boolean
  * currently Settings and About (see `FeedListToolbarRow` / `GeneralTab`).
  */
 expect val hasNativeAppMenu: Boolean
+
+/**
+ * Whether the platform provides a desktop-style system tray (`tray/KeryxTray.kt`) that the app can
+ * minimize into. Android has no tray equivalent — its background story relies on the OS
+ * notification dot instead (see `background-update.md`) — so UI gated on this must not offer a
+ * "minimize to tray" concept there.
+ */
+expect val hasSystemTray: Boolean
+
+/**
+ * Whether the platform already shows its own "copied to clipboard" confirmation UI, so the app
+ * must not show a redundant one of its own on top of it. `true` only on Android API 33+ (Google's
+ * own guidance: https://developer.android.com/develop/ui/views/touch-and-input/copy-paste —
+ * starting with Android 13, the system shows a visual confirmation whenever an app writes to the
+ * clipboard, and an app's own confirmation UI becomes a duplicate). `false` everywhere else —
+ * desktop, and Android below API 33, both of which get no such system-level feedback at all.
+ */
+expect val platformShowsOwnCopyConfirmation: Boolean

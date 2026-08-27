@@ -23,7 +23,7 @@ worker は重複実装せず同じ実装を呼んでいる。
 ```kotlin
 while (true) {
     val minutes = settings.refreshIntervalMinutes
-    delay(if (minutes <= 0) 60_000L else minutes * 60_000L)  // 「手動のみ」（minutes <= 0）は 1 分ごとに起床
+    delay(if (minutes <= 0) 60_000L else minutes * 60_000L)  // 「手動」（minutes <= 0）は 1 分ごとに起床
     if (minutes > 0) {
         refreshFeedsAndNotify()   // 全フィード更新（ETag / Last-Modified 差分取得）→ 新着があり通知が
                                   // 有効なら NewArticleNotifier.notifyBackground(newArticles(newCount))
@@ -50,7 +50,7 @@ while (true) {
 同期し続ける — そのため設定変更は再起動なしに即座に反映される。設定値からスケジュールへの写像は
 純粋関数 `domain/BackgroundRefreshSchedule.kt` の `backgroundRefreshSchedule`（commonMain に置き、
 単体テスト済み — このモジュールには Android 固有クラスをテストする `androidUnitTest` ソースセットが
-無いため）: 「手動のみ」（`<= 0`）はジョブを完全にキャンセルし、`WorkManager` 自体の最短間隔
+無いため）: 「手動」（`<= 0`）はジョブを完全にキャンセルし、`WorkManager` 自体の最短間隔
 （`PeriodicWorkRequest.MIN_PERIODIC_INTERVAL_MILLIS`、15分）を下回る正の値はそれに切り上げる
 （無効化はしない）。アプリの UI 自体は15分未満の値を提示しないため、これは手動編集や移行された
 `local_settings.json` の場合にのみ関係する。
@@ -59,7 +59,7 @@ while (true) {
 リフレクションでインスタンス化するため、依存関係はコンストラクタ注入ではなく `doWork()` 内で
 `KoinPlatform.getKoin()` から解決する）は、デスクトップの `backgroundUpdateLoop` が毎周回実行する
 のとまったく同じ手順を実行する: `refreshFeedsAndNotify` → （`CloudSession.isConnected()` が真なら）
-`SyncRepository.sync(SyncTrigger.AUTOMATIC)` → `checkForUpdateAndNotify` → `maybeRebuildFtsIndex`。
+`SyncRepository.sync(SyncTrigger.AUTOMATIC)` → `shouldCheckForUpdate` が true の場合のみ `checkForUpdateAndNotify` → `maybeRebuildFtsIndex`。
 Android の `CloudSession` は現状 Dropbox/OneDrive のみプロバイダーを持つ（Google Drive 非対応の理由は
 [sync-architecture.ja.md](sync-architecture.ja.md) の「Android で Google Drive が未対応な理由」参照）
 ため、ユーザーがそのどちらとも連携していない場合、あるいは連携済みでも `autoSyncSuspended` が
@@ -82,12 +82,14 @@ Android の `CloudSession` は現状 Dropbox/OneDrive のみプロバイダー�
 FTS 処理と重複してしまう。プロセス内ガード（`startupTasksRan`）により、画面回転など Activity だけが
 再生成される設定変更で `onCreate` が再度走ってもプロセス内で1回に保たれる。
 
-新着記事の OS 通知は `domain/OsNotificationSink.kt`（`fun interface`）経由で届く。Android は
+新着記事の OS 通知は `domain/OsNotificationSink.kt`（`fun interface`、
+`post(message: String, count: Int)`）経由で届く。Android は
 `platformModule` でこれを `platform/AndroidNotificationSink.kt`（`NotificationManagerCompat` で
 投稿する実装）に束縛しており、デスクトップの `NewArticleNotifier.trayEvents` を購読する経路とは
 別系統になっている（理由はそのクラス自身の KDoc を参照: `WorkManager` に起こされたプロセスでは、
 更新が終わった時点で `trayEvents` の購読者が既に張られている保証が無い — `trayEvents` は replay 0 で、
-購読者がいない間に発行されたものは黙って捨てられるため）。`AndroidNotificationSink` は投稿のたびに
+購読者がいない間に発行されたものは黙って捨てられるため。デスクトップ自身の束縛は同じ理由で no-op に
+なっている）。`AndroidNotificationSink` は投稿のたびに
 `NotificationManagerCompat.areNotificationsEnabled()` でガードしており、これ1回で Android 13+ の
 `POST_NOTIFICATIONS` ランタイム権限とユーザーによるアプリ/チャンネル単位のブロックの両方をカバーする。
 権限自体は `platform/NotificationPermission.kt` の `rememberNotificationPermissionRequester` で
@@ -97,6 +99,23 @@ FTS 処理と重複してしまう。プロセス内ガード（`startupTasksRan
 ダイアログを表示しなくなる — 設定のトグル自体は ON のままにしておいてよいが、ユーザーが OS の設定から
 直接許可するまで通知は届かない。この場合に「端末の設定を開いてください」と誘導するフローは今回は
 作っていない。
+
+投稿する通知の小アイコンは `composeApp/src/androidMain/res/drawable/ic_stat_keryx.xml` —
+`design/icons/svg/app_icon_foreground.svg` から手作業で変換した、Keryx ロゴマークのモノクロ・
+アルファのみのシルエット VectorDrawable（VectorDrawable には `<rect>`/`<circle>` に相当する要素が
+無いため変換が必要だった）で、`:composeApp` 自身の `androidMain/res/`（`works.merc.keryx.app.R` を
+生成する通常の AGP リソースディレクトリで、Compose Multiplatform 自身の `composeResources/` とは
+別物）に置かれている — `:composeApp` は `:androidApp` のリソースに依存できないため、
+ランチャーアイコンと同じ `androidApp/src/main/res/` には置けない。`OsNotificationSink.post` に渡す
+`count` パラメータは `NotificationCompat.Builder.setNumber` に転送しており、これが影響するのは
+ランチャーアイコンの長押しメニューに出る件数だけで、**アイコン自体に描かれる数字ではない**。
+アクティブな通知と独立してアプリアイコンのバッジ数を設定する API は Android に存在しない（iOS の
+`setApplicationIconBadgeNumber` に相当するものが無い）ため、デスクトップの `IconBadge.kt`
+（`drawUnreadBadge` — 総未読数を Dock/タスクバー/ウィンドウアイコンに直接合成する）とは異なり、
+Android は完全に OS 自身の通知ドット（未読数ではなく、通知が現在アクティブかどうかに連動）と、
+上記の長押し件数だけに頼っている。これは埋めるべきギャップではなく意図的な非対称である —
+アイコンレベルのバッジを維持するためだけに、消せない通知を出し続けることは Android 自身の通知
+モデルに反する。ユーザー向けの要約は `external-spec.ja.md` §7 を参照。
 
 アプリ内の「アップデートを確認」（`checkForUpdateAndNotify` と設定の「アップデート」タブ）は
 `platform/SelfUpdateCheck.kt` の `selfUpdateCheckSupported` でゲートしている。これは

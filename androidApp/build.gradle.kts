@@ -53,6 +53,39 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    signingConfigs {
+        create("release") {
+            val keystorePath = System.getenv("ANDROID_RELEASE_KEYSTORE_PATH")
+                ?: (project.findProperty("androidReleaseKeystorePath") as? String)
+                ?: localProperties.getProperty("android.release.keystore.path")
+            val keystorePassword = System.getenv("ANDROID_RELEASE_KEYSTORE_PASSWORD")
+                ?: (project.findProperty("androidReleaseKeystorePassword") as? String)
+                ?: localProperties.getProperty("android.release.keystore.password")
+            val keyAlias = System.getenv("ANDROID_RELEASE_KEY_ALIAS")
+                ?: (project.findProperty("androidReleaseKeyAlias") as? String)
+                ?: localProperties.getProperty("android.release.key.alias")
+            val keyPassword = System.getenv("ANDROID_RELEASE_KEY_PASSWORD")
+                ?: (project.findProperty("androidReleaseKeyPassword") as? String)
+                ?: localProperties.getProperty("android.release.key.password")
+
+            if (keystorePath != null && keystorePassword != null && keyAlias != null && keyPassword != null) {
+                storeFile = File(keystorePath)
+                storePassword = keystorePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            // Do NOT fall back to the debug signing config. If the release signing
+            // properties are missing, AGP fails during validateSigningRelease instead
+            // of silently producing a debug-signed (or unsigned) release artifact.
+            signingConfig = signingConfigs.getByName("release")
+        }
+    }
 }
 
 dependencies {
@@ -70,4 +103,13 @@ dependencies {
     implementation(libs.koin.core)
     implementation(libs.ktor.client.core)
     implementation(libs.kotlinx.coroutines.core)
+
+    // Instrumented Compose UI tests for androidApp. These are not inherited from composeApp's
+    // androidDeviceTest dependencies (test-scoped dependencies do not propagate across modules),
+    // so they must be declared explicitly here.
+    androidTestImplementation(libs.kotlin.test)
+    androidTestImplementation(libs.androidx.test.runner.app.android.test)
+    androidTestImplementation(libs.androidx.test.junit.app.android.test)
+    androidTestImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(libs.compose.ui.test.manifest)
 }

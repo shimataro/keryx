@@ -51,7 +51,7 @@ actual val platformModule: Module = module {
     // No-op: main.kt collects NewArticleNotifier.trayEvents itself for the whole process
     // lifetime and posts tray notifications from there (see that flow's own KDoc). Posting again
     // through this sink would show every new-article notification twice.
-    single<OsNotificationSink> { OsNotificationSink { } }
+    single<OsNotificationSink> { OsNotificationSink { _, _ -> } }
 
     single {
         HttpClient(CIO) {
