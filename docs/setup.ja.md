@@ -115,8 +115,9 @@
 
 ### パッケージングに必要なソフトウェア
 
-`:composeApp:run` は JDK 以外に何も要らない（ヘッドレスな Linux 環境での Xvfb は除く — 上記
-参照）。ルートの `./gradlew build` は前述のとおり Android SDK とリリース署名キーストアの用意
+`:composeApp:run` は JDK に加えて前述「アプリの実行に必要なソフトウェア」に挙げた各プラット
+フォームのランタイムが必要（ヘッドレスな Linux 環境での Xvfb は除く）。ルートの
+`./gradlew build` は前述のとおり Android SDK とリリース署名キーストアの用意
 も追加で必要になる。ネイティブパッケージング系タスク（`createDistributable`, `packageDmg`,
 `packageMsi`, `packageDeb`, `packageRpm` — 詳細は [build.md](build.md)）は OS ごとに以下も
 必要。

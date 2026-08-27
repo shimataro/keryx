@@ -118,9 +118,10 @@ packaged app (or `:composeApp:run`).
 
 ### Software Required for Packaging
 
-`:composeApp:run` needs nothing beyond the JDK (aside from Xvfb on a headless Linux machine — see
-above); the root `./gradlew build` additionally needs the Android SDK and a release signing
-keystore, per above. The native packaging tasks (`createDistributable`, `packageDmg`,
+`:composeApp:run` needs the JDK plus the applicable platform runtime from "Software Required to
+Run the App" above (aside from Xvfb on a headless Linux machine); the root `./gradlew build`
+additionally needs the Android SDK and a release signing keystore, per above. The native
+packaging tasks (`createDistributable`, `packageDmg`,
 `packageMsi`, `packageDeb`, `packageRpm` — see [build.md](build.md)) additionally require the
 following, per OS:
 
