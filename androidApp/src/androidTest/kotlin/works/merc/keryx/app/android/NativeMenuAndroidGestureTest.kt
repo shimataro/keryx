@@ -65,6 +65,8 @@ class NativeMenuAndroidGestureTest {
             )
         }
 
+        composeTestRule.onNodeWithTag("menu-host").assertIsDisplayed()
+
         composeTestRule.onNodeWithTag("menu-host").performClick()
 
         composeTestRule.onNodeWithText("Test action").assertDoesNotExist()
