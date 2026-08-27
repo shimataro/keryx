@@ -171,6 +171,8 @@ SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundli
 | `notificationEnabled` | boolean | true |
 | `lastCacheCleanupAt` | int\|null | null |
 | `lastFtsRebuiltAt` | int\|null | null（FTS 全再構築の 24h ゲート。日次 heal で更新） |
+| `updateCheckIntervalHours` | int | 24 |
+| `lastUpdateCheckAt` | int\|null | null |
 | `windowWidth` / `windowHeight` | number\|null | null |
 | `feedListPaneWidth` / `articleListPaneWidth` | number | 260 / 360 |
 
