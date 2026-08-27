@@ -291,7 +291,7 @@ UI に一切現れない内部的なビルド識別子。中間成果物は `Ker
 **リポジトリの Secrets** に設定する。未設定でもビルドは成功するが、リリースされたアプリでは
 該当するクラウド連携が完全に非表示になる（`CloudStorageAvailability` 参照）。
 
-Android のリリース署名には、`ANDROID_RELEASE_KEYSTORE_BASE64`、`ANDROID_RELEASE_KEYSTORE_PASSWORD`、`ANDROID_RELEASE_KEY_ALIAS`、`ANDROID_RELEASE_KEY_PASSWORD` をリポジトリの Secrets に設定する。keystore は Base64 エンコードした PKCS12/JKS ファイルであり、ワークフローがビルド時に復元する。GitHub Releases と Google Play で同じ署名キーを使いたい場合は、ローカルで生成した keystore を Google Play Console でアプリ作成時に「既存のアプリ署名キー」としてインポートする。これらの Secrets が未設定の場合、release ビルドは debug 署名設定にフォールバックする。
+Android のリリース署名には、`ANDROID_RELEASE_KEYSTORE_BASE64`、`ANDROID_RELEASE_KEYSTORE_PASSWORD`、`ANDROID_RELEASE_KEY_ALIAS`、`ANDROID_RELEASE_KEY_PASSWORD` をリポジトリの Secrets に設定する。keystore は Base64 エンコードした PKCS12/JKS ファイルであり、ワークフローがビルド時に復元する。GitHub Releases と Google Play で同じ署名キーを使いたい場合は、ローカルで生成した keystore を Google Play Console でアプリ作成時に「既存のアプリ署名キー」としてインポートする。これらの Secrets が未設定の場合、release ビルドは debug 署名設定にフォールバックせず、AGP の署名検証（`validateSigningRelease`）で失敗する — release ワークフローの成功には4つすべての Secrets が必須。
 
 > [!IMPORTANT]
 > **リリースされる DMG は未署名**（ad-hoc）のため、開く際に Gatekeeper にブロックされる。回避方法は

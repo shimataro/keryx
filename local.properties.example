@@ -64,7 +64,8 @@ update.repo=
 #                      -PandroidReleaseKeyAlias=...
 #                      -PandroidReleaseKeyPassword=...
 #   Default: (empty)
-# Leave empty (or omit) to fall back to the debug signing configuration.
+# Leave empty (or omit) at your own risk: a release build then fails AGP's signing
+# validation (`validateSigningRelease`) instead of falling back to debug signing.
 # Use an absolute path for android.release.keystore.path; relative paths are
 # resolved against the androidApp module directory, not the repository root.
 # See docs/build.md for how to generate a release keystore and register it

@@ -279,7 +279,7 @@ Set `DROPBOX_APP_KEY` / `GOOGLE_DRIVE_CLIENT_ID` / `GOOGLE_DRIVE_CLIENT_SECRET` 
 **repository secrets**. If they are unset the build still succeeds, but the released app has the corresponding
 cloud integration hidden entirely (see `CloudStorageAvailability`).
 
-For Android release signing, set `ANDROID_RELEASE_KEYSTORE_BASE64`, `ANDROID_RELEASE_KEYSTORE_PASSWORD`, `ANDROID_RELEASE_KEY_ALIAS`, and `ANDROID_RELEASE_KEY_PASSWORD` as repository secrets. The keystore is a Base64-encoded PKCS12/JKS file; the workflow decodes it at build time. To keep the same signing key on GitHub Releases and Google Play, generate the keystore locally and import it into Google Play Console as the "existing app signing key" when creating the app. Without these secrets the release build falls back to the debug signing configuration.
+For Android release signing, set `ANDROID_RELEASE_KEYSTORE_BASE64`, `ANDROID_RELEASE_KEYSTORE_PASSWORD`, `ANDROID_RELEASE_KEY_ALIAS`, and `ANDROID_RELEASE_KEY_PASSWORD` as repository secrets. The keystore is a Base64-encoded PKCS12/JKS file; the workflow decodes it at build time. To keep the same signing key on GitHub Releases and Google Play, generate the keystore locally and import it into Google Play Console as the "existing app signing key" when creating the app. Without these secrets the release build fails AGP's signing validation (`validateSigningRelease`) rather than falling back to debug signing — all four secrets are required for the release workflow to succeed.
 
 > [!IMPORTANT]
 > **The released DMG is unsigned** (ad-hoc), so Gatekeeper blocks it on open. See the
