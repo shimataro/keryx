@@ -52,7 +52,8 @@
 - **Android SDK Platform 37**（`compileSdk` / `targetSdk`）と build-tools。Android Studio の
   SDK Manager、またはコマンドラインツール単体
   （[`cmdline-tools`](https://developer.android.com/tools/sdkmanager)、
-  `sdkmanager "platforms;android-37"`）で導入する。
+  `sdkmanager "platforms;android-37" "build-tools;36.0.0"`）で導入する（36.0.0 は AGP 9.3.2 が
+  既定で選択するバージョン）。
 - 初期設定: `local.properties` の `sdk.dir` に SDK の場所を指定する（AGP がこのキー自体を
   直接読むため、下記 OAuth キーで使う `-P`/環境変数/`local.properties` の解決チェーンとは
   別系統）か、環境変数 `ANDROID_HOME` を設定してもよい。`:composeApp:compileKotlinDesktop` や
