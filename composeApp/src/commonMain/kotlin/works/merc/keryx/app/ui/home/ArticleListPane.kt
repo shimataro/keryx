@@ -112,7 +112,17 @@ fun ArticleListPane(
         )
     }
     if (filter is ArticleFilter.Search) {
-        SearchListPane(vm, focused, onActivated, modifier, notifVm, onNavigateUp, navigateUpEnabled, title, onSelectionAdvance)
+        SearchListPane(
+            vm = vm,
+            focused = focused,
+            onActivated = onActivated,
+            modifier = modifier,
+            notifVm = notifVm,
+            onNavigateUp = onNavigateUp,
+            navigateUpEnabled = navigateUpEnabled,
+            title = title,
+            onSelectionAdvance = onSelectionAdvance,
+        )
         return
     }
 

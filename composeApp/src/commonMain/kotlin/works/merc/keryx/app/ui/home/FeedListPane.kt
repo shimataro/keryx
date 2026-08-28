@@ -818,7 +818,7 @@ private fun SidebarRow(
     val rowInteraction = remember { MutableInteractionSource() }
     Row(
         Modifier.fillMaxWidth()
-            .listRowClickable(rowInteraction, onClick)
+            .listRowClickable(rowInteraction, selected, onClick)
             .listRowSurface(selectionBackground(selected, focused), ListRowKind.NavItem, rowInteraction)
             .padding(horizontal = 8.dp, vertical = 8.dp)
             .heightIn(min = listRowMinHeight()),
@@ -892,7 +892,7 @@ private fun TagRow(
     Row(
         Modifier.testTag(tagRowTestTag(tag.id))
             .fillMaxWidth()
-            .listRowClickable(rowInteraction, onClick)
+            .listRowClickable(rowInteraction, selected, onClick)
             .nativeContextMenu(
                 items = {
                     listOf(
@@ -1060,7 +1060,7 @@ private fun TagFeedRow(
     val rowInteraction = remember { MutableInteractionSource() }
     Row(
         Modifier.fillMaxWidth()
-            .listRowClickable(rowInteraction, onClick)
+            .listRowClickable(rowInteraction, selectionTone == RowSelectionTone.PRIMARY, onClick)
             .nativeContextMenu(
                 items = {
                     listOf(

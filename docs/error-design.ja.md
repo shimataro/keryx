@@ -59,7 +59,11 @@ sealed class KeryxException(message: String) : Exception(message)
 
 - 通知センター（履歴・手動で消す）を主とする。かつての一時トーストは macOS ネイティブ寄りの
   インライン表現（コピーは操作元の✓、OPML はボタン近くの結果テキスト、購読は一覧出現＋ダイアログ内表示）へ
-  置き換えたため、アプリ内スナックバーは廃止した。
+  置き換えたため、デスクトップにはアプリ内スナックバーが無い。Android だけはプラットフォーム固有の例外で、
+  URL コピーの確認を M3 の `Snackbar` で表示するが、これは API 33 未満に限られる — API 33 以降は OS 側が
+  既にクリップボードコピーの確認を表示するため、Snackbar を出すとそれと重複してしまう
+  （`platform/PlatformOs.kt` の `platformShowsOwnCopyConfirmation` と `ui/home/HomeCommon.kt` の
+  `LocalSnackbarHostState` を参照）。
 - 履歴はセッション中のみ保持（DB 保存なし）。記録するのは「後から見返す価値がある内容」に限る:
   エラー・警告に加え、`INFO` は新バージョンの通知のみ。**新着記事は通知センターには記録しない**
   （`NewArticleNotifier` は OS 通知（トレイ）にのみ流す）——記事一覧と未読バッジという永続的な手段で

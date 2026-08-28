@@ -8,6 +8,7 @@ paths:
   - "**/StartupTasks.kt"           # desktop orchestration that calls maybeRebuildFtsIndex
   - "**/StartupMaintenanceTasks.kt" # maybeRebuildFtsIndex itself (daily idle heal, commonMain)
   - "**/main.kt"                   # ensureIndexed() called at startup, before application {}
+  - "**/KeryxApplication.kt"       # ensureIndexedIfTableAbsent() called on every Android process start
   - "**/*.sq"                      # do NOT add articles_fts to a .sq file
 ---
 
@@ -25,7 +26,12 @@ whole index is only rebuilt in the rare healing pass: a once-per-24h idle pass
 (`maybeRebuildFtsIndex` in commonMain's `domain/StartupMaintenanceTasks.kt`, gated on
 `lastFtsRebuiltAt` + `ActivityCenter` idle, called from desktop's `StartupTasks.kt`),
 which re-indexes content that incremental indexing left stale. On startup, `FtsManager.ensureIndexed()` creates the table on first
-run and backfills any missing rows. `busy_timeout` (set in
+run and backfills any missing rows. Android's `KeryxApplication.onCreate` calls the
+cheaper `FtsManager.ensureIndexedIfTableAbsent()` instead — it also runs on every
+`WorkManager` wakeup, not just once per app launch like desktop's `main.kt`, so it
+skips `indexMissing()`'s `O(articles)` scan entirely (a single `sqlite_master` check)
+once the table has already been created and backfilled once; new articles keep
+getting indexed as normal through the hot-path `indexMissing()` calls below. `busy_timeout` (set in
 `DatabaseDriverFactory`) lets a search wait out, rather than error on, the brief
 write lock of an incremental insert or a rebuild.
 

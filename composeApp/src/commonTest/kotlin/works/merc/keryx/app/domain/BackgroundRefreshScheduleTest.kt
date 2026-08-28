@@ -5,24 +5,29 @@ import kotlin.test.assertEquals
 
 class BackgroundRefreshScheduleTest {
 
+    // WorkManager's own PeriodicWorkRequest.MIN_PERIODIC_INTERVAL_MILLIS floor, mirrored here as a
+    // plain literal so these tests don't need an androidx.work dependency — see
+    // backgroundRefreshSchedule's own KDoc for why the function itself takes no default anymore.
+    private val workManagerMinimum = 15L
+
     @Test
     fun zeroAndNegativeValuesAreDisabled() {
-        assertEquals(BackgroundRefreshSchedule.Disabled, backgroundRefreshSchedule(0))
-        assertEquals(BackgroundRefreshSchedule.Disabled, backgroundRefreshSchedule(-30))
+        assertEquals(BackgroundRefreshSchedule.Disabled, backgroundRefreshSchedule(0, workManagerMinimum))
+        assertEquals(BackgroundRefreshSchedule.Disabled, backgroundRefreshSchedule(-30, workManagerMinimum))
     }
 
     @Test
     fun valuesAtOrAboveTheMinimumArePeriodicAtThatInterval() {
-        assertEquals(BackgroundRefreshSchedule.Periodic(15), backgroundRefreshSchedule(15))
-        assertEquals(BackgroundRefreshSchedule.Periodic(30), backgroundRefreshSchedule(30))
-        assertEquals(BackgroundRefreshSchedule.Periodic(60), backgroundRefreshSchedule(60))
-        assertEquals(BackgroundRefreshSchedule.Periodic(180), backgroundRefreshSchedule(180))
+        assertEquals(BackgroundRefreshSchedule.Periodic(15), backgroundRefreshSchedule(15, workManagerMinimum))
+        assertEquals(BackgroundRefreshSchedule.Periodic(30), backgroundRefreshSchedule(30, workManagerMinimum))
+        assertEquals(BackgroundRefreshSchedule.Periodic(60), backgroundRefreshSchedule(60, workManagerMinimum))
+        assertEquals(BackgroundRefreshSchedule.Periodic(180), backgroundRefreshSchedule(180, workManagerMinimum))
     }
 
     @Test
     fun positiveValuesBelowTheMinimumAreCoercedUpToIt() {
-        assertEquals(BackgroundRefreshSchedule.Periodic(15), backgroundRefreshSchedule(5))
-        assertEquals(BackgroundRefreshSchedule.Periodic(15), backgroundRefreshSchedule(1))
+        assertEquals(BackgroundRefreshSchedule.Periodic(15), backgroundRefreshSchedule(5, workManagerMinimum))
+        assertEquals(BackgroundRefreshSchedule.Periodic(15), backgroundRefreshSchedule(1, workManagerMinimum))
     }
 
     @Test

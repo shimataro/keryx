@@ -3,6 +3,7 @@ package works.merc.keryx.app.background
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequest
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -39,7 +40,13 @@ fun startBackgroundRefresh(koin: Koin) {
         .map { it.refreshIntervalMinutes }
         .distinctUntilChanged()
         .onEach { minutes ->
-            when (val schedule = backgroundRefreshSchedule(minutes)) {
+            // backgroundRefreshSchedule has no default for this parameter — WorkManager's minimum
+            // is an Android-specific scheduler constant, so it is passed explicitly here to keep
+            // this the single source of truth rather than a commonMain literal that could silently
+            // drift from WorkManager's own value. commonTest supplies its own test value directly,
+            // with no androidx.work dependency needed.
+            val minimumMinutes = TimeUnit.MILLISECONDS.toMinutes(PeriodicWorkRequest.MIN_PERIODIC_INTERVAL_MILLIS)
+            when (val schedule = backgroundRefreshSchedule(minutes, minimumMinutes)) {
                 BackgroundRefreshSchedule.Disabled -> workManager.cancelUniqueWork(FEED_REFRESH_WORK_NAME)
                 is BackgroundRefreshSchedule.Periodic -> {
                     val request = PeriodicWorkRequestBuilder<FeedRefreshWorker>(schedule.minutes, TimeUnit.MINUTES)

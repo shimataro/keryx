@@ -31,7 +31,6 @@ import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.platform.SelfUpdateCheckSupport
-import works.merc.keryx.app.platform.databaseFilePath
 import works.merc.keryx.app.platform.selfUpdateCheckSupported
 import works.merc.keryx.app.ui.home.HomeViewModel
 import works.merc.keryx.app.ui.home.NotificationCenterViewModel
@@ -75,10 +74,9 @@ val appModule: Module = module {
             activityCenter = get(),
             notificationCenter = get(),
             notificationMessages = get(),
-            // Explicit rather than relying on the constructor default: the default composes
-            // AppDirs.appDataDir()/keryx.db, which only matches the real DB file on desktop —
-            // see databaseFilePath()'s own KDoc for why Android needs a different path.
-            localDbPath = databaseFilePath(),
+            // localDbPath left at its constructor default (platform/DatabaseFile.kt's
+            // databaseFilePath(), already the platform-correct real DB path on both desktop and
+            // Android) rather than passed here — see that function's own KDoc for why it exists.
         )
     }
     single<SyncScheduler> { get<SyncRepository>() }

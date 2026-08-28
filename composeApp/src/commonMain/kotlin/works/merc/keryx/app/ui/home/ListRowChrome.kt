@@ -1,11 +1,12 @@
 package works.merc.keryx.app.ui.home
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -97,11 +98,30 @@ internal val LIST_ROW_VERTICAL_MARGIN = LIST_ROW_GUIDE_CLEARANCE + LIST_ROW_GUID
  * Pass `indication = null` deliberately here so the press feedback [listRowSurface] paints stays
  * confined to the inset highlight instead of flashing edge-to-edge; pair this with [listRowSurface]
  * on the same [interactionSource].
+ *
+ * Built on `Modifier.selectable` rather than plain `clickable` so [selected] reaches accessibility
+ * services as this row's own semantics (`Role`/checked-analogue state), not just as a painted
+ * highlight from [selectionBackground] — the only way a screen-reader user can tell which row is
+ * selected once [LocalRowSelectionVisible] hides that highlight (`PaneLayout.Single`, where the
+ * highlight would be confusing with only one pane visible at a time). [selected] is therefore this
+ * row's actual *logical* selection state, independent of whether the highlight is currently drawn.
+ *
+ * [Role.Tab] for every call site (feed/folder/tag/sidebar/article rows alike): Material 3's own
+ * `NavigationDrawerItem` and `Tab` both report this same role for "pick one of a set, the pick
+ * changes what's shown elsewhere" selection, which is exactly what every one of these rows does —
+ * `ListRowChrome.android.kt`'s [ListRowKind.NavItem] style is itself modeled on `NavigationDrawerItem`.
  */
 internal fun Modifier.listRowClickable(
     interactionSource: MutableInteractionSource,
+    selected: Boolean,
     onClick: () -> Unit,
-): Modifier = clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+): Modifier = selectable(
+    selected = selected,
+    interactionSource = interactionSource,
+    indication = null,
+    role = Role.Tab,
+    onClick = onClick,
+)
 
 /**
  * Which native row idiom a list row should follow — see [listRowSurface]'s own KDoc and the

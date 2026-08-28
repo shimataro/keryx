@@ -502,8 +502,9 @@ not M3's `OutlinedTextField`** — an `expect`/`actual` drop-in (desktop `actual
 `KeryxTextField.desktop.kt`) that renders a flat, thin-bordered native-feel field
 (hairline `outlineVariant` border, `shapes.small`, border → `primary` on focus /
 `error` when `isError`) instead of M3's tall outlined box with a floating label.
-When an Android target is added, its `actual` should go back to M3's
-`OutlinedTextField`/`TextField` (Material is the desirable look there). Don't reach
+The Android `actual` goes back to M3's own `OutlinedTextField`/`TextField` (Material
+is the desirable look there — see the `KeryxTextField` bullet under "Native-feel
+restyle" below for the full "why fight the platform" reasoning). Don't reach
 for `OutlinedTextField`/`TextField`/`BasicTextField` directly at a call site — use
 `KeryxTextField`. Its `modifier` param lands on the inner text field, so a
 `focusRequester` / `onFocusChanged { it.isFocused }` on it behaves as it did on
@@ -513,7 +514,7 @@ for `OutlinedTextField`/`TextField`/`BasicTextField` directly at a call site —
   message that blocks confirm (e.g. duplicate tag name); a separate
   `infoHint: (String) -> String?` returns a non-blocking hint (e.g. "leaving
   this blank resets to the default title"). Either feeds `isError` /
-  `supportingText` on the `OutlinedTextField`; both return `null` when there's
+  `supportingText` on `KeryxTextField`; both return `null` when there's
   nothing to show.
 - **Blank input**: blocked by default; pass `allowBlank = true` when an empty
   value is meaningful (e.g. "reset to default") rather than invalid.
@@ -904,3 +905,34 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   window-level layer, above the WebView) rather than `Scaffold`'s own slot — see
   `LocalSnackbarHostState`'s own KDoc. Any future Android-side "float something over the current
   pane" UI needs the same `Popup`/`KeryxAnchoredPanel`-style treatment, not a plain Compose overlay.
+
+## Accessibility
+
+Conventions established piecemeal across the codebase (each currently only documented on its own
+KDoc) — follow these for any new `expect`/`actual` control or list-row interaction under `ui/`:
+
+- **Give a new interactive `expect`/`actual` control a `Role`.** A row/control that merely
+  `clickable`s conveys nothing about *what kind* of control it is to a screen reader. Use
+  `Modifier.selectable(selected, role = ...)` for a row that participates in a mutually-exclusive
+  selection (see `ui/home/ListRowChrome.kt`'s `listRowClickable`, backing every feed/folder/tag/
+  article row) and `Modifier.toggleable(value, role = Role.Switch)` for a row whose click flips a
+  boolean the row itself represents (see `ui/common/KeryxSettingRow.android.kt`'s toggle-row path).
+  When a control has its own inner interactive child (e.g. a trailing `FlatSwitch` inside a
+  toggle row), wrap that child's container in `Modifier.clearAndSetSemantics {}` so its semantics
+  don't merge in as a second, separately-focusable stop for what is visually one control.
+- **A purely decorative icon gets `contentDescription = null`, with the label on the clickable
+  parent's `onClickLabel` instead** — never on both, or a screen reader announces the label twice
+  (once for the icon, once for the click action). `ui/home/HomeCommon.kt`'s
+  `ExpandCollapseChevron` is the reference implementation; its own KDoc explains why.
+- **Route state-description text through `ui/i18n/AccessibilityDescriptions.kt`** (e.g.
+  `checkedStateDescription()`/`uncheckedStateDescription()`) rather than inlining a literal at the
+  call site — this is also where constraint #3's "no hardcoded user-facing strings" applies to
+  accessibility-only text nobody sees on screen. `platform/NativeMenu.android.kt`'s checkable menu
+  items are the reference call site (`Modifier.semantics { this.stateDescription = ... }`).
+- **A pointer-only gesture (drag-to-reorder, long-press context menu) needs a
+  `CustomAccessibilityAction` equivalent**, since a screen reader user cannot perform either. See
+  `ui/home/FeedListRowParts.kt`'s `reorderAccessibilityActions` (a "move up"/"move down" action
+  pair, driven by the exact same `HomeViewModel` mutation a completed drag would trigger) for the
+  pattern: only expose an action for a direction that is actually available (`onMoveUp`/
+  `onMoveDown` is `null` when already first/last in scope), and gate the whole modifier on the
+  same `isTouchPrimary` condition the underlying gesture itself is gated on.

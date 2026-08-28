@@ -35,10 +35,33 @@ class FtsManager(private val driver: SqlDriver) {
     /**
      * Startup: create the table on first run, then index any articles not yet in the index. This
      * backfills rows that were never indexed — e.g. articles fetched before the FTS feature existed,
-     * or feeds whose refresh returned no new articles. Idempotent and cheap when nothing is missing.
+     * or feeds whose refresh returned no new articles. Idempotent and cheap when nothing is missing
+     * — [indexMissing]'s scan still runs every call, though, which is fine for a call site that runs
+     * once per app launch (desktop's `main.kt`). For a call site that instead runs on every process
+     * start — including a background wakeup with no new articles to backfill — see
+     * [ensureIndexedIfTableAbsent].
      */
     suspend fun ensureIndexed() {
         createTable() // create on first run (IF NOT EXISTS otherwise)
+        indexMissing()
+    }
+
+    /**
+     * Cheaper counterpart to [ensureIndexed] for a call site that runs on **every process start**
+     * rather than once per app launch — Android's `KeryxApplication.onCreate`, which also runs when
+     * `WorkManager` wakes the process to run `FeedRefreshWorker` (up to ~96 times/day at the
+     * platform's 15-minute minimum interval). [exists] is a single `sqlite_master` lookup, so once
+     * the table has been created (the very first launch after install, or after a sync reset), every
+     * later call is a cheap no-op instead of [indexMissing]'s `O(articles)` scan.
+     *
+     * This does not weaken indexing: backfill of new articles keeps happening through the normal
+     * hot-path calls to [indexMissing] (feed refresh, sync merge) and the daily [rebuildIndex] heal —
+     * this function's only job is guaranteeing the table exists and is backfilled *once* per
+     * install, not re-scanning it on every wakeup that finds it already does.
+     */
+    suspend fun ensureIndexedIfTableAbsent() {
+        if (exists()) return
+        createTable()
         indexMissing()
     }
 

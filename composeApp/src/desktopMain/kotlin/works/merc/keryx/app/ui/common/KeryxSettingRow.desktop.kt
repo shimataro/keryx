@@ -39,6 +39,7 @@ actual fun KeryxSettingRow(
     supporting: String?,
     onClick: (() -> Unit)?,
     trailing: (@Composable () -> Unit)?,
+    @Suppress("UNUSED_PARAMETER") toggled: Boolean?,
 ) {
     if (trailing != null) {
         Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

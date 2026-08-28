@@ -35,13 +35,18 @@ class KeryxApplication : Application() {
         configureImageLoader(koin.get<HttpClient>(), AppDirs.cacheDir())
 
         // Desktop's main.kt does this with runBlocking before application {} — acceptable there
-        // since it only delays showing the first window by a trivial amount. Blocking
-        // Application.onCreate the same way would delay every cold start instead, so this runs as
-        // fire-and-forget on the shared app-scope CoroutineScope (registered in appModule).
-        // ensureIndexed() only backfills newly-unindexed rows, so a search performed in the brief
-        // window before it completes just returns fewer/no hits rather than failing outright.
+        // since it only delays showing the first window by a trivial amount, and only ever runs
+        // once per process. Blocking Application.onCreate the same way would delay every cold
+        // start instead, so this runs as fire-and-forget on the shared app-scope CoroutineScope
+        // (registered in appModule). ensureIndexedIfTableAbsent() — not ensureIndexed() — because
+        // this onCreate also runs on every WorkManager wakeup that starts the process to run
+        // FeedRefreshWorker (up to ~96 times/day), and ensureIndexed()'s indexMissing() call is an
+        // O(articles) scan; ensureIndexedIfTableAbsent() skips straight to a no-op via a single
+        // sqlite_master lookup once the table has been created and backfilled the first time. A
+        // search performed in the brief window before either completes just returns fewer/no hits
+        // rather than failing outright.
         koin.get<CoroutineScope>().launch {
-            koin.get<FtsManager>().ensureIndexed()
+            koin.get<FtsManager>().ensureIndexedIfTableAbsent()
         }
 
         // Keeps WorkManager's periodic feed-refresh job in sync with the refresh-interval

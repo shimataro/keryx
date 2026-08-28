@@ -107,7 +107,7 @@ internal fun Modifier.paneActivation(
  *
  * On a touch-primary platform the click target grows to a 48dp box around the (still 20dp) icon —
  * unlike the tag color dot's own 8dp-margin-absorbing trick, there's no spare margin here to
- * absorb, so this relies on the row's own [LIST_ROW_MIN_HEIGHT] density pass to keep the row from
+ * absorb, so this relies on the row's own [listRowMinHeight] density pass to keep the row from
  * being forced taller than its neighbors just by this one control.
  *
  * @param isTouchPrimary Overridable for tests only (mirrors `feedListReorderDrag`'s own

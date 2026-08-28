@@ -2,6 +2,7 @@ package works.merc.keryx.app.platform
 
 import android.net.Uri
 import works.merc.keryx.app.core.Log
+import java.io.IOException
 
 private const val TAG = "AndroidFilePicker"
 
@@ -23,17 +24,22 @@ internal suspend fun readTextFromUri(uri: Uri): String? = runCatching {
  * goes through [android.content.ContentResolver], the only API that can open a `content://` Uri
  * this app doesn't itself own.
  */
-private class ContentUriPickedFile(private val uri: Uri) : PickedFile {
+internal class ContentUriPickedFile(private val uri: Uri) : PickedFile {
     override suspend fun readText(): String? = readTextFromUri(uri)
 
     override suspend fun writeText(text: String) {
-        runCatching {
-            // "wt": write + truncate. SAF's CreateDocument already creates an empty placeholder at
-            // this Uri, but a plain "w" mode's truncate behavior is provider-dependent — "wt" makes
-            // the intent explicit so a re-export to the same file can't leave trailing old bytes.
-            AndroidAppContext.application.contentResolver.openOutputStream(uri, "wt")
-                ?.use { it.write(text.encodeToByteArray()) }
-        }.onFailure { e -> Log.warn(TAG, "Failed to write the picked file", e) }
+        // Deliberately not wrapped in runCatching — see writeText's own KDoc: the desktop actual
+        // (FileIO.writeText) lets an IOException propagate on failure, and a caller (e.g.
+        // SettingsViewModel.exportOpml) relies on that to report the export as failed. A silently
+        // swallowed failure here previously left the UI reporting "exported" for content that was
+        // never actually written — see review finding #4 (v0.11.0..HEAD).
+        //
+        // "wt": write + truncate. SAF's CreateDocument already creates an empty placeholder at this
+        // Uri, but a plain "w" mode's truncate behavior is provider-dependent — "wt" makes the
+        // intent explicit so a re-export to the same file can't leave trailing old bytes.
+        val stream = AndroidAppContext.application.contentResolver.openOutputStream(uri, "wt")
+            ?: throw IOException("contentResolver.openOutputStream returned null")
+        stream.use { it.write(text.encodeToByteArray()) }
     }
 }
 

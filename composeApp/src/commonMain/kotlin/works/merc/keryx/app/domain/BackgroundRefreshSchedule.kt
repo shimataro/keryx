@@ -16,13 +16,17 @@ sealed interface BackgroundRefreshSchedule {
 /**
  * Maps a `refreshIntervalMinutes` setting to a [BackgroundRefreshSchedule].
  *
- * @param minimumMinutes The shortest interval the underlying scheduler can actually honor
- *   (`WorkManager`'s `PeriodicWorkRequest.MIN_PERIODIC_INTERVAL_MILLIS` is 15 minutes). The app's
- *   own UI never offers a positive value below this, but a positive value under the floor —
- *   e.g. from a hand-edited or migrated `local_settings.json` — is coerced up to it rather than
- *   silently disabled, since a positive setting means "I want this to run periodically".
+ * @param minimumMinutes The shortest interval the underlying scheduler can actually honor. No
+ *   default here on purpose — the real value (`WorkManager`'s own
+ *   `PeriodicWorkRequest.MIN_PERIODIC_INTERVAL_MILLIS`, 15 minutes) is an Android-specific
+ *   scheduler constant, and the only production caller (`background/BackgroundRefresh.kt`) passes
+ *   it explicitly so this stays the single source of truth rather than a commonMain literal that
+ *   could silently drift from it. The app's own UI never offers a positive value below this, but a
+ *   positive value under the floor — e.g. from a hand-edited or migrated `local_settings.json` —
+ *   is coerced up to it rather than silently disabled, since a positive setting means "I want this
+ *   to run periodically".
  */
-fun backgroundRefreshSchedule(refreshIntervalMinutes: Int, minimumMinutes: Long = 15): BackgroundRefreshSchedule =
+fun backgroundRefreshSchedule(refreshIntervalMinutes: Int, minimumMinutes: Long): BackgroundRefreshSchedule =
     if (refreshIntervalMinutes <= 0) {
         BackgroundRefreshSchedule.Disabled
     } else {

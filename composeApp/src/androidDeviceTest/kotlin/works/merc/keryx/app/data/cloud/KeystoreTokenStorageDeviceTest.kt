@@ -71,8 +71,99 @@ class KeystoreTokenStorageDeviceTest {
         val newTokens = OAuthTokens(accessToken = "new-access", refreshToken = "new-refresh")
         storage.save(newTokens)
 
-        assertEquals(newTokens, storage.load(), "load() must return the fresh fallback tokens, not the stale encrypted ones")
-        assertTrue(encryptedFile.exists(), "the stale encrypted file must remain in place (zeroed out), not be deleted")
+        // Checked before calling load() below, deliberately: load()'s own truncated-file handling
+        // (bytes.size <= GCM_IV_LENGTH_BYTES) deletes a file this short as its next side effect —
+        // exactly the "cleans up on its own next read" save() itself documents — so asserting
+        // existence *after* load() would be asserting a state load() just changed out from under it.
+        assertTrue(encryptedFile.exists(), "the stale encrypted file must remain in place (zeroed out) right after save(), not be deleted")
         assertEquals(0L, encryptedFile.length(), "the stale encrypted file must be invalidated, not left holding decryptable old tokens")
+        assertEquals(newTokens, storage.load(), "load() must return the fresh fallback tokens, not the stale encrypted ones")
+    }
+
+    /** A [KeystoreTokenStorage] + [FileTokenStorage] fallback pair, with both backing files exposed. */
+    private class Fixture(val storage: KeystoreTokenStorage, val encryptedFile: File, val fallbackFile: File)
+
+    /** Sets up a fresh [KeystoreTokenStorage] + [FileTokenStorage] fallback pair for one test. */
+    private fun newStorage(account: String = "devicetest-${UUID.randomUUID()}"): Fixture {
+        val encryptedDir = tempDir("encrypted")
+        val fallbackDir = tempDir("fallback")
+        val fallbackFileName = ".${account}_tokens.json"
+        val fallback = FileTokenStorage(dirOverride = fallbackDir.absolutePath, fileName = fallbackFileName)
+        keyAliasesToCleanup += "keryx_token_$account"
+        val storage = KeystoreTokenStorage(fallback = fallback, account = account, dirOverride = encryptedDir.absolutePath)
+        return Fixture(
+            storage = storage,
+            encryptedFile = File(encryptedDir, ".${account}_tokens.enc"),
+            fallbackFile = File(fallbackDir, fallbackFileName),
+        )
+    }
+
+    @Test
+    fun saveThenLoadRoundTripsThroughRealKeystoreEncryption() {
+        val fixture = newStorage()
+        val tokens = OAuthTokens(accessToken = "access-1", refreshToken = "refresh-1", expiresAtMillis = 12345L)
+
+        fixture.storage.save(tokens)
+
+        // Assert the round trip actually went through Keystore encryption, not KeystoreTokenStorage's
+        // own fallback path: save() falls back to FileTokenStorage silently on encryption failure, and
+        // load() prefers the fallback whenever the encrypted file is absent — so an equality check on
+        // load()'s result alone would pass even if every save had silently gone straight to fallback.
+        assertTrue(
+            fixture.encryptedFile.exists() && fixture.encryptedFile.length() > 0,
+            "save() must have produced a real encrypted file rather than falling back",
+        )
+        assertTrue(!fixture.fallbackFile.exists(), "a successful encrypted save() must clear() the fallback file")
+        assertEquals(tokens, fixture.storage.load())
+    }
+
+    @Test
+    fun loadReturnsNullWhenNothingWasEverSaved() {
+        val fixture = newStorage()
+
+        assertEquals(null, fixture.storage.load())
+    }
+
+    @Test
+    fun clearDeletesTheEncryptedFileAndSubsequentLoadReturnsNull() {
+        val account = "devicetest-${UUID.randomUUID()}"
+        val encryptedDir = tempDir("encrypted")
+        val fallbackDir = tempDir("fallback")
+        val fallback = FileTokenStorage(dirOverride = fallbackDir.absolutePath, fileName = ".${account}_tokens.json")
+        keyAliasesToCleanup += "keryx_token_$account"
+        val storage = KeystoreTokenStorage(fallback = fallback, account = account, dirOverride = encryptedDir.absolutePath)
+
+        storage.save(OAuthTokens(accessToken = "access-1"))
+        val encryptedFile = File(encryptedDir, ".${account}_tokens.enc")
+        assertTrue(encryptedFile.exists(), "save() must have produced an encrypted file")
+
+        storage.clear()
+
+        assertTrue(!encryptedFile.exists(), "clear() must delete the encrypted file")
+        assertEquals(null, storage.load(), "load() must return null once cleared")
+    }
+
+    /**
+     * Covers [KeystoreTokenStorage.load]'s truncated-file discard branch (`bytes.size <=
+     * GCM_IV_LENGTH_BYTES`) — a file this short cannot even hold a full GCM IV, let alone any
+     * ciphertext, so it must be treated as corrupt and cleaned up rather than passed to the cipher.
+     */
+    @Test
+    fun loadDiscardsATruncatedEncryptedFileAndFallsBackToNull() {
+        val account = "devicetest-${UUID.randomUUID()}"
+        val encryptedDir = tempDir("encrypted")
+        val fallbackDir = tempDir("fallback")
+        val fallback = FileTokenStorage(dirOverride = fallbackDir.absolutePath, fileName = ".${account}_tokens.json")
+        keyAliasesToCleanup += "keryx_token_$account"
+        val storage = KeystoreTokenStorage(fallback = fallback, account = account, dirOverride = encryptedDir.absolutePath)
+
+        val encryptedFile = File(encryptedDir, ".${account}_tokens.enc").apply {
+            parentFile?.mkdirs()
+            // Shorter than the 12-byte GCM IV alone (see KeystoreTokenStorage.GCM_IV_LENGTH_BYTES).
+            writeBytes(ByteArray(4))
+        }
+
+        assertEquals(null, storage.load(), "a truncated encrypted file must not be handed to the cipher")
+        assertTrue(!encryptedFile.exists(), "the truncated file must be discarded")
     }
 }
