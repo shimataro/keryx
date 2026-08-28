@@ -69,9 +69,10 @@ suspend fun runAndroidStartupTasks(koin: Koin) {
     if (!startupMaintenanceMutex.tryLock()) return
     try {
         // compareAndSet, not a plain assignment: two concurrent callers could otherwise both pass
-        // the checks above and both run the tasks below.
-        if (!startupTasksRan.compareAndSet(false, true)) return
-        runCatching {
+        // the checks above and both run the tasks below. It is set only after all tasks succeed so
+        // that a failure (e.g. cache cleanup throws) leaves the guard unset and a later Activity
+        // recreation can retry; FeedRefreshWorker never runs cleanUpArticleCacheIfDue itself.
+        val success = runCatching {
             cleanUpArticleCacheIfDue(koin)
             if (koin.get<CloudSession>().isConnected()) {
                 koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
@@ -80,6 +81,10 @@ suspend fun runAndroidStartupTasks(koin: Koin) {
             checkForUpdateAndNotify(koin)
             maybeRebuildFtsIndex(koin)
         }.onFailure { if (it is CancellationException) throw it else Log.error(LOG_TAG, "Startup tasks failed", it) }
+            .isSuccess
+        if (success) {
+            startupTasksRan.compareAndSet(false, true)
+        }
     } finally {
         startupMaintenanceMutex.unlock()
     }
