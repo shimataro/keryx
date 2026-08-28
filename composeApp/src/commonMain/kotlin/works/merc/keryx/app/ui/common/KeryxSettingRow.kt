@@ -19,6 +19,12 @@ import androidx.compose.ui.Modifier
  * @param trailing An optional trailing slot (e.g. `FlatSwitch`). When present, desktop renders the
  *   label in the default (non-primary, non-underlined) text color — matching the former
  *   `SwitchRow`'s look, where only the switch itself was ever the visibly-interactive element.
+ * @param toggled When non-null, this row is a toggle (e.g. `SwitchRow`): Android exposes the whole
+ *   row to accessibility services as one `Role.Switch` node carrying this checked state (rather
+ *   than the row and [trailing]'s own switch merging into two separately-focusable nodes with no
+ *   checked state announced at all), and [onClick] is expected to flip it. Desktop ignores this —
+ *   its `trailing != null` branch already leaves the row itself non-interactive (see above), so
+ *   there is nothing to attach a checked state to there.
  */
 @Composable
 expect fun KeryxSettingRow(
@@ -27,4 +33,5 @@ expect fun KeryxSettingRow(
     supporting: String? = null,
     onClick: (() -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
+    toggled: Boolean? = null,
 )

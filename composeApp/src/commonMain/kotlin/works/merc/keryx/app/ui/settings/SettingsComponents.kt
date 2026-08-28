@@ -97,5 +97,6 @@ internal fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> U
         label = label,
         onClick = { onChange(!checked) },
         trailing = { FlatSwitch(checked = checked, onCheckedChange = onChange) },
+        toggled = checked,
     )
 }
