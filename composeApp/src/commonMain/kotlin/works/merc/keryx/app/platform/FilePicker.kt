@@ -38,6 +38,10 @@ interface PickedFile {
      * Writes text to the file, replacing any existing contents.
      *
      * @param text The text to write.
+     * @throws Exception if the write fails (e.g. an `IOException` on either platform's `actual`).
+     *   Unlike [readText], a write failure has no "could not do it" sentinel to return instead —
+     *   both `actual`s let the underlying I/O exception propagate, and callers (e.g.
+     *   `SettingsViewModel.exportOpml`) rely on that to distinguish a genuine failure from success.
      */
     suspend fun writeText(text: String)
 }
