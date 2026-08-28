@@ -26,8 +26,13 @@ class DatabaseSnapshotDeviceTest {
         cleanup.forEach { it.deleteDbFiles() }
     }
 
+    // Opened OPEN_READONLY, deliberately not openOrCreateDatabase: requery's own
+    // SQLiteConnection.setLocaleFromConfiguration() creates android_metadata the moment any
+    // non-read-only connection opens the file (see DatabaseSnapshot.android.kt's own comment on
+    // dropping it), which would make this inspection helper itself recreate the very table
+    // exportedCopyExcludesFtsSyncStateAndArticleIndexesButPreservesUserVersion below asserts absent.
     private fun tableAndIndexNames(dbPath: String): Set<String> =
-        SQLiteDatabase.openOrCreateDatabase(dbPath, null, NoOpDatabaseErrorHandler).use { db ->
+        SQLiteDatabase.openDatabase(dbPath, null, SQLiteDatabase.OPEN_READONLY, NoOpDatabaseErrorHandler).use { db ->
             db.rawQuery("SELECT name FROM sqlite_master WHERE type IN ('table', 'index')", null).use { cursor ->
                 buildSet {
                     while (cursor.moveToNext()) add(cursor.getString(0))
@@ -57,6 +62,10 @@ class DatabaseSnapshotDeviceTest {
         val copyEntries = tableAndIndexNames(destFile.absolutePath)
         assertFalse(copyEntries.contains("articles_fts"), "articles_fts must be excluded from the upload copy")
         assertFalse(copyEntries.contains("sync_state"), "sync_state must be excluded from the upload copy")
+        // requery creates this itself (setLocaleFromConfiguration) the moment any non-read-only
+        // connection opens the file — including exportForUpload's own DROP-statement connection —
+        // so the exported copy's shape would otherwise depend on which platform produced it.
+        assertFalse(copyEntries.contains("android_metadata"), "android_metadata must be excluded from the upload copy")
         for (index in listOf(
             "idx_articles_feed_id", "idx_articles_is_read", "idx_articles_is_starred", "idx_articles_published",
         )) {

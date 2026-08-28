@@ -44,6 +44,16 @@ actual object DatabaseSnapshot {
         SQLiteDatabase.openOrCreateDatabase(destPath, null, NoOpDatabaseErrorHandler).use { db ->
             db.execSQL("DROP TABLE IF EXISTS articles_fts")
             db.execSQL("DROP TABLE IF EXISTS sync_state")
+            // requery's SQLiteConnection.setLocaleFromConfiguration() creates this table (confirmed
+            // by disassembling the AAR) the moment any non-read-only connection opens the file — the
+            // very "open ... db ->" line above already did, on both this copy and the live DB the
+            // VACUUM INTO read from. It is never read by this app (no query anywhere selects from
+            // it) and desktop's actual has no equivalent, so leaving it in would make the uploaded
+            // snapshot's shape depend on which platform produced it, contradicting this file's own
+            // KDoc — and since it stores the device's locale, merely changing the Android system
+            // language would otherwise change the snapshot's bytes with no data actually changed,
+            // defeating SyncRepository's "identical to what we last uploaded" digest check.
+            db.execSQL("DROP TABLE IF EXISTS android_metadata")
             db.execSQL("DROP INDEX IF EXISTS idx_articles_feed_id")
             db.execSQL("DROP INDEX IF EXISTS idx_articles_is_read")
             db.execSQL("DROP INDEX IF EXISTS idx_articles_is_starred")
