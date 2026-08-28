@@ -50,10 +50,14 @@
 #### Android ターゲット向け
 
 - **Android SDK Platform 37**（`compileSdk` / `targetSdk`）と build-tools。Android Studio の
-  SDK Manager、またはコマンドラインツール単体
-  （[`cmdline-tools`](https://developer.android.com/tools/sdkmanager)、
-  `sdkmanager "platforms;android-37" "build-tools;36.0.0"`）で導入する（36.0.0 は AGP 9.3.2 が
-  既定で選択するバージョン）。
+  SDK Manager（推奨。現在のパッケージ名を自動で解決してくれる）、またはコマンドラインツール単体
+  （[`cmdline-tools`](https://developer.android.com/tools/sdkmanager)）で導入する。API レベル37
+  以降、Google はプラットフォームをマイナーリビジョン単位で公開するようになった
+  （`platforms;android-37.0`、`.1` など）ため、フラットな `platforms;android-37` というパッケージ
+  ID はもう存在せず、`sdkmanager platforms;android-37` は "Failed to find package" で失敗する。
+  `sdkmanager --list | grep android-37` で現在の ID を確認するか、初回ビルド時に AGP 自身の
+  SDK 自動ダウンロードに解決させればよい。`build-tools;36.0.0` はこの影響を受けず、そのまま
+  導入できる（`sdkmanager "build-tools;36.0.0"` — 36.0.0 は AGP 9.3.2 が既定で選択するバージョン）。
 - 初期設定: `local.properties` の `sdk.dir` に SDK の場所を指定する（AGP がこのキー自体を
   直接読むため、下記 OAuth キーで使う `-P`/環境変数/`local.properties` の解決チェーンとは
   別系統）か、環境変数 `ANDROID_HOME` を設定してもよい。`:composeApp:compileKotlinDesktop` や
