@@ -24,9 +24,12 @@ private const val LOG_TAG = "StartupMaintenanceTasks"
  * here, since it is itself an [Exception] — because it signals the calling scope was cancelled
  * (e.g. the hosting Activity was destroyed), not that this particular step failed.
  *
- * Kept as a plain commonMain function rather than inlined at each androidMain call site, so this
- * isolation behavior is unit-testable without an `androidUnitTest` source set (this module has
- * none) — the same reason [BackgroundRefreshSchedule] is a pure commonMain mapping.
+ * Kept as a plain commonMain function rather than inlined at each call site — desktop's
+ * `StartupTasks.kt` and Android's `AndroidStartupTasks.kt` both call this for every step of their
+ * own maintenance sequence — partly so the two platforms share one isolation behavior instead of
+ * two hand-written copies, and partly so it is unit-testable without an `androidUnitTest` source
+ * set (this module has none) — the same reason [BackgroundRefreshSchedule] is a pure commonMain
+ * mapping.
  */
 internal suspend fun runMaintenanceStep(name: String, step: suspend () -> Unit) {
     try {
