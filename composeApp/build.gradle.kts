@@ -118,15 +118,17 @@ val androidVersionCode: Int = appPackageVersion.split('.')
 
 val generatedBuildConfigDir = layout.buildDirectory.dir("generated/buildConfig/kotlin")
 
+// Google Drive is desktop-only (see CloudStorageAvailability.android.kt / PlatformModule.android.kt
+// — Android has no Google Drive provider, per sync-architecture.md's "Google Drive on Android").
+// Its client secret must therefore never reach a source set Android compiles against: generated
+// into its own object, in its own directory, attached only to desktopMain below — not the shared
+// jvmCommonMain the main BuildConfig lives in — so it cannot end up in the APK/AAB even for a
+// developer whose local.properties happens to hold real Google Drive credentials.
+val generatedDesktopBuildConfigDir = layout.buildDirectory.dir("generated/desktopBuildConfig/kotlin")
+
 abstract class GenerateBuildConfigTask : DefaultTask() {
     @get:Input
     abstract val dropboxAppKey: Property<String>
-
-    @get:Input
-    abstract val googleDriveClientId: Property<String>
-
-    @get:Input
-    abstract val googleDriveClientSecret: Property<String>
 
     @get:Input
     abstract val oneDriveClientId: Property<String>
@@ -151,8 +153,6 @@ abstract class GenerateBuildConfigTask : DefaultTask() {
             |// Auto-generated. Do not edit by hand.
             |object BuildConfig {
             |    const val DROPBOX_APP_KEY: String = "${dropboxAppKey.get()}"
-            |    const val GOOGLE_DRIVE_CLIENT_ID: String = "${googleDriveClientId.get()}"
-            |    const val GOOGLE_DRIVE_CLIENT_SECRET: String = "${googleDriveClientSecret.get()}"
             |    const val ONEDRIVE_CLIENT_ID: String = "${oneDriveClientId.get()}"
             |    const val VERSION: String = "${versionName.get()}"
             |    const val UPDATE_REPO: String = "${updateRepo.get()}"
@@ -165,12 +165,47 @@ abstract class GenerateBuildConfigTask : DefaultTask() {
 
 val generateBuildConfig = tasks.register<GenerateBuildConfigTask>("generateBuildConfig") {
     dropboxAppKey.set(resolvedDropboxAppKey)
-    googleDriveClientId.set(resolvedGoogleDriveClientId)
-    googleDriveClientSecret.set(resolvedGoogleDriveClientSecret)
     oneDriveClientId.set(resolvedOneDriveClientId)
     versionName.set(appVersion)
     updateRepo.set(resolvedUpdateRepo)
     outputDir.set(generatedBuildConfigDir)
+}
+
+// Desktop-only counterpart holding the Google Drive OAuth client id/secret — see
+// generatedDesktopBuildConfigDir's own comment above for why this is split out of BuildConfig.
+abstract class GenerateDesktopBuildConfigTask : DefaultTask() {
+    @get:Input
+    abstract val googleDriveClientId: Property<String>
+
+    @get:Input
+    abstract val googleDriveClientSecret: Property<String>
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun generate() {
+        val pkgDir = outputDir.get().asFile.resolve("works/merc/keryx/app")
+        pkgDir.mkdirs()
+        pkgDir.resolve("DesktopBuildConfig.kt").writeText(
+            """
+            |package works.merc.keryx.app
+            |
+            |// Auto-generated. Do not edit by hand.
+            |object DesktopBuildConfig {
+            |    const val GOOGLE_DRIVE_CLIENT_ID: String = "${googleDriveClientId.get()}"
+            |    const val GOOGLE_DRIVE_CLIENT_SECRET: String = "${googleDriveClientSecret.get()}"
+            |}
+            |
+            """.trimMargin(),
+        )
+    }
+}
+
+val generateDesktopBuildConfig = tasks.register<GenerateDesktopBuildConfigTask>("generateDesktopBuildConfig") {
+    googleDriveClientId.set(resolvedGoogleDriveClientId)
+    googleDriveClientSecret.set(resolvedGoogleDriveClientSecret)
+    outputDir.set(generatedDesktopBuildConfigDir)
 }
 
 kotlin {
@@ -306,6 +341,7 @@ kotlin {
         }
 
         getByName("desktopMain") {
+            kotlin.srcDir(generatedDesktopBuildConfigDir)
             dependencies {
                 implementation(compose.desktop.currentOs)
                 implementation(libs.kotlinx.coroutines.swing)
@@ -369,9 +405,14 @@ kotlin {
     }
 }
 
-// The generated BuildConfig must exist before any Kotlin compilation runs.
+// The generated BuildConfig must exist before any Kotlin compilation runs. DesktopBuildConfig is
+// only ever in desktopMain's srcDir (see the sourceSets block above), so making every compilation
+// task depend on generateDesktopBuildConfig too is harmless — it just writes an unused file for
+// non-desktop targets — and keeping the dependency unconditional avoids matching compile task
+// names against the target name here.
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask<*>>().configureEach {
     dependsOn(generateBuildConfig)
+    dependsOn(generateDesktopBuildConfig)
 }
 
 sqldelight {

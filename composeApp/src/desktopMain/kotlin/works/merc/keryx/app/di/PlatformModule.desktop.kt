@@ -8,6 +8,7 @@ import org.jetbrains.compose.resources.getString
 import org.koin.core.module.Module
 import org.koin.dsl.module
 import works.merc.keryx.app.BuildConfig
+import works.merc.keryx.app.DesktopBuildConfig
 import works.merc.keryx.app.core.CONNECTION_TIMEOUT_MS
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.REQUEST_TIMEOUT_MS
@@ -86,15 +87,18 @@ actual val platformModule: Module = module {
             createStorage = { tokenProvider -> DropboxStorage(client, tokenProvider) },
         )
 
-        // Google Drive: loopback redirect (Google rejects arbitrary custom schemes).
-        val driveAuth: CloudAuthManager = GoogleDriveAuthManager(client, BuildConfig.GOOGLE_DRIVE_CLIENT_SECRET)
+        // Google Drive: loopback redirect (Google rejects arbitrary custom schemes). Desktop-only —
+        // see DesktopBuildConfig's own generation comment in build.gradle.kts for why its client
+        // secret is generated separately from the shared BuildConfig above.
+        val driveAuth: CloudAuthManager =
+            GoogleDriveAuthManager(client, DesktopBuildConfig.GOOGLE_DRIVE_CLIENT_SECRET)
         val driveProvider = CloudSession.Provider(
-            clientId = BuildConfig.GOOGLE_DRIVE_CLIENT_ID,
+            clientId = DesktopBuildConfig.GOOGLE_DRIVE_CLIENT_ID,
             tokenStorage = providerTokenStorage(CloudStorageType.GOOGLE_DRIVE, isMacOs),
             authManager = driveAuth,
             connectFlow = OAuthConnectFlow(
                 authManager = driveAuth,
-                clientId = BuildConfig.GOOGLE_DRIVE_CLIENT_ID,
+                clientId = DesktopBuildConfig.GOOGLE_DRIVE_CLIENT_ID,
                 transport = LoopbackRedirectTransport(
                     successMessageProvider = { getString(Res.string.oauth_loopback_success) },
                 ),
