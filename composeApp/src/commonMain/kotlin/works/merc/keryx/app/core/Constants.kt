@@ -134,7 +134,7 @@ const val PANE_DIVIDER_WIDTH = 8
  * [WINDOW_MIN_WIDTH] is deliberately `>=` this value: the article reader's WebView must stay
  * composed for the pane's whole lifetime (see `ArticleDetailPane`'s KDoc and `known-issues.md`),
  * so the desktop window — which can never narrow below [WINDOW_MIN_WIDTH] — must never resolve to
- * anything but [works.merc.keryx.app.ui.home.PaneLayout.Triple]. `HomeScreenPaneLayoutTest`
+ * anything but [works.merc.keryx.app.ui.home.PaneLayout.Triple]. `HomePaneLayoutTest`
  * pins this at [WINDOW_MIN_WIDTH].
  */
 const val TRIPLE_PANE_MIN_WIDTH =
