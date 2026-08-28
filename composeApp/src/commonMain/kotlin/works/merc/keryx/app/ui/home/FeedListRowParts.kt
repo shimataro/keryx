@@ -146,7 +146,10 @@ internal fun DragHandle() {
  * that direction at all, rather than one that would do nothing.
  *
  * @param enabled Gated by the caller on `isTouchPrimary`, exactly like [DragHandle] itself: these
- *   actions exist for the platform whose reorder gesture starts from that handle.
+ *   actions exist for the platform whose reorder gesture starts from that handle. Checked *before*
+ *   resolving [moveUpLabel]/[moveDownLabel] below — desktop always passes `false` here, so without
+ *   this ordering every visible feed/folder row would resolve two `stringResource` slots on every
+ *   recomposition (e.g. every row, on every frame of a drag) purely to discard both immediately.
  */
 @Composable
 internal fun Modifier.reorderAccessibilityActions(
@@ -154,13 +157,12 @@ internal fun Modifier.reorderAccessibilityActions(
     onMoveUp: (() -> Unit)?,
     onMoveDown: (() -> Unit)?,
 ): Modifier {
+    if (!enabled || (onMoveUp == null && onMoveDown == null)) return this
     val moveUpLabel = stringResource(Res.string.home_move_up)
     val moveDownLabel = stringResource(Res.string.home_move_down)
-    if (!enabled) return this
     val actions = buildList {
         onMoveUp?.let { move -> add(CustomAccessibilityAction(moveUpLabel) { move(); true }) }
         onMoveDown?.let { move -> add(CustomAccessibilityAction(moveDownLabel) { move(); true }) }
     }
-    if (actions.isEmpty()) return this
     return this.semantics { customActions = actions }
 }
