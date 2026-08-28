@@ -28,6 +28,7 @@ import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.CountingSqlDriver
+import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFolder
@@ -43,6 +44,14 @@ import kotlin.test.assertTrue
 private const val RSS = """<?xml version="1.0"?><rss version="2.0"><channel>
 <title>Feed</title><link>https://ex.com</link>
 <item><title>Post</title><link>https://ex.com/1</link><guid>g1</guid></item>
+</channel></rss>"""
+
+/**
+ * A feed with no items, so a subscribe performs no article or FTS writes after releasing
+ * subscribePlacementMutex. Used by the concurrent-subscribe test — see its own comment.
+ */
+private const val RSS_NO_ITEMS = """<?xml version="1.0"?><rss version="2.0"><channel>
+<title>Feed</title><link>https://ex.com</link>
 </channel></rss>"""
 
 /** A single distinctively-titled article, for FTS search regression tests. */
@@ -256,12 +265,37 @@ class FeedRepositoryTest {
 
     @Test
     fun subscribeFeedSerializesSortOrderAllocationAcrossConcurrentCalls(): Unit = runBlocking {
-        val (rawDriver, _) = inMemoryDb()
+        // A file-backed DB, not inMemoryDb(): SQLDelight's JdbcSqliteDriver pins ALL callers of an
+        // IN_MEMORY driver to one shared physical JDBC connection (there's no other way to keep the
+        // in-memory data visible across statements), so once this test's two real Threads are both
+        // mid-transaction on it, a second BEGIN issued while the first hasn't committed yet throws
+        // "cannot start a transaction within a transaction" — a single-connection JDBC artifact, not
+        // a real race. A file-backed driver gives each transaction its own connection, exactly like
+        // production, so genuinely overlapping transactions are resolved by SQLite's own locking
+        // instead of colliding on one Connection object.
+        //
+        // RSS_NO_ITEMS (not RSS) matters too: subscribeFeedWrite's db.transaction {} does a read
+        // (getByUrl / nextSortOrderInGroup) before its write (upsert), so SQLite's deferred BEGIN
+        // means that transaction only takes a SHARED lock up front and has to upgrade to RESERVED at
+        // the write. If the first call's articleRepository.upsertParsed (a separate, per-feed
+        // transaction, run after subscribePlacementMutex is released) is still holding RESERVED when
+        // the second call tries to upgrade, SQLite treats the upgrade as a potential deadlock and
+        // fails it with SQLITE_BUSY *without* invoking the busy handler at all — busy_timeout does
+        // not apply to a failed lock upgrade, only to acquiring a lock that has no other waiter ahead
+        // of it. A feed with no items means upsertParsed's insert loop runs zero times and
+        // indexMissing() is skipped (hadArticles == false), so nothing outside the mutex writes to
+        // the DB — the only thing left to overlap the second call's read is the first call's own
+        // read-only feeds.getById, which cannot block a SHARED-lock acquisition.
+        val (_, rawDriver, _) = fileDb()
         val driver = GatedSortOrderDriver(rawDriver)
         val db = works.merc.keryx.app.data.local.db.KeryxDatabase(driver)
         try {
             db.insertFolder("folder-1", "Folder 1")
-            val fetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) }
+            val secondFetchStarted = CountDownLatch(1)
+            val fetcher = fetcherWith { request ->
+                if (request.url.toString().endsWith("/second")) secondFetchStarted.countDown()
+                respond(RSS_NO_ITEMS, HttpStatusCode.OK)
+            }
             val repo = newRepo(db, driver, fetcher)
 
             val firstResult = java.util.concurrent.atomic.AtomicReference<Result<Feeds>>()
@@ -276,6 +310,7 @@ class FeedRepositoryTest {
             val second = Thread {
                 runBlocking { secondResult.set(repo.subscribeFeed("https://ex.com/second", folderId = "folder-1")) }
             }.apply { start() }
+            assertTrue(secondFetchStarted.await(5, TimeUnit.SECONDS), "second subscribeFeed never started its fetch")
             Thread.sleep(300)
             driver.releaseFirstRead.countDown()
             first.join(5_000)

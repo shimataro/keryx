@@ -121,22 +121,25 @@ fun inMemoryDb(): Pair<SqlDriver, KeryxDatabase> {
 }
 
 /**
- * Creates a file-backed SQLite database for merge tests.
+ * Creates a file-backed SQLite database, e.g. for merge tests or for a UI-fixture test whose
+ * gesture-triggered write must run on a real per-thread connection instead of [inMemoryDb]'s
+ * single shared one (see [FeedListDragTest][works.merc.keryx.app.ui.home.FeedListDragTest]'s
+ * `dragsAFeedAboveAnotherAndPersistsTheNewOrder` for why).
  *
+ * @param foreignKeys Whether to enforce foreign keys. Defaults to `false`, matching production's
+ * properties minus foreign_keys: the merge tests seed states that FK enforcement forbids on
+ * purpose — an article whose feed is missing, a feed_tag whose tag is missing, a feed pointing at
+ * an absent folder — because those are exactly what MergeSql's EXISTS/NOT EXISTS guards exist to
+ * skip when a cloud DB written by another device or version carries them. Pass `true` for a test
+ * that needs full production-parity connection properties without deliberately violating FKs. The
+ * production configuration (foreign_keys included) is covered against a real file DB by
+ * SqliteConnectionPropertiesTest.
  * @return A triple containing the temporary database file, SQL driver, and initialized database.
  */
-fun fileDb(): Triple<File, SqlDriver, KeryxDatabase> {
+fun fileDb(foreignKeys: Boolean = false): Triple<File, SqlDriver, KeryxDatabase> {
     val file = File.createTempFile("keryx-test-", ".db").apply { deleteOnExit() }
-    // Production's properties minus foreign_keys. The merge tests seed states that FK enforcement
-    // forbids on purpose — an article whose feed is missing, a feed_tag whose tag is missing, a feed
-    // pointing at an absent folder — because those are exactly what MergeSql's EXISTS/NOT EXISTS
-    // guards exist to skip when a cloud DB written by another device or version carries them. The
-    // production configuration (foreign_keys included) is covered against a real file DB by
-    // SqliteConnectionPropertiesTest.
-    val driver = JdbcSqliteDriver(
-        "jdbc:sqlite:${file.absolutePath}",
-        sqliteConnectionProperties().apply { remove("foreign_keys") },
-    )
+    val properties = sqliteConnectionProperties().apply { if (!foreignKeys) remove("foreign_keys") }
+    val driver = JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}", properties)
     KeryxDatabase.Schema.create(driver)
     return Triple(file, driver, KeryxDatabase(driver))
 }
