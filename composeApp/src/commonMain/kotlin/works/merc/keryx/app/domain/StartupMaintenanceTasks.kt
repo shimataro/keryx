@@ -1,17 +1,42 @@
 package works.merc.keryx.app.domain
 
+import kotlinx.coroutines.CancellationException
 import org.jetbrains.compose.resources.getString
 import org.koin.core.Koin
 import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.MILLIS_PER_DAY
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.platform.SelfUpdateCheckSupport
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.update_available_notification
+
+private const val LOG_TAG = "StartupMaintenanceTasks"
+
+/**
+ * Runs one startup/background maintenance step, isolating its failure from the other steps in the
+ * same sequence: an exception here is logged and swallowed so the caller can move on to the next
+ * step regardless. [CancellationException] is rethrown rather than swallowed — catch order matters
+ * here, since it is itself an [Exception] — because it signals the calling scope was cancelled
+ * (e.g. the hosting Activity was destroyed), not that this particular step failed.
+ *
+ * Kept as a plain commonMain function rather than inlined at each androidMain call site, so this
+ * isolation behavior is unit-testable without an `androidUnitTest` source set (this module has
+ * none) — the same reason [BackgroundRefreshSchedule] is a pure commonMain mapping.
+ */
+internal suspend fun runMaintenanceStep(name: String, step: suspend () -> Unit) {
+    try {
+        step()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Log.error(LOG_TAG, "Startup task '$name' failed", e)
+    }
+}
 
 /**
  * Soft-deletes expired cached articles once per day (gated on [works.merc.keryx.app.data.local.db.LocalSettings.lastCacheCleanupAt],

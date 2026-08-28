@@ -1,9 +1,7 @@
 package works.merc.keryx.app
 
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import org.koin.core.Koin
-import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
@@ -12,9 +10,8 @@ import works.merc.keryx.app.domain.checkForUpdateAndNotify
 import works.merc.keryx.app.domain.cleanUpArticleCacheIfDue
 import works.merc.keryx.app.domain.maybeRebuildFtsIndex
 import works.merc.keryx.app.domain.refreshFeedsAndNotify
+import works.merc.keryx.app.domain.runMaintenanceStep
 import java.util.concurrent.atomic.AtomicBoolean
-
-private const val LOG_TAG = "AndroidStartupTasks"
 
 /**
  * Serializes Android's two independent maintenance entry points — [runAndroidStartupTasks]
@@ -30,13 +27,14 @@ internal val startupMaintenanceMutex = Mutex()
 // Guards runAndroidStartupTasks to once per process: MainActivity.onCreate runs again on
 // configuration changes (rotation) that recreate the Activity without restarting the process, and
 // this must not re-run the full startup sequence each time. Set only once the maintenance lock is
-// actually held and the tasks are about to run (see startupMaintenanceMutex.tryLock() below) — a
-// call skipped because setup isn't finished yet, or because FeedRefreshWorker currently holds the
-// lock, must not burn this process's only chance to run them (in particular cleanUpArticleCacheIfDue,
-// which FeedRefreshWorker never runs itself). An AtomicBoolean (not a plain var) because
-// MainActivity.onCreate launches onto a Dispatchers.Default-backed CoroutineScope (AppModule.kt) —
-// a real thread pool — so two Activity recreations in quick succession (e.g. an early rotation)
-// can race two coroutines through this guard on different threads.
+// actually held and every step below has been attempted (see startupMaintenanceMutex.tryLock() and
+// runMaintenanceStep below) — a call skipped because setup isn't finished yet, or because
+// FeedRefreshWorker currently holds the lock, must not burn this process's only chance to run them
+// (in particular cleanUpArticleCacheIfDue, which FeedRefreshWorker never runs itself). An
+// AtomicBoolean (not a plain var) because MainActivity.onCreate launches onto a
+// Dispatchers.Default-backed CoroutineScope (AppModule.kt) — a real thread pool — so two Activity
+// recreations in quick succession (e.g. an early rotation) can race two coroutines through this
+// guard on different threads.
 private val startupTasksRan = AtomicBoolean(false)
 
 /**
@@ -68,23 +66,28 @@ suspend fun runAndroidStartupTasks(koin: Koin) {
     // the rest of this process (FeedRefreshWorker never runs cleanUpArticleCacheIfDue itself).
     if (!startupMaintenanceMutex.tryLock()) return
     try {
-        // compareAndSet, not a plain assignment: two concurrent callers could otherwise both pass
-        // the checks above and both run the tasks below. It is set only after all tasks succeed so
-        // that a failure (e.g. cache cleanup throws) leaves the guard unset and a later Activity
-        // recreation can retry; FeedRefreshWorker never runs cleanUpArticleCacheIfDue itself.
-        val success = runCatching {
-            cleanUpArticleCacheIfDue(koin)
+        // Double execution is prevented by startupMaintenanceMutex.tryLock() above, not by this
+        // flag — it is a plain `set`, not a `compareAndSet`, because only one caller can ever reach
+        // this point at a time. Each step runs through runMaintenanceStep so that one step's
+        // exception (e.g. maybeRebuildFtsIndex hitting FtsManager's busy_timeout) does not skip the
+        // rest of the sequence the way a single shared try/catch would. The flag is then set
+        // unconditionally once every step has been attempted — a step that failed is logged and
+        // left for FeedRefreshWorker's own periodic run to pick back up (refreshFeedsAndNotify /
+        // sync / checkForUpdateAndNotify / maybeRebuildFtsIndex), except cleanUpArticleCacheIfDue,
+        // which only runs here and simply waits for its own 24h gate on the next process start.
+        // sync()'s own Result (as opposed to a thrown exception) is deliberately not inspected here
+        // — Activity recreation is not meant to be a retry mechanism for the expected failure
+        // categories error-design.md documents as Result, only for genuinely unexpected exceptions.
+        runMaintenanceStep("cacheCleanup") { cleanUpArticleCacheIfDue(koin) }
+        runMaintenanceStep("sync") {
             if (koin.get<CloudSession>().isConnected()) {
                 koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
             }
-            refreshFeedsAndNotify(koin)
-            checkForUpdateAndNotify(koin)
-            maybeRebuildFtsIndex(koin)
-        }.onFailure { if (it is CancellationException) throw it else Log.error(LOG_TAG, "Startup tasks failed", it) }
-            .isSuccess
-        if (success) {
-            startupTasksRan.compareAndSet(false, true)
         }
+        runMaintenanceStep("feedRefresh") { refreshFeedsAndNotify(koin) }
+        runMaintenanceStep("updateCheck") { checkForUpdateAndNotify(koin) }
+        runMaintenanceStep("ftsRebuild") { maybeRebuildFtsIndex(koin) }
+        startupTasksRan.set(true)
     } finally {
         startupMaintenanceMutex.unlock()
     }
