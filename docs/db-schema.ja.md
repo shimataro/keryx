@@ -175,6 +175,7 @@ SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundli
 | `lastUpdateCheckAt` | int\|null | null |
 | `windowWidth` / `windowHeight` | number\|null | null |
 | `feedListPaneWidth` / `articleListPaneWidth` | number | 260 / 360 |
+| `appMenuBarVisible` | boolean\|null | null（Linux KDE Global Menu: null=自動（`RegisterWindow` が成功するまで表示し、その後非表示）。true/false は Ctrl+M またはエクスポートされた「メニューバーを表示」チェックボックスによる明示的な上書き。`com.canonical.AppMenu.Registrar` が存在しない環境では効果なし） |
 
 ## キャッシュ削除
 
