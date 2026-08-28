@@ -180,7 +180,7 @@ macOS の translocated インストールの警告（デスクトップ固有の
    1 日最大 ~96 回。「Android での実装」節を参照）ため、`ensureIndexed()` が呼ぶ `indexMissing()` の
    `O(記事数)` スキャンをそのたびに払うわけにはいかない。`ensureIndexedIfTableAbsent()` はテーブルが
    一度作成・バックフィルされた後は `sqlite_master` を 1 回引くだけの no-op になる。新着記事の
-   索引付けは、ステップ3の `refreshFeedsAndNotify` / 同期でのホットパス `indexMissing()` 呼び出しと、
+   索引付けは、`refreshFeedsAndNotify` / 同期でのホットパス `indexMissing()` 呼び出しと、
    下記の日次再構築 heal で通常どおり継続される。
 
 ## FTS 全再構築の日次 heal（`maybeRebuildFtsIndex`）
