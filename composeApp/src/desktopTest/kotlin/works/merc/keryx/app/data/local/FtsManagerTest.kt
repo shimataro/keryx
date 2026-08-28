@@ -245,6 +245,51 @@ class FtsManagerTest {
     }
 
     @Test
+    fun ensureIndexedIfTableAbsentCreatesAndBackfillsOnFirstCall() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertArticle("a1", "f1", "Kotlin Multiplatform", "cross platform apps")
+
+            val manager = ftsManager(driver)
+            assertFalse(manager.exists())
+
+            runBlocking { manager.ensureIndexedIfTableAbsent() }
+
+            assertTrue(manager.exists())
+            assertEquals(listOf("a1"), FtsSearch(driver).search("Kotlin").map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * The whole point of [FtsManager.ensureIndexedIfTableAbsent] over [FtsManager.ensureIndexed] —
+     * it must skip [FtsManager.indexMissing]'s scan once the table already exists, even if that
+     * means an article inserted after table creation stays unindexed until the next hot-path
+     * [FtsManager.indexMissing] call (feed refresh / sync) or the daily [FtsManager.rebuildIndex]
+     * heal. This is the accepted trade-off documented on the function's own KDoc — a call site that
+     * runs on every process start must not pay indexMissing's O(articles) scan every time.
+     */
+    @Test
+    fun ensureIndexedIfTableAbsentSkipsTheBackfillWhenTheTableAlreadyExists() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            val manager = ftsManager(driver)
+            manager.createTable()
+            db.insertArticle("a1", "f1", "Kotlin Multiplatform", "cross platform apps")
+            assertTrue(FtsSearch(driver).search("Kotlin").isEmpty())
+
+            runBlocking { manager.ensureIndexedIfTableAbsent() }
+
+            assertTrue(FtsSearch(driver).search("Kotlin").isEmpty(), "must not have backfilled once the table already existed")
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun ensureIndexedTwiceDoesNotDuplicateIndexedRows() {
         val (driver, db) = inMemoryDb()
         try {
