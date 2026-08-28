@@ -326,7 +326,7 @@ internal fun FolderGroupHeader(
         Modifier.fillMaxWidth()
             .testTag(folderRowTestTag(folder.id))
             .reorderAccessibilityActions(isTouchPrimary, onMoveUp, onMoveDown)
-            .listRowClickable(rowInteraction, onClick)
+            .listRowClickable(rowInteraction, selected, onClick)
             .nativeContextMenu(
                 items = {
                     listOf(
@@ -532,7 +532,7 @@ internal fun FeedRow(
         Modifier.fillMaxWidth()
             .testTag(feedRowTestTag(feed.id))
             .reorderAccessibilityActions(isTouchPrimary, onMoveUp, onMoveDown)
-            .listRowClickable(rowInteraction, onClick)
+            .listRowClickable(rowInteraction, selectionTone == RowSelectionTone.PRIMARY, onClick)
             .nativeContextMenu(
                 items = {
                     listOf(

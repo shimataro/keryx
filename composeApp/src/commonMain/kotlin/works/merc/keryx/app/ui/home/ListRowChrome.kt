@@ -1,7 +1,7 @@
 package works.merc.keryx.app.ui.home
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -97,11 +97,19 @@ internal val LIST_ROW_VERTICAL_MARGIN = LIST_ROW_GUIDE_CLEARANCE + LIST_ROW_GUID
  * Pass `indication = null` deliberately here so the press feedback [listRowSurface] paints stays
  * confined to the inset highlight instead of flashing edge-to-edge; pair this with [listRowSurface]
  * on the same [interactionSource].
+ *
+ * Built on `Modifier.selectable` rather than plain `clickable` so [selected] reaches accessibility
+ * services as this row's own semantics (`Role`/checked-analogue state), not just as a painted
+ * highlight from [selectionBackground] — the only way a screen-reader user can tell which row is
+ * selected once [LocalRowSelectionVisible] hides that highlight (`PaneLayout.Single`, where the
+ * highlight would be confusing with only one pane visible at a time). [selected] is therefore this
+ * row's actual *logical* selection state, independent of whether the highlight is currently drawn.
  */
 internal fun Modifier.listRowClickable(
     interactionSource: MutableInteractionSource,
+    selected: Boolean,
     onClick: () -> Unit,
-): Modifier = clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+): Modifier = selectable(selected = selected, interactionSource = interactionSource, indication = null, onClick = onClick)
 
 /**
  * Which native row idiom a list row should follow — see [listRowSurface]'s own KDoc and the

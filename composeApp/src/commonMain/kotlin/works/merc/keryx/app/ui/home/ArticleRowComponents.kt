@@ -197,7 +197,7 @@ internal fun ArticleRow(
     Row(
         Modifier.testTag(testTag)
             .fillMaxWidth()
-            .listRowClickable(rowInteraction, onClick)
+            .listRowClickable(rowInteraction, selected, onClick)
             .nativeContextMenu(
                 items = {
                     val urlUsable = hasUsableUrl(article.url)
