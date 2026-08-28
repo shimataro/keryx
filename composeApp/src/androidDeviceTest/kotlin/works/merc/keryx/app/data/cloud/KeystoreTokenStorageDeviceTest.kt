@@ -80,30 +80,48 @@ class KeystoreTokenStorageDeviceTest {
         assertEquals(newTokens, storage.load(), "load() must return the fresh fallback tokens, not the stale encrypted ones")
     }
 
+    /** A [KeystoreTokenStorage] + [FileTokenStorage] fallback pair, with both backing files exposed. */
+    private class Fixture(val storage: KeystoreTokenStorage, val encryptedFile: File, val fallbackFile: File)
+
     /** Sets up a fresh [KeystoreTokenStorage] + [FileTokenStorage] fallback pair for one test. */
-    private fun newStorage(account: String = "devicetest-${UUID.randomUUID()}"): KeystoreTokenStorage {
+    private fun newStorage(account: String = "devicetest-${UUID.randomUUID()}"): Fixture {
         val encryptedDir = tempDir("encrypted")
         val fallbackDir = tempDir("fallback")
-        val fallback = FileTokenStorage(dirOverride = fallbackDir.absolutePath, fileName = ".${account}_tokens.json")
+        val fallbackFileName = ".${account}_tokens.json"
+        val fallback = FileTokenStorage(dirOverride = fallbackDir.absolutePath, fileName = fallbackFileName)
         keyAliasesToCleanup += "keryx_token_$account"
-        return KeystoreTokenStorage(fallback = fallback, account = account, dirOverride = encryptedDir.absolutePath)
+        val storage = KeystoreTokenStorage(fallback = fallback, account = account, dirOverride = encryptedDir.absolutePath)
+        return Fixture(
+            storage = storage,
+            encryptedFile = File(encryptedDir, ".${account}_tokens.enc"),
+            fallbackFile = File(fallbackDir, fallbackFileName),
+        )
     }
 
     @Test
     fun saveThenLoadRoundTripsThroughRealKeystoreEncryption() {
-        val storage = newStorage()
+        val fixture = newStorage()
         val tokens = OAuthTokens(accessToken = "access-1", refreshToken = "refresh-1", expiresAtMillis = 12345L)
 
-        storage.save(tokens)
+        fixture.storage.save(tokens)
 
-        assertEquals(tokens, storage.load())
+        // Assert the round trip actually went through Keystore encryption, not KeystoreTokenStorage's
+        // own fallback path: save() falls back to FileTokenStorage silently on encryption failure, and
+        // load() prefers the fallback whenever the encrypted file is absent — so an equality check on
+        // load()'s result alone would pass even if every save had silently gone straight to fallback.
+        assertTrue(
+            fixture.encryptedFile.exists() && fixture.encryptedFile.length() > 0,
+            "save() must have produced a real encrypted file rather than falling back",
+        )
+        assertTrue(!fixture.fallbackFile.exists(), "a successful encrypted save() must clear() the fallback file")
+        assertEquals(tokens, fixture.storage.load())
     }
 
     @Test
     fun loadReturnsNullWhenNothingWasEverSaved() {
-        val storage = newStorage()
+        val fixture = newStorage()
 
-        assertEquals(null, storage.load())
+        assertEquals(null, fixture.storage.load())
     }
 
     @Test
