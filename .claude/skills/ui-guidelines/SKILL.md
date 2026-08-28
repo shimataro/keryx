@@ -502,8 +502,9 @@ not M3's `OutlinedTextField`** — an `expect`/`actual` drop-in (desktop `actual
 `KeryxTextField.desktop.kt`) that renders a flat, thin-bordered native-feel field
 (hairline `outlineVariant` border, `shapes.small`, border → `primary` on focus /
 `error` when `isError`) instead of M3's tall outlined box with a floating label.
-When an Android target is added, its `actual` should go back to M3's
-`OutlinedTextField`/`TextField` (Material is the desirable look there). Don't reach
+The Android `actual` goes back to M3's own `OutlinedTextField`/`TextField` (Material
+is the desirable look there — see the `KeryxTextField` bullet under "Native-feel
+restyle" below for the full "why fight the platform" reasoning). Don't reach
 for `OutlinedTextField`/`TextField`/`BasicTextField` directly at a call site — use
 `KeryxTextField`. Its `modifier` param lands on the inner text field, so a
 `focusRequester` / `onFocusChanged { it.isFocused }` on it behaves as it did on
@@ -513,7 +514,7 @@ for `OutlinedTextField`/`TextField`/`BasicTextField` directly at a call site —
   message that blocks confirm (e.g. duplicate tag name); a separate
   `infoHint: (String) -> String?` returns a non-blocking hint (e.g. "leaving
   this blank resets to the default title"). Either feeds `isError` /
-  `supportingText` on the `OutlinedTextField`; both return `null` when there's
+  `supportingText` on `KeryxTextField`; both return `null` when there's
   nothing to show.
 - **Blank input**: blocked by default; pass `allowBlank = true` when an empty
   value is meaningful (e.g. "reset to default") rather than invalid.
