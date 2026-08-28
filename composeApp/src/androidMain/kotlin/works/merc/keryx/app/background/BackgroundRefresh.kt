@@ -40,11 +40,11 @@ fun startBackgroundRefresh(koin: Koin) {
         .map { it.refreshIntervalMinutes }
         .distinctUntilChanged()
         .onEach { minutes ->
-            // Passed explicitly rather than relying on backgroundRefreshSchedule's own default:
-            // that default exists only so commonTest can exercise the mapping without an
-            // androidx.work dependency, and letting a commonMain function's default value be the
-            // single source of truth for an Android-specific WorkManager constant would silently
-            // drift from WorkManager's own value if it ever changed.
+            // backgroundRefreshSchedule has no default for this parameter — WorkManager's minimum
+            // is an Android-specific scheduler constant, so it is passed explicitly here to keep
+            // this the single source of truth rather than a commonMain literal that could silently
+            // drift from WorkManager's own value. commonTest supplies its own test value directly,
+            // with no androidx.work dependency needed.
             val minimumMinutes = TimeUnit.MILLISECONDS.toMinutes(PeriodicWorkRequest.MIN_PERIODIC_INTERVAL_MILLIS)
             when (val schedule = backgroundRefreshSchedule(minutes, minimumMinutes)) {
                 BackgroundRefreshSchedule.Disabled -> workManager.cancelUniqueWork(FEED_REFRESH_WORK_NAME)
