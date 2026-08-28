@@ -1,12 +1,8 @@
 package works.merc.keryx.app.platform
 
-import android.database.sqlite.SQLiteCantOpenDatabaseException
 import android.database.sqlite.SQLiteConstraintException
 import android.database.sqlite.SQLiteDatabaseCorruptException
-import android.database.sqlite.SQLiteDatabaseLockedException
-import android.database.sqlite.SQLiteDiskIOException
 import android.database.sqlite.SQLiteException
-import android.database.sqlite.SQLiteFullException
 import app.cash.sqldelight.driver.android.AndroidSqliteDriver
 import io.requery.android.database.sqlite.SQLiteDatabase
 import works.merc.keryx.app.core.CloudDataIncompatibleException
@@ -125,20 +121,30 @@ actual object DatabaseMerger {
     /**
      * Reduces this failure to a driver-independent [SqliteFailureCategory], or `null` if it is not
      * a SQLite failure at all. A subclass this app doesn't specifically recognize (e.g.
-     * `SQLiteMisuseException`, `SQLiteFullException`'s less common siblings) falls into [OTHER]
-     * rather than being ignored, matching the desktop actual's own catch-all `else` branch for an
-     * unrecognized SQLite result code.
+     * `SQLiteMisuseException`, `SQLiteTableLockedException`, `SQLiteOutOfMemoryException`,
+     * `SQLiteFullException`'s less common siblings) falls into [OTHER] rather than being ignored,
+     * matching the desktop actual's own catch-all `else` branch for an unrecognized SQLite result
+     * code — the `else -> SqliteFailureCategory.OTHER` branch below is what does this; the
+     * `STATEMENT_ERROR` branch above it matches only the *exact* `SQLiteException` class, not its
+     * subclasses (Kotlin's `is` would otherwise match every subclass too, which previously routed
+     * every unrecognized subclass into the ambiguous `STATEMENT_ERROR` bucket instead — the one
+     * that can escalate to a destructive [CloudDataIncompatibleException] via `validateCloudSchema`
+     * once cloud data merely happens to look schema-incompatible for an unrelated reason).
+     *
+     * `internal` rather than `private` so this subclass-classification logic can be unit-tested
+     * directly against synthetic exception instances (see `MergeFailureClassificationDeviceTest`'s
+     * `failureCategory` cases) — exercising every specific subclass through a real ATTACH/merge
+     * would be far more fragile than constructing e.g. a bare `SQLiteTableLockedException` and
+     * checking the category it maps to.
      */
-    private fun Throwable.failureCategory(): SqliteFailureCategory? = when (this) {
-        is SQLiteConstraintException, is SQLiteDatabaseCorruptException ->
+    internal fun Throwable.failureCategory(): SqliteFailureCategory? = when {
+        this is SQLiteConstraintException || this is SQLiteDatabaseCorruptException ->
             SqliteFailureCategory.CORRUPT_OR_CONSTRAINT
-        is SQLiteDatabaseLockedException, is SQLiteDiskIOException,
-        is SQLiteCantOpenDatabaseException, is SQLiteFullException,
-        -> SqliteFailureCategory.OTHER
-        // A plain SQLiteException (not one of the more specific subclasses above) is what
+        // A plain SQLiteException (not one of the more specific subclasses in this file) is what
         // "no such table"/"no such column" looks like — ambiguous, so MergeFailureClassifier
         // disambiguates it against the downloaded cloud file itself (validateCloudSchema).
-        is SQLiteException -> SqliteFailureCategory.STATEMENT_ERROR
+        this::class == SQLiteException::class -> SqliteFailureCategory.STATEMENT_ERROR
+        this is SQLiteException -> SqliteFailureCategory.OTHER
         else -> null
     }
 
