@@ -52,10 +52,15 @@ Split into what every target needs in common, and what's specific to the Android
 #### For the Android Target
 
 - **Android SDK Platform 37** (`compileSdk` / `targetSdk`) and build-tools. Install via Android
-  Studio's SDK Manager, or the standalone command-line tools
-  ([`cmdline-tools`](https://developer.android.com/tools/sdkmanager),
-  `sdkmanager "platforms;android-37" "build-tools;36.0.0"`) — 36.0.0 is the version AGP 9.3.2
-  selects by default when none is specified.
+  Studio's SDK Manager (recommended — it resolves the current package name for you), or the
+  standalone command-line tools ([`cmdline-tools`](https://developer.android.com/tools/sdkmanager)).
+  Since API level 37, Google publishes the platform per minor revision (`platforms;android-37.0`,
+  `.1`, …) rather than a flat `platforms;android-37` — that literal package id no longer exists, so
+  `sdkmanager platforms;android-37` fails with "Failed to find package". Run `sdkmanager --list |
+  grep android-37` to find the current id, or just let AGP's own SDK auto-download resolve it on
+  the first build. `build-tools;36.0.0` is unaffected and installs directly
+  (`sdkmanager "build-tools;36.0.0"` — the version AGP 9.3.2 selects by default when none is
+  specified).
 - Setup: point `local.properties`' `sdk.dir` at the SDK location (AGP reads this key itself; it
   doesn't go through this project's own `-P`/env-var/`local.properties` resolution chain used for
   the OAuth keys below), or set the `ANDROID_HOME` environment variable instead. A target-scoped
