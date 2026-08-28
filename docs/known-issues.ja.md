@@ -1343,7 +1343,7 @@ SQLite 自身のロック昇格ルール（`sqlite3_busy_handler` の公式ド�
 ロックの**取得**を待つ場合にのみ効き、この経路には効かない。
 
 失敗したテストにおける並行書き込み元は次の 2 つ: 1 本目の `subscribeFeedWrite` は
-`subscribePlacementMutex.withLock { db.transaction { ... } } }` の中で RESERVED を保持するが、
+`subscribePlacementMutex.withLock { db.transaction { ... } }` の中で RESERVED を保持するが、
 mutex を解放した**直後**にその呼び出しが行う次の処理 —
 `articleRepository.upsertParsed(feedId, fetched.articles)`（フィードごとの別トランザクション）—
 がまだ進行中でロックを保持している間に、2 本目の呼び出しが自分の SHARED read ロックを RESERVED へ

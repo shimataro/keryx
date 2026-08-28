@@ -1380,7 +1380,7 @@ upgrade could deadlock against another connection that is itself waiting to upgr
 *acquire* a lock that has no conflicting upgrade in progress — it does not apply here.
 
 The two overlapping writers in the failing test: the first `subscribeFeedWrite` call holds RESERVED
-inside `subscribePlacementMutex.withLock { db.transaction { ... } } }`, but the *next* thing that
+inside `subscribePlacementMutex.withLock { db.transaction { ... } }`, but the *next* thing that
 call does after releasing the mutex — `articleRepository.upsertParsed(feedId, fetched.articles)`, a
 separate per-feed `db.transaction {}` — can still be mid-flight, still holding a lock, when the
 second call's own transaction tries to upgrade its SHARED read lock to RESERVED for its write.
