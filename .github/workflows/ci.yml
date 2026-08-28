@@ -168,6 +168,11 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      # The composeApp module is an android.kotlin.multiplatform.library, so Gradle needs the
+      # Android SDK (ANDROID_HOME) to resolve compileSdk even before the emulator starts.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Run Android instrumented tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
