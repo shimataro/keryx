@@ -37,7 +37,7 @@
 > xattr -d com.apple.quarantine ~/Downloads/Keryx-*.dmg
 >
 > # .zip
-> xattr -d com.apple.quarantine ~/Downloads/Keryx-*.zip 
+> xattr -d com.apple.quarantine ~/Downloads/Keryx-*.zip
 > ```
 >
 > または、ダブルクリックの代わりに右クリックして「開く」を選択してください。背景は
