@@ -117,9 +117,11 @@
   `./gradlew build`・その他のテストタスクはいずれも実機/エミュレータ無しで動く。Linux で
   エミュレータを実用的な速度で動かすには **KVM**（ハードウェアアクセラレーション）が必要 —
   設定方法は[公式ガイド](https://developer.android.com/studio/run/emulator-acceleration)を
-  参照。AVD は「Google APIs」だけのイメージではなく **Google Play** イメージを使う必要がある
-  ——そうしないと Dropbox / OneDrive 連携が動かない。詳細は後述の「よくある問題」の
-  「（Android エミュレータ）Dropbox / OneDrive 連携で画面は開くがタップに反応しない」を参照。
+  参照。AVD には「Google APIs」だけのイメージではなく **Google Play** イメージを使うことを推奨する
+  ——そうしないと Dropbox / OneDrive 連携に使える実用的なブラウザーが無く連携が動かない
+  （既存の AVD に実ブラウザーの APK を追加インストールする形でも代替できる）。詳細は後述の
+  「よくある問題」の「（Android エミュレータ）Dropbox / OneDrive 連携で画面は開くがタップに
+  反応しない」を参照。
 - **NDK は不要**（プロジェクト内でネイティブコードのビルドは行っていない。誤って導入しない
   よう注意）。
 

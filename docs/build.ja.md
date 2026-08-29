@@ -114,8 +114,8 @@ Android が対応するのは **Dropbox と OneDrive のみ** — 設定方法�
 宣言だけで `keryx://oauth2/callback` のリダイレクトを受け取れる（`scheme="keryx"`
 `host="oauth2"` の `ACTION_VIEW` インテントフィルター）。そのため、上記デスクトップの
 `./gradlew :composeApp:run` のようなパッケージ済み/未パッケージの区別は無い。エミュレータで
-連携を検証するには、OAuth フローを完了させる Chrome が必要なので Google Play イメージが
-やはり必要 — [setup.ja.md](setup.ja.md) を参照。
+連携を検証するには、OAuth フローを完了させる実用的なブラウザーが必要——それを得る推奨手段が
+Google Play イメージ（Chrome 入り）— [setup.ja.md](setup.ja.md) を参照。
 
 ## パッケージング
 

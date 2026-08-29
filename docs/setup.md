@@ -124,9 +124,10 @@ Split into what every target needs in common, and what's specific to the Android
   test task work without one. Running the emulator at a usable speed on Linux needs **KVM**
   (hardware acceleration) — see the
   [official guide](https://developer.android.com/studio/run/emulator-acceleration) for setup.
-  An AVD must use a **Google Play** system image, not a plain "Google APIs" one, or Dropbox/OneDrive
-  linking won't work in it — see Common Issues' "Dropbox/OneDrive linking opens a page but taps
-  don't respond" below.
+  An AVD should use a **Google Play** system image rather than a plain "Google APIs" one, since
+  Dropbox/OneDrive linking needs a real browser to complete and "Google APIs" images don't ship
+  one (a real browser APK installed onto an existing AVD works too) — see Common Issues'
+  "Dropbox/OneDrive linking opens a page but taps don't respond" below.
 - **The NDK is not needed** (the project builds no native code of its own — don't install it by
   mistake).
 

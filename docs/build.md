@@ -114,8 +114,8 @@ above), Android receives the `keryx://oauth2/callback` redirect through a plain 
 declaration — an `ACTION_VIEW` intent-filter (`scheme="keryx"` `host="oauth2"`) in
 `androidApp/src/main/AndroidManifest.xml` — so there is no packaged-vs-unpackaged distinction like
 the desktop `./gradlew :composeApp:run` limitation above. To verify linking in an emulator, it
-still needs a Google Play system image (Chrome) to actually complete the OAuth flow — see
-[setup.md](setup.md).
+needs a real browser to actually complete the OAuth flow — a Google Play system image (Chrome) is
+the recommended way to get one — see [setup.md](setup.md).
 
 ## Packaging
 
