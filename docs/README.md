@@ -10,7 +10,7 @@ Design documents for Keryx.
 | --- | --- |
 | [setup.md](setup.md) | Development environment setup |
 | [external-spec.md](external-spec.md) | External spec, feature list, technology choices |
-| [build.md](build.md) | Build, packaging, Dropbox App Key |
+| [build.md](build.md) | Build, packaging, Android APK/AAB, cloud storage API keys |
 | [app-architecture.md](app-architecture.md) | App structure, layers, key classes |
 | [error-design.md](error-design.md) | Error design, Result type |
 | [db-schema.md](db-schema.md) | DB schema, local_settings |

@@ -63,10 +63,42 @@ Split into what every target needs in common, and what's specific to the Android
   specified).
 - Setup: point `local.properties`' `sdk.dir` at the SDK location (AGP reads this key itself; it
   doesn't go through this project's own `-P`/env-var/`local.properties` resolution chain used for
-  the OAuth keys below), or set the `ANDROID_HOME` environment variable instead. A target-scoped
-  task like `:composeApp:compileKotlinDesktop` or `:composeApp:desktopTest` works fine without it,
-  but the root `./gradlew build` aggregates every subproject including `:androidApp`, so it fails
+  the OAuth keys below), or set the `ANDROID_HOME` environment variable instead — the commands
+  below assume one of the two is already set. A target-scoped task like
+  `:composeApp:compileKotlinDesktop` or `:composeApp:desktopTest` works fine without it, but the
+  root `./gradlew build` aggregates every subproject including `:androidApp`, so it fails
   immediately at configuration time without a resolvable SDK — see Common Issues below.
+- **SDK license agreement**: the standalone `cmdline-tools` route requires accepting the SDK
+  licenses once before any package can be downloaded (Android Studio's SDK Manager already
+  presents this as part of its own UI, so this step only matters on the `cmdline-tools`-only
+  path — CI, a headless machine, or a manual install):
+
+  ```bash
+  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
+  ```
+
+- **Emulator (AVD) setup**: only needed if you don't have a physical device — see "Software
+  Required to Run the App" below for why an emulator should use a **Google Play** system image
+  specifically. Install the `platform-tools` and `emulator` packages first — `adb` and the
+  `emulator` binary (used by [testing.md](testing.md)'s device-test commands) come from these, not
+  from `cmdline-tools`. The system image ID changes as Google ships new revisions, so list what's
+  currently available rather than hardcoding one. Commands below use the same explicit
+  `cmdline-tools` path as the license-acceptance command above, since it may not be on `PATH`:
+
+  ```bash
+  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "emulator"
+  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list | grep google_apis_playstore
+  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "system-images;android-<N>;google_apis_playstore;<ABI>"
+  "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n keryx -k "system-images;android-<N>;google_apis_playstore;<ABI>"
+  ```
+
+  `<N>` should match (or be close to) `minSdk = 26` / `compileSdk`/`targetSdk = 37` above; the
+  CI instrumented-test job runs against API 29. `<ABI>` should match your host CPU's own
+  architecture for hardware-accelerated emulation — `x86_64` on an x86_64 host, `arm64-v8a` on an
+  ARM64 host (e.g. an Apple Silicon Mac, or ARM64 Windows/Linux) — see the
+  [emulator acceleration guide](https://developer.android.com/studio/run/emulator-acceleration).
+  See the [official AVD guide](https://developer.android.com/studio/run/managing-avds) for details
+  beyond this project's own constraints.
 - **Android release signing keystore (optional)**: Gradle's default `build` lifecycle includes
   `:androidApp`'s `assembleRelease` (the App Bundle is not part of it — `:androidApp:bundleRelease`
   has to be invoked explicitly, as `release.yml` does), and `androidApp/build.gradle.kts` is
@@ -94,12 +126,17 @@ Split into what every target needs in common, and what's specific to the Android
   already excludes `*.keystore` / `*.jks`, so it's safe to keep the file at the repo root — it
   won't get committed by accident. See [build.md](build.md) for how to issue a production keystore
   for Google Play distribution.
-- **A connected Android device or running emulator**: only needed to run the `androidDeviceTest`
-  instrumented suite (`DatabaseMerger`/`DatabaseSnapshot`'s Android actuals against the real
-  bundled SQLite — see [testing.md](testing.md)); building, `./gradlew build`, and every other
+- **A connected Android device or running emulator**: only needed to run one of the two Android
+  instrumented suites — `androidDeviceTest` (`DatabaseMerger`/`DatabaseSnapshot`'s Android actuals
+  against the real bundled SQLite) and `androidApp`'s own suite (Compose UI gesture tests) — see
+  [testing.md](testing.md) for both. Building, `./gradlew build`, and every other
   test task work without one. Running the emulator at a usable speed on Linux needs **KVM**
   (hardware acceleration) — see the
   [official guide](https://developer.android.com/studio/run/emulator-acceleration) for setup.
+  An AVD should use a **Google Play** system image rather than a plain "Google APIs" one, since
+  Dropbox/OneDrive linking needs a real browser to complete and "Google APIs" images don't ship
+  one (a real browser APK installed onto an existing AVD works too) — see Common Issues'
+  "Dropbox/OneDrive linking opens a page but taps don't respond" below.
 - **The NDK is not needed** (the project builds no native code of its own — don't install it by
   mistake).
 
@@ -127,6 +164,11 @@ packaged app (or `:composeApp:run`).
   notifications. Not required — an environment without one falls back to the AWT-based tray
   automatically.
 - **macOS**: no additional software needed (the WebView uses the OS's own WebKit).
+- **Android**: a physical device (with Developer Options/USB debugging enabled) or a running
+  emulator, plus `adb` (`platform-tools`) to install and launch the app. No extra WebView runtime
+  to install — the article reader uses the OS's own bundled WebView. Android 13+'s notification
+  permission (`POST_NOTIFICATIONS`) is requested by the app itself at runtime, not something to
+  set up in advance — see [background-update.md](background-update.md).
 
 ### Software Required for Packaging
 
@@ -154,6 +196,12 @@ Tools and WiX Toolset already come preinstalled on the `macos-latest` and `windo
 images respectively — a local dev machine still needs whichever of these three it's missing set up
 manually.
 
+**Android (APK/AAB)** needs none of the above — no jpackage-equivalent native tool. The only extra
+requirement is a release signing keystore if you want a distributable (installable, non-`debug`)
+build; see "Android release signing keystore" above. Unlike the native desktop packages, which can
+only be built on the OS they target (no cross-compilation), an APK/AAB can be built on any OS —
+see [build.md](build.md) for the commands.
+
 ## First-time Setup
 
 ```bash
@@ -172,6 +220,9 @@ keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
 # android.release.key.alias / android.release.key.password to local.properties
 
 ./gradlew build
+
+# Android: with a device connected (or an emulator already running, see Prerequisites above)
+./gradlew :androidApp:installDebug
 ```
 
 If `build` passes, code generation for SQLDelight / Compose Resources / BuildConfig, compilation,

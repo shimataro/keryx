@@ -59,11 +59,43 @@
   SDK 自動ダウンロードに解決させればよい。`build-tools;36.0.0` はこの影響を受けず、そのまま
   導入できる（`sdkmanager "build-tools;36.0.0"` — 36.0.0 は AGP 9.3.2 が既定で選択するバージョン）。
 - 初期設定: `local.properties` の `sdk.dir` に SDK の場所を指定する（AGP がこのキー自体を
-  直接読むため、下記 OAuth キーで使う `-P`/環境変数/`local.properties` の解決チェーンとは
-  別系統）か、環境変数 `ANDROID_HOME` を設定してもよい。`:composeApp:compileKotlinDesktop` や
+  直接読み取るため、下記 OAuth キーで使う `-P`/環境変数/`local.properties` の解決チェーンとは
+  別系統）か、環境変数 `ANDROID_HOME` を設定してもよい——以下のコマンドは、どちらかが
+  すでに設定済みであることを前提としている。`:composeApp:compileKotlinDesktop` や
   `:composeApp:desktopTest` のようなターゲット限定タスクは SDK が無くても動くが、ルートの
   `./gradlew build` は `:androidApp` を含む全サブプロジェクトを集約するため、SDK が解決できない
   と設定段階で即座に失敗する — 詳細は後述の「よくある問題」を参照。
+- **SDK ライセンスへの同意**: コマンドラインツール単体（`cmdline-tools`）経路では、パッケージを
+  ダウンロードする前に一度ライセンスへ同意する必要がある（Android Studio の SDK Manager では
+  この同意が UI の一部として組み込まれているため、この手順が必要なのは `cmdline-tools` 単体の
+  経路——CI、ヘッドレス環境、手動インストール——に限られる）:
+
+  ```bash
+  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
+  ```
+
+- **エミュレータ（AVD）の作成**: 実機が無い場合のみ必要——なぜエミュレータに **Google Play**
+  イメージを使うべきなのかは、後述の「アプリの実行に必要なソフトウェア」を参照。まず
+  `platform-tools` と `emulator` パッケージを導入する——`adb` と `emulator` バイナリ
+  （[testing.ja.md](testing.ja.md) の実機テストコマンドで使用）は `cmdline-tools` ではなく
+  これらのパッケージに含まれる。system image の ID は Google のリビジョン更新で変わるため、
+  固定値を書かず一覧から選ぶ。以下のコマンドは、`PATH` に無い可能性を踏まえて上記のライセンス
+  同意コマンドと同じくフルパスで統一している:
+
+  ```bash
+  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "emulator"
+  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list | grep google_apis_playstore
+  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "system-images;android-<N>;google_apis_playstore;<ABI>"
+  "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n keryx -k "system-images;android-<N>;google_apis_playstore;<ABI>"
+  ```
+
+  `<N>` は上記の `minSdk = 26` / `compileSdk`・`targetSdk = 37` に近い値を選ぶ。CI の計装テスト
+  ジョブは API 29 で実行している。`<ABI>` はホスト CPU のアーキテクチャに合わせる必要がある
+  ——ハードウェアアクセラレーションを効かせるには、x86_64 ホストなら `x86_64`、ARM64 ホスト
+  （Apple Silicon Mac や ARM64 版 Windows/Linux など）なら `arm64-v8a` を選ぶ。詳細は
+  [エミュレータのアクセラレーションガイド](https://developer.android.com/studio/run/emulator-acceleration)
+  を参照。このプロジェクト固有の制約を超えた詳細は
+  [公式の AVD ガイド](https://developer.android.com/studio/run/managing-avds) を参照。
 - **Android リリース署名キーストア（任意）**: Gradle の既定 `build` ライフサイクルは
   `:androidApp` の `assembleRelease` を含んでおり（App Bundle は含まれない —
   `:androidApp:bundleRelease` は `release.yml` のように明示的に叩く必要がある）、
@@ -89,13 +121,18 @@
   静かに進んだり、不完全な署名情報のまま進んだりせず、即座にビルドが失敗する。`.gitignore` は
   `*.keystore` / `*.jks` を除外済みなので、リポジトリ直下に置いても誤ってコミットされることは
   ない。Google Play 配布用の本番キーストアの発行手順は [build.md](build.md) を参照。
-- **実機または起動中の Android エミュレータ**: `androidDeviceTest` 計装スイート
-  （`DatabaseMerger`/`DatabaseSnapshot` の Android 実装を実際のバンドル SQLite に対して検証
-  する。[testing.ja.md](testing.ja.md) 参照）を実行する場合にのみ必要。ビルド・
+- **実機または起動中の Android エミュレータ**: Android の計装テストスイート2つ
+  ——`androidDeviceTest`（`DatabaseMerger`/`DatabaseSnapshot` の Android 実装を実際の
+  バンドル SQLite に対して検証）と `androidApp` 自身のスイート（Compose UI のジェスチャテスト）
+  ——のいずれかを実行する場合にのみ必要。両方の詳細は [testing.ja.md](testing.ja.md) を参照。ビルド・
   `./gradlew build`・その他のテストタスクはいずれも実機/エミュレータ無しで動く。Linux で
   エミュレータを実用的な速度で動かすには **KVM**（ハードウェアアクセラレーション）が必要 —
   設定方法は[公式ガイド](https://developer.android.com/studio/run/emulator-acceleration)を
-  参照。
+  参照。AVD には「Google APIs」だけのイメージではなく **Google Play** イメージを使うことを推奨する
+  ——そうしないと Dropbox / OneDrive 連携に使える実用的なブラウザーが無く連携が動かない
+  （既存の AVD に実ブラウザーの APK を追加インストールする形でも代替できる）。詳細は後述の
+  「よくある問題」の「（Android エミュレータ）Dropbox / OneDrive 連携で画面は開くがタップに
+  反応しない」を参照。
 - **NDK は不要**（プロジェクト内でネイティブコードのビルドは行っていない。誤って導入しない
   よう注意）。
 
@@ -122,6 +159,11 @@
 - **Linux: D-Bus セッションバス**（任意）: トレイ（StatusNotifierItem）とデスクトップ通知に
   使う。無い環境では自動的に AWT ベースのトレイにフォールバックするため必須ではない。
 - **macOS**: 追加ソフトウェア不要（WebView は OS 標準の WebKit を使う）。
+- **Android**: 実機（開発者オプション/USB デバッグを有効化したもの）または起動中のエミュレータ、
+  そしてアプリのインストール・起動に使う `adb`（`platform-tools`）。記事リーダーは OS 標準の
+  WebView を使うため、追加の WebView ランタイム導入は不要。Android 13+ の通知権限
+  （`POST_NOTIFICATIONS`）はアプリが実行時に自ら要求するので、事前に用意しておくものではない —
+  詳細は [background-update.ja.md](background-update.ja.md) を参照。
 
 ### パッケージングに必要なソフトウェア
 
@@ -149,6 +191,12 @@
 `macos-latest` / `windows-latest` の各ランナーイメージにそれぞれプリインストール済み —
 ローカルの開発機ではこの3つのうち足りないものを手動でセットアップする必要がある。
 
+**Android（APK/AAB）** は上記のいずれも不要 — jpackage 相当のネイティブツールは無い。追加で
+必要になるのは配布可能な（`debug` ではない）ビルドを作る場合のリリース署名キーストアだけ。
+前述の「Android リリース署名キーストア」を参照。デスクトップのネイティブパッケージが対象 OS
+上でしかビルドできない（クロスコンパイル不可）のとは違い、APK/AAB はどの OS からでもビルド
+できる — コマンドは [build.md](build.md) を参照。
+
 ## 初回
 
 ```bash
@@ -168,6 +216,9 @@ keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
 # android.release.key.password を追記する
 
 ./gradlew build
+
+# Android: 実機を接続済み（または前述のエミュレータを起動済み）の場合
+./gradlew :androidApp:installDebug
 ```
 
 `build` が通れば SQLDelight / Compose Resources / BuildConfig のコード生成、コンパイル、`build`
