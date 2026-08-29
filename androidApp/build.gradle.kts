@@ -35,6 +35,41 @@ val androidVersionCode: Int = appVersion.substringBefore('-').split('.')
     }
     .coerceAtLeast(1)
 
+// Blank counts as unset: local.properties.example ships these keys with empty values, so a plain
+// null check treats a freshly copied file as "configured" and then fails deep inside AGP with
+// "Keystore file not set for signing config release" instead of taking the unsigned path below.
+fun releaseSigningValue(env: String, gradleProperty: String, localProperty: String): String? =
+    (System.getenv(env)
+        ?: project.findProperty(gradleProperty) as? String
+        ?: localProperties.getProperty(localProperty))
+        ?.takeIf { it.isNotBlank() }
+
+val keystorePath = releaseSigningValue("ANDROID_RELEASE_KEYSTORE_PATH", "androidReleaseKeystorePath", "android.release.keystore.path")
+val keystorePassword = releaseSigningValue("ANDROID_RELEASE_KEYSTORE_PASSWORD", "androidReleaseKeystorePassword", "android.release.keystore.password")
+// Named releaseKeyAlias/releaseKeyPassword rather than keyAlias/keyPassword: inside the
+// `create("release") { ... }` block below, ApkSigningConfig itself declares properties of
+// exactly those names, and an unqualified reference on the right-hand side of an assignment
+// there resolves to the receiver's own (still-null) property, not this outer val - a real bug
+// caught by manually verifying this file (`this.keyPassword = keyPassword` silently assigned
+// null to itself, and packageRelease then failed with "missing required property keyPassword").
+val releaseKeyAlias = releaseSigningValue("ANDROID_RELEASE_KEY_ALIAS", "androidReleaseKeyAlias", "android.release.key.alias")
+val releaseKeyPassword = releaseSigningValue("ANDROID_RELEASE_KEY_PASSWORD", "androidReleaseKeyPassword", "android.release.key.password")
+
+val missingSigningValues = buildList {
+    if (keystorePath == null) add("keystore path")
+    if (keystorePassword == null) add("keystore password")
+    if (releaseKeyAlias == null) add("key alias")
+    if (releaseKeyPassword == null) add("key password")
+}
+
+// Opt-in enforcement for anything that publishes an artifact (release.yml passes this). Without
+// it, a missing or half-configured secret there would fall through to the unsigned path below,
+// and release.yml's own `find ... -name '*.apk'` would happily upload the result. Deliberately
+// -P only: unlike the four values above this never arrives via CI secrets, it is a flag the
+// workflow sets on the command line, the same way it already passes -PappVersion.
+val releaseSigningRequired =
+    (project.findProperty("androidReleaseSigningRequired") as? String)?.toBooleanStrictOrNull() ?: false
+
 android {
     namespace = "works.merc.keryx.app.android"
     compileSdk = 37
@@ -55,35 +90,43 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            val keystorePath = System.getenv("ANDROID_RELEASE_KEYSTORE_PATH")
-                ?: (project.findProperty("androidReleaseKeystorePath") as? String)
-                ?: localProperties.getProperty("android.release.keystore.path")
-            val keystorePassword = System.getenv("ANDROID_RELEASE_KEYSTORE_PASSWORD")
-                ?: (project.findProperty("androidReleaseKeystorePassword") as? String)
-                ?: localProperties.getProperty("android.release.keystore.password")
-            val keyAlias = System.getenv("ANDROID_RELEASE_KEY_ALIAS")
-                ?: (project.findProperty("androidReleaseKeyAlias") as? String)
-                ?: localProperties.getProperty("android.release.key.alias")
-            val keyPassword = System.getenv("ANDROID_RELEASE_KEY_PASSWORD")
-                ?: (project.findProperty("androidReleaseKeyPassword") as? String)
-                ?: localProperties.getProperty("android.release.key.password")
+        when {
+            // Spelled out rather than `missingSigningValues.isEmpty()` so the four vals above
+            // smart-cast to non-null inside this branch.
+            keystorePath != null && keystorePassword != null && releaseKeyAlias != null && releaseKeyPassword != null ->
+                create("release") {
+                    storeFile = File(keystorePath)
+                    storePassword = keystorePassword
+                    keyAlias = releaseKeyAlias
+                    keyPassword = releaseKeyPassword
+                }
 
-            if (keystorePath != null && keystorePassword != null && keyAlias != null && keyPassword != null) {
-                storeFile = File(keystorePath)
-                storePassword = keystorePassword
-                this.keyAlias = keyAlias
-                this.keyPassword = keyPassword
-            }
+            // Half-configured is always a mistake, never "not set up yet" — say which values are
+            // missing rather than letting AGP fail with a generic message, or silently going
+            // unsigned as if nothing were configured at all.
+            missingSigningValues.size < 4 ->
+                error("Incomplete Android release signing configuration: missing ${missingSigningValues.joinToString()}. See docs/setup.md.")
+
+            releaseSigningRequired ->
+                error("Android release signing is required here but is not configured. See docs/build.md.")
+
+            else -> project.logger.warn(
+                "No Android release signing configured — :androidApp's release build will be UNSIGNED " +
+                    "(it cannot be installed on a device or uploaded to Google Play). This keeps plain " +
+                    "`./gradlew build` working for desktop-only work; see docs/setup.md to configure signing.",
+            )
         }
     }
 
     buildTypes {
         release {
-            // Do NOT fall back to the debug signing config. If the release signing
-            // properties are missing, AGP fails during validateSigningRelease instead
-            // of silently producing a debug-signed (or unsigned) release artifact.
-            signingConfig = signingConfigs.getByName("release")
+            // Deliberately never falls back to the debug signing config: a debug-signed release
+            // artifact is installable and looks legitimate, which is exactly the dangerous case.
+            // `null` here is AGP's own unsigned-release behavior instead — it fails closed, since
+            // an unsigned APK can be neither installed nor published. Anything that actually
+            // distributes sets `androidReleaseSigningRequired` so the unsigned path is a hard
+            // error there (see the signingConfigs block above).
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 }

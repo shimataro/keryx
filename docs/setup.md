@@ -67,11 +67,15 @@ Split into what every target needs in common, and what's specific to the Android
   task like `:composeApp:compileKotlinDesktop` or `:composeApp:desktopTest` works fine without it,
   but the root `./gradlew build` aggregates every subproject including `:androidApp`, so it fails
   immediately at configuration time without a resolvable SDK — see Common Issues below.
-- **Android release signing keystore**: Gradle's default `build` lifecycle includes
-  `:androidApp`'s `assembleRelease`/`validateSigningRelease`, and `androidApp/build.gradle.kts` is
-  deliberately built to **not** fall back to debug signing when signing credentials are missing.
-  So **without a keystore, the root `./gradlew build` fails here**. For development, a throwaway
-  keystore made with the JDK's own `keytool` is enough:
+- **Android release signing keystore (optional)**: Gradle's default `build` lifecycle includes
+  `:androidApp`'s `assembleRelease`/`bundleRelease`, and `androidApp/build.gradle.kts` is
+  deliberately built to **not** fall back to debug signing when signing credentials are missing —
+  a debug-signed release artifact is installable and looks legitimate, which is the dangerous
+  case. Instead, **without a keystore the root `./gradlew build` still succeeds**, but
+  `:androidApp`'s release APK comes out **unsigned** (with a build warning) — it cannot be
+  installed on a device or uploaded to Google Play. Set this up only if you actually want to
+  install or distribute a release build; a throwaway keystore made with the JDK's own `keytool` is
+  enough for local testing:
 
   ```bash
   keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
@@ -83,10 +87,12 @@ Split into what every target needs in common, and what's specific to the Android
   Set the generated file's **absolute path** in `local.properties` as
   `android.release.keystore.path` / `android.release.keystore.password` /
   `android.release.key.alias` / `android.release.key.password` (a relative path is resolved
-  against the `androidApp` module directory, not the repo root). `.gitignore` already excludes
-  `*.keystore` / `*.jks`, so it's safe to keep the file at the repo root — it won't get committed
-  by accident. See [build.md](build.md) for how to issue a production keystore for Google Play
-  distribution.
+  against the `androidApp` module directory, not the repo root). All four are required together —
+  setting only some of them is always a configuration mistake and fails the build immediately,
+  rather than silently building unsigned or with only part of the signing identity. `.gitignore`
+  already excludes `*.keystore` / `*.jks`, so it's safe to keep the file at the repo root — it
+  won't get committed by accident. See [build.md](build.md) for how to issue a production keystore
+  for Google Play distribution.
 - **A connected Android device or running emulator**: only needed to run the `androidDeviceTest`
   instrumented suite (`DatabaseMerger`/`DatabaseSnapshot`'s Android actuals against the real
   bundled SQLite — see [testing.md](testing.md)); building, `./gradlew build`, and every other
@@ -155,8 +161,9 @@ git clone <repo>
 cd keryx
 cp local.properties.example local.properties   # Then add sdk.dir (see Prerequisites); the OAuth keys are optional
 
-# Android release signing keystore (required for ./gradlew build — see Prerequisites'
-# "Software Required to Build")
+# Android release signing keystore (OPTIONAL — ./gradlew build succeeds without this too,
+# producing an unsigned :androidApp release APK; see Prerequisites' "Software Required to Build".
+# Only needed if you want to install or distribute a release build.)
 keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
   -alias keryx-dev -keyalg RSA -keysize 2048 -validity 10000 \
   -dname "CN=Dev, OU=Dev, O=Dev, L=Dev, S=Dev, C=US" \
@@ -202,17 +209,20 @@ variable. Desktop-only work can avoid this by scoping to a specific desktop task
 `:composeApp:compileKotlinDesktop` or `:composeApp:desktopTest`, neither of which resolves the
 Android SDK.
 
-### Build fails at `validateSigningRelease`
+### The Android release build comes out unsigned
 
-Gradle's default `build` lifecycle includes `:androidApp`'s `assembleRelease`/
-`validateSigningRelease`, and `androidApp/build.gradle.kts` is deliberately built to not fall back
-to debug signing when signing credentials are missing. So the root `./gradlew build` fails here —
-even for desktop-only work — unless an Android release signing keystore is in place.
+Gradle's default `build` lifecycle includes `:androidApp`'s `assembleRelease`/`bundleRelease`.
+Without an Android release signing keystore configured, `androidApp/build.gradle.kts` prints a
+build warning and produces an **unsigned** release APK (`androidApp-release-unsigned.apk`) —
+`./gradlew build` still succeeds, since this only affects distributability, not desktop work. The
+unsigned APK cannot be installed on a device or uploaded to Google Play.
 
 Generate a development keystore per Prerequisites' "Software Required to Build" and set the four
 `local.properties` values (`android.release.keystore.path` / `android.release.keystore.password` /
-`android.release.key.alias` / `android.release.key.password`), or scope to a target-limited task
-like `:composeApp:desktopTest` instead.
+`android.release.key.alias` / `android.release.key.password`) to get a real (installable) release
+build. **Setting only some of the four is always a configuration mistake** — the build fails
+immediately, naming which values are missing, rather than silently going unsigned or using a
+half-formed signing identity.
 
 ### `UnsupportedClassVersionError` (at runtime)
 
