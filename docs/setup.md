@@ -68,7 +68,8 @@ Split into what every target needs in common, and what's specific to the Android
   but the root `./gradlew build` aggregates every subproject including `:androidApp`, so it fails
   immediately at configuration time without a resolvable SDK — see Common Issues below.
 - **Android release signing keystore (optional)**: Gradle's default `build` lifecycle includes
-  `:androidApp`'s `assembleRelease`/`bundleRelease`, and `androidApp/build.gradle.kts` is
+  `:androidApp`'s `assembleRelease` (the App Bundle is not part of it — `:androidApp:bundleRelease`
+  has to be invoked explicitly, as `release.yml` does), and `androidApp/build.gradle.kts` is
   deliberately built to **not** fall back to debug signing when signing credentials are missing —
   a debug-signed release artifact is installable and looks legitimate, which is the dangerous
   case. Instead, **without a keystore the root `./gradlew build` still succeeds**, but
@@ -210,11 +211,13 @@ Android SDK.
 
 ### The Android release build comes out unsigned
 
-Gradle's default `build` lifecycle includes `:androidApp`'s `assembleRelease`/`bundleRelease`.
-Without an Android release signing keystore configured, `androidApp/build.gradle.kts` prints a
-build warning and produces an **unsigned** release APK (`androidApp-release-unsigned.apk`) —
-`./gradlew build` still succeeds, since this only affects distributability, not desktop work. The
-unsigned APK cannot be installed on a device or uploaded to Google Play.
+Gradle's default `build` lifecycle includes `:androidApp`'s `assembleRelease`, so it produces the
+release APK (the App Bundle does not come out of it — `:androidApp:bundleRelease` has to be invoked
+explicitly). Without an Android release signing keystore configured,
+`androidApp/build.gradle.kts` prints a build warning and produces an **unsigned** release APK
+(`androidApp-release-unsigned.apk`) — `./gradlew build` still succeeds, since this only affects
+distributability, not desktop work. The unsigned APK cannot be installed on a device or uploaded
+to Google Play.
 
 Generate a development keystore per Prerequisites' "Software Required to Build" and set the four
 `local.properties` values (`android.release.keystore.path` / `android.release.keystore.password` /

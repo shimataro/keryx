@@ -65,10 +65,11 @@
   `./gradlew build` は `:androidApp` を含む全サブプロジェクトを集約するため、SDK が解決できない
   と設定段階で即座に失敗する — 詳細は後述の「よくある問題」を参照。
 - **Android リリース署名キーストア（任意）**: Gradle の既定 `build` ライフサイクルは
-  `:androidApp` の `assembleRelease`/`bundleRelease` を含んでおり、`androidApp/build.gradle.kts`
-  は署名情報が無いときに debug 署名へフォールバックしない設計になっている
-  （debug 署名の release 成果物はインストール可能で本物に見えてしまうため、これこそ危険な
-  ケース）。その代わり、**キーストアを用意していなくてもルートの `./gradlew build` は成功する**
+  `:androidApp` の `assembleRelease` を含んでおり（App Bundle は含まれない —
+  `:androidApp:bundleRelease` は `release.yml` のように明示的に叩く必要がある）、
+  `androidApp/build.gradle.kts` は署名情報が無いときに debug 署名へフォールバックしない設計に
+  なっている（debug 署名の release 成果物はインストール可能で本物に見えてしまうため、これこそ
+  危険なケース）。その代わり、**キーストアを用意していなくてもルートの `./gradlew build` は成功する**
   が、`:androidApp` の release APK は**未署名**になる（ビルド警告が出る） — その APK は実機に
   インストールも Google Play へのアップロードもできない。実機で動かす/配布するつもりがある
   場合にのみ用意すればよく、ローカル検証には JDK 同梱の `keytool` でその場限りのキーストアを
@@ -204,8 +205,9 @@ Android SDK を必要とする。
 
 ### Android のリリースビルドが未署名になる
 
-Gradle の既定 `build` ライフサイクルは `:androidApp` の `assembleRelease`/`bundleRelease` を
-含んでいる。Android リリース署名キーストアを設定していない場合、
+Gradle の既定 `build` ライフサイクルは `:androidApp` の `assembleRelease` を含んでおり、
+release APK が生成される（App Bundle は生成されない — `:androidApp:bundleRelease` を明示的に
+叩く必要がある）。Android リリース署名キーストアを設定していない場合、
 `androidApp/build.gradle.kts` はビルド警告を出したうえで**未署名**の release APK
 （`androidApp-release-unsigned.apk`）を生成する — これはインストール可否だけに関わる話なので、
 `./gradlew build` 自体は（デスクトップの作業しかしていなくても）成功する。未署名 APK は実機に

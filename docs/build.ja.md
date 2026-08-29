@@ -294,8 +294,9 @@ UI に一切現れない内部的なビルド識別子。中間成果物は `Ker
 Android のリリース署名には、`ANDROID_RELEASE_KEYSTORE_BASE64`、`ANDROID_RELEASE_KEYSTORE_PASSWORD`、`ANDROID_RELEASE_KEY_ALIAS`、`ANDROID_RELEASE_KEY_PASSWORD` をリポジトリの Secrets に設定する。keystore は Base64 エンコードした PKCS12/JKS ファイルであり、ワークフローがビルド時に復元する。GitHub Releases と Google Play で同じ署名キーを使いたい場合は、ローカルで生成した keystore を、アプリ作成時に Google Play Console で**既存のアプリ署名キー**として登録する: Play Console は生の JKS/PKCS12 ファイルをそのままでは受け付けず、まず Google の PEPK（Play Encrypt Private Key）ツールで暗号化する必要がある（`java -jar pepk.jar --keystore=<path> --alias=<alias> --output=<encrypted-file> --encryptionkey=<key-from-play-console>`。Play App Signing の登録ページからダウンロードできる）。生成された暗号化ファイルをアップロードすると、その keystore が**アプリ署名キー**として登録される — これは Google が保持し、ユーザーに届く前にアプリを再署名するために使う鍵であり、以降 Play Console にアップロードする各 `.aab` に署名する**アップロードキー**とは区別される。同じ keystore を両方の役割に使うこともでき（Google はアプリ署名キーをそのままアップロードキーとして再利用することを明示的に許可している）、これにより GitHub Releases（APK/AAB に直接その keystore で署名する）と Google Play の双方で単一の keystore のみで済む。専用のアップロードキーを別に用意するのは Google が推奨する追加の防御策であり、必須ではない。`release.yml` は `:androidApp:assembleRelease`/`:androidApp:bundleRelease` に `-PandroidReleaseSigningRequired=true` を渡しており、これは Secrets が未設定（または一部だけ設定）の場合に**即座のビルド失敗**へつなげるためのフラグ — このワークフローは成果物を公開するので、未署名のまま成功させてはならない。そのため release ワークフローの成功には4つすべての Secrets が必須。
 
 `ci.yml` の通常のビルドジョブは、push のたびに実行され何も公開しない都合上、意図的にこれらの
-Secrets を受け取らない。AGP は成果物が実際に使われるかどうかに関わらず `assembleRelease`/
-`bundleRelease` を `:androidApp` のデフォルトの `build` タスクに組み込むが、
+Secrets を受け取らない。AGP は成果物が実際に使われるかどうかに関わらず `assembleRelease` を
+`:androidApp` のデフォルトの `build` タスクに組み込むが（`bundleRelease` は別系統の
+ライフサイクルタスクであり、だからこそ上記の `release.yml` は明示的に実行している）、
 `androidApp/build.gradle.kts` の `signingConfigs` ブロックは、署名情報が一切設定されていない
 状態を「未署名リリース」として扱う（ビルド失敗ではなく警告 — [setup.md](setup.md) の
 「Android release signing keystore」参照）。`androidReleaseSigningRequired` を明示的に要求
