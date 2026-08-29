@@ -13,9 +13,11 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -51,7 +53,12 @@ import kotlin.test.assertTrue
 class FeedListPaneTest {
 
     @Composable
-    private fun FeedListPaneTestHost(vm: HomeViewModel, height: Dp) {
+    private fun FeedListPaneTestHost(
+        vm: HomeViewModel,
+        height: Dp,
+        onSelectionAdvance: (() -> Unit)? = null,
+        onTextInputFocusChange: (Boolean) -> Unit = {},
+    ) {
         KoinApplication(configuration = koinConfiguration { modules(module { single { testMenuController } }) }) {
             Box(Modifier.testTag(ROOT_TEST_TAG).size(320.dp, height)) {
                 FeedListPane(
@@ -59,6 +66,8 @@ class FeedListPaneTest {
                     focused = true,
                     dragOverlay = remember { FeedDragOverlayState() },
                     onActivated = {},
+                    onSelectionAdvance = onSelectionAdvance,
+                    onTextInputFocusChange = onTextInputFocusChange,
                 )
             }
         }
@@ -253,6 +262,83 @@ class FeedListPaneTest {
             onNodeWithContentDescription("同期").assertIsEnabled()
         } finally {
             testScope.cancel()
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    /**
+     * Desktop regression guard: with no `onSelectionAdvance` (`PaneLayout.Triple`), the search
+     * field stays the original editable `KeryxTextField` — see `FeedListPane`'s own KDoc on why
+     * `null` is what keeps it editable.
+     */
+    @Test
+    fun triplePaneRendersTheEditableSearchFieldWhenGivenNoOnSelectionAdvance() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            setContent { FeedListPaneTestHost(vm, 600.dp) }
+            waitForIdle()
+
+            onNode(hasSetTextAction()).assertIsDisplayed()
+        } finally {
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    @Test
+    fun narrowLayoutRendersACollapsedSearchBarInsteadOfAnEditableField() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            setContent { FeedListPaneTestHost(vm, 600.dp, onSelectionAdvance = {}) }
+            waitForIdle()
+
+            onNode(hasSetTextAction()).assertDoesNotExist()
+            onNodeWithText("記事を検索…").assertIsDisplayed()
+        } finally {
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    @Test
+    fun tappingTheCollapsedSearchBarSelectsSearchAdvancesAndRaisesAFocusRequest() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        var advanceCount = 0
+        try {
+            setContent { FeedListPaneTestHost(vm, 600.dp, onSelectionAdvance = { advanceCount++ }) }
+            waitForIdle()
+
+            onNodeWithText("記事を検索…").performClick()
+            waitForIdle()
+
+            assertEquals(ArticleFilter.Search, vm.filter.value)
+            assertEquals(1, advanceCount)
+            assertEquals(true, vm.pendingSearchFocus.value)
+        } finally {
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    @Test
+    fun theCollapsedSearchBarShowsTheCurrentQueryRatherThanThePlaceholder() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            vm.setSearchQuery("kotlin")
+            setContent { FeedListPaneTestHost(vm, 600.dp, onSelectionAdvance = {}) }
+            waitForIdle()
+
+            onNodeWithText("kotlin").assertIsDisplayed()
+        } finally {
             fixture.close()
             driver.close()
         }

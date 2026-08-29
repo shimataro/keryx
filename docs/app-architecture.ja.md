@@ -386,8 +386,13 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 3段（`HomePane.FeedList` → `ArticleList` → `ArticleDetail`）であり、狭いレイアウトはそのうち表示する
 段数を減らしているに過ぎない。`HomePane.ordinal + 1` がそのままスタックの現在の深さを兼ねるため、
 `HomeScreen` は別途深さの状態を持つ必要がない — フィルターや記事の選択で深さが進み
-（`onSelectionAdvance`。`Triple` では no-op）、`platform/BackHandler`（Android では実際の戻る
-ジェスチャー/ボタンを横取りし、デスクトップでは no-op）が1段戻す。`PaneLayout.Dual` は、そのスタック上を
+（`FeedListPane` / `ArticleListPane` それぞれの `onSelectionAdvance`。どちらも `Triple` では
+`null` — 全ペインが既に見えており、進む先がない）、`platform/BackHandler`（Android では実際の戻る
+ジェスチャー/ボタンを横取りし、デスクトップでは no-op）が1段戻す — その有効/無効は
+`canNavigateBack(layout, depth)` という純関数で決まり、「1段戻っても実際には画面が変わらない」場合に
+常に `false` を返す（`Triple` では常に。`PaneLayout.Dual` の深さ 1→2 でも、下記のスライド窓が同じ
+2ペインを表示するため同様 — この関数が無かった頃は、そこでの戻る操作が何も起こさず黙って消費されて
+いた）。`PaneLayout.Dual` は、そのスタック上を
 スライドする2ペインの窓であり、単純な隣接ペア表示ではない: 記事一覧はどの深さでも表示される2ペインの
 一方であり続けるため、記事にドリルインするとフィード一覧が記事詳細ペインに入れ替わる形になり、
 一覧自体が画面外にスライドすることはない。
@@ -397,3 +402,21 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 WebView をホストするペインを含む3ペインすべてがアプリのライフタイム全体でマウントされ続ける。
 `Single`/`Dual` は、対象のペインが現在表示されていない場合にそれをアンマウントするが、これは
 Android では（重量級 AWT インターロップの懸念が無いため）問題ない。
+
+狭いレイアウトでは、`initialPaneFor(layout, saved)` が起動時に `HomeScreen` が復元するペインも
+クランプする: `Triple` では `HomePane.ArticleDetail` をそのまま復元する（これまでどおり、最後に
+読んでいた記事）が、`Single`/`Dual` では `ArticleList` に切り下げる — 一覧も無く、どうやってそこへ
+たどり着いたかという文脈も無いまま記事詳細にいきなり着地するのは、スマートフォンのセッションでは
+使い勝手が悪い。このクランプは、レイアウト後の実際の幅が判明した最初のフレームで一度だけ適用され、
+以後は二度と適用されない — 後からのリサイズや回転で、読んでいる最中のユーザーを弾き出してはならない
+ため。
+
+**狭いレイアウトでの検索**は、周囲のクロームだけでなく入力欄自体が移動する — 詳しい設計は
+`ui-guidelines` スキルの「Adaptive pane layout & touch affordances」節を参照
+（`ui/common/KeryxSearchBar.kt` の `KeryxCollapsedSearchBar`/`KeryxExpandedSearchBar`、および
+narrow/`Triple` の分岐が `PaneLayout` や `isTouchPrimary` ではなく `onSelectionAdvance`/
+`onNavigateUp` が `null` かどうかで決まる理由）。`HomeViewModel.pendingSearchFocus` が一発
+イベントではなく latch された `StateFlow<Boolean>` なのも、上記の深さカーソルと同じ理由による:
+入力欄へフォーカスを要求する操作は、スタックを進めるのと同じクリックの中で発生するため、実際に
+入力欄を持つことになるペインはまだコンポーズされておらず、購読者のいない `SharedFlow` では要求が
+黙って失われてしまう。

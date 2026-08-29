@@ -74,3 +74,29 @@ fun visiblePanes(layout: PaneLayout, depth: Int): List<HomePane> = when (layout)
     }
     PaneLayout.Single -> listOf(HomePane.entries[(depth - 1).coerceIn(0, HomePane.entries.lastIndex)])
 }
+
+/**
+ * Whether going back one step from [depth] at [layout] actually changes what's on screen.
+ *
+ * [PaneLayout.Dual]'s sliding window (see [visiblePanes]'s own KDoc) shows the same two panes at
+ * depth 1 and depth 2 — the feed list and article list are both already visible, so "going back"
+ * from the article list to the feed list is a no-op there, unlike at [PaneLayout.Single] where
+ * each depth is its own screen. [PaneLayout.Triple] never has anywhere to go back to (all three
+ * panes are always shown), which this naturally resolves to `false` since [visiblePanes] returns
+ * the same list for every depth there.
+ */
+fun canNavigateBack(layout: PaneLayout, depth: Int): Boolean =
+    depth > 1 && visiblePanes(layout, depth - 1) != visiblePanes(layout, depth)
+
+/**
+ * The [HomePane] a narrow layout should actually open on, given the last-focused pane [saved] from
+ * local settings.
+ *
+ * At [PaneLayout.Triple], [saved] is returned unchanged — all three panes are on screen regardless,
+ * so this only matters for a narrow layout. There, restoring straight into [HomePane.ArticleDetail]
+ * would land the user on whatever article they last read with no list around it and no context for
+ * how they got there; clamping to [HomePane.ArticleList] instead mirrors how a phone-shaped inbox
+ * app opens (the list, not the last-read item).
+ */
+fun initialPaneFor(layout: PaneLayout, saved: HomePane): HomePane =
+    if (layout == PaneLayout.Triple) saved else minOf(saved, HomePane.ArticleList)

@@ -4,6 +4,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -93,10 +94,29 @@ fun HomeScreen() {
     var feedListDeleteRequestId by remember { mutableStateOf(0) }
     val focusRequester = remember { FocusRequester() }
     var focusedPane by remember { mutableStateOf(vm.getInitialFocusedPane()) }
-    // True while a text input in the feed list pane holds focus — the sidebar search field or a
-    // row's inline name editor — so the root keyboard shortcuts step aside and let typed
-    // letters/arrows reach it (they'd otherwise be swallowed by homeKeyboardShortcuts).
-    var textInputFocused by remember { mutableStateOf(false) }
+    // Two separate flags, one per pane that can host a text input — not a single shared
+    // `textInputFocused` — because at PaneLayout.Dual (depth <= 2) FeedListPane and ArticleListPane
+    // are both on screen at once, and a single `var` would let one pane's `false` (e.g. its field
+    // unmounting) clobber the other's still-current `true`. See FeedListPane's/ArticleListPane's
+    // own DisposableEffect for why a pane reliably reports `false` when it unmounts.
+    var feedListTextInputFocused by remember { mutableStateOf(false) }
+    var articleListTextInputFocused by remember { mutableStateOf(false) }
+    // True while a text input in either pane holds focus — the feed list's search field (or a row's
+    // inline name editor), or the article list's own search field at a narrow layout — so the root
+    // keyboard shortcuts step aside and let typed letters/arrows reach it (they'd otherwise be
+    // swallowed by homeKeyboardShortcuts).
+    val textInputFocused = feedListTextInputFocused || articleListTextInputFocused
+    // Mirrors BoxWithConstraints' own `paneLayoutFor(maxWidth)` so focusSearch() (Cmd+F / the menu
+    // bar's "Search…") can route to whichever pane currently owns the field: FeedListPane at
+    // PaneLayout.Triple, ArticleListPane's SearchListPane at a narrow layout (see FeedListPane's own
+    // KDoc on why the field moves there). Initialized to Triple so desktop is already correct on
+    // the very first frame, before BoxWithConstraints below has measured anything.
+    var paneLayout by remember { mutableStateOf(PaneLayout.Triple) }
+    // Whether HomeScreen has already clamped focusedPane for a narrow layout at least once this
+    // session — see the one-shot LaunchedEffect inside BoxWithConstraints below for why this must
+    // never re-fire (a mid-session narrow<->Triple flip, e.g. a window resize or an Android
+    // rotation, must not yank the user off whatever article they're reading).
+    var initialPaneClamped by remember { mutableStateOf(false) }
     // Arrow keys only actually reach a pane when this window has real OS focus (not a modal dialog,
     // Settings/About, or another application) and the search field isn't the one consuming them —
     // panes must render their selection dimmed in every other case, not just when focus moved to a
@@ -149,7 +169,10 @@ fun HomeScreen() {
     }
     fun focusSearch() {
         vm.selectFilter(ArticleFilter.Search)
-        setFocusedPane(HomePane.FeedList)
+        // At PaneLayout.Triple the field stays in FeedListPane; at a narrow layout it has moved
+        // into ArticleListPane's SearchListPane instead (see FeedListPane's own KDoc) — Triple is
+        // paneLayout's initial value, so desktop's behavior here is unchanged.
+        setFocusedPane(if (paneLayout == PaneLayout.Triple) HomePane.FeedList else HomePane.ArticleList)
         vm.requestSearchFocus()
     }
 
@@ -189,7 +212,7 @@ fun HomeScreen() {
     Scaffold { padding ->
         CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {
         Box(
-            Modifier.padding(padding).fillMaxSize()
+            Modifier.padding(padding).consumeWindowInsets(padding).fillMaxSize()
                 .focusRequester(focusRequester)
                 .focusable()
                 .homeKeyboardShortcuts(
@@ -238,11 +261,30 @@ fun HomeScreen() {
         ) {
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 val layout = paneLayoutFor(maxWidth)
-                // BackHandler is always called (its own `enabled` gates the actual interception);
-                // at PaneLayout.Triple this is always disabled — desktop's WINDOW_MIN_WIDTH never
-                // resolves to anything else (see TRIPLE_PANE_MIN_WIDTH's KDoc) — so the app's
-                // default (OS back gesture / Alt+F4-equivalent) is left alone there.
-                BackHandler(enabled = layout != PaneLayout.Triple && focusedPane.ordinal > 0) { goBack() }
+                LaunchedEffect(layout) { paneLayout = layout }
+                // Clamps focusedPane for a narrow layout exactly once, on the first frame with a
+                // real (post-layout) width — a transient pre-layout frame reports maxWidth == 0.dp,
+                // which paneLayoutFor resolves to Single regardless of the eventual layout, and
+                // clamping against that would misfire even on desktop. See initialPaneFor's own
+                // KDoc for why restoring straight into ArticleDetail at a narrow layout is wrong;
+                // this LaunchedEffect composes only until initialPaneClamped flips true, and never
+                // again after that, so a later resize/rotation can't re-trigger it.
+                if (!initialPaneClamped && maxWidth > 0.dp) {
+                    LaunchedEffect(Unit) {
+                        initialPaneClamped = true
+                        val clamped = initialPaneFor(layout, focusedPane)
+                        if (clamped != focusedPane) setFocusedPane(clamped)
+                    }
+                }
+                // BackHandler is always called (its own `enabled` gates the actual interception).
+                // canNavigateBack is false at PaneLayout.Triple (visiblePanes never changes there —
+                // desktop's WINDOW_MIN_WIDTH never resolves to anything else, see
+                // TRIPLE_PANE_MIN_WIDTH's KDoc), so the app's default (OS back gesture /
+                // Alt+F4-equivalent) is left alone there. It is also false at PaneLayout.Dual depth
+                // 1->2 (visiblePanes' sliding window shows the same two panes at both depths), so a
+                // back press that would produce no visible change falls through instead of being
+                // swallowed.
+                BackHandler(enabled = canNavigateBack(layout, focusedPane.ordinal + 1)) { goBack() }
 
                 // Single: tapping a row navigates away from it (drills into the article list, or
                 // the article detail), so a lingering selection highlight there would mark a row
@@ -266,7 +308,7 @@ fun HomeScreen() {
                             onActivated = { setFocusedPane(HomePane.FeedList) },
                             modifier = Modifier.width(displayedFeedWidth),
                             onAddFeedClick = { showAddFeed = true },
-                            onTextInputFocusChange = { textInputFocused = it },
+                            onTextInputFocusChange = { feedListTextInputFocused = it },
                             renameSelectedRequestId = feedListRenameRequestId,
                             deleteSelectedRequestId = feedListDeleteRequestId,
                         )
@@ -306,7 +348,7 @@ fun HomeScreen() {
                                     onActivated = { setFocusedPane(HomePane.FeedList) },
                                     modifier = paneModifier,
                                     onAddFeedClick = { showAddFeed = true },
-                                    onTextInputFocusChange = { textInputFocused = it },
+                                    onTextInputFocusChange = { feedListTextInputFocused = it },
                                     renameSelectedRequestId = feedListRenameRequestId,
                                     deleteSelectedRequestId = feedListDeleteRequestId,
                                     onSelectionAdvance = { setFocusedPane(HomePane.ArticleList) },
@@ -321,12 +363,21 @@ fun HomeScreen() {
                                     // Every narrow layout gives this pane its own back-button row
                                     // (the Triple branch above passes none at all), and only the
                                     // button's enabled state tracks whether there is anywhere to go
-                                    // back to — the feed list isn't also on screen (Single always;
-                                    // Dual once drilled into an article, per visiblePanes' sliding
-                                    // window). Hiding the row instead would shift the controls row
+                                    // back to — see canNavigateBack's own KDoc (false at Dual depth
+                                    // 1->2, where the feed list is still on screen beside this
+                                    // pane). Hiding the row instead would shift the controls row
                                     // and the whole list under it every time Dual slides.
                                     onNavigateUp = ::goBack,
-                                    navigateUpEnabled = HomePane.FeedList !in visible,
+                                    navigateUpEnabled = canNavigateBack(layout, focusedPane.ordinal + 1),
+                                    onTextInputFocusChange = { articleListTextInputFocused = it },
+                                    // Only outside the Search scope: once already there, there is
+                                    // nowhere further to advance to (see ArticleListTopBar's own
+                                    // KDoc on onSearchClick).
+                                    onSearchClick = {
+                                        vm.selectFilter(ArticleFilter.Search)
+                                        vm.requestSearchFocus()
+                                        setFocusedPane(HomePane.ArticleList)
+                                    },
                                 )
                                 HomePane.ArticleDetail -> ArticleDetailPane(
                                     vm,

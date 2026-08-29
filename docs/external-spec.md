@@ -116,7 +116,11 @@ The 3-pane layout is desktop's steady state — the window can never narrow belo
 three panes need, so it always shows all three. On a phone-width screen, the app instead shows one
 pane at a time as a hierarchical stack (feed list → article list → article detail), each with its
 own back control; a tablet-width screen shows two. Nothing about a pane's own content changes
-between these — only how many are on screen together.
+between these — only how many are on screen together — with one exception: search. At the 3-pane
+width the search field stays where it has always been, in the feed list's sidebar, with results
+appearing reactively in the article list beside it. At a narrower width there is no second pane to
+show those results in, so the field itself relocates to sit directly above the results it filters,
+and the feed list's own copy becomes a tap-to-open entry point instead of something to type into.
 
 Where a mouse and a touchscreen need different affordances, both are supported without changing
 the underlying action: reordering a feed or folder is a plain click-and-drag with a mouse, and a

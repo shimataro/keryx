@@ -1589,6 +1589,59 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun requestSearchFocusLatchesUntilConsumed() = runTest {
+        val vm = newViewModel()
+
+        assertEquals(false, vm.pendingSearchFocus.value)
+        vm.requestSearchFocus()
+        assertEquals(true, vm.pendingSearchFocus.value)
+        // Deliberately not consumed here — this is the case a plain one-shot SharedFlow used to
+        // drop silently when no collector existed yet (see requestSearchFocus's own KDoc): the
+        // latch must still be true for whatever field composes and collects it later.
+        assertEquals(true, vm.pendingSearchFocus.value)
+    }
+
+    @Test
+    fun consumeSearchFocusRequestClearsTheLatch() = runTest {
+        val vm = newViewModel()
+
+        vm.requestSearchFocus()
+        assertEquals(true, vm.pendingSearchFocus.value)
+        vm.consumeSearchFocusRequest()
+        assertEquals(false, vm.pendingSearchFocus.value)
+    }
+
+    @Test
+    fun selectingANonSearchFilterDropsAnUnconsumedSearchFocusRequest() = runTest {
+        val vm = newViewModel()
+        subscribeAll(vm)
+
+        vm.selectFilter(ArticleFilter.Search)
+        vm.requestSearchFocus()
+        assertEquals(true, vm.pendingSearchFocus.value)
+
+        // Navigating away before any field consumed the request must drop it — otherwise it would
+        // steal focus at whatever unrelated field appears next.
+        vm.selectFilter(ArticleFilter.All)
+        assertEquals(false, vm.pendingSearchFocus.value)
+    }
+
+    @Test
+    fun reselectingTheSearchFilterKeepsAPendingFocusRequest() = runTest {
+        val vm = newViewModel()
+        subscribeAll(vm)
+
+        vm.selectFilter(ArticleFilter.Search)
+        vm.requestSearchFocus()
+        assertEquals(true, vm.pendingSearchFocus.value)
+
+        // Re-selecting the filter that is already active takes selectFilter's early-return path,
+        // which must not clear a request still waiting to be consumed.
+        vm.selectFilter(ArticleFilter.Search)
+        assertEquals(true, vm.pendingSearchFocus.value)
+    }
+
+    @Test
     fun setSearchQuerySwitchesToSearchScopeAndRetainsQuery() = runTest {
         val vm = newViewModel()
         subscribeAll(vm)
