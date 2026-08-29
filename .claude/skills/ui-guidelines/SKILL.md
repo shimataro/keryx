@@ -140,10 +140,15 @@ without one stealing the other's press.
 (`ui/home/ListRowChrome.kt`'s `listRowMinHeight`, matching M3's `NavigationDrawerItem` minimum —
 `56.dp` on a touch-primary platform, `0.dp`/no floor elsewhere) are both gated the same way as the
 drag handle above: a plain `isTouchPrimary` check, applied via `Modifier.heightIn(min = ...)`
-*after* a row's own content padding, never touching `LIST_ROW_VERTICAL_MARGIN` (the drag insertion
-marker's geometry depends on it — see the Divider policy section above). A row's individual
-touch-only elements (the tag color dot, the folder/tag expand chevron) grow their own click target
-to a full 48dp the same way, independent of their drawn/visible size.
+*before* a row's own content padding and immediately after `listRowSurface` — M3's 56dp is an
+*outer* height (content plus the row's own padding), so flooring the content alone instead would
+add the padding on top and leave each row's floored height depending on how much padding it has.
+Never touching `LIST_ROW_VERTICAL_MARGIN` (the drag insertion marker's geometry depends on it —
+see the Divider policy section above), and never applied outside `listRowSurface` either, or the
+floor would swallow that margin instead of the highlight it's meant for — see
+`listRowMinHeight`'s own KDoc. A row's individual touch-only elements (the tag color dot, the
+folder/tag expand chevron) grow their own click target to a full 48dp the same way, independent of
+their drawn/visible size.
 
 ## Divider policy
 

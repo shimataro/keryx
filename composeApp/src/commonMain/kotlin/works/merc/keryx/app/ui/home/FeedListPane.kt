@@ -387,6 +387,7 @@ internal fun FeedListPane(
             selected = filter == ArticleFilter.All,
             focused = focused,
             onClick = { vm.selectFilter(ArticleFilter.All); onActivated(); onSelectionAdvance() },
+            isTouchPrimary = isTouchPrimary,
         )
         SidebarRow(
             icon = { KeryxIcon(KeryxIcons.Star, null) },
@@ -395,6 +396,7 @@ internal fun FeedListPane(
             selected = filter == ArticleFilter.Starred,
             focused = focused,
             onClick = { vm.selectFilter(ArticleFilter.Starred); onActivated(); onSelectionAdvance() },
+            isTouchPrimary = isTouchPrimary,
         )
         SidebarRow(
             icon = { KeryxIcon(KeryxIcons.Search, null) },
@@ -403,6 +405,7 @@ internal fun FeedListPane(
             selected = filter == ArticleFilter.Search,
             focused = focused,
             onClick = { vm.selectFilter(ArticleFilter.Search); vm.requestSearchFocus(); onActivated(); onSelectionAdvance() },
+            isTouchPrimary = isTouchPrimary,
         )
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
 
@@ -640,6 +643,7 @@ internal fun FeedListPane(
                                     }
                                 },
                                 onSelectColor = { vm.updateTag(tag.id, tag.name, it) },
+                                isTouchPrimary = isTouchPrimary,
                             )
                         }
                         if (tag.id in expandedTagIds) {
@@ -665,6 +669,7 @@ internal fun FeedListPane(
                                     onCopyFeedUrl = { copyUrl(feed.url) },
                                     onCopySiteUrl = { feed.site_url?.let(copyUrl) },
                                     onOpenSite = { feed.site_url?.let(BrowserOpener::open) },
+                                    isTouchPrimary = isTouchPrimary,
                                 )
                             }
                         }
@@ -805,6 +810,7 @@ private fun FeedListToolbarRow(
  * @param selected Whether the row is selected.
  * @param focused Whether the sidebar is focused.
  * @param onClick The action invoked when the row is clicked.
+ * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
  */
 @Composable
 private fun SidebarRow(
@@ -814,14 +820,15 @@ private fun SidebarRow(
     selected: Boolean,
     focused: Boolean,
     onClick: () -> Unit,
+    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
     val rowInteraction = remember { MutableInteractionSource() }
     Row(
         Modifier.fillMaxWidth()
             .listRowClickable(rowInteraction, selected, onClick)
             .listRowSurface(selectionBackground(selected, focused), ListRowKind.NavItem, rowInteraction)
-            .padding(horizontal = 8.dp, vertical = 8.dp)
-            .heightIn(min = listRowMinHeight()),
+            .heightIn(min = listRowMinHeight(isTouchPrimary))
+            .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CompositionLocalProvider(LocalContentColor provides (selectionContentColorOrNull(selected, focused) ?: LocalContentColor.current)) {
@@ -864,6 +871,7 @@ private fun SidebarRow(
  * @param nameError Produces a validation message for an edited name, or `null` when valid.
  * @param onSelectColor Applies a color picked from the color dot's popover. Independent of name
  *   editing: the dot is clickable whether or not the row is currently being renamed.
+ * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
  */
 @Composable
 private fun TagRow(
@@ -882,6 +890,7 @@ private fun TagRow(
     onRenameCancel: () -> Unit = {},
     nameError: (String) -> String? = { null },
     onSelectColor: (String?) -> Unit = {},
+    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
     val editLabel = stringResource(Res.string.home_edit_tag_menu)
     val deleteLabel = stringResource(Res.string.home_delete_tag_menu)
@@ -908,13 +917,12 @@ private fun TagRow(
                 rowInteraction,
                 decoration = dropTargetBorderModifier(isDropTarget, MaterialTheme.colorScheme.tertiary),
             )
-            .padding(start = 8.dp, end = 8.dp)
-            .heightIn(min = listRowMinHeight()),
+            .heightIn(min = listRowMinHeight(isTouchPrimary))
+            .padding(start = 8.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        val isTouchPrimary = works.merc.keryx.app.platform.isTouchPrimary
         CompositionLocalProvider(LocalContentColor provides (contentColor ?: LocalContentColor.current)) {
-            ExpandCollapseChevron(expanded = expanded, onToggle = onToggleExpanded)
+            ExpandCollapseChevron(expanded = expanded, onToggle = onToggleExpanded, isTouchPrimary = isTouchPrimary)
             Spacer(Modifier.width(4.dp))
             Row(
                 Modifier.weight(1f).padding(vertical = 4.dp),
@@ -1034,6 +1042,7 @@ internal fun tagRowTestTag(tagId: String): String = "tag-row-$tagId"
  * @param onCopyFeedUrl Copies the feed's own (RSS/Atom) URL to the clipboard.
  * @param onCopySiteUrl Copies the feed's website URL to the clipboard.
  * @param onOpenSite Opens the feed's website in the external browser.
+ * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
  */
 @Composable
 private fun TagFeedRow(
@@ -1050,6 +1059,7 @@ private fun TagFeedRow(
     onCopyFeedUrl: () -> Unit,
     onCopySiteUrl: () -> Unit,
     onOpenSite: () -> Unit,
+    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
     val renameLabel = stringResource(Res.string.home_rename_feed)
     val removeLabel = stringResource(Res.string.home_remove_feed_from_tag_menu)
@@ -1078,8 +1088,8 @@ private fun TagFeedRow(
                 onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
             )
             .listRowSurface(selectionBackground(selectionTone, focused), ListRowKind.NavItem, rowInteraction)
-            .padding(start = FEED_ROW_INDENT, end = 8.dp, top = 4.dp, bottom = 4.dp)
-            .heightIn(min = listRowMinHeight()),
+            .heightIn(min = listRowMinHeight(isTouchPrimary))
+            .padding(start = FEED_ROW_INDENT, end = 8.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FeedAvatar(feed.displayTitle(), feed.favicon_url)
