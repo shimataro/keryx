@@ -100,7 +100,8 @@ application module only runs `lintAnalyzeDebugAndroidTest` (static analysis) on 
 source set, not `compileDebugAndroidTestKotlin`/`assembleDebugAndroidTest`. A dedicated
 `android-instrumented-test` job in `.github/workflows/ci.yml` runs this suite on every push.
 
-The suite covers parser, fetcher redirect/304/404/410/timeout/discovery, OPML, Dropbox storage/auth, PKCE, OAuth loopback server, merge (last-write-wins / OR merge / collision guard / FK guard), schema, local settings, article upsert, URL resolver, datetime parser, Result, Repository layer (Article/Feed/Tag/Settings), CloudSession, NotificationCenter, IdGenerator, SyncRepository, ViewModel layer (Home/Settings/Setup/NotificationCenter, including `SettingsViewModel`'s OPML
+Project-wide, this is on top of the two Android suites above: `commonTest`/`desktopTest` (run via
+`./gradlew :composeApp:desktopTest` above) covers parser, fetcher redirect/304/404/410/timeout/discovery, OPML, Dropbox storage/auth, PKCE, OAuth loopback server, merge (last-write-wins / OR merge / collision guard / FK guard), schema, local settings, article upsert, URL resolver, datetime parser, Result, Repository layer (Article/Feed/Tag/Settings), CloudSession, NotificationCenter, IdGenerator, SyncRepository, ViewModel layer (Home/Settings/Setup/NotificationCenter, including `SettingsViewModel`'s OPML
 import/export paths — the built document/read file round-tripping through the picked path, the
 localized request fields reaching a `FakeFileSelector`, cancellation, and the document
 build/write/import work actually running on the injected dispatcher rather than the EDT), the

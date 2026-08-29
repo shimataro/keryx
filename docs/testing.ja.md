@@ -132,7 +132,8 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 `assembleDebugAndroidTest` は実行しない。ただし `.github/workflows/ci.yml` の
 `android-instrumented-test` ジョブがプッシュごとにこのスイートを実行している。
 
-スイートはパーサ、フェッチャのリダイレクト/304/404/410/タイムアウト/ディスカバリ、
+プロジェクト全体で見ると、上記の Android の2スイートに加えて、`commonTest`/`desktopTest`
+（上記の `./gradlew :composeApp:desktopTest` で実行）がパーサ、フェッチャのリダイレクト/304/404/410/タイムアウト/ディスカバリ、
 OPML、Dropbox ストレージ/認証、PKCE、OAuth ループバックサーバ、マージ（後勝ち・OR マージ・衝突ガード・
 FK ガード）、スキーマ、ローカル設定、記事 upsert、URL リゾルバ、日時パーサ、Result、Repository 層
 （Article/Feed/Tag/Settings）、CloudSession、NotificationCenter、IdGenerator、SyncRepository、

@@ -116,9 +116,10 @@
   静かに進んだり、不完全な署名情報のまま進んだりせず、即座にビルドが失敗する。`.gitignore` は
   `*.keystore` / `*.jks` を除外済みなので、リポジトリ直下に置いても誤ってコミットされることは
   ない。Google Play 配布用の本番キーストアの発行手順は [build.md](build.md) を参照。
-- **実機または起動中の Android エミュレータ**: `androidDeviceTest` 計装スイート
-  （`DatabaseMerger`/`DatabaseSnapshot` の Android 実装を実際のバンドル SQLite に対して検証
-  する。[testing.ja.md](testing.ja.md) 参照）を実行する場合にのみ必要。ビルド・
+- **実機または起動中の Android エミュレータ**: Android の計装テストスイート2つ
+  ——`androidDeviceTest`（`DatabaseMerger`/`DatabaseSnapshot` の Android 実装を実際の
+  バンドル SQLite に対して検証）と `androidApp` 自身のスイート（Compose UI のジェスチャテスト）
+  ——のいずれかを実行する場合にのみ必要。両方の詳細は [testing.ja.md](testing.ja.md) を参照。ビルド・
   `./gradlew build`・その他のテストタスクはいずれも実機/エミュレータ無しで動く。Linux で
   エミュレータを実用的な速度で動かすには **KVM**（ハードウェアアクセラレーション）が必要 —
   設定方法は[公式ガイド](https://developer.android.com/studio/run/emulator-acceleration)を
