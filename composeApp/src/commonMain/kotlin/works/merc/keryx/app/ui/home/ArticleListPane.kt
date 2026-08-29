@@ -32,7 +32,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -40,6 +39,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Box
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.searchTerms
@@ -347,6 +347,21 @@ internal fun rememberCopyUrlAction(): (String) -> Unit {
 }
 
 /**
+ * Picks the sort button's icon for the current state. Each state gets its own asset rather than one
+ * asset transformed at the call site: this button used to flip a single [KeryxIcons.Sort] glyph
+ * vertically, which reads as a direction only on an icon set whose sort glyph carries an arrow —
+ * Material Symbols' does not, so the flip was invisible on Android. See `KeryxIcons`' own KDoc.
+ *
+ * [sortEnabled] is false in the search scope, where results stay pinned to FTS5 relevance rank and
+ * neither direction applies, so it yields the direction-free glyph.
+ */
+internal fun sortDirectionIcon(sortEnabled: Boolean, newestFirst: Boolean): DrawableResource = when {
+    !sortEnabled -> KeryxIcons.Sort
+    newestFirst -> KeryxIcons.SortDescending
+    else -> KeryxIcons.SortAscending
+}
+
+/**
  * The top bar shared by the normal article list ([ArticleListPaneContent]) and the search scope
  * ([SearchListPane]): unread-only toggle, notifications bell, sort, mark-all-read. When
  * [sortEnabled] is false (search scope, where results stay pinned to FTS5 relevance rank), the
@@ -425,11 +440,7 @@ internal fun ArticleListTopBar(
                     stringResource(Res.string.home_sort_disabled_search)
                 }
                 TooltipIconButton(tooltip = sortTooltip, onClick = onToggleSort, enabled = sortEnabled) {
-                    KeryxIcon(
-                        KeryxIcons.Sort,
-                        contentDescription = sortTooltip,
-                        modifier = Modifier.graphicsLayer(scaleY = if (sortEnabled && !newestFirst) -1f else 1f),
-                    )
+                    KeryxIcon(sortDirectionIcon(sortEnabled, newestFirst), contentDescription = sortTooltip)
                 }
                 val markAllReadTooltip = stringResource(Res.string.home_mark_all_read)
                 TooltipIconButton(tooltip = markAllReadTooltip, onClick = onMarkAllRead) {

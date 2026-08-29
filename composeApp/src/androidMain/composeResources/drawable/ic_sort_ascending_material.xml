@@ -1,0 +1,36 @@
+<!-- Composed from Material Symbols Outlined "sort" + "arrow_upward", both at wght 700 (Apache-2.0).
+     Material Symbols ships no directional sort glyph (google/material-design-icons#189), so the two
+     stock paths are laid out side by side with group transforms rather than redrawn by hand. Both
+     groups take the SAME uniform scale, which is what keeps the bars and the arrow's shaft at one
+     stroke weight; the wght 700 source (125/126 units thick, vs the default weight's 80) is what
+     leaves that weight at ~1.7px once scaled, close to the 2px of the default-weight icons this
+     one sits beside in the toolbar. Scaling only one group, or scaling either non-uniformly, breaks
+     one of those two properties. The bars are also the stock `sort` path mirrored vertically, so
+     that the staircase reverses with the arrow instead of staying put (matching what Tabler ships
+     as two separate glyphs on desktop). Swapping the outer two bar widths IS that mirror exactly,
+     since the three bar bands (173..298, 418..543, 663..788) are symmetric about y 480.5. Resulting layout: bars x 47..481, arrow x 523..913 (symmetric
+     47-unit side insets, 43-unit gap), both centred on y 480. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960"
+    android:autoMirrored="true">
+  <group
+      android:scaleX="0.55"
+      android:scaleY="0.55"
+      android:translateY="216">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M86,788v-125h788v125H86Zm0,-245v-125h539v125H86Zm0,-245v-125h291v125H86Z"/>
+  </group>
+  <group
+      android:scaleX="0.55"
+      android:scaleY="0.55"
+      android:translateX="454"
+      android:translateY="216">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M417,834v-466L215,570l-89,-90 354,-354 354,354 -89,90 -202,-202v466H417Z"/>
+  </group>
+</vector>

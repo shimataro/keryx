@@ -25,6 +25,7 @@ import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.Articles
+import works.merc.keryx.app.ui.common.KeryxIcons
 import app.cash.sqldelight.db.SqlDriver
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -64,6 +65,7 @@ import works.merc.keryx.app.singleProviderCloudSession
 import works.merc.keryx.app.ftsManagerIndexed
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
@@ -319,6 +321,23 @@ class ArticleListPaneTest {
         waitForIdle()
 
         assertEquals(1, toggleSortCount)
+    }
+
+    @Test
+    fun sortDirectionIconDistinguishesTheTwoEnabledDirections() {
+        // The regression this guards: both directions used to share one asset, flipped vertically at
+        // the call site, which reads as a direction only on an icon set whose sort glyph has an arrow.
+        assertNotEquals(
+            sortDirectionIcon(sortEnabled = true, newestFirst = true),
+            sortDirectionIcon(sortEnabled = true, newestFirst = false),
+        )
+    }
+
+    @Test
+    fun sortDirectionIconIsDirectionFreeWhileDisabled() {
+        // Search results stay pinned to FTS5 relevance rank, so neither direction applies there.
+        assertEquals(KeryxIcons.Sort, sortDirectionIcon(sortEnabled = false, newestFirst = true))
+        assertEquals(KeryxIcons.Sort, sortDirectionIcon(sortEnabled = false, newestFirst = false))
     }
 
     @Test

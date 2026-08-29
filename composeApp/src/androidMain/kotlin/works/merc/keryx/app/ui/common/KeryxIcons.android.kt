@@ -33,6 +33,8 @@ import works.merc.keryx.app.resources.ic_public_outlined_material
 import works.merc.keryx.app.resources.ic_refresh_material
 import works.merc.keryx.app.resources.ic_restart_alt_material
 import works.merc.keryx.app.resources.ic_search_material
+import works.merc.keryx.app.resources.ic_sort_ascending_material
+import works.merc.keryx.app.resources.ic_sort_descending_material
 import works.merc.keryx.app.resources.ic_sort_material
 import works.merc.keryx.app.resources.ic_star_border_material
 import works.merc.keryx.app.resources.ic_star_material
@@ -76,7 +78,12 @@ actual object KeryxIcons {
     actual val Refresh: DrawableResource = Res.drawable.ic_refresh_material
     actual val RestartAlt: DrawableResource = Res.drawable.ic_restart_alt_material
     actual val Search: DrawableResource = Res.drawable.ic_search_material
+    // Material Symbols' stock `sort` (bars only, no arrow) is direction-free, so it stays the
+    // disabled-state glyph. The two directional entries are local composites of `sort` plus
+    // `arrow_downward`/`arrow_upward`, since Material Symbols ships no directional sort glyph.
     actual val Sort: DrawableResource = Res.drawable.ic_sort_material
+    actual val SortAscending: DrawableResource = Res.drawable.ic_sort_ascending_material
+    actual val SortDescending: DrawableResource = Res.drawable.ic_sort_descending_material
     actual val Storage: DrawableResource = Res.drawable.ic_storage_material
     actual val Tune: DrawableResource = Res.drawable.ic_tune_material
     actual val Update: DrawableResource = Res.drawable.ic_update_material
