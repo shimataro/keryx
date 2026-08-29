@@ -55,22 +55,24 @@ update.repo=
 # sdk.dir=/path/to/Android/sdk
 
 # Android release signing configuration.
-#   Environment variables: ANDROID_RELEASE_KEYSTORE_PATH
-#                          ANDROID_RELEASE_KEYSTORE_PASSWORD
-#                          ANDROID_RELEASE_KEY_ALIAS
-#                          ANDROID_RELEASE_KEY_PASSWORD
 #   Gradle properties: -PandroidReleaseKeystorePath=...
 #                      -PandroidReleaseKeystorePassword=...
 #                      -PandroidReleaseKeyAlias=...
 #                      -PandroidReleaseKeyPassword=...
+#   Environment variables: ANDROID_RELEASE_KEYSTORE_PATH
+#                          ANDROID_RELEASE_KEYSTORE_PASSWORD
+#                          ANDROID_RELEASE_KEY_ALIAS
+#                          ANDROID_RELEASE_KEY_PASSWORD
 #   Default: (empty)
-# Leave empty (or omit) at your own risk: a release build then fails AGP's signing
-# validation (`validateSigningRelease`) instead of falling back to debug signing.
+# Leave empty (or omit): `./gradlew build` still succeeds, but :androidApp's release build comes
+# out UNSIGNED (a build warning says so) — it cannot be installed on a device or uploaded to
+# Google Play. Set all four only if you want a release build you can actually install or publish;
+# setting some but not all of them is always a mistake and fails the build immediately.
 # Use an absolute path for android.release.keystore.path; relative paths are
 # resolved against the androidApp module directory, not the repository root.
 # See docs/build.md for how to generate a release keystore and register it
 # in GitHub Actions / Google Play Console.
 android.release.keystore.path=
 android.release.keystore.password=
-android.release.key.alias=keryx-release
+android.release.key.alias=
 android.release.key.password=

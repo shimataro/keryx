@@ -64,11 +64,16 @@
   `:composeApp:desktopTest` のようなターゲット限定タスクは SDK が無くても動くが、ルートの
   `./gradlew build` は `:androidApp` を含む全サブプロジェクトを集約するため、SDK が解決できない
   と設定段階で即座に失敗する — 詳細は後述の「よくある問題」を参照。
-- **Android リリース署名キーストア**: Gradle の既定 `build` ライフサイクルは `:androidApp` の
-  `assembleRelease`/`validateSigningRelease` を含んでおり、`androidApp/build.gradle.kts` は
-  署名情報が無いときに debug 署名へフォールバックしない設計になっている。そのため
-  **キーストアを用意していないと、ルートの `./gradlew build` はここで失敗する**。開発用には
-  JDK 同梱の `keytool` でその場限りのキーストアを作れば十分:
+- **Android リリース署名キーストア（任意）**: Gradle の既定 `build` ライフサイクルは
+  `:androidApp` の `assembleRelease` を含んでおり（App Bundle は含まれない —
+  `:androidApp:bundleRelease` は `release.yml` のように明示的に叩く必要がある）、
+  `androidApp/build.gradle.kts` は署名情報が無いときに debug 署名へフォールバックしない設計に
+  なっている（debug 署名の release 成果物はインストール可能で本物に見えてしまうため、これこそ
+  危険なケース）。その代わり、**キーストアを用意していなくてもルートの `./gradlew build` は成功する**
+  が、`:androidApp` の release APK は**未署名**になる（ビルド警告が出る） — その APK は実機に
+  インストールも Google Play へのアップロードもできない。実機で動かす/配布するつもりがある
+  場合にのみ用意すればよく、ローカル検証には JDK 同梱の `keytool` でその場限りのキーストアを
+  作れば十分:
 
   ```bash
   keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
@@ -80,9 +85,10 @@
   生成したファイルの**絶対パス**を `local.properties` の `android.release.keystore.path` /
   `android.release.keystore.password` / `android.release.key.alias` /
   `android.release.key.password` に設定する（相対パスは `androidApp` モジュール基準に解決
-  される）。`.gitignore` は `*.keystore` / `*.jks` を除外済みなので、リポジトリ直下に置いても
-  誤ってコミットされることはない。Google Play 配布用の本番キーストアの発行手順は
-  [build.md](build.md) を参照。
+  される）。4つは常にセットで必要 — 一部だけ設定するのは常に設定ミスであり、未署名で
+  静かに進んだり、不完全な署名情報のまま進んだりせず、即座にビルドが失敗する。`.gitignore` は
+  `*.keystore` / `*.jks` を除外済みなので、リポジトリ直下に置いても誤ってコミットされることは
+  ない。Google Play 配布用の本番キーストアの発行手順は [build.md](build.md) を参照。
 - **実機または起動中の Android エミュレータ**: `androidDeviceTest` 計装スイート
   （`DatabaseMerger`/`DatabaseSnapshot` の Android 実装を実際のバンドル SQLite に対して検証
   する。[testing.ja.md](testing.ja.md) 参照）を実行する場合にのみ必要。ビルド・
@@ -121,10 +127,9 @@
 
 `:composeApp:run` は JDK に加えて前述「アプリの実行に必要なソフトウェア」に挙げた各プラット
 フォームのランタイムが必要（ヘッドレスな Linux 環境での Xvfb は除く）。ルートの
-`./gradlew build` は前述のとおり Android SDK とリリース署名キーストアの用意
-も追加で必要になる。ネイティブパッケージング系タスク（`createDistributable`, `packageDmg`,
-`packageMsi`, `packageDeb`, `packageRpm` — 詳細は [build.md](build.md)）は OS ごとに以下も
-必要。
+`./gradlew build` は前述のとおり Android SDK も追加で必要になる。ネイティブパッケージング系
+タスク（`createDistributable`, `packageDmg`, `packageMsi`, `packageDeb`, `packageRpm` —
+詳細は [build.md](build.md)）は OS ごとに以下も必要。
 
 - **Linux**
   - `fakeroot` — `packageDeb` に必要（jpackage が `.deb` 生成のために呼び出す）
@@ -151,8 +156,9 @@ git clone <repo>
 cd keryx
 cp local.properties.example local.properties   # sdk.dir を追記する（前提を参照）。OAuth キーは任意
 
-# Android のリリース署名キーストア（./gradlew build に必須。詳細は前提の
-# 「ビルドに必要なソフトウェア」参照）
+# Android のリリース署名キーストア（任意 — 無くても ./gradlew build は成功するが、
+# :androidApp の release APK は未署名になる。実機で動かす/配布する場合のみ必要。
+# 詳細は前提の「ビルドに必要なソフトウェア」参照）
 keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
   -alias keryx-dev -keyalg RSA -keysize 2048 -validity 10000 \
   -dname "CN=Dev, OU=Dev, O=Dev, L=Dev, S=Dev, C=US" \
@@ -170,7 +176,7 @@ keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
 `androidDeviceTest` 計装スイート（実機/エミュレータが必要。前提を参照）はこれに含まれない。
 
 デスクトップの作業だけであれば、`./gradlew :composeApp:desktopTest` のようなターゲット限定
-タスクを使うことで、Android SDK もリリース署名キーストアも用意せずに済む。
+タスクを使うことで、Android SDK を用意せずに済む。
 
 ## データディレクトリ
 
@@ -197,18 +203,22 @@ Android SDK を必要とする。
 だけの作業なら `:composeApp:compileKotlinDesktop` や `:composeApp:desktopTest` のような特定
 タスクに絞ることで Android SDK の解決を避けられる。
 
-### `validateSigningRelease` でビルドが失敗する
+### Android のリリースビルドが未署名になる
 
-Gradle の既定 `build` ライフサイクルは `:androidApp` の `assembleRelease`/
-`validateSigningRelease` を含んでおり、`androidApp/build.gradle.kts` は署名情報が無いときに
-debug 署名へフォールバックしない設計になっている。そのため、Android リリース署名キーストアを
-用意していないと、デスクトップの作業しかしていなくてもルートの `./gradlew build` はここで
-失敗する。
+Gradle の既定 `build` ライフサイクルは `:androidApp` の `assembleRelease` を含んでおり、
+release APK が生成される（App Bundle は生成されない — `:androidApp:bundleRelease` を明示的に
+叩く必要がある）。Android リリース署名キーストアを設定していない場合、
+`androidApp/build.gradle.kts` はビルド警告を出したうえで**未署名**の release APK
+（`androidApp-release-unsigned.apk`）を生成する — これはインストール可否だけに関わる話なので、
+`./gradlew build` 自体は（デスクトップの作業しかしていなくても）成功する。未署名 APK は実機に
+インストールすることも Google Play にアップロードすることもできない。
 
-前提の「ビルドに必要なソフトウェア」に沿って開発用キーストアを生成し、`local.properties` に
-4つの値（`android.release.keystore.path` / `android.release.keystore.password` /
-`android.release.key.alias` / `android.release.key.password`）を設定するか、
-`:composeApp:desktopTest` のようなターゲット限定タスクに絞る。
+実機にインストールできる本物の release ビルドが必要なら、前提の「ビルドに必要な
+ソフトウェア」に沿って開発用キーストアを生成し、`local.properties` に4つの値
+（`android.release.keystore.path` / `android.release.keystore.password` /
+`android.release.key.alias` / `android.release.key.password`）を設定する。**4つのうち一部だけ
+設定するのは常に設定ミス** — 未署名で静かに進んだり不完全な署名情報のまま進んだりせず、
+どの値が足りないかを示して即座にビルドが失敗する。
 
 ### `UnsupportedClassVersionError`（実行時エラー）
 

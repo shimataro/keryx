@@ -382,7 +382,13 @@ jobs:
         # Drive has no Android provider (see CloudStorageAvailability.android.kt), and the client
         # secret now generates into DesktopBuildConfig, which is only attached to desktopMain's
         # srcDir — so it isn't a build input for :androidApp at all.
-        run: ./gradlew :androidApp:assembleRelease :androidApp:bundleRelease -PappVersion=${{ steps.version.outputs.version }}
+        # androidReleaseSigningRequired turns a missing/half-configured secret above into a hard
+        # build failure instead of androidApp/build.gradle.kts's own local-dev fallback (an
+        # unsigned APK) — this job publishes its output, so it must never succeed unsigned.
+        run: >
+          ./gradlew :androidApp:assembleRelease :androidApp:bundleRelease
+          -PappVersion=${{ steps.version.outputs.version }}
+          -PandroidReleaseSigningRequired=true
         env:
           DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
           ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
@@ -404,6 +410,15 @@ jobs:
             echo "::error::No AAB produced under androidApp/build/outputs/bundle/release."
             exit 1
           fi
+          # Defense in depth on top of -PandroidReleaseSigningRequired=true above: AGP names an
+          # unsigned release APK with an "-unsigned" suffix (it has no equivalent marker for the
+          # AAB), so this is a cheap extra check right before the irreversible upload below.
+          case "$apk_src" in
+            *-unsigned.apk)
+              echo "::error::Refusing to publish an unsigned APK ($apk_src)."
+              exit 1
+              ;;
+          esac
           apk_dest="Keryx-${{ steps.version.outputs.version }}-android-universal.apk"
           aab_dest="Keryx-${{ steps.version.outputs.version }}-android-universal.aab"
           mv "$apk_src" "$apk_dest"
