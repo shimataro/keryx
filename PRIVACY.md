@@ -40,9 +40,14 @@ app-private storage areas that only Keryx can access — `keryx.db` in the app's
 database directory and `local_settings.json` in its internal files directory —
 neither reachable by other apps, and not accessible to you directly without root.
 
-An OS-level image cache (and, on Android, the WebView profile used to render
-article content) also stores transient data — favicon images and rendering data —
-purely as a local performance cache.
+An OS-level cache directory — `~/Library/Caches/Keryx` on macOS,
+`%LOCALAPPDATA%\Keryx\Cache` on Windows, `$XDG_CACHE_HOME/Keryx` on Linux — stores
+favicon images and the article reader's WebView profile as transient, local
+performance data. On Android, favicon images and the article reader's WebView
+profile live in the app's own private cache area instead, which the OS may clear
+under storage pressure. Either way, this is separate from the application data
+directory above; see "Data retention & deletion" below for how to remove it
+yourself.
 
 None of this data is transmitted anywhere unless you opt into cloud sync (below).
 
@@ -115,9 +120,17 @@ developer:
   checks only make sense for the GitHub-distributed build).
 - **Dropbox, Google Drive, or OneDrive** — only if you've connected cloud sync,
   as described above.
+- **Content an article itself references** — when you open an article, any external
+  resources its own HTML embeds (images, videos, social-media embeds, iframes) are
+  loaded directly from their original hosts by the reader view, the same way a normal
+  web page would. Keryx does not filter, proxy, or block these requests — what gets
+  contacted depends entirely on the article's own content, not on anything Keryx
+  chooses to fetch.
 
-That's the complete list. Nothing else is contacted, and no analytics or tracking
-payloads are ever sent with any of these requests.
+Aside from what an opened article's own content may additionally reference (above),
+that's the complete list of servers Keryx itself decides to contact. Nothing else is
+contacted, and no analytics or tracking payloads are ever sent with any of these
+requests.
 
 ## Data retention & deletion
 
@@ -125,10 +138,12 @@ payloads are ever sent with any of these requests.
   window are deleted automatically, except starred articles and the 10 most recent
   articles per feed, which are always kept regardless of age.
 - To erase all local Keryx data: on desktop, delete `keryx.db` and
-  `local_settings.json` from the application data directory described above, or
-  simply uninstall the app. On Android, since these files live in app-private
-  storage you cannot reach directly, use uninstall, or Android Settings → Apps →
-  Keryx → Storage → Clear storage.
+  `local_settings.json` from the application data directory described above, along
+  with the cache directory named in "Data stored on your device" (it holds the
+  favicon cache and the article reader's WebView data), or simply uninstall the app.
+  On Android, since these files live in app-private storage you cannot reach
+  directly, use uninstall, or Android Settings → Apps → Keryx → Storage → Clear
+  storage (this also clears the app's cache).
 - See "Optional cloud sync" above for how to remove data from your cloud storage
   account.
 
