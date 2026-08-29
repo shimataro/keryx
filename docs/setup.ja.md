@@ -58,6 +58,13 @@
   `sdkmanager --list | grep android-37` で現在の ID を確認するか、初回ビルド時に AGP 自身の
   SDK 自動ダウンロードに解決させればよい。`build-tools;36.0.0` はこの影響を受けず、そのまま
   導入できる（`sdkmanager "build-tools;36.0.0"` — 36.0.0 は AGP 9.3.2 が既定で選択するバージョン）。
+- 初期設定: `local.properties` の `sdk.dir` に SDK の場所を指定する（AGP がこのキー自体を
+  直接読むため、下記 OAuth キーで使う `-P`/環境変数/`local.properties` の解決チェーンとは
+  別系統）か、環境変数 `ANDROID_HOME` を設定してもよい——以下のコマンドは、どちらかが
+  すでに設定済みであることを前提としている。`:composeApp:compileKotlinDesktop` や
+  `:composeApp:desktopTest` のようなターゲット限定タスクは SDK が無くても動くが、ルートの
+  `./gradlew build` は `:androidApp` を含む全サブプロジェクトを集約するため、SDK が解決できない
+  と設定段階で即座に失敗する — 詳細は後述の「よくある問題」を参照。
 - **SDK ライセンスへの同意**: コマンドラインツール単体（`cmdline-tools`）経路では、パッケージを
   ダウンロードする前に一度ライセンスへ同意する必要がある（Android Studio の SDK Manager では
   この同意が UI の一部として組み込まれているため、この手順が必要なのは `cmdline-tools` 単体の
@@ -85,12 +92,6 @@
   `<N>` は上記の `minSdk = 26` / `compileSdk`・`targetSdk = 37` に近い値を選ぶ。CI の計装テスト
   ジョブは API 29 で実行している。このプロジェクト固有の制約を超えた詳細は
   [公式の AVD ガイド](https://developer.android.com/studio/run/managing-avds) を参照。
-- 初期設定: `local.properties` の `sdk.dir` に SDK の場所を指定する（AGP がこのキー自体を
-  直接読むため、下記 OAuth キーで使う `-P`/環境変数/`local.properties` の解決チェーンとは
-  別系統）か、環境変数 `ANDROID_HOME` を設定してもよい。`:composeApp:compileKotlinDesktop` や
-  `:composeApp:desktopTest` のようなターゲット限定タスクは SDK が無くても動くが、ルートの
-  `./gradlew build` は `:androidApp` を含む全サブプロジェクトを集約するため、SDK が解決できない
-  と設定段階で即座に失敗する — 詳細は後述の「よくある問題」を参照。
 - **Android リリース署名キーストア（任意）**: Gradle の既定 `build` ライフサイクルは
   `:androidApp` の `assembleRelease` を含んでおり（App Bundle は含まれない —
   `:androidApp:bundleRelease` は `release.yml` のように明示的に叩く必要がある）、

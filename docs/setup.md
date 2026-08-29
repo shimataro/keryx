@@ -61,6 +61,13 @@ Split into what every target needs in common, and what's specific to the Android
   the first build. `build-tools;36.0.0` is unaffected and installs directly
   (`sdkmanager "build-tools;36.0.0"` — the version AGP 9.3.2 selects by default when none is
   specified).
+- Setup: point `local.properties`' `sdk.dir` at the SDK location (AGP reads this key itself; it
+  doesn't go through this project's own `-P`/env-var/`local.properties` resolution chain used for
+  the OAuth keys below), or set the `ANDROID_HOME` environment variable instead — the commands
+  below assume one of the two is already set. A target-scoped task like
+  `:composeApp:compileKotlinDesktop` or `:composeApp:desktopTest` works fine without it, but the
+  root `./gradlew build` aggregates every subproject including `:androidApp`, so it fails
+  immediately at configuration time without a resolvable SDK — see Common Issues below.
 - **SDK license agreement**: the standalone `cmdline-tools` route requires accepting the SDK
   licenses once before any package can be downloaded (Android Studio's SDK Manager already
   presents this as part of its own UI, so this step only matters on the `cmdline-tools`-only
@@ -89,12 +96,6 @@ Split into what every target needs in common, and what's specific to the Android
   CI instrumented-test job runs against API 29. See the
   [official AVD guide](https://developer.android.com/studio/run/managing-avds) for details beyond
   this project's own constraints.
-- Setup: point `local.properties`' `sdk.dir` at the SDK location (AGP reads this key itself; it
-  doesn't go through this project's own `-P`/env-var/`local.properties` resolution chain used for
-  the OAuth keys below), or set the `ANDROID_HOME` environment variable instead. A target-scoped
-  task like `:composeApp:compileKotlinDesktop` or `:composeApp:desktopTest` works fine without it,
-  but the root `./gradlew build` aggregates every subproject including `:androidApp`, so it fails
-  immediately at configuration time without a resolvable SDK — see Common Issues below.
 - **Android release signing keystore (optional)**: Gradle's default `build` lifecycle includes
   `:androidApp`'s `assembleRelease` (the App Bundle is not part of it — `:androidApp:bundleRelease`
   has to be invoked explicitly, as `release.yml` does), and `androidApp/build.gradle.kts` is
