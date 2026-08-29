@@ -85,12 +85,16 @@
   ```bash
   "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "emulator"
   "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list | grep google_apis_playstore
-  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "system-images;android-<N>;google_apis_playstore;x86_64"
-  "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n keryx -k "system-images;android-<N>;google_apis_playstore;x86_64"
+  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "system-images;android-<N>;google_apis_playstore;<ABI>"
+  "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n keryx -k "system-images;android-<N>;google_apis_playstore;<ABI>"
   ```
 
   `<N>` は上記の `minSdk = 26` / `compileSdk`・`targetSdk = 37` に近い値を選ぶ。CI の計装テスト
-  ジョブは API 29 で実行している。このプロジェクト固有の制約を超えた詳細は
+  ジョブは API 29 で実行している。`<ABI>` はホスト CPU のアーキテクチャに合わせる必要がある
+  ——ハードウェアアクセラレーションを効かせるには、x86_64 ホストなら `x86_64`、ARM64 ホスト
+  （Apple Silicon Mac や ARM64 版 Windows/Linux など）なら `arm64-v8a` を選ぶ。詳細は
+  [エミュレータのアクセラレーションガイド](https://developer.android.com/studio/run/emulator-acceleration)
+  を参照。このプロジェクト固有の制約を超えた詳細は
   [公式の AVD ガイド](https://developer.android.com/studio/run/managing-avds) を参照。
 - **Android リリース署名キーストア（任意）**: Gradle の既定 `build` ライフサイクルは
   `:androidApp` の `assembleRelease` を含んでおり（App Bundle は含まれない —

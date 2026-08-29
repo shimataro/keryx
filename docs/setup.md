@@ -88,14 +88,17 @@ Split into what every target needs in common, and what's specific to the Android
   ```bash
   "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "emulator"
   "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list | grep google_apis_playstore
-  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "system-images;android-<N>;google_apis_playstore;x86_64"
-  "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n keryx -k "system-images;android-<N>;google_apis_playstore;x86_64"
+  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "system-images;android-<N>;google_apis_playstore;<ABI>"
+  "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n keryx -k "system-images;android-<N>;google_apis_playstore;<ABI>"
   ```
 
   `<N>` should match (or be close to) `minSdk = 26` / `compileSdk`/`targetSdk = 37` above; the
-  CI instrumented-test job runs against API 29. See the
-  [official AVD guide](https://developer.android.com/studio/run/managing-avds) for details beyond
-  this project's own constraints.
+  CI instrumented-test job runs against API 29. `<ABI>` should match your host CPU's own
+  architecture for hardware-accelerated emulation — `x86_64` on an x86_64 host, `arm64-v8a` on an
+  ARM64 host (e.g. an Apple Silicon Mac, or ARM64 Windows/Linux) — see the
+  [emulator acceleration guide](https://developer.android.com/studio/run/emulator-acceleration).
+  See the [official AVD guide](https://developer.android.com/studio/run/managing-avds) for details
+  beyond this project's own constraints.
 - **Android release signing keystore (optional)**: Gradle's default `build` lifecycle includes
   `:androidApp`'s `assembleRelease` (the App Bundle is not part of it — `:androidApp:bundleRelease`
   has to be invoked explicitly, as `release.yml` does), and `androidApp/build.gradle.kts` is
