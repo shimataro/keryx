@@ -640,3 +640,28 @@ confirmation, on all three desktop platforms (build with `createDistributable`/`
   double-click an `.opml` file in the file manager.
 - On all three: repeat while Keryx is already running (second launch) to confirm single-instance
   forwarding activates the existing window and imports without spawning a second process.
+
+### (Android) The notification bell and the foreground alert Snackbar
+
+Where the bell is drawn is covered by `NotificationBellPlacementTest.kt`, and the Snackbar's own
+policy by `ForegroundAlertSnackbarTest.kt` / `NotificationCenterViewModelTest.kt`. What no test can
+cover is that the Snackbar is actually *visible* where the platform draws it, and whether
+`LocalWindowInfo`'s focus flag behaves as assumed on a real device. Confirm on a phone-sized
+device/emulator:
+
+- Leave the app while the feed list is showing, then relaunch: the bell is on the feed list's own
+  toolbar (this is the case that had no entry point at all before).
+- With a cloud provider connected, launch in airplane mode: the startup sync fails and a Snackbar
+  announces it, with an action that opens the settings dialog on the sync tab.
+- Subscribe to an unreachable feed URL, then refresh: the Snackbar's action lands on **that feed's
+  article list**, not back on the feed list.
+- With an article open, raise an alert: the Snackbar draws above the reader's `WebView`.
+- The Snackbar does not collide with the navigation bar, with both 3-button and gesture navigation.
+- Raise an alert while the settings dialog is open (or the notification shade is pulled down):
+  nothing is announced then, and the Snackbar appears once it is closed. If it is instead announced
+  and lost underneath, `LocalWindowInfo.isWindowFocused` does not go false for a Compose `Dialog`
+  on this platform — record that as a known limitation rather than removing the gate.
+- Rotate to landscape (two panes) and try a tablet-width device (three panes): exactly one bell,
+  never two.
+- With cloud sync connected, the feed list toolbar's five icons fit without wrapping, including at
+  the OS's largest display size.

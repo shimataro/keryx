@@ -19,7 +19,11 @@ sealed interface AppNotificationAction {
     /** Opens [url] in the external browser (e.g. a new release's page). */
     data class OpenUrl(val url: String) : AppNotificationAction
 
-    /** Selects the feed [feedId] in the feed list, as if the user had clicked it there. */
+    /**
+     * Selects the feed [feedId] in the feed list, as if the user had clicked it there. At a
+     * single-pane width the feed list is a screen of its own, so this lands on that feed's article
+     * list instead of navigating backwards — see `ui/home/HomePaneLayout.kt`'s `paneForFeedDetail`.
+     */
     data class ShowFeedDetail(val feedId: String) : AppNotificationAction
 
     /** Opens the settings dialog on the tab [tabId] (see `SettingsDialog`'s tab ids). */
@@ -42,3 +46,22 @@ data class AppNotification(
     val timestampMillis: Long,
     val action: AppNotificationAction? = null,
 )
+
+/**
+ * The identity of an *alert* — two notifications with the same [AlertKey] say the same thing about
+ * the same problem, whatever their [AppNotification.id] is.
+ *
+ * Ids are deliberately not part of it: a recurring failure (e.g. every background sync attempt)
+ * produces a fresh id each time, so anything that must treat a recurrence as "the same alert
+ * again" — `NotificationCenter.addCoalescing`'s deduplication and the Android foreground Snackbar's
+ * already-surfaced bookkeeping — has to key on this instead. Both go through [alertKey] so they can
+ * never drift apart (which would make a coalesced-away notification still re-announce itself).
+ */
+internal data class AlertKey(
+    val level: AppNotificationLevel,
+    val message: String,
+    val action: AppNotificationAction?,
+)
+
+/** This notification's [AlertKey]. */
+internal fun AppNotification.alertKey(): AlertKey = AlertKey(level, message, action)

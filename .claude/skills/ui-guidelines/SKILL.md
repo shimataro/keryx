@@ -108,8 +108,22 @@ not in global chrome:
   `ArticleListPane`'s own header row (`ArticleListTopBar`) also gets a search
   icon (`onSearchClick`) as its entry point, in the position (before
   notifications/sort/mark all read) this bullet used to describe as fixed.
-- Notifications / sort / mark all read — header row of `ArticleListPane`,
-  unchanged at every layout.
+- Sort / mark all read — header row of `ArticleListPane`, unchanged at every
+  layout.
+- Notifications (the bell) — normally the same `ArticleListPane` header row,
+  but it is the one action that follows the *user* rather than a pane: an alert
+  entry point that only exists on one of three screens is not reachable from
+  the app's own launch destination. `FeedListPane` therefore grows its own bell
+  exactly when the article list is not on screen beside it (only
+  `PaneLayout.Single`'s depth 1 today), driven from `HomeScreen`'s
+  `visiblePanes` result — `notifVm.takeIf { HomePane.ArticleList !in visible }`
+  — so the two panes can never both draw one, or both skip it. It is a single
+  icon and therefore stays bare (no `ToolbarIconGroup` capsule), separated from
+  the add/refresh/sync cluster by the standard 8dp and placed ahead of it, the
+  same relative position it holds in `ArticleListTopBar`. `ArticleDetailPane`
+  deliberately has none at any layout — a reading screen carries no
+  notification entry point, matching how Android's own apps treat a detail
+  destination.
 
 Panes are tinted left-to-right with increasingly bright Material3 tonal
 surface roles, so boundaries read from tone alone rather than requiring a
@@ -131,7 +145,10 @@ resolves `Triple` (`WINDOW_MIN_WIDTH >= TRIPLE_PANE_MIN_WIDTH`); narrower widths
 `Single`, showing one pane at a time as a hierarchical stack with its own back button
 (`ArticleListPane`/`ArticleDetailPane`'s `onNavigateUp`) and — on Android — the OS back
 gesture/button (`platform/BackHandler`). Nothing about the panes' own internal layout (tonal
-roles, dividers, row chrome) changes between layouts; only how many are mounted at once does.
+roles, dividers, row chrome) changes between layouts; only how many are mounted at once does —
+with two deliberate exceptions, both about an affordance that has nowhere else to live once the
+panes become separate screens: the search field (see below) and the notification bell (see "Pane
+structure & tonal roles" above).
 `ui/home/HomePaneLayout.kt`'s `canNavigateBack(layout, depth)` is the single predicate for
 "does going back one step actually change anything on screen" — `false` at `PaneLayout.Triple`
 (nothing ever changes there) and at `PaneLayout.Dual` depth 1→2 (the sliding window shows the
@@ -721,8 +738,9 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   when checked. The Android `actual`s delegate to M3's own `Switch`/`Checkbox`
   — see the `KeryxTextField` bullet below for why that's the right call on
   that platform. `KeryxBadgedIcon` (`ui/common/KeryxBadge.kt`, expect/actual) —
-  the count badge overlaid on an icon (currently only the notification bell in
-  `ArticleListPane`) — follows the same split: desktop's `actual` draws a
+  the count badge overlaid on an icon (currently only the notification bell,
+  in `ArticleListPane` and — at a single-pane width — `FeedListPane`) — follows
+  the same split: desktop's `actual` draws a
   hand-rolled `Box`/`Text` pill (`error` fill, `onError` text), Android's
   `actual` uses M3's own `BadgedBox`/`Badge`. Don't add a raw `Box`/`Text` pill
   or a raw `BadgedBox`/`Badge` at a `commonMain` call site — use
@@ -896,7 +914,11 @@ side, Android's own Material 3 ripple/shapes/components on the other:
     banner view rather than a drop-in native replacement. (The URL-copied feedback is no longer purely
     an inline-icon affair — see `LocalSnackbarHostState`'s own KDoc: Android now also reports it via a
     real M3 `Snackbar`, below API 33 only, where the OS itself doesn't already show a clipboard-copy
-    confirmation. Desktop still has none, per this app's no-in-app-snackbar convention.)
+    confirmation. Android's second use is `HomeScreen`'s `ForegroundAlertSnackbar`, which announces a
+    warning/error the moment it is raised — the bell's badge alone only reaches a user already looking
+    at the pane hosting it, and these alerts are raised asynchronously by the startup tasks and the
+    background worker with no OS notification behind them; see `docs/error-design.md`. Desktop still
+    has none of either, per this app's no-in-app-snackbar convention.)
   - **Desktop only.** The Settings dialog's tab switcher (desktop's `KeryxTabDialog`
     actual in `KeryxDialogs.desktop.kt`) now uses Material3's
     `SecondaryScrollableTabRow`/`Tab` via the shared `KeryxDialogTabs` helper, making
@@ -932,7 +954,8 @@ side, Android's own Material 3 ripple/shapes/components on the other:
 - **Popup vs. Dialog**: non-modal, anchored info panels (no scrim, dismiss on
   outside click, positioned relative to the control that opened them) use
   `KeryxAnchoredPanel` (see above) — `NotificationCenterSheet`, opened from
-  `ArticleListPane`'s bell icon, is the first example (a `Box` around the
+  whichever pane currently hosts the bell (see "Pane structure & tonal roles"
+  above), is the first example (a `Box` around the
   `TooltipIconButton` holds local `showNotifications` state and anchors the
   panel with `alignment = Alignment.TopEnd` + a small `anchorOffsetY`, desktop-only
   positioning — see `KeryxAnchoredPanel`'s own KDoc). The tag

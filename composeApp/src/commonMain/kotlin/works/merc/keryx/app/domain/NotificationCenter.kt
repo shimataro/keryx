@@ -4,7 +4,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import works.merc.keryx.app.core.AlertKey
 import works.merc.keryx.app.core.AppNotification
+import works.merc.keryx.app.core.alertKey
 
 /**
  * Session-only notification history (the bell icon). Repositories push
@@ -24,16 +26,13 @@ class NotificationCenter {
     }
 
     /**
-     * Adds a notification while keeping only the newest entry with the same level, message, and action.
+     * Adds a notification while keeping only the newest entry saying the same thing — see
+     * [AlertKey], which is also what the Android foreground Snackbar keys its already-surfaced
+     * bookkeeping on, so the two agree on what counts as a recurrence.
      */
     fun addCoalescing(notification: AppNotification) {
-        _items.update { list ->
-            listOf(notification) + list.filterNot {
-                it.level == notification.level &&
-                    it.message == notification.message &&
-                    it.action == notification.action
-            }
-        }
+        val key = notification.alertKey()
+        _items.update { list -> listOf(notification) + list.filterNot { it.alertKey() == key } }
     }
 
     /**
