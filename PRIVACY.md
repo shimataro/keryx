@@ -53,7 +53,8 @@ This means `keryx.db` and `local_settings.json` may be included in Android's
 automatic backup of app data to your own Google Account, and in device-to-device
 transfer when you set up a new phone — channels Keryx's developer has no access to.
 Your cloud-sync credentials (below) are explicitly excluded from both. You can turn
-this off for Keryx at any time in Android's Settings app (Apps → Keryx → Backup).
+this off for Keryx at any time from your device's Android backup settings (the
+exact menu path varies by device and Android version).
 
 ## Optional cloud sync (Dropbox / Google Drive / OneDrive)
 
