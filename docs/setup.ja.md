@@ -58,6 +58,28 @@
   `sdkmanager --list | grep android-37` で現在の ID を確認するか、初回ビルド時に AGP 自身の
   SDK 自動ダウンロードに解決させればよい。`build-tools;36.0.0` はこの影響を受けず、そのまま
   導入できる（`sdkmanager "build-tools;36.0.0"` — 36.0.0 は AGP 9.3.2 が既定で選択するバージョン）。
+- **SDK ライセンスへの同意**: コマンドラインツール単体（`cmdline-tools`）経路では、パッケージを
+  ダウンロードする前に一度ライセンスへ同意する必要がある（Android Studio の SDK Manager では
+  この同意が UI の一部として組み込まれているため、この手順が必要なのは `cmdline-tools` 単体の
+  経路——CI、ヘッドレス環境、手動インストール——に限られる）:
+
+  ```bash
+  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
+  ```
+
+- **エミュレータ（AVD）の作成**: 実機が無い場合のみ必要——なぜエミュレータには **Google Play**
+  イメージが必要なのかは、後述の「アプリの実行に必要なソフトウェア」を参照。system image の
+  ID は Google のリビジョン更新で変わるため、固定値を書かず一覧から選ぶ:
+
+  ```bash
+  sdkmanager --list | grep google_apis_playstore
+  sdkmanager "system-images;android-<N>;google_apis_playstore;x86_64"
+  avdmanager create avd -n keryx -k "system-images;android-<N>;google_apis_playstore;x86_64"
+  ```
+
+  `<N>` は上記の `minSdk = 26` / `compileSdk`・`targetSdk = 37` に近い値を選ぶ。CI の計装テスト
+  ジョブは API 29 で実行している。このプロジェクト固有の制約を超えた詳細は
+  [公式の AVD ガイド](https://developer.android.com/studio/run/managing-avds) を参照。
 - 初期設定: `local.properties` の `sdk.dir` に SDK の場所を指定する（AGP がこのキー自体を
   直接読むため、下記 OAuth キーで使う `-P`/環境変数/`local.properties` の解決チェーンとは
   別系統）か、環境変数 `ANDROID_HOME` を設定してもよい。`:composeApp:compileKotlinDesktop` や
@@ -95,7 +117,9 @@
   `./gradlew build`・その他のテストタスクはいずれも実機/エミュレータ無しで動く。Linux で
   エミュレータを実用的な速度で動かすには **KVM**（ハードウェアアクセラレーション）が必要 —
   設定方法は[公式ガイド](https://developer.android.com/studio/run/emulator-acceleration)を
-  参照。
+  参照。AVD は「Google APIs」だけのイメージではなく **Google Play** イメージを使う必要がある
+  ——そうしないと Dropbox / OneDrive 連携が動かない。詳細は後述の「よくある問題」の
+  「（Android エミュレータ）Dropbox / OneDrive 連携で画面は開くがタップに反応しない」を参照。
 - **NDK は不要**（プロジェクト内でネイティブコードのビルドは行っていない。誤って導入しない
   よう注意）。
 
@@ -122,6 +146,11 @@
 - **Linux: D-Bus セッションバス**（任意）: トレイ（StatusNotifierItem）とデスクトップ通知に
   使う。無い環境では自動的に AWT ベースのトレイにフォールバックするため必須ではない。
 - **macOS**: 追加ソフトウェア不要（WebView は OS 標準の WebKit を使う）。
+- **Android**: 実機（開発者オプション/USB デバッグを有効化したもの）または起動中のエミュレータ、
+  そしてアプリのインストール・起動に使う `adb`（`platform-tools`）。記事リーダーは OS 標準の
+  WebView を使うため、追加の WebView ランタイム導入は不要。Android 13+ の通知権限
+  （`POST_NOTIFICATIONS`）はアプリが実行時に自ら要求するので、事前に用意しておくものではない —
+  詳細は [background-update.ja.md](background-update.ja.md) を参照。
 
 ### パッケージングに必要なソフトウェア
 
@@ -149,6 +178,12 @@
 `macos-latest` / `windows-latest` の各ランナーイメージにそれぞれプリインストール済み —
 ローカルの開発機ではこの3つのうち足りないものを手動でセットアップする必要がある。
 
+**Android（APK/AAB）** は上記のいずれも不要 — jpackage 相当のネイティブツールは無い。追加で
+必要になるのは配布可能な（`debug` ではない）ビルドを作る場合のリリース署名キーストアだけ。
+前述の「Android リリース署名キーストア」を参照。デスクトップのネイティブパッケージが対象 OS
+上でしかビルドできない（クロスコンパイル不可）のとは違い、APK/AAB はどの OS からでもビルド
+できる — コマンドは [build.md](build.md) を参照。
+
 ## 初回
 
 ```bash
@@ -168,6 +203,9 @@ keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
 # android.release.key.password を追記する
 
 ./gradlew build
+
+# Android: 実機を接続済み（または前述のエミュレータを起動済み）の場合
+./gradlew :androidApp:installDebug
 ```
 
 `build` が通れば SQLDelight / Compose Resources / BuildConfig のコード生成、コンパイル、`build`

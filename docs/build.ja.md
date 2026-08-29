@@ -9,6 +9,11 @@
   ただし `:composeApp:run` などの JavaExec タスクは Gradle を起動した JVM で実行されるため、
   それが 25 未満だと実行時に `UnsupportedClassVersionError` になる。
 - Gradle は同梱の wrapper（`./gradlew`, Gradle 9.6.1）を使う。
+- **Android SDK**（`local.properties` の `sdk.dir`、または環境変数 `ANDROID_HOME`） —
+  `:composeApp` 自体が Android library ターゲットを構成しているため、デスクトップ側だけの変更
+  であってもルートの `./gradlew build` には SDK の解決が必要。インストールと AVD の作成は
+  [setup.ja.md](setup.ja.md) を参照。`:composeApp:compileKotlinDesktop`/`:composeApp:desktopTest`
+  のようなデスクトップ限定タスクはこの要件を回避できる。
 
 サンドボックス等でツールチェーンの自動ダウンロードが必要な場合:
 `./gradlew -Dorg.gradle.java.installations.auto-download=true ...`。
@@ -16,9 +21,12 @@
 ## ビルド・実行
 
 ```bash
-./gradlew build                    # 全ソースセットのコンパイル + テスト
-./gradlew :composeApp:desktopTest  # テストのみ
-./gradlew :composeApp:run          # デスクトップアプリを起動
+./gradlew build                       # 全ソースセットのコンパイル + テスト
+./gradlew :composeApp:desktopTest     # テストのみ
+./gradlew :composeApp:run             # デスクトップアプリを起動
+
+./gradlew :androidApp:assembleDebug   # デバッグ APK をビルド
+./gradlew :androidApp:installDebug    # ビルドして接続中の実機/エミュレータへインストール
 ```
 
 ## クラウドストレージとの連携
@@ -91,6 +99,23 @@ Gradle のカスタムタスク（`generateBuildConfig`）で実現している�
 
 OneDrive は Dropbox と同じカスタム URI スキーム（`keryx://oauth2/callback`、`state` で識別）を再利用するため、追加の OS 登録は不要。**クライアントシークレットは不要**（Google と異なり、Microsoft は「モバイル/デスクトップ」登録を PKCE の完全なパブリッククライアントとして扱う）。同期 DB は OneDrive のアプリ専用フォルダー（`/me/drive/special/approot`）に保存される。Dropbox 同様、macOS では `keryx://` がパッケージ済みアプリへルーティングされるため `./gradlew :composeApp:run` では連携が完了しない。macOS で検証するには `createDistributable` で `Keryx.app` をビルドして起動する。
 
+### Android
+
+Android が対応するのは **Dropbox と OneDrive のみ** — 設定方法は上記と同じく
+`DROPBOX_APP_KEY`/`ONEDRIVE_CLIENT_ID` を設定する。Google Drive のキーは Android ビルドには
+影響しない。**Google Drive が Android で提供されないのは**、そのデスクトップ用 OAuth 構成
+（loopback リダイレクト + `client_secret`）を Android では再利用できないため —
+背景となる調査は `external-spec.md` §4 と `sync-architecture.md` の "Google Drive on Android"
+を参照。
+
+デスクトップでは `keryx://` の受け口に OS レベルの登録手順が必要だった（上記の各サービスの
+説明を参照）のに対し、Android は `androidApp/src/main/AndroidManifest.xml` 内のマニフェスト
+宣言だけで `keryx://oauth2/callback` のリダイレクトを受け取れる（`scheme="keryx"`
+`host="oauth2"` の `ACTION_VIEW` インテントフィルター）。そのため、上記デスクトップの
+`./gradlew :composeApp:run` のようなパッケージ済み/未パッケージの区別は無い。エミュレータで
+連携を検証するには、OAuth フローを完了させる Chrome が必要なので Google Play イメージが
+やはり必要 — [setup.ja.md](setup.ja.md) を参照。
+
 ## パッケージング
 
 [`composeApp/build/compose/binaries/main`](./composeApp/build/compose/binaries/main)以下に作成される
@@ -111,6 +136,38 @@ OneDrive は Dropbox と同じカスタム URI スキーム（`keryx://oauth2/ca
 ./gradlew :composeApp:packageDeb
 ./gradlew :composeApp:packageRpm
 ```
+
+### Android（APK / AAB）
+
+上記のデスクトップパッケージと違い、APK/AAB は**どの OS からでも**ビルドできる —
+クロスコンパイルの制約は無い。
+
+```bash
+./gradlew :androidApp:assembleRelease -PappVersion=1.2.3   # APK
+./gradlew :androidApp:bundleRelease   -PappVersion=1.2.3   # AAB（Play Store 提出用の形式）
+```
+
+出力先はそれぞれ `androidApp/build/outputs/apk/release/` と
+`androidApp/build/outputs/bundle/release/`（上記デスクトップパッケージの
+`composeApp/build/compose/binaries/main` とは別の場所）。`assembleRelease` は既定の `build`
+ライフサイクルに含まれるが、`bundleRelease` は含まれず明示的に実行する必要がある —
+両方の使われ方は後述の「リリース（CD）」を参照。
+
+リリース署名は 3 つのソースから、この優先順で解決される — Gradle プロジェクトプロパティ、
+環境変数、`local.properties` の順 — 4 つの値はすべて揃って初めて有効になる（一部だけの設定は
+未署名/半端な署名結果へフォールバックせず即座にビルド失敗する）。ローカル用のキーストア
+生成方法は [setup.ja.md](setup.ja.md) を参照:
+
+| `local.properties` のキー | `-P` プロパティ | 環境変数 |
+| --- | --- | --- |
+| `android.release.keystore.path` | `androidReleaseKeystorePath` | `ANDROID_RELEASE_KEYSTORE_PATH` |
+| `android.release.keystore.password` | `androidReleaseKeystorePassword` | `ANDROID_RELEASE_KEYSTORE_PASSWORD` |
+| `android.release.key.alias` | `androidReleaseKeyAlias` | `ANDROID_RELEASE_KEY_ALIAS` |
+| `android.release.key.password` | `androidReleaseKeyPassword` | `ANDROID_RELEASE_KEY_PASSWORD` |
+
+3 つのソースのどれも未設定の場合、ビルド自体は成功するが release APK は**未署名**になる
+（ビルド警告のみで、debug 署名へのフォールバックは無い）— CI での署名の扱いは後述の
+「リリース（CD）」、この設計の理由は setup.ja.md の「ビルドに必要なソフトウェア」を参照。
 
 アプリアイコンは `composeApp/icons/{keryx.icns, keryx.ico, keryx.png}`。トレイアイコンは
 `composeApp/src/commonMain/composeResources/drawable/tray_icon*.png`。`tray_icon_outlined.png`

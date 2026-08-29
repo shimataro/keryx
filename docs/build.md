@@ -8,6 +8,11 @@
   The JDK 25 compilation toolchain is auto-provisioned by Gradle's foojay-resolver.
   However, JavaExec tasks such as `:composeApp:run` are executed with the JVM that launched Gradle, so if it is older than 25 you will hit `UnsupportedClassVersionError` at runtime.
 - Use the bundled wrapper (`./gradlew`, Gradle 9.6.1).
+- **Android SDK** (`local.properties`' `sdk.dir` or the `ANDROID_HOME` environment variable) —
+  `:composeApp` itself configures an Android library target, so the root `./gradlew build` needs
+  the SDK resolvable even for a desktop-only change. See [setup.md](setup.md) for install/AVD
+  setup; a desktop-scoped task like `:composeApp:compileKotlinDesktop`/`:composeApp:desktopTest`
+  avoids this requirement.
 
 If toolchain auto-download is blocked in a sandbox:
 `./gradlew -Dorg.gradle.java.installations.auto-download=true ...`.
@@ -15,9 +20,12 @@ If toolchain auto-download is blocked in a sandbox:
 ## Build & Run
 
 ```bash
-./gradlew build                    # Compile all source sets + run tests
-./gradlew :composeApp:desktopTest  # Tests only
-./gradlew :composeApp:run          # Launch the desktop app
+./gradlew build                       # Compile all source sets + run tests
+./gradlew :composeApp:desktopTest     # Tests only
+./gradlew :composeApp:run             # Launch the desktop app
+
+./gradlew :androidApp:assembleDebug   # Build a debug APK
+./gradlew :androidApp:installDebug    # Build + install it on a connected device/emulator
 ```
 
 ## Cloud Storage Integration
@@ -91,6 +99,22 @@ The flow uses PKCE (`code_verifier`), but **a client secret is also required sep
 
 OneDrive reuses the same custom URI scheme as Dropbox (`keryx://oauth2/callback`, disambiguated by `state`), so no additional OS registration is needed. **No client secret is required** (unlike Google, Microsoft treats a "Mobile and desktop applications" registration as a full public client with PKCE). The sync DB is stored in OneDrive's hidden app folder (`/me/drive/special/approot`). As with Dropbox, macOS routes `keryx://` to the packaged app, so `./gradlew :composeApp:run` cannot complete linking — build `Keryx.app` with `createDistributable` to test it on macOS.
 
+### Android
+
+Android supports **Dropbox and OneDrive only** — set `DROPBOX_APP_KEY`/`ONEDRIVE_CLIENT_ID` the same
+way as above; the Google Drive keys have no effect on the Android build. **Google Drive is not
+offered on Android** because its desktop OAuth configuration (a "Desktop app" client using loopback
+redirect + `client_secret`) cannot be reused there — see `external-spec.md` §4 and
+`sync-architecture.md`'s "Google Drive on Android" for the underlying investigation.
+
+Unlike desktop, where `keryx://` needs an OS-level registration step (see each provider's note
+above), Android receives the `keryx://oauth2/callback` redirect through a plain manifest
+declaration — an `ACTION_VIEW` intent-filter (`scheme="keryx"` `host="oauth2"`) in
+`androidApp/src/main/AndroidManifest.xml` — so there is no packaged-vs-unpackaged distinction like
+the desktop `./gradlew :composeApp:run` limitation above. To verify linking in an emulator, it
+still needs a Google Play system image (Chrome) to actually complete the OAuth flow — see
+[setup.md](setup.md).
+
 ## Packaging
 
 Created under [`composeApp/build/compose/binaries/main`](./composeApp/build/compose/binaries/main).
@@ -111,6 +135,37 @@ Only the platform matching the execution platform can be built (cross-compilatio
 ./gradlew :composeApp:packageDeb
 ./gradlew :composeApp:packageRpm
 ```
+
+### Android (APK / AAB)
+
+Unlike the desktop packages above, an APK/AAB can be built on **any** OS — there is no
+cross-compilation restriction here.
+
+```bash
+./gradlew :androidApp:assembleRelease -PappVersion=1.2.3   # APK
+./gradlew :androidApp:bundleRelease   -PappVersion=1.2.3   # AAB (Play Store submission format)
+```
+
+Output goes to `androidApp/build/outputs/apk/release/` and `androidApp/build/outputs/bundle/release/`
+respectively (a different location than the desktop packages' `composeApp/build/compose/binaries/main`
+above). `assembleRelease` is part of the default `build` lifecycle; `bundleRelease` is not and must
+be invoked explicitly — see "Release (CD)" below for how `release.yml` uses both.
+
+Release signing is resolved from three sources, in this priority order — a Gradle project property,
+an environment variable, then `local.properties` — and all four values are required together (an
+incomplete set fails the build immediately rather than falling back to an unsigned/half-signed
+result); see [setup.md](setup.md) for how to generate a keystore for local use:
+
+| `local.properties` key | `-P` property | Environment variable |
+| --- | --- | --- |
+| `android.release.keystore.path` | `androidReleaseKeystorePath` | `ANDROID_RELEASE_KEYSTORE_PATH` |
+| `android.release.keystore.password` | `androidReleaseKeystorePassword` | `ANDROID_RELEASE_KEYSTORE_PASSWORD` |
+| `android.release.key.alias` | `androidReleaseKeyAlias` | `ANDROID_RELEASE_KEY_ALIAS` |
+| `android.release.key.password` | `androidReleaseKeyPassword` | `ANDROID_RELEASE_KEY_PASSWORD` |
+
+With none of the three sources set, the build still succeeds but produces an **unsigned** release
+APK (a build warning, no fallback to debug signing) — see "Release (CD)" below for how CI handles
+signing, and setup.md's "Software Required to Build" for the reasoning behind that design.
 
 App icons are at `composeApp/icons/{keryx.icns, keryx.ico, keryx.png}`. Tray icons are at
 `composeApp/src/commonMain/composeResources/drawable/tray_icon*.png` — `tray_icon_outlined.png` (white glyph +

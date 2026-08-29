@@ -72,6 +72,13 @@
   （または実時間ポーリング）に切り替える（`FeedFetcherTest.kt`, `FeedRepositoryTest.kt`,
   `OAuthLoopbackServerTest.kt` 等の実績あり）。
 - 実スレッドで DB への並行書き込みを行うテストは `inMemoryDb()` ではなく `fileDb()` を使うこと —— 前者は全呼び出し元を、同期機構を持たない 1 本の共有 JDBC コネクションに固定するため、実スレッド 2 本で SQLDelight のトランザクション管理そのものが壊れ得る。`fileDb()` を使う場合でも、テスト対象と無関係な書き込みを fixture に残さないこと: SQLite の deferred `BEGIN` により、write の前に read を行うトランザクションは、無関係な並行書き込み側のロック昇格を、`busy_timeout` では救済されないリトライ不能な `SQLITE_BUSY` で失敗させることがある —— 詳細は `known-issues.md` の「並行書き込みにより read→write トランザクションがリトライ不能な SQLITE_BUSY で失敗する」を参照。
+- 新規の Android Compose UI 計装テストは `androidApp/src/androidTest/` に置く（`composeApp` は
+  ライブラリモジュールなので、その計装テストはアプリケーションモジュール側に置く — 上記「構成」
+  参照）。バンドルされた `requery` SQLite に依存する DB テストは
+  `composeApp/src/androidDeviceTest/` に置く。**`androidUnitTest`/`androidHostTest` ソースセットは
+  存在しない**（Robolectric 未導入）— たまたま Android 固有クラスに実装されている純粋なロジックは、
+  `domain/BackgroundRefreshSchedule.kt`（`BackgroundRefreshScheduleTest.kt` で検証済み）のように
+  `commonMain` へ切り出し、`commonTest` から検証する。
 
 ## `Result<T>` のテスト方針
 
@@ -89,8 +96,16 @@
 ./gradlew :composeApp:desktopTest
 ```
 
-Android の計装テストスイート `androidDeviceTest`（実際のバンドル SQLite に対する
-`DatabaseMerger`/`DatabaseSnapshot` の検証）には実機または起動中のエミュレータが必要:
+Android には計装テストスイートが 2 つある。CI に組み込まれているのは片方だけなので混同
+しやすい:
+
+| スイート | タスク | 対象 | CI |
+| --- | --- | --- | --- |
+| `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | 実際のバンドル SQLite に対する `DatabaseMerger`/`DatabaseSnapshot` | ✗ ローカルのみ |
+| `androidApp/src/androidTest/` | `:androidApp:connectedDebugAndroidTest` | Compose UI（長押しジェスチャ、検索バー） | ✓ 毎プッシュ |
+
+どちらも実機または起動中のエミュレータが必要 — AVD（`<name>`）の作り方は
+[setup.ja.md](setup.ja.md) を参照:
 
 ```bash
 $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
@@ -230,7 +245,11 @@ Linux の SNI トレイでは `SniConnection`（接続・バス名取得・expor
 `NewIcon`/`NewToolTip`/`LayoutUpdated` の実配送（*発火の判断* はカバー済み）、`NameOwnerChanged` からの
 再登録経路、ホスト起点の `Activate`/`Event` が dbus-java のワーカースレッド経由で届くこと、
 `LinuxNotifier.notify` の実デーモンへの配送、`LinuxTray` コンポーザブルの結線もテスト不可。
-パネル上で実際に透過して見えるかは本質的に目視確認になる。
+パネル上で実際に透過して見えるかは本質的に目視確認になる。Android 側では、「実行」節にある
+2 つの計装スイート以外はすべて同様に未カバーである: `WorkManager` の実際の定期ジョブスケジューリング
+と実行（純粋なスケジュール算出ロジック `BackgroundRefreshSchedule.kt` のみテスト済み）、
+`NotificationManagerCompat` 経由の実通知投稿、Storage Access Framework のファイルピッカー、
+Keystore を使ったトークン保存。
 
 ## 手動確認（UI）
 

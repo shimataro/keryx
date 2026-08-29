@@ -61,6 +61,30 @@ Split into what every target needs in common, and what's specific to the Android
   the first build. `build-tools;36.0.0` is unaffected and installs directly
   (`sdkmanager "build-tools;36.0.0"` — the version AGP 9.3.2 selects by default when none is
   specified).
+- **SDK license agreement**: the standalone `cmdline-tools` route requires accepting the SDK
+  licenses once before any package can be downloaded (Android Studio's SDK Manager already
+  presents this as part of its own UI, so this step only matters on the `cmdline-tools`-only
+  path — CI, a headless machine, or a manual install):
+
+  ```bash
+  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
+  ```
+
+- **Emulator (AVD) setup**: only needed if you don't have a physical device — see "Software
+  Required to Run the App" below for why an emulator has to use a **Google Play** system image
+  specifically. The system image ID changes as Google ships new revisions, so list what's
+  currently available rather than hardcoding one:
+
+  ```bash
+  sdkmanager --list | grep google_apis_playstore
+  sdkmanager "system-images;android-<N>;google_apis_playstore;x86_64"
+  avdmanager create avd -n keryx -k "system-images;android-<N>;google_apis_playstore;x86_64"
+  ```
+
+  `<N>` should match (or be close to) `minSdk = 26` / `compileSdk`/`targetSdk = 37` above; the
+  CI instrumented-test job runs against API 29. See the
+  [official AVD guide](https://developer.android.com/studio/run/managing-avds) for details beyond
+  this project's own constraints.
 - Setup: point `local.properties`' `sdk.dir` at the SDK location (AGP reads this key itself; it
   doesn't go through this project's own `-P`/env-var/`local.properties` resolution chain used for
   the OAuth keys below), or set the `ANDROID_HOME` environment variable instead. A target-scoped
@@ -100,6 +124,9 @@ Split into what every target needs in common, and what's specific to the Android
   test task work without one. Running the emulator at a usable speed on Linux needs **KVM**
   (hardware acceleration) — see the
   [official guide](https://developer.android.com/studio/run/emulator-acceleration) for setup.
+  An AVD must use a **Google Play** system image, not a plain "Google APIs" one, or Dropbox/OneDrive
+  linking won't work in it — see Common Issues' "Dropbox/OneDrive linking opens a page but taps
+  don't respond" below.
 - **The NDK is not needed** (the project builds no native code of its own — don't install it by
   mistake).
 
@@ -127,6 +154,11 @@ packaged app (or `:composeApp:run`).
   notifications. Not required — an environment without one falls back to the AWT-based tray
   automatically.
 - **macOS**: no additional software needed (the WebView uses the OS's own WebKit).
+- **Android**: a physical device (with Developer Options/USB debugging enabled) or a running
+  emulator, plus `adb` (`platform-tools`) to install and launch the app. No extra WebView runtime
+  to install — the article reader uses the OS's own bundled WebView. Android 13+'s notification
+  permission (`POST_NOTIFICATIONS`) is requested by the app itself at runtime, not something to
+  set up in advance — see [background-update.md](background-update.md).
 
 ### Software Required for Packaging
 
@@ -154,6 +186,12 @@ Tools and WiX Toolset already come preinstalled on the `macos-latest` and `windo
 images respectively — a local dev machine still needs whichever of these three it's missing set up
 manually.
 
+**Android (APK/AAB)** needs none of the above — no jpackage-equivalent native tool. The only extra
+requirement is a release signing keystore if you want a distributable (installable, non-`debug`)
+build; see "Android release signing keystore" above. Unlike the native desktop packages, which can
+only be built on the OS they target (no cross-compilation), an APK/AAB can be built on any OS —
+see [build.md](build.md) for the commands.
+
 ## First-time Setup
 
 ```bash
@@ -172,6 +210,9 @@ keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
 # android.release.key.alias / android.release.key.password to local.properties
 
 ./gradlew build
+
+# Android: with a device connected (or an emulator already running, see Prerequisites above)
+./gradlew :androidApp:installDebug
 ```
 
 If `build` passes, code generation for SQLDelight / Compose Resources / BuildConfig, compilation,
