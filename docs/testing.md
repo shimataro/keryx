@@ -300,8 +300,9 @@ real app UI, so confirm manually on a device or emulator:
 semantics/text-input/font-scale behavior in isolation (see `androidApp/src/androidTest/` above);
 confirm the full navigation flow manually on a device or emulator:
 
-- On launch, the app lands on the article list (depth 2), not the last-read article — confirms
-  `initialPaneFor`'s clamp.
+- On launch, a saved `HomePane.ArticleDetail` comes back as the article list (depth 2), not the
+  last-read article — `initialPaneFor`'s clamp. A saved `HomePane.FeedList` is restored as-is
+  (depth 1); the article list is only what a session with nothing saved falls back to.
 - Tapping the article list's own search icon, or the feed list's collapsed search bar, opens the
   search screen with the keyboard already up and the field focused.
 - Typing 3+ characters shows results on the same screen, below the field — no pane change needed.
