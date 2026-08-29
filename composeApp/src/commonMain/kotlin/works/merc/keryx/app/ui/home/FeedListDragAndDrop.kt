@@ -343,8 +343,8 @@ internal fun FolderGroupHeader(
                 rowInteraction,
                 decoration = dropTargetBorderModifier(isFeedDragHighlight, MaterialTheme.colorScheme.secondary),
             )
-            .padding(end = 8.dp)
-            .heightIn(min = listRowMinHeight(isTouchPrimary)),
+            .heightIn(min = listRowMinHeight(isTouchPrimary))
+            .padding(end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CompositionLocalProvider(
@@ -578,8 +578,8 @@ internal fun FeedRow(
             )
             .insertionMarkers(top = topMarker, bottom = bottomMarker)
             .listRowSurface(selectionBackground(selectionTone, focused), ListRowKind.NavItem, rowInteraction)
-            .padding(start = if (indented) FEED_ROW_INDENT else 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp)
-            .heightIn(min = listRowMinHeight(isTouchPrimary)),
+            .heightIn(min = listRowMinHeight(isTouchPrimary))
+            .padding(start = if (indented) FEED_ROW_INDENT else 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FeedAvatar(feed.displayTitle(), feed.favicon_url)

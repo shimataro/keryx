@@ -215,8 +215,9 @@ internal fun ArticleRow(
                 onOpen = onClick,
             )
             .listRowSurface(selectionBackground(selected, focused), ListRowKind.ListItem, rowInteraction)
+            .heightIn(min = listRowMinHeight())
             .padding(horizontal = 8.dp, vertical = 10.dp)
-            .heightIn(min = maxOf(rowHeight, listRowMinHeight())),
+            .heightIn(min = rowHeight),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.width(8.dp).height(rowHeight)) {

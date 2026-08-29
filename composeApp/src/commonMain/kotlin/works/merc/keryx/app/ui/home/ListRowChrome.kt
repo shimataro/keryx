@@ -18,14 +18,28 @@ internal val LIST_ROW_HORIZONTAL_MARGIN = 8.dp
  * M3's own `NavigationDrawerItem` minimum height on a touch-primary platform, `0.dp` (no floor,
  * the row's intrinsic content height applies) everywhere else.
  *
+ * **M3's 56dp is an outer height — content plus the row's own padding — so this must floor the
+ * *padded* row, not its content.** Apply it as `Modifier.heightIn(min = listRowMinHeight())`,
+ * placed *before* a row's inner content padding and immediately *after* [listRowSurface]:
+ *
+ * - Before the content padding, because after it the floor applies to the content alone and the
+ *   padding stacks on top of it — making a row as much taller than 56dp as its own padding is
+ *   thick, and making rows with differing content padding differing heights. This is the opposite
+ *   placement from `ArticleRow`'s own `rowHeight` floor, which genuinely *is* a content height
+ *   (derived from typography line heights by `rememberArticleRowMetrics()`) and therefore stays
+ *   inside the padding; `ArticleRow` carries both floors, one on each side of it.
+ * - After [listRowSurface], because that applies [LIST_ROW_VERTICAL_MARGIN] before it clips and
+ *   paints: any further out, the floor would swallow that margin and leave the painted highlight
+ *   `2 *` [LIST_ROW_VERTICAL_MARGIN] short of it. What this floors is the *highlight*, not the
+ *   row's whole clickable band.
+ *
  * Deliberately independent of [LIST_ROW_VERTICAL_MARGIN]/[LIST_ROW_HORIZONTAL_MARGIN]/
  * [LIST_ROW_GUIDE_THICKNESS] — those govern the *gap* between two rows and the drag insertion
  * marker's geometry, which must stay put regardless of a row's own content height (see
- * [LIST_ROW_VERTICAL_MARGIN]'s own KDoc). Apply via `Modifier.heightIn(min = listRowMinHeight())`
- * *after* a row's inner content padding, the same placement `ArticleRow`'s own `rowHeight` floor
- * already uses — never before it, or the padding would be measured against the still-unfloored
- * height. `NoFolderHeader` is deliberately excluded: it is a plain section label with no click
- * target or touch-sized child of its own, not an interactive row this floor is meant for.
+ * [LIST_ROW_VERTICAL_MARGIN]'s own KDoc). It is a *minimum*, not a fixed height: a row whose
+ * content genuinely needs more (a large `fontScale`, say) grows past it, exactly as M3 intends.
+ * `NoFolderHeader` is deliberately excluded: it is a plain section label with no click target or
+ * touch-sized child of its own, not an interactive row this floor is meant for.
  *
  * @param isTouchPrimary Overridable for tests only (mirrors `feedListReorderDrag`'s own
  *   `isTouchPrimary` parameter) — production call sites always use the platform default.
