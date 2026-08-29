@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
@@ -95,6 +96,7 @@ import works.merc.keryx.app.resources.home_tag_color
 import works.merc.keryx.app.resources.home_tag_name_duplicate
 import works.merc.keryx.app.resources.home_tags
 import works.merc.keryx.app.resources.menu_settings
+import works.merc.keryx.app.ui.common.KeryxCollapsedSearchBar
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.KeryxPaneTopBar
@@ -139,8 +141,12 @@ internal const val FEED_LIST_DRAG_HOST_TEST_TAG = "feed-list-drag-host"
  *   change, opens the unsubscribe/delete confirmation for whichever feed/folder/tag the current
  *   filter selects.
  * @param onSelectionAdvance Called after a filter selection (a quick filter, feed, folder, or
- *   tag row), in addition to [onActivated] — see `HomeScreen`'s pane-layout wiring. No-op at
- *   [PaneLayout.Triple], where every pane is already visible and there is nowhere to advance to.
+ *   tag row), in addition to [onActivated] — see `HomeScreen`'s pane-layout wiring. `null` means
+ *   [PaneLayout.Triple], where every pane is already visible and there is nowhere to advance to —
+ *   this is also what keeps this pane's search field editable (see the `KeryxTextField`/
+ *   `KeryxCollapsedSearchBar` branch below): a narrow layout instead folds it into a read-only
+ *   entry point, since the field the user would actually type into now lives in
+ *   `ArticleListPane`'s `SearchListPane` alongside the results (see that composable's own KDoc).
  * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
  */
 @Composable
@@ -154,7 +160,7 @@ internal fun FeedListPane(
     onTextInputFocusChange: (Boolean) -> Unit = {},
     renameSelectedRequestId: Int = 0,
     deleteSelectedRequestId: Int = 0,
-    onSelectionAdvance: () -> Unit = {},
+    onSelectionAdvance: (() -> Unit)? = null,
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
     val feeds by vm.feeds.collectAsStateSafe(emptyList())
@@ -174,8 +180,21 @@ internal fun FeedListPane(
     val searchQuery by vm.searchQuery.collectAsStateSafe("")
     val cloudConnected by vm.cloudConnected.collectAsStateSafe(false)
     val searchFocusRequester = remember { FocusRequester() }
-    LaunchedEffect(Unit) {
-        vm.searchFocusRequests.collect { searchFocusRequester.requestFocus() }
+    val pendingSearchFocus by vm.pendingSearchFocus.collectAsStateSafe(false)
+    // Only consumed at PaneLayout.Triple (onSelectionAdvance == null), where this pane's own field
+    // stays editable — at a narrow layout the latch is meant for SearchListPane's field instead
+    // (see HomeViewModel.requestSearchFocus's KDoc on why this is a latch, not a one-shot event).
+    LaunchedEffect(pendingSearchFocus, onSelectionAdvance) {
+        if (onSelectionAdvance != null || !pendingSearchFocus) return@LaunchedEffect
+        searchFocusRequester.requestFocus()
+        vm.consumeSearchFocusRequest()
+    }
+    // A field that unmounts (this pane itself, at a narrow layout past depth 1) must report its
+    // focus as gone — a LaunchedEffect merely being cancelled does not report false on its own,
+    // and a stuck `true` would permanently suppress bare-key shortcuts (see HomeScreen's own
+    // textInputFocused KDoc). Never fires at PaneLayout.Triple, where this pane is never unmounted.
+    DisposableEffect(Unit) {
+        onDispose { onTextInputFocusChange(false) }
     }
     // Shared by every feed row's "copy feed URL"/"copy site URL" context-menu item, mirroring
     // ArticleListPane's rememberCopyUrlAction() for article rows.
@@ -356,25 +375,43 @@ internal fun FeedListPane(
             onAddFeedClick = onAddFeedClick,
         )
 
-        KeryxTextField(
-            value = searchQuery,
-            onValueChange = { vm.setSearchQuery(it) },
-            singleLine = true,
-            placeholder = stringResource(Res.string.home_search_placeholder),
-            leadingIcon = { KeryxIcon(KeryxIcons.Search, contentDescription = null) },
-            trailingIcon = {
-                if (searchQuery.isNotEmpty()) {
-                    val clearLabel = stringResource(Res.string.home_search_clear)
-                    TooltipIconButton(tooltip = clearLabel, size = 32.dp, onClick = { vm.setSearchQuery("") }) {
-                        KeryxIcon(KeryxIcons.CloseFilled, contentDescription = clearLabel)
+        if (onSelectionAdvance == null) {
+            KeryxTextField(
+                value = searchQuery,
+                onValueChange = { vm.setSearchQuery(it) },
+                singleLine = true,
+                placeholder = stringResource(Res.string.home_search_placeholder),
+                leadingIcon = { KeryxIcon(KeryxIcons.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        val clearLabel = stringResource(Res.string.home_search_clear)
+                        TooltipIconButton(tooltip = clearLabel, size = 32.dp, onClick = { vm.setSearchQuery("") }) {
+                            KeryxIcon(KeryxIcons.CloseFilled, contentDescription = clearLabel)
+                        }
                     }
-                }
-            },
-            modifier = Modifier.fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp)
-                .focusRequester(searchFocusRequester)
-                .onFocusChanged { searchFieldFocused = it.isFocused },
-        )
+                },
+                modifier = Modifier.fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .focusRequester(searchFocusRequester)
+                    .onFocusChanged { searchFieldFocused = it.isFocused },
+            )
+        } else {
+            // A narrow layout has nowhere on this pane to show results, so the field here is a
+            // read-only entry point rather than something to type into — see SearchListPane's own
+            // KDoc for where the editable field (and the results) actually live at this layout.
+            KeryxCollapsedSearchBar(
+                text = searchQuery.ifEmpty { stringResource(Res.string.home_search_placeholder) },
+                isPlaceholder = searchQuery.isEmpty(),
+                onClick = {
+                    vm.selectFilter(ArticleFilter.Search)
+                    vm.requestSearchFocus()
+                    onActivated()
+                    onSelectionAdvance()
+                },
+                onClickLabel = stringResource(Res.string.home_search),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
 
         // Kept outside the drag-host Box below (rather than as the LazyColumn's first item): these
         // three quick filters are never valid feed drop targets (FeedListRowKey.Other), and living
@@ -386,7 +423,7 @@ internal fun FeedListPane(
             count = totalUnread,
             selected = filter == ArticleFilter.All,
             focused = focused,
-            onClick = { vm.selectFilter(ArticleFilter.All); onActivated(); onSelectionAdvance() },
+            onClick = { vm.selectFilter(ArticleFilter.All); onActivated(); onSelectionAdvance?.invoke() },
             isTouchPrimary = isTouchPrimary,
         )
         SidebarRow(
@@ -395,7 +432,7 @@ internal fun FeedListPane(
             count = starredUnread,
             selected = filter == ArticleFilter.Starred,
             focused = focused,
-            onClick = { vm.selectFilter(ArticleFilter.Starred); onActivated(); onSelectionAdvance() },
+            onClick = { vm.selectFilter(ArticleFilter.Starred); onActivated(); onSelectionAdvance?.invoke() },
             isTouchPrimary = isTouchPrimary,
         )
         SidebarRow(
@@ -404,7 +441,7 @@ internal fun FeedListPane(
             count = searchUnread,
             selected = filter == ArticleFilter.Search,
             focused = focused,
-            onClick = { vm.selectFilter(ArticleFilter.Search); vm.requestSearchFocus(); onActivated(); onSelectionAdvance() },
+            onClick = { vm.selectFilter(ArticleFilter.Search); vm.requestSearchFocus(); onActivated(); onSelectionAdvance?.invoke() },
             isTouchPrimary = isTouchPrimary,
         )
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
@@ -494,7 +531,7 @@ internal fun FeedListPane(
                                 folderId = folderId,
                                 isFirstInList = isFirstInList && index == 0,
                                 activeBoundaryState = activeBoundaryState,
-                                onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id), instance); onActivated(); onSelectionAdvance() },
+                                onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id), instance); onActivated(); onSelectionAdvance?.invoke() },
                                 onRename = { inlineEdit = InlineEditTarget.Feed(feed.id) },
                                 editingName = inlineEdit == InlineEditTarget.Feed(feed.id),
                                 onRenameCommit = { vm.renameFeed(feed.id, it); inlineEdit = null },
@@ -569,7 +606,7 @@ internal fun FeedListPane(
                                     precedingFeedZoneBoundary = precedingFeedZoneBoundary,
                                     activeBoundaryState = activeBoundaryState,
                                     onToggleCollapse = { vm.toggleFolderCollapsed(folder.id) },
-                                    onClick = { vm.selectFilter(ArticleFilter.Folder(folder.id)); onActivated(); onSelectionAdvance() },
+                                    onClick = { vm.selectFilter(ArticleFilter.Folder(folder.id)); onActivated(); onSelectionAdvance?.invoke() },
                                     onEdit = { inlineEdit = InlineEditTarget.Folder(folder.id) },
                                     onDelete = { confirmingDeleteFolder = folder },
                                     editingName = inlineEdit == InlineEditTarget.Folder(folder.id),
@@ -629,7 +666,7 @@ internal fun FeedListPane(
                                 focused = focused,
                                 isDropTarget = tag.id == hoveredAttachTagId,
                                 onToggleExpanded = { vm.toggleTagExpanded(tag.id) },
-                                onClick = { vm.selectFilter(ArticleFilter.Tag(tag.id)); onActivated(); onSelectionAdvance() },
+                                onClick = { vm.selectFilter(ArticleFilter.Tag(tag.id)); onActivated(); onSelectionAdvance?.invoke() },
                                 onEdit = { inlineEdit = InlineEditTarget.Tag(tag.id) },
                                 onDelete = { confirmingDeleteTag = tag },
                                 editingName = inlineEdit == InlineEditTarget.Tag(tag.id),
@@ -660,7 +697,7 @@ internal fun FeedListPane(
                                     count = unreadByFeed[feed.id] ?: 0L,
                                     selectionTone = toneFor(instance),
                                     focused = focused,
-                                    onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id), instance); onActivated(); onSelectionAdvance() },
+                                    onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id), instance); onActivated(); onSelectionAdvance?.invoke() },
                                     onRename = { inlineEdit = InlineEditTarget.Feed(feed.id, tag.id) },
                                     editingName = inlineEdit == InlineEditTarget.Feed(feed.id, tag.id),
                                     onRenameCommit = { vm.renameFeed(feed.id, it); inlineEdit = null },

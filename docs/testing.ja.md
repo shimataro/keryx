@@ -31,7 +31,11 @@
 - `androidApp/src/androidTest/` — `androidx.compose.ui.test.junit4.v2.createComposeRule` を
   ホストできる、実際の Android アプリケーションモジュールを必要とする計装 Compose UI テスト
   （例: `nativeContextMenu` の Android `actual` の長押しジェスチャ方針を検証する
-  `NativeMenuAndroidGestureTest.kt`）。`composeApp` 自体は Android **ライブラリ**モジュール
+  `NativeMenuAndroidGestureTest.kt`。`ui/common/KeryxSearchBar.kt` の Android `actual` を検証する
+  `KeryxSearchBarAndroidTest.kt` ——ここには `desktopTest` では一切検証できない M3 固有のリスクがある:
+  編集可能な入力欄の `SearchBarDefaults.InputField` は、文字サイズ設定でテキストが最小高 56dp を
+  超えて拡大されてもクリップしてはならず、これを最大（1.4倍）設定で確認している）。`composeApp` 自体は
+  Android **ライブラリ**モジュール
   （`com.android.kotlin.multiplatform.library`）でありアプリケーションではない——その計装テスト
   （上記の `androidDeviceTest`）は Compose UI ツリーを必要としないネイティブドライバ寄りの範囲に
   絞っているため、Compose を実際にレンダリングするテストは、実際に Android アプリケーションである
@@ -413,6 +417,29 @@ Linux の SNI トレイでは `SniConnection`（接続・バス名取得・expor
   スクロールし、メニューは開かず、行も選択されないこと。
 - フィード行・フォルダーヘッダー・タグ行を長押しするとメニューが正しいアクションとともに表示され、
   長押しそのものの副作用として行の選択が変わらないこと。
+
+（Android、スマートフォン幅）検索 —— `KeryxSearchBarAndroidTest.kt` が2つの `actual` の
+セマンティクス・テキスト入力・フォントスケールの挙動を単独で検証している（上記の
+`androidApp/src/androidTest/` を参照）。ナビゲーションの一連の流れは実機またはエミュレータで
+目視確認する:
+
+- 起動時、保存されたペインが `HomePane.ArticleDetail` の場合は記事一覧（深さ2）に着地し、最後に
+  読んでいた記事（深さ3）には戻らないこと —— `initialPaneFor` のクランプの確認。保存されたペインが
+  `HomePane.FeedList` ならそのまま（深さ1）復元される。記事一覧になるのは、未保存のセッションでの
+  フォールバック先だからにすぎない。
+- 記事一覧自身の検索アイコン、またはフィード一覧の折りたたみ検索バーをタップすると、検索画面が
+  キーボードを上げた状態で開き、入力欄にフォーカスがあること。
+- 3文字以上入力すると、同じ画面の入力欄の下に結果が表示されること —— ペイン移動は不要。
+- キーボードを表示したまま、結果リストを最後の項目までスクロールでき、キーボードに隠れないこと。
+- 結果を開いてから戻ると、クエリと結果が残ったまま検索画面に戻ること（キーボードは自動で
+  再表示されない）。
+- さらに戻ると、フィード一覧の折りたたみ検索バーにクエリが表示され、再度タップすると同じ結果に
+  戻れること。
+- セッションの途中でタブレット幅の横向き（`PaneLayout.Dual`）に回転しても、読んでいた内容から
+  弾き出されないこと。また、その状態の記事一覧での最初の戻る操作が黙って無視されないこと
+  （`canNavigateBack` の修正）。
+- `PaneLayout.Triple` に達するほど広いタブレット幅の横向きでは、レイアウトがデスクトップと完全に
+  一致すること —— 検索欄はフィード一覧のサイドバーに戻り、記事一覧に検索バーは表示されない。
 
 **表示スケール**。上記の確認はすべて、**100% 以外の表示スケール**でも実施すること。特に Windows では
 200%、続いて 150% で行う。AWT のメニューバックエンドは、まさにこの設定でメニューを誤った位置に開き

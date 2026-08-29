@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -18,6 +19,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,9 +29,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Box
@@ -49,7 +55,9 @@ import works.merc.keryx.app.resources.common_back
 import works.merc.keryx.app.resources.home_all_feeds
 import works.merc.keryx.app.resources.home_mark_all_read
 import works.merc.keryx.app.resources.home_no_articles
+import works.merc.keryx.app.resources.home_search_clear
 import works.merc.keryx.app.resources.home_search_no_results
+import works.merc.keryx.app.resources.home_search_placeholder
 import works.merc.keryx.app.resources.home_search_too_short
 import works.merc.keryx.app.resources.home_sort_disabled_search
 import works.merc.keryx.app.resources.home_search
@@ -57,6 +65,7 @@ import works.merc.keryx.app.resources.home_sort_newest
 import works.merc.keryx.app.resources.home_sort_oldest
 import works.merc.keryx.app.resources.home_starred
 import works.merc.keryx.app.resources.home_unread_only
+import works.merc.keryx.app.ui.common.KeryxExpandedSearchBar
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.KeryxPaneTopBar
@@ -84,6 +93,14 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  *   while the feed list is still on screen beside this pane). Only the back button's enabled state
  *   depends on it — the row itself stays laid out either way, so nothing below it moves as the user
  *   drills in and back out (see the `ui-guidelines` skill's "Layout stability under state changes").
+ * @param onTextInputFocusChange Reports whether this pane's own search field (the one hosted here
+ *   when [filter] is [ArticleFilter.Search] at a narrow layout) currently holds focus — same
+ *   contract as `FeedListPane`'s own parameter of that name, so `HomeScreen` can suppress bare-key
+ *   shortcuts while the user is typing regardless of which pane the field currently lives in.
+ * @param onSearchClick Adds a search entry point to [ArticleListPaneContent]'s own top bar when
+ *   non-null — the search icon `ui-guidelines`' "Pane structure & tonal roles" section places at
+ *   the head of this pane's header row. Not forwarded to [SearchListPane]: once [filter] is already
+ *   [ArticleFilter.Search] there is nowhere further to advance to.
  */
 @Composable
 fun ArticleListPane(
@@ -95,6 +112,8 @@ fun ArticleListPane(
     onSelectionAdvance: () -> Unit = {},
     onNavigateUp: (() -> Unit)? = null,
     navigateUpEnabled: Boolean = true,
+    onTextInputFocusChange: (Boolean) -> Unit = {},
+    onSearchClick: (() -> Unit)? = null,
 ) {
     val filter by vm.filter.collectAsStateSafe(ArticleFilter.All)
     val feeds by vm.feeds.collectAsStateSafe(emptyList())
@@ -120,8 +139,8 @@ fun ArticleListPane(
             notifVm = notifVm,
             onNavigateUp = onNavigateUp,
             navigateUpEnabled = navigateUpEnabled,
-            title = title,
             onSelectionAdvance = onSelectionAdvance,
+            onTextInputFocusChange = onTextInputFocusChange,
         )
         return
     }
@@ -166,6 +185,7 @@ fun ArticleListPane(
         onNavigateUp = onNavigateUp,
         navigateUpEnabled = navigateUpEnabled,
         title = title,
+        onSearchClick = onSearchClick,
     )
 }
 
@@ -175,8 +195,19 @@ fun ArticleListPane(
  * Search results are shown with matched terms highlighted. The pane displays appropriate hints for
  * short queries and empty results, keeps the selected result visible, and uses relevance ordering.
  *
+ * At a narrow `PaneLayout` ([onNavigateUp] non-null), this pane's own top bar is
+ * [KeryxExpandedSearchBar] — an editable query field with its own back arrow — rather than
+ * [ArticleListTopBar]'s usual back-button-and-title row: the query field itself needs to live
+ * wherever the results do (see this file's own module KDoc / the `ui-guidelines` skill's "Adaptive
+ * pane layout" section for why), and the back arrow inside it replaces the title row entirely
+ * rather than sitting above it, so [ArticleListTopBar] is still called but with `onNavigateUp =
+ * null` to suppress its own row. At [PaneLayout.Triple] ([onNavigateUp] is `null`), this pane is
+ * unchanged from before: no query field of its own, since `FeedListPane`'s field already covers it.
+ *
  * @param focused Whether the pane currently has focus.
  * @param onActivated Called when the pane is activated.
+ * @param onTextInputFocusChange Reports whether this pane's own query field currently holds focus
+ *   — see `ArticleListPane`'s own parameter of the same name.
  */
 @Composable
 private fun SearchListPane(
@@ -187,8 +218,8 @@ private fun SearchListPane(
     notifVm: NotificationCenterViewModel? = null,
     onNavigateUp: (() -> Unit)? = null,
     navigateUpEnabled: Boolean = true,
-    title: String? = null,
     onSelectionAdvance: () -> Unit = {},
+    onTextInputFocusChange: (Boolean) -> Unit = {},
 ) {
     val query by vm.searchQuery.collectAsStateSafe("")
     val results by vm.searchResults.collectAsStateSafe(emptyList())
@@ -210,6 +241,25 @@ private fun SearchListPane(
         listState.scrollToIndexIfNeeded(index)
     }
 
+    // Consumes HomeViewModel's pendingSearchFocus latch — only while this pane's own field is
+    // actually on screen (onNavigateUp != null), since at PaneLayout.Triple FeedListPane's own
+    // field is the one the latch is meant for instead (see HomeViewModel.requestSearchFocus's KDoc
+    // on why this is a latch rather than a one-shot event in the first place).
+    val searchFocusRequester = remember { FocusRequester() }
+    val pendingSearchFocus by vm.pendingSearchFocus.collectAsStateSafe(false)
+    LaunchedEffect(pendingSearchFocus, onNavigateUp) {
+        if (onNavigateUp == null || !pendingSearchFocus) return@LaunchedEffect
+        searchFocusRequester.requestFocus()
+        vm.consumeSearchFocusRequest()
+    }
+    // A field that unmounts (the user navigates away, or PaneLayout narrows down to Triple mid-
+    // session) must report its focus as gone — a LaunchedEffect merely being cancelled does not
+    // report false on its own, and a stuck `true` would permanently suppress bare-key shortcuts
+    // (see HomeScreen's own textInputFocused KDoc).
+    DisposableEffect(Unit) {
+        onDispose { onTextInputFocusChange(false) }
+    }
+
     Column(
         modifier
             .background(MaterialTheme.colorScheme.surfaceContainer)
@@ -217,6 +267,22 @@ private fun SearchListPane(
             .paneActivation(onActivated)
             .nativeContextMenu(items = { emptyList() }, onOpen = onActivated),
     ) {
+        if (onNavigateUp != null) {
+            val keyboardController = LocalSoftwareKeyboardController.current
+            KeryxExpandedSearchBar(
+                query = query,
+                onQueryChange = { vm.setSearchQuery(it) },
+                placeholder = stringResource(Res.string.home_search_placeholder),
+                onNavigateUp = onNavigateUp,
+                navigateUpEnabled = navigateUpEnabled,
+                navigateUpContentDescription = stringResource(Res.string.common_back),
+                clearContentDescription = stringResource(Res.string.home_search_clear),
+                onSearchAction = { keyboardController?.hide() },
+                fieldModifier = Modifier
+                    .focusRequester(searchFocusRequester)
+                    .onFocusChanged { onTextInputFocusChange(it.isFocused) },
+            )
+        }
         ArticleListTopBar(
             unreadOnly = unreadOnly,
             onToggleUnreadOnly = { vm.setUnreadOnly(!unreadOnly) },
@@ -225,12 +291,9 @@ private fun SearchListPane(
             onMarkAllRead = { vm.markAllRead() },
             sortEnabled = false,
             notifVm = notifVm,
-            onNavigateUp = onNavigateUp,
-            navigateUpEnabled = navigateUpEnabled,
-            title = title,
         )
 
-        Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().imePadding()) {
             when {
                 !hasValidTerms -> CenteredHint(stringResource(Res.string.home_search_too_short))
                 // Hold (blank) while the debounced search for the current query is still in flight,
@@ -300,6 +363,13 @@ internal fun rememberCopyUrlAction(): (String) -> Unit {
  * in and out beside this pane as the user drills into an article and back, and hiding the row for
  * the half of that cycle where there is nothing to go back to would move the controls row (and the
  * whole list under it) up and down each time.
+ *
+ * @param onSearchClick Adds a search icon at the head of the controls row's [ToolbarIconGroup] when
+ *   non-null (before notifications/sort/mark-all-read — the order the `ui-guidelines` skill's
+ *   "Pane structure & tonal roles" section lists them in) — the entry point into search at a
+ *   narrow layout, where the feed list's own search field is folded into a collapsed bar instead
+ *   (see `FeedListPane`'s KDoc). [SearchListPane] never passes this: once already in the Search
+ *   scope there is nowhere further to advance to.
  */
 @Composable
 internal fun ArticleListTopBar(
@@ -313,6 +383,7 @@ internal fun ArticleListTopBar(
     onNavigateUp: (() -> Unit)? = null,
     navigateUpEnabled: Boolean = true,
     title: String? = null,
+    onSearchClick: (() -> Unit)? = null,
 ) {
     WindowDragArea(Modifier.fillMaxWidth()) {
     Column(Modifier.fillMaxWidth()) {
@@ -339,6 +410,12 @@ internal fun ArticleListTopBar(
             )
             Spacer(Modifier.weight(1f))
             ToolbarIconGroup {
+                if (onSearchClick != null) {
+                    val searchLabel = stringResource(Res.string.home_search)
+                    TooltipIconButton(tooltip = searchLabel, onClick = onSearchClick) {
+                        KeryxIcon(KeryxIcons.Search, contentDescription = searchLabel)
+                    }
+                }
                 if (notifVm != null) {
                     NotificationsBell(notifVm)
                 }
@@ -397,6 +474,7 @@ internal fun ArticleListPaneContent(
     onNavigateUp: (() -> Unit)? = null,
     navigateUpEnabled: Boolean = true,
     title: String? = null,
+    onSearchClick: (() -> Unit)? = null,
 ) {
     LaunchedEffect(selectedId, articles.isNotEmpty()) {
         val index = articles.indexOfFirst { it.id == selectedId }
@@ -422,6 +500,7 @@ internal fun ArticleListPaneContent(
             onNavigateUp = onNavigateUp,
             navigateUpEnabled = navigateUpEnabled,
             title = title,
+            onSearchClick = onSearchClick,
         )
 
         if (articles.isEmpty()) {

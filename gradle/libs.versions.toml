@@ -31,6 +31,11 @@ dbusjava = "4.2.1"
 # material3 is versioned independently from the Compose Multiplatform plugin
 # (compose-multiplatform). When bumping compose-multiplatform, verify/update
 # compose-material3 to the version that release aligns to.
+#
+# ui/common/KeryxSearchBar.android.kt's actual depends on @ExperimentalMaterial3Api
+# SearchBarDefaults (InputField/inputFieldShape/InputFieldHeight/TonalElevation/ShadowElevation)
+# and its TextFieldState-based InputField overload — check that surface specifically after a bump
+# (KeryxSearchBarTest/KeryxSearchBarAndroidTest cover it).
 compose-material3 = "1.9.0"
 
 androidx-activity-compose = "1.13.0"

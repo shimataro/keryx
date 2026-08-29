@@ -98,8 +98,18 @@ not in global chrome:
   icon button at the top of `FeedListPane` instead, sending the same command;
   About gets the equivalent treatment as an `ActionLinkRow` at the bottom of
   `GeneralTab`
-- Article-related icons (search / notifications / sort / mark all read) —
-  header row of `ArticleListPane`
+- Search is layout-dependent rather than a fixed icon: at `PaneLayout.Triple`
+  the real, editable field lives in `FeedListPane` (unchanged from before this
+  section's rewrite); at a narrow layout it folds into a read-only
+  `KeryxCollapsedSearchBar` there instead, and the real field moves into
+  `ArticleListPane`'s `SearchListPane` (a `KeryxExpandedSearchBar`, alongside
+  the results it filters — see "Adaptive pane layout & touch affordances"
+  below for why). Outside the Search scope at a narrow layout,
+  `ArticleListPane`'s own header row (`ArticleListTopBar`) also gets a search
+  icon (`onSearchClick`) as its entry point, in the position (before
+  notifications/sort/mark all read) this bullet used to describe as fixed.
+- Notifications / sort / mark all read — header row of `ArticleListPane`,
+  unchanged at every layout.
 
 Panes are tinted left-to-right with increasingly bright Material3 tonal
 surface roles, so boundaries read from tone alone rather than requiring a
@@ -122,6 +132,46 @@ resolves `Triple` (`WINDOW_MIN_WIDTH >= TRIPLE_PANE_MIN_WIDTH`); narrower widths
 (`ArticleListPane`/`ArticleDetailPane`'s `onNavigateUp`) and — on Android — the OS back
 gesture/button (`platform/BackHandler`). Nothing about the panes' own internal layout (tonal
 roles, dividers, row chrome) changes between layouts; only how many are mounted at once does.
+`ui/home/HomePaneLayout.kt`'s `canNavigateBack(layout, depth)` is the single predicate for
+"does going back one step actually change anything on screen" — `false` at `PaneLayout.Triple`
+(nothing ever changes there) and at `PaneLayout.Dual` depth 1→2 (the sliding window shows the
+same two panes at both depths, see `visiblePanes`' own KDoc) — both `HomeScreen`'s own
+`BackHandler` and `ArticleListPane`'s `navigateUpEnabled` are driven by it, so a back press that
+would produce no visible change is never silently swallowed.
+
+**Search at a narrow layout.** The search field itself moves, not just its surrounding chrome: at
+`PaneLayout.Triple` it stays the plain, always-editable `KeryxTextField` this app has always had,
+in `FeedListPane`'s own sidebar (results render reactively in `ArticleListPane`'s `SearchListPane`
+beside it). At `PaneLayout.Single` there is no second pane to show those results in at all; at
+`PaneLayout.Dual` there is one, but the article list is the pane a narrow layout always keeps on
+screen (`visiblePanes` includes it at every `Dual` depth), and the field has to live in exactly one
+place, never as two editable copies bound to the same `HomeViewModel.searchQuery`. So both narrow
+layouts put the field on the results pane instead, which also leaves it where it is across a
+`Single`↔`Dual` rotation — `FeedListPane` folds its copy into a read-only
+`KeryxCollapsedSearchBar` (`ui/common/KeryxSearchBar.kt`; tapping it selects
+`ArticleFilter.Search` and advances the navigation stack, it never itself takes focus or a
+keystroke), and the real, editable field becomes `SearchListPane`'s own header
+(`KeryxExpandedSearchBar`), sitting directly above the results it filters. Outside the Search
+scope at a narrow layout, `ArticleListTopBar`'s own `onSearchClick` gives `ArticleListPane` a
+matching entry point (a search icon, ahead of notifications/sort/mark-all-read) — otherwise a user
+who lands on the article list first (the narrow layout's own default) would have no way in.
+
+This split is driven by the same nullable-callback idiom the rest of this file already uses for
+"is this pane narrow": `FeedListPane`'s `onSelectionAdvance` and `ArticleListPane`'s `onNavigateUp`
+are `null` at `PaneLayout.Triple` and non-null otherwise — **not** a `PaneLayout` or
+`isTouchPrimary` parameter passed down. `isTouchPrimary` in particular would be wrong here: a
+touch-primary Android device in landscape at a tablet width can still resolve `PaneLayout.Triple`
+(the same threshold desktop uses), where the field must stay in `FeedListPane` exactly as it does
+on desktop.
+
+`HomeViewModel.pendingSearchFocus` is a latched `StateFlow<Boolean>`, not a one-shot
+`SharedFlow` — the request to focus the field (tapping the collapsed bar, the sidebar's own
+"Search" row, or Cmd+F/the menu bar's "Search…") is raised in the very click that advances the
+navigation stack, so the pane that will actually own the field has not composed yet when the
+request fires; a `SharedFlow` with no subscriber yet would drop it silently, which is exactly what
+used to make Android's search feel broken. The latch stays set until whichever field composes
+next consumes it (`consumeSearchFocusRequest()`), and `HomeViewModel.selectFilter` clears an
+unconsumed one when the user navigates elsewhere first.
 
 **Touch input on the feed list.** A mouse can drag a draggable row (a folder header, or a feed row
 inside a folder group — tag rows and tag-nested feed copies were never drag sources) from anywhere
@@ -765,6 +815,21 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   keeps `WindowDragArea`/`WindowChrome.titleBarInsetDp` wrapped *around* the call, since neither is
   shared across all three panes either) via its own `modifier`. Android's `actual` is a real M3
   `TopAppBar`.
+- **`KeryxCollapsedSearchBar`/`KeryxExpandedSearchBar`** (`ui/common/KeryxSearchBar.kt`,
+  expect/actual): the narrow-layout search pair described in "Adaptive pane layout & touch
+  affordances" above — a read-only entry point and an editable search-screen header,
+  respectively. **Deliberately not built on `KeryxPaneTopBar`**: an editable field's own minimum
+  height (56dp) grows past `TopAppBar`'s fixed 64dp container once the font-size setting scales it
+  up (to 1.4×), clipping it — a plain pill shape has no fixed height to clip against. Android's
+  `actual` matches M3's own search-bar tokens (`SearchBarDefaults.inputFieldShape`/
+  `InputFieldHeight`/`TonalElevation`/`ShadowElevation`) for both, and uses
+  `SearchBarDefaults.InputField` itself (not a self-drawn `BasicTextField`) for the editable one —
+  so the two read as one continuous surface expanding, the way search does in Gmail/Drive/Photos.
+  The collapsed one's `Modifier.clickable(onClickLabel = …, role = Role.Button)` is explicit rather
+  than an M3 `Surface(onClick = …)`, which sets neither (see "Accessibility" below). Desktop's
+  `actual` never renders in production (desktop always resolves `PaneLayout.Triple`, where
+  `FeedListPane` keeps its original editable field instead), and exists only so `desktopTest` can
+  render and assert this composable directly.
 - **Raised surfaces — `KeryxRaisedSurface`** (`ui/common/KeryxSurface.kt`, expect/actual): the
   container `NotificationCenterSheet`, `SetupScreen`'s `OptionCard`, `TagColorPicker`'s popup, and
   `SettingsCard` all use for a "raised" panel instead of M3's tonal-elevation `Card` **at a
@@ -808,10 +873,12 @@ side, Android's own Material 3 ripple/shapes/components on the other:
     recorded there.
   - `WindowChrome.titleBarInsetDp` (`platform/WindowChrome.kt`) — manual inset math to dodge the
     traffic-light buttons → disappears entirely with a native full-size-content-view + unified toolbar.
-  - The inline article search — `ArticleListPane`'s search `KeryxTextField` bound to
-    `HomeViewModel.searchQuery` (results render reactively in the article list;
-    `SearchResults.kt`'s `CenteredHint` covers the too-short-query / no-results states) →
-    SwiftUI's `.searchable()`.
+  - Article search — at `PaneLayout.Triple`, `FeedListPane`'s search `KeryxTextField` bound to
+    `HomeViewModel.searchQuery` (results render reactively in `ArticleListPane`'s `SearchListPane`;
+    `SearchResults.kt`'s `CenteredHint` covers the too-short-query / no-results states); at a
+    narrow layout, `KeryxCollapsedSearchBar`/`KeryxExpandedSearchBar` (`ui/common/KeryxSearchBar.kt`)
+    instead — see "Adaptive pane layout & touch affordances" below → either way, SwiftUI's
+    `.searchable()`.
   - `selectionBackground()` (`ui/home/HomeCommon.kt`) row highlight in `ArticleListPane`/`FeedListPane` —
     hand-computed focused/unfocused-pane dimming → native `List` row selection already dims the same way.
   - `SettingsScreen`'s `SwitchRow` — now uses `FlatSwitch` (`ui/common/FlatToggles.kt`), consistent with
@@ -884,8 +951,16 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   that demands full attention and blocks the rest of the UI (confirmations,
   text-prompt forms, the add-feed flow) stays an `AlertDialog`/`Dialog`
   — see `TextPromptDialog`, the various `AlertDialog` usages
-  in `FeedListDialogs.kt`. (Search is neither — it's an inline field in
-  `ArticleListPane`, see the Flat surface / migration notes above.) Don't reach for `KeryxAnchoredPanel` for anything that should block
+  in `FeedListDialogs.kt`. (Search is neither a Popup nor a Dialog — nor, on
+  Android, M3's own `ExpandedFullScreenSearchBar` dialog, which was
+  considered and deliberately not used: it can't host the search results,
+  which is exactly the problem the narrow-layout redesign exists to fix. It
+  is instead a plain step of the existing 3-pane navigation stack — an
+  editable field at `PaneLayout.Triple` (`FeedListPane`), or, at a narrow
+  layout, a `KeryxCollapsedSearchBar` entry point plus a
+  `KeryxExpandedSearchBar` header on `ArticleListPane`'s `SearchListPane`
+  alongside the results — see "Adaptive pane layout & touch affordances"
+  below.) Don't reach for `KeryxAnchoredPanel` for anything that should block
   interaction with the rest of the window, and don't reach for `Dialog` for
   something that's meant to feel like a lightweight, dismissable overlay.
 - **Nothing Compose-drawn can appear over the article detail pane's content area**: the article

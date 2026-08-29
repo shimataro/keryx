@@ -380,8 +380,13 @@ guaranteed `>= TRIPLE_PANE_MIN_WIDTH`, see that constant's KDoc in `core/Constan
 The navigation stack itself is always three deep (`HomePane.FeedList` → `ArticleList` →
 `ArticleDetail`); a narrower layout just shows fewer of those three at once. `HomePane.ordinal + 1`
 doubles as the stack's current depth, so `HomeScreen` needs no separate depth state — selecting a
-filter or an article advances it (`onSelectionAdvance`, a no-op at `Triple`), and `platform/BackHandler`
-(a real back-gesture/button interception on Android, a no-op on desktop) pops it by one.
+filter or an article advances it (`FeedListPane`'s `onSelectionAdvance` / `ArticleListPane`'s
+`onSelectionAdvance`, both `null` at `Triple`, where every pane is already visible and there is
+nowhere to advance to), and `platform/BackHandler` (a real back-gesture/button interception on
+Android, a no-op on desktop) pops it by one — gated on `canNavigateBack(layout, depth)`, a pure
+function that resolves `false` whenever stepping back wouldn't actually change what's on screen
+(always at `Triple`; also at `PaneLayout.Dual` depth 1→2, since the sliding window below shows the
+same two panes at both — a back press there used to be silently swallowed before this existed).
 `PaneLayout.Dual` is a two-pane *sliding window* over that stack, not a plain adjacent pair: the
 article list stays one of the two panes shown at every depth, so drilling into an article swaps the
 feed list out for the detail pane rather than sliding the list itself off-screen.
@@ -391,3 +396,21 @@ below) is safe on desktop specifically: desktop can only ever resolve `Triple`, 
 panes — including the one hosting the WebView — stay mounted for the app's whole lifetime.
 `Single`/`Dual` do unmount it when its pane isn't among those currently shown, which is fine on
 Android (no heavyweight AWT interop concern there).
+
+At a narrow layout, `initialPaneFor(layout, saved)` also clamps the pane `HomeScreen` restores on
+launch: `HomePane.ArticleDetail` is left alone at `Triple` (the article the user was last reading,
+same as ever), but clamped down to `ArticleList` at `Single`/`Dual` — restoring straight into a
+detail pane with no list around it and no context for how the user got there would be disorienting
+on a phone-shaped session. This clamp is applied exactly once, on the first frame with a real
+(post-layout) width, and never again — a later resize or rotation must not yank the user off
+whatever they're reading.
+
+**Search at a narrow layout** moves the field itself, not just its surrounding chrome — see the
+`ui-guidelines` skill's "Adaptive pane layout & touch affordances" section for the full design
+(`ui/common/KeryxSearchBar.kt`'s `KeryxCollapsedSearchBar`/`KeryxExpandedSearchBar`, and why the
+narrow/`Triple` split is driven by `onSelectionAdvance`/`onNavigateUp` being `null` rather than a
+`PaneLayout` or `isTouchPrimary` parameter). `HomeViewModel.pendingSearchFocus` is a latched
+`StateFlow<Boolean>` rather than a one-shot event for the same reason as the depth cursor above: a
+request to focus the field is raised in the same click that advances the stack, so the pane that
+will own the field hasn't composed yet, and a `SharedFlow` with no subscriber yet would drop the
+request silently.

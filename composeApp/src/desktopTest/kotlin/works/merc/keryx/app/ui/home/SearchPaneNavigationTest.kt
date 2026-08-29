@@ -1,0 +1,200 @@
+package works.merc.keryx.app.ui.home
+
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.v2.runDesktopComposeUiTest
+import androidx.compose.ui.unit.dp
+import org.koin.compose.KoinApplication
+import org.koin.dsl.koinConfiguration
+import org.koin.dsl.module
+import works.merc.keryx.app.core.ArticleFilter
+import works.merc.keryx.app.inMemoryDb
+import works.merc.keryx.app.ui.common.KeryxIcon
+import works.merc.keryx.app.ui.common.KeryxIcons
+import works.merc.keryx.app.ui.common.TooltipIconButton
+import kotlin.test.Test
+import kotlin.test.assertEquals
+
+/**
+ * End-to-end coverage for the bug this app's Android narrow layout used to have: typing into the
+ * feed list's search field never advanced the navigation stack (so the results were never on
+ * screen — see `FeedListPane.kt`'s old `KeryxTextField` block), and drilling into the article list
+ * made the field disappear along with `FeedListPane` itself.
+ *
+ * This drives `FeedListPane` + `ArticleListPane` together exactly as `HomeScreen` wires them at
+ * `PaneLayout.Single`, using a plain depth cursor in place of `HomeScreen`'s own
+ * `focusedPane`/menu-bar machinery — `FeedListPaneTest.kt`'s own host is why only `FeedListPane`
+ * needs Koin at all (`ArticleListPane` injects nothing).
+ */
+@OptIn(ExperimentalTestApi::class)
+class SearchPaneNavigationTest {
+
+    @Composable
+    private fun NarrowHomeTestHost(vm: HomeViewModel, depth: Int, onDepthChange: (Int) -> Unit) {
+        KoinApplication(configuration = koinConfiguration { modules(module { single { testMenuController } }) }) {
+            val layout = PaneLayout.Single
+            val visible = visiblePanes(layout, depth)
+            fun goBack() {
+                if (canNavigateBack(layout, depth)) onDepthChange(depth - 1)
+            }
+            Box(Modifier.size(320.dp, 600.dp)) {
+                visible.forEach { pane ->
+                    when (pane) {
+                        HomePane.FeedList -> FeedListPane(
+                            vm = vm,
+                            focused = true,
+                            dragOverlay = remember { FeedDragOverlayState() },
+                            onActivated = {},
+                            onSelectionAdvance = { onDepthChange(2) },
+                        )
+                        HomePane.ArticleList -> ArticleListPane(
+                            vm = vm,
+                            focused = true,
+                            onActivated = {},
+                            onSelectionAdvance = { onDepthChange(3) },
+                            onNavigateUp = ::goBack,
+                            navigateUpEnabled = canNavigateBack(layout, depth),
+                        )
+                        // A plain stand-in for ArticleDetailPane: its own reader is a genuine
+                        // native WebView this test harness cannot host (see
+                        // ArticleDetailPaneTest.kt's own KDoc) — this test only cares about depth
+                        // transitions, not the article body.
+                        HomePane.ArticleDetail -> Box(
+                            Modifier.fillMaxSize().testTag(ARTICLE_DETAIL_STUB_TAG),
+                        ) {
+                            TooltipIconButton(tooltip = "Back", onClick = { goBack() }) {
+                                KeryxIcon(KeryxIcons.ArrowBack, contentDescription = "Back")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun tappingTheCollapsedSearchBarNavigatesToTheResultsPaneWhoseFieldCarriesTheQuery() {
+        val (driver, db) = inMemoryDb()
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            runDesktopComposeUiTest {
+                var depth by mutableStateOf(1)
+                setContent { NarrowHomeTestHost(vm, depth, { depth = it }) }
+                waitForIdle()
+
+                // Depth 1: only the collapsed bar is on screen — no editable field anywhere yet.
+                onNode(hasSetTextAction()).assertDoesNotExist()
+
+                onNodeWithText("記事を検索…").performClick()
+                waitForIdle()
+
+                // Depth 2: the navigation stack advanced, and the query field is now on the same
+                // pane as the results — the exact bug this design fixes.
+                assertEquals(2, depth)
+                assertEquals(ArticleFilter.Search, vm.filter.value)
+                onNode(hasSetTextAction()).assertIsDisplayed()
+            }
+        } finally {
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    @Test
+    fun theQueryAndTheFieldSurviveOpeningAResultAndComingBack() {
+        val (driver, db) = inMemoryDb()
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            vm.setSearchQuery("kotlin")
+            runDesktopComposeUiTest {
+                var depth by mutableStateOf(2)
+                setContent { NarrowHomeTestHost(vm, depth, { depth = it }) }
+                waitForIdle()
+
+                onNode(hasSetTextAction()).assertIsDisplayed()
+                assertEquals("kotlin", vm.searchQuery.value)
+
+                depth = 3
+                waitForIdle()
+                onNode(hasSetTextAction()).assertDoesNotExist()
+                onNodeWithTag(ARTICLE_DETAIL_STUB_TAG).assertIsDisplayed()
+
+                onNodeWithContentDescription("Back").performClick()
+                waitForIdle()
+
+                assertEquals(2, depth)
+                assertEquals("kotlin", vm.searchQuery.value)
+                onNode(hasSetTextAction()).assertIsDisplayed()
+            }
+        } finally {
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    @Test
+    fun exactlyOnePaneConsumesASearchFocusRequest() {
+        val (driver, db) = inMemoryDb()
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            runDesktopComposeUiTest {
+                var depth by mutableStateOf(1)
+                setContent { NarrowHomeTestHost(vm, depth, { depth = it }) }
+                waitForIdle()
+
+                onNodeWithText("記事を検索…").performClick()
+                waitForIdle()
+
+                // The latch (raised by the collapsed bar's own onClick, via requestSearchFocus())
+                // must have been consumed by exactly the field that appeared at depth 2 — not left
+                // dangling to steal focus at some later, unrelated field.
+                assertEquals(2, depth)
+                assertEquals(false, vm.pendingSearchFocus.value)
+            }
+        } finally {
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    @Test
+    fun switchingAwayFromSearchAtDepthOneDropsThePendingFocusRequest() {
+        val (driver, db) = inMemoryDb()
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            vm.selectFilter(ArticleFilter.Search)
+            vm.requestSearchFocus()
+            assertEquals(true, vm.pendingSearchFocus.value)
+
+            // Navigating away before any field consumed the request (e.g. the user picked a
+            // different quick filter before the search screen ever composed) must drop it.
+            vm.selectFilter(ArticleFilter.All)
+
+            assertEquals(false, vm.pendingSearchFocus.value)
+        } finally {
+            fixture.close()
+            driver.close()
+        }
+    }
+}
+
+private const val ARTICLE_DETAIL_STUB_TAG = "article-detail-stub"

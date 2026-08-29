@@ -12,12 +12,14 @@ import androidx.lifecycle.viewModelScope
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.rightClick
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
@@ -428,6 +430,168 @@ class ArticleListPaneTest {
                 vm.selectFilter(ArticleFilter.All)
                 waitForIdle()
                 onNodeWithText("未読のみ").assertIsEnabled()
+            }
+        } finally {
+            vm.viewModelScope.cancel()
+            driver.close()
+        }
+    }
+
+    /**
+     * At a narrow layout, the query field itself moves into this pane's own top bar
+     * (`KeryxExpandedSearchBar`) once the Search scope is active — see `SearchListPane`'s KDoc for
+     * why it can't stay in `FeedListPane` there.
+     */
+    @Test
+    fun articleListPaneShowsAnEditableSearchFieldAtANarrowLayoutInSearchScope() {
+        val (driver, db) = inMemoryDb()
+        val vm = newMinimalViewModel(driver, db)
+        try {
+            runDesktopComposeUiTest {
+                setContent {
+                    ArticleListPane(vm = vm, focused = true, onActivated = {}, onNavigateUp = {}, navigateUpEnabled = true)
+                }
+                waitForIdle()
+
+                vm.selectFilter(ArticleFilter.Search)
+                waitForIdle()
+
+                onNode(hasSetTextAction()).assertIsDisplayed()
+                onNodeWithContentDescription("戻る").assertIsDisplayed()
+            }
+        } finally {
+            vm.viewModelScope.cancel()
+            driver.close()
+        }
+    }
+
+    /**
+     * Desktop regression guard: at [PaneLayout.Triple] (no `onNavigateUp`), `FeedListPane`'s own
+     * field already covers search input, so `SearchListPane` must not render its own editable
+     * field even while the Search scope is active.
+     */
+    @Test
+    fun articleListPaneOmitsTheEditableSearchFieldAtTripleEvenInSearchScope() {
+        val (driver, db) = inMemoryDb()
+        val vm = newMinimalViewModel(driver, db)
+        try {
+            runDesktopComposeUiTest {
+                setContent {
+                    ArticleListPane(vm = vm, focused = true, onActivated = {})
+                }
+                waitForIdle()
+
+                vm.selectFilter(ArticleFilter.Search)
+                waitForIdle()
+
+                onNode(hasSetTextAction()).assertDoesNotExist()
+            }
+        } finally {
+            vm.viewModelScope.cancel()
+            driver.close()
+        }
+    }
+
+    @Test
+    fun articleListPaneNarrowSearchFieldReportsEditsUpstreamAndClears() {
+        val (driver, db) = inMemoryDb()
+        val vm = newMinimalViewModel(driver, db)
+        try {
+            runDesktopComposeUiTest {
+                setContent {
+                    ArticleListPane(vm = vm, focused = true, onActivated = {}, onNavigateUp = {}, navigateUpEnabled = true)
+                }
+                waitForIdle()
+
+                vm.selectFilter(ArticleFilter.Search)
+                waitForIdle()
+
+                onNode(hasSetTextAction()).performTextInput("kotlin")
+                waitForIdle()
+                assertEquals("kotlin", vm.searchQuery.value)
+
+                onNodeWithContentDescription("クリア").performClick()
+                waitForIdle()
+                assertEquals("", vm.searchQuery.value)
+            }
+        } finally {
+            vm.viewModelScope.cancel()
+            driver.close()
+        }
+    }
+
+    /**
+     * The search icon this test targets is [ArticleListTopBar]'s own entry point into search at a
+     * narrow layout ("Native-feel restyle"/"Pane structure" in the `ui-guidelines` skill) — distinct
+     * from the query field inside [SearchListPane]'s `KeryxExpandedSearchBar`, which is never
+     * present at the same time (the icon only shows outside the Search scope).
+     */
+    @Test
+    fun articleListTopBarSearchIconInvokesOnSearchClickWhenProvided() = runDesktopComposeUiTest {
+        var clicked = false
+        setContent {
+            ArticleListTopBar(
+                unreadOnly = false,
+                onToggleUnreadOnly = {},
+                newestFirst = true,
+                onToggleSort = {},
+                onMarkAllRead = {},
+                onSearchClick = { clicked = true },
+            )
+        }
+        waitForIdle()
+
+        onNodeWithContentDescription("記事を検索").performClick()
+        waitForIdle()
+        assertEquals(true, clicked)
+    }
+
+    @Test
+    fun articleListTopBarOmitsTheSearchIconWhenNotProvided() = runDesktopComposeUiTest {
+        setContent {
+            ArticleListTopBar(
+                unreadOnly = false,
+                onToggleUnreadOnly = {},
+                newestFirst = true,
+                onToggleSort = {},
+                onMarkAllRead = {},
+            )
+        }
+        waitForIdle()
+
+        onNodeWithContentDescription("記事を検索").assertDoesNotExist()
+    }
+
+    /**
+     * `KeryxExpandedSearchBar` and `ArticleListTopBar` are two separate composables stacked in the
+     * same `Column` (see `SearchListPane`) — the clear button appearing/disappearing inside the
+     * former must not shift the latter's controls row, the same "Layout stability under state
+     * changes" concern `articleListTopBarKeepsTheControlsRowInPlaceWhenNavigateUpBecomesUnavailable`
+     * already covers for the back-button row.
+     */
+    @Test
+    fun theSearchFieldsClearButtonAppearingDoesNotMoveTheControlsRowBelowIt() {
+        val (driver, db) = inMemoryDb()
+        val vm = newMinimalViewModel(driver, db)
+        try {
+            runDesktopComposeUiTest {
+                setContent {
+                    ArticleListPane(vm = vm, focused = true, onActivated = {}, onNavigateUp = {}, navigateUpEnabled = true)
+                }
+                waitForIdle()
+
+                vm.selectFilter(ArticleFilter.Search)
+                waitForIdle()
+                val boundsWhenEmpty = onNodeWithText("未読のみ").fetchSemanticsNode().boundsInRoot
+
+                vm.setSearchQuery("kotlin")
+                waitForIdle()
+
+                assertEquals(
+                    boundsWhenEmpty,
+                    onNodeWithText("未読のみ").fetchSemanticsNode().boundsInRoot,
+                    "the controls row must not move when the search field's clear button appears",
+                )
             }
         } finally {
             vm.viewModelScope.cancel()

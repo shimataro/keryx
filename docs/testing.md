@@ -11,11 +11,14 @@
 - `androidApp/src/androidTest/` — Instrumented Compose UI tests that need a real Android
   application module to host `androidx.compose.ui.test.junit4.v2.createComposeRule` (e.g.
   `NativeMenuAndroidGestureTest.kt`, covering the long-press gesture policy of `nativeContextMenu`'s
-  Android `actual`). `composeApp` itself is an Android *library* module
-  (`com.android.kotlin.multiplatform.library`), not an application — its own instrumented tests
-  (`androidDeviceTest` above) are scoped to native-driver concerns that don't need a Compose UI
-  tree, so a Compose-rendering test lives here instead, in the one module that is an actual Android
-  application.
+  Android `actual`; `KeryxSearchBarAndroidTest.kt`, covering `ui/common/KeryxSearchBar.kt`'s Android
+  `actual`s — this is where the M3-specific risk `desktopTest` cannot exercise at all lives: the
+  editable field's `SearchBarDefaults.InputField` must not clip once the font-size setting scales
+  text past its 56dp minimum height, confirmed here at the largest (1.4×) setting). `composeApp`
+  itself is an Android *library* module (`com.android.kotlin.multiplatform.library`), not an
+  application — its own instrumented tests (`androidDeviceTest` above) are scoped to native-driver
+  concerns that don't need a Compose UI tree, so a Compose-rendering test lives here instead, in
+  the one module that is an actual Android application.
 
 New tests are placed at the same relative path as the code under test.
 
@@ -292,6 +295,29 @@ real app UI, so confirm manually on a device or emulator:
   list as a normal drag; the menu does not open and the row is not activated.
 - Long-pressing a feed row, a folder header, and a tag row shows the menu with the correct actions,
   and the row's selection does not change as a side effect of the long-press itself.
+
+(Android, phone width) Search — `KeryxSearchBarAndroidTest.kt` covers the two `actual`s'
+semantics/text-input/font-scale behavior in isolation (see `androidApp/src/androidTest/` above);
+confirm the full navigation flow manually on a device or emulator:
+
+- On launch, a saved `HomePane.ArticleDetail` comes back as the article list (depth 2), not the
+  last-read article — `initialPaneFor`'s clamp. A saved `HomePane.FeedList` is restored as-is
+  (depth 1); the article list is only what a session with nothing saved falls back to.
+- Tapping the article list's own search icon, or the feed list's collapsed search bar, opens the
+  search screen with the keyboard already up and the field focused.
+- Typing 3+ characters shows results on the same screen, below the field — no pane change needed.
+- With the keyboard still open, the results list scrolls all the way to its last item without the
+  keyboard covering it.
+- Opening a result, then going back, returns to the search screen with the query and results still
+  in place (no keyboard auto-reopening).
+- Going back once more shows the query on the collapsed search bar in the feed list; tapping it
+  again returns to the same results.
+- Rotating to a tablet-width landscape (`PaneLayout.Dual`) mid-session does not eject the user from
+  whatever they were reading, and the first back press from the article list there is not silently
+  swallowed (`canNavigateBack`'s fix).
+- At a tablet-width landscape wide enough to reach `PaneLayout.Triple`, the layout matches desktop
+  exactly — the search field is back in the feed list sidebar, and the article list carries no
+  search bar of its own.
 
 **Display scaling.** Every check above must also be run at a **non-100% display scale**, on Windows
 in particular — 200% first, then 150%. The AWT menu backend was mispositioning menus and painting

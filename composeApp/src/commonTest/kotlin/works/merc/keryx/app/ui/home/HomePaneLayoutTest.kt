@@ -144,4 +144,71 @@ class HomePaneLayoutTest {
         assertEquals(ARTICLE_LIST_PANE_MIN_WIDTH.dp, widths.articleWidth)
     }
 
+    // --- canNavigateBack ---
+
+    @Test
+    fun canNavigateBackIsAlwaysFalseAtTriple() {
+        // visiblePanes returns the same list for every depth at Triple, so there is never
+        // anywhere to go back to — desktop's BackHandler must stay disabled at every depth.
+        for (depth in 1..3) {
+            assertEquals(false, canNavigateBack(PaneLayout.Triple, depth), "depth $depth")
+        }
+    }
+
+    @Test
+    fun canNavigateBackIsFalseAtDepthOneForEveryLayout() {
+        // There is nothing before depth 1 to go back to, regardless of layout.
+        for (layout in PaneLayout.entries) {
+            assertEquals(false, canNavigateBack(layout, 1), layout.name)
+        }
+    }
+
+    @Test
+    fun canNavigateBackIsTrueAtSingleForEveryDeeperDepth() {
+        // Single shows exactly one pane per depth, so stepping back always changes the screen.
+        assertEquals(true, canNavigateBack(PaneLayout.Single, 2))
+        assertEquals(true, canNavigateBack(PaneLayout.Single, 3))
+    }
+
+    @Test
+    fun canNavigateBackIsFalseAtDualDepthTwoBecauseTheSlidingWindowDidNotMove() {
+        // Dual shows [FeedList, ArticleList] at both depth 1 and depth 2 (see visiblePanes'
+        // sliding-window KDoc) — going back from depth 2 to depth 1 changes nothing on screen, so
+        // this must resolve to false (the bug this function exists to fix: HomeScreen's old
+        // BackHandler intercepted this back press and produced no visible change).
+        assertEquals(false, canNavigateBack(PaneLayout.Dual, 2))
+    }
+
+    @Test
+    fun canNavigateBackIsTrueAtDualDepthThreeBecauseTheFeedListSlidesOut() {
+        // Depth 3 swaps the feed list pane out for the detail pane (visiblePanes(Dual, 3) ==
+        // [ArticleList, ArticleDetail]) — a real, visible change from depth 2.
+        assertEquals(true, canNavigateBack(PaneLayout.Dual, 3))
+    }
+
+    // --- initialPaneFor ---
+
+    @Test
+    fun initialPaneForReturnsTheSavedPaneUnchangedAtTriple() {
+        // All three panes are always on screen at Triple, so restoring ArticleDetail there is
+        // exactly the point (it's what shows the previously read article on desktop).
+        for (pane in HomePane.entries) {
+            assertEquals(pane, initialPaneFor(PaneLayout.Triple, pane))
+        }
+    }
+
+    @Test
+    fun initialPaneForClampsArticleDetailToArticleListAtANarrowLayout() {
+        assertEquals(HomePane.ArticleList, initialPaneFor(PaneLayout.Single, HomePane.ArticleDetail))
+        assertEquals(HomePane.ArticleList, initialPaneFor(PaneLayout.Dual, HomePane.ArticleDetail))
+    }
+
+    @Test
+    fun initialPaneForLeavesFeedListAndArticleListUnchangedAtANarrowLayout() {
+        assertEquals(HomePane.FeedList, initialPaneFor(PaneLayout.Single, HomePane.FeedList))
+        assertEquals(HomePane.ArticleList, initialPaneFor(PaneLayout.Single, HomePane.ArticleList))
+        assertEquals(HomePane.FeedList, initialPaneFor(PaneLayout.Dual, HomePane.FeedList))
+        assertEquals(HomePane.ArticleList, initialPaneFor(PaneLayout.Dual, HomePane.ArticleList))
+    }
+
 }

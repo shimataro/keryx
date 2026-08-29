@@ -7,12 +7,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
@@ -382,13 +379,26 @@ class HomeViewModel(
             }.toLong()
         }.flowOn(dispatcher).stateIn(viewModelScope, started, 0L)
 
-    // One-shot requests to move keyboard focus into the sidebar's search field (Cmd+F, clicking the
-    // "Search" sidebar row) — collected by FeedListPane, which owns the field's FocusRequester.
-    private val _searchFocusRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    val searchFocusRequests: SharedFlow<Unit> = _searchFocusRequests.asSharedFlow()
+    // Requests to move keyboard focus into whichever pane currently owns the search field —
+    // FeedListPane's own KeryxTextField at PaneLayout.Triple, or SearchListPane's KeryxExpandedSearchBar
+    // at a narrow layout (Cmd+F, clicking the "Search" sidebar row, or tapping the collapsed search
+    // bar all call requestSearchFocus()). Deliberately a *latched* StateFlow rather than a one-shot
+    // SharedFlow: at a narrow layout the request is raised in the same click that advances the
+    // navigation stack, so the pane that will own the field has not composed yet — a SharedFlow
+    // emission (as this used to be) is dropped silently when no collector exists yet, which is
+    // exactly what happened here. The latch stays set until the field that actually gains focus
+    // consumes it (consumeSearchFocusRequest()), and selectFilter clears it when the user leaves the
+    // Search scope without any field ever consuming it, so a stale request can never steal focus from
+    // an unrelated field later.
+    private val _pendingSearchFocus = MutableStateFlow(false)
+    val pendingSearchFocus: StateFlow<Boolean> = _pendingSearchFocus.asStateFlow()
 
     fun requestSearchFocus() {
-        _searchFocusRequests.tryEmit(Unit)
+        _pendingSearchFocus.value = true
+    }
+
+    fun consumeSearchFocusRequest() {
+        _pendingSearchFocus.value = false
     }
 
     // --- Pane widths ---
@@ -524,6 +534,11 @@ class HomeViewModel(
             _selectedRowInstance.value = instance
             return
         }
+        // Drops a focus request no field ever consumed (e.g. Cmd+F at a narrow layout, then
+        // navigating elsewhere before the search pane composed), so it can't steal focus at
+        // whatever field appears next. Placed after the early return above, so reselecting the
+        // already-active Search filter never clears a request still waiting to be consumed.
+        if (filter != ArticleFilter.Search) _pendingSearchFocus.value = false
         _filter.value = filter
         _selectedRowInstance.value = instance
         _selectedArticle.value = null
