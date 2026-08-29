@@ -126,10 +126,9 @@
 
 `:composeApp:run` は JDK に加えて前述「アプリの実行に必要なソフトウェア」に挙げた各プラット
 フォームのランタイムが必要（ヘッドレスな Linux 環境での Xvfb は除く）。ルートの
-`./gradlew build` は前述のとおり Android SDK とリリース署名キーストアの用意
-も追加で必要になる。ネイティブパッケージング系タスク（`createDistributable`, `packageDmg`,
-`packageMsi`, `packageDeb`, `packageRpm` — 詳細は [build.md](build.md)）は OS ごとに以下も
-必要。
+`./gradlew build` は前述のとおり Android SDK も追加で必要になる。ネイティブパッケージング系
+タスク（`createDistributable`, `packageDmg`, `packageMsi`, `packageDeb`, `packageRpm` —
+詳細は [build.md](build.md)）は OS ごとに以下も必要。
 
 - **Linux**
   - `fakeroot` — `packageDeb` に必要（jpackage が `.deb` 生成のために呼び出す）
@@ -176,7 +175,7 @@ keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
 `androidDeviceTest` 計装スイート（実機/エミュレータが必要。前提を参照）はこれに含まれない。
 
 デスクトップの作業だけであれば、`./gradlew :composeApp:desktopTest` のようなターゲット限定
-タスクを使うことで、Android SDK もリリース署名キーストアも用意せずに済む。
+タスクを使うことで、Android SDK を用意せずに済む。
 
 ## データディレクトリ
 

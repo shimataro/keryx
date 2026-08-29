@@ -131,10 +131,9 @@ packaged app (or `:composeApp:run`).
 
 `:composeApp:run` needs the JDK plus the applicable platform runtime from "Software Required to
 Run the App" above (aside from Xvfb on a headless Linux machine); the root `./gradlew build`
-additionally needs the Android SDK and a release signing keystore, per above. The native
-packaging tasks (`createDistributable`, `packageDmg`,
-`packageMsi`, `packageDeb`, `packageRpm` — see [build.md](build.md)) additionally require the
-following, per OS:
+additionally needs the Android SDK, per above. The native packaging tasks
+(`createDistributable`, `packageDmg`, `packageMsi`, `packageDeb`, `packageRpm` — see
+[build.md](build.md)) additionally require the following, per OS:
 
 - **Linux**
   - `fakeroot` — required for `packageDeb` (jpackage shells out to it to build the `.deb`)
@@ -181,7 +180,7 @@ separately-executed `androidDeviceTest` instrumented suite, which needs a real d
 (see Prerequisites above).
 
 For desktop-only work, a target-scoped task like `./gradlew :composeApp:desktopTest` avoids
-needing either the Android SDK or a release signing keystore.
+needing the Android SDK.
 
 ## Data Directory
 
