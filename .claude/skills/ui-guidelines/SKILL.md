@@ -779,8 +779,8 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   has no arrow at all, so the flip was effectively invisible on Android —
   where, with no menu bar and a tooltip that only appears on long-press,
   nothing else showed the current order either. It now uses
-  `KeryxIcons.SortDescending`/`SortAscending`, with `KeryxIcons.Sort` demoted
-  to the direction-free glyph shown while the button is disabled (the search
+  `KeryxIcons.SortDescending`/`SortAscending`, while retaining the selected directional glyph
+  when the button is disabled (the search
   scope). Desktop's two directional entries are Tabler's own
   `sort-descending`/`sort-ascending`; Android's are **local composites** —
   Material Symbols ships no directional sort glyph
