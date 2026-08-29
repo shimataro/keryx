@@ -38,11 +38,15 @@ val androidVersionCode: Int = appVersion.substringBefore('-').split('.')
 // Blank counts as unset: local.properties.example ships these keys with empty values, so a plain
 // null check treats a freshly copied file as "configured" and then fails deep inside AGP with
 // "Keystore file not set for signing config release" instead of taking the unsigned path below.
+// Each source is tested individually rather than the elvis chain's result: a blank higher-priority
+// source is non-null, so it would otherwise short-circuit the chain and mask a valid lower-priority
+// value (GitHub Actions maps an undefined secret to "" rather than leaving the variable unset, and
+// `-PandroidReleaseKeystorePath` with no value does the same). Same pattern, same reason, as
+// composeApp/build.gradle.kts's resolvedUpdateRepo.
 fun releaseSigningValue(env: String, gradleProperty: String, localProperty: String): String? =
-    (System.getenv(env)
-        ?: project.findProperty(gradleProperty) as? String
-        ?: localProperties.getProperty(localProperty))
-        ?.takeIf { it.isNotBlank() }
+    System.getenv(env)?.takeIf { it.isNotBlank() }
+        ?: (project.findProperty(gradleProperty) as? String)?.takeIf { it.isNotBlank() }
+        ?: localProperties.getProperty(localProperty)?.takeIf { it.isNotBlank() }
 
 val keystorePath = releaseSigningValue("ANDROID_RELEASE_KEYSTORE_PATH", "androidReleaseKeystorePath", "android.release.keystore.path")
 val keystorePassword = releaseSigningValue("ANDROID_RELEASE_KEYSTORE_PASSWORD", "androidReleaseKeystorePassword", "android.release.keystore.password")
