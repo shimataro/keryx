@@ -70,6 +70,12 @@ val missingSigningValues = buildList {
 val releaseSigningRequired =
     (project.findProperty("androidReleaseSigningRequired") as? String)?.toBooleanStrictOrNull() ?: false
 
+// Bold yellow, so this one WARN line stands out among hundreds of ordinary task lines instead of
+// looking identical to them. NO_COLOR (https://no-color.org) opts out for environments that don't
+// want ANSI codes, e.g. a plain log file.
+fun highlightWarning(message: String): String =
+    if (System.getenv("NO_COLOR") != null) message else "\u001B[1;33m$message\u001B[0m"
+
 android {
     namespace = "works.merc.keryx.app.android"
     compileSdk = 37
@@ -111,9 +117,11 @@ android {
                 error("Android release signing is required here but is not configured. See docs/build.md.")
 
             else -> project.logger.warn(
-                "No Android release signing configured — :androidApp's release build will be UNSIGNED " +
-                    "(it cannot be installed on a device or uploaded to Google Play). This keeps plain " +
-                    "`./gradlew build` working for desktop-only work; see docs/setup.md to configure signing.",
+                highlightWarning(
+                    "⚠ No Android release signing configured — :androidApp's release build will be UNSIGNED " +
+                        "(it cannot be installed on a device or uploaded to Google Play). This keeps plain " +
+                        "`./gradlew build` working for desktop-only work; see docs/setup.md to configure signing.",
+                ),
             )
         }
     }
