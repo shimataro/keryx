@@ -55,14 +55,14 @@ update.repo=
 # sdk.dir=/path/to/Android/sdk
 
 # Android release signing configuration.
-#   Environment variables: ANDROID_RELEASE_KEYSTORE_PATH
-#                          ANDROID_RELEASE_KEYSTORE_PASSWORD
-#                          ANDROID_RELEASE_KEY_ALIAS
-#                          ANDROID_RELEASE_KEY_PASSWORD
 #   Gradle properties: -PandroidReleaseKeystorePath=...
 #                      -PandroidReleaseKeystorePassword=...
 #                      -PandroidReleaseKeyAlias=...
 #                      -PandroidReleaseKeyPassword=...
+#   Environment variables: ANDROID_RELEASE_KEYSTORE_PATH
+#                          ANDROID_RELEASE_KEYSTORE_PASSWORD
+#                          ANDROID_RELEASE_KEY_ALIAS
+#                          ANDROID_RELEASE_KEY_PASSWORD
 #   Default: (empty)
 # Leave empty (or omit): `./gradlew build` still succeeds, but :androidApp's release build comes
 # out UNSIGNED (a build warning says so) — it cannot be installed on a device or uploaded to

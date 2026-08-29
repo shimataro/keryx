@@ -35,6 +35,9 @@ val androidVersionCode: Int = appVersion.substringBefore('-').split('.')
     }
     .coerceAtLeast(1)
 
+// -P > environment variable > local.properties, the repo-wide order local.properties.example's
+// "Priority" header documents — so a `-PandroidRelease...` value can override an ANDROID_RELEASE_*
+// one already exported into the shell (release.yml passes all four via the environment).
 // Blank counts as unset: local.properties.example ships these keys with empty values, so a plain
 // null check treats a freshly copied file as "configured" and then fails deep inside AGP with
 // "Keystore file not set for signing config release" instead of taking the unsigned path below.
@@ -44,8 +47,8 @@ val androidVersionCode: Int = appVersion.substringBefore('-').split('.')
 // `-PandroidReleaseKeystorePath` with no value does the same). Same pattern, same reason, as
 // composeApp/build.gradle.kts's resolvedUpdateRepo.
 fun releaseSigningValue(env: String, gradleProperty: String, localProperty: String): String? =
-    System.getenv(env)?.takeIf { it.isNotBlank() }
-        ?: (project.findProperty(gradleProperty) as? String)?.takeIf { it.isNotBlank() }
+    (project.findProperty(gradleProperty) as? String)?.takeIf { it.isNotBlank() }
+        ?: System.getenv(env)?.takeIf { it.isNotBlank() }
         ?: localProperties.getProperty(localProperty)?.takeIf { it.isNotBlank() }
 
 val keystorePath = releaseSigningValue("ANDROID_RELEASE_KEYSTORE_PATH", "androidReleaseKeystorePath", "android.release.keystore.path")
