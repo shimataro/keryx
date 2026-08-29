@@ -101,8 +101,9 @@ OneDrive は Dropbox と同じカスタム URI スキーム（`keryx://oauth2/ca
 
 ### Android
 
-Android が対応するのは **Dropbox と OneDrive のみ** — 設定方法は上記と同じく
-`DROPBOX_APP_KEY`/`ONEDRIVE_CLIENT_ID` を設定する。Google Drive のキーは Android ビルドには
+Android が対応するのは **Dropbox と OneDrive のみ** — 設定方法は上記と同じく、`local.properties`
+の `dropbox.app.key` / `onedrive.client.id`（またはそれぞれの環境変数 `DROPBOX_APP_KEY` /
+`ONEDRIVE_CLIENT_ID`）を設定する。Google Drive のキーは Android ビルドには
 影響しない。**Google Drive が Android で提供されないのは**、そのデスクトップ用 OAuth 構成
 （loopback リダイレクト + `client_secret`）を Android では再利用できないため —
 背景となる調査は `external-spec.md` §4 と `sync-architecture.md` の "Google Drive on Android"

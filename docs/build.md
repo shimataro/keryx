@@ -101,8 +101,10 @@ OneDrive reuses the same custom URI scheme as Dropbox (`keryx://oauth2/callback`
 
 ### Android
 
-Android supports **Dropbox and OneDrive only** — set `DROPBOX_APP_KEY`/`ONEDRIVE_CLIENT_ID` the same
-way as above; the Google Drive keys have no effect on the Android build. **Google Drive is not
+Android supports **Dropbox and OneDrive only** — set the same `local.properties` keys as above
+(`dropbox.app.key` / `onedrive.client.id`, or their `DROPBOX_APP_KEY`/`ONEDRIVE_CLIENT_ID`
+environment-variable equivalents); the Google Drive keys have no effect on the Android build.
+**Google Drive is not
 offered on Android** because its desktop OAuth configuration (a "Desktop app" client using loopback
 redirect + `client_secret`) cannot be reused there — see `external-spec.md` §4 and
 `sync-architecture.md`'s "Google Drive on Android" for the underlying investigation.
