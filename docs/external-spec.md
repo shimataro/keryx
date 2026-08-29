@@ -118,8 +118,11 @@ pane at a time as a hierarchical stack (feed list → article list → article d
 own back control; a tablet-width screen shows two. Nothing about a pane's own content changes
 between these — only how many are on screen together — with one exception: search. At the 3-pane
 width the search field stays where it has always been, in the feed list's sidebar, with results
-appearing reactively in the article list beside it. At a narrower width there is no second pane to
-show those results in, so the field itself relocates to sit directly above the results it filters,
+appearing reactively in the article list beside it. At a phone width there is no second pane to
+show those results in at all; at a tablet width there is, but the article list is the one pane a
+narrower layout always keeps on screen, and the field has to live in exactly one place rather than
+as two editable copies of the same query. So both narrower layouts move the field to sit directly
+above the results it filters — where it also stays put when the device is rotated between the two —
 and the feed list's own copy becomes a tap-to-open entry point instead of something to type into.
 
 Where a mouse and a touchscreen need different affordances, both are supported without changing

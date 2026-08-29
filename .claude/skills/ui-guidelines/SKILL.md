@@ -142,8 +142,12 @@ would produce no visible change is never silently swallowed.
 **Search at a narrow layout.** The search field itself moves, not just its surrounding chrome: at
 `PaneLayout.Triple` it stays the plain, always-editable `KeryxTextField` this app has always had,
 in `FeedListPane`'s own sidebar (results render reactively in `ArticleListPane`'s `SearchListPane`
-beside it). At a narrow layout there is no second pane to show those results in, so the field
-itself relocates there instead — `FeedListPane` folds its copy into a read-only
+beside it). At `PaneLayout.Single` there is no second pane to show those results in at all; at
+`PaneLayout.Dual` there is one, but the article list is the pane a narrow layout always keeps on
+screen (`visiblePanes` includes it at every `Dual` depth), and the field has to live in exactly one
+place, never as two editable copies bound to the same `HomeViewModel.searchQuery`. So both narrow
+layouts put the field on the results pane instead, which also leaves it where it is across a
+`Single`↔`Dual` rotation — `FeedListPane` folds its copy into a read-only
 `KeryxCollapsedSearchBar` (`ui/common/KeryxSearchBar.kt`; tapping it selects
 `ArticleFilter.Search` and advances the navigation stack, it never itself takes focus or a
 keystroke), and the real, editable field becomes `SearchListPane`'s own header
