@@ -67,14 +67,19 @@
   "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
   ```
 
-- **エミュレータ（AVD）の作成**: 実機が無い場合のみ必要——なぜエミュレータには **Google Play**
-  イメージが必要なのかは、後述の「アプリの実行に必要なソフトウェア」を参照。system image の
-  ID は Google のリビジョン更新で変わるため、固定値を書かず一覧から選ぶ:
+- **エミュレータ（AVD）の作成**: 実機が無い場合のみ必要——なぜエミュレータに **Google Play**
+  イメージを使うべきなのかは、後述の「アプリの実行に必要なソフトウェア」を参照。まず
+  `platform-tools` と `emulator` パッケージを導入する——`adb` と `emulator` バイナリ
+  （[testing.ja.md](testing.ja.md) の実機テストコマンドで使用）は `cmdline-tools` ではなく
+  これらのパッケージに含まれる。system image の ID は Google のリビジョン更新で変わるため、
+  固定値を書かず一覧から選ぶ。以下のコマンドは、`PATH` に無い可能性を踏まえて上記のライセンス
+  同意コマンドと同じくフルパスで統一している:
 
   ```bash
-  sdkmanager --list | grep google_apis_playstore
-  sdkmanager "system-images;android-<N>;google_apis_playstore;x86_64"
-  avdmanager create avd -n keryx -k "system-images;android-<N>;google_apis_playstore;x86_64"
+  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "emulator"
+  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list | grep google_apis_playstore
+  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "system-images;android-<N>;google_apis_playstore;x86_64"
+  "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n keryx -k "system-images;android-<N>;google_apis_playstore;x86_64"
   ```
 
   `<N>` は上記の `minSdk = 26` / `compileSdk`・`targetSdk = 37` に近い値を選ぶ。CI の計装テスト

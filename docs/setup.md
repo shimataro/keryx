@@ -71,14 +71,18 @@ Split into what every target needs in common, and what's specific to the Android
   ```
 
 - **Emulator (AVD) setup**: only needed if you don't have a physical device — see "Software
-  Required to Run the App" below for why an emulator has to use a **Google Play** system image
-  specifically. The system image ID changes as Google ships new revisions, so list what's
-  currently available rather than hardcoding one:
+  Required to Run the App" below for why an emulator should use a **Google Play** system image
+  specifically. Install the `platform-tools` and `emulator` packages first — `adb` and the
+  `emulator` binary (used by [testing.md](testing.md)'s device-test commands) come from these, not
+  from `cmdline-tools`. The system image ID changes as Google ships new revisions, so list what's
+  currently available rather than hardcoding one. Commands below use the same explicit
+  `cmdline-tools` path as the license-acceptance command above, since it may not be on `PATH`:
 
   ```bash
-  sdkmanager --list | grep google_apis_playstore
-  sdkmanager "system-images;android-<N>;google_apis_playstore;x86_64"
-  avdmanager create avd -n keryx -k "system-images;android-<N>;google_apis_playstore;x86_64"
+  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "emulator"
+  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list | grep google_apis_playstore
+  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "system-images;android-<N>;google_apis_playstore;x86_64"
+  "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n keryx -k "system-images;android-<N>;google_apis_playstore;x86_64"
   ```
 
   `<N>` should match (or be close to) `minSdk = 26` / `compileSdk`/`targetSdk = 37` above; the
