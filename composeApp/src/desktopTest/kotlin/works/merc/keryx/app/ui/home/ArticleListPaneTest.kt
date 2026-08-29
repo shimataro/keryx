@@ -324,20 +324,21 @@ class ArticleListPaneTest {
     }
 
     @Test
-    fun sortDirectionIconDistinguishesTheTwoEnabledDirections() {
+    fun sortDirectionIconDistinguishesTheTwoDirections() {
         // The regression this guards: both directions used to share one asset, flipped vertically at
         // the call site, which reads as a direction only on an icon set whose sort glyph has an arrow.
         assertNotEquals(
-            sortDirectionIcon(sortEnabled = true, newestFirst = true),
-            sortDirectionIcon(sortEnabled = true, newestFirst = false),
+            sortDirectionIcon(newestFirst = true),
+            sortDirectionIcon(newestFirst = false),
         )
     }
 
     @Test
-    fun sortDirectionIconIsDirectionFreeWhileDisabled() {
-        // Search results stay pinned to FTS5 relevance rank, so neither direction applies there.
-        assertEquals(KeryxIcons.Sort, sortDirectionIcon(sortEnabled = false, newestFirst = true))
-        assertEquals(KeryxIcons.Sort, sortDirectionIcon(sortEnabled = false, newestFirst = false))
+    fun sortDirectionIconStaysDirectionalWhileDisabled() {
+        // The disabled search scope must show the same directional glyph as the enabled state — only
+        // TooltipIconButton's own dimmed styling should convey "disabled", not a different glyph.
+        assertEquals(KeryxIcons.SortDescending, sortDirectionIcon(newestFirst = true))
+        assertEquals(KeryxIcons.SortAscending, sortDirectionIcon(newestFirst = false))
     }
 
     @Test

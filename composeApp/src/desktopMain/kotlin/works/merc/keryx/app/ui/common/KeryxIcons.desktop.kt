@@ -66,10 +66,6 @@ actual object KeryxIcons {
     actual val Refresh: DrawableResource = Res.drawable.ic_refresh_outlined
     actual val RestartAlt: DrawableResource = Res.drawable.ic_restart_alt_outlined
     actual val Search: DrawableResource = Res.drawable.ic_search_outlined
-    // Tabler's descending glyph doubles as the direction-free "sort" chrome icon: it is what this
-    // toolbar button has always shown, and Tabler's only direction-free alternative is the
-    // symmetric `arrows-sort` that previously broke the sort-direction indicator entirely.
-    actual val Sort: DrawableResource = Res.drawable.ic_sort_descending_outlined
     actual val SortAscending: DrawableResource = Res.drawable.ic_sort_ascending_outlined
     actual val SortDescending: DrawableResource = Res.drawable.ic_sort_descending_outlined
     actual val Storage: DrawableResource = Res.drawable.ic_storage_outlined

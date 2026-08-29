@@ -54,13 +54,6 @@ expect object KeryxIcons {
     val Refresh: DrawableResource
     val RestartAlt: DrawableResource
     val Search: DrawableResource
-
-    /**
-     * Direction-free "sort" glyph, used only where sorting is unavailable and the button is
-     * disabled (the search scope, whose results stay pinned to FTS5 relevance rank). The two
-     * live sort states use [SortDescending]/[SortAscending] instead.
-     */
-    val Sort: DrawableResource
     val SortAscending: DrawableResource
     val SortDescending: DrawableResource
     val Storage: DrawableResource
