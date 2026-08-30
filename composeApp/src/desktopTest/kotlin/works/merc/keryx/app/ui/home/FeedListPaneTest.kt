@@ -343,6 +343,13 @@ class FeedListPaneTest {
             waitForIdle()
 
             onNodeWithText("記事を検索").assertIsDisplayed()
+            onNodeWithText("記事を検索").performClick()
+            waitForIdle()
+
+            // The row enters search scope just like the collapsed bar does at a narrow layout,
+            // so a back action can restore the previous pane/filter.
+            assertEquals(HomePane.FeedList, vm.searchScopeEntry.value?.returnPane)
+            assertEquals(ArticleFilter.Search, vm.filter.value)
         } finally {
             fixture.close()
             driver.close()
