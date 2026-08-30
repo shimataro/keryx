@@ -311,7 +311,7 @@ class FeedListPaneTest {
      * all; see `FeedListPane`'s `onSelectionAdvance` KDoc.
      */
     @Test
-    fun narrowLayoutOmitsTheSearchQuickFilterRowSinceTheCollapsedBarIsItsEntryPoint() = runDesktopComposeUiTest {
+    fun omitsSearchQuickFilterRowWhenOnSelectionAdvanceIsProvided() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         val fixture = newHomeViewModel(driver, db)
         val vm = fixture.vm
@@ -334,7 +334,7 @@ class FeedListPaneTest {
      * All/Starred (unread badge, selection highlight), so it stays.
      */
     @Test
-    fun triplePaneKeepsTheSearchQuickFilterRowAsAFilterScope() = runDesktopComposeUiTest {
+    fun keepsSearchQuickFilterRowWhenOnSelectionAdvanceIsNull() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         val fixture = newHomeViewModel(driver, db)
         val vm = fixture.vm
