@@ -330,10 +330,9 @@ confirm the full navigation flow manually on a device or emulator:
   then going back returns to **that same article list**, with the original scope selected again —
   not to the feed list (`homeBackAction`'s `ExitSearch`, the fix for the bug where the article
   list's search icon didn't advance the stack but going back still popped a pane).
-- From the feed list's collapsed search bar (or its sidebar "Search" row), going back returns to
-  the feed list with the scope restored to what it was before (the "Search" row's own highlight
-  clears); the query itself survives on the collapsed bar, and tapping it again reopens the search
-  screen with the same results.
+- From the feed list's collapsed search bar, going back returns to the feed list with the scope
+  restored to what it was before; the query itself survives on the collapsed bar, and tapping it
+  again reopens the search screen with the same results.
 - Rotating to a tablet-width landscape (`PaneLayout.Dual`) mid-session does not eject the user from
   whatever they were reading, and the first back press from the article list there is not silently
   swallowed (`canNavigateBack`'s fix). Entering search there and pressing back exits the search

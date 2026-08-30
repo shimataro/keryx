@@ -427,7 +427,7 @@ narrow/`Triple` の分岐が `PaneLayout` や `isTouchPrimary` ではなく `onS
 
 検索専用の `HomePane` は存在しない — どの入口も `HomePane.ArticleList` の中身を差し替えて
 `ArticleFilter.Search` を設定するだけで、スタックを進めるとは限らない（記事一覧自身の検索アイコンは
-進めないが、折りたたみバーやサイドバー行は進める）— そのため単純な「1段ポップ」では、どちらの
+進めないが、折りたたみバーは進める）— そのため単純な「1段ポップ」では、どちらの
 経路でも正しく元に戻せない。`HomeViewModel.enterSearchScope(returnPane)` が、切り替え直前の
 filter・選択行と、狭いレイアウトの戻る操作が着地すべきペインをスナップショットし、
 `exitSearchScope()` がその両方を復元してそのペインを返す。これを上記 `homeBackAction` の

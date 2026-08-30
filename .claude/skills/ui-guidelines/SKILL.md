@@ -172,10 +172,14 @@ layouts put the field on the results pane instead, which also leaves it where it
 `KeryxCollapsedSearchBar` (`ui/common/KeryxSearchBar.kt`; tapping it selects
 `ArticleFilter.Search` and advances the navigation stack, it never itself takes focus or a
 keystroke), and the real, editable field becomes `SearchListPane`'s own header
-(`KeryxExpandedSearchBar`), sitting directly above the results it filters. Outside the Search
-scope at a narrow layout, `ArticleListTopBar`'s own `onSearchClick` gives `ArticleListPane` a
-matching entry point (a search icon, ahead of notifications/sort/mark-all-read) — otherwise a user
-who lands on the article list first (the narrow layout's own default) would have no way in.
+(`KeryxExpandedSearchBar`), sitting directly above the results it filters. At a narrow layout
+`FeedListPane` also hides its own "Search" quick-filter row entirely (kept only at
+`PaneLayout.Triple`, where it is a filter scope rather than an entry point) — otherwise the same
+screen would carry two controls for the identical action, the collapsed bar above it and this row
+below it. Outside the Search scope at a narrow layout, `ArticleListTopBar`'s own `onSearchClick`
+gives `ArticleListPane` a matching entry point (a search icon, ahead of
+notifications/sort/mark-all-read) — otherwise a user who lands on the article list first (the
+narrow layout's own default) would have no way in.
 
 This split is driven by the same nullable-callback idiom the rest of this file already uses for
 "is this pane narrow": `FeedListPane`'s `onSelectionAdvance` and `ArticleListPane`'s `onNavigateUp`
@@ -186,10 +190,10 @@ touch-primary Android device in landscape at a tablet width can still resolve `P
 on desktop.
 
 `HomeViewModel.pendingSearchFocus` is a latched `StateFlow<Boolean>`, not a one-shot
-`SharedFlow` — the request to focus the field (tapping the collapsed bar, the sidebar's own
-"Search" row, or Cmd+F/the menu bar's "Search…") is raised in the very click that advances the
-navigation stack, so the pane that will actually own the field has not composed yet when the
-request fires; a `SharedFlow` with no subscriber yet would drop it silently, which is exactly what
+`SharedFlow` — requests from the collapsed bar and narrow-layout menu-bar Search can be raised
+before the destination field composes. At `PaneLayout.Triple`, the sidebar's own "Search" row
+focuses the already-composed field without advancing the navigation stack.
+A `SharedFlow` with no subscriber yet would drop a request silently, which is exactly what
 used to make Android's search feel broken. The latch stays set until whichever field composes
 next consumes it (`consumeSearchFocusRequest()`), and `HomeViewModel.selectFilter` clears an
 unconsumed one when the user navigates elsewhere first.
@@ -199,7 +203,7 @@ sets `ArticleFilter.Search` on `HomePane.ArticleList` (see "Search is layout-dep
 so a plain "pop one pane" back action would either overshoot (from `ArticleListTopBar`'s own
 search icon, which never advances the stack: popping would land on the feed list, not the article
 list the user actually came from) or leave the filter stuck on `Search` after popping back to it
-(from the collapsed bar / sidebar row, which does advance). `HomeViewModel.enterSearchScope(returnPane)`
+(from the collapsed bar, which does advance). `HomeViewModel.enterSearchScope(returnPane)`
 snapshots the filter/row-selection active right before the switch, plus the pane a narrow-layout
 back action should land on; `exitSearchScope()` restores both and hands back that pane.
 `ui/home/HomePaneLayout.kt`'s `homeBackAction(layout, depth, searchScopeReturnPending)` is where

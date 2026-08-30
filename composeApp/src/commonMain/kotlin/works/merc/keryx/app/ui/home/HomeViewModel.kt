@@ -390,8 +390,9 @@ class HomeViewModel(
 
     // Requests to move keyboard focus into whichever pane currently owns the search field —
     // FeedListPane's own KeryxTextField at PaneLayout.Triple, or SearchListPane's KeryxExpandedSearchBar
-    // at a narrow layout (Cmd+F, clicking the "Search" sidebar row, or tapping the collapsed search
-    // bar all call requestSearchFocus()). Deliberately a *latched* StateFlow rather than a one-shot
+    // at a narrow layout (Cmd+F, or tapping the collapsed search bar, both call requestSearchFocus()
+    // — the sidebar's own "Search" row does too, but only exists at PaneLayout.Triple). Deliberately
+    // a *latched* StateFlow rather than a one-shot
     // SharedFlow: at a narrow layout the request is raised in the same click that advances the
     // navigation stack, so the pane that will own the field has not composed yet — a SharedFlow
     // emission (as this used to be) is dropped silently when no collector exists yet, which is
