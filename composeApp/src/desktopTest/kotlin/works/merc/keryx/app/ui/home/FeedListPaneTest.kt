@@ -305,6 +305,50 @@ class FeedListPaneTest {
         }
     }
 
+    /**
+     * At a narrow layout the collapsed search bar above is already the screen's search entry point,
+     * so the "Search" quick-filter row — which would run the identical action — is not rendered at
+     * all; see `FeedListPane`'s `onSelectionAdvance` KDoc.
+     */
+    @Test
+    fun narrowLayoutOmitsTheSearchQuickFilterRowSinceTheCollapsedBarIsItsEntryPoint() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            setContent { FeedListPaneTestHost(vm, 600.dp, onSelectionAdvance = {}) }
+            waitForIdle()
+
+            // onNodeWithText matches exactly by default, so the row's own label ("記事を検索") is
+            // never confused with the collapsed bar's placeholder ("記事を検索…").
+            onNodeWithText("記事を検索").assertDoesNotExist()
+            onNodeWithText("記事を検索…").assertIsDisplayed()
+        } finally {
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    /**
+     * At `PaneLayout.Triple` the same row is not an entry point but a filter scope alongside
+     * All/Starred (unread badge, selection highlight), so it stays.
+     */
+    @Test
+    fun triplePaneKeepsTheSearchQuickFilterRowAsAFilterScope() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            setContent { FeedListPaneTestHost(vm, 600.dp) }
+            waitForIdle()
+
+            onNodeWithText("記事を検索").assertIsDisplayed()
+        } finally {
+            fixture.close()
+            driver.close()
+        }
+    }
+
     @Test
     fun tappingTheCollapsedSearchBarSelectsSearchAdvancesAndRaisesAFocusRequest() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()

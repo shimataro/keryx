@@ -144,9 +144,12 @@ internal const val FEED_LIST_DRAG_HOST_TEST_TAG = "feed-list-drag-host"
  *   tag row), in addition to [onActivated] — see `HomeScreen`'s pane-layout wiring. `null` means
  *   [PaneLayout.Triple], where every pane is already visible and there is nowhere to advance to —
  *   this is also what keeps this pane's search field editable (see the `KeryxTextField`/
- *   `KeryxCollapsedSearchBar` branch below): a narrow layout instead folds it into a read-only
- *   entry point, since the field the user would actually type into now lives in
- *   `ArticleListPane`'s `SearchListPane` alongside the results (see that composable's own KDoc).
+ *   `KeryxCollapsedSearchBar` branch below) and its "Search" quick-filter row visible (see the
+ *   `SidebarRow` below it): a narrow layout instead folds the field into a read-only entry point,
+ *   since the field the user would actually type into now lives in `ArticleListPane`'s
+ *   `SearchListPane` alongside the results (see that composable's own KDoc), and hides the
+ *   quick-filter row entirely since the collapsed bar above is already its narrow-layout
+ *   equivalent.
  * @param notifVm The notification center, when this pane is the one that has to host its bell —
  *   i.e. when the article list pane (which owns the bell everywhere else) is not on screen
  *   alongside this one. `null` at every other layout/depth, so the bell is never drawn twice; see
@@ -440,15 +443,23 @@ internal fun FeedListPane(
             onClick = { vm.selectFilter(ArticleFilter.Starred); onActivated(); onSelectionAdvance?.invoke() },
             isTouchPrimary = isTouchPrimary,
         )
-        SidebarRow(
-            icon = { KeryxIcon(KeryxIcons.Search, null) },
-            label = stringResource(Res.string.home_search),
-            count = searchUnread,
-            selected = filter == ArticleFilter.Search,
-            focused = focused,
-            onClick = { vm.enterSearchScope(HomePane.FeedList); onActivated(); onSelectionAdvance?.invoke() },
-            isTouchPrimary = isTouchPrimary,
-        )
+        // At a narrow layout the collapsed search bar above is already this row's entry point, and
+        // a second control with the same action on the same screen is the redundancy this avoids.
+        // At PaneLayout.Triple the row is not an entry point but a filter scope alongside
+        // All/Starred — it carries the unread badge, and it is the only way back to the results
+        // after switching filters, which a narrow layout gets from the collapsed bar's retained
+        // query instead.
+        if (onSelectionAdvance == null) {
+            SidebarRow(
+                icon = { KeryxIcon(KeryxIcons.Search, null) },
+                label = stringResource(Res.string.home_search),
+                count = searchUnread,
+                selected = filter == ArticleFilter.Search,
+                focused = focused,
+                onClick = { vm.enterSearchScope(HomePane.FeedList); onActivated() },
+                isTouchPrimary = isTouchPrimary,
+            )
+        }
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
 
         Box(Modifier.weight(1f)) {
