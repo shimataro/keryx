@@ -100,3 +100,21 @@ fun canNavigateBack(layout: PaneLayout, depth: Int): Boolean =
  */
 fun initialPaneFor(layout: PaneLayout, saved: HomePane): HomePane =
     if (layout == PaneLayout.Triple) saved else minOf(saved, HomePane.ArticleList)
+
+/**
+ * The [HomePane] to focus when a notification's `ShowFeedDetail` action selects a feed.
+ *
+ * At [PaneLayout.Triple] — and at [PaneLayout.Dual]'s depth 1, where [visiblePanes] shows the feed
+ * list and the article list together — focusing [HomePane.FeedList] puts the selected feed's row
+ * on screen next to its articles, which is what "select that feed in the feed list" means there.
+ * At [PaneLayout.Single] the feed list is a screen of its own, so focusing it would navigate
+ * *back* from wherever the user was and show a list whose selection isn't even painted
+ * (`LocalRowSelectionVisible` is `false` there — see `HomeScreen`). Advancing to
+ * [HomePane.ArticleList] instead shows the feed's own articles, titled with the feed's name.
+ */
+fun paneForFeedDetail(layout: PaneLayout): HomePane =
+    if (HomePane.ArticleList in visiblePanes(layout, HomePane.FeedList.ordinal + 1)) {
+        HomePane.FeedList
+    } else {
+        HomePane.ArticleList
+    }

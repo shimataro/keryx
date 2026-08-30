@@ -63,13 +63,33 @@ sealed class KeryxException(message: String) : Exception(message)
   URL コピーの確認を M3 の `Snackbar` で表示するが、これは API 33 未満に限られる — API 33 以降は OS 側が
   既にクリップボードコピーの確認を表示するため、Snackbar を出すとそれと重複してしまう
   （`platform/PlatformOs.kt` の `platformShowsOwnCopyConfirmation` と `ui/home/HomeCommon.kt` の
-  `LocalSnackbarHostState` を参照）。
+  `LocalSnackbarHostState` を参照）。Android における Snackbar のもう一つの用途は
+  `ui/home/HomeScreen.kt` の `ForegroundAlertSnackbar`（後述）。
 - 履歴はセッション中のみ保持（DB 保存なし）。記録するのは「後から見返す価値がある内容」に限る:
   エラー・警告に加え、`INFO` は新バージョンの通知のみ。**新着記事は通知センターには記録しない**
   （`NewArticleNotifier` は OS 通知（トレイ）にのみ流す）——記事一覧と未読バッジという永続的な手段で
   既に把握できるため。手動更新も同様に、一覧・未読バッジの更新で示す。
-- ベルアイコンにバッジ（件数）。バックグラウンド更新中の警告は UI コンテキストが無いため
-  通知センターにのみ記録する。
+- ベルアイコンにバッジ（件数）。ベルは `ArticleListPane` のヘッダ行にあり、シングルペイン幅
+  （3 ペインが 3 つの別画面になり、そのヘッダがアプリの起動先の画面に存在しない）では
+  `FeedListPane` のヘッダ行にも置かれる（正確な規則は `ui-guidelines` スキルを参照。
+  両方に同時に出ることはない）。`ArticleDetailPane` には意図的に置かない。
+- バックグラウンド更新中の警告は UI コンテキストが無いため通知センターにのみ記録し、
+  **OS 通知には出さない**（OS 通知は新着記事専用。上記参照）。そのため Android では
+  `ForegroundAlertSnackbar`（`ui/home/HomeScreen.kt`）が、`WARNING`/`ERROR` の発生時点で
+  Snackbar によっても通知する: バッジだけでは「ベルのあるペインを既に見ているユーザー」にしか
+  届かず、これらのアラートは `runAndroidStartupTasks` や `FeedRefreshWorker` が非同期に積むため。
+  `INFO` は対象外（新バージョン通知はアラートではない）。詳細:
+  - 提示済みの判定は `core/AppNotification.kt` の `AlertKey`（レベル + メッセージ + アクション）を
+    キーにする。通知 id は `NotificationCenter.addCoalescing` が再発のたびに振り直すため使えない
+    — 恒久的に失敗し続ける同期が、バックグラウンド試行のたびではなく一度だけ通知されるようにする。
+    重複排除と提示済み判定は同じヘルパを通すので、両者が食い違うことはない。
+  - collector はウィンドウが実際に OS フォーカスを持っているかで gate する（`LocalWindowInfo`）。
+    アプリがバックグラウンドにある間、通知シェードが下りている間、設定ダイアログ（独立ウィンドウ）が
+    開いている間はアラートを保留する — 誰も見ていないウィンドウに出しても、Snackbar が見られないまま
+    タイムアウトして消費されてしまうため。フォーカスが戻った時点で提示する。
+  - Snackbar のアクションは、その通知自身のネクストアクション（下表）を実行する。ベルの行と同じ
+    `notificationRowAction` を通る。`ResetCloudData` は専用の確認を経る必要があるためアクションなしで通知する。
+  - 同時に複数届いた場合は最新の 1 件のみを通知する（Material 3 は同時に 1 件）。件数はバッジが伝える。
 - **ベルに残るすべての通知はネクストアクションを持つ**（`AppNotificationAction`）。行をクリックすると
   そのアクションが実行され、`ResetCloudData` だけは破壊的操作のため行クリックではなく専用の
   インライン確認ボタンを持つ。クリック可能な行は、設定画面の `LinkRow` と同じ見た目
@@ -78,7 +98,7 @@ sealed class KeryxException(message: String) : Exception(message)
 | ネクストアクション | 発生源 | 挙動 |
 | --- | --- | --- |
 | `OpenUrl(url)` | 新バージョン通知 | リリースページを外部ブラウザで開く |
-| `ShowFeedDetail(feedId)` | フィード消失(410) / URL 変更(301/308) | フィード一覧で該当フィードを選択（一覧をクリックしたときと同じ） |
+| `ShowFeedDetail(feedId)` | フィード消失(410) / URL 変更(301/308) | フィード一覧で該当フィードを選択（一覧をクリックしたときと同じ）。シングルペイン幅ではフィード一覧が独立した画面のため、選択ハイライトすら描かれない画面へ戻るのではなく、そのフィードの記事一覧まで進む — `ui/home/HomePaneLayout.kt` の `paneForFeedDetail` を参照 |
 | `ShowSettingsTab(tabId)` | 同期エラー（`SchemaVersionException` は `updates`、その他は `cloud_sync`） | 設定ダイアログを該当タブで開く。`cloud_sync` タブは `SyncRepository.lastSyncError` を失敗理由として表示し、`updates` タブは開いた時点で自動的に更新確認を行う |
 | `ShowInfoDialog(detail)` | macOS の translocated 警告 | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
 | `ResetCloudData` | `CloudDataIncompatibleException` | 専用のインラインボタン → 確認ダイアログ → クラウドDBをタイムスタンプ付き名前で退避してから作り直す（[sync-architecture.ja.md](sync-architecture.ja.md)「クラウドデータのリセット（退避）」参照） |

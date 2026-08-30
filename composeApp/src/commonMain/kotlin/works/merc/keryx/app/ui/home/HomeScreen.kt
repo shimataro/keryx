@@ -6,12 +6,15 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -31,6 +34,8 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
@@ -49,6 +54,7 @@ import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.resources.common_ok
 import works.merc.keryx.app.resources.notification_detail_title
+import works.merc.keryx.app.resources.notification_snackbar_action
 import works.merc.keryx.app.resources.settings_cloud_reset_confirm_action
 import works.merc.keryx.app.resources.settings_cloud_reset_confirm_body
 import works.merc.keryx.app.resources.settings_cloud_reset_confirm_title
@@ -352,6 +358,12 @@ fun HomeScreen() {
                                     renameSelectedRequestId = feedListRenameRequestId,
                                     deleteSelectedRequestId = feedListDeleteRequestId,
                                     onSelectionAdvance = { setFocusedPane(HomePane.ArticleList) },
+                                    // The bell lives in ArticleListPane's header everywhere it is
+                                    // on screen; this pane only has to host it when it isn't —
+                                    // PaneLayout.Single's depth 1. Derived from `visible` rather
+                                    // than from a layout/depth check of its own, so the two panes
+                                    // can never both draw one (or both skip it).
+                                    notifVm = notifVm.takeIf { HomePane.ArticleList !in visible },
                                 )
                                 HomePane.ArticleList -> ArticleListPane(
                                     vm,
@@ -410,9 +422,13 @@ fun HomeScreen() {
             alignment = Alignment.BottomCenter,
             properties = PopupProperties(focusable = false, dismissOnClickOutside = false),
         ) {
-            SnackbarHost(snackbarHostState, modifier = Modifier.padding(bottom = 24.dp))
+            SnackbarHost(
+                snackbarHostState,
+                modifier = Modifier.navigationBarsPadding().padding(bottom = 24.dp),
+            )
         }
     }
+    ForegroundAlertSnackbar(notifVm, snackbarHostState, windowFocused)
 
     if (showAddFeed) {
         AddFeedDialog(
@@ -425,7 +441,7 @@ fun HomeScreen() {
         )
     }
 
-    PendingNotificationActionHost(vm, notifVm, onFocusPane = { setFocusedPane(it) })
+    PendingNotificationActionHost(vm, notifVm, paneLayout, onFocusPane = { setFocusedPane(it) })
 }
 
 /**
@@ -434,9 +450,10 @@ fun HomeScreen() {
  * `App` instead (the settings dialog lives there).
  */
 @Composable
-private fun PendingNotificationActionHost(
+internal fun PendingNotificationActionHost(
     vm: HomeViewModel,
     notifVm: NotificationCenterViewModel,
+    layout: PaneLayout,
     onFocusPane: (HomePane) -> Unit,
 ) {
     val pending = notifVm.pendingAction ?: return
@@ -458,10 +475,12 @@ private fun PendingNotificationActionHost(
                 },
                 dismissText = stringResource(Res.string.common_cancel),
             )
-        // Same effect as clicking that feed in the feed list.
+        // Same effect as clicking that feed in the feed list — except at PaneLayout.Single,
+        // where that list is a screen of its own and focusing it would navigate backwards; see
+        // paneForFeedDetail's own KDoc.
         is AppNotificationAction.ShowFeedDetail -> LaunchedEffect(pending.id) {
             vm.selectFilter(ArticleFilter.Feed(action.feedId))
-            onFocusPane(HomePane.FeedList)
+            onFocusPane(paneForFeedDetail(layout))
             notifVm.clearPendingAction()
         }
         // Explanation only (e.g. the macOS translocation warning) — no navigation, one button.
@@ -476,5 +495,58 @@ private fun PendingNotificationActionHost(
                 onConfirm = { notifVm.clearPendingAction() },
             )
         else -> Unit
+    }
+}
+
+/**
+ * Announces a warning/error in a Snackbar the moment it is raised, wherever the user happens to be.
+ *
+ * The bell's badge alone is a passive signal — it only reaches a user who is already looking at the
+ * pane that hosts it, and these alerts are raised asynchronously by the startup tasks and the
+ * background refresh worker, neither of which posts an OS notification (see `error-design.md`).
+ * A Snackbar is Material 3's own answer for a non-blocking problem report, and this app's host for
+ * it already renders through a `Popup`, so it stays visible above the article reader's WebView at
+ * every pane layout and depth.
+ *
+ * Desktop passes a `null` [hostState] (it has no in-app snackbar convention — see
+ * `LocalSnackbarHostState`'s KDoc), which makes this a no-op there.
+ *
+ * @param windowFocused Whether this window actually has OS focus. Announcing into a window nobody
+ *   is looking at would burn the alert — the Snackbar would time out unseen and
+ *   [NotificationCenterViewModel.markAlertsSurfaced] would stop it ever coming back. False covers
+ *   the app being backgrounded, the notification shade being pulled down, and the settings dialog
+ *   (a window of its own) being open; the alert simply waits, and `alertToSurface` being a
+ *   `StateFlow` is what lets it still be there when focus returns.
+ */
+@Composable
+internal fun ForegroundAlertSnackbar(
+    notifVm: NotificationCenterViewModel,
+    hostState: SnackbarHostState?,
+    windowFocused: Boolean,
+) {
+    if (hostState == null) return
+    val actionLabel = stringResource(Res.string.notification_snackbar_action)
+    LaunchedEffect(hostState, windowFocused) {
+        if (!windowFocused) return@LaunchedEffect
+        notifVm.alertToSurface.filterNotNull().collectLatest { alert ->
+            // collectLatest: a newer alert cancels whatever is showing and replaces it, matching
+            // Material 3's one-Snackbar-at-a-time rule. The replacement's markAlertsSurfaced()
+            // covers the cancelled one too, so nothing is left to re-announce itself later.
+            val act = notificationRowAction(
+                alert,
+                onRequestHostAction = { notifVm.requestAction(alert) },
+                onNavigated = {},
+            )
+            val result = hostState.showSnackbar(
+                message = alert.message,
+                actionLabel = actionLabel.takeIf { act != null },
+                withDismissAction = true,
+                duration = SnackbarDuration.Long,
+            )
+            // After, not before: marking first would burn an alert whose Snackbar is cancelled a
+            // moment later by a lost window focus, leaving it announced but never actually seen.
+            notifVm.markAlertsSurfaced()
+            if (result == SnackbarResult.ActionPerformed) act?.invoke()
+        }
     }
 }

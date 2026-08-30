@@ -186,6 +186,25 @@ class HomePaneLayoutTest {
         assertEquals(true, canNavigateBack(PaneLayout.Dual, 3))
     }
 
+    // --- paneForFeedDetail ---
+
+    @Test
+    fun paneForFeedDetailFocusesTheFeedListWhereTheArticleListIsVisibleBesideIt() {
+        // Triple always shows all three panes; Dual's depth 1 shows [FeedList, ArticleList]. In
+        // both, focusing the feed list puts the selected feed's row on screen next to its
+        // articles — the original "select that feed in the feed list" behaviour.
+        assertEquals(HomePane.FeedList, paneForFeedDetail(PaneLayout.Triple))
+        assertEquals(HomePane.FeedList, paneForFeedDetail(PaneLayout.Dual))
+    }
+
+    @Test
+    fun paneForFeedDetailAdvancesToTheArticleListAtSingle() {
+        // Single shows one pane per depth, so focusing the feed list would navigate *backwards*
+        // from wherever the user was — and onto a list whose selection highlight isn't even
+        // painted (LocalRowSelectionVisible is false there).
+        assertEquals(HomePane.ArticleList, paneForFeedDetail(PaneLayout.Single))
+    }
+
     // --- initialPaneFor ---
 
     @Test

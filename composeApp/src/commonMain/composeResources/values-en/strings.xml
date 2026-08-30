@@ -287,6 +287,7 @@
     <string name="notification_level_warning">Warning</string>
     <string name="notification_level_info">Info</string>
     <string name="notification_detail_title">Details</string>
+    <string name="notification_snackbar_action">View</string>
 
     <!-- errors -->
     <string name="error_feed_timeout">Fetching the feed timed out</string>

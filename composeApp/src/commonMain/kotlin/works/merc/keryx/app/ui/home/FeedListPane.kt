@@ -147,6 +147,10 @@ internal const val FEED_LIST_DRAG_HOST_TEST_TAG = "feed-list-drag-host"
  *   `KeryxCollapsedSearchBar` branch below): a narrow layout instead folds it into a read-only
  *   entry point, since the field the user would actually type into now lives in
  *   `ArticleListPane`'s `SearchListPane` alongside the results (see that composable's own KDoc).
+ * @param notifVm The notification center, when this pane is the one that has to host its bell —
+ *   i.e. when the article list pane (which owns the bell everywhere else) is not on screen
+ *   alongside this one. `null` at every other layout/depth, so the bell is never drawn twice; see
+ *   `HomeScreen`'s pane-layout wiring, which derives it from `visiblePanes`.
  * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
  */
 @Composable
@@ -161,6 +165,7 @@ internal fun FeedListPane(
     renameSelectedRequestId: Int = 0,
     deleteSelectedRequestId: Int = 0,
     onSelectionAdvance: (() -> Unit)? = null,
+    notifVm: NotificationCenterViewModel? = null,
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
     val feeds by vm.feeds.collectAsStateSafe(emptyList())
@@ -373,6 +378,7 @@ internal fun FeedListPane(
             vm = vm,
             cloudConnected = cloudConnected,
             onAddFeedClick = onAddFeedClick,
+            notifVm = notifVm,
         )
 
         if (onSelectionAdvance == null) {
@@ -775,7 +781,8 @@ private fun FeedListAutoScrollEffect(
 }
 
 /**
- * [FeedListPane]'s top toolbar row: add feed / refresh all / cloud sync (when [cloudConnected]).
+ * [FeedListPane]'s top toolbar row: the notification bell (when [notifVm] is given — see
+ * [FeedListPane]'s own KDoc), then add feed / refresh all / cloud sync (when [cloudConnected]).
  * Reads [vm]'s refreshing/syncing state itself (rather than taking it as a parameter) so a
  * refresh/sync toggle only invalidates this row's own restart scope, not the whole pane.
  */
@@ -784,6 +791,7 @@ private fun FeedListToolbarRow(
     vm: HomeViewModel,
     cloudConnected: Boolean,
     onAddFeedClick: () -> Unit,
+    notifVm: NotificationCenterViewModel?,
 ) {
     val refreshing by vm.feedRefreshing.collectAsStateSafe(false)
     val syncing by vm.syncing.collectAsStateSafe(false)
@@ -806,6 +814,15 @@ private fun FeedListToolbarRow(
                 icon
             },
         ) {
+            // Notifications are their own concern, not part of the add/refresh/sync cluster, so
+            // they get their own (single-icon, therefore uncapsuled) slot separated by the
+            // standard 8dp — and sit ahead of it, matching where the bell sits relative to
+            // ArticleListTopBar's own icons, so it keeps the same relative position across the
+            // two top bars a narrow layout swaps between.
+            if (notifVm != null) {
+                NotificationsBell(notifVm)
+                Spacer(Modifier.width(8.dp))
+            }
             ToolbarIconGroup {
                 val addFeedTooltip = stringResource(Res.string.home_add_feed)
                 TooltipIconButton(tooltip = addFeedTooltip, onClick = onAddFeedClick) {

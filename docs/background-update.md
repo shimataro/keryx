@@ -36,7 +36,7 @@ while (true) {
 ```
 
 - The interval setting is re-read every loop, so changes take effect from the next cycle (no explicit rescheduling needed).
-- Errors during update do not crash the app; they are recorded in the notification center (handled inside `FeedRepository.refreshFeed`).
+- Errors during update do not crash the app; they are recorded in the notification center (handled inside `FeedRepository.refreshFeed`). On Android they are additionally announced in a Snackbar — but only while the app's window actually has focus, so one raised by `FeedRefreshWorker` in the background waits and is announced once the user comes back, rather than timing out unseen. See "Notification Center" in [error-design.md](error-design.md).
 - New-article notifications reach the OS through one of three platform paths, all fed by the same
   `NewArticleNotifier.trayEvents` flow (`TrayState` can only be created inside Compose's `application {}`
   scope, so a `MutableSharedFlow` bridges it): macOS uses `TrayIcon.displayMessage`, Linux with a

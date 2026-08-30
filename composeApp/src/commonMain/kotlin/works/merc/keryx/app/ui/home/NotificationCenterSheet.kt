@@ -128,17 +128,7 @@ private fun NotificationRow(
     onNavigated: () -> Unit,
 ) {
     val action = notification.action
-    // The reset action is destructive, so it must not fire from a stray row click.
-    val rowAction: (() -> Unit)? = when (action) {
-        null, AppNotificationAction.ResetCloudData -> null
-        // Opening the browser needs no host state, so it's done right here (same pattern as the
-        // article list's "open in browser").
-        is AppNotificationAction.OpenUrl -> ({ BrowserOpener.open(action.url); onNavigated() })
-        is AppNotificationAction.ShowFeedDetail,
-        is AppNotificationAction.ShowSettingsTab,
-        is AppNotificationAction.ShowInfoDialog,
-        -> ({ onRequestHostAction(); onNavigated() })
-    }
+    val rowAction = notificationRowAction(notification, onRequestHostAction, onNavigated)
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
 
@@ -193,4 +183,34 @@ private fun NotificationRow(
             KeryxIcon(KeryxIcons.CloseOutlined, contentDescription = dismissTooltip, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(16.dp))
         }
     }
+}
+
+/**
+ * What acting on [notification] does, or `null` when the notification offers nothing to act on
+ * from a plain tap — no action at all, or the destructive
+ * [AppNotificationAction.ResetCloudData], which must never fire from a stray row click and gets
+ * its own confirmed button instead.
+ *
+ * Shared by the notification row and Android's foreground alert Snackbar
+ * (`HomeScreen`'s `ForegroundAlertSnackbar`), so both reach the same destination for the same
+ * notification. Kept a plain function rather than a composable so its branches are unit-testable.
+ *
+ * @param onRequestHostAction Hands the notification to the host screen, for the actions that need
+ *   another screen's state changed (see [AppNotificationAction]'s own KDoc).
+ * @param onNavigated Called once the action has been started, so a caller showing the notification
+ *   in a transient surface (popover, Snackbar) can dismiss it.
+ */
+internal fun notificationRowAction(
+    notification: AppNotification,
+    onRequestHostAction: () -> Unit,
+    onNavigated: () -> Unit,
+): (() -> Unit)? = when (val action = notification.action) {
+    null, AppNotificationAction.ResetCloudData -> null
+    // Opening the browser needs no host state, so it's done right here (same pattern as the
+    // article list's "open in browser").
+    is AppNotificationAction.OpenUrl -> ({ BrowserOpener.open(action.url); onNavigated() })
+    is AppNotificationAction.ShowFeedDetail,
+    is AppNotificationAction.ShowSettingsTab,
+    is AppNotificationAction.ShowInfoDialog,
+    -> ({ onRequestHostAction(); onNavigated() })
 }
