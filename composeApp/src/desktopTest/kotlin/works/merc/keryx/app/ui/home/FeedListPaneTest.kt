@@ -42,6 +42,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
+private val TEST_PANE_HEIGHT = 600.dp
+
 /**
  * End-to-end Compose UI tests for `FeedListPane`'s scroll-to-selection behavior (`feedListRowIndex`
  * + `scrollToIndexIfNeeded(Int)` in `HomeCommon.kt`), driven against the real rendered pane
@@ -278,7 +280,7 @@ class FeedListPaneTest {
         val fixture = newHomeViewModel(driver, db)
         val vm = fixture.vm
         try {
-            setContent { FeedListPaneTestHost(vm, 600.dp) }
+            setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT) }
             waitForIdle()
 
             onNode(hasSetTextAction()).assertIsDisplayed()
@@ -294,11 +296,61 @@ class FeedListPaneTest {
         val fixture = newHomeViewModel(driver, db)
         val vm = fixture.vm
         try {
-            setContent { FeedListPaneTestHost(vm, 600.dp, onSelectionAdvance = {}) }
+            setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = {}) }
             waitForIdle()
 
             onNode(hasSetTextAction()).assertDoesNotExist()
             onNodeWithText("記事を検索…").assertIsDisplayed()
+        } finally {
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    /**
+     * At a narrow layout the collapsed search bar above is already the screen's search entry point,
+     * so the "Search" quick-filter row — which would run the identical action — is not rendered at
+     * all; see `FeedListPane`'s `onSelectionAdvance` KDoc.
+     */
+    @Test
+    fun omitsSearchQuickFilterRowWhenOnSelectionAdvanceIsProvided() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = {}) }
+            waitForIdle()
+
+            // onNodeWithText matches exactly by default, so the quick-filter label is never
+            // confused with the collapsed search bar placeholder.
+            onNodeWithText("記事を検索").assertDoesNotExist()
+        } finally {
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    /**
+     * At `PaneLayout.Triple` the same row is not an entry point but a filter scope alongside
+     * All/Starred (unread badge, selection highlight), so it stays.
+     */
+    @Test
+    fun keepsSearchQuickFilterRowWhenOnSelectionAdvanceIsNull() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT) }
+            waitForIdle()
+
+            onNodeWithText("記事を検索").assertIsDisplayed()
+            onNodeWithText("記事を検索").performClick()
+            waitForIdle()
+
+            // The row enters search scope just like the collapsed bar does at a narrow layout,
+            // so a back action can restore the previous pane/filter.
+            assertEquals(HomePane.FeedList, vm.searchScopeEntry.value?.returnPane)
+            assertEquals(ArticleFilter.Search, vm.filter.value)
         } finally {
             fixture.close()
             driver.close()
@@ -312,7 +364,7 @@ class FeedListPaneTest {
         val vm = fixture.vm
         var advanceCount = 0
         try {
-            setContent { FeedListPaneTestHost(vm, 600.dp, onSelectionAdvance = { advanceCount++ }) }
+            setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = { advanceCount++ }) }
             waitForIdle()
 
             onNodeWithText("記事を検索…").performClick()
@@ -337,7 +389,7 @@ class FeedListPaneTest {
         val vm = fixture.vm
         try {
             vm.setSearchQuery("kotlin")
-            setContent { FeedListPaneTestHost(vm, 600.dp, onSelectionAdvance = {}) }
+            setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = {}) }
             waitForIdle()
 
             onNodeWithText("kotlin").assertIsDisplayed()

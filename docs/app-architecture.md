@@ -438,7 +438,7 @@ request silently.
 
 Search has no `HomePane` of its own — every entry point just sets `ArticleFilter.Search` on
 `HomePane.ArticleList` with its content swapped out, without necessarily advancing the stack (the
-article list's own search icon doesn't; the collapsed bar and sidebar row do) — so a plain "pop
+article list's own search icon doesn't; the collapsed bar does) — so a plain "pop
 one pane" back action can't undo it correctly either way. `HomeViewModel.enterSearchScope(returnPane)`
 snapshots the filter/row-selection active right before the switch, plus the pane a narrow-layout
 back action should land on; `exitSearchScope()` restores both and hands back that pane, which
