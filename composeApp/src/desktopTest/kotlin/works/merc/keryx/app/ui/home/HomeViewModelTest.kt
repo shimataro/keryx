@@ -1709,8 +1709,13 @@ class HomeViewModelTest {
 
     @Test
     fun exitSearchScopeRestoresTheFilterAndRowInstanceAndReturnsTheEntryPane() = runTest {
+        db.insertFeed("f1")
+        db.insertTag("t1", "Kotlin")
+        db.insertFeedTag("f1", "t1")
         val vm = newViewModel()
         subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.toggleTagExpanded("t1")
         vm.selectFilter(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInTag("f1", "t1"))
         vm.enterSearchScope(HomePane.ArticleList)
 
@@ -1723,8 +1728,10 @@ class HomeViewModelTest {
 
     @Test
     fun reenteringSearchScopeWhileAlreadyInItKeepsTheOriginalSnapshot() = runTest {
+        db.insertFeed("f1")
         val vm = newViewModel()
         subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
         vm.selectFilter(ArticleFilter.Feed("f1"))
         vm.enterSearchScope(HomePane.FeedList)
 
@@ -2554,6 +2561,48 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
 
         assertEquals(ArticleFilter.All, vm2.filter.value)
+    }
+
+    @Test
+    fun exitSearchScopeFallsBackToAllWhenFilterTargetWasDeletedMeanwhile() = runTest {
+        db.insertTag("t1", "Kotlin")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Tag("t1"))
+        testScheduler.advanceUntilIdle()
+        vm.enterSearchScope(HomePane.ArticleList)
+
+        // Simulate the tag being soft-deleted independently (e.g. by another device's sync)
+        // while Search is active, so the snapshot inside _searchScopeEntry still points at "t1".
+        db.tagsQueries.softDelete(1L, 1L, "t1")
+
+        vm.exitSearchScope()
+
+        assertEquals(ArticleFilter.All, vm.filter.value)
+    }
+
+    @Test
+    fun exitSearchScopeDemotesStaleTagNestedRowInstanceWhenTagCollapsedMeanwhile() = runTest {
+        db.insertFeed("f1")
+        db.insertTag("t1", "Kotlin")
+        db.insertFeedTag("f1", "t1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        assertFalse("t1" in vm.expandedTagIds.value)
+        vm.toggleTagExpanded("t1")
+        assertTrue("t1" in vm.expandedTagIds.value)
+        vm.selectFilter(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInTag("f1", "t1"))
+        vm.enterSearchScope(HomePane.ArticleList)
+
+        // Collapsing the tag while still in Search only normalizes the live selection, not the
+        // frozen snapshot inside _searchScopeEntry — exitSearchScope must do that normalization itself.
+        vm.toggleTagExpanded("t1")
+
+        vm.exitSearchScope()
+
+        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
+        assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), vm.selectedRowInstance.value)
     }
 
     @Test
