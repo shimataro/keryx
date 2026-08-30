@@ -321,8 +321,8 @@ class FeedListPaneTest {
             setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = {}) }
             waitForIdle()
 
-            // onNodeWithText matches exactly by default, so the row's own label ("記事を検索") is
-            // never confused with the collapsed bar's placeholder ("記事を検索…").
+            // onNodeWithText matches exactly by default, so the quick-filter label is never
+            // confused with the collapsed search bar placeholder.
             onNodeWithText("記事を検索").assertDoesNotExist()
         } finally {
             fixture.close()
