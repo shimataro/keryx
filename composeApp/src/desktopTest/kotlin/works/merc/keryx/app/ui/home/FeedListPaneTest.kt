@@ -42,6 +42,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
+private val TEST_PANE_HEIGHT = 600.dp
+
 /**
  * End-to-end Compose UI tests for `FeedListPane`'s scroll-to-selection behavior (`feedListRowIndex`
  * + `scrollToIndexIfNeeded(Int)` in `HomeCommon.kt`), driven against the real rendered pane
@@ -278,7 +280,7 @@ class FeedListPaneTest {
         val fixture = newHomeViewModel(driver, db)
         val vm = fixture.vm
         try {
-            setContent { FeedListPaneTestHost(vm, 600.dp) }
+            setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT) }
             waitForIdle()
 
             onNode(hasSetTextAction()).assertIsDisplayed()
@@ -294,7 +296,7 @@ class FeedListPaneTest {
         val fixture = newHomeViewModel(driver, db)
         val vm = fixture.vm
         try {
-            setContent { FeedListPaneTestHost(vm, 600.dp, onSelectionAdvance = {}) }
+            setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = {}) }
             waitForIdle()
 
             onNode(hasSetTextAction()).assertDoesNotExist()
@@ -316,7 +318,7 @@ class FeedListPaneTest {
         val fixture = newHomeViewModel(driver, db)
         val vm = fixture.vm
         try {
-            setContent { FeedListPaneTestHost(vm, 600.dp, onSelectionAdvance = {}) }
+            setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = {}) }
             waitForIdle()
 
             // onNodeWithText matches exactly by default, so the row's own label ("記事を検索") is
@@ -338,7 +340,7 @@ class FeedListPaneTest {
         val fixture = newHomeViewModel(driver, db)
         val vm = fixture.vm
         try {
-            setContent { FeedListPaneTestHost(vm, 600.dp) }
+            setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT) }
             waitForIdle()
 
             onNodeWithText("記事を検索").assertIsDisplayed()
@@ -362,7 +364,7 @@ class FeedListPaneTest {
         val vm = fixture.vm
         var advanceCount = 0
         try {
-            setContent { FeedListPaneTestHost(vm, 600.dp, onSelectionAdvance = { advanceCount++ }) }
+            setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = { advanceCount++ }) }
             waitForIdle()
 
             onNodeWithText("記事を検索…").performClick()
@@ -387,7 +389,7 @@ class FeedListPaneTest {
         val vm = fixture.vm
         try {
             vm.setSearchQuery("kotlin")
-            setContent { FeedListPaneTestHost(vm, 600.dp, onSelectionAdvance = {}) }
+            setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = {}) }
             waitForIdle()
 
             onNodeWithText("kotlin").assertIsDisplayed()
