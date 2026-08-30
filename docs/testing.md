@@ -326,14 +326,22 @@ confirm the full navigation flow manually on a device or emulator:
   keyboard covering it.
 - Opening a result, then going back, returns to the search screen with the query and results still
   in place (no keyboard auto-reopening).
-- Going back once more shows the query on the collapsed search bar in the feed list; tapping it
-  again returns to the same results.
+- From an article list already showing some other feed/tag/folder, tapping its own search icon and
+  then going back returns to **that same article list**, with the original scope selected again —
+  not to the feed list (`homeBackAction`'s `ExitSearch`, the fix for the bug where the article
+  list's search icon didn't advance the stack but going back still popped a pane).
+- From the feed list's collapsed search bar (or its sidebar "Search" row), going back returns to
+  the feed list with the scope restored to what it was before (the "Search" row's own highlight
+  clears); the query itself survives on the collapsed bar, and tapping it again reopens the search
+  screen with the same results.
 - Rotating to a tablet-width landscape (`PaneLayout.Dual`) mid-session does not eject the user from
   whatever they were reading, and the first back press from the article list there is not silently
-  swallowed (`canNavigateBack`'s fix).
+  swallowed (`canNavigateBack`'s fix). Entering search there and pressing back exits the search
+  scope the same way it does at phone width — the back arrow stays enabled while searching even
+  though `PaneLayout.Dual`'s depth 1→2 step is otherwise a no-op for back navigation.
 - At a tablet-width landscape wide enough to reach `PaneLayout.Triple`, the layout matches desktop
   exactly — the search field is back in the feed list sidebar, and the article list carries no
-  search bar of its own.
+  search bar of its own. Back navigation stays disabled at every depth there, same as desktop.
 
 **Display scaling.** Every check above must also be run at a **non-100% display scale**, on Windows
 in particular — 200% first, then 150%. The AWT menu backend was mispositioning menus and painting

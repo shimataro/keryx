@@ -321,6 +321,9 @@ class FeedListPaneTest {
             assertEquals(ArticleFilter.Search, vm.filter.value)
             assertEquals(1, advanceCount)
             assertEquals(true, vm.pendingSearchFocus.value)
+            // Snapshotted so a later back action can restore this pane and filter — see
+            // HomeViewModel.enterSearchScope's own KDoc.
+            assertEquals(HomePane.FeedList, vm.searchScopeEntry.value?.returnPane)
         } finally {
             fixture.close()
             driver.close()

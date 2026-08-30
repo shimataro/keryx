@@ -76,6 +76,12 @@ fun HomeScreen() {
     // invocation (same pattern as openSelectedInBrowser/copySelectedUrl) — collecting it here would
     // recompose the whole HomeScreen on every arrow-key selection change for no rendering benefit.
     val feeds by vm.feeds.collectAsStateSafe(emptyList())
+    // Whether a Search-scope snapshot is waiting to be restored — see homeBackAction's own KDoc.
+    // Only its nullness is read here; _filter is written in exactly one place (selectFilter), which
+    // also clears this whenever the filter moves away from Search, so a non-null entry always means
+    // the filter is currently Search — no need to separately collect vm.filter (and recompose this
+    // whole screen on every filter change) just to re-derive what this already implies.
+    val searchScopeEntry by vm.searchScopeEntry.collectAsStateSafe(null)
     val tags by vm.tags.collectAsStateSafe(emptyList())
     val folders by vm.folders.collectAsStateSafe(emptyList())
     val collapsedFolderIds by vm.collapsedFolderIds.collectAsStateSafe(emptySet())
@@ -141,10 +147,17 @@ fun HomeScreen() {
 
     // At a narrow PaneLayout, focusedPane doubles as the navigation stack's depth cursor (see
     // HomePane's KDoc) — one step back is just the previous ordinal, with no separate depth state
-    // to keep in sync. A no-op at depth 1 (feed list): nothing before it to go back to.
+    // to keep in sync. See homeBackAction's own KDoc for why exiting the Search scope is resolved
+    // as a distinct action rather than always popping the pane stack.
     fun goBack() {
-        val previous = focusedPane.ordinal - 1
-        if (previous >= 0) setFocusedPane(HomePane.entries[previous])
+        when (homeBackAction(paneLayout, focusedPane.ordinal + 1, searchScopeEntry != null)) {
+            HomeBackAction.ExitSearch -> vm.exitSearchScope()?.let { setFocusedPane(it) }
+            HomeBackAction.PopPane -> {
+                val previous = focusedPane.ordinal - 1
+                if (previous >= 0) setFocusedPane(HomePane.entries[previous])
+            }
+            HomeBackAction.None -> {}
+        }
     }
 
     // Mirrors that focus state into MenuController (composition-local state -> StateFlow, same
@@ -174,12 +187,16 @@ fun HomeScreen() {
         }
     }
     fun focusSearch() {
-        vm.selectFilter(ArticleFilter.Search)
+        // Read before setFocusedPane below overwrites it: at a narrow layout, coerced down to
+        // ArticleList so triggering this from the article detail pane doesn't later restore back
+        // into a detail view with no list around it (see enterSearchScope's own KDoc on
+        // returnPane) — matching initialPaneFor's own clamp for the same reason.
+        val returnPane = if (paneLayout == PaneLayout.Triple) focusedPane else minOf(focusedPane, HomePane.ArticleList)
+        vm.enterSearchScope(returnPane)
         // At PaneLayout.Triple the field stays in FeedListPane; at a narrow layout it has moved
         // into ArticleListPane's SearchListPane instead (see FeedListPane's own KDoc) — Triple is
         // paneLayout's initial value, so desktop's behavior here is unchanged.
         setFocusedPane(if (paneLayout == PaneLayout.Triple) HomePane.FeedList else HomePane.ArticleList)
-        vm.requestSearchFocus()
     }
 
     // Same live-read-at-call-time pattern as openSelectedInBrowser/copySelectedUrl, resolving the
@@ -283,14 +300,16 @@ fun HomeScreen() {
                     }
                 }
                 // BackHandler is always called (its own `enabled` gates the actual interception).
-                // canNavigateBack is false at PaneLayout.Triple (visiblePanes never changes there —
-                // desktop's WINDOW_MIN_WIDTH never resolves to anything else, see
+                // homeBackAction is false (None) at PaneLayout.Triple (visiblePanes never changes
+                // there — desktop's WINDOW_MIN_WIDTH never resolves to anything else, see
                 // TRIPLE_PANE_MIN_WIDTH's KDoc), so the app's default (OS back gesture /
-                // Alt+F4-equivalent) is left alone there. It is also false at PaneLayout.Dual depth
-                // 1->2 (visiblePanes' sliding window shows the same two panes at both depths), so a
-                // back press that would produce no visible change falls through instead of being
-                // swallowed.
-                BackHandler(enabled = canNavigateBack(layout, focusedPane.ordinal + 1)) { goBack() }
+                // Alt+F4-equivalent) is left alone there. It is also None at PaneLayout.Dual depth
+                // 1->2 outside the Search scope (visiblePanes' sliding window shows the same two
+                // panes at both depths), so a back press that would produce no visible change falls
+                // through instead of being swallowed — but ExitSearch still applies there while
+                // Search is active, since exiting it always changes what's on screen.
+                val backAction = homeBackAction(layout, focusedPane.ordinal + 1, searchScopeEntry != null)
+                BackHandler(enabled = backAction != HomeBackAction.None) { goBack() }
 
                 // Single: tapping a row navigates away from it (drills into the article list, or
                 // the article detail), so a lingering selection highlight there would mark a row
@@ -375,21 +394,19 @@ fun HomeScreen() {
                                     // Every narrow layout gives this pane its own back-button row
                                     // (the Triple branch above passes none at all), and only the
                                     // button's enabled state tracks whether there is anywhere to go
-                                    // back to — see canNavigateBack's own KDoc (false at Dual depth
-                                    // 1->2, where the feed list is still on screen beside this
-                                    // pane). Hiding the row instead would shift the controls row
-                                    // and the whole list under it every time Dual slides.
+                                    // back to — see homeBackAction's own KDoc (None at Dual depth
+                                    // 1->2 outside Search, where the feed list is still on screen
+                                    // beside this pane). Hiding the row instead would shift the
+                                    // controls row and the whole list under it every time Dual slides.
                                     onNavigateUp = ::goBack,
-                                    navigateUpEnabled = canNavigateBack(layout, focusedPane.ordinal + 1),
+                                    navigateUpEnabled = backAction != HomeBackAction.None,
                                     onTextInputFocusChange = { articleListTextInputFocused = it },
                                     // Only outside the Search scope: once already there, there is
                                     // nowhere further to advance to (see ArticleListTopBar's own
-                                    // KDoc on onSearchClick).
-                                    onSearchClick = {
-                                        vm.selectFilter(ArticleFilter.Search)
-                                        vm.requestSearchFocus()
-                                        setFocusedPane(HomePane.ArticleList)
-                                    },
+                                    // KDoc on onSearchClick). Doesn't advance the navigation stack —
+                                    // the field lives on this same pane (see enterSearchScope's own
+                                    // KDoc on returnPane).
+                                    onSearchClick = { vm.enterSearchScope(HomePane.ArticleList) },
                                 )
                                 HomePane.ArticleDetail -> ArticleDetailPane(
                                     vm,

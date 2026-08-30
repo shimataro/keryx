@@ -51,11 +51,15 @@ expect fun KeryxCollapsedSearchBar(
  * @param onQueryChange Reports every edit upstream to `HomeViewModel.setSearchQuery`.
  * @param placeholder Shown when [query] is empty.
  * @param onNavigateUp Called by the leading back arrow — same "go back one step" contract as every
- *   other narrow pane's own back button (see `ArticleListPane`'s `onNavigateUp` KDoc); this screen
- *   applies no special "exit search" behavior of its own.
+ *   other narrow pane's own back button (see `ArticleListPane`'s `onNavigateUp` KDoc), which here
+ *   resolves to `HomeScreen`'s own `goBack()`. Unlike every other pane, one step back from *this*
+ *   screen is exiting the Search scope (`HomeViewModel.exitSearchScope`) and restoring the filter
+ *   active before it, not popping the navigation stack — see `ui/home/HomePaneLayout.kt`'s
+ *   `homeBackAction` for why that's a distinct action.
  * @param navigateUpEnabled Whether the back arrow can act right now — passed straight through from
- *   `ArticleListPane`'s own `navigateUpEnabled` (false at `PaneLayout.Dual` while the feed list is
- *   still on screen beside this one, matching every other narrow pane's convention).
+ *   `ArticleListPane`'s own `navigateUpEnabled`, itself driven by `homeBackAction` (which resolves
+ *   to enabled even at `PaneLayout.Dual`'s otherwise-inert depth 1->2 step, since exiting Search
+ *   always changes what's on screen there too).
  * @param navigateUpContentDescription Accessibility label for the back arrow.
  * @param clearContentDescription Accessibility label for the clear ("×") action, shown only when
  *   [query] is non-empty.

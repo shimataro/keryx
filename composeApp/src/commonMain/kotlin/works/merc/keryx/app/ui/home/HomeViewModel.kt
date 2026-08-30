@@ -401,6 +401,51 @@ class HomeViewModel(
         _pendingSearchFocus.value = false
     }
 
+    /**
+     * The state to restore when a narrow-layout back action exits the Search scope: the pane to
+     * return focus to, and the [filter]/row selection that was active right before entering Search.
+     *
+     * Captured only on the *first* [enterSearchScope] call after leaving Search (a re-entry while
+     * already in Search — e.g. re-tapping the sidebar's own "Search" row — must not overwrite it
+     * with Search-scope state). Cleared by [selectFilter] whenever the user leaves Search by any
+     * other means (e.g. tapping an unrelated feed at [PaneLayout.Dual], where both panes are on
+     * screen at once), so a stale snapshot can never resurface a filter the user already moved past.
+     */
+    internal data class SearchScopeEntry(
+        val returnPane: HomePane,
+        val filter: ArticleFilter,
+        val row: FeedListRowSelection,
+    )
+
+    private val _searchScopeEntry = MutableStateFlow<SearchScopeEntry?>(null)
+    internal val searchScopeEntry: StateFlow<SearchScopeEntry?> = _searchScopeEntry.asStateFlow()
+
+    /**
+     * Enters the Search scope, snapshotting the current filter/row/[returnPane] so [exitSearchScope]
+     * can restore them later. [returnPane] is the pane a narrow-layout back action should focus on
+     * exit — the caller's own pane, since entering Search never advances the navigation stack past
+     * it (the field itself lives on [HomePane.ArticleList], see `ArticleListPane`'s `SearchListPane`).
+     */
+    fun enterSearchScope(returnPane: HomePane) {
+        if (_filter.value != ArticleFilter.Search) {
+            _searchScopeEntry.value = SearchScopeEntry(returnPane, _filter.value, _selectedRowInstance.value)
+        }
+        selectFilter(ArticleFilter.Search)
+        requestSearchFocus()
+    }
+
+    /**
+     * Exits the Search scope, restoring the filter/row snapshotted by [enterSearchScope].
+     *
+     * @return The pane a narrow-layout back action should focus, or `null` if there is no snapshot
+     *   to restore (Search was entered some other way, e.g. directly via [setSearchQuery] in a test).
+     */
+    fun exitSearchScope(): HomePane? {
+        val entry = _searchScopeEntry.value ?: return null
+        selectFilter(entry.filter, entry.row)
+        return entry.returnPane
+    }
+
     // --- Pane widths ---
     private val _feedListPaneWidth = MutableStateFlow(
         settingsRepository.getLocalSettings().feedListPaneWidth
@@ -538,7 +583,12 @@ class HomeViewModel(
         // navigating elsewhere before the search pane composed), so it can't steal focus at
         // whatever field appears next. Placed after the early return above, so reselecting the
         // already-active Search filter never clears a request still waiting to be consumed.
-        if (filter != ArticleFilter.Search) _pendingSearchFocus.value = false
+        // Also drops the exitSearchScope() snapshot the same way — once the user has left Search
+        // by any means, there is nothing left for a later back action to restore.
+        if (filter != ArticleFilter.Search) {
+            _pendingSearchFocus.value = false
+            _searchScopeEntry.value = null
+        }
         _filter.value = filter
         _selectedRowInstance.value = instance
         _selectedArticle.value = null

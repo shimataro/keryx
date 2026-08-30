@@ -383,11 +383,15 @@ doubles as the stack's current depth, so `HomeScreen` needs no separate depth st
 filter or an article advances it (`FeedListPane`'s `onSelectionAdvance` / `ArticleListPane`'s
 `onSelectionAdvance`, both `null` at `Triple`, where every pane is already visible and there is
 nowhere to advance to), and `platform/BackHandler` (a real back-gesture/button interception on
-Android, a no-op on desktop) pops it by one — gated on `canNavigateBack(layout, depth)`, a pure
-function that resolves `false` whenever stepping back wouldn't actually change what's on screen
-(always at `Triple`; also at `PaneLayout.Dual` depth 1→2, since the sliding window below shows the
-same two panes at both — a back press there used to be silently swallowed before this existed).
-`PaneLayout.Dual` is a two-pane *sliding window* over that stack, not a plain adjacent pair: the
+Android, a no-op on desktop) pops it by one — gated on `homeBackAction(layout, depth,
+searchScopeReturnPending)`, which wraps the pane-only predicate `canNavigateBack(layout, depth)`
+(`false` whenever stepping back wouldn't actually change what's on screen: always at `Triple`;
+also at `PaneLayout.Dual` depth 1→2, since the sliding window below shows the same two panes at
+both — a back press there used to be silently swallowed before this existed) with the other half
+of "what does going back actually do": exiting the Search scope instead of popping a pane, when a
+snapshot is waiting to be restored (see "Search at a narrow layout" below) — this takes priority
+even where `canNavigateBack` alone says there's nothing to do, since exiting Search always changes
+what's on screen. `PaneLayout.Dual` is a two-pane *sliding window* over that stack, not a plain adjacent pair: the
 article list stays one of the two panes shown at every depth, so drilling into an article swaps the
 feed list out for the detail pane rather than sliding the list itself off-screen.
 
@@ -414,3 +418,12 @@ narrow/`Triple` split is driven by `onSelectionAdvance`/`onNavigateUp` being `nu
 request to focus the field is raised in the same click that advances the stack, so the pane that
 will own the field hasn't composed yet, and a `SharedFlow` with no subscriber yet would drop the
 request silently.
+
+Search has no `HomePane` of its own — every entry point just sets `ArticleFilter.Search` on
+`HomePane.ArticleList` with its content swapped out, without necessarily advancing the stack (the
+article list's own search icon doesn't; the collapsed bar and sidebar row do) — so a plain "pop
+one pane" back action can't undo it correctly either way. `HomeViewModel.enterSearchScope(returnPane)`
+snapshots the filter/row-selection active right before the switch, plus the pane a narrow-layout
+back action should land on; `exitSearchScope()` restores both and hands back that pane, which
+`homeBackAction`'s `ExitSearch` case (above) resolves to instead of `PopPane`. The search query
+itself is never touched by any of this — it survives on the collapsed bar exactly as it was.

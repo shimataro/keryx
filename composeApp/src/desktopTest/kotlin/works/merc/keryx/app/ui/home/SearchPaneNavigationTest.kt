@@ -17,6 +17,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import org.koin.compose.KoinApplication
@@ -49,8 +50,13 @@ class SearchPaneNavigationTest {
         KoinApplication(configuration = koinConfiguration { modules(module { single { testMenuController } }) }) {
             val layout = PaneLayout.Single
             val visible = visiblePanes(layout, depth)
+            val searchScopeEntry by vm.searchScopeEntry.collectAsStateSafe(null)
             fun goBack() {
-                if (canNavigateBack(layout, depth)) onDepthChange(depth - 1)
+                when (homeBackAction(layout, depth, searchScopeEntry != null)) {
+                    HomeBackAction.ExitSearch -> vm.exitSearchScope()?.let { onDepthChange(it.ordinal + 1) }
+                    HomeBackAction.PopPane -> onDepthChange(depth - 1)
+                    HomeBackAction.None -> {}
+                }
             }
             Box(Modifier.size(320.dp, 600.dp)) {
                 visible.forEach { pane ->
@@ -68,7 +74,8 @@ class SearchPaneNavigationTest {
                             onActivated = {},
                             onSelectionAdvance = { onDepthChange(3) },
                             onNavigateUp = ::goBack,
-                            navigateUpEnabled = canNavigateBack(layout, depth),
+                            navigateUpEnabled = homeBackAction(layout, depth, searchScopeEntry != null) != HomeBackAction.None,
+                            onSearchClick = { vm.enterSearchScope(HomePane.ArticleList) },
                         )
                         // A plain stand-in for ArticleDetailPane: its own reader is a genuine
                         // native WebView this test harness cannot host (see
@@ -190,6 +197,72 @@ class SearchPaneNavigationTest {
             vm.selectFilter(ArticleFilter.All)
 
             assertEquals(false, vm.pendingSearchFocus.value)
+        } finally {
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    @Test
+    fun theArticleListsOwnSearchIconDoesNotAdvanceAndBackReturnsToTheSameArticleList() {
+        val (driver, db) = inMemoryDb()
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            runDesktopComposeUiTest {
+                var depth by mutableStateOf(2)
+                setContent { NarrowHomeTestHost(vm, depth, { depth = it }) }
+                waitForIdle()
+
+                assertEquals(ArticleFilter.All, vm.filter.value)
+                onNodeWithContentDescription("記事を検索").performClick()
+                waitForIdle()
+
+                // The regression this whole feature fixes: entering Search from the article list's
+                // own search icon must not push a new depth (the field lives on this same pane), so
+                // going back afterwards doesn't overshoot past the list the user was actually on.
+                assertEquals(2, depth)
+                assertEquals(ArticleFilter.Search, vm.filter.value)
+
+                onNodeWithContentDescription("戻る").performClick()
+                waitForIdle()
+
+                assertEquals(2, depth)
+                assertEquals(ArticleFilter.All, vm.filter.value)
+            }
+        } finally {
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    @Test
+    fun theCollapsedSearchBarsBackArrowRestoresTheFeedListAndKeepsTheQuery() {
+        val (driver, db) = inMemoryDb()
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            runDesktopComposeUiTest {
+                var depth by mutableStateOf(1)
+                setContent { NarrowHomeTestHost(vm, depth, { depth = it }) }
+                waitForIdle()
+
+                onNodeWithText("記事を検索…").performClick()
+                waitForIdle()
+                assertEquals(2, depth)
+                onNode(hasSetTextAction()).performTextInput("kotlin")
+                waitForIdle()
+
+                onNodeWithContentDescription("戻る").performClick()
+                waitForIdle()
+
+                // Back from the search screen returns to the feed list (where it was entered from,
+                // not depth 1 as an incidental side effect of popping), with the filter restored —
+                // not left on Search — and the query kept for the collapsed bar to show.
+                assertEquals(1, depth)
+                assertEquals(ArticleFilter.All, vm.filter.value)
+                assertEquals("kotlin", vm.searchQuery.value)
+            }
         } finally {
             fixture.close()
             driver.close()
