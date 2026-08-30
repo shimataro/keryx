@@ -1,5 +1,7 @@
 package works.merc.keryx.app.ui.home
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -59,6 +61,7 @@ import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.inMemoryDb
+import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.singleProviderCloudSession
@@ -101,6 +104,41 @@ class ArticleListPaneTest {
         val info = state.layoutInfo.visibleItemsInfo.first { it.index == 25 }
         assertTrue(info.offset >= state.layoutInfo.viewportStartOffset)
         assertTrue(info.offset + info.size <= state.layoutInfo.viewportEndOffset)
+    }
+
+    /**
+     * The pane can be composed with its list already positioned partway down — `NarrowPaneRow`
+     * restores a saved scroll position as `rememberLazyListState`'s *initial* index/offset when the
+     * pane comes back at a narrow layout. On that first frame `layoutInfo` is still empty, which
+     * `scrollToIndexIfNeeded` would otherwise read as "the selection isn't rendered anywhere" and
+     * answer with an animated scroll, yanking the restored position to put the selected row at the
+     * top of a viewport it was already sitting inside.
+     */
+    @Test
+    fun doesNotScrollAwayFromARestoredPositionThatAlreadyShowsTheSelection() = runDesktopComposeUiTest {
+        val items = articles(60)
+        lateinit var state: LazyListState
+
+        setContent {
+            state = rememberLazyListState(initialFirstVisibleItemIndex = 20)
+            ArticleListPaneContent(
+                articles = items,
+                feedTitles = emptyMap(),
+                selectedId = items[22].id,
+                unreadOnly = false,
+                onToggleUnreadOnly = {},
+                onToggleSort = {},
+                onMarkAllRead = {},
+                onSelectArticle = {},
+                modifier = Modifier.size(360.dp, 400.dp),
+                listState = state,
+            )
+        }
+        waitForIdle()
+
+        onNodeWithTag("article-a22").assertIsDisplayed()
+        assertEquals(20, state.firstVisibleItemIndex)
+        assertEquals(0, state.firstVisibleItemScrollOffset)
     }
 
     @Test
@@ -583,6 +621,64 @@ class ArticleListPaneTest {
     }
 
     /**
+     * At `PaneLayout.Single` this pane is unmounted while the article detail is on screen, and the
+     * filter can change underneath it while it is gone — a notification's `ShowFeedDetail`, or
+     * deleting the feed being viewed. `NarrowPaneRow` restores the scroll position it saved on the
+     * way out, so the reset-to-top has to notice a filter change that happened across that gap;
+     * `lastFilter` being a plain `remember` would re-initialize to the *new* filter on remount and
+     * silently leave the new feed's list scrolled to the old one's offset.
+     */
+    @Test
+    fun resetsToTheTopWhenTheFilterChangedWhileThePaneWasUnmounted() {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("fa")
+        db.insertFeed("fb", url = "https://feed/fb")
+        repeat(40) { db.insertArticleRow("a$it", "fa", createdAt = it.toLong()) }
+        repeat(40) { db.insertArticleRow("b$it", "fb", createdAt = it.toLong()) }
+        val vm = newMinimalViewModel(driver, db)
+        try {
+            runDesktopComposeUiTest {
+                var depth by mutableStateOf(2)
+                setContent {
+                    NarrowPaneRow(visiblePanes(PaneLayout.Single, depth), Modifier.size(360.dp, 400.dp)) { pane, paneModifier ->
+                        when (pane) {
+                            HomePane.ArticleList -> ArticleListPane(
+                                vm = vm,
+                                focused = true,
+                                onActivated = {},
+                                modifier = paneModifier,
+                            )
+                            else -> Box(paneModifier.fillMaxSize())
+                        }
+                    }
+                }
+                vm.selectFilter(ArticleFilter.Feed("fa"))
+                waitForIdle()
+
+                // Newest first, so a39 is feed A's top row — scroll until it is gone.
+                onRoot().performMouseInput { moveTo(center); repeat(12) { scroll(3f) } }
+                waitForIdle()
+                onNodeWithTag("article-a39").assertDoesNotExist()
+
+                // Drill into the article detail (this pane unmounts), switch feeds while it is
+                // gone — as PendingNotificationActionHost's ShowFeedDetail does — then come back.
+                depth = 3
+                waitForIdle()
+                vm.selectFilter(ArticleFilter.Feed("fb"))
+                waitForIdle()
+                depth = 2
+                waitForIdle()
+
+                // Feed B's own top row, not whatever sat at feed A's restored offset.
+                onNodeWithTag("article-b39").assertIsDisplayed()
+            }
+        } finally {
+            vm.viewModelScope.cancel()
+            driver.close()
+        }
+    }
+
+    /**
      * `KeryxExpandedSearchBar` and `ArticleListTopBar` are two separate composables stacked in the
      * same `Column` (see `SearchListPane`) — the clear button appearing/disappearing inside the
      * former must not shift the latter's controls row, the same "Layout stability under state
@@ -699,6 +795,16 @@ private fun newMinimalViewModel(
         feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
         syncRepository, cloudSession, activityCenter, clock, NewArticleNotifier(), ArticleListPaneTestNotificationMessages(),
         Dispatchers.Unconfined, Dispatchers.Unconfined,
+    )
+}
+
+/** Inserts an article row for the DB-backed tests above (`article`/`articles` build UI rows). */
+private fun KeryxDatabase.insertArticleRow(id: String, feedId: String, createdAt: Long) {
+    articlesQueries.insert(
+        id = id, feed_id = feedId, guid = id, url = "https://article/$id", title = "Title $id",
+        summary = null, content = null, author = null, published_at = null, thumbnail_url = null,
+        is_read = 0L, read_at = null, is_starred = 0L, starred_at = null, cached_at = 0L,
+        search_text = "", updated_at = 0L, created_at = createdAt,
     )
 }
 

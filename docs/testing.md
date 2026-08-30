@@ -342,6 +342,12 @@ confirm the full navigation flow manually on a device or emulator:
 - At a tablet-width landscape wide enough to reach `PaneLayout.Triple`, the layout matches desktop
   exactly — the search field is back in the feed list sidebar, and the article list carries no
   search bar of its own. Back navigation stays disabled at every depth there, same as desktop.
+- Opening an article from partway down the article list and then going back returns to the list at
+  the same scroll position, with **no visible scroll animation** — at phone width (where the pane is
+  genuinely unmounted) and at tablet-width landscape alike (where the sliding window keeps it on
+  screen). The same holds for the feed list and for a search results list.
+- With an article open, using a notification's "show feed" action to switch to a different feed and
+  then going back opens that feed's list at the **top**, not at the previous feed's scroll position.
 
 **Display scaling.** Every check above must also be run at a **non-100% display scale**, on Windows
 in particular — 200% first, then 150%. The AWT menu backend was mispositioning menus and painting

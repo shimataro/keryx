@@ -25,7 +25,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,10 +40,12 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Box
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.ArticleFilter
+import works.merc.keryx.app.core.encode
 import works.merc.keryx.app.core.searchTerms
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.displayTitle
@@ -155,12 +159,21 @@ fun ArticleListPane(
     // Reset the list to the top when the user switches feed/tag/folder/scope, so a new list never
     // opens scrolled to the previous one's offset. Only fires on an actual filter change (not the
     // first composition), so a restored last-selected article's scroll-into-view isn't clobbered.
+    //
+    // rememberSaveable, so this survives the pane being unmounted and remounted at a narrow
+    // PaneLayout (see NarrowPaneRow) — the filter can change while this pane is off screen at
+    // PaneLayout.Single (a notification's ShowFeedDetail, or deleting the feed/tag/folder being
+    // viewed), and a plain remember would re-initialize to the *new* filter on remount, leaving
+    // the restored scroll position pointing into the previous filter's list with no reset. Held
+    // as ArticleFilter.encode()'s String (the same form local settings persist it as) because
+    // ArticleFilter itself isn't a saveable type.
     val listState = rememberLazyListState()
-    var lastFilter by remember { mutableStateOf(filter) }
+    var lastFilter by rememberSaveable { mutableStateOf(filter.encode()) }
     LaunchedEffect(filter) {
-        if (filter != lastFilter) {
+        val encoded = filter.encode()
+        if (encoded != lastFilter) {
             listState.scrollToItem(0)
-            lastFilter = filter
+            lastFilter = encoded
         }
     }
 
@@ -488,6 +501,15 @@ internal fun ArticleListPaneContent(
     LaunchedEffect(selectedId, articles.isNotEmpty()) {
         val index = articles.indexOfFirst { it.id == selectedId }
         if (index !in articles.indices) return@LaunchedEffect
+        // Before the list's first measure pass layoutInfo is still empty, which
+        // scrollToIndexIfNeeded reads as "not rendered anywhere" and answers with an animated
+        // scroll — clobbering the scroll position NarrowPaneRow just restored, and pulling the
+        // selected row to the top of a viewport it was already sitting comfortably inside. Only
+        // ever suspends on that first frame; every later run (a genuine selection change, keyboard
+        // navigation) sees a measured list and takes exactly the path it always has.
+        if (listState.layoutInfo.totalItemsCount == 0) {
+            snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it > 0 }
+        }
         listState.scrollToIndexIfNeeded(index)
     }
 

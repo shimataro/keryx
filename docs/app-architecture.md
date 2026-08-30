@@ -395,6 +395,23 @@ what's on screen. `PaneLayout.Dual` is a two-pane *sliding window* over that sta
 article list stays one of the two panes shown at every depth, so drilling into an article swaps the
 feed list out for the detail pane rather than sliding the list itself off-screen.
 
+At a narrow layout the panes are hosted by `ui/home/NarrowPaneRow.kt`, which is what keeps each
+one's scroll position across the stack's comings and goings — the two layouts lose it for different
+reasons, so it addresses both. `Dual` never unmounts the article list, but the slide moves it from
+index 1 to index 0 of `visiblePanes`' result, and a `visible.forEach` loop gives every iteration the
+same compose group key, so a pane that changes position used to be torn down and rebuilt even though
+it never left the screen. `NarrowPaneRow` emits each pane from its own fixed source position instead
+(a pane added there must likewise get its own `if`, never a loop iteration), so it is simply never
+disposed and keeps its `LazyListState` outright. `Single` genuinely unmounts every pane but one, and
+there a `rememberSaveableStateHolder` saves each pane's `rememberSaveable` state — in practice its
+`LazyListState`, which `rememberLazyListState` stores that way — and restores it as the list state's
+*initial* index/offset, so nothing scrolls and no new call lands in the `scrollToIndexIfNeeded` code
+path `known-issues.md` implicates in an unfixed upstream Compose crash. `ArticleListPane`'s
+`lastFilter` is a `rememberSaveable` holding `ArticleFilter.encode()`'s string for the same reason:
+the filter can change while the pane is unmounted (a notification's `ShowFeedDetail`, or deleting the
+feed being viewed), and a plain `remember` would re-initialize to the new filter on remount, leaving
+the restored position pointing into the previous filter's list with no reset to the top.
+
 This is why the article reader's WebView being unconditionally composed (see "Article Reader"
 below) is safe on desktop specifically: desktop can only ever resolve `Triple`, where all three
 panes — including the one hosting the WebView — stay mounted for the app's whole lifetime.
