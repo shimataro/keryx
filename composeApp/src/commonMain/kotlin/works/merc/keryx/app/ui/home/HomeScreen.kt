@@ -405,8 +405,16 @@ fun HomeScreen() {
                                     // nowhere further to advance to (see ArticleListTopBar's own
                                     // KDoc on onSearchClick). Doesn't advance the navigation stack —
                                     // the field lives on this same pane (see enterSearchScope's own
-                                    // KDoc on returnPane).
-                                    onSearchClick = { vm.enterSearchScope(HomePane.ArticleList) },
+                                    // KDoc on returnPane). setFocusedPane is still required at
+                                    // PaneLayout.Dual: the search icon's own onClick never reaches
+                                    // paneActivation (a separate, unchained click handler — see
+                                    // ArticleListPaneContent), so without this, focusedPane could
+                                    // still be FeedList (both panes are on screen at Dual) and
+                                    // homeBackAction would never resolve to ExitSearch.
+                                    onSearchClick = {
+                                        setFocusedPane(HomePane.ArticleList)
+                                        vm.enterSearchScope(HomePane.ArticleList)
+                                    },
                                 )
                                 HomePane.ArticleDetail -> ArticleDetailPane(
                                     vm,

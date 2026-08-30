@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
@@ -12,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -91,6 +93,104 @@ class SearchPaneNavigationTest {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Mirrors `HomeScreen`'s real [PaneLayout.Dual] wiring (see `HomeScreen.kt` around lines
+     * 108-161 and 364-418), using a genuine `focusedPane: HomePane` state instead of
+     * [NarrowHomeTestHost]'s plain depth cursor — `homeBackAction` is driven off
+     * `focusedPane.ordinal + 1`, exactly as `HomeScreen`'s own `goBack()`/`navigateUpEnabled` are,
+     * which is what the regression below actually depends on: at `Dual`, both
+     * [FeedListPane] and [ArticleListPane] are on screen together, so which one is "focused" is
+     * independent of which panes are visible.
+     */
+    @Composable
+    private fun DualHomeTestHost(vm: HomeViewModel, focusedPane: HomePane, onFocusedPaneChange: (HomePane) -> Unit) {
+        KoinApplication(configuration = koinConfiguration { modules(module { single { testMenuController } }) }) {
+            val layout = PaneLayout.Dual
+            val visible = visiblePanes(layout, focusedPane.ordinal + 1)
+            val searchScopeEntry by vm.searchScopeEntry.collectAsStateSafe(null)
+            fun setFocusedPane(pane: HomePane) {
+                if (pane != focusedPane) onFocusedPaneChange(pane)
+            }
+            fun goBack() {
+                when (homeBackAction(layout, focusedPane.ordinal + 1, searchScopeEntry != null)) {
+                    HomeBackAction.ExitSearch -> vm.exitSearchScope()?.let { setFocusedPane(it) }
+                    HomeBackAction.PopPane -> {
+                        val previous = focusedPane.ordinal - 1
+                        if (previous >= 0) setFocusedPane(HomePane.entries[previous])
+                    }
+                    HomeBackAction.None -> {}
+                }
+            }
+            Box(Modifier.size(640.dp, 600.dp)) {
+                Row(Modifier.fillMaxSize()) {
+                    visible.forEach { pane ->
+                        when (pane) {
+                            HomePane.FeedList -> FeedListPane(
+                                vm = vm,
+                                focused = focusedPane == HomePane.FeedList,
+                                dragOverlay = remember { FeedDragOverlayState() },
+                                onActivated = { setFocusedPane(HomePane.FeedList) },
+                                modifier = Modifier.weight(1f),
+                                onSelectionAdvance = { setFocusedPane(HomePane.ArticleList) },
+                            )
+                            HomePane.ArticleList -> ArticleListPane(
+                                vm = vm,
+                                focused = focusedPane == HomePane.ArticleList,
+                                onActivated = { setFocusedPane(HomePane.ArticleList) },
+                                modifier = Modifier.weight(1f),
+                                onNavigateUp = ::goBack,
+                                navigateUpEnabled = homeBackAction(layout, focusedPane.ordinal + 1, searchScopeEntry != null) != HomeBackAction.None,
+                                onSearchClick = {
+                                    setFocusedPane(HomePane.ArticleList)
+                                    vm.enterSearchScope(HomePane.ArticleList)
+                                },
+                            )
+                            HomePane.ArticleDetail -> Box(Modifier.weight(1f).testTag(ARTICLE_DETAIL_STUB_TAG)) {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun theArticleListsOwnSearchIconAtDualLayoutFocusesItSoBackCanExitSearch() {
+        val (driver, db) = inMemoryDb()
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        try {
+            runDesktopComposeUiTest {
+                var focusedPane by mutableStateOf(HomePane.FeedList)
+                setContent { DualHomeTestHost(vm, focusedPane, { focusedPane = it }) }
+                waitForIdle()
+
+                assertEquals(ArticleFilter.All, vm.filter.value)
+
+                // Bug precondition: the feed list, not the article list, is focused when the
+                // article list's own search icon is tapped.
+                onNodeWithContentDescription("記事を検索").performClick()
+                waitForIdle()
+
+                assertEquals(ArticleFilter.Search, vm.filter.value)
+                // The fix: entering Search from this icon also focuses the article list, so
+                // homeBackAction resolves to ExitSearch instead of None.
+                assertEquals(HomePane.ArticleList, focusedPane)
+                onNodeWithContentDescription("戻る").assertIsEnabled()
+
+                onNodeWithContentDescription("戻る").performClick()
+                waitForIdle()
+
+                // Back actually exits Search: the filter is restored and focus lands back on the
+                // article list (enterSearchScope's own returnPane), not the feed list.
+                assertEquals(ArticleFilter.All, vm.filter.value)
+                assertEquals(HomePane.ArticleList, focusedPane)
+            }
+        } finally {
+            fixture.close()
+            driver.close()
         }
     }
 
