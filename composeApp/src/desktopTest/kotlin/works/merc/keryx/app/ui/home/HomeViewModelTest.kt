@@ -1240,6 +1240,66 @@ class HomeViewModelTest {
     }
 
     /**
+     * The read pin is a deliberately optimistic cache (see [HomeViewModel.reconcilePinnedArticles]'s
+     * own KDoc) — it must not hide an external change forever. Mirrors
+     * [pinnedArticleSoftDeletedByAnotherDeviceIsDroppedFromPinsReactively] above, but for another
+     * device syncing a "mark unread" instead of a tombstone. Asserted via the row's own `is_read`
+     * field, not list membership: under [ArticleFilter.All] (no unread-only) a1 stays in the list
+     * either way, so only the field's value tells a stale pin from a dropped one apart.
+     */
+    @Test
+    fun pinnedArticleMarkedUnreadByAnotherDeviceShowsAsUnreadAgainReactively() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+        // Selecting a1 marks it read and pins it, so it displays as read.
+        assertEquals(1L, vm.articles.value.first { it.id == "a1" }.is_read)
+
+        // Simulate another device's sync propagating a "mark unread" for the pinned article.
+        db.articlesQueries.updateReadStatus(is_read = 0L, read_at = null, updated_at = 200L, id = "a1")
+        vm.toggleStar(db.articlesQueries.getById("a2").executeAsOne().toListRow()) // ticks articleChangeSignal
+        testScheduler.advanceUntilIdle()
+
+        // The pin must have been dropped, so the row now reflects the DB's current (unread) value.
+        assertEquals(0L, vm.articles.value.first { it.id == "a1" }.is_read)
+    }
+
+    /**
+     * The star pin's equivalent of [pinnedArticleMarkedUnreadByAnotherDeviceShowsAsUnreadAgainReactively].
+     * Asserted the same way, via `is_starred`, not list membership: [ArticleFilter.Starred]'s own
+     * raw query would re-include a1 the moment it is genuinely re-starred regardless of the pin, so
+     * only the field's value distinguishes a stale pin from a dropped one.
+     */
+    @Test
+    fun pinnedArticleRestarredByAnotherDeviceShowsAsStarredAgainReactively() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isStarred = 1L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        vm.toggleStar(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+        // Unstarring while browsing Starred pins a1 in place so it doesn't vanish mid-browse.
+        assertEquals(0L, vm.articles.value.single { it.id == "a1" }.is_starred)
+
+        // Simulate another device's sync re-starring the article the optimistic unstar-pin hid.
+        db.articlesQueries.updateStarStatus(is_starred = 1L, starred_at = 200L, updated_at = 200L, id = "a1")
+        db.articlesQueries.updateReadStatus(is_read = 1L, read_at = 100L, updated_at = 100L, id = "a2") // ticks articleChangeSignal
+        testScheduler.advanceUntilIdle()
+
+        // The pin must have been dropped, so the row now reflects the DB's current (starred) value.
+        assertEquals(1L, vm.articles.value.single { it.id == "a1" }.is_starred)
+    }
+
+    /**
      * A sync that tombstones the *selected* article must not leave it in the visible list. The
      * trailing re-pin that `sync()` / `refreshAll()` perform (to keep the selection visible across
      * a refresh) must not resurrect a row that no longer exists, which is the same invariant
@@ -1780,6 +1840,190 @@ class HomeViewModelTest {
         vm.exitSearchScope()
 
         assertEquals("kotlin", vm.searchQuery.value)
+    }
+
+    /**
+     * The user-reported regression this whole group guards: [selectFilter] (which [enterSearchScope]
+     * calls) clears `_pinnedReadArticles`/`_selectedArticle`/the cursor the same way it clears the
+     * filter/row — [exitSearchScope] restores the filter/row already, and must restore this browsing
+     * context too, or a round trip through Search silently drops an article that was only staying
+     * visible under unread-only because it was pinned.
+     */
+    @Test
+    fun exitSearchScopeRestoresAPinnedArticleUnderUnreadOnly() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+
+        vm.enterSearchScope(HomePane.ArticleList)
+        testScheduler.advanceUntilIdle()
+        // Search clears the browsing context the same way any other filter switch would.
+        assertEquals(emptyList<String>(), vm.articles.value.map { it.id })
+
+        vm.exitSearchScope()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
+        // a1 is back, still showing read (the pin survived the round trip, resolved against the DB's
+        // current — unchanged — flags), so it stays visible under unread-only exactly as before.
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+        assertEquals(1L, vm.articles.value.first { it.id == "a1" }.is_read)
+    }
+
+    /** Selection and the keyboard-navigation cursor are restored the same way the pin is. */
+    @Test
+    fun exitSearchScopeRestoresTheSelectedArticleAndCursor() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+        assertEquals("a1", vm.selectedArticle.value?.id)
+
+        vm.enterSearchScope(HomePane.ArticleList)
+        testScheduler.advanceUntilIdle()
+        assertEquals(null, vm.selectedArticle.value)
+
+        vm.exitSearchScope()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("a1", vm.selectedArticle.value?.id)
+        // The cursor is restored too, so the next arrow key steps from a1 rather than the top.
+        vm.selectNext()
+        testScheduler.advanceUntilIdle()
+        assertEquals("a1", vm.selectedArticle.value?.id)
+    }
+
+    /**
+     * A change made *from inside Search* — here, toggling a search result row's own read state
+     * back to unread — must not be undone by restoring the frozen pre-Search snapshot:
+     * [exitSearchScope] resolves the snapshot against the DB's current flags rather than replaying
+     * it verbatim, the same rule [HomeViewModel.reconcilePinnedArticles] applies reactively while
+     * Search is not involved. Uses [HomeViewModel.toggleRead] directly (not the selection) since
+     * entering Search already cleared the selection [enterSearchScope] snapshotted — the row action
+     * doesn't require anything to be selected, matching a tap on the row's own read/unread control.
+     */
+    @Test
+    fun exitSearchScopeReflectsAnUnreadMadeWhileInsideSearch() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, vm.articles.value.first { it.id == "a1" }.is_read)
+
+        vm.enterSearchScope(HomePane.ArticleList)
+        testScheduler.advanceUntilIdle()
+        vm.toggleRead(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+        assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+
+        vm.exitSearchScope()
+        testScheduler.advanceUntilIdle()
+
+        // The pin restored from before Search must not resurrect the stale "read" state on top of
+        // the unread the user just made from inside Search.
+        assertEquals(0L, vm.articles.value.first { it.id == "a1" }.is_read)
+    }
+
+    /**
+     * A sync merge that tombstones a pinned article while Search is active must not resurrect it —
+     * the same invariant [reconcilePinnedArticles] applies reactively, applied here to the one-shot
+     * restore instead.
+     */
+    @Test
+    fun exitSearchScopeDoesNotResurrectAnArticleTombstonedWhileInsideSearch() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+
+        vm.enterSearchScope(HomePane.ArticleList)
+        testScheduler.advanceUntilIdle()
+        driver.stampArticleDeleted("a1", deletedAt = 100L)
+
+        vm.exitSearchScope()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf("a2"), vm.articles.value.map { it.id })
+    }
+
+    /**
+     * Mirrors [exitSearchScopeFallsBackToAllWhenFilterTargetWasDeletedMeanwhile]: when the filter
+     * itself falls back to a different one, the pinned-read/selection snapshot belongs to the
+     * *original* filter and must not be attached to the fallback.
+     */
+    @Test
+    fun exitSearchScopeDoesNotRestoreTheBrowsingContextWhenTheFilterFallsBack() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+
+        vm.enterSearchScope(HomePane.ArticleList)
+        testScheduler.advanceUntilIdle()
+        // Simulate the feed being soft-deleted independently (e.g. by another device's sync) while
+        // Search is active, so the snapshot inside _searchScopeEntry still points at "f1".
+        db.feedsQueries.softDelete(50L, 50L, 50L, "f1")
+
+        vm.exitSearchScope()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleFilter.All, vm.filter.value)
+        assertEquals(null, vm.selectedArticle.value)
+    }
+
+    /**
+     * A pin set *from inside Search* — reading a different feed's article there — is not part of
+     * [enterSearchScope]'s snapshot at all, and must not leak into the returned filter's list: the
+     * `articles` combine re-adds any pinned id missing from its query result, so restoring it here
+     * would surface an unrelated feed's article in this filter's list.
+     */
+    @Test
+    fun exitSearchScopeDoesNotLeakAPinSetFromInsideSearchIntoTheReturnedFilter() = runTest {
+        db.insertFeed("f1")
+        db.insertFeed("f2")
+        db.insertArticle("a1", "f1", isRead = 0L)
+        db.insertArticle("b1", "f2", title = "Kotlin", content = "kotlin content", isRead = 0L)
+        ftsManagerIndexed(driver)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+
+        vm.enterSearchScope(HomePane.ArticleList)
+        vm.setSearchQuery("Kotlin")
+        advanceForSearchDebounce()
+        vm.selectArticle(db.articlesQueries.getById("b1").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, db.articlesQueries.getById("b1").executeAsOne().is_read)
+
+        vm.exitSearchScope()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
+        assertEquals(listOf("a1"), vm.articles.value.map { it.id })
     }
 
     /**

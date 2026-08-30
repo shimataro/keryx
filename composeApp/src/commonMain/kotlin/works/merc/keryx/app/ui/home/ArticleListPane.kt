@@ -134,6 +134,49 @@ fun ArticleListPane(
             searchLabel = stringResource(Res.string.home_search),
         )
     }
+    // Reset the list to the top when the user switches feed/tag/folder/scope, so a new list never
+    // opens scrolled to the previous one's offset. Only fires on an actual filter change (not the
+    // first composition), so a restored last-selected article's scroll-into-view isn't clobbered.
+    //
+    // rememberSaveable, so this survives the pane being unmounted and remounted at a narrow
+    // PaneLayout (see NarrowPaneRow) — the filter can change while this pane is off screen at
+    // PaneLayout.Single (a notification's ShowFeedDetail, or deleting the feed/tag/folder being
+    // viewed), and a plain remember would re-initialize to the *new* filter on remount, leaving
+    // the restored scroll position pointing into the previous filter's list with no reset. Held
+    // as ArticleFilter.encode()'s String (the same form local settings persist it as) because
+    // ArticleFilter itself isn't a saveable type.
+    //
+    // Declared above the Search early-return below (not next to the content that uses it) so this
+    // call site — and therefore listState/lastFilter themselves — stays unconditional and never
+    // leaves composition while Search is active. Search has no HomePane/SaveableStateHolder of its
+    // own to preserve state across a branch it isn't part of (unlike NarrowPaneRow's pane-level
+    // unmounts), so without this the list's scroll position would reset every time Search closes.
+    val listState = rememberLazyListState()
+    var lastFilter by rememberSaveable { mutableStateOf(filter.encode()) }
+    // Whether the previous composition's filter was Search — read synchronously below to detect
+    // the one composition right after Search closes, so ArticleListPaneContent's own "keep the
+    // selection in view" scroll can sit out that single frame (see preserveScrollPositionOnMount's
+    // own parameter doc). Updated inside the same LaunchedEffect(filter) that already runs on every
+    // filter change, so by the time a *later* composition reads it (after Search has since closed),
+    // the write from entering Search has had a full cycle to land.
+    var wasSearch by rememberSaveable { mutableStateOf(false) }
+    val justReturnedFromSearch = wasSearch && filter !is ArticleFilter.Search
+    LaunchedEffect(filter) {
+        if (filter is ArticleFilter.Search) {
+            wasSearch = true
+            return@LaunchedEffect
+        }
+        wasSearch = false
+        // While Search is active this pane renders SearchListPane instead (below), so there is no
+        // list to reset — and leaving lastFilter untouched is what lets the check below recognize
+        // "back to the same filter Search was entered from" and skip the reset-to-top on return.
+        val encoded = filter.encode()
+        if (encoded != lastFilter) {
+            listState.scrollToItem(0)
+            lastFilter = encoded
+        }
+    }
+
     if (filter is ArticleFilter.Search) {
         SearchListPane(
             vm = vm,
@@ -156,27 +199,6 @@ fun ArticleListPane(
     val feedTitles = feeds.associate { it.id to it.displayTitle() }
     val feedFavicons = feeds.associate { it.id to it.favicon_url }
 
-    // Reset the list to the top when the user switches feed/tag/folder/scope, so a new list never
-    // opens scrolled to the previous one's offset. Only fires on an actual filter change (not the
-    // first composition), so a restored last-selected article's scroll-into-view isn't clobbered.
-    //
-    // rememberSaveable, so this survives the pane being unmounted and remounted at a narrow
-    // PaneLayout (see NarrowPaneRow) — the filter can change while this pane is off screen at
-    // PaneLayout.Single (a notification's ShowFeedDetail, or deleting the feed/tag/folder being
-    // viewed), and a plain remember would re-initialize to the *new* filter on remount, leaving
-    // the restored scroll position pointing into the previous filter's list with no reset. Held
-    // as ArticleFilter.encode()'s String (the same form local settings persist it as) because
-    // ArticleFilter itself isn't a saveable type.
-    val listState = rememberLazyListState()
-    var lastFilter by rememberSaveable { mutableStateOf(filter.encode()) }
-    LaunchedEffect(filter) {
-        val encoded = filter.encode()
-        if (encoded != lastFilter) {
-            listState.scrollToItem(0)
-            lastFilter = encoded
-        }
-    }
-
     ArticleListPaneContent(
         articles = articles,
         feedTitles = feedTitles,
@@ -193,6 +215,7 @@ fun ArticleListPane(
         onToggleStar = { vm.toggleStar(it) },
         modifier = modifier,
         listState = listState,
+        preserveScrollPositionOnMount = justReturnedFromSearch,
         onActivated = onActivated,
         notifVm = notifVm,
         onNavigateUp = onNavigateUp,
@@ -473,6 +496,15 @@ internal fun ArticleListTopBar(
  * @param unreadOnly Whether to show only unread articles.
  * @param newestFirst Whether to sort articles from newest to oldest.
  * @param focused Whether the list has focus.
+ * @param preserveScrollPositionOnMount Suppresses this composable's own "keep the selection in
+ *   view" scroll for the single [selectedId]/[articles] evaluation that runs right as it mounts.
+ *   Set by [ArticleListPane] for the one composition right after the Search scope closes: the list
+ *   there is scrolled to wherever it was left before Search opened (see `ArticleListPane`'s own
+ *   `listState`/`lastFilter` handling), which may well not be where [selectedId] currently sits —
+ *   without this, that restored position would be immediately overridden by a scroll back to the
+ *   selection. `false` elsewhere, including the analogous `NarrowPaneRow` remount case: there the
+ *   restored position is already guaranteed to already show the selection (see
+ *   `doesNotScrollAwayFromARestoredPositionThatAlreadyShowsTheSelection`), so this isn't needed.
  */
 @Composable
 internal fun ArticleListPaneContent(
@@ -497,10 +529,19 @@ internal fun ArticleListPaneContent(
     navigateUpEnabled: Boolean = true,
     title: String? = null,
     onSearchClick: (() -> Unit)? = null,
+    preserveScrollPositionOnMount: Boolean = false,
 ) {
+    // Consumed on this composable's first LaunchedEffect run, whatever that run turns out to do —
+    // not just when it actually finds selectedId in articles — so a mount where the selection isn't
+    // in this list yet (still loading, or genuinely absent) doesn't leave the flag stuck `true` and
+    // suppress a later, real selection change within the same mount.
+    var skipInitialSelectionScroll by remember { mutableStateOf(preserveScrollPositionOnMount) }
     LaunchedEffect(selectedId, articles.isNotEmpty()) {
+        val skip = skipInitialSelectionScroll
+        skipInitialSelectionScroll = false
         val index = articles.indexOfFirst { it.id == selectedId }
         if (index !in articles.indices) return@LaunchedEffect
+        if (skip) return@LaunchedEffect
         // Before the list's first measure pass layoutInfo is still empty, which
         // scrollToIndexIfNeeded reads as "not rendered anywhere" and answers with an animated
         // scroll — clobbering the scroll position NarrowPaneRow just restored, and pulling the

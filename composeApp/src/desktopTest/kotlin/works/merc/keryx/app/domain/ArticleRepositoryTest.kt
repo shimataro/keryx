@@ -95,6 +95,53 @@ class ArticleRepositoryTest {
     }
 
     /**
+     * `aliveFlagsIn` is mapped positionally too (`id, is_read, is_starred`), the same load-bearing
+     * order as the list queries above — seeded with different values so a column swap would fail
+     * this test instead of silently compiling.
+     */
+    @Test
+    fun aliveArticleFlagsMapsEachColumnToItsOwnField() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("feed-id-1")
+            db.insertArticle("article-id-1", "feed-id-1", isRead = 1L, isStarred = 0L)
+
+            val flags = newRepo(db, driver).aliveArticleFlags(listOf("article-id-1"))
+
+            assertEquals(mapOf("article-id-1" to ArticleFlags(isRead = 1L, isStarred = 0L)), flags)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun aliveArticleFlagsOmitsSoftDeletedAndUnknownIds() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("feed-id-1")
+            db.insertArticle("alive", "feed-id-1", isRead = 0L, isStarred = 0L)
+            db.insertArticle("deleted", "feed-id-1", isRead = 0L, isStarred = 0L)
+            driver.stampArticleDeleted("deleted", deletedAt = 100L)
+
+            val flags = newRepo(db, driver).aliveArticleFlags(listOf("alive", "deleted", "missing"))
+
+            assertEquals(setOf("alive"), flags.keys)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun aliveArticleFlagsOfAnEmptyCollectionIsEmptyWithNoQuery() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            assertEquals(emptyMap(), newRepo(db, driver).aliveArticleFlags(emptyList()))
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
      * The list projection deliberately omits the body columns; the reader loads them per selected
      * article instead. Pins the split so neither side drifts back.
      */

@@ -141,6 +141,85 @@ class ArticleListPaneTest {
         assertEquals(0, state.firstVisibleItemScrollOffset)
     }
 
+    /**
+     * The `ArticleListPane`-level counterpart of the test above: a round trip through Search
+     * restores `listState` to wherever it was left (see `ArticleListPane`'s own `listState`/
+     * `wasSearch` handling), but the selected article — cleared and possibly re-restored to
+     * something unrelated to where the list happens to be scrolled — is not guaranteed to land
+     * inside that viewport the way a `NarrowPaneRow` remount's selection always does.
+     * `preserveScrollPositionOnMount` exists for exactly this gap: it must suppress the "keep the
+     * selection in view" scroll for this composable's first evaluation, even when the selected
+     * article is nowhere near the restored viewport.
+     */
+    @Test
+    fun preserveScrollPositionOnMountSuppressesTheInitialSelectionScroll() = runDesktopComposeUiTest {
+        val items = articles(60)
+        lateinit var state: LazyListState
+
+        setContent {
+            state = rememberLazyListState(initialFirstVisibleItemIndex = 20)
+            ArticleListPaneContent(
+                articles = items,
+                feedTitles = emptyMap(),
+                // Far outside the restored viewport (rows ~20-25 at this size) — a plain mount would
+                // animate-scroll all the way down to it.
+                selectedId = items[55].id,
+                unreadOnly = false,
+                onToggleUnreadOnly = {},
+                onToggleSort = {},
+                onMarkAllRead = {},
+                onSelectArticle = {},
+                modifier = Modifier.size(360.dp, 400.dp),
+                listState = state,
+                preserveScrollPositionOnMount = true,
+            )
+        }
+        waitForIdle()
+
+        onNodeWithTag("article-a20").assertIsDisplayed()
+        assertEquals(20, state.firstVisibleItemIndex)
+        assertEquals(0, state.firstVisibleItemScrollOffset)
+    }
+
+    /**
+     * The suppression above must only ever cover the mount's own first evaluation — a genuine
+     * selection change afterward (keyboard navigation, picking a different article) still has to
+     * scroll normally, or a search round trip would leave the list stuck refusing to follow the
+     * selection for the rest of the pane's lifetime.
+     */
+    @Test
+    fun preserveScrollPositionOnMountDoesNotSuppressALaterGenuineSelectionChange() = runDesktopComposeUiTest {
+        val items = articles(60)
+        lateinit var state: LazyListState
+        var selected by mutableStateOf(items[55])
+
+        setContent {
+            state = rememberLazyListState(initialFirstVisibleItemIndex = 20)
+            ArticleListPaneContent(
+                articles = items,
+                feedTitles = emptyMap(),
+                selectedId = selected.id,
+                unreadOnly = false,
+                onToggleUnreadOnly = {},
+                onToggleSort = {},
+                onMarkAllRead = {},
+                onSelectArticle = {},
+                modifier = Modifier.size(360.dp, 400.dp),
+                listState = state,
+                preserveScrollPositionOnMount = true,
+            )
+        }
+        waitForIdle()
+        // The mount's own evaluation was suppressed, exactly as above.
+        assertEquals(20, state.firstVisibleItemIndex)
+
+        // A later, genuine selection change must scroll normally.
+        selected = items[59]
+        waitForIdle()
+
+        onNodeWithTag("article-a59").assertIsDisplayed()
+    }
+
     @Test
     fun doesNotScrollWhenSelectionAlreadyFullyVisible() = runDesktopComposeUiTest {
         val items = articles(30)
@@ -671,6 +750,45 @@ class ArticleListPaneTest {
 
                 // Feed B's own top row, not whatever sat at feed A's restored offset.
                 onNodeWithTag("article-b39").assertIsDisplayed()
+            }
+        } finally {
+            vm.viewModelScope.cancel()
+            driver.close()
+        }
+    }
+
+    /**
+     * Search has no `HomePane`/`SaveableStateHolder` of its own the way `NarrowPaneRow` gives
+     * `PaneLayout.Single` — `ArticleListPane` renders `SearchListPane` from an early `return` inside
+     * the same composable instead, which used to leave `listState`/`lastFilter` out of composition
+     * (and therefore reset to a fresh, unscrolled state) for as long as Search was active.
+     */
+    @Test
+    fun returningFromSearchPreservesTheArticleListsScrollPosition() {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("fa")
+        repeat(40) { db.insertArticleRow("a$it", "fa", createdAt = it.toLong()) }
+        val vm = newMinimalViewModel(driver, db)
+        try {
+            runDesktopComposeUiTest {
+                setContent {
+                    ArticleListPane(vm = vm, focused = true, onActivated = {})
+                }
+                vm.selectFilter(ArticleFilter.Feed("fa"))
+                waitForIdle()
+
+                // Newest first, so a39 is the top row — scroll until it is gone.
+                onRoot().performMouseInput { moveTo(center); repeat(12) { scroll(3f) } }
+                waitForIdle()
+                onNodeWithTag("article-a39").assertDoesNotExist()
+
+                vm.enterSearchScope(HomePane.ArticleList)
+                waitForIdle()
+                vm.exitSearchScope()
+                waitForIdle()
+
+                // Still scrolled past the top row, not reset by the round trip through Search.
+                onNodeWithTag("article-a39").assertDoesNotExist()
             }
         } finally {
             vm.viewModelScope.cancel()

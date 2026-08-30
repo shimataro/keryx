@@ -69,6 +69,9 @@ data class ArticleSearchResult(
     val titleMarked: String,
 )
 
+/** An alive article's current read/starred flags, for revalidating an optimistic pin. */
+data class ArticleFlags(val isRead: Long, val isStarred: Long)
+
 /**
  * Read/star state, article queries, upsert of fetched articles, and full-text
  * search. Read/star changes use a timestamp so the last operation wins on sync.
@@ -141,15 +144,21 @@ class ArticleRepository(
     fun getArticleById(id: String): Articles? = articles.getById(id).executeAsOneOrNull()
 
     /**
-     * Determines which requested article IDs still refer to existing articles.
+     * Determines which requested article IDs still refer to existing articles, and their current
+     * read/starred flags. Used to revalidate an optimistic pin against the DB's current state,
+     * rather than just its continued existence.
      *
      * @param ids The article IDs to check.
-     * @return The IDs of existing articles that have not been soft-deleted.
+     * @return A map from each still-alive, non-soft-deleted article's ID to its current flags.
      */
-    fun aliveArticleIds(ids: Collection<String>): Set<String> {
-        if (ids.isEmpty()) return emptySet()
+    fun aliveArticleFlags(ids: Collection<String>): Map<String, ArticleFlags> {
+        if (ids.isEmpty()) return emptyMap()
         return ids.chunked(ID_FETCH_CHUNK)
-            .flatMapTo(HashSet()) { articles.aliveIdsIn(it).executeAsList() }
+            .flatMap { chunk ->
+                articles.aliveFlagsIn(chunk) { id, isRead, isStarred -> id to ArticleFlags(isRead, isStarred) }
+                    .executeAsList()
+            }
+            .toMap()
     }
 
     /**

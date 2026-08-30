@@ -444,3 +444,65 @@ snapshots the filter/row-selection active right before the switch, plus the pane
 back action should land on; `exitSearchScope()` restores both and hands back that pane, which
 `homeBackAction`'s `ExitSearch` case (above) resolves to instead of `PopPane`. The search query
 itself is never touched by any of this — it survives on the collapsed bar exactly as it was.
+
+`enterSearchScope`'s snapshot also carries the browsing context active at that moment — the
+pinned-read/pinned-unstarred maps, the selected article, and the keyboard-navigation cursor (see
+"Optimistic read/star pins" below) — because `selectFilter` (which entering Search goes through
+like any other filter change) clears all of that. `exitSearchScope` restores it, but not verbatim:
+it re-resolves every snapshotted id against the DB's *current* flags (via the same
+`ArticleRepository.aliveArticleFlags` the reactive reconciliation below uses), so a change made from
+the search results themselves, or one that arrived via sync while Search was active, is not
+overwritten by the frozen pre-Search snapshot. A pin set *from inside* Search is never part of this
+at all — only what was pinned *before* Search was entered is — since restoring it would resurface a
+possibly unrelated feed's article in the returned filter's list (see the `articles` combine's `extra`
+handling below). Restoration is skipped entirely when the filter itself fell back to a different one
+(`validateFilterTarget` found its target deleted meanwhile): the snapshot's pins/selection belong to
+the *original* filter, not the fallback.
+
+Because Search has no `HomePane` of its own, `ArticleListPane` renders `SearchListPane` from an
+early `return` inside the same composable rather than through `NarrowPaneRow`'s pane-level
+`SaveableStateHolder` — so the article list's own `listState`/`lastFilter` have to stay declared
+*above* that `return` to remain part of composition (and therefore alive) while Search is active;
+declaring them below it, next to the content that uses them, would dispose and recreate them every
+time Search opens, resetting the list to the top on every return. `lastFilter` is also left
+untouched while `filter is ArticleFilter.Search`, so returning to the same filter Search was
+entered from reads as "unchanged" and skips the reset-to-top the same mechanism otherwise applies
+on a genuine filter change. Restoring the selected article on return can re-trigger
+`ArticleListPaneContent`'s own "keep the selection in view" scroll on remount — harmless when a
+pane genuinely unmounted (the selection is always inside the just-restored viewport there, see
+"Adaptive pane layout" above), but not guaranteed here, since the list's own scroll position and the
+restored selection come from independent snapshots. `ArticleListPaneContent`'s
+`preserveScrollPositionOnMount` parameter exists for exactly this: `ArticleListPane` sets it for the
+one composition right after Search closes, suppressing that scroll for the mount's first evaluation
+only — a later, genuine selection change still scrolls normally.
+
+### Optimistic read/star pins
+
+`HomeViewModel._pinnedReadArticles`/`_pinnedUnstarredArticles` are how the article list avoids
+shifting under the user the instant they act on it: selecting an unread article marks it read in the
+DB asynchronously (`dbWriteDispatcher`), but the row must show as read *now*, and — under
+unread-only — must not simply vanish from the list before the next filter switch. The `articles`
+combine resolves each row's `is_read`/`is_starred` from the pin when present, falling back to the
+raw query's value otherwise, and (under unread-only) treats pinned-read membership itself as
+"currently unread enough to show". These pins are therefore a deliberately optimistic cache that can
+outrun the DB by design — but nothing about setting one re-checks that the DB actually caught up, so
+without revalidation a pin could hide an external change (another device's sync propagating a "mark
+unread"/restar, or a soft-delete tombstone) forever, not just for the brief window the write is in
+flight for.
+
+`HomeViewModel.reconcilePinnedArticles` closes that gap: it runs on every write to `articles` (via
+an `articleChangeSignal` collector), revalidating every pinned id — and the current selection's own
+cached flags — against `ArticleRepository.aliveArticleFlags` in one query, dropping (or, for the
+selection, refreshing) anything whose article is gone or whose flags no longer match what was
+pinned. The read it does this with is deliberately routed through `dbWriteDispatcher`, the same
+serial (`limitedParallelism(1)`) dispatcher every pin-setting call site (`selectArticle`/
+`toggleRead`/`toggleStar`/`markAllRead`/`markSelectedUnread`) dispatches its own DB write to — and
+every one of those call sites dispatches that write *before* updating the pin/selection, never
+after. Since the pin/selection fields are `MutableStateFlow`s, observing a given pin here implies
+(by the flow's memory-visibility guarantee) that the write which justified it was already enqueued
+onto `dbWriteDispatcher`; routing this read through the same FIFO dispatcher then guarantees it runs
+*after* that write lands, so this function can never mistake a still-in-flight optimistic write for
+an external change and drop a pin that is actually still correct. This is a real hazard only under
+genuine multi-threaded dispatchers (`Dispatchers.Default`), not something the existing single-
+scheduler test suite can reproduce directly — the invariant is enforced by code review and the
+comments at each call site, not a dedicated race test.
