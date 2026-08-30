@@ -190,11 +190,10 @@ touch-primary Android device in landscape at a tablet width can still resolve `P
 on desktop.
 
 `HomeViewModel.pendingSearchFocus` is a latched `StateFlow<Boolean>`, not a one-shot
-`SharedFlow` — the request to focus the field (tapping the collapsed bar, Cmd+F/the menu bar's
-"Search…", or — at `PaneLayout.Triple` — the sidebar's own "Search" row) is raised in the very
-click that advances the
-navigation stack, so the pane that will actually own the field has not composed yet when the
-request fires; a `SharedFlow` with no subscriber yet would drop it silently, which is exactly what
+`SharedFlow` — requests from the collapsed bar and narrow-layout menu-bar Search can be raised
+before the destination field composes. At `PaneLayout.Triple`, the sidebar's own "Search" row
+focuses the already-composed field without advancing the navigation stack.
+A `SharedFlow` with no subscriber yet would drop a request silently, which is exactly what
 used to make Android's search feel broken. The latch stays set until whichever field composes
 next consumes it (`consumeSearchFocusRequest()`), and `HomeViewModel.selectFilter` clears an
 unconsumed one when the user navigates elsewhere first.
