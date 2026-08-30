@@ -145,7 +145,7 @@ internal const val FEED_LIST_DRAG_HOST_TEST_TAG = "feed-list-drag-host"
  *   [PaneLayout.Triple], where every pane is already visible and there is nowhere to advance to —
  *   this is also what keeps this pane's search field editable (see the `KeryxTextField`/
  *   `KeryxCollapsedSearchBar` branch below) and its "Search" quick-filter row visible (see the
- *   `SidebarRow` below it): a narrow layout instead folds the field into a read-only entry point,
+ *   SidebarRow below it): a narrow layout instead folds the field into a read-only entry point,
  *   since the field the user would actually type into now lives in `ArticleListPane`'s
  *   `SearchListPane` alongside the results (see that composable's own KDoc), and hides the
  *   quick-filter row entirely since the collapsed bar above is already its narrow-layout
