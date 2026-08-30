@@ -149,12 +149,16 @@ roles, dividers, row chrome) changes between layouts; only how many are mounted 
 with two deliberate exceptions, both about an affordance that has nowhere else to live once the
 panes become separate screens: the search field (see below) and the notification bell (see "Pane
 structure & tonal roles" above).
-`ui/home/HomePaneLayout.kt`'s `canNavigateBack(layout, depth)` is the single predicate for
-"does going back one step actually change anything on screen" — `false` at `PaneLayout.Triple`
-(nothing ever changes there) and at `PaneLayout.Dual` depth 1→2 (the sliding window shows the
-same two panes at both depths, see `visiblePanes`' own KDoc) — both `HomeScreen`'s own
-`BackHandler` and `ArticleListPane`'s `navigateUpEnabled` are driven by it, so a back press that
-would produce no visible change is never silently swallowed.
+`ui/home/HomePaneLayout.kt`'s `canNavigateBack(layout, depth)` is the pane-only half of "does
+going back one step actually change anything on screen" — `false` at `PaneLayout.Triple` (nothing
+ever changes there) and at `PaneLayout.Dual` depth 1→2 (the sliding window shows the same two
+panes at both depths, see `visiblePanes`' own KDoc). `HomeScreen`'s own `BackHandler` and
+`ArticleListPane`'s `navigateUpEnabled` are driven by `homeBackAction` instead, which wraps
+`canNavigateBack` and adds the other half: exiting the Search scope (see below) whenever a
+snapshot is waiting to be restored, which takes priority over popping the pane stack and applies
+even where `canNavigateBack` alone says `false` (`PaneLayout.Dual`'s otherwise-inert depth 1→2 —
+exiting Search there still changes what's on screen). Either way, a back press that would produce
+no visible change is never silently swallowed.
 
 **Search at a narrow layout.** The search field itself moves, not just its surrounding chrome: at
 `PaneLayout.Triple` it stays the plain, always-editable `KeryxTextField` this app has always had,
@@ -189,6 +193,22 @@ request fires; a `SharedFlow` with no subscriber yet would drop it silently, whi
 used to make Android's search feel broken. The latch stays set until whichever field composes
 next consumes it (`consumeSearchFocusRequest()`), and `HomeViewModel.selectFilter` clears an
 unconsumed one when the user navigates elsewhere first.
+
+**Going back out of Search.** Search has no `HomePane` of its own — every entry point above just
+sets `ArticleFilter.Search` on `HomePane.ArticleList` (see "Search is layout-dependent" above) —
+so a plain "pop one pane" back action would either overshoot (from `ArticleListTopBar`'s own
+search icon, which never advances the stack: popping would land on the feed list, not the article
+list the user actually came from) or leave the filter stuck on `Search` after popping back to it
+(from the collapsed bar / sidebar row, which does advance). `HomeViewModel.enterSearchScope(returnPane)`
+snapshots the filter/row-selection active right before the switch, plus the pane a narrow-layout
+back action should land on; `exitSearchScope()` restores both and hands back that pane.
+`ui/home/HomePaneLayout.kt`'s `homeBackAction(layout, depth, searchScopeReturnPending)` is where
+`HomeScreen`'s `goBack()`, `BackHandler`, and `ArticleListPane`'s `navigateUpEnabled` all resolve
+whether a back action means `ExitSearch` or the ordinary `PopPane` — `ExitSearch` only applies at
+`HomePane.ArticleList`'s own depth and never at `PaneLayout.Triple` (the field stays in
+`FeedListPane`'s sidebar there, and back navigation is disabled at every depth regardless). The
+search query itself is never cleared by any of this — it survives on the collapsed bar exactly as
+it was, so re-opening Search shows the same results.
 
 **Touch input on the feed list.** A mouse can drag a draggable row (a folder header, or a feed row
 inside a folder group — tag rows and tag-nested feed copies were never drag sources) from anywhere

@@ -1695,6 +1695,93 @@ class HomeViewModelTest {
         assertEquals(ArticleFilter.All, vm2.filter.value)
     }
 
+    @Test
+    fun enterSearchScopeSnapshotsTheCurrentFilterAndRequestsFocus() = runTest {
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInTag("f1", "t1"))
+
+        vm.enterSearchScope(HomePane.FeedList)
+
+        assertEquals(ArticleFilter.Search, vm.filter.value)
+        assertEquals(true, vm.pendingSearchFocus.value)
+    }
+
+    @Test
+    fun exitSearchScopeRestoresTheFilterAndRowInstanceAndReturnsTheEntryPane() = runTest {
+        db.insertFeed("f1")
+        db.insertTag("t1", "Kotlin")
+        db.insertFeedTag("f1", "t1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.toggleTagExpanded("t1")
+        vm.selectFilter(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInTag("f1", "t1"))
+        vm.enterSearchScope(HomePane.ArticleList)
+
+        val returnPane = vm.exitSearchScope()
+
+        assertEquals(HomePane.ArticleList, returnPane)
+        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
+        assertEquals(FeedListRowSelection.FeedInTag("f1", "t1"), vm.selectedRowInstance.value)
+    }
+
+    @Test
+    fun reenteringSearchScopeWhileAlreadyInItKeepsTheOriginalSnapshot() = runTest {
+        db.insertFeed("f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        vm.enterSearchScope(HomePane.FeedList)
+
+        // e.g. re-tapping the sidebar's own "Search" row while already on the search screen —
+        // must not overwrite the snapshot with Search-scope state.
+        vm.enterSearchScope(HomePane.ArticleList)
+
+        assertEquals(HomePane.FeedList, vm.exitSearchScope())
+        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
+    }
+
+    @Test
+    fun leavingSearchByAnyOtherMeansDropsTheSnapshot() = runTest {
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        vm.enterSearchScope(HomePane.FeedList)
+
+        // The user picked a different feed directly (e.g. at PaneLayout.Dual, where the feed list
+        // stays on screen beside the search results) instead of going back.
+        vm.selectFilter(ArticleFilter.Feed("f2"))
+
+        assertEquals(null, vm.exitSearchScope())
+    }
+
+    @Test
+    fun exitSearchScopeReturnsNullWithoutASnapshot() = runTest {
+        val vm = newViewModel()
+        subscribeAll(vm)
+
+        // Entered directly (e.g. a restored "search" filter, or a test calling selectFilter itself)
+        // rather than through enterSearchScope, so there is nothing to restore.
+        vm.selectFilter(ArticleFilter.Search)
+
+        assertEquals(null, vm.exitSearchScope())
+    }
+
+    @Test
+    fun theSearchQuerySurvivesEnteringAndExitingTheSearchScope() = runTest {
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        vm.enterSearchScope(HomePane.FeedList)
+        vm.setSearchQuery("kotlin")
+
+        vm.exitSearchScope()
+
+        assertEquals("kotlin", vm.searchQuery.value)
+    }
+
     /**
      * [HomeViewModel.setSearchQuery]'s 250ms debounce runs under the search flow's
      * `flowOn(dispatcher)` (`Dispatchers.Unconfined` in these tests), which drops the shared
@@ -2474,6 +2561,48 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
 
         assertEquals(ArticleFilter.All, vm2.filter.value)
+    }
+
+    @Test
+    fun exitSearchScopeFallsBackToAllWhenFilterTargetWasDeletedMeanwhile() = runTest {
+        db.insertTag("t1", "Kotlin")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Tag("t1"))
+        testScheduler.advanceUntilIdle()
+        vm.enterSearchScope(HomePane.ArticleList)
+
+        // Simulate the tag being soft-deleted independently (e.g. by another device's sync)
+        // while Search is active, so the snapshot inside _searchScopeEntry still points at "t1".
+        db.tagsQueries.softDelete(1L, 1L, "t1")
+
+        vm.exitSearchScope()
+
+        assertEquals(ArticleFilter.All, vm.filter.value)
+    }
+
+    @Test
+    fun exitSearchScopeDemotesStaleTagNestedRowInstanceWhenTagCollapsedMeanwhile() = runTest {
+        db.insertFeed("f1")
+        db.insertTag("t1", "Kotlin")
+        db.insertFeedTag("f1", "t1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        assertFalse("t1" in vm.expandedTagIds.value)
+        vm.toggleTagExpanded("t1")
+        assertTrue("t1" in vm.expandedTagIds.value)
+        vm.selectFilter(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInTag("f1", "t1"))
+        vm.enterSearchScope(HomePane.ArticleList)
+
+        // Collapsing the tag while still in Search only normalizes the live selection, not the
+        // frozen snapshot inside _searchScopeEntry — exitSearchScope must do that normalization itself.
+        vm.toggleTagExpanded("t1")
+
+        vm.exitSearchScope()
+
+        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
+        assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), vm.selectedRowInstance.value)
     }
 
     @Test

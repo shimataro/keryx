@@ -389,10 +389,14 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 （`FeedListPane` / `ArticleListPane` それぞれの `onSelectionAdvance`。どちらも `Triple` では
 `null` — 全ペインが既に見えており、進む先がない）、`platform/BackHandler`（Android では実際の戻る
 ジェスチャー/ボタンを横取りし、デスクトップでは no-op）が1段戻す — その有効/無効は
-`canNavigateBack(layout, depth)` という純関数で決まり、「1段戻っても実際には画面が変わらない」場合に
-常に `false` を返す（`Triple` では常に。`PaneLayout.Dual` の深さ 1→2 でも、下記のスライド窓が同じ
+`homeBackAction(layout, depth, searchScopeReturnPending)` で決まる。これは、ペインだけを見る
+純関数 `canNavigateBack(layout, depth)`（「1段戻っても実際には画面が変わらない」場合に常に
+`false` を返す — `Triple` では常に。`PaneLayout.Dual` の深さ 1→2 でも、下記のスライド窓が同じ
 2ペインを表示するため同様 — この関数が無かった頃は、そこでの戻る操作が何も起こさず黙って消費されて
-いた）。`PaneLayout.Dual` は、そのスタック上を
+いた）に、「戻る操作が実際に何をするか」のもう半分——復元待ちのスナップショットがあるときは
+ペインを1段戻すのではなく検索スコープを抜けること（下記「狭いレイアウトでの検索」参照）——を
+組み合わせたものであり、`canNavigateBack` だけでは「何もしない」はずの場面でもこちらが優先される
+（検索を抜けることは常に画面を変えるため）。`PaneLayout.Dual` は、そのスタック上を
 スライドする2ペインの窓であり、単純な隣接ペア表示ではない: 記事一覧はどの深さでも表示される2ペインの
 一方であり続けるため、記事にドリルインするとフィード一覧が記事詳細ペインに入れ替わる形になり、
 一覧自体が画面外にスライドすることはない。
@@ -420,3 +424,12 @@ narrow/`Triple` の分岐が `PaneLayout` や `isTouchPrimary` ではなく `onS
 入力欄へフォーカスを要求する操作は、スタックを進めるのと同じクリックの中で発生するため、実際に
 入力欄を持つことになるペインはまだコンポーズされておらず、購読者のいない `SharedFlow` では要求が
 黙って失われてしまう。
+
+検索専用の `HomePane` は存在しない — どの入口も `HomePane.ArticleList` の中身を差し替えて
+`ArticleFilter.Search` を設定するだけで、スタックを進めるとは限らない（記事一覧自身の検索アイコンは
+進めないが、折りたたみバーやサイドバー行は進める）— そのため単純な「1段ポップ」では、どちらの
+経路でも正しく元に戻せない。`HomeViewModel.enterSearchScope(returnPane)` が、切り替え直前の
+filter・選択行と、狭いレイアウトの戻る操作が着地すべきペインをスナップショットし、
+`exitSearchScope()` がその両方を復元してそのペインを返す。これを上記 `homeBackAction` の
+`ExitSearch` が `PopPane` の代わりに使う。検索クエリ自体はこの一連の処理では一切触れられず、
+折りたたみバー上にそのまま残る。

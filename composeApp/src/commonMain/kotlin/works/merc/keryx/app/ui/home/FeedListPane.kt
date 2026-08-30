@@ -409,8 +409,7 @@ internal fun FeedListPane(
                 text = searchQuery.ifEmpty { stringResource(Res.string.home_search_placeholder) },
                 isPlaceholder = searchQuery.isEmpty(),
                 onClick = {
-                    vm.selectFilter(ArticleFilter.Search)
-                    vm.requestSearchFocus()
+                    vm.enterSearchScope(HomePane.FeedList)
                     onActivated()
                     onSelectionAdvance()
                 },
@@ -447,7 +446,7 @@ internal fun FeedListPane(
             count = searchUnread,
             selected = filter == ArticleFilter.Search,
             focused = focused,
-            onClick = { vm.selectFilter(ArticleFilter.Search); vm.requestSearchFocus(); onActivated(); onSelectionAdvance?.invoke() },
+            onClick = { vm.enterSearchScope(HomePane.FeedList); onActivated(); onSelectionAdvance?.invoke() },
             isTouchPrimary = isTouchPrimary,
         )
         HorizontalDivider(Modifier.padding(vertical = 4.dp))

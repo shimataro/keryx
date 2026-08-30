@@ -186,6 +186,47 @@ class HomePaneLayoutTest {
         assertEquals(true, canNavigateBack(PaneLayout.Dual, 3))
     }
 
+    // --- homeBackAction ---
+
+    @Test
+    fun homeBackActionIsAlwaysNoneAtTripleRegardlessOfAPendingSearchScope() {
+        // Triple never has anywhere to go back to (see canNavigateBackIsAlwaysFalseAtTriple), and
+        // exiting Search isn't assigned there either — the field stays in FeedListPane's sidebar.
+        for (depth in 1..3) {
+            assertEquals(HomeBackAction.None, homeBackAction(PaneLayout.Triple, depth, searchScopeReturnPending = true), "depth $depth")
+            assertEquals(HomeBackAction.None, homeBackAction(PaneLayout.Triple, depth, searchScopeReturnPending = false), "depth $depth")
+        }
+    }
+
+    @Test
+    fun homeBackActionExitsSearchAtArticleListDepthWhenAScopeIsPending() {
+        // Depth 2 is HomePane.ArticleList's own depth — where Search's content-swapped screen
+        // lives (see homeBackAction's own KDoc). This is the fix for both bugs a pending scope used
+        // to trip over: Single unconditionally popped to the feed list instead of exiting Search,
+        // and Dual's back arrow was disabled outright (canNavigateBack(Dual, 2) == false).
+        assertEquals(HomeBackAction.ExitSearch, homeBackAction(PaneLayout.Single, 2, searchScopeReturnPending = true))
+        assertEquals(HomeBackAction.ExitSearch, homeBackAction(PaneLayout.Dual, 2, searchScopeReturnPending = true))
+    }
+
+    @Test
+    fun homeBackActionStillPopsThePaneAtDepthThreeEvenWithASearchScopePending() {
+        // A result opened from the search screen into ArticleDetail (depth 3) still pops one pane
+        // at a time — landing back on the search screen with the scope intact, not exiting it in
+        // one step.
+        assertEquals(HomeBackAction.PopPane, homeBackAction(PaneLayout.Single, 3, searchScopeReturnPending = true))
+        assertEquals(HomeBackAction.PopPane, homeBackAction(PaneLayout.Dual, 3, searchScopeReturnPending = true))
+    }
+
+    @Test
+    fun homeBackActionMatchesCanNavigateBackWhenNoSearchScopeIsPending() {
+        for (layout in PaneLayout.entries) {
+            for (depth in 1..3) {
+                val expected = if (canNavigateBack(layout, depth)) HomeBackAction.PopPane else HomeBackAction.None
+                assertEquals(expected, homeBackAction(layout, depth, searchScopeReturnPending = false), "$layout depth $depth")
+            }
+        }
+    }
+
     // --- paneForFeedDetail ---
 
     @Test

@@ -84,9 +84,37 @@ fun visiblePanes(layout: PaneLayout, depth: Int): List<HomePane> = when (layout)
  * each depth is its own screen. [PaneLayout.Triple] never has anywhere to go back to (all three
  * panes are always shown), which this naturally resolves to `false` since [visiblePanes] returns
  * the same list for every depth there.
+ *
+ * `HomeScreen`'s `BackHandler`/`navigateUpEnabled` no longer read this directly — they go through
+ * [homeBackAction], which also accounts for exiting the Search scope. This stays the pane-only
+ * half of that decision.
  */
 fun canNavigateBack(layout: PaneLayout, depth: Int): Boolean =
     depth > 1 && visiblePanes(layout, depth - 1) != visiblePanes(layout, depth)
+
+/** What a back action (system back, or a narrow pane's own back arrow) actually does. */
+enum class HomeBackAction { None, ExitSearch, PopPane }
+
+/**
+ * Resolves what a back action should do at [depth]/[layout], given whether a Search-scope
+ * snapshot is waiting to be restored ([searchScopeReturnPending] — see
+ * `HomeViewModel.searchScopeEntry`).
+ *
+ * Search has no [HomePane] of its own — it's `HomePane.ArticleList` with its content swapped out
+ * (see `ArticleListPane`'s own KDoc) — so exiting it is a distinct action from popping the pane
+ * stack, and takes priority over [canNavigateBack] whenever it applies. It only applies at
+ * [HomePane.ArticleList]'s own depth (2): a search *result* opened into
+ * [HomePane.ArticleDetail] (depth 3) still pops one pane at a time, landing back on the search
+ * screen with the scope intact. [PaneLayout.Triple] is excluded entirely — the field there stays
+ * in `FeedListPane`'s sidebar, and back navigation is disabled at every depth regardless.
+ */
+fun homeBackAction(layout: PaneLayout, depth: Int, searchScopeReturnPending: Boolean): HomeBackAction = when {
+    layout != PaneLayout.Triple &&
+        searchScopeReturnPending &&
+        depth == HomePane.ArticleList.ordinal + 1 -> HomeBackAction.ExitSearch
+    canNavigateBack(layout, depth) -> HomeBackAction.PopPane
+    else -> HomeBackAction.None
+}
 
 /**
  * The [HomePane] a narrow layout should actually open on, given the last-focused pane [saved] from

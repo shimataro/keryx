@@ -124,24 +124,33 @@ class HomeViewModel(
      */
     private fun restoreFilter(): ArticleFilter {
         val encoded = settingsRepository.getLocalSettings().lastFilter ?: return ArticleFilter.All
-        return when (val decoded = decodeArticleFilter(encoded) ?: return ArticleFilter.All) {
-            is ArticleFilter.Feed -> {
-                val feed = feedRepository.getFeedById(decoded.feedId)
-                if (feed != null && feed.deleted_at == null) decoded else ArticleFilter.All
-            }
-            is ArticleFilter.Tag -> {
-                val tag = tagRepository.getTagById(decoded.tagId)
-                if (tag != null && tag.deleted_at == null) decoded else ArticleFilter.All
-            }
-            is ArticleFilter.Folder -> {
-                val folder = folderRepository.getFolderById(decoded.folderId)
-                if (folder != null && folder.deleted_at == null) decoded else ArticleFilter.All
-            }
-            ArticleFilter.All, ArticleFilter.Starred -> decoded
-            // Search results depend on a query that isn't persisted, so a restored "search" filter
-            // would show an empty view — fall back to All.
-            ArticleFilter.Search -> ArticleFilter.All
+        val decoded = decodeArticleFilter(encoded) ?: return ArticleFilter.All
+        // Search results depend on a query that isn't persisted, so a restored "search" filter
+        // would show an empty view — fall back to All.
+        if (decoded == ArticleFilter.Search) return ArticleFilter.All
+        return validateFilterTarget(decoded)
+    }
+
+    /**
+     * Falls back to [ArticleFilter.All] when [filter] references a feed/tag/folder that no longer
+     * exists (soft-deleted locally, or since the snapshot this filter came from was taken — see
+     * [restoreFilter] and [exitSearchScope]). Filters with no target of their own pass through
+     * unchanged.
+     */
+    private fun validateFilterTarget(filter: ArticleFilter): ArticleFilter = when (filter) {
+        is ArticleFilter.Feed -> {
+            val feed = feedRepository.getFeedById(filter.feedId)
+            if (feed != null && feed.deleted_at == null) filter else ArticleFilter.All
         }
+        is ArticleFilter.Tag -> {
+            val tag = tagRepository.getTagById(filter.tagId)
+            if (tag != null && tag.deleted_at == null) filter else ArticleFilter.All
+        }
+        is ArticleFilter.Folder -> {
+            val folder = folderRepository.getFolderById(filter.folderId)
+            if (folder != null && folder.deleted_at == null) filter else ArticleFilter.All
+        }
+        ArticleFilter.All, ArticleFilter.Starred, ArticleFilter.Search -> filter
     }
 
     // One-time migration: the persisted "unread" filter (removed as a selectable option) is
@@ -401,6 +410,63 @@ class HomeViewModel(
         _pendingSearchFocus.value = false
     }
 
+    /**
+     * The state to restore when a narrow-layout back action exits the Search scope: the pane to
+     * return focus to, and the [filter]/row selection that was active right before entering Search.
+     *
+     * Captured only on the *first* [enterSearchScope] call after leaving Search (a re-entry while
+     * already in Search — e.g. re-tapping the sidebar's own "Search" row — must not overwrite it
+     * with Search-scope state). Cleared by [selectFilter] whenever the user leaves Search by any
+     * other means (e.g. tapping an unrelated feed at [PaneLayout.Dual], where both panes are on
+     * screen at once), so a stale snapshot can never resurface a filter the user already moved past.
+     */
+    internal data class SearchScopeEntry(
+        val returnPane: HomePane,
+        val filter: ArticleFilter,
+        val row: FeedListRowSelection,
+    )
+
+    private val _searchScopeEntry = MutableStateFlow<SearchScopeEntry?>(null)
+    internal val searchScopeEntry: StateFlow<SearchScopeEntry?> = _searchScopeEntry.asStateFlow()
+
+    /**
+     * Enters the Search scope, snapshotting the current filter/row/[returnPane] so [exitSearchScope]
+     * can restore them later. [returnPane] is the pane a narrow-layout back action should focus on
+     * exit — the caller's own pane, since entering Search never advances the navigation stack past
+     * it (the field itself lives on [HomePane.ArticleList], see `ArticleListPane`'s `SearchListPane`).
+     */
+    fun enterSearchScope(returnPane: HomePane) {
+        if (_filter.value != ArticleFilter.Search) {
+            _searchScopeEntry.value = SearchScopeEntry(returnPane, _filter.value, _selectedRowInstance.value)
+        }
+        selectFilter(ArticleFilter.Search)
+        requestSearchFocus()
+    }
+
+    /**
+     * Exits the Search scope, restoring the filter/row snapshotted by [enterSearchScope].
+     *
+     * The snapshot can go stale while Search was active — its filter's target may have been
+     * deleted ([validateFilterTarget]), or its row may be a [FeedListRowSelection.FeedInTag] whose
+     * tag has since been collapsed (the same staleness [toggleTagExpanded] guards against for the
+     * live selection) — so both are re-validated here rather than restored verbatim.
+     *
+     * @return The pane a narrow-layout back action should focus, or `null` if there is no snapshot
+     *   to restore (Search was entered some other way, e.g. directly via [setSearchQuery] in a test).
+     */
+    fun exitSearchScope(): HomePane? {
+        val entry = _searchScopeEntry.value ?: return null
+        val validatedFilter = validateFilterTarget(entry.filter)
+        val row = when {
+            validatedFilter != entry.filter -> FeedListRowSelection.canonicalFor(validatedFilter)
+            entry.row is FeedListRowSelection.FeedInTag && entry.row.tagId !in _expandedTagIds.value ->
+                FeedListRowSelection.FeedInFolderGroup(entry.row.feedId)
+            else -> entry.row
+        }
+        selectFilter(validatedFilter, row)
+        return entry.returnPane
+    }
+
     // --- Pane widths ---
     private val _feedListPaneWidth = MutableStateFlow(
         settingsRepository.getLocalSettings().feedListPaneWidth
@@ -538,7 +604,12 @@ class HomeViewModel(
         // navigating elsewhere before the search pane composed), so it can't steal focus at
         // whatever field appears next. Placed after the early return above, so reselecting the
         // already-active Search filter never clears a request still waiting to be consumed.
-        if (filter != ArticleFilter.Search) _pendingSearchFocus.value = false
+        // Also drops the exitSearchScope() snapshot the same way — once the user has left Search
+        // by any means, there is nothing left for a later back action to restore.
+        if (filter != ArticleFilter.Search) {
+            _pendingSearchFocus.value = false
+            _searchScopeEntry.value = null
+        }
         _filter.value = filter
         _selectedRowInstance.value = instance
         _selectedArticle.value = null
