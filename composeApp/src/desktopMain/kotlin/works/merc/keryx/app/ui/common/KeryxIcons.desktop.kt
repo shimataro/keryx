@@ -33,7 +33,8 @@ import works.merc.keryx.app.resources.ic_public_outlined
 import works.merc.keryx.app.resources.ic_refresh_outlined
 import works.merc.keryx.app.resources.ic_restart_alt_outlined
 import works.merc.keryx.app.resources.ic_search_outlined
-import works.merc.keryx.app.resources.ic_sort_outlined
+import works.merc.keryx.app.resources.ic_sort_ascending_outlined
+import works.merc.keryx.app.resources.ic_sort_descending_outlined
 import works.merc.keryx.app.resources.ic_star_border
 import works.merc.keryx.app.resources.ic_star_filled
 import works.merc.keryx.app.resources.ic_storage_outlined
@@ -65,7 +66,8 @@ actual object KeryxIcons {
     actual val Refresh: DrawableResource = Res.drawable.ic_refresh_outlined
     actual val RestartAlt: DrawableResource = Res.drawable.ic_restart_alt_outlined
     actual val Search: DrawableResource = Res.drawable.ic_search_outlined
-    actual val Sort: DrawableResource = Res.drawable.ic_sort_outlined
+    actual val SortAscending: DrawableResource = Res.drawable.ic_sort_ascending_outlined
+    actual val SortDescending: DrawableResource = Res.drawable.ic_sort_descending_outlined
     actual val Storage: DrawableResource = Res.drawable.ic_storage_outlined
     actual val Tune: DrawableResource = Res.drawable.ic_tune_outlined
     actual val Update: DrawableResource = Res.drawable.ic_update_outlined

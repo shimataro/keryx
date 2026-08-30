@@ -21,7 +21,7 @@ A local-first, cross-platform RSS reader
 
 ## Supported Platforms
 
-Currently available for Windows, macOS, and Linux. Native apps for Android and iOS/iPadOS are planned for the future, with macOS eventually joining that native lineup as well.
+Currently available for Windows, macOS, Linux, and Android. A native app for iOS/iPadOS is planned for the future, with macOS eventually joining that native lineup as well.
 
 ## Download
 
@@ -46,6 +46,10 @@ Download the latest release from the [Releases page](https://github.com/shimatar
 > **Windows**: Until a code-signing certificate is in place, the `.msi` is unsigned, so
 > Windows SmartScreen shows a "Windows protected your PC" warning on first run. Click
 > "More info", then "Run anyway" to continue.
+>
+> **Android**: the `.apk` is not distributed through Google Play, so Android will ask you to
+> allow installing from this source the first time you open it. The `.aab` is a Google Play
+> submission format, not something you can install directly — download the `.apk` instead.
 
 ## Development Documentation
 
@@ -60,7 +64,7 @@ Download the latest release from the [Releases page](https://github.com/shimatar
   - [x] macOS
   - [x] Linux ( `.deb` )
   - [x] Linux ( `.rpm` )
-  - [ ] Android
+  - [x] Android
   - [ ] iOS
   - [ ] iPadOS
 - Cloud storage support
