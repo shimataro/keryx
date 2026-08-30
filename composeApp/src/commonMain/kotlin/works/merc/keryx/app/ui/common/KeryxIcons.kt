@@ -27,7 +27,9 @@ import org.jetbrains.compose.resources.painterResource
  * `graphicsLayer`/`rotate`/`scaleX`/`scaleY` modifiers applied around each `KeryxIcon(...)` call
  * site first; see `ui-guidelines`' "Native-feel restyle" section for the concrete incident this
  * warning comes from (Tabler's `arrows-sort` silently breaking `ArticleListPane`'s sort-direction
- * flip) and why `ArrowBack` exists as its own entry rather than a flipped `ChevronRight`.
+ * flip). A two-state icon therefore gets a dedicated asset per state rather than one asset
+ * transformed at the call site: [SortAscending]/[SortDescending] and [ArrowBack] (as opposed to a
+ * flipped [ChevronRight]) both exist for that reason.
  */
 expect object KeryxIcons {
     // Chrome / actions (Outlined)
@@ -52,7 +54,8 @@ expect object KeryxIcons {
     val Refresh: DrawableResource
     val RestartAlt: DrawableResource
     val Search: DrawableResource
-    val Sort: DrawableResource
+    val SortAscending: DrawableResource
+    val SortDescending: DrawableResource
     val Storage: DrawableResource
     val Tune: DrawableResource
     val Update: DrawableResource

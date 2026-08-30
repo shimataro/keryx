@@ -759,20 +759,52 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   (or adding a new one), don't just match each icon by semantic name — grep
   for `graphicsLayer`/`rotate`/`scaleX`/`scaleY` modifiers applied around each
   `KeryxIcon(...)` call site first. A handful of icons are transformed at
-  their call site to represent state with a single asset (e.g.
-  `ArticleListPane.kt`'s sort button, which flips `KeryxIcons.Sort` vertically
-  for ascending/descending) — swapping in a same-named but
-  differently-shaped glyph (e.g. a symmetric double-arrow instead of a
-  directional bars+arrow icon) silently breaks the transform without
-  breaking compilation or tests, which is exactly what happened when Tabler's
-  `arrows-sort` initially replaced the directional Material "sort" glyph
-  (confirmed still safe for the Material-ized Android `actual`: Material
-  Symbols' own `sort` glyph is the same three-different-length-bars shape, so
-  the flip still reads correctly there too). Where practical, prefer swapping
+  their call site to represent state with a single asset — swapping in a
+  same-named but differently-shaped glyph (e.g. a symmetric double-arrow
+  instead of a directional bars+arrow icon) silently breaks the transform
+  without breaking compilation or tests, which is exactly what happened when
+  Tabler's `arrows-sort` initially replaced the directional Material "sort"
+  glyph. Where practical, prefer swapping
   between two distinct icon assets for a
   two-state icon (as the folder/tag expand chevron already does, picking
   between `ExpandMore`/`ChevronRight`) over transforming one shared asset —
-  it's immune to this class of mistake by construction. `KeryxIcons.ArrowBack`
+  it's immune to this class of mistake by construction.
+  **`ArticleListPane.kt`'s sort button is the case that proves the rule.** It
+  used to flip a single `KeryxIcons.Sort` vertically for
+  ascending/descending, and this document previously recorded that as
+  "confirmed still safe" on Android because Material Symbols' `sort` is the
+  same three-bar shape. That reasoning was wrong: desktop's Tabler
+  `sort-descending` conveys direction through the **arrow** beside its bars
+  (whose own lengths are 9/7/7, not a staircase), and Material Symbols' `sort`
+  has no arrow at all, so the flip was effectively invisible on Android —
+  where, with no menu bar and a tooltip that only appears on long-press,
+  nothing else showed the current order either. It now uses
+  `KeryxIcons.SortDescending`/`SortAscending`, while retaining the selected directional glyph
+  when the button is disabled (the search
+  scope). Desktop's two directional entries are Tabler's own
+  `sort-descending`/`sort-ascending`; Android's are **local composites** —
+  Material Symbols ships no directional sort glyph
+  (google/material-design-icons#189), so `ic_sort_{ascending,descending}_material.xml`
+  place the stock `sort` and `arrow_downward`/`arrow_upward` paths side by side
+  via `<group>` transforms rather than redrawing either by hand. **On both
+  platforms the bar staircase reverses along with the arrow**, so direction is
+  carried twice over: desktop gets that for free (Tabler ships `sort-descending`
+  and `sort-ascending` as two glyphs, 9/7/7 vs 7/7/9), and the Android
+  ascending composite mirrors the stock `sort` bars vertically to match.
+  Three things about those two files are load-bearing and easy to undo by
+  accident, so each carries its own comment saying so: both groups take the
+  **same uniform scale** (scaling only one, or scaling either non-uniformly,
+  leaves the bars and the arrow's shaft at different stroke weights inside one
+  glyph); the source paths are the **wght 700** variants, not the default
+  weight — at 125 units thick instead of 80, they land at roughly the 2px of
+  the default-weight icons beside them in the toolbar once scaled down to fit
+  two glyphs in one 24dp box; and the ascending file's bars are that mirror,
+  which reads as a swap of the outer two bar widths because the three bar bands
+  are symmetric about y 480.5. Diffing either file's path data against the
+  stock default-weight glyph will therefore show differences on all three
+  counts — none of them is a defect to "correct". They are also the repo's only
+  `<group>`-using vector assets; Compose Multiplatform's own `XmlVectorParser`
+  supports the full `pivot`/`scale`/`translate`/`rotation` set on every target. `KeryxIcons.ArrowBack`
   is the other concrete instance of this fix: `ChevronRight` used to double as
   a flipped (`scaleX = -1f`) "back" icon at three call sites
   (`ArticleListPane`/`ArticleDetailPane`'s back buttons,
