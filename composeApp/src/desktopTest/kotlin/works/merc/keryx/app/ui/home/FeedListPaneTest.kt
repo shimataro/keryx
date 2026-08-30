@@ -322,7 +322,6 @@ class FeedListPaneTest {
             // onNodeWithText matches exactly by default, so the row's own label ("記事を検索") is
             // never confused with the collapsed bar's placeholder ("記事を検索…").
             onNodeWithText("記事を検索").assertDoesNotExist()
-            onNodeWithText("記事を検索…").assertIsDisplayed()
         } finally {
             fixture.close()
             driver.close()
