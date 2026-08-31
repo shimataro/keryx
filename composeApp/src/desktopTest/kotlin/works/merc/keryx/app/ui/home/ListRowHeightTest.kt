@@ -80,9 +80,8 @@ class ListRowHeightTest {
     fun everyTouchPrimaryRowKindSharesTheSameBandHeight() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.seedOneOfEachRowKind()
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             vm.toggleTagExpanded("t1")
             setContent { ListRowHeightTestHost(vm, isTouchPrimary = true) }
             waitForIdle()
@@ -96,8 +95,6 @@ class ListRowHeightTest {
             // a TagFeedRow nested under the expanded tag (see ListRowHitAreaTest's own tag-nested
             // test for the same duplication). The tag-nested instance is the second (lower) match.
             onAllNodesWithText("Feed f2")[1].assertHeightIsEqualTo(expectedTouchBandHeight)
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -105,9 +102,8 @@ class ListRowHeightTest {
     fun theTouchFloorDoesNotApplyOnANonTouchPrimaryPlatform() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.seedOneOfEachRowKind()
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setContent { ListRowHeightTestHost(vm, isTouchPrimary = false) }
             waitForIdle()
 
@@ -118,8 +114,6 @@ class ListRowHeightTest {
                 actual < expected,
                 "a non-touch-primary row must not be floored to the touch band height (expected < ${expected}px, was ${actual}px)",
             )
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 }

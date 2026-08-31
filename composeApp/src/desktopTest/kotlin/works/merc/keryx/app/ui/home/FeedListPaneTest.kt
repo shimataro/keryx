@@ -84,9 +84,8 @@ class FeedListPaneTest {
         db.insertFeed("f-tag", folderId = "d1")
         db.insertTag("t1", "Tag One")
         db.insertFeedTag("f-tag", "t1")
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             // The feed's only rendered row is the TagFeedRow: its folder is collapsed (hiding the
             // folder-group row) while the tag it's attached to is expanded.
             vm.toggleFolderCollapsed("d1")
@@ -138,9 +137,6 @@ class FeedListPaneTest {
                 absoluteTolerance = 1f,
                 message = "the row must end up fully visible, at its natural height",
             )
-        } finally {
-            fixture.close()
-            driver.close()
         }
     }
 
@@ -152,9 +148,8 @@ class FeedListPaneTest {
         repeat(30) { i -> db.insertFeed("f$i", sortOrder = (i + 1).toLong()) }
         db.insertTag("t1", "Tag One")
         db.insertFeedTag("f-tag", "t1")
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             // The feed now renders twice: once near the top under its (expanded) folder, and once
             // under the expanded tag, far below the viewport.
             vm.toggleTagExpanded("t1")
@@ -170,9 +165,6 @@ class FeedListPaneTest {
             // what proves the *selected* instance is the one scrolled to.
             onNodeWithText("Tag One", useUnmergedTree = true).assertIsDisplayed()
             onNodeWithText("Feed f-tag", useUnmergedTree = true).assertIsDisplayed()
-        } finally {
-            fixture.close()
-            driver.close()
         }
     }
 
@@ -180,9 +172,8 @@ class FeedListPaneTest {
     fun stillScrollsToAnOffscreenSelection() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         repeat(30) { i -> db.insertFeed("f$i", sortOrder = i.toLong()) }
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setContent { FeedListPaneTestHost(vm, 400.dp) }
             waitForIdle()
 
@@ -192,9 +183,6 @@ class FeedListPaneTest {
             waitForIdle()
 
             onNodeWithText("Feed f29", useUnmergedTree = true).assertIsDisplayed()
-        } finally {
-            fixture.close()
-            driver.close()
         }
     }
 
@@ -203,31 +191,30 @@ class FeedListPaneTest {
         val (driver, db) = inMemoryDb()
         val testScope = CoroutineScope(Dispatchers.Unconfined)
         val activityCenter = ActivityCenter(testScope)
-        val fixture = newHomeViewModel(driver, db, activityCenter = activityCenter)
-        val vm = fixture.vm
         try {
-            setContent { FeedListPaneTestHost(vm, 300.dp) }
-            waitForIdle()
-            onNodeWithContentDescription("更新").assertIsEnabled()
+            useHomeViewModel(driver, db, activityCenter = activityCenter) { fixture ->
+                val vm = fixture.vm
+                setContent { FeedListPaneTestHost(vm, 300.dp) }
+                waitForIdle()
+                onNodeWithContentDescription("更新").assertIsEnabled()
 
-            // Reproduces refreshAll()'s own sequencing: the feed-fetch phase (trackFeedRefresh)
-            // completes, then the chained sync phase (trackSync) is still running.
-            val syncGate = CompletableDeferred<Unit>()
-            testScope.launch {
-                activityCenter.trackFeedRefresh { }
-                activityCenter.trackSync { syncGate.await() }
+                // Reproduces refreshAll()'s own sequencing: the feed-fetch phase (trackFeedRefresh)
+                // completes, then the chained sync phase (trackSync) is still running.
+                val syncGate = CompletableDeferred<Unit>()
+                testScope.launch {
+                    activityCenter.trackFeedRefresh { }
+                    activityCenter.trackSync { syncGate.await() }
+                }
+                waitForIdle()
+
+                onNodeWithContentDescription("更新").assertIsNotEnabled()
+
+                syncGate.complete(Unit)
+                waitForIdle()
+                onNodeWithContentDescription("更新").assertIsEnabled()
             }
-            waitForIdle()
-
-            onNodeWithContentDescription("更新").assertIsNotEnabled()
-
-            syncGate.complete(Unit)
-            waitForIdle()
-            onNodeWithContentDescription("更新").assertIsEnabled()
         } finally {
             testScope.cancel()
-            fixture.close()
-            driver.close()
         }
     }
 
@@ -237,37 +224,36 @@ class FeedListPaneTest {
         val testScope = CoroutineScope(Dispatchers.Unconfined)
         val activityCenter = ActivityCenter(testScope)
         val tokenStorage = FeedListPaneTestTokenStorage().apply { save(OAuthTokens("AT", "RT")) }
-        val fixture = newHomeViewModel(
-            driver, db, activityCenter = activityCenter, tokenStorage = tokenStorage, appKey = "test-app-key",
-        )
-        val vm = fixture.vm
         try {
-            setContent { FeedListPaneTestHost(vm, 300.dp) }
-            waitForIdle()
-            onNodeWithContentDescription("同期").assertIsEnabled()
+            useHomeViewModel(
+                driver, db, activityCenter = activityCenter, tokenStorage = tokenStorage, appKey = "test-app-key",
+            ) { fixture ->
+                val vm = fixture.vm
+                setContent { FeedListPaneTestHost(vm, 300.dp) }
+                waitForIdle()
+                onNodeWithContentDescription("同期").assertIsEnabled()
 
-            // Counterpart to refreshButtonStaysDisabledThroughRefreshAllsSyncPhase: proves the sync
-            // button stays disabled through refreshAll()'s fetch phase (trackFeedRefresh), before the
-            // chained sync phase (trackSync) starts. (Not during trackSync itself: syncing == true
-            // swaps this button's content to a bare SmallSpinner with no content description, so it
-            // can no longer be located by "同期" at that point — the fetch phase is the assertion
-            // window where the button is both disabled and still identifiable this way.)
-            val fetchGate = CompletableDeferred<Unit>()
-            testScope.launch {
-                activityCenter.trackFeedRefresh { fetchGate.await() }
-                activityCenter.trackSync { }
+                // Counterpart to refreshButtonStaysDisabledThroughRefreshAllsSyncPhase: proves the sync
+                // button stays disabled through refreshAll()'s fetch phase (trackFeedRefresh), before the
+                // chained sync phase (trackSync) starts. (Not during trackSync itself: syncing == true
+                // swaps this button's content to a bare SmallSpinner with no content description, so it
+                // can no longer be located by "同期" at that point — the fetch phase is the assertion
+                // window where the button is both disabled and still identifiable this way.)
+                val fetchGate = CompletableDeferred<Unit>()
+                testScope.launch {
+                    activityCenter.trackFeedRefresh { fetchGate.await() }
+                    activityCenter.trackSync { }
+                }
+                waitForIdle()
+
+                onNodeWithContentDescription("同期").assertIsNotEnabled()
+
+                fetchGate.complete(Unit)
+                waitForIdle()
+                onNodeWithContentDescription("同期").assertIsEnabled()
             }
-            waitForIdle()
-
-            onNodeWithContentDescription("同期").assertIsNotEnabled()
-
-            fetchGate.complete(Unit)
-            waitForIdle()
-            onNodeWithContentDescription("同期").assertIsEnabled()
         } finally {
             testScope.cancel()
-            fixture.close()
-            driver.close()
         }
     }
 
@@ -279,33 +265,25 @@ class FeedListPaneTest {
     @Test
     fun triplePaneRendersTheEditableSearchFieldWhenGivenNoOnSelectionAdvance() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT) }
             waitForIdle()
 
             onNode(hasSetTextAction()).assertIsDisplayed()
-        } finally {
-            fixture.close()
-            driver.close()
         }
     }
 
     @Test
     fun narrowLayoutRendersACollapsedSearchBarInsteadOfAnEditableField() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = {}) }
             waitForIdle()
 
             onNode(hasSetTextAction()).assertDoesNotExist()
             onNodeWithText("記事を検索…").assertIsDisplayed()
-        } finally {
-            fixture.close()
-            driver.close()
         }
     }
 
@@ -317,18 +295,14 @@ class FeedListPaneTest {
     @Test
     fun omitsSearchQuickFilterRowWhenOnSelectionAdvanceIsProvided() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = {}) }
             waitForIdle()
 
             // onNodeWithText matches exactly by default, so the quick-filter label is never
             // confused with the collapsed search bar placeholder.
             onNodeWithText("記事を検索").assertDoesNotExist()
-        } finally {
-            fixture.close()
-            driver.close()
         }
     }
 
@@ -339,9 +313,8 @@ class FeedListPaneTest {
     @Test
     fun keepsSearchQuickFilterRowWhenOnSelectionAdvanceIsNull() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT) }
             waitForIdle()
 
@@ -353,19 +326,15 @@ class FeedListPaneTest {
             // so a back action can restore the previous pane/filter.
             assertEquals(HomePane.FeedList, vm.searchScopeEntry.value?.returnPane)
             assertEquals(ArticleFilter.Search, vm.filter.value)
-        } finally {
-            fixture.close()
-            driver.close()
         }
     }
 
     @Test
     fun tappingTheCollapsedSearchBarSelectsSearchAdvancesAndRaisesAFocusRequest() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        var advanceCount = 0
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            var advanceCount = 0
             setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = { advanceCount++ }) }
             waitForIdle()
 
@@ -378,26 +347,19 @@ class FeedListPaneTest {
             // Snapshotted so a later back action can restore this pane and filter — see
             // HomeViewModel.enterSearchScope's own KDoc.
             assertEquals(HomePane.FeedList, vm.searchScopeEntry.value?.returnPane)
-        } finally {
-            fixture.close()
-            driver.close()
         }
     }
 
     @Test
     fun theCollapsedSearchBarShowsTheCurrentQueryRatherThanThePlaceholder() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             vm.setSearchQuery("kotlin")
             setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = {}) }
             waitForIdle()
 
             onNodeWithText("kotlin").assertIsDisplayed()
-        } finally {
-            fixture.close()
-            driver.close()
         }
     }
 
@@ -409,10 +371,9 @@ class FeedListPaneTest {
         // fire so the caller can discard that pane's saved scroll state. See HomeViewModel's own
         // `reentering` param and FeedListPane's onEnterArticleList KDoc.
         val (driver, db) = inMemoryDb()
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        var enterCount = 0
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            var enterCount = 0
             vm.selectFilter(ArticleFilter.All)
             setContent {
                 FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = {}, onEnterArticleList = { enterCount++ })
@@ -424,9 +385,6 @@ class FeedListPaneTest {
 
             assertEquals(ArticleFilter.All, vm.filter.value)
             assertEquals(1, enterCount)
-        } finally {
-            fixture.close()
-            driver.close()
         }
     }
 }

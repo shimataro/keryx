@@ -752,6 +752,22 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   "outlined" flat button. The Android `actual`s delegate straight to M3's own
   `Button`/`FilledTonalButton`/`TextButton` — see the `KeryxTextField`
   bullet below for why that's the right call on that platform.
+  **A button whose action destroys data takes `FlatTonalButton(destructive = true)`**
+  (`CloudSyncTab`'s "reset sync data", `NotificationCenterSheet`'s
+  `ResetCloudData` row button), which paints the container
+  `errorContainer`/`onErrorContainer` on **both** platforms — desktop keeps its
+  hairline `outlineVariant` border, Android overrides
+  `ButtonDefaults.filledTonalButtonColors`. M3 defines `errorContainer` as the
+  restrained container tone for an error-role component, which is what a rare,
+  dangerous recovery action wants; the `error` role itself is for high-priority
+  errors and emergency actions, so **don't reach for it here**. M3 has no
+  "destructive button" variant of its own, so this flag *is* the app's
+  convention — don't hand-roll `colors = ...` at a call site. Disabled state
+  keeps the neutral `onSurface` 12%/38% dim on both platforms (a disabled
+  button carries no meaning to color). And **color is never the only signal**
+  (WCAG 1.4.1): such a button always also carries its own glyph
+  (`KeryxIcons.Delete`) plus either a label or a tooltip, and a prose
+  confirmation dialog behind it.
 - **`SegmentedControl<T>` / `ToggleChip`**
   (`ui/common/SegmentedControl.kt`, expect/actual): the replacement for
   Material3's `FilterChip` for both "pick one of N" (`SegmentedControl`, used
@@ -1027,6 +1043,32 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   are otherwise untouched by this split): desktop's `actual` is the flat surface pattern (see
   "Raised surfaces" above, `surfaceContainerHighest` variant); Android's `actual` is M3's own
   `PlainTooltip`.
+- **`IconButtonKind` — how much container an icon button carries**
+  (`ui/common/TooltipIconButton.kt`): `TooltipIconButton`'s one emphasis axis, defaulting to
+  `Standard`. `Standard` has no container at all (the pane toolbars' own look, and every existing
+  call site); `Primary` is a `primary` fill for the surface's own main action; `Secondary` is an
+  **outline**, for a secondary action that must still read as a button; `Destructive` is an
+  `errorContainer` fill (see the `FlatButtons` bullet above for why `errorContainer` and not
+  `error`). Android maps these onto M3's own icon-button family
+  (`IconButton`/`FilledIconButton`/`OutlinedIconButton`/`FilledTonalIconButton` recolored), desktop
+  onto the same flat tokens `FlatButton`/`FlatTonalButton` use, layering its hover highlight *over*
+  the kind's fill rather than replacing it, and dimming container and content together with the one
+  `alpha(0.38f)` it already applied when disabled. **A kind's container tone must not equal the tone
+  of the row or surface it sits on** — that is exactly why `Secondary` is outlined rather than
+  tonal-filled: a tonal fill is `secondaryContainer`, which is the tone `CloudSyncTab`'s connected
+  provider row itself is painted with, so the container would vanish into it. The glyph inside never
+  needs its own `tint`; it inherits the container's content color.
+- **A settings card row's trailing actions are icon-only on a touch-primary platform**
+  (`isTouchPrimary`) and icon + label buttons on desktop — see `ui/settings/CloudSyncTab.kt`'s
+  `ProviderActionButton`, which routes both through one helper so the emphasis is expressed once,
+  as an `IconButtonKind`. This is not a taste call: two labelled buttons plus the row's own name
+  need ~340-366dp of the ~288dp a phone-width settings dialog actually has, and a `Row` measures
+  its non-weighted children first, so the labelled buttons take their intrinsic width and the name
+  gets only the remainder — which is how the connected provider row used to wrap "OneDrive" onto
+  four lines. Desktop's settings dialog is a fixed `KERYX_TAB_DIALOG_WIDTH`, so it keeps its
+  labels. Belt and braces: also give such a name `maxLines = 1` +
+  `overflow = TextOverflow.Ellipsis`, so a future locale or font scale degrades by truncating
+  rather than reflowing.
 - **Popup vs. Dialog**: non-modal, anchored info panels (no scrim, dismiss on
   outside click, positioned relative to the control that opened them) use
   `KeryxAnchoredPanel` (see above) — `NotificationCenterSheet`, opened from
@@ -1103,6 +1145,12 @@ KDoc) — follow these for any new `expect`/`actual` control or list-row interac
   parent's `onClickLabel` instead** — never on both, or a screen reader announces the label twice
   (once for the icon, once for the click action). `ui/home/HomeCommon.kt`'s
   `ExpandCollapseChevron` is the reference implementation; its own KDoc explains why.
+  **`TooltipIconButton` is the standing exception**: neither `actual` sets an `onClickLabel`, so
+  there is no parent to carry the label — an icon-only button therefore puts it on the icon's own
+  `contentDescription` (what every existing call site already does), and the tooltip text is
+  normally the same string. A glyph that sits *beside* its own visible label (desktop's
+  `ProviderActionButton`) goes back to `contentDescription = null`, since the `Text` announces the
+  action.
 - **Route state-description text through `ui/i18n/AccessibilityDescriptions.kt`** (e.g.
   `checkedStateDescription()`/`uncheckedStateDescription()`) rather than inlining a literal at the
   call site — this is also where constraint #3's "no hardcoded user-facing strings" applies to

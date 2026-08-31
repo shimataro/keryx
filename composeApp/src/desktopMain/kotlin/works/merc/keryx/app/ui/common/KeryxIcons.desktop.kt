@@ -15,6 +15,7 @@ import works.merc.keryx.app.resources.ic_cloud_outlined
 import works.merc.keryx.app.resources.ic_computer_outlined
 import works.merc.keryx.app.resources.ic_content_copy_outlined
 import works.merc.keryx.app.resources.ic_create_new_folder_outlined
+import works.merc.keryx.app.resources.ic_delete_outlined
 import works.merc.keryx.app.resources.ic_delete_sweep_outlined
 import works.merc.keryx.app.resources.ic_drag_handle_outlined
 import works.merc.keryx.app.resources.ic_done_all_outlined
@@ -26,6 +27,7 @@ import works.merc.keryx.app.resources.ic_file_upload_outlined
 import works.merc.keryx.app.resources.ic_folder_filled
 import works.merc.keryx.app.resources.ic_info_outlined
 import works.merc.keryx.app.resources.ic_link_off_outlined
+import works.merc.keryx.app.resources.ic_link_outlined
 import works.merc.keryx.app.resources.ic_new_label_outlined
 import works.merc.keryx.app.resources.ic_notifications_outlined
 import works.merc.keryx.app.resources.ic_public_filled
@@ -53,6 +55,7 @@ actual object KeryxIcons {
     actual val ContentCopy: DrawableResource = Res.drawable.ic_content_copy_outlined
     actual val Circle: DrawableResource = Res.drawable.ic_circle_outlined
     actual val CreateNewFolder: DrawableResource = Res.drawable.ic_create_new_folder_outlined
+    actual val Delete: DrawableResource = Res.drawable.ic_delete_outlined
     actual val DeleteSweep: DrawableResource = Res.drawable.ic_delete_sweep_outlined
     actual val DoneAll: DrawableResource = Res.drawable.ic_done_all_outlined
     actual val DragHandle: DrawableResource = Res.drawable.ic_drag_handle_outlined
@@ -60,6 +63,7 @@ actual object KeryxIcons {
     actual val FileDownload: DrawableResource = Res.drawable.ic_file_download_outlined
     actual val FileUpload: DrawableResource = Res.drawable.ic_file_upload_outlined
     actual val Info: DrawableResource = Res.drawable.ic_info_outlined
+    actual val Link: DrawableResource = Res.drawable.ic_link_outlined
     actual val LinkOff: DrawableResource = Res.drawable.ic_link_off_outlined
     actual val NewLabel: DrawableResource = Res.drawable.ic_new_label_outlined
     actual val Notifications: DrawableResource = Res.drawable.ic_notifications_outlined

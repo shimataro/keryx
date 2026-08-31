@@ -15,6 +15,7 @@ import works.merc.keryx.app.resources.ic_cloud_material
 import works.merc.keryx.app.resources.ic_computer_material
 import works.merc.keryx.app.resources.ic_content_copy_material
 import works.merc.keryx.app.resources.ic_create_new_folder_material
+import works.merc.keryx.app.resources.ic_delete_material
 import works.merc.keryx.app.resources.ic_delete_sweep_material
 import works.merc.keryx.app.resources.ic_drag_handle_material
 import works.merc.keryx.app.resources.ic_done_all_material
@@ -25,6 +26,7 @@ import works.merc.keryx.app.resources.ic_file_download_material
 import works.merc.keryx.app.resources.ic_file_upload_material
 import works.merc.keryx.app.resources.ic_folder_material
 import works.merc.keryx.app.resources.ic_info_material
+import works.merc.keryx.app.resources.ic_link_material
 import works.merc.keryx.app.resources.ic_link_off_material
 import works.merc.keryx.app.resources.ic_new_label_material
 import works.merc.keryx.app.resources.ic_notifications_material
@@ -64,6 +66,7 @@ actual object KeryxIcons {
     actual val ContentCopy: DrawableResource = Res.drawable.ic_content_copy_material
     actual val Circle: DrawableResource = Res.drawable.ic_circle_material
     actual val CreateNewFolder: DrawableResource = Res.drawable.ic_create_new_folder_material
+    actual val Delete: DrawableResource = Res.drawable.ic_delete_material
     actual val DeleteSweep: DrawableResource = Res.drawable.ic_delete_sweep_material
     actual val DoneAll: DrawableResource = Res.drawable.ic_done_all_material
     actual val DragHandle: DrawableResource = Res.drawable.ic_drag_handle_material
@@ -71,6 +74,7 @@ actual object KeryxIcons {
     actual val FileDownload: DrawableResource = Res.drawable.ic_file_download_material
     actual val FileUpload: DrawableResource = Res.drawable.ic_file_upload_material
     actual val Info: DrawableResource = Res.drawable.ic_info_material
+    actual val Link: DrawableResource = Res.drawable.ic_link_material
     actual val LinkOff: DrawableResource = Res.drawable.ic_link_off_material
     actual val NewLabel: DrawableResource = Res.drawable.ic_new_label_material
     actual val Notifications: DrawableResource = Res.drawable.ic_notifications_material

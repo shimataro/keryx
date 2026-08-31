@@ -63,6 +63,13 @@
   `@BeforeTest` で `Dispatchers.setMain(StandardTestDispatcher())`、`@AfterTest` で `Dispatchers.resetMain()`
   を呼ぶ（`HomeViewModelTest.kt` が最初の導入例）。`StateFlow` が `SharingStarted.WhileSubscribed(...)`
   の場合、テスト側で明示的に `collect` して購読を開始しないと値が更新されない点に注意。
+- 実際の `HomeViewModel` を必要とする Compose UI テストは、自前の `try`/`finally` ではなく必ず
+  `ui/home/HomeViewModelTestSupport.kt` の `ComposeUiTest.useHomeViewModel(driver, db) { fixture -> … }`
+  を経由すること。`HomeViewModel` の DB 購読は `SharingStarted.Eagerly` なので、`viewModelScope` を
+  `cancelAndJoin` せずに driver を閉じると、EDT にキューされていた継続が閉じた接続に対して再開してしまう
+  ——この未捕捉例外は、たまたま次に走った**別の**テストで `kotlinx.coroutines.test.UncaughtExceptionsBeforeTest`
+  としてフレーク的に表面化する。`ComposeUiTest.waitForIdle()` はここでは役に立たない
+  ——Compose 自身のテストクロックを進めるだけで、AWT のイベントキューは一切汲み出さない。
 - `SyncRepository` のような `CloudStorage` を直接扱うクラスは、HTTP 層をモックする代わりに
   `CloudStorage` インターフェースを手製フェイク（インメモリ Map + rev 管理）で差し替えて検証する
   （`SyncRepositoryTest.kt` 参照）。`DropboxStorage`/`DropboxAuthManager` 自体のテストは従来どおり
@@ -702,3 +709,10 @@ OS 側のルーティングではない）。パッケージ版をインスト�
 - 横向き（2 ペイン）とタブレット幅（3 ペイン）で、ベルがちょうど 1 個であること（2 個にならない）。
 - クラウド同期接続時に、フィード一覧ツールバーの 5 アイコンが折り返さず収まること
   （OS の表示サイズを最大にした状態でも）。
+- 電話幅の 設定 ▸ クラウド同期（プロバイダー接続済み）で、プロバイダー名が 1 行に収まり、末尾の
+  アイコンボタン 2 つが横に並ぶこと（OS の表示サイズ最大＋アプリの文字サイズ最大でも）。
+  - 未接続行では、連携ボタンが primary 塗りであることを確認する。
+  - 接続済み行では、リセットが errorContainer 塗り、連携解除が枠線であり、いずれも接続済み行の
+    ティール地の上で判別できることを確認する。各アイコンを長押ししてツールチップを確認。
+  リセット実行中はスピナーが器の上で見えること・行の高さが変わらないこと。ライト／ダーク両テーマで
+  確認する。

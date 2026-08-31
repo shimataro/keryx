@@ -31,11 +31,11 @@ class PendingNotificationActionHostTest {
     )
 
     private fun focusedPaneAfterShowFeedDetail(layout: PaneLayout): Pair<HomePane?, ArticleFilter> {
-        val (driver, db) = inMemoryDb()
-        val fixture = newHomeViewModel(driver, db)
-        var focused: HomePane? = null
-        try {
-            runDesktopComposeUiTest {
+        lateinit var result: Pair<HomePane?, ArticleFilter>
+        runDesktopComposeUiTest {
+            val (driver, db) = inMemoryDb()
+            useHomeViewModel(driver, db) { fixture ->
+                var focused: HomePane? = null
                 val notifVm = NotificationCenterViewModel(NotificationCenter())
                 setContent {
                     PendingNotificationActionHost(fixture.vm, notifVm, layout, onFocusPane = { focused = it })
@@ -44,12 +44,11 @@ class PendingNotificationActionHostTest {
 
                 notifVm.requestAction(showFeedDetail("feed-1"))
                 waitForIdle()
+
+                result = focused to fixture.vm.filter.value
             }
-            return focused to fixture.vm.filter.value
-        } finally {
-            fixture.close()
-            driver.close()
         }
+        return result
     }
 
     @Test

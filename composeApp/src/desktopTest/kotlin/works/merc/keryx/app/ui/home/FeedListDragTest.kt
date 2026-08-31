@@ -30,55 +30,19 @@ import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewModelScope
-import app.cash.sqldelight.db.SqlDriver
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.mock.MockEngine
-import io.ktor.client.engine.mock.respond
-import io.ktor.client.plugins.HttpTimeout
-import io.ktor.http.HttpStatusCode
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import org.koin.compose.KoinApplication
 import org.koin.dsl.koinConfiguration
 import org.koin.dsl.module
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
-import works.merc.keryx.app.core.KeryxException
-import works.merc.keryx.app.data.cloud.DropboxAuthManager
-import works.merc.keryx.app.data.cloud.OAuthTokens
-import works.merc.keryx.app.data.cloud.TokenStorage
-import works.merc.keryx.app.data.local.FtsManager
-import works.merc.keryx.app.data.local.FtsSearch
-import works.merc.keryx.app.data.local.LocalSettingsStore
-import works.merc.keryx.app.data.local.db.KeryxDatabase
-import works.merc.keryx.app.data.remote.FaviconResolver
-import works.merc.keryx.app.data.remote.FeedFetcher
-import works.merc.keryx.app.domain.ActivityCenter
-import works.merc.keryx.app.domain.ArticleRepository
-import works.merc.keryx.app.domain.FeedRepository
-import works.merc.keryx.app.domain.FolderRepository
-import works.merc.keryx.app.domain.NewArticleNotifier
-import works.merc.keryx.app.domain.NotificationCenter
-import works.merc.keryx.app.domain.NotificationMessages
-import works.merc.keryx.app.domain.SettingsRepository
-import works.merc.keryx.app.domain.SyncRepository
-import works.merc.keryx.app.domain.SyncScheduler
-import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.fileDb
-import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertTag
-import works.merc.keryx.app.platform.AppDirs
-import works.merc.keryx.app.platform.FileIO
-import works.merc.keryx.app.singleProviderCloudSession
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
-import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
@@ -197,9 +161,8 @@ class FeedListDragTest {
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
         db.insertFeed("c", sortOrder = 2L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setFeedListDragContent(vm)
             waitForIdle()
 
@@ -221,8 +184,6 @@ class FeedListDragTest {
 
             val order = db.feedsQueries.getByFolder(null).executeAsList().map { it.id }
             assertEquals(listOf("c", "a", "b"), order)
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -235,9 +196,8 @@ class FeedListDragTest {
         val (driver, db) = inMemoryDb()
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setFeedListDragContent(vm, isTouchPrimary = true)
             waitForIdle()
 
@@ -257,8 +217,6 @@ class FeedListDragTest {
 
             val order = db.feedsQueries.getByFolder(null).executeAsList().map { it.id }
             assertEquals(listOf("a", "b"), order)
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -267,9 +225,8 @@ class FeedListDragTest {
         val (_, driver, db) = fileDb(foreignKeys = true)
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setFeedListDragContent(vm, isTouchPrimary = true)
             waitForIdle()
 
@@ -293,8 +250,6 @@ class FeedListDragTest {
 
             val order = db.feedsQueries.getByFolder(null).executeAsList().map { it.id }
             assertEquals(listOf("b", "a"), order)
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -323,9 +278,8 @@ class FeedListDragTest {
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
         db.insertFeed("c", sortOrder = 2L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setFeedListDragContent(vm, isTouchPrimary = true)
             waitForIdle()
 
@@ -333,8 +287,6 @@ class FeedListDragTest {
             waitForIdle()
 
             assertEquals(listOf("b", "a", "c"), db.feedsQueries.getByFolder(null).executeAsList().map { it.id })
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -344,9 +296,8 @@ class FeedListDragTest {
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
         db.insertFeed("c", sortOrder = 2L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setFeedListDragContent(vm, isTouchPrimary = true)
             waitForIdle()
 
@@ -354,8 +305,6 @@ class FeedListDragTest {
             waitForIdle()
 
             assertEquals(listOf("a", "c", "b"), db.feedsQueries.getByFolder(null).executeAsList().map { it.id })
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -371,9 +320,8 @@ class FeedListDragTest {
         db.insertFeed("f1", folderId = "d1", sortOrder = 0L)
         db.insertFeed("f2", folderId = "d1", sortOrder = 1L)
         db.insertFeed("a", sortOrder = 0L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setFeedListDragContent(vm, isTouchPrimary = true)
             waitForIdle()
 
@@ -382,8 +330,6 @@ class FeedListDragTest {
             // The only feed of the "no folder" group: neither direction has a sibling to swap with,
             // even though other feed rows sit above it on screen.
             assertEquals(emptyList(), customActionLabels(feedRowTestTag("a")))
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -393,9 +339,8 @@ class FeedListDragTest {
         db.insertFolder("d1", "Alpha", sortOrder = 0L)
         db.insertFolder("d2", "Beta", sortOrder = 1L)
         db.insertFolder("d3", "Gamma", sortOrder = 2L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setFeedListDragContent(vm, isTouchPrimary = true)
             waitForIdle()
 
@@ -404,8 +349,6 @@ class FeedListDragTest {
             waitForIdle()
 
             assertEquals(listOf("d2", "d1", "d3"), db.foldersQueries.watchAll().executeAsList().map { it.id })
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -414,9 +357,8 @@ class FeedListDragTest {
         val (_, driver, db) = fileDb(foreignKeys = true)
         db.insertFolder("d1", "Alpha", sortOrder = 0L)
         db.insertFolder("d2", "Beta", sortOrder = 1L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setFeedListDragContent(vm, isTouchPrimary = true)
             waitForIdle()
 
@@ -425,8 +367,6 @@ class FeedListDragTest {
             waitForIdle()
 
             assertEquals(listOf("d2", "d1"), db.foldersQueries.watchAll().executeAsList().map { it.id })
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -436,16 +376,13 @@ class FeedListDragTest {
         val (driver, db) = inMemoryDb()
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setFeedListDragContent(vm, isTouchPrimary = false)
             waitForIdle()
 
             assertEquals(emptyList(), customActionLabels(feedRowTestTag("a")))
             assertEquals(emptyList(), customActionLabels(feedRowTestTag("b")))
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -460,9 +397,8 @@ class FeedListDragTest {
         val (driver, db) = inMemoryDb()
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setFeedListDragContent(vm)
             waitForIdle()
 
@@ -489,8 +425,6 @@ class FeedListDragTest {
             onNodeWithTag(FEED_DRAG_GHOST_TEST_TAG, useUnmergedTree = true).assertDoesNotExist()
 
             assertEquals(listOf("a", "b"), db.feedsQueries.getByFolder(null).executeAsList().map { it.id })
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -500,9 +434,8 @@ class FeedListDragTest {
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
         db.insertFeed("c", sortOrder = 2L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setFeedListDragContent(vm)
             waitForIdle()
 
@@ -521,8 +454,6 @@ class FeedListDragTest {
             val order = db.feedsQueries.getByFolder(null).executeAsList().map { it.id }
             assertEquals(listOf("a", "b", "c"), order, "a sub-threshold move must not reorder anything")
             assertEquals(ArticleFilter.Feed("a"), vm.filter.value, "the row's own click must still register as a selection")
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -531,9 +462,8 @@ class FeedListDragTest {
         val (_, driver, db) = fileDb(foreignKeys = true)
         db.insertFolder("folder1", "Folder One", sortOrder = 0L)
         db.insertFeed("a", sortOrder = 0L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setFeedListDragContent(vm)
             waitForIdle()
 
@@ -553,8 +483,6 @@ class FeedListDragTest {
             waitForIdle()
 
             assertEquals("folder1", db.feedsQueries.getById("a").executeAsOne().folder_id)
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -576,50 +504,50 @@ class FeedListDragTest {
         db.insertFolder("d1", "Folder One", sortOrder = 0L)
         db.insertFeed("f1", folderId = "d1", sortOrder = 0L)
         db.insertFeed("a", sortOrder = 1L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        vm.toggleFolderCollapsed("d1")
-        try {
-            setFeedListDragContent(vm)
-            waitForIdle()
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            vm.toggleFolderCollapsed("d1")
+            try {
+                setFeedListDragContent(vm)
+                waitForIdle()
 
-            val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-            val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-            val folderBounds = onNodeWithTag(folderRowTestTag("d1"), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-            val start = localOf(aBounds.center, hostBounds)
-            val target = localOf(folderBounds.center, hostBounds)
-            val stripX = folderBounds.center.x.toInt()
-            val edge = folderBounds.bottom.toInt()
-            val halfGuidePx = with(density) { (LIST_ROW_GUIDE_THICKNESS / 2f).roundToPx() }
+                val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                val folderBounds = onNodeWithTag(folderRowTestTag("d1"), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                val start = localOf(aBounds.center, hostBounds)
+                val target = localOf(folderBounds.center, hostBounds)
+                val stripX = folderBounds.center.x.toInt()
+                val edge = folderBounds.bottom.toInt()
+                val halfGuidePx = with(density) { (LIST_ROW_GUIDE_THICKNESS / 2f).roundToPx() }
 
-            fun edgeStrip() = onRoot().captureToImage().toPixelMap().let { pixels ->
-                (edge - 4 until edge + 4).map { y -> pixels[stripX, y] }
+                fun edgeStrip() = onRoot().captureToImage().toPixelMap().let { pixels ->
+                    (edge - 4 until edge + 4).map { y -> pixels[stripX, y] }
+                }
+
+                onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput {
+                    moveTo(start)
+                    press()
+                    moveTo(start + Offset(0f, dragThresholdCrossPx))
+                    moveTo(target)
+                }
+                waitForIdle()
+                val beforeExpand = edgeStrip()
+
+                val pixelsBeforeExpand = onRoot().captureToImage().toPixelMap()
+                assertNotEquals(
+                    pixelsBeforeExpand[stripX, edge - 1],
+                    pixelsBeforeExpand[stripX, edge - halfGuidePx - 1],
+                    "the guide must sit LIST_ROW_GUIDE_CLEARANCE clear of the folder's own highlight, not flush against it",
+                )
+
+                waitUntil(timeoutMillis = 2000) { "d1" !in vm.collapsedFolderIds.value }
+                waitForIdle()
+                val afterExpand = edgeStrip()
+
+                assertEquals(beforeExpand, afterExpand, "the insertion guide must not move when the collapsed folder auto-expands mid-drag")
+            } finally {
+                onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput { release() }
             }
-
-            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput {
-                moveTo(start)
-                press()
-                moveTo(start + Offset(0f, dragThresholdCrossPx))
-                moveTo(target)
-            }
-            waitForIdle()
-            val beforeExpand = edgeStrip()
-
-            val pixelsBeforeExpand = onRoot().captureToImage().toPixelMap()
-            assertNotEquals(
-                pixelsBeforeExpand[stripX, edge - 1],
-                pixelsBeforeExpand[stripX, edge - halfGuidePx - 1],
-                "the guide must sit LIST_ROW_GUIDE_CLEARANCE clear of the folder's own highlight, not flush against it",
-            )
-
-            waitUntil(timeoutMillis = 2000) { "d1" !in vm.collapsedFolderIds.value }
-            waitForIdle()
-            val afterExpand = edgeStrip()
-
-            assertEquals(beforeExpand, afterExpand, "the insertion guide must not move when the collapsed folder auto-expands mid-drag")
-        } finally {
-            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput { release() }
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -641,41 +569,41 @@ class FeedListDragTest {
         db.insertFolder("d2", "Folder Two", sortOrder = 1L)
         db.insertFeed("f2", folderId = "d2", sortOrder = 0L)
         db.insertFeed("a", sortOrder = 2L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        vm.toggleFolderCollapsed("d1")
-        try {
-            setFeedListDragContent(vm)
-            waitForIdle()
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            vm.toggleFolderCollapsed("d1")
+            try {
+                setFeedListDragContent(vm)
+                waitForIdle()
 
-            val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-            val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-            val d1Bounds = onNodeWithTag(folderRowTestTag("d1"), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-            val start = localOf(aBounds.center, hostBounds)
-            val target = localOf(d1Bounds.center, hostBounds)
-            val stripX = d1Bounds.center.x.toInt()
-            val edge = d1Bounds.bottom.toInt()
-            val halfGuidePx = with(density) { (LIST_ROW_GUIDE_THICKNESS / 2f).roundToPx() }
+                val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                val d1Bounds = onNodeWithTag(folderRowTestTag("d1"), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                val start = localOf(aBounds.center, hostBounds)
+                val target = localOf(d1Bounds.center, hostBounds)
+                val stripX = d1Bounds.center.x.toInt()
+                val edge = d1Bounds.bottom.toInt()
+                val halfGuidePx = with(density) { (LIST_ROW_GUIDE_THICKNESS / 2f).roundToPx() }
 
-            val baseline = bandAround(edge, stripX)
+                val baseline = bandAround(edge, stripX)
 
-            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput {
-                moveTo(start)
-                press()
-                moveTo(start + Offset(0f, dragThresholdCrossPx))
-                moveTo(target)
+                onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput {
+                    moveTo(start)
+                    press()
+                    moveTo(start + Offset(0f, dragThresholdCrossPx))
+                    moveTo(target)
+                }
+                waitForIdle()
+                val duringDrag = bandAround(edge, stripX)
+
+                assertEquals(
+                    (edge - halfGuidePx until edge + halfGuidePx).toList(),
+                    guideYs(edge, baseline, duringDrag),
+                    "the guide below a collapsed folder must be the full LIST_ROW_GUIDE_THICKNESS, centred on the boundary",
+                )
+            } finally {
+                onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput { release() }
             }
-            waitForIdle()
-            val duringDrag = bandAround(edge, stripX)
-
-            assertEquals(
-                (edge - halfGuidePx until edge + halfGuidePx).toList(),
-                guideYs(edge, baseline, duringDrag),
-                "the guide below a collapsed folder must be the full LIST_ROW_GUIDE_THICKNESS, centred on the boundary",
-            )
-        } finally {
-            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput { release() }
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -695,55 +623,55 @@ class FeedListDragTest {
         db.insertFolder("d2", "Folder Two", sortOrder = 1L)
         db.insertFeed("f2", folderId = "d2", sortOrder = 0L)
         db.insertFeed("a", sortOrder = 2L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        vm.toggleFolderCollapsed("d2")
-        try {
-            setFeedListDragContent(vm)
-            waitForIdle()
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            vm.toggleFolderCollapsed("d2")
+            try {
+                setFeedListDragContent(vm)
+                waitForIdle()
 
-            val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-            val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-            val d1Bounds = onNodeWithTag(folderRowTestTag("d1"), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-            val d2Bounds = onNodeWithTag(folderRowTestTag("d2"), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-            val start = localOf(aBounds.center, hostBounds)
-            val target = localOf(d2Bounds.center, hostBounds)
-            val d1StripX = d1Bounds.center.x.toInt()
-            val d1Top = d1Bounds.top.toInt()
-            val d2StripX = d2Bounds.center.x.toInt()
-            val d2Top = d2Bounds.top.toInt()
-            val d2Bottom = d2Bounds.bottom.toInt()
-            val halfGuidePx = with(density) { (LIST_ROW_GUIDE_THICKNESS / 2f).roundToPx() }
+                val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                val d1Bounds = onNodeWithTag(folderRowTestTag("d1"), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                val d2Bounds = onNodeWithTag(folderRowTestTag("d2"), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                val start = localOf(aBounds.center, hostBounds)
+                val target = localOf(d2Bounds.center, hostBounds)
+                val d1StripX = d1Bounds.center.x.toInt()
+                val d1Top = d1Bounds.top.toInt()
+                val d2StripX = d2Bounds.center.x.toInt()
+                val d2Top = d2Bounds.top.toInt()
+                val d2Bottom = d2Bounds.bottom.toInt()
+                val halfGuidePx = with(density) { (LIST_ROW_GUIDE_THICKNESS / 2f).roundToPx() }
 
-            val baselineD1Top = bandAround(d1Top, d1StripX)
-            val baselineD2Top = bandAround(d2Top, d2StripX)
-            val baselineD2Bottom = bandAround(d2Bottom, d2StripX)
+                val baselineD1Top = bandAround(d1Top, d1StripX)
+                val baselineD2Top = bandAround(d2Top, d2StripX)
+                val baselineD2Bottom = bandAround(d2Bottom, d2StripX)
 
-            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput {
-                moveTo(start)
-                press()
-                moveTo(start + Offset(0f, dragThresholdCrossPx))
-                moveTo(target)
+                onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput {
+                    moveTo(start)
+                    press()
+                    moveTo(start + Offset(0f, dragThresholdCrossPx))
+                    moveTo(target)
+                }
+                waitForIdle()
+                onNodeWithTag(FEED_DRAG_GHOST_TEST_TAG, useUnmergedTree = true).assertExists()
+
+                assertTrue(
+                    guideYs(d1Top, baselineD1Top, bandAround(d1Top, d1StripX)).isEmpty(),
+                    "the first folder's own top edge (right below the sticky \"Folders\" label) must show no guide",
+                )
+                assertTrue(
+                    guideYs(d2Top, baselineD2Top, bandAround(d2Top, d2StripX)).isEmpty(),
+                    "the collapsed folder being hovered must not also paint a spurious guide at its own top edge",
+                )
+                assertEquals(
+                    (d2Bottom - halfGuidePx until d2Bottom + halfGuidePx).toList(),
+                    guideYs(d2Bottom, baselineD2Bottom, bandAround(d2Bottom, d2StripX)),
+                    "sanity check: the drag must actually be painting the real guide below the collapsed folder",
+                )
+            } finally {
+                onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput { release() }
             }
-            waitForIdle()
-            onNodeWithTag(FEED_DRAG_GHOST_TEST_TAG, useUnmergedTree = true).assertExists()
-
-            assertTrue(
-                guideYs(d1Top, baselineD1Top, bandAround(d1Top, d1StripX)).isEmpty(),
-                "the first folder's own top edge (right below the sticky \"Folders\" label) must show no guide",
-            )
-            assertTrue(
-                guideYs(d2Top, baselineD2Top, bandAround(d2Top, d2StripX)).isEmpty(),
-                "the collapsed folder being hovered must not also paint a spurious guide at its own top edge",
-            )
-            assertEquals(
-                (d2Bottom - halfGuidePx until d2Bottom + halfGuidePx).toList(),
-                guideYs(d2Bottom, baselineD2Bottom, bandAround(d2Bottom, d2StripX)),
-                "sanity check: the drag must actually be painting the real guide below the collapsed folder",
-            )
-        } finally {
-            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput { release() }
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -769,9 +697,8 @@ class FeedListDragTest {
         val (_, driver, db) = fileDb(foreignKeys = true)
         db.insertFolder("d1", "Folder One", sortOrder = 0L)
         db.insertFeed("f1", folderId = "d1", sortOrder = 0L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setFeedListDragContent(vm)
             waitForIdle()
 
@@ -807,12 +734,6 @@ class FeedListDragTest {
                 "an empty \"no folder\" section must reserve exactly LIST_ROW_GUIDE_THICKNESS / 2 more height " +
                     "than a non-empty one, to hold its unpaired marker's missing clearance",
             )
-        } finally {
-            // The drag was already released above (needed mid-test to compare against the
-            // non-empty state) — the test input dispatcher rejects a second release with nothing
-            // pressed, so cleanup here is just the fixture/database, unlike every other test in
-            // this file.
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -822,9 +743,8 @@ class FeedListDragTest {
         db.insertFolder("folder1", "Folder One", sortOrder = 0L)
         db.insertFeed("a", sortOrder = 0L, folderId = "folder1")
         db.insertTag("tag1", "Tag One", sortOrder = 0L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setFeedListDragContent(vm)
             waitForIdle()
 
@@ -849,8 +769,6 @@ class FeedListDragTest {
                 db.feedsQueries.getById("a").executeAsOne().folder_id,
                 "attaching a tag must not move the feed out of its folder",
             )
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -860,9 +778,8 @@ class FeedListDragTest {
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
         db.insertFeed("c", sortOrder = 2L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setFeedListDragContent(vm)
             waitForIdle()
 
@@ -901,8 +818,6 @@ class FeedListDragTest {
             assertEquals(ArticleFilter.All, vm.filter.value)
             val order = db.feedsQueries.getByFolder(null).executeAsList().map { it.id }
             assertEquals(listOf("b", "c", "a"), order, "the drag must still complete despite the mid-drag right-click")
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -911,9 +826,8 @@ class FeedListDragTest {
         val (_, driver, db) = fileDb(foreignKeys = true)
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setFeedListDragContent(vm)
             waitForIdle()
             onNodeWithTag(FEED_DRAG_GHOST_TEST_TAG, useUnmergedTree = true).assertDoesNotExist()
@@ -940,8 +854,6 @@ class FeedListDragTest {
             }
             waitForIdle()
             onNodeWithTag(FEED_DRAG_GHOST_TEST_TAG, useUnmergedTree = true).assertDoesNotExist()
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -951,9 +863,8 @@ class FeedListDragTest {
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
         db.insertFeed("c", sortOrder = 2L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setFeedListDragContent(vm)
             waitForIdle()
             onNodeWithTag("root", useUnmergedTree = true).requestFocus()
@@ -987,8 +898,6 @@ class FeedListDragTest {
             waitForIdle()
 
             assertEquals(listOf("a", "b", "c"), db.feedsQueries.getByFolder(null).executeAsList().map { it.id })
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -997,9 +906,8 @@ class FeedListDragTest {
         val (_, driver, db) = fileDb(foreignKeys = true)
         db.insertFolder("d1", "Alpha", sortOrder = 0L)
         db.insertFolder("d2", "Beta", sortOrder = 1L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setFeedListDragContent(vm)
             waitForIdle()
 
@@ -1021,8 +929,6 @@ class FeedListDragTest {
 
             val order = db.foldersQueries.watchAll().executeAsList().map { it.id }
             assertEquals(listOf("d2", "d1"), order)
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -1041,9 +947,8 @@ class FeedListDragTest {
     fun pressingDeleteWithNoFeedFolderOrTagSelectedOpensNoDialog() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertFeed("a", sortOrder = 0L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setFeedListDragContent(vm)
             waitForIdle()
             vm.selectFilter(ArticleFilter.All)
@@ -1054,8 +959,6 @@ class FeedListDragTest {
             waitForIdle()
 
             onNodeWithText("「Feed a」の購読を削除しますか？").assertDoesNotExist()
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -1063,10 +966,9 @@ class FeedListDragTest {
     fun sendingRenameOrUnsubscribeFeedCommandWithNoFeedSelectedStartsNothing() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertFeed("a", sortOrder = 0L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        val menuController = testMenuController
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            val menuController = testMenuController
             setFeedListDragContent(vm, menuController = menuController)
             waitForIdle()
             vm.selectFilter(ArticleFilter.All)
@@ -1078,8 +980,6 @@ class FeedListDragTest {
 
             onNodeWithTag(INLINE_RENAME_FIELD_TEST_TAG, useUnmergedTree = true).assertDoesNotExist()
             onNodeWithText("「Feed a」の購読を削除しますか？").assertDoesNotExist()
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 }
@@ -1096,128 +996,3 @@ class FeedListDragTest {
  */
 internal val testMenuController = MenuController()
 
-/** A [NotificationMessages] fake returning canned, recognizable strings. */
-private class FeedListDragTestNotificationMessages : NotificationMessages {
-    override suspend fun feedGone(feedTitle: String): String = "gone:$feedTitle"
-    override suspend fun feedUrlChanged(feedTitle: String): String = "urlChanged:$feedTitle"
-    override suspend fun newArticles(count: Int): String = "new:$count"
-    override suspend fun syncFailed(exception: KeryxException): String = "syncFailed:${exception::class.simpleName}"
-    override suspend fun opmlImported(added: Int, failed: Int): String = "opmlImported:$added/$failed"
-}
-
-private class FeedListDragTestTokenStorage : TokenStorage {
-    private var stored: OAuthTokens? = null
-    override fun save(tokens: OAuthTokens) { stored = tokens }
-    override fun load(): OAuthTokens? = stored
-    override fun clear() { stored = null }
-}
-
-private fun feedListDragTestNotFoundHttpClient(): HttpClient = HttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }) {
-    followRedirects = false
-    expectSuccess = false
-    install(HttpTimeout)
-}
-
-/**
- * Bundles the [HomeViewModel] under test with the resources [newHomeViewModel] creates outside
- * its own [HomeViewModel.viewModelScope] — [SyncRepository]'s channel-consumer scope and the
- * MockEngine [HttpClient]s — so tests can release them in `finally`.
- */
-internal class HomeViewModelFixture(
-    val vm: HomeViewModel,
-    private val syncScope: CoroutineScope,
-    private val httpClients: List<HttpClient>,
-    val settingsRepository: SettingsRepository,
-) {
-    fun close() {
-        syncScope.cancel()
-        httpClients.forEach { it.close() }
-    }
-}
-
-/**
- * Builds a real [HomeViewModel] over an already-seeded [db], wired the same way
- * `ArticleListPaneTest.newMinimalViewModel` is — every dispatcher is [Dispatchers.Unconfined] so DB
- * writes triggered by the drag gesture (via [FeedRepository.moveFeed] etc.) apply synchronously
- * within the test.
- */
-internal fun newHomeViewModel(
-    driver: SqlDriver,
-    db: KeryxDatabase,
-    syncScheduler: SyncScheduler = SyncScheduler {},
-    clock: Clock = Clock { 0L },
-    activityCenter: ActivityCenter = ActivityCenter(),
-    tokenStorage: TokenStorage = FeedListDragTestTokenStorage(),
-    appKey: String = "",
-): HomeViewModelFixture {
-    // A fresh, unique directory per call (not a fixed name shared across every test in this file):
-    // LocalSettingsStore persists lastFilter/collapsedFolderIds/etc. to a JSON file there, and a
-    // shared path would leak state between tests within the same run (e.g. a filter selected by
-    // one test becoming the *restored* initial filter of the next), exactly like
-    // `HomeViewModelTest`'s per-instance `Random.nextInt()`-suffixed directory.
-    val dir = FileIO.join(AppDirs.tempDir(), "feed-list-drag-test-${Random.nextInt()}")
-    val fetcherClient = feedListDragTestNotFoundHttpClient()
-    val faviconClient = feedListDragTestNotFoundHttpClient()
-    val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
-    val feedRepository = FeedRepository(
-        db, FeedFetcher(fetcherClient), FaviconResolver(faviconClient), articleRepository,
-        ftsManagerIndexed(driver), syncScheduler, NotificationCenter(), FeedListDragTestNotificationMessages(),
-        clock, Dispatchers.Unconfined,
-    )
-    val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
-    val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
-    val settingsRepository = SettingsRepository(
-        db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined,
-    )
-    val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
-    val syncRepository = SyncRepository(
-        driver = driver,
-        db = db,
-        ftsManager = FtsManager(driver),
-        cloudProvider = { null },
-        clock = clock,
-        scope = syncScope,
-        activityCenter = activityCenter,
-        notificationCenter = NotificationCenter(),
-        notificationMessages = FeedListDragTestNotificationMessages(),
-        localDbPath = "unused",
-        tempDir = "unused",
-    )
-    val authClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.OK) }) { expectSuccess = false }
-    val authManager = DropboxAuthManager(authClient, clock = clock)
-    val cloudSession = singleProviderCloudSession(
-        client = authClient,
-        tokenStorage = tokenStorage,
-        authManager = authManager,
-        clientId = appKey,
-        clock = clock,
-    )
-    val vm = HomeViewModel(
-        feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
-        syncRepository, cloudSession, activityCenter, clock, NewArticleNotifier(), FeedListDragTestNotificationMessages(),
-        Dispatchers.Unconfined, Dispatchers.Unconfined,
-    )
-    return HomeViewModelFixture(vm, syncScope, listOf(fetcherClient, faviconClient, authClient), settingsRepository)
-}
-
-/**
- * Tears down a [HomeViewModelFixture] for reuse across every drag/rename/hit-area test's `finally`
- * block. [HomeViewModel] observes SQLDelight query flows via `stateIn(viewModelScope, ...)`, and
- * `viewModelScope`'s dispatcher resolves to the real AWT EventDispatchThread on desktop — so a
- * query-change notification from a gesture performed just before teardown can already be queued as
- * a pending `InvocationEvent` when [vm]'s scope is cancelled. Cancellation is cooperative and does
- * not retract that queued event, so closing [driver] immediately after `cancel()` races it: the
- * queued event later resumes on the closed connection and throws `stmt pointer is closed`.
- * [ComposeUiTest.waitForIdle] drains the EDT queue first, so any such pending resumption runs
- * against the still-open [driver] instead.
- */
-@OptIn(ExperimentalTestApi::class)
-internal fun ComposeUiTest.closeHomeViewModelFixture(vm: HomeViewModel, fixture: HomeViewModelFixture, driver: SqlDriver) {
-    vm.viewModelScope.cancel()
-    try {
-        fixture.close()
-        waitForIdle()
-    } finally {
-        driver.close()
-    }
-}

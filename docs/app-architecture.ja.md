@@ -57,7 +57,10 @@ composeApp/src/
     `ListRowChrome.android.kt` の `listRowSurface`（`ListRowKind.NavItem` 行は
     `NavigationDrawerItem` 風のピル形ハイライト、`ListRowKind.ListItem` 行はフルブリード —
     詳細は同ファイル自身の KDoc）、TooltipIconButton/ToolbarIconGroup/FlatTooltipContent
-    （それぞれ、独自のネイティブな長押しトリガーを持つ素の M3 `IconButton` + `TooltipBox`、
+    （それぞれ、独自のネイティブな長押しトリガーを持つ `TooltipBox` の中に置いた M3 自身の
+    アイコンボタン群 — どれを使うかは `IconButtonKind` が決める: `IconButton`（`Standard`）、
+    `FilledIconButton`（`Primary`）、`OutlinedIconButton`（`Secondary`）、`errorContainer` に
+    塗り替えた `FilledTonalIconButton`（`Destructive`）、
     デスクトップの macOS ツールバー風カプセルの代わりの装飾なし `Row`、M3 自身の `PlainTooltip`）、
     KeryxRaisedSurface（デスクトップのヘアライン枠フラットカードの代わりに、明確に色調の異なる
     `colorScheme.surfaceContainerHigh` トーナルコンテナ）、KeryxBadgedIcon（デスクトップの

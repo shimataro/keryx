@@ -25,12 +25,18 @@ expect fun FlatButton(
  * a transparent outlined box, which can be mistaken for a link/label. Use for secondary actions
  * that still need clear button affordance (OPML import/export, Dropbox disconnect, update check,
  * setup cards); [FlatButton] stays the primary/filled action.
+ *
+ * @param destructive Paints the container `errorContainer`/`onErrorContainer` on both platforms, for
+ *   an action that destroys data (see the `ui-guidelines` skill for why `errorContainer` and not
+ *   the `error` role itself). Color is never the only signal — such a button also carries its own
+ *   glyph and a confirmation dialog.
  */
 @Composable
 expect fun FlatTonalButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    destructive: Boolean = false,
     content: @Composable () -> Unit,
 )
 
