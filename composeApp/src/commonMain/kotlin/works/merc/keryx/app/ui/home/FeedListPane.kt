@@ -150,6 +150,13 @@ internal const val FEED_LIST_DRAG_HOST_TEST_TAG = "feed-list-drag-host"
  *   `SearchListPane` alongside the results (see that composable's own KDoc), and hides the
  *   quick-filter row entirely since the collapsed bar above is already its narrow-layout
  *   equivalent.
+ * @param onEnterArticleList A *different* null boundary than [onSelectionAdvance]'s: non-null only
+ *   when the article list pane isn't on screen next to this one at all — [PaneLayout.Single]'s
+ *   depth 1 (`null` at [PaneLayout.Dual] too, unlike [onSelectionAdvance]). Called right before a
+ *   filter-selecting row's `vm.selectFilter`, so `HomeScreen` can discard that pane's saved scroll
+ *   state — opening the list is an *entrance* there, not a return to where the user left off, even
+ *   when the filter selected is the one already active (see `selectFilter`'s own `reentering`
+ *   param, which this parameter's non-nullness also drives).
  * @param notifVm The notification center, when this pane is the one that has to host its bell —
  *   i.e. when the article list pane (which owns the bell everywhere else) is not on screen
  *   alongside this one. `null` at every other layout/depth, so the bell is never drawn twice; see
@@ -168,6 +175,7 @@ internal fun FeedListPane(
     renameSelectedRequestId: Int = 0,
     deleteSelectedRequestId: Int = 0,
     onSelectionAdvance: (() -> Unit)? = null,
+    onEnterArticleList: (() -> Unit)? = null,
     notifVm: NotificationCenterViewModel? = null,
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
@@ -224,6 +232,23 @@ internal fun FeedListPane(
     // menu bar's own F2/Delete accelerators must stand down too (see MenuController).
     LaunchedEffect(searchFieldFocused, inlineEdit != null) {
         onTextInputFocusChange(searchFieldFocused || inlineEdit != null)
+    }
+
+    // Shared by every filter-selecting row below (quick filters, feeds, folders, tags): selecting a
+    // filter from this pane, rather than moving the keyboard cursor over an already-visible list
+    // (see HomeScreen's moveFeedSelection), always goes through here. onEnterArticleList is fired
+    // first so a narrow layout's saved article-list scroll state is gone before vm.selectFilter's
+    // own `reentering` flag (mirroring onEnterArticleList's non-nullness) rebuilds the browsing
+    // context — see onEnterArticleList's own KDoc for why re-selecting the same filter must still
+    // reset it there.
+    fun selectFilterFromRow(
+        filter: ArticleFilter,
+        instance: FeedListRowSelection = FeedListRowSelection.canonicalFor(filter),
+    ) {
+        onEnterArticleList?.invoke()
+        vm.selectFilter(filter, instance, reentering = onEnterArticleList != null)
+        onActivated()
+        onSelectionAdvance?.invoke()
     }
 
     // Shared by the keyboard shortcuts (via the request-id effects below) and the Feed menu bar
@@ -431,7 +456,7 @@ internal fun FeedListPane(
             count = totalUnread,
             selected = filter == ArticleFilter.All,
             focused = focused,
-            onClick = { vm.selectFilter(ArticleFilter.All); onActivated(); onSelectionAdvance?.invoke() },
+            onClick = { selectFilterFromRow(ArticleFilter.All) },
             isTouchPrimary = isTouchPrimary,
         )
         SidebarRow(
@@ -440,7 +465,7 @@ internal fun FeedListPane(
             count = starredUnread,
             selected = filter == ArticleFilter.Starred,
             focused = focused,
-            onClick = { vm.selectFilter(ArticleFilter.Starred); onActivated(); onSelectionAdvance?.invoke() },
+            onClick = { selectFilterFromRow(ArticleFilter.Starred) },
             isTouchPrimary = isTouchPrimary,
         )
         // At a narrow layout the collapsed search bar above is already this row's entry point, and
@@ -547,7 +572,7 @@ internal fun FeedListPane(
                                 folderId = folderId,
                                 isFirstInList = isFirstInList && index == 0,
                                 activeBoundaryState = activeBoundaryState,
-                                onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id), instance); onActivated(); onSelectionAdvance?.invoke() },
+                                onClick = { selectFilterFromRow(ArticleFilter.Feed(feed.id), instance) },
                                 onRename = { inlineEdit = InlineEditTarget.Feed(feed.id) },
                                 editingName = inlineEdit == InlineEditTarget.Feed(feed.id),
                                 onRenameCommit = { vm.renameFeed(feed.id, it); inlineEdit = null },
@@ -622,7 +647,7 @@ internal fun FeedListPane(
                                     precedingFeedZoneBoundary = precedingFeedZoneBoundary,
                                     activeBoundaryState = activeBoundaryState,
                                     onToggleCollapse = { vm.toggleFolderCollapsed(folder.id) },
-                                    onClick = { vm.selectFilter(ArticleFilter.Folder(folder.id)); onActivated(); onSelectionAdvance?.invoke() },
+                                    onClick = { selectFilterFromRow(ArticleFilter.Folder(folder.id)) },
                                     onEdit = { inlineEdit = InlineEditTarget.Folder(folder.id) },
                                     onDelete = { confirmingDeleteFolder = folder },
                                     editingName = inlineEdit == InlineEditTarget.Folder(folder.id),
@@ -682,7 +707,7 @@ internal fun FeedListPane(
                                 focused = focused,
                                 isDropTarget = tag.id == hoveredAttachTagId,
                                 onToggleExpanded = { vm.toggleTagExpanded(tag.id) },
-                                onClick = { vm.selectFilter(ArticleFilter.Tag(tag.id)); onActivated(); onSelectionAdvance?.invoke() },
+                                onClick = { selectFilterFromRow(ArticleFilter.Tag(tag.id)) },
                                 onEdit = { inlineEdit = InlineEditTarget.Tag(tag.id) },
                                 onDelete = { confirmingDeleteTag = tag },
                                 editingName = inlineEdit == InlineEditTarget.Tag(tag.id),
@@ -713,7 +738,7 @@ internal fun FeedListPane(
                                     count = unreadByFeed[feed.id] ?: 0L,
                                     selectionTone = toneFor(instance),
                                     focused = focused,
-                                    onClick = { vm.selectFilter(ArticleFilter.Feed(feed.id), instance); onActivated(); onSelectionAdvance?.invoke() },
+                                    onClick = { selectFilterFromRow(ArticleFilter.Feed(feed.id), instance) },
                                     onRename = { inlineEdit = InlineEditTarget.Feed(feed.id, tag.id) },
                                     editingName = inlineEdit == InlineEditTarget.Feed(feed.id, tag.id),
                                     onRenameCommit = { vm.renameFeed(feed.id, it); inlineEdit = null },

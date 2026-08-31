@@ -476,6 +476,23 @@ restored selection come from independent snapshots. `ArticleListPaneContent`'s
 one composition right after Search closes, suppressing that scroll for the mount's first evaluation
 only — a later, genuine selection change still scrolls normally.
 
+**Re-entering the article list at `PaneLayout.Single`.** Everywhere above, re-selecting the filter
+already active is a no-op past moving the row highlight (`selectFilter`'s own early return, see
+"Optimistic read/star pins" below) — reasonable when the article list pane is already on screen and
+nothing about it needs to change. At `Single`'s depth 1 that assumption breaks: the article list
+isn't on screen at all, so tapping a feed-list row is always an *entrance* into it, even when the
+row names the filter already selected — a stale reading session (a just-read article still pinned
+into an unread-only list from before the user backed all the way out) must not resurface just
+because the destination happens to match. `FeedListPane`'s `onEnterArticleList` (non-null only at
+that depth — `null` even at `Dual`, where the article list stays visible beside the feed list) is
+invoked immediately before the row's own `vm.selectFilter` call, and does two things: `HomeScreen`
+uses it to call the pane-hosting `NarrowPaneRow`'s hoisted `SaveableStateHolder.removeState
+(HomePane.ArticleList)`, discarding the saved `LazyListState` outright (rather than restoring it)
+so the list opens at the top instead of wherever it last scrolled to; and its own non-nullness is
+passed through as `selectFilter`'s `reentering` argument, which forces that call past its same-filter
+early return so the browsing context — pins, selection, cursor — is rebuilt as if a different filter
+had been chosen.
+
 ### Optimistic read/star pins
 
 `HomeViewModel._pinnedReadArticles`/`_pinnedUnstarredArticles` are how the article list avoids
@@ -506,3 +523,11 @@ an external change and drop a pin that is actually still correct. This is a real
 genuine multi-threaded dispatchers (`Dispatchers.Default`), not something the existing single-
 scheduler test suite can reproduce directly — the invariant is enforced by code review and the
 comments at each call site, not a dedicated race test.
+
+A same-filter re-selection ordinarily leaves both pins, the selection, and the cursor untouched
+(`selectFilter`'s early return above) — but not when it *enters* the article list pane rather than
+returning to it (`PaneLayout.Single`'s depth 1, see "Home's adaptive pane layout" above): there,
+`selectFilter`'s `reentering` argument forces the same reset a genuine filter change gets, clearing
+`_selectedArticle` along with both pins. Clearing the selection is what actually matters for the
+pins' own sake — left set, `HomeViewModel.pinnedReadArticlesKeepingSelected` would simply re-seed the read
+pin from it the next time the user toggles unread-only back on, defeating the reset entirely.

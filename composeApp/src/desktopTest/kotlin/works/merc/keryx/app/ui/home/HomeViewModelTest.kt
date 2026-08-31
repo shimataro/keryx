@@ -723,6 +723,66 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun selectFilterReenteringOnSameFilterClearsPinnedReadArticlesAndSelection() = runTest {
+        // At PaneLayout.Single's depth 1, the feed list is a screen of its own: re-tapping the same
+        // feed row to open its article list is an *entrance*, not a return to where the user left
+        // off, so unlike a plain re-selection (above) it must show the list's current state — a
+        // just-read article should not linger in an unread-only list forever. See FeedListPane's
+        // onEnterArticleList / HomeViewModel.selectFilter's own `reentering` param.
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        val article1 = db.articlesQueries.getById("a1").executeAsOne()
+        vm.selectArticle(article1.toListRow())
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a1"), vm.articles.value.map { it.id })
+
+        // Simulates leaving the article list pane entirely (depth 2 -> 1) and re-entering it by
+        // tapping the same feed row again.
+        vm.selectFilter(ArticleFilter.Feed("f1"), reentering = true)
+        testScheduler.advanceUntilIdle()
+
+        assertNull(vm.selectedArticle.value)
+        assertTrue(vm.articles.value.isEmpty())
+    }
+
+    @Test
+    fun selectFilterReenteringDoesNotResurrectPinOnUnreadOnlyToggle() = runTest {
+        // Regression for the reported follow-on symptom: once selectedArticle survived a same-filter
+        // re-selection, toggling unread-only off then back on re-seeded the pin from it
+        // (pinnedReadArticlesKeepingSelected), so the stale read article kept coming back. Clearing
+        // selectedArticle on re-entry (above) must prevent that re-seeding.
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        val article1 = db.articlesQueries.getById("a1").executeAsOne()
+        vm.selectArticle(article1.toListRow())
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Feed("f1"), reentering = true)
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.articles.value.isEmpty())
+
+        // unreadOnly itself is a combine(...).stateIn(viewModelScope, Eagerly, ...) — its collector
+        // runs on the StandardTestDispatcher installed as Dispatchers.Main above, so each toggle
+        // needs its own pump before setUnreadOnly's own `value == unreadOnly.value` guard reads the
+        // update, exactly as a real UI would see it land before the next click.
+        vm.setUnreadOnly(false)
+        testScheduler.advanceUntilIdle()
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+
+        assertTrue(vm.articles.value.isEmpty())
+    }
+
+    @Test
     fun selectFilterOnSameFilterStillMovesTheSelectedRowInstance() = runTest {
         // Clicking the tag-nested copy of a feed already selected under its folder must move the
         // primary highlight to that row without disturbing the loaded article/pin state (the

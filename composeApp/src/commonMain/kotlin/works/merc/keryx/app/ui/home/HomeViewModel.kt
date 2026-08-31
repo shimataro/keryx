@@ -673,12 +673,21 @@ class HomeViewModel(
      *   Selecting a *different rendered instance of the already-selected filter* (e.g. the
      *   tag-nested copy of a feed already selected under its folder) only moves the highlight: the
      *   article/cursor/epoch side effects below stay gated on the filter itself changing.
+     * @param reentering Whether this selection *enters* the article list from a screen that doesn't
+     *   show it — `PaneLayout.Single`'s depth 1, where the feed list is a screen of its own (see
+     *   `FeedListPane`'s `onEnterArticleList`). The browsing context is then rebuilt even when
+     *   [filter] is unchanged, because opening the list anew is not a back-navigation and must show
+     *   the list's current state: a row pinned read while reading it last time would otherwise stay
+     *   in an unread-only list indefinitely. Clearing [_selectedArticle] is load-bearing for that
+     *   too — left set, [pinnedReadArticlesKeepingSelected] re-seeds the pin from it every time the
+     *   user toggles unread-only back on, so the row could not be dismissed at all.
      */
     fun selectFilter(
         filter: ArticleFilter,
         instance: FeedListRowSelection = FeedListRowSelection.canonicalFor(filter),
+        reentering: Boolean = false,
     ) {
-        if (filter == _filter.value) {
+        if (filter == _filter.value && !reentering) {
             _selectedRowInstance.value = instance
             return
         }

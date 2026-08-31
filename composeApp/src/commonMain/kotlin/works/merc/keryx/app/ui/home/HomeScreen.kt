@@ -23,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -106,6 +107,12 @@ fun HomeScreen() {
     var feedListDeleteRequestId by remember { mutableStateOf(0) }
     val focusRequester = remember { FocusRequester() }
     var focusedPane by remember { mutableStateOf(vm.getInitialFocusedPane()) }
+    // Hoisted (not NarrowPaneRow's own internal default) so a feed-list row selection that
+    // *enters* the article list pane (PaneLayout.Single depth 1, see FeedListPane's
+    // onEnterArticleList) can discard that pane's saved scroll state itself, rather than
+    // restoring wherever the user scrolled to last time it was open. Declared outside
+    // BoxWithConstraints below so it isn't recreated across a Triple<->narrow layout flip.
+    val paneState = rememberSaveableStateHolder()
     // Two separate flags, one per pane that can host a text input — not a single shared
     // `textInputFocused` — because at PaneLayout.Dual (depth <= 2) FeedListPane and ArticleListPane
     // are both on screen at once, and a single `var` would let one pane's `false` (e.g. its field
@@ -365,7 +372,12 @@ fun HomeScreen() {
                     // rather than iterated over (it is what preserves each pane's scroll position
                     // across the stack's comings and goings).
                     val visible = visiblePanes(layout, focusedPane.ordinal + 1)
-                    NarrowPaneRow(visible, Modifier.fillMaxSize()) { pane, paneModifier ->
+                    // Also gates onEnterArticleList below: the article list pane only needs its
+                    // saved scroll state discarded when a row selection is what brings it on
+                    // screen in the first place — PaneLayout.Single's depth 1 — never at Dual,
+                    // where it was already visible beside the feed list.
+                    val articleListOffScreen = HomePane.ArticleList !in visible
+                    NarrowPaneRow(visible, Modifier.fillMaxSize(), paneState) { pane, paneModifier ->
                         when (pane) {
                             HomePane.FeedList -> FeedListPane(
                                 vm,
@@ -378,12 +390,17 @@ fun HomeScreen() {
                                 renameSelectedRequestId = feedListRenameRequestId,
                                 deleteSelectedRequestId = feedListDeleteRequestId,
                                 onSelectionAdvance = { setFocusedPane(HomePane.ArticleList) },
+                                // Non-null only where the article list isn't already on screen to
+                                // return to — see FeedListPane's own KDoc for why this is a
+                                // distinct null boundary from onSelectionAdvance above.
+                                onEnterArticleList = { paneState.removeState(HomePane.ArticleList) }
+                                    .takeIf { articleListOffScreen },
                                 // The bell lives in ArticleListPane's header everywhere it is
                                 // on screen; this pane only has to host it when it isn't —
                                 // PaneLayout.Single's depth 1. Derived from `visible` rather
                                 // than from a layout/depth check of its own, so the two panes
                                 // can never both draw one (or both skip it).
-                                notifVm = notifVm.takeIf { HomePane.ArticleList !in visible },
+                                notifVm = notifVm.takeIf { articleListOffScreen },
                             )
                             HomePane.ArticleList -> ArticleListPane(
                                 vm,

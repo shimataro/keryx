@@ -3,6 +3,7 @@ package works.merc.keryx.app.ui.home
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.saveable.SaveableStateHolder
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 
@@ -38,15 +39,20 @@ import androidx.compose.ui.Modifier
  * [pane] still applies.
  *
  * @param visible The panes to show, from [visiblePanes].
+ * @param paneState The [SaveableStateHolder] backing the mechanism above, hoisted (rather than
+ *   `remember`ed internally) so a caller can call [SaveableStateHolder.removeState] itself — e.g.
+ *   `HomeScreen` discarding the article list's saved scroll position when a feed-list row selection
+ *   *enters* that pane rather than returning to it (see `FeedListPane`'s `onEnterArticleList`).
+ *   Defaults to a freshly remembered one, so existing call sites are unaffected.
  * @param pane Renders one pane, with the [Modifier] it should be laid out with.
  */
 @Composable
 internal fun NarrowPaneRow(
     visible: List<HomePane>,
     modifier: Modifier = Modifier,
+    paneState: SaveableStateHolder = rememberSaveableStateHolder(),
     pane: @Composable (HomePane, Modifier) -> Unit,
 ) {
-    val paneState = rememberSaveableStateHolder()
     Row(modifier) {
         val paneModifier = if (visible.size > 1) Modifier.weight(1f) else Modifier.fillMaxSize()
         if (HomePane.FeedList in visible) {
