@@ -25,4 +25,19 @@ class HomeViewModelTestSupportTest {
         val vm = useHomeViewModel(driver, db) { it.vm }
         assertFalse(vm.viewModelScope.isActive)
     }
+
+    /**
+     * Pins the sibling invariant for the default [ActivityCenter] [newHomeViewModel]/
+     * [ComposeUiTest.useHomeViewModel] build when no [ActivityCenter] is supplied: its own scope
+     * (holding the `SharingStarted.Eagerly` `feedRefreshing`/`syncing` collectors) must be
+     * cancelled by [HomeViewModelFixture.close] too, not just [HomeViewModel.viewModelScope]. A
+     * regression here leaks one live coroutine scope per test that doesn't pass its own
+     * [ActivityCenter].
+     */
+    @Test
+    fun useHomeViewModelCancelsOwnedActivityCenterScope() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        val ownedScope = useHomeViewModel(driver, db) { it.ownedActivityCenterScope }
+        assertFalse(ownedScope!!.isActive)
+    }
 }

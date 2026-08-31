@@ -75,14 +75,16 @@ private fun notFoundHttpClient(): HttpClient = HttpClient(MockEngine { respond("
 /**
  * Bundles the [HomeViewModel] under test with every resource [newHomeViewModel] creates outside
  * its own [HomeViewModel.viewModelScope] — the SQL [driver] itself, [SyncRepository]'s
- * channel-consumer scope, and the MockEngine [HttpClient]s — so a test can release all of them, in
- * the one order that's safe, via [close].
+ * channel-consumer scope, the MockEngine [HttpClient]s, and (only when [newHomeViewModel] built the
+ * default [ActivityCenter] itself) that `ActivityCenter`'s own scope — so a test can release all of
+ * them, in the one order that's safe, via [close].
  */
 internal class HomeViewModelFixture(
     val vm: HomeViewModel,
     private val driver: SqlDriver,
     private val syncScope: CoroutineScope,
     private val httpClients: List<HttpClient>,
+    val ownedActivityCenterScope: CoroutineScope? = null,
 ) {
     /**
      * Cancels every scope this fixture owns and *joins* it before [driver] is closed.
@@ -97,10 +99,15 @@ internal class HomeViewModelFixture(
      * it, which then surfaces flakily — on whichever *other* test happens to run next — as
      * `kotlinx.coroutines.test.UncaughtExceptionsBeforeTest`. Same reasoning, and the same fix, as
      * `SettingsViewModelTest.tearDown`.
+     *
+     * [ownedActivityCenterScope] is only non-null when [newHomeViewModel] built the default
+     * [ActivityCenter] itself — a caller-supplied `ActivityCenter` keeps its scope's lifecycle
+     * external, exactly like [driver]/[db] passed in from outside.
      */
     suspend fun close() {
         vm.viewModelScope.coroutineContext.job.cancelAndJoin()
         syncScope.coroutineContext.job.cancelAndJoin()
+        ownedActivityCenterScope?.coroutineContext?.job?.cancelAndJoin()
         httpClients.forEach { it.close() }
         driver.close()
     }
@@ -115,13 +122,20 @@ internal class HomeViewModelFixture(
  * matching [HomeViewModelFixture.close], so teardown can't be forgotten, misplaced, or
  * mis-ordered. Call this directly only for a plain (non-Compose) `HomeViewModel` test, where the
  * caller must still `try { … } finally { runBlocking { fixture.close() } }` itself.
+ *
+ * When [activityCenter] is left `null`, this function builds the default [ActivityCenter] itself
+ * (over a scope this fixture then owns and cancels in [HomeViewModelFixture.close]) rather than
+ * relying on [ActivityCenter]'s own default constructor argument, whose scope nothing would ever
+ * cancel. Pass an [activityCenter] explicitly only when the caller needs to observe or drive it
+ * itself (e.g. via [ActivityCenter.trackFeedRefresh]) — that scope's lifecycle then stays the
+ * caller's responsibility.
  */
 internal fun newHomeViewModel(
     driver: SqlDriver,
     db: KeryxDatabase,
     syncScheduler: SyncScheduler = SyncScheduler {},
     clock: Clock = Clock { 0L },
-    activityCenter: ActivityCenter = ActivityCenter(),
+    activityCenter: ActivityCenter? = null,
     tokenStorage: TokenStorage = HomeViewModelFixtureTokenStorage(),
     appKey: String = "",
 ): HomeViewModelFixture {
@@ -145,6 +159,8 @@ internal fun newHomeViewModel(
         db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined,
     )
     val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+    val ownedActivityCenterScope = if (activityCenter == null) CoroutineScope(SupervisorJob() + Dispatchers.Unconfined) else null
+    val resolvedActivityCenter = activityCenter ?: ActivityCenter(ownedActivityCenterScope!!)
     val syncRepository = SyncRepository(
         driver = driver,
         db = db,
@@ -152,7 +168,7 @@ internal fun newHomeViewModel(
         cloudProvider = { null },
         clock = clock,
         scope = syncScope,
-        activityCenter = activityCenter,
+        activityCenter = resolvedActivityCenter,
         notificationCenter = NotificationCenter(),
         notificationMessages = HomeViewModelFixtureNotificationMessages(),
         localDbPath = "unused",
@@ -169,10 +185,12 @@ internal fun newHomeViewModel(
     )
     val vm = HomeViewModel(
         feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
-        syncRepository, cloudSession, activityCenter, clock, NewArticleNotifier(), HomeViewModelFixtureNotificationMessages(),
-        Dispatchers.Unconfined, Dispatchers.Unconfined,
+        syncRepository, cloudSession, resolvedActivityCenter, clock, NewArticleNotifier(),
+        HomeViewModelFixtureNotificationMessages(), Dispatchers.Unconfined, Dispatchers.Unconfined,
     )
-    return HomeViewModelFixture(vm, driver, syncScope, listOf(fetcherClient, faviconClient, authClient))
+    return HomeViewModelFixture(
+        vm, driver, syncScope, listOf(fetcherClient, faviconClient, authClient), ownedActivityCenterScope,
+    )
 }
 
 /**
@@ -189,7 +207,7 @@ internal suspend fun <T> ComposeUiTest.useHomeViewModel(
     db: KeryxDatabase,
     syncScheduler: SyncScheduler = SyncScheduler {},
     clock: Clock = Clock { 0L },
-    activityCenter: ActivityCenter = ActivityCenter(),
+    activityCenter: ActivityCenter? = null,
     tokenStorage: TokenStorage = HomeViewModelFixtureTokenStorage(),
     appKey: String = "",
     block: suspend (HomeViewModelFixture) -> T,
