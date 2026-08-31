@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.stringResource
@@ -143,7 +144,7 @@ private fun NotificationRow(
                     Modifier
                         .hoverable(interactionSource)
                         .pointerHoverIcon(PointerIcon.Hand)
-                        .clickable(interactionSource = interactionSource, onClick = rowAction)
+                        .clickable(interactionSource = interactionSource, role = Role.Button, onClick = rowAction)
                 },
             )
             .padding(vertical = 8.dp),
