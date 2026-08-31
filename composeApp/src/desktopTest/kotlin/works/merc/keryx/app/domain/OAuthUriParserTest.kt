@@ -22,6 +22,25 @@ class OAuthUriParserTest {
         assertNull(params.code)
         assertEquals("xyz789", params.state)
         assertEquals("access_denied", params.error)
+        assertNull(params.errorDescription)
+    }
+
+    @Test
+    fun parseErrorResponseWithDescription() {
+        // A realistic Microsoft Identity platform error: percent-encoded space (%20 here, since a
+        // raw `+` in error_description text would otherwise be misread as a space by the decoder)
+        // and colon, which must come through decoded rather than truncated at the first `:`.
+        val params = parseOAuthUri(
+            "keryx://oauth2/callback?error=unauthorized_client" +
+                "&error_description=AADSTS50011%3A%20The%20redirect%20URI%20specified%20in%20the%20request%20does%20not%20match." +
+                "&state=xyz789",
+        )
+
+        assertEquals("unauthorized_client", params.error)
+        assertEquals(
+            "AADSTS50011: The redirect URI specified in the request does not match.",
+            params.errorDescription,
+        )
     }
 
     @Test

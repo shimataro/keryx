@@ -31,6 +31,11 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
 - Sync targets: subscription list, read state, stars, tag structure, global settings.
 - Non-sync targets: device-local settings, cloud authentication info.
 - Import / export is OPML.
+- **OneDrive supports personal Microsoft accounts only** — a work/school (Microsoft 365 / Entra ID)
+  account cannot be connected. Keryx keeps its sync file in OneDrive's hidden per-app folder, and the
+  Graph permission that grants access to only that folder is offered for personal accounts alone;
+  supporting an organizational account would mean requesting access to the user's entire drive
+  instead. See "Cloud Authentication" in [sync-architecture.md](sync-architecture.md).
 - **Android supports Dropbox and OneDrive only** (both are PKCE public clients using the same
   `keryx://oauth2/callback` custom-URI redirect as desktop). Google Drive's desktop OAuth
   configuration (a "Desktop app" client using loopback redirect + `client_secret`) cannot be reused

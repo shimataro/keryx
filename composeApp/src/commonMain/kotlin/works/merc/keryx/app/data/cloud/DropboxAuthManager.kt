@@ -7,10 +7,12 @@ import io.ktor.http.Parameters
 import io.ktor.http.URLBuilder
 import io.ktor.http.parameters
 import kotlinx.serialization.json.Json
+import works.merc.keryx.app.core.CLOUD_ERROR_BODY_PREVIEW_LENGTH
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.DROPBOX_AUTHORIZE_ENDPOINT
 import works.merc.keryx.app.core.DROPBOX_REVOKE_ENDPOINT
 import works.merc.keryx.app.core.DROPBOX_TOKEN_ENDPOINT
+import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SystemClock
 
@@ -95,5 +97,11 @@ class DropboxAuthManager(
     private suspend fun tokenRequest(
         form: Parameters,
         keepRefreshToken: String? = null,
-    ): Result<OAuthTokens> = requestOAuthTokens(client, json, clock, DROPBOX_TOKEN_ENDPOINT, form, keepRefreshToken)
+    ): Result<OAuthTokens> = requestOAuthTokens(client, json, clock, DROPBOX_TOKEN_ENDPOINT, form, keepRefreshToken) { status, body ->
+        Log.warn(TAG, "Dropbox token request failed (HTTP $status): ${body.take(CLOUD_ERROR_BODY_PREVIEW_LENGTH)}")
+    }
+
+    private companion object {
+        const val TAG = "DropboxAuth"
+    }
 }

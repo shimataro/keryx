@@ -174,9 +174,21 @@ const val GOOGLE_REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke"
 const val GOOGLE_DRIVE_APPDATA_SCOPE = "https://www.googleapis.com/auth/drive.appdata"
 
 // --- OneDrive (Microsoft Identity platform / Graph) endpoints ---
-// `common` tenant accepts both personal Microsoft accounts and work/school accounts.
-const val ONEDRIVE_AUTHORIZE_ENDPOINT = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
-const val ONEDRIVE_TOKEN_ENDPOINT = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+// The tenant segment MUST stay `consumers`, not `common`. The Azure app registration is a
+// "Personal Microsoft accounts only" one (see docs/build.md), i.e. signInAudience = Consumer, and
+// Microsoft rejects that audience on `/common` outright: "The request is not valid for the
+// application's 'userAudience' configuration. In order to use /common/ endpoint, the application
+// must not be configured with 'Consumer' as the user audience." That rejection arrives only after
+// the user has entered their address (the authorize page itself still renders), so it surfaces as
+// a generic "authentication failed" rather than an obvious misconfiguration.
+//
+// Widening the registration to work/school accounts is not the fix: `Files.ReadWrite.AppFolder`
+// (ONEDRIVE_SCOPES below) is a personal-account-only Graph permission, so an organizational
+// account would force a far broader scope such as Files.ReadWrite(.All) over the user's whole
+// drive — against the privacy stance in docs/external-spec.md. OneDrive sync is therefore
+// personal-Microsoft-account-only by design; see docs/sync-architecture.md.
+const val ONEDRIVE_AUTHORIZE_ENDPOINT = "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize"
+const val ONEDRIVE_TOKEN_ENDPOINT = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
 const val ONEDRIVE_GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
 /**
