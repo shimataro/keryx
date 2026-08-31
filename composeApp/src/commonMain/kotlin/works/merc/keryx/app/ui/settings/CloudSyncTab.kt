@@ -393,7 +393,12 @@ internal fun CloudProviderRow(
                 // the spinner rides inside the button (as it always has); icon-only it needs its own
                 // slot, so the button can keep showing the abort glyph instead of progress.
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (iconOnly) SmallSpinner(size = 20.dp) // matches the icon-only glyph size beside it
+                    if (iconOnly) {
+                        SmallSpinner(
+                            size = 20.dp, // matches the icon-only glyph size beside it
+                            color = LocalContentColor.current,
+                        )
+                    }
                     ProviderActionButton(
                         label = stringResource(Res.string.common_abort),
                         icon = KeryxIcons.CloseOutlined,
