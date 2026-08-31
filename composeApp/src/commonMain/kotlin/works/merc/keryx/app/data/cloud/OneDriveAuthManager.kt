@@ -5,7 +5,9 @@ import io.ktor.http.Parameters
 import io.ktor.http.URLBuilder
 import io.ktor.http.parameters
 import kotlinx.serialization.json.Json
+import works.merc.keryx.app.core.CLOUD_ERROR_BODY_PREVIEW_LENGTH
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.ONEDRIVE_AUTHORIZE_ENDPOINT
 import works.merc.keryx.app.core.ONEDRIVE_SCOPES
 import works.merc.keryx.app.core.ONEDRIVE_TOKEN_ENDPOINT
@@ -88,5 +90,11 @@ class OneDriveAuthManager(
     private suspend fun tokenRequest(
         form: Parameters,
         keepRefreshToken: String? = null,
-    ): Result<OAuthTokens> = requestOAuthTokens(client, json, clock, ONEDRIVE_TOKEN_ENDPOINT, form, keepRefreshToken)
+    ): Result<OAuthTokens> = requestOAuthTokens(client, json, clock, ONEDRIVE_TOKEN_ENDPOINT, form, keepRefreshToken) { status, body ->
+        Log.warn(TAG, "OneDrive token request failed (HTTP $status): ${body.take(CLOUD_ERROR_BODY_PREVIEW_LENGTH)}")
+    }
+
+    private companion object {
+        const val TAG = "OneDriveAuth"
+    }
 }

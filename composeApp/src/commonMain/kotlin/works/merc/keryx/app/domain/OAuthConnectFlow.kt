@@ -1,5 +1,6 @@
 package works.merc.keryx.app.domain
 
+import works.merc.keryx.app.core.CLOUD_ERROR_BODY_PREVIEW_LENGTH
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.OAUTH_CONNECT_TIMEOUT_MS
@@ -29,6 +30,7 @@ class OAuthConnectFlow(
 
     override suspend fun connect(): Result<OAuthTokens> {
         if (clientId.isEmpty()) {
+            Log.warn(TAG, "Cloud provider is not configured (empty client id)")
             return Result.Err(CloudAuthException("Cloud provider is not configured"))
         }
 
@@ -51,15 +53,27 @@ class OAuthConnectFlow(
         }
 
         if (callback.error != null) {
+            // Never log callback.code/state/token values here — only the provider-supplied error
+            // fields (never secrets) so a rejection is diagnosable after release. Both fields come
+            // from an attacker-controllable redirect URI, so strip CR/LF and bound their length
+            // before interpolation to prevent forged log lines (CWE-117).
+            val error = sanitizeForLog(callback.error, CLOUD_ERROR_BODY_PREVIEW_LENGTH)
+            val description = callback.errorDescription?.let { sanitizeForLog(it, CLOUD_ERROR_BODY_PREVIEW_LENGTH) }
+            Log.warn(TAG, "OAuth authorization callback returned an error: $error ($description)")
             return Result.Err(CloudAuthException(callback.error))
         }
         if (callback.state != state) {
+            Log.warn(TAG, "OAuth callback state did not match the expected state (possible CSRF)")
             return Result.Err(CloudAuthException("State mismatch (possible CSRF)"))
         }
-        val code = callback.code
-            ?: return Result.Err(CloudAuthException("No authorization code returned"))
-        val usedRedirectUri = redirectUri
-            ?: return Result.Err(CloudAuthException("Redirect URI was not established"))
+        val code = callback.code ?: run {
+            Log.warn(TAG, "OAuth callback carried no authorization code")
+            return Result.Err(CloudAuthException("No authorization code returned"))
+        }
+        val usedRedirectUri = redirectUri ?: run {
+            Log.warn(TAG, "OAuth redirect URI was not established before the callback arrived")
+            return Result.Err(CloudAuthException("Redirect URI was not established"))
+        }
 
         return authManager.exchangeCode(clientId, code, verifier, usedRedirectUri)
     }
@@ -68,3 +82,9 @@ class OAuthConnectFlow(
         const val TAG = "OAuthConnect"
     }
 }
+
+private val LOG_LINE_BREAK_PATTERN = Regex("[\r\n]+")
+
+/** Strips CR/LF (to prevent forged log lines) and truncates [value] to [maxLength] before it is logged. */
+internal fun sanitizeForLog(value: String, maxLength: Int): String =
+    value.replace(LOG_LINE_BREAK_PATTERN, " ").take(maxLength)
