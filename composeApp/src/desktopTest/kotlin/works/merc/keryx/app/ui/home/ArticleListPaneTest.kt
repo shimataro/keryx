@@ -10,7 +10,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.lifecycle.viewModelScope
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -28,44 +27,11 @@ import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.ui.common.KeryxIcons
-import app.cash.sqldelight.db.SqlDriver
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.mock.MockEngine
-import io.ktor.client.engine.mock.respond
-import io.ktor.client.plugins.HttpTimeout
-import io.ktor.http.HttpStatusCode
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import works.merc.keryx.app.core.Clock
-import works.merc.keryx.app.data.cloud.DropboxAuthManager
-import works.merc.keryx.app.data.cloud.OAuthTokens
-import works.merc.keryx.app.data.cloud.TokenStorage
-import works.merc.keryx.app.data.local.FtsManager
-import works.merc.keryx.app.data.local.FtsSearch
-import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
-import works.merc.keryx.app.data.remote.FaviconResolver
-import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.domain.ArticleListRow
-import works.merc.keryx.app.domain.ActivityCenter
-import works.merc.keryx.app.domain.ArticleRepository
-import works.merc.keryx.app.domain.FeedRepository
-import works.merc.keryx.app.domain.FolderRepository
-import works.merc.keryx.app.domain.NewArticleNotifier
-import works.merc.keryx.app.domain.NotificationCenter
-import works.merc.keryx.app.domain.NotificationMessages
-import works.merc.keryx.app.domain.SettingsRepository
-import works.merc.keryx.app.domain.SyncRepository
-import works.merc.keryx.app.domain.SyncScheduler
-import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
-import works.merc.keryx.app.platform.AppDirs
-import works.merc.keryx.app.platform.FileIO
-import works.merc.keryx.app.singleProviderCloudSession
-import works.merc.keryx.app.ftsManagerIndexed
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
@@ -550,27 +516,22 @@ class ArticleListPaneTest {
     }
 
     @Test
-    fun articleListPaneUnreadOnlyEnabledForStarredFilter() {
+    fun articleListPaneUnreadOnlyEnabledForStarredFilter() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
-        val vm = newMinimalViewModel(driver, db)
-        try {
-            runDesktopComposeUiTest {
-                setContent {
-                    ArticleListPane(vm = vm, focused = true, onActivated = {})
-                }
-                waitForIdle()
-
-                vm.selectFilter(ArticleFilter.Starred)
-                waitForIdle()
-                onNodeWithText("未読のみ").assertIsEnabled()
-
-                vm.selectFilter(ArticleFilter.All)
-                waitForIdle()
-                onNodeWithText("未読のみ").assertIsEnabled()
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            setContent {
+                ArticleListPane(vm = vm, focused = true, onActivated = {})
             }
-        } finally {
-            vm.viewModelScope.cancel()
-            driver.close()
+            waitForIdle()
+
+            vm.selectFilter(ArticleFilter.Starred)
+            waitForIdle()
+            onNodeWithText("未読のみ").assertIsEnabled()
+
+            vm.selectFilter(ArticleFilter.All)
+            waitForIdle()
+            onNodeWithText("未読のみ").assertIsEnabled()
         }
     }
 
@@ -580,25 +541,20 @@ class ArticleListPaneTest {
      * why it can't stay in `FeedListPane` there.
      */
     @Test
-    fun articleListPaneShowsAnEditableSearchFieldAtANarrowLayoutInSearchScope() {
+    fun articleListPaneShowsAnEditableSearchFieldAtANarrowLayoutInSearchScope() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
-        val vm = newMinimalViewModel(driver, db)
-        try {
-            runDesktopComposeUiTest {
-                setContent {
-                    ArticleListPane(vm = vm, focused = true, onActivated = {}, onNavigateUp = {}, navigateUpEnabled = true)
-                }
-                waitForIdle()
-
-                vm.selectFilter(ArticleFilter.Search)
-                waitForIdle()
-
-                onNode(hasSetTextAction()).assertIsDisplayed()
-                onNodeWithContentDescription("戻る").assertIsDisplayed()
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            setContent {
+                ArticleListPane(vm = vm, focused = true, onActivated = {}, onNavigateUp = {}, navigateUpEnabled = true)
             }
-        } finally {
-            vm.viewModelScope.cancel()
-            driver.close()
+            waitForIdle()
+
+            vm.selectFilter(ArticleFilter.Search)
+            waitForIdle()
+
+            onNode(hasSetTextAction()).assertIsDisplayed()
+            onNodeWithContentDescription("戻る").assertIsDisplayed()
         }
     }
 
@@ -608,52 +564,42 @@ class ArticleListPaneTest {
      * field even while the Search scope is active.
      */
     @Test
-    fun articleListPaneOmitsTheEditableSearchFieldAtTripleEvenInSearchScope() {
+    fun articleListPaneOmitsTheEditableSearchFieldAtTripleEvenInSearchScope() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
-        val vm = newMinimalViewModel(driver, db)
-        try {
-            runDesktopComposeUiTest {
-                setContent {
-                    ArticleListPane(vm = vm, focused = true, onActivated = {})
-                }
-                waitForIdle()
-
-                vm.selectFilter(ArticleFilter.Search)
-                waitForIdle()
-
-                onNode(hasSetTextAction()).assertDoesNotExist()
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            setContent {
+                ArticleListPane(vm = vm, focused = true, onActivated = {})
             }
-        } finally {
-            vm.viewModelScope.cancel()
-            driver.close()
+            waitForIdle()
+
+            vm.selectFilter(ArticleFilter.Search)
+            waitForIdle()
+
+            onNode(hasSetTextAction()).assertDoesNotExist()
         }
     }
 
     @Test
-    fun articleListPaneNarrowSearchFieldReportsEditsUpstreamAndClears() {
+    fun articleListPaneNarrowSearchFieldReportsEditsUpstreamAndClears() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
-        val vm = newMinimalViewModel(driver, db)
-        try {
-            runDesktopComposeUiTest {
-                setContent {
-                    ArticleListPane(vm = vm, focused = true, onActivated = {}, onNavigateUp = {}, navigateUpEnabled = true)
-                }
-                waitForIdle()
-
-                vm.selectFilter(ArticleFilter.Search)
-                waitForIdle()
-
-                onNode(hasSetTextAction()).performTextInput("kotlin")
-                waitForIdle()
-                assertEquals("kotlin", vm.searchQuery.value)
-
-                onNodeWithContentDescription("クリア").performClick()
-                waitForIdle()
-                assertEquals("", vm.searchQuery.value)
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            setContent {
+                ArticleListPane(vm = vm, focused = true, onActivated = {}, onNavigateUp = {}, navigateUpEnabled = true)
             }
-        } finally {
-            vm.viewModelScope.cancel()
-            driver.close()
+            waitForIdle()
+
+            vm.selectFilter(ArticleFilter.Search)
+            waitForIdle()
+
+            onNode(hasSetTextAction()).performTextInput("kotlin")
+            waitForIdle()
+            assertEquals("kotlin", vm.searchQuery.value)
+
+            onNodeWithContentDescription("クリア").performClick()
+            waitForIdle()
+            assertEquals("", vm.searchQuery.value)
         }
     }
 
@@ -708,52 +654,47 @@ class ArticleListPaneTest {
      * silently leave the new feed's list scrolled to the old one's offset.
      */
     @Test
-    fun resetsToTheTopWhenTheFilterChangedWhileThePaneWasUnmounted() {
+    fun resetsToTheTopWhenTheFilterChangedWhileThePaneWasUnmounted() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertFeed("fa")
         db.insertFeed("fb", url = "https://feed/fb")
         repeat(40) { db.insertArticleRow("a$it", "fa", createdAt = it.toLong()) }
         repeat(40) { db.insertArticleRow("b$it", "fb", createdAt = it.toLong()) }
-        val vm = newMinimalViewModel(driver, db)
-        try {
-            runDesktopComposeUiTest {
-                var depth by mutableStateOf(2)
-                setContent {
-                    NarrowPaneRow(visiblePanes(PaneLayout.Single, depth), Modifier.size(360.dp, 400.dp)) { pane, paneModifier ->
-                        when (pane) {
-                            HomePane.ArticleList -> ArticleListPane(
-                                vm = vm,
-                                focused = true,
-                                onActivated = {},
-                                modifier = paneModifier,
-                            )
-                            else -> Box(paneModifier.fillMaxSize())
-                        }
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            var depth by mutableStateOf(2)
+            setContent {
+                NarrowPaneRow(visiblePanes(PaneLayout.Single, depth), Modifier.size(360.dp, 400.dp)) { pane, paneModifier ->
+                    when (pane) {
+                        HomePane.ArticleList -> ArticleListPane(
+                            vm = vm,
+                            focused = true,
+                            onActivated = {},
+                            modifier = paneModifier,
+                        )
+                        else -> Box(paneModifier.fillMaxSize())
                     }
                 }
-                vm.selectFilter(ArticleFilter.Feed("fa"))
-                waitForIdle()
-
-                // Newest first, so a39 is feed A's top row — scroll until it is gone.
-                onRoot().performMouseInput { moveTo(center); repeat(12) { scroll(3f) } }
-                waitForIdle()
-                onNodeWithTag("article-a39").assertDoesNotExist()
-
-                // Drill into the article detail (this pane unmounts), switch feeds while it is
-                // gone — as PendingNotificationActionHost's ShowFeedDetail does — then come back.
-                depth = 3
-                waitForIdle()
-                vm.selectFilter(ArticleFilter.Feed("fb"))
-                waitForIdle()
-                depth = 2
-                waitForIdle()
-
-                // Feed B's own top row, not whatever sat at feed A's restored offset.
-                onNodeWithTag("article-b39").assertIsDisplayed()
             }
-        } finally {
-            vm.viewModelScope.cancel()
-            driver.close()
+            vm.selectFilter(ArticleFilter.Feed("fa"))
+            waitForIdle()
+
+            // Newest first, so a39 is feed A's top row — scroll until it is gone.
+            onRoot().performMouseInput { moveTo(center); repeat(12) { scroll(3f) } }
+            waitForIdle()
+            onNodeWithTag("article-a39").assertDoesNotExist()
+
+            // Drill into the article detail (this pane unmounts), switch feeds while it is
+            // gone — as PendingNotificationActionHost's ShowFeedDetail does — then come back.
+            depth = 3
+            waitForIdle()
+            vm.selectFilter(ArticleFilter.Feed("fb"))
+            waitForIdle()
+            depth = 2
+            waitForIdle()
+
+            // Feed B's own top row, not whatever sat at feed A's restored offset.
+            onNodeWithTag("article-b39").assertIsDisplayed()
         }
     }
 
@@ -764,35 +705,30 @@ class ArticleListPaneTest {
      * (and therefore reset to a fresh, unscrolled state) for as long as Search was active.
      */
     @Test
-    fun returningFromSearchPreservesTheArticleListsScrollPosition() {
+    fun returningFromSearchPreservesTheArticleListsScrollPosition() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertFeed("fa")
         repeat(40) { db.insertArticleRow("a$it", "fa", createdAt = it.toLong()) }
-        val vm = newMinimalViewModel(driver, db)
-        try {
-            runDesktopComposeUiTest {
-                setContent {
-                    ArticleListPane(vm = vm, focused = true, onActivated = {})
-                }
-                vm.selectFilter(ArticleFilter.Feed("fa"))
-                waitForIdle()
-
-                // Newest first, so a39 is the top row — scroll until it is gone.
-                onRoot().performMouseInput { moveTo(center); repeat(12) { scroll(3f) } }
-                waitForIdle()
-                onNodeWithTag("article-a39").assertDoesNotExist()
-
-                vm.enterSearchScope(HomePane.ArticleList)
-                waitForIdle()
-                vm.exitSearchScope()
-                waitForIdle()
-
-                // Still scrolled past the top row, not reset by the round trip through Search.
-                onNodeWithTag("article-a39").assertDoesNotExist()
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            setContent {
+                ArticleListPane(vm = vm, focused = true, onActivated = {})
             }
-        } finally {
-            vm.viewModelScope.cancel()
-            driver.close()
+            vm.selectFilter(ArticleFilter.Feed("fa"))
+            waitForIdle()
+
+            // Newest first, so a39 is the top row — scroll until it is gone.
+            onRoot().performMouseInput { moveTo(center); repeat(12) { scroll(3f) } }
+            waitForIdle()
+            onNodeWithTag("article-a39").assertDoesNotExist()
+
+            vm.enterSearchScope(HomePane.ArticleList)
+            waitForIdle()
+            vm.exitSearchScope()
+            waitForIdle()
+
+            // Still scrolled past the top row, not reset by the round trip through Search.
+            onNodeWithTag("article-a39").assertDoesNotExist()
         }
     }
 
@@ -804,116 +740,29 @@ class ArticleListPaneTest {
      * already covers for the back-button row.
      */
     @Test
-    fun theSearchFieldsClearButtonAppearingDoesNotMoveTheControlsRowBelowIt() {
+    fun theSearchFieldsClearButtonAppearingDoesNotMoveTheControlsRowBelowIt() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
-        val vm = newMinimalViewModel(driver, db)
-        try {
-            runDesktopComposeUiTest {
-                setContent {
-                    ArticleListPane(vm = vm, focused = true, onActivated = {}, onNavigateUp = {}, navigateUpEnabled = true)
-                }
-                waitForIdle()
-
-                vm.selectFilter(ArticleFilter.Search)
-                waitForIdle()
-                val boundsWhenEmpty = onNodeWithText("未読のみ").fetchSemanticsNode().boundsInRoot
-
-                vm.setSearchQuery("kotlin")
-                waitForIdle()
-
-                assertEquals(
-                    boundsWhenEmpty,
-                    onNodeWithText("未読のみ").fetchSemanticsNode().boundsInRoot,
-                    "the controls row must not move when the search field's clear button appears",
-                )
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            setContent {
+                ArticleListPane(vm = vm, focused = true, onActivated = {}, onNavigateUp = {}, navigateUpEnabled = true)
             }
-        } finally {
-            vm.viewModelScope.cancel()
-            driver.close()
+            waitForIdle()
+
+            vm.selectFilter(ArticleFilter.Search)
+            waitForIdle()
+            val boundsWhenEmpty = onNodeWithText("未読のみ").fetchSemanticsNode().boundsInRoot
+
+            vm.setSearchQuery("kotlin")
+            waitForIdle()
+
+            assertEquals(
+                boundsWhenEmpty,
+                onNodeWithText("未読のみ").fetchSemanticsNode().boundsInRoot,
+                "the controls row must not move when the search field's clear button appears",
+            )
         }
     }
-}
-
-private class ArticleListPaneTestNotificationMessages : NotificationMessages {
-    override suspend fun feedGone(feedTitle: String): String = "gone:$feedTitle"
-    override suspend fun feedUrlChanged(feedTitle: String): String = "urlChanged:$feedTitle"
-    override suspend fun newArticles(count: Int): String = "new:$count"
-    override suspend fun syncFailed(exception: works.merc.keryx.app.core.KeryxException): String = "syncFailed:${exception::class.simpleName}"
-    override suspend fun opmlImported(added: Int, failed: Int): String = "opmlImported:$added/$failed"
-}
-
-private class ArticleListPaneTestTokenStorage : TokenStorage {
-    private var stored: OAuthTokens? = null
-    override fun save(tokens: OAuthTokens) { stored = tokens }
-    override fun load(): OAuthTokens? = stored
-    override fun clear() { stored = null }
-}
-
-private fun failingFetcher(): FeedFetcher {
-    val client = HttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }) {
-        followRedirects = false
-        expectSuccess = false
-        install(HttpTimeout)
-    }
-    return FeedFetcher(client)
-}
-
-private fun missingFaviconResolver(): FaviconResolver {
-    val client = HttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }) {
-        followRedirects = false
-        expectSuccess = false
-        install(HttpTimeout)
-    }
-    return FaviconResolver(client)
-}
-
-private fun newMinimalViewModel(
-    driver: SqlDriver,
-    db: KeryxDatabase,
-    syncScheduler: SyncScheduler = SyncScheduler {},
-    clock: Clock = Clock { 0L },
-    appKey: String = "",
-    activityCenter: ActivityCenter = ActivityCenter(),
-): HomeViewModel {
-    val dir = FileIO.join(AppDirs.tempDir(), "article-list-pane-test")
-    val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
-    val feedRepository = FeedRepository(
-        db, failingFetcher(), missingFaviconResolver(), articleRepository, ftsManagerIndexed(driver), syncScheduler,
-        NotificationCenter(), ArticleListPaneTestNotificationMessages(), clock, Dispatchers.Unconfined,
-    )
-    val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
-    val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
-    val settingsRepository = SettingsRepository(
-        db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined
-    )
-    val syncRepository = SyncRepository(
-        driver = driver,
-        db = db,
-        ftsManager = FtsManager(driver),
-        cloudProvider = { null },
-        clock = clock,
-        scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
-        activityCenter = activityCenter,
-        notificationCenter = NotificationCenter(),
-        notificationMessages = ArticleListPaneTestNotificationMessages(),
-        localDbPath = "unused",
-        tempDir = "unused",
-    )
-    val tokenStorage = ArticleListPaneTestTokenStorage()
-    val authClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.OK) }) { expectSuccess = false }
-    val authManager = DropboxAuthManager(authClient, clock = clock)
-    val cloudSession = singleProviderCloudSession(
-        client = authClient,
-        tokenStorage = tokenStorage,
-        authManager = authManager,
-        clientId = appKey,
-        clock = clock,
-    )
-    return HomeViewModel(
-        feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
-        syncRepository, cloudSession, activityCenter, clock, NewArticleNotifier(), ArticleListPaneTestNotificationMessages(),
-        Dispatchers.Unconfined, Dispatchers.Unconfined,
-    )
 }
 
 /** Inserts an article row for the DB-backed tests above (`article`/`articles` build UI rows). */

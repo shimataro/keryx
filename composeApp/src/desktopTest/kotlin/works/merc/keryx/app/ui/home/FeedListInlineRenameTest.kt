@@ -150,9 +150,8 @@ class FeedListInlineRenameTest {
     fun f2StartsInlineEditingAndEnterCommitsTheNewFeedTitle() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertFeed("a", sortOrder = 0L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setInlineRenameContent(vm)
             startInlineRename(vm, ArticleFilter.Feed("a"))
 
@@ -162,8 +161,6 @@ class FeedListInlineRenameTest {
             assertEquals("Renamed", db.customTitleOf("a"))
             editor().assertDoesNotExist()
             onNodeWithText("Renamed", useUnmergedTree = true).assertExists()
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -171,9 +168,8 @@ class FeedListInlineRenameTest {
     fun escapeCancelsInlineEditingAndRestoresTheOriginalName() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertFeed("a", sortOrder = 0L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setInlineRenameContent(vm)
             startInlineRename(vm, ArticleFilter.Feed("a"))
 
@@ -184,8 +180,6 @@ class FeedListInlineRenameTest {
             assertNull(db.customTitleOf("a"), "Escape must never write")
             editor().assertDoesNotExist()
             onNodeWithText("Feed a", useUnmergedTree = true).assertExists()
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -193,9 +187,8 @@ class FeedListInlineRenameTest {
     fun theCancelIconAbandonsTheEditTheSameWayEscapeDoes() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertFeed("a", sortOrder = 0L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setInlineRenameContent(vm)
             startInlineRename(vm, ArticleFilter.Feed("a"))
 
@@ -205,8 +198,6 @@ class FeedListInlineRenameTest {
 
             assertNull(db.customTitleOf("a"))
             editor().assertDoesNotExist()
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -214,9 +205,8 @@ class FeedListInlineRenameTest {
     fun losingFocusCommitsAValidName() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertFeed("a", sortOrder = 0L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setInlineRenameContent(vm)
             startInlineRename(vm, ArticleFilter.Feed("a"))
 
@@ -225,8 +215,6 @@ class FeedListInlineRenameTest {
 
             assertEquals("Renamed by blur", db.customTitleOf("a"))
             editor().assertDoesNotExist()
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -235,9 +223,8 @@ class FeedListInlineRenameTest {
         val (driver, db) = inMemoryDb()
         db.insertFeed("a", sortOrder = 0L)
         db.feedsQueries.updateCustomTitle("Custom", 0L, 0L, "a")
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setInlineRenameContent(vm)
             startInlineRename(vm, ArticleFilter.Feed("a"))
 
@@ -250,8 +237,6 @@ class FeedListInlineRenameTest {
 
             assertNull(db.customTitleOf("a"), "a blank title clears custom_title")
             onNodeWithText("Feed a", useUnmergedTree = true).assertExists()
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -260,9 +245,8 @@ class FeedListInlineRenameTest {
         val (driver, db) = inMemoryDb()
         db.insertFolder("d1", "Alpha", sortOrder = 0L)
         db.insertFolder("d2", "Beta", sortOrder = 1L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setInlineRenameContent(vm)
             startInlineRename(vm, ArticleFilter.Folder("d2"))
 
@@ -276,8 +260,6 @@ class FeedListInlineRenameTest {
 
             assertEquals("Beta", db.folderNameOf("d2"), "blur on an invalid value reverts rather than commits")
             editor().assertDoesNotExist()
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -285,9 +267,8 @@ class FeedListInlineRenameTest {
     fun aBlankFolderNameCannotBeCommitted() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertFolder("d1", "Alpha", sortOrder = 0L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setInlineRenameContent(vm)
             startInlineRename(vm, ArticleFilter.Folder("d1"))
 
@@ -296,8 +277,6 @@ class FeedListInlineRenameTest {
 
             assertEquals("Alpha", db.folderNameOf("d1"))
             editor().assertIsDisplayed()
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -308,9 +287,8 @@ class FeedListInlineRenameTest {
             id = "tag1", name = "Tag One", color = "#43A047", sort_order = 0L,
             deleted_at = null, updated_at = 0L, created_at = 0L,
         )
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setInlineRenameContent(vm)
             startInlineRename(vm, ArticleFilter.Tag("tag1"))
 
@@ -320,8 +298,6 @@ class FeedListInlineRenameTest {
             val tag = db.tagOf("tag1")
             assertEquals("Renamed tag", tag.name)
             assertEquals("#43A047", tag.color, "renaming must not touch the color")
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -329,9 +305,8 @@ class FeedListInlineRenameTest {
     fun theTagColorDotAppliesAColorImmediately() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertTag("tag1", "Tag One", sortOrder = 0L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setInlineRenameContent(vm)
 
             onNodeWithTag(tagColorDotTestTag("tag1"), useUnmergedTree = true).performClick()
@@ -343,8 +318,6 @@ class FeedListInlineRenameTest {
             assertEquals("#1E88E5", tag.color)
             assertEquals("Tag One", tag.name, "picking a color must not touch the name")
             onNodeWithTag(tagColorSwatchTestTag("#1E88E5"), useUnmergedTree = true).assertDoesNotExist()
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -352,9 +325,8 @@ class FeedListInlineRenameTest {
     fun theTagColorDotStillWorksWhileTheRowIsBeingRenamed() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertTag("tag1", "Tag One", sortOrder = 0L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setInlineRenameContent(vm)
             startInlineRename(vm, ArticleFilter.Tag("tag1"))
             typeName("Renamed tag")
@@ -369,8 +341,6 @@ class FeedListInlineRenameTest {
             val tag = db.tagOf("tag1")
             assertEquals("Renamed tag", tag.name)
             assertEquals("#E53935", tag.color)
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -381,10 +351,9 @@ class FeedListInlineRenameTest {
         // Compose UI test's reach (see `nativeContextMenu` and the manual checks in docs/testing.md).
         val (driver, db) = inMemoryDb()
         db.insertFeed("a", sortOrder = 0L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        val menuController = testMenuController
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            val menuController = testMenuController
             setInlineRenameContent(vm, menuController)
             vm.selectFilter(ArticleFilter.Feed("a"))
             onNodeWithTag(ROOT_TEST_TAG).requestFocus()
@@ -400,8 +369,6 @@ class FeedListInlineRenameTest {
             typeName("From the menu")
             pressEnter()
             assertEquals("From the menu", db.customTitleOf("a"))
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -414,9 +381,8 @@ class FeedListInlineRenameTest {
         db.insertFeed("a", folderId = "d1", sortOrder = 0L)
         db.insertTag("t1", "Tag One", sortOrder = 0L)
         db.insertFeedTag("a", "t1")
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             // The feed's only rendered row is the tag-nested one: its folder is collapsed while the
             // tag it's attached to is expanded.
             vm.toggleFolderCollapsed("d1")
@@ -433,8 +399,6 @@ class FeedListInlineRenameTest {
             assertEquals("Renamed via tag row", db.customTitleOf("a"))
             editor().assertDoesNotExist()
             onNodeWithText("Renamed via tag row", useUnmergedTree = true).assertExists()
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -445,10 +409,9 @@ class FeedListInlineRenameTest {
         db.insertFeed("a", folderId = "d1", sortOrder = 0L)
         db.insertTag("t1", "Tag One", sortOrder = 0L)
         db.insertFeedTag("a", "t1")
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        val menuController = testMenuController
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            val menuController = testMenuController
             vm.toggleFolderCollapsed("d1")
             vm.toggleTagExpanded("t1")
             setInlineRenameContent(vm, menuController)
@@ -465,8 +428,6 @@ class FeedListInlineRenameTest {
             typeName("From the menu via tag row")
             pressEnter()
             assertEquals("From the menu via tag row", db.customTitleOf("a"))
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -479,9 +440,8 @@ class FeedListInlineRenameTest {
         db.insertFeed("a", folderId = "d1", sortOrder = 0L)
         db.insertTag("t1", "Tag One", sortOrder = 0L)
         db.insertFeedTag("a", "t1")
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             // The feed renders twice: once under its folder, once under the expanded tag.
             vm.toggleTagExpanded("t1")
             setInlineRenameContent(vm)
@@ -493,8 +453,6 @@ class FeedListInlineRenameTest {
             pressEnter()
 
             assertEquals("Renamed via folder row", db.customTitleOf("a"))
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -504,9 +462,8 @@ class FeedListInlineRenameTest {
         db.insertFeed("a", sortOrder = 0L)
         db.insertTag("t1", "Tag One", sortOrder = 0L)
         db.insertFeedTag("a", "t1")
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             vm.toggleTagExpanded("t1")
             setInlineRenameContent(vm)
             startInlineRename(vm, ArticleFilter.Feed("a"), FeedListRowSelection.FeedInTag("a", "t1"))
@@ -530,8 +487,6 @@ class FeedListInlineRenameTest {
             // blur-commit as the scene disposes, writing to the DB after driver.close() below.
             editor().performKeyInput { pressKey(Key.Escape) }
             waitForIdle()
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 }

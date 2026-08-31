@@ -63,6 +63,13 @@
   `@BeforeTest` で `Dispatchers.setMain(StandardTestDispatcher())`、`@AfterTest` で `Dispatchers.resetMain()`
   を呼ぶ（`HomeViewModelTest.kt` が最初の導入例）。`StateFlow` が `SharingStarted.WhileSubscribed(...)`
   の場合、テスト側で明示的に `collect` して購読を開始しないと値が更新されない点に注意。
+- 実際の `HomeViewModel` を必要とする Compose UI テストは、自前の `try`/`finally` ではなく必ず
+  `ui/home/HomeViewModelTestSupport.kt` の `ComposeUiTest.useHomeViewModel(driver, db) { fixture -> … }`
+  を経由すること。`HomeViewModel` の DB 購読は `SharingStarted.Eagerly` なので、`viewModelScope` を
+  `cancelAndJoin` せずに driver を閉じると、EDT にキューされていた継続が閉じた接続に対して再開してしまう
+  ——この未捕捉例外は、たまたま次に走った**別の**テストで `kotlinx.coroutines.test.UncaughtExceptionsBeforeTest`
+  としてフレーク的に表面化する。`ComposeUiTest.waitForIdle()` はここでは役に立たない
+  ——Compose 自身のテストクロックを進めるだけで、AWT のイベントキューは一切汲み出さない。
 - `SyncRepository` のような `CloudStorage` を直接扱うクラスは、HTTP 層をモックする代わりに
   `CloudStorage` インターフェースを手製フェイク（インメモリ Map + rev 管理）で差し替えて検証する
   （`SyncRepositoryTest.kt` 参照）。`DropboxStorage`/`DropboxAuthManager` 自体のテストは従来どおり

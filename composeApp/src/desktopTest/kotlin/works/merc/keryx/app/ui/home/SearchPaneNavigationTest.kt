@@ -21,6 +21,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.runBlocking
 import org.koin.compose.KoinApplication
 import org.koin.dsl.koinConfiguration
 import org.koin.dsl.module
@@ -152,128 +153,104 @@ class SearchPaneNavigationTest {
     }
 
     @Test
-    fun theArticleListsOwnSearchIconAtDualLayoutFocusesItSoBackCanExitSearch() {
+    fun theArticleListsOwnSearchIconAtDualLayoutFocusesItSoBackCanExitSearch() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
-            runDesktopComposeUiTest {
-                var focusedPane by mutableStateOf(HomePane.FeedList)
-                setContent { DualHomeTestHost(vm, focusedPane, { focusedPane = it }) }
-                waitForIdle()
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            var focusedPane by mutableStateOf(HomePane.FeedList)
+            setContent { DualHomeTestHost(vm, focusedPane, { focusedPane = it }) }
+            waitForIdle()
 
-                assertEquals(ArticleFilter.All, vm.filter.value)
+            assertEquals(ArticleFilter.All, vm.filter.value)
 
-                // Bug precondition: the feed list, not the article list, is focused when the
-                // article list's own search icon is tapped.
-                onNodeWithContentDescription("記事を検索").performClick()
-                waitForIdle()
+            // Bug precondition: the feed list, not the article list, is focused when the
+            // article list's own search icon is tapped.
+            onNodeWithContentDescription("記事を検索").performClick()
+            waitForIdle()
 
-                assertEquals(ArticleFilter.Search, vm.filter.value)
-                // The fix: entering Search from this icon also focuses the article list, so
-                // homeBackAction resolves to ExitSearch instead of None.
-                assertEquals(HomePane.ArticleList, focusedPane)
-                onNodeWithContentDescription("戻る").assertIsEnabled()
+            assertEquals(ArticleFilter.Search, vm.filter.value)
+            // The fix: entering Search from this icon also focuses the article list, so
+            // homeBackAction resolves to ExitSearch instead of None.
+            assertEquals(HomePane.ArticleList, focusedPane)
+            onNodeWithContentDescription("戻る").assertIsEnabled()
 
-                onNodeWithContentDescription("戻る").performClick()
-                waitForIdle()
+            onNodeWithContentDescription("戻る").performClick()
+            waitForIdle()
 
-                // Back actually exits Search: the filter is restored and focus lands back on the
-                // article list (enterSearchScope's own returnPane), not the feed list.
-                assertEquals(ArticleFilter.All, vm.filter.value)
-                assertEquals(HomePane.ArticleList, focusedPane)
-            }
-        } finally {
-            fixture.close()
-            driver.close()
+            // Back actually exits Search: the filter is restored and focus lands back on the
+            // article list (enterSearchScope's own returnPane), not the feed list.
+            assertEquals(ArticleFilter.All, vm.filter.value)
+            assertEquals(HomePane.ArticleList, focusedPane)
         }
     }
 
     @Test
-    fun tappingTheCollapsedSearchBarNavigatesToTheResultsPaneWhoseFieldCarriesTheQuery() {
+    fun tappingTheCollapsedSearchBarNavigatesToTheResultsPaneWhoseFieldCarriesTheQuery() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
-            runDesktopComposeUiTest {
-                var depth by mutableStateOf(1)
-                setContent { NarrowHomeTestHost(vm, depth, { depth = it }) }
-                waitForIdle()
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            var depth by mutableStateOf(1)
+            setContent { NarrowHomeTestHost(vm, depth, { depth = it }) }
+            waitForIdle()
 
-                // Depth 1: only the collapsed bar is on screen — no editable field anywhere yet.
-                onNode(hasSetTextAction()).assertDoesNotExist()
+            // Depth 1: only the collapsed bar is on screen — no editable field anywhere yet.
+            onNode(hasSetTextAction()).assertDoesNotExist()
 
-                onNodeWithText("記事を検索…").performClick()
-                waitForIdle()
+            onNodeWithText("記事を検索…").performClick()
+            waitForIdle()
 
-                // Depth 2: the navigation stack advanced, and the query field is now on the same
-                // pane as the results — the exact bug this design fixes.
-                assertEquals(2, depth)
-                assertEquals(ArticleFilter.Search, vm.filter.value)
-                onNode(hasSetTextAction()).assertIsDisplayed()
-            }
-        } finally {
-            fixture.close()
-            driver.close()
+            // Depth 2: the navigation stack advanced, and the query field is now on the same
+            // pane as the results — the exact bug this design fixes.
+            assertEquals(2, depth)
+            assertEquals(ArticleFilter.Search, vm.filter.value)
+            onNode(hasSetTextAction()).assertIsDisplayed()
         }
     }
 
     @Test
-    fun theQueryAndTheFieldSurviveOpeningAResultAndComingBack() {
+    fun theQueryAndTheFieldSurviveOpeningAResultAndComingBack() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             vm.setSearchQuery("kotlin")
-            runDesktopComposeUiTest {
-                var depth by mutableStateOf(2)
-                setContent { NarrowHomeTestHost(vm, depth, { depth = it }) }
-                waitForIdle()
+            var depth by mutableStateOf(2)
+            setContent { NarrowHomeTestHost(vm, depth, { depth = it }) }
+            waitForIdle()
 
-                onNode(hasSetTextAction()).assertIsDisplayed()
-                assertEquals("kotlin", vm.searchQuery.value)
+            onNode(hasSetTextAction()).assertIsDisplayed()
+            assertEquals("kotlin", vm.searchQuery.value)
 
-                depth = 3
-                waitForIdle()
-                onNode(hasSetTextAction()).assertDoesNotExist()
-                onNodeWithTag(ARTICLE_DETAIL_STUB_TAG).assertIsDisplayed()
+            depth = 3
+            waitForIdle()
+            onNode(hasSetTextAction()).assertDoesNotExist()
+            onNodeWithTag(ARTICLE_DETAIL_STUB_TAG).assertIsDisplayed()
 
-                onNodeWithContentDescription("Back").performClick()
-                waitForIdle()
+            onNodeWithContentDescription("Back").performClick()
+            waitForIdle()
 
-                assertEquals(2, depth)
-                assertEquals("kotlin", vm.searchQuery.value)
-                onNode(hasSetTextAction()).assertIsDisplayed()
-            }
-        } finally {
-            fixture.close()
-            driver.close()
+            assertEquals(2, depth)
+            assertEquals("kotlin", vm.searchQuery.value)
+            onNode(hasSetTextAction()).assertIsDisplayed()
         }
     }
 
     @Test
-    fun exactlyOnePaneConsumesASearchFocusRequest() {
+    fun exactlyOnePaneConsumesASearchFocusRequest() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
-            runDesktopComposeUiTest {
-                var depth by mutableStateOf(1)
-                setContent { NarrowHomeTestHost(vm, depth, { depth = it }) }
-                waitForIdle()
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            var depth by mutableStateOf(1)
+            setContent { NarrowHomeTestHost(vm, depth, { depth = it }) }
+            waitForIdle()
 
-                onNodeWithText("記事を検索…").performClick()
-                waitForIdle()
+            onNodeWithText("記事を検索…").performClick()
+            waitForIdle()
 
-                // The latch (raised by the collapsed bar's own onClick, via requestSearchFocus())
-                // must have been consumed by exactly the field that appeared at depth 2 — not left
-                // dangling to steal focus at some later, unrelated field.
-                assertEquals(2, depth)
-                assertEquals(false, vm.pendingSearchFocus.value)
-            }
-        } finally {
-            fixture.close()
-            driver.close()
+            // The latch (raised by the collapsed bar's own onClick, via requestSearchFocus())
+            // must have been consumed by exactly the field that appeared at depth 2 — not left
+            // dangling to steal focus at some later, unrelated field.
+            assertEquals(2, depth)
+            assertEquals(false, vm.pendingSearchFocus.value)
         }
     }
 
@@ -293,74 +270,61 @@ class SearchPaneNavigationTest {
 
             assertEquals(false, vm.pendingSearchFocus.value)
         } finally {
-            fixture.close()
-            driver.close()
+            runBlocking { fixture.close() }
         }
     }
 
     @Test
-    fun theArticleListsOwnSearchIconDoesNotAdvanceAndBackReturnsToTheSameArticleList() {
+    fun theArticleListsOwnSearchIconDoesNotAdvanceAndBackReturnsToTheSameArticleList() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
-            runDesktopComposeUiTest {
-                var depth by mutableStateOf(2)
-                setContent { NarrowHomeTestHost(vm, depth, { depth = it }) }
-                waitForIdle()
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            var depth by mutableStateOf(2)
+            setContent { NarrowHomeTestHost(vm, depth, { depth = it }) }
+            waitForIdle()
 
-                assertEquals(ArticleFilter.All, vm.filter.value)
-                onNodeWithContentDescription("記事を検索").performClick()
-                waitForIdle()
+            assertEquals(ArticleFilter.All, vm.filter.value)
+            onNodeWithContentDescription("記事を検索").performClick()
+            waitForIdle()
 
-                // The regression this whole feature fixes: entering Search from the article list's
-                // own search icon must not push a new depth (the field lives on this same pane), so
-                // going back afterwards doesn't overshoot past the list the user was actually on.
-                assertEquals(2, depth)
-                assertEquals(ArticleFilter.Search, vm.filter.value)
+            // The regression this whole feature fixes: entering Search from the article list's
+            // own search icon must not push a new depth (the field lives on this same pane), so
+            // going back afterwards doesn't overshoot past the list the user was actually on.
+            assertEquals(2, depth)
+            assertEquals(ArticleFilter.Search, vm.filter.value)
 
-                onNodeWithContentDescription("戻る").performClick()
-                waitForIdle()
+            onNodeWithContentDescription("戻る").performClick()
+            waitForIdle()
 
-                assertEquals(2, depth)
-                assertEquals(ArticleFilter.All, vm.filter.value)
-            }
-        } finally {
-            fixture.close()
-            driver.close()
+            assertEquals(2, depth)
+            assertEquals(ArticleFilter.All, vm.filter.value)
         }
     }
 
     @Test
-    fun theCollapsedSearchBarsBackArrowRestoresTheFeedListAndKeepsTheQuery() {
+    fun theCollapsedSearchBarsBackArrowRestoresTheFeedListAndKeepsTheQuery() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
-            runDesktopComposeUiTest {
-                var depth by mutableStateOf(1)
-                setContent { NarrowHomeTestHost(vm, depth, { depth = it }) }
-                waitForIdle()
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            var depth by mutableStateOf(1)
+            setContent { NarrowHomeTestHost(vm, depth, { depth = it }) }
+            waitForIdle()
 
-                onNodeWithText("記事を検索…").performClick()
-                waitForIdle()
-                assertEquals(2, depth)
-                onNode(hasSetTextAction()).performTextInput("kotlin")
-                waitForIdle()
+            onNodeWithText("記事を検索…").performClick()
+            waitForIdle()
+            assertEquals(2, depth)
+            onNode(hasSetTextAction()).performTextInput("kotlin")
+            waitForIdle()
 
-                onNodeWithContentDescription("戻る").performClick()
-                waitForIdle()
+            onNodeWithContentDescription("戻る").performClick()
+            waitForIdle()
 
-                // Back from the search screen returns to the feed list (where it was entered from,
-                // not depth 1 as an incidental side effect of popping), with the filter restored —
-                // not left on Search — and the query kept for the collapsed bar to show.
-                assertEquals(1, depth)
-                assertEquals(ArticleFilter.All, vm.filter.value)
-                assertEquals("kotlin", vm.searchQuery.value)
-            }
-        } finally {
-            fixture.close()
-            driver.close()
+            // Back from the search screen returns to the feed list (where it was entered from,
+            // not depth 1 as an incidental side effect of popping), with the filter restored —
+            // not left on Search — and the query kept for the collapsed bar to show.
+            assertEquals(1, depth)
+            assertEquals(ArticleFilter.All, vm.filter.value)
+            assertEquals("kotlin", vm.searchQuery.value)
         }
     }
 }

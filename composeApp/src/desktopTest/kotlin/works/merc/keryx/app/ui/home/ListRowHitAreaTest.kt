@@ -133,9 +133,8 @@ class ListRowHitAreaTest {
         val (driver, db) = inMemoryDb()
         db.insertFolder("d1", "Folder One", sortOrder = 0L)
         db.insertFeed("f1", folderId = "d1", sortOrder = 0L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setContent { FeedListHitAreaTestHost(vm, 400.dp) }
             waitForIdle()
 
@@ -152,8 +151,6 @@ class ListRowHitAreaTest {
                 resolvesToA = { vm.filter.value == ArticleFilter.Folder("d1") },
                 resolvesToB = { vm.filter.value == ArticleFilter.Feed("f1") },
             )
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -165,9 +162,8 @@ class ListRowHitAreaTest {
         db.insertTag("t1", "Tag One")
         db.insertFeedTag("a", "t1")
         db.insertFeedTag("b", "t1")
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             vm.toggleTagExpanded("t1")
             setContent { FeedListHitAreaTestHost(vm, 1000.dp) }
             waitForIdle()
@@ -187,8 +183,6 @@ class ListRowHitAreaTest {
                 resolvesToA = { vm.filter.value == ArticleFilter.Feed("a") },
                 resolvesToB = { vm.filter.value == ArticleFilter.Feed("b") },
             )
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -237,9 +231,8 @@ class ListRowHitAreaTest {
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
         db.insertFeed("c", sortOrder = 2L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setContent { FeedListHitAreaTestHost(vm, 400.dp) }
             waitForIdle()
 
@@ -258,8 +251,6 @@ class ListRowHitAreaTest {
                 heights.map { it.second }.toSet().size,
                 "feed rows must all have the same band height regardless of their position in the group: $heights",
             )
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -270,9 +261,8 @@ class ListRowHitAreaTest {
         db.insertFolder("d2", "Folder Two", sortOrder = 1L)
         db.insertFeed("f1", folderId = "d1", sortOrder = 0L)
         db.insertFeed("f2", folderId = "d2", sortOrder = 1L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setContent { FeedListHitAreaTestHost(vm, 400.dp) }
             waitForIdle()
 
@@ -291,8 +281,6 @@ class ListRowHitAreaTest {
                 "a folder header's band height must not depend on collapsed/last state: " +
                     "expandedNotLast=$expandedNotLast last=$last collapsedNotLast=$collapsedNotLast",
             )
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -301,9 +289,8 @@ class ListRowHitAreaTest {
         val (driver, db) = inMemoryDb()
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setContent { FeedListHitAreaTestHost(vm, 400.dp) }
             waitForIdle()
 
@@ -328,8 +315,6 @@ class ListRowHitAreaTest {
                     "clicking the feed row's $label ($point, row bounds=$bounds) must select it",
                 )
             }
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -343,9 +328,8 @@ class ListRowHitAreaTest {
         val (driver, db) = inMemoryDb()
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setContent { FeedListHitAreaTestHost(vm, 400.dp) }
             waitForIdle()
 
@@ -362,8 +346,6 @@ class ListRowHitAreaTest {
                 resolvesToA = { vm.filter.value == ArticleFilter.Feed("a") },
                 resolvesToB = { vm.filter.value == ArticleFilter.Feed("b") },
             )
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -373,9 +355,8 @@ class ListRowHitAreaTest {
         db.insertFolder("d1", "Folder One")
         db.insertFeed("f1", folderId = "d1")
         db.insertArticle("a1", "f1", isRead = 0L)
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setContent { FeedListHitAreaTestHost(vm, 400.dp) }
             waitForIdle()
             settleFolderRowHitTesting("d1")
@@ -388,8 +369,6 @@ class ListRowHitAreaTest {
             }
             waitForIdle()
             assertEquals(ArticleFilter.Folder("d1"), vm.filter.value, "clicking the folder header's badge column must select the folder")
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -398,9 +377,8 @@ class ListRowHitAreaTest {
         val (driver, db) = inMemoryDb()
         db.insertFolder("d1", "Folder One")
         db.insertFeed("f1", folderId = "d1")
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setContent { FeedListHitAreaTestHost(vm, 400.dp) }
             waitForIdle()
 
@@ -423,8 +401,6 @@ class ListRowHitAreaTest {
             onNodeWithTag(folderRowTestTag("d1")).performMouseInput { click(Offset(chevronCenterX, bounds.height - 1f)) }
             waitForIdle()
             assertEquals(ArticleFilter.Folder("d1"), vm.filter.value, "a point below the chevron, inside the row band, must select the folder")
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -433,9 +409,8 @@ class ListRowHitAreaTest {
         val (driver, db) = inMemoryDb()
         db.insertFolder("d1", "Folder One")
         db.insertFeed("f1", folderId = "d1")
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setContent { FeedListHitAreaTestHost(vm, 400.dp) }
             waitForIdle()
             assertTrue("d1" !in vm.collapsedFolderIds.value, "the folder must start expanded")
@@ -447,8 +422,6 @@ class ListRowHitAreaTest {
 
             assertTrue("d1" in vm.collapsedFolderIds.value, "clicking the chevron itself must toggle the folder's collapsed state")
             assertEquals(ArticleFilter.All, vm.filter.value, "clicking the chevron itself must not also select the folder")
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 
@@ -456,9 +429,8 @@ class ListRowHitAreaTest {
     fun clickingATagRowsInnerLeadingAndTrailingEdgesSelectsTheTag() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertTag("t1", "Tag One")
-        val fixture = newHomeViewModel(driver, db)
-        val vm = fixture.vm
-        try {
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
             setContent { FeedListHitAreaTestHost(vm, 400.dp) }
             waitForIdle()
 
@@ -477,8 +449,6 @@ class ListRowHitAreaTest {
             onNodeWithTag(tagRowTestTag("t1")).performMouseInput { click(Offset(bounds.width - 4f, bounds.height / 2f)) }
             waitForIdle()
             assertEquals(ArticleFilter.Tag("t1"), vm.filter.value, "clicking the tag row's inner trailing 8dp must select the tag")
-        } finally {
-            closeHomeViewModelFixture(vm, fixture, driver)
         }
     }
 

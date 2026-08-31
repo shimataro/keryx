@@ -73,19 +73,13 @@ class NotificationBellPlacementTest {
         }
     }
 
-    private fun runWithHost(layout: PaneLayout, depth: Int, assertBellCount: (Int) -> Unit) {
+    private fun runWithHost(layout: PaneLayout, depth: Int, assertBellCount: (Int) -> Unit) = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
-        val fixture = newHomeViewModel(driver, db)
         val notifVm = NotificationCenterViewModel(NotificationCenter())
-        try {
-            runDesktopComposeUiTest {
-                setContent { NarrowHomeTestHost(fixture.vm, notifVm, layout, depth) }
-                waitForIdle()
-                assertBellCount(onAllNodesWithContentDescription(bellLabel).fetchSemanticsNodes().size)
-            }
-        } finally {
-            fixture.close()
-            driver.close()
+        useHomeViewModel(driver, db) { fixture ->
+            setContent { NarrowHomeTestHost(fixture.vm, notifVm, layout, depth) }
+            waitForIdle()
+            assertBellCount(onAllNodesWithContentDescription(bellLabel).fetchSemanticsNodes().size)
         }
     }
 
