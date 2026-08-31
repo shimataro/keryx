@@ -54,9 +54,12 @@ class OAuthConnectFlow(
 
         if (callback.error != null) {
             // Never log callback.code/state/token values here — only the provider-supplied error
-            // fields (never secrets) so a rejection is diagnosable after release.
-            val description = callback.errorDescription?.take(CLOUD_ERROR_BODY_PREVIEW_LENGTH)
-            Log.warn(TAG, "OAuth authorization callback returned an error: ${callback.error} ($description)")
+            // fields (never secrets) so a rejection is diagnosable after release. Both fields come
+            // from an attacker-controllable redirect URI, so strip CR/LF and bound their length
+            // before interpolation to prevent forged log lines (CWE-117).
+            val error = sanitizeForLog(callback.error, CLOUD_ERROR_BODY_PREVIEW_LENGTH)
+            val description = callback.errorDescription?.let { sanitizeForLog(it, CLOUD_ERROR_BODY_PREVIEW_LENGTH) }
+            Log.warn(TAG, "OAuth authorization callback returned an error: $error ($description)")
             return Result.Err(CloudAuthException(callback.error))
         }
         if (callback.state != state) {
@@ -79,3 +82,9 @@ class OAuthConnectFlow(
         const val TAG = "OAuthConnect"
     }
 }
+
+private val LOG_LINE_BREAK_PATTERN = Regex("[\r\n]+")
+
+/** Strips CR/LF (to prevent forged log lines) and truncates [value] to [maxLength] before it is logged. */
+internal fun sanitizeForLog(value: String, maxLength: Int): String =
+    value.replace(LOG_LINE_BREAK_PATTERN, " ").take(maxLength)
