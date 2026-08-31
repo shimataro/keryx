@@ -511,7 +511,7 @@ class HomeViewModel(
      *
      * Needs a DB read (there is no other way to learn whether something changed while Search was
      * active), so this cannot run inline inside [exitSearchScope] the way the filter/row restoration
-     * does — see [reconcilePinnedArticles]'s own KDoc for why that read is routed through
+     * does — see [reconcilePinnedArticlesAndSelection]'s own KDoc for why that read is routed through
      * [dbWriteDispatcher] rather than [dispatcher], which is the same reason it is routed that way
      * here. [epoch] is [exitSearchScope]'s [browsingEpoch] snapshot, and pins/selection are merged
      * in (never replacing the maps outright) so a pin set by an unrelated action that lands in the
@@ -651,7 +651,7 @@ class HomeViewModel(
         // Any write to `articles` can be a sync merge propagating a soft-delete tombstone for an
         // article currently pinned here; revalidate the pins so a deleted one can't stay visible.
         articleChangeSignal
-            .onEach { reconcilePinnedArticles() }
+            .onEach { reconcilePinnedArticlesAndSelection() }
             .flowOn(dispatcher)
             .launchIn(viewModelScope)
     }
@@ -747,7 +747,7 @@ class HomeViewModel(
             // Marking read is unconditional (external-spec §7: read the instant it is selected), so
             // an article passed over by a fast key repeat is still marked read exactly as before.
             // Dispatched before the optimistic pin/selection below, not after — see
-            // reconcilePinnedArticles's own KDoc for why this order is load-bearing.
+            // reconcilePinnedArticlesAndSelection's own KDoc for why this order is load-bearing.
             viewModelScope.launch(dbWriteDispatcher) { articleRepository.markAsRead(article.id) }
             // Nothing is selected any more — a filter switch, or an earlier hydration finding its
             // own article tombstoned — so there is nothing left to apply below.
@@ -799,7 +799,7 @@ class HomeViewModel(
     fun markSelectedUnread() {
         val current = _selectedArticle.value ?: return
         val id = current.id
-        // Dispatched before the optimistic state below, not after — see reconcilePinnedArticles's
+        // Dispatched before the optimistic state below, not after — see reconcilePinnedArticlesAndSelection's
         // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
         // pass can never observe (and revert) this optimistic unread state using DB flags from
         // before this write has landed.
@@ -816,7 +816,7 @@ class HomeViewModel(
      */
     fun toggleRead(article: ArticleListRow) {
         val nowRead = article.is_read == 0L
-        // Dispatched before the optimistic state below, not after — see reconcilePinnedArticles's
+        // Dispatched before the optimistic state below, not after — see reconcilePinnedArticlesAndSelection's
         // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
         // pass can never observe (and revert) this optimistic pin/selection using DB flags from
         // before this write has landed.
@@ -856,7 +856,7 @@ class HomeViewModel(
         // combine resolves this exact confirmed value onto the row once the raw query catches up, so
         // nothing changes, and it's cleared for good on the next filter switch, exactly like the
         // unstarred-pin lifecycle.
-        // Dispatched before the optimistic state below, not after — see reconcilePinnedArticles's
+        // Dispatched before the optimistic state below, not after — see reconcilePinnedArticlesAndSelection's
         // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
         // pass can never observe (and revert) this optimistic pin/selection using DB flags from
         // before this write has landed.
@@ -901,7 +901,7 @@ class HomeViewModel(
         // no unread articles left to pin at all.
         val selected = _selectedArticle.value
         val visibleUnread = if (marksSelectedRead) currentArticles().filter { it.is_read == 0L } else emptyList()
-        // Dispatched before the optimistic state below, not after — see reconcilePinnedArticles's
+        // Dispatched before the optimistic state below, not after — see reconcilePinnedArticlesAndSelection's
         // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
         // pass can never observe (and revert) this optimistic pin/selection using DB flags from
         // before this write has landed.
@@ -983,7 +983,7 @@ class HomeViewModel(
         // The selected row may have been tombstoned by a sync merge that landed while it was
         // selected. Re-pinning it would put deleted content back into the visible list, because the
         // `articles` merge step re-adds any pinned id missing from the repository result — the same
-        // reason [reconcilePinnedArticles] exists, and the same check it applies.
+        // reason [reconcilePinnedArticlesAndSelection] exists, and the same check it applies.
         if (selected.id !in articleRepository.aliveArticleFlags(listOf(selected.id))) return emptyMap()
         return mapOf(selected.id to selected.toListRow())
     }
@@ -1005,7 +1005,7 @@ class HomeViewModel(
      * *before* the write that justified it has landed — is spelled out where the read happens,
      * below.
      */
-    private suspend fun reconcilePinnedArticles() {
+    private suspend fun reconcilePinnedArticlesAndSelection() {
         val readSnapshot = _pinnedReadArticles.value
         val unstarredSnapshot = _pinnedUnstarredArticles.value
         val selectedSnapshot = _selectedArticle.value
