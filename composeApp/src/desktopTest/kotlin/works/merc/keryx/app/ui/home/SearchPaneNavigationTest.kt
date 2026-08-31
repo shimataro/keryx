@@ -1,7 +1,6 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
@@ -60,35 +59,35 @@ class SearchPaneNavigationTest {
                     HomeBackAction.None -> {}
                 }
             }
-            Box(Modifier.size(320.dp, 600.dp)) {
-                visible.forEach { pane ->
-                    when (pane) {
-                        HomePane.FeedList -> FeedListPane(
-                            vm = vm,
-                            focused = true,
-                            dragOverlay = remember { FeedDragOverlayState() },
-                            onActivated = {},
-                            onSelectionAdvance = { onDepthChange(2) },
-                        )
-                        HomePane.ArticleList -> ArticleListPane(
-                            vm = vm,
-                            focused = true,
-                            onActivated = {},
-                            onSelectionAdvance = { onDepthChange(3) },
-                            onNavigateUp = ::goBack,
-                            navigateUpEnabled = homeBackAction(layout, depth, searchScopeEntry != null) != HomeBackAction.None,
-                            onSearchClick = { vm.enterSearchScope(HomePane.ArticleList) },
-                        )
-                        // A plain stand-in for ArticleDetailPane: its own reader is a genuine
-                        // native WebView this test harness cannot host (see
-                        // ArticleDetailPaneTest.kt's own KDoc) — this test only cares about depth
-                        // transitions, not the article body.
-                        HomePane.ArticleDetail -> Box(
-                            Modifier.fillMaxSize().testTag(ARTICLE_DETAIL_STUB_TAG),
-                        ) {
-                            TooltipIconButton(tooltip = "Back", onClick = { goBack() }) {
-                                KeryxIcon(KeryxIcons.ArrowBack, contentDescription = "Back")
-                            }
+            NarrowPaneRow(visible, Modifier.size(320.dp, 600.dp)) { pane, paneModifier ->
+                when (pane) {
+                    HomePane.FeedList -> FeedListPane(
+                        vm = vm,
+                        focused = true,
+                        dragOverlay = remember { FeedDragOverlayState() },
+                        onActivated = {},
+                        modifier = paneModifier,
+                        onSelectionAdvance = { onDepthChange(2) },
+                    )
+                    HomePane.ArticleList -> ArticleListPane(
+                        vm = vm,
+                        focused = true,
+                        onActivated = {},
+                        modifier = paneModifier,
+                        onSelectionAdvance = { onDepthChange(3) },
+                        onNavigateUp = ::goBack,
+                        navigateUpEnabled = homeBackAction(layout, depth, searchScopeEntry != null) != HomeBackAction.None,
+                        onSearchClick = { vm.enterSearchScope(HomePane.ArticleList) },
+                    )
+                    // A plain stand-in for ArticleDetailPane: its own reader is a genuine
+                    // native WebView this test harness cannot host (see
+                    // ArticleDetailPaneTest.kt's own KDoc) — this test only cares about depth
+                    // transitions, not the article body.
+                    HomePane.ArticleDetail -> Box(
+                        paneModifier.fillMaxSize().testTag(ARTICLE_DETAIL_STUB_TAG),
+                    ) {
+                        TooltipIconButton(tooltip = "Back", onClick = { goBack() }) {
+                            KeryxIcon(KeryxIcons.ArrowBack, contentDescription = "Back")
                         }
                     }
                 }
@@ -97,8 +96,8 @@ class SearchPaneNavigationTest {
     }
 
     /**
-     * Mirrors `HomeScreen`'s real [PaneLayout.Dual] wiring (see `HomeScreen.kt` around lines
-     * 108-161 and 364-418), using a genuine `focusedPane: HomePane` state instead of
+     * Mirrors `HomeScreen`'s real [PaneLayout.Dual] wiring (its `focusedPane`/`goBack` state, plus
+     * the same [NarrowPaneRow] host it lays the panes out with), using a genuine `focusedPane: HomePane` state instead of
      * [NarrowHomeTestHost]'s plain depth cursor — `homeBackAction` is driven off
      * `focusedPane.ordinal + 1`, exactly as `HomeScreen`'s own `goBack()`/`navigateUpEnabled` are,
      * which is what the regression below actually depends on: at `Dual`, both
@@ -124,33 +123,29 @@ class SearchPaneNavigationTest {
                     HomeBackAction.None -> {}
                 }
             }
-            Box(Modifier.size(640.dp, 600.dp)) {
-                Row(Modifier.fillMaxSize()) {
-                    visible.forEach { pane ->
-                        when (pane) {
-                            HomePane.FeedList -> FeedListPane(
-                                vm = vm,
-                                focused = focusedPane == HomePane.FeedList,
-                                dragOverlay = remember { FeedDragOverlayState() },
-                                onActivated = { setFocusedPane(HomePane.FeedList) },
-                                modifier = Modifier.weight(1f),
-                                onSelectionAdvance = { setFocusedPane(HomePane.ArticleList) },
-                            )
-                            HomePane.ArticleList -> ArticleListPane(
-                                vm = vm,
-                                focused = focusedPane == HomePane.ArticleList,
-                                onActivated = { setFocusedPane(HomePane.ArticleList) },
-                                modifier = Modifier.weight(1f),
-                                onNavigateUp = ::goBack,
-                                navigateUpEnabled = homeBackAction(layout, focusedPane.ordinal + 1, searchScopeEntry != null) != HomeBackAction.None,
-                                onSearchClick = {
-                                    setFocusedPane(HomePane.ArticleList)
-                                    vm.enterSearchScope(HomePane.ArticleList)
-                                },
-                            )
-                            HomePane.ArticleDetail -> Box(Modifier.weight(1f).testTag(ARTICLE_DETAIL_STUB_TAG)) {}
-                        }
-                    }
+            NarrowPaneRow(visible, Modifier.size(640.dp, 600.dp)) { pane, paneModifier ->
+                when (pane) {
+                    HomePane.FeedList -> FeedListPane(
+                        vm = vm,
+                        focused = focusedPane == HomePane.FeedList,
+                        dragOverlay = remember { FeedDragOverlayState() },
+                        onActivated = { setFocusedPane(HomePane.FeedList) },
+                        modifier = paneModifier,
+                        onSelectionAdvance = { setFocusedPane(HomePane.ArticleList) },
+                    )
+                    HomePane.ArticleList -> ArticleListPane(
+                        vm = vm,
+                        focused = focusedPane == HomePane.ArticleList,
+                        onActivated = { setFocusedPane(HomePane.ArticleList) },
+                        modifier = paneModifier,
+                        onNavigateUp = ::goBack,
+                        navigateUpEnabled = homeBackAction(layout, focusedPane.ordinal + 1, searchScopeEntry != null) != HomeBackAction.None,
+                        onSearchClick = {
+                            setFocusedPane(HomePane.ArticleList)
+                            vm.enterSearchScope(HomePane.ArticleList)
+                        },
+                    )
+                    HomePane.ArticleDetail -> Box(paneModifier.testTag(ARTICLE_DETAIL_STUB_TAG)) {}
                 }
             }
         }

@@ -41,7 +41,7 @@ class CountingSqlDriver(private val delegate: SqlDriver) : SqlDriver {
      * How many single-row `getById` fetches ran — the shape an N+1 shows up as. Matched on the
      * trailing clause, not the projection: SQLDelight expands `SELECT *` into explicit columns, so
      * a `startsWith("SELECT * ...")` sentinel would silently never match. `WHERE id = ?` separates
-     * it from `getListRowsByIds` and `aliveIdsIn`, which both use `WHERE id IN`.
+     * it from `getListRowsByIds` and `aliveFlagsIn`, which both use `WHERE id IN`.
      */
     var articleGetByIdExecutions = 0
         private set

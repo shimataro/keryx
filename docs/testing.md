@@ -341,6 +341,26 @@ confirm the full navigation flow manually on a device or emulator:
 - At a tablet-width landscape wide enough to reach `PaneLayout.Triple`, the layout matches desktop
   exactly — the search field is back in the feed list sidebar, and the article list carries no
   search bar of its own. Back navigation stays disabled at every depth there, same as desktop.
+- Opening an article from partway down the article list and then going back returns to the list at
+  the same scroll position, with **no visible scroll animation** — at phone width (where the pane is
+  genuinely unmounted) and at tablet-width landscape alike (where the sliding window keeps it on
+  screen). The same holds for the feed list and for a search results list.
+- With an article open, using a notification's "show feed" action to switch to a different feed and
+  then going back opens that feed's list at the **top**, not at the previous feed's scroll position.
+- Scroll the article list down, open Search from its own icon, then close Search without picking
+  anything — the list returns to the same scroll position, not the top. Applies at every
+  `PaneLayout`, including desktop's `Triple` (this round trip stays inside `ArticleListPane`, not
+  `NarrowPaneRow`, so it isn't narrow-layout-specific).
+- With "unread only" on, select an unread article (it stays visible, shown read, while browsing) and
+  then open and close Search without picking anything — that article must still be there, still
+  shown read, not silently dropped from the list. The selection itself, and the article detail pane,
+  must also come back exactly as they were before Search opened.
+- With an article open in Search results (not the same one that was selected beforehand), mark it
+  unread from its own row and then close Search — it must show as unread, not snap back to read.
+- With an article selected (and therefore pinned read under "unread only"), have another device sync
+  a "mark unread" for that same article — it must switch to showing unread reactively, without
+  needing a filter switch or app restart. The same for a re-star synced in while browsing under
+  "unstarred" browsing of the Starred filter.
 
 **Display scaling.** Every check above must also be run at a **non-100% display scale**, on Windows
 in particular — 200% first, then 150%. The AWT menu backend was mispositioning menus and painting

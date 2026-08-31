@@ -148,7 +148,11 @@ gesture/button (`platform/BackHandler`). Nothing about the panes' own internal l
 roles, dividers, row chrome) changes between layouts; only how many are mounted at once does —
 with two deliberate exceptions, both about an affordance that has nowhere else to live once the
 panes become separate screens: the search field (see below) and the notification bell (see "Pane
-structure & tonal roles" above).
+structure & tonal roles" above). That unmounting is state-preserving: `ui/home/NarrowPaneRow.kt`
+hosts the panes so each one keeps (or gets restored to) its own scroll position across the stack's
+comings and goings, which is why **a pane added there must be emitted from its own fixed `if`, never
+a loop iteration** — every iteration of a loop shares one compose group key, so a pane that merely
+changes position is torn down and rebuilt. See that file's KDoc and `app-architecture.md`.
 `ui/home/HomePaneLayout.kt`'s `canNavigateBack(layout, depth)` is the pane-only half of "does
 going back one step actually change anything on screen" — `false` at `PaneLayout.Triple` (nothing
 ever changes there) and at `PaneLayout.Dual` depth 1→2 (the sliding window shows the same two

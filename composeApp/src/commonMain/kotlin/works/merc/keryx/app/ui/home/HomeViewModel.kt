@@ -413,7 +413,11 @@ class HomeViewModel(
 
     /**
      * The state to restore when a narrow-layout back action exits the Search scope: the pane to
-     * return focus to, and the [filter]/row selection that was active right before entering Search.
+     * return focus to, the [filter]/row selection that was active right before entering Search, and
+     * the browsing context ([pinnedRead]/[pinnedUnstarred]/[selectedArticle]/[cursorId]) active at
+     * that same moment — [selectFilter] clears all of that the instant [enterSearchScope] switches
+     * to [ArticleFilter.Search], the same as any other filter change, so it has to be carried
+     * forward here to come back at all.
      *
      * Captured only on the *first* [enterSearchScope] call after leaving Search (a re-entry while
      * already in Search — e.g. re-tapping the sidebar's own "Search" row — must not overwrite it
@@ -425,32 +429,48 @@ class HomeViewModel(
         val returnPane: HomePane,
         val filter: ArticleFilter,
         val row: FeedListRowSelection,
+        val pinnedRead: Map<String, ArticleListRow>,
+        val pinnedUnstarred: Map<String, ArticleListRow>,
+        val selectedArticle: Articles?,
+        val cursorId: String?,
     )
 
     private val _searchScopeEntry = MutableStateFlow<SearchScopeEntry?>(null)
     internal val searchScopeEntry: StateFlow<SearchScopeEntry?> = _searchScopeEntry.asStateFlow()
 
     /**
-     * Enters the Search scope, snapshotting the current filter/row/[returnPane] so [exitSearchScope]
-     * can restore them later. [returnPane] is the pane a narrow-layout back action should focus on
-     * exit — the caller's own pane, since entering Search never advances the navigation stack past
-     * it (the field itself lives on [HomePane.ArticleList], see `ArticleListPane`'s `SearchListPane`).
+     * Enters the Search scope, snapshotting the current filter/row/browsing-context/[returnPane] so
+     * [exitSearchScope] can restore them later. [returnPane] is the pane a narrow-layout back action
+     * should focus on exit — the caller's own pane, since entering Search never advances the
+     * navigation stack past it (the field itself lives on [HomePane.ArticleList], see
+     * `ArticleListPane`'s `SearchListPane`).
      */
     fun enterSearchScope(returnPane: HomePane) {
         if (_filter.value != ArticleFilter.Search) {
-            _searchScopeEntry.value = SearchScopeEntry(returnPane, _filter.value, _selectedRowInstance.value)
+            _searchScopeEntry.value = SearchScopeEntry(
+                returnPane, _filter.value, _selectedRowInstance.value,
+                _pinnedReadArticles.value, _pinnedUnstarredArticles.value,
+                _selectedArticle.value, selectionCursorId,
+            )
         }
         selectFilter(ArticleFilter.Search)
         requestSearchFocus()
     }
 
     /**
-     * Exits the Search scope, restoring the filter/row snapshotted by [enterSearchScope].
+     * Exits the Search scope, restoring the filter/row snapshotted by [enterSearchScope]
+     * synchronously, then the rest of the browsing context (pins/selection/cursor) asynchronously —
+     * see [restoreSearchScopeBrowsingContext]'s own KDoc for why the latter needs a DB read and
+     * cannot be applied inline.
      *
      * The snapshot can go stale while Search was active — its filter's target may have been
      * deleted ([validateFilterTarget]), or its row may be a [FeedListRowSelection.FeedInTag] whose
      * tag has since been collapsed (the same staleness [toggleTagExpanded] guards against for the
-     * live selection) — so both are re-validated here rather than restored verbatim.
+     * live selection) — so both are re-validated here rather than restored verbatim. The browsing
+     * context is restored only when the filter itself came back unchanged: a fallback target
+     * (deleted meanwhile) is a *different* filter than the one the snapshot's pins/selection belong
+     * to, and attaching them to it would be wrong the same way carrying a pin across an ordinary
+     * filter switch would be.
      *
      * @return The pane a narrow-layout back action should focus, or `null` if there is no snapshot
      *   to restore (Search was entered some other way, e.g. directly via [setSearchQuery] in a test).
@@ -465,7 +485,68 @@ class HomeViewModel(
             else -> entry.row
         }
         selectFilter(validatedFilter, row)
+        if (validatedFilter == entry.filter) {
+            // Stamped after selectFilter (which bumps browsingEpoch itself), so anything that
+            // changes the browsing context again before the read below lands — another filter
+            // switch, another Search round trip — is detected and this restoration backs off
+            // instead of clobbering it. See restoreSearchScopeBrowsingContext's own KDoc.
+            val epoch = browsingEpoch
+            viewModelScope.launch { restoreSearchScopeBrowsingContext(entry, epoch) }
+        }
         return entry.returnPane
+    }
+
+    /**
+     * Restores [entry]'s pinned-read/pinned-unstarred/selected-article/cursor state, resolved
+     * against the DB's *current* flags rather than replayed verbatim — a change made from the
+     * search results themselves, or one that arrived via sync while Search was active, must not be
+     * hidden behind a frozen snapshot. Only entries whose article is still alive *and* whose flags
+     * still match what was snapshotted survive.
+     *
+     * A pin the user set from inside the Search results themselves is deliberately never part of
+     * this restoration — [entry] only carries what was pinned *before* Search was entered, and
+     * restoring anything pinned during Search would resurface a possibly unrelated feed's article
+     * in the returned filter's list (see the `articles` combine's own handling of a pinned id
+     * missing from its query result).
+     *
+     * Needs a DB read (there is no other way to learn whether something changed while Search was
+     * active), so this cannot run inline inside [exitSearchScope] the way the filter/row restoration
+     * does — see [reconcilePinnedArticles]'s own KDoc for why that read is routed through
+     * [dbWriteDispatcher] rather than [dispatcher], which is the same reason it is routed that way
+     * here. [epoch] is [exitSearchScope]'s [browsingEpoch] snapshot, and pins/selection are merged
+     * in (never replacing the maps outright) so a pin set by an unrelated action that lands in the
+     * gap before this read completes is not stomped by this restoration finishing after it.
+     */
+    private suspend fun restoreSearchScopeBrowsingContext(entry: SearchScopeEntry, epoch: Int) {
+        val ids = entry.pinnedRead.keys + entry.pinnedUnstarred.keys +
+            listOfNotNull(entry.selectedArticle?.id, entry.cursorId)
+        if (ids.isEmpty()) return
+        val flags = withContext(dbWriteDispatcher) { articleRepository.aliveArticleFlags(ids) }
+        // A filter switch (or another Search round trip) that landed while this read was in flight
+        // already reset the browsing context to its own fresh state; applying this stale snapshot on
+        // top of it now would attach state that belongs to a filter no longer being shown.
+        if (epoch != browsingEpoch) return
+
+        val restoredRead = entry.pinnedRead.filterKeys { flags[it]?.isRead == 1L }
+        if (restoredRead.isNotEmpty()) _pinnedReadArticles.update { it + restoredRead }
+
+        val restoredUnstarred = entry.pinnedUnstarred.filterKeys {
+            flags[it]?.isStarred == entry.pinnedUnstarred.getValue(it).is_starred
+        }
+        if (restoredUnstarred.isNotEmpty()) _pinnedUnstarredArticles.update { it + restoredUnstarred }
+
+        // Only restored when nothing has claimed the selection/cursor in the meantime (selectFilter
+        // left both null) — an article picked from the freshly-unpinned list while this read was in
+        // flight must win over a stale snapshot from before the trip through Search.
+        val selected = entry.selectedArticle
+        if (selected != null && _selectedArticle.value == null && flags[selected.id] != null) {
+            val current = flags.getValue(selected.id)
+            _selectedArticle.value = selected.copy(is_read = current.isRead, is_starred = current.isStarred)
+            settingsRepository.mutateLocalSettings { it.copy(lastArticleId = selected.id) }
+        }
+        if (entry.cursorId != null && selectionCursorId == null && flags[entry.cursorId] != null) {
+            selectionCursorId = entry.cursorId
+        }
     }
 
     // --- Pane widths ---
@@ -656,6 +737,8 @@ class HomeViewModel(
             }
             // Marking read is unconditional (external-spec §7: read the instant it is selected), so
             // an article passed over by a fast key repeat is still marked read exactly as before.
+            // Dispatched before the optimistic pin/selection below, not after — see
+            // reconcilePinnedArticles's own KDoc for why this order is load-bearing.
             viewModelScope.launch(dbWriteDispatcher) { articleRepository.markAsRead(article.id) }
             // Nothing is selected any more — a filter switch, or an earlier hydration finding its
             // own article tombstoned — so there is nothing left to apply below.
@@ -707,10 +790,14 @@ class HomeViewModel(
     fun markSelectedUnread() {
         val current = _selectedArticle.value ?: return
         val id = current.id
-        // Optimistic: flip to unread in place (no DB read-back); persist off the UI thread.
+        // Dispatched before the optimistic state below, not after — see reconcilePinnedArticles's
+        // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
+        // pass can never observe (and revert) this optimistic unread state using DB flags from
+        // before this write has landed.
+        viewModelScope.launch(dbWriteDispatcher) { articleRepository.markAsUnread(id) }
+        // Optimistic: flip to unread in place (no DB read-back).
         _pinnedReadArticles.update { it - id }
         _selectedArticle.value = current.copy(is_read = 0L)
-        viewModelScope.launch(dbWriteDispatcher) { articleRepository.markAsUnread(id) }
     }
 
     /**
@@ -720,6 +807,13 @@ class HomeViewModel(
      */
     fun toggleRead(article: ArticleListRow) {
         val nowRead = article.is_read == 0L
+        // Dispatched before the optimistic state below, not after — see reconcilePinnedArticles's
+        // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
+        // pass can never observe (and revert) this optimistic pin/selection using DB flags from
+        // before this write has landed.
+        viewModelScope.launch(dbWriteDispatcher) {
+            if (nowRead) articleRepository.markAsRead(article.id) else articleRepository.markAsUnread(article.id)
+        }
         if (nowRead) {
             _pinnedReadArticles.update { it + (article.id to article.copy(is_read = 1L)) }
         } else {
@@ -727,9 +821,6 @@ class HomeViewModel(
         }
         if (_selectedArticle.value?.id == article.id) {
             _selectedArticle.update { it?.copy(is_read = if (nowRead) 1L else 0L) }
-        }
-        viewModelScope.launch(dbWriteDispatcher) {
-            if (nowRead) articleRepository.markAsRead(article.id) else articleRepository.markAsUnread(article.id)
         }
     }
 
@@ -756,6 +847,11 @@ class HomeViewModel(
         // combine resolves this exact confirmed value onto the row once the raw query catches up, so
         // nothing changes, and it's cleared for good on the next filter switch, exactly like the
         // unstarred-pin lifecycle.
+        // Dispatched before the optimistic state below, not after — see reconcilePinnedArticles's
+        // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
+        // pass can never observe (and revert) this optimistic pin/selection using DB flags from
+        // before this write has landed.
+        viewModelScope.launch(dbWriteDispatcher) { articleRepository.setStarred(article.id, starred = starred) }
         if (_filter.value == ArticleFilter.Starred) {
             _pinnedUnstarredArticles.update { it + (article.id to article.copy(is_starred = if (starred) 1L else 0L)) }
         } else if (starred) {
@@ -764,7 +860,6 @@ class HomeViewModel(
         if (_selectedArticle.value?.id == article.id) {
             _selectedArticle.update { it?.copy(is_starred = if (starred) 1L else 0L) }
         }
-        viewModelScope.launch(dbWriteDispatcher) { articleRepository.setStarred(article.id, starred = starred) }
     }
 
     /**
@@ -783,13 +878,40 @@ class HomeViewModel(
         // Starred's markAllAsRead is a no-op (you don't "read" the starred view), so mark-all-read
         // must not force the selected article read there; every other scope does mark it read.
         val marksSelectedRead = filter != ArticleFilter.Starred
+        val idsToMark = if (filter == ArticleFilter.Search) {
+            _rawSearchResults.value.results
+                .filter { it.article.is_read == 0L }
+                .map { it.article.id }
+        } else {
+            emptyList()
+        }
+        // Everything the optimistic update below needs is read here, *before* the write is
+        // dispatched — not after. dbWriteDispatcher is Dispatchers.Unconfined in tests (and could
+        // race a real write landing before this reads it in production), so reading `articles`
+        // after the dispatch below could already observe the post-write, all-read snapshot and see
+        // no unread articles left to pin at all.
+        val selected = _selectedArticle.value
+        val visibleUnread = if (marksSelectedRead) currentArticles().filter { it.is_read == 0L } else emptyList()
+        // Dispatched before the optimistic state below, not after — see reconcilePinnedArticles's
+        // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
+        // pass can never observe (and revert) this optimistic pin/selection using DB flags from
+        // before this write has landed.
+        viewModelScope.launch(dbWriteDispatcher) {
+            if (filter == ArticleFilter.Search) {
+                if (idsToMark.isNotEmpty()) {
+                    articleRepository.markArticlesAsRead(idsToMark)
+                    // Re-run search only after the write lands so the freshly-read state shows up.
+                    _searchRefreshTrigger.update { it + 1 }
+                }
+            } else {
+                articleRepository.markAllAsRead(filter)
+            }
+        }
         // Optimistic update: pin every currently-visible unread article in its read state so the list
         // doesn't collapse the instant the user presses "mark all read" under unread-only.
         // All pins are cleared on filter switch / refresh, so articles disappear naturally later.
-        val selected = _selectedArticle.value
         if (marksSelectedRead) {
             val nowRead = clock.nowMillis()
-            val visibleUnread = currentArticles().filter { it.is_read == 0L }
             val pins = _pinnedReadArticles.value.toMutableMap()
             visibleUnread.forEach { article ->
                 pins[article.id] = article.copy(is_read = 1L)
@@ -804,26 +926,6 @@ class HomeViewModel(
             // Starred: markAllAsRead is a no-op, don't alter read state.
             _pinnedReadArticles.value =
                 if (selected != null) mapOf(selected.id to selected.toListRow()) else emptyMap()
-        }
-        val idsToMark = if (filter == ArticleFilter.Search) {
-            _rawSearchResults.value.results
-                .filter { it.article.is_read == 0L }
-                .map { it.article.id }
-        } else {
-            emptyList()
-        }
-
-        viewModelScope.launch(dbWriteDispatcher) {
-            if (filter == ArticleFilter.Search) {
-                val ids = idsToMark
-                if (ids.isNotEmpty()) {
-                    articleRepository.markArticlesAsRead(ids)
-                    // Re-run search only after the write lands so the freshly-read state shows up.
-                    _searchRefreshTrigger.update { it + 1 }
-                }
-            } else {
-                articleRepository.markAllAsRead(filter)
-            }
         }
     }
 
@@ -870,32 +972,79 @@ class HomeViewModel(
         // selected. Re-pinning it would put deleted content back into the visible list, because the
         // `articles` merge step re-adds any pinned id missing from the repository result — the same
         // reason [reconcilePinnedArticles] exists, and the same check it applies.
-        if (selected.id !in articleRepository.aliveArticleIds(listOf(selected.id))) return emptyMap()
+        if (selected.id !in articleRepository.aliveArticleFlags(listOf(selected.id))) return emptyMap()
         return mapOf(selected.id to selected.toListRow())
     }
 
     /**
-     * Removes pinned (read or unstarred) articles that have been deleted.
+     * Revalidates every optimistic pin (and the current selection's cached flags) against the DB's
+     * current state, so a pin can never hide an external change forever.
+     *
+     * [_pinnedReadArticles]/[_pinnedUnstarredArticles] intentionally show a value that outruns the
+     * DB while their own write is still in flight (see each of [selectArticle]/[toggleRead]/
+     * [toggleStar]/[markAllRead]/[markSelectedUnread]'s own comments) — but nothing here ever
+     * re-checks that the DB actually caught up, so a pin that started as "optimistic" could
+     * otherwise stay wrong forever once something *external* changes the same article: another
+     * device's sync propagating a "mark unread" or a restar, or a soft-delete tombstone. This runs
+     * on every write to `articles` (via the `articleChangeSignal` collector below) precisely so
+     * such a change surfaces promptly rather than staying hidden until the next filter switch.
+     *
+     * The concurrency argument this relies on — that a pin observed here can never be checked
+     * *before* the write that justified it has landed — is spelled out where the read happens,
+     * below.
      */
-    private fun reconcilePinnedArticles() {
+    private suspend fun reconcilePinnedArticles() {
         val readSnapshot = _pinnedReadArticles.value
         val unstarredSnapshot = _pinnedUnstarredArticles.value
-        if (readSnapshot.isEmpty() && unstarredSnapshot.isEmpty()) return
-        // Resolved with ONE query covering both maps, outside the update lambdas. Per-pin getById
-        // was both an N+1 (each one a full row on its own connection) and inside a CAS retry loop
-        // that can re-run it; "mark all read" sizes the read map to the whole visible list, and this
-        // runs on every articles write.
-        val alive = articleRepository.aliveArticleIds(readSnapshot.keys + unstarredSnapshot.keys)
+        val selectedSnapshot = _selectedArticle.value
+        if (readSnapshot.isEmpty() && unstarredSnapshot.isEmpty() && selectedSnapshot == null) return
+        // Resolved with ONE query covering all three, outside the update lambdas below. Per-pin
+        // getById was both an N+1 (each one a full row on its own connection) and inside a CAS retry
+        // loop that can re-run it; "mark all read" sizes the read map to the whole visible list, and
+        // this runs on every articles write.
+        //
+        // Read via dbWriteDispatcher, not the `dispatcher` this function itself runs on (see the
+        // articleChangeSignal collector in init, below) — deliberately, and this is the ordering
+        // argument every optimistic-update call site above points back to. _pinnedReadArticles/
+        // _pinnedUnstarredArticles/_selectedArticle are all MutableStateFlow, so if this function
+        // observes a given pin/selection value, the Main-thread write that produced it has already
+        // happened (StateFlow's memory-visibility guarantee) — and every call site that sets one of
+        // these now dispatches its DB write to dbWriteDispatcher strictly *before* that state update,
+        // so that write was necessarily enqueued on dbWriteDispatcher before this value became
+        // observable. Reading here through the same dbWriteDispatcher — which runs everything
+        // dispatched to it in FIFO order (limitedParallelism(1)) — therefore guarantees this read
+        // executes *after* that write lands, never seeing a stale pre-write value that would
+        // otherwise make this function incorrectly drop a still-valid optimistic pin/selection. This
+        // is not "same thread, so it's safe" — the two sides run on different dispatchers.
+        val ids = readSnapshot.keys + unstarredSnapshot.keys + listOfNotNull(selectedSnapshot?.id)
+        val flags = withContext(dbWriteDispatcher) { articleRepository.aliveArticleFlags(ids) }
         if (readSnapshot.isNotEmpty()) {
             _pinnedReadArticles.update { pinned ->
-                // Keys added since the snapshot are kept: they were just pinned, so they are alive by
-                // construction, and `alive` has no verdict on them.
-                pinned.filterKeys { it in alive || it !in readSnapshot }
+                // Keys added since the snapshot are kept: they were just pinned, so `flags` has no
+                // verdict on them. A pin whose article is alive but no longer actually read (an
+                // external "mark unread", or a soft-delete tombstone) is dropped too — this map must
+                // hold only is_read == 1 entries, since the unread-only filter trusts membership
+                // alone (see its own declaration).
+                pinned.filterKeys { it !in readSnapshot || flags[it]?.isRead == 1L }
             }
         }
         if (unstarredSnapshot.isNotEmpty()) {
             _pinnedUnstarredArticles.update { pinned ->
-                pinned.filterKeys { it in alive || it !in unstarredSnapshot }
+                // Same idea for the starred pin: dropped once the article's current is_starred no
+                // longer matches what was optimistically pinned (deleted, or externally re-starred),
+                // not just once it is deleted.
+                pinned.filterKeys { it !in unstarredSnapshot || flags[it]?.isStarred == pinned.getValue(it).is_starred }
+            }
+        }
+        // Keeps the detail pane's toolbar (read/star toggle state) from staying stale forever behind
+        // an external change, the same way the two pins above do for the list. Body/title are left
+        // alone — this only ever revalidates the two flags, never re-fetches content.
+        selectedSnapshot?.let { selected ->
+            val current = flags[selected.id] ?: return@let
+            if (current.isRead != selected.is_read || current.isStarred != selected.is_starred) {
+                _selectedArticle.update {
+                    if (it?.id == selected.id) it.copy(is_read = current.isRead, is_starred = current.isStarred) else it
+                }
             }
         }
     }

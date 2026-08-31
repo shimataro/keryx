@@ -360,70 +360,70 @@ fun HomeScreen() {
                 } else {
                     // Single/Dual: no resizable dividers (nothing to drag on a phone/narrow window)
                     // and no persisted pane widths — visible panes just split the width evenly.
-                    // See HomePaneLayout.kt's visiblePanes for what's shown at each depth.
+                    // See HomePaneLayout.kt's visiblePanes for what's shown at each depth, and
+                    // NarrowPaneRow for why the panes are emitted from fixed positions there
+                    // rather than iterated over (it is what preserves each pane's scroll position
+                    // across the stack's comings and goings).
                     val visible = visiblePanes(layout, focusedPane.ordinal + 1)
-                    Row(Modifier.fillMaxSize()) {
-                        val paneModifier = if (visible.size > 1) Modifier.weight(1f) else Modifier.fillMaxSize()
-                        visible.forEach { pane ->
-                            when (pane) {
-                                HomePane.FeedList -> FeedListPane(
-                                    vm,
-                                    focused = focusedPane == HomePane.FeedList && keyboardNavActive,
-                                    dragOverlay = dragOverlay,
-                                    onActivated = { setFocusedPane(HomePane.FeedList) },
-                                    modifier = paneModifier,
-                                    onAddFeedClick = { showAddFeed = true },
-                                    onTextInputFocusChange = { feedListTextInputFocused = it },
-                                    renameSelectedRequestId = feedListRenameRequestId,
-                                    deleteSelectedRequestId = feedListDeleteRequestId,
-                                    onSelectionAdvance = { setFocusedPane(HomePane.ArticleList) },
-                                    // The bell lives in ArticleListPane's header everywhere it is
-                                    // on screen; this pane only has to host it when it isn't —
-                                    // PaneLayout.Single's depth 1. Derived from `visible` rather
-                                    // than from a layout/depth check of its own, so the two panes
-                                    // can never both draw one (or both skip it).
-                                    notifVm = notifVm.takeIf { HomePane.ArticleList !in visible },
-                                )
-                                HomePane.ArticleList -> ArticleListPane(
-                                    vm,
-                                    focused = focusedPane == HomePane.ArticleList && keyboardNavActive,
-                                    onActivated = { setFocusedPane(HomePane.ArticleList) },
-                                    modifier = paneModifier,
-                                    notifVm = notifVm,
-                                    onSelectionAdvance = { setFocusedPane(HomePane.ArticleDetail) },
-                                    // Every narrow layout gives this pane its own back-button row
-                                    // (the Triple branch above passes none at all), and only the
-                                    // button's enabled state tracks whether there is anywhere to go
-                                    // back to — see homeBackAction's own KDoc (None at Dual depth
-                                    // 1->2 outside Search, where the feed list is still on screen
-                                    // beside this pane). Hiding the row instead would shift the
-                                    // controls row and the whole list under it every time Dual slides.
-                                    onNavigateUp = ::goBack,
-                                    navigateUpEnabled = backAction != HomeBackAction.None,
-                                    onTextInputFocusChange = { articleListTextInputFocused = it },
-                                    // Only outside the Search scope: once already there, there is
-                                    // nowhere further to advance to (see ArticleListTopBar's own
-                                    // KDoc on onSearchClick). Doesn't advance the navigation stack —
-                                    // the field lives on this same pane (see enterSearchScope's own
-                                    // KDoc on returnPane). setFocusedPane is still required at
-                                    // PaneLayout.Dual: the search icon's own onClick never reaches
-                                    // paneActivation (a separate, unchained click handler — see
-                                    // ArticleListPaneContent), so without this, focusedPane could
-                                    // still be FeedList (both panes are on screen at Dual) and
-                                    // homeBackAction would never resolve to ExitSearch.
-                                    onSearchClick = {
-                                        setFocusedPane(HomePane.ArticleList)
-                                        vm.enterSearchScope(HomePane.ArticleList)
-                                    },
-                                )
-                                HomePane.ArticleDetail -> ArticleDetailPane(
-                                    vm,
-                                    modifier = paneModifier,
-                                    onActivated = { setFocusedPane(HomePane.ArticleDetail) },
-                                    copyPulse = copyPulse,
-                                    onNavigateUp = ::goBack,
-                                )
-                            }
+                    NarrowPaneRow(visible, Modifier.fillMaxSize()) { pane, paneModifier ->
+                        when (pane) {
+                            HomePane.FeedList -> FeedListPane(
+                                vm,
+                                focused = focusedPane == HomePane.FeedList && keyboardNavActive,
+                                dragOverlay = dragOverlay,
+                                onActivated = { setFocusedPane(HomePane.FeedList) },
+                                modifier = paneModifier,
+                                onAddFeedClick = { showAddFeed = true },
+                                onTextInputFocusChange = { feedListTextInputFocused = it },
+                                renameSelectedRequestId = feedListRenameRequestId,
+                                deleteSelectedRequestId = feedListDeleteRequestId,
+                                onSelectionAdvance = { setFocusedPane(HomePane.ArticleList) },
+                                // The bell lives in ArticleListPane's header everywhere it is
+                                // on screen; this pane only has to host it when it isn't —
+                                // PaneLayout.Single's depth 1. Derived from `visible` rather
+                                // than from a layout/depth check of its own, so the two panes
+                                // can never both draw one (or both skip it).
+                                notifVm = notifVm.takeIf { HomePane.ArticleList !in visible },
+                            )
+                            HomePane.ArticleList -> ArticleListPane(
+                                vm,
+                                focused = focusedPane == HomePane.ArticleList && keyboardNavActive,
+                                onActivated = { setFocusedPane(HomePane.ArticleList) },
+                                modifier = paneModifier,
+                                notifVm = notifVm,
+                                onSelectionAdvance = { setFocusedPane(HomePane.ArticleDetail) },
+                                // Every narrow layout gives this pane its own back-button row
+                                // (the Triple branch above passes none at all), and only the
+                                // button's enabled state tracks whether there is anywhere to go
+                                // back to — see homeBackAction's own KDoc (None at Dual depth
+                                // 1->2 outside Search, where the feed list is still on screen
+                                // beside this pane). Hiding the row instead would shift the
+                                // controls row and the whole list under it every time Dual slides.
+                                onNavigateUp = ::goBack,
+                                navigateUpEnabled = backAction != HomeBackAction.None,
+                                onTextInputFocusChange = { articleListTextInputFocused = it },
+                                // Only outside the Search scope: once already there, there is
+                                // nowhere further to advance to (see ArticleListTopBar's own
+                                // KDoc on onSearchClick). Doesn't advance the navigation stack —
+                                // the field lives on this same pane (see enterSearchScope's own
+                                // KDoc on returnPane). setFocusedPane is still required at
+                                // PaneLayout.Dual: the search icon's own onClick never reaches
+                                // paneActivation (a separate, unchained click handler — see
+                                // ArticleListPaneContent), so without this, focusedPane could
+                                // still be FeedList (both panes are on screen at Dual) and
+                                // homeBackAction would never resolve to ExitSearch.
+                                onSearchClick = {
+                                    setFocusedPane(HomePane.ArticleList)
+                                    vm.enterSearchScope(HomePane.ArticleList)
+                                },
+                            )
+                            HomePane.ArticleDetail -> ArticleDetailPane(
+                                vm,
+                                modifier = paneModifier,
+                                onActivated = { setFocusedPane(HomePane.ArticleDetail) },
+                                copyPulse = copyPulse,
+                                onNavigateUp = ::goBack,
+                            )
                         }
                     }
                 }
