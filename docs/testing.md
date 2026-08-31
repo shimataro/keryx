@@ -710,8 +710,9 @@ device/emulator:
   the OS's largest display size.
 - At a phone width, in Settings ▸ Cloud sync with a provider connected: the provider name fits on
   one line and the two trailing icon buttons sit beside it on the same row (including at the OS's
-  largest display size combined with the app's largest font size). On an unconnected row the connect
-  button reads as a `primary` fill, reset as an `errorContainer` fill, and disconnect as an outline —
-  all three distinguishable against the row's teal background. Long-press each icon to check its
+  largest display size combined with the app's largest font size).
+  - On an unconnected row, verify that the connect button reads as a `primary` fill.
+  - On a connected row, verify that reset uses an `errorContainer` fill and disconnect uses an outline;
+    both remain distinguishable against the connected row's teal background. Long-press each icon to check its
   tooltip. While a reset is running, the spinner is visible against its container and the row's
   height doesn't change. Check in both light and dark themes.
