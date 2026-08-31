@@ -2,7 +2,10 @@ package works.merc.keryx.app.ui.settings
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,8 +24,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.DrawableResource
@@ -276,7 +281,19 @@ private fun ProviderActionButton(
         IconButtonKind.Primary -> FlatButton(onClick = onClick, enabled = enabled, content = labelled)
         IconButtonKind.Destructive ->
             FlatTonalButton(onClick = onClick, enabled = enabled, destructive = true, content = labelled)
-        else -> FlatTonalButton(onClick = onClick, enabled = enabled, content = labelled)
+        // Outlined, not tonal-filled: a tonal fill is `secondaryContainer`, which is exactly the
+        // tone CloudProviderRow's connected row itself is painted with (see IconButtonKind's own
+        // KDoc) — a filled button here would vanish into its own row.
+        IconButtonKind.Secondary ->
+            Box(
+                Modifier
+                    .clip(MaterialTheme.shapes.small)
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.small)
+                    .clickable(onClick = onClick, enabled = enabled, role = Role.Button)
+                    .padding(horizontal = 20.dp, vertical = 10.dp)
+                    .alpha(if (enabled) 1f else 0.38f),
+            ) { labelled() }
+        IconButtonKind.Standard -> FlatTonalButton(onClick = onClick, enabled = enabled, content = labelled)
     }
 }
 
