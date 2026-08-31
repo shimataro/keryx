@@ -2305,6 +2305,33 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun markAllReadAfterMarkSelectedUnreadInSearchMarksSelectedArticleRead() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content")
+        ftsManagerIndexed(driver)
+        // Use a controllable dispatcher so markSelectedUnread()'s unread write stays queued until
+        // markAllRead() has already inspected the stale search snapshot.
+        val vm = newViewModel(dbWriteDispatcher = StandardTestDispatcher(testScheduler))
+        subscribeAll(vm)
+        vm.setSearchQuery("Kotlin")
+        advanceForSearchDebounce()
+
+        val article1 = db.articlesQueries.getById("a1").executeAsOne()
+        vm.selectArticle(article1.toListRow())
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+
+        vm.markSelectedUnread()
+        // Do not advance: the unread DB write is still queued and _rawSearchResults still reflects
+        // the pre-unread snapshot, so markAllRead() must not treat the operation as a no-op.
+        vm.markAllRead()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+        assertEquals(1L, vm.selectedArticle.value?.is_read)
+    }
+
+    @Test
     fun toggleSortHasNoEffectOnSearchResultsOrdering() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Zzz Kotlin", content = "kotlin kotlin kotlin filler padding words")

@@ -53,6 +53,10 @@ internal fun NarrowPaneRow(
     paneState: SaveableStateHolder = rememberSaveableStateHolder(),
     pane: @Composable (HomePane, Modifier) -> Unit,
 ) {
+    require(HomePane.entries.size == 3) {
+        "NarrowPaneRow's unrolled pane layout assumes exactly three HomePane entries; " +
+            "add a new fixed branch when expanding HomePane."
+    }
     Row(modifier) {
         val paneModifier = if (visible.size > 1) Modifier.weight(1f) else Modifier.fillMaxSize()
         if (HomePane.FeedList in visible) {

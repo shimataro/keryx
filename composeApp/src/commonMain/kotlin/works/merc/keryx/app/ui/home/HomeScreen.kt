@@ -125,11 +125,11 @@ fun HomeScreen() {
     // keyboard shortcuts step aside and let typed letters/arrows reach it (they'd otherwise be
     // swallowed by homeKeyboardShortcuts).
     val textInputFocused = feedListTextInputFocused || articleListTextInputFocused
-    // Mirrors BoxWithConstraints' own `paneLayoutFor(maxWidth)` so focusSearch() (Cmd+F / the menu
-    // bar's "Search…") can route to whichever pane currently owns the field: FeedListPane at
-    // PaneLayout.Triple, ArticleListPane's SearchListPane at a narrow layout (see FeedListPane's own
-    // KDoc on why the field moves there). Initialized to Triple so desktop is already correct on
-    // the very first frame, before BoxWithConstraints below has measured anything.
+    // Hoists the value of `paneLayoutFor(maxWidth)` from the `BoxWithConstraints` scope below so
+    // that code outside that scope — `focusSearch()`, `goBack()`, keyboard shortcuts, and
+    // `PendingNotificationActionHost` — can read the current layout. Initialized to Triple so
+    // desktop is already correct on the very first frame, before `BoxWithConstraints` has measured
+    // anything.
     var paneLayout by remember { mutableStateOf(PaneLayout.Triple) }
     // Whether HomeScreen has already clamped focusedPane for a narrow layout at least once this
     // session — see the one-shot LaunchedEffect inside BoxWithConstraints below for why this must
