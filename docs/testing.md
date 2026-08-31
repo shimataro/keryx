@@ -708,3 +708,10 @@ device/emulator:
   never two.
 - With cloud sync connected, the feed list toolbar's five icons fit without wrapping, including at
   the OS's largest display size.
+- At a phone width, in Settings ▸ Cloud sync with a provider connected: the provider name fits on
+  one line and the two trailing icon buttons sit beside it on the same row (including at the OS's
+  largest display size combined with the app's largest font size). On an unconnected row the connect
+  button reads as a `primary` fill, reset as an `errorContainer` fill, and disconnect as an outline —
+  all three distinguishable against the row's teal background. Long-press each icon to check its
+  tooltip. While a reset is running, the spinner is visible against its container and the row's
+  height doesn't change. Check in both light and dark themes.

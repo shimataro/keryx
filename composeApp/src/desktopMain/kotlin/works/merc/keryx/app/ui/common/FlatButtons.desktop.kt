@@ -49,17 +49,20 @@ actual fun FlatTonalButton(
     onClick: () -> Unit,
     modifier: Modifier,
     enabled: Boolean,
+    destructive: Boolean,
     content: @Composable () -> Unit,
 ) {
-    val background = if (enabled) {
-        MaterialTheme.colorScheme.secondaryContainer
-    } else {
-        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+    // Only the enabled palette varies with `destructive`: a disabled button carries no meaning to
+    // color, so it keeps the same neutral onSurface 12%/38% dim either way.
+    val background = when {
+        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+        destructive -> MaterialTheme.colorScheme.errorContainer
+        else -> MaterialTheme.colorScheme.secondaryContainer
     }
-    val contentColor = if (enabled) {
-        MaterialTheme.colorScheme.onSecondaryContainer
-    } else {
-        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    val contentColor = when {
+        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+        destructive -> MaterialTheme.colorScheme.onErrorContainer
+        else -> MaterialTheme.colorScheme.onSecondaryContainer
     }
     Box(
         modifier

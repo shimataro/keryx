@@ -59,9 +59,11 @@ composeApp/src/
     Direction" in external-spec.md), `ListRowChrome.android.kt`'s `listRowSurface` (a pill-shaped
     `NavigationDrawerItem`-style highlight for `ListRowKind.NavItem` rows, full-bleed for
     `ListRowKind.ListItem` rows — see that file's own KDoc), TooltipIconButton/ToolbarIconGroup/
-    FlatTooltipContent (a plain M3 `IconButton` + `TooltipBox` with its own native long-press
-    trigger, an unadorned `Row` instead of desktop's macOS-toolbar-style capsule, and M3's own
-    `PlainTooltip`, respectively), KeryxRaisedSurface (a distinctly-tinted
+    FlatTooltipContent (M3's own icon-button family inside a `TooltipBox` with its own native
+    long-press trigger — `IconButtonKind` picks the member: `IconButton` (`Standard`),
+    `FilledIconButton` (`Primary`), `OutlinedIconButton` (`Secondary`) and `FilledTonalIconButton`
+    recolored to `errorContainer` (`Destructive`) — an unadorned `Row` instead of desktop's
+    macOS-toolbar-style capsule, and M3's own `PlainTooltip`, respectively), KeryxRaisedSurface (a distinctly-tinted
     `colorScheme.surfaceContainerHigh` tonal container instead of desktop's hairline-bordered flat
     card), KeryxBadgedIcon (M3's own `BadgedBox`/`Badge` instead of desktop's hand-rolled pill —
     used by `NotificationsBell`), KeryxSettingRow (a real M3 `ListItem`, whose own tap target covers

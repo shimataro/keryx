@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,18 +23,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.CloudStorageType
+import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.ui.common.FlatButton
 import works.merc.keryx.app.ui.common.FlatTonalButton
+import works.merc.keryx.app.ui.common.IconButtonKind
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.SmallSpinner
+import works.merc.keryx.app.ui.common.TooltipIconButton
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_abort
 import works.merc.keryx.app.resources.common_cancel
@@ -217,17 +222,78 @@ private fun CloudStorageType.disconnectLabel(): StringResource = when (this) {
 }
 
 /**
+ * One trailing action on a provider row: a labelled button on desktop, an icon-only
+ * [TooltipIconButton] on a touch-primary platform. Two labelled buttons plus the provider name
+ * cannot fit a phone-width settings dialog in any locale (they need ~340-366dp of ~288dp), which
+ * used to squeeze the name onto four lines.
+ *
+ * [kind] is the one emphasis axis, rendered by each platform's own means: the icon-only button
+ * takes it as its container, while labelled it selects the button component (`Primary` -> the
+ * filled `FlatButton`, `Destructive` -> `FlatTonalButton(destructive = true)`, anything else -> a
+ * plain `FlatTonalButton`). The glyph therefore never needs its own tint — it inherits the
+ * container's content color (`onPrimary` / `onErrorContainer`) on both platforms.
+ *
+ * @param busy Swaps the glyph for a spinner in the same fixed slot, so the swap can't reflow.
+ * @param iconOnly Overridable for tests only (mirrors `listRowMinHeight`'s own parameter).
+ */
+@Composable
+private fun ProviderActionButton(
+    label: String,
+    icon: DrawableResource,
+    onClick: () -> Unit,
+    kind: IconButtonKind,
+    enabled: Boolean = true,
+    busy: Boolean = false,
+    iconOnly: Boolean = isTouchPrimary,
+) {
+    // 18dp keeps desktop's labelled buttons exactly as they look today; 20dp matches the row's own
+    // brand mark inside the bare icon buttons.
+    val glyphSize = if (iconOnly) 20.dp else 18.dp
+    val glyph: @Composable () -> Unit = {
+        if (busy) {
+            // Follow the container's content color: a primary-filled container would otherwise
+            // hide SmallSpinner's own `primary` default entirely.
+            SmallSpinner(size = glyphSize, color = LocalContentColor.current)
+        } else {
+            // Icon-only: the glyph is the sole carrier of the label (as at every other
+            // TooltipIconButton call site — neither actual sets an onClickLabel). Labelled: the
+            // Text beside it announces the action, so the glyph is decorative.
+            KeryxIcon(icon, contentDescription = label.takeIf { iconOnly }, modifier = Modifier.size(glyphSize))
+        }
+    }
+    if (iconOnly) {
+        TooltipIconButton(tooltip = label, onClick = onClick, enabled = enabled, kind = kind, content = glyph)
+        return
+    }
+    val labelled: @Composable () -> Unit = {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            glyph()
+            Spacer(Modifier.width(8.dp))
+            Text(label)
+        }
+    }
+    when (kind) {
+        IconButtonKind.Primary -> FlatButton(onClick = onClick, enabled = enabled, content = labelled)
+        IconButtonKind.Destructive ->
+            FlatTonalButton(onClick = onClick, enabled = enabled, destructive = true, content = labelled)
+        else -> FlatTonalButton(onClick = onClick, enabled = enabled, content = labelled)
+    }
+}
+
+/**
  * Displays a cloud provider's connection state, available actions, and synchronization details.
  *
  * @param lastSyncedAtText Formatted time of the provider's most recent synchronization, or null.
  * @param lastSyncErrorText Localized explanation of the provider's current synchronization failure, or null.
+ * @param iconOnly Whether the trailing actions drop their labels — see [ProviderActionButton]. Only
+ *   overridden by tests; production always takes the platform's own answer.
  * @param onSelect Invoked to select or connect the provider.
  * @param onCancel Invoked to abort an in-progress connection.
  * @param onDisconnect Invoked to disconnect the provider.
  * @param onResetCloudData Invoked to reset the provider's cloud data.
  */
 @Composable
-private fun CloudProviderRow(
+internal fun CloudProviderRow(
     type: CloudStorageType,
     connected: Boolean,
     connecting: Boolean,
@@ -237,6 +303,7 @@ private fun CloudProviderRow(
     lastSyncedAtText: String? = null,
     lastSyncErrorText: String? = null,
     resetting: Boolean = false,
+    iconOnly: Boolean = isTouchPrimary,
     onSelect: () -> Unit,
     onCancel: () -> Unit,
     onDisconnect: () -> Unit,
@@ -270,60 +337,66 @@ private fun CloudProviderRow(
                     contentDescription = null,
                     modifier = Modifier.size(20.dp),
                 )
-                Text(type.brandLabel(), style = MaterialTheme.typography.bodyMedium, color = contentColor)
+                Text(
+                    type.brandLabel(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = contentColor,
+                    // A `Row` measures its non-weighted children first, so the trailing actions
+                    // always take their intrinsic width and only the remainder reaches the name.
+                    // Truncating here is what keeps that remainder from becoming four wrapped lines.
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
             if (connected) {
                 // Disabled during a switch (old provider's revoke in flight, connectingType != null)
                 // or a reset in progress, so neither destructive action can be re-triggered mid-op.
                 val enabled = idleEnabled && !resetting
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    FlatTonalButton(onClick = onResetCloudData, enabled = enabled) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (resetting) {
-                                SmallSpinner(size = 18.dp)
-                            } else {
-                                KeryxIcon(
-                                    KeryxIcons.RestartAlt,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                            Spacer(Modifier.width(8.dp))
-                            Text(stringResource(Res.string.settings_cloud_reset))
-                        }
-                    }
-                    FlatTonalButton(onClick = onDisconnect, enabled = enabled) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            KeryxIcon(
-                                KeryxIcons.LinkOff,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(stringResource(type.disconnectLabel()))
-                        }
-                    }
+                    ProviderActionButton(
+                        label = stringResource(Res.string.settings_cloud_reset),
+                        icon = KeryxIcons.Delete,
+                        onClick = onResetCloudData,
+                        kind = IconButtonKind.Destructive,
+                        enabled = enabled,
+                        busy = resetting,
+                        iconOnly = iconOnly,
+                    )
+                    ProviderActionButton(
+                        label = stringResource(type.disconnectLabel()),
+                        icon = KeryxIcons.LinkOff,
+                        onClick = onDisconnect,
+                        kind = IconButtonKind.Secondary,
+                        enabled = enabled,
+                        iconOnly = iconOnly,
+                    )
                 }
             } else if (connecting && canCancel) {
-                // Still waiting on the OAuth browser redirect — offer an explicit abort.
-                FlatTonalButton(onClick = onCancel) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        SmallSpinner()
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(Res.string.common_abort))
-                    }
+                // Still waiting on the OAuth browser redirect — offer an explicit abort. Labelled,
+                // the spinner rides inside the button (as it always has); icon-only it needs its own
+                // slot, so the button can keep showing the abort glyph instead of progress.
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (iconOnly) SmallSpinner(size = 20.dp) // matches the icon-only glyph size beside it
+                    ProviderActionButton(
+                        label = stringResource(Res.string.common_abort),
+                        icon = KeryxIcons.CloseOutlined,
+                        onClick = onCancel,
+                        kind = IconButtonKind.Secondary,
+                        busy = !iconOnly,
+                        iconOnly = iconOnly,
+                    )
                 }
             } else {
                 // Idle, or past the cancellable window (finishing up: saving tokens/settings/syncing).
-                FlatButton(onClick = onSelect, enabled = idleEnabled) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (connecting) {
-                            SmallSpinner()
-                            Spacer(Modifier.width(8.dp))
-                        }
-                        Text(stringResource(type.connectLabel()))
-                    }
-                }
+                ProviderActionButton(
+                    label = stringResource(type.connectLabel()),
+                    icon = KeryxIcons.Link,
+                    onClick = onSelect,
+                    kind = IconButtonKind.Primary,
+                    enabled = idleEnabled,
+                    busy = connecting,
+                    iconOnly = iconOnly,
+                )
             }
         }
         // Last-synced shown as a subtitle under the provider name (only non-null for the connected

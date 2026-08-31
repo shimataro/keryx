@@ -173,7 +173,7 @@ private fun NotificationRow(
             // inline below the message (the popup is too narrow to place it alongside).
             if (action == AppNotificationAction.ResetCloudData) {
                 Spacer(Modifier.height(6.dp))
-                FlatTonalButton(onClick = onRequestHostAction) {
+                FlatTonalButton(onClick = onRequestHostAction, destructive = true) {
                     Text(stringResource(Res.string.settings_cloud_reset))
                 }
             }

@@ -41,6 +41,7 @@ expect object KeryxIcons {
     val ContentCopy: DrawableResource
     val Circle: DrawableResource
     val CreateNewFolder: DrawableResource
+    val Delete: DrawableResource
     val DeleteSweep: DrawableResource
     val DoneAll: DrawableResource
     val DragHandle: DrawableResource
@@ -48,6 +49,7 @@ expect object KeryxIcons {
     val FileDownload: DrawableResource
     val FileUpload: DrawableResource
     val Info: DrawableResource
+    val Link: DrawableResource
     val LinkOff: DrawableResource
     val NewLabel: DrawableResource
     val Notifications: DrawableResource
