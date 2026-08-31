@@ -153,6 +153,18 @@ hosts the panes so each one keeps (or gets restored to) its own scroll position 
 comings and goings, which is why **a pane added there must be emitted from its own fixed `if`, never
 a loop iteration** — every iteration of a loop shares one compose group key, so a pane that merely
 changes position is torn down and rebuilt. See that file's KDoc and `app-architecture.md`.
+
+One case deliberately opts out of that preservation: at `PaneLayout.Single`'s depth 1 the article
+list pane isn't on screen at all, so a feed-list row selection is always an *entrance* into it, even
+when the row names the filter already active — restoring a stale scroll position (and the stale
+read/star pins that go with it, see "Optimistic read/star pins" in `app-architecture.md`) would be
+wrong there in a way it isn't when the pane is already visible. `FeedListPane`'s
+`onEnterArticleList` fires right before the row's own `vm.selectFilter`, and `HomeScreen` uses it to
+call `NarrowPaneRow`'s hoisted `SaveableStateHolder.removeState(HomePane.ArticleList)` — discarding
+the saved state outright rather than letting it be restored — while its own non-nullness also
+becomes `selectFilter`'s `reentering` argument, forcing the same-filter early return past its guard
+so the browsing context is rebuilt fresh.
+
 `ui/home/HomePaneLayout.kt`'s `canNavigateBack(layout, depth)` is the pane-only half of "does
 going back one step actually change anything on screen" — `false` at `PaneLayout.Triple` (nothing
 ever changes there) and at `PaneLayout.Dual` depth 1→2 (the sliding window shows the same two
@@ -191,7 +203,11 @@ are `null` at `PaneLayout.Triple` and non-null otherwise — **not** a `PaneLayo
 `isTouchPrimary` parameter passed down. `isTouchPrimary` in particular would be wrong here: a
 touch-primary Android device in landscape at a tablet width can still resolve `PaneLayout.Triple`
 (the same threshold desktop uses), where the field must stay in `FeedListPane` exactly as it does
-on desktop.
+on desktop. `FeedListPane`'s `onEnterArticleList` (the entrance exception described earlier in
+this section) is *not* built on this same boundary, despite living on the same composable: it's
+`null` at `PaneLayout.Dual` too, since the article list stays visible there the whole time —
+non-null only where that pane isn't on screen to return to at all, i.e. `Single`'s depth 1
+specifically.
 
 `HomeViewModel.pendingSearchFocus` is a latched `StateFlow<Boolean>`, not a one-shot
 `SharedFlow` — requests from the collapsed bar and narrow-layout menu-bar Search can be raised

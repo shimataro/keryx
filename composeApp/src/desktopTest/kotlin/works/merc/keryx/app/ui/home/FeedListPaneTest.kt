@@ -59,6 +59,7 @@ class FeedListPaneTest {
         vm: HomeViewModel,
         height: Dp,
         onSelectionAdvance: (() -> Unit)? = null,
+        onEnterArticleList: (() -> Unit)? = null,
         onTextInputFocusChange: (Boolean) -> Unit = {},
     ) {
         KoinApplication(configuration = koinConfiguration { modules(module { single { testMenuController } }) }) {
@@ -69,6 +70,7 @@ class FeedListPaneTest {
                     dragOverlay = remember { FeedDragOverlayState() },
                     onActivated = {},
                     onSelectionAdvance = onSelectionAdvance,
+                    onEnterArticleList = onEnterArticleList,
                     onTextInputFocusChange = onTextInputFocusChange,
                 )
             }
@@ -393,6 +395,35 @@ class FeedListPaneTest {
             waitForIdle()
 
             onNodeWithText("kotlin").assertIsDisplayed()
+        } finally {
+            fixture.close()
+            driver.close()
+        }
+    }
+
+    @Test
+    fun onEnterArticleListFiresEvenWhenReselectingTheAlreadyActiveFilter() = runDesktopComposeUiTest {
+        // At PaneLayout.Single's depth 1, tapping a row is always an entrance into the article list
+        // pane, even when it names the filter already active — unlike onSelectionAdvance alone
+        // (which HomeViewModel.selectFilter would otherwise no-op on), this callback must still
+        // fire so the caller can discard that pane's saved scroll state. See HomeViewModel's own
+        // `reentering` param and FeedListPane's onEnterArticleList KDoc.
+        val (driver, db) = inMemoryDb()
+        val fixture = newHomeViewModel(driver, db)
+        val vm = fixture.vm
+        var enterCount = 0
+        try {
+            vm.selectFilter(ArticleFilter.All)
+            setContent {
+                FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = {}, onEnterArticleList = { enterCount++ })
+            }
+            waitForIdle()
+
+            onNodeWithText("すべてのフィード").performClick()
+            waitForIdle()
+
+            assertEquals(ArticleFilter.All, vm.filter.value)
+            assertEquals(1, enterCount)
         } finally {
             fixture.close()
             driver.close()

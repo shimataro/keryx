@@ -12,6 +12,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.SaveableStateHolder
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -51,8 +53,13 @@ class NarrowPaneRowTest {
     }
 
     @Composable
-    private fun Host(layout: PaneLayout, depth: Int, onArticleListState: (LazyListState) -> Unit) {
-        NarrowPaneRow(visiblePanes(layout, depth), Modifier.size(360.dp, 400.dp)) { pane, paneModifier ->
+    private fun Host(
+        layout: PaneLayout,
+        depth: Int,
+        paneState: SaveableStateHolder = rememberSaveableStateHolder(),
+        onArticleListState: (LazyListState) -> Unit,
+    ) {
+        NarrowPaneRow(visiblePanes(layout, depth), Modifier.size(360.dp, 400.dp), paneState) { pane, paneModifier ->
             when (pane) {
                 HomePane.ArticleList -> StubListPane(paneModifier, onArticleListState)
                 else -> Box(paneModifier.fillMaxSize().testTag("pane-${pane.name}"))
@@ -112,5 +119,36 @@ class NarrowPaneRowTest {
         assertSame(scrolled, state, "the pane stayed on screen, so it must keep the same state")
         assertEquals(index, state.firstVisibleItemIndex)
         assertEquals(offset, state.firstVisibleItemScrollOffset)
+    }
+
+    @Test
+    fun hoistedPaneStateLetsACallerDiscardASavedScrollPosition() = runDesktopComposeUiTest {
+        // Mirrors HomeScreen's onEnterArticleList: a feed-list row selection that *enters* the
+        // article list pane (rather than returning to it) discards its saved scroll state via the
+        // hoisted SaveableStateHolder, so the pane opens at the top instead of restoring where the
+        // user scrolled to last time it was open.
+        var depth by mutableStateOf(2)
+        lateinit var state: LazyListState
+        lateinit var paneState: SaveableStateHolder
+
+        setContent {
+            paneState = rememberSaveableStateHolder()
+            Host(PaneLayout.Single, depth, paneState) { state = it }
+        }
+        waitForIdle()
+
+        onNodeWithTag("stub-list").performMouseInput { moveTo(center); repeat(12) { scroll(3f) } }
+        waitForIdle()
+        assertTrue(state.firstVisibleItemIndex > 0, "precondition: scrolled away from the top")
+
+        // Unmount the article list (depth 3), discard its saved state, then bring it back.
+        depth = 3
+        waitForIdle()
+        paneState.removeState(HomePane.ArticleList)
+        depth = 2
+        waitForIdle()
+
+        assertEquals(0, state.firstVisibleItemIndex, "the discarded state must not be restored")
+        assertEquals(0, state.firstVisibleItemScrollOffset)
     }
 }
