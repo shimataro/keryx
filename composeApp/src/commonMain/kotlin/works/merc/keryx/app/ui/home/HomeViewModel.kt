@@ -888,9 +888,18 @@ class HomeViewModel(
         // must not force the selected article read there; every other scope does mark it read.
         val marksSelectedRead = filter != ArticleFilter.Starred
         val idsToMark = if (filter == ArticleFilter.Search) {
-            _rawSearchResults.value.results
+            val resultIds = _rawSearchResults.value.results
                 .filter { it.article.is_read == 0L }
                 .map { it.article.id }
+                .toMutableList()
+            // The raw search snapshot can lag an optimistic unread change (e.g. markSelectedUnread()
+            // immediately followed by markAllRead()). Include the selected article if it is currently
+            // unread so the operation is not treated as a no-op and the article is actually marked read.
+            _selectedArticle.value
+                ?.takeIf { it.is_read == 0L }
+                ?.id
+                ?.let { if (it !in resultIds) resultIds += it }
+            resultIds
         } else {
             emptyList()
         }
