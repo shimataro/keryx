@@ -38,7 +38,9 @@ class OneDriveAuthManagerTest {
     fun buildsAuthorizeUrlWithPkceAndAppFolderScope() {
         val url = manager { respond("{}", HttpStatusCode.OK) }
             .buildAuthorizeUrl("CID", "keryx://oauth2/callback", "CHAL", "STATE")
-        assertTrue(url.startsWith("https://login.microsoftonline.com/common/oauth2/v2.0/authorize"))
+        // The tenant segment must be `consumers`, never `common`: the app registration is
+        // personal-accounts-only, and Microsoft rejects that audience on /common (see Constants.kt).
+        assertTrue(url.startsWith("https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize"))
         assertTrue(url.contains("client_id=CID"))
         assertTrue(url.contains("code_challenge=CHAL"))
         assertTrue(url.contains("code_challenge_method=S256"))
@@ -62,12 +64,17 @@ class OneDriveAuthManagerTest {
     @Test
     fun exchangeCodeSendsScopeAndVerifierButNoClientSecret() = runTest {
         var body: String? = null
+        var tokenUrl: String? = null
         val m = manager { request ->
             body = (request.body as FormDataContent).bytes().decodeToString()
+            tokenUrl = request.url.toString()
             respond("""{"access_token":"AT","refresh_token":"RT","expires_in":3600}""", HttpStatusCode.OK, jsonHeaders)
         }
         val r = m.exchangeCode("CID", "code", "verifier", "keryx://oauth2/callback")
         assertIs<Result.Ok<OAuthTokens>>(r)
+        // The token endpoint must use the same `consumers` tenant as the authorize URL — a code
+        // obtained from one tenant segment cannot be redeemed at another.
+        assertTrue(tokenUrl!!.startsWith("https://login.microsoftonline.com/consumers/oauth2/v2.0/token"))
         val form = body!!
         assertTrue(form.contains("grant_type=authorization_code"))
         assertTrue(form.contains("client_id=CID"))

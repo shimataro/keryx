@@ -91,6 +91,13 @@ The flow uses PKCE (`code_verifier`), but **a client secret is also required sep
 
 1. Register an app in the [Azure Portal](https://portal.azure.com) → "Microsoft Entra ID" → "App registrations" → "New registration"
    - "Supported account types": choose "Personal Microsoft accounts only".
+     This is **paired with the `consumers` tenant segment** hardcoded in
+     `core/Constants.kt`'s `ONEDRIVE_AUTHORIZE_ENDPOINT`/`ONEDRIVE_TOKEN_ENDPOINT` — Microsoft
+     rejects a `Consumer`-audience registration on the `/common` endpoint, and only after the
+     user submits their address, so the mismatch shows up as a generic "authentication failed".
+     Do not change one without the other. Work/school accounts are deliberately unsupported:
+     `Files.ReadWrite.AppFolder` below is a personal-account-only Graph permission (see
+     [sync-architecture.md](sync-architecture.md)).
 2. In "Authentication" → "Add a platform" → **"Mobile and desktop applications"**:
    - Under "Custom redirect URIs" add `keryx://oauth2/callback`.
    - Set "Allow public client flows" to **Yes** (OneDrive is a PKCE public client — no client secret).

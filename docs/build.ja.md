@@ -91,6 +91,13 @@ Gradle のカスタムタスク（`generateBuildConfig`）で実現している�
 
 1. [Azure Portal](https://portal.azure.com) →「Microsoft Entra ID」→「アプリの登録」→「新規登録」でアプリを登録
    - 「サポートされているアカウントの種類」は「個人用 Microsoft アカウントのみ」を選ぶ。
+     これは `core/Constants.kt` の `ONEDRIVE_AUTHORIZE_ENDPOINT`/`ONEDRIVE_TOKEN_ENDPOINT` に
+     ハードコードされた **`consumers` テナントセグメントと対になっている**。Microsoft は
+     `Consumer` audience の登録による `/common` エンドポイント利用を拒否し、しかもその拒否は
+     ユーザーがメールアドレスを送信した後に返るため、不一致は汎用の「認証に失敗しました」として
+     現れる。一方だけを変更しないこと。職場・学校アカウントは意図的に非対応で、下記の
+     `Files.ReadWrite.AppFolder` が個人用アカウント限定の Graph 権限であるため
+     （[sync-architecture.ja.md](sync-architecture.ja.md) 参照）。
 2. 「認証」→「プラットフォームを追加」→ **「モバイル アプリケーションとデスクトップ アプリケーション」**:
    - 「カスタム リダイレクト URI」に `keryx://oauth2/callback` を追加する。
    - 「パブリック クライアント フローを許可する」を **はい** にする（OneDrive は PKCE パブリッククライアントで、クライアントシークレットは不要）。

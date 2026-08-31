@@ -32,6 +32,11 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
 - 同期対象: 購読リスト・既読状態・スター・タグ構造・グローバル設定。
 - 非同期対象: デバイスローカル設定・クラウド認証情報。
 - インポート / エクスポートは OPML。
+- **OneDrive が対応するのは個人用 Microsoft アカウントのみ** — 職場・学校（Microsoft 365 / Entra ID）
+  アカウントは連携できない。Keryx は同期ファイルを OneDrive のアプリ専用の隠しフォルダーに置くが、
+  そのフォルダーだけにアクセスを限定する Graph 権限は個人用アカウントにしか提供されておらず、
+  組織アカウントに対応するにはユーザーのドライブ全体へのアクセスを要求することになるため。
+  [sync-architecture.ja.md](sync-architecture.ja.md) の「クラウド認証」を参照。
 - **Android は Dropbox と OneDrive のみ対応**（どちらもデスクトップと同じ `keryx://oauth2/callback`
   カスタム URI リダイレクトを使う PKCE パブリッククライアント）。Google Drive のデスクトップ向け
   OAuth 構成（ループバックリダイレクト + `client_secret` を使う「デスクトップアプリ」クライアント）は

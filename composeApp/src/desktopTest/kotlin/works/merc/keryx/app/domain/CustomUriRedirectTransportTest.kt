@@ -21,7 +21,7 @@ class CustomUriRedirectTransportTest {
 
         val result = transport.capture(state = "st8", timeoutMillis = 10_000) {
             // Simulate an instant redirect: emit before returning from the browser launch.
-            flow.emit(OAuthCallbackParams(code = "the-code", state = "st8", error = null))
+            flow.emit(OAuthCallbackParams(code = "the-code", state = "st8", error = null, errorDescription = null))
         }
 
         assertEquals("the-code", result?.code)
@@ -34,7 +34,7 @@ class CustomUriRedirectTransportTest {
         val transport = CustomUriRedirectTransport(flow, redirectUri = "keryx://oauth2/callback")
 
         val result = transport.capture(state = "expected", timeoutMillis = 1_000) {
-            flow.emit(OAuthCallbackParams(code = "c", state = "different", error = null))
+            flow.emit(OAuthCallbackParams(code = "c", state = "different", error = null, errorDescription = null))
         }
 
         assertNull(result)

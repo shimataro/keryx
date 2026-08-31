@@ -14,6 +14,7 @@ fun parseOAuthUri(uriString: String): OAuthCallbackParams {
         code = queryMap["code"],
         state = queryMap["state"],
         error = queryMap["error"],
+        errorDescription = queryMap["error_description"],
     )
 }
 
