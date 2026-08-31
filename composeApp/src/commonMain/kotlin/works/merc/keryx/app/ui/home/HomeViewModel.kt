@@ -905,13 +905,16 @@ class HomeViewModel(
         // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
         // pass can never observe (and revert) this optimistic pin/selection using DB flags from
         // before this write has landed.
+        if (filter == ArticleFilter.Search && idsToMark.isEmpty()) {
+            // Nothing in the current search results needs marking read; skip both the DB write and
+            // the dependent search refresh.
+            return
+        }
         viewModelScope.launch(dbWriteDispatcher) {
             if (filter == ArticleFilter.Search) {
-                if (idsToMark.isNotEmpty()) {
-                    articleRepository.markArticlesAsRead(idsToMark)
-                    // Re-run search only after the write lands so the freshly-read state shows up.
-                    _searchRefreshTrigger.update { it + 1 }
-                }
+                articleRepository.markArticlesAsRead(idsToMark)
+                // Re-run search only after the write lands so the freshly-read state shows up.
+                _searchRefreshTrigger.update { it + 1 }
             } else {
                 articleRepository.markAllAsRead(filter)
             }
