@@ -28,7 +28,7 @@ import kotlin.test.assertEquals
 
 /**
  * Regression coverage for the two Android bugs `ProviderActionButton`/`CloudProviderRow.iconOnly`
- * fixed (see the plan's "背景" section): the provider name wrapping onto four lines at a phone
+ * fixed (see the plan's "background" section): the provider name wrapping onto four lines at a phone
  * width once two labelled buttons squeezed it, and a connected row's action buttons having no
  * visible container against the row's own `secondaryContainer` tint.
  *
