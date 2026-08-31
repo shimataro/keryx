@@ -3,9 +3,11 @@ package works.merc.keryx.app.ui.home
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.isActive
 import works.merc.keryx.app.inMemoryDb
 import kotlin.test.Test
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 
 /**
@@ -39,5 +41,32 @@ class HomeViewModelTestSupportTest {
         val (driver, db) = inMemoryDb()
         val ownedScope = useHomeViewModel(driver, db) { it.ownedActivityCenterScope }
         assertFalse(ownedScope!!.isActive)
+    }
+
+    /**
+     * Pins the failure-path counterpart of [useHomeViewModelCancelsOwnedActivityCenterScope]:
+     * [newHomeViewModel] never gets to return a [HomeViewModelFixture] here, so
+     * [HomeViewModelFixture.close] is never reachable — the owned [ActivityCenter] scope's eager
+     * `SharingStarted.Eagerly` collectors must instead be cancelled by [newHomeViewModel]'s own
+     * failure cleanup. A regression here leaks one live coroutine scope per construction that fails
+     * partway through.
+     */
+    @Test
+    fun newHomeViewModelCancelsOwnedResourcesWhenLateConstructionFails() {
+        val (driver, db) = inMemoryDb()
+        var capturedScope: CoroutineScope? = null
+        try {
+            assertFailsWith<IllegalStateException> {
+                newHomeViewModel(driver, db, injectFailureAfterActivityCenter = { scope ->
+                    capturedScope = scope
+                    error("simulated late construction failure")
+                })
+            }
+            assertFalse(capturedScope!!.isActive)
+        } finally {
+            // newHomeViewModel never returns a HomeViewModelFixture here, so nothing else closes
+            // the caller-owned driver (matching HomeViewModelFixture.close()'s ownership model).
+            driver.close()
+        }
     }
 }

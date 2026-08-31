@@ -12,6 +12,7 @@ import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.job
 import works.merc.keryx.app.core.Clock
@@ -129,6 +130,14 @@ internal class HomeViewModelFixture(
  * cancel. Pass an [activityCenter] explicitly only when the caller needs to observe or drive it
  * itself (e.g. via [ActivityCenter.trackFeedRefresh]) — that scope's lifecycle then stays the
  * caller's responsibility.
+ *
+ * Everything created below is tracked in `cleanupOnFailure` as it's built, and unwound in reverse
+ * if a later step throws — [HomeViewModelFixture.close] is only reachable once this function
+ * actually returns a [HomeViewModelFixture], so a throw partway through (e.g. from [HomeViewModel]'s
+ * own constructor) would otherwise leak whatever was already created, most notably
+ * [ActivityCenter]'s `SharingStarted.Eagerly` collectors, which start running the moment
+ * `ActivityCenter(...)` is called — well before this function has a fixture to hand back to a
+ * caller who could ever cancel them.
  */
 internal fun newHomeViewModel(
     driver: SqlDriver,
@@ -138,6 +147,10 @@ internal fun newHomeViewModel(
     activityCenter: ActivityCenter? = null,
     tokenStorage: TokenStorage = HomeViewModelFixtureTokenStorage(),
     appKey: String = "",
+    // Test-only injection point, invoked right after `resolvedActivityCenter` is built: lets a test
+    // simulate a late constructor throwing, to verify the failure-cleanup below actually runs. A
+    // no-op default keeps every other caller unaffected.
+    injectFailureAfterActivityCenter: (ownedActivityCenterScope: CoroutineScope?) -> Unit = {},
 ): HomeViewModelFixture {
     // A fresh, unique directory per call (not a fixed name shared across every test in this file):
     // LocalSettingsStore persists lastFilter/collapsedFolderIds/etc. to a JSON file there, and a
@@ -145,52 +158,66 @@ internal fun newHomeViewModel(
     // one test becoming the *restored* initial filter of the next), exactly like
     // `HomeViewModelTest`'s per-instance `Random.nextInt()`-suffixed directory.
     val dir = FileIO.join(AppDirs.tempDir(), "home-vm-test-${Random.nextInt()}")
-    val fetcherClient = notFoundHttpClient()
-    val faviconClient = notFoundHttpClient()
-    val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
-    val feedRepository = FeedRepository(
-        db, FeedFetcher(fetcherClient), FaviconResolver(faviconClient), articleRepository,
-        ftsManagerIndexed(driver), syncScheduler, NotificationCenter(), HomeViewModelFixtureNotificationMessages(),
-        clock, Dispatchers.Unconfined,
-    )
-    val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
-    val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
-    val settingsRepository = SettingsRepository(
-        db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined,
-    )
-    val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
-    val ownedActivityCenterScope = if (activityCenter == null) CoroutineScope(SupervisorJob() + Dispatchers.Unconfined) else null
-    val resolvedActivityCenter = activityCenter ?: ActivityCenter(ownedActivityCenterScope!!)
-    val syncRepository = SyncRepository(
-        driver = driver,
-        db = db,
-        ftsManager = FtsManager(driver),
-        cloudProvider = { null },
-        clock = clock,
-        scope = syncScope,
-        activityCenter = resolvedActivityCenter,
-        notificationCenter = NotificationCenter(),
-        notificationMessages = HomeViewModelFixtureNotificationMessages(),
-        localDbPath = "unused",
-        tempDir = "unused",
-    )
-    val authClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.OK) }) { expectSuccess = false }
-    val authManager = DropboxAuthManager(authClient, clock = clock)
-    val cloudSession = singleProviderCloudSession(
-        client = authClient,
-        tokenStorage = tokenStorage,
-        authManager = authManager,
-        clientId = appKey,
-        clock = clock,
-    )
-    val vm = HomeViewModel(
-        feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
-        syncRepository, cloudSession, resolvedActivityCenter, clock, NewArticleNotifier(),
-        HomeViewModelFixtureNotificationMessages(), Dispatchers.Unconfined, Dispatchers.Unconfined,
-    )
-    return HomeViewModelFixture(
-        vm, driver, syncScope, listOf(fetcherClient, faviconClient, authClient), ownedActivityCenterScope,
-    )
+    val cleanupOnFailure = mutableListOf<() -> Unit>()
+    try {
+        val fetcherClient = notFoundHttpClient().also { client -> cleanupOnFailure += { client.close() } }
+        val faviconClient = notFoundHttpClient().also { client -> cleanupOnFailure += { client.close() } }
+        val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
+        val feedRepository = FeedRepository(
+            db, FeedFetcher(fetcherClient), FaviconResolver(faviconClient), articleRepository,
+            ftsManagerIndexed(driver), syncScheduler, NotificationCenter(), HomeViewModelFixtureNotificationMessages(),
+            clock, Dispatchers.Unconfined,
+        )
+        val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
+        val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
+        val settingsRepository = SettingsRepository(
+            db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined,
+        )
+        val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            .also { scope -> cleanupOnFailure += { scope.cancel() } }
+        val ownedActivityCenterScope = if (activityCenter == null) {
+            CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+                .also { scope -> cleanupOnFailure += { scope.cancel() } }
+        } else {
+            null
+        }
+        val resolvedActivityCenter = activityCenter ?: ActivityCenter(ownedActivityCenterScope!!)
+        injectFailureAfterActivityCenter(ownedActivityCenterScope)
+        val syncRepository = SyncRepository(
+            driver = driver,
+            db = db,
+            ftsManager = FtsManager(driver),
+            cloudProvider = { null },
+            clock = clock,
+            scope = syncScope,
+            activityCenter = resolvedActivityCenter,
+            notificationCenter = NotificationCenter(),
+            notificationMessages = HomeViewModelFixtureNotificationMessages(),
+            localDbPath = "unused",
+            tempDir = "unused",
+        )
+        val authClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.OK) }) { expectSuccess = false }
+            .also { client -> cleanupOnFailure += { client.close() } }
+        val authManager = DropboxAuthManager(authClient, clock = clock)
+        val cloudSession = singleProviderCloudSession(
+            client = authClient,
+            tokenStorage = tokenStorage,
+            authManager = authManager,
+            clientId = appKey,
+            clock = clock,
+        )
+        val vm = HomeViewModel(
+            feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
+            syncRepository, cloudSession, resolvedActivityCenter, clock, NewArticleNotifier(),
+            HomeViewModelFixtureNotificationMessages(), Dispatchers.Unconfined, Dispatchers.Unconfined,
+        )
+        return HomeViewModelFixture(
+            vm, driver, syncScope, listOf(fetcherClient, faviconClient, authClient), ownedActivityCenterScope,
+        )
+    } catch (e: Throwable) {
+        cleanupOnFailure.asReversed().forEach { it() }
+        throw e
+    }
 }
 
 /**
