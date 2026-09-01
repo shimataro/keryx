@@ -68,6 +68,10 @@ private const val SWIPE_EXIT_ANIMATION_MS = 160
  * exactly where it was and would otherwise strand the content off-pane forever. */
 private const val SWIPE_SELECTION_CHANGE_TIMEOUT_MS = 1_000L
 
+/** The sample count Compose's [VelocityTracker] (`Lsq2` strategy, its default) requires before
+ * `calculateVelocity()` returns anything but `0f` — see [ArticleSwipeController.resolveDragVelocityPxPerSec]. */
+private const val LSQ2_MIN_SAMPLE_COUNT = 3
+
 /**
  * Resolution of a completed horizontal drag on the article reader.
  */
@@ -156,6 +160,13 @@ internal class ArticleSwipeController(
     private var dragTotalPx = 0f
     private val velocityTracker = VelocityTracker()
 
+    /** Time of the drag's first recorded point ([onDragStart]) and its most recently recorded
+     * point ([onDrag]), plus how many points [onDrag] has recorded since — used by [onDragEnd]'s
+     * fallback below. */
+    private var dragStartUptimeMillis = 0L
+    private var dragLastUptimeMillis = 0L
+    private var dragSampleCount = 0
+
     /**
      * The offset the drag has resolved to *so far* — kept alongside [offset] rather than read back
      * from it, since [offset]'s value is only updated once the `scope.launch { offset.snapTo(...) }`
@@ -167,10 +178,13 @@ internal class ArticleSwipeController(
      */
     private var lastAppliedOffsetPx = 0f
 
-    fun onDragStart() {
+    fun onDragStart(startUptimeMillis: Long) {
         dragTotalPx = 0f
         lastAppliedOffsetPx = 0f
         velocityTracker.resetTracking()
+        dragStartUptimeMillis = startUptimeMillis
+        dragLastUptimeMillis = startUptimeMillis
+        dragSampleCount = 0
     }
 
     /**
@@ -185,6 +199,8 @@ internal class ArticleSwipeController(
     fun onDrag(deltaX: Float, uptimeMillis: Long) {
         dragTotalPx += deltaX
         velocityTracker.addPosition(uptimeMillis, Offset(dragTotalPx, 0f))
+        dragLastUptimeMillis = uptimeMillis
+        dragSampleCount++
         val towardsNext = dragTotalPx < 0f
         val movable = if (towardsNext) canSelectNext() else canSelectPrevious()
         lastAppliedOffsetPx = swipeDragOffset(dragTotalPx, movable, maxRubberBandPx)
@@ -193,7 +209,7 @@ internal class ArticleSwipeController(
     }
 
     fun onDragEnd() {
-        val velocity = velocityTracker.calculateVelocity().x
+        val velocity = resolveDragVelocityPxPerSec()
         val outcome = resolveSwipeOutcome(
             offsetPx = lastAppliedOffsetPx,
             velocityPxPerSec = velocity,
@@ -207,6 +223,23 @@ internal class ArticleSwipeController(
             ArticleSwipeOutcome.Next -> commit(exitTowards = -widthPx, select = onSelectNext)
             ArticleSwipeOutcome.Previous -> commit(exitTowards = widthPx, select = onSelectPrevious)
         }
+    }
+
+    /**
+     * [VelocityTracker]'s default `Lsq2` fitting strategy needs at least [LSQ2_MIN_SAMPLE_COUNT]
+     * samples before `calculateVelocity()` returns anything but `0f` — a short, fast flick (one
+     * move past touch slop, then immediately `up`) can supply only one, silently reporting zero
+     * velocity for a drag that plainly wasn't stationary. When [dragSampleCount] is below that
+     * floor, fall back to this drag's own average velocity (its net offset over its own recorded
+     * span) instead of trusting the tracker's guaranteed-zero answer; once there are enough
+     * samples, the tracker's own (more accurate, deceleration-aware) fit is used unchanged.
+     */
+    private fun resolveDragVelocityPxPerSec(): Float {
+        val trackerVelocity = velocityTracker.calculateVelocity().x
+        if (dragSampleCount >= LSQ2_MIN_SAMPLE_COUNT) return trackerVelocity
+        val elapsedMillis = dragLastUptimeMillis - dragStartUptimeMillis
+        if (elapsedMillis <= 0L) return trackerVelocity
+        return dragTotalPx / elapsedMillis * 1000f
     }
 
     /** The gesture was abandoned mid-drag (node detach / composition teardown) rather than released
@@ -282,6 +315,10 @@ internal fun Modifier.articleSwipeNavigation(controller: ArticleSwipeController)
                     if (change.changedToUpIgnoreConsumed()) {
                         if (dragging) {
                             change.consume()
+                            // Position hasn't moved since the last recorded drag sample, but this
+                            // still records the true release time (up can fire later than the
+                            // last move) for onDragEnd's low-sample-count velocity fallback.
+                            controller.onDrag(0f, change.uptimeMillis)
                             controller.onDragEnd()
                             dragging = false
                         }
@@ -300,7 +337,7 @@ internal fun Modifier.articleSwipeNavigation(controller: ArticleSwipeController)
                     if (abs(total.x) > viewConfiguration.touchSlop && abs(total.x) > abs(total.y)) {
                         change.consume()
                         dragging = true
-                        controller.onDragStart()
+                        controller.onDragStart(down.uptimeMillis)
                         controller.onDrag(total.x, change.uptimeMillis)
                     }
                 }

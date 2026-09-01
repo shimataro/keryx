@@ -118,4 +118,14 @@ class ArticleSwipeGestureTest {
     fun rightDragIsIgnoredWhenThereIsNoPreviousArticle() {
         assertEquals(emptyList(), fireEvents(canPrevious = false, totalDrag = Offset(commitDragDp, 0f)))
     }
+
+    @Test
+    fun aFastShortFlickBelowTheCommitDistanceStillSelectsNextViaFlingVelocity() {
+        // 50dp is well under SWIPE_COMMIT_FRACTION (30% of 400dp = 120dp), so only the
+        // fling-velocity path (SWIPE_FLING_VELOCITY_DP_PER_S = 800dp/s) can commit this one — and
+        // a 50dp move over a handful of milliseconds comfortably clears it. A single post-slop
+        // move+up (fireEvents' default steps = 1) used to record only one VelocityTracker sample,
+        // so calculateVelocity() returned 0 and this incorrectly cancelled.
+        assertEquals(listOf("next"), fireEvents(totalDrag = Offset(-50f, 0f)))
+    }
 }
