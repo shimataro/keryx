@@ -103,6 +103,60 @@ class ArticleWebViewHtmlTest {
     }
 
     @Test
+    fun wrapArticleHtmlWrapsTitleInLinkWhenUrlProvided() {
+        val result = wrapArticleHtml(
+            theme,
+            title = "My Title",
+            meta = "",
+            body = "<p>body</p>",
+            titleUrl = "https://example.com/article",
+            titleTooltip = "Open in browser",
+        )
+        assertTrue(result.contains("""<h1 class="article-title"><a href="https://example.com/article" title="Open in browser">My Title</a></h1>"""))
+    }
+
+    @Test
+    fun wrapArticleHtmlOmitsTitleLinkWhenUrlIsNullOrBlank() {
+        val withNull = wrapArticleHtml(theme, title = "My Title", meta = "", body = "<p>body</p>", titleUrl = null)
+        val withBlank = wrapArticleHtml(theme, title = "My Title", meta = "", body = "<p>body</p>", titleUrl = "")
+        assertTrue(withNull.contains("""<h1 class="article-title">My Title</h1>"""))
+        assertTrue(withBlank.contains("""<h1 class="article-title">My Title</h1>"""))
+        assertTrue(!withNull.contains("<a "))
+        assertTrue(!withBlank.contains("<a "))
+    }
+
+    @Test
+    fun wrapArticleHtmlOmitsTitleLinkForNonHttpUrls() {
+        val malicious = wrapArticleHtml(
+            theme,
+            title = "My Title",
+            meta = "",
+            body = "<p>body</p>",
+            titleUrl = "javascript:alert(1)",
+        )
+        val dataUrl = wrapArticleHtml(
+            theme,
+            title = "My Title",
+            meta = "",
+            body = "<p>body</p>",
+            titleUrl = "data:text/html,<script>alert(1)</script>",
+        )
+        val upperCaseScheme = wrapArticleHtml(
+            theme,
+            title = "My Title",
+            meta = "",
+            body = "<p>body</p>",
+            titleUrl = "JAVASCRIPT:alert(1)",
+        )
+        assertTrue(malicious.contains("""<h1 class="article-title">My Title</h1>"""))
+        assertTrue(dataUrl.contains("""<h1 class="article-title">My Title</h1>"""))
+        assertTrue(upperCaseScheme.contains("""<h1 class="article-title">My Title</h1>"""))
+        assertTrue(!malicious.contains("<a "))
+        assertTrue(!dataUrl.contains("<a "))
+        assertTrue(!upperCaseScheme.contains("<a "))
+    }
+
+    @Test
     fun wrapArticleHtmlRendersEscapedTitleAndMeta() {
         val result = wrapArticleHtml(
             theme,
@@ -147,12 +201,46 @@ class ArticleWebViewHtmlTest {
     }
 
     @Test
+    fun articleNoContentHtmlWrapsTitleInLinkWhenUrlProvided() {
+        val result = articleNoContentHtml(
+            theme,
+            title = "My Title",
+            meta = "Alice · now",
+            message = "No content",
+            titleUrl = "https://example.com/article",
+            titleTooltip = "Open in browser",
+        )
+        assertTrue(result.contains("""<h1 class="article-title"><a href="https://example.com/article" title="Open in browser">My Title</a></h1>"""))
+    }
+
+    @Test
+    fun wrapArticleHtmlContainsTitleLinkStyles() {
+        val result = wrapArticleHtml(theme, title = "My Title", meta = "", body = "<p>body</p>", titleUrl = "https://example.com/article")
+        assertTrue(result.contains(".article-title a { color: inherit; text-decoration: none; cursor: pointer; transition: opacity 0.15s ease; }"))
+        assertTrue(result.contains(".article-title a:hover { opacity: 0.7; }"))
+        assertTrue(result.contains(".article-title a:active { opacity: 0.5; }"))
+    }
+
+    @Test
     fun articlePlaceholderHtmlRendersOnlyTheCenteredEscapedMessage() {
         val result = articlePlaceholderHtml(theme, "Select <an> article & read it")
         assertTrue(result.contains("""<div class="article-placeholder">Select &lt;an&gt; article &amp; read it</div>"""))
         assertTrue(!result.contains("""<h1 class="article-title">"""))
         assertTrue(!result.contains("""<div class="article-meta">"""))
         assertTrue(!result.contains("<an>"))
+    }
+
+    @Test
+    fun articleNoContentHtmlOmitsTitleLinkForNonHttpUrls() {
+        val result = articleNoContentHtml(
+            theme,
+            title = "My Title",
+            meta = "Alice · now",
+            message = "No content",
+            titleUrl = "javascript:alert(1)",
+        )
+        assertTrue(result.contains("""<h1 class="article-title">My Title</h1>"""))
+        assertTrue(!result.contains("<a "))
     }
 
     @Test
