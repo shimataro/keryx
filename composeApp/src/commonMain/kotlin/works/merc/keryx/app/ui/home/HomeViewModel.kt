@@ -772,6 +772,32 @@ class HomeViewModel(
     fun selectPrevious() = moveSelection(-1)
 
     /**
+     * Whether [selectNext] would actually land on a different article.
+     *
+     * Read by the article reader's swipe gesture (`ui/home/ArticleSwipeNav.kt`) to decide whether a
+     * drag in that direction moves the content or only rubber-bands, so the two must agree with
+     * [moveSelection]'s own clamping — which is why both resolve the current row through the same
+     * [selectionIndex] helper.
+     *
+     * @return `true` when there is a following article to move to.
+     */
+    fun canSelectNext(): Boolean {
+        val list = currentArticles()
+        val index = selectionIndex(list)
+        // No cursor means nothing is selected: the keyboard's own `moveSelection` would jump to the
+        // first row here, but a swipe on the reader has no article on screen to swipe away from, so
+        // report neither direction as available rather than inventing a selection from a gesture.
+        return index >= 0 && index < list.lastIndex
+    }
+
+    /**
+     * Whether [selectPrevious] would actually land on a different article.
+     *
+     * @return `true` when there is a preceding article to move to.
+     */
+    fun canSelectPrevious(): Boolean = selectionIndex(currentArticles()) > 0
+
+    /**
      * Provides the article rows currently displayed in the center pane.
      *
      * @return Search-result rows for the search filter, or the filtered article rows otherwise.
@@ -782,15 +808,27 @@ class HomeViewModel(
     private fun moveSelection(delta: Int) {
         val list = currentArticles()
         if (list.isEmpty()) return
-        // The cursor, not _selectedArticle: the latter only catches up once the body has loaded, so
-        // stepping from it would make a held arrow key re-read the same stale index every repeat.
-        val currentId = selectionCursorId
-        val index = list.indexOfFirst { it.id == currentId }
+        val index = selectionIndex(list)
         val next = when {
             index < 0 -> 0
             else -> (index + delta).coerceIn(0, list.lastIndex)
         }
         selectArticle(list[next])
+    }
+
+    /**
+     * Locates the current selection within [list].
+     *
+     * Resolved from the cursor, not from `_selectedArticle`: the latter only catches up once the
+     * body has loaded, so stepping from it would make a held arrow key re-read the same stale index
+     * every repeat.
+     *
+     * @param list The rows currently displayed, as returned by [currentArticles].
+     * @return The selected row's index, or `-1` when nothing in [list] is selected.
+     */
+    private fun selectionIndex(list: List<ArticleListRow>): Int {
+        val currentId = selectionCursorId ?: return -1
+        return list.indexOfFirst { it.id == currentId }
     }
 
     /**

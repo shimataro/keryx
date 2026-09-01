@@ -246,6 +246,43 @@ context menu (`nativeContextMenu`) and drag-from-handle for reordering are delib
 gestures on the same row — see `platform/NativeMenu.android.kt`'s KDoc for how the two coexist
 without one stealing the other's press.
 
+**Touch input on the article reader.** At a narrow layout, the article detail pane
+(`ui/home/ArticleDetailPane.kt`) also accepts a horizontal swipe to move to the next/previous
+article — `ui/home/ArticleSwipeNav.kt`'s `articleSwipeNavigation`, driven by
+`HomeViewModel.selectNext`/`selectPrevious`/`canSelectNext`/`canSelectPrevious` (the same calls
+desktop's J/K keyboard shortcut already used — see `ui/home/KeyboardNav.kt`). It is gated on
+`isTouchPrimary && onNavigateUp != null && article != null`, not on `PaneLayout` or a phone/tablet
+distinction: `onNavigateUp` being non-`null` is this file's existing signal for "the reader is a
+drilled-into destination with somewhere to navigate back from" (see "Adaptive pane layout & touch
+affordances" above), which covers both `Single` and `Dual` — a tablet-width landscape session
+still gets the gesture, matching how Gmail/Feedly/Reeder-style readers treat it as a property of
+the detail screen itself rather than of how many other panes happen to be visible beside it — and
+excludes `PaneLayout.Triple`, where the reader is a permanent, keyboard-driven pane shared with
+desktop and has no back action to gate on in the first place.
+
+The reader's content is two nested `Box`es, not one: the outer one owns the gesture and the clip
+(so a sliding reader can't spill into a neighboring pane at `Dual`); the inner one carries the
+actual `Modifier.offset`, the existing `ARTICLE_READER_TEST_TAG`, and the accessibility actions
+below. Dragging past either end of the list still moves the content — heavily
+damped and capped — rather than refusing to move at all, so the boundary is felt as resistance
+instead of the gesture doing nothing.
+
+Since Android's `WebView` (embedded via `AndroidView`) is an ordinary in-tree view that still
+consumes touch input on its own terms, the gesture is arbitrated the same way this file's touch
+drag/long-press sections above already do: a `pointerInput` loop watches
+`PointerEventPass.Initial` and leaves every event unconsumed until the drag is confirmed
+horizontal (past touch slop, and more horizontal than vertical travel), so the WebView's own
+scroll and link taps are untouched by an ordinary vertical gesture; only once confirmed does it
+start consuming, cancelling the WebView's own gesture in turn.
+
+Per "A pointer-only gesture … needs a `CustomAccessibilityAction` equivalent" under Accessibility
+below, the same next/previous navigation is exposed as `CustomAccessibilityAction`s
+(`articleSwipeAccessibilityActions`), mirroring `ui/home/FeedListRowParts.kt`'s
+`reorderAccessibilityActions` in shape: a direction with nothing to move to
+(`canSelectNext`/`canSelectPrevious`) exposes no action for that direction at all, and the actions
+live on the same node `ARTICLE_READER_TEST_TAG` tags (not the outer gesture-owning `Box`), since
+that is the node a screen reader actually focuses.
+
 **Touch density.** Each pane's own click-to-focus background (a mouse-only affordance — see
 `ui/home/HomeCommon.kt`'s `paneActivation`) and every interactive list row's minimum height
 (`ui/home/ListRowChrome.kt`'s `listRowMinHeight`, matching M3's `NavigationDrawerItem` minimum —

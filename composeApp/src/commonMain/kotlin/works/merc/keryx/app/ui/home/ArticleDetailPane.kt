@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -15,15 +16,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import io.github.kdroidfilter.webview.request.RequestInterceptor
 import io.github.kdroidfilter.webview.request.WebRequest
@@ -41,6 +47,7 @@ import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.WindowDragArea
+import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.platform.platformShowsOwnCopyConfirmation
 import works.merc.keryx.app.platform.setNativeWebViewVisible
 import works.merc.keryx.app.resources.Res
@@ -96,6 +103,10 @@ fun ArticleDetailPane(
         onToggleStar = { vm.toggleStarSelected() },
         onMarkUnread = { vm.markSelectedUnread() },
         onNavigateUp = onNavigateUp,
+        onSelectNext = { vm.selectNext() },
+        onSelectPrevious = { vm.selectPrevious() },
+        canSelectNext = { vm.canSelectNext() },
+        canSelectPrevious = { vm.canSelectPrevious() },
     )
 }
 
@@ -127,6 +138,11 @@ internal fun ArticleDetailPaneContent(
     onToggleStar: () -> Unit = {},
     onMarkUnread: () -> Unit = {},
     onNavigateUp: (() -> Unit)? = null,
+    onSelectNext: () -> Unit = {},
+    onSelectPrevious: () -> Unit = {},
+    canSelectNext: () -> Boolean = { false },
+    canSelectPrevious: () -> Boolean = { false },
+    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     reader: @Composable (html: String, body: String, baseUrl: String?, articleUrl: String?) -> Unit =
         { html, body, baseUrl, articleUrl -> ArticleWebView(html, body, baseUrl, articleUrl) },
 ) {
@@ -187,6 +203,22 @@ internal fun ArticleDetailPaneContent(
         }
     }
 
+    // Only enabled where the reader is a "drilled-into" destination with somewhere to navigate
+    // back from (onNavigateUp != null — the same narrow-layout signal every other touch-only
+    // affordance in this codebase keys off, see the ui-guidelines skill's "Adaptive pane layout &
+    // touch affordances") and only while an article is actually on screen to swipe away from.
+    // At PaneLayout.Triple (onNavigateUp == null) the reader is a permanent, keyboard-driven pane
+    // shared with desktop, exactly like J/K there — a swipe gesture has no place in that state.
+    val swipeEnabled = isTouchPrimary && onNavigateUp != null && article != null
+    val currentArticleId by rememberUpdatedState(article?.id)
+    val swipeController = rememberArticleSwipeController(
+        canSelectNext = canSelectNext,
+        canSelectPrevious = canSelectPrevious,
+        onSelectNext = onSelectNext,
+        onSelectPrevious = onSelectPrevious,
+        currentArticleId = { currentArticleId },
+    )
+
     Column(
         modifier
             .background(surface)
@@ -203,8 +235,38 @@ internal fun ArticleDetailPaneContent(
                 onNavigateUp = onNavigateUp,
             )
         }
-        Box(Modifier.fillMaxSize().testTag(ARTICLE_READER_TEST_TAG)) {
-            reader(html, body.orEmpty(), article?.url, article?.url)
+        // Two nested boxes: the outer one is the fixed hit area for the swipe gesture (its bounds
+        // never move, so the drag's hit-testing and the off-pane "wait for the commit to land"
+        // phase both stay well-defined) plus the clip that keeps a sliding reader from spilling
+        // into a neighboring pane at PaneLayout.Dual; the inner one carries the actual horizontal
+        // offset and is what ARTICLE_READER_TEST_TAG anchors to, so the existing
+        // readerBoundsAreIdenticalWithAndWithoutASelection test still measures the reader's own
+        // layout bounds (always fillMaxSize, offset is a draw-time translation) rather than the
+        // outer container. When swipeEnabled is false, offset never leaves 0 — same measured
+        // bounds as before this feature existed. The accessibility actions live on this inner box
+        // too, not the outer one: a screen reader focuses the reader's own content node, and that
+        // is also the node ARTICLE_READER_TEST_TAG's tests already query with useUnmergedTree.
+        Box(
+            Modifier.fillMaxSize()
+                .clipToBounds()
+                .onSizeChanged { swipeController.widthPx = it.width.toFloat() }
+                .let { if (swipeEnabled) it.articleSwipeNavigation(swipeController) else it },
+        ) {
+            val offsetPx = swipeController.offset.value
+            Box(
+                Modifier.fillMaxSize()
+                    .offset { IntOffset(offsetPx.roundToInt(), 0) }
+                    .testTag(ARTICLE_READER_TEST_TAG)
+                    .articleSwipeAccessibilityActions(
+                        enabled = swipeEnabled,
+                        canNext = swipeEnabled && canSelectNext(),
+                        canPrevious = swipeEnabled && canSelectPrevious(),
+                        onNext = onSelectNext,
+                        onPrevious = onSelectPrevious,
+                    ),
+            ) {
+                reader(html, body.orEmpty(), article?.url, article?.url)
+            }
         }
     }
 }

@@ -186,6 +186,28 @@ class HomePaneLayoutTest {
         assertEquals(true, canNavigateBack(PaneLayout.Dual, 3))
     }
 
+    // --- shouldFlashReturnedArticle ---
+
+    @Test
+    fun shouldFlashReturnedArticleIsTrueAtSingleBackingOutOfArticleDetail() {
+        assertEquals(true, shouldFlashReturnedArticle(PaneLayout.Single, HomePane.ArticleDetail))
+    }
+
+    @Test
+    fun shouldFlashReturnedArticleIsFalseAtSingleFromAnyOtherPane() {
+        assertEquals(false, shouldFlashReturnedArticle(PaneLayout.Single, HomePane.ArticleList))
+        assertEquals(false, shouldFlashReturnedArticle(PaneLayout.Single, HomePane.FeedList))
+    }
+
+    @Test
+    fun shouldFlashReturnedArticleIsFalseAtDualAndTripleEvenFromArticleDetail() {
+        // The article list pane's row highlight is already visible throughout the transition at
+        // both of these layouts (LocalRowSelectionVisible stays true), so a one-shot flash would
+        // be redundant.
+        assertEquals(false, shouldFlashReturnedArticle(PaneLayout.Dual, HomePane.ArticleDetail))
+        assertEquals(false, shouldFlashReturnedArticle(PaneLayout.Triple, HomePane.ArticleDetail))
+    }
+
     // --- homeBackAction ---
 
     @Test

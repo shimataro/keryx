@@ -1,5 +1,12 @@
 package works.merc.keryx.app.ui.home
 
+import androidx.compose.foundation.interaction.Interaction
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithText
@@ -78,6 +85,77 @@ class ArticleRowHighlightTest {
         waitForIdle()
 
         assertEquals(1, clicks)
+    }
+
+    // --- ripplePulse (see ArticleReturnRippleTest for the pure-function/timing coverage of
+    // ripplePulseFor/playPulseRipple this wiring itself calls into) ---
+
+    @Test
+    fun aNonzeroRipplePulsePlaysAPressOnTheProvidedInteractionSource() = runDesktopComposeUiTest {
+        val interactionSource = MutableInteractionSource()
+        val interactions = mutableListOf<Interaction>()
+        var pulse by mutableStateOf(0)
+
+        setContent {
+            LaunchedEffect(Unit) { interactionSource.interactions.collect { interactions += it } }
+            ArticleRow(
+                article = article("a1"),
+                feedTitle = "Feed",
+                feedFavicon = null,
+                selected = false,
+                focused = true,
+                rowHeight = 48.dp,
+                faviconSize = 20.dp,
+                onClick = {},
+                onToggleRead = {},
+                onToggleStar = {},
+                onCopyUrl = {},
+                onOpenInBrowser = {},
+                interactionSource = interactionSource,
+                ripplePulse = pulse,
+            )
+        }
+        waitForIdle()
+        assertEquals(emptyList(), interactions)
+
+        pulse = 1
+        waitForIdle()
+
+        // Only the immediate Press is asserted here — playPulseRipple's Release follows a 220ms
+        // delay, and waiting that out reliably inside a Compose UI test (rather than kotlinx-
+        // coroutines-test's virtual time) isn't a pattern this codebase already relies on
+        // elsewhere; the full Press-then-Release sequence and its timing are covered
+        // deterministically by ArticleReturnRippleTest's own playPulseRipple test instead.
+        assertEquals(listOf(PressInteraction.Press::class), interactions.map { it::class })
+    }
+
+    @Test
+    fun aZeroRipplePulseNeverPlaysAnything() = runDesktopComposeUiTest {
+        val interactionSource = MutableInteractionSource()
+        val interactions = mutableListOf<Interaction>()
+
+        setContent {
+            LaunchedEffect(Unit) { interactionSource.interactions.collect { interactions += it } }
+            ArticleRow(
+                article = article("a1"),
+                feedTitle = "Feed",
+                feedFavicon = null,
+                selected = false,
+                focused = true,
+                rowHeight = 48.dp,
+                faviconSize = 20.dp,
+                onClick = {},
+                onToggleRead = {},
+                onToggleStar = {},
+                onCopyUrl = {},
+                onOpenInBrowser = {},
+                interactionSource = interactionSource,
+                ripplePulse = 0,
+            )
+        }
+        waitForIdle()
+
+        assertEquals(emptyList(), interactions)
     }
 }
 

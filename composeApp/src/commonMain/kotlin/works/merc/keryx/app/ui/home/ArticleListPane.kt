@@ -118,6 +118,7 @@ fun ArticleListPane(
     navigateUpEnabled: Boolean = true,
     onTextInputFocusChange: (Boolean) -> Unit = {},
     onSearchClick: (() -> Unit)? = null,
+    returnRipplePulse: Int = 0,
 ) {
     val filter by vm.filter.collectAsStateSafe(ArticleFilter.All)
     val feeds by vm.feeds.collectAsStateSafe(emptyList())
@@ -216,6 +217,7 @@ fun ArticleListPane(
         modifier = modifier,
         listState = listState,
         preserveScrollPositionOnMount = justReturnedFromSearch,
+        returnRipplePulse = returnRipplePulse,
         onActivated = onActivated,
         notifVm = notifVm,
         onNavigateUp = onNavigateUp,
@@ -489,6 +491,14 @@ internal fun ArticleListTopBar(
 }
 
 /**
+ * The [returnRipplePulse] a specific row ([articleId]) should receive: [returnRipplePulse] itself
+ * when [articleId] is the currently selected row (the one a return-from-detail flash targets),
+ * `0` (no ripple) for every other row.
+ */
+internal fun ripplePulseFor(articleId: String, selectedId: String?, returnRipplePulse: Int): Int =
+    if (articleId == selectedId) returnRipplePulse else 0
+
+/**
  * Renders the article list with sorting, unread filtering, selection, and article actions.
  *
  * @param articles The article rows to display.
@@ -532,6 +542,7 @@ internal fun ArticleListPaneContent(
     title: String? = null,
     onSearchClick: (() -> Unit)? = null,
     preserveScrollPositionOnMount: Boolean = false,
+    returnRipplePulse: Int = 0,
 ) {
     // Consumed on this composable's first LaunchedEffect run, whatever that run turns out to do —
     // not just when it actually finds selectedId in articles — so a mount where the selection isn't
@@ -602,6 +613,7 @@ internal fun ArticleListPaneContent(
                             onCopyUrl = { copyUrl(article.url) },
                             onOpenInBrowser = { BrowserOpener.open(article.url) },
                             strings = rowStrings,
+                            ripplePulse = ripplePulseFor(article.id, selectedId, returnRipplePulse),
                         )
                     }
                 }

@@ -141,6 +141,18 @@ arrow there, since its near-fullscreen dialog otherwise leaves no other tappable
 divider between panes (reachable at a tablet-width landscape viewport) becomes a fixed, non-draggable
 line there — a mouse has room for a thinner target and a draggable divider that touch does not.
 
+At a narrow layout (both phone- and tablet-width), the article detail pane also gains a
+touch-only affordance with no desktop counterpart: a horizontal swipe on the reader moves to the
+next/previous article in the same order the list itself shows, following the finger as it drags
+and settling into place once released; dragging past either end of the list still moves the
+content a little before springing back, so the boundary is felt rather than the gesture simply
+doing nothing. This is available whenever the reader is a drilled-into destination with somewhere
+to navigate back from (a phone-width screen, and a tablet-width screen in either orientation) — not
+only in portrait — since the same reader, the same list order, and the same next/previous action
+apply regardless of how many panes happen to be visible beside it. At the desktop-width 3-pane
+layout the reader is a permanent, keyboard-driven pane instead (J/K — see `app-architecture.md`),
+and the swipe gesture does not apply there.
+
 The surfaces that are not drawn by Compose — the application menu bar, context menus, and the
 dialog button row — are real Swing/AWT widgets, so they follow the platform's Look & Feel.
 macOS and Windows use the system one; Linux uses FlatLaf tinted to the app's own teal theme,
