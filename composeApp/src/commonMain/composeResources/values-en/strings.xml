@@ -115,7 +115,7 @@
     <string name="home_unread_only">Unread only</string>
     <string name="home_sort_newest">Newest first</string>
     <string name="home_sort_oldest">Oldest first</string>
-    <string name="home_sort_disabled_search">Search results are sorted by relevance</string>
+    <string name="home_sort_disabled_search">Sorting is unavailable during search</string>
     <string name="home_already_subscribed">You’re already subscribed to this feed</string>
     <string name="home_sync">Sync</string>
     <string name="home_syncing">Syncing…</string>
@@ -124,7 +124,7 @@
     <string name="home_no_article_selected">Select an article</string>
     <string name="home_search">Search articles</string>
     <string name="home_search_placeholder">Search articles…</string>
-    <string name="home_search_too_short">Enter at least 3 characters</string>
+    <string name="home_search_too_short">Enter at least 2 characters</string>
     <string name="home_search_no_results">No matching articles</string>
     <string name="home_search_hint">↑↓ to navigate · Enter to open</string>
     <string name="home_search_clear">Clear</string>

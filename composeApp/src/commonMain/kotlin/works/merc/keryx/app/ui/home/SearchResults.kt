@@ -8,7 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 
-/** Centered one-line hint (e.g. "type at least 3 characters", "no results"). */
+/** Centered one-line hint (e.g. "type at least 2 characters", "no results"). */
 @Composable
 internal fun CenteredHint(text: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

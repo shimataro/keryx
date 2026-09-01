@@ -322,7 +322,7 @@ confirm the full navigation flow manually on a device or emulator:
   (depth 1); the article list is only what a session with nothing saved falls back to.
 - Tapping the article list's own search icon, or the feed list's collapsed search bar, opens the
   search screen with the keyboard already up and the field focused.
-- Typing 3+ characters shows results on the same screen, below the field — no pane change needed.
+- Typing 2+ characters shows results on the same screen, below the field — no pane change needed.
 - With the keyboard still open, the results list scrolls all the way to its last item without the
   keyboard covering it.
 - Opening a result, then going back, returns to the search screen with the query and results still

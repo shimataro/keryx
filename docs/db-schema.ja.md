@@ -156,6 +156,16 @@ SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundli
 実機で実際に `articles_fts` テーブルを作成・投入し、`MATCH` クエリを実行した DB ファイルを取り出して
 検証済み。
 
+**trigram トークナイザは 3 文字未満のクエリ文字列からトークンを一つも生成しない** — 1〜2 文字での
+`MATCH` はエラーにならず無音で 0 件を返す。検索の最小文字数（`core/Constants.kt` の
+`SEARCH_MIN_TERM_LENGTH`、現在 2）は trigram の下限（`TRIGRAM_MIN_TERM_LENGTH`、3）より小さいため、
+2 文字の語は `articles_fts` を使わず `articles` 本体（title と `search_text`）への
+`LIKE '%語%'` 走査（バインドパラメータ化・エスケープ済み。文字列連結はしない）にフォールバックする。
+`FtsSearch`（`data/local/`）参照。2 文字語のみのクエリは FTS のランクを持たないため、結果は
+`published_at DESC` にフォールバックし、`SEARCH_FALLBACK_RESULT_LIMIT`（200）で上限を切る。
+3 文字以上の語と 2 文字の語が混在するクエリは、従来どおり `articles_fts MATCH`（ランク順）を実行し、
+短い語はマッチした行に対する追加の `LIKE` フィルタとして AND で効かせる。
+
 ## local_settings.json（keryx.db 外・非同期）
 
 保存先: アプリデータディレクトリ直下（`AppDirs.appDataDir()`。macOS: `~/Library/Application Support/Keryx`）。
