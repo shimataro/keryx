@@ -103,6 +103,29 @@ class ArticleWebViewHtmlTest {
     }
 
     @Test
+    fun wrapArticleHtmlWrapsTitleInLinkWhenUrlProvided() {
+        val result = wrapArticleHtml(
+            theme,
+            title = "My Title",
+            meta = "",
+            body = "<p>body</p>",
+            titleUrl = "https://example.com/article",
+            titleTooltip = "Open in browser",
+        )
+        assertTrue(result.contains("""<h1 class="article-title"><a href="https://example.com/article" title="Open in browser">My Title</a></h1>"""))
+    }
+
+    @Test
+    fun wrapArticleHtmlOmitsTitleLinkWhenUrlIsNullOrBlank() {
+        val withNull = wrapArticleHtml(theme, title = "My Title", meta = "", body = "<p>body</p>", titleUrl = null)
+        val withBlank = wrapArticleHtml(theme, title = "My Title", meta = "", body = "<p>body</p>", titleUrl = "")
+        assertTrue(withNull.contains("""<h1 class="article-title">My Title</h1>"""))
+        assertTrue(withBlank.contains("""<h1 class="article-title">My Title</h1>"""))
+        assertTrue(!withNull.contains("<a "))
+        assertTrue(!withBlank.contains("<a "))
+    }
+
+    @Test
     fun wrapArticleHtmlRendersEscapedTitleAndMeta() {
         val result = wrapArticleHtml(
             theme,
@@ -144,6 +167,27 @@ class ArticleWebViewHtmlTest {
         // The CSS rules for these classes are always present; assert the *elements* aren't emitted.
         assertTrue(!result.contains("""<h1 class="article-title">"""))
         assertTrue(!result.contains("""<div class="article-meta">"""))
+    }
+
+    @Test
+    fun articleNoContentHtmlWrapsTitleInLinkWhenUrlProvided() {
+        val result = articleNoContentHtml(
+            theme,
+            title = "My Title",
+            meta = "Alice · now",
+            message = "No content",
+            titleUrl = "https://example.com/article",
+            titleTooltip = "Open in browser",
+        )
+        assertTrue(result.contains("""<h1 class="article-title"><a href="https://example.com/article" title="Open in browser">My Title</a></h1>"""))
+    }
+
+    @Test
+    fun wrapArticleHtmlContainsTitleLinkStyles() {
+        val result = wrapArticleHtml(theme, title = "My Title", meta = "", body = "<p>body</p>", titleUrl = "https://example.com/article")
+        assertTrue(result.contains(".article-title a { color: inherit; text-decoration: none; cursor: pointer; transition: opacity 0.15s ease; }"))
+        assertTrue(result.contains(".article-title a:hover { opacity: 0.7; }"))
+        assertTrue(result.contains(".article-title a:active { opacity: 0.5; }"))
     }
 
     @Test

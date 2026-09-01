@@ -127,8 +127,8 @@ internal fun ArticleDetailPaneContent(
     onToggleStar: () -> Unit = {},
     onMarkUnread: () -> Unit = {},
     onNavigateUp: (() -> Unit)? = null,
-    reader: @Composable (html: String, body: String, baseUrl: String?) -> Unit =
-        { html, body, baseUrl -> ArticleWebView(html, body, baseUrl) },
+    reader: @Composable (html: String, body: String, baseUrl: String?, articleUrl: String?) -> Unit =
+        { html, body, baseUrl, articleUrl -> ArticleWebView(html, body, baseUrl, articleUrl) },
 ) {
     // Inline "copied" feedback for the toolbar copy button. Kept above any conditional so this
     // composable never leaves/re-enters composition — otherwise LaunchedEffect(copyPulse) would
@@ -177,11 +177,13 @@ internal fun ArticleDetailPaneContent(
         article?.let { articleMetaText(it.author, it.published_at) }.orEmpty()
     }
 
-    val html = remember(theme, article?.id, article?.url, title, meta, body, placeholderText, noContentText) {
+    val openInBrowserTooltip = stringResource(Res.string.article_open_in_browser)
+    val html = remember(theme, article?.id, article?.url, title, meta, body, placeholderText, noContentText, openInBrowserTooltip) {
+        val articleUrl = article?.url
         when {
             article == null -> articlePlaceholderHtml(theme, placeholderText)
-            body.isNullOrBlank() -> articleNoContentHtml(theme, title, meta, noContentText)
-            else -> wrapArticleHtml(theme, title, meta, body, baseUrl = article.url)
+            body.isNullOrBlank() -> articleNoContentHtml(theme, title, meta, noContentText, titleUrl = articleUrl, titleTooltip = openInBrowserTooltip)
+            else -> wrapArticleHtml(theme, title, meta, body, baseUrl = articleUrl, titleUrl = articleUrl, titleTooltip = openInBrowserTooltip)
         }
     }
 
@@ -202,7 +204,7 @@ internal fun ArticleDetailPaneContent(
             )
         }
         Box(Modifier.fillMaxSize().testTag(ARTICLE_READER_TEST_TAG)) {
-            reader(html, body.orEmpty(), article?.url)
+            reader(html, body.orEmpty(), article?.url, article?.url)
         }
     }
 }
@@ -313,14 +315,15 @@ internal fun articleMetaText(author: String?, publishedAt: Long?): String =
  * itself will navigate to.
  */
 @Composable
-private fun ArticleWebView(html: String, body: String, baseUrl: String?) {
+private fun ArticleWebView(html: String, body: String, baseUrl: String?, titleUrl: String?) {
     // Only genuine outbound links from the article's own HTML are forwarded to the system
     // browser. A plain "any http(s) main-frame request" check would also catch SNS-embed
     // widgets' own internal requests (confirmed during the spike for the X/Twitter widget),
     // breaking the embed instead of letting it render in place.
     val knownLinks = remember { mutableStateOf(emptySet<String>()) }
-    LaunchedEffect(body, baseUrl) {
-        knownLinks.value = extractLinks(body, baseUrl.orEmpty())
+    LaunchedEffect(body, baseUrl, titleUrl) {
+        val links = extractLinks(body, baseUrl.orEmpty())
+        knownLinks.value = titleUrl?.takeIf { hasUsableUrl(it) }?.let { links + it } ?: links
     }
     val scope = rememberCoroutineScope()
     val interceptor = remember {

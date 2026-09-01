@@ -46,16 +46,29 @@ data class ArticleHtmlTheme(
  * article's origin instead of failing to resolve at all. Left `null`/blank, no `<base>` tag is
  * emitted — an empty `<base href="">` would resolve to the document's own (meaningless) URL.
  */
-fun wrapArticleHtml(theme: ArticleHtmlTheme, title: String, meta: String, body: String, baseUrl: String? = null): String =
-    articleDocument(theme, articleHeader(title, meta) + body, baseUrl = baseUrl)
+fun wrapArticleHtml(
+    theme: ArticleHtmlTheme,
+    title: String,
+    meta: String,
+    body: String,
+    baseUrl: String? = null,
+    titleUrl: String? = null,
+    titleTooltip: String? = null,
+): String = articleDocument(theme, articleHeader(title, meta, titleUrl, titleTooltip) + body, baseUrl = baseUrl)
 
 /**
  * Same header as [wrapArticleHtml], with a muted [message] where the body would be — for an
  * article whose feed supplied neither `content` nor `summary`. Rendered here rather than as
  * Compose text so the reader WebView is never unmounted (see `ArticleDetailPane`'s KDoc).
  */
-fun articleNoContentHtml(theme: ArticleHtmlTheme, title: String, meta: String, message: String): String =
-    articleDocument(theme, articleHeader(title, meta) + """<p class="article-notice">${escapeHtml(message)}</p>""")
+fun articleNoContentHtml(
+    theme: ArticleHtmlTheme,
+    title: String,
+    meta: String,
+    message: String,
+    titleUrl: String? = null,
+    titleTooltip: String? = null,
+): String = articleDocument(theme, articleHeader(title, meta, titleUrl, titleTooltip) + """<p class="article-notice">${escapeHtml(message)}</p>""")
 
 /** [message] centered in the viewport with no header — the "no article selected" state. */
 fun articlePlaceholderHtml(theme: ArticleHtmlTheme, message: String): String =
@@ -65,8 +78,20 @@ fun articlePlaceholderHtml(theme: ArticleHtmlTheme, message: String): String =
         bodyClass = "placeholder",
     )
 
-private fun articleHeader(title: String, meta: String): String = buildString {
-    if (title.isNotBlank()) append("""<h1 class="article-title">${escapeHtml(title)}</h1>""")
+private fun articleHeader(
+    title: String,
+    meta: String,
+    titleUrl: String? = null,
+    titleTooltip: String? = null,
+): String = buildString {
+    if (title.isNotBlank()) {
+        if (!titleUrl.isNullOrBlank()) {
+            val tooltipAttr = titleTooltip?.takeIf { it.isNotBlank() }?.let { " title=\"${escapeHtml(it)}\"" }.orEmpty()
+            append("""<h1 class="article-title"><a href="${escapeHtml(titleUrl)}"$tooltipAttr>${escapeHtml(title)}</a></h1>""")
+        } else {
+            append("""<h1 class="article-title">${escapeHtml(title)}</h1>""")
+        }
+    }
     if (meta.isNotBlank()) append("""<div class="article-meta">${escapeHtml(meta)}</div>""")
 }
 
@@ -104,6 +129,9 @@ private fun articleDocument(theme: ArticleHtmlTheme, content: String, bodyClass:
           table { border-collapse: collapse; }
           td, th { padding: 4px 8px; }
           .article-title { font-size: 1.6em; font-weight: 600; line-height: 1.3; margin: 0 0 4px; }
+          .article-title a { color: inherit; text-decoration: none; cursor: pointer; transition: opacity 0.15s ease; }
+          .article-title a:hover { opacity: 0.7; }
+          .article-title a:active { opacity: 0.5; }
           .article-meta { font-size: 0.85em; color: ${theme.mutedColor.toCssHex()}; margin: 0 0 16px; }
           .article-notice { color: ${theme.mutedColor.toCssHex()}; margin: 0; }
           .article-placeholder {
