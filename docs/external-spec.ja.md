@@ -70,7 +70,7 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
   連続エラーはフィード一覧にインジケータ表示
 - 記事一覧・記事ビュー（リーダービュー）。**記事を選択した瞬間に既読**。未読に戻す操作あり。
 - スター（永続）、外部ブラウザーで開く
-- SQLite FTS5（trigram）によるローカル全文検索（2 文字以上 — 3 文字以上は trigram インデックス、2 文字は新着順の `LIKE` 走査にフォールバック。[db-schema.ja.md](db-schema.ja.md) 参照）
+- SQLite FTS5（trigram）によるローカル全文検索（2 文字以上 — 3 文字以上は trigram インデックス、2 文字のみからなるクエリは新着順の `LIKE` 走査にフォールバック、3 文字以上を含む混在クエリは FTS5 ランク順を使用。[db-schema.ja.md](db-schema.ja.md) 参照）
 - デスクトップ通知・タスクトレイ常駐（閉じるとトレイに収納）・通知センター。
   Linux ではトレイに D-Bus の `org.kde.StatusNotifierItem` + `com.canonical.dbusmenu`、通知に
   `org.freedesktop.Notifications` を使い、StatusNotifierItem ホストが居ない環境では AWT の
