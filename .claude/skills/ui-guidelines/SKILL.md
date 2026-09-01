@@ -260,10 +260,10 @@ the detail screen itself rather than of how many other panes happen to be visibl
 excludes `PaneLayout.Triple`, where the reader is a permanent, keyboard-driven pane shared with
 desktop and has no back action to gate on in the first place.
 
-The reader's content is two nested `Box`es, not one: the outer one owns the gesture, the clip
-(so a sliding reader can't spill into a neighboring pane at `Dual`), and the accessibility actions
-below; the inner one carries the actual `Modifier.offset` and the existing
-`ARTICLE_READER_TEST_TAG`. Dragging past either end of the list still moves the content — heavily
+The reader's content is two nested `Box`es, not one: the outer one owns the gesture and the clip
+(so a sliding reader can't spill into a neighboring pane at `Dual`); the inner one carries the
+actual `Modifier.offset`, the existing `ARTICLE_READER_TEST_TAG`, and the accessibility actions
+below. Dragging past either end of the list still moves the content — heavily
 damped and capped — rather than refusing to move at all, so the boundary is felt as resistance
 instead of the gesture doing nothing.
 
