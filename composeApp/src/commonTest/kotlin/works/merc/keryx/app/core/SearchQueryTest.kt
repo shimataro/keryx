@@ -11,9 +11,12 @@ class SearchQueryTest {
     }
 
     @Test
-    fun dropsShortTermsAndKeepsLongOnes() {
-        // "de" and "f" are shorter than SEARCH_MIN_TERM_LENGTH and are dropped.
-        assertEquals(listOf("abc"), searchTerms("abc de f"))
+    fun dropsSubMinimumTermsAndKeepsTheRest() {
+        // "f" is 1 character, shorter than SEARCH_MIN_TERM_LENGTH, and is dropped. "de" (2
+        // characters) and "abc" (3+) both clear the minimum and are kept — whether a kept term
+        // is long enough for the trigram index or falls back to LIKE is FtsSearch's concern, not
+        // searchTerms'.
+        assertEquals(listOf("abc", "de"), searchTerms("abc de f"))
     }
 
     @Test
@@ -23,8 +26,9 @@ class SearchQueryTest {
     }
 
     @Test
-    fun allShortTermsReturnEmpty() {
-        assertEquals(emptyList(), searchTerms("ab cd"))
+    fun allSubMinimumTermsReturnEmpty() {
+        // Both terms are 1 character, below SEARCH_MIN_TERM_LENGTH.
+        assertEquals(emptyList(), searchTerms("a b"))
     }
 
     @Test

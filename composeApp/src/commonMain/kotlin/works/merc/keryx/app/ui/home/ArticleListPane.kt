@@ -265,8 +265,9 @@ private fun SearchListPane(
     val feeds by vm.feeds.collectAsStateSafe(emptyList())
     val feedTitles = feeds.associate { it.id to it.displayTitle() }
     val feedFavicons = feeds.associate { it.id to it.favicon_url }
-    // A query has usable terms once at least one word is long enough for the trigram index
-    // (short words like a lone "ab", or "ab cd" where every word is too short, count as no terms).
+    // A query has usable terms once at least one word is 2+ characters (searched via the trigram
+    // index at 3+, or a LIKE fallback at exactly 2 — see FtsSearch). A lone 1-character word, or
+    // "a b" where every word is too short, count as no terms.
     val hasValidTerms = searchTerms(query).isNotEmpty()
 
     val listState = rememberLazyListState()
@@ -398,8 +399,9 @@ internal fun sortDirectionIcon(newestFirst: Boolean): DrawableResource =
 /**
  * The top bar shared by the normal article list ([ArticleListPaneContent]) and the search scope
  * ([SearchListPane]): unread-only toggle, notifications bell, sort, mark-all-read. When
- * [sortEnabled] is false (search scope, where results stay pinned to FTS5 relevance rank), the
- * sort button is disabled and its tooltip explains why instead of showing the usual "sort by ...".
+ * [sortEnabled] is false (search scope, where the result order is fixed — FTS5 relevance rank, or
+ * recency when every term is too short to be ranked, see FtsSearch), the sort button is disabled
+ * and its tooltip explains why instead of showing the usual "sort by ...".
  *
  * When [onNavigateUp] is non-null (this pane is shown alone or paired at a narrow
  * [PaneLayout] — see `ArticleListPane`'s KDoc), a leading back-button-and-[title] row is added

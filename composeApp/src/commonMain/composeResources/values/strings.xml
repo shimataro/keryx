@@ -114,7 +114,7 @@
     <string name="home_unread_only">未読のみ</string>
     <string name="home_sort_newest">新しい順</string>
     <string name="home_sort_oldest">古い順</string>
-    <string name="home_sort_disabled_search">検索結果は関連度順で表示されます</string>
+    <string name="home_sort_disabled_search">検索中は並び替えできません</string>
     <string name="home_already_subscribed">このフィードはすでに購読済みです</string>
     <string name="home_sync">同期</string>
     <string name="home_syncing">同期中…</string>
@@ -123,7 +123,7 @@
     <string name="home_no_article_selected">記事を選択してください</string>
     <string name="home_search">記事を検索</string>
     <string name="home_search_placeholder">記事を検索…</string>
-    <string name="home_search_too_short">3文字以上の語句を入力してください</string>
+    <string name="home_search_too_short">2文字以上の語句を入力してください</string>
     <string name="home_search_no_results">該当する記事がありません</string>
     <string name="home_search_hint">↑↓ で移動 · Enter で開く</string>
     <string name="home_search_clear">クリア</string>

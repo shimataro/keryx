@@ -129,6 +129,18 @@ instead. See `.claude/rules/android-sqlite-bundling.md` for the rationale and ex
 was verified against a real `articles_fts` table (created, populated, and queried with `MATCH`)
 pulled from a device during Android bring-up.
 
+**The trigram tokenizer produces no tokens at all for a query string under 3 characters** — a
+`MATCH` against a 1- or 2-character string silently returns zero rows rather than erroring. Search's
+minimum term length (`SEARCH_MIN_TERM_LENGTH` in `core/Constants.kt`, currently 2) is therefore
+below the trigram floor (`TRIGRAM_MIN_TERM_LENGTH`, 3): a 2-character term is instead matched with a
+`LIKE '%term%'` scan directly over `articles` (title and `search_text`, bind-parameterized and
+escaped — never string-concatenated), bypassing `articles_fts` entirely. See `FtsSearch` (`data/local/`).
+A query made up only of such short terms has no FTS rank to sort by, so results fall back to
+`published_at DESC` and are capped at `SEARCH_FALLBACK_RESULT_LIMIT` (200) rather than left
+unbounded. A query that mixes a 3+-character term with a 2-character one still runs through
+`articles_fts MATCH` (rank-ordered) with the short term ANDed in as an extra `LIKE` filter on the
+matched rows.
+
 ## local_settings.json (outside keryx.db, non-sync)
 
 Location: directly under the app data directory (`AppDirs.appDataDir()`. macOS: `~/Library/Application Support/Keryx`).

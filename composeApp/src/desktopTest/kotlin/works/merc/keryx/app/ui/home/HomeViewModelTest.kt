@@ -1768,8 +1768,8 @@ class HomeViewModelTest {
 
         assertEquals(ArticleFilter.All, vm.filter.value)
 
-        // Typing moves into the Search scope on the first keystroke. (A <3-char query keeps the FTS
-        // query from running — the switch happens on isNotEmpty, not on the result set.)
+        // Typing moves into the Search scope on the first keystroke — the switch happens on
+        // isNotEmpty, not on whether the query has any usable (2+ char) terms or a result set.
         vm.setSearchQuery("ko")
         assertEquals(ArticleFilter.Search, vm.filter.value)
         assertEquals("ko", vm.searchQuery.value)
@@ -2121,8 +2121,9 @@ class HomeViewModelTest {
         assertFalse(vm.searching.value)
         assertEquals(listOf("a1"), vm.searchResults.value.map { it.article.id })
 
-        // Too-short query has no usable terms, so it's not "searching" (shows the too-short hint).
-        vm.setSearchQuery("ab")
+        // Too-short (1-character) query has no usable terms, so it's not "searching" (shows the
+        // too-short hint) — SEARCH_MIN_TERM_LENGTH is 2, so "a" alone is dropped by searchTerms.
+        vm.setSearchQuery("a")
         testScheduler.advanceUntilIdle()
         assertFalse(vm.searching.value)
     }
