@@ -71,6 +71,17 @@ class FtsSearchQueryHelpersTest {
     }
 
     @Test
+    fun markTermsMergesOverlappingRangesFromSameTerm() {
+        // "aa" occurs at index 0 and index 1 inside "aaa". Advancing by term.length would skip
+        // the second occurrence, leaving only the first two characters highlighted; advancing by
+        // one discovers both and the merge logic unions them into the full range.
+        val marked = markTerms("aaa", listOf("aa"))
+        val s = FtsSearch.MARK_START
+        val e = FtsSearch.MARK_END
+        assertEquals("${s}aaa$e", marked)
+    }
+
+    @Test
     fun markTermsStrippedOfMarkersRestoresOriginalText() {
         val text = "Kotlin Multiplatform apps"
         val marked = markTerms(text, listOf("Kotlin", "apps"))

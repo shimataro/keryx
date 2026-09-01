@@ -182,7 +182,7 @@ internal fun markTerms(text: String, terms: List<String>): String {
             val index = text.indexOf(term, from, ignoreCase = true)
             if (index < 0) break
             ranges.add(index until (index + term.length))
-            from = index + term.length
+            from = index + 1
         }
     }
     if (ranges.isEmpty()) return text
