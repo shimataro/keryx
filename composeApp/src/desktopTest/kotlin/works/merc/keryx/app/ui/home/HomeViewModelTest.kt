@@ -634,6 +634,71 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun canSelectNextAndCanSelectPreviousReflectPositionAndClampAtEnds() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 1L, publishedAt = 3L, createdAt = 3L)
+        db.insertArticle("a2", "f1", isRead = 1L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a3", "f1", isRead = 1L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+
+        // No selection yet: the reader has nothing on screen to swipe away from.
+        assertFalse(vm.canSelectNext())
+        assertFalse(vm.canSelectPrevious())
+
+        vm.selectArticle(vm.articles.value.first { it.id == "a1" })
+        testScheduler.advanceUntilIdle()
+        // First article: nothing to move back to.
+        assertTrue(vm.canSelectNext())
+        assertFalse(vm.canSelectPrevious())
+
+        vm.selectNext()
+        testScheduler.advanceUntilIdle()
+        // Middle article: both directions available.
+        assertTrue(vm.canSelectNext())
+        assertTrue(vm.canSelectPrevious())
+
+        vm.selectNext()
+        testScheduler.advanceUntilIdle()
+        // Last article: nothing further to move to.
+        assertFalse(vm.canSelectNext())
+        assertTrue(vm.canSelectPrevious())
+    }
+
+    @Test
+    fun canSelectNextAndCanSelectPreviousAreFalseForAnEmptyList() = runTest {
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+
+        assertFalse(vm.canSelectNext())
+        assertFalse(vm.canSelectPrevious())
+    }
+
+    @Test
+    fun canSelectNextAndCanSelectPreviousReflectPositionWithinSearchResults() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 1L)
+        db.insertArticle("a2", "f1", title = "Kotlin Two", content = "kotlin content", isRead = 1L)
+        ftsManagerIndexed(driver)
+        val vm = newViewModel()
+        subscribeAll(vm)
+
+        vm.setSearchQuery("Kotlin")
+        advanceForSearchDebounce()
+        val results = vm.searchResults.value.map { it.article }
+        assertEquals(2, results.size)
+
+        vm.selectArticle(results[0])
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.canSelectNext())
+        assertFalse(vm.canSelectPrevious())
+    }
+
+    @Test
     fun selectingUnreadArticleWhileUnreadOnlyKeepsItPinnedInList() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)

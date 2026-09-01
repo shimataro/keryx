@@ -2,6 +2,7 @@ package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import org.jetbrains.compose.resources.painterResource
 import androidx.compose.ui.layout.ContentScale
@@ -36,6 +39,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import kotlinx.datetime.TimeZone
 import coil3.compose.AsyncImage
 import org.jetbrains.compose.resources.stringResource
@@ -151,6 +155,27 @@ internal fun rememberArticleRowStrings(): ArticleRowStrings {
     }
 }
 
+/** How long a pulse-triggered ripple holds its press state before releasing, so the indication has
+ * time to visibly grow before it starts fading — an immediate press-then-release can render as
+ * barely visible. */
+private const val RETURN_RIPPLE_PRESS_HOLD_MS = 220L
+
+/**
+ * Plays a one-shot press+release into [this], mimicking a real tap so whichever indication is
+ * bound to it (Android's M3 ripple via `listRowSurface`'s Android `actual`; desktop's
+ * `FlatIndication`) shows its normal press feedback with no actual pointer input. Used to flash
+ * the row for the article the user was last reading when they back out of the article detail pane
+ * at `PaneLayout.Single` (see `HomePaneLayout.kt`'s `shouldFlashReturnedArticle` and
+ * `ArticleListPane.kt`'s `ripplePulseFor`), where the persistent selection highlight is
+ * suppressed by `LocalRowSelectionVisible`.
+ */
+internal suspend fun MutableInteractionSource.playPulseRipple() {
+    val press = PressInteraction.Press(Offset.Zero)
+    emit(press)
+    delay(RETURN_RIPPLE_PRESS_HOLD_MS)
+    emit(PressInteraction.Release(press))
+}
+
 /**
  * Renders an article row with selection styling, read and starred indicators, metadata, and context-menu actions.
  *
@@ -168,6 +193,10 @@ internal fun rememberArticleRowStrings(): ArticleRowStrings {
  * @param onOpenInBrowser Called to open the article URL in a browser.
  * @param titleOverride An optional title to display instead of the article title.
  * @param strings The per-list strings and time zone, hoisted above `items {}` by the caller.
+ * @param ripplePulse A nonzero value plays a one-shot [playPulseRipple] on [interactionSource] —
+ *   see `ArticleListPane.kt`'s `ripplePulseFor`. `0` (the default) never plays one.
+ * @param interactionSource The row's press/selection interaction source. Hoisted (rather than
+ *   created internally) so [ripplePulse] can be exercised directly in tests.
  */
 @Composable
 internal fun ArticleRow(
@@ -185,6 +214,8 @@ internal fun ArticleRow(
     onOpenInBrowser: () -> Unit,
     titleOverride: AnnotatedString? = null,
     strings: ArticleRowStrings = rememberArticleRowStrings(),
+    ripplePulse: Int = 0,
+    interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
 ) {
     val unread = article.is_read == 0L
     val toggleReadLabel = if (article.is_read == 1L) strings.markAsUnread else strings.markAsRead
@@ -193,11 +224,13 @@ internal fun ArticleRow(
     val openInBrowserLabel = strings.openInBrowser
     val noTitleFallback = strings.noTitleFallback
     val testTag = remember(article.id) { "article-${article.id}" }
-    val rowInteraction = remember { MutableInteractionSource() }
+    LaunchedEffect(ripplePulse) {
+        if (ripplePulse != 0) interactionSource.playPulseRipple()
+    }
     Row(
         Modifier.testTag(testTag)
             .fillMaxWidth()
-            .listRowClickable(rowInteraction, selected, onClick)
+            .listRowClickable(interactionSource, selected, onClick)
             .nativeContextMenu(
                 items = {
                     val urlUsable = hasUsableUrl(article.url)
@@ -214,7 +247,7 @@ internal fun ArticleRow(
                 },
                 onOpen = onClick,
             )
-            .listRowSurface(selectionBackground(selected, focused), ListRowKind.ListItem, rowInteraction)
+            .listRowSurface(selectionBackground(selected, focused), ListRowKind.ListItem, interactionSource)
             .heightIn(min = listRowMinHeight())
             .padding(horizontal = 8.dp, vertical = 10.dp)
             .heightIn(min = rowHeight),

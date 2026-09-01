@@ -9,6 +9,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -20,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.data.local.db.Articles
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * `ArticleDetailPaneContent` composes its native reader unconditionally, regardless of whether an
@@ -235,6 +237,114 @@ class ArticleDetailPaneTest {
         waitForIdle()
 
         onNodeWithContentDescription("URL をコピーしました").assertExists()
+    }
+
+    // --- Swipe-to-navigate accessibility actions (the reader's screen-reader counterpart for
+    // articleSwipeNavigation's pointer-only gesture — see ArticleSwipeNav.kt's
+    // articleSwipeAccessibilityActions). ---
+
+    /** The labels of the custom accessibility actions exposed by [ARTICLE_READER_TEST_TAG]. */
+    private fun androidx.compose.ui.test.ComposeUiTest.readerCustomActionLabels(): List<String> =
+        onNodeWithTag(ARTICLE_READER_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode()
+            .config.getOrElse(SemanticsActions.CustomActions) { emptyList() }
+            .map { it.label }
+
+    @Test
+    fun swipeAccessibilityActionsAreExposedWhenTouchPrimaryAndNarrow() = runDesktopComposeUiTest {
+        setContent {
+            ArticleDetailPaneContent(
+                article = testArticle(),
+                modifier = Modifier.size(400.dp, 500.dp),
+                onNavigateUp = {},
+                canSelectNext = { true },
+                canSelectPrevious = { true },
+                isTouchPrimary = true,
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        assertEquals(listOf("前の記事", "次の記事"), readerCustomActionLabels())
+    }
+
+    @Test
+    fun swipeAccessibilityActionsAreAbsentOnDesktopEvenWhenNarrow() = runDesktopComposeUiTest {
+        setContent {
+            ArticleDetailPaneContent(
+                article = testArticle(),
+                modifier = Modifier.size(400.dp, 500.dp),
+                onNavigateUp = {},
+                canSelectNext = { true },
+                canSelectPrevious = { true },
+                isTouchPrimary = false,
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        assertEquals(emptyList(), readerCustomActionLabels())
+    }
+
+    @Test
+    fun swipeAccessibilityActionsAreAbsentAtTriplePaneWidth() = runDesktopComposeUiTest {
+        // onNavigateUp == null is how this codebase signals PaneLayout.Triple everywhere else in
+        // this pane (see the ui-guidelines skill's "Adaptive pane layout & touch affordances").
+        setContent {
+            ArticleDetailPaneContent(
+                article = testArticle(),
+                modifier = Modifier.size(400.dp, 500.dp),
+                onNavigateUp = null,
+                canSelectNext = { true },
+                canSelectPrevious = { true },
+                isTouchPrimary = true,
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        assertEquals(emptyList(), readerCustomActionLabels())
+    }
+
+    @Test
+    fun swipeAccessibilityActionsOmitADirectionWithNothingToMoveTo() = runDesktopComposeUiTest {
+        setContent {
+            ArticleDetailPaneContent(
+                article = testArticle(),
+                modifier = Modifier.size(400.dp, 500.dp),
+                onNavigateUp = {},
+                canSelectNext = { false },
+                canSelectPrevious = { true },
+                isTouchPrimary = true,
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        assertEquals(listOf("前の記事"), readerCustomActionLabels())
+    }
+
+    @Test
+    fun invokingTheNextArticleAccessibilityActionCallsOnSelectNext() = runDesktopComposeUiTest {
+        var invoked = false
+        setContent {
+            ArticleDetailPaneContent(
+                article = testArticle(),
+                modifier = Modifier.size(400.dp, 500.dp),
+                onNavigateUp = {},
+                onSelectNext = { invoked = true },
+                canSelectNext = { true },
+                canSelectPrevious = { true },
+                isTouchPrimary = true,
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        val actions = onNodeWithTag(ARTICLE_READER_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode()
+            .config.getOrElse(SemanticsActions.CustomActions) { emptyList() }
+        val nextAction = actions.first { it.label == "次の記事" }
+        assertTrue(nextAction.action(), "custom action \"次の記事\" reported failure")
+        assertTrue(invoked)
     }
 }
 

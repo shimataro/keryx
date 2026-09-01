@@ -100,6 +100,10 @@ fun HomeScreen() {
     // Bumped on each keyboard-shortcut copy; ArticleDetailPane watches it to flash its copy button's
     // inline ✓ (the keyboard copies the selected article, which that pane already shows).
     var copyPulse by remember { mutableStateOf(0) }
+    // Bumped by goBack() whenever shouldFlashReturnedArticle says so; ArticleListPane threads it
+    // down to the returned-to article's own row, which plays a one-shot ripple so the user can
+    // tell where they were reading (see ArticleRowComponents.kt's playPulseRipple).
+    var articleReturnRipplePulse by remember { mutableStateOf(0) }
     // Bumped by the F2(Enter)/Delete feed-list shortcuts; FeedListPane observes these and resolves
     // the currently selected filter (feed/folder/tag) against its own already-collected rows to
     // trigger the same rename/edit and delete/unsubscribe dialogs the context menu uses.
@@ -160,6 +164,7 @@ fun HomeScreen() {
         when (homeBackAction(paneLayout, focusedPane.ordinal + 1, searchScopeEntry != null)) {
             HomeBackAction.ExitSearch -> vm.exitSearchScope()?.let { setFocusedPane(it) }
             HomeBackAction.PopPane -> {
+                if (shouldFlashReturnedArticle(paneLayout, focusedPane)) articleReturnRipplePulse++
                 val previous = focusedPane.ordinal - 1
                 if (previous >= 0) setFocusedPane(HomePane.entries[previous])
             }
@@ -433,6 +438,7 @@ fun HomeScreen() {
                                     setFocusedPane(HomePane.ArticleList)
                                     vm.enterSearchScope(HomePane.ArticleList)
                                 },
+                                returnRipplePulse = articleReturnRipplePulse,
                             )
                             HomePane.ArticleDetail -> ArticleDetailPane(
                                 vm,

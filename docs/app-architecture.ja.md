@@ -220,6 +220,27 @@ WebView **内部**の HTML として描画する（`ui/article/ArticleWebViewHtm
 [known-issues.md](known-issues.ja.md) 参照（この生成失敗の例外が uncaught のまま伝播し、ライブラリの
 生成リトライタイマが止まらなくなることが、クリック時にアプリ全体がフリーズする原因でもあった）。
 
+**Android のリーダー（`ui/home/ArticleDetailPane.kt`。commonMain 共有のコンポーザブル）は、
+狭いレイアウトではスワイプによる前後移動も持つ**（`ui/home/ArticleSwipeNav.kt`） — リーダー上の
+水平ドラッグで次/前の記事へ移動する。有効化条件は `isTouchPrimary && onNavigateUp != null &&
+article != null`（`HomePaneLayout.kt` が他所でも使っている、狭いレイアウトを示す既定の
+nullable-callback シグナルと同じ — 下記「Home's adaptive pane layout」参照）で、
+`PaneLayout.Triple` およびデスクトップでは無効になる。Android の `WebView`（`AndroidView` 経由で
+埋め込まれる）は通常の in-tree ビューだが、タッチ入力は自分自身で消費してしまうため、このジェスチャーは
+`platform/NativeMenu.android.kt` の長押しや `ui/home/FeedListDragGestures.kt` の並べ替えドラッグと
+同じ方式で調停する: `pointerInput` ループが `PointerEventPass.Initial`（この祖先ノードに WebView 側の
+interop 処理より先に届くパス）を監視し、ドラッグが水平方向であると確定する（touch slop を超え、かつ
+垂直方向より水平方向の移動量が大きい）までは一切イベントを consume しない。これにより通常の縦方向
+ジェスチャー（WebView 自体のスクロールやリンクタップ）は妨げられない。確定した時点で初めて consume を
+始め、WebView 側のジェスチャーをキャンセルさせる。`HorizontalPager` の採用は検討した上で見送った —
+ページごとに `WebView` を 1 つずつマウントする必要があり、隣接ページの本文を先読みすると、
+`error-design.md` の「選択した瞬間に既読」というルールに従って、ユーザーがまだスワイプしてすら
+いないページまで本文をロード（＝既読化）してしまう。これは `HomeViewModel.selectArticle` の設計意図に
+反する。代わりに、このジェスチャーはドラッグが確定した時点で `HomeViewModel.selectNext`/
+`selectPrevious`（デスクトップの J/K キーボードショートカットと同じ呼び出し）を駆動するだけで、
+リーダー本文のスライドは、2 つ目の WebView を差し替えるのではなく、既存の単一の WebView インスタンスに
+対する単純な `Modifier.offset` で行う。
+
 ### デスクトップトレイ（プラットフォーム分岐）
 
 `tray/KeryxTray.kt` が 4 実装のいずれかを選ぶ。

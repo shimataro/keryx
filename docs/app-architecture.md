@@ -212,6 +212,27 @@ see [known-issues.md](known-issues.md) for the investigation (an uncaught except
 creation also left the library's creation-retry timer running forever, which was the cause of an
 app-wide freeze on click).
 
+**Android's reader (`ui/home/ArticleDetailPane.kt`, shared `commonMain` composable) also grows
+swipe-to-navigate at a narrow layout** (`ui/home/ArticleSwipeNav.kt`) — a horizontal drag on the
+reader moves to the next/previous article, gated on `isTouchPrimary && onNavigateUp != null &&
+article != null` (the same nullable-callback narrow-layout signal `HomePaneLayout.kt` already uses
+elsewhere, see "Home's adaptive pane layout" below), so it is inert at `PaneLayout.Triple` and on
+desktop. Android's `WebView` (embedded via `AndroidView`) is an ordinary in-tree view, but it still
+consumes touch input on its own terms, so the gesture is arbitrated the same way
+`platform/NativeMenu.android.kt`'s long-press and `ui/home/FeedListDragGestures.kt`'s reorder drag
+already are: a `pointerInput` loop watches `PointerEventPass.Initial` (which reaches this ancestor
+before the WebView's own interop handling) and leaves every event unconsumed until the drag is
+confirmed horizontal (past touch slop, and more horizontal than vertical travel), so the WebView's
+own scroll and link taps are never interrupted for an ordinary vertical gesture; only once confirmed
+does it start consuming, which cancels the WebView's own gesture. A `HorizontalPager` was considered
+and rejected: it would need one `WebView` mounted per page, and preloading the adjacent pages' HTML
+would load their bodies (and, per the "selection marks read instantly" rule in `error-design.md`,
+mark them read) before the user ever swipes to them — the opposite of what `HomeViewModel.selectArticle`
+is designed to do. Instead, the gesture only drives `HomeViewModel.selectNext`/`selectPrevious` (the
+same calls desktop's J/K keyboard shortcut uses) once the drag commits, and the reader's own content
+slides via a plain `Modifier.offset` on the existing single WebView instance rather than swapping in
+a second one.
+
 ### Desktop Tray (platform branch)
 
 `tray/KeryxTray.kt` picks one of four implementations:
