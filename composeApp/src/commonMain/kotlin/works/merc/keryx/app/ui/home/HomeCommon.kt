@@ -448,6 +448,13 @@ internal fun feedOperationsAvailable(feedRefreshing: Boolean, syncing: Boolean):
  * (open in browser, copy URL) are available, for an article's URL or a feed's site URL alike. */
 internal fun hasUsableUrl(url: String?): Boolean = !url.isNullOrBlank()
 
+/** Whether [url] is a plain http:// or https:// URL. Scheme matching is case-insensitive. */
+internal fun isHttpOrHttpsUrl(url: String?): Boolean {
+    if (url.isNullOrBlank()) return false
+    val trimmed = url.trim()
+    return trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true)
+}
+
 /**
  * The rendered `LazyColumn` index for one specific feed-list row instance, or `null` if it isn't
  * currently rendered (its folder is collapsed, its tag isn't expanded, or the item no longer

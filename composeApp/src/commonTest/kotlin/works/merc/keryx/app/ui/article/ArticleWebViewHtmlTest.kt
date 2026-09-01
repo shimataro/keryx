@@ -126,6 +126,37 @@ class ArticleWebViewHtmlTest {
     }
 
     @Test
+    fun wrapArticleHtmlOmitsTitleLinkForNonHttpUrls() {
+        val malicious = wrapArticleHtml(
+            theme,
+            title = "My Title",
+            meta = "",
+            body = "<p>body</p>",
+            titleUrl = "javascript:alert(1)",
+        )
+        val dataUrl = wrapArticleHtml(
+            theme,
+            title = "My Title",
+            meta = "",
+            body = "<p>body</p>",
+            titleUrl = "data:text/html,<script>alert(1)</script>",
+        )
+        val upperCaseScheme = wrapArticleHtml(
+            theme,
+            title = "My Title",
+            meta = "",
+            body = "<p>body</p>",
+            titleUrl = "JAVASCRIPT:alert(1)",
+        )
+        assertTrue(malicious.contains("""<h1 class="article-title">My Title</h1>"""))
+        assertTrue(dataUrl.contains("""<h1 class="article-title">My Title</h1>"""))
+        assertTrue(upperCaseScheme.contains("""<h1 class="article-title">My Title</h1>"""))
+        assertTrue(!malicious.contains("<a "))
+        assertTrue(!dataUrl.contains("<a "))
+        assertTrue(!upperCaseScheme.contains("<a "))
+    }
+
+    @Test
     fun wrapArticleHtmlRendersEscapedTitleAndMeta() {
         val result = wrapArticleHtml(
             theme,
@@ -197,6 +228,19 @@ class ArticleWebViewHtmlTest {
         assertTrue(!result.contains("""<h1 class="article-title">"""))
         assertTrue(!result.contains("""<div class="article-meta">"""))
         assertTrue(!result.contains("<an>"))
+    }
+
+    @Test
+    fun articleNoContentHtmlOmitsTitleLinkForNonHttpUrls() {
+        val result = articleNoContentHtml(
+            theme,
+            title = "My Title",
+            meta = "Alice · now",
+            message = "No content",
+            titleUrl = "javascript:alert(1)",
+        )
+        assertTrue(result.contains("""<h1 class="article-title">My Title</h1>"""))
+        assertTrue(!result.contains("<a "))
     }
 
     @Test

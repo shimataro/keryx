@@ -3,6 +3,7 @@ package works.merc.keryx.app.ui.article
 import androidx.compose.ui.graphics.Color
 import com.fleeksoft.ksoup.Ksoup
 import works.merc.keryx.app.data.remote.UrlResolver
+import works.merc.keryx.app.ui.home.isHttpOrHttpsUrl
 
 /**
  * Absolute href of every `<a>` tag in [html], resolved against [baseUri] (the article's own URL)
@@ -85,7 +86,7 @@ private fun articleHeader(
     titleTooltip: String? = null,
 ): String = buildString {
     if (title.isNotBlank()) {
-        if (!titleUrl.isNullOrBlank()) {
+        if (titleUrl != null && isHttpOrHttpsUrl(titleUrl)) {
             val tooltipAttr = titleTooltip?.takeIf { it.isNotBlank() }?.let { " title=\"${escapeHtml(it)}\"" }.orEmpty()
             append("""<h1 class="article-title"><a href="${escapeHtml(titleUrl)}"$tooltipAttr>${escapeHtml(title)}</a></h1>""")
         } else {

@@ -323,7 +323,7 @@ private fun ArticleWebView(html: String, body: String, baseUrl: String?, titleUr
     val knownLinks = remember { mutableStateOf(emptySet<String>()) }
     LaunchedEffect(body, baseUrl, titleUrl) {
         val links = extractLinks(body, baseUrl.orEmpty())
-        knownLinks.value = titleUrl?.takeIf { hasUsableUrl(it) }?.let { links + it } ?: links
+        knownLinks.value = titleUrl?.takeIf { isHttpOrHttpsUrl(it) }?.let { links + it } ?: links
     }
     val scope = rememberCoroutineScope()
     val interceptor = remember {
