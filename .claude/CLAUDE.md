@@ -24,11 +24,8 @@ themselves stay in English regardless (see constraint #9 below).
 **Always loaded** (imported at session start):
 
 - @../docs/external-spec.md — External spec & technology choices
-- @../docs/app-architecture.md — App structure & key classes
 - @../docs/error-design.md — Error design & Result type
 - @../docs/db-schema.md — DB schema & local_settings
-- @../docs/background-update.md — Background update
-- @../docs/setup.md — Development environment setup
 
 **Read on demand** — these are deliberately *not* imported (they would cost ~43k tokens
 every session). Read the relevant one before doing that kind of work; don't work from
@@ -36,6 +33,12 @@ memory:
 
 - `docs/sync-architecture.md` — **read before changing sync, merge SQL, or cloud storage.**
   `.claude/rules/sync-merge.md` auto-loads on those files and points back here.
+- `docs/app-architecture.md` — read before changing architecture, directory structure,
+  platform abstractions, or navigation/pane layout.
+- `docs/background-update.md` — read before changing background refresh, notifications, or
+  WorkManager behavior.
+- `docs/setup.md` — read when setting up the development environment or troubleshooting
+  build/runtime dependencies.
 - `docs/testing.md` — read before writing tests or producing manual-QA steps
 - `docs/build.md` — read before build/packaging/release work or API-key setup
 - `docs/known-issues.md` — known defects deliberately left unfixed, with the evidence, so
