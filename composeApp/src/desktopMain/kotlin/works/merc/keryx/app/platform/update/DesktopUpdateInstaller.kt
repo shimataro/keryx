@@ -182,6 +182,13 @@ class DesktopUpdateInstaller internal constructor(
         File(filePath).delete()
 
         val oldDir = File(parent, ".${appRootFile.name}.old")
+        // Cleared for the same reason newDir was above: every script's own retreat step is a plain
+        // `mv "$APP" "$OLD"` (never delete-then-move, by design — see UpdateScriptWriter's own
+        // KDoc), so if a stale .old is still sitting here from a previous attempt that never got
+        // this far, that mv would nest into it instead of overwriting it — the script's own health
+        // check would then find nothing at the path it expects, and a rollback would restore the
+        // wrapper directory rather than the actual app.
+        FileSystemExtras.deleteRecursively(oldDir.path)
         val logFile = File(workDir, "apply.log")
         val pid = ProcessHandle.current().pid().toString()
 
@@ -274,6 +281,27 @@ class DesktopUpdateInstaller internal constructor(
             else -> "Unsupported self-replace asset kind: $assetKind"
         }
     }
+}
+
+/**
+ * Removes a stale `.new`/`.old` self-replace sibling directory next to [location]'s `appRoot`, left
+ * behind by a self-replace attempt that failed before its own script could clean up after itself
+ * (the app couldn't be moved aside, or a failed swap was rolled back — see
+ * `UpdateScriptWriter`'s own KDoc for exit codes 11/12/13) and was never retried. `selfReplace`
+ * itself already clears both right before staging a *new* attempt, so this only matters for an
+ * abandoned one nobody ever retried — otherwise a full extra copy of the app sits there forever.
+ *
+ * Safe to call unconditionally at every startup: reaching this line at all means [location]'s
+ * `appRoot` is the live install this process is currently running from, which a script mid-swap
+ * never leaves in a normal, launchable state — so any `.new`/`.old` sibling still sitting next to
+ * it can only be a leftover from a past, abandoned attempt, never one this process itself needs.
+ */
+internal fun cleanUpStaleSelfReplaceArtifacts(location: InstallLocation) {
+    if (location.kind !in SELF_REPLACE_KINDS) return
+    val appRootFile = File(location.appRoot ?: return)
+    val parent = appRootFile.parentFile ?: return
+    FileSystemExtras.deleteRecursively(File(parent, ".${appRootFile.name}.new").path)
+    FileSystemExtras.deleteRecursively(File(parent, ".${appRootFile.name}.old").path)
 }
 
 /** Reads a top-level `<key>[key]</key><string>...</string>` value out of a plist file by plain

@@ -202,7 +202,14 @@ separate, explicit click (Updates tab button, or the tray item once one is offer
     wait for this process's
     PID to exit, **retreat** the running install aside (`mv`, never delete first), **place** the new
     one, **verify** it, and **roll back** to the retreated copy on any failure along the way — so a
-    crash mid-swap never leaves the install directory empty. A Windows MSI-installed build instead
+    crash mid-swap never leaves the install directory empty. Because that retreat is always a plain
+    `mv` rather than delete-then-move, `DesktopUpdateInstaller` clears both the `.new` staging
+    directory and the `.old` retreat directory immediately before staging a fresh attempt (a stale
+    one from a past attempt that failed before the script could run would otherwise make the `mv`
+    nest into it instead of overwriting it), and `cleanUpStaleSelfReplaceArtifacts` sweeps the same
+    two on every startup — safe unconditionally, since reaching that line at all means the current
+    `appRoot` is the live install this process is running from, which a script mid-swap never
+    leaves behind. A Windows MSI-installed build instead
     launches a script that waits out the PID and then runs `msiexec /i ... /passive /norestart`
     (WiX's fixed `upgradeUuid` makes this a MajorUpgrade, not a fresh install), relaunching whatever
     ends up at the exe path either way — a declined UAC prompt or a failed upgrade relaunches the

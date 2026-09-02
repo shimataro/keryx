@@ -23,6 +23,8 @@ import works.merc.keryx.app.domain.refreshFeedsAndNotify
 import works.merc.keryx.app.domain.runMaintenanceStep
 import works.merc.keryx.app.domain.shouldCheckForUpdate
 import works.merc.keryx.app.platform.FileIO
+import works.merc.keryx.app.platform.InstallLocation
+import works.merc.keryx.app.platform.update.cleanUpStaleSelfReplaceArtifacts
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.notification_app_translocated
 import works.merc.keryx.app.resources.notification_app_translocated_detail
@@ -38,6 +40,7 @@ private const val LOG_TAG = "StartupTasks"
  */
 internal suspend fun runStartupTasks(koin: Koin) {
     runMaintenanceStep("translocationWarning") { warnIfAppTranslocated(koin) }
+    runMaintenanceStep("staleSelfReplaceCleanup") { cleanUpStaleSelfReplaceArtifacts(koin.get<InstallLocation>()) }
     // Every step below eventually calls SettingsRepository.mutateLocalSettings (to record its own
     // "last ran at" timestamp), which persists local_settings.json in the background — the same
     // file whose mere *existence* is isSetupComplete()'s signal that setup finished (SetupViewModel

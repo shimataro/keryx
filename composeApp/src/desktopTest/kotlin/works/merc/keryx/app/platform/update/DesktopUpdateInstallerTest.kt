@@ -227,6 +227,35 @@ class DesktopUpdateInstallerTest {
         assertFalse(File(downloadDir, "extracted").exists(), "the extraction directory must be removed once staged")
     }
 
+    /**
+     * Regression guard: every self-replace script's own retreat step is a plain
+     * `mv "$APP" "$OLD"` (never delete-then-move, by design), so a `.old` sibling left behind by a
+     * previous abandoned attempt must be cleared *before* launching a new one — otherwise that `mv`
+     * nests into it (`.old/Keryx.app`) instead of overwriting it, and a later rollback would restore
+     * the wrapper directory rather than the actual app.
+     */
+    @Test
+    fun installMacSelfReplaceClearsAStaleOldDirBeforeLaunching() {
+        val root = newTempDir("desktop-installer-mac-stale-old")
+        val appRoot = File(root, "Keryx.app").apply { mkdirs() }
+        val staleOld = File(root, ".Keryx.app.old").apply { mkdirs() }
+        File(staleOld, "leftover-from-a-past-attempt.txt").writeText("stale")
+        val downloadDir = newTempDir("desktop-installer-mac-stale-old-download")
+        val zip = macAppZip(downloadDir)
+        val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, File(appRoot, "Contents/MacOS/Keryx").path, parentWritable = true, translocated = false)
+        val installer = DesktopUpdateInstaller(location, FakeProcessLauncher())
+
+        val result = runBlocking {
+            installer.install(zip.path, update("1.2.3", macAsset("1.2.3"), UpdatePlan.SelfReplace(macAsset("1.2.3"))))
+        }
+
+        assertEquals(InstallLaunchResult.Launched, result)
+        assertFalse(
+            File(staleOld, "leftover-from-a-past-attempt.txt").exists(),
+            "a stale .old sibling must be cleared, not left for the script's mv to nest into",
+        )
+    }
+
     @Test
     fun installMacSelfReplaceFailsAndNeverLaunchesWhenTheBundleVersionDoesNotMatch() {
         val root = newTempDir("desktop-installer-mac-version-mismatch")
@@ -387,5 +416,54 @@ class DesktopUpdateInstallerTest {
     @Test
     fun hasEnoughFreeSpaceRejectsANegativeBase() {
         assertFalse(hasEnoughFreeSpace(usableBytes = Long.MAX_VALUE, baseBytes = -1, multiple = 10))
+    }
+
+    // --- cleanUpStaleSelfReplaceArtifacts ---
+
+    @Test
+    fun cleanUpStaleSelfReplaceArtifactsRemovesBothStaleSiblings() {
+        val root = newTempDir("desktop-installer-stale-cleanup")
+        val appRoot = File(root, "Keryx.app").apply { mkdirs() }
+        val staleNew = File(root, ".Keryx.app.new").apply { mkdirs() }
+        val staleOld = File(root, ".Keryx.app.old").apply { mkdirs() }
+        val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, null, parentWritable = true, translocated = false)
+
+        cleanUpStaleSelfReplaceArtifacts(location)
+
+        assertFalse(staleNew.exists())
+        assertFalse(staleOld.exists())
+        assertTrue(appRoot.exists(), "the live install itself must never be touched")
+    }
+
+    @Test
+    fun cleanUpStaleSelfReplaceArtifactsIsANoOpWhenThereIsNothingStale() {
+        val root = newTempDir("desktop-installer-stale-cleanup-noop")
+        val appRoot = File(root, "Keryx.app").apply { mkdirs() }
+        val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, null, parentWritable = true, translocated = false)
+
+        cleanUpStaleSelfReplaceArtifacts(location) // must not throw when there's nothing to remove
+
+        assertTrue(appRoot.exists())
+    }
+
+    @Test
+    fun cleanUpStaleSelfReplaceArtifactsIgnoresInstallKindsThatNeverSelfReplace() {
+        val root = newTempDir("desktop-installer-stale-cleanup-not-self-replace")
+        val appDir = File(root, "Keryx").apply { mkdirs() }
+        val staleNew = File(root, ".Keryx.new").apply { mkdirs() }
+        // WINDOWS_INSTALLED never self-replaces (see updatePlan) — a stale sibling next to it (were
+        // one ever to exist) is out of scope for this cleanup and must be left alone.
+        val location = InstallLocation(InstallKind.WINDOWS_INSTALLED, appDir.path, null, parentWritable = true, translocated = false)
+
+        cleanUpStaleSelfReplaceArtifacts(location)
+
+        assertTrue(staleNew.exists())
+    }
+
+    @Test
+    fun cleanUpStaleSelfReplaceArtifactsIsANoOpWithNoAppRoot() {
+        val location = InstallLocation(InstallKind.UNKNOWN, appRoot = null, launcherPath = null, parentWritable = false, translocated = false)
+
+        cleanUpStaleSelfReplaceArtifacts(location) // must not throw
     }
 }
