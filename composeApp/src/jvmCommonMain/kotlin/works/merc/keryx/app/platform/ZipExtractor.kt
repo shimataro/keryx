@@ -15,6 +15,7 @@ private const val MAX_ZIP_ENTRIES = 100_000
 actual object ZipExtractor {
     actual fun extract(zipPath: String, destDir: String, maxBytes: Long, executableEntries: Set<String>) {
         val destRoot = File(destDir).canonicalFile
+        val destRootPath = destRoot.toPath()
         destRoot.mkdirs()
         var totalBytes = 0L
         var entryCount = 0
@@ -24,7 +25,21 @@ actual object ZipExtractor {
                 entryCount++
                 check(entryCount <= MAX_ZIP_ENTRIES) { "Zip archive has too many entries" }
 
-                val target = resolveEntryPath(destRoot, entry.name)
+                // Zip-slip guard, inlined here rather than delegated to a helper: CodeQL's
+                // java/zipslip query recognizes a `Path.normalize()` + `Path.startsWith(Path)`
+                // check that directly gates the path it protects (its own documented example uses
+                // this exact shape), but does not credit a separate function's guard as a
+                // sanitizer for its return value — moving this out to a `resolveEntryPath` helper
+                // left every use of `target` below flagged as unsanitized. `.canonicalFile` already
+                // resolves both `..` segments and symlinks (stronger than `normalize()` alone,
+                // which only strips `..` lexically); the `.normalize()` call is a redundant no-op
+                // on an already-canonical path, kept only because it's the exact call CodeQL's
+                // barrier-guard pattern matches on.
+                val target = File(destRoot, entry.name).canonicalFile
+                if (!target.toPath().normalize().startsWith(destRootPath)) {
+                    throw IllegalStateException("Zip entry escapes the destination directory: ${entry.name}")
+                }
+
                 if (entry.isDirectory) {
                     target.mkdirs()
                 } else {
@@ -35,15 +50,6 @@ actual object ZipExtractor {
                 zip.closeEntry()
             }
         }
-    }
-
-    /** Resolves [entryName] against [destRoot], rejecting a "zip slip" entry whose resolved path
-     * (after normalizing `..`/symlinks via [File.getCanonicalFile]) would land outside [destRoot]. */
-    private fun resolveEntryPath(destRoot: File, entryName: String): File {
-        val candidate = File(destRoot, entryName).canonicalFile
-        val withinRoot = candidate.path == destRoot.path || candidate.path.startsWith(destRoot.path + File.separator)
-        if (!withinRoot) throw IllegalStateException("Zip entry escapes the destination directory: $entryName")
-        return candidate
     }
 
     private fun writeEntry(zip: ZipInputStream, target: File, totalBytesSoFar: Long, maxBytes: Long): Long {
