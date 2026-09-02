@@ -2,6 +2,7 @@ package works.merc.keryx.app.platform
 
 import java.io.File
 import java.io.IOException
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
 import java.nio.file.NoSuchFileException
@@ -36,9 +37,9 @@ actual object FileSystemExtras {
                 },
             )
             true
-        } catch (e: NoSuchFileException) {
+        } catch (_: NoSuchFileException) {
             true // nothing there to begin with
-        } catch (e: IOException) {
+        } catch (_: IOException) {
             !File(path).exists()
         }
     }
@@ -57,9 +58,9 @@ actual object FileSystemExtras {
             val probe = File.createTempFile("keryx-writable-probe", ".tmp", dir)
             probe.delete()
             true
-        } catch (e: IOException) {
+        } catch (_: IOException) {
             false
-        } catch (e: SecurityException) {
+        } catch (_: SecurityException) {
             false
         }
     }
@@ -70,9 +71,9 @@ actual object FileSystemExtras {
         return try {
             Files.move(source, destination, StandardCopyOption.ATOMIC_MOVE)
             true
-        } catch (e: java.nio.file.AtomicMoveNotSupportedException) {
+        } catch (_: AtomicMoveNotSupportedException) {
             moveAcrossFilesystems(source, destination)
-        } catch (e: IOException) {
+        } catch (_: IOException) {
             false
         }
     }
@@ -96,7 +97,7 @@ actual object FileSystemExtras {
             }
             deleteRecursively(source.toString())
             true
-        } catch (e: IOException) {
+        } catch (_: IOException) {
             false
         }
     }
