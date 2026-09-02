@@ -62,9 +62,16 @@ internal fun hasEnoughFreeSpace(usableBytes: Long, baseBytes: Long, multiple: Lo
 class DesktopUpdateInstaller internal constructor(
     private val location: InstallLocation,
     private val launcher: ProcessLauncher,
+    // Defaulted to an always-true no-op (rather than left required, like launcher above) so the
+    // many existing tests unrelated to code signing — Windows/Linux self-replace, MSI install,
+    // canInstall, the guard-rail tests — don't all need to name a verifier they never exercise
+    // (verifyExtractedApp only ever calls it for MAC_APP_ZIP). Production never sees this default:
+    // the public constructor below always supplies RealCodeSigningVerifier().
+    private val codeSigningVerifier: CodeSigningVerifier = CodeSigningVerifier { true },
 ) : UpdateInstaller {
 
-    constructor(location: InstallLocation = detectInstallLocation()) : this(location, RealProcessLauncher())
+    constructor(location: InstallLocation = detectInstallLocation()) :
+        this(location, RealProcessLauncher(), RealCodeSigningVerifier())
 
     override fun canInstall(plan: UpdatePlan): Boolean = when (plan) {
         is UpdatePlan.SelfReplace ->
@@ -278,6 +285,10 @@ class DesktopUpdateInstaller internal constructor(
                 when {
                     !exe.canExecute() -> "Extracted app's launcher isn't executable"
                     plistVersion != expectedVersion -> "Extracted app reports version $plistVersion, expected $expectedVersion"
+                    // Self-consistency only — not a publisher/identity check. See CodeSigningVerifier.kt's
+                    // KDoc for why Developer-ID verification (`codesign --verify -R "notarized"`) can't be
+                    // required yet: current releases are ad-hoc signed, which this check already accepts.
+                    !codeSigningVerifier.verify(extractedApp.path) -> "Extracted app failed its own code-signature self-check"
                     else -> null
                 }
             }

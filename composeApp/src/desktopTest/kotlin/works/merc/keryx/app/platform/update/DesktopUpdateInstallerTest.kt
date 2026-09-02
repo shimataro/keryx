@@ -276,6 +276,45 @@ class DesktopUpdateInstallerTest {
     }
 
     @Test
+    fun installMacSelfReplaceFailsAndNeverLaunchesWhenTheCodeSignatureSelfCheckFails() {
+        val root = newTempDir("desktop-installer-mac-codesign-fail")
+        val appRoot = File(root, "Keryx.app").apply { mkdirs() }
+        val downloadDir = newTempDir("desktop-installer-mac-codesign-fail-download")
+        val zip = macAppZip(downloadDir)
+        val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, File(appRoot, "Contents/MacOS/Keryx").path, parentWritable = true, translocated = false)
+        val launcher = FakeProcessLauncher()
+        val installer = DesktopUpdateInstaller(location, launcher, CodeSigningVerifier { false })
+
+        val result = runBlocking {
+            installer.install(zip.path, update("1.2.3", macAsset("1.2.3"), UpdatePlan.SelfReplace(macAsset("1.2.3"))))
+        }
+
+        assertIs<InstallLaunchResult.Failed>(result)
+        assertEquals(0, launcher.callCount, "a failed self-consistency check must never launch the swap script")
+        assertFalse(File(root, ".Keryx.app.new").exists())
+    }
+
+    @Test
+    fun installMacSelfReplaceChecksTheExtractedBundlesOwnSignatureBeforeLaunching() {
+        val root = newTempDir("desktop-installer-mac-codesign-pass")
+        val appRoot = File(root, "Keryx.app").apply { mkdirs() }
+        val downloadDir = newTempDir("desktop-installer-mac-codesign-pass-download")
+        val zip = macAppZip(downloadDir)
+        val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, File(appRoot, "Contents/MacOS/Keryx").path, parentWritable = true, translocated = false)
+        val launcher = FakeProcessLauncher()
+        val verifiedPaths = mutableListOf<String>()
+        val installer = DesktopUpdateInstaller(location, launcher, CodeSigningVerifier { path -> verifiedPaths.add(path); true })
+
+        val result = runBlocking {
+            installer.install(zip.path, update("1.2.3", macAsset("1.2.3"), UpdatePlan.SelfReplace(macAsset("1.2.3"))))
+        }
+
+        assertEquals(InstallLaunchResult.Launched, result)
+        assertEquals(1, verifiedPaths.size, "the self-check must run exactly once, against the extracted bundle")
+        assertEquals(1, launcher.callCount)
+    }
+
+    @Test
     fun installMacSelfReplaceFailsWhenTheExtractedLauncherIsMissing() {
         val root = newTempDir("desktop-installer-mac-missing-exe")
         val appRoot = File(root, "Keryx.app").apply { mkdirs() }

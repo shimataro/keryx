@@ -23,9 +23,17 @@ internal object UpdateScriptWriter {
      * Retreats the running `.app` aside (`mv`, a same-volume rename) rather than deleting it
      * outright first — if the following move of the new bundle into place then fails, the retreated
      * copy is simply moved back, so a mid-swap crash never leaves the install directory empty.
-     * `xattr -dr` is a defensive no-op belt: an update this app downloaded itself was never marked
-     * quarantined by LaunchServices in the first place (see the design doc), but stripping it anyway
-     * costs nothing if some other mechanism ever did.
+     *
+     * `xattr -dr` deliberately stays, even though the update was downloaded by this process (via
+     * Ktor, not Finder/Safari) rather than a route that reliably applies `com.apple.quarantine`
+     * itself: current release builds are signed ad-hoc, not with a Developer ID + notarization, so
+     * if the flag *were* present on the extracted bundle for any reason (a future download path
+     * that does apply it, or an OS mechanism this script's author didn't anticipate), an ad-hoc
+     * signature gives Gatekeeper nothing to clear it against — the relaunch would be blocked or
+     * warned on rather than silently passing the way a notarized app's would. Stripping it here
+     * removes that failure mode entirely, at zero cost on the (expected) common case where the flag
+     * was never set. See [CodeSigningVerifier] and `SECURITY.md` for the same ad-hoc-signing caveat
+     * as it applies to the separate self-consistency check run before this script is even invoked.
      */
     fun macSelfReplace(): String = """
         #!/bin/sh

@@ -115,5 +115,19 @@ Keryx is designed to minimize its attack surface:
   guarantee (e.g. a detached minisign/cosign signature published alongside each
   release, with the verifying public key embedded in the app) is a considered
   future improvement, not yet implemented.
+- **On macOS, an extracted update also passes a code-signature self-consistency
+  check** (`codesign --verify --strict --deep`) before it is swapped into place —
+  this catches an extracted bundle whose signed contents were altered or
+  corrupted after signing, independent of the digest check above. It is **not** a
+  publisher-identity check: current release builds are signed ad-hoc rather than
+  with a Developer ID certificate and notarized, so there is no certificate chain
+  to verify the signer against (`codesign --verify -R "anchor apple generic and
+  certificate leaf[subject.OU] = <team id>"` would reject every ad-hoc-signed
+  release unconditionally, including legitimate ones). Tightening this to an
+  actual publisher check is planned once releases are signed with a real
+  Developer ID and notarized. For the same ad-hoc-signing reason, the self-replace
+  script also strips any `com.apple.quarantine` flag from the new bundle before
+  relaunching it — an ad-hoc signature gives Gatekeeper nothing to clear a
+  quarantine flag against, so leaving one in place could block the relaunch.
 
 For the complete data-handling description, see [PRIVACY.md](PRIVACY.md).
