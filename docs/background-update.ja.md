@@ -237,7 +237,7 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
     flavor でビルドされたかで分岐するのではなく、**マージ済みマニフェスト**の権限を
     `canRequestPackageInstalls()` 経由で読む——`play` flavor の APK が Play を経由せずサイドロード
     される経路（Play Console のテスト配布、`bundletool`、社内配布）が実在し、そこでも正しく拒否
-    しなければならないため。セッションをコミットした後の終端failure（特に
+    しなければならないため。セッションをコミットした後の終端的な失敗（特に
     `STATUS_FAILURE_INCOMPATIBLE` ——このインストールと上書き対象の署名鍵の不一致。`build.ja.md`
     の Play App Signing の項を参照）はログには残すが `UpdateRepository.state` へは反映しない——
     コミット時点で既に同期的に `Installing` へ遷移済みであり、後から届く非同期の結果を反映する

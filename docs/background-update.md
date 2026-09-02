@@ -152,7 +152,7 @@ separate, explicit click (Updates tab button, or the tray item once one is offer
   digest — see "Integrity verification" below) — `.aab` is never a candidate at all, since no
   `UpdateAssetKind` suffix ends in it. `domain/UpdateInstallPolicy.kt`'s `updatePlan` then decides
   what an update should actually *do* with that asset, purely from the install location
-  (`platform/InstallLocation.kt`'s `detectInstallLocation()` — an macOS `.app`, a Windows/Linux
+  (`platform/InstallLocation.kt`'s `detectInstallLocation()` — a macOS `.app`, a Windows/Linux
   portable ZIP, a Windows MSI install, an Android sideload, …) and the already-selected asset (or
   its absence) — touching neither the network nor the filesystem itself: `SelfReplace` (replace
   files in place, then relaunch), `RunInstaller` (hand
