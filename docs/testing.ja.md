@@ -137,8 +137,11 @@ $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
 
 CI で実行する（そしてローカルでも実行すべき）のは `github` だけ——このスイートは flavor 固有の
 挙動を何も検証していない（2 つの flavor の違いは `REQUEST_INSTALL_PACKAGES` マニフェスト権限の
-有無だけ）ので、`connectedPlayDebugAndroidTest` まで実行すると同じ検証にエミュレータ時間を
-二重にかけるだけになる。`connectedAndroidTest`（flavor 指定なし）は両方を実行する、必要になれば。
+有無だけ）。そもそも `connectedPlayDebugAndroidTest` にフォールバックする先すら無い:
+`androidApp/build.gradle.kts` が `playDebug` バリアント自体を無効化しているためで（`githubDebug`
+がすでにカバーしていない、デバッグビルド固有の検証対象は無い——同ファイル自身のコメント参照）、
+`connectedAndroidTest`（flavor 指定なし）は今では唯一残るデバッグバリアントである `githubDebug`
+のみを実行する。
 
 `androidDeviceTest` と同様、これも `./gradlew build` には含まれない — アプリケーションモジュールの
 AGP の `build` ライフサイクルは `androidTest` ソースセットに対して静的解析タスクの

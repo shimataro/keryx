@@ -166,6 +166,19 @@ android {
     }
 }
 
+// playDebug builds and installs like any other debug variant, but nobody has a reason to run it:
+// Play Debug is never uploaded (only playRelease is), never sideloaded for manual testing (that's
+// what githubDebug is for), and the flavors differ only in the REQUEST_INSTALL_PACKAGES manifest
+// permission (see the flavorDimensions comment above) — nothing debug-build-specific to exercise
+// there that githubDebug doesn't already cover. Disabling it keeps `./gradlew assembleDebug` and
+// `connectedAndroidTest` (see docs/testing.md) from building/running a variant nobody uses, down to
+// githubDebug/githubRelease/playRelease.
+androidComponents {
+    beforeVariants(selector().withFlavor("distribution" to "play").withBuildType("debug")) { variantBuilder ->
+        variantBuilder.enable = false
+    }
+}
+
 dependencies {
     implementation(project(":composeApp"))
 

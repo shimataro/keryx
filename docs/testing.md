@@ -98,9 +98,11 @@ $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
 ```
 
 Only `github` runs in CI (and is the one to run locally too) — the suite doesn't exercise anything
-flavor-specific (the two flavors differ only in the `REQUEST_INSTALL_PACKAGES` manifest permission),
-so `connectedPlayDebugAndroidTest` would just double emulator time for identical assertions.
-`connectedAndroidTest` (no flavor) runs both, if ever needed.
+flavor-specific (the two flavors differ only in the `REQUEST_INSTALL_PACKAGES` manifest permission).
+There is no `connectedPlayDebugAndroidTest` to fall back to either way: `androidApp/build.gradle.kts`
+disables the `playDebug` variant entirely (nothing debug-build-specific to exercise there that
+`githubDebug` doesn't already cover — see that file's own comment), so `connectedAndroidTest` (no
+flavor) now runs only `githubDebug`, the sole remaining debug variant.
 
 Like `androidDeviceTest`, this is not part of `./gradlew build` — AGP's `build` lifecycle for an
 application module only runs `lintAnalyzeDebugAndroidTest` (static analysis) on the `androidTest`
