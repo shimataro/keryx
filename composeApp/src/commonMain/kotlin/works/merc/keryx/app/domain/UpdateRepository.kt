@@ -1,5 +1,6 @@
 package works.merc.keryx.app.domain
 
+import kotlin.concurrent.Volatile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -100,7 +101,23 @@ class UpdateRepository(
     // the whole download would make cancelDownload() (a plain, non-suspend call) unable to safely
     // inspect/replace downloadJob while a check() is mid-flight. See this class's own methods below.
     private val mutex = Mutex()
+
+    // Written only under mutex (startDownloadOf), but read from cancelDownload() — a plain,
+    // non-suspend call from a UI click handler that cannot take a suspend lock — without it. @Volatile
+    // is what makes that read see the write at all: a plain var gives the JVM/other backends no
+    // happens-before edge between a mutex.withLock write on one thread and an unsynchronized read on
+    // another, so cancelDownload() could otherwise observe a stale null/previous Job forever.
+    @Volatile
     private var downloadJob: Job? = null
+
+    // Read-modified-written by postNotification(), called from both check() (after its own mutex is
+    // released — see check()'s own KDoc for why that lock is scoped narrowly) and runDownload() (never
+    // mutex-guarded at all). A plain var here would let a background check() and a download finishing
+    // race to dismiss/replace this id, losing one of the two updates — this repository's own KDoc
+    // promises "one evolving row", not "usually one row". Guarded by its own, narrower mutex rather
+    // than folded into [mutex] so a slow notificationMessages.* call here never blocks the decision
+    // points [mutex] exists for.
+    private val notificationMutex = Mutex()
 
     /** The notification-center row this repository most recently posted, so a later state (e.g.
      * "ready to install") can replace it instead of leaving both rows behind — see this class's own
@@ -353,8 +370,10 @@ class UpdateRepository(
     }
 
     /** Replaces [lastNotificationId] (if any) with a fresh row for [message]/[action], so an update
-     * moving from "available" to "ready to install" reads as one evolving row rather than two. */
-    private fun postNotification(message: String, action: AppNotificationAction) {
+     * moving from "available" to "ready to install" reads as one evolving row rather than two.
+     * [notificationMutex]-guarded — see that field's own KDoc for why: [check] and [runDownload] can
+     * both reach this, on different threads, with no other synchronization between them. */
+    private suspend fun postNotification(message: String, action: AppNotificationAction) = notificationMutex.withLock {
         lastNotificationId?.let { notificationCenter.dismiss(it) }
         val id = IdGenerator.newId()
         notificationCenter.addCoalescing(
