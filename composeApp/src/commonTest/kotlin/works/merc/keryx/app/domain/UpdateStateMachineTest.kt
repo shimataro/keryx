@@ -14,6 +14,11 @@ private val WRITABLE_MAC_LOCATION = InstallLocation(
     InstallKind.MAC_APP_BUNDLE, appRoot = "/Applications/Keryx.app", launcherPath = null, parentWritable = true, translocated = false,
 )
 
+/** A representative check failure — the exact exception doesn't matter to most tests below, only
+ * that [nextStateAfterCheck] carries whichever one it's given through unchanged rather than
+ * fabricating its own (see [idlePlusFailedBecomesFailedWithNoUpdateAndTheCheckStage]). */
+private val CHECK_FAILURE = UpdateStatus.Failed(UpdateException(UpdateStage.CHECK, "simulated check failure"))
+
 private val MAC_ASSET = UpdateAsset(
     "Keryx-2.0.0-macos-arm64.zip", "https://dl/mac.zip", 100L, "a".repeat(64), UpdateAssetKind.MAC_APP_ZIP,
 )
@@ -41,10 +46,12 @@ class UpdateStateMachineTest {
 
     @Test
     fun idlePlusFailedBecomesFailedWithNoUpdateAndTheCheckStage() {
-        val next = nextStateAfterCheck(UpdateState.Idle, UpdateStatus.Failed, WRITABLE_MAC_LOCATION)
+        val next = nextStateAfterCheck(UpdateState.Idle, CHECK_FAILURE, WRITABLE_MAC_LOCATION)
         assertIs<UpdateState.Failed>(next)
         assertNull(next.update)
-        assertEquals(UpdateStage.CHECK, next.exception.stage)
+        // Carried through unchanged, not fabricated — see this file's own regression note on
+        // CHECK_FAILURE.
+        assertSame(CHECK_FAILURE.exception, next.exception)
     }
 
     @Test
@@ -76,7 +83,7 @@ class UpdateStateMachineTest {
     @Test
     fun readySurvivesACheckFailure() {
         val ready = UpdateState.Ready(availableUpdate("2.0.0"), filePath = "/tmp/Keryx-2.0.0.zip")
-        val next = nextStateAfterCheck(ready, UpdateStatus.Failed, WRITABLE_MAC_LOCATION)
+        val next = nextStateAfterCheck(ready, CHECK_FAILURE, WRITABLE_MAC_LOCATION)
         assertSame(ready, next)
     }
 
@@ -102,7 +109,7 @@ class UpdateStateMachineTest {
     @Test
     fun downloadingIsNeverInterruptedByAConcurrentCheck() {
         val downloading = UpdateState.Downloading(availableUpdate("2.0.0"), bytesDone = 10, bytesTotal = 100)
-        for (status in listOf(UpdateStatus.UpToDate, UpdateStatus.Failed, UpdateStatus.Available("3.0.0", "https://ex.com/3.0.0", null, MAC_ASSET))) {
+        for (status in listOf(UpdateStatus.UpToDate, CHECK_FAILURE, UpdateStatus.Available("3.0.0", "https://ex.com/3.0.0", null, MAC_ASSET))) {
             assertSame(downloading, nextStateAfterCheck(downloading, status, WRITABLE_MAC_LOCATION))
         }
     }

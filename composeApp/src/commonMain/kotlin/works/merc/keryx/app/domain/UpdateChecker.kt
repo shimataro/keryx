@@ -5,7 +5,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.MILLIS_PER_HOUR
+import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.core.UpdateException
+import works.merc.keryx.app.core.UpdateStage
 import works.merc.keryx.app.core.compareReleaseVersions
+import works.merc.keryx.app.core.fold
 import works.merc.keryx.app.core.isBelowStable
 import works.merc.keryx.app.core.isNewer
 import works.merc.keryx.app.data.remote.ReleaseFeedSource
@@ -36,7 +40,12 @@ sealed interface UpdateStatus {
         val asset: UpdateAsset? = null,
     ) : UpdateStatus
 
-    data object Failed : UpdateStatus
+    /** @param exception Why the check itself failed to produce a verdict — never fabricated: this
+     *   is either the [UpdateException] a `data/remote/ReleaseFeedSource` fetch failure already
+     *   carries, or one built here from a locally-detected problem (a malformed `tag_name`, a
+     *   missing `html_url`, …). Surfaced to the user via [works.merc.keryx.app.ui.i18n.userMessage]
+     *   once this becomes an [UpdateState.Failed]. */
+    data class Failed(val exception: UpdateException) : UpdateStatus
 }
 
 /**
@@ -78,7 +87,12 @@ class UpdateChecker(
             val currentIsPreStable = isBelowStable(currentVersion)
             val releases = (
                 if (currentIsPreStable) releaseFeedSource.fetchReleaseList(repoSlug) else releaseFeedSource.fetchLatestRelease(repoSlug)
-                ) ?: return UpdateStatus.Failed
+                ).fold(
+                    ok = { it },
+                    // ReleaseFeedSource always constructs an UpdateException, but Result.Err is
+                    // typed as the general KeryxException — this fallback never actually triggers.
+                    err = { return UpdateStatus.Failed(it as? UpdateException ?: UpdateException(UpdateStage.CHECK, it.messageText)) },
+                )
 
             val candidate = releases
                 .filter { !it.draft }
@@ -88,17 +102,21 @@ class UpdateChecker(
                 .maxWithOrNull { a, b -> compareReleaseVersions(versionOf(a), versionOf(b)) }
                 ?: return UpdateStatus.UpToDate // no eligible release → nothing to offer
 
-            val remoteVersion = versionOf(candidate)
-                ?: return UpdateStatus.Failed.also { Log.warn(TAG, "Update check failed: missing tag_name") }
+            val remoteVersion = versionOf(candidate) ?: return UpdateStatus.Failed(
+                UpdateException(UpdateStage.CHECK, "The release is missing tag_name").also { Log.warn(TAG, it.messageText) },
+            )
             if (!isSafeVersionForPathUse(remoteVersion)) {
                 // remoteVersion ends up as a path component (UpdateRepository's updateDownloadDir),
                 // so a tag_name containing '/', a backslash, or anything else outside a plain version's
                 // alphabet is rejected outright here rather than sanitized — see this function's
                 // own KDoc.
-                return UpdateStatus.Failed.also { Log.warn(TAG, "Update check failed: tag_name is not a safe version string") }
+                return UpdateStatus.Failed(
+                    UpdateException(UpdateStage.CHECK, "tag_name is not a safe version string").also { Log.warn(TAG, it.messageText) },
+                )
             }
-            val htmlUrl = candidate.htmlUrl
-                ?: return UpdateStatus.Failed.also { Log.warn(TAG, "Update check failed: missing html_url") }
+            val htmlUrl = candidate.htmlUrl ?: return UpdateStatus.Failed(
+                UpdateException(UpdateStage.CHECK, "The release is missing html_url").also { Log.warn(TAG, it.messageText) },
+            )
 
             if (isNewer(remoteVersion, currentVersion)) {
                 val asset = selectUpdateAsset(candidate.assets, location)
@@ -110,7 +128,7 @@ class UpdateChecker(
             throw e // don't swallow coroutine cancellation as a failed update check
         } catch (e: Exception) {
             Log.warn(TAG, "Update check failed", e)
-            UpdateStatus.Failed
+            UpdateStatus.Failed(UpdateException(UpdateStage.CHECK, e.message ?: "Update check failed"))
         }
     }
 }

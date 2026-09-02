@@ -6,6 +6,7 @@ import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -15,6 +16,9 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.core.UpdateException
+import works.merc.keryx.app.core.UpdateStage
 
 private const val TAG = "ReleaseFeedSource"
 
@@ -66,42 +70,56 @@ internal class ReleaseFeedSource(
 ) {
     /**
      * Fetches the full `releases` list (pre-stable path — see [works.merc.keryx.app.domain.UpdateChecker]'s own KDoc for why).
-     * Returns the release objects, or `null` on HTTP error / unexpected body (the caller treats
-     * that as a failed check). `per_page=100` raises the single-page limit from GitHub's default 30
-     * so realistic release histories fit in one request.
+     * `per_page=100` raises the single-page limit from GitHub's default 30 so realistic release
+     * histories fit in one request. Converts every failure mode — HTTP error, unexpected body, a
+     * network exception — into [UpdateException]`(`[UpdateStage.CHECK]`, …)` here rather than
+     * leaking it upward, per this codebase's error-design convention for the DataSource layer.
      */
-    suspend fun fetchReleaseList(repoSlug: String): List<ReleaseInfo>? {
+    suspend fun fetchReleaseList(repoSlug: String): Result<List<ReleaseInfo>> = fetchReleases {
         val response = client.get("https://api.github.com/repos/$repoSlug/releases?per_page=100") {
             applyGitHubHeaders()
         }
         if (response.status.value !in 200..299) {
-            Log.warn(TAG, "Fetching the release list failed: HTTP ${response.status.value}")
-            return null
+            return@fetchReleases Result.Err(UpdateException(UpdateStage.CHECK, "HTTP ${response.status.value}"))
         }
         val array = json.parseToJsonElement(response.bodyAsText()) as? JsonArray
-            ?: return null.also { Log.warn(TAG, "Fetching the release list failed: unexpected response body") }
-        return array.mapNotNull { (it as? JsonObject)?.let(::releaseInfoOf) }
+            ?: return@fetchReleases Result.Err(UpdateException(UpdateStage.CHECK, "Unexpected response body"))
+        Result.Ok(array.mapNotNull { (it as? JsonObject)?.let(::releaseInfoOf) })
     }
 
     /**
      * Fetches the newest full release via `releases/latest` (stable path — see [works.merc.keryx.app.domain.UpdateChecker]'s
-     * own KDoc for why). Returns a single-element list, an empty list on 404 (no full release yet —
-     * the caller treats that as up to date), or `null` on any other HTTP error / unexpected body
-     * (the caller treats that as a failed check).
+     * own KDoc for why). Resolves to a single-element list, or an empty one on 404 (no full release
+     * yet — the caller treats that as up to date, not a failure). Every other failure mode is
+     * converted the same way [fetchReleaseList] converts its own.
      */
-    suspend fun fetchLatestRelease(repoSlug: String): List<ReleaseInfo>? {
+    suspend fun fetchLatestRelease(repoSlug: String): Result<List<ReleaseInfo>> = fetchReleases {
         val response = client.get("https://api.github.com/repos/$repoSlug/releases/latest") {
             applyGitHubHeaders()
         }
-        if (response.status.value == 404) return emptyList()
+        if (response.status.value == 404) return@fetchReleases Result.Ok(emptyList())
         if (response.status.value !in 200..299) {
-            Log.warn(TAG, "Fetching the latest release failed: HTTP ${response.status.value}")
-            return null
+            return@fetchReleases Result.Err(UpdateException(UpdateStage.CHECK, "HTTP ${response.status.value}"))
         }
         val obj = json.parseToJsonElement(response.bodyAsText()) as? JsonObject
-            ?: return null.also { Log.warn(TAG, "Fetching the latest release failed: unexpected response body") }
-        return listOf(releaseInfoOf(obj))
+            ?: return@fetchReleases Result.Err(UpdateException(UpdateStage.CHECK, "Unexpected response body"))
+        Result.Ok(listOf(releaseInfoOf(obj)))
     }
+
+    /** Shares the network-exception handling both fetch methods need: a [CancellationException]
+     * must never be swallowed as a failed check, and anything else (a timeout, DNS failure, …)
+     * becomes the same [UpdateException] shape their own explicit failure branches already return,
+     * rather than propagating as a raw exception for [works.merc.keryx.app.domain.UpdateChecker]'s
+     * own catch-all to reclassify less precisely. */
+    private suspend inline fun fetchReleases(block: () -> Result<List<ReleaseInfo>>): Result<List<ReleaseInfo>> =
+        try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.warn(TAG, "Fetching releases failed", e)
+            Result.Err(UpdateException(UpdateStage.CHECK, e.message ?: "Fetching releases failed"))
+        }
 
     private fun releaseInfoOf(release: JsonObject): ReleaseInfo =
         ReleaseInfo(

@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import works.merc.keryx.app.core.APP_NAME
+import works.merc.keryx.app.core.UpdateStage
 import works.merc.keryx.app.core.compareReleaseVersions
 import works.merc.keryx.app.core.isBelowStable
 import works.merc.keryx.app.core.isNewer
@@ -130,16 +131,28 @@ class UpdateCheckerTest {
         assertIs<UpdateStatus.UpToDate>(status)
     }
 
+    /**
+     * Regression guard: the underlying failure reason (here, the HTTP status) must survive into
+     * the returned UpdateStatus.Failed rather than being discarded in favor of a generic message -
+     * see UpdateChecker.kt's own UpdateStatus.Failed KDoc and data/remote/ReleaseFeedSource, which
+     * is what actually classifies this one.
+     */
     @Test
     fun latestServerErrorIsFailed() = runTest {
         val status = checker(currentVersion = "1.0.0", latestStatus = HttpStatusCode.InternalServerError).check()
         assertIs<UpdateStatus.Failed>(status)
+        assertEquals(UpdateStage.CHECK, status.exception.stage)
+        assertTrue(
+            status.exception.messageText.contains("500"),
+            "the failure reason must mention the HTTP status, not a generic message: ${status.exception.messageText}",
+        )
     }
 
     @Test
     fun missingHtmlUrlIsFailed() = runTest {
         val status = checker(latestBody = """{"tag_name":"v2.0.0"}""").check()
         assertIs<UpdateStatus.Failed>(status)
+        assertEquals(UpdateStage.CHECK, status.exception.stage)
     }
 
     /**

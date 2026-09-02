@@ -1,7 +1,6 @@
 package works.merc.keryx.app.domain
 
 import works.merc.keryx.app.core.UpdateException
-import works.merc.keryx.app.core.UpdateStage
 import works.merc.keryx.app.platform.InstallLocation
 
 /**
@@ -69,7 +68,7 @@ internal fun nextStateAfterCheck(
     return when (status) {
         is UpdateStatus.UpToDate -> current as? UpdateState.Ready ?: UpdateState.UpToDate
         is UpdateStatus.Failed -> current as? UpdateState.Ready
-            ?: UpdateState.Failed(current.update, UpdateException(UpdateStage.CHECK, "Update check failed"))
+            ?: UpdateState.Failed(current.update, status.exception)
         is UpdateStatus.Available -> {
             if (current is UpdateState.Ready && current.update.version == status.version) {
                 current
