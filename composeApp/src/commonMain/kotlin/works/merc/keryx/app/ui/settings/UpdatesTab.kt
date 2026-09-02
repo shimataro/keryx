@@ -346,8 +346,11 @@ private fun UpdateHeadlineRow(
 
 /** Fixed-height reserved for download/verify progress feedback — present (though empty) for
  * every state the card can be in, so reaching [UpdateState.Downloading]/[UpdateState.Verifying]
- * and leaving them again never shifts the primary action button below it. Only the *content*
- * inside is conditional, per the "reserve unconditionally" layout-stability rule. */
+ * and leaving them again never shifts what's below this slot: the manual-only/error caption (when
+ * present), then [UpdateResultSection]'s release-notes card and its trailing `LinkRow`. Only the
+ * *content* inside this slot is conditional, per the "reserve unconditionally" layout-stability
+ * rule — the same rule [UPDATE_STATUS_ACTION_MIN_HEIGHT] applies one level up, to this slot plus
+ * everything above it. */
 private val UPDATE_PROGRESS_SLOT_HEIGHT = 40.dp
 
 /** Exposed for `UpdatesTabTest` to measure the slot directly, independent of every other element
