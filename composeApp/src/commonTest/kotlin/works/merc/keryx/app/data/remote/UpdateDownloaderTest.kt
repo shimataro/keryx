@@ -95,8 +95,9 @@ class UpdateDownloaderTest {
      *
      * The byte counts are deliberate: `readRemaining(max)` keeps awaiting content until it has the
      * full `max` bytes (or the channel closes), so writing only as much as the reader consumes
-     * would park it mid-chunk. 320 KiB is comfortably past the 256 KiB that triggers the first
-     * progress emit, with a whole chunk to spare.
+     * would park it mid-chunk. 320 KiB (50% of the 640 KiB total) is comfortably past the first
+     * whole-percent change `shouldEmitProgress` fires on — which happens after just the first
+     * 64 KiB chunk, itself already ~10% of this total — with a whole chunk to spare.
      */
     @Test
     fun progressArrivesWhileTheBodyIsStillStreaming() = runBlocking {
@@ -334,19 +335,37 @@ class UpdateDownloaderTest {
     // --- shouldEmitProgress ---
 
     @Test
-    fun shouldEmitProgressIsFalseBelowTheThreshold() {
-        assertFalse(shouldEmitProgress(bytesDone = 100, lastEmitted = 0, total = 1_000_000))
+    fun shouldEmitProgressIsFalseWhenTheWholePercentHasNotChanged() {
+        // 1,000 of 1,000,000 is 0% either way — no visible change for an integer-percent consumer.
+        assertFalse(shouldEmitProgress(bytesDone = 1_000, lastEmitted = 0, total = 1_000_000))
     }
 
     @Test
-    fun shouldEmitProgressIsTrueAtOrAboveTheThreshold() {
-        assertTrue(shouldEmitProgress(bytesDone = UPDATE_PROGRESS_EMIT_BYTES, lastEmitted = 0, total = 1_000_000))
-        assertTrue(shouldEmitProgress(bytesDone = UPDATE_PROGRESS_EMIT_BYTES + 1, lastEmitted = 0, total = 1_000_000))
+    fun shouldEmitProgressIsTrueWhenTheWholePercentChanges() {
+        // 10,000 of 1,000,000 is the first byte count that reaches 1%.
+        assertTrue(shouldEmitProgress(bytesDone = 10_000, lastEmitted = 0, total = 1_000_000))
+    }
+
+    @Test
+    fun shouldEmitProgressScalesWithTotalRatherThanAFixedByteCount() {
+        // A tiny asset must still emit at its own 1%-of-total granularity, not wait for a fixed
+        // byte delta that could exceed the entire asset.
+        assertTrue(shouldEmitProgress(bytesDone = 1, lastEmitted = 0, total = 100))
+        // A huge asset must not emit needlessly often just because a fixed byte delta was crossed —
+        // 1% of a 1 GiB asset is far more than the old fixed 256 KiB threshold would have allowed.
+        val oneGiB = 1024L * 1024 * 1024
+        assertFalse(shouldEmitProgress(bytesDone = 512 * 1024, lastEmitted = 0, total = oneGiB))
     }
 
     @Test
     fun shouldEmitProgressIsAlwaysTrueOnCompletionEvenBelowTheThreshold() {
         assertTrue(shouldEmitProgress(bytesDone = 10, lastEmitted = 5, total = 10))
+    }
+
+    @Test
+    fun shouldEmitProgressHandlesAZeroTotalWithoutDividingByZero() {
+        assertTrue(shouldEmitProgress(bytesDone = 0, lastEmitted = 0, total = 0)) // bytesDone >= total: the final reading
+        assertFalse(shouldEmitProgress(bytesDone = -1, lastEmitted = 0, total = 0))
     }
 
     // --- isAllowedUpdateDownloadHost ---

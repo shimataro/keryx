@@ -180,8 +180,10 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
   `SaveBody` プラグインを入れており、素の `get()` が返る前に**本文全体をメモリに読み切って
   しまう**——実際にこれが原因で、進捗バーが転送中ずっと 0% のまま固まり、終わった瞬間に完了へ
   飛んでいた（おまけに 100MB 超を RAM に載せていた）。Ktor 3.5 の `skipSavingBody()` は
-  deprecated な no-op なので、streaming 構文以外に回避手段は無い。進捗は 1 秒あたり数回に間引かれ
-  （`shouldEmitProgress`）、キャンセルは `Failed` ではなく `Available` に戻す——ユーザー起因の
+  deprecated な no-op なので、streaming 構文以外に回避手段は無い。進捗は整数パーセントが
+  変わるたびにのみ発火するよう間引かれる（`shouldEmitProgress`——固定バイト幅ではなくパーセント
+  自体をゲートにしているのは、どの消費側もそれより細かい解像度は表示できず、かつアセットサイズに
+  よらず正しくスケールするため）、キャンセルは `Failed` ではなく `Available` に戻す——ユーザー起因の
   中断は失敗ではない。中断からの再開は無い: リダイレクト先は約 1 時間で失効する署名付き URL の
   ため、失敗／キャンセルしたダウンロードは再開せず単にやり直す。`check()` は
   `<cacheDir>/updates/` も掃除し、現在の状態が参照しているバージョン以外（進行中の `.part` と

@@ -33,11 +33,6 @@ private const val TAG = "UpdateDownloader"
  * `TRANSFER_CHUNK_BYTES` for why this is a chunked copy rather than a single in-memory read. */
 private const val DOWNLOAD_CHUNK_BYTES = 64 * 1024
 
-/** Minimum bytes between [UpdateDownloader.download]'s progress callbacks. A 100+ MB asset in
- * 64 KiB chunks would otherwise invoke it thousands of times — wastefully precise for a UI that
- * only ever shows a whole-percent progress bar and a tray label rounded further still. */
-internal const val UPDATE_PROGRESS_EMIT_BYTES = 256 * 1024L
-
 private val REDIRECT_STATUSES = setOf(301, 302, 303, 307, 308)
 
 /**
@@ -53,12 +48,23 @@ internal fun isAllowedUpdateDownloadHost(host: String): Boolean =
     host == "github.com" || host == "api.github.com" || host.endsWith(".githubusercontent.com")
 
 /**
- * Minimum bytes between two progress readings for [UpdateDownloader.download] to actually invoke
- * its progress callback — see [UPDATE_PROGRESS_EMIT_BYTES]. Always emits the final reading
- * ([bytesDone] `==` [total]) so a caller driving a progress bar or an assertion never misses 100%.
+ * Whether [UpdateDownloader.download] should actually invoke its progress callback for [bytesDone]
+ * out of [total], given the last reading it emitted ([lastEmitted]) — gated on the *whole-percent*
+ * value changing, not a fixed byte delta. Every consumer of this progress (the Updates tab's
+ * integer percent, the tray's label rounded to 5%) can't distinguish anything finer than that
+ * anyway, and unlike a fixed byte threshold this scales correctly regardless of how large [total]
+ * happens to be — a small asset never emits more often than its own percent resolution allows, and
+ * a large one never emits far less often than its consumers could actually show. Always emits the
+ * final reading ([bytesDone] `>=` [total]) so a caller driving a progress bar or an assertion never
+ * misses 100%.
  */
-internal fun shouldEmitProgress(bytesDone: Long, lastEmitted: Long, total: Long): Boolean =
-    bytesDone - lastEmitted >= UPDATE_PROGRESS_EMIT_BYTES || bytesDone >= total
+internal fun shouldEmitProgress(bytesDone: Long, lastEmitted: Long, total: Long): Boolean {
+    if (bytesDone >= total) return true
+    if (total <= 0) return false
+    return wholePercentOf(bytesDone, total) != wholePercentOf(lastEmitted, total)
+}
+
+private fun wholePercentOf(bytesDone: Long, total: Long): Long = bytesDone * 100 / total
 
 /**
  * Downloads a single GitHub release asset to [destPath], verifying its exact size and SHA-256
@@ -92,9 +98,8 @@ class UpdateDownloader(private val client: HttpClient) {
      *   bound) once the download completes — short *or* long is a failure.
      * @param expectedSha256 The asset's parsed `digest` — see
      *   [works.merc.keryx.app.domain.parseSha256Digest].
-     * @param onProgress Invoked as bytes arrive, throttled to roughly every
-     *   [UPDATE_PROGRESS_EMIT_BYTES] — never invoked more often than that, always invoked once more
-     *   at completion.
+     * @param onProgress Invoked as bytes arrive, throttled to once per whole-percent change (see
+     *   [shouldEmitProgress]) — always invoked once more at completion.
      */
     suspend fun download(
         url: String,

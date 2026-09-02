@@ -178,9 +178,10 @@ separate, explicit click (Updates tab button, or the tray item once one is offer
   `SaveBody` plugin by default, which reads the *whole* response body into memory before a plain
   `get()` even returns — which froze the real progress bar at 0% for the entire transfer and then
   jumped it straight to done, besides holding 100MB+ in RAM (`skipSavingBody()` is a deprecated
-  no-op in Ktor 3.5; the streaming form is the only way out). Progress is throttled to a few
-  updates a second (`shouldEmitProgress`), and cancelling reverts to `Available` rather than
-  `Failed` — a
+  no-op in Ktor 3.5; the streaming form is the only way out). Progress is throttled to once per
+  whole-percent change (`shouldEmitProgress` — gated on the percentage itself, not a fixed byte
+  delta, since that's the finest resolution any consumer can show and scales correctly regardless
+  of asset size), and cancelling reverts to `Available` rather than `Failed` — a
   user-requested stop is not a failure. There is no resume-from-partial: the redirect target is a
   signed URL that expires in about an hour, so a failed/cancelled download is simply restarted, not
   resumed. `check()` also sweeps `<cacheDir>/updates/` of every version except whichever one the
