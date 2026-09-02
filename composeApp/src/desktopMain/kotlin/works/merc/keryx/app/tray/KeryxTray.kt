@@ -211,8 +211,10 @@ internal fun ApplicationScope.KeryxTray(
  * Maps [state] to the tray's single update menu item, or `null` when nothing should be shown —
  * see [TrayUpdateEntry]'s own KDoc, and `UpdatesTab.kt`'s button-state table for the equivalent
  * mapping the settings dialog renders instead. [UpdateState.Installing] is deliberately `null`
- * too: reaching it is followed immediately by the whole app exiting (see `main.kt`'s own
- * `UpdateState.Installing` handling), so there is no meaningful window to show a tray item in.
+ * too: reaching it is followed shortly by the whole app exiting, once the installer/self-replace
+ * hand-off actually launches (`domain/UpdateRepository.installLaunched`, collected in `main.kt`'s
+ * `application {}` to call `exitApplication()`) — so the window this tray item would be shown in
+ * is too short-lived to have any action worth presenting there.
  */
 @Composable
 private fun trayUpdateEntry(state: UpdateState): TrayUpdateEntry? = when (state) {
