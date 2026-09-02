@@ -192,8 +192,18 @@ class UpdateRepositoryTest {
         val seenByFirst = mutableListOf<UpdateState>()
         val seenBySecond = mutableListOf<UpdateState>()
         val collectorScope = trackedScope()
-        collectorScope.launch { repo.state.collect { seenByFirst.add(it) } }
-        collectorScope.launch { repo.state.collect { seenBySecond.add(it) } }
+        // Both collectors must actually be subscribed — not just launch()ed — before check() starts
+        // mutating state, or a slow-to-schedule collector could miss the leading Idle emission and
+        // make this test flaky rather than prove the two collectors really see the same sequence.
+        val firstSubscribed = CompletableDeferred<Unit>()
+        val secondSubscribed = CompletableDeferred<Unit>()
+        collectorScope.launch {
+            repo.state.onSubscription { firstSubscribed.complete(Unit) }.collect { seenByFirst.add(it) }
+        }
+        collectorScope.launch {
+            repo.state.onSubscription { secondSubscribed.complete(Unit) }.collect { seenBySecond.add(it) }
+        }
+        runBlocking { withTimeout(5_000) { firstSubscribed.await(); secondSubscribed.await() } }
 
         runBlocking { repo.check() }
         repo.startDownload()

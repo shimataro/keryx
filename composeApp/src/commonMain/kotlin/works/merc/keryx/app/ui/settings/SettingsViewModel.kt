@@ -180,7 +180,7 @@ class SettingsViewModel(
      */
     fun checkForUpdate() {
         if (updateState.value is UpdateState.Checking) return
-        viewModelScope.launch { updateRepository.check() }
+        viewModelScope.launch(dispatcher) { updateRepository.check() }
     }
 
     /** Starts downloading the update currently reported by [updateState], if one can be installed

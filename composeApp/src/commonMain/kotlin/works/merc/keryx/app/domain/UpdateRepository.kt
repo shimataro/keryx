@@ -1,7 +1,9 @@
 package works.merc.keryx.app.domain
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -13,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemFileSystem
 import works.merc.keryx.app.core.AppNotification
@@ -63,6 +66,13 @@ class UpdateRepository(
     private val notificationMessages: NotificationMessages,
     private val scope: CoroutineScope,
     private val location: InstallLocation = detectInstallLocation(),
+    // Sweeping <cacheDir>/updates/ and deleting a superseded version directory in check() are
+    // blocking filesystem calls; SettingsViewModel's manual "check for update" launches check()
+    // directly on its own dispatcher (Main/EDT by default there), so this must move that work off
+    // whatever dispatcher happens to call check() rather than assume every caller already does —
+    // the startup task and Android's WorkManager worker already run in the background on their own,
+    // but a UI-triggered check should not have to rely on that being true forever.
+    private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     // Lets a test point at a temp directory, the same way LocalSettingsStore's dirOverride does.
     private val cacheDirOverride: String? = null,
 ) {
@@ -133,7 +143,7 @@ class UpdateRepository(
                 }
             }
         }
-        sweepStaleUpdateDownloads(before)
+        withContext(dispatcher) { sweepStaleUpdateDownloads(before) }
 
         val status = checker.check()
 
@@ -145,7 +155,7 @@ class UpdateRepository(
         // A Ready version this check just superseded (replaced by a newer Available) would
         // otherwise sit on disk, unprotected, until whenever the *next* check happens to run.
         if (before is UpdateState.Ready && (after !is UpdateState.Ready || after.update.version != before.update.version)) {
-            FileSystemExtras.deleteRecursively(updateDownloadDir(before.update.version))
+            withContext(dispatcher) { FileSystemExtras.deleteRecursively(updateDownloadDir(before.update.version)) }
         }
 
         if (status is UpdateStatus.Available && after is UpdateState.Available) {
