@@ -3,6 +3,7 @@ package works.merc.keryx.app.domain
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.engine.mock.respondError
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -655,6 +656,163 @@ class UpdateRepositoryTest {
 
         assertEquals(UpdateStage.INSTALL, (repo.state.value as UpdateState.Failed).exception.stage)
         assertFalse(exited.isCompleted)
+    }
+
+    // --- performPrimaryAction(): the single dispatcher the tray/notification-center row calls ---
+
+    @Test
+    fun performPrimaryActionOnAvailableStartsTheDownload() {
+        val payload = Random(30).nextBytes(64 * 1024)
+        val sha256 = sha256Hex(payload)
+        val downloaderClient = HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }
+        val repo = UpdateRepository(
+            checker = checkerFor { releaseJson("2.0.0", "Keryx-2.0.0-macos-arm64.zip", "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256) },
+            downloader = UpdateDownloader(downloaderClient),
+            installer = noOpInstaller(),
+            notificationCenter = NotificationCenter(),
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+        )
+        runBlocking { repo.check() }
+        assertIs<UpdateState.Available>(repo.state.value)
+
+        repo.performPrimaryAction()
+
+        awaitState(repo) { it is UpdateState.Ready }
+    }
+
+    @Test
+    fun performPrimaryActionOnReadyInstalls() {
+        val installer = GatedInstaller(InstallLaunchResult.Launched)
+        val repo = readyRepo(installer, seed = 31)
+
+        repo.performPrimaryAction()
+
+        runBlocking { withTimeout(5_000) { installer.started.await() } }
+        awaitState(repo) { it is UpdateState.Installing }
+    }
+
+    @Test
+    fun performPrimaryActionOnAFailedDownloadRetriesIt() {
+        val payload = Random(32).nextBytes(64 * 1024)
+        val sha256 = sha256Hex(payload)
+        var requestCount = 0
+        val downloaderClient = HttpClient(
+            MockEngine {
+                requestCount++
+                if (requestCount == 1) respond("", HttpStatusCode.InternalServerError) else respond(payload, HttpStatusCode.OK)
+            },
+        ) { expectSuccess = false }
+        val repo = UpdateRepository(
+            checker = checkerFor { releaseJson("2.0.0", "Keryx-2.0.0-macos-arm64.zip", "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256) },
+            downloader = UpdateDownloader(downloaderClient),
+            installer = noOpInstaller(),
+            notificationCenter = NotificationCenter(),
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+        )
+        runBlocking { repo.check() }
+        repo.startDownload()
+        awaitState(repo) { it is UpdateState.Failed }
+        assertEquals(UpdateStage.DOWNLOAD, (repo.state.value as UpdateState.Failed).exception.stage)
+
+        repo.performPrimaryAction()
+
+        awaitState(repo) { it is UpdateState.Ready }
+        assertEquals(2, requestCount)
+    }
+
+    @Test
+    fun performPrimaryActionOnACheckFailureWithNoUpdateReChecks() {
+        var requestCount = 0
+        val checkerClient = HttpClient(
+            MockEngine {
+                requestCount++
+                if (requestCount == 1) {
+                    respondError(HttpStatusCode.InternalServerError)
+                } else {
+                    respond(
+                        releaseJson("2.0.0", "Keryx-2.0.0-macos-arm64.zip", "https://release-assets.githubusercontent.com/x.zip", 1_000, "a".repeat(64)),
+                        HttpStatusCode.OK,
+                    )
+                }
+            },
+        ) { expectSuccess = false }
+        val repo = UpdateRepository(
+            checker = UpdateChecker(checkerClient, currentVersion = "1.0.0", repoSlug = "owner/repo", location = WRITABLE_MAC_LOCATION),
+            downloader = UpdateDownloader(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }) { expectSuccess = false }),
+            installer = noOpInstaller(),
+            notificationCenter = NotificationCenter(),
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+        )
+        runBlocking { repo.check() }
+        val failed = repo.state.value
+        assertIs<UpdateState.Failed>(failed)
+        assertEquals(null, failed.update)
+        assertEquals(UpdateStage.CHECK, failed.exception.stage)
+
+        repo.performPrimaryAction()
+
+        awaitState(repo) { it is UpdateState.Available }
+        assertEquals(2, requestCount)
+    }
+
+    /**
+     * The states [performPrimaryAction] deliberately treats as having no action of its own — see
+     * its own KDoc. Covers a representative state reachable purely from construction (Idle) and one
+     * only reachable mid-download (Downloading), rather than every state in the sealed hierarchy.
+     */
+    @Test
+    fun performPrimaryActionIsANoOpForStatesWithNoActionOfTheirOwn() {
+        var checkRequestCount = 0
+        var downloadRequestCount = 0
+        val payload = Random(33).nextBytes(64 * 1024)
+        val downloadGate = CompletableDeferred<Unit>()
+        val downloaderClient = HttpClient(MockEngine { downloadRequestCount++; downloadGate.await(); respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }
+        val checkerClient = HttpClient(
+            MockEngine {
+                checkRequestCount++
+                respond(
+                    releaseJson("2.0.0", "Keryx-2.0.0-macos-arm64.zip", "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256Hex(payload)),
+                    HttpStatusCode.OK,
+                )
+            },
+        ) { expectSuccess = false }
+        val repo = UpdateRepository(
+            checker = UpdateChecker(checkerClient, currentVersion = "1.0.0", repoSlug = "owner/repo", location = WRITABLE_MAC_LOCATION),
+            downloader = UpdateDownloader(downloaderClient),
+            installer = noOpInstaller(),
+            notificationCenter = NotificationCenter(),
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+        )
+
+        // Idle: brand new repository, nothing has ever run.
+        assertEquals(UpdateState.Idle, repo.state.value)
+        repo.performPrimaryAction()
+        assertEquals(0, checkRequestCount, "Idle must be a no-op, not an implicit check()")
+        assertEquals(UpdateState.Idle, repo.state.value)
+
+        // Downloading: parked mid-download via downloadGate.
+        runBlocking { repo.check() }
+        repo.startDownload()
+        awaitState(repo) { it is UpdateState.Downloading }
+        val requestsWhileDownloading = downloadRequestCount
+        repo.performPrimaryAction()
+        assertEquals(requestsWhileDownloading, downloadRequestCount, "Downloading must be a no-op, not a second download")
+        assertIs<UpdateState.Downloading>(repo.state.value)
+
+        downloadGate.complete(Unit)
+        awaitState(repo) { it is UpdateState.Ready }
     }
 }
 
