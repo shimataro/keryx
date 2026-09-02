@@ -16,7 +16,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.io.buffered
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemFileSystem
-import kotlinx.io.readByteArray
 import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.MAX_REDIRECTS
@@ -223,14 +222,21 @@ class UpdateDownloader(private val client: HttpClient) {
             while (true) {
                 val packet = channel.readRemaining(DOWNLOAD_CHUNK_BYTES.toLong())
                 if (packet.exhausted()) break
-                val bytes = packet.readByteArray()
-                total += bytes.size
+                // transferTo copies straight into sink and reports how much it moved, rather than
+                // materializing this chunk into a ByteArray just to measure its size and hand it to
+                // sink.write(bytes) — one fewer full-chunk copy and allocation per iteration. The
+                // "exceeds expected size" check below now runs after the chunk is already written
+                // (packet.buffer.size, which would let it run before, is an @InternalIoApi); the
+                // .part file this could over-write into is deleted on any error path regardless
+                // (see download()'s own catch/error handling), so this only ever costs at most one
+                // extra chunk of transient disk usage, never a correctness difference.
+                val chunkSize = packet.transferTo(sink)
+                total += chunkSize
                 if (total > expectedSizeBytes) {
                     return Result.Err(
                         UpdateException(UpdateStage.DOWNLOAD, "Downloaded body exceeds the expected $expectedSizeBytes-byte size"),
                     )
                 }
-                sink.write(bytes)
                 if (shouldEmitProgress(total, lastEmitted, expectedSizeBytes)) {
                     lastEmitted = total
                     onProgress(total, expectedSizeBytes)
