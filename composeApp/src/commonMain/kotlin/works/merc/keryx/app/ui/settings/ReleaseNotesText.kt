@@ -1,4 +1,4 @@
-package works.merc.keryx.app.domain
+package works.merc.keryx.app.ui.settings
 
 /** A line-start `#` through `######` heading marker, with any following whitespace. */
 private val HEADING_PREFIX = Regex("(?m)^#{1,6}[ \\t]*")

@@ -28,7 +28,6 @@ import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.domain.AvailableUpdate
 import works.merc.keryx.app.domain.UpdateState
-import works.merc.keryx.app.domain.plainTextReleaseNotes
 import works.merc.keryx.app.domain.update
 import works.merc.keryx.app.ui.common.FlatButton
 import works.merc.keryx.app.ui.common.FlatTextButton

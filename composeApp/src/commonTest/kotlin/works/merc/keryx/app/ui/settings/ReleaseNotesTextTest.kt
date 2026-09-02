@@ -1,4 +1,4 @@
-package works.merc.keryx.app.domain
+package works.merc.keryx.app.ui.settings
 
 import kotlin.test.Test
 import kotlin.test.assertEquals

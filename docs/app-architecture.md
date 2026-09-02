@@ -214,6 +214,12 @@ platform `actual` gets to say "not right now" for a reason `updatePlan` itself h
 boolean, so it's covered by `commonTest` despite `androidMain` having no JVM-testable unit-test
 source set (see `testing.md`).
 
+A third pure function sits beside those two but deliberately outside `domain/`:
+`ui/settings/ReleaseNotesText.kt`'s `plainTextReleaseNotes` (Markdown-to-plain-text for the Updates
+tab's read-only summary) is UI-layer presentation formatting, not update policy — the same
+reasoning that keeps `ui/home/HomeCommon.kt`'s `formatTimestamp` and `ui/i18n/ErrorMessages.kt` out
+of `domain/` too, and its sole caller (`ui/settings/UpdatesTab.kt`).
+
 The desktop and Android `UpdateInstaller` actuals share no code at all — desktop
 (`platform/update/DesktopUpdateInstaller.kt`) extracts a ZIP via `platform/ZipExtractor.kt`
 (`jvmCommonMain`, shared with Android exactly like `FileIO`/`Gzip`), stages it next to the current

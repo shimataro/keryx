@@ -229,6 +229,12 @@ interface。`OsNotificationSink` とまったく同じように `platformModule`
 JVM でテスト可能なユニットテストのソースセットが無いにもかかわらず `commonTest` でカバーされて
 いる（testing.ja.md 参照）。
 
+この 2 つと並ぶ 3 つ目の純粋関数は、意図的に `domain/` の外に置かれている:
+`ui/settings/ReleaseNotesText.kt` の `plainTextReleaseNotes`（Updates タブの読み取り専用サマリー
+向けの Markdown → プレーンテキスト変換）は更新ポリシーではなく UI 層の表示整形であり、
+`ui/home/HomeCommon.kt` の `formatTimestamp` や `ui/i18n/ErrorMessages.kt` が `domain/` の外に
+置かれているのと同じ理由による。唯一の呼び出し元も `ui/settings/UpdatesTab.kt` である。
+
 デスクトップと Android の `UpdateInstaller` actual はコードを一切共有していない——デスクトップ
 （`platform/update/DesktopUpdateInstaller.kt`）は `platform/ZipExtractor.kt`（`jvmCommonMain`。
 `FileIO`/`Gzip` とまったく同じ形で Android と共有）経由で ZIP を展開し、現在のインストール先の
