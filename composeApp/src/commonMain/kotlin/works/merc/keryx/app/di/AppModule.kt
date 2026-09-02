@@ -1,6 +1,7 @@
 package works.merc.keryx.app.di
 
 import app.cash.sqldelight.db.SqlDriver
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -8,6 +9,7 @@ import org.koin.core.module.Module
 import org.koin.dsl.module
 import works.merc.keryx.app.core.AppInfo
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.data.local.DatabaseDriverFactory
 import works.merc.keryx.app.data.local.FtsManager
@@ -62,8 +64,16 @@ val appModule: Module = module {
     single { NewArticleNotifier(get()) }
     single<NotificationMessages> { ComposeNotificationMessages() }
 
-    // Long-lived scope for debounced sync + background work.
-    single { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
+    // Long-lived scope for debounced sync + background work. The handler doesn't change any
+    // existing behavior (SupervisorJob's semantics and every launch/async's own exception handling
+    // are unaffected) — it only keeps an exception that would otherwise reach the platform default
+    // handler (stderr, invisible in a packaged .app with no attached console) from vanishing
+    // without a trace. That silence is exactly what made a launch()-time IllegalArgumentException
+    // in the in-app updater look like a hang instead of a logged failure (see DetachedProcess.kt).
+    single {
+        val exceptionHandler = CoroutineExceptionHandler { _, e -> Log.error("AppScope", "Uncaught coroutine exception", e) }
+        CoroutineScope(SupervisorJob() + Dispatchers.Default + exceptionHandler)
+    }
 
     single {
         SyncRepository(

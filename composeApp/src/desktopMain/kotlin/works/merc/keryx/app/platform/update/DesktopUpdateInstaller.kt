@@ -121,6 +121,12 @@ class DesktopUpdateInstaller internal constructor(
             )
         } catch (e: IllegalStateException) {
             return InstallLaunchResult.Failed("Failed to extract the downloaded update: ${e.message}")
+        } catch (e: IOException) {
+            // Kotlin has no multi-catch, so this is a second clause rather than widening the one
+            // above to Exception (which would also swallow CancellationException on this suspend
+            // path). Covers a full disk (ENOSPC) or a corrupt archive (ZipException) — anything
+            // ZipExtractor's own java.util.zip/java.io calls can throw beyond its check()s.
+            return InstallLaunchResult.Failed("Failed to extract the downloaded update: ${e.message}")
         }
 
         val extractedApp = File(extractDir, entryDirName)

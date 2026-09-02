@@ -378,6 +378,34 @@ class UpdateRepositoryTest {
 
         assertFalse(exited.isCompleted)
     }
+
+    /**
+     * The regression guard for the real bug this class exists to catch: `installer.install()`
+     * throwing (as `RealProcessLauncher.launch()` did unconditionally before its
+     * `redirectInput(Redirect.DISCARD)` bug was fixed — see `DetachedProcess.kt`'s own KDoc) must
+     * turn into `Failed`, not leave `state` stuck at `Installing` forever with no error and no exit
+     * signal.
+     */
+    @Test
+    fun anInstallerThatThrowsFailsInsteadOfFreezing() {
+        val installer = ThrowingInstaller()
+        val repo = readyRepo(installer, seed = 10)
+        val exited = exitSignalOf(repo)
+
+        repo.install()
+        awaitState(repo) { it is UpdateState.Failed }
+
+        assertEquals(UpdateStage.INSTALL, (repo.state.value as UpdateState.Failed).exception.stage)
+        assertFalse(exited.isCompleted)
+    }
+}
+
+/** A fake [UpdateInstaller] whose [install] throws, as [GatedInstaller] cannot express. */
+private class ThrowingInstaller : UpdateInstaller {
+    override fun canInstall(plan: UpdatePlan) = true
+
+    override suspend fun install(filePath: String, update: AvailableUpdate): InstallLaunchResult =
+        throw IllegalArgumentException("simulated launcher failure")
 }
 
 /**

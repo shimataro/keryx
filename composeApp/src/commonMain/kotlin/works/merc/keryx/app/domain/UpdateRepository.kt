@@ -213,6 +213,14 @@ class UpdateRepository(
         } catch (e: CancellationException) {
             _state.value = UpdateState.Available(update)
             throw e
+        } catch (e: Exception) {
+            // Anything downloader.download() itself doesn't already turn into a Result.Err (e.g.
+            // SystemFileSystem.createDirectories failing) would otherwise leave state stuck at
+            // Downloading/Verifying forever with no error shown and nothing logged — the same
+            // failure mode a stray IllegalArgumentException in the install path caused (see
+            // DetachedProcess.kt's own KDoc).
+            Log.warn(TAG, "Update download failed unexpectedly", e)
+            _state.value = UpdateState.Failed(update, UpdateException(UpdateStage.DOWNLOAD, e.message ?: "Download failed"))
         }
     }
 
@@ -227,15 +235,27 @@ class UpdateRepository(
                 (_state.value as? UpdateState.Ready)?.also { _state.value = UpdateState.Installing(it.update) }
             } ?: return@launch
 
-            when (val result = installer.install(ready.filePath, ready.update)) {
-                // Launched: the installer/OS takes over from here (see InstallLaunchResult's own
-                // KDoc). State stays at Installing rather than being guessed forward; the app-exit
-                // signal is emitted *here*, after the hand-off actually happened — never from the
-                // state transition above, which is set before installer.install() has done a thing.
-                InstallLaunchResult.Launched -> _installLaunched.emit(Unit)
-                InstallLaunchResult.AwaitingUserConsent -> _state.value = ready
-                is InstallLaunchResult.Failed ->
-                    _state.value = UpdateState.Failed(ready.update, UpdateException(UpdateStage.INSTALL, result.reason))
+            try {
+                when (val result = installer.install(ready.filePath, ready.update)) {
+                    // Launched: the installer/OS takes over from here (see InstallLaunchResult's
+                    // own KDoc). State stays at Installing rather than being guessed forward; the
+                    // app-exit signal is emitted *here*, after the hand-off actually happened —
+                    // never from the state transition above, which is set before
+                    // installer.install() has done a thing.
+                    InstallLaunchResult.Launched -> _installLaunched.emit(Unit)
+                    InstallLaunchResult.AwaitingUserConsent -> _state.value = ready
+                    is InstallLaunchResult.Failed ->
+                        _state.value = UpdateState.Failed(ready.update, UpdateException(UpdateStage.INSTALL, result.reason))
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // installer.install() extracts/stages/launches a real external process — any of
+                // those steps throwing (a bad zip, a disk error, a launcher misuse like the
+                // IllegalArgumentException DetachedProcess.kt's own KDoc describes) must never
+                // leave state stuck at Installing forever with no error and nothing logged.
+                Log.warn(TAG, "Update install failed unexpectedly", e)
+                _state.value = UpdateState.Failed(ready.update, UpdateException(UpdateStage.INSTALL, e.message ?: "Install failed"))
             }
         }
     }

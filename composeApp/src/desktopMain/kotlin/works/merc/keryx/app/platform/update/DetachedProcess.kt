@@ -27,13 +27,24 @@ internal fun interface ProcessLauncher {
  * the launched script redirects its own output to a log-file argument (see [UpdateScriptWriter]),
  * and inheriting this (about to exit) process's streams would keep the child attached to file
  * descriptors nobody reads from afterwards.
+ *
+ * Input is deliberately left at the default [ProcessBuilder.Redirect.PIPE] rather than also
+ * discarded: `Redirect.DISCARD`'s [ProcessBuilder.Redirect.type] is `WRITE` (it names a
+ * destination, `/dev/null`, to discard *output* into), so passing it to
+ * [ProcessBuilder.redirectInput] — which only accepts a *source* of input — always threw
+ * `IllegalArgumentException("Redirect invalid for reading: ...")` before `start()` was ever
+ * reached. That exception isn't an [IOException], so it escaped the `catch` below (and every
+ * catch above it, all the way up through [works.merc.keryx.app.domain.UpdateRepository.install])
+ * silently — every self-replace install launch failed, leaving `UpdateState.Installing` stuck
+ * forever with no error and nothing in the log. The scripts never read stdin, and the pipe's
+ * write end simply closes once this
+ * process exits, so the default is exactly what's needed here.
  */
 internal class RealProcessLauncher : ProcessLauncher {
     override fun launch(command: List<String>): Boolean = try {
         ProcessBuilder(command)
             .redirectOutput(ProcessBuilder.Redirect.DISCARD)
             .redirectError(ProcessBuilder.Redirect.DISCARD)
-            .redirectInput(ProcessBuilder.Redirect.DISCARD)
             .start()
         true
     } catch (e: IOException) {
