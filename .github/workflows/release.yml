@@ -90,7 +90,7 @@ jobs:
         run: |
           src="composeApp/build/compose/binaries/main/app/Keryx.app"
           dest="Keryx-${{ steps.version.outputs.version }}-macos-arm64.zip"
-          (cd "$(dirname "$src")" && zip -r "$OLDPWD/$dest" "$(basename "$src")")
+          (cd "$(dirname "$src")" && zip -ry "$OLDPWD/$dest" "$(basename "$src")")
 
       - name: Attach to release
         run: |
@@ -200,7 +200,7 @@ jobs:
         run: |
           src="composeApp/build/compose/binaries/main/app/Keryx"
           dest="Keryx-${{ steps.version.outputs.version }}-linux-x86_64.zip"
-          (cd "$(dirname "$src")" && zip -r "$OLDPWD/$dest" "$(basename "$src")")
+          (cd "$(dirname "$src")" && zip -ry "$OLDPWD/$dest" "$(basename "$src")")
 
       - name: Attach to release
         run: |
