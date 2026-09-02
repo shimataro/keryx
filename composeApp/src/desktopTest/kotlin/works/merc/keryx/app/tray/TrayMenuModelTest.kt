@@ -93,4 +93,56 @@ class TrayMenuModelTest {
         val layout = buildMenuLayout(MENU_ROOT_ID, -1, emptyList(), hidden)
         layout.children.forEach { assertEquals(MENU_LAYOUT_SIGNATURE, it.sig) }
     }
+
+    // --- update entry ---
+
+    @Test
+    fun `no update entry keeps the original two-item menu shape`() {
+        val layout = buildMenuLayout(MENU_ROOT_ID, -1, emptyList(), hidden)
+        assertEquals(listOf(MENU_TOGGLE_ID, MENU_QUIT_ID), layout.childItems().map { it.id })
+    }
+
+    @Test
+    fun `an update entry is inserted ahead of a separator then toggle and quit`() {
+        val withUpdate = hidden.copy(update = TrayUpdateEntry("Download update 2.0.0", enabled = true))
+        val layout = buildMenuLayout(MENU_ROOT_ID, -1, emptyList(), withUpdate)
+        assertEquals(
+            listOf(MENU_UPDATE_ID, MENU_SEPARATOR_ID, MENU_TOGGLE_ID, MENU_QUIT_ID),
+            layout.childItems().map { it.id },
+        )
+    }
+
+    @Test
+    fun `the update entry carries its own label and enabled state`() {
+        val withUpdate = hidden.copy(update = TrayUpdateEntry("Download update 2.0.0", enabled = false))
+        val properties = menuItemProperties(MENU_UPDATE_ID, withUpdate)
+        assertEquals("Download update 2.0.0", properties.getValue("label").value)
+        assertEquals(false, properties.getValue("enabled").value)
+    }
+
+    @Test
+    fun `the separator has no label and is typed as a separator`() {
+        val withUpdate = hidden.copy(update = TrayUpdateEntry("Download update 2.0.0", enabled = true))
+        val properties = menuItemProperties(MENU_SEPARATOR_ID, withUpdate)
+        assertEquals("separator", properties.getValue("type").value)
+    }
+
+    @Test
+    fun `the update entry properties are empty when no update is offered`() {
+        assertTrue(menuItemProperties(MENU_UPDATE_ID, hidden).isEmpty())
+    }
+
+    // --- roundedTrayProgressPercent ---
+
+    @Test
+    fun `progress rounds down to the nearest 5 percent`() {
+        assertEquals(60, roundedTrayProgressPercent(bytesDone = 62, bytesTotal = 100))
+        assertEquals(0, roundedTrayProgressPercent(bytesDone = 4, bytesTotal = 100))
+        assertEquals(100, roundedTrayProgressPercent(bytesDone = 100, bytesTotal = 100))
+    }
+
+    @Test
+    fun `progress is zero for an unknown total`() {
+        assertEquals(0, roundedTrayProgressPercent(bytesDone = 0, bytesTotal = 0))
+    }
 }

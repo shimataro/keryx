@@ -44,14 +44,17 @@ internal fun MacTray(
     hideLabel: String,
     quitLabel: String,
     windowVisible: Boolean,
+    updateEntry: TrayUpdateEntry?,
     onToggle: () -> Unit,
     onQuit: () -> Unit,
+    onUpdateAction: () -> Unit,
     newArticleNotifications: SharedFlow<String>,
 ) {
     val image = image ?: return
 
     val currentOnToggle by rememberUpdatedState(onToggle)
     val currentOnQuit by rememberUpdatedState(onQuit)
+    val currentOnUpdateAction by rememberUpdatedState(onUpdateAction)
 
     // TrayIcon isn't a java.awt.Component, so PopupMenu.show(...) needs some
     // origin Component. This Frame exists only to host the PopupMenu and is
@@ -69,6 +72,11 @@ internal fun MacTray(
     }
     val toggleItem = remember { MenuItem() }
     val quitItem = remember { MenuItem() }
+    // "-" is the exact idiom java.awt.Menu.addSeparator() itself uses (see NativeMenu.desktop.kt) —
+    // built directly (rather than via addSeparator()) so this composable keeps its own reference,
+    // needed to insert/remove it alongside updateItem below.
+    val updateSeparator = remember { MenuItem("-") }
+    val updateItem = remember { MenuItem() }
     val popupMenu = remember {
         PopupMenu().apply {
             add(toggleItem)
@@ -116,6 +124,9 @@ internal fun MacTray(
     LaunchedEffect(quitItem) {
         quitItem.addActionListener { currentOnQuit() }
     }
+    LaunchedEffect(updateItem) {
+        updateItem.addActionListener { currentOnUpdateAction() }
+    }
     LaunchedEffect(trayIcon, tooltip) {
         trayIcon.toolTip = tooltip
     }
@@ -124,6 +135,26 @@ internal fun MacTray(
     }
     LaunchedEffect(quitItem, quitLabel) {
         quitItem.label = quitLabel
+    }
+    // Inserted ahead of toggle/quit (item, then separator, so the final order reads
+    // item/separator/toggle/quit) rather than disabled-and-always-present, since "an update is
+    // available" is conceptually never relevant until one actually is — see ui-guidelines'
+    // "Prefer disabled over hidden" carve-out for elements that aren't merely temporarily inactive.
+    LaunchedEffect(popupMenu, updateItem, updateSeparator, updateEntry) {
+        val alreadyInserted = popupMenu.getItem(0) === updateItem
+        if (updateEntry == null) {
+            if (alreadyInserted) {
+                popupMenu.remove(updateSeparator)
+                popupMenu.remove(updateItem)
+            }
+        } else {
+            updateItem.label = updateEntry.label
+            updateItem.isEnabled = updateEntry.enabled
+            if (!alreadyInserted) {
+                popupMenu.insert(updateSeparator, 0)
+                popupMenu.insert(updateItem, 0)
+            }
+        }
     }
 
     // Tray()'s own composable body is what turns a queued TrayState notification

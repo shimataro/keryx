@@ -13,6 +13,8 @@ import androidx.compose.ui.window.rememberTrayState
 import kotlinx.coroutines.flow.SharedFlow
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.APP_NAME
+import works.merc.keryx.app.domain.UpdateState
+import works.merc.keryx.app.domain.isInstallable
 import works.merc.keryx.app.drawUnreadDot
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.isWindows
@@ -23,6 +25,10 @@ import works.merc.keryx.app.resources.tray_icon
 import works.merc.keryx.app.resources.tray_icon_outlined
 import works.merc.keryx.app.resources.tray_quit
 import works.merc.keryx.app.resources.tray_show
+import works.merc.keryx.app.resources.tray_update_download
+import works.merc.keryx.app.resources.tray_update_downloading
+import works.merc.keryx.app.resources.tray_update_failed
+import works.merc.keryx.app.resources.tray_update_restart
 import java.awt.image.BufferedImage
 
 /**
@@ -68,8 +74,10 @@ internal fun ApplicationScope.KeryxTray(
     notificationIcon: BufferedImage?,
     unreadCount: Long,
     windowVisible: Boolean,
+    updateState: UpdateState,
     onToggle: () -> Unit,
     onQuit: () -> Unit,
+    onUpdateAction: () -> Unit,
     onNotificationClicked: () -> Unit,
     onTrayAction: () -> Unit,
     newArticleNotifications: SharedFlow<String>,
@@ -92,6 +100,7 @@ internal fun ApplicationScope.KeryxTray(
     val hideLabel = stringResource(Res.string.tray_hide)
     val quitLabel = stringResource(Res.string.tray_quit)
     val toggleLabel = if (windowVisible) hideLabel else showLabel
+    val updateEntry = trayUpdateEntry(updateState)
 
     when {
         isMacOs -> {
@@ -106,8 +115,10 @@ internal fun ApplicationScope.KeryxTray(
                 hideLabel = hideLabel,
                 quitLabel = quitLabel,
                 windowVisible = windowVisible,
+                updateEntry = updateEntry,
                 onToggle = onToggle,
                 onQuit = onQuit,
+                onUpdateAction = onUpdateAction,
                 newArticleNotifications = newArticleNotifications,
             )
         }
@@ -122,8 +133,10 @@ internal fun ApplicationScope.KeryxTray(
                 unreadCount = unreadCount,
                 toggleLabel = toggleLabel,
                 quitLabel = quitLabel,
+                updateEntry = updateEntry,
                 onToggle = onToggle,
                 onQuit = onQuit,
+                onUpdateAction = onUpdateAction,
                 onNotificationClicked = onNotificationClicked,
                 newArticleNotifications = newArticleNotifications,
             )
@@ -138,8 +151,10 @@ internal fun ApplicationScope.KeryxTray(
                 tooltip = tooltip,
                 toggleLabel = toggleLabel,
                 quitLabel = quitLabel,
+                updateEntry = updateEntry,
                 onToggle = onToggle,
                 onQuit = onQuit,
+                onUpdateAction = onUpdateAction,
                 onTrayAction = onTrayAction,
                 newArticleNotifications = newArticleNotifications,
             )
@@ -160,6 +175,9 @@ internal fun ApplicationScope.KeryxTray(
                     tooltip = tooltip,
                     onAction = onTrayAction,
                     menu = {
+                        updateEntry?.let { entry ->
+                            Item(entry.label, enabled = entry.enabled, onClick = onUpdateAction)
+                        }
                         Item(toggleLabel, onClick = onToggle)
                         Item(quitLabel, onClick = onQuit)
                     },
@@ -177,4 +195,31 @@ internal fun ApplicationScope.KeryxTray(
             }
         }
     }
+}
+
+/**
+ * Maps [state] to the tray's single update menu item, or `null` when nothing should be shown —
+ * see [TrayUpdateEntry]'s own KDoc, and `UpdatesTab.kt`'s button-state table for the equivalent
+ * mapping the settings dialog renders instead. [UpdateState.Installing] is deliberately `null`
+ * too: reaching it is followed immediately by the whole app exiting (see `main.kt`'s own
+ * `UpdateState.Installing` handling), so there is no meaningful window to show a tray item in.
+ */
+@Composable
+private fun trayUpdateEntry(state: UpdateState): TrayUpdateEntry? = when (state) {
+    is UpdateState.Available ->
+        if (state.update.plan.isInstallable) {
+            TrayUpdateEntry(stringResource(Res.string.tray_update_download, state.update.version), enabled = true)
+        } else {
+            null
+        }
+    is UpdateState.Downloading -> {
+        val percent = roundedTrayProgressPercent(state.bytesDone, state.bytesTotal)
+        TrayUpdateEntry(stringResource(Res.string.tray_update_downloading, "$percent%"), enabled = false)
+    }
+    is UpdateState.Verifying ->
+        TrayUpdateEntry(stringResource(Res.string.tray_update_downloading, "100%"), enabled = false)
+    is UpdateState.Ready ->
+        TrayUpdateEntry(stringResource(Res.string.tray_update_restart, state.update.version), enabled = true)
+    is UpdateState.Failed -> TrayUpdateEntry(stringResource(Res.string.tray_update_failed), enabled = true)
+    UpdateState.Idle, UpdateState.Checking, UpdateState.UpToDate, is UpdateState.Installing -> null
 }

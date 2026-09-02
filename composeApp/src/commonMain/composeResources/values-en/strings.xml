@@ -230,6 +230,18 @@
     <string name="settings_update_check_available">Version %1$s is available</string>
     <string name="settings_update_check_failed">Couldn’t check for updates</string>
     <string name="settings_update_open_release_page">Open release page</string>
+    <string name="settings_update_download">Download</string>
+    <string name="settings_update_downloading">Downloading… %1$s</string>
+    <string name="settings_update_verifying">Verifying…</string>
+    <string name="settings_update_ready">Version %1$s is ready to install</string>
+    <string name="settings_update_install">Restart and install</string>
+    <string name="settings_update_installing">Restarting…</string>
+    <string name="settings_update_retry">Retry</string>
+    <string name="settings_update_manual_only">In-app update isn’t available for this installation</string>
+    <string name="tray_update_download">Download update %1$s</string>
+    <string name="tray_update_downloading">Downloading… %1$s</string>
+    <string name="tray_update_restart">Restart to update to %1$s</string>
+    <string name="tray_update_failed">Update failed</string>
 
     <!-- feed notifications -->
     <string name="feed_gone_title">Feed removed</string>

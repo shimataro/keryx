@@ -64,7 +64,7 @@ import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.domain.UpdateInstaller
 import works.merc.keryx.app.domain.UpdatePlan
 import works.merc.keryx.app.domain.UpdateRepository
-import works.merc.keryx.app.domain.UpdateStatus
+import works.merc.keryx.app.domain.UpdateState
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
@@ -734,19 +734,14 @@ class SettingsViewModelTest {
     @Test
     fun checkForUpdateSurfacesAvailableResultWithoutTouchingLastUpdateCheckAt() {
         val vm = newViewModel(updateRepository = fakeUpdateRepository(updateCheckerReturning("2.0.0")))
-        assertNull(vm.updateCheckResult)
+        assertEquals(UpdateState.Idle, vm.updateState.value)
 
         vm.checkForUpdate()
-        // Await checkingForUpdate becoming false too, not just updateCheckResult: both are written
-        // sequentially in the same coroutine after the suspend point, on whatever thread the mocked
-        // HTTP call resumes on — observing the first write gives no happens-before guarantee for the
-        // second (see disconnectClearsLastSyncErrorText for the same class of race).
-        awaitTrue { vm.updateCheckResult != null && !vm.checkingForUpdate }
+        awaitTrue { vm.updateState.value is UpdateState.Available }
 
-        val result = vm.updateCheckResult
-        assertIs<UpdateStatus.Available>(result)
-        assertEquals("2.0.0", result.version)
-        assertFalse(vm.checkingForUpdate)
+        val result = vm.updateState.value
+        assertIs<UpdateState.Available>(result)
+        assertEquals("2.0.0", result.update.version)
         // Manual checks are deliberately excluded from the automatic schedule (see SettingsViewModel).
         assertNull(vm.localSettings.value.lastUpdateCheckAt)
     }
@@ -767,13 +762,11 @@ class SettingsViewModelTest {
         val vm = newViewModel(updateRepository = fakeUpdateRepository(UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo")))
 
         vm.checkForUpdate()
-        awaitTrue { vm.checkingForUpdate }
+        awaitTrue { vm.updateState.value is UpdateState.Checking }
         vm.checkForUpdate() // ignored: a check is already in flight
 
-        // Same race guard as checkForUpdateSurfacesAvailableResultWithoutTouchingLastUpdateCheckAt.
-        awaitTrue { vm.updateCheckResult != null && !vm.checkingForUpdate }
+        awaitTrue { vm.updateState.value is UpdateState.Available }
         assertEquals(1, requestCount)
-        assertFalse(vm.checkingForUpdate)
     }
 
     @Test

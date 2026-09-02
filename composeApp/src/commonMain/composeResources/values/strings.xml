@@ -227,6 +227,18 @@
     <string name="settings_update_check_available">新しいバージョン %1$s があります</string>
     <string name="settings_update_check_failed">確認できませんでした</string>
     <string name="settings_update_open_release_page">リリースページを開く</string>
+    <string name="settings_update_download">ダウンロード</string>
+    <string name="settings_update_downloading">ダウンロード中… %1$s</string>
+    <string name="settings_update_verifying">検証中…</string>
+    <string name="settings_update_ready">%1$s の準備ができました</string>
+    <string name="settings_update_install">再起動してインストール</string>
+    <string name="settings_update_installing">再起動しています…</string>
+    <string name="settings_update_retry">再試行</string>
+    <string name="settings_update_manual_only">このインストール形態はアプリ内更新に対応していません</string>
+    <string name="tray_update_download">アップデート %1$s をダウンロード</string>
+    <string name="tray_update_downloading">ダウンロード中… %1$s</string>
+    <string name="tray_update_restart">再起動して %1$s に更新</string>
+    <string name="tray_update_failed">アップデートに失敗しました</string>
 
     <!-- feed notifications -->
     <string name="feed_gone_title">フィードが削除されました</string>

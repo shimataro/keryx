@@ -30,6 +30,13 @@ sealed interface UpdatePlan {
     data class RunInstaller(val asset: UpdateAsset) : UpdatePlan
 }
 
+/** Whether [UpdatePlan] represents something an in-app update can actually carry out, as opposed
+ * to falling back to the release page or not being offered at all — the one thing the Updates tab
+ * (`UpdatesTab.kt`) and the tray (`tray/KeryxTray.kt`'s `trayUpdateEntry`) both need to decide
+ * whether an [UpdateState.Available] update gets a "download" affordance at all. */
+internal val UpdatePlan.isInstallable: Boolean
+    get() = this is UpdatePlan.SelfReplace || this is UpdatePlan.RunInstaller
+
 /**
  * Decides [UpdatePlan] for [location] given the asset (if any) [UpdateChecker] already selected for
  * it. [asset] is `null` exactly when [selectUpdateAsset] found nothing installable — that alone

@@ -225,6 +225,24 @@ class UpdateRepository(
      * knows nothing about). */
     private fun canInstall(plan: UpdatePlan): Boolean = installer.canInstall(plan)
 
+    /**
+     * Dispatches to whichever single action the tray's one update menu item (or the notification
+     * center's "updates" row) currently represents — see `tray/KeryxTray.kt`'s `trayUpdateEntry`
+     * for the label/enabled state this corresponds to. A no-op for every state with no action of
+     * its own ([UpdateState.Idle]/[UpdateState.Checking]/[UpdateState.UpToDate]/
+     * [UpdateState.Downloading]/[UpdateState.Verifying]/[UpdateState.Installing]).
+     */
+    fun performPrimaryAction() {
+        when (val current = _state.value) {
+            is UpdateState.Available -> startDownload()
+            is UpdateState.Ready -> install()
+            is UpdateState.Failed -> if (current.update != null) startDownload() else scope.launch { check() }
+            UpdateState.Idle, UpdateState.Checking, UpdateState.UpToDate,
+            is UpdateState.Downloading, is UpdateState.Verifying, is UpdateState.Installing,
+            -> Unit
+        }
+    }
+
     /** Replaces [lastNotificationId] (if any) with a fresh row for [message]/[action], so an update
      * moving from "available" to "ready to install" reads as one evolving row rather than two. */
     private fun postNotification(message: String, action: AppNotificationAction) {

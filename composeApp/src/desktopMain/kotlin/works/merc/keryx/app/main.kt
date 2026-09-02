@@ -57,6 +57,8 @@ import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.OAuthCallbackParams
 import works.merc.keryx.app.domain.parseOAuthUri
 import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.domain.UpdateRepository
+import works.merc.keryx.app.domain.UpdateState
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.isLinux
 import works.merc.keryx.app.platform.isMacOs
@@ -233,6 +235,8 @@ fun main(args: Array<String>) {
     val newArticleNotifications = newArticleNotifier.trayEvents
     appScope.launch { backgroundUpdateLoop(koin) }
 
+    val updateRepository = koin.get<UpdateRepository>()
+
     val menuController = koin.get<MenuController>()
 
     // Replace the JVM's default "About" panel (which shows "java" + the JVM version) with our
@@ -346,6 +350,14 @@ fun main(args: Array<String>) {
 
         val unreadCount by koin.get<ArticleRepository>().watchUnreadCount().collectAsState(0L)
 
+        val updateState by updateRepository.state.collectAsState()
+        // Installing hands off to the OS installer/self-replace script, which is already waiting
+        // for this process to exit (see UpdateInstaller's own KDoc on desktop) — nothing else in
+        // this state actually needs the app to still be running.
+        LaunchedEffect(updateState) {
+            if (updateState is UpdateState.Installing) exitApplication()
+        }
+
         // Dock/taskbar icon override (used below) needs the full branded icon, not the
         // small transparent tray glyph windowBaseImage uses for the window's own
         // title-bar/taskbar icon. Declared here (before the Dock activation-policy effect)
@@ -378,8 +390,10 @@ fun main(args: Array<String>) {
             notificationIcon = dockBaseImage,
             unreadCount = unreadCount,
             windowVisible = windowVisible,
+            updateState = updateState,
             onToggle = { windowVisible = !windowVisible },
             onQuit = ::exitApplication,
+            onUpdateAction = { updateRepository.performPrimaryAction() },
             // Reuses the same activation signal as the single-instance/reopen paths below
             // (window.toFront/requestFocus, de-iconify, activateIgnoringOtherApps) - see the
             // LaunchedEffect(Unit) collecting activationRequests further down.
