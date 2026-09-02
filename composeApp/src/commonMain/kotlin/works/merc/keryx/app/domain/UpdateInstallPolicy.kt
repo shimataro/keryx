@@ -41,12 +41,6 @@ internal val UpdatePlan.isInstallable: Boolean
     get() = this is UpdatePlan.SelfReplace || this is UpdatePlan.RunInstaller
 
 /**
- * Decides [UpdatePlan] for [location] given the asset (if any) [UpdateChecker] already selected for
- * it. [asset] is `null` exactly when [selectUpdateAsset] found nothing installable — that alone
- * forces [UpdatePlan.OpenReleasePage] for every [InstallKind] that would otherwise self-replace or
- * run an installer.
- */
-/**
  * Whether `AndroidUpdateInstaller.canInstall` should accept [plan], given whether the OS currently
  * lets this app install packages ([canRequestPackageInstalls] — the exact value
  * `PackageManager.canRequestPackageInstalls()` returns, which already folds together both facts
@@ -60,6 +54,12 @@ internal val UpdatePlan.isInstallable: Boolean
 internal fun canInstallAndroidApkUpdate(plan: UpdatePlan, canRequestPackageInstalls: Boolean): Boolean =
     plan is UpdatePlan.RunInstaller && plan.asset.kind == UpdateAssetKind.ANDROID_APK && canRequestPackageInstalls
 
+/**
+ * Decides [UpdatePlan] for [location] given the asset (if any) [UpdateChecker] already selected for
+ * it. [asset] is `null` exactly when [selectUpdateAsset] found nothing installable — that alone
+ * forces [UpdatePlan.OpenReleasePage] for every [InstallKind] that would otherwise self-replace or
+ * run an installer.
+ */
 fun updatePlan(location: InstallLocation, asset: UpdateAsset?): UpdatePlan = when (location.kind) {
     InstallKind.DEVELOPMENT, InstallKind.ANDROID_STORE, InstallKind.UNKNOWN -> UpdatePlan.NotOffered
 
