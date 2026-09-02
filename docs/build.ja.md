@@ -357,6 +357,33 @@ deb / rpm / msi は `0.x` を受け付けるので手を触れない）。メジ
 `restoreMacOsShortVersion` が `CFBundleShortVersionString` を実バージョンに書き戻す。両者が
 一致する場合（プレリリースを伴わない、メジャー 1 以上の通常のタグ）は何もしない。
 
+jpackage が署名するのはこの `doLast` より**前**なので、書き戻しは ad-hoc の署名シールを無効化する。
+そのため同じ `doLast` が続けてバンドルを**再署名**し（`resealMacOsBundle`:
+`codesign --force --deep --preserve-metadata=entitlements,flags,runtime --sign -`）、
+**再署名がハッシュ以外の署名特性を何も変えていないことを確認**し
+（`macSignatureProperties` が `codesign -dv` の `flags=` と `hashes=13+N` を前後で比較する）、
+最後に**検証**する（`verifyMacOsBundleSeal`: `codesign --verify --strict --deep`）。
+どの段でも失敗すればビルドを失敗させる。
+
+`--preserve-metadata` はこの中間の確認を通すためのもので、単なる保険ではなく必須である。
+Compose Desktop はアプリイメージを自身の `default-entitlements.plist`（`allow-jit`、
+`allow-unsigned-executable-memory`、`disable-library-validation`）**と** hardened runtime フラグの
+両方で署名しており、これらは Apple Silicon 上で JVM が動作するために必要なものである。
+`--options runtime` を手書きするとフラグは再現できるがエンタイトルメントが黙って落ち
+（`hashes=13+7` が `13+3` になる）、`codesign --verify` は通るのに起動した瞬間に AMFI に
+kill されるバンドルができる — シール自体は本当に有効なので、`verifyMacOsBundleSeal` だけでは
+検出できない失敗である。よってメタデータの保持と前後比較のどちらも、シール検証と重複していない。検証は書き戻しの
+有無にかかわらず macOS ビルドで常に走る。Windows / Linux には `.app` が存在しないので 3 段すべて
+no-op。これは見た目の問題ではない: アプリ内アップデートは、ダウンロードしたバンドルを差し替える前に
+まさにこの検証を実行する（[background-update.ja.md](background-update.ja.md) 参照）ため、これを
+通れないアプリイメージはリリース ZIP を**アプリ内アップデータからは**インストール不能にする —
+まったく同じ ZIP を手動でインストールする分には動き続ける。カーネルは起動時に `Info.plist` を
+再ハッシュしないためである。この非対称性ゆえに 0.x のリリースはすべてこの状態のまま気づかれず出荷され、
+アプリ内アップデータが初めてこの検証を行使したときに表面化した。そしてこれを捕まえられるのが
+ビルド時の検証だけである理由でもある: 通常の手動スモークテストでは捕まらない。DMG でも表に出なかったのは、
+jpackage が DMG 作成時にアプリイメージのコピーを再署名するから — `binaries/main/app` から直接作る
+ZIP 資産だけが壊れたシールを抱えていた。
+
 `0.1.1` での結果: タグ・`BuildConfig.VERSION`（About 画面）・更新チェック・Finder の表示が
 すべて `0.1.1` で揃う。プレースホルダ `1.0.0` が残るのは `CFBundleVersion` だけで、これは
 UI に一切現れない内部的なビルド識別子。中間成果物は `Keryx-1.0.0.dmg` という名前になるが、
@@ -401,10 +428,12 @@ Secrets を受け取らない。AGP は成果物が実際に使われるかど�
 > `Info.plist` を編集するとバンドルの署名シールが壊れる。カスタム URI スキームは
 > `macOS { infoPlist { extraKeysRawXml } }` 経由になったのでこれには該当しない
 > （jpackage が署名する plist に最初から含まれている）。残るのは `restoreMacOsShortVersion` だけで、
-> これはメジャーバージョンが `0` のときしか走らない。1.0.0 以降は後処理が一切なくなり、
-> `codesign --verify --strict` が通る。**0.x のまま** Developer ID 署名を導入する場合は、
-> バージョン書き戻しが署名を無効化するため、書き換え後に同じ identity で再署名する必要がある
-> （ad-hoc で再署名すると Developer ID 署名を黙って上書きしてしまい、公証も通らなくなる）。
+> これはメジャーバージョンが `0` のときしか走らない。その書き戻しには既に `resealMacOsBundle` による
+> 再署名が続く（前述のバージョン処理の節を参照）が、これは **ad-hoc** 再署名であり、このビルドが
+> 署名 identity を一切設定していないため `-` をハードコードしている。したがって **0.x のまま**
+> Developer ID 署名を導入する場合は、`resealMacOsBundle` にその identity を渡すよう変更する必要がある
+> （Developer ID 署名の上に ad-hoc で再署名すると、それを黙って置き換えて公証も通らなくなる）。
+> 1.0.0 以降は書き戻しも再署名も走らず、jpackage 自身の署名がそのまま残る。
 
 手順の概要:
 

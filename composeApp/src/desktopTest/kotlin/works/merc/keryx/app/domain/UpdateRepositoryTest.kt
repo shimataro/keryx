@@ -321,6 +321,57 @@ class UpdateRepositoryTest {
     }
 
     @Test
+    fun retryingAnInstallStageFailureTwiceStartsOnlyOneInstall() {
+        val payload = Random(29).nextBytes(64 * 1024)
+        val downloaderClient = HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }
+        var installCount = 0
+        val gate = CompletableDeferred<Unit>()
+        val secondInstallEntered = CompletableDeferred<Unit>()
+        val installer = object : UpdateInstaller {
+            override fun canInstall(plan: UpdatePlan) = true
+            override suspend fun install(filePath: String, update: AvailableUpdate): InstallLaunchResult {
+                installCount++
+                return when (installCount) {
+                    1 -> InstallLaunchResult.Failed("simulated")
+                    // Hold the retry inside install() so a *second* retry has a real window to slip
+                    // through — the exact race two Retry surfaces on one Failed state can produce.
+                    2 -> { gate.await(); InstallLaunchResult.Launched }
+                    else -> { secondInstallEntered.complete(Unit); InstallLaunchResult.Launched }
+                }
+            }
+        }
+        val repo = UpdateRepository(
+            checker = checkerFor {
+                releaseJson(
+                    "2.0.0", "Keryx-2.0.0-macos-arm64.zip",
+                    "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256Hex(payload),
+                )
+            },
+            downloader = UpdateDownloader(downloaderClient),
+            installer = installer,
+            notificationCenter = NotificationCenter(),
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+        )
+        runBlocking { repo.check() }
+        repo.startDownload()
+        awaitState(repo) { it is UpdateState.Ready }
+        repo.install()
+        awaitState(repo) { it is UpdateState.Failed }
+
+        repo.startDownload() // first retry — parks inside install()
+        awaitState(repo) { it is UpdateState.Installing }
+        repo.startDownload() // second retry — must find Installing, not Failed, and do nothing
+
+        Thread.sleep(200) // give a leaked third install every chance to appear
+        assertEquals(2, installCount, "a retry must never start a second install over one already running")
+        assertTrue(!secondInstallEntered.isCompleted)
+        gate.complete(Unit)
+    }
+
+    @Test
     fun retryingAnInstallStageFailureRedownloadsWhenTheVerifiedFileIsGone() {
         var downloadRequestCount = 0
         val payload = Random(24).nextBytes(64 * 1024)

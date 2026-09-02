@@ -37,7 +37,7 @@ composeApp/src/
     FileSystemExtras, ZipExtractor (in-app update — see "In-App Update" below)
   desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of each expect not covered by jvmCommonMain (DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule, InstallLocation) + LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage), DesktopOs (isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux)
     tray/      KeryxTray (platform branch), MacTray, LinuxTray + the StatusNotifierItem/dbusmenu D-Bus objects
-    platform/update/  DesktopUpdateInstaller, UpdateScriptWriter (pure self-replace/msiexec script templates), ProcessLauncher/RealProcessLauncher (the detached-launch seam a test fakes)
+    platform/update/  DesktopUpdateInstaller, UpdateScriptWriter (pure self-replace/msiexec script templates), ProcessLauncher/RealProcessLauncher (the detached-launch seam a test fakes), ArchiveExtractor (DittoArchiveExtractor on macOS, where the signed bundle seals its own symlinks; InProcessArchiveExtractor in process elsewhere), CodeSigningVerifier/RealCodeSigningVerifier (the `codesign --verify` seam)
   androidMain/kotlin/…/  actual implementations not covered by jvmCommonMain: DatabaseDriverFactory
     (bundled SQLite, see below), DatabaseFile (`databaseFilePath()` — `Context.getDatabasePath`,
     a different directory than AppDirs.appDataDir()/`Context.filesDir`; see db-schema.md),
@@ -222,8 +222,10 @@ reasoning that keeps `ui/home/HomeCommon.kt`'s `formatTimestamp` and `ui/i18n/Er
 of `domain/` too, and its sole caller (`ui/settings/UpdatesTab.kt`).
 
 The desktop and Android `UpdateInstaller` actuals share no code at all — desktop
-(`platform/update/DesktopUpdateInstaller.kt`) extracts a ZIP via `platform/ZipExtractor.kt`
-(`jvmCommonMain`, shared with Android exactly like `FileIO`/`Gzip`), stages it next to the current
+(`platform/update/DesktopUpdateInstaller.kt`) extracts a ZIP via
+`platform/update/ArchiveExtractor.kt` (`ditto` on macOS, whose signed bundle seals its own symlinks;
+`platform/ZipExtractor.kt` — `jvmCommonMain`, shared with Android exactly like `FileIO`/`Gzip` —
+everywhere else, see [background-update.md](background-update.md)), stages it next to the current
 install, and hands off to a detached helper script (`platform/update/UpdateScriptWriter.kt`, pure
 string templates — tested by asserting their text directly, never by running one) via
 `platform/update/DetachedProcess.kt`'s `ProcessLauncher` seam (mirroring

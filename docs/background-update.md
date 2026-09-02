@@ -192,10 +192,11 @@ separate, explicit click (Updates tab button, or the tray item once one is offer
   current state is still using (protecting an in-progress `.part` as well as a `Ready` file), so an
   update this repository stops referencing doesn't accumulate on disk forever.
 - **Installing.** The two platform `UpdateInstaller` actuals do not share an approach:
-  - **Desktop** (`platform/update/DesktopUpdateInstaller.kt`) extracts a self-replace ZIP via
-    `platform/ZipExtractor.kt` (zip-slip rejection, entry-count and byte-size limits, restoring the
-    executable bit only on the entries the caller names) into a staging directory, health-checks it
-    (the executable exists; on macOS, its `Info.plist` version also matches), moves the extraction
+  - **Desktop** (`platform/update/DesktopUpdateInstaller.kt`) extracts a self-replace ZIP into a
+    staging directory through `platform/update/ArchiveExtractor.kt` (zip-slip rejection,
+    entry-count and byte-size limits — see below for why this is a seam), health-checks it
+    (the executable exists; on macOS, its `Info.plist` version and its own code signature also
+    match — `codesign --verify --strict --deep`), moves the extraction
     onto the same volume as the current install (so the swap is a plain rename), and hands off to a
     detached helper script (`platform/update/UpdateScriptWriter.kt`) via `ProcessLauncher`. Only
     once that hand-off has actually happened — the installer returning `Launched`, which makes
@@ -210,8 +211,11 @@ separate, explicit click (Updates tab button, or the tray item once one is offer
     `mv` rather than delete-then-move, `DesktopUpdateInstaller` clears both the `.new` staging
     directory and the `.old` retreat directory immediately before staging a fresh attempt (a stale
     one from a past attempt that failed before the script could run would otherwise make the `mv`
-    nest into it instead of overwriting it), and `cleanUpStaleSelfReplaceArtifacts` sweeps the same
-    two on every startup — safe unconditionally, since reaching that line at all means the current
+    nest into it instead of overwriting it). The `extracted/` staging directory is cleared first for
+    a different reason: an attempt killed *mid-extraction* leaves a partial tree, and both extractors
+    merge into an existing destination rather than replacing it, so without the clear a retried
+    install would blend two versions into one bundle. `cleanUpStaleSelfReplaceArtifacts` sweeps the
+    other two on every startup — safe unconditionally, since reaching that line at all means the current
     `appRoot` is the live install this process is running from, which a script mid-swap never
     leaves behind. A Windows MSI-installed build instead
     launches a script that waits out the PID and then runs `msiexec /i ... /passive /norestart`
@@ -220,6 +224,36 @@ separate, explicit click (Updates tab button, or the tray item once one is offer
     previous, still-working install rather than leaving nothing running. A Linux deb/rpm install is
     never self-replaced at all (`updatePlan` above already routes it to `OpenReleasePage`) — running
     `pkexec`/`sudo` from a GUI with no recovery path if it fails was judged not worth the risk.
+
+    Extraction sits behind a seam because a **signed** macOS bundle cannot be unpacked in process at
+    all: its `CodeResources` seals the 43 symbolic links in the bundled JDK's legal-notices directory
+    *as links*, and `java.util.zip` exposes no way to tell a stored link from a regular file — it
+    writes each one out as a file holding the link target, which fails the `codesign` check above
+    every single time. macOS therefore extracts with `ditto -x -k` (`DittoArchiveExtractor`),
+    preceded by `ZipExtractor.validate` so the zip-slip, entry-count and uncompressed-size guards
+    still apply to an extraction `ditto` performs with no limits of its own — and are the only limits
+    in play, since `ditto` itself is bounded only by a 300-second ceiling, past which the child is
+    force-destroyed and the install fails (rather than hanging) with the exit status in its reason.
+    `validate` establishes the size bound by inflating every entry and discarding it, so a macOS
+    install decompresses the archive twice (order of +1-2 s for a ~190MB bundle, on a path the user
+    triggered by hand). That is deliberate: a local header's declared size can be absent, so reading
+    it from the central directory instead would mean trusting the archive's own metadata for a bound
+    whose whole purpose is to survive a crafted one, and overlapping the pass with `ditto` would give
+    up the property that a rejected archive leaves nothing on disk at all.
+    What `validate` cannot check is a stored link's *target* (same `java.util.zip` blind spot);
+    `ditto` itself is what covers that, on an archive already SHA-256-verified against the release:
+    it normalizes a `..` entry name into the destination rather than escaping it, and refuses to
+    write *through* a symlink at all, exiting non-zero. The `codesign` check is deliberately not
+    counted as a second line of defense against an *escape* — it inspects the bundle directory only,
+    so an entry written beside the bundle is never looked at (see [SECURITY.md](../SECURITY.md)).
+    Windows and Linux, whose app images carry no signature for a flattened link to invalidate, stay
+    on the in-process path (`InProcessArchiveExtractor` → `platform/ZipExtractor.kt`, which
+    restores the executable bit only on the entries the caller names). Their `legal/` links do come
+    out of an in-app update flattened into files holding a relative path, which is accepted rather
+    than overlooked: they are license text, never a path the app executes. The staging move has the same requirement and the same
+    trap: `FileSystemExtras`'s cross-volume fallback copies with `NOFOLLOW_LINKS`, since both
+    `Files.copy` and `Files.isDirectory` follow links by default and would otherwise flatten them
+    right back on any install whose cache and install directory sit on different volumes.
   - **Android** (`platform/update/AndroidUpdateInstaller.kt`) streams the downloaded APK into a
     `PackageInstaller` session and commits it; the OS takes over from there (showing its own install
     confirmation, and — on success — killing this process itself, so nothing here has to). If

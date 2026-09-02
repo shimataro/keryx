@@ -345,6 +345,31 @@ suffix, or both at once — `restoreMacOsShortVersion` rewrites `CFBundleShortVe
 version in `createDistributable`'s `doLast`; when they already match (a plain, non-prerelease, major-1-or-higher
 tag) it is a no-op.
 
+jpackage signs the bundle *before* that `doLast` runs, so a write-back invalidates the ad-hoc seal — which is
+why the same `doLast` then **re-signs** the bundle (`resealMacOsBundle`: `codesign --force --deep
+--preserve-metadata=entitlements,flags,runtime --sign -`), **checks that the re-sign changed nothing about the
+signature but its hashes** (`macSignatureProperties` compares `codesign -dv`'s `flags=` and `hashes=13+N`
+before and after), and finally **verifies** it (`verifyMacOsBundleSeal`: `codesign --verify --strict --deep`),
+failing the build outright at either step.
+
+`--preserve-metadata` is what makes that middle step pass, and it is load-bearing rather than defensive.
+Compose Desktop signs the app image with its own `default-entitlements.plist` — `allow-jit`,
+`allow-unsigned-executable-memory`, `disable-library-validation` — **and** the hardened-runtime flag, all of
+which a JVM needs to run at all on Apple Silicon. Naming `--options runtime` by hand reproduces the flag while
+silently dropping the entitlements (`hashes=13+7` becomes `13+3`), which yields a bundle that passes
+`codesign --verify` and is then killed by AMFI the moment it launches — a failure `verifyMacOsBundleSeal` alone
+cannot see, since the seal really is valid. Hence both the metadata preservation and the before/after
+comparison; neither is redundant with the seal verify. The verify runs on every macOS build whether or not anything was patched; on Windows and
+Linux all three steps are no-ops, since no `.app` exists there. This is not cosmetic: the in-app updater runs
+that exact check against every downloaded bundle before swapping it in (see
+[background-update.md](background-update.md)), so an app image that cannot pass it leaves the release ZIP
+un-installable **by the in-app updater** — a manual install of the very same ZIP keeps working, since the kernel
+never re-hashes `Info.plist` at launch. That asymmetry is why every 0.x release shipped this way unnoticed until
+the in-app updater first exercised the check, and why the build-time verify is the only thing that catches it:
+ordinary manual smoke-testing cannot. The DMG never exposed it either, because jpackage re-signs its own copy of
+the app image while building it — only the ZIP asset, made straight from `binaries/main/app`, carried the broken
+seal.
+
 The net effect for `0.1.1`: the tag, `BuildConfig.VERSION` (About screen), the update checker, and the version
 Finder shows are all `0.1.1`. Only `CFBundleVersion` keeps the `1.0.0` placeholder, which is an internal build
 identifier that never surfaces. The intermediate artifact is named `Keryx-1.0.0.dmg`, but the workflow's rename
@@ -385,10 +410,12 @@ Currently, packaged artifacts are **ad-hoc signed** (effectively unsigned). This
 > **Signing while still on a 0.x version needs care.** jpackage signs the `.app`, so anything that edits
 > `Info.plist` *afterwards* breaks the bundle seal. The custom URI scheme no longer does this — it goes through
 > `macOS { infoPlist { extraKeysRawXml } }` and is therefore already in the plist jpackage signs. What remains is
-> `restoreMacOsShortVersion`, which only runs when the major version is `0`: at 1.0.0 and beyond there is no
-> post-processing at all and `codesign --verify --strict` passes. If Developer ID signing is adopted **while still
-> on 0.x**, the version write-back will invalidate it, so the bundle must be re-signed with the same identity
-> afterwards — re-signing ad-hoc would silently replace the Developer ID signature and defeat notarization.
+> `restoreMacOsShortVersion`, which only runs when the major version is `0`. Its write-back is already followed by
+> `resealMacOsBundle` (see the version-handling section above), but that re-signs **ad-hoc**, with `-` hardcoded
+> because this build configures no signing identity at all. Adopting Developer ID signing therefore means passing
+> that identity to `resealMacOsBundle` instead: re-signing ad-hoc over a Developer ID signature would silently
+> replace it and defeat notarization. At 1.0.0 and beyond there is no write-back and no re-sign — jpackage's own
+> signature is left exactly as produced.
 
 Overview:
 

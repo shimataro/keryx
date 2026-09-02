@@ -255,12 +255,17 @@ heavyweight ポップアップの強制。置き換え対象の AWT ウィジェ
 `DesktopUpdateInstallerTest.kt`：`canInstall` の `InstallKind`／アセット種別ごとのゲーティング、
 macOS/Windows/Linux の自己置換と Windows MSI 経路それぞれで実際に起動されるコマンドライン一式を、
 実際には何も起動しないフェイクの `ProcessLauncher` 経由で検証すること、バージョン不一致や実行権限の
-無い展開済みバンドルはランチャーが呼ばれる前に失敗すること；`ZipExtractorTest.kt`：zip slip の拒否、
-`maxBytes` の上限、指定したエントリだけ実行ビットが復元されること（エントリ数上限自体——
-`ZipExtractor.kt` の `MAX_ZIP_ENTRIES`、10 万——は未検証: 実際に 10 万件超のエントリを持つ ZIP を
+無い展開済みバンドルはランチャーが呼ばれる前に失敗すること、書庫を拒否する `ArchiveExtractor` も
+同様にランチャーより手前で失敗し、その理由が呼び出し側まで伝わること、展開開始前に古い
+`extracted/` ツリーが消されること；`ZipExtractorTest.kt`：zip slip の拒否、
+`maxBytes` の上限、指定したエントリだけ実行ビットが復元されること、および同じ 2 つのガードを
+`validate` 経由でも検証すること（`validate` はさらに、解決先としてしか使わない展開先ディレクトリを
+作らないこと）（エントリ数上限自体——`ZipExtractor.kt` の `MAX_ZIP_ENTRIES`、10 万——は
+どちらの関数についても未検証: 実際に 10 万件超のエントリを持つ ZIP を
 ユニットテストで生成・展開することになるため、実用的なフィクスチャが作れない）；
 `FileSystemExtrasTest.kt`/`InstallLocationDesktopTest.kt` を `setExecutable`/`isDirectoryWritable`/
-`move` と OS ごとの `InstallLocation` 判定向けに拡張したもの）などを網羅する。
+`move`、`copyTree` が symlink（ファイル・ディレクトリとも）をたどらずリンクのまま複製すること、
+OS ごとの `InstallLocation` 判定向けに拡張したもの）などを網羅する。
 `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` の失敗は DB スキーマ・
 マージ SQL・同期オーケストレーションの退行を意味するので特に注意する。
 
@@ -312,7 +317,21 @@ Keystore を使ったトークン保存、そして `AndroidUpdateInstaller` の
 同様にデスクトップ側でも、自己置換／`msiexec` スクリプト（`UpdateScriptWriter` の出力）を実際に
 実行する部分は手動確認のみ——生成されたスクリプト本文そのものは直接検証しており、
 `DesktopUpdateInstaller` はテスト内で実際にスクリプトを起動することがない（上記のフェイク
-`ProcessLauncher` を参照）。詳細は下記「アプリ内アップデート」を参照。
+`ProcessLauncher` を参照）。詳細は下記「アプリ内アップデート」を参照。この経路にはさらに、
+*ユニット*テストでは到達できない箇所が 2 つあり、それぞれ別の形でカバーしている。
+`DittoArchiveExtractor` が実際に `ditto` を実行する部分は `ArchiveExtractorTest.kt` の
+`isMacOs` ゲート付きテストがカバーしている（CI マトリクスに `macos-latest` があるので実際に走る。
+Linux / Windows のランナーには `ditto` が無く、インストーラー自身のテストは既定で
+`InProcessArchiveExtractor` を注入する）。実署名済みの `.app` が
+`zip -ry` → `ditto` → `codesign --verify --strict --deep` の往復を通ること自体は macOS **かつ**
+jpackage バンドルを要し、どのテストソースセットにも用意できない——そこで `ci.yml` の
+「Verify packaging (macOS)」ステップがビルドしたてのアプリイメージに対してまさにその往復を実行し、
+symlink の数が変わらないことと展開後のバンドルが検証を通ることをアサートする。対になるのが
+`createDistributable` 自身の `verifyMacOsBundleSeal`／署名特性のガードで、zip より*前*の段階で
+バンドルが既に壊れていればビルドを失敗させる（[build.ja.md](build.ja.md) 参照）。両者により、
+当初の欠陥のどちらの半分も気付かれずリリースへ届くことはない。`FileSystemExtras.move` のボリューム跨ぎフォールバックも同様に
+テストから到達できない（2 つ目のファイルシステムを用意できない）ため、その委譲先である
+リンク保持コピーを `copyTree` として切り出し、直接テストしている。
 
 ## 手動確認（UI）
 
@@ -787,6 +806,18 @@ OS 側のルーティングではない）。パッケージ版をインスト�
   新しい `.app` に対する `xattr -l` が `com.apple.quarantine` を示さないこと（このアプリ自身が
   ファイルを書き込んでいるため——`background-update.ja.md` の「アプリ内アップデート」を参照）、
   旧 `.app` が跡形もなく消えていること（`.old` ディレクトリが隣に残っていないこと）を確認する。
+  そのうえで差し替わったバンドル自体も確認する。以下はどのプラットフォームの自動テストからも
+  到達できず、しかも「再起動した」ことからは何も導けない項目である:
+  - 再起動した `.app` に対する `codesign --verify --strict --deep` が通り、`codesign -dv` が
+    ダウンロードした資産と同じ `flags=`／`hashes=13+N` を報告すること——バンドルは正常に再起動しても
+    エンタイトルメントやシールを失っていることがある（[build.ja.md](build.ja.md) 参照）。
+  - `find <app>/Contents/runtime -type l | wc -l` が 0 でないこと。つまり同梱 JDK の `legal/` の
+    symlink が書庫の往復をリンクとして通り抜けていること。ここが退行すると「インストールが失敗した」
+    としか現れず、原因を名指しするものが何も残らない。
+  - インストール先を**別ボリューム**（RAM ディスク——`hdiutil attach -nomount ram://…`——または
+    スクラッチの APFS ボリューム）に置いてもう一度実行し、ボリューム跨ぎのステージングコピー
+    （`FileSystemExtras.copyTree`）を実際に通すこと。既定の `~/Library/Caches` ＋ `/Applications`
+    の構成は常に同一ボリュームなので、通常の実行ではこのコードに一度も入らない。
 - **Windows（MSI インストール済み）**: 同じ流れ。UAC 昇格プロンプトが一度だけ出ること、アプリが
   同じインストール先から新バージョンで再起動すること、UAC を拒否した場合（またはアップグレードが
   それ以外の理由で失敗した場合）でも、何も起動していない状態にはならず元の動いていたインストールが

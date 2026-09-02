@@ -36,7 +36,7 @@ composeApp/src/
     ZipExtractor（アプリ内アップデート——下記「アプリ内アップデート」参照）
   desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ jvmCommonMain がカバーしない expect の actual（DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule, InstallLocation）+ LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）, DesktopOs（isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf）
     tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray + StatusNotifierItem/dbusmenu の D-Bus オブジェクト
-    platform/update/  DesktopUpdateInstaller, UpdateScriptWriter（純粋な自己置換／msiexec スクリプトのテンプレート）, ProcessLauncher/RealProcessLauncher（テストがフェイクに差し替える detached 起動のシーム）
+    platform/update/  DesktopUpdateInstaller, UpdateScriptWriter（純粋な自己置換／msiexec スクリプトのテンプレート）, ProcessLauncher/RealProcessLauncher（テストがフェイクに差し替える detached 起動のシーム）, ArchiveExtractor（macOS は DittoArchiveExtractor——署名済みバンドルが自身の symlink を封印しているため。それ以外はインプロセスの InProcessArchiveExtractor）, CodeSigningVerifier/RealCodeSigningVerifier（`codesign --verify` のシーム）
   androidMain/kotlin/…/  jvmCommonMain がカバーしない expect の actual: DatabaseDriverFactory（バンドル
     SQLite、後述）, DatabaseFile（`databaseFilePath()` — `Context.getDatabasePath` で、
     AppDirs.appDataDir()/`Context.filesDir` とは別ディレクトリになる。db-schema.ja.md 参照）,
@@ -237,8 +237,10 @@ JVM でテスト可能なユニットテストのソースセットが無いに�
 置かれているのと同じ理由による。唯一の呼び出し元も `ui/settings/UpdatesTab.kt` である。
 
 デスクトップと Android の `UpdateInstaller` actual はコードを一切共有していない——デスクトップ
-（`platform/update/DesktopUpdateInstaller.kt`）は `platform/ZipExtractor.kt`（`jvmCommonMain`。
-`FileIO`/`Gzip` とまったく同じ形で Android と共有）経由で ZIP を展開し、現在のインストール先の
+（`platform/update/DesktopUpdateInstaller.kt`）は `platform/update/ArchiveExtractor.kt` 経由で ZIP を
+展開し（macOS は `ditto`——署名済みバンドルが自身の symlink を封印しているため。それ以外は
+`platform/ZipExtractor.kt`（`jvmCommonMain`。`FileIO`/`Gzip` とまったく同じ形で Android と共有）。
+[background-update.ja.md](background-update.ja.md) 参照）、現在のインストール先の
 隣にステージングしてから、`platform/update/UpdateScriptWriter.kt`（純粋な文字列テンプレート——
 本文そのものを直接アサーションで検証し、実際に起動することは無い）が生成した detached ヘルパー
 スクリプトへ、`platform/update/DetachedProcess.kt` の `ProcessLauncher` シーム

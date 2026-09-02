@@ -8,6 +8,7 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ZipExtractorTest {
@@ -96,5 +97,40 @@ class ZipExtractorTest {
         ZipExtractor.extract(zipFile.path, dest.path, maxBytes = 1_000_000, executableEntries = emptySet())
 
         assertTrue(File(dest, "Keryx.app/Contents").isDirectory)
+    }
+
+    // --- validate: the same guards, for an extraction performed by something else (ditto) ---
+
+    @Test
+    fun validateAcceptsAWellFormedArchiveWithoutCreatingAnything() {
+        val zip = zipOf("Keryx.app/Contents/MacOS/Keryx" to "binary", "Keryx.app/Contents/Info.plist" to "plist")
+        val root = newTempDir("zip-extractor-validate")
+        // Deliberately absent: a caller that rejects an archive must be left with nothing on disk,
+        // and the destination is only ever resolved against, never written to.
+        val dest = File(root, "extracted")
+
+        ZipExtractor.validate(zip.path, dest.path, maxBytes = 1_000_000)
+
+        assertFalse(dest.exists(), "validate must not create the destination directory")
+    }
+
+    @Test
+    fun validateRejectsAZipSlipEntry() {
+        val zip = zipOf("../../etc/escaped" to "malicious")
+        val dest = newTempDir("zip-extractor-validate-slip")
+
+        assertFailsWith<IllegalStateException> {
+            ZipExtractor.validate(zip.path, dest.path, maxBytes = 1_000_000)
+        }
+    }
+
+    @Test
+    fun validateRejectsAnArchiveOverTheByteLimit() {
+        val zip = zipOf("big.bin" to "x".repeat(1024))
+        val dest = newTempDir("zip-extractor-validate-toolarge")
+
+        assertFailsWith<IllegalStateException> {
+            ZipExtractor.validate(zip.path, dest.path, maxBytes = 100)
+        }
     }
 }

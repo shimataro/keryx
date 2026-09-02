@@ -35,10 +35,17 @@ interface UpdateInstaller {
      * nothing about). [UpdateRepository] only starts a download when this is `true`. */
     fun canInstall(plan: UpdatePlan): Boolean
 
-    /** Launches the OS-level install of the file at [filePath] (already downloaded and verified
-     * against [update]'s asset digest). Suspends only long enough to launch it — the actual
-     * install/replace happens out-of-process (a detached helper script on desktop, the OS installer
-     * on Android), so this returning [InstallLaunchResult.Launched] does not mean the update is
-     * finished yet. */
+    /**
+     * Launches the OS-level install of the file at [filePath] (already downloaded and verified
+     * against [update]'s asset digest). Returning [InstallLaunchResult.Launched] does not mean the
+     * update is finished: the actual install/replace happens out-of-process (a detached helper
+     * script on desktop, the OS installer on Android).
+     *
+     * "Launching" is not necessarily quick. Desktop unpacks and health-checks the whole bundle
+     * first, which for a macOS app image means inflating ~200 MB and running two child processes, so
+     * an implementation with blocking work must move it off the caller's dispatcher itself —
+     * `UpdateRepository` calls this from the shared app scope, whose `Dispatchers.Default` pool is
+     * also what every DB write and feed refresh runs on.
+     */
     suspend fun install(filePath: String, update: AvailableUpdate): InstallLaunchResult
 }

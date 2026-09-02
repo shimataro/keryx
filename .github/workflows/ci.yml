@@ -81,6 +81,22 @@ jobs:
         run: |
           ./gradlew createDistributable --no-configuration-cache
           ./gradlew packageDmg --no-configuration-cache
+          # The other half of what makes an in-app update work, and the half no unit test can
+          # reach: that the release ZIP, built exactly as release.yml builds it, survives being
+          # unpacked again. `zip -y` has to store the bundled JDK's symlinks as links and `ditto`
+          # has to restore them, or the swapped-in bundle fails its own `codesign` check on the
+          # user's machine (see docs/background-update.md). createDistributable's own guard covers
+          # the seal; nothing but this covers the round trip.
+          app=composeApp/build/compose/binaries/main/app/Keryx.app
+          links_before=$(find "$app" -type l | wc -l | tr -d ' ')
+          (cd "$(dirname "$app")" && zip -qry "$RUNNER_TEMP/roundtrip.zip" Keryx.app)
+          ditto -x -k "$RUNNER_TEMP/roundtrip.zip" "$RUNNER_TEMP/roundtrip"
+          links_after=$(find "$RUNNER_TEMP/roundtrip/Keryx.app" -type l | wc -l | tr -d ' ')
+          if [ "$links_before" != "$links_after" ]; then
+            echo "::error::Symlinks lost in the archive round trip: $links_before before, $links_after after."
+            exit 1
+          fi
+          codesign --verify --strict --deep "$RUNNER_TEMP/roundtrip/Keryx.app"
         env:
           DROPBOX_APP_KEY: ""
           GOOGLE_DRIVE_CLIENT_ID: ""

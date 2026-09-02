@@ -129,5 +129,20 @@ Keryx is designed to minimize its attack surface:
   script also strips any `com.apple.quarantine` flag from the new bundle before
   relaunching it — an ad-hoc signature gives Gatekeeper nothing to clear a
   quarantine flag against, so leaving one in place could block the relaunch.
+- **The macOS bundle is unpacked with `ditto`, not in process.** A signed bundle's
+  `CodeResources` seals the symbolic links in its bundled JDK *as links*, and
+  `java.util.zip` cannot tell a stored link from a regular file — so an in-process
+  extraction flattens them and the check above rejects the result. Extraction
+  therefore hands off to `ditto -x -k`, with `ZipExtractor.validate` run first so the
+  zip-slip, entry-count and uncompressed-size limits still apply to an extraction
+  `ditto` performs with no limits of its own. A stored link's *target* cannot be
+  pre-checked (the same blind spot); what covers that is `ditto` itself, on an archive
+  that already had to match the digest above — it normalizes a `..` entry name into
+  the destination rather than escaping it, and refuses to write *through* a symlink at
+  all, exiting non-zero. The code-signature check is **not** a second line of defense
+  against an escape: it inspects the bundle directory only, so an entry written
+  *beside* the bundle is never looked at, and it is a self-consistency check, so an
+  attacker able to produce the whole archive could ad-hoc sign their own bundle. It
+  detects modification *inside* the bundle, which is what it is there for.
 
 For the complete data-handling description, see [PRIVACY.md](PRIVACY.md).

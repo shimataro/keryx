@@ -2,6 +2,7 @@ package works.merc.keryx.app.platform
 
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.Path
 import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -162,5 +163,53 @@ class FileSystemExtrasTest {
         val destination = File(root, "destination.txt")
 
         assertFalse(FileSystemExtras.move(source.path, destination.path))
+    }
+
+    // --- copyTree: the cross-volume staging copy (see its own KDoc for why symlinks matter) ---
+
+    // Creating a symlink on Windows needs a privilege a test run cannot assume, and the behavior
+    // being pinned here is a POSIX app bundle's own links.
+    @Test
+    fun copyTreeReproducesASymlinkAsALinkRatherThanACopy() {
+        if (isWindows) return
+
+        val root = newTempDir("file-system-extras-copy-symlink")
+        val source = File(root, "source").apply { mkdirs() }
+        File(source, "real.txt").writeText("real")
+        // COPY_ATTRIBUTES only guarantees last-modified-time; whether it carries POSIX permissions
+        // is platform-dependent, and a staged bundle whose launcher lost its executable bit fails
+        // the swap script's health check and silently rolls back. Pin it here.
+        val launcher = File(source, "launcher").apply { writeText("#!/bin/sh\n"); setExecutable(true) }
+        Files.createSymbolicLink(File(source, "link.txt").toPath(), Path.of("real.txt"))
+        val destination = File(root, "destination")
+
+        FileSystemExtras.copyTree(source.toPath(), destination.toPath())
+
+        assertEquals("real", File(destination, "real.txt").readText())
+        assertTrue(launcher.canExecute() && File(destination, "launcher").canExecute(), "an executable file must stay executable")
+        val copied = File(destination, "link.txt").toPath()
+        assertTrue(
+            Files.isSymbolicLink(copied),
+            "a symlink must survive the copy as a link — a macOS bundle's CodeResources seals it as one",
+        )
+        assertEquals("real.txt", Files.readSymbolicLink(copied).toString())
+    }
+
+    @Test
+    fun copyTreeDoesNotTurnADirectorySymlinkIntoARealDirectory() {
+        if (isWindows) return
+
+        val root = newTempDir("file-system-extras-copy-dir-symlink")
+        val source = File(root, "source").apply { mkdirs() }
+        File(source, "target").mkdirs()
+        File(source, "target/inside.txt").writeText("inside")
+        Files.createSymbolicLink(File(source, "link-dir").toPath(), Path.of("target"))
+        val destination = File(root, "destination")
+
+        FileSystemExtras.copyTree(source.toPath(), destination.toPath())
+
+        val copied = File(destination, "link-dir").toPath()
+        assertTrue(Files.isSymbolicLink(copied), "a directory symlink must not become a real directory")
+        assertEquals("target", Files.readSymbolicLink(copied).toString())
     }
 }

@@ -5,6 +5,7 @@ import java.io.IOException
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import java.nio.file.SimpleFileVisitor
@@ -84,21 +85,38 @@ actual object FileSystemExtras {
      * copy fully succeeds. */
     private fun moveAcrossFilesystems(source: Path, destination: Path): Boolean {
         return try {
-            Files.walk(source).use { stream ->
-                stream.sorted().forEach { path ->
-                    val target = destination.resolve(source.relativize(path))
-                    if (Files.isDirectory(path)) {
-                        Files.createDirectories(target)
-                    } else {
-                        Files.createDirectories(target.parent)
-                        Files.copy(path, target, StandardCopyOption.COPY_ATTRIBUTES)
-                    }
-                }
-            }
+            copyTree(source, destination)
             deleteRecursively(source.toString())
             true
         } catch (_: IOException) {
             false
+        }
+    }
+
+    /**
+     * Copies the tree at [source] to [destination], reproducing a symbolic link **as a link** — not
+     * as a copy of whatever it points at. Split out of [moveAcrossFilesystems] (rather than left
+     * inline) purely so it is testable: a cross-volume move cannot be provoked from a unit test.
+     *
+     * The two [LinkOption.NOFOLLOW_LINKS] arguments are the whole point. Both `Files.copy` and
+     * `Files.isDirectory` follow links by default, which silently turned each of the 43 symlinks in
+     * a macOS `.app`'s bundled JDK (`Contents/runtime/.../legal/`) into a regular file — and
+     * `CodeResources` seals those *as links*, so the staged bundle then failed the in-app updater's
+     * own `codesign --verify --strict --deep` check on any install whose cache and install
+     * directory happen to sit on different volumes. `Files.walk` needs no such flag: it already
+     * does not descend into a symlinked directory.
+     */
+    internal fun copyTree(source: Path, destination: Path) {
+        Files.walk(source).use { stream ->
+            stream.sorted().forEach { path ->
+                val target = destination.resolve(source.relativize(path))
+                if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+                    Files.createDirectories(target)
+                } else {
+                    Files.createDirectories(target.parent)
+                    Files.copy(path, target, StandardCopyOption.COPY_ATTRIBUTES, LinkOption.NOFOLLOW_LINKS)
+                }
+            }
         }
     }
 }

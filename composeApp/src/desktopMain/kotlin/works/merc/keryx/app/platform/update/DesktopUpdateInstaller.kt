@@ -1,5 +1,7 @@
 package works.merc.keryx.app.platform.update
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runInterruptible
 import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.domain.AvailableUpdate
 import works.merc.keryx.app.domain.InstallLaunchResult
@@ -11,6 +13,7 @@ import works.merc.keryx.app.platform.InstallKind
 import works.merc.keryx.app.platform.InstallLocation
 import works.merc.keryx.app.platform.ZipExtractor
 import works.merc.keryx.app.platform.detectInstallLocation
+import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.isWindows
 import java.io.File
 import java.io.IOException
@@ -21,10 +24,11 @@ private val SELF_REPLACE_KINDS =
 
 /** Uncompressed size an update ZIP is allowed to expand to, as a multiple of the compressed asset
  * size — generous headroom for a `.app`/app-image (mostly a JVM runtime, which compresses well)
- * without leaving [ZipExtractor]'s own `maxBytes` guard toothless. Also the free-space multiple
+ * without leaving the extraction's own `maxBytes` guard toothless. Also the free-space multiple
  * [selfReplace] checks both the cache volume (before extracting) and the install volume (before
  * staging) against — the extracted tree can never exceed this, since it's the same bound
- * [ZipExtractor] itself enforces while extracting. */
+ * [ArchiveExtractor] enforces: [ZipExtractor.extract] as it writes, and [ZipExtractor.validate]
+ * up front for the `ditto` path, which enforces nothing of its own. */
 private const val ZIP_EXTRACT_MAX_BYTES_MULTIPLE = 10L
 
 /**
@@ -39,7 +43,7 @@ internal fun hasEnoughFreeSpace(usableBytes: Long, baseBytes: Long, multiple: Lo
 
 /**
  * Desktop [UpdateInstaller]. For [UpdatePlan.SelfReplace] (macOS `.app`, Windows/Linux portable):
- * extracts the downloaded ZIP to a staging directory via [ZipExtractor], verifies it, moves it
+ * extracts the downloaded ZIP to a staging directory via [ArchiveExtractor], verifies it, moves it
  * next to the current install (so the swap the detached [UpdateScriptWriter] script performs is a
  * same-volume rename), and launches that script. For [UpdatePlan.RunInstaller] on an installed
  * Windows build: launches a script that waits for this process to exit, then runs `msiexec`
@@ -51,13 +55,13 @@ internal fun hasEnoughFreeSpace(usableBytes: Long, baseBytes: Long, multiple: Lo
  * waits for that exit before touching any files. (The app must never exit merely because state
  * reached `UpdateState.Installing`: that happens before this method has extracted anything.)
  *
- * Deliberately extracts every self-replace ZIP with the same [ZipExtractor] used for its own unit
- * tests, rather than shelling out to `ditto` on macOS for symlink/mode fidelity: the only symlinks
- * a jpackage macOS bundle contains live under its runtime's legal-notices directory (license text,
- * verified during PR2's `zip -y` fix), never in a path this app executes, so extracting them as
- * flattened regular files changes nothing the app depends on while keeping extraction on one
- * already-tested, in-process code path instead of adding a second synchronous external-process
- * dependency for a cosmetic difference.
+ * Extraction goes through [ArchiveExtractor] rather than straight to [ZipExtractor] because a macOS
+ * bundle cannot be extracted in-process at all: `CodeResources` seals the symbolic links in its
+ * bundled JDK's legal-notices directory *as links*, and `java.util.zip` exposes no way to tell a
+ * stored link from a regular file — so it flattens each one into a file holding the link target, and
+ * [verifyExtractedApp]'s `codesign` check then rejects the result unconditionally. macOS therefore
+ * extracts with `ditto` ([DittoArchiveExtractor]) and Windows/Linux, whose app images carry no
+ * signature for that to invalidate, stay on the in-process path ([InProcessArchiveExtractor]).
  */
 class DesktopUpdateInstaller internal constructor(
     private val location: InstallLocation,
@@ -68,10 +72,15 @@ class DesktopUpdateInstaller internal constructor(
     // (verifyExtractedApp only ever calls it for MAC_APP_ZIP). Production never sees this default:
     // the public constructor below always supplies RealCodeSigningVerifier().
     private val codeSigningVerifier: CodeSigningVerifier = CodeSigningVerifier { true },
+    // Defaulted to the in-process extractor for the same reason codeSigningVerifier is defaulted
+    // above: the existing tests build synthetic ZIPs and expect them to actually land on disk, and
+    // ditto is neither available nor meaningful on the Linux/Windows CI runners they also run on.
+    // Production never sees this default on macOS — the public constructor below picks per platform.
+    private val archiveExtractor: ArchiveExtractor = InProcessArchiveExtractor,
 ) : UpdateInstaller {
 
     constructor(location: InstallLocation = detectInstallLocation()) :
-        this(location, RealProcessLauncher(), RealCodeSigningVerifier())
+        this(location, RealProcessLauncher(), RealCodeSigningVerifier(), defaultArchiveExtractor(isMacOs))
 
     override fun canInstall(plan: UpdatePlan): Boolean = when (plan) {
         is UpdatePlan.SelfReplace ->
@@ -83,9 +92,18 @@ class DesktopUpdateInstaller internal constructor(
         UpdatePlan.NotOffered, UpdatePlan.OpenReleasePage -> false
     }
 
-    override suspend fun install(filePath: String, update: AvailableUpdate): InstallLaunchResult {
-        val asset = update.asset ?: return InstallLaunchResult.Failed("No update asset was selected for this install")
-        return when (update.plan) {
+    /**
+     * Everything below this point blocks: inflating the archive twice over (once to check it, once
+     * to unpack it), two child processes bounded at 300 s and 30 s, and possibly a full copy of the
+     * bundle onto another volume. [runInterruptible] moves all of it to [Dispatchers.IO] — the
+     * caller's `Dispatchers.Default` is the same pool every DB write and feed refresh shares, and a
+     * *failed* install (the case that doesn't exit the app) would leave it a worker short for the
+     * whole window — and turns coroutine cancellation into a thread interrupt, which
+     * [runLocalProcess] already answers by killing its child instead of waiting the timeout out.
+     */
+    override suspend fun install(filePath: String, update: AvailableUpdate): InstallLaunchResult = runInterruptible(Dispatchers.IO) {
+        val asset = update.asset ?: return@runInterruptible InstallLaunchResult.Failed("No update asset was selected for this install")
+        when (update.plan) {
             is UpdatePlan.RunInstaller ->
                 if (asset.kind == UpdateAssetKind.WINDOWS_MSI) {
                     installMsi(filePath, location.launcherPath)
@@ -125,6 +143,10 @@ class DesktopUpdateInstaller internal constructor(
         when (assetKind) {
             UpdateAssetKind.MAC_APP_ZIP -> {
                 entryDirName = "$APP_NAME.app"
+                // Only reachable by the in-process extractor, which on macOS means tests alone:
+                // production always extracts a bundle with ditto, which restores every mode from
+                // the archive and ignores this set (see ArchiveExtractor's own @param KDoc). A
+                // newly-required executable therefore has to be fixed in packaging, not here.
                 executableEntries = setOf(
                     "$entryDirName/Contents/MacOS/$APP_NAME",
                     "$entryDirName/Contents/runtime/Contents/Home/lib/jspawnhelper",
@@ -152,20 +174,36 @@ class DesktopUpdateInstaller internal constructor(
         }
 
         val extractDir = File(workDir, "extracted")
+        // A previous attempt killed mid-extraction leaves a partial tree here, and both extractors
+        // merge into an existing destination rather than replacing it — so without this the next
+        // attempt blends two versions into one bundle, which on Windows/Linux passes every gate
+        // (verifyExtractedApp only looks for the launcher) and is then swapped in while the working
+        // install is deleted. Retrying an install is an ordinary thing to do, so this is a
+        // precondition, not a courtesy: a clear that fails has to stop the install.
+        if (!FileSystemExtras.deleteRecursively(extractDir.path)) {
+            return InstallLaunchResult.Failed("Could not clear the stale staging directory at ${extractDir.path}")
+        }
         try {
-            ZipExtractor.extract(
+            archiveExtractor.extract(
                 zipPath = filePath,
                 destDir = extractDir.path,
                 maxBytes = zipSize * ZIP_EXTRACT_MAX_BYTES_MULTIPLE,
                 executableEntries = executableEntries,
             )
         } catch (e: IllegalStateException) {
+            // Both clauses clear the partial tree themselves: a rejected extraction can otherwise
+            // leave up to zipSize * ZIP_EXTRACT_MAX_BYTES_MULTIPLE sitting under <cacheDir>, which
+            // nothing reclaims until the next check()'s sweep — up to updateCheckIntervalHours
+            // away, and never if the app is closed first.
+            FileSystemExtras.deleteRecursively(extractDir.path)
             return InstallLaunchResult.Failed("Failed to extract the downloaded update: ${e.message}")
         } catch (e: IOException) {
             // Kotlin has no multi-catch, so this is a second clause rather than widening the one
             // above to Exception (which would also swallow CancellationException on this suspend
-            // path). Covers a full disk (ENOSPC) or a corrupt archive (ZipException) — anything
-            // ZipExtractor's own java.util.zip/java.io calls can throw beyond its check()s.
+            // path). Covers a full disk (ENOSPC), a corrupt archive (ZipException), or an extractor
+            // process that could not be started at all — anything the extractor's own
+            // java.util.zip/java.io/ProcessBuilder calls can throw beyond its check()s.
+            FileSystemExtras.deleteRecursively(extractDir.path)
             return InstallLaunchResult.Failed("Failed to extract the downloaded update: ${e.message}")
         }
 
@@ -176,9 +214,10 @@ class DesktopUpdateInstaller internal constructor(
         }
 
         // appRoot's own volume — not necessarily the same one workDir/extractDir are on — needs its
-        // own equivalent check before staging: ZipExtractor's own maxBytes guard already bounds the
-        // extracted tree at zipSize * ZIP_EXTRACT_MAX_BYTES_MULTIPLE, so that same figure is a valid
-        // upper bound on what's about to be moved (or, cross-volume, copied) onto it.
+        // own equivalent check before staging: the extraction's maxBytes guard already bounds the
+        // extracted tree at zipSize * ZIP_EXTRACT_MAX_BYTES_MULTIPLE (enforced while writing on the
+        // in-process path, and up front by ZipExtractor.validate on the ditto path), so that same
+        // figure is a valid upper bound on what's about to be moved (or, cross-volume, copied) onto it.
         if (!hasEnoughFreeSpace(FileSystemExtras.usableSpaceBytes(parent.path), zipSize, ZIP_EXTRACT_MAX_BYTES_MULTIPLE)) {
             FileSystemExtras.deleteRecursively(extractDir.path)
             return InstallLaunchResult.Failed("Not enough free disk space on the install volume to stage the update")
@@ -330,6 +369,15 @@ internal fun cleanUpStaleSelfReplaceArtifacts(location: InstallLocation) {
  * text search rather than a full XML parse — jpackage's generated Info.plist is a small, fixed,
  * non-attacker-controlled file (it comes from inside an already digest-verified ZIP), so this
  * avoids pulling in a plist/XML dependency for a single field. */
+/**
+ * Longest value [readPlistStringValue] will hand back, and no control characters with it. A version
+ * string is a handful of characters, so this costs nothing legitimate — it exists because the value
+ * ends up inside an [InstallLaunchResult.Failed] reason, which `UpdateRepository` writes verbatim to
+ * the rotating app log. Unbounded, a crafted `Info.plist` could forge log lines with newlines or
+ * push earlier entries out through rotation.
+ */
+private const val MAX_PLIST_VALUE_LENGTH = 64
+
 private fun readPlistStringValue(plistPath: String, key: String): String? {
     val file = File(plistPath)
     if (!file.isFile) return null
@@ -342,4 +390,6 @@ private fun readPlistStringValue(plistPath: String, key: String): String? {
     val valueEnd = text.indexOf("</string>", valueStart)
     if (valueEnd < 0) return null
     return text.substring(valueStart, valueEnd)
+        .filterNot { it.isISOControl() }
+        .take(MAX_PLIST_VALUE_LENGTH)
 }

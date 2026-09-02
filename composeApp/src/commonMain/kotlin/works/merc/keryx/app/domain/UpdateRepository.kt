@@ -253,12 +253,24 @@ class UpdateRepository(
 
     private suspend fun retryInstall(update: AvailableUpdate) {
         val filePath = update.asset?.let { FileIO.join(updateDownloadDir(update.version), it.name) }
-        if (filePath != null && FileIO.exists(filePath)) {
-            _state.value = UpdateState.Ready(update, filePath)
-            install()
-        } else {
+        if (filePath == null || !FileIO.exists(filePath)) {
             startDownloadOf(update)
+            return
         }
+        // Rewinding to Ready happens under the lock, and only from the Failed this retry was
+        // decided on. Two surfaces act on the same Failed state — the tray's own item and the
+        // Updates tab / notification row — and both fan out through scope.launch, so without this
+        // the loser of that race re-sets Ready after the winner already moved to Installing.
+        // install()'s own Ready -> Installing transition would then let a second selfReplace start
+        // against the same staging and swap directories: the second attempt's pre-clear deletes the
+        // tree the first is still extracting, both write apply.sh at the same path, and two detached
+        // scripts race the same install directory with only one .old between them. It also keeps
+        // check()'s sweep correct for free, since a directory is only ever in use while state is one
+        // of the four updateVersionInUse() protects.
+        val claimed = mutex.withLock {
+            (_state.value is UpdateState.Failed).also { if (it) _state.value = UpdateState.Ready(update, filePath) }
+        }
+        if (claimed) install()
     }
 
     /** Cancels an in-progress download, if any. Not `suspend` — callable directly from a UI click
@@ -348,8 +360,15 @@ class UpdateRepository(
                     // installer.install() has done a thing.
                     InstallLaunchResult.Launched -> _installLaunched.emit(Unit)
                     InstallLaunchResult.AwaitingUserConsent -> _state.value = ready
-                    is InstallLaunchResult.Failed ->
+                    is InstallLaunchResult.Failed -> {
+                        // The reason never reaches the user — ui/i18n/ErrorMessages maps every
+                        // UpdateException to one generic string — so without this line an install
+                        // failure leaves no trace anywhere at all, in the app log included. That is
+                        // exactly how a macOS bundle that failed its code-signature check went
+                        // undiagnosed: the UI said "update failed" and nothing else existed.
+                        Log.warn(TAG, "Update install failed: ${result.reason}")
                         _state.value = UpdateState.Failed(ready.update, UpdateException(UpdateStage.INSTALL, result.reason))
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e

@@ -2,6 +2,7 @@ package works.merc.keryx.app.platform.update
 
 import kotlinx.coroutines.runBlocking
 import java.io.File
+import java.io.IOException
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.io.path.createTempDirectory
@@ -18,6 +19,7 @@ import works.merc.keryx.app.domain.UpdateAssetKind
 import works.merc.keryx.app.domain.UpdatePlan
 import works.merc.keryx.app.platform.InstallKind
 import works.merc.keryx.app.platform.InstallLocation
+import works.merc.keryx.app.platform.isWindows
 
 /**
  * Exercises [DesktopUpdateInstaller] against a [FakeProcessLauncher] so a self-replace or msiexec
@@ -48,7 +50,14 @@ class DesktopUpdateInstallerTest {
         }
     }
 
-    private fun macAppZip(destDir: File, version: String = "1.2.3", includeExecutable: Boolean = true): File {
+    private fun macAppZip(
+        destDir: File,
+        version: String = "1.2.3",
+        includeExecutable: Boolean = true,
+        // Separate from `version`, which also names the file: a crafted plist value can contain
+        // characters a filename cannot.
+        plistVersion: String = version,
+    ): File {
         val zipFile = File(destDir, "Keryx-$version-macos-arm64.zip")
         ZipOutputStream(zipFile.outputStream()).use { zip ->
             if (includeExecutable) {
@@ -62,7 +71,7 @@ class DesktopUpdateInstallerTest {
                 <?xml version="1.0" encoding="UTF-8"?>
                 <plist><dict>
                 <key>CFBundleShortVersionString</key>
-                <string>$version</string>
+                <string>$plistVersion</string>
                 </dict></plist>
                 """.trimIndent().encodeToByteArray(),
             )
@@ -276,6 +285,29 @@ class DesktopUpdateInstallerTest {
     }
 
     @Test
+    fun installMacSelfReplaceBoundsWhatACraftedPlistVersionCanPutIntoTheFailureReason() {
+        val root = newTempDir("desktop-installer-mac-plist-injection")
+        val appRoot = File(root, "Keryx.app").apply { mkdirs() }
+        val downloadDir = newTempDir("desktop-installer-mac-plist-injection-download")
+        // The reason string is written verbatim to the app log by UpdateRepository, so a value that
+        // can carry newlines could forge log lines, and an unbounded one could push earlier entries
+        // out through rotation.
+        val zip = macAppZip(downloadDir, plistVersion = "9.9.9\nFORGED LOG LINE " + "A".repeat(500))
+        val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, File(appRoot, "Contents/MacOS/Keryx").path, parentWritable = true, translocated = false)
+        val launcher = FakeProcessLauncher()
+        val installer = DesktopUpdateInstaller(location, launcher)
+
+        val result = runBlocking {
+            installer.install(zip.path, update("1.2.3", macAsset("1.2.3"), UpdatePlan.SelfReplace(macAsset("1.2.3"))))
+        }
+
+        val failed = assertIs<InstallLaunchResult.Failed>(result)
+        assertFalse(failed.reason.contains("\n"), "a plist value must not be able to inject a newline: ${failed.reason}")
+        assertTrue(failed.reason.length < 200, "a plist value must not be able to grow the reason unbounded: ${failed.reason.length}")
+        assertEquals(0, launcher.callCount)
+    }
+
+    @Test
     fun installMacSelfReplaceFailsAndNeverLaunchesWhenTheCodeSignatureSelfCheckFails() {
         val root = newTempDir("desktop-installer-mac-codesign-fail")
         val appRoot = File(root, "Keryx.app").apply { mkdirs() }
@@ -312,6 +344,123 @@ class DesktopUpdateInstallerTest {
         assertEquals(InstallLaunchResult.Launched, result)
         assertEquals(1, verifiedPaths.size, "the self-check must run exactly once, against the extracted bundle")
         assertEquals(1, launcher.callCount)
+    }
+
+    @Test
+    fun installMacSelfReplaceFailsAndNeverLaunchesWhenTheArchiveExtractorRejectsTheArchive() {
+        val root = newTempDir("desktop-installer-mac-extract-reject")
+        val appRoot = File(root, "Keryx.app").apply { mkdirs() }
+        val downloadDir = newTempDir("desktop-installer-mac-extract-reject-download")
+        val zip = macAppZip(downloadDir)
+        val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, File(appRoot, "Contents/MacOS/Keryx").path, parentWritable = true, translocated = false)
+        val launcher = FakeProcessLauncher()
+        val installer = DesktopUpdateInstaller(
+            location,
+            launcher,
+            CodeSigningVerifier { true },
+            ArchiveExtractor { _, _, _, _ -> error("ditto could not extract the update archive (exit 1)") },
+        )
+
+        val result = runBlocking {
+            installer.install(zip.path, update("1.2.3", macAsset("1.2.3"), UpdatePlan.SelfReplace(macAsset("1.2.3"))))
+        }
+
+        val failed = assertIs<InstallLaunchResult.Failed>(result)
+        // The reason is the only trace an install failure leaves anywhere (UpdateRepository logs it;
+        // the UI collapses every stage to one string), so it has to carry the extractor's own words.
+        assertTrue(failed.reason.contains("exit 1"), "the extractor's reason must reach the caller: ${failed.reason}")
+        assertEquals(0, launcher.callCount, "a rejected archive must never launch the swap script")
+        assertFalse(File(root, ".Keryx.app.new").exists())
+    }
+
+    @Test
+    fun installMacSelfReplaceFailsAndNeverLaunchesWhenTheArchiveExtractorThrowsAnIoException() {
+        val root = newTempDir("desktop-installer-mac-extract-io")
+        val appRoot = File(root, "Keryx.app").apply { mkdirs() }
+        val downloadDir = newTempDir("desktop-installer-mac-extract-io-download")
+        val zip = macAppZip(downloadDir)
+        val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, File(appRoot, "Contents/MacOS/Keryx").path, parentWritable = true, translocated = false)
+        val launcher = FakeProcessLauncher()
+        // A missing or unrunnable ditto arrives as an IOException from ProcessBuilder.start(), not
+        // as the IllegalStateException a rejected archive throws — a separate catch clause, so a
+        // separate test.
+        val installer = DesktopUpdateInstaller(
+            location,
+            launcher,
+            CodeSigningVerifier { true },
+            ArchiveExtractor { _, _, _, _ -> throw IOException("boom") },
+        )
+
+        val result = runBlocking {
+            installer.install(zip.path, update("1.2.3", macAsset("1.2.3"), UpdatePlan.SelfReplace(macAsset("1.2.3"))))
+        }
+
+        val failed = assertIs<InstallLaunchResult.Failed>(result)
+        assertTrue(failed.reason.contains("boom"), "the I/O failure's own message must reach the caller: ${failed.reason}")
+        assertEquals(0, launcher.callCount, "a failed extraction must never launch the swap script")
+        assertFalse(File(downloadDir, "extracted").exists(), "a failed extraction must not leave its partial tree behind")
+    }
+
+    // Removing a directory entry needs write permission on its parent, which is how this makes
+    // deleteRecursively fail; Windows' permission model doesn't reproduce it.
+    @Test
+    fun installMacSelfReplaceFailsWhenTheStaleStagingDirectoryCannotBeCleared() {
+        if (isWindows) return
+
+        val root = newTempDir("desktop-installer-mac-stale-unclearable")
+        val appRoot = File(root, "Keryx.app").apply { mkdirs() }
+        val downloadDir = newTempDir("desktop-installer-mac-stale-unclearable-download")
+        val zip = macAppZip(downloadDir)
+        File(downloadDir, "extracted").mkdirs()
+        File(downloadDir, "extracted/leftover.txt").writeText("undeletable")
+        val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, File(appRoot, "Contents/MacOS/Keryx").path, parentWritable = true, translocated = false)
+        val launcher = FakeProcessLauncher()
+        val installer = DesktopUpdateInstaller(location, launcher, CodeSigningVerifier { true })
+
+        downloadDir.setWritable(false)
+        val result = try {
+            runBlocking {
+                installer.install(zip.path, update("1.2.3", macAsset("1.2.3"), UpdatePlan.SelfReplace(macAsset("1.2.3"))))
+            }
+        } finally {
+            downloadDir.setWritable(true) // so tearDown can clean up
+        }
+
+        assertIs<InstallLaunchResult.Failed>(result)
+        assertEquals(0, launcher.callCount, "extracting into a stale tree must never reach the swap script")
+        assertFalse(File(root, ".Keryx.app.new").exists())
+    }
+
+    @Test
+    fun installMacSelfReplaceClearsAStalePartialExtractionBeforeExtracting() {
+        val root = newTempDir("desktop-installer-mac-stale-extract")
+        val appRoot = File(root, "Keryx.app").apply { mkdirs() }
+        val downloadDir = newTempDir("desktop-installer-mac-stale-extract-download")
+        val zip = macAppZip(downloadDir)
+        // What an attempt killed mid-extraction leaves behind — an extractor that merges into an
+        // existing directory would otherwise mix it into the next attempt's bundle.
+        File(downloadDir, "extracted/Keryx.app/Contents").mkdirs()
+        File(downloadDir, "extracted/Keryx.app/Contents/leftover.txt").writeText("from a killed attempt")
+        val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, File(appRoot, "Contents/MacOS/Keryx").path, parentWritable = true, translocated = false)
+        val launcher = FakeProcessLauncher()
+        var staleWasStillThere: Boolean? = null
+        val installer = DesktopUpdateInstaller(
+            location,
+            launcher,
+            CodeSigningVerifier { true },
+            ArchiveExtractor { zipPath, destDir, maxBytes, executableEntries ->
+                staleWasStillThere = File(destDir, "Keryx.app/Contents/leftover.txt").exists()
+                InProcessArchiveExtractor.extract(zipPath, destDir, maxBytes, executableEntries)
+            },
+        )
+
+        val result = runBlocking {
+            installer.install(zip.path, update("1.2.3", macAsset("1.2.3"), UpdatePlan.SelfReplace(macAsset("1.2.3"))))
+        }
+
+        assertEquals(InstallLaunchResult.Launched, result)
+        assertEquals(false, staleWasStillThere, "the staging directory must be cleared before extraction starts")
+        assertFalse(File(root, ".Keryx.app.new/Contents/leftover.txt").exists())
     }
 
     @Test
