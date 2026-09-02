@@ -216,8 +216,10 @@ The desktop and Android `UpdateInstaller` actuals share no code at all — deskt
 install, and hands off to a detached helper script (`platform/update/UpdateScriptWriter.kt`, pure
 string templates — tested by asserting their text directly, never by running one) via
 `platform/update/DetachedProcess.kt`'s `ProcessLauncher` seam (mirroring
-`data/cloud/SecurityCliTokenStorage.kt`'s `CommandRunner`/`RealCommandRunner` split) before
-`main.kt` exits the whole app; Android (`platform/update/AndroidUpdateInstaller.kt`) streams the
+`data/cloud/SecurityCliTokenStorage.kt`'s `CommandRunner`/`RealCommandRunner` split). `main.kt`
+exits the whole app only on `UpdateRepository.installLaunched`, the signal emitted once that
+hand-off has actually returned `Launched` — never on `UpdateState.Installing`, which is set while
+the installer is still extracting; Android (`platform/update/AndroidUpdateInstaller.kt`) streams the
 downloaded APK into a `PackageInstaller` session instead. See "In-App Update" in
 `background-update.md` for the full behavioral flow (state machine, per-platform install steps,
 presentation) and `SECURITY.md` for the integrity-verification trust model.

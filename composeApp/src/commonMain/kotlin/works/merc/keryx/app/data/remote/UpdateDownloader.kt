@@ -3,8 +3,8 @@ package works.merc.keryx.app.data.remote
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeoutConfig
 import io.ktor.client.plugins.timeout
-import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.prepareGet
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.HttpHeaders
@@ -70,6 +70,14 @@ internal fun shouldEmitProgress(bytesDone: Long, lastEmitted: Long, total: Long)
  * The shared app [HttpClient] is configured with `followRedirects = false` (every other caller
  * handles its own redirects explicitly too — see `FeedFetcher`), so this follows redirects itself,
  * checking [isAllowedUpdateDownloadHost] on every hop and capping the chain at [MAX_REDIRECTS].
+ *
+ * **Every request here must go through `prepareGet(…).execute { … }`, never a plain `client.get()`.**
+ * Ktor's `SaveBody` plugin is installed by default and reads the *entire* response body into memory
+ * before a plain `client.get()` even returns, which would make [download]'s `onProgress` fire only
+ * once the transfer is already over (a progress bar frozen at 0%, then jumping straight to done) —
+ * and would hold a 100 MB+ asset in RAM besides. Only the streaming form skips that
+ * (`HttpStatement.execute` → `fetchStreamingResponse()` → `skipSaveBody()`); `skipSavingBody()` on
+ * a regular request is a deprecated no-op that merely logs.
  */
 class UpdateDownloader(private val client: HttpClient) {
 
@@ -95,12 +103,7 @@ class UpdateDownloader(private val client: HttpClient) {
     ): Result<Unit> {
         val partPath = "$destPath.part"
         return try {
-            val response = fetchFollowingRedirects(url, redirectCount = 0)
-            if (response.status.value !in 200..299) {
-                return Result.Err(UpdateException(UpdateStage.DOWNLOAD, "HTTP ${response.status.value}"))
-            }
-
-            writeVerifiedBody(response, partPath, expectedSizeBytes, onProgress)
+            streamToFile(url, redirectCount = 0, partPath, expectedSizeBytes, onProgress)
 
             val actualSha256 = ContentDigest.sha256File(partPath)
             if (actualSha256 != expectedSha256) {
@@ -120,11 +123,26 @@ class UpdateDownloader(private val client: HttpClient) {
         }
     }
 
-    private suspend fun fetchFollowingRedirects(url: String, redirectCount: Int): HttpResponse {
+    /**
+     * Streams the response for [url] straight into [partPath], following a redirect by recursing
+     * *inside* the enclosing `execute` block rather than returning its [HttpResponse] outward — a
+     * streaming response is only readable for the duration of that block, so there is nothing
+     * useful to hand back to a caller. Nesting is bounded by [MAX_REDIRECTS] and each outer hop is
+     * a redirect whose body is empty, so the handful of briefly-overlapping connections costs
+     * nothing. (Resolving the final URL up front instead would not work: the resolving request that
+     * finally answers `200` is exactly the one whose body would be buffered into memory.)
+     */
+    private suspend fun streamToFile(
+        url: String,
+        redirectCount: Int,
+        partPath: String,
+        expectedSizeBytes: Long,
+        onProgress: suspend (Long, Long) -> Unit,
+    ) {
         check(redirectCount <= MAX_REDIRECTS) { "Too many redirects" }
         requireAllowedDownloadUrl(url)
 
-        val response = client.get(url) {
+        client.prepareGet(url) {
             header(HttpHeaders.UserAgent, APP_NAME)
             timeout {
                 // The overall request has no useful upper bound for an asset this size (see this
@@ -133,13 +151,17 @@ class UpdateDownloader(private val client: HttpClient) {
                 requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
                 socketTimeoutMillis = UPDATE_DOWNLOAD_SOCKET_TIMEOUT_MS
             }
+        }.execute { response ->
+            if (response.status.value in REDIRECT_STATUSES) {
+                val location = response.headers[HttpHeaders.Location]
+                checkNotNull(location) { "${response.status.value} without Location header" }
+                val target = UrlResolver.resolve(url, location) ?: location
+                streamToFile(target, redirectCount + 1, partPath, expectedSizeBytes, onProgress)
+            } else {
+                check(response.status.value in 200..299) { "HTTP ${response.status.value}" }
+                writeVerifiedBody(response, partPath, expectedSizeBytes, onProgress)
+            }
         }
-        if (response.status.value !in REDIRECT_STATUSES) return response
-
-        val location = response.headers[HttpHeaders.Location]
-        checkNotNull(location) { "${response.status.value} without Location header" }
-        val target = UrlResolver.resolve(url, location) ?: location
-        return fetchFollowingRedirects(target, redirectCount + 1)
     }
 
     private fun requireAllowedDownloadUrl(url: String) {

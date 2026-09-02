@@ -169,8 +169,14 @@ separate, explicit click (Updates tab button, or the tray item once one is offer
   release's own values does it get an atomic rename to its final name — "the final name exists" is
   the invariant the rest of the pipeline relies on for "this file is verified". A per-request
   timeout override replaces the shared client's ordinary (much shorter) request timeout, since an
-  update asset can be 100MB+. Progress is throttled to a few updates a second
-  (`shouldEmitProgress`), and cancelling reverts to `Available` rather than `Failed` — a
+  update asset can be 100MB+. Every request goes through `prepareGet(…).execute { … }` rather than
+  a plain `client.get()`, and that is load-bearing rather than stylistic: Ktor installs its
+  `SaveBody` plugin by default, which reads the *whole* response body into memory before a plain
+  `get()` even returns — which froze the real progress bar at 0% for the entire transfer and then
+  jumped it straight to done, besides holding 100MB+ in RAM (`skipSavingBody()` is a deprecated
+  no-op in Ktor 3.5; the streaming form is the only way out). Progress is throttled to a few
+  updates a second (`shouldEmitProgress`), and cancelling reverts to `Available` rather than
+  `Failed` — a
   user-requested stop is not a failure. There is no resume-from-partial: the redirect target is a
   signed URL that expires in about an hour, so a failed/cancelled download is simply restarted, not
   resumed. `check()` also sweeps `<cacheDir>/updates/` of every version except whichever one the
@@ -182,8 +188,13 @@ separate, explicit click (Updates tab button, or the tray item once one is offer
     executable bit only on the entries the caller names) into a staging directory, health-checks it
     (the executable exists; on macOS, its `Info.plist` version also matches), moves the extraction
     onto the same volume as the current install (so the swap is a plain rename), and hands off to a
-    detached helper script (`platform/update/UpdateScriptWriter.kt`) via `ProcessLauncher` before
-    exiting the app. Every script follows the same shape regardless of OS: wait for this process's
+    detached helper script (`platform/update/UpdateScriptWriter.kt`) via `ProcessLauncher`. Only
+    once that hand-off has actually happened — the installer returning `Launched`, which makes
+    `UpdateRepository` emit its `installLaunched` signal — does `main.kt` exit the app. The app
+    deliberately does **not** exit on `UpdateState.Installing`: that state is set the moment an
+    install starts, while the extraction is still running, so exiting on it killed the process
+    before the script had even been written. Every script follows the same shape regardless of OS:
+    wait for this process's
     PID to exit, **retreat** the running install aside (`mv`, never delete first), **place** the new
     one, **verify** it, and **roll back** to the retreated copy on any failure along the way — so a
     crash mid-swap never leaves the install directory empty. A Windows MSI-installed build instead

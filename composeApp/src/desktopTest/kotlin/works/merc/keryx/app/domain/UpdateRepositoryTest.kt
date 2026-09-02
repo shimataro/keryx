@@ -10,9 +10,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import works.merc.keryx.app.core.KeryxException
+import works.merc.keryx.app.core.UpdateStage
 import works.merc.keryx.app.data.remote.UpdateDownloader
 import works.merc.keryx.app.platform.InstallKind
 import works.merc.keryx.app.platform.InstallLocation
@@ -281,6 +284,120 @@ class UpdateRepositoryTest {
         assertIs<UpdateState.Available>(repo.state.value)
         assertEquals("3.0.0", (repo.state.value as UpdateState.Available).update.version)
         assertFalse(oldVersionDir.exists())
+    }
+
+    // --- install() and the app-exit signal ---
+
+    /** Builds a repository already sitting at [UpdateState.Ready], the only state [install] acts on. */
+    private fun readyRepo(installer: UpdateInstaller, seed: Int): UpdateRepository {
+        val payload = Random(seed).nextBytes(64 * 1024)
+        val downloaderClient = HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }
+        val repo = UpdateRepository(
+            checker = checkerFor {
+                releaseJson(
+                    "2.0.0", "Keryx-2.0.0-macos-arm64.zip",
+                    "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256Hex(payload),
+                )
+            },
+            downloader = UpdateDownloader(downloaderClient),
+            installer = installer,
+            notificationCenter = NotificationCenter(),
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+        )
+        runBlocking { repo.check() }
+        repo.startDownload()
+        awaitState(repo) { it is UpdateState.Ready }
+        return repo
+    }
+
+    /**
+     * Subscribes to [UpdateRepository.installLaunched] and hands back a deferred completing on its
+     * first emission. Returns only once the subscription is actually registered ([onSubscription]),
+     * since a `replay = 0` flow drops anything emitted before that — without this the test could
+     * "pass" by missing a signal it should have caught.
+     */
+    private fun exitSignalOf(repo: UpdateRepository): CompletableDeferred<Unit> {
+        val subscribed = CompletableDeferred<Unit>()
+        val exited = CompletableDeferred<Unit>()
+        trackedScope().launch {
+            repo.installLaunched.onSubscription { subscribed.complete(Unit) }.collect { exited.complete(Unit) }
+        }
+        runBlocking { withTimeout(5_000) { subscribed.await() } }
+        return exited
+    }
+
+    /**
+     * The regression guard for "clicking install just quit the app": [UpdateState.Installing] is
+     * set the moment an install starts, while the installer is still extracting and staging, so
+     * exiting on *that* killed the process before the self-replace script was ever launched. Only
+     * an [InstallLaunchResult.Launched] result may signal the app to exit.
+     */
+    @Test
+    fun installSignalsTheAppToExitOnlyAfterTheInstallerHasLaunchedSomething() {
+        val gate = CompletableDeferred<Unit>()
+        val installer = GatedInstaller(InstallLaunchResult.Launched, gate)
+        val repo = readyRepo(installer, seed = 7)
+        val exited = exitSignalOf(repo)
+
+        repo.install()
+        runBlocking { withTimeout(5_000) { installer.started.await() } }
+        awaitState(repo) { it is UpdateState.Installing }
+
+        assertFalse(exited.isCompleted, "the app was told to exit while the installer was still working")
+
+        gate.complete(Unit)
+        runBlocking { withTimeout(5_000) { exited.await() } }
+        assertIs<UpdateState.Installing>(repo.state.value)
+    }
+
+    @Test
+    fun aFailedInstallNeverSignalsTheAppToExit() {
+        val installer = GatedInstaller(InstallLaunchResult.Failed("no installer here"))
+        val repo = readyRepo(installer, seed = 8)
+        val exited = exitSignalOf(repo)
+
+        repo.install()
+        awaitState(repo) { it is UpdateState.Failed }
+
+        assertEquals(UpdateStage.INSTALL, (repo.state.value as UpdateState.Failed).exception.stage)
+        assertFalse(exited.isCompleted)
+    }
+
+    @Test
+    fun awaitingUserConsentReturnsToReadyWithoutSignallingTheAppToExit() {
+        val installer = GatedInstaller(InstallLaunchResult.AwaitingUserConsent)
+        val repo = readyRepo(installer, seed = 9)
+        val exited = exitSignalOf(repo)
+
+        repo.install()
+        runBlocking { withTimeout(5_000) { installer.started.await() } }
+        awaitState(repo) { it is UpdateState.Ready }
+
+        assertFalse(exited.isCompleted)
+    }
+}
+
+/**
+ * A fake [UpdateInstaller] returning [result], optionally not until [gate] completes — which is
+ * what lets a test inspect the repository *while* an install is still in flight, the window the
+ * app used to quit itself in.
+ */
+private class GatedInstaller(
+    private val result: InstallLaunchResult,
+    private val gate: CompletableDeferred<Unit>? = null,
+) : UpdateInstaller {
+    /** Completes as soon as [install] is entered, so a test never has to guess when that happened. */
+    val started = CompletableDeferred<Unit>()
+
+    override fun canInstall(plan: UpdatePlan) = true
+
+    override suspend fun install(filePath: String, update: AvailableUpdate): InstallLaunchResult {
+        started.complete(Unit)
+        gate?.await()
+        return result
     }
 }
 

@@ -7,7 +7,13 @@ import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import io.ktor.utils.io.ByteChannel
+import io.ktor.utils.io.writeFully
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.UpdateException
 import works.merc.keryx.app.core.UpdateStage
@@ -77,6 +83,55 @@ class UpdateDownloaderTest {
         assertTrue(readings.isNotEmpty())
         assertTrue(readings.zipWithNext().all { (a, b) -> b.first >= a.first })
         assertEquals(payload.size.toLong() to payload.size.toLong(), readings.last())
+    }
+
+    /**
+     * Progress must arrive **while the body is still being transferred**, not once it is already
+     * over. Ktor's `SaveBody` plugin reads the whole body into memory before a plain `client.get()`
+     * returns, which left the real progress bar frozen at 0% until the download had finished and
+     * then jumped it straight to done — [UpdateDownloader] therefore has to use
+     * `prepareGet(…).execute { … }` (see its own KDoc). This drives the response body by hand so a
+     * regression fails here instead of only being visible on a 100 MB real download.
+     *
+     * The byte counts are deliberate: `readRemaining(max)` keeps awaiting content until it has the
+     * full `max` bytes (or the channel closes), so writing only as much as the reader consumes
+     * would park it mid-chunk. 320 KiB is comfortably past the 256 KiB that triggers the first
+     * progress emit, with a whole chunk to spare.
+     */
+    @Test
+    fun progressArrivesWhileTheBodyIsStillStreaming() = runBlocking {
+        val payload = Random(23).nextBytes(640 * 1024)
+        val headBytes = 320 * 1024
+        val body = ByteChannel(autoFlush = true)
+        val client = HttpClient(MockEngine { respond(body, HttpStatusCode.OK) }) { followRedirects = false; expectSuccess = false }
+        val dest = destFile()
+        val firstProgress = CompletableDeferred<Pair<Long, Long>>()
+
+        val download = async(Dispatchers.Default) {
+            UpdateDownloader(client).download(
+                url = "https://github.com/x",
+                destPath = dest.absolutePath,
+                expectedSizeBytes = payload.size.toLong(),
+                expectedSha256 = sha256Hex(payload),
+                onProgress = { done, total -> firstProgress.complete(done to total) },
+            )
+        }
+
+        try {
+            body.writeFully(payload, 0, headBytes)
+            // Never completes if the body was buffered whole before download() could read any of it.
+            val (done, total) = withTimeout(10_000) { firstProgress.await() }
+            assertTrue(done in 1..headBytes.toLong(), "progress reported $done bytes, only $headBytes were sent")
+            assertEquals(payload.size.toLong(), total)
+
+            body.writeFully(payload, headBytes, payload.size)
+            body.flushAndClose()
+            assertIs<Result.Ok<Unit>>(download.await())
+            assertContentEquals(payload, dest.readBytes())
+        } finally {
+            download.cancel()
+            dest.delete()
+        }
     }
 
     @Test

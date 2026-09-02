@@ -232,7 +232,9 @@ JVM でテスト可能なユニットテストのソースセットが無いに�
 本文そのものを直接アサーションで検証し、実際に起動することは無い）が生成した detached ヘルパー
 スクリプトへ、`platform/update/DetachedProcess.kt` の `ProcessLauncher` シーム
 （`data/cloud/SecurityCliTokenStorage.kt` の `CommandRunner`/`RealCommandRunner` の分割を踏襲）
-経由で引き渡してから、`main.kt` がアプリ全体を終了する。Android
+経由で引き渡す。`main.kt` がアプリ全体を終了するのは、この引き渡しが `Launched` を返した
+ことを受けて流れる `UpdateRepository.installLaunched` シグナルによってのみで、まだ展開中に
+立つ `UpdateState.Installing` を理由に終了することはない。Android
 （`platform/update/AndroidUpdateInstaller.kt`）は代わりに、ダウンロードした APK を
 `PackageInstaller` セッションへストリーム書き込みする。挙動面の全体（状態機械、プラットフォームごとの
 インストール手順、提示のしかた）は `background-update.ja.md` の「アプリ内アップデート」を、

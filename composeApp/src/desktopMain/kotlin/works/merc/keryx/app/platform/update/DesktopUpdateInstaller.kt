@@ -32,10 +32,11 @@ private const val ZIP_EXTRACT_MAX_BYTES_MULTIPLE = 10L
  * Windows build: launches a script that waits for this process to exit, then runs `msiexec`
  * against the downloaded `.msi`.
  *
- * Either way this method only *launches* the hand-off and returns — [UpdateRepository] is expected
- * to exit the whole app right after a [InstallLaunchResult.Launched] result (see `main.kt`'s own
- * `UpdateState.Installing` handling), and the launched script is what actually waits for that exit
- * before touching any files.
+ * Either way this method only *launches* the hand-off and returns — returning
+ * [InstallLaunchResult.Launched] is what makes `UpdateRepository` emit its `installLaunched`
+ * signal, which `main.kt` collects to exit the whole app, and the launched script is what actually
+ * waits for that exit before touching any files. (The app must never exit merely because state
+ * reached `UpdateState.Installing`: that happens before this method has extracted anything.)
  *
  * Deliberately extracts every self-replace ZIP with the same [ZipExtractor] used for its own unit
  * tests, rather than shelling out to `ditto` on macOS for symlink/mode fidelity: the only symlinks

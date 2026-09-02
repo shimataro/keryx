@@ -6,8 +6,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.io.files.Path
@@ -66,6 +69,22 @@ class UpdateRepository(
     private val cacheDir: String get() = cacheDirOverride ?: AppDirs.cacheDir()
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
     val state: StateFlow<UpdateState> = _state.asStateFlow()
+
+    // replay = 0 so a later subscriber can never be handed a past "quit now" and act on it out of
+    // nowhere; extraBufferCapacity = 1 so emit() never suspends when nothing is collecting at all
+    // (Android has no subscriber — a rendezvous SharedFlow would hang install() there forever).
+    private val _installLaunched = MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
+
+    /**
+     * Fires once the OS-level install has actually been handed off ([InstallLaunchResult.Launched]),
+     * and is the **only** signal desktop may exit the app on — see [install].
+     *
+     * [UpdateState.Installing] deliberately does not mean that: it is set the moment the install
+     * *starts*, while [installer] is still extracting/staging, purely so the UI can show its
+     * "restarting…" feedback. Exiting on the state value instead is what made an install quit the
+     * app before the self-replace script had even been written, let alone launched.
+     */
+    val installLaunched: SharedFlow<Unit> = _installLaunched.asSharedFlow()
 
     // Guards only the *decision* to start/transition, never the download itself — holding it across
     // the whole download would make cancelDownload() (a plain, non-suspend call) unable to safely
@@ -210,9 +229,10 @@ class UpdateRepository(
 
             when (val result = installer.install(ready.filePath, ready.update)) {
                 // Launched: the installer/OS takes over from here (see InstallLaunchResult's own
-                // KDoc) — desktop is expected to exit the whole app shortly after this returns, so
-                // state is deliberately left at Installing rather than guessed forward.
-                InstallLaunchResult.Launched -> Unit
+                // KDoc). State stays at Installing rather than being guessed forward; the app-exit
+                // signal is emitted *here*, after the hand-off actually happened — never from the
+                // state transition above, which is set before installer.install() has done a thing.
+                InstallLaunchResult.Launched -> _installLaunched.emit(Unit)
                 InstallLaunchResult.AwaitingUserConsent -> _state.value = ready
                 is InstallLaunchResult.Failed ->
                     _state.value = UpdateState.Failed(ready.update, UpdateException(UpdateStage.INSTALL, result.reason))

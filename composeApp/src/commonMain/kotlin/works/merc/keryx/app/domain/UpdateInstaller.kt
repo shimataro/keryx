@@ -2,10 +2,12 @@ package works.merc.keryx.app.domain
 
 /** How handing a downloaded, verified update file off to the OS went. */
 sealed interface InstallLaunchResult {
-    /** The OS-level install/replace process was launched. On desktop the app should now exit —
-     * the launched process is waiting for exactly that (see the platform actual's own KDoc). On
-     * Android this is unreachable: a successful `PackageInstaller` commit kills the process itself
-     * before a result would ever be delivered. */
+    /** The OS-level install/replace process was launched. On desktop the app should now exit — the
+     * launched process is waiting for exactly that (see the platform actual's own KDoc) — and
+     * *this result* is the trigger for it: it makes [UpdateRepository] emit
+     * [UpdateRepository.installLaunched], the one signal `main.kt` exits on. On Android this is
+     * unreachable: a successful `PackageInstaller` commit kills the process itself before a result
+     * would ever be delivered. */
     data object Launched : InstallLaunchResult
 
     /** Android only: the OS needs the user's consent first (e.g. "install unknown apps" is not yet

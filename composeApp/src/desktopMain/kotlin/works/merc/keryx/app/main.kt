@@ -351,11 +351,16 @@ fun main(args: Array<String>) {
         val unreadCount by koin.get<ArticleRepository>().watchUnreadCount().collectAsState(0L)
 
         val updateState by updateRepository.state.collectAsState()
-        // Installing hands off to the OS installer/self-replace script, which is already waiting
-        // for this process to exit (see UpdateInstaller's own KDoc on desktop) — nothing else in
-        // this state actually needs the app to still be running.
-        LaunchedEffect(updateState) {
-            if (updateState is UpdateState.Installing) exitApplication()
+        // Exit only once the OS installer / self-replace script has actually been launched — that
+        // process is already waiting for this one to exit (see UpdateInstaller's own KDoc on
+        // desktop), and nothing else in this state needs the app still running.
+        //
+        // Deliberately NOT keyed on `updateState is UpdateState.Installing`: that state is set the
+        // moment an install starts, while the installer is still extracting and staging, so exiting
+        // on it killed this process (and the extraction coroutine with it) before the script had
+        // even been written. See UpdateRepository.installLaunched.
+        LaunchedEffect(Unit) {
+            updateRepository.installLaunched.collect { exitApplication() }
         }
 
         // Dock/taskbar icon override (used below) needs the full branded icon, not the
