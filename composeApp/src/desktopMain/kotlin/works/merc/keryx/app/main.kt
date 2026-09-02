@@ -348,9 +348,18 @@ fun main(args: Array<String>) {
             newArticleNotifications.collect { lastNotificationSentAtMillis = SystemClock.nowMillis() }
         }
 
-        val unreadCount by koin.get<ArticleRepository>().watchUnreadCount().collectAsState(0L)
+        // Stabilized with remember: without it, koin.get<ArticleRepository>().watchUnreadCount()
+        // built a brand-new Flow instance on every recomposition of this application {} scope
+        // (including one triggered by every download-progress tick below), and collectAsState's own
+        // key1 is the flow instance itself — so an unstable Flow kept cancelling and restarting its
+        // underlying SQLDelight query collection instead of ever settling.
+        val unreadCountFlow = remember { koin.get<ArticleRepository>().watchUnreadCount() }
+        val unreadCount by unreadCountFlow.collectAsState(0L)
 
-        val updateState by updateRepository.state.collectAsState()
+        // Deliberately NOT collected here (`.collectAsState()`) — this application {} scope
+        // composes the window, the Dock icon, and single-instance/reopen handling, all of which
+        // would otherwise recompose on every download-progress tick. KeryxTray collects the flow
+        // itself, confining that recomposition to the tray's own composable.
         // Exit only once the OS installer / self-replace script has actually been launched — that
         // process is already waiting for this one to exit (see UpdateInstaller's own KDoc on
         // desktop), and nothing else in this state needs the app still running.
@@ -395,7 +404,7 @@ fun main(args: Array<String>) {
             notificationIcon = dockBaseImage,
             unreadCount = unreadCount,
             windowVisible = windowVisible,
-            updateState = updateState,
+            updateStateFlow = updateRepository.state,
             onToggle = { windowVisible = !windowVisible },
             onQuit = ::exitApplication,
             onUpdateAction = { updateRepository.performPrimaryAction() },
