@@ -258,7 +258,12 @@ internal fun UpdateResultSection(
                 text,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 12,
+                // Measured (a 20-line synthetic body, KERYX_TAB_DIALOG_WIDTH's 640dp) at ~397dp
+                // total tab height with 6, comfortably inside KERYX_TAB_DIALOG_CONTENT_HEIGHT's
+                // 416dp — 12 measured ~493dp, well past it, forcing every "update available" tab
+                // open into KeryxTabDialog's scroll fallback that other tabs never need. See that
+                // constant's own KDoc.
+                maxLines = 6,
                 overflow = TextOverflow.Ellipsis,
             )
         }
