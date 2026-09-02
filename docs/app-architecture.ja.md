@@ -18,7 +18,7 @@ composeApp/src/
   commonMain/kotlin/works/merc/keryx/app/
     core/      Constants, Result, KeryxException, ArticleFilter, AppNotification, Clock, DateTimeParser, CloudStorageAvailability(expect)
     data/local/   DatabaseDriverFactory(expect), FtsManager, FtsSearch, LocalSettings(Store)
-    data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels
+    data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels, UpdateDownloader, ReleaseFeedSource（アプリ内アップデート——後述の「アプリ内アップデート」参照）
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce(expect), TokenStorage, OAuthTokens
     data/opml/    OpmlCodec
     domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler（importOpmlAndNotify。デスクトップと Android の「`.opml` ファイル関連付け」で共有）, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, OAuthCallbackParams, StartupMaintenanceTasks（refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
@@ -207,8 +207,12 @@ Dropbox / OneDrive — sync-architecture.ja.md の「Android で Google Drive �
 `domain/UpdateRepository` は上記の `SyncRepository` と同じ種類の、アプリのライフタイムを持つ
 Koin `single` のオーケストレーターであり、`StateFlow<UpdateState>` を UI 側の各面（Updates タブ、
 トレイ、ベル）が読む——設定ダイアログを閉じても進行中のダウンロードはキャンセルされない。これは
-3 つのシームを組み合わせる: `UpdateChecker`（既存を拡張し `assets[]`/`body` をパース）、
-`data/remote/UpdateDownloader`（新規；手動リダイレクト追従＋ホスト allowlist＋digest 検証。
+3 つのシームを組み合わせる: `domain/UpdateChecker`（候補選択とバージョン比較のポリシーのみ——
+GitHub Releases への HTTP リクエストと JSON パースは `data/remote/ReleaseFeedSource` に住み、
+`UpdateChecker` は自分のコンストラクタと同じ引数から内部でそれを組み立てる。依存として
+受け取らないのは、多数のテストが直接使っているこのクラス自身のコンストラクタ形状を、
+単なる内部の層分けの都合で変えたくないため）、
+`data/remote/UpdateDownloader`（手動リダイレクト追従＋ホスト allowlist＋digest 検証。
 `FeedFetcher` 自身が自前のリダイレクト処理に使っている「共有クライアントのプラグインに頼らず
 手で書く」という形をそのまま踏襲）、そして `platform/UpdateInstaller`（新規の expect 相当の
 interface。`OsNotificationSink` とまったく同じように `platformModule` 経由でバインドされる

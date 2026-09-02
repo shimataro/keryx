@@ -1,21 +1,9 @@
 package works.merc.keryx.app.domain
 
 import works.merc.keryx.app.core.APP_NAME
+import works.merc.keryx.app.data.remote.ReleaseAsset
 import works.merc.keryx.app.platform.InstallKind
 import works.merc.keryx.app.platform.InstallLocation
-
-/**
- * One entry of a GitHub release's `assets[]` array, as returned by the Releases API. `digest` and
- * `state` were added to that API after some already-published releases, so both are nullable —
- * [selectUpdateAsset] treats a missing digest the same as an unverifiable one (never selected).
- */
-internal data class ReleaseAsset(
-    val name: String,
-    val downloadUrl: String,
-    val sizeBytes: Long,
-    val digest: String?,
-    val state: String?,
-)
 
 /** Which release asset an in-app update would install, driving both the download and the
  * installer that eventually consumes it. */

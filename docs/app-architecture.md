@@ -19,7 +19,7 @@ composeApp/src/
   commonMain/kotlin/works/merc/keryx/app/
     core/      Constants, Result, KeryxException, ArticleFilter, AppNotification, Clock, DateTimeParser, CloudStorageAvailability(expect)
     data/local/   DatabaseDriverFactory(expect), FtsManager, FtsSearch, LocalSettings(Store)
-    data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels
+    data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels, UpdateDownloader, ReleaseFeedSource (in-app update — see "In-App Update" below)
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce(expect), TokenStorage, OAuthTokens
     data/opml/    OpmlCodec
     domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, StartupMaintenanceTasks (refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
@@ -194,8 +194,12 @@ resolves the live DB's real path per platform (see `db-schema.md`).
 `domain/UpdateRepository` is the same kind of app-lifetime, Koin-`single` orchestrator as
 `SyncRepository` above — a `StateFlow<UpdateState>` every UI surface (Updates tab, tray, bell)
 reads, so a closed settings dialog doesn't cancel an in-flight download. It composes three seams:
-`UpdateChecker` (existing, extended to parse `assets[]`/`body`), `data/remote/UpdateDownloader`
-(new; manual redirect-following + host allowlist + digest verification, the same "no shared-client
+`domain/UpdateChecker` (candidate selection and version-comparison policy only — the GitHub
+Releases HTTP request and JSON parsing live in `data/remote/ReleaseFeedSource`, which
+`UpdateChecker` builds internally from the same constructor params rather than taking one as a
+dependency, so its own constructor — used directly by a large number of tests — didn't have to
+change shape for what's an internal layering detail), `data/remote/UpdateDownloader`
+(manual redirect-following + host allowlist + digest verification, the same "no shared-client
 plugin, roll it by hand" shape `FeedFetcher` already uses for its own redirect handling), and
 `platform/UpdateInstaller` (new `expect`-like interface, bound via `platformModule` exactly like
 `OsNotificationSink` — a `single<UpdateInstaller>` per platform, fakeable in tests). Two pure

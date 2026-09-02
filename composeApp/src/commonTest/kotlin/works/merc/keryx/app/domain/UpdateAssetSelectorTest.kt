@@ -1,5 +1,6 @@
 package works.merc.keryx.app.domain
 
+import works.merc.keryx.app.data.remote.ReleaseAsset
 import works.merc.keryx.app.platform.InstallKind
 import works.merc.keryx.app.platform.InstallLocation
 import kotlin.test.Test
