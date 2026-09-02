@@ -58,4 +58,24 @@ class ArticleReturnRippleTest {
         val release = assertIs<PressInteraction.Release>(interactions[1])
         assertEquals(interactions[0], release.press)
     }
+
+    @Test
+    fun playPulseRippleEmitsCancelWhenInterruptedBeforeTheHoldCompletes() = runTest(UnconfinedTestDispatcher()) {
+        val source = MutableInteractionSource()
+        val interactions = mutableListOf<Interaction>()
+        backgroundScope.launch { source.interactions.collect { interactions += it } }
+
+        val job = launch { source.playPulseRipple() }
+        // Unconfined runs `job` eagerly up to its first real suspension point (delay()) before
+        // launch() even returns — same rationale as the UnconfinedTestDispatcher note above. So
+        // by this point Press has already been emitted and the coroutine is parked in delay(),
+        // not yet auto-advanced past it.
+        job.cancel()
+        job.join()
+
+        assertEquals(2, interactions.size)
+        assertIs<PressInteraction.Press>(interactions[0])
+        val cancel = assertIs<PressInteraction.Cancel>(interactions[1])
+        assertEquals(interactions[0], cancel.press)
+    }
 }

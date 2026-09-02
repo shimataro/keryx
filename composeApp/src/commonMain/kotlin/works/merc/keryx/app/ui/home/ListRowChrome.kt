@@ -12,7 +12,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 /** The horizontal inset a list row's highlight keeps from the pane edge — see [listRowSurface]. */
 internal val LIST_ROW_HORIZONTAL_MARGIN = 8.dp
@@ -36,8 +39,13 @@ private const val RETURN_RIPPLE_PRESS_HOLD_MS = 220L
 internal suspend fun MutableInteractionSource.playPulseRipple() {
     val press = PressInteraction.Press(Offset.Zero)
     emit(press)
-    delay(RETURN_RIPPLE_PRESS_HOLD_MS)
-    emit(PressInteraction.Release(press))
+    try {
+        delay(RETURN_RIPPLE_PRESS_HOLD_MS)
+        emit(PressInteraction.Release(press))
+    } catch (e: CancellationException) {
+        withContext(NonCancellable) { emit(PressInteraction.Cancel(press)) }
+        throw e
+    }
 }
 
 /**
