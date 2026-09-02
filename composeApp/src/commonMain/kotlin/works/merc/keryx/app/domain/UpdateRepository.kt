@@ -174,16 +174,56 @@ class UpdateRepository(
      * Starts downloading the currently [UpdateState.Available] update, if [installer] reports it
      * can actually be installed here and no download is already running. A no-op otherwise — in
      * particular, calling this twice in a row starts exactly one download, not two.
+     *
+     * Also the retry entry point for a [UpdateState.Failed]: which action "retry" means depends on
+     * where the failure happened ([UpdateException.stage]) — see [retryFailed]. This is what both
+     * the Updates tab's "Retry" button and the tray/notification-center row (via
+     * [performPrimaryAction]) call, so a failure at any stage has exactly one way back.
      */
     fun startDownload() {
         scope.launch {
-            mutex.withLock {
-                if (downloadJob?.isActive == true) return@withLock
-                val update = (_state.value as? UpdateState.Available)?.update ?: return@withLock
-                val asset = update.asset ?: return@withLock
-                if (!canInstall(update.plan)) return@withLock
-                downloadJob = scope.launch { runDownload(update, asset) }
+            when (val current = _state.value) {
+                is UpdateState.Failed -> retryFailed(current)
+                is UpdateState.Available -> startDownloadOf(current.update)
+                else -> Unit
             }
+        }
+    }
+
+    private suspend fun startDownloadOf(update: AvailableUpdate) {
+        mutex.withLock {
+            if (downloadJob?.isActive == true) return@withLock
+            val asset = update.asset ?: return@withLock
+            if (!canInstall(update.plan)) return@withLock
+            downloadJob = scope.launch { runDownload(update, asset) }
+        }
+    }
+
+    /**
+     * Resumes a [failed] update per [UpdateException.stage] rather than treating every failure the
+     * same way: [UpdateStage.CHECK] (or no [UpdateState.Failed.update] at all — the check itself is
+     * what failed, so there's nothing else to act on) re-runs [check]; [UpdateStage.DOWNLOAD]/
+     * [UpdateStage.VERIFY] re-downloads, since whatever bytes made it to disk can't be trusted;
+     * [UpdateStage.INSTALL] re-installs the already-downloaded, already-verified file directly
+     * without downloading it again — falling back to a fresh download only if that file is no
+     * longer where it should be (e.g. swept as stale by an intervening [check]).
+     */
+    private suspend fun retryFailed(failed: UpdateState.Failed) {
+        val update = failed.update
+        when {
+            update == null || failed.exception.stage == UpdateStage.CHECK -> check()
+            failed.exception.stage == UpdateStage.INSTALL -> retryInstall(update)
+            else -> startDownloadOf(update) // DOWNLOAD or VERIFY
+        }
+    }
+
+    private suspend fun retryInstall(update: AvailableUpdate) {
+        val filePath = update.asset?.let { FileIO.join(updateDownloadDir(update.version), it.name) }
+        if (filePath != null && FileIO.exists(filePath)) {
+            _state.value = UpdateState.Ready(update, filePath)
+            install()
+        } else {
+            startDownloadOf(update)
         }
     }
 
@@ -293,15 +333,16 @@ class UpdateRepository(
     /**
      * Dispatches to whichever single action the tray's one update menu item (or the notification
      * center's "updates" row) currently represents — see `tray/KeryxTray.kt`'s `trayUpdateEntry`
-     * for the label/enabled state this corresponds to. A no-op for every state with no action of
-     * its own ([UpdateState.Idle]/[UpdateState.Checking]/[UpdateState.UpToDate]/
-     * [UpdateState.Downloading]/[UpdateState.Verifying]/[UpdateState.Installing]).
+     * for the label/enabled state this corresponds to. [UpdateState.Failed] goes through
+     * [startDownload] too — see its own KDoc for how it resumes a failure per-stage. A no-op for
+     * every state with no action of its own ([UpdateState.Idle]/[UpdateState.Checking]/
+     * [UpdateState.UpToDate]/[UpdateState.Downloading]/[UpdateState.Verifying]/
+     * [UpdateState.Installing]).
      */
     fun performPrimaryAction() {
-        when (val current = _state.value) {
-            is UpdateState.Available -> startDownload()
+        when (_state.value) {
+            is UpdateState.Available, is UpdateState.Failed -> startDownload()
             is UpdateState.Ready -> install()
-            is UpdateState.Failed -> if (current.update != null) startDownload() else scope.launch { check() }
             UpdateState.Idle, UpdateState.Checking, UpdateState.UpToDate,
             is UpdateState.Downloading, is UpdateState.Verifying, is UpdateState.Installing,
             -> Unit

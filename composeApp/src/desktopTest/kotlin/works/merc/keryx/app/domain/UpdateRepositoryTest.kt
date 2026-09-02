@@ -146,6 +146,158 @@ class UpdateRepositoryTest {
         assertEquals(1, requestCount)
     }
 
+    // --- startDownload() as the Failed retry entry point ---
+
+    @Test
+    fun retryingADownloadStageFailureReDownloads() {
+        val payload = Random(20).nextBytes(64 * 1024)
+        val sha256 = sha256Hex(payload)
+        var requestCount = 0
+        val downloaderClient = HttpClient(
+            MockEngine {
+                requestCount++
+                if (requestCount == 1) respond("", HttpStatusCode.InternalServerError) else respond(payload, HttpStatusCode.OK)
+            },
+        ) { expectSuccess = false }
+        val repo = UpdateRepository(
+            checker = checkerFor { releaseJson("2.0.0", "Keryx-2.0.0-macos-arm64.zip", "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256) },
+            downloader = UpdateDownloader(downloaderClient),
+            installer = noOpInstaller(),
+            notificationCenter = NotificationCenter(),
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+        )
+        runBlocking { repo.check() }
+
+        repo.startDownload()
+        awaitState(repo) { it is UpdateState.Failed }
+        assertEquals(UpdateStage.DOWNLOAD, (repo.state.value as UpdateState.Failed).exception.stage)
+
+        repo.startDownload() // retry
+        awaitState(repo) { it is UpdateState.Ready }
+        assertEquals(2, requestCount)
+    }
+
+    @Test
+    fun retryingAVerifyStageFailureReDownloads() {
+        val payload = Random(21).nextBytes(64 * 1024)
+        val corrupted = Random(22).nextBytes(64 * 1024)
+        val sha256 = sha256Hex(payload)
+        var requestCount = 0
+        val downloaderClient = HttpClient(
+            MockEngine {
+                requestCount++
+                respond(if (requestCount == 1) corrupted else payload, HttpStatusCode.OK)
+            },
+        ) { expectSuccess = false }
+        val repo = UpdateRepository(
+            checker = checkerFor { releaseJson("2.0.0", "Keryx-2.0.0-macos-arm64.zip", "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256) },
+            downloader = UpdateDownloader(downloaderClient),
+            installer = noOpInstaller(),
+            notificationCenter = NotificationCenter(),
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+        )
+        runBlocking { repo.check() }
+
+        repo.startDownload()
+        awaitState(repo) { it is UpdateState.Failed }
+        assertEquals(UpdateStage.VERIFY, (repo.state.value as UpdateState.Failed).exception.stage)
+
+        repo.startDownload() // retry
+        awaitState(repo) { it is UpdateState.Ready }
+        assertEquals(2, requestCount)
+        assertContentEqualsFile(payload, (repo.state.value as UpdateState.Ready).filePath)
+    }
+
+    @Test
+    fun retryingAnInstallStageFailureReinstallsWithoutRedownloading() {
+        var downloadRequestCount = 0
+        val payload = Random(23).nextBytes(64 * 1024)
+        val downloaderClient = HttpClient(MockEngine { downloadRequestCount++; respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }
+        var installCount = 0
+        val installer = object : UpdateInstaller {
+            override fun canInstall(plan: UpdatePlan) = true
+            override suspend fun install(filePath: String, update: AvailableUpdate): InstallLaunchResult {
+                installCount++
+                return if (installCount == 1) InstallLaunchResult.Failed("simulated") else InstallLaunchResult.Launched
+            }
+        }
+        val repo = UpdateRepository(
+            checker = checkerFor {
+                releaseJson(
+                    "2.0.0", "Keryx-2.0.0-macos-arm64.zip",
+                    "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256Hex(payload),
+                )
+            },
+            downloader = UpdateDownloader(downloaderClient),
+            installer = installer,
+            notificationCenter = NotificationCenter(),
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+        )
+        runBlocking { repo.check() }
+        repo.startDownload()
+        awaitState(repo) { it is UpdateState.Ready }
+        val filePath = (repo.state.value as UpdateState.Ready).filePath
+
+        repo.install()
+        awaitState(repo) { it is UpdateState.Failed }
+        assertEquals(UpdateStage.INSTALL, (repo.state.value as UpdateState.Failed).exception.stage)
+        val requestsBeforeRetry = downloadRequestCount
+
+        repo.startDownload() // retry: must re-install the file already on disk, not re-download it
+        awaitState(repo) { it is UpdateState.Installing }
+        assertEquals(2, installCount)
+        assertEquals(requestsBeforeRetry, downloadRequestCount)
+        assertTrue(File(filePath).exists(), "the verified file must still be there for a direct re-install")
+    }
+
+    @Test
+    fun retryingAnInstallStageFailureRedownloadsWhenTheVerifiedFileIsGone() {
+        var downloadRequestCount = 0
+        val payload = Random(24).nextBytes(64 * 1024)
+        val downloaderClient = HttpClient(MockEngine { downloadRequestCount++; respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }
+        val installer = object : UpdateInstaller {
+            override fun canInstall(plan: UpdatePlan) = true
+            override suspend fun install(filePath: String, update: AvailableUpdate) = InstallLaunchResult.Failed("simulated")
+        }
+        val repo = UpdateRepository(
+            checker = checkerFor {
+                releaseJson(
+                    "2.0.0", "Keryx-2.0.0-macos-arm64.zip",
+                    "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256Hex(payload),
+                )
+            },
+            downloader = UpdateDownloader(downloaderClient),
+            installer = installer,
+            notificationCenter = NotificationCenter(),
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+        )
+        runBlocking { repo.check() }
+        repo.startDownload()
+        awaitState(repo) { it is UpdateState.Ready }
+        val filePath = (repo.state.value as UpdateState.Ready).filePath
+
+        repo.install()
+        awaitState(repo) { it is UpdateState.Failed }
+        assertTrue(File(filePath).delete(), "test setup: could not remove the verified file")
+        val requestsBeforeRetry = downloadRequestCount
+
+        repo.startDownload() // retry: the file is gone, so this must fall back to a fresh download
+        awaitState(repo) { it is UpdateState.Ready }
+        assertTrue(downloadRequestCount > requestsBeforeRetry, "a new download request must have been issued")
+    }
+
     @Test
     fun cancelDownloadRevertsToAvailableAndRemovesThePartFile() {
         val payload = Random(3).nextBytes(64 * 1024)
