@@ -78,6 +78,17 @@
   タイムアウトが誤検知されて flaky になることがある。該当するテストは `kotlinx.coroutines.runBlocking`
   （または実時間ポーリング）に切り替える（`FeedFetcherTest.kt`, `FeedRepositoryTest.kt`,
   `OAuthLoopbackServerTest.kt` 等の実績あり）。
+- **同一の `StateFlow` を 2 つのコレクタで観測し、その列が一致することをアサートしてはならない。**
+  `StateFlow` は conflating で、「最新値が届くこと」しか保証しない。中間値は**コレクタごとに独立に**
+  間引かれる。したがって 2 本の記録列の比較は、「一方だけ間引かれる」ことが起きないほど速いマシンで
+  しか成立せず、低速・低コア数の CI ランナーでは落ちる（実測: `windows-latest`（2 コア）の
+  `UpdateRepositoryTest.everyCollectorObservesTheSameSharedStateProgression` が、2 本のリストを
+  `assertEquals` で比較していた当時に落ちた）。代わりに、各記録列がその実行で発生する唯一の正典列の
+  **部分列**であること（同ファイルの `assertSubsequenceOf`）を、各状態が運ぶペイロードまで含めて
+  アサートし、両者が同一の最終値に収束することを確認する。付随して 2 点: `flow.value` ではなく
+  **コレクタ側**が最終値に到達するのを待つこと（コレクタは別スレッドで動くので `flow.value` に遅れる）。
+  記録先はスレッドセーフなリスト（`CopyOnWriteArrayList`）にすること —— `Dispatchers.Default` から
+  追記し、テストスレッドから読む素の `ArrayList` には両者間の happens-before がない。
 - 実スレッドで DB への並行書き込みを行うテストは `inMemoryDb()` ではなく `fileDb()` を使うこと —— 前者は全呼び出し元を、同期機構を持たない 1 本の共有 JDBC コネクションに固定するため、実スレッド 2 本で SQLDelight のトランザクション管理そのものが壊れ得る。`fileDb()` を使う場合でも、テスト対象と無関係な書き込みを fixture に残さないこと: SQLite の deferred `BEGIN` により、write の前に read を行うトランザクションは、無関係な並行書き込み側のロック昇格を、`busy_timeout` では救済されないリトライ不能な `SQLITE_BUSY` で失敗させることがある —— 詳細は `known-issues.md` の「並行書き込みにより read→write トランザクションがリトライ不能な SQLITE_BUSY で失敗する」を参照。
 - 新規の Android Compose UI 計装テストは `androidApp/src/androidTest/` に置く（`composeApp` は
   ライブラリモジュールなので、その計装テストはアプリケーションモジュール側に置く — 上記「構成」

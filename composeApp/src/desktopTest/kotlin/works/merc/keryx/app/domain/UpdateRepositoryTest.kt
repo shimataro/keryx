@@ -23,6 +23,7 @@ import works.merc.keryx.app.platform.InstallKind
 import works.merc.keryx.app.platform.InstallLocation
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.io.path.createTempDirectory
 import kotlin.random.Random
 import kotlin.test.AfterTest
@@ -31,6 +32,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlin.test.fail
 
 private val WRITABLE_MAC_LOCATION = InstallLocation(
     InstallKind.MAC_APP_BUNDLE, appRoot = "/Applications/Keryx.app", launcherPath = null, parentWritable = true, translocated = false,
@@ -44,6 +46,24 @@ private fun releaseJson(version: String, assetName: String, assetUrl: String, si
         {"name":"$assetName","browser_download_url":"$assetUrl","size":$sizeBytes,"digest":"sha256:$sha256","state":"uploaded"}
     ]}
 """.trimIndent()
+
+/**
+ * Asserts every element of [actual] appears in [expected], in that order — i.e. [actual] is what is
+ * left of [expected] after zero or more elements are dropped. Used to check a conflating
+ * [kotlinx.coroutines.flow.StateFlow] collector against the progression the emitter really produced:
+ * missing values are fine (that is what conflation does), but an unknown value, a duplicate, or a
+ * reordering is not. [label] names the collector in the failure message.
+ */
+private fun <T> assertSubsequenceOf(expected: List<T>, actual: List<T>, label: String) {
+    var next = 0
+    for (value in actual) {
+        while (next < expected.size && expected[next] != value) next++
+        if (next >= expected.size) {
+            fail("$label observed $value, which the progression $expected never emits at that point (observed: $actual)")
+        }
+        next++
+    }
+}
 
 private class RecordingNotificationMessages : NotificationMessages {
     override suspend fun feedGone(feedTitle: String) = "feedGone:$feedTitle"
@@ -77,13 +97,18 @@ class UpdateRepositoryTest {
 
     private fun trackedScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default).also { scopes.add(it) }
 
-    private fun awaitState(repo: UpdateRepository, timeoutMs: Long = 5_000, predicate: (UpdateState) -> Boolean) = runBlocking {
+    /** Polls [condition] on the real wall clock until it holds, failing with [describe]'s message on
+     * timeout — see this class's own KDoc for why these tests poll rather than use `runTest`. */
+    private fun await(timeoutMs: Long = 5_000, describe: () -> String, condition: () -> Boolean) = runBlocking {
         val deadline = System.currentTimeMillis() + timeoutMs
-        while (!predicate(repo.state.value)) {
-            check(System.currentTimeMillis() < deadline) { "Timed out; last state was ${repo.state.value}" }
+        while (!condition()) {
+            check(System.currentTimeMillis() < deadline, describe)
             delay(5)
         }
     }
+
+    private fun awaitState(repo: UpdateRepository, timeoutMs: Long = 5_000, predicate: (UpdateState) -> Boolean) =
+        await(timeoutMs, { "Timed out; last state was ${repo.state.value}" }) { predicate(repo.state.value) }
 
     private fun checkerFor(releaseBody: () -> String): UpdateChecker {
         val client = HttpClient(MockEngine { respond(releaseBody(), HttpStatusCode.OK) }) { expectSuccess = false }
@@ -362,8 +387,27 @@ class UpdateRepositoryTest {
         assertFalse(partFile.exists())
     }
 
+    /**
+     * Every surface that reads [UpdateRepository.state] — tray, notification center, Updates tab —
+     * must be observing the *one* shared state machine, not a per-collector copy of it: each sees
+     * only states that machine really emitted, in the order it emitted them, and all of them
+     * converge on the same terminal value.
+     *
+     * Deliberately does **not** assert the two recorded sequences are identical. A `StateFlow` is
+     * conflating: it only guarantees the latest value arrives, and intermediate values are dropped
+     * per collector, *independently*. `Available -> Downloading -> Verifying -> Ready` are all
+     * written back-to-back by `UpdateRepository.runDownload` on [Dispatchers.Default], so on a
+     * slow/low-core machine (observed: the 2-core `windows-latest` CI runner) one collector can
+     * conflate a value the other keeps — an `assertEquals` of the two lists was flaky for exactly
+     * that reason, not because anything was wrong with the state machine.
+     *
+     * What it asserts instead is that each sequence is a *subsequence* of the single canonical
+     * progression this run emits, payloads included. That is not weaker than the old comparison: a
+     * wrong version, a wrong progress reading, a wrong `filePath`, an out-of-order transition, or a
+     * state the machine never produces all still fail — only conflation is tolerated.
+     */
     @Test
-    fun twoCollectorsObserveTheSameStateSequence() {
+    fun everyCollectorObservesTheSameSharedStateProgression() {
         val payload = Random(4).nextBytes(1024)
         val sha256 = sha256Hex(payload)
         val downloaderClient = HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }
@@ -377,12 +421,18 @@ class UpdateRepositoryTest {
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
         )
-        val seenByFirst = mutableListOf<UpdateState>()
-        val seenBySecond = mutableListOf<UpdateState>()
+        // Appended from the collectors' own Dispatchers.Default threads and read from this one, with
+        // no happens-before edge between them — a plain ArrayList here would make even the observed
+        // contents undefined, quite apart from the conflation this test's KDoc describes.
+        val seenByFirst = CopyOnWriteArrayList<UpdateState>()
+        val seenBySecond = CopyOnWriteArrayList<UpdateState>()
         val collectorScope = trackedScope()
         // Both collectors must actually be subscribed — not just launch()ed — before check() starts
-        // mutating state, or a slow-to-schedule collector could miss the leading Idle emission and
-        // make this test flaky rather than prove the two collectors really see the same sequence.
+        // mutating state, so each is guaranteed to observe the progression from somewhere at or
+        // before its first transition. (This does not guarantee either one *sees* the leading Idle:
+        // onSubscription only fires once the subscription is registered, and the collector reads the
+        // state slot after that — by which point check() may already have moved it on. Hence the
+        // subsequence assertion below rather than one anchored on Idle.)
         val firstSubscribed = CompletableDeferred<Unit>()
         val secondSubscribed = CompletableDeferred<Unit>()
         collectorScope.launch {
@@ -396,10 +446,32 @@ class UpdateRepositoryTest {
         runBlocking { repo.check() }
         repo.startDownload()
         awaitState(repo) { it is UpdateState.Ready }
+        // repo.state.value reaching Ready says nothing about the collectors having been handed it
+        // yet — they run on their own threads. Wait for them, not just for the state.
+        await(describe = { "collectors never converged on Ready; first=$seenByFirst second=$seenBySecond" }) {
+            seenByFirst.lastOrNull() is UpdateState.Ready && seenBySecond.lastOrNull() is UpdateState.Ready
+        }
 
+        // The one progression this run emits. Downloading appears exactly once: runDownload() posts
+        // Downloading(update, 0, size) before the transfer starts, and a 1 KiB payload is a single
+        // DOWNLOAD_CHUNK_BYTES read, so shouldEmitProgress fires only its final (done >= total)
+        // call — which is the Verifying transition. Every state past Checking carries the same
+        // AvailableUpdate instance nextStateAfterCheck built once, so it is recoverable from Ready.
+        val ready = repo.state.value as UpdateState.Ready
+        val canonical = listOf(
+            UpdateState.Idle,
+            UpdateState.Checking,
+            UpdateState.Available(ready.update),
+            UpdateState.Downloading(ready.update, 0L, payload.size.toLong()),
+            UpdateState.Verifying(ready.update),
+            ready,
+        )
         assertTrue(seenByFirst.isNotEmpty())
-        assertEquals(seenByFirst, seenBySecond)
-        assertEquals(repo.state.value, seenByFirst.last())
+        assertTrue(seenBySecond.isNotEmpty())
+        assertSubsequenceOf(canonical, seenByFirst, "first collector")
+        assertSubsequenceOf(canonical, seenBySecond, "second collector")
+        assertEquals(ready, seenByFirst.last())
+        assertEquals(ready, seenBySecond.last())
     }
 
     /**

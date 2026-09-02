@@ -42,6 +42,19 @@ New tests are placed at the same relative path as the code under test.
 - A Compose UI test that needs a real `HomeViewModel` must go through `ui/home/HomeViewModelTestSupport.kt`'s `ComposeUiTest.useHomeViewModel(driver, db) { fixture -> … }`, never a hand-rolled `try`/`finally`. `HomeViewModel`'s DB collectors use `SharingStarted.Eagerly`, and closing the driver without first `cancelAndJoin`-ing `viewModelScope` lets an already-queued continuation on the EDT resume against the closed connection — an *uncaught* exception that surfaces flakily, on whichever *other* test runs next, as `kotlinx.coroutines.test.UncaughtExceptionsBeforeTest`. `ComposeUiTest.waitForIdle()` does not help here: it only advances Compose's own test clock, it never pumps the AWT event queue.
 - Classes that directly use `CloudStorage` like `SyncRepository` are verified by swapping `CloudStorage` with a hand-rolled fake (in-memory Map + rev management) instead of mocking the HTTP layer (`SyncRepositoryTest.kt`). `DropboxStorage`/`DropboxAuthManager` tests themselves mock the HTTP layer via Ktor `MockEngine` as usual.
 - Combining `runTest` (virtual time) with Ktor `MockEngine`'s `HttpTimeout` or real socket I/O can cause false timeout detection and flakiness. Affected tests switch to `kotlinx.coroutines.runBlocking` (or real-time polling) (`FeedFetcherTest.kt`, `FeedRepositoryTest.kt`, `OAuthLoopbackServerTest.kt`, etc.).
+- **Never assert that two collectors of the same `StateFlow` observed an identical sequence.** A
+  `StateFlow` is conflating: it only guarantees the latest value arrives, and intermediate values are
+  dropped *per collector, independently*. A comparison of two recorded sequences therefore only holds
+  on a machine fast enough that nothing got conflated for one collector but not the other — it fails
+  on a slow/low-core CI runner (observed: `windows-latest`, 2 cores, in
+  `UpdateRepositoryTest.everyCollectorObservesTheSameSharedStateProgression`, back when it compared
+  the two lists with `assertEquals`). Assert instead that each recorded sequence is a *subsequence*
+  of the one canonical progression the run emits (`assertSubsequenceOf` in that file), payloads
+  included, and that both converge on the same terminal value. Two further rules go with it: wait for
+  the *collectors* to reach the terminal value, not just for `flow.value` — they run on their own
+  threads and lag it; and record into a thread-safe list (`CopyOnWriteArrayList`), since a plain
+  `ArrayList` appended from `Dispatchers.Default` and read from the test thread has no happens-before
+  edge between the two.
 - A test that drives concurrent DB writes with real `Thread`s needs `fileDb()`, not `inMemoryDb()` — the latter pins every caller to one shared JDBC connection with no synchronization of its own, so two real threads can corrupt SQLDelight's transaction bookkeeping. Even with `fileDb()`, keep fixtures free of writes the test doesn't care about: SQLite's deferred `BEGIN` means a transaction that reads before it writes can fail an unrelated concurrent writer's lock upgrade with a non-retryable `SQLITE_BUSY` that `busy_timeout` does not cover — see "A concurrent write can fail a read-then-write transaction with a non-retryable SQLITE_BUSY" in `known-issues.md`.
 - New Android Compose UI instrumented tests go in `androidApp/src/androidTest/` (`composeApp` is a
   library module, so its own instrumented tests live in the application module instead — see
