@@ -1,11 +1,13 @@
 package works.merc.keryx.app.domain
 
 import kotlin.concurrent.Volatile
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -282,6 +284,12 @@ class UpdateRepository(
             )
             when (result) {
                 is Result.Ok -> {
+                    // download() already checks cancellation right after hashing (see its own
+                    // comment), but this is the very last chance before committing to Ready — a
+                    // cancellation landing in the narrow window between download() returning and
+                    // here would otherwise still surface as "ready to install" for a download the
+                    // user had already cancelled.
+                    coroutineContext.ensureActive()
                     _state.value = UpdateState.Ready(update, destPath)
                     postNotification(
                         notificationMessages.updateReadyToInstall(update.version),

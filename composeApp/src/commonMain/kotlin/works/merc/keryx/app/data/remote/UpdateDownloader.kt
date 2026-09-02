@@ -10,7 +10,9 @@ import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.HttpHeaders
 import io.ktor.http.Url
 import io.ktor.utils.io.readRemaining
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ensureActive
 import kotlinx.io.buffered
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemFileSystem
@@ -106,6 +108,12 @@ class UpdateDownloader(private val client: HttpClient) {
             streamToFile(url, redirectCount = 0, partPath, expectedSizeBytes, onProgress)
 
             val actualSha256 = ContentDigest.sha256File(partPath)
+            // sha256File is a plain blocking call with no cancellation checks of its own (shared
+            // with SyncRepository's snapshot digest, which this deliberately leaves untouched — see
+            // this method's own cancellation handling below), so a large asset's hash can take long
+            // enough that a Cancel click during it would otherwise go unnoticed until well after —
+            // this is the first point that can actually observe it.
+            coroutineContext.ensureActive()
             if (actualSha256 != expectedSha256) {
                 FileSystemExtras.deleteRecursively(partPath)
                 return Result.Err(UpdateException(UpdateStage.VERIFY, "Downloaded file's digest does not match"))
