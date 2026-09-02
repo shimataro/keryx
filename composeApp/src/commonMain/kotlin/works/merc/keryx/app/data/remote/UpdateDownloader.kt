@@ -105,7 +105,11 @@ class UpdateDownloader(private val client: HttpClient) {
     ): Result<Unit> {
         val partPath = "$destPath.part"
         return try {
-            streamToFile(url, redirectCount = 0, partPath, expectedSizeBytes, onProgress)
+            val streamed = streamToFile(url, redirectCount = 0, partPath, expectedSizeBytes, onProgress)
+            if (streamed is Result.Err) {
+                FileSystemExtras.deleteRecursively(partPath)
+                return streamed
+            }
 
             val actualSha256 = ContentDigest.sha256File(partPath)
             // sha256File is a plain blocking call with no cancellation checks of its own (shared
@@ -125,8 +129,13 @@ class UpdateDownloader(private val client: HttpClient) {
             FileSystemExtras.deleteRecursively(partPath)
             throw e // a cancelled download is not a failed one — the caller (UpdateRepository) treats it as such
         } catch (e: Exception) {
+            // Only genuinely unexpected exceptions reach here now — every ordinary remote-response
+            // condition (bad status, disallowed host, size/digest mismatch, too many redirects) is
+            // classified explicitly as a Result.Err by streamToFile/writeVerifiedBody/
+            // requireAllowedDownloadUrl instead of thrown, per this codebase's error-design
+            // convention that classification belongs to the DataSource layer, not a catch-all.
             FileSystemExtras.deleteRecursively(partPath)
-            Log.warn(TAG, "Update download failed", e)
+            Log.warn(TAG, "Update download failed unexpectedly", e)
             Result.Err(UpdateException(UpdateStage.DOWNLOAD, e.message ?: "Download failed"))
         }
     }
@@ -146,11 +155,14 @@ class UpdateDownloader(private val client: HttpClient) {
         partPath: String,
         expectedSizeBytes: Long,
         onProgress: suspend (Long, Long) -> Unit,
-    ) {
-        check(redirectCount <= MAX_REDIRECTS) { "Too many redirects" }
-        requireAllowedDownloadUrl(url)
+    ): Result<Unit> {
+        if (redirectCount > MAX_REDIRECTS) {
+            return Result.Err(UpdateException(UpdateStage.DOWNLOAD, "Too many redirects"))
+        }
+        val allowed = requireAllowedDownloadUrl(url)
+        if (allowed is Result.Err) return allowed
 
-        client.prepareGet(url) {
+        return client.prepareGet(url) {
             header(HttpHeaders.UserAgent, APP_NAME)
             timeout {
                 // The overall request has no useful upper bound for an asset this size (see this
@@ -162,20 +174,28 @@ class UpdateDownloader(private val client: HttpClient) {
         }.execute { response ->
             if (response.status.value in REDIRECT_STATUSES) {
                 val location = response.headers[HttpHeaders.Location]
-                checkNotNull(location) { "${response.status.value} without Location header" }
+                    ?: return@execute Result.Err(
+                        UpdateException(UpdateStage.DOWNLOAD, "${response.status.value} without Location header"),
+                    )
                 val target = UrlResolver.resolve(url, location) ?: location
                 streamToFile(target, redirectCount + 1, partPath, expectedSizeBytes, onProgress)
+            } else if (response.status.value !in 200..299) {
+                Result.Err(UpdateException(UpdateStage.DOWNLOAD, "HTTP ${response.status.value}"))
             } else {
-                check(response.status.value in 200..299) { "HTTP ${response.status.value}" }
                 writeVerifiedBody(response, partPath, expectedSizeBytes, onProgress)
             }
         }
     }
 
-    private fun requireAllowedDownloadUrl(url: String) {
+    private fun requireAllowedDownloadUrl(url: String): Result<Unit> {
         val parsed = Url(url)
-        check(parsed.protocol.name == "https") { "Refusing a non-HTTPS update download URL" }
-        check(isAllowedUpdateDownloadHost(parsed.host)) { "Refusing update download from disallowed host: ${parsed.host}" }
+        if (parsed.protocol.name != "https") {
+            return Result.Err(UpdateException(UpdateStage.DOWNLOAD, "Refusing a non-HTTPS update download URL"))
+        }
+        if (!isAllowedUpdateDownloadHost(parsed.host)) {
+            return Result.Err(UpdateException(UpdateStage.DOWNLOAD, "Refusing update download from disallowed host: ${parsed.host}"))
+        }
+        return Result.Ok(Unit)
     }
 
     private suspend fun writeVerifiedBody(
@@ -183,12 +203,12 @@ class UpdateDownloader(private val client: HttpClient) {
         partPath: String,
         expectedSizeBytes: Long,
         onProgress: suspend (Long, Long) -> Unit,
-    ) {
+    ): Result<Unit> {
         val declaredLength = response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
-        if (declaredLength != null) {
-            check(declaredLength == expectedSizeBytes) {
-                "Content-Length ($declaredLength) does not match the expected size ($expectedSizeBytes)"
-            }
+        if (declaredLength != null && declaredLength != expectedSizeBytes) {
+            return Result.Err(
+                UpdateException(UpdateStage.DOWNLOAD, "Content-Length ($declaredLength) does not match the expected size ($expectedSizeBytes)"),
+            )
         }
 
         val channel = response.bodyAsChannel()
@@ -200,7 +220,11 @@ class UpdateDownloader(private val client: HttpClient) {
                 if (packet.exhausted()) break
                 val bytes = packet.readByteArray()
                 total += bytes.size
-                check(total <= expectedSizeBytes) { "Downloaded body exceeds the expected $expectedSizeBytes-byte size" }
+                if (total > expectedSizeBytes) {
+                    return Result.Err(
+                        UpdateException(UpdateStage.DOWNLOAD, "Downloaded body exceeds the expected $expectedSizeBytes-byte size"),
+                    )
+                }
                 sink.write(bytes)
                 if (shouldEmitProgress(total, lastEmitted, expectedSizeBytes)) {
                     lastEmitted = total
@@ -208,6 +232,9 @@ class UpdateDownloader(private val client: HttpClient) {
                 }
             }
         }
-        check(total == expectedSizeBytes) { "Downloaded $total bytes, expected $expectedSizeBytes" }
+        if (total != expectedSizeBytes) {
+            return Result.Err(UpdateException(UpdateStage.DOWNLOAD, "Downloaded $total bytes, expected $expectedSizeBytes"))
+        }
+        return Result.Ok(Unit)
     }
 }
