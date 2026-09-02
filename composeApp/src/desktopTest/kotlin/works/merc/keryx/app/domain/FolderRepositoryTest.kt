@@ -10,7 +10,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import works.merc.keryx.app.core.Clock
-import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.remote.FaviconResolver
@@ -35,17 +34,6 @@ private class FolderCountingSyncScheduler : SyncScheduler {
     }
 }
 
-/** A [NotificationMessages] fake returning canned, recognizable strings. */
-private class FolderRepositoryTestNotificationMessages : NotificationMessages {
-    override suspend fun feedGone(feedTitle: String): String = "gone:$feedTitle"
-    override suspend fun feedUrlChanged(feedTitle: String): String = "urlChanged:$feedTitle"
-    override suspend fun newArticles(count: Int): String = "new:$count"
-    override suspend fun syncFailed(exception: KeryxException): String = "syncFailed:${exception::class.simpleName}"
-    override suspend fun opmlImported(added: Int, failed: Int): String = "opmlImported:$added/$failed"
-    override suspend fun updateAvailable(version: String): String = "updateAvailable:$version"
-    override suspend fun updateReadyToInstall(version: String): String = "updateReadyToInstall:$version"
-}
-
 class FolderRepositoryTest {
     /** An HTTP client whose calls always fail, for [FeedFetcher]/[FaviconResolver] instances that this test never exercises. */
     private fun failingClient(): HttpClient = HttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }) {
@@ -65,7 +53,7 @@ class FolderRepositoryTest {
         val ftsManager = ftsManagerIndexed(driver)
         val feedRepository = FeedRepository(
             db, FeedFetcher(failingClient()), FaviconResolver(failingClient()),
-            articleRepository, ftsManager, syncScheduler, NotificationCenter(), FolderRepositoryTestNotificationMessages(),
+            articleRepository, ftsManager, syncScheduler, NotificationCenter(), FakeNotificationMessages(),
             clock, Dispatchers.Unconfined,
         )
         return FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)

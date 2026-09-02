@@ -13,7 +13,6 @@ import org.koin.dsl.koinApplication
 import org.koin.dsl.module
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.Clock
-import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
@@ -187,7 +186,7 @@ class StartupMaintenanceTasksTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = installer,
             notificationCenter = notificationCenter,
-            notificationMessages = FakeUpdateNotificationMessages(),
+            notificationMessages = FakeNotificationMessages(),
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
             location = location,
         )
@@ -272,16 +271,6 @@ class StartupMaintenanceTasksTest {
             driver.close()
         }
     }
-}
-
-private class FakeUpdateNotificationMessages : NotificationMessages {
-    override suspend fun feedGone(feedTitle: String) = "feedGone:$feedTitle"
-    override suspend fun feedUrlChanged(feedTitle: String) = "feedUrlChanged:$feedTitle"
-    override suspend fun newArticles(count: Int) = "newArticles:$count"
-    override suspend fun syncFailed(exception: KeryxException) = "syncFailed"
-    override suspend fun opmlImported(added: Int, failed: Int) = "opmlImported:$added/$failed"
-    override suspend fun updateAvailable(version: String) = "updateAvailable:$version"
-    override suspend fun updateReadyToInstall(version: String) = "updateReadyToInstall:$version"
 }
 
 private val FAKE_MAC_LOCATION = InstallLocation(

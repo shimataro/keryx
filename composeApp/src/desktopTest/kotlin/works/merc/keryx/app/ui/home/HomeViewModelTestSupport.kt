@@ -16,7 +16,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.job
 import works.merc.keryx.app.core.Clock
-import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.data.cloud.TokenStorage
@@ -31,8 +30,8 @@ import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.NewArticleNotifier
+import works.merc.keryx.app.domain.FakeNotificationMessages
 import works.merc.keryx.app.domain.NotificationCenter
-import works.merc.keryx.app.domain.NotificationMessages
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
@@ -50,17 +49,6 @@ import kotlin.random.Random
  * test file, since burying it in a single test's file is what let several call sites drift out of
  * step with its teardown contract (see [HomeViewModelFixture.close]).
  */
-
-/** A [NotificationMessages] fake returning canned, recognizable strings. */
-private class HomeViewModelFixtureNotificationMessages : NotificationMessages {
-    override suspend fun feedGone(feedTitle: String): String = "gone:$feedTitle"
-    override suspend fun feedUrlChanged(feedTitle: String): String = "urlChanged:$feedTitle"
-    override suspend fun newArticles(count: Int): String = "new:$count"
-    override suspend fun syncFailed(exception: KeryxException): String = "syncFailed:${exception::class.simpleName}"
-    override suspend fun opmlImported(added: Int, failed: Int): String = "opmlImported:$added/$failed"
-    override suspend fun updateAvailable(version: String): String = "updateAvailable:$version"
-    override suspend fun updateReadyToInstall(version: String): String = "updateReadyToInstall:$version"
-}
 
 private class HomeViewModelFixtureTokenStorage : TokenStorage {
     private var stored: OAuthTokens? = null
@@ -167,7 +155,7 @@ internal fun newHomeViewModel(
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
         val feedRepository = FeedRepository(
             db, FeedFetcher(fetcherClient), FaviconResolver(faviconClient), articleRepository,
-            ftsManagerIndexed(driver), syncScheduler, NotificationCenter(), HomeViewModelFixtureNotificationMessages(),
+            ftsManagerIndexed(driver), syncScheduler, NotificationCenter(), FakeNotificationMessages(),
             clock, Dispatchers.Unconfined,
         )
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
@@ -194,7 +182,7 @@ internal fun newHomeViewModel(
             scope = syncScope,
             activityCenter = resolvedActivityCenter,
             notificationCenter = NotificationCenter(),
-            notificationMessages = HomeViewModelFixtureNotificationMessages(),
+            notificationMessages = FakeNotificationMessages(),
             localDbPath = "unused",
             tempDir = "unused",
         )
@@ -211,7 +199,7 @@ internal fun newHomeViewModel(
         val vm = HomeViewModel(
             feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
             syncRepository, cloudSession, resolvedActivityCenter, clock, NewArticleNotifier(),
-            HomeViewModelFixtureNotificationMessages(), Dispatchers.Unconfined, Dispatchers.Unconfined,
+            FakeNotificationMessages(), Dispatchers.Unconfined, Dispatchers.Unconfined,
         )
         return HomeViewModelFixture(
             vm, driver, syncScope, listOf(fetcherClient, faviconClient, authClient), ownedActivityCenterScope,

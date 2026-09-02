@@ -48,8 +48,8 @@ import works.merc.keryx.app.domain.toListRow
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.NewArticleNotifier
+import works.merc.keryx.app.domain.FakeNotificationMessages
 import works.merc.keryx.app.domain.NotificationCenter
-import works.merc.keryx.app.domain.NotificationMessages
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
@@ -75,17 +75,6 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-
-/** A [NotificationMessages] fake returning canned strings (unused by most HomeViewModel tests). */
-private class HomeViewModelTestNotificationMessages : NotificationMessages {
-    override suspend fun feedGone(feedTitle: String): String = "gone:$feedTitle"
-    override suspend fun feedUrlChanged(feedTitle: String): String = "urlChanged:$feedTitle"
-    override suspend fun newArticles(count: Int): String = "new:$count"
-    override suspend fun syncFailed(exception: works.merc.keryx.app.core.KeryxException): String = "syncFailed:${exception::class.simpleName}"
-    override suspend fun opmlImported(added: Int, failed: Int): String = "opmlImported:$added/$failed"
-    override suspend fun updateAvailable(version: String): String = "updateAvailable:$version"
-    override suspend fun updateReadyToInstall(version: String): String = "updateReadyToInstall:$version"
-}
 
 /** In-memory [TokenStorage] fake (never actually used since appKey is empty in these tests). */
 private class HomeViewModelTestTokenStorage : TokenStorage {
@@ -204,7 +193,7 @@ class HomeViewModelTest {
         // Mirror startup: ensureIndexed() creates articles_fts so the subscribe/refresh path's indexMissing() works.
         val feedRepository = FeedRepository(
             db, feedFetcher, missingFaviconResolver(), articleRepository, ftsManagerIndexed(driver), syncScheduler,
-            NotificationCenter(), HomeViewModelTestNotificationMessages(), clock, Dispatchers.Unconfined,
+            NotificationCenter(), FakeNotificationMessages(), clock, Dispatchers.Unconfined,
         )
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
         val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
@@ -221,7 +210,7 @@ class HomeViewModelTest {
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
             activityCenter = activityCenter,
             notificationCenter = NotificationCenter(),
-            notificationMessages = HomeViewModelTestNotificationMessages(),
+            notificationMessages = FakeNotificationMessages(),
             localDbPath = "unused",
             tempDir = "unused",
         )
@@ -237,7 +226,7 @@ class HomeViewModelTest {
         return HomeViewModel(
             feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
             syncRepository, cloudSession, activityCenter, clock,
-            newArticleNotifier, HomeViewModelTestNotificationMessages(),
+            newArticleNotifier, FakeNotificationMessages(),
             Dispatchers.Unconfined,
             // dbWriteDispatcher: Unconfined by default so read/star writes run inline for
             // deterministic assertions; overridable via the dbWriteDispatcher parameter above.

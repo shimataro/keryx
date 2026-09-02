@@ -5,22 +5,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import works.merc.keryx.app.core.FeedTimeoutException
-import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.core.Result
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-
-/** A [NotificationMessages] fake returning a canned string keyed off the summed count. */
-private class NewArticleNotifierTestNotificationMessages : NotificationMessages {
-    override suspend fun feedGone(feedTitle: String): String = "gone:$feedTitle"
-    override suspend fun feedUrlChanged(feedTitle: String): String = "urlChanged:$feedTitle"
-    override suspend fun newArticles(count: Int): String = "new:$count"
-    override suspend fun syncFailed(exception: KeryxException): String = "syncFailed:${exception::class.simpleName}"
-    override suspend fun opmlImported(added: Int, failed: Int): String = "opmlImported:$added/$failed"
-    override suspend fun updateAvailable(version: String): String = "updateAvailable:$version"
-    override suspend fun updateReadyToInstall(version: String): String = "updateReadyToInstall:$version"
-}
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class NewArticleNotifierTest {
@@ -56,7 +44,7 @@ class NewArticleNotifierTest {
             "f1" to Result.Ok(2),
             "f2" to Result.Ok(3),
         )
-        notifier.notifyIfEnabled(results, notificationEnabled = true, messages = NewArticleNotifierTestNotificationMessages())
+        notifier.notifyIfEnabled(results, notificationEnabled = true, messages = FakeNotificationMessages())
         runCurrent()
 
         assertEquals(listOf("new:5"), tray)
@@ -76,7 +64,7 @@ class NewArticleNotifierTest {
             "f1" to Result.Ok(0),
             "f2" to Result.Err(FeedTimeoutException()),
         )
-        notifier.notifyIfEnabled(results, notificationEnabled = true, messages = NewArticleNotifierTestNotificationMessages())
+        notifier.notifyIfEnabled(results, notificationEnabled = true, messages = FakeNotificationMessages())
         runCurrent()
 
         assertTrue(tray.isEmpty())
@@ -92,7 +80,7 @@ class NewArticleNotifierTest {
         runCurrent()
 
         val results = mapOf("f1" to Result.Ok(4))
-        notifier.notifyIfEnabled(results, notificationEnabled = false, messages = NewArticleNotifierTestNotificationMessages())
+        notifier.notifyIfEnabled(results, notificationEnabled = false, messages = FakeNotificationMessages())
         runCurrent()
 
         assertTrue(tray.isEmpty())
@@ -123,7 +111,7 @@ class NewArticleNotifierTest {
         val notifier = NewArticleNotifier(sink = { message, _ -> posted.add(message) })
 
         val results = mapOf("f1" to Result.Ok(4))
-        notifier.notifyIfEnabled(results, notificationEnabled = false, messages = NewArticleNotifierTestNotificationMessages())
+        notifier.notifyIfEnabled(results, notificationEnabled = false, messages = FakeNotificationMessages())
 
         assertTrue(posted.isEmpty())
     }
@@ -139,7 +127,7 @@ class NewArticleNotifierTest {
         val notifier = NewArticleNotifier(sink = { _, count -> postedCounts.add(count) })
 
         val results = mapOf("f1" to Result.Ok(2), "f2" to Result.Ok(3))
-        notifier.notifyIfEnabled(results, notificationEnabled = true, messages = NewArticleNotifierTestNotificationMessages())
+        notifier.notifyIfEnabled(results, notificationEnabled = true, messages = FakeNotificationMessages())
 
         assertEquals(listOf(5), postedCounts)
     }

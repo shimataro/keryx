@@ -64,17 +64,6 @@ private const val OPML_TWO_SEARCHABLE_FEEDS = """<?xml version="1.0"?>
 </body>
 </opml>"""
 
-/** A [NotificationMessages] fake returning canned, recognizable strings. */
-private class OpmlImporterTestNotificationMessages : NotificationMessages {
-    override suspend fun feedGone(feedTitle: String): String = "gone:$feedTitle"
-    override suspend fun feedUrlChanged(feedTitle: String): String = "urlChanged:$feedTitle"
-    override suspend fun newArticles(count: Int): String = "new:$count"
-    override suspend fun syncFailed(exception: works.merc.keryx.app.core.KeryxException): String = "syncFailed:${exception::class.simpleName}"
-    override suspend fun opmlImported(added: Int, failed: Int): String = "opmlImported:$added/$failed"
-    override suspend fun updateAvailable(version: String): String = "updateAvailable:$version"
-    override suspend fun updateReadyToInstall(version: String): String = "updateReadyToInstall:$version"
-}
-
 class OpmlImporterTest {
 
     private fun fetcherWith(handler: MockRequestHandler): FeedFetcher {
@@ -144,7 +133,7 @@ class OpmlImporterTest {
         val ftsManager = ftsManagerIndexed(driver)
         val feedRepository = FeedRepository(
             db, feedFetcher, missingFaviconResolver(), articleRepository, ftsManager, syncScheduler,
-            NotificationCenter(), OpmlImporterTestNotificationMessages(), clock, Dispatchers.Unconfined,
+            NotificationCenter(), FakeNotificationMessages(), clock, Dispatchers.Unconfined,
         )
         val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)

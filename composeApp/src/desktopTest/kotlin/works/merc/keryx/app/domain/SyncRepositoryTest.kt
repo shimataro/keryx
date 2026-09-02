@@ -20,7 +20,6 @@ import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.CloudStorageException
-import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SYNC_DEBOUNCE_MS
@@ -176,17 +175,6 @@ private class FakeCloudStorage : CloudStorage {
     }
 }
 
-/** A [NotificationMessages] fake for sync tests: encodes the failing exception type into the message. */
-private object FakeSyncNotificationMessages : NotificationMessages {
-    override suspend fun feedGone(feedTitle: String): String = "gone:$feedTitle"
-    override suspend fun feedUrlChanged(feedTitle: String): String = "urlChanged:$feedTitle"
-    override suspend fun newArticles(count: Int): String = "new:$count"
-    override suspend fun syncFailed(exception: KeryxException): String = "syncFailed:${exception::class.simpleName}"
-    override suspend fun opmlImported(added: Int, failed: Int): String = "opmlImported:$added/$failed"
-    override suspend fun updateAvailable(version: String): String = "updateAvailable:$version"
-    override suspend fun updateReadyToInstall(version: String): String = "updateReadyToInstall:$version"
-}
-
 @OptIn(ExperimentalCoroutinesApi::class)
 class SyncRepositoryTest {
 
@@ -232,7 +220,7 @@ class SyncRepositoryTest {
             scope = backgroundScope,
             activityCenter = activityCenter,
             notificationCenter = notificationCenter,
-            notificationMessages = FakeSyncNotificationMessages,
+            notificationMessages = FakeNotificationMessages(),
             localDbPath = localFile.absolutePath,
             tempDir = tempDir.absolutePath,
         )
@@ -1172,7 +1160,7 @@ class SyncRepositoryTest {
             scope = backgroundScope,
             activityCenter = ActivityCenter(backgroundScope),
             notificationCenter = notificationCenter,
-            notificationMessages = FakeSyncNotificationMessages,
+            notificationMessages = FakeNotificationMessages(),
             localDbPath = localFile.absolutePath,
             tempDir = tempDir.absolutePath,
         )
