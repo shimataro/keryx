@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.core.UpdateStage
 import works.merc.keryx.app.data.remote.UpdateDownloader
@@ -120,6 +121,40 @@ class UpdateRepositoryTest {
         assertEquals("2.0.0", ready.update.version)
         assertContentEqualsFile(payload, ready.filePath)
         assertFalse(File("${ready.filePath}.part").exists())
+    }
+
+    /**
+     * Regression guard for this class's own KDoc promise: "an update is available" and "ready to
+     * install" must read as one evolving notification-center row, not two left to accumulate —
+     * see [UpdateRepository.postNotification]'s own KDoc.
+     */
+    @Test
+    fun readyToInstallReplacesTheAvailableNotificationRatherThanAddingASecondOne() {
+        val payload = Random(35).nextBytes(1024)
+        val sha256 = sha256Hex(payload)
+        val downloaderClient = HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }
+        val notificationCenter = NotificationCenter()
+        val repo = UpdateRepository(
+            checker = checkerFor { releaseJson("2.0.0", "Keryx-2.0.0-macos-arm64.zip", "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256) },
+            downloader = UpdateDownloader(downloaderClient),
+            installer = noOpInstaller(),
+            notificationCenter = notificationCenter,
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+        )
+
+        runBlocking { repo.check() }
+        assertEquals(listOf("updateAvailable:2.0.0"), notificationCenter.items.value.map { it.message })
+
+        repo.startDownload()
+        awaitState(repo) { it is UpdateState.Ready }
+
+        val items = notificationCenter.items.value
+        assertEquals(1, items.size, "the \"available\" row must be replaced, not left alongside a new one")
+        assertEquals("updateReadyToInstall:2.0.0", items.single().message)
+        assertEquals(AppNotificationAction.ShowSettingsTab("updates"), items.single().action)
     }
 
     @Test
