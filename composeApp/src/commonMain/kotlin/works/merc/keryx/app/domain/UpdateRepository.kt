@@ -410,7 +410,7 @@ class UpdateRepository(
 
     private fun sweepStaleUpdateDownloads(currentBeforeCheck: UpdateState) {
         val keep = updateVersionInUse(currentBeforeCheck)
-        val updatesDir = Path(FileIO.join(cacheDir, "updates"))
+        val updatesDir = Path(updatesRootDir)
         if (SystemFileSystem.metadataOrNull(updatesDir)?.isDirectory != true) return
         val entries = runCatching { SystemFileSystem.list(updatesDir) }.getOrElse { emptyList() }
         for (entry in entries) {
@@ -419,5 +419,10 @@ class UpdateRepository(
         }
     }
 
-    private fun updateDownloadDir(version: String): String = FileIO.join(cacheDir, "updates", version)
+    /** Where every in-progress or completed download's own version directory lives — the single
+     * definition [updateDownloadDir] and [sweepStaleUpdateDownloads] both derive from, so the two
+     * can never drift apart and have the sweep quietly stop seeing what downloads actually use. */
+    private val updatesRootDir: String get() = FileIO.join(cacheDir, "updates")
+
+    private fun updateDownloadDir(version: String): String = FileIO.join(updatesRootDir, version)
 }

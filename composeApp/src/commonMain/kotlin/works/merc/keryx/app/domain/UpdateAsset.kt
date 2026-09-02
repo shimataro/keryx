@@ -1,5 +1,6 @@
 package works.merc.keryx.app.domain
 
+import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.platform.InstallKind
 import works.merc.keryx.app.platform.InstallLocation
 
@@ -39,7 +40,8 @@ data class UpdateAsset(
  */
 private const val MAX_PLAUSIBLE_UPDATE_ASSET_SIZE_BYTES = 1024L * 1024 * 1024 // 1 GiB
 
-/** The asset name suffix each [UpdateAssetKind] is matched by, e.g. `Keryx-0.14.0-macos-arm64.zip`. */
+/** The asset name suffix each [UpdateAssetKind] is matched by, e.g. `Keryx-0.14.0-macos-arm64.zip`
+ * ([APP_NAME] is `"Keryx"`). */
 private val ASSET_SUFFIX_BY_KIND = mapOf(
     UpdateAssetKind.MAC_APP_ZIP to "-macos-arm64.zip",
     UpdateAssetKind.WINDOWS_MSI to "-windows-x86_64.msi",
@@ -57,7 +59,9 @@ private val ASSET_SUFFIX_BY_KIND = mapOf(
  * asset at all: [selectUpdateAsset] returns `null`, and no in-app update is offered.
  */
 private val ASSET_NAME_PATTERN_BY_KIND: Map<UpdateAssetKind, Regex> =
-    ASSET_SUFFIX_BY_KIND.mapValues { (_, suffix) -> Regex("^Keryx-[A-Za-z0-9._+-]+${Regex.escape(suffix)}$") }
+    ASSET_SUFFIX_BY_KIND.mapValues { (_, suffix) ->
+        Regex("^${Regex.escape(APP_NAME)}-[A-Za-z0-9._+-]+${Regex.escape(suffix)}$")
+    }
 
 /** The [UpdateAssetKind] this [InstallLocation] would need, or `null` when no in-app update path
  * applies to this install form at all (regardless of what the release actually shipped). */
