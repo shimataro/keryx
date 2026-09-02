@@ -259,6 +259,18 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
 強い保証（例えば minisign/cosign の detached 署名）に何が必要かについては
 [SECURITY.ja.md](../SECURITY.ja.md) を参照。
 
+**条件付きリクエスト。** `ReleaseFeedSource` は各エンドポイントの `ETag` をメモリ上にキャッシュし
+（`releases/latest` 用と `releases` 一覧用に 1 枠ずつ——`UpdateChecker` インスタンスは自身の
+`currentVersion` が選んだ側しか呼ばない、というのは同クラス自身の KDoc の通り）、次回呼び出し時に
+`If-None-Match` として送り返す。304 が返れば、空のボディを「何も見つからなかった」と誤解するのでは
+なく、キャッシュ済みのパース結果をそのまま再利用する。あえて `local_settings.json` へは永続化して
+いない（`FeedFetcher` の validator が `feeds` テーブルへ保存されるのとは対照的——下記「フィード
+更新の効率化」参照）: `ReleaseFeedSource` は `UpdateChecker` の Koin `single` の一部としてアプリの
+プロセス寿命全体で生き続けるため、インメモリキャッシュだけで実際に重要なケース（定期的なバック
+グラウンド再チェックのたびに再取得・再パースするのを避けること）は既にカバーできており、再起動を
+挟んだ稀なケースのためだけにリリースペイロードまで再起動をまたいで永続化する複雑さを追加する
+価値は無いと判断した。
+
 ## フィード更新の効率化
 
 `FeedFetcher` は `If-None-Match`（ETag）/ `If-Modified-Since`（Last-Modified）を送り、304 なら

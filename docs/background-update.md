@@ -254,6 +254,18 @@ compromised, the attacker-substituted asset and its digest would still match eac
 [SECURITY.md](../SECURITY.md) for this limitation and what a stronger guarantee (e.g. a
 minisign/cosign detached signature) would require.
 
+**Conditional requests.** `ReleaseFeedSource` caches each endpoint's `ETag` in memory (one slot for
+`releases/latest`, one for the `releases` list — an `UpdateChecker` instance only ever calls the one
+its `currentVersion` picks, per its own KDoc) and sends it back as `If-None-Match` on the next call;
+a 304 replays the cached parsed result rather than a fresh, empty-bodied response being treated as
+"nothing found". This is intentionally **not** persisted to `local_settings.json` the way
+`FeedFetcher`'s validators are saved in the `feeds` table (see "Feed Update Efficiency" below) —
+`ReleaseFeedSource` already lives for the app's whole process lifetime as part of the
+`UpdateChecker` Koin `single`, so an in-memory cache already covers what actually matters (skipping
+a re-fetch/re-parse on every periodic background re-check); persisting release payloads across
+restarts as well would add real complexity for the comparatively rare case of a restart landing
+between two checks.
+
 ## Feed Update Efficiency
 
 `FeedFetcher` sends `If-None-Match` (ETag) / `If-Modified-Since` (Last-Modified), and returns empty on 304 (no new articles). Updated ETag / Last-Modified values are saved in the `feeds` table.

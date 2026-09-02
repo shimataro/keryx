@@ -7,6 +7,7 @@ import io.ktor.client.engine.mock.respondError
 import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -432,6 +433,77 @@ class UpdateCheckerTest {
         ).check()
         assertIs<UpdateStatus.Available>(status)
         assertEquals("Keryx-1.2.3-macos-arm64.zip", status.asset?.name)
+    }
+
+    // --- Conditional requests (ETag / If-None-Match) — data/remote/ReleaseFeedSource ---
+
+    /**
+     * Regression guard: a second check() on the same UpdateChecker instance must send back
+     * whichever validator the first response's ETag header supplied, and a 304 in response must
+     * resolve to the exact same result the cached ETag was stored against — not a failure, and not
+     * a re-parse of a body a 304 doesn't even carry.
+     */
+    @Test
+    fun secondCheckSendsIfNoneMatchAndReplaysTheCachedReleaseOn304() = runTest {
+        var requestCount = 0
+        val client = HttpClient(
+            MockEngine { request ->
+                requestCount++
+                if (requestCount == 1) {
+                    respond(
+                        """{"tag_name":"v2.0.0","html_url":"https://ex.com/2.0.0"}""",
+                        HttpStatusCode.OK,
+                        headersOf(HttpHeaders.ETag, listOf("\"abc123\"")),
+                    )
+                } else {
+                    assertEquals("\"abc123\"", request.headers[HttpHeaders.IfNoneMatch])
+                    respond("", HttpStatusCode.NotModified)
+                }
+            },
+        ) { expectSuccess = false }
+        val checker = UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo")
+
+        val first = checker.check()
+        val second = checker.check()
+
+        assertIs<UpdateStatus.Available>(first)
+        assertIs<UpdateStatus.Available>(second)
+        assertEquals(first.version, second.version)
+        assertEquals(first.url, second.url)
+        assertEquals(2, requestCount)
+    }
+
+    @Test
+    fun firstCheckSendsNoIfNoneMatchWithoutAPriorETag() = runTest {
+        val history = mutableListOf<HttpRequestData>()
+        val client = HttpClient(
+            MockEngine { request ->
+                history.add(request)
+                respond("""{"tag_name":"v1.0.0","html_url":"https://ex.com"}""")
+            },
+        ) { expectSuccess = false }
+        UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo").check()
+
+        assertEquals(1, history.size)
+        assertNull(history[0].headers[HttpHeaders.IfNoneMatch])
+    }
+
+    @Test
+    fun aResponseWithNoETagIsNeverCachedSoLaterChecksStayUnconditional() = runTest {
+        var requestCount = 0
+        val client = HttpClient(
+            MockEngine { request ->
+                requestCount++
+                assertNull(request.headers[HttpHeaders.IfNoneMatch], "request #$requestCount must not carry a validator")
+                respond("""{"tag_name":"v2.0.0","html_url":"https://ex.com/2.0.0"}""") // no ETag header
+            },
+        ) { expectSuccess = false }
+        val checker = UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo")
+
+        checker.check()
+        checker.check()
+
+        assertEquals(2, requestCount)
     }
 }
 

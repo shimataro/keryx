@@ -4,9 +4,12 @@ import io.ktor.client.HttpClient
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -68,6 +71,21 @@ internal class ReleaseFeedSource(
     private val currentVersion: String,
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
+    // Which single endpoint gets called is fixed for this instance's whole lifetime
+    // (UpdateChecker picks one based on isBelowStable(currentVersion), never both), so one cache
+    // slot per method is enough — no eviction/keying by repoSlug needed. In-memory only, not
+    // persisted to local_settings.json: this instance already lives for the app's whole process
+    // lifetime as part of the UpdateChecker Koin single, so it already covers the case that
+    // actually matters (skipping a re-fetch/re-parse on each periodic background re-check) without
+    // the added complexity and surface area of persisting release payloads across restarts for the
+    // comparatively rare case of two checks happening to straddle one. `cacheMutex` guards both
+    // slots against the (narrow, but real) case of two check() calls overlapping — see
+    // UpdateRepository.check()'s own KDoc for why the network call itself isn't otherwise
+    // serialized.
+    private val cacheMutex = Mutex()
+    private var cachedReleaseList: ETagCache? = null
+    private var cachedLatestRelease: ETagCache? = null
+
     /**
      * Fetches the full `releases` list (pre-stable path — see [works.merc.keryx.app.domain.UpdateChecker]'s own KDoc for why).
      * `per_page=100` raises the single-page limit from GitHub's default 30 so realistic release
@@ -76,15 +94,22 @@ internal class ReleaseFeedSource(
      * leaking it upward, per this codebase's error-design convention for the DataSource layer.
      */
     suspend fun fetchReleaseList(repoSlug: String): Result<List<ReleaseInfo>> = fetchReleases {
+        val cached = cacheMutex.withLock { cachedReleaseList }
         val response = client.get("https://api.github.com/repos/$repoSlug/releases?per_page=100") {
             applyGitHubHeaders()
+            applyConditionalHeader(cached)
+        }
+        if (response.status.value == 304 && cached != null) {
+            return@fetchReleases Result.Ok(cached.releases)
         }
         if (response.status.value !in 200..299) {
             return@fetchReleases Result.Err(UpdateException(UpdateStage.CHECK, "HTTP ${response.status.value}"))
         }
         val array = json.parseToJsonElement(response.bodyAsText()) as? JsonArray
             ?: return@fetchReleases Result.Err(UpdateException(UpdateStage.CHECK, "Unexpected response body"))
-        Result.Ok(array.mapNotNull { (it as? JsonObject)?.let(::releaseInfoOf) })
+        val releases = array.mapNotNull { (it as? JsonObject)?.let(::releaseInfoOf) }
+        cacheMutex.withLock { cachedReleaseList = response.newETagCache(releases) }
+        Result.Ok(releases)
     }
 
     /**
@@ -94,8 +119,13 @@ internal class ReleaseFeedSource(
      * converted the same way [fetchReleaseList] converts its own.
      */
     suspend fun fetchLatestRelease(repoSlug: String): Result<List<ReleaseInfo>> = fetchReleases {
+        val cached = cacheMutex.withLock { cachedLatestRelease }
         val response = client.get("https://api.github.com/repos/$repoSlug/releases/latest") {
             applyGitHubHeaders()
+            applyConditionalHeader(cached)
+        }
+        if (response.status.value == 304 && cached != null) {
+            return@fetchReleases Result.Ok(cached.releases)
         }
         if (response.status.value == 404) return@fetchReleases Result.Ok(emptyList())
         if (response.status.value !in 200..299) {
@@ -103,7 +133,9 @@ internal class ReleaseFeedSource(
         }
         val obj = json.parseToJsonElement(response.bodyAsText()) as? JsonObject
             ?: return@fetchReleases Result.Err(UpdateException(UpdateStage.CHECK, "Unexpected response body"))
-        Result.Ok(listOf(releaseInfoOf(obj)))
+        val releases = listOf(releaseInfoOf(obj))
+        cacheMutex.withLock { cachedLatestRelease = response.newETagCache(releases) }
+        Result.Ok(releases)
     }
 
     /** Shares the network-exception handling both fetch methods need: a [CancellationException]
@@ -152,4 +184,18 @@ internal class ReleaseFeedSource(
         header(HttpHeaders.UserAgent, "$APP_NAME/$currentVersion")
         header(HttpHeaders.Accept, "application/vnd.github+json")
     }
+
+    /** Sends the cached validator, if any, so an unchanged release list/latest release costs GitHub
+     * a bodyless 304 rather than the full response — and, per GitHub's own documented behavior,
+     * doesn't count against the unauthenticated rate limit the way a normal request would. */
+    private fun HttpRequestBuilder.applyConditionalHeader(cached: ETagCache?) {
+        if (cached != null) header(HttpHeaders.IfNoneMatch, cached.etag)
+    }
+
+    private fun HttpResponse.newETagCache(releases: List<ReleaseInfo>): ETagCache? =
+        headers[HttpHeaders.ETag]?.let { ETagCache(it, releases) }
 }
+
+/** [releases] as they stood the last time this endpoint returned [etag] — replayed verbatim on a
+ * subsequent 304, which by definition means GitHub would have sent this exact same content again. */
+private data class ETagCache(val etag: String, val releases: List<ReleaseInfo>)
