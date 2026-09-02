@@ -151,9 +151,11 @@ separate, explicit click (Updates tab button, or the tray item once one is offer
   (never an asset GitHub hasn't finished processing, and never one with no verifiable `sha256`
   digest — see "Integrity verification" below) — `.aab` is never a candidate at all, since no
   `UpdateAssetKind` suffix ends in it. `domain/UpdateInstallPolicy.kt`'s `updatePlan` then decides
-  what an update should actually *do* with that asset, purely from `platform/InstallLocation.kt`'s
-  `detectInstallLocation()` (an macOS `.app`, a Windows/Linux portable ZIP, a Windows MSI install, an
-  Android sideload, …): `SelfReplace` (replace files in place, then relaunch), `RunInstaller` (hand
+  what an update should actually *do* with that asset, purely from the install location
+  (`platform/InstallLocation.kt`'s `detectInstallLocation()` — an macOS `.app`, a Windows/Linux
+  portable ZIP, a Windows MSI install, an Android sideload, …) and the already-selected asset (or
+  its absence) — touching neither the network nor the filesystem itself: `SelfReplace` (replace
+  files in place, then relaunch), `RunInstaller` (hand
   off to the OS's own installer), `OpenReleasePage` (this install form can't be updated in place —
   a Linux deb/rpm install, macOS App Translocation, an unwritable install directory, no matching
   asset in this release), or `NotOffered` (a development run, or an Android build installed through

@@ -152,9 +152,10 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
   1 つ選ぶ（GitHub がまだ処理を終えていないアセットや、検証可能な `sha256` digest を持たない
   アセットは絶対に選ばない——詳細は下記「完全性検証」）——`.aab` はどの `UpdateAssetKind` の
   サフィックスにも一致しないため、そもそも候補になることがない。続いて `domain/UpdateInstallPolicy.kt`
-  の `updatePlan` が、そのアセットに対して実際に何をすべきかを、`platform/InstallLocation.kt` の
-  `detectInstallLocation()`（macOS の `.app`、Windows/Linux の portable ZIP、Windows の MSI
-  インストール、Android のサイドロード、……）だけから純粋に決める:
+  の `updatePlan` が、そのアセットに対して実際に何をすべきかを、インストール場所
+  （`platform/InstallLocation.kt` の `detectInstallLocation()`——macOS の `.app`、Windows/Linux の
+  portable ZIP、Windows の MSI インストール、Android のサイドロード、……）と、すでに選択済みの
+  アセット（無ければその不在）だけから、ネットワークにもファイルシステムにも一切触れず純粋に決める:
   `SelfReplace`（その場でファイルを置き換えて再起動）、`RunInstaller`（OS 自身のインストーラーへ
   引き渡す）、`OpenReleasePage`（この形態はその場で更新できない——Linux の deb/rpm インストール、
   macOS App Translocation、書き込めないインストール先、このリリースに合致するアセットが無い、
