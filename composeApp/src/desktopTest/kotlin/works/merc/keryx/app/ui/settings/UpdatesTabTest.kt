@@ -19,6 +19,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
+import works.merc.keryx.app.core.AppInfo
 import works.merc.keryx.app.core.UpdateException
 import works.merc.keryx.app.core.UpdateStage
 import works.merc.keryx.app.domain.AvailableUpdate
@@ -159,6 +160,34 @@ class UpdatesTabTest {
         waitForIdle()
 
         onNodeWithText("再起動してインストール").assertIsDisplayed().assertIsEnabled()
+    }
+
+    @Test
+    fun readyShowsTheReadyToInstallWordingInsteadOfTheGenericAvailableHeadline() = runDesktopComposeUiTest {
+        val state = UpdateState.Ready(installableUpdate(), filePath = "/tmp/x.zip")
+        setContent {
+            Box(Modifier.width(360.dp)) {
+                UpdateResultSection(state, ::noop, ::noop, ::noop, ::noop)
+            }
+        }
+        waitForIdle()
+
+        onNodeWithText("2.0.0 の準備ができました").assertIsDisplayed()
+        onAllNodesWithText("新しいバージョン 2.0.0 があります").assertCountEquals(0)
+    }
+
+    @Test
+    fun theCardNoLongerShowsARedundantCurrentVersionLine() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(360.dp)) {
+                UpdateResultSection(UpdateState.Available(installableUpdate()), ::noop, ::noop, ::noop, ::noop)
+            }
+        }
+        waitForIdle()
+
+        // The current app version is already shown in the About dialog; showing it again here
+        // just to the left of "there's a new version" added nothing.
+        onAllNodesWithText("バージョン ${AppInfo.version}").assertCountEquals(0)
     }
 
     @Test

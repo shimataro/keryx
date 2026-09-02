@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,7 +23,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.stringResource
-import works.merc.keryx.app.core.AppInfo
 import works.merc.keryx.app.domain.AvailableUpdate
 import works.merc.keryx.app.domain.UpdateState
 import works.merc.keryx.app.domain.isInstallable
@@ -53,13 +53,17 @@ import works.merc.keryx.app.resources.settings_update_install
 import works.merc.keryx.app.resources.settings_update_installing
 import works.merc.keryx.app.resources.settings_update_manual_only
 import works.merc.keryx.app.resources.settings_update_open_release_page
+import works.merc.keryx.app.resources.settings_update_ready
 import works.merc.keryx.app.resources.settings_update_retry
 import works.merc.keryx.app.resources.settings_update_verifying
-import works.merc.keryx.app.resources.settings_version
 
 /**
- * Updates tab: update-check interval, the manual "check for update" trigger, and — once one is
- * found — the download/verify/install flow driven by [SettingsViewModel.updateState].
+ * Updates tab: the update status/action — once one is known — leads, driven by
+ * [SettingsViewModel.updateState]; the update-check interval and the manual "check for update"
+ * trigger sit below a divider, deprioritized as ordinary configuration rather than the thing most
+ * worth a glance. A newly available update is the reason someone opens this tab in the first
+ * place, so it (and its one actionable button — download, install, retry, whichever applies) reads
+ * first; "check for update" is something to reach for only once that story is already known.
  *
  * Opening the tab starts a check if nothing has run yet, same as before this composable was
  * rewritten against the full [UpdateState] machine — equivalent to one press of "check now", so it
@@ -77,6 +81,18 @@ internal fun UpdatesTabContent(vm: SettingsViewModel) {
     }
 
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
+        UpdateResultSection(
+            state = state,
+            onCheckForUpdate = { vm.checkForUpdate() },
+            onStartDownload = { vm.startDownload() },
+            onCancelDownload = { vm.cancelDownload() },
+            onInstall = { vm.installUpdate() },
+        )
+
+        Spacer(Modifier.height(16.dp))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+        Spacer(Modifier.height(16.dp))
+
         Text(
             stringResource(Res.string.settings_update_check_interval),
             style = MaterialTheme.typography.labelLarge,
@@ -107,14 +123,6 @@ internal fun UpdatesTabContent(vm: SettingsViewModel) {
                 Text(stringResource(Res.string.settings_update_check_now))
             }
         }
-
-        UpdateResultSection(
-            state = state,
-            onCheckForUpdate = { vm.checkForUpdate() },
-            onStartDownload = { vm.startDownload() },
-            onCancelDownload = { vm.cancelDownload() },
-            onInstall = { vm.installUpdate() },
-        )
     }
 }
 
@@ -163,16 +171,26 @@ internal fun UpdateResultSection(
 
     Spacer(Modifier.height(12.dp))
     SettingsCard {
-        Text(
-            stringResource(Res.string.settings_version, AppInfo.version),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            stringResource(Res.string.settings_update_check_available, update.version),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        val installable = update.plan.isInstallable
+        UpdateHeadlineRow(state, update, installable, onStartDownload, onInstall)
+        UpdateProgressSlot(state, onCancelDownload)
+
+        if (!installable) {
+            Text(
+                stringResource(Res.string.settings_update_manual_only),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        if (state is UpdateState.Failed) {
+            Text(
+                userMessage(state.exception),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
         update.releaseNotes?.let { notes ->
             Text(
                 plainTextReleaseNotes(notes),
@@ -183,27 +201,63 @@ internal fun UpdateResultSection(
             )
         }
 
-        val installable = update.plan.isInstallable
-        if (!installable) {
-            Text(
-                stringResource(Res.string.settings_update_manual_only),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        UpdateProgressSlot(state, onCancelDownload)
-
-        if (state is UpdateState.Failed) {
-            Text(
-                userMessage(state.exception),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-
-        PrimaryUpdateActionButton(state, installable, onStartDownload, onInstall)
         LinkRow(label = stringResource(Res.string.settings_update_open_release_page), url = update.releaseUrl)
+    }
+}
+
+/**
+ * The card's single hero line: what's currently true about the update, and — trailing, on the
+ * same row — the one button that acts on it (download / install / retry), so the most useful
+ * thing to do about an update is never more than one glance and one click away. Downloading and
+ * Verifying render nothing here — [UpdateProgressSlot] right below is their entire status/action
+ * surface (progress bar + Cancel, or a spinner) — so this row and that slot together read as one
+ * continuous status block.
+ */
+@Composable
+private fun UpdateHeadlineRow(
+    state: UpdateState,
+    update: AvailableUpdate,
+    installable: Boolean,
+    onStartDownload: () -> Unit,
+    onInstall: () -> Unit,
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        val headline = if (state is UpdateState.Ready) {
+            stringResource(Res.string.settings_update_ready, update.version)
+        } else {
+            stringResource(Res.string.settings_update_check_available, update.version)
+        }
+        Text(
+            headline,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        when (state) {
+            is UpdateState.Available -> if (installable) {
+                Spacer(Modifier.width(8.dp))
+                FlatButton(onClick = onStartDownload) { Text(stringResource(Res.string.settings_update_download)) }
+            }
+            is UpdateState.Ready -> {
+                Spacer(Modifier.width(8.dp))
+                FlatButton(onClick = onInstall) { Text(stringResource(Res.string.settings_update_install)) }
+            }
+            is UpdateState.Installing -> {
+                Spacer(Modifier.width(8.dp))
+                FlatButton(onClick = {}, enabled = false) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SmallSpinner()
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(Res.string.settings_update_installing))
+                    }
+                }
+            }
+            is UpdateState.Failed -> {
+                Spacer(Modifier.width(8.dp))
+                FlatTonalButton(onClick = onStartDownload) { Text(stringResource(Res.string.settings_update_retry)) }
+            }
+            else -> Unit // Downloading/Verifying: UpdateProgressSlot below is the only action surface
+        }
     }
 }
 
@@ -252,37 +306,6 @@ private fun UpdateProgressSlot(state: UpdateState, onCancelDownload: () -> Unit)
             }
             else -> Unit // reserved but empty — see this function's own KDoc
         }
-    }
-}
-
-/** The card's own state-dependent action — omitted (not disabled) for a state with nothing
- * actionable at all ([UpdateState.Available] this install form can't act on), since that is a
- * permanent property of this install, not a merely temporary one. */
-@Composable
-private fun PrimaryUpdateActionButton(
-    state: UpdateState,
-    installable: Boolean,
-    onStartDownload: () -> Unit,
-    onInstall: () -> Unit,
-) {
-    when (state) {
-        is UpdateState.Available -> if (installable) {
-            FlatButton(onClick = onStartDownload) { Text(stringResource(Res.string.settings_update_download)) }
-        }
-        is UpdateState.Ready -> FlatButton(onClick = onInstall) {
-            Text(stringResource(Res.string.settings_update_install))
-        }
-        is UpdateState.Installing -> FlatButton(onClick = {}, enabled = false) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                SmallSpinner()
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(Res.string.settings_update_installing))
-            }
-        }
-        is UpdateState.Failed -> if (state.update != null) {
-            FlatTonalButton(onClick = onStartDownload) { Text(stringResource(Res.string.settings_update_retry)) }
-        }
-        else -> Unit // Downloading/Verifying: DownloadProgressRow above already covers the action (cancel)
     }
 }
 
