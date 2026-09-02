@@ -43,7 +43,11 @@ internal fun detectMacInstallLocation(launcher: String, launcherFile: File): Ins
         Log.warn(TAG, "Launcher path didn't match the expected .app/Contents/MacOS layout: $launcher")
         return InstallLocation(InstallKind.UNKNOWN, null, launcher, parentWritable = false, translocated = false)
     }
-    val translocated = appRoot.path.contains("/AppTranslocation/")
+    // Matched by ancestor directory name rather than as a "/AppTranslocation/" substring:
+    // File.path uses the host JVM's own separator, so a substring check silently answers false
+    // wherever that separator isn't '/' — including this detector's own unit tests, which
+    // exercise it on whichever OS the suite runs under (see InstallLocationDesktopTest's KDoc).
+    val translocated = generateSequence(appRoot) { it.parentFile }.any { it.name == "AppTranslocation" }
     val parentWritable = appRoot.parentFile?.let { FileSystemExtras.isDirectoryWritable(it.path) } ?: false
     return InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, launcher, parentWritable, translocated)
 }
@@ -75,7 +79,10 @@ internal fun detectLinuxInstallLocation(launcher: String, launcherFile: File): I
         Log.warn(TAG, "Launcher path didn't match the expected <root>/bin/Keryx layout: $launcher")
         return InstallLocation(InstallKind.UNKNOWN, null, launcher, parentWritable = false, translocated = false)
     }
-    val underSystemRoot = LINUX_SYSTEM_ROOTS.any { appRoot.path == it || appRoot.path.startsWith("$it/") }
+    // Path.startsWith compares whole name elements (and the root), which is exactly the
+    // "the root itself, or anything beneath it" test this needs — and, like
+    // detectMacInstallLocation's ancestor walk above, it holds whatever the host's separator is.
+    val underSystemRoot = LINUX_SYSTEM_ROOTS.any { appRoot.toPath().startsWith(it) }
     if (underSystemRoot) {
         return InstallLocation(InstallKind.LINUX_PACKAGE, appRoot.path, launcher, parentWritable = false, translocated = false)
     }
