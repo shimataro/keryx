@@ -202,6 +202,31 @@ class DesktopUpdateInstallerTest {
         assertTrue(script.contains("open -n -a \"\$APP\""))
     }
 
+    /**
+     * Regression guard: once the extracted app is staged next to the current install, neither the
+     * downloaded ZIP nor its extraction directory is still needed — leaving them for the next
+     * check()'s sweep could mean never, on a Failed retry loop (see
+     * UpdateRepository.retryFailed), and both sit on the same cache volume runDownload's own
+     * free-space guard already budgets tightly for.
+     */
+    @Test
+    fun installMacSelfReplaceCleansUpTheZipAndExtractionDirImmediatelyAfterStaging() {
+        val root = newTempDir("desktop-installer-mac-cleanup")
+        val appRoot = File(root, "Keryx.app").apply { mkdirs() }
+        val downloadDir = newTempDir("desktop-installer-mac-cleanup-download")
+        val zip = macAppZip(downloadDir)
+        val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, File(appRoot, "Contents/MacOS/Keryx").path, parentWritable = true, translocated = false)
+        val installer = DesktopUpdateInstaller(location, FakeProcessLauncher())
+
+        val result = runBlocking {
+            installer.install(zip.path, update("1.2.3", macAsset("1.2.3"), UpdatePlan.SelfReplace(macAsset("1.2.3"))))
+        }
+
+        assertEquals(InstallLaunchResult.Launched, result)
+        assertFalse(zip.exists(), "the downloaded ZIP must be removed once staged")
+        assertFalse(File(downloadDir, "extracted").exists(), "the extraction directory must be removed once staged")
+    }
+
     @Test
     fun installMacSelfReplaceFailsAndNeverLaunchesWhenTheBundleVersionDoesNotMatch() {
         val root = newTempDir("desktop-installer-mac-version-mismatch")
@@ -337,5 +362,30 @@ class DesktopUpdateInstallerTest {
         assertIs<InstallLaunchResult.Failed>(releasePageResult)
         assertIs<InstallLaunchResult.Failed>(notOfferedResult)
         assertEquals(0, launcher.callCount)
+    }
+
+    // --- hasEnoughFreeSpace ---
+
+    @Test
+    fun hasEnoughFreeSpaceIsTrueExactlyAtTheRequiredMultiple() {
+        assertTrue(hasEnoughFreeSpace(usableBytes = 1_000, baseBytes = 100, multiple = 10))
+    }
+
+    @Test
+    fun hasEnoughFreeSpaceIsFalseOneByteShortOfTheRequiredMultiple() {
+        assertFalse(hasEnoughFreeSpace(usableBytes = 999, baseBytes = 100, multiple = 10))
+    }
+
+    @Test
+    fun hasEnoughFreeSpaceRejectsABaseThatWouldOverflowMultiplication() {
+        // Mirrors domain.UpdateFreeSpaceGuardTest's own overflow case, for the same reason: a plain
+        // usableBytes < baseBytes * multiple would silently overflow into a negative Long here too.
+        val hugeBase = Long.MAX_VALUE / 2
+        assertFalse(hasEnoughFreeSpace(usableBytes = Long.MAX_VALUE, baseBytes = hugeBase, multiple = 10L))
+    }
+
+    @Test
+    fun hasEnoughFreeSpaceRejectsANegativeBase() {
+        assertFalse(hasEnoughFreeSpace(usableBytes = Long.MAX_VALUE, baseBytes = -1, multiple = 10))
     }
 }

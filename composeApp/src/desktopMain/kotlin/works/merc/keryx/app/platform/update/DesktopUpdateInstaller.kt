@@ -21,8 +21,21 @@ private val SELF_REPLACE_KINDS =
 
 /** Uncompressed size an update ZIP is allowed to expand to, as a multiple of the compressed asset
  * size — generous headroom for a `.app`/app-image (mostly a JVM runtime, which compresses well)
- * without leaving [ZipExtractor]'s own `maxBytes` guard toothless. */
+ * without leaving [ZipExtractor]'s own `maxBytes` guard toothless. Also the free-space multiple
+ * [selfReplace] checks both the cache volume (before extracting) and the install volume (before
+ * staging) against — the extracted tree can never exceed this, since it's the same bound
+ * [ZipExtractor] itself enforces while extracting. */
 private const val ZIP_EXTRACT_MAX_BYTES_MULTIPLE = 10L
+
+/**
+ * Overflow-safe "is [usableBytes] enough for [baseBytes] `*` [multiple]" — mirrors
+ * `domain.hasEnoughFreeSpaceForUpdate`'s own reasoning (see its KDoc for why a plain
+ * `usableBytes < baseBytes * multiple` isn't used) but kept local here rather than shared with it:
+ * [ZIP_EXTRACT_MAX_BYTES_MULTIPLE] is a desktop-only extraction-pipeline concept `domain/` — used
+ * equally by Android, which never extracts anything locally — has no business knowing about.
+ */
+internal fun hasEnoughFreeSpace(usableBytes: Long, baseBytes: Long, multiple: Long): Boolean =
+    baseBytes >= 0 && usableBytes / multiple >= baseBytes
 
 /**
  * Desktop [UpdateInstaller]. For [UpdatePlan.SelfReplace] (macOS `.app`, Windows/Linux portable):
@@ -111,12 +124,22 @@ class DesktopUpdateInstaller internal constructor(
             else -> emptySet()
         }
 
+        val zipSize = File(filePath).length()
+        // The 3x check runDownload() already did covers the download itself (the .part file
+        // briefly coexisting with its verified rename) — extraction needs its own, much larger
+        // headroom on the very same volume (the ZIP's parent dir, under <cacheDir>/updates/), so
+        // this re-checks with the multiple that actually matters here before doing the expensive
+        // part.
+        if (!hasEnoughFreeSpace(FileSystemExtras.usableSpaceBytes(workDir.path), zipSize, ZIP_EXTRACT_MAX_BYTES_MULTIPLE)) {
+            return InstallLaunchResult.Failed("Not enough free disk space to extract the downloaded update")
+        }
+
         val extractDir = File(workDir, "extracted")
         try {
             ZipExtractor.extract(
                 zipPath = filePath,
                 destDir = extractDir.path,
-                maxBytes = File(filePath).length() * ZIP_EXTRACT_MAX_BYTES_MULTIPLE,
+                maxBytes = zipSize * ZIP_EXTRACT_MAX_BYTES_MULTIPLE,
                 executableEntries = executableEntries,
             )
         } catch (e: IllegalStateException) {
@@ -131,14 +154,32 @@ class DesktopUpdateInstaller internal constructor(
 
         val extractedApp = File(extractDir, entryDirName)
         verifyExtractedApp(extractedApp, assetKind, expectedVersion)?.let { reason ->
+            FileSystemExtras.deleteRecursively(extractDir.path)
             return InstallLaunchResult.Failed(reason)
+        }
+
+        // appRoot's own volume — not necessarily the same one workDir/extractDir are on — needs its
+        // own equivalent check before staging: ZipExtractor's own maxBytes guard already bounds the
+        // extracted tree at zipSize * ZIP_EXTRACT_MAX_BYTES_MULTIPLE, so that same figure is a valid
+        // upper bound on what's about to be moved (or, cross-volume, copied) onto it.
+        if (!hasEnoughFreeSpace(FileSystemExtras.usableSpaceBytes(parent.path), zipSize, ZIP_EXTRACT_MAX_BYTES_MULTIPLE)) {
+            FileSystemExtras.deleteRecursively(extractDir.path)
+            return InstallLaunchResult.Failed("Not enough free disk space on the install volume to stage the update")
         }
 
         val newDir = File(parent, ".${appRootFile.name}.new")
         FileSystemExtras.deleteRecursively(newDir.path) // clear any leftover from a previously failed attempt
         if (!FileSystemExtras.move(extractedApp.path, newDir.path)) {
+            FileSystemExtras.deleteRecursively(extractDir.path)
             return InstallLaunchResult.Failed("Could not stage the extracted update next to the current install")
         }
+
+        // The extracted tree just moved out from under extractDir, and the downloaded ZIP itself is
+        // no longer needed once staged — clean up both immediately rather than leaving them for the
+        // next check()'s sweep, which could be a long time away (or never come, on a Failed retry
+        // loop — see UpdateRepository.retryFailed).
+        FileSystemExtras.deleteRecursively(extractDir.path)
+        File(filePath).delete()
 
         val oldDir = File(parent, ".${appRootFile.name}.old")
         val logFile = File(workDir, "apply.log")
