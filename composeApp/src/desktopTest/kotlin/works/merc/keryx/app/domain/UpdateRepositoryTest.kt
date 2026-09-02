@@ -463,6 +463,40 @@ class UpdateRepositoryTest {
         assertFalse(available.update.installable) // ...but the installer refuses right now
     }
 
+    /**
+     * Regression guard for the `noOpInstaller(canInstall = false)` seam itself: startDownload()'s
+     * own gate (`if (!canInstall(update.plan)) return@withLock`) must not download a single byte
+     * when the installer refuses — not just leave AvailableUpdate.installable == false for the UI
+     * to read (see checkFoldsInstallerCanInstallIntoAvailableUpdate above).
+     */
+    @Test
+    fun startDownloadNeverDownloadsWhenTheInstallerCannotInstall() {
+        val payload = Random(34).nextBytes(1024)
+        val sha256 = sha256Hex(payload)
+        var downloadRequestCount = 0
+        val downloaderClient = HttpClient(MockEngine { downloadRequestCount++; respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }
+        val repo = UpdateRepository(
+            checker = checkerFor { releaseJson("2.0.0", "Keryx-2.0.0-macos-arm64.zip", "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256) },
+            downloader = UpdateDownloader(downloaderClient),
+            installer = noOpInstaller(canInstall = false),
+            notificationCenter = NotificationCenter(),
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+        )
+        runBlocking { repo.check() }
+        assertIs<UpdateState.Available>(repo.state.value)
+
+        repo.startDownload()
+
+        // No completion signal to await (nothing should ever start), so give any wrongly-launched
+        // download a real chance to have issued its request before asserting it didn't.
+        runBlocking { delay(200) }
+        assertEquals(0, downloadRequestCount)
+        assertIs<UpdateState.Available>(repo.state.value)
+    }
+
     @Test
     fun sweepPreservesTheCurrentlyReadyVersionsDirectory() {
         val payload = Random(5).nextBytes(1024)
