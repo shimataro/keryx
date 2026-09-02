@@ -375,8 +375,8 @@ class ArticleListPaneTest {
         waitForIdle()
 
         // sortEnabled=false uses the "disabled while searching" tooltip text as its contentDescription.
-        onNodeWithContentDescription("検索結果は関連度順で表示されます").assertIsNotEnabled()
-        onNodeWithContentDescription("検索結果は関連度順で表示されます").performClick()
+        onNodeWithContentDescription("検索中は並び替えできません").assertIsNotEnabled()
+        onNodeWithContentDescription("検索中は並び替えできません").performClick()
         waitForIdle()
 
         assertEquals(0, toggleSortCount)

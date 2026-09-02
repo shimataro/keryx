@@ -95,8 +95,18 @@ const val CACHE_RETENTION_DAYS_DEFAULT = 30
 const val FEED_ERROR_REASON_GONE = "gone"
 
 // --- Full-text search ---
-/** Minimum search term length. The trigram tokenizer doesn't index terms under 3 characters, so shorter terms are excluded from search. */
-const val SEARCH_MIN_TERM_LENGTH = 3
+/**
+ * Minimum search term length. Terms at or above [TRIGRAM_MIN_TERM_LENGTH] use the `articles_fts`
+ * trigram index; shorter terms (down to this length) fall back to a `LIKE` scan over `articles`
+ * (see `FtsSearch`), since the trigram tokenizer indexes no tokens at all below 3 characters.
+ */
+const val SEARCH_MIN_TERM_LENGTH = 2
+
+/** Minimum term length the `articles_fts` trigram index can match. Shorter terms (down to [SEARCH_MIN_TERM_LENGTH]) use a `LIKE` fallback instead. */
+const val TRIGRAM_MIN_TERM_LENGTH = 3
+
+/** Result cap for a search whose terms are all below [TRIGRAM_MIN_TERM_LENGTH] (no FTS rank available, so results are ordered by `published_at` instead). */
+const val SEARCH_FALLBACK_RESULT_LIMIT = 200
 
 // --- sync_state keys ---
 const val SYNC_STATE_LAST_SYNCED_AT = "last_synced_at"

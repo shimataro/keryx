@@ -153,8 +153,13 @@ Android の `actual` は `AndroidSqliteDriver` を生成する。こちらは `o
 `articles_fts`（FTS5 trigram, `content='articles'`）を生 SQL で管理する。SQLDelight のスキーマには含めない。
 **ライブ DB では決して DROP しない**（アップロードからの除外はスナップショットのコピー側で行う。`DatabaseSnapshot`）。
 `ensureIndexed()`（起動時、初回作成 + 未索引行の増分投入）、`indexMissing()`（hot path＝フィード更新・同期マージ後の
-増分投入）、`rebuildIndex()`（日次アイドルの全再構築 heal のみ）を持つ。検索は `FtsSearch` が `MATCH` クエリを
-実行し、記事 ID をランク順に返す。
+増分投入）、`rebuildIndex()`（日次アイドルの全再構築 heal のみ）を持つ。`FtsSearch.search()` は語の長さで
+分岐する — 3 文字以上の語は `articles_fts MATCH`（ランク順）を実行するが、trigram トークナイザはそれより
+短い語を索引化できないため、2 文字の語は `LIKE` フィルタとして扱う（長い語が1つでもあればマッチ済みの行への
+追加 AND、全語が2文字ならマッチ ID なしの単独 `LIKE` 走査を `published_at DESC` 順・
+`SEARCH_FALLBACK_RESULT_LIMIT` 上限で行う。FTS ランクが存在しないため）。両経路のハイライトマーカーは
+FTS5 の `highlight()` ではなく Kotlin 側（`markTerms`）で生成し、`LIKE` で拾った短い語も FTS 一致と
+同じ見え方でマークされる。正確な文字数の閾値は [db-schema.ja.md](db-schema.ja.md) の `articles_fts` 節を参照。
 
 ### DatabaseMerger（expect / actual）— 同期マージの要
 
