@@ -280,15 +280,7 @@ class FeedRepository(
         }
         val newOrder = reorderIds(groupIds, feedId, targetFeedId)
         val sortOrderOf = group.associate { it.id to it.sort_order }
-        var newFeedSortOrder = 0L
-        newOrder.forEachIndexed { index, id ->
-            if (id == feedId) {
-                newFeedSortOrder = index.toLong()
-            } else if (sortOrderOf[id] != index.toLong()) {
-                feeds.updateSortOrder(index.toLong(), now, now, id)
-            }
-        }
-        return newFeedSortOrder
+        return applyReorderUpdates(newOrder, sortOrderOf, feedId, now, feeds)
     }
 
     /**
@@ -304,12 +296,8 @@ class FeedRepository(
         val newOrder = reorderIds(current.map { it.id }, feedId, targetFeedId)
         val now = clock.nowMillis()
         db.transaction {
-            newOrder.forEachIndexed { index, id ->
-                if (id == feedId) {
-                    feeds.updateFolderAndSortOrder(folderId, index.toLong(), now, now, now, id)
-                } else if (sortOrderOf[id] != index.toLong()) {
-                    feeds.updateSortOrder(index.toLong(), now, now, id)
-                }
+            applyReorderUpdates(newOrder, sortOrderOf, feedId, now, feeds) { index ->
+                feeds.updateFolderAndSortOrder(folderId, index.toLong(), now, now, now, feedId)
             }
         }
         syncScheduler.scheduleSync()
@@ -529,4 +517,31 @@ class FeedRepository(
             ),
         )
     }
+}
+
+/**
+ * Iterates over a reordered feed-id list and writes [newSortOrder]/[newSortOrderUpdatedAt]
+ * only for feeds whose sort order actually changed. The caller provides [onFeedId] for any
+ * extra action on the feed being moved/inserted (e.g. folder update).
+ *
+ * @return The new sort order of [feedId].
+ */
+private inline fun applyReorderUpdates(
+    newOrder: List<String>,
+    previousSortOrderOf: Map<String, Long>,
+    feedId: String,
+    now: Long,
+    feedsQueries: works.merc.keryx.app.data.local.db.FeedsQueries,
+    onFeedId: (index: Int) -> Unit = {},
+): Long {
+    var newFeedSortOrder = 0L
+    newOrder.forEachIndexed { index, id ->
+        if (id == feedId) {
+            newFeedSortOrder = index.toLong()
+            onFeedId(index)
+        } else if (previousSortOrderOf[id] != index.toLong()) {
+            feedsQueries.updateSortOrder(index.toLong(), now, now, id)
+        }
+    }
+    return newFeedSortOrder
 }
