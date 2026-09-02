@@ -81,8 +81,14 @@ class InstallLocationDesktopTest {
         assertTrue(location.parentWritable)
     }
 
+    // File.setWritable(false) on a directory is itself ignored by Windows' own filesystem
+    // (FILE_ATTRIBUTE_READONLY has no effect there), so this negative probe only works on the
+    // POSIX platforms this JVM might run the test suite under — a real Windows ACL would be
+    // needed to exercise the unwritable branch on Windows itself, out of scope here.
     @Test
     fun windowsInstalledWhenTheInstallParentIsUnwritable() {
+        if (isWindows) return
+
         val root = newTempDir("install-location-windows-unwritable")
         val parent = File(root, "parent").apply { mkdirs() }
         val appDir = File(parent, "Keryx").apply { mkdirs() }
@@ -110,8 +116,13 @@ class InstallLocationDesktopTest {
         assertTrue(location.parentWritable)
     }
 
+    // Same Windows caveat as windowsInstalledWhenTheInstallParentIsUnwritable() above — this
+    // exercises the Linux detector, but the CI leg it would run under is still whichever OS the
+    // JVM itself is on, and setWritable(false) on a directory is a no-op on Windows.
     @Test
     fun linuxUnknownWhenTheInstallParentIsUnwritable() {
+        if (isWindows) return
+
         val root = newTempDir("install-location-linux-unwritable")
         val parent = File(root, "parent").apply { mkdirs() }
         val binDir = File(parent, "Keryx/bin").apply { mkdirs() }

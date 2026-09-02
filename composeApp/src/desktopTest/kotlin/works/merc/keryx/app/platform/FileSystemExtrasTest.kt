@@ -81,8 +81,12 @@ class FileSystemExtrasTest {
         assertTrue(FileSystemExtras.usableSpaceBytes(notYetCreated.path) > 0)
     }
 
+    // Windows' WinNTFileSystem always answers ACCESS_EXECUTE with true, so `canExecute()` cannot
+    // distinguish "made executable" from "was already". The executable bit itself is POSIX-only.
     @Test
     fun setExecutableMarksTheFileAsExecutable() {
+        if (isWindows) return
+
         val root = newTempDir("file-system-extras-executable")
         val file = File(root, "script.sh").apply { writeText("#!/bin/sh") }
         assertFalse(file.canExecute())
@@ -107,8 +111,13 @@ class FileSystemExtrasTest {
         assertFalse(FileSystemExtras.isDirectoryWritable(file.path))
     }
 
+    // Windows ignores File.setWritable(false) on directories (FILE_ATTRIBUTE_READONLY has no
+    // effect there), so this negative case needs a real ACL to exercise on Windows — out of scope
+    // here. The positive case above still runs on every platform.
     @Test
     fun isDirectoryWritableIsFalseWhenWriteAccessIsRevoked() {
+        if (isWindows) return
+
         val root = newTempDir("file-system-extras-unwritable")
         val dir = File(root, "locked").apply { mkdirs() }
         check(dir.setWritable(false)) { "test setup: could not revoke write permission" }

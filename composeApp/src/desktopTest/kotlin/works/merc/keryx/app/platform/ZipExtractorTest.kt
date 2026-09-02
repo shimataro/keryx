@@ -44,8 +44,12 @@ class ZipExtractorTest {
         assertEquals("plist", File(dest, "Keryx.app/Contents/Info.plist").readText())
     }
 
+    // Windows' WinNTFileSystem always answers ACCESS_EXECUTE with true, so `canExecute()` cannot
+    // observe this distinction there — the executable bit itself is POSIX-only.
     @Test
     fun marksOnlyTheListedEntriesAsExecutable() {
+        if (isWindows) return
+
         val zip = zipOf("Keryx.app/Contents/MacOS/Keryx" to "binary", "Keryx.app/Contents/Info.plist" to "plist")
         val dest = newTempDir("zip-extractor-dest-exec")
 
