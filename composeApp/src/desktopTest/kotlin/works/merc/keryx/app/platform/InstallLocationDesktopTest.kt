@@ -12,8 +12,8 @@ import kotlin.test.assertTrue
  * Exercises the path-parsing logic in `InstallLocation.desktop.kt` directly, independent of the
  * real `jpackage.app-path`/OS this test itself runs under (see `detectInstallLocation`'s own
  * dispatch, which these internal `detect*InstallLocation` functions sit behind). Writability
- * outcomes use real temporary directories rather than mocks, since [isWritable] does real
- * filesystem probing that a mock would misrepresent.
+ * outcomes use real temporary directories rather than mocks, since [FileSystemExtras.isDirectoryWritable]
+ * does real filesystem probing that a mock would misrepresent.
  */
 class InstallLocationDesktopTest {
     private val tempDirs = mutableListOf<File>()
@@ -154,13 +154,4 @@ class InstallLocationDesktopTest {
         assertEquals(InstallKind.UNKNOWN, location.kind)
     }
 
-    // --- isWritable ---
-
-    @Test
-    fun isWritableIsFalseForANonDirectory() {
-        val root = newTempDir("install-location-not-a-dir")
-        val file = File(root, "not-a-directory").apply { writeText("x") }
-
-        assertFalse(isWritable(file))
-    }
 }

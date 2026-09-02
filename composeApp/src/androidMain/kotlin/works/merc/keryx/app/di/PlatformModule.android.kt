@@ -53,7 +53,7 @@ private fun providerTokenStorage(type: CloudStorageType): TokenStorage =
 actual val platformModule: Module = module {
     single<OsNotificationSink> { AndroidNotificationSink(AndroidAppContext.application) }
 
-    single<UpdateInstaller> { AndroidUpdateInstaller }
+    single<UpdateInstaller> { AndroidUpdateInstaller() }
 
     single {
         HttpClient(OkHttp) {

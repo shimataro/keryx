@@ -385,8 +385,12 @@ jobs:
         # androidReleaseSigningRequired turns a missing/half-configured secret above into a hard
         # build failure instead of androidApp/build.gradle.kts's own local-dev fallback (an
         # unsigned APK) — this job publishes its output, so it must never succeed unsigned.
+        # The APK comes from the "github" flavor (carries REQUEST_INSTALL_PACKAGES, the sideload
+        # distribution an in-app update installs over) and the AAB from "play" (the Play Console
+        # submission artifact, which must not carry that permission) — see
+        # androidApp/build.gradle.kts's flavorDimensions and AndroidUpdateInstaller's own KDoc.
         run: >
-          ./gradlew :androidApp:assembleRelease :androidApp:bundleRelease
+          ./gradlew :androidApp:assembleGithubRelease :androidApp:bundlePlayRelease
           -PappVersion=${{ steps.version.outputs.version }}
           -PandroidReleaseSigningRequired=true
         env:
@@ -400,14 +404,14 @@ jobs:
       - name: Rename artifacts
         id: artifact
         run: |
-          apk_src=$(find androidApp/build/outputs/apk/release -maxdepth 1 -name '*.apk' | head -n 1)
-          aab_src=$(find androidApp/build/outputs/bundle/release -maxdepth 1 -name '*.aab' | head -n 1)
+          apk_src=$(find androidApp/build/outputs/apk/github/release -maxdepth 1 -name '*.apk' | head -n 1)
+          aab_src=$(find androidApp/build/outputs/bundle/playRelease -maxdepth 1 -name '*.aab' | head -n 1)
           if [ -z "$apk_src" ]; then
-            echo "::error::No APK produced under androidApp/build/outputs/apk/release."
+            echo "::error::No APK produced under androidApp/build/outputs/apk/github/release."
             exit 1
           fi
           if [ -z "$aab_src" ]; then
-            echo "::error::No AAB produced under androidApp/build/outputs/bundle/release."
+            echo "::error::No AAB produced under androidApp/build/outputs/bundle/playRelease."
             exit 1
           fi
           # Defense in depth on top of -PandroidReleaseSigningRequired=true above: AGP names an

@@ -98,5 +98,22 @@ Keryx is designed to minimize its attack surface:
   your device and the provider — no credentials pass through any developer server.
 - **Local data** (subscriptions, cached articles, settings) stays on your device
   unless you explicitly enable cloud sync.
+- **In-app update downloads are verified, but not authenticated to a publisher
+  identity.** When Keryx offers to download and install an update in-app (see
+  `docs/background-update.md`'s "In-App Update" for which platforms/install forms
+  this applies to), the downloaded file is checked against the SHA-256 digest the
+  GitHub Releases API itself reports for that asset before anything is installed,
+  over an HTTPS connection to an allowlisted GitHub host only. This detects
+  transport corruption and a tampered-in-transit download, but **it does not
+  verify who published the release** — the digest is computed and served by the
+  same GitHub Releases API the asset itself comes from, so if the GitHub
+  account/token used to publish Keryx releases were ever compromised, a
+  substituted asset and its digest would still match each other. Trust in a
+  release's authenticity currently rests on GitHub account security (2FA, token
+  scoping) and HTTPS/TLS to GitHub, the same as any other software distributed
+  without a separate, independently-verifiable release signature. A stronger
+  guarantee (e.g. a detached minisign/cosign signature published alongside each
+  release, with the verifying public key embedded in the app) is a considered
+  future improvement, not yet implemented.
 
 For the complete data-handling description, see [PRIVACY.md](PRIVACY.md).

@@ -109,7 +109,7 @@ Android には計装テストスイートが 2 つある。CI に組み込まれ
 | スイート | タスク | 対象 | CI |
 | --- | --- | --- | --- |
 | `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | 実際のバンドル SQLite に対する `DatabaseMerger`/`DatabaseSnapshot` | ✗ ローカルのみ |
-| `androidApp/src/androidTest/` | `:androidApp:connectedDebugAndroidTest` | Compose UI（長押しジェスチャ、検索バー） | ✓ 毎プッシュ |
+| `androidApp/src/androidTest/` | `:androidApp:connectedGithubDebugAndroidTest` | Compose UI（長押しジェスチャ、検索バー） | ✓ 毎プッシュ |
 
 どちらも実機または起動中のエミュレータが必要 — AVD（`<name>`）の作り方は
 [setup.ja.md](setup.ja.md) を参照:
@@ -126,12 +126,19 @@ $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
 がまだ導入していない別種の CI 課題のため、現状はローカル実行のみ。
 
 `androidApp` 自身の計装テストスイート（Compose UI のジェスチャテスト。上記の
-`androidApp/src/androidTest/` を参照）は、通常の `com.android.application` のタスク命名を使う:
+`androidApp/src/androidTest/` を参照）は、通常の `com.android.application` のタスク命名を使う——
+`androidApp` が `github`/`play` の product flavor に分かれた分だけタスク名も flavor 修飾される
+（`build.ja.md` の「Android (APK / AAB)」を参照）:
 
 ```bash
 $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
-./gradlew :androidApp:connectedDebugAndroidTest
+./gradlew :androidApp:connectedGithubDebugAndroidTest
 ```
+
+CI で実行する（そしてローカルでも実行すべき）のは `github` だけ——このスイートは flavor 固有の
+挙動を何も検証していない（2 つの flavor の違いは `REQUEST_INSTALL_PACKAGES` マニフェスト権限の
+有無だけ）ので、`connectedPlayDebugAndroidTest` まで実行すると同じ検証にエミュレータ時間を
+二重にかけるだけになる。`connectedAndroidTest`（flavor 指定なし）は両方を実行する、必要になれば。
 
 `androidDeviceTest` と同様、これも `./gradlew build` には含まれない — アプリケーションモジュールの
 AGP の `build` ライフサイクルは `androidTest` ソースセットに対して静的解析タスクの
@@ -211,7 +218,33 @@ heavyweight ポップアップの強制。置き換え対象の AWT ウィジェ
 （`SyncRepositoryTest.kt`：`AUTOMATIC` トリガーの同期が `autoSyncSuspended` 中はスキップされること、
 `MANUAL` は決してゲートされないこと、`scheduleSync()` も同様に抑制されること、成功した同期／リセット／
 `clearSyncFailureState()` でゲートがクリアされること——`SchemaVersionException` は意図的にゲートを
-一切起動しない）などを網羅する。
+一切起動しない）、アプリ内アップデートのパイプライン（`UpdateCheckerTest.kt`：`assets[]`/`body` を
+`asset`/`releaseNotes` へパースすること、`sha256` 以外や不正な `digest` はアセットなし扱いになる
+こと、`state` が `"uploaded"` でないアセットは除外されること；`UpdateAssetSelectorTest.kt`：
+`InstallKind` ごとのアセットのサフィックス一致、リリースに何が含まれていても `.aab` は絶対に
+選ばれないこと；`UpdateInstallPolicyTest.kt`：`InstallLocation` × アセット → `UpdatePlan`、および
+`canInstallAndroidApkUpdate` のプラン種別／OS 同意状態によるゲーティング——`AndroidUpdateInstaller`
+の判断のうちここだけ純粋関数として切り出してあるのは、`androidMain` 自体には JVM でテストできる
+ユニットテストのソースセットが存在しないため（下記「既知の未カバー範囲」参照）；
+`UpdateDownloaderTest.kt`/`UpdateDownloadHostTest.kt`：ホストの allowlist（先頭ドット必須の
+サフィックス一致、生 IP や紛らわしいホスト名を拒否）、`MAX_REDIRECTS` で頭打ちになる手動リダイレクト
+追従、digest やサイズの不一致時に `.part` ファイルも本体ファイルも残らないこと、進捗通知が単調に
+増加して `bytesTotal` に到達すること；`UpdateStateMachineTest.kt`：`Ready` が `UpToDate`／同一
+バージョンの再チェックでは潰れないが、より新しいバージョンでは潰れること、`Downloading`/
+`Verifying`/`Installing` には一切割り込まれないこと；`UpdateRepositoryTest.kt`：`startDownload()`
+を2回呼んでもダウンロードは1本だけ開始されること、`cancelDownload()` が `.part` ファイルを削除し
+`Failed` ではなく `Available` に戻すこと、sweep が進行中の `.part` と現在の `Ready` ファイルを保護
+しつつそれ以外を削除すること、より新しいバージョンのチェックが旧 `Ready` バージョンのディレクトリを
+削除すること；`ReleaseNotesTextTest.kt`）、デスクトップの自己置換／インストーラースクリプト
+（`UpdateScriptWriterTest.kt`：生成されたスクリプト本文そのものをテンプレートごとに検証——退避して
+から削除する順序、配置に失敗した際のロールバック分岐、旧コピーの削除を許可する前のヘルスチェック；
+`DesktopUpdateInstallerTest.kt`：`canInstall` の `InstallKind`／アセット種別ごとのゲーティング、
+macOS/Windows/Linux の自己置換と Windows MSI 経路それぞれで実際に起動されるコマンドライン一式を、
+実際には何も起動しないフェイクの `ProcessLauncher` 経由で検証すること、バージョン不一致や実行権限の
+無い展開済みバンドルはランチャーが呼ばれる前に失敗すること；`ZipExtractorTest.kt`：zip slip の拒否、
+エントリ数上限と `maxBytes` の上限、指定したエントリだけ実行ビットが復元されること；
+`FileSystemExtrasTest.kt`/`InstallLocationDesktopTest.kt` を `setExecutable`/`isDirectoryWritable`/
+`move` と OS ごとの `InstallLocation` 判定向けに拡張したもの）などを網羅する。
 `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` の失敗は DB スキーマ・
 マージ SQL・同期オーケストレーションの退行を意味するので特に注意する。
 
@@ -257,7 +290,13 @@ Linux の SNI トレイでは `SniConnection`（接続・バス名取得・expor
 2 つの計装スイート以外はすべて同様に未カバーである: `WorkManager` の実際の定期ジョブスケジューリング
 と実行（純粋なスケジュール算出ロジック `BackgroundRefreshSchedule.kt` のみテスト済み）、
 `NotificationManagerCompat` 経由の実通知投稿、Storage Access Framework のファイルピッカー、
-Keystore を使ったトークン保存。
+Keystore を使ったトークン保存、そして `AndroidUpdateInstaller` の `PackageInstaller` セッション／
+`BroadcastReceiver`／`canRequestPackageInstalls()` の扱い（委譲先の純粋なプラン／同意判断である
+`canInstallAndroidApkUpdate` のみテスト済み——上記「アプリ内アップデートのパイプライン」参照）。
+同様にデスクトップ側でも、自己置換／`msiexec` スクリプト（`UpdateScriptWriter` の出力）を実際に
+実行する部分は手動確認のみ——生成されたスクリプト本文そのものは直接検証しており、
+`DesktopUpdateInstaller` はテスト内で実際にスクリプトを起動することがない（上記のフェイク
+`ProcessLauncher` を参照）。詳細は下記「アプリ内アップデート」を参照。
 
 ## 手動確認（UI）
 
@@ -716,3 +755,43 @@ OS 側のルーティングではない）。パッケージ版をインスト�
     ティール地の上で判別できることを確認する。各アイコンを長押ししてツールチップを確認。
   リセット実行中はスピナーが器の上で見えること・行の高さが変わらないこと。ライト／ダーク両テーマで
   確認する。
+
+### アプリ内アップデート
+
+`canInstallAndroidApkUpdate` と純粋な状態機械の関数群より先は何も自動テストで検証していない
+（上記「既知の未カバー範囲」参照）——自己置換／インストーラー経路はすべて実際にパッケージ化した
+ビルドが必要になる。`./gradlew :composeApp:createDistributable` でビルドし（`:run` は
+`jpackage.app-path` が存在せず常に開発用インストールとして扱われるため不可——
+`InstallLocation.desktop.kt` を参照）、パッケージ化されたアプリを起動する。開発者本人が普段使って
+いる既存のインストール先ではなく、必ず**複製したコピー**に対して行うこと——各プラットフォームで
+最初に自己置換を試す際は、ロールバック経路にバグがあってインストール先を壊してしまう場合に備える。
+
+- **macOS**: 旧バージョンを起動し、トレイまたは Updates タブからダウンロードを開始、検証を経て
+  「インストール準備完了」に達したらインストールする。アプリが新バージョンで再起動すること、
+  新しい `.app` に対する `xattr -l` が `com.apple.quarantine` を示さないこと（このアプリ自身が
+  ファイルを書き込んでいるため——`background-update.ja.md` の「アプリ内アップデート」を参照）、
+  旧 `.app` が跡形もなく消えていること（`.old` ディレクトリが隣に残っていないこと）を確認する。
+- **Windows（MSI インストール済み）**: 同じ流れ。UAC 昇格プロンプトが一度だけ出ること、アプリが
+  同じインストール先から新バージョンで再起動すること、UAC を拒否した場合（またはアップグレードが
+  それ以外の理由で失敗した場合）でも、何も起動していない状態にはならず元の動いていたインストールが
+  再起動されることを確認する。
+- **Windows / Linux（portable ZIP）**: macOS と同じ自己置換の流れ。再起動したアプリが同じ
+  ディレクトリから動くこと、`.new`/`.old` の兄弟ディレクトリが残らないことを確認する。
+- **Linux（deb/rpm）**: Updates タブとトレイのどちらも、ダウンロードを提示せず「リリースページを
+  開く」にフォールバックすることを確認する——`updatePlan` は `LINUX_PACKAGE` に対して常に
+  `OpenReleasePage` を返す。
+- **Android**: `github` flavor の APK をサイドロードし（`build.ja.md` の flavor 分割を参照）、
+  ダウンロードとインストールを行い、OS 自身のインストール確認ダイアログが出てその場でアプリが
+  更新されることを確認する。別途、`play` flavor の APK をサイドロードし、Updates タブが一切
+  ダウンロードを提示しないことを確認する（`canInstallAndroidApkUpdate` は `REQUEST_INSTALL_PACKAGES`
+  を要求するが、これを宣言しているのは `github` のマニフェストだけ）。「提供元不明のアプリ」が
+  まだ許可されていない場合、インストールをクリックするとセッションではなくこのシステム設定画面が
+  開くこと、許可せずに戻ってきても Updates タブが固まらず「インストール準備完了」のままであることを
+  確認する。
+- **各プラットフォームの失敗経路**: ダウンロード途中でキャンセルする（`Failed` ではなく
+  `Available` に戻り、`.part` ファイルも消えていること）；ダウンロード中にネットワークを切断する
+  （`Failed` になり再試行アクションが出ること）；ダウンロード開始前にディスクを満杯にする
+  （事前の空き容量チェックが 1 バイトも書き込む前に拒否すること）。デスクトップでは、
+  「インストール準備完了」からインストールをクリックする前にアプリを強制終了し再起動した場合、
+  次回チェックで古い `Ready` を再開するのではなく同じバージョンが再び `Available` として
+  提示されることを確認する。

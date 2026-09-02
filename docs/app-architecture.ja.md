@@ -21,9 +21,9 @@ composeApp/src/
     data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce(expect), TokenStorage, OAuthTokens
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler（importOpmlAndNotify。デスクトップと Android の「`.opml` ファイル関連付け」で共有）, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, OAuthCallbackParams, StartupMaintenanceTasks（refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex）
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler（importOpmlAndNotify。デスクトップと Android の「`.opml` ファイル関連付け」で共有）, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, OAuthCallbackParams, StartupMaintenanceTasks（refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
     di/           AppModule（+ expect platformModule）
-    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile（すべて expect）
+    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor（すべて expect）
     ui/           theme/, navigation/, setup/, home/（3ペイン + 検索 + 通知センター）, article/, settings/, i18n/
     LaunchArg.kt  起動時の引数（`keryx://` URI か `.opml` パスか）を分類する — プラットフォーム非依存、パッケージ直下
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq（7 テーブル）
@@ -32,12 +32,16 @@ composeApp/src/
     実行時にクラッシュするため。VectorDrawable XML は `painterResource` が全ターゲットで描画できる唯一の画像形式）
   jvmCommonMain/kotlin/…/  デスクトップと Android の両方が共有する actual（どちらのプラットフォーム
     API にも依存しない）: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage, AppInfo,
-    CloudStorageAvailability（後者2つは共有生成 BuildConfig を読むだけ）
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ jvmCommonMain がカバーしない expect の actual（DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule）+ LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）, DesktopOs（isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf）
+    CloudStorageAvailability（後者2つは共有生成 BuildConfig を読むだけ）, FileSystemExtras,
+    ZipExtractor（アプリ内アップデート——下記「アプリ内アップデート」参照）
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ jvmCommonMain がカバーしない expect の actual（DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule, InstallLocation）+ LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）, DesktopOs（isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf）
     tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray + StatusNotifierItem/dbusmenu の D-Bus オブジェクト
+    platform/update/  DesktopUpdateInstaller, UpdateScriptWriter（純粋な自己置換／msiexec スクリプトのテンプレート）, ProcessLauncher/RealProcessLauncher（テストがフェイクに差し替える detached 起動のシーム）
   androidMain/kotlin/…/  jvmCommonMain がカバーしない expect の actual: DatabaseDriverFactory（バンドル
     SQLite、後述）, DatabaseFile（`databaseFilePath()` — `Context.getDatabasePath` で、
     AppDirs.appDataDir()/`Context.filesDir` とは別ディレクトリになる。db-schema.ja.md 参照）,
+    InstallLocation（常に ANDROID_SIDELOADED か ANDROID_STORE のどちらか——下記「アプリ内アップデート」
+    参照）,
     AppDirs/BrowserOpener/ClipboardEntries（AndroidAppContext 経由 — KeryxApplication.onCreate
     で一度だけ設定される静的 Context ホルダ）, PlatformModule（Ktor OkHttp エンジン、Dropbox/OneDrive
     プロバイダを登録した CloudSession — 下記 Provider/DI 参照。加えて AndroidNotificationSink、下記
@@ -96,7 +100,9 @@ composeApp/src/
     AndroidStartupTasks.kt（`runAndroidStartupTasks`。`:androidApp` の `MainActivity` から呼ばれる）+
     background/（`FeedRefreshWorker` + `BackgroundRefresh.kt` の `startBackgroundRefresh`。
     `WorkManager` ベース — Android のバックグラウンド/通知の全体像は
-    [background-update.ja.md](background-update.ja.md) を参照）
+    [background-update.ja.md](background-update.ja.md) を参照）, platform/update/AndroidUpdateInstaller
+    （`PackageInstaller` セッション＋その結果を受ける動的登録の `BroadcastReceiver` — 下記
+    「アプリ内アップデート」参照）
   androidMain/res/  `works.merc.keryx.app.R` を生成する通常の AGP リソースディレクトリ
     （`values/`、`drawable/` など）— 上記 `commonMain/composeResources/`（Compose Multiplatform
     自身の仕組みで、リソース ID ではなく型付きの `Res.drawable.*` アクセサーを生成する）とは別物。
@@ -195,6 +201,42 @@ Dropbox / OneDrive — sync-architecture.ja.md の「Android で Google Drive �
 （rev チェック）、のフローとデバウンス（`SyncScheduler`）を実装する。ライブ DB の FTS は触らない。
 `SyncRepository` の `localDbPath` の既定値は `platform/DatabaseFile.kt` の `databaseFilePath()`
 — プラットフォームごとにライブ DB の実パスを解決する唯一の `expect` 関数（db-schema.ja.md 参照）。
+
+### アプリ内アップデート
+
+`domain/UpdateRepository` は上記の `SyncRepository` と同じ種類の、アプリのライフタイムを持つ
+Koin `single` のオーケストレーターであり、`StateFlow<UpdateState>` を UI 側の各面（Updates タブ、
+トレイ、ベル）が読む——設定ダイアログを閉じても進行中のダウンロードはキャンセルされない。これは
+3 つのシームを組み合わせる: `UpdateChecker`（既存を拡張し `assets[]`/`body` をパース）、
+`data/remote/UpdateDownloader`（新規；手動リダイレクト追従＋ホスト allowlist＋digest 検証。
+`FeedFetcher` 自身が自前のリダイレクト処理に使っている「共有クライアントのプラグインに頼らず
+手で書く」という形をそのまま踏襲）、そして `platform/UpdateInstaller`（新規の expect 相当の
+interface。`OsNotificationSink` とまったく同じように `platformModule` 経由でバインドされる
+プラットフォームごとの `single<UpdateInstaller>` で、テストではフェイクに差し替えられる）。
+何をすべきかを決める 2 つの純粋な `domain/` 関数はネットワークにもファイルシステムにも触れない
+ため、どちらも素の `commonTest` の対象になる: `UpdateAsset.kt` の `selectUpdateAsset`
+（`platform/InstallLocation.kt` の `detectInstallLocation()` を踏まえて、どのリリースアセットか）
+と `UpdateInstallPolicy.kt` の `updatePlan`（そのアセットで何をすべきか——自己置換、OS の
+インストーラーへの引き渡し、リリースページへのフォールバックのいずれか）。`UpdateInstaller.canInstall(plan)`
+は意図的に純粋関数では**ない**——プラットフォームの `actual` が「今はダメ」と言える唯一の場所で
+あり、その理由は `updatePlan` 自身には知りようがないもの（典型的には Android の実行時インストール
+同意状態）だからである。それでも `UpdateInstallPolicy.kt` の `canInstallAndroidApkUpdate` は
+その*判断*自体を 1 つの boolean を受け取る純粋関数として切り出しており、`androidMain` 自体には
+JVM でテスト可能なユニットテストのソースセットが無いにもかかわらず `commonTest` でカバーされて
+いる（testing.ja.md 参照）。
+
+デスクトップと Android の `UpdateInstaller` actual はコードを一切共有していない——デスクトップ
+（`platform/update/DesktopUpdateInstaller.kt`）は `platform/ZipExtractor.kt`（`jvmCommonMain`。
+`FileIO`/`Gzip` とまったく同じ形で Android と共有）経由で ZIP を展開し、現在のインストール先の
+隣にステージングしてから、`platform/update/UpdateScriptWriter.kt`（純粋な文字列テンプレート——
+本文そのものを直接アサーションで検証し、実際に起動することは無い）が生成した detached ヘルパー
+スクリプトへ、`platform/update/DetachedProcess.kt` の `ProcessLauncher` シーム
+（`data/cloud/SecurityCliTokenStorage.kt` の `CommandRunner`/`RealCommandRunner` の分割を踏襲）
+経由で引き渡してから、`main.kt` がアプリ全体を終了する。Android
+（`platform/update/AndroidUpdateInstaller.kt`）は代わりに、ダウンロードした APK を
+`PackageInstaller` セッションへストリーム書き込みする。挙動面の全体（状態機械、プラットフォームごとの
+インストール手順、提示のしかた）は `background-update.ja.md` の「アプリ内アップデート」を、
+完全性検証の信頼モデルについては `SECURITY.ja.md` を参照。
 
 ### Provider / DI（Koin）
 

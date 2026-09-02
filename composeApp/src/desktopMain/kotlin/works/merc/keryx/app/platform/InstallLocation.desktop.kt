@@ -2,7 +2,6 @@ package works.merc.keryx.app.platform
 
 import works.merc.keryx.app.core.Log
 import java.io.File
-import java.io.IOException
 
 private const val TAG = "InstallLocation"
 
@@ -15,21 +14,6 @@ private const val TAG = "InstallLocation"
 private fun launcherPath(): String? =
     System.getProperty("jpackage.app-path")
         ?: ProcessHandle.current().info().command().orElse(null)
-
-/** Probes actual writability by creating and deleting a temp file — Windows ACLs aren't reliably
- * reflected by [File.canWrite]. */
-internal fun isWritable(dir: File): Boolean {
-    if (!dir.isDirectory) return false
-    return try {
-        val probe = File.createTempFile("keryx-update-probe", ".tmp", dir)
-        probe.delete()
-        true
-    } catch (e: IOException) {
-        false
-    } catch (e: SecurityException) {
-        false
-    }
-}
 
 actual fun detectInstallLocation(): InstallLocation {
     val launcher = launcherPath()
@@ -60,7 +44,7 @@ internal fun detectMacInstallLocation(launcher: String, launcherFile: File): Ins
         return InstallLocation(InstallKind.UNKNOWN, null, launcher, parentWritable = false, translocated = false)
     }
     val translocated = appRoot.path.contains("/AppTranslocation/")
-    val parentWritable = appRoot.parentFile?.let(::isWritable) ?: false
+    val parentWritable = appRoot.parentFile?.let { FileSystemExtras.isDirectoryWritable(it.path) } ?: false
     return InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, launcher, parentWritable, translocated)
 }
 
@@ -73,7 +57,7 @@ internal fun detectWindowsInstallLocation(launcher: String, launcherFile: File):
     // Self-replace renames the whole app directory within its parent (mirroring the macOS .app
     // bundle swap) rather than writing inside it, so it's the *parent's* write permission that
     // actually matters here — consistent with parentWritable's own name and detectMacInstallLocation.
-    val parentWritable = appRoot.parentFile?.let(::isWritable) ?: false
+    val parentWritable = appRoot.parentFile?.let { FileSystemExtras.isDirectoryWritable(it.path) } ?: false
     val underProgramFiles = WINDOWS_SYSTEM_ROOTS.any { env ->
         System.getenv(env)?.let { root -> appRoot.path.startsWith(root, ignoreCase = true) } ?: false
     }
@@ -97,7 +81,7 @@ internal fun detectLinuxInstallLocation(launcher: String, launcherFile: File): I
     }
     // Same reasoning as the Windows case above: a rename-based self-replace needs the *parent*
     // directory to be writable, not appRoot itself.
-    val parentWritable = appRoot.parentFile?.let(::isWritable) ?: false
+    val parentWritable = appRoot.parentFile?.let { FileSystemExtras.isDirectoryWritable(it.path) } ?: false
     val kind = if (parentWritable) InstallKind.LINUX_PORTABLE else InstallKind.UNKNOWN
     return InstallLocation(kind, appRoot.path, launcher, parentWritable, translocated = false)
 }

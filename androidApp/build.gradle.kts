@@ -144,6 +144,26 @@ android {
             signingConfig = signingConfigs.findByName("release")
         }
     }
+
+    // Splits the one distribution-specific permission an in-app update install needs
+    // (REQUEST_INSTALL_PACKAGES, declared only in src/github/AndroidManifest.xml) out of the AAB
+    // submitted to Google Play, without maintaining two applicationIds — `composeApp` is a KMP
+    // library module (no flavor dimension of its own) and, having none, is consumed identically by
+    // both flavors, so no `missingDimensionStrategy` is needed on this side either. See
+    // `docs/app-architecture.md`'s in-app-update section and `AndroidUpdateInstaller`'s own KDoc
+    // for how `canInstallUpdates` reads the *merged manifest* at runtime rather than branching on
+    // the flavor name — a play-flavored APK can still reach this code path if sideloaded outside
+    // Play (Play Console test tracks, `bundletool`, internal distribution), so the runtime check
+    // must stay independent of which flavor produced the APK.
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("github") {
+            dimension = "distribution"
+        }
+        create("play") {
+            dimension = "distribution"
+        }
+    }
 }
 
 dependencies {

@@ -30,7 +30,7 @@ sealed class KeryxException(message: String) : Exception(message)
 
 主なサブクラス: `FeedFetchException(statusCode)`, `FeedParseException`, `FeedDiscoveryException(candidates)`,
 `FeedTimeoutException`, `FeedNotFoundException(isGone)`, `CloudAuthException`, `CloudStorageException`,
-`SyncConflictException`, `SchemaVersionException(localVersion, cloudVersion)`, `CloudDataIncompatibleException`, `InvalidFeedUrlException`。
+`SyncConflictException`, `SchemaVersionException(localVersion, cloudVersion)`, `CloudDataIncompatibleException`, `InvalidFeedUrlException`, `UpdateException(stage)`。
 
 補助拡張: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `onOk` / `onErr` / `map`。
 
@@ -97,9 +97,9 @@ sealed class KeryxException(message: String) : Exception(message)
 
 | ネクストアクション | 発生源 | 挙動 |
 | --- | --- | --- |
-| `OpenUrl(url)` | 新バージョン通知 | リリースページを外部ブラウザで開く |
+| `OpenUrl(url)` | 新バージョン通知（アプリ内アップデート経路が無い場合——`UpdatePlan.OpenReleasePage`/`NotOffered`。[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照） | リリースページを外部ブラウザで開く |
 | `ShowFeedDetail(feedId)` | フィード消失(410) / URL 変更(301/308) | フィード一覧で該当フィードを選択（一覧をクリックしたときと同じ）。シングルペイン幅ではフィード一覧が独立した画面のため、選択ハイライトすら描かれない画面へ戻るのではなく、そのフィードの記事一覧まで進む — `ui/home/HomePaneLayout.kt` の `paneForFeedDetail` を参照 |
-| `ShowSettingsTab(tabId)` | 同期エラー（`SchemaVersionException` は `updates`、その他は `cloud_sync`） | 設定ダイアログを該当タブで開く。`cloud_sync` タブは `SyncRepository.lastSyncError` を失敗理由として表示し、`updates` タブは開いた時点で自動的に更新確認を行う |
+| `ShowSettingsTab(tabId)` | 同期エラー（`SchemaVersionException` は `updates`、その他は `cloud_sync`）；アプリ内アップデート経路がある場合の新バージョン通知（`updates`） | 設定ダイアログを該当タブで開く。`cloud_sync` タブは `SyncRepository.lastSyncError` を失敗理由として表示し、`updates` タブは開いた時点で自動的に更新確認を行う |
 | `ShowInfoDialog(detail)` | macOS の translocated 警告 | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
 | `ResetCloudData` | `CloudDataIncompatibleException` | 専用のインラインボタン → 確認ダイアログ → クラウドDBをタイムスタンプ付き名前で退避してから作り直す（[sync-architecture.ja.md](sync-architecture.ja.md)「クラウドデータのリセット（退避）」参照） |
 
@@ -118,8 +118,10 @@ Repository から通知を出す際、文言は `NotificationMessages`（`getStr
 | `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ |
 | `CloudDataIncompatibleException`（破損/非互換なクラウドDB／制約違反データ） | ❌（リセットまたは手動同期の成功まで**自動**同期そのものが抑制される — `SyncTrigger.AUTOMATIC` ゲート。[sync-architecture.ja.md](sync-architecture.ja.md)「自動同期の抑制」参照） | ✅ |
 | `FeedNotFoundException(isGone=true)` | ❌ | ✅ |
+| `UpdateException`（チェック/ダウンロード/検証/インストールの失敗） | ❌（ユーザーが Updates 設定タブまたはトレイの項目で「再試行」を押した時のみ再試行） | ❌（代わりに Updates タブとトレイの項目で提示する——[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照。ベルに届くのは「更新があります」/「インストール準備完了」という情報通知のみで、上記の `ShowSettingsTab`/`OpenUrl` 経由） |
 
 ## 定数（`core/Constants.kt`）
 
 `SYNC_MAX_RETRY=3`, `FEED_TIMEOUT_RETRY_COUNT=1`, `SYNC_DEBOUNCE_MS=5000`,
-`CONNECTION_TIMEOUT_MS=10000`, `READ_TIMEOUT_SECONDS_DEFAULT=30`, `MAX_REDIRECTS=5`。
+`CONNECTION_TIMEOUT_MS=10000`, `READ_TIMEOUT_SECONDS_DEFAULT=30`, `MAX_REDIRECTS=5`,
+`UPDATE_DOWNLOAD_SOCKET_TIMEOUT_MS=60000`。

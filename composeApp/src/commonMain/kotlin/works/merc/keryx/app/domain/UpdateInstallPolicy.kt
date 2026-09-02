@@ -43,6 +43,20 @@ internal val UpdatePlan.isInstallable: Boolean
  * forces [UpdatePlan.OpenReleasePage] for every [InstallKind] that would otherwise self-replace or
  * run an installer.
  */
+/**
+ * Whether `AndroidUpdateInstaller.canInstall` should accept [plan], given whether the OS currently
+ * lets this app install packages ([canRequestPackageInstalls] — the exact value
+ * `PackageManager.canRequestPackageInstalls()` returns, which already folds together both facts
+ * the [UpdateInstaller] interface's own KDoc calls out: the `REQUEST_INSTALL_PACKAGES` permission
+ * being declared at all (only the "github" distribution flavor's manifest — see
+ * `androidApp/build.gradle.kts`'s `flavorDimensions`) and the user's per-app "install unknown
+ * apps" consent). Pulled out as a pure function of that one boolean, rather than living directly
+ * in the androidMain actual, purely so it's exercisable by commonTest — `androidMain` has no
+ * JVM-testable unit-test source set in this project (see `docs/testing.md`).
+ */
+internal fun canInstallAndroidApkUpdate(plan: UpdatePlan, canRequestPackageInstalls: Boolean): Boolean =
+    plan is UpdatePlan.RunInstaller && plan.asset.kind == UpdateAssetKind.ANDROID_APK && canRequestPackageInstalls
+
 fun updatePlan(location: InstallLocation, asset: UpdateAsset?): UpdatePlan = when (location.kind) {
     InstallKind.DEVELOPMENT, InstallKind.ANDROID_STORE, InstallKind.UNKNOWN -> UpdatePlan.NotOffered
 

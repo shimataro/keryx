@@ -22,9 +22,9 @@ composeApp/src/
     data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce(expect), TokenStorage, OAuthTokens
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, StartupMaintenanceTasks (refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex)
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, StartupMaintenanceTasks (refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
     di/           AppModule (+ expect platformModule)
-    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile (all expect)
+    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor (all expect)
     ui/           theme/, navigation/, setup/, home/ (3-pane + search + notification center), article/, settings/, i18n/
     LaunchArg.kt  Classifies a raw launch argument (`keryx://` URI vs `.opml` path) — platform-independent, package root
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq (7 tables)
@@ -33,12 +33,15 @@ composeApp/src/
     runtime; VectorDrawable XML is the one image format `painterResource` renders on every target)
   jvmCommonMain/kotlin/…/  actuals shared by desktop and Android, needing no platform API either
     target lacks: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage, AppInfo,
-    CloudStorageAvailability (the last two just read the shared generated BuildConfig)
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of each expect not covered by jvmCommonMain (DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule) + LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage), DesktopOs (isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux)
+    CloudStorageAvailability (the last two just read the shared generated BuildConfig),
+    FileSystemExtras, ZipExtractor (in-app update — see "In-App Update" below)
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of each expect not covered by jvmCommonMain (DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule, InstallLocation) + LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage), DesktopOs (isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux)
     tray/      KeryxTray (platform branch), MacTray, LinuxTray + the StatusNotifierItem/dbusmenu D-Bus objects
+    platform/update/  DesktopUpdateInstaller, UpdateScriptWriter (pure self-replace/msiexec script templates), ProcessLauncher/RealProcessLauncher (the detached-launch seam a test fakes)
   androidMain/kotlin/…/  actual implementations not covered by jvmCommonMain: DatabaseDriverFactory
     (bundled SQLite, see below), DatabaseFile (`databaseFilePath()` — `Context.getDatabasePath`,
     a different directory than AppDirs.appDataDir()/`Context.filesDir`; see db-schema.md),
+    InstallLocation (always ANDROID_SIDELOADED or ANDROID_STORE — see "In-App Update" below),
     AppDirs/BrowserOpener/ClipboardEntries (via AndroidAppContext, a
     static Context holder set once from KeryxApplication.onCreate), PlatformModule (Ktor OkHttp
     engine, CloudSession with Dropbox/OneDrive providers — see Provider/DI below — plus
@@ -97,7 +100,9 @@ composeApp/src/
     AndroidStartupTasks.kt (`runAndroidStartupTasks`, called from `:androidApp`'s `MainActivity`) +
     background/ (`FeedRefreshWorker` + `BackgroundRefresh.kt`'s `startBackgroundRefresh`,
     `WorkManager`-based — see [background-update.md](background-update.md) for the whole Android
-    background/notification story)
+    background/notification story), platform/update/AndroidUpdateInstaller (a `PackageInstaller`
+    session + a dynamically-registered `BroadcastReceiver` for its result — see "In-App Update"
+    below)
   androidMain/res/  a conventional AGP resource directory (`values/`, `drawable/`, …) generating
     `works.merc.keryx.app.R` — distinct from `commonMain/composeResources/` above (Compose
     Multiplatform's own mechanism, generating typed `Res.drawable.*` accessors instead of resource
@@ -183,6 +188,39 @@ automatic access-token refresh. `SyncRepository` implements the download → mer
 with debouncing (`SyncScheduler`). The live DB's FTS is untouched. `SyncRepository`'s `localDbPath`
 defaults to `platform/DatabaseFile.kt`'s `databaseFilePath()`, the single `expect` function that
 resolves the live DB's real path per platform (see `db-schema.md`).
+
+### In-App Update
+
+`domain/UpdateRepository` is the same kind of app-lifetime, Koin-`single` orchestrator as
+`SyncRepository` above — a `StateFlow<UpdateState>` every UI surface (Updates tab, tray, bell)
+reads, so a closed settings dialog doesn't cancel an in-flight download. It composes three seams:
+`UpdateChecker` (existing, extended to parse `assets[]`/`body`), `data/remote/UpdateDownloader`
+(new; manual redirect-following + host allowlist + digest verification, the same "no shared-client
+plugin, roll it by hand" shape `FeedFetcher` already uses for its own redirect handling), and
+`platform/UpdateInstaller` (new `expect`-like interface, bound via `platformModule` exactly like
+`OsNotificationSink` — a `single<UpdateInstaller>` per platform, fakeable in tests). Two pure
+`domain/` functions decide *what* to do without touching the network or filesystem, so both are
+plain `commonTest` targets: `UpdateAsset.kt`'s `selectUpdateAsset` (which release asset, given
+`platform/InstallLocation.kt`'s `detectInstallLocation()`) and `UpdateInstallPolicy.kt`'s
+`updatePlan` (what to do with it — self-replace, hand off to the OS installer, or fall back to the
+release page). `UpdateInstaller.canInstall(plan)` is deliberately *not* pure — it's the one place a
+platform `actual` gets to say "not right now" for a reason `updatePlan` itself has no way to know
+(Android's runtime install-consent state, most notably); `UpdateInstallPolicy.kt`'s
+`canInstallAndroidApkUpdate` still pulls the *decision* itself out as a pure function of one
+boolean, so it's covered by `commonTest` despite `androidMain` having no JVM-testable unit-test
+source set (see `testing.md`).
+
+The desktop and Android `UpdateInstaller` actuals share no code at all — desktop
+(`platform/update/DesktopUpdateInstaller.kt`) extracts a ZIP via `platform/ZipExtractor.kt`
+(`jvmCommonMain`, shared with Android exactly like `FileIO`/`Gzip`), stages it next to the current
+install, and hands off to a detached helper script (`platform/update/UpdateScriptWriter.kt`, pure
+string templates — tested by asserting their text directly, never by running one) via
+`platform/update/DetachedProcess.kt`'s `ProcessLauncher` seam (mirroring
+`data/cloud/SecurityCliTokenStorage.kt`'s `CommandRunner`/`RealCommandRunner` split) before
+`main.kt` exits the whole app; Android (`platform/update/AndroidUpdateInstaller.kt`) streams the
+downloaded APK into a `PackageInstaller` session instead. See "In-App Update" in
+`background-update.md` for the full behavioral flow (state machine, per-platform install steps,
+presentation) and `SECURITY.md` for the integrity-verification trust model.
 
 ### Provider / DI (Koin)
 

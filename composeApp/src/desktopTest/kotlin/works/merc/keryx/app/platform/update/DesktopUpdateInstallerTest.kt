@@ -1,0 +1,341 @@
+package works.merc.keryx.app.platform.update
+
+import kotlinx.coroutines.runBlocking
+import java.io.File
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+import kotlin.io.path.createTempDirectory
+import kotlin.test.AfterTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
+import kotlin.test.assertTrue
+import works.merc.keryx.app.domain.AvailableUpdate
+import works.merc.keryx.app.domain.InstallLaunchResult
+import works.merc.keryx.app.domain.UpdateAsset
+import works.merc.keryx.app.domain.UpdateAssetKind
+import works.merc.keryx.app.domain.UpdatePlan
+import works.merc.keryx.app.platform.InstallKind
+import works.merc.keryx.app.platform.InstallLocation
+
+/**
+ * Exercises [DesktopUpdateInstaller] against a [FakeProcessLauncher] so a self-replace or msiexec
+ * hand-off is only ever asserted by its command line, never actually run — this is the whole point
+ * of the [ProcessLauncher] seam (see its own KDoc). Every extraction/staging step still runs for
+ * real against temp directories, since that's exactly the logic worth catching regressions in.
+ */
+class DesktopUpdateInstallerTest {
+    private val tempDirs = mutableListOf<File>()
+
+    private fun newTempDir(prefix: String): File = createTempDirectory(prefix).toFile().also { tempDirs.add(it) }
+
+    @AfterTest
+    fun tearDown() {
+        tempDirs.forEach { it.deleteRecursively() }
+    }
+
+    private class FakeProcessLauncher(private val result: Boolean = true) : ProcessLauncher {
+        var callCount = 0
+            private set
+        var lastCommand: List<String>? = null
+            private set
+
+        override fun launch(command: List<String>): Boolean {
+            callCount++
+            lastCommand = command
+            return result
+        }
+    }
+
+    private fun macAppZip(destDir: File, version: String = "1.2.3", includeExecutable: Boolean = true): File {
+        val zipFile = File(destDir, "Keryx-$version-macos-arm64.zip")
+        ZipOutputStream(zipFile.outputStream()).use { zip ->
+            if (includeExecutable) {
+                zip.putNextEntry(ZipEntry("Keryx.app/Contents/MacOS/Keryx"))
+                zip.write("binary".encodeToByteArray())
+                zip.closeEntry()
+            }
+            zip.putNextEntry(ZipEntry("Keryx.app/Contents/Info.plist"))
+            zip.write(
+                """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <plist><dict>
+                <key>CFBundleShortVersionString</key>
+                <string>$version</string>
+                </dict></plist>
+                """.trimIndent().encodeToByteArray(),
+            )
+            zip.closeEntry()
+        }
+        return zipFile
+    }
+
+    private fun linuxAppZip(destDir: File, version: String = "1.2.3", includeExecutable: Boolean = true): File {
+        val zipFile = File(destDir, "Keryx-$version-linux-x86_64.zip")
+        ZipOutputStream(zipFile.outputStream()).use { zip ->
+            if (includeExecutable) {
+                zip.putNextEntry(ZipEntry("Keryx/bin/Keryx"))
+                zip.write("binary".encodeToByteArray())
+                zip.closeEntry()
+            }
+        }
+        return zipFile
+    }
+
+    private fun windowsAppZip(destDir: File, version: String = "1.2.3", includeExe: Boolean = true): File {
+        val zipFile = File(destDir, "Keryx-$version-windows-x86_64.zip")
+        ZipOutputStream(zipFile.outputStream()).use { zip ->
+            if (includeExe) {
+                zip.putNextEntry(ZipEntry("Keryx/Keryx.exe"))
+                zip.write("binary".encodeToByteArray())
+                zip.closeEntry()
+            }
+        }
+        return zipFile
+    }
+
+    private fun macAsset(version: String = "1.2.3") =
+        UpdateAsset("Keryx-$version-macos-arm64.zip", "https://example.invalid/x.zip", 1_000, "0".repeat(64), UpdateAssetKind.MAC_APP_ZIP)
+
+    private fun update(version: String, asset: UpdateAsset?, plan: UpdatePlan) =
+        AvailableUpdate(version, "https://example.invalid/release", null, asset, plan)
+
+    // --- canInstall ---
+
+    @Test
+    fun canInstallSelfReplaceOnAWritableUntranslocatedMacBundle() {
+        val root = newTempDir("desktop-installer-can-mac")
+        val appRoot = File(root, "Keryx.app").apply { mkdirs() }
+        val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, File(appRoot, "Contents/MacOS/Keryx").path, parentWritable = true, translocated = false)
+        val installer = DesktopUpdateInstaller(location, FakeProcessLauncher())
+
+        assertTrue(installer.canInstall(UpdatePlan.SelfReplace(macAsset())))
+    }
+
+    @Test
+    fun canInstallRefusesATranslocatedMacBundle() {
+        val root = newTempDir("desktop-installer-can-mac-translocated")
+        val appRoot = File(root, "Keryx.app").apply { mkdirs() }
+        val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, File(appRoot, "Contents/MacOS/Keryx").path, parentWritable = true, translocated = true)
+        val installer = DesktopUpdateInstaller(location, FakeProcessLauncher())
+
+        assertFalse(installer.canInstall(UpdatePlan.SelfReplace(macAsset())))
+    }
+
+    @Test
+    fun canInstallRefusesAnUnwritableInstallParent() {
+        val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, "/Applications/Keryx.app", "/Applications/Keryx.app/Contents/MacOS/Keryx", parentWritable = false, translocated = false)
+        val installer = DesktopUpdateInstaller(location, FakeProcessLauncher())
+
+        assertFalse(installer.canInstall(UpdatePlan.SelfReplace(macAsset())))
+    }
+
+    @Test
+    fun canInstallRunInstallerOnlyForAnInstalledWindowsMsiForm() {
+        val installedLocation = InstallLocation(InstallKind.WINDOWS_INSTALLED, "C:\\Program Files\\Keryx", "C:\\Program Files\\Keryx\\Keryx.exe", parentWritable = false, translocated = false)
+        val msiAsset = UpdateAsset("Keryx-1.2.3-windows-x86_64.msi", "https://example.invalid/x.msi", 1_000, "0".repeat(64), UpdateAssetKind.WINDOWS_MSI)
+        val installer = DesktopUpdateInstaller(installedLocation, FakeProcessLauncher())
+
+        assertTrue(installer.canInstall(UpdatePlan.RunInstaller(msiAsset)))
+    }
+
+    @Test
+    fun canInstallNeverAcceptsAnAndroidApkOnDesktop() {
+        val installedLocation = InstallLocation(InstallKind.WINDOWS_INSTALLED, "C:\\Program Files\\Keryx", "C:\\Program Files\\Keryx\\Keryx.exe", parentWritable = false, translocated = false)
+        val apkAsset = UpdateAsset("Keryx-1.2.3-android-universal.apk", "https://example.invalid/x.apk", 1_000, "0".repeat(64), UpdateAssetKind.ANDROID_APK)
+        val installer = DesktopUpdateInstaller(installedLocation, FakeProcessLauncher())
+
+        assertFalse(installer.canInstall(UpdatePlan.RunInstaller(apkAsset)))
+    }
+
+    @Test
+    fun canInstallRefusesOpenReleasePageAndNotOffered() {
+        val root = newTempDir("desktop-installer-can-refuse-plans")
+        val appRoot = File(root, "Keryx.app").apply { mkdirs() }
+        val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, File(appRoot, "Contents/MacOS/Keryx").path, parentWritable = true, translocated = false)
+        val installer = DesktopUpdateInstaller(location, FakeProcessLauncher())
+
+        assertFalse(installer.canInstall(UpdatePlan.OpenReleasePage))
+        assertFalse(installer.canInstall(UpdatePlan.NotOffered))
+    }
+
+    // --- install(): macOS self-replace ---
+
+    @Test
+    fun installMacSelfReplaceExtractsStagesAndLaunchesTheApplyScript() {
+        val root = newTempDir("desktop-installer-mac")
+        val appRoot = File(root, "Keryx.app").apply { mkdirs() }
+        val downloadDir = newTempDir("desktop-installer-mac-download")
+        val zip = macAppZip(downloadDir)
+        val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, File(appRoot, "Contents/MacOS/Keryx").path, parentWritable = true, translocated = false)
+        val launcher = FakeProcessLauncher()
+        val installer = DesktopUpdateInstaller(location, launcher)
+
+        val result = runBlocking {
+            installer.install(zip.path, update("1.2.3", macAsset("1.2.3"), UpdatePlan.SelfReplace(macAsset("1.2.3"))))
+        }
+
+        assertEquals(InstallLaunchResult.Launched, result)
+        assertEquals(1, launcher.callCount)
+
+        val stagedApp = File(root, ".Keryx.app.new")
+        assertTrue(stagedApp.isDirectory, "the extracted app must be staged next to the current install")
+        assertTrue(File(stagedApp, "Contents/MacOS/Keryx").canExecute())
+
+        val command = launcher.lastCommand!!
+        assertEquals("/bin/sh", command[0])
+        assertTrue(command[1].endsWith("apply.sh"))
+        assertEquals(ProcessHandle.current().pid().toString(), command[2])
+        assertEquals(appRoot.path, command[3])
+        assertEquals(stagedApp.path, command[4])
+        assertEquals(File(root, ".Keryx.app.old").path, command[5])
+        assertTrue(command[6].endsWith("apply.log"))
+
+        val scriptFile = File(command[1])
+        assertTrue(scriptFile.canExecute(), "the launched script must be marked executable")
+        assertContainsMacSelfReplaceShape(scriptFile.readText())
+    }
+
+    private fun assertContainsMacSelfReplaceShape(script: String) {
+        assertTrue(script.contains("mv \"\$APP\" \"\$OLD\""))
+        assertTrue(script.contains("open -n -a \"\$APP\""))
+    }
+
+    @Test
+    fun installMacSelfReplaceFailsAndNeverLaunchesWhenTheBundleVersionDoesNotMatch() {
+        val root = newTempDir("desktop-installer-mac-version-mismatch")
+        val appRoot = File(root, "Keryx.app").apply { mkdirs() }
+        val downloadDir = newTempDir("desktop-installer-mac-version-mismatch-download")
+        val zip = macAppZip(downloadDir, version = "9.9.9")
+        val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, File(appRoot, "Contents/MacOS/Keryx").path, parentWritable = true, translocated = false)
+        val launcher = FakeProcessLauncher()
+        val installer = DesktopUpdateInstaller(location, launcher)
+
+        val result = runBlocking {
+            installer.install(zip.path, update("1.2.3", macAsset("1.2.3"), UpdatePlan.SelfReplace(macAsset("1.2.3"))))
+        }
+
+        assertIs<InstallLaunchResult.Failed>(result)
+        assertEquals(0, launcher.callCount, "a failed health check must never launch the swap script")
+        assertFalse(File(root, ".Keryx.app.new").exists())
+    }
+
+    @Test
+    fun installMacSelfReplaceFailsWhenTheExtractedLauncherIsMissing() {
+        val root = newTempDir("desktop-installer-mac-missing-exe")
+        val appRoot = File(root, "Keryx.app").apply { mkdirs() }
+        val downloadDir = newTempDir("desktop-installer-mac-missing-exe-download")
+        val zip = macAppZip(downloadDir, includeExecutable = false)
+        val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, File(appRoot, "Contents/MacOS/Keryx").path, parentWritable = true, translocated = false)
+        val launcher = FakeProcessLauncher()
+        val installer = DesktopUpdateInstaller(location, launcher)
+
+        val result = runBlocking {
+            installer.install(zip.path, update("1.2.3", macAsset(), UpdatePlan.SelfReplace(macAsset())))
+        }
+
+        assertIs<InstallLaunchResult.Failed>(result)
+        assertEquals(0, launcher.callCount)
+    }
+
+    // --- install(): Linux / Windows portable self-replace ---
+
+    @Test
+    fun installLinuxSelfReplaceLaunchesTheApplyScriptWithNoLogArgumentOmitted() {
+        val root = newTempDir("desktop-installer-linux")
+        val appRoot = File(root, "Keryx").apply { mkdirs() }
+        val downloadDir = newTempDir("desktop-installer-linux-download")
+        val zip = linuxAppZip(downloadDir)
+        val asset = UpdateAsset("Keryx-1.2.3-linux-x86_64.zip", "https://example.invalid/x.zip", 1_000, "0".repeat(64), UpdateAssetKind.LINUX_ZIP)
+        val location = InstallLocation(InstallKind.LINUX_PORTABLE, appRoot.path, File(appRoot, "bin/Keryx").path, parentWritable = true, translocated = false)
+        val launcher = FakeProcessLauncher()
+        val installer = DesktopUpdateInstaller(location, launcher)
+
+        val result = runBlocking { installer.install(zip.path, update("1.2.3", asset, UpdatePlan.SelfReplace(asset))) }
+
+        assertEquals(InstallLaunchResult.Launched, result)
+        val stagedApp = File(root, ".Keryx.new")
+        assertTrue(File(stagedApp, "bin/Keryx").canExecute())
+        val command = launcher.lastCommand!!
+        assertEquals("/bin/sh", command[0])
+        assertEquals(7, command.size, "linux self-replace still takes a log-path argument")
+        assertTrue(command.last().endsWith("apply.log"))
+    }
+
+    @Test
+    fun installWindowsSelfReplaceLaunchesViaCmdWithNoLogArgument() {
+        val root = newTempDir("desktop-installer-windows")
+        val appRoot = File(root, "Keryx").apply { mkdirs() }
+        val downloadDir = newTempDir("desktop-installer-windows-download")
+        val zip = windowsAppZip(downloadDir)
+        val asset = UpdateAsset("Keryx-1.2.3-windows-x86_64.zip", "https://example.invalid/x.zip", 1_000, "0".repeat(64), UpdateAssetKind.WINDOWS_ZIP)
+        val location = InstallLocation(InstallKind.WINDOWS_PORTABLE, appRoot.path, File(appRoot, "Keryx.exe").path, parentWritable = true, translocated = false)
+        val launcher = FakeProcessLauncher()
+        val installer = DesktopUpdateInstaller(location, launcher)
+
+        val result = runBlocking { installer.install(zip.path, update("1.2.3", asset, UpdatePlan.SelfReplace(asset))) }
+
+        assertEquals(InstallLaunchResult.Launched, result)
+        val command = launcher.lastCommand!!
+        assertEquals(listOf("cmd", "/c"), command.take(2))
+        assertTrue(command[2].endsWith("apply.cmd"))
+        assertEquals(7, command.size)
+        assertFalse(
+            command.any { it.endsWith(".log") },
+            "windows self-replace takes no log-path argument (see UpdateScriptWriter)",
+        )
+    }
+
+    // --- install(): Windows MSI ---
+
+    @Test
+    fun installWindowsMsiLaunchesMsiexecScriptAgainstTheDownloadedFile() {
+        val downloadDir = newTempDir("desktop-installer-msi-download")
+        val msi = File(downloadDir, "Keryx-1.2.3-windows-x86_64.msi").apply { writeText("msi bytes") }
+        val asset = UpdateAsset("Keryx-1.2.3-windows-x86_64.msi", "https://example.invalid/x.msi", 1_000, "0".repeat(64), UpdateAssetKind.WINDOWS_MSI)
+        val location = InstallLocation(InstallKind.WINDOWS_INSTALLED, "C:\\Program Files\\Keryx", "C:\\Program Files\\Keryx\\Keryx.exe", parentWritable = false, translocated = false)
+        val launcher = FakeProcessLauncher()
+        val installer = DesktopUpdateInstaller(location, launcher)
+
+        val result = runBlocking { installer.install(msi.path, update("1.2.3", asset, UpdatePlan.RunInstaller(asset))) }
+
+        assertEquals(InstallLaunchResult.Launched, result)
+        val command = launcher.lastCommand!!
+        assertEquals(listOf("cmd", "/c"), command.take(2))
+        assertTrue(command[2].endsWith("apply.cmd"))
+        assertEquals(ProcessHandle.current().pid().toString(), command[3])
+        assertEquals(msi.path, command[4])
+        assertEquals("C:\\Program Files\\Keryx\\Keryx.exe", command[5])
+        assertTrue(command[6].endsWith("apply.log"))
+    }
+
+    // --- install(): guard rails that must never reach the launcher ---
+
+    @Test
+    fun installFailsWithoutLaunchingWhenNoAssetWasSelected() {
+        val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, "/Applications/Keryx.app", "/Applications/Keryx.app/Contents/MacOS/Keryx", parentWritable = true, translocated = false)
+        val launcher = FakeProcessLauncher()
+        val installer = DesktopUpdateInstaller(location, launcher)
+
+        val result = runBlocking { installer.install("/tmp/whatever.zip", update("1.2.3", null, UpdatePlan.OpenReleasePage)) }
+
+        assertIs<InstallLaunchResult.Failed>(result)
+        assertEquals(0, launcher.callCount)
+    }
+
+    @Test
+    fun installFailsWithoutLaunchingForOpenReleasePageOrNotOffered() {
+        val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, "/Applications/Keryx.app", "/Applications/Keryx.app/Contents/MacOS/Keryx", parentWritable = true, translocated = false)
+        val launcher = FakeProcessLauncher()
+        val installer = DesktopUpdateInstaller(location, launcher)
+        val asset = macAsset()
+
+        val releasePageResult = runBlocking { installer.install("/tmp/whatever.zip", update("1.2.3", asset, UpdatePlan.OpenReleasePage)) }
+        val notOfferedResult = runBlocking { installer.install("/tmp/whatever.zip", update("1.2.3", asset, UpdatePlan.NotOffered)) }
+
+        assertIs<InstallLaunchResult.Failed>(releasePageResult)
+        assertIs<InstallLaunchResult.Failed>(notOfferedResult)
+        assertEquals(0, launcher.callCount)
+    }
+}

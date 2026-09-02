@@ -94,4 +94,43 @@ class UpdateInstallPolicyTest {
     fun androidSideloadedFallsBackWhenNoAsset() {
         assertEquals(UpdatePlan.OpenReleasePage, updatePlan(location(InstallKind.ANDROID_SIDELOADED), null))
     }
+
+    private val apkAsset =
+        UpdateAsset("Keryx-0.14.0-android-universal.apk", "https://x", 1L, "a".repeat(64), UpdateAssetKind.ANDROID_APK)
+    private val msiAsset =
+        UpdateAsset("Keryx-0.14.0-windows-x86_64.msi", "https://x", 1L, "a".repeat(64), UpdateAssetKind.WINDOWS_MSI)
+
+    @Test
+    fun androidApkUpdateRequiresBothAnApkRunInstallerPlanAndOsConsent() {
+        assertEquals(
+            true,
+            canInstallAndroidApkUpdate(UpdatePlan.RunInstaller(apkAsset), canRequestPackageInstalls = true),
+        )
+    }
+
+    @Test
+    fun androidApkUpdateIsRefusedWithoutOsConsentEvenWithTheRightPlan() {
+        assertEquals(
+            false,
+            canInstallAndroidApkUpdate(UpdatePlan.RunInstaller(apkAsset), canRequestPackageInstalls = false),
+        )
+    }
+
+    @Test
+    fun androidApkUpdateIsRefusedForANonApkRunInstallerPlanRegardlessOfConsent() {
+        assertEquals(
+            false,
+            canInstallAndroidApkUpdate(UpdatePlan.RunInstaller(msiAsset), canRequestPackageInstalls = true),
+        )
+    }
+
+    @Test
+    fun androidApkUpdateIsRefusedForSelfReplaceOrNonInstallablePlans() {
+        assertEquals(
+            false,
+            canInstallAndroidApkUpdate(UpdatePlan.SelfReplace(apkAsset), canRequestPackageInstalls = true),
+        )
+        assertEquals(false, canInstallAndroidApkUpdate(UpdatePlan.OpenReleasePage, canRequestPackageInstalls = true))
+        assertEquals(false, canInstallAndroidApkUpdate(UpdatePlan.NotOffered, canRequestPackageInstalls = true))
+    }
 }

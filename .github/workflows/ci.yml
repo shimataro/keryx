@@ -163,7 +163,12 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 29
-          script: ./gradlew :androidApp:connectedDebugAndroidTest --no-configuration-cache
+          # Only the "github" flavor (see androidApp/build.gradle.kts's flavorDimensions) — the
+          # instrumented suite doesn't exercise anything flavor-specific (the two differ only in
+          # the REQUEST_INSTALL_PACKAGES manifest permission), so running "play" too would just
+          # double emulator time for identical assertions. connectedAndroidTest (no flavor) runs
+          # both.
+          script: ./gradlew :androidApp:connectedGithubDebugAndroidTest --no-configuration-cache
         # No GOOGLE_DRIVE_CLIENT_ID/SECRET: Google Drive's client secret now generates into
         # DesktopBuildConfig, attached only to desktopMain's srcDir, so it isn't a build input for
         # :androidApp — see the same comment in release.yml's "Build Android release packages" step.

@@ -27,4 +27,27 @@ expect object FileSystemExtras {
      *   ancestor directory instead of [path] itself.
      */
     fun usableSpaceBytes(path: String): Long
+
+    /**
+     * Marks the file at [path] as executable (POSIX permission bits). A no-op that returns `true`
+     * on a platform with no such concept — Windows determines executability from the file
+     * extension (`.exe`) instead, which a ZIP extraction never needs to set.
+     */
+    fun setExecutable(path: String): Boolean
+
+    /**
+     * Whether [path] (an existing directory) can actually be written to — determined by creating
+     * and deleting a temporary file inside it, not by permission bits alone: `java.nio.file`'s own
+     * `Files.isWritable` does not reliably reflect Windows ACLs.
+     */
+    fun isDirectoryWritable(path: String): Boolean
+
+    /**
+     * Moves (renames) [from] to [to]. Tries an atomic rename first; when [from] and [to] are on
+     * different filesystems or volumes (`EXDEV`, which a plain rename cannot bridge), falls back to
+     * a non-atomic copy-then-delete.
+     *
+     * @return `true` if [to] exists and [from] no longer does afterward.
+     */
+    fun move(from: String, to: String): Boolean
 }

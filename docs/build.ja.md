@@ -150,16 +150,30 @@ Google Play イメージ（Chrome 入り）— [setup.ja.md](setup.ja.md) を参
 上記のデスクトップパッケージと違い、APK/AAB は**どの OS からでも**ビルドできる —
 クロスコンパイルの制約は無い。
 
+`androidApp` は `distribution` という次元で `github` と `play` という 2 つの product flavor に
+分かれている（`applicationId` は同一）。両者が異なるのはただ 1 点だけ:
+`androidApp/src/github/AndroidManifest.xml` が `REQUEST_INSTALL_PACKAGES` を宣言しており、これは
+アプリ内アップデートのインストーラーが `PackageInstaller` セッションを張るために必要
+（[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照）。`play`
+flavor のマニフェストはこの権限を含まない — Play は既にアプリ自身を更新してくれるうえ、Play の
+ポリシーはこの権限を「他のアプリのインストールを主目的とするアプリ」に限定しているため。
+`composeApp`（KMP ライブラリモジュール）には flavor 次元が無く、両 flavor から同一に消費される。
+
 ```bash
-./gradlew :androidApp:assembleRelease -PappVersion=1.2.3   # APK
-./gradlew :androidApp:bundleRelease   -PappVersion=1.2.3   # AAB（Play Store 提出用の形式）
+./gradlew :androidApp:assembleGithubRelease -PappVersion=1.2.3   # APK（GitHub Releases）
+./gradlew :androidApp:bundlePlayRelease     -PappVersion=1.2.3   # AAB（Play Store 提出用の形式）
 ```
 
-出力先はそれぞれ `androidApp/build/outputs/apk/release/` と
-`androidApp/build/outputs/bundle/release/`（上記デスクトップパッケージの
-`composeApp/build/compose/binaries/main` とは別の場所）。`assembleRelease` は既定の `build`
-ライフサイクルに含まれるが、`bundleRelease` は含まれず明示的に実行する必要がある —
-両方の使われ方は後述の「リリース（CD）」を参照。
+出力先はそれぞれ `androidApp/build/outputs/apk/github/release/` と
+`androidApp/build/outputs/bundle/playRelease/`（上記デスクトップパッケージの
+`composeApp/build/compose/binaries/main` とは別の場所）。`assembleGithubRelease` は既定の `build`
+ライフサイクルの集約タスク `assembleRelease`/`build` 経由で到達できる（両 flavor の release
+variant をビルドする）が、`bundlePlayRelease` はどの集約ライフサイクルタスクにも含まれず明示的に
+実行する必要がある — 両方の使われ方は後述の「リリース（CD）」を参照。`androidApp/build.gradle.kts`
+の `flavorDimensions` を触った後は、`release.yml` を書き換える前に
+`./gradlew :androidApp:tasks --all | grep -i release` でこれらのタスク名と出力パスを確認すること
+— これらは AGP が flavor／buildType 名から導出するものなので、リネームするとリリースタグを打った
+瞬間に初めてワークフローが壊れる。
 
 リリース署名は 3 つのソースから、この優先順で解決される — Gradle プロジェクトプロパティ、
 環境変数、`local.properties` の順 — 4 つの値はすべて揃って初めて有効になる（一部だけの設定は
@@ -305,7 +319,7 @@ URI がプロセスに届かないからである。代わりにアプリが初�
    - macOS ランナーで `:composeApp:packageDmg` を実行し、`Keryx-<version>-macos-arm64.dmg` に加えて **`Keryx-<version>-macos-arm64.zip`** としても添付する。**プレリリースタグの場合は `packageDmg` をスキップし、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。
    - Linux ランナーで（jpackage 用に `fakeroot`/`rpm` をインストールした上で）`:composeApp:packageDeb :composeApp:packageRpm` を実行し、`Keryx-<version>-linux-x86_64.deb` と `Keryx-<version>-linux-x86_64.rpm` に加えて **`Keryx-<version>-linux-x86_64.zip`** としても添付する。**プレリリースタグの場合は `packageDeb`/`packageRpm` をスキップし、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。
    - Windows ランナーで `:composeApp:createDistributable :composeApp:packageMsi` を実行し（`windows-latest` には WiX Toolset v3.14.1 がプリインストール済みのため、別途 WiX のセットアップ手順は不要）、`Keryx-<version>-windows-x86_64.msi` に加えて **`Keryx-<version>-windows-x86_64.zip`** としても添付する。**プレリリースタグの場合は `packageMsi` をスキップし、`.zip` のみを添付する** — MSI の `ProductVersion`（後述）は数値のみでなければならず、同一の対象バージョンに属するプレリリースはすべて同じ `ProductVersion` に潰れてしまうため、固定の `upgradeUuid` の下では WiX が後続のプレリリースや最終的な正式版を「アップグレード」として認識できない。
-   - Ubuntu ランナーで `:androidApp:assembleRelease` と `:androidApp:bundleRelease` を実行し、`Keryx-<version>-android-universal.apk` と `Keryx-<version>-android-universal.aab` として添付する。Android 版はデスクトップのインストーラーとは異なり、プレリリースタグでもビルド・添付する — Android には該当するバージョンメタデータ制約が無く、テスターが署名済み APK を必要とするため。**ワークフローが出力するプレリリースの APK/AAB は、GitHub 用のテストアーティファクトに過ぎない。** `androidApp/build.gradle.kts` は `versionCode` を `appVersion.substringBefore('-')` から導出しているため、`v1.2.0-beta.1` のようなプレリリースタグと最終的な `v1.2.0` は同じ `versionCode`（例: `10200`）になる。Google Play に提出する際は、`androidApp/build.gradle.kts`（またはそれを駆動するリリースタグ）を調整し、厳密に増加した `versionCode` で再ビルドすること — この値はビルド時に署名済みアーティファクトへ焼き込まれるため、ビルド後に書き換えることはできない。
+   - Ubuntu ランナーで `:androidApp:assembleGithubRelease` と `:androidApp:bundlePlayRelease` を実行し、`Keryx-<version>-android-universal.apk` と `Keryx-<version>-android-universal.aab` として添付する。APK は `github` flavor（`REQUEST_INSTALL_PACKAGES` を持つ——アプリ内アップデートがこの上に上書きインストールするため。上記「Android（APK / AAB）」参照）から、AAB は `play`（Play Console 提出用の成果物で、この権限を持ってはならない）から生成する。Android 版はデスクトップのインストーラーとは異なり、プレリリースタグでもビルド・添付する — Android には該当するバージョンメタデータ制約が無く、テスターが署名済み APK を必要とするため。**ワークフローが出力するプレリリースの APK/AAB は、GitHub 用のテストアーティファクトに過ぎない。** `androidApp/build.gradle.kts` は `versionCode` を `appVersion.substringBefore('-')` から導出しているため、`v1.2.0-beta.1` のようなプレリリースタグと最終的な `v1.2.0` は同じ `versionCode`（例: `10200`）になる。Google Play に提出する際は、`androidApp/build.gradle.kts`（またはそれを駆動するリリースタグ）を調整し、厳密に増加した `versionCode` で再ビルドすること — この値はビルド時に署名済みアーティファクトへ焼き込まれるため、ビルド後に書き換えることはできない。
 
    `.zip` ファイルは `:composeApp:createDistributable` が出力する、インストーラ不要のアプリバンドル／イメージを圧縮したものである。パッケージを経由せずに使いたいユーザー向け。`deploy-pages` ジョブ（Cloudflare Pages のデプロイフックを叩く）は、4つのパッケージングジョブすべての完了を待ってから実行される。
 
@@ -356,7 +370,7 @@ UI に一切現れない内部的なビルド識別子。中間成果物は `Ker
 **リポジトリの Secrets** に設定する。未設定でもビルドは成功するが、リリースされたアプリでは
 該当するクラウド連携が完全に非表示になる（`CloudStorageAvailability` 参照）。
 
-Android のリリース署名には、`ANDROID_RELEASE_KEYSTORE_BASE64`、`ANDROID_RELEASE_KEYSTORE_PASSWORD`、`ANDROID_RELEASE_KEY_ALIAS`、`ANDROID_RELEASE_KEY_PASSWORD` をリポジトリの Secrets に設定する。keystore は Base64 エンコードした PKCS12/JKS ファイルであり、ワークフローがビルド時に復元する。GitHub Releases と Google Play で同じ署名キーを使いたい場合は、ローカルで生成した keystore を、アプリ作成時に Google Play Console で**既存のアプリ署名キー**として登録する: Play Console は生の JKS/PKCS12 ファイルをそのままでは受け付けず、まず Google の PEPK（Play Encrypt Private Key）ツールで暗号化する必要がある（`java -jar pepk.jar --keystore=<path> --alias=<alias> --output=<encrypted-file> --encryptionkey=<key-from-play-console>`。Play App Signing の登録ページからダウンロードできる）。生成された暗号化ファイルをアップロードすると、その keystore が**アプリ署名キー**として登録される — これは Google が保持し、ユーザーに届く前にアプリを再署名するために使う鍵であり、以降 Play Console にアップロードする各 `.aab` に署名する**アップロードキー**とは区別される。同じ keystore を両方の役割に使うこともでき（Google はアプリ署名キーをそのままアップロードキーとして再利用することを明示的に許可している）、これにより GitHub Releases（APK/AAB に直接その keystore で署名する）と Google Play の双方で単一の keystore のみで済む。専用のアップロードキーを別に用意するのは Google が推奨する追加の防御策であり、必須ではない。`release.yml` は `:androidApp:assembleRelease`/`:androidApp:bundleRelease` に `-PandroidReleaseSigningRequired=true` を渡しており、これは Secrets が未設定（または一部だけ設定）の場合に**即座のビルド失敗**へつなげるためのフラグ — このワークフローは成果物を公開するので、未署名のまま成功させてはならない。そのため release ワークフローの成功には4つすべての Secrets が必須。
+Android のリリース署名には、`ANDROID_RELEASE_KEYSTORE_BASE64`、`ANDROID_RELEASE_KEYSTORE_PASSWORD`、`ANDROID_RELEASE_KEY_ALIAS`、`ANDROID_RELEASE_KEY_PASSWORD` をリポジトリの Secrets に設定する。keystore は Base64 エンコードした PKCS12/JKS ファイルであり、ワークフローがビルド時に復元する。GitHub Releases と Google Play で同じ署名キーを使いたい場合は、ローカルで生成した keystore を、アプリ作成時に Google Play Console で**既存のアプリ署名キー**として登録する: Play Console は生の JKS/PKCS12 ファイルをそのままでは受け付けず、まず Google の PEPK（Play Encrypt Private Key）ツールで暗号化する必要がある（`java -jar pepk.jar --keystore=<path> --alias=<alias> --output=<encrypted-file> --encryptionkey=<key-from-play-console>`。Play App Signing の登録ページからダウンロードできる）。生成された暗号化ファイルをアップロードすると、その keystore が**アプリ署名キー**として登録される — これは Google が保持し、ユーザーに届く前にアプリを再署名するために使う鍵であり、以降 Play Console にアップロードする各 `.aab` に署名する**アップロードキー**とは区別される。同じ keystore を両方の役割に使うこともでき（Google はアプリ署名キーをそのままアップロードキーとして再利用することを明示的に許可している）、これにより GitHub Releases（APK/AAB に直接その keystore で署名する）と Google Play の双方で単一の keystore のみで済む。専用のアップロードキーを別に用意するのは Google が推奨する追加の防御策であり、必須ではない。`release.yml` は `:androidApp:assembleGithubRelease`/`:androidApp:bundlePlayRelease` に `-PandroidReleaseSigningRequired=true` を渡しており、これは Secrets が未設定（または一部だけ設定）の場合に**即座のビルド失敗**へつなげるためのフラグ — このワークフローは成果物を公開するので、未署名のまま成功させてはならない。そのため release ワークフローの成功には4つすべての Secrets が必須。両方の flavor は同じ keystore で署名される（`signingConfigs` は flavor スコープではない）——これはまさに上記のアプリ署名キー登録が要求する構成そのもの: サイドロードされる `github` の APK と、Play が再署名する `play` の AAB は同一の署名 ID に遡れる必要があり、そうでなければ一方が既にインストールされている端末が他方をその場でのアップデートとして受け取れなくなる（`INSTALL_FAILED_UPDATE_INCOMPATIBLE`）。
 
 `ci.yml` の通常のビルドジョブは、push のたびに実行され何も公開しない都合上、意図的にこれらの
 Secrets を受け取らない。AGP は成果物が実際に使われるかどうかに関わらず `assembleRelease` を

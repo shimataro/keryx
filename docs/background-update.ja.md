@@ -133,6 +133,116 @@ Play 以外からの実行可能コードのダウンロードであり、この
 既にアプリを自動更新しているため、そこに GitHub 版の更新導線をもう一つ並べるとユーザーがどちらを
 使えばよいのか混乱するからである。
 
+## アプリ内アップデート
+
+`selfUpdateCheckSupported` が確認そのものを提供している場所では、`domain/UpdateRepository`
+（Koin の `single` なので、これ自身も進行中のダウンロードも設定ダイアログを閉じても生き続ける）が
+「リンクを出すだけ」からさらに進めて、実際のダウンロードとインストールまでを、1 本の
+`StateFlow<UpdateState>` の背後で駆動する: `Idle → Checking → (UpToDate | Available) →
+Downloading → Verifying → Ready → Installing`、そして `Checking`/`Downloading`/`Verifying` から
+`Failed` へも遷移しうる。Updates 設定タブ、デスクトップトレイの唯一のアップデートメニュー項目、
+通知センターのベル——すべてが同じこの状態を読むので、いま何が起きているかについて食い違うことは
+ありえない。**どの段階も無人では進まない**: 確認が自動的にダウンロードを始めることはなく、
+ダウンロード済みファイルが自動的にインストールされることもない——ダウンロードもインストールも、
+それぞれ個別の明示的なクリックである（Updates タブのボタン、あるいは提示されていればトレイの
+項目）。
+
+- **どのファイルを、どうするか。** `UpdateChecker` が GitHub リリースの `assets[]` をパースし、
+  `domain/UpdateAsset.kt` の `selectUpdateAsset` がこのビルドのインストール形態に合致するものを
+  1 つ選ぶ（GitHub がまだ処理を終えていないアセットや、検証可能な `sha256` digest を持たない
+  アセットは絶対に選ばない——詳細は下記「完全性検証」）——`.aab` はどの `UpdateAssetKind` の
+  サフィックスにも一致しないため、そもそも候補になることがない。続いて `domain/UpdateInstallPolicy.kt`
+  の `updatePlan` が、そのアセットに対して実際に何をすべきかを、`platform/InstallLocation.kt` の
+  `detectInstallLocation()`（macOS の `.app`、Windows/Linux の portable ZIP、Windows の MSI
+  インストール、Android のサイドロード、……）だけから純粋に決める:
+  `SelfReplace`（その場でファイルを置き換えて再起動）、`RunInstaller`（OS 自身のインストーラーへ
+  引き渡す）、`OpenReleasePage`（この形態はその場で更新できない——Linux の deb/rpm インストール、
+  macOS App Translocation、書き込めないインストール先、このリリースに合致するアセットが無い、
+  など）、`NotOffered`（開発実行、または Google Play 経由でインストールされた Android ビルド）。
+  `UpdateInstaller.canInstall(plan)` はこれとは別の、より狭い問いにプラットフォームの `actual` が
+  実行時に答えるもの——「何をすべきか」ではなく「この実行環境に今それが許されているか」
+  （典型的には Android の「提供元不明のアプリ」同意）——であり、ダウンロードを始めるかどうかを
+  ゲートする。
+- **ダウンロード。** `data/remote/UpdateDownloader` は手動でリダイレクトを追う（共有 HTTP
+  クライアントにはリダイレクトプラグイン自体が入っていない）。小さなホスト allowlist
+  （`github.com`、`*.githubusercontent.com`。先頭ドット必須——`evilgithubusercontent.com` を
+  決して一致させないため）を毎ホップ再検証し、`https` 以外は不可、`MAX_REDIRECTS` で頭打ちにする。
+  ファイルは `<cacheDir>/updates/<version>/` 配下の `.part` パスへストリーミングされ、実サイズと
+  SHA-256 の両方がリリース自身の値と一致して初めて最終的な名前へ原子的にリネームされる——
+  「最終名が存在する＝検証済み」がパイプライン全体の不変条件になっている。1 リクエストごとの
+  タイムアウト上書きが、共有クライアントの（もっと短い）通常のリクエストタイムアウトを置き換える
+  — アップデートアセットは 100MB 超になりうるため。進捗は 1 秒あたり数回に間引かれ
+  （`shouldEmitProgress`）、キャンセルは `Failed` ではなく `Available` に戻す——ユーザー起因の
+  中断は失敗ではない。中断からの再開は無い: リダイレクト先は約 1 時間で失効する署名付き URL の
+  ため、失敗／キャンセルしたダウンロードは再開せず単にやり直す。`check()` は
+  `<cacheDir>/updates/` も掃除し、現在の状態が参照しているバージョン以外（進行中の `.part` と
+  `Ready` ファイルは保護する）をすべて削除するので、このリポジトリが参照しなくなったバージョンが
+  ディスク上に無限に溜まることはない。
+- **インストール。** 2 つのプラットフォーム別 `UpdateInstaller` は手法を共有していない:
+  - **デスクトップ**（`platform/update/DesktopUpdateInstaller.kt`）は `platform/ZipExtractor.kt`
+    経由で自己置換用の ZIP を展開し（zip slip の拒否、エントリ数とバイト数の上限、呼び出し側が
+    指定したエントリだけ実行ビットを復元）、ステージングディレクトリへヘルスチェックをかけ
+    （実行ファイルが存在すること、macOS では `Info.plist` のバージョンも一致すること）、展開結果を
+    現在のインストール先と同じボリュームへ移動し（スワップが単なる rename になるように）、
+    アプリを終了する前に detached ヘルパースクリプト（`platform/update/UpdateScriptWriter.kt`）を
+    `ProcessLauncher` 経由で起動する。OS を問わずスクリプトの形は同じ: このプロセスの PID が
+    終了するのを待ち、実行中のインストールを**退避**させ（`mv`。決して先に削除しない）、新しい方を
+    **配置**し、それを**検証**し、途中で失敗すれば退避したコピーへ**ロールバック**する——これにより
+    スワップ途中のクラッシュがインストール先を空にしてしまうことは無い。Windows の MSI
+    インストール済みビルドの場合は、代わりに PID の終了を待ってから
+    `msiexec /i ... /passive /norestart` を実行するスクリプトを起動する（WiX の固定 `upgradeUuid`
+    により、これは新規インストールではなく MajorUpgrade になる）。どちらの結果になっても exe パス
+    に最終的に存在する方を再起動する——UAC を拒否した場合やアップグレードが失敗した場合でも、
+    何も動いていない状態にはせず、元の動作していたインストールを再起動する。Linux の deb/rpm
+    インストールは自己置換の対象に一切ならない（上記の `updatePlan` が既に `OpenReleasePage` へ
+    振り分けている）——GUI から `pkexec`/`sudo` を呼び、失敗時の回復手段も無いという構成はリスクに
+    見合わないと判断した。
+  - **Android**（`platform/update/AndroidUpdateInstaller.kt`）はダウンロードした APK を
+    `PackageInstaller` セッションへストリーム書き込みしてコミットする。以降は OS が引き継ぐ（自前の
+    インストール確認を表示し、成功時にはこのプロセス自身を kill してくれるので、こちら側で何かする
+    必要は無い）。Install をクリックした時点で `canRequestPackageInstalls()` が false の場合
+    （宣言はされているがまだ許可されていない、あるいはダウンロード開始後に取り消された場合）、
+    アプリは即座に失敗させる代わりに「提供元不明のアプリ」システム設定画面を開き、state を
+    `Ready` のままにしておく——同意が得られた後の再クリックで再試行できるようにするため。
+    `REQUEST_INSTALL_PACKAGES` は `github` distribution flavor のマニフェストにのみ宣言されており
+    （`androidApp/build.gradle.kts` の `flavorDimensions` — `build.ja.md` 参照）、Google Play へ
+    提出する方には含めない——Play のポリシーがこの権限を「他アプリのインストールを主目的とする
+    アプリ」に限定していることと、Play が既にアプリ自身を更新してくれることの両方が理由。これを
+    駆動するゲートである `canInstallAndroidApkUpdate`（`domain/UpdateInstallPolicy.kt`）は、どの
+    flavor でビルドされたかで分岐するのではなく、**マージ済みマニフェスト**の権限を
+    `canRequestPackageInstalls()` 経由で読む——`play` flavor の APK が Play を経由せずサイドロード
+    される経路（Play Console のテスト配布、`bundletool`、社内配布）が実在し、そこでも正しく拒否
+    しなければならないため。セッションをコミットした後の終端failure（特に
+    `STATUS_FAILURE_INCOMPATIBLE` ——このインストールと上書き対象の署名鍵の不一致。`build.ja.md`
+    の Play App Signing の項を参照）はログには残すが `UpdateRepository.state` へは反映しない——
+    コミット時点で既に同期的に `Installing` へ遷移済みであり、後から届く非同期の結果を反映する
+    経路が無いため。成功時には OS がプロセスを先に kill するのでこの分岐に到達すること自体が無く、
+    この既知の狭い UX 上のギャップは、到達しえないケースのためにレイヤーをまたぐコールバックを
+    増やすよりも許容する、という判断である。
+- **提示のしかた。** 準備ができてからではなく、`check()` が何かを見つけた時点から提示する:
+  デスクトップトレイの唯一のアップデートメニュー項目は、`state` が動くのに合わせて
+  「アップデート %s をダウンロード」「ダウンロード中… N%」（5% 刻みに丸めており、Linux SNI の
+  D-Bus メニューをレイアウト変更シグナルで溢れさせないため）、「検証中…」、
+  「再起動して更新」、「アップデートに失敗しました」と切り替わる——`NotOffered`／インストール不可な
+  プランでは項目自体が無く、Updates タブ自身の「ダウンロード」ボタンも同様に単なる
+  「更新を確認」に縮退する（この一般的なパターンについては `ui-guidelines` の
+  「非表示より無効化を優先する」を参照）。通知センターのベルは、意味のある瞬間ごとに 1 行
+  出す——`check()` が見つけた時点で「新しいバージョンがあります」、ダウンロードが終わった時点で
+  同じ行を消してから「インストール準備ができました」に置き換える（並べて残すことは無い）——専用の
+  アクションを新設するのではなく、既存の `ShowSettingsTab("updates")`/`OpenUrl(releaseUrl)` を
+  再利用する（[error-design.ja.md](error-design.ja.md) の「通知センター」参照）。ダウンロードの
+  失敗そのものは意図的にベルへは出さない——トレイの項目と Updates タブ（自身の「再試行」ボタン
+  付き）が既に提示しており、ちょっとしたネットワークの不調のたびに `postNotification` を呼ぶのは
+  有用というよりうるさいだけになる。
+
+**完全性検証**は、GitHub Releases API 自身が返す `assets[].digest`（`"sha256:…"`）とダウンロード
+したファイル自身の SHA-256 が一致することだけに全面的に依拠している——API が既にこの値を返すため、
+この機能のために `release.yml` を変更する必要は無かった。これは転送経路の破損や改竄されたダウンロード
+は検出するが、**発行者の侵害は検出しない**: リリースを作成する GitHub アカウント／トークン自体が
+侵害されれば、攻撃者がすり替えたアセットとその digest は互いに一致してしまう。この限界と、より
+強い保証（例えば minisign/cosign の detached 署名）に何が必要かについては
+[SECURITY.ja.md](../SECURITY.ja.md) を参照。
+
 ## フィード更新の効率化
 
 `FeedFetcher` は `If-None-Match`（ETag）/ `If-Modified-Since`（Last-Modified）を送り、304 なら

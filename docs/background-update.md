@@ -134,6 +134,110 @@ mechanism or downloading executable code from elsewhere, neither of which this f
 reason is that Play already auto-updates the app, so a second, GitHub-flavored update path next to
 it would only confuse the user about which one to use.
 
+## In-App Update
+
+Where `selfUpdateCheckSupported` offers a check at all, `domain/UpdateRepository` (a Koin `single`,
+so it and any in-flight download outlive a closed settings dialog) drives it past a plain
+"here's a link" into an actual download-and-install, behind one `StateFlow<UpdateState>`:
+`Idle → Checking → (UpToDate | Available) → Downloading → Verifying → Ready → Installing`, with
+`Failed` reachable from `Checking`/`Downloading`/`Verifying`. Every surface — the Updates settings
+tab, the desktop tray's one update menu item, the notification-center bell — reads this same state,
+so they can never disagree about what's currently true. **No step ever runs unattended**: a check
+never auto-downloads, and a downloaded file never auto-installs — download and install are each a
+separate, explicit click (Updates tab button, or the tray item once one is offered).
+
+- **Which file, and what to do with it.** `UpdateChecker` parses the GitHub release's `assets[]`;
+  `domain/UpdateAsset.kt`'s `selectUpdateAsset` picks the one matching this build's install form
+  (never an asset GitHub hasn't finished processing, and never one with no verifiable `sha256`
+  digest — see "Integrity verification" below) — `.aab` is never a candidate at all, since no
+  `UpdateAssetKind` suffix ends in it. `domain/UpdateInstallPolicy.kt`'s `updatePlan` then decides
+  what an update should actually *do* with that asset, purely from `platform/InstallLocation.kt`'s
+  `detectInstallLocation()` (an macOS `.app`, a Windows/Linux portable ZIP, a Windows MSI install, an
+  Android sideload, …): `SelfReplace` (replace files in place, then relaunch), `RunInstaller` (hand
+  off to the OS's own installer), `OpenReleasePage` (this install form can't be updated in place —
+  a Linux deb/rpm install, macOS App Translocation, an unwritable install directory, no matching
+  asset in this release), or `NotOffered` (a development run, or an Android build installed through
+  Google Play). `UpdateInstaller.canInstall(plan)` is a separate, narrower question the platform
+  `actual` answers at runtime — not just "what should happen" but "is this instance currently
+  allowed to" (Android's install-unknown-apps consent, most notably) — and gates whether a download
+  even starts.
+- **Downloading.** `data/remote/UpdateDownloader` manually follows redirects (the shared HTTP client
+  has no redirect plugin at all) against a small host allowlist (`github.com`,
+  `*.githubusercontent.com`, leading dot required — `evilgithubusercontent.com` must never match),
+  re-validated at every hop, `https` only, capped at `MAX_REDIRECTS`. The file streams to a `.part`
+  path under `<cacheDir>/updates/<version>/`; only once its exact size and SHA-256 both match the
+  release's own values does it get an atomic rename to its final name — "the final name exists" is
+  the invariant the rest of the pipeline relies on for "this file is verified". A per-request
+  timeout override replaces the shared client's ordinary (much shorter) request timeout, since an
+  update asset can be 100MB+. Progress is throttled to a few updates a second
+  (`shouldEmitProgress`), and cancelling reverts to `Available` rather than `Failed` — a
+  user-requested stop is not a failure. There is no resume-from-partial: the redirect target is a
+  signed URL that expires in about an hour, so a failed/cancelled download is simply restarted, not
+  resumed. `check()` also sweeps `<cacheDir>/updates/` of every version except whichever one the
+  current state is still using (protecting an in-progress `.part` as well as a `Ready` file), so an
+  update this repository stops referencing doesn't accumulate on disk forever.
+- **Installing.** The two platform `UpdateInstaller` actuals do not share an approach:
+  - **Desktop** (`platform/update/DesktopUpdateInstaller.kt`) extracts a self-replace ZIP via
+    `platform/ZipExtractor.kt` (zip-slip rejection, entry-count and byte-size limits, restoring the
+    executable bit only on the entries the caller names) into a staging directory, health-checks it
+    (the executable exists; on macOS, its `Info.plist` version also matches), moves the extraction
+    onto the same volume as the current install (so the swap is a plain rename), and hands off to a
+    detached helper script (`platform/update/UpdateScriptWriter.kt`) via `ProcessLauncher` before
+    exiting the app. Every script follows the same shape regardless of OS: wait for this process's
+    PID to exit, **retreat** the running install aside (`mv`, never delete first), **place** the new
+    one, **verify** it, and **roll back** to the retreated copy on any failure along the way — so a
+    crash mid-swap never leaves the install directory empty. A Windows MSI-installed build instead
+    launches a script that waits out the PID and then runs `msiexec /i ... /passive /norestart`
+    (WiX's fixed `upgradeUuid` makes this a MajorUpgrade, not a fresh install), relaunching whatever
+    ends up at the exe path either way — a declined UAC prompt or a failed upgrade relaunches the
+    previous, still-working install rather than leaving nothing running. A Linux deb/rpm install is
+    never self-replaced at all (`updatePlan` above already routes it to `OpenReleasePage`) — running
+    `pkexec`/`sudo` from a GUI with no recovery path if it fails was judged not worth the risk.
+  - **Android** (`platform/update/AndroidUpdateInstaller.kt`) streams the downloaded APK into a
+    `PackageInstaller` session and commits it; the OS takes over from there (showing its own install
+    confirmation, and — on success — killing this process itself, so nothing here has to). If
+    `canRequestPackageInstalls()` is false when Install is clicked (declared but not yet granted, or
+    revoked since the download started), the app instead opens the "install unknown apps" system
+    settings screen and leaves state at `Ready` rather than failing outright, so a later click
+    retries once consent is granted. `REQUEST_INSTALL_PACKAGES` is declared only in the `github`
+    distribution flavor's manifest (`androidApp/build.gradle.kts`'s `flavorDimensions` — see
+    `build.md`) — not the one submitted to Google Play, both because Play policy restricts that
+    permission to apps whose primary purpose is installing other apps and because Play already
+    updates the app itself. The gate this drives, `canInstallAndroidApkUpdate`
+    (`domain/UpdateInstallPolicy.kt`), reads the *merged manifest's* permission via
+    `canRequestPackageInstalls()` rather than branching on which flavor built the running APK, since
+    a `play`-flavored APK can still reach this code sideloaded outside Play (a Play Console test
+    track, `bundletool`, internal distribution) and must still correctly refuse there. A terminal
+    failure after the session is committed (most notably `STATUS_FAILURE_INCOMPATIBLE` — a
+    signing-key mismatch between this install and the one being installed over, see `build.md`'s
+    Play App Signing note) is logged but not fed back into `UpdateRepository.state`, which already
+    moved to `Installing` synchronously on commit and has no channel for a later async result to
+    revise it — a known, narrow UX gap this installer accepts for now rather than adding a
+    cross-layer callback for a case a successful install never even reaches (the OS kills the
+    process first).
+- **Presentation.** Surfaced from the moment `check()` finds something, not only once it's ready:
+  the desktop tray's single update menu item cycles through "Download update", "Downloading… N%"
+  (rounded to 5% to avoid flooding the Linux SNI D-Bus menu with layout-change signals),
+  "Verifying…", "Restart to update", and "Update failed" as `state` moves — absent entirely for a
+  `NotOffered`/non-installable plan, where the Updates tab's own "Download" button likewise reduces
+  to a plain "Check for update" instead (see `ui-guidelines`'s "prefer disabled over hidden" for the
+  general pattern this follows). The notification-center bell gets one row per meaningful moment —
+  "a new version is available" when `check()` finds one, then that same row is dismissed and
+  replaced (never left to accumulate alongside it) by "ready to install" once a download finishes —
+  reusing the existing `ShowSettingsTab("updates")`/`OpenUrl(releaseUrl)` actions rather than adding
+  a dedicated one (see "Notification Center" in [error-design.md](error-design.md)). A download
+  failure itself is deliberately **not** posted to the bell — the tray item and the Updates tab
+  (with its own "Retry" button) already surface it, and a `postNotification` call for every
+  transient network hiccup would be noisier than useful.
+
+**Integrity verification** relies entirely on the GitHub Releases API's own `assets[].digest`
+(`"sha256:…"`) matching the downloaded file's own SHA-256 — no `release.yml` change was needed for
+this, since the API already returns it. This detects transport corruption and a tampered download,
+but **not** publisher compromise: if the GitHub account/token that produces a release were itself
+compromised, the attacker-substituted asset and its digest would still match each other. See
+[SECURITY.md](../SECURITY.md) for this limitation and what a stronger guarantee (e.g. a
+minisign/cosign detached signature) would require.
+
 ## Feed Update Efficiency
 
 `FeedFetcher` sends `If-None-Match` (ETag) / `If-Modified-Since` (Last-Modified), and returns empty on 304 (no new articles). Updated ETag / Last-Modified values are saved in the `feeds` table.
