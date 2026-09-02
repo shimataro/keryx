@@ -24,9 +24,14 @@ If toolchain auto-download is blocked in a sandbox:
 ./gradlew :composeApp:desktopTest     # Tests only
 ./gradlew :composeApp:run             # Launch the desktop app
 
-./gradlew :androidApp:assembleDebug   # Build a debug APK
-./gradlew :androidApp:installDebug    # Build + install it on a connected device/emulator
+./gradlew :androidApp:assembleDebug        # Build a debug APK
+./gradlew :androidApp:installGithubDebug   # Build + install it on a connected device/emulator
 ```
+
+`:androidApp` has a `distribution` product-flavor dimension (see "Android (APK / AAB)" below), so
+installing is a per-variant task — there is no `installDebug`, and `githubDebug` is the only debug
+variant (`playDebug` is disabled). `assembleDebug` remains an aggregate over the enabled debug
+variants and so still works as written.
 
 ## Cloud Storage Integration
 

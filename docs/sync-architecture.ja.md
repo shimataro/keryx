@@ -398,7 +398,7 @@ single-instance 経由で実行中インスタンスへ転送する。
 > Gradle 実行終了後も残ってしまうため。連携を行う/確認する場合は `createDistributable` でビルドした
 > アプリを起動する（詳細は [setup.ja.md](setup.ja.md)）。
 > Google Drive はループバック受信のため、この制約はなく `gradlew run` でも連携を完了できる。
-> Android にはどちらの制約もない——`installDebug` でもリリースパイプライン経由でも、マニフェスト宣言の
+> Android にはどちらの制約もない——`installGithubDebug` でもリリースパイプライン経由でも、マニフェスト宣言の
 > `intent-filter` は同じように機能する。
 
 ### Android で Google Drive が未対応な理由

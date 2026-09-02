@@ -25,9 +25,14 @@
 ./gradlew :composeApp:desktopTest     # テストのみ
 ./gradlew :composeApp:run             # デスクトップアプリを起動
 
-./gradlew :androidApp:assembleDebug   # デバッグ APK をビルド
-./gradlew :androidApp:installDebug    # ビルドして接続中の実機/エミュレータへインストール
+./gradlew :androidApp:assembleDebug        # デバッグ APK をビルド
+./gradlew :androidApp:installGithubDebug   # ビルドして接続中の実機/エミュレータへインストール
 ```
+
+`:androidApp` には `distribution` プロダクトフレーバー次元があるため（後述「Android（APK / AAB）」）、
+インストールはバリアント単位のタスクになる —— `installDebug` は存在せず、デバッグバリアントは
+`githubDebug` だけ（`playDebug` は無効化済み）。`assembleDebug` は有効なデバッグバリアントを束ねる
+集約タスクとして残っているので、上記のままで動く。
 
 ## クラウドストレージとの連携
 

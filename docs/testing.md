@@ -117,6 +117,14 @@ disables the `playDebug` variant entirely (nothing debug-build-specific to exerc
 `githubDebug` doesn't already cover — see that file's own comment), so `connectedAndroidTest` (no
 flavor) now runs only `githubDebug`, the sole remaining debug variant.
 
+That the flavors differ *only* in that permission is itself checked on every push, by `ci.yml`'s
+"Verify REQUEST_INSTALL_PACKAGES is github-only (Linux)" step: it runs
+`:androidApp:processGithubReleaseManifest`/`processPlayReleaseManifest` and greps the two **merged**
+manifests, so the assertion holds against what AGP actually produces rather than against the flavor
+source sets. Merged output is what matters here — a transitive library manifest could reintroduce
+the permission into `play` without either flavor's own `AndroidManifest.xml` changing, and that is
+exactly the case Google Play would reject.
+
 Like `androidDeviceTest`, this is not part of `./gradlew build` — AGP's `build` lifecycle for an
 application module only runs `lintAnalyzeDebugAndroidTest` (static analysis) on the `androidTest`
 source set, not `compileDebugAndroidTestKotlin`/`assembleDebugAndroidTest`. A dedicated

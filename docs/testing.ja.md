@@ -154,6 +154,14 @@ CI で実行する（そしてローカルでも実行すべき）のは `github
 `connectedAndroidTest`（flavor 指定なし）は今では唯一残るデバッグバリアントである `githubDebug`
 のみを実行する。
 
+「2 つの flavor の違いがその権限*だけ*である」こと自体も、`ci.yml` の
+「Verify REQUEST_INSTALL_PACKAGES is github-only (Linux)」ステップが毎 push で検証している。
+`:androidApp:processGithubReleaseManifest`/`processPlayReleaseManifest` を実行し、**マージ後の**
+マニフェスト 2 つを grep するので、flavor のソースセットではなく AGP が実際に生成したものに対する
+アサーションになる。マージ後であることが重要で、どちらの flavor の `AndroidManifest.xml` も変えずに
+推移的なライブラリのマニフェストが `play` 側へこの権限を復活させることがあり得る——そしてそれこそが
+Google Play に弾かれるケースである。
+
 `androidDeviceTest` と同様、これも `./gradlew build` には含まれない — アプリケーションモジュールの
 AGP の `build` ライフサイクルは `androidTest` ソースセットに対して静的解析タスクの
 `lintAnalyzeDebugAndroidTest` のみを実行し、`compileDebugAndroidTestKotlin` /
