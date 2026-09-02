@@ -2,7 +2,6 @@ package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,7 +19,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,7 +26,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import org.jetbrains.compose.resources.painterResource
 import androidx.compose.ui.layout.ContentScale
@@ -39,7 +36,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
 import kotlinx.datetime.TimeZone
 import coil3.compose.AsyncImage
 import org.jetbrains.compose.resources.stringResource
@@ -155,27 +151,6 @@ internal fun rememberArticleRowStrings(): ArticleRowStrings {
     }
 }
 
-/** How long a pulse-triggered ripple holds its press state before releasing, so the indication has
- * time to visibly grow before it starts fading — an immediate press-then-release can render as
- * barely visible. */
-private const val RETURN_RIPPLE_PRESS_HOLD_MS = 220L
-
-/**
- * Plays a one-shot press+release into [this], mimicking a real tap so whichever indication is
- * bound to it (Android's M3 ripple via `listRowSurface`'s Android `actual`; desktop's
- * `FlatIndication`) shows its normal press feedback with no actual pointer input. Used to flash
- * the row for the article the user was last reading when they back out of the article detail pane
- * at `PaneLayout.Single` (see `HomePaneLayout.kt`'s `shouldFlashReturnedArticle` and
- * `ArticleListPane.kt`'s `ripplePulseFor`), where the persistent selection highlight is
- * suppressed by `LocalRowSelectionVisible`.
- */
-internal suspend fun MutableInteractionSource.playPulseRipple() {
-    val press = PressInteraction.Press(Offset.Zero)
-    emit(press)
-    delay(RETURN_RIPPLE_PRESS_HOLD_MS)
-    emit(PressInteraction.Release(press))
-}
-
 /**
  * Renders an article row with selection styling, read and starred indicators, metadata, and context-menu actions.
  *
@@ -224,9 +199,7 @@ internal fun ArticleRow(
     val openInBrowserLabel = strings.openInBrowser
     val noTitleFallback = strings.noTitleFallback
     val testTag = remember(article.id) { "article-${article.id}" }
-    LaunchedEffect(ripplePulse) {
-        if (ripplePulse != 0) interactionSource.playPulseRipple()
-    }
+    PulseRippleEffect(ripplePulse, interactionSource)
     Row(
         Modifier.testTag(testTag)
             .fillMaxWidth()

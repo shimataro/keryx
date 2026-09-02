@@ -1,17 +1,65 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 /** The horizontal inset a list row's highlight keeps from the pane edge — see [listRowSurface]. */
 internal val LIST_ROW_HORIZONTAL_MARGIN = 8.dp
+
+/** How long a pulse-triggered ripple holds its press state before releasing, so the indication has
+ * time to visibly grow before it starts fading — an immediate press-then-release can render as
+ * barely visible. */
+private const val RETURN_RIPPLE_PRESS_HOLD_MS = 220L
+
+/**
+ * Plays a one-shot press+release into [this], mimicking a real tap so whichever indication is
+ * bound to it (Android's M3 ripple via `listRowSurface`'s Android `actual`; desktop's
+ * `FlatIndication`) shows its normal press feedback with no actual pointer input. Used to flash
+ * the row a user just navigated away from when they back out to it at `PaneLayout.Single`, where
+ * the persistent selection highlight is suppressed by `LocalRowSelectionVisible` — the article row
+ * backed out of from the article detail pane (see `HomePaneLayout.kt`'s `shouldFlashReturnedArticle`
+ * and `ArticleListPane.kt`'s `ripplePulseFor`), and the feed-list row (feed / folder / tag /
+ * quick-filter) backed out of from the article list pane (see `shouldFlashReturnedFeedListRow` and
+ * `FeedListPane.kt`'s `feedListRipplePulseFor`).
+ */
+internal suspend fun MutableInteractionSource.playPulseRipple() {
+    val press = PressInteraction.Press(Offset.Zero)
+    emit(press)
+    try {
+        delay(RETURN_RIPPLE_PRESS_HOLD_MS)
+        emit(PressInteraction.Release(press))
+    } catch (e: CancellationException) {
+        withContext(NonCancellable) { emit(PressInteraction.Cancel(press)) }
+        throw e
+    }
+}
+
+/**
+ * Plays a one-shot [playPulseRipple] on [interactionSource] whenever [ripplePulse] becomes
+ * nonzero — including on the very first composition, which is what a pane remounting on a back
+ * navigation at `PaneLayout.Single` relies on. `0` (the default at every call site) never plays
+ * one.
+ */
+@Composable
+internal fun PulseRippleEffect(ripplePulse: Int, interactionSource: MutableInteractionSource) {
+    LaunchedEffect(ripplePulse) {
+        if (ripplePulse != 0) interactionSource.playPulseRipple()
+    }
+}
 
 /**
  * The mobile density floor for an interactive list row (feed / folder / tag / article) —

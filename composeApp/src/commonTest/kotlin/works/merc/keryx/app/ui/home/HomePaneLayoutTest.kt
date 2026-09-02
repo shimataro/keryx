@@ -208,6 +208,28 @@ class HomePaneLayoutTest {
         assertEquals(false, shouldFlashReturnedArticle(PaneLayout.Triple, HomePane.ArticleDetail))
     }
 
+    // --- shouldFlashReturnedFeedListRow ---
+
+    @Test
+    fun shouldFlashReturnedFeedListRowIsTrueAtSingleBackingOutOfArticleList() {
+        assertEquals(true, shouldFlashReturnedFeedListRow(PaneLayout.Single, HomePane.ArticleList))
+    }
+
+    @Test
+    fun shouldFlashReturnedFeedListRowIsFalseAtSingleFromAnyOtherPane() {
+        assertEquals(false, shouldFlashReturnedFeedListRow(PaneLayout.Single, HomePane.FeedList))
+        assertEquals(false, shouldFlashReturnedFeedListRow(PaneLayout.Single, HomePane.ArticleDetail))
+    }
+
+    @Test
+    fun shouldFlashReturnedFeedListRowIsFalseAtDualAndTripleEvenFromArticleList() {
+        // At Dual, backing out of the article list toward the feed list is already a no-op
+        // (canNavigateBack is false there — both panes are already on screen), and Triple never
+        // has anywhere to back out to at all.
+        assertEquals(false, shouldFlashReturnedFeedListRow(PaneLayout.Dual, HomePane.ArticleList))
+        assertEquals(false, shouldFlashReturnedFeedListRow(PaneLayout.Triple, HomePane.ArticleList))
+    }
+
     // --- homeBackAction ---
 
     @Test

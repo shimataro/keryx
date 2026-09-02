@@ -118,7 +118,7 @@ fun homeBackAction(layout: PaneLayout, depth: Int, searchScopeReturnPending: Boo
 
 /**
  * Whether landing on [HomePane.ArticleList] via a back action should flash the row for the
- * article that was just being read (see `ArticleRowComponents.kt`'s ripple-pulse mechanism).
+ * article that was just being read (see `ListRowChrome.kt`'s ripple-pulse mechanism).
  * `true` only when backing out of [HomePane.ArticleDetail] specifically, and only at
  * [PaneLayout.Single], where `LocalRowSelectionVisible` (`HomeCommon.kt`) suppresses the
  * persistent selection highlight — at [PaneLayout.Dual]/[PaneLayout.Triple] the row's highlight
@@ -127,6 +127,21 @@ fun homeBackAction(layout: PaneLayout, depth: Int, searchScopeReturnPending: Boo
  */
 fun shouldFlashReturnedArticle(layout: PaneLayout, fromPane: HomePane): Boolean =
     layout == PaneLayout.Single && fromPane == HomePane.ArticleDetail
+
+/**
+ * Whether landing on [HomePane.FeedList] via a back action should flash the row for the
+ * feed/folder/tag/quick-filter selection that was just being browsed (see `ListRowChrome.kt`'s
+ * ripple-pulse mechanism, and `FeedListPane.kt`'s `feedListRipplePulseFor` for how the pulse is
+ * narrowed down to the one selected row).
+ *
+ * `true` only when backing out of [HomePane.ArticleList] specifically, and only at
+ * [PaneLayout.Single] — the same reasoning as [shouldFlashReturnedArticle]: at [PaneLayout.Dual]
+ * backing out of [HomePane.ArticleList] toward [HomePane.FeedList] is already a no-op
+ * ([canNavigateBack] is `false` there, so [homeBackAction] never reaches [HomeBackAction.PopPane]
+ * for it), and at [PaneLayout.Triple] there is nowhere to back out to at all.
+ */
+fun shouldFlashReturnedFeedListRow(layout: PaneLayout, fromPane: HomePane): Boolean =
+    layout == PaneLayout.Single && fromPane == HomePane.ArticleList
 
 /**
  * The [HomePane] a narrow layout should actually open on, given the last-focused pane [saved] from
