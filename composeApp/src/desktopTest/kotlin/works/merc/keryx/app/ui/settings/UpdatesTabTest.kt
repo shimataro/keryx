@@ -111,7 +111,7 @@ class UpdatesTabTest {
         waitForIdle()
 
         onAllNodesWithText("ダウンロード").assertCountEquals(0)
-        onNodeWithText("このインストール形態はアプリ内更新に対応していません").assertIsDisplayed()
+        onNodeWithText("このインストール形態はアプリ内アップデートに対応していません").assertIsDisplayed()
         onNodeWithText("リリースページを開く").assertIsDisplayed()
     }
 
@@ -131,7 +131,7 @@ class UpdatesTabTest {
         waitForIdle()
 
         onAllNodesWithText("ダウンロード").assertCountEquals(0)
-        onNodeWithText("このインストール形態はアプリ内更新に対応していません").assertIsDisplayed()
+        onNodeWithText("このインストール形態はアプリ内アップデートに対応していません").assertIsDisplayed()
     }
 
     @Test
@@ -220,7 +220,7 @@ class UpdatesTabTest {
         }
         waitForIdle()
 
-        onNodeWithText("2.0.0 の準備ができました").assertIsDisplayed()
+        onNodeWithText("バージョン 2.0.0 のインストール準備ができました").assertIsDisplayed()
         onAllNodesWithText("新しいバージョン 2.0.0 があります").assertCountEquals(0)
     }
 
