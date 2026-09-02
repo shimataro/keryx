@@ -163,8 +163,10 @@ class UpdatesTabTest {
 
         onNodeWithText("ダウンロード中… 50%").assertIsDisplayed()
         onNodeWithText("キャンセル").assertIsDisplayed().assertIsEnabled()
-        // Downloading has no primary action button of its own — cancel is the only affordance.
-        onAllNodesWithText("ダウンロード").assertCountEquals(0)
+        // The headline row keeps its Download button structurally present but disabled while a
+        // download is in flight (see UpdateHeadlineRow's own KDoc) — cancel, in the progress slot
+        // below, is the only actionable affordance.
+        onNodeWithText("ダウンロード").assertIsDisplayed().assertIsNotEnabled()
     }
 
     @Test
@@ -353,6 +355,42 @@ class UpdatesTabTest {
         ).getBoundsInRoot().height
 
         assertEquals(emptySlotHeight, filledSlotHeight)
+    }
+
+    @Test
+    fun theHeadlineRowIsTheSameHeightWithOrWithoutATrailingButton() = runDesktopComposeUiTest {
+        setContent {
+            Column {
+                Column(Modifier.testTag("available-section").width(360.dp)) {
+                    UpdateResultSection(UpdateState.Available(installableUpdate()), ::noop, ::noop, ::noop, ::noop)
+                }
+                Column(Modifier.testTag("downloading-section").width(360.dp)) {
+                    UpdateResultSection(
+                        UpdateState.Downloading(installableUpdate(), 50, 100), ::noop, ::noop, ::noop, ::noop,
+                    )
+                }
+                Column(Modifier.testTag("verifying-section").width(360.dp)) {
+                    UpdateResultSection(UpdateState.Verifying(installableUpdate()), ::noop, ::noop, ::noop, ::noop)
+                }
+                Column(Modifier.testTag("installing-section").width(360.dp)) {
+                    UpdateResultSection(UpdateState.Installing(installableUpdate()), ::noop, ::noop, ::noop, ::noop)
+                }
+            }
+        }
+        waitForIdle()
+
+        // Downloading/Verifying now keep the same disabled Download button Available shows (see
+        // UpdateHeadlineRow's own KDoc), rather than omitting the trailing button entirely — so
+        // this row's height must be identical across all four, matching Installing's own always-
+        // present disabled button.
+        fun heightOf(sectionTag: String) = onNode(
+            hasTestTag(UPDATE_HEADLINE_ROW_TEST_TAG) and hasAnyAncestor(hasTestTag(sectionTag)),
+        ).getBoundsInRoot().height
+
+        val availableHeight = heightOf("available-section")
+        assertEquals(availableHeight, heightOf("downloading-section"))
+        assertEquals(availableHeight, heightOf("verifying-section"))
+        assertEquals(availableHeight, heightOf("installing-section"))
     }
 
     @Test

@@ -275,11 +275,20 @@ internal const val UPDATE_RELEASE_NOTES_CARD_TEST_TAG = "update-release-notes-ca
 /**
  * The card's single hero line: what's currently true about the update, and — trailing, on the
  * same row — the one button that acts on it (download / install / retry), so the most useful
- * thing to do about an update is never more than one glance and one click away. Downloading and
- * Verifying render nothing here — [UpdateProgressSlot] right below is their entire status/action
- * surface (progress bar + Cancel, or a spinner) — so this row and that slot together read as one
- * continuous status block.
+ * thing to do about an update is never more than one glance and one click away.
+ *
+ * Downloading and Verifying keep the same disabled Download button structurally present (matching
+ * [UpdateState.Installing]'s own disabled button below) rather than omitting it: an omitted button
+ * shrinks this row's height (no button content to size against, just the headline text), which
+ * shifted [UpdateProgressSlot] right below up and down as a download started/finished — a real,
+ * if small, layout jump *inside* [UpdateResultSection]'s own reserved floor height (see that
+ * function's own KDoc), which only guards the row's *total* height, not this internal wobble.
+ * [UpdateProgressSlot] remains the actual progress feedback (bar/percent, or a spinner) and the
+ * Cancel action; this button is disabled precisely because there is nothing to click here while
+ * either is in flight.
  */
+internal const val UPDATE_HEADLINE_ROW_TEST_TAG = "update-headline-row"
+
 @Composable
 private fun UpdateHeadlineRow(
     state: UpdateState,
@@ -288,7 +297,10 @@ private fun UpdateHeadlineRow(
     onStartDownload: () -> Unit,
     onInstall: () -> Unit,
 ) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier.fillMaxWidth().testTag(UPDATE_HEADLINE_ROW_TEST_TAG),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         val headline = if (state is UpdateState.Ready) {
             stringResource(Res.string.settings_update_ready, update.version)
         } else {
@@ -304,6 +316,10 @@ private fun UpdateHeadlineRow(
             is UpdateState.Available -> if (installable) {
                 Spacer(Modifier.width(8.dp))
                 FlatButton(onClick = onStartDownload) { Text(stringResource(Res.string.settings_update_download)) }
+            }
+            is UpdateState.Downloading, is UpdateState.Verifying -> if (installable) {
+                Spacer(Modifier.width(8.dp))
+                FlatButton(onClick = {}, enabled = false) { Text(stringResource(Res.string.settings_update_download)) }
             }
             is UpdateState.Ready -> {
                 Spacer(Modifier.width(8.dp))
@@ -323,7 +339,7 @@ private fun UpdateHeadlineRow(
                 Spacer(Modifier.width(8.dp))
                 FlatTonalButton(onClick = onStartDownload) { Text(stringResource(Res.string.settings_update_retry)) }
             }
-            else -> Unit // Downloading/Verifying: UpdateProgressSlot below is the only action surface
+            else -> Unit // unreachable here: Idle/Checking/UpToDate never carry an AvailableUpdate (see UpdateResultSection)
         }
     }
 }
