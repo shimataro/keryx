@@ -26,6 +26,7 @@ import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.domain.AvailableUpdate
 import works.merc.keryx.app.domain.UpdateState
 import works.merc.keryx.app.domain.plainTextReleaseNotes
+import works.merc.keryx.app.domain.update
 import works.merc.keryx.app.ui.common.FlatButton
 import works.merc.keryx.app.ui.common.FlatTextButton
 import works.merc.keryx.app.ui.common.FlatTonalButton
@@ -127,7 +128,7 @@ internal fun UpdatesTabContent(vm: SettingsViewModel) {
 
 /**
  * The result of the check above: nothing yet, "up to date", a bare check failure, or the full
- * card once a release is (or was) known — see [availableUpdateOrNull]. Takes plain callbacks
+ * card once a release is (or was) known — see [UpdateState.update]. Takes plain callbacks
  * rather than [SettingsViewModel] itself so it (and the two helpers below) can be exercised
  * directly from a Compose UI test against a bare [UpdateState], with no ViewModel/DI wiring needed.
  */
@@ -139,7 +140,7 @@ internal fun UpdateResultSection(
     onCancelDownload: () -> Unit,
     onInstall: () -> Unit,
 ) {
-    val update = availableUpdateOrNull(state)
+    val update = state.update
     if (update == null) {
         when (state) {
             UpdateState.UpToDate -> {
@@ -322,12 +323,3 @@ private fun UpdateProgressSlot(state: UpdateState, onCancelDownload: () -> Unit)
     }
 }
 
-private fun availableUpdateOrNull(state: UpdateState): AvailableUpdate? = when (state) {
-    is UpdateState.Available -> state.update
-    is UpdateState.Downloading -> state.update
-    is UpdateState.Verifying -> state.update
-    is UpdateState.Ready -> state.update
-    is UpdateState.Installing -> state.update
-    is UpdateState.Failed -> state.update
-    UpdateState.Idle, UpdateState.Checking, UpdateState.UpToDate -> null
-}

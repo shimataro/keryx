@@ -69,7 +69,7 @@ internal fun nextStateAfterCheck(
     return when (status) {
         is UpdateStatus.UpToDate -> current as? UpdateState.Ready ?: UpdateState.UpToDate
         is UpdateStatus.Failed -> current as? UpdateState.Ready
-            ?: UpdateState.Failed(updateOf(current), UpdateException(UpdateStage.CHECK, "Update check failed"))
+            ?: UpdateState.Failed(current.update, UpdateException(UpdateStage.CHECK, "Update check failed"))
         is UpdateStatus.Available -> {
             if (current is UpdateState.Ready && current.update.version == status.version) {
                 current
@@ -83,11 +83,18 @@ internal fun nextStateAfterCheck(
     }
 }
 
-private fun updateOf(state: UpdateState): AvailableUpdate? = when (state) {
-    is UpdateState.Available -> state.update
-    is UpdateState.Ready -> state.update
-    is UpdateState.Failed -> state.update
-    is UpdateState.Downloading, is UpdateState.Verifying, is UpdateState.Installing,
-    UpdateState.Idle, UpdateState.Checking, UpdateState.UpToDate,
-    -> null
-}
+/** The [AvailableUpdate] any state that carries one is currently showing — every state past
+ * [UpdateState.Idle]/[UpdateState.Checking]/[UpdateState.UpToDate], `null` for those three. The
+ * single definition both [UpdatesTab.kt] (deciding what to render) and [nextStateAfterCheck]
+ * (recovering the update a bare check failure happened while acting on) use, so a state added later
+ * that should carry an update can't have one of the two call sites quietly forget it. */
+internal val UpdateState.update: AvailableUpdate?
+    get() = when (this) {
+        is UpdateState.Available -> update
+        is UpdateState.Downloading -> update
+        is UpdateState.Verifying -> update
+        is UpdateState.Ready -> update
+        is UpdateState.Installing -> update
+        is UpdateState.Failed -> update
+        UpdateState.Idle, UpdateState.Checking, UpdateState.UpToDate -> null
+    }
