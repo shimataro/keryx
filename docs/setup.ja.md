@@ -120,7 +120,7 @@
   される）。4つは常にセットで必要 — 一部だけ設定するのは常に設定ミスであり、未署名で
   静かに進んだり、不完全な署名情報のまま進んだりせず、即座にビルドが失敗する。`.gitignore` は
   `*.keystore` / `*.jks` を除外済みなので、リポジトリ直下に置いても誤ってコミットされることは
-  ない。Google Play 配布用の本番キーストアの発行手順は [build.md](build.md) を参照。
+  ない。Google Play 配布用の本番キーストアの発行手順は [build.ja.md](build.ja.md) を参照。
 - **実機または起動中の Android エミュレータ**: Android の計装テストスイート2つ
   ——`androidDeviceTest`（`DatabaseMerger`/`DatabaseSnapshot` の Android 実装を実際の
   バンドル SQLite に対して検証）と `androidApp` 自身のスイート（Compose UI のジェスチャテスト）
@@ -171,7 +171,7 @@
 フォームのランタイムが必要（ヘッドレスな Linux 環境での Xvfb は除く）。ルートの
 `./gradlew build` は前述のとおり Android SDK も追加で必要になる。ネイティブパッケージング系
 タスク（`createDistributable`, `packageDmg`, `packageMsi`, `packageDeb`, `packageRpm` —
-詳細は [build.md](build.md)）は OS ごとに以下も必要。
+詳細は [build.ja.md](build.ja.md)）は OS ごとに以下も必要。
 
 - **Linux**
   - `fakeroot` — `packageDeb` に必要（jpackage が `.deb` 生成のために呼び出す）
@@ -195,7 +195,7 @@
 必要になるのは配布可能な（`debug` ではない）ビルドを作る場合のリリース署名キーストアだけ。
 前述の「Android リリース署名キーストア」を参照。デスクトップのネイティブパッケージが対象 OS
 上でしかビルドできない（クロスコンパイル不可）のとは違い、APK/AAB はどの OS からでもビルド
-できる — コマンドは [build.md](build.md) を参照。
+できる — コマンドは [build.ja.md](build.ja.md) を参照。
 
 ## 初回
 

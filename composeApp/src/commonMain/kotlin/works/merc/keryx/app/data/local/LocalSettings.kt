@@ -17,7 +17,7 @@ data class LocalSettings(
     val fontSizeScale: Double = 1.0,
     val refreshIntervalMinutes: Int = 30,
     val startMinimized: Boolean = false,
-    val cloudStorageType: String? = null, // "dropbox" | null (local only)
+    val cloudStorageType: String? = null, // CloudStorageType.id: "dropbox" | "google_drive" | "onedrive" | null (local only)
     val notificationEnabled: Boolean = true,
     val lastCacheCleanupAt: Long? = null,
     val windowWidth: Double? = null,

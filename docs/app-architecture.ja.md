@@ -267,7 +267,7 @@ HttpClient・TokenStorage・CloudSession・CloudConnectFlow を登録。ViewMode
 おり、Compose が描画するテクスチャではない。ペインの生存期間中は `if` の下に置かず常時
 無条件でコンポーズする — Compose Desktop の `SwingInteropContainer` はヘビーウェイトな
 コンポーネントが追加・削除・移動されるたびに、このペインだけでなく**ウインドウ全体**を
-再検証＋再描画するため（調査の詳細は [known-issues.md](known-issues.ja.md) 参照）。その帰結として、
+再検証＋再描画するため（調査の詳細は [known-issues.ja.md](known-issues.ja.md) 参照）。その帰結として、
 描画すべき記事が無い状態（「記事未選択」「本文なし」）は Compose の `Text` ではなく、同じ
 WebView **内部**の HTML として描画する（`ui/article/ArticleWebViewHtml.kt` の
 `articlePlaceholderHtml`／`articleNoContentHtml`。実記事用の `wrapArticleHtml` と同じ
@@ -279,7 +279,7 @@ WebView **内部**の HTML として描画する（`ui/article/ArticleWebViewHtm
 `AppDirs.cacheDir()` 配下の `webview` サブディレクトリを、デスクトップ 3 OS すべてに同一に適用している
 （OS 分岐なし）。デフォルトの `null` のままだと WebView2 は実行ファイルの隣に自分のデータフォルダを
 作ろうとし、その場所が書き込み不可の場合は Access Denied で失敗する — 調査の詳細は
-[known-issues.md](known-issues.ja.md) 参照（この生成失敗の例外が uncaught のまま伝播し、ライブラリの
+[known-issues.ja.md](known-issues.ja.md) 参照（この生成失敗の例外が uncaught のまま伝播し、ライブラリの
 生成リトライタイマが止まらなくなることが、クリック時にアプリ全体がフリーズする原因でもあった）。
 
 **Android のリーダー（`ui/home/ArticleDetailPane.kt`。commonMain 共有のコンポーザブル）は、

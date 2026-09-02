@@ -409,7 +409,7 @@ Secrets を受け取らない。AGP は成果物が実際に使われるかど�
 `:androidApp` のデフォルトの `build` タスクに組み込むが（`bundleRelease` は別系統の
 ライフサイクルタスクであり、だからこそ上記の `release.yml` は明示的に実行している）、
 `androidApp/build.gradle.kts` の `signingConfigs` ブロックは、署名情報が一切設定されていない
-状態を「未署名リリース」として扱う（ビルド失敗ではなく警告 — [setup.md](setup.md) の
+状態を「未署名リリース」として扱う（ビルド失敗ではなく警告 — [setup.ja.md](setup.ja.md) の
 「Android release signing keystore」参照）。`androidReleaseSigningRequired` を明示的に要求
 しない限りこの経路に入るため、単なる `./gradlew build` は CI でもローカルでも keystore を
 一切必要としない。成果物を実際に配布するワークフロー（`release.yml`）だけが、この経路の代わりに

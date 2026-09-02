@@ -178,7 +178,7 @@ only act on what you actually measured.
 2. **Whole-list recomputation.** `HomeViewModel.articles` rebuilds a `HashSet`
    and runs `sortedWith` + `filter` + `reversed()` over *every* article on each
    emission — including a single read toggle. Same family: the linear scans in
-   `HomeCommon.groupFeedsByFolder` / `feedListItemIndex`, and the per-character
+   `HomeCommon.groupFeedsByFolder` / `feedListRowIndex`, and the per-character
    `AnnotatedString` build in `markedToAnnotatedString` for every search row.
 3. **SQL N+1.** `ArticleRepository.search` issues a `getById` per FTS hit;
    `upsertParsed` issues a `getByFeedAndGuid` per article purely to count new

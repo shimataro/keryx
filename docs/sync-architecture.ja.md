@@ -366,7 +366,7 @@ state 検証・コード交換）はプロバイダー共通の `OAuthConnectFlo
   で拒否する（詳細は [build.ja.md](build.ja.md)）。
 
 OS へのスキーム登録方法はプラットフォームごとに異なる。macOS はパッケージング時に Info.plist
-（`CFBundleURLTypes`）で宣言する。Windows / Linux は起動時に `registerCustomUriScheme()` が登録し、
+（`CFBundleURLTypes`）で宣言する。Windows / Linux は起動時に `registerFileAssociations()` が登録し、
 Windows は `HKEY_CURRENT_USER\Software\Classes\keryx`（ユーザー単位のハイブなので管理者権限は不要）を、Linux は `LinuxUriSchemeRegistrar` がユーザーレベルの
 `.desktop`（`$XDG_DATA_HOME/applications/keryx-url-handler.desktop`、既定
 `~/.local/share/applications/keryx-url-handler.desktop`）と `$XDG_CONFIG_HOME/mimeapps.list`

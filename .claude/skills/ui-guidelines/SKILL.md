@@ -733,7 +733,7 @@ in place yet, and a new tag picks its name and color at once.
 The app does not embed AWT/Swing widgets via `SwingPanel` for ordinary controls
 (e.g. `Switch`/dropdowns) — JetBrains Compose Multiplatform has unresolved
 z-order/overdraw/crash bugs for `SwingPanel` inside scrollable containers, and
-every candidate control here lives inside one (`SettingsScreen`'s
+every candidate control here lives inside one (`SettingsDialog`'s
 `verticalScroll` `Column`, `FeedListPane`/`ArticleListPane`'s `LazyColumn`).
 This whole constraint — and everything under it about Swing interop — is desktop-only; Android has
 no AWT/Swing layer at all.
@@ -820,7 +820,7 @@ side, Android's own Material 3 ripple/shapes/components on the other:
 - **`SegmentedControl<T>` / `ToggleChip`**
   (`ui/common/SegmentedControl.kt`, expect/actual): the replacement for
   Material3's `FilterChip` for both "pick one of N" (`SegmentedControl`, used
-  by `SettingsScreen`'s theme/font-size/cache/timeout/refresh-interval rows)
+  by `SettingsDialog`'s theme/font-size/cache/timeout/refresh-interval rows)
   and standalone boolean toggles (`ToggleChip`, used by `ArticleListPane`'s
   "unread only"), **at a `commonMain` call site** — reach for these, not
   `FilterChip`, there. The desktop `actual`s render as a bordered
@@ -1040,7 +1040,7 @@ side, Android's own Material 3 ripple/shapes/components on the other:
     `.searchable()`.
   - `selectionBackground()` (`ui/home/HomeCommon.kt`) row highlight in `ArticleListPane`/`FeedListPane` —
     hand-computed focused/unfocused-pane dimming → native `List` row selection already dims the same way.
-  - `SettingsScreen`'s `SwitchRow` — now uses `FlatSwitch` (`ui/common/FlatToggles.kt`), consistent with
+  - `SettingsDialog`'s `SwitchRow` — now uses `FlatSwitch` (`ui/common/FlatToggles.kt`), consistent with
     the app's other flat controls → SwiftUI's native `Toggle` on a future SwiftUI port.
   - The drag-and-drop insertion-marker system in `FeedListDragAndDrop.kt` (`insertionMarkers`,
     `DropBoundary`, `RowHalf`, `resolveRowHalf`) — hand-computed row-half hit-testing and a manually

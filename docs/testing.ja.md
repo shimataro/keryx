@@ -77,7 +77,7 @@
 - `runTest`（仮想時間）と Ktor `MockEngine` の `HttpTimeout` や実ソケット I/O を組み合わせると、
   タイムアウトが誤検知されて flaky になることがある。該当するテストは `kotlinx.coroutines.runBlocking`
   （または実時間ポーリング）に切り替える（`FeedFetcherTest.kt`, `FeedRepositoryTest.kt`,
-  `OAuthLoopbackServerTest.kt` 等の実績あり）。
+  `OAuthConnectFlowTest.kt` 等の実績あり）。
 - **同一の `StateFlow` を 2 つのコレクタで観測し、その列が一致することをアサートしてはならない。**
   `StateFlow` は conflating で、「最新値が届くこと」しか保証しない。中間値は**コレクタごとに独立に**
   間引かれる。したがって 2 本の記録列の比較は、「一方だけ間引かれる」ことが起きないほど速いマシンで
@@ -283,7 +283,7 @@ OS ごとの `InstallLocation` 判定向けに拡張したもの）などを網�
 ため、下記の手動確認に留まる）と、`FilePicker.desktop.kt` の `resolveDialogOwner()` を実ウインドウに
 対して動かす部分（委譲先の純粋な `chooseDialogOwner` の選択ロジックのみテスト済み）である。
 `OAuthConnectFlow.connect()` のブラウザー起動〜コールバック待受〜
-コード交換部分（`BrowserOpener`/`OAuthLoopbackServer` の実I/Oに依存し、シームなしにはモック不可。
+コード交換部分（`BrowserOpener`/`LoopbackRedirectTransport` の実I/Oに依存し、シームなしにはモック不可。
 App Key 空チェックで即エラーになる分岐のみ `OAuthConnectFlowTest` でカバー済み）、
 `DatabaseDriverFactory.create()` そのもの（`AppDirs.appDataDir()` を直接参照しておりテスト用の
 ディレクトリ差し替えができない）。ただし本質的な部分である接続設定は `sqliteConnectionProperties()`
@@ -293,7 +293,7 @@ App Key 空チェックで即エラーになる分岐のみ `OAuthConnectFlowTes
 ことで、まさにこの部分をテスト可能にするために書き直された経緯があり、`FeedListDragTest.kt` が
 `performMouseInput`/`performKeyInput` を使って実際にエンドツーエンドで検証する（ドラッグによる並べ替え、
 しきい値判定、フォルダー/タグへのドロップ、ドラッグ中の右クリック、ゴーストのライフサイクル、
-Escape によるキャンセル）。並び替えの計算ロジック自体（`ReorderUtil.reorderIds`）と、それを使う
+Escape によるキャンセル）。並び替えの計算ロジック自体（`ReorderUtil.kt` のトップレベル関数 `reorderIds`）と、それを使う
 `FeedRepository.moveFeed`/`FolderRepository.reorderFolders` の DB 反映は通常どおりテストする。
 新規に追加されたものとして、`SqliteConnectionPropertiesTest`（本番の接続プロパティが実際にすべての
 接続へ届くこと — 外部キーが効き `busy_timeout` が適用されること。JVM ドライバは文ごとに接続を開くため
