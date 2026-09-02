@@ -238,6 +238,7 @@
     <string name="notification_channel_new_articles_name">新着記事</string>
     <string name="notification_channel_new_articles_description">新しい記事を取得したときに通知します</string>
     <string name="update_available_notification">新しいバージョン %1$s が利用可能です</string>
+    <string name="update_ready_notification">アップデート %1$s の準備ができました</string>
     <string name="notification_app_translocated">Keryx が一時的な場所で実行されています。Dropbox 連携などが失敗する場合は、Keryx を「アプリケーション」フォルダへ移動してから起動し直してください。</string>
     <string name="notification_app_translocated_detail">macOS は、ディスクイメージ（DMG）や「ダウンロード」フォルダから直接起動されたアプリを、App Translocation という仕組みによって毎回ランダムな一時的な場所にコピーして実行します。\n\nこのとき Keryx の実体のパスが変わるため、OS が keryx:// のリンクを Keryx に届けられず、Dropbox や OneDrive の連携（OAuth 認証）が完了しないことがあります。\n\n対処方法: Keryx.app を「アプリケーション」フォルダにコピーし、コピーしたものから起動し直してください。</string>
 

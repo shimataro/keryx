@@ -17,4 +17,12 @@ interface NotificationMessages {
 
     /** Localized message summarizing an OPML import (e.g. opened via a file association). */
     suspend fun opmlImported(added: Int, failed: Int): String
+
+    /** Localized message for the notification-center row [UpdateRepository] posts when [check]
+     * finds a newer release. */
+    suspend fun updateAvailable(version: String): String
+
+    /** Localized message for the notification-center row [UpdateRepository] replaces its "an
+     * update is available" one with once [version] has finished downloading and verifying. */
+    suspend fun updateReadyToInstall(version: String): String
 }

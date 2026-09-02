@@ -9,6 +9,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -27,9 +28,11 @@ import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.OpmlImporter
 import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.domain.AvailableUpdate
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
-import works.merc.keryx.app.domain.UpdateChecker
+import works.merc.keryx.app.domain.UpdateRepository
+import works.merc.keryx.app.domain.UpdateState
 import works.merc.keryx.app.domain.UpdateStatus
 import works.merc.keryx.app.platform.FileSelector
 import works.merc.keryx.app.platform.OpenFileRequest
@@ -46,6 +49,25 @@ import works.merc.keryx.app.resources.settings_import_opml
 
 import works.merc.keryx.app.ui.home.formatTimestamp
 import works.merc.keryx.app.ui.home.groupFeedsByFolder
+
+/**
+ * Projects [UpdateRepository]'s richer [UpdateState] down to the older, simpler [UpdateStatus]
+ * shape [UpdatesTabContent] currently renders — a bridge kept only until that composable is
+ * rewritten against [UpdateState] directly. `null` for [UpdateState.Idle]/[UpdateState.Checking]:
+ * neither has a resolved result of its own, so the caller should leave whatever was last shown.
+ */
+private fun updateStatusOf(state: UpdateState): UpdateStatus? = when (state) {
+    UpdateState.Idle, UpdateState.Checking -> null
+    UpdateState.UpToDate -> UpdateStatus.UpToDate
+    is UpdateState.Available -> state.update.toStatus()
+    is UpdateState.Downloading -> state.update.toStatus()
+    is UpdateState.Verifying -> state.update.toStatus()
+    is UpdateState.Ready -> state.update.toStatus()
+    is UpdateState.Installing -> state.update.toStatus()
+    is UpdateState.Failed -> UpdateStatus.Failed
+}
+
+private fun AvailableUpdate.toStatus() = UpdateStatus.Available(version, releaseUrl, releaseNotes, asset)
 
 /** A transient result of an OPML operation, surfaced inline near the action. */
 sealed interface OpmlResult {
@@ -64,7 +86,7 @@ class SettingsViewModel(
     private val folderRepository: FolderRepository,
     private val tagRepository: TagRepository,
     private val opmlImporter: OpmlImporter,
-    private val updateChecker: UpdateChecker,
+    private val updateRepository: UpdateRepository,
     private val activityCenter: ActivityCenter,
     // Token store / sync touch the OS Keychain (macOS shells out to `security`, which may
     // block and show an authorization dialog), so keep them off the Main/EDT dispatcher.
@@ -112,7 +134,12 @@ class SettingsViewModel(
     var exportingOpml by mutableStateOf(false)
         private set
 
-    var checkingForUpdate by mutableStateOf(false)
+    /** [UpdateRepository.state] passed straight through for UI that wants the full state machine
+     * (progress, ready-to-install, …) rather than the older [checkingForUpdate]/[updateCheckResult]
+     * shape below. */
+    val updateState: StateFlow<UpdateState> = updateRepository.state
+
+    var checkingForUpdate by mutableStateOf(updateState.value is UpdateState.Checking)
         private set
 
     /** True while a "reset cloud data" (delete + fresh re-upload) is running. */
@@ -131,14 +158,26 @@ class SettingsViewModel(
     var lastSyncErrorText by mutableStateOf<String?>(null)
         private set
 
-    /** Set by [checkForUpdate]. Does not affect the automatic update-check schedule. */
-    var updateCheckResult by mutableStateOf<UpdateStatus?>(null)
+    /**
+     * Set by [checkForUpdate] — and, since [updateState] is shared process-wide, by any other
+     * trigger of the same [UpdateRepository] (the automatic background schedule, or a download
+     * completing). Does not affect [works.merc.keryx.app.data.local.db.LocalSettings.lastUpdateCheckAt].
+     * `Idle`/`Checking` leave this at whatever it last resolved to, rather than clearing it, so the
+     * previous result stays visible while a new check runs.
+     */
+    var updateCheckResult by mutableStateOf(updateStatusOf(updateState.value))
         private set
 
     init {
         refreshLastSyncedAt()
         viewModelScope.launch {
             syncRepository.lastSyncError.collect { lastSyncErrorText = it }
+        }
+        viewModelScope.launch {
+            updateState.collect { state ->
+                checkingForUpdate = state is UpdateState.Checking
+                updateStatusOf(state)?.let { updateCheckResult = it }
+            }
         }
         viewModelScope.launch {
             // Skip the initial replay (current state at VM creation) — already handled by the
@@ -177,16 +216,24 @@ class SettingsViewModel(
      * Manual "check for update" (About section). Deliberately does not touch
      * [LocalSettings.lastUpdateCheckAt] — that timestamp belongs to the automatic
      * startup/background schedule (see main.kt's `checkForUpdateAndNotify`), so a manual check
-     * never perturbs it.
+     * never perturbs it. [checkingForUpdate]/[updateCheckResult] update themselves via the
+     * [updateState] collector in `init {}` above, driven by [UpdateRepository.check] itself rather
+     * than assigned here directly.
      */
     fun checkForUpdate() {
         if (checkingForUpdate) return
-        viewModelScope.launch {
-            checkingForUpdate = true
-            updateCheckResult = updateChecker.check()
-            checkingForUpdate = false
-        }
+        viewModelScope.launch { updateRepository.check() }
     }
+
+    /** Starts downloading the update currently reported by [updateState], if one can be installed
+     * here. See [UpdateRepository.startDownload]. */
+    fun startDownload() = updateRepository.startDownload()
+
+    /** Cancels an in-progress download started by [startDownload]. */
+    fun cancelDownload() = updateRepository.cancelDownload()
+
+    /** Hands the current [UpdateState.Ready] download off to the OS installer. */
+    fun installUpdate() = updateRepository.install()
 
     fun updateReadTimeout(seconds: Int) {
         settingsRepository.setReadTimeoutSeconds(seconds)

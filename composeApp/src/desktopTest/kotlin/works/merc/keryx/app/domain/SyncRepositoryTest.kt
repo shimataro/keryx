@@ -183,6 +183,8 @@ private object FakeSyncNotificationMessages : NotificationMessages {
     override suspend fun newArticles(count: Int): String = "new:$count"
     override suspend fun syncFailed(exception: KeryxException): String = "syncFailed:${exception::class.simpleName}"
     override suspend fun opmlImported(added: Int, failed: Int): String = "opmlImported:$added/$failed"
+    override suspend fun updateAvailable(version: String): String = "updateAvailable:$version"
+    override suspend fun updateReadyToInstall(version: String): String = "updateReadyToInstall:$version"
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)

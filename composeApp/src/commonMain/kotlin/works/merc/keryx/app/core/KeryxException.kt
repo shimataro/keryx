@@ -47,7 +47,7 @@ class CloudDataIncompatibleException(message: String) : KeryxException(message)
 // --- Update ---
 
 /** Which step of an in-app update ([works.merc.keryx.app.domain.UpdateRepository]) failed. */
-enum class UpdateStage { DOWNLOAD, VERIFY, INSTALL }
+enum class UpdateStage { CHECK, DOWNLOAD, VERIFY, INSTALL }
 
 /** An in-app update failed at [stage]. Never auto-retried and never sent to the notification
  * center — the Updates settings tab shows it inline (a "Retry" button), the same restrained

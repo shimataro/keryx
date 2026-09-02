@@ -5,6 +5,7 @@ import app.cash.sqldelight.db.SqlDriver
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.engine.mock.respondError
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpStatusCode
 import java.io.File
@@ -56,7 +57,13 @@ import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.domain.TagRepository
+import works.merc.keryx.app.data.remote.UpdateDownloader
+import works.merc.keryx.app.domain.AvailableUpdate
+import works.merc.keryx.app.domain.InstallLaunchResult
 import works.merc.keryx.app.domain.UpdateChecker
+import works.merc.keryx.app.domain.UpdateInstaller
+import works.merc.keryx.app.domain.UpdatePlan
+import works.merc.keryx.app.domain.UpdateRepository
 import works.merc.keryx.app.domain.UpdateStatus
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
@@ -164,6 +171,8 @@ private class SettingsViewModelTestNotificationMessages : NotificationMessages {
     override suspend fun newArticles(count: Int): String = "new:$count"
     override suspend fun syncFailed(exception: works.merc.keryx.app.core.KeryxException): String = "syncFailed:${exception::class.simpleName}"
     override suspend fun opmlImported(added: Int, failed: Int): String = "opmlImported:$added/$failed"
+    override suspend fun updateAvailable(version: String): String = "updateAvailable:$version"
+    override suspend fun updateReadyToInstall(version: String): String = "updateReadyToInstall:$version"
 }
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -257,6 +266,28 @@ class SettingsViewModelTest {
     }
 
     /**
+     * Wraps [checker] in a real [UpdateRepository] so [SettingsViewModel.checkForUpdate] exercises
+     * the same code path production does — only [downloader]/[installer] are inert stand-ins,
+     * since these tests only exercise the check/result path, never an actual download or install.
+     */
+    private fun fakeUpdateRepository(checker: UpdateChecker): UpdateRepository {
+        val unusedClient = HttpClient(MockEngine { respondError(HttpStatusCode.NotImplemented) }) { expectSuccess = false }
+        val installer = object : UpdateInstaller {
+            override fun canInstall(plan: UpdatePlan) = false
+            override suspend fun install(filePath: String, update: AvailableUpdate) =
+                InstallLaunchResult.Failed("not used in this test")
+        }
+        return UpdateRepository(
+            checker = checker,
+            downloader = UpdateDownloader(unusedClient),
+            installer = installer,
+            notificationCenter = NotificationCenter(),
+            notificationMessages = SettingsViewModelTestNotificationMessages(),
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also { createdSyncScopes += it },
+        )
+    }
+
+    /**
      * An [ActivityCenter] whose scope is tracked in [createdSyncScopes], so tearDown() cancels
      * its eager stateIn collectors instead of leaking them for the life of the JVM test process.
      */
@@ -269,7 +300,7 @@ class SettingsViewModelTest {
         connectResult: Result<OAuthTokens> = Result.Ok(OAuthTokens("AT")),
         tokenStorage: TokenStorage = FakeTokenStorage(),
         clock: Clock = Clock { 0L },
-        updateChecker: UpdateChecker = updateCheckerReturning("1.0.0"),
+        updateRepository: UpdateRepository = fakeUpdateRepository(updateCheckerReturning("1.0.0")),
         // Only the OPML import tests need subscribeFeed to actually succeed.
         feedFetcher: FeedFetcher = failingFetcher(),
         connectFlow: CloudConnectFlow? = null,
@@ -333,7 +364,7 @@ class SettingsViewModelTest {
         createdSyncRepository = syncRepository
         return SettingsViewModel(
             settingsRepository, session, syncRepository, feedRepository, folderRepository, tagRepository,
-            opmlImporter, updateChecker, activityCenter, dispatcher, fileSelector,
+            opmlImporter, updateRepository, activityCenter, dispatcher, fileSelector,
         ).also { createdViewModels += it }
     }
 
@@ -702,7 +733,7 @@ class SettingsViewModelTest {
     // TestCoroutineScheduler, so we poll with real wall-clock waits instead.
     @Test
     fun checkForUpdateSurfacesAvailableResultWithoutTouchingLastUpdateCheckAt() {
-        val vm = newViewModel(updateChecker = updateCheckerReturning("2.0.0"))
+        val vm = newViewModel(updateRepository = fakeUpdateRepository(updateCheckerReturning("2.0.0")))
         assertNull(vm.updateCheckResult)
 
         vm.checkForUpdate()
@@ -733,7 +764,7 @@ class SettingsViewModelTest {
                 )
             },
         ) { expectSuccess = false }
-        val vm = newViewModel(updateChecker = UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo"))
+        val vm = newViewModel(updateRepository = fakeUpdateRepository(UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo")))
 
         vm.checkForUpdate()
         awaitTrue { vm.checkingForUpdate }

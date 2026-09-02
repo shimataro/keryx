@@ -36,6 +36,8 @@ private class OpmlOpenHandlerTestNotificationMessages : NotificationMessages {
     override suspend fun newArticles(count: Int): String = error("not used")
     override suspend fun syncFailed(exception: KeryxException): String = error("not used")
     override suspend fun opmlImported(added: Int, failed: Int): String = "opmlImported:$added/$failed"
+    override suspend fun updateAvailable(version: String): String = "updateAvailable:$version"
+    override suspend fun updateReadyToInstall(version: String): String = "updateReadyToInstall:$version"
 }
 
 /**
