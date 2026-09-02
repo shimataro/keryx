@@ -42,7 +42,7 @@ actual object ZipExtractor {
     private fun resolveEntryPath(destRoot: File, entryName: String): File {
         val candidate = File(destRoot, entryName).canonicalFile
         val withinRoot = candidate.path == destRoot.path || candidate.path.startsWith(destRoot.path + File.separator)
-        check(withinRoot) { "Zip entry escapes the destination directory: $entryName" }
+        if (!withinRoot) throw IllegalStateException("Zip entry escapes the destination directory: $entryName")
         return candidate
     }
 
