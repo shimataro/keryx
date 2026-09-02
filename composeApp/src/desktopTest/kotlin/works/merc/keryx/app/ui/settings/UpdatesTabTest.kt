@@ -354,4 +354,40 @@ class UpdatesTabTest {
 
         assertEquals(emptySlotHeight, filledSlotHeight)
     }
+
+    @Test
+    fun theStatusActionAreaReservesTheSameFloorHeightAcrossNoUpdateOutcomes() = runDesktopComposeUiTest {
+        setContent {
+            Column {
+                Column(Modifier.testTag("idle-section").width(360.dp)) {
+                    UpdateResultSection(UpdateState.Idle, ::noop, ::noop, ::noop, ::noop)
+                }
+                Column(Modifier.testTag("uptodate-section").width(360.dp)) {
+                    UpdateResultSection(UpdateState.UpToDate, ::noop, ::noop, ::noop, ::noop)
+                }
+                Column(Modifier.testTag("failed-section").width(360.dp)) {
+                    UpdateResultSection(
+                        UpdateState.Failed(null, UpdateException(UpdateStage.CHECK, "boom")), ::noop, ::noop, ::noop, ::noop,
+                    )
+                }
+            }
+        }
+        waitForIdle()
+
+        // UpdateState.Idle renders nothing at all inside the reserved area, UpdateState.UpToDate a
+        // single line of text, and this UpdateState.Failed a line of text plus a retry button — all
+        // three must still measure the same floor height, or the interval control and "check for
+        // update" button beneath the divider (not part of this composable, but positioned right
+        // after it in UpdatesTabContent) would jump as the check resolves from one to another.
+        fun heightOf(sectionTag: String) = onNode(
+            hasTestTag(UPDATE_STATUS_ACTION_TEST_TAG) and hasAnyAncestor(hasTestTag(sectionTag)),
+        ).getBoundsInRoot().height
+
+        val idleHeight = heightOf("idle-section")
+        val upToDateHeight = heightOf("uptodate-section")
+        val failedHeight = heightOf("failed-section")
+
+        assertEquals(idleHeight, upToDateHeight)
+        assertEquals(idleHeight, failedHeight)
+    }
 }

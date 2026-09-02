@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -153,6 +154,16 @@ private fun CheckNowButton(vm: SettingsViewModel) {
     }
 }
 
+/** Floor height for [UpdateResultSection]'s status/action area (everything up to, but not
+ * including, the release-notes card and link row) — see that function's own KDoc for why. Sized to
+ * the "update available, installable" case: 12dp top spacer + a ~40dp headline row + 4dp spacer +
+ * [UPDATE_PROGRESS_SLOT_HEIGHT]'s own 40dp. */
+private val UPDATE_STATUS_ACTION_MIN_HEIGHT = 96.dp
+
+/** Exposed for `UpdatesTabTest` to measure the reserved area directly, the same way
+ * [UPDATE_PROGRESS_SLOT_TEST_TAG] does for the progress slot nested inside it. */
+internal const val UPDATE_STATUS_ACTION_TEST_TAG = "update-status-action"
+
 /**
  * The result of the check above: nothing yet, "up to date", a bare check failure, or the full
  * card once a release is (or was) known — see [UpdateState.update]. Takes plain callbacks
@@ -168,57 +179,71 @@ internal fun UpdateResultSection(
     onInstall: () -> Unit,
 ) {
     val update = state.update
-    if (update == null) {
-        when (state) {
-            UpdateState.UpToDate -> {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    stringResource(Res.string.settings_update_check_up_to_date),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            is UpdateState.Failed -> {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    stringResource(Res.string.settings_update_check_failed),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
+
+    // Reserved unconditionally — independent of which branch below actually renders — for the
+    // same reason UpdateProgressSlot's own height is: without it, the interval control and "check
+    // for update" button beneath this tab's divider jumped every time the check resolved (Idle /
+    // Checking render nothing at all here, so the very first resolved outcome — UpToDate, Failed,
+    // or an available update — pushed everything below down by however tall that outcome's content
+    // happened to be). heightIn(min=...) only sets a *floor*: a state whose content genuinely needs
+    // more room (e.g. a long Failed error message) still grows past it rather than being clipped.
+    // The release-notes card and link row further below are deliberately NOT part of this reserved
+    // area — their height is separately bounded (see the notes Text's own `maxLines`).
+    Box(Modifier.heightIn(min = UPDATE_STATUS_ACTION_MIN_HEIGHT).testTag(UPDATE_STATUS_ACTION_TEST_TAG)) {
+        Column(Modifier.fillMaxWidth()) {
+            if (update == null) {
+                when (state) {
+                    UpdateState.UpToDate -> {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            stringResource(Res.string.settings_update_check_up_to_date),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    is UpdateState.Failed -> {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            stringResource(Res.string.settings_update_check_failed),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        FlatTonalButton(onClick = onCheckForUpdate) {
+                            Text(stringResource(Res.string.settings_update_retry))
+                        }
+                    }
+                    UpdateState.Idle, UpdateState.Checking -> Unit
+                    else -> Unit // unreachable: every other state carries an AvailableUpdate
+                }
+            } else {
+                Spacer(Modifier.height(12.dp))
+                val installable = update.installable
+                UpdateHeadlineRow(state, update, installable, onStartDownload, onInstall)
                 Spacer(Modifier.height(4.dp))
-                FlatTonalButton(onClick = onCheckForUpdate) {
-                    Text(stringResource(Res.string.settings_update_retry))
+                UpdateProgressSlot(state, onCancelDownload)
+
+                if (!installable) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        stringResource(Res.string.settings_update_manual_only),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                if (state is UpdateState.Failed) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        userMessage(state.exception),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
             }
-            UpdateState.Idle, UpdateState.Checking -> Unit
-            else -> Unit // unreachable: every other state carries an AvailableUpdate
         }
-        return
     }
-
-    Spacer(Modifier.height(12.dp))
-    val installable = update.installable
-    UpdateHeadlineRow(state, update, installable, onStartDownload, onInstall)
-    Spacer(Modifier.height(4.dp))
-    UpdateProgressSlot(state, onCancelDownload)
-
-    if (!installable) {
-        Spacer(Modifier.height(4.dp))
-        Text(
-            stringResource(Res.string.settings_update_manual_only),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-
-    if (state is UpdateState.Failed) {
-        Spacer(Modifier.height(4.dp))
-        Text(
-            userMessage(state.exception),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.error,
-        )
-    }
+    if (update == null) return
 
     // The status/action block above is a plain, unboxed banner — always the first thing seen,
     // never sharing a frame with the release notes below (see UpdatesTab.kt's own module KDoc for
