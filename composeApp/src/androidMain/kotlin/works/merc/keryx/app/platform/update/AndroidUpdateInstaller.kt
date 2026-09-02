@@ -25,7 +25,7 @@ import java.io.IOException
 private const val TAG = "AndroidUpdateInstaller"
 
 /** Never registered in the manifest — this app's own process, matched by explicit package. A
- * fresh dynamic registration backs every session (see [AndroidUpdateInstaller.installResultPendingIntent]). */
+ * fresh dynamic registration backs every session (see [AndroidUpdateInstaller.commitPackageInstallerSession]). */
 private const val INSTALL_RESULT_ACTION = "works.merc.keryx.app.UPDATE_INSTALL_RESULT"
 private const val INSTALL_SESSION_NAME = "keryx_update"
 
@@ -91,7 +91,7 @@ class AndroidUpdateInstaller internal constructor(
     /** Streams [filePath] into a new `PackageInstaller` session and commits it. Committing only
      * *launches* the OS-level install (see [InstallLaunchResult.Launched]'s own KDoc) — the
      * confirmation dialog and the actual install/replace happen asynchronously, delivered through
-     * [installResultPendingIntent]'s receiver. */
+     * the [InstallResultReceiver] registered here. */
     private fun commitPackageInstallerSession(filePath: String): InstallLaunchResult {
         val apkFile = File(filePath)
         val installer = context.packageManager.packageInstaller
@@ -106,19 +106,32 @@ class AndroidUpdateInstaller internal constructor(
             return InstallLaunchResult.Failed("Not permitted to create an install session: ${e.message}")
         }
 
+        // Registered and resolved before the try block, not as commit()'s own argument expression —
+        // evaluating it inline there registered the receiver as a side effect of building commit()'s
+        // argument, before commit() itself ran, so a commit() that threw left it registered with
+        // nothing left to ever unregister it. Held in a local now so every exit path below — success
+        // and both catch clauses — can account for it explicitly.
+        val receiver = InstallResultReceiver(context)
+        ContextCompat.registerReceiver(
+            context, receiver, IntentFilter(INSTALL_RESULT_ACTION), ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+        val pendingIntent = installResultPendingIntent(sessionId)
+
         return try {
             installer.openSession(sessionId).use { session ->
                 session.openWrite(INSTALL_SESSION_NAME, 0, apkFile.length()).use { out ->
                     apkFile.inputStream().use { it.copyTo(out) }
                     session.fsync(out)
                 }
-                session.commit(installResultPendingIntent(sessionId).intentSender)
+                session.commit(pendingIntent.intentSender)
             }
             InstallLaunchResult.Launched
         } catch (e: IOException) {
+            context.unregisterReceiver(receiver)
             installer.abandonSession(sessionId)
             InstallLaunchResult.Failed("Could not write the update to the install session: ${e.message}")
         } catch (e: SecurityException) {
+            context.unregisterReceiver(receiver)
             installer.abandonSession(sessionId)
             InstallLaunchResult.Failed("Not permitted to commit the install session: ${e.message}")
         }
@@ -127,15 +140,12 @@ class AndroidUpdateInstaller internal constructor(
     /**
      * A [PendingIntent] the OS fires — with `PackageInstaller.EXTRA_STATUS`/`EXTRA_INTENT` added to
      * the [Intent] — once this session's outcome is known. Must be [PendingIntent.FLAG_MUTABLE]:
-     * an immutable one would silently drop those extras (enforced from API 31 onward). Delivered
-     * to a receiver registered dynamically per session, never in the manifest — a static receiver
-     * would have no way to know which in-flight session a broadcast belongs to.
+     * an immutable one would silently drop those extras (enforced from API 31 onward). Delivered to
+     * whichever [InstallResultReceiver] [commitPackageInstallerSession] already registered for this
+     * session — a static, manifest-declared receiver would have no way to know which in-flight
+     * session a broadcast belongs to.
      */
     private fun installResultPendingIntent(sessionId: Int): PendingIntent {
-        val receiver = InstallResultReceiver(context)
-        ContextCompat.registerReceiver(
-            context, receiver, IntentFilter(INSTALL_RESULT_ACTION), ContextCompat.RECEIVER_NOT_EXPORTED,
-        )
         val intent = Intent(INSTALL_RESULT_ACTION).setPackage(context.packageName)
         return PendingIntent.getBroadcast(
             context, sessionId, intent, PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
@@ -145,15 +155,18 @@ class AndroidUpdateInstaller internal constructor(
 
 /**
  * Handles the asynchronous result of a single [PackageInstaller] session commit. Registered
- * dynamically (never in the manifest) and unregisters itself on its one delivery — a fresh
- * instance backs every session (see [AndroidUpdateInstaller.installResultPendingIntent]), so
- * there is never a second broadcast to route.
+ * dynamically (never in the manifest) and unregisters itself once it sees a *terminal* status — a
+ * fresh instance backs every session (see [AndroidUpdateInstaller.commitPackageInstallerSession]),
+ * so there is never a second session for this same receiver to route.
  *
  * [PackageInstaller.STATUS_PENDING_USER_ACTION] is the routine "confirm this install" dialog every
  * APK install shows — distinct from the one-time "install unknown apps" consent
  * [AndroidUpdateInstaller.requestInstallConsent] handles *before* the session is even created —
  * and its `EXTRA_INTENT` needs `FLAG_ACTIVITY_NEW_TASK` since it's launched from a receiver, not
- * an `Activity`.
+ * an `Activity`. Critically, it is **not terminal**: the real outcome (success, or a failure like
+ * `STATUS_FAILURE_INCOMPATIBLE`) is delivered in a *second*, later broadcast once the user responds
+ * to that confirmation — so unregistering here, before that second delivery, would make this
+ * receiver miss the only status it exists to observe. Only every other status unregisters.
  *
  * A terminal failure (most notably `STATUS_FAILURE_INCOMPATIBLE` — the sideloaded APK's signature
  * doesn't match this install's, e.g. because the Play-signing keystore mismatch `docs/build.md`
@@ -168,13 +181,15 @@ class AndroidUpdateInstaller internal constructor(
  */
 private class InstallResultReceiver(private val context: Context) : BroadcastReceiver() {
     override fun onReceive(receivedContext: Context, intent: Intent) {
+        val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+        if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
+            val confirmIntent = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_INTENT, Intent::class.java)
+            confirmIntent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            confirmIntent?.let { context.startActivity(it) }
+            return // not terminal — this session's real outcome is still to come
+        }
         context.unregisterReceiver(this)
-        when (val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
-            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
-                val confirmIntent = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_INTENT, Intent::class.java)
-                confirmIntent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                confirmIntent?.let { context.startActivity(it) }
-            }
+        when (status) {
             PackageInstaller.STATUS_SUCCESS -> Unit // Unreachable in practice — the OS kills this process first.
             else -> {
                 val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
