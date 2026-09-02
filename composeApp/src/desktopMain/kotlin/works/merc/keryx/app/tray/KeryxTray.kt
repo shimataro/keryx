@@ -31,6 +31,7 @@ import works.merc.keryx.app.resources.tray_update_download
 import works.merc.keryx.app.resources.tray_update_downloading
 import works.merc.keryx.app.resources.tray_update_failed
 import works.merc.keryx.app.resources.tray_update_restart
+import works.merc.keryx.app.resources.tray_update_verifying
 import java.awt.image.BufferedImage
 
 /**
@@ -226,7 +227,7 @@ private fun trayUpdateEntry(state: UpdateState): TrayUpdateEntry? = when (state)
         TrayUpdateEntry(stringResource(Res.string.tray_update_downloading, "$percent%"), enabled = false)
     }
     is UpdateState.Verifying ->
-        TrayUpdateEntry(stringResource(Res.string.tray_update_downloading, "100%"), enabled = false)
+        TrayUpdateEntry(stringResource(Res.string.tray_update_verifying), enabled = false)
     is UpdateState.Ready ->
         TrayUpdateEntry(stringResource(Res.string.tray_update_restart, state.update.version), enabled = true)
     is UpdateState.Failed -> TrayUpdateEntry(stringResource(Res.string.tray_update_failed), enabled = true)

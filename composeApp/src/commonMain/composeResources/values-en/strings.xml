@@ -240,6 +240,7 @@
     <string name="settings_update_manual_only">In-app update isn’t available for this installation</string>
     <string name="tray_update_download">Download update %1$s</string>
     <string name="tray_update_downloading">Downloading… %1$s</string>
+    <string name="tray_update_verifying">Verifying…</string>
     <string name="tray_update_restart">Restart to update to %1$s</string>
     <string name="tray_update_failed">Update failed</string>
 

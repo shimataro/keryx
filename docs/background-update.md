@@ -239,11 +239,12 @@ separate, explicit click (Updates tab button, or the tray item once one is offer
     cross-layer callback for a case a successful install never even reaches (the OS kills the
     process first).
 - **Presentation.** Surfaced from the moment `check()` finds something, not only once it's ready:
-  the desktop tray's single update menu item cycles through "Download update", "Downloading… N%"
-  (rounded to 5% to avoid flooding the Linux SNI D-Bus menu with layout-change signals),
-  "Verifying…", "Restart to update", and "Update failed" as `state` moves — absent entirely for a
-  `NotOffered`/non-installable plan, where the Updates tab's own "Download" button likewise reduces
-  to a plain "Check for update" instead (see `ui-guidelines`'s "prefer disabled over hidden" for the
+  the desktop tray's single update menu item cycles through "Download update %1$s", "Downloading…
+  N%" (rounded to 5% to avoid flooding the Linux SNI D-Bus menu with layout-change signals),
+  "Verifying…", "Restart to update to %1$s", and "Update failed" as `state` moves (`%1$s` is the
+  target version — see `tray_update_download`/`tray_update_restart` in `strings.xml`) — absent
+  entirely for a `NotOffered`/non-installable plan, where the Updates tab's own "Download" button
+  likewise reduces to a plain "Check for update" instead (see `ui-guidelines`'s "prefer disabled over hidden" for the
   general pattern this follows). The notification-center bell gets one row per meaningful moment —
   "a new version is available" when `check()` finds one, then that same row is dismissed and
   replaced (never left to accumulate alongside it) by "ready to install" once a download finishes —
