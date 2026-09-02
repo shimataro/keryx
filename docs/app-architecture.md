@@ -201,7 +201,8 @@ dependency, so its own constructor — used directly by a large number of tests 
 change shape for what's an internal layering detail), `data/remote/UpdateDownloader`
 (manual redirect-following + host allowlist + digest verification, the same "no shared-client
 plugin, roll it by hand" shape `FeedFetcher` already uses for its own redirect handling), and
-`platform/UpdateInstaller` (new `expect`-like interface, bound via `platformModule` exactly like
+`domain/UpdateInstaller` (new `expect`-like interface — its own implementations live in
+`platform/update/`, not alongside it — bound via `platformModule` exactly like
 `OsNotificationSink` — a `single<UpdateInstaller>` per platform, fakeable in tests). Two pure
 `domain/` functions decide *what* to do without touching the network or filesystem, so both are
 plain `commonTest` targets: `UpdateAsset.kt`'s `selectUpdateAsset` (which release asset, given

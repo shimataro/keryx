@@ -214,9 +214,10 @@ GitHub Releases への HTTP リクエストと JSON パースは `data/remote/Re
 単なる内部の層分けの都合で変えたくないため）、
 `data/remote/UpdateDownloader`（手動リダイレクト追従＋ホスト allowlist＋digest 検証。
 `FeedFetcher` 自身が自前のリダイレクト処理に使っている「共有クライアントのプラグインに頼らず
-手で書く」という形をそのまま踏襲）、そして `platform/UpdateInstaller`（新規の expect 相当の
-interface。`OsNotificationSink` とまったく同じように `platformModule` 経由でバインドされる
-プラットフォームごとの `single<UpdateInstaller>` で、テストではフェイクに差し替えられる）。
+手で書く」という形をそのまま踏襲）、そして `domain/UpdateInstaller`（新規の expect 相当の
+interface——その実装自体は隣接する場所ではなく `platform/update/` にある。`OsNotificationSink`
+とまったく同じように `platformModule` 経由でバインドされるプラットフォームごとの
+`single<UpdateInstaller>` で、テストではフェイクに差し替えられる）。
 何をすべきかを決める 2 つの純粋な `domain/` 関数はネットワークにもファイルシステムにも触れない
 ため、どちらも素の `commonTest` の対象になる: `UpdateAsset.kt` の `selectUpdateAsset`
 （`platform/InstallLocation.kt` の `detectInstallLocation()` を踏まえて、どのリリースアセットか）
