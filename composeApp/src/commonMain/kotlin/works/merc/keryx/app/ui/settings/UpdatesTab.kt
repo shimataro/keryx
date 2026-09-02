@@ -155,8 +155,9 @@ private fun CheckNowButton(vm: SettingsViewModel) {
 
 /** Floor height for [UpdateResultSection]'s status/action area (everything up to, but not
  * including, the release-notes card and link row) — see that function's own KDoc for why. Sized to
- * the "update available, installable" case: 12dp top spacer + a ~40dp headline row + 4dp spacer +
- * [UPDATE_PROGRESS_SLOT_HEIGHT]'s own 40dp. */
+ * the "update available, installable" case: 12dp top spacer + a 40dp headline row (its trailing
+ * button's own height, which is pinned rather than font-derived — see `FlatButtons`) + 4dp spacer +
+ * [UPDATE_PROGRESS_SLOT_HEIGHT]'s own 40dp, i.e. exactly this value. */
 private val UPDATE_STATUS_ACTION_MIN_HEIGHT = 96.dp
 
 /** Exposed for `UpdatesTabTest` to measure the reserved area directly, the same way

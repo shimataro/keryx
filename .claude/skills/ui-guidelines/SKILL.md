@@ -789,6 +789,18 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   "outlined" flat button. The Android `actual`s delegate straight to M3's own
   `Button`/`FilledTonalButton`/`TextButton` — see the `KeryxTextField`
   bullet below for why that's the right call on that platform.
+  **Desktop's `actual`s wrap their content in
+  `ProvideTextStyle(MaterialTheme.typography.labelLarge)`** — the same style M3's own `Button`
+  gives its label, so the Android `actual`s already have it — and that is load-bearing, not a
+  redundant wrapper to tidy away later: a bare `Text` would fall back to `TextStyle.Default`,
+  whose `lineHeight` is unspecified, making the label's height (and with it the button's) come
+  from whichever font the *host* resolves for the label's own glyphs. Two buttons whose labels are
+  worded differently then measure differently on one machine and identically on another — which is
+  how the Updates tab's headline row came to be 36dp beside "ダウンロード" and 40dp beside
+  "再起動しています…" on a CI runner and nowhere else. `desktopTest`'s `FlatButtonsTest` pins the
+  invariant (a flat button is 40dp tall regardless of its label). It also means these labels go
+  through the app's `Typography`, hence its OS-native font family (`AppFont.kt`), like every other
+  string in the app.
   **A button whose action destroys data takes `FlatTonalButton(destructive = true)`**
   (`CloudSyncTab`'s "reset sync data", `NotificationCenterSheet`'s
   `ResetCloudData` row button), which paints the container
