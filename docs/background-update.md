@@ -166,9 +166,11 @@ separate, explicit click (Updates tab button, or the tray item once one is offer
   refuses it, and both surfaces need to agree with `startDownload()`'s own gate about whether
   "Download" does anything.
 - **Downloading.** `data/remote/UpdateDownloader` manually follows redirects (the shared HTTP client
-  has no redirect plugin at all) against a small host allowlist (`github.com`,
-  `*.githubusercontent.com`, leading dot required — `evilgithubusercontent.com` must never match),
-  re-validated at every hop, `https` only, capped at `MAX_REDIRECTS`. The file streams to a `.part`
+  has no redirect plugin at all) against a small host allowlist — exact-match `github.com` and
+  `api.github.com` (where the Releases API itself answers), plus a leading-dot-required suffix
+  match against `.githubusercontent.com` (the signed-asset redirect target, e.g.
+  `release-assets.githubusercontent.com`; the leading dot means `evilgithubusercontent.com` must
+  never match) — re-validated at every hop, `https` only, capped at `MAX_REDIRECTS`. The file streams to a `.part`
   path under `<cacheDir>/updates/<version>/`; only once its exact size and SHA-256 both match the
   release's own values does it get an atomic rename to its final name — "the final name exists" is
   the invariant the rest of the pipeline relies on for "this file is verified". A per-request

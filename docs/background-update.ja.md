@@ -168,9 +168,11 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
   両サーフェスとも「ダウンロード」を押して実際に何か起きるかについて `startDownload()` 自身の
   ゲートと食い違ってはならないため。
 - **ダウンロード。** `data/remote/UpdateDownloader` は手動でリダイレクトを追う（共有 HTTP
-  クライアントにはリダイレクトプラグイン自体が入っていない）。小さなホスト allowlist
-  （`github.com`、`*.githubusercontent.com`。先頭ドット必須——`evilgithubusercontent.com` を
-  決して一致させないため）を毎ホップ再検証し、`https` 以外は不可、`MAX_REDIRECTS` で頭打ちにする。
+  クライアントにはリダイレクトプラグイン自体が入っていない）。小さなホスト allowlist——
+  完全一致の `github.com` と `api.github.com`（Releases API 自身が応答するホスト）、および
+  先頭ドット必須のサフィックス一致 `.githubusercontent.com`（署名付きアセットのリダイレクト先。
+  実例: `release-assets.githubusercontent.com`。先頭ドットにより `evilgithubusercontent.com` は
+  決して一致しない）——を毎ホップ再検証し、`https` 以外は不可、`MAX_REDIRECTS` で頭打ちにする。
   ファイルは `<cacheDir>/updates/<version>/` 配下の `.part` パスへストリーミングされ、実サイズと
   SHA-256 の両方がリリース自身の値と一致して初めて最終的な名前へ原子的にリネームされる——
   「最終名が存在する＝検証済み」がパイプライン全体の不変条件になっている。1 リクエストごとの
