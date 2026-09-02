@@ -48,6 +48,17 @@ private val ASSET_SUFFIX_BY_KIND = mapOf(
     UpdateAssetKind.ANDROID_APK to "-android-universal.apk",
 )
 
+/**
+ * Full-match pattern each [UpdateAssetKind]'s asset name must satisfy — not just the prefix/suffix
+ * [selectUpdateAsset] used to check alone. [UpdateAsset.name] ends up as a path component
+ * ([works.merc.keryx.app.domain.UpdateRepository]'s `updateDownloadDir`/`destPath`), so this rejects
+ * anything a path shouldn't see (`/`, `\`, `..`, shell metacharacters) rather than sanitizing it —
+ * a release whose asset name doesn't match this exactly is treated the same as one with no matching
+ * asset at all: [selectUpdateAsset] returns `null`, and no in-app update is offered.
+ */
+private val ASSET_NAME_PATTERN_BY_KIND: Map<UpdateAssetKind, Regex> =
+    ASSET_SUFFIX_BY_KIND.mapValues { (_, suffix) -> Regex("^Keryx-[A-Za-z0-9._+-]+${Regex.escape(suffix)}$") }
+
 /** The [UpdateAssetKind] this [InstallLocation] would need, or `null` when no in-app update path
  * applies to this install form at all (regardless of what the release actually shipped). */
 private fun assetKindFor(location: InstallLocation): UpdateAssetKind? = when (location.kind) {
@@ -86,9 +97,9 @@ internal fun parseSha256Digest(digest: String?): String? {
  */
 internal fun selectUpdateAsset(assets: List<ReleaseAsset>, location: InstallLocation): UpdateAsset? {
     val kind = assetKindFor(location) ?: return null
-    val suffix = ASSET_SUFFIX_BY_KIND.getValue(kind)
+    val namePattern = ASSET_NAME_PATTERN_BY_KIND.getValue(kind)
     val candidate = assets.firstOrNull { a ->
-        (a.state == null || a.state == "uploaded") && a.name.startsWith("Keryx-") && a.name.endsWith(suffix) &&
+        (a.state == null || a.state == "uploaded") && namePattern.matches(a.name) &&
             a.sizeBytes in 1..MAX_PLAUSIBLE_UPDATE_ASSET_SIZE_BYTES
     } ?: return null
     val sha256 = parseSha256Digest(candidate.digest) ?: return null

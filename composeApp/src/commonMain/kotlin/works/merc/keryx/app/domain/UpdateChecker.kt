@@ -96,6 +96,13 @@ class UpdateChecker(
 
             val remoteVersion = versionOf(candidate)
                 ?: return UpdateStatus.Failed.also { Log.warn(TAG, "Update check failed: missing tag_name") }
+            if (!isSafeVersionForPathUse(remoteVersion)) {
+                // remoteVersion ends up as a path component (UpdateRepository's updateDownloadDir),
+                // so a tag_name containing '/', a backslash, or anything else outside a plain version's
+                // alphabet is rejected outright here rather than sanitized — see this function's
+                // own KDoc.
+                return UpdateStatus.Failed.also { Log.warn(TAG, "Update check failed: tag_name is not a safe version string") }
+            }
             val htmlUrl = candidate["html_url"]?.jsonPrimitive?.content
                 ?: return UpdateStatus.Failed.also { Log.warn(TAG, "Update check failed: missing html_url") }
 
@@ -181,6 +188,15 @@ class UpdateChecker(
  */
 private fun versionOf(release: JsonObject): String? =
     release["tag_name"]?.jsonPrimitive?.content?.removePrefix("v")?.removePrefix("V")
+
+/** Matches a `tag_name`-derived version string safe to use as a single path component — letters,
+ * digits, `.`, `+`, `-` only. `core/SemVer.kt`'s own core-parsing only validates up to the first
+ * `-`/`+`, leaving everything after it (a prerelease/build-metadata suffix) — where `/`, `\`, or
+ * `..` could hide — unchecked; this is the gate that actually matters once the version is about to
+ * become a directory name ([works.merc.keryx.app.domain.UpdateRepository]'s `updateDownloadDir`). */
+private val SAFE_VERSION_PATTERN = Regex("^[A-Za-z0-9.+-]+$")
+
+private fun isSafeVersionForPathUse(version: String): Boolean = SAFE_VERSION_PATTERN.matches(version)
 
 /**
  * `intervalHours <= 0` means "startup checks only" and is never due for a periodic recheck.

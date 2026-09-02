@@ -142,6 +142,28 @@ class UpdateCheckerTest {
         assertIs<UpdateStatus.Failed>(status)
     }
 
+    /**
+     * Regression guard: the version this returns ends up as a path component
+     * (UpdateRepository.updateDownloadDir), so a tag_name that isn't a plain version string must be
+     * rejected outright rather than passed through — see UpdateChecker.kt's own
+     * isSafeVersionForPathUse.
+     */
+    @Test
+    fun tagNameWithAPathSeparatorIsFailedNotAvailable() = runTest {
+        val status = checker(
+            latestBody = """{"tag_name":"v9.9.9-../../../../Library/LaunchAgents","html_url":"https://ex.com/x"}""",
+        ).check()
+        assertIs<UpdateStatus.Failed>(status)
+    }
+
+    @Test
+    fun tagNameWithABackslashIsFailedNotAvailable() = runTest {
+        val status = checker(
+            latestBody = """{"tag_name":"v9.9.9-..\\..\\evil","html_url":"https://ex.com/x"}""",
+        ).check()
+        assertIs<UpdateStatus.Failed>(status)
+    }
+
     @Test
     fun v1PreReleaseCurrentIsTreatedAsStableAndOfferedStable() = runTest {
         // A 1.x pre-release build (isBelowStable == false) uses releases/latest and is offered the

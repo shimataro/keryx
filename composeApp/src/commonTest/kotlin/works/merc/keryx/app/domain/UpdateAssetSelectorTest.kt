@@ -168,6 +168,36 @@ class UpdateAssetSelectorTest {
         }
     }
 
+    /**
+     * Regression guard: [UpdateAsset.name] ends up as a path component (UpdateRepository's
+     * `destPath`), so a release asset name containing a path separator or traversal sequence must
+     * be rejected outright — the old prefix/suffix-only check let anything through in between.
+     */
+    @Test
+    fun assetNameWithAPathSeparatorInTheMiddleIsNeverSelected() {
+        val maliciousNames = listOf(
+            "Keryx-../../../Library/LaunchAgents/x-macos-arm64.zip",
+            "Keryx-2.0.0/../../evil-macos-arm64.zip",
+            "Keryx-2.0.0\\..\\evil-macos-arm64.zip",
+        )
+        for (name in maliciousNames) {
+            val assets = listOf(ReleaseAsset(name, "https://x", 1_000, "sha256:${"a".repeat(64)}", "uploaded"))
+            assertNull(selectUpdateAsset(assets, location(InstallKind.MAC_APP_BUNDLE)), "name=$name must not be selected")
+        }
+    }
+
+    @Test
+    fun assetNameWithAnOrdinaryVersionMiddleIsStillSelected() {
+        // The tightened pattern must not become so strict it rejects real release asset names.
+        val assets = listOf(
+            ReleaseAsset("Keryx-2.0.0-rc.1+build.5-macos-arm64.zip", "https://x", 1_000, "sha256:${"a".repeat(64)}", "uploaded"),
+        )
+        assertEquals(
+            "Keryx-2.0.0-rc.1+build.5-macos-arm64.zip",
+            selectUpdateAsset(assets, location(InstallKind.MAC_APP_BUNDLE))?.name,
+        )
+    }
+
     // --- parseSha256Digest ---
 
     @Test
