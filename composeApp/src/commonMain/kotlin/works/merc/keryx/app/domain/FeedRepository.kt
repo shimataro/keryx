@@ -274,11 +274,11 @@ class FeedRepository(
      * @param now The timestamp to apply to the moved feeds.
      */
     fun moveFeedsOutOfFolder(folderId: String, now: Long = clock.nowMillis()) {
+        val feedsInFolder = feeds.getByFolder(folderId).executeAsList()
+        val startOrder = feeds.nextSortOrderInGroup(null).executeAsOne()
         db.transaction {
-            var next = feeds.nextSortOrderInGroup(null).executeAsOne()
-            for (feed in feeds.getByFolder(folderId).executeAsList()) {
-                feeds.updateFolderAndSortOrder(null, next, now, now, now, feed.id)
-                next++
+            feedsInFolder.forEachIndexed { index, feed ->
+                feeds.updateFolderAndSortOrder(null, startOrder + index, now, now, now, feed.id)
             }
         }
     }
