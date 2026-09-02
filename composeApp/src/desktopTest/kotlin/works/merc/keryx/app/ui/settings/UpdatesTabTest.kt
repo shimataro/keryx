@@ -1,6 +1,5 @@
 package works.merc.keryx.app.ui.settings
 
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Modifier
@@ -13,6 +12,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -51,7 +51,7 @@ class UpdatesTabTest {
     @Test
     fun upToDateShowsTheUpToDateMessageAndNoActionButton() = runDesktopComposeUiTest {
         setContent {
-            Box(Modifier.width(360.dp)) {
+            Column(Modifier.width(360.dp)) {
                 UpdateResultSection(UpdateState.UpToDate, ::noop, ::noop, ::noop, ::noop)
             }
         }
@@ -64,7 +64,7 @@ class UpdatesTabTest {
     @Test
     fun availableInstallableShowsAnEnabledDownloadButton() = runDesktopComposeUiTest {
         setContent {
-            Box(Modifier.width(360.dp)) {
+            Column(Modifier.width(360.dp)) {
                 UpdateResultSection(UpdateState.Available(installableUpdate()), ::noop, ::noop, ::noop, ::noop)
             }
         }
@@ -74,10 +74,32 @@ class UpdatesTabTest {
         onNodeWithText("ダウンロード").assertIsDisplayed().assertIsEnabled()
     }
 
+    /**
+     * Regression guard for this file's own design intent: the release notes are the *only* thing
+     * inside [UPDATE_RELEASE_NOTES_CARD_TEST_TAG]'s card — the status/action headline is a plain,
+     * unboxed banner above it, never sharing that frame (see `UpdatesTab.kt`'s own module KDoc).
+     */
+    @Test
+    fun releaseNotesSitInsideTheirOwnCardWhileTheHeadlineDoesNot() = runDesktopComposeUiTest {
+        setContent {
+            Column(Modifier.width(360.dp)) {
+                UpdateResultSection(UpdateState.Available(installableUpdate()), ::noop, ::noop, ::noop, ::noop)
+            }
+        }
+        waitForIdle()
+
+        onNode(
+            hasText("- new stuff") and hasAnyAncestor(hasTestTag(UPDATE_RELEASE_NOTES_CARD_TEST_TAG)),
+        ).assertIsDisplayed()
+        onAllNodes(
+            hasText("新しいバージョン 2.0.0 があります") and hasAnyAncestor(hasTestTag(UPDATE_RELEASE_NOTES_CARD_TEST_TAG)),
+        ).assertCountEquals(0)
+    }
+
     @Test
     fun availableNotInstallableShowsNoDownloadButtonButLinksToTheReleasePage() = runDesktopComposeUiTest {
         setContent {
-            Box(Modifier.width(360.dp)) {
+            Column(Modifier.width(360.dp)) {
                 UpdateResultSection(UpdateState.Available(manualOnlyUpdate()), ::noop, ::noop, ::noop, ::noop)
             }
         }
@@ -92,7 +114,7 @@ class UpdatesTabTest {
     fun clickingDownloadInvokesTheCallback() = runDesktopComposeUiTest {
         var invoked = false
         setContent {
-            Box(Modifier.width(360.dp)) {
+            Column(Modifier.width(360.dp)) {
                 UpdateResultSection(
                     UpdateState.Available(installableUpdate()), ::noop, { invoked = true }, ::noop, ::noop,
                 )
@@ -109,7 +131,7 @@ class UpdatesTabTest {
     fun downloadingShowsProgressPercentAndAnEnabledCancelButton() = runDesktopComposeUiTest {
         val state = UpdateState.Downloading(installableUpdate(), bytesDone = 50, bytesTotal = 100)
         setContent {
-            Box(Modifier.width(360.dp)) {
+            Column(Modifier.width(360.dp)) {
                 UpdateResultSection(state, ::noop, ::noop, ::noop, ::noop)
             }
         }
@@ -126,7 +148,7 @@ class UpdatesTabTest {
         var invoked = false
         val state = UpdateState.Downloading(installableUpdate(), bytesDone = 50, bytesTotal = 100)
         setContent {
-            Box(Modifier.width(360.dp)) {
+            Column(Modifier.width(360.dp)) {
                 UpdateResultSection(state, ::noop, ::noop, { invoked = true }, ::noop)
             }
         }
@@ -140,7 +162,7 @@ class UpdatesTabTest {
     @Test
     fun verifyingShowsTheVerifyingMessage() = runDesktopComposeUiTest {
         setContent {
-            Box(Modifier.width(360.dp)) {
+            Column(Modifier.width(360.dp)) {
                 UpdateResultSection(UpdateState.Verifying(installableUpdate()), ::noop, ::noop, ::noop, ::noop)
             }
         }
@@ -153,7 +175,7 @@ class UpdatesTabTest {
     fun readyShowsAnEnabledInstallButton() = runDesktopComposeUiTest {
         val state = UpdateState.Ready(installableUpdate(), filePath = "/tmp/x.zip")
         setContent {
-            Box(Modifier.width(360.dp)) {
+            Column(Modifier.width(360.dp)) {
                 UpdateResultSection(state, ::noop, ::noop, ::noop, ::noop)
             }
         }
@@ -166,7 +188,7 @@ class UpdatesTabTest {
     fun readyShowsTheReadyToInstallWordingInsteadOfTheGenericAvailableHeadline() = runDesktopComposeUiTest {
         val state = UpdateState.Ready(installableUpdate(), filePath = "/tmp/x.zip")
         setContent {
-            Box(Modifier.width(360.dp)) {
+            Column(Modifier.width(360.dp)) {
                 UpdateResultSection(state, ::noop, ::noop, ::noop, ::noop)
             }
         }
@@ -179,7 +201,7 @@ class UpdatesTabTest {
     @Test
     fun theCardNoLongerShowsARedundantCurrentVersionLine() = runDesktopComposeUiTest {
         setContent {
-            Box(Modifier.width(360.dp)) {
+            Column(Modifier.width(360.dp)) {
                 UpdateResultSection(UpdateState.Available(installableUpdate()), ::noop, ::noop, ::noop, ::noop)
             }
         }
@@ -195,7 +217,7 @@ class UpdatesTabTest {
         var invoked = false
         val state = UpdateState.Ready(installableUpdate(), filePath = "/tmp/x.zip")
         setContent {
-            Box(Modifier.width(360.dp)) {
+            Column(Modifier.width(360.dp)) {
                 UpdateResultSection(state, ::noop, ::noop, ::noop, { invoked = true })
             }
         }
@@ -210,7 +232,7 @@ class UpdatesTabTest {
     fun installingShowsADisabledButton() = runDesktopComposeUiTest {
         val state = UpdateState.Installing(installableUpdate())
         setContent {
-            Box(Modifier.width(360.dp)) {
+            Column(Modifier.width(360.dp)) {
                 UpdateResultSection(state, ::noop, ::noop, ::noop, ::noop)
             }
         }
@@ -223,7 +245,7 @@ class UpdatesTabTest {
     fun failedWithAnUpdateShowsTheErrorAndARetryButton() = runDesktopComposeUiTest {
         val state = UpdateState.Failed(installableUpdate(), UpdateException(UpdateStage.DOWNLOAD, "boom"))
         setContent {
-            Box(Modifier.width(360.dp)) {
+            Column(Modifier.width(360.dp)) {
                 UpdateResultSection(state, ::noop, ::noop, ::noop, ::noop)
             }
         }
@@ -238,7 +260,7 @@ class UpdatesTabTest {
         var invoked = false
         val state = UpdateState.Failed(installableUpdate(), UpdateException(UpdateStage.DOWNLOAD, "boom"))
         setContent {
-            Box(Modifier.width(360.dp)) {
+            Column(Modifier.width(360.dp)) {
                 UpdateResultSection(state, ::noop, { invoked = true }, ::noop, ::noop)
             }
         }
@@ -253,7 +275,7 @@ class UpdatesTabTest {
     fun failedWithNoKnownUpdateShowsTheCheckFailedMessage() = runDesktopComposeUiTest {
         val state = UpdateState.Failed(null, UpdateException(UpdateStage.CHECK, "boom"))
         setContent {
-            Box(Modifier.width(360.dp)) {
+            Column(Modifier.width(360.dp)) {
                 UpdateResultSection(state, ::noop, ::noop, ::noop, ::noop)
             }
         }
@@ -268,7 +290,7 @@ class UpdatesTabTest {
         var invoked = false
         val state = UpdateState.Failed(null, UpdateException(UpdateStage.CHECK, "boom"))
         setContent {
-            Box(Modifier.width(360.dp)) {
+            Column(Modifier.width(360.dp)) {
                 UpdateResultSection(state, { invoked = true }, ::noop, ::noop, ::noop)
             }
         }
@@ -283,10 +305,10 @@ class UpdatesTabTest {
     fun theProgressSlotReservesTheSameHeightWhetherOrNotItHasContent() = runDesktopComposeUiTest {
         setContent {
             Column {
-                Box(Modifier.testTag("available-section").width(360.dp)) {
+                Column(Modifier.testTag("available-section").width(360.dp)) {
                     UpdateResultSection(UpdateState.Available(installableUpdate()), ::noop, ::noop, ::noop, ::noop)
                 }
-                Box(Modifier.testTag("downloading-section").width(360.dp)) {
+                Column(Modifier.testTag("downloading-section").width(360.dp)) {
                     UpdateResultSection(
                         UpdateState.Downloading(installableUpdate(), 50, 100), ::noop, ::noop, ::noop, ::noop,
                     )

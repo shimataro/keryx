@@ -170,28 +170,37 @@ internal fun UpdateResultSection(
     }
 
     Spacer(Modifier.height(12.dp))
-    SettingsCard {
-        val installable = update.plan.isInstallable
-        UpdateHeadlineRow(state, update, installable, onStartDownload, onInstall)
-        UpdateProgressSlot(state, onCancelDownload)
+    val installable = update.plan.isInstallable
+    UpdateHeadlineRow(state, update, installable, onStartDownload, onInstall)
+    Spacer(Modifier.height(4.dp))
+    UpdateProgressSlot(state, onCancelDownload)
 
-        if (!installable) {
-            Text(
-                stringResource(Res.string.settings_update_manual_only),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+    if (!installable) {
+        Spacer(Modifier.height(4.dp))
+        Text(
+            stringResource(Res.string.settings_update_manual_only),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 
-        if (state is UpdateState.Failed) {
-            Text(
-                userMessage(state.exception),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
+    if (state is UpdateState.Failed) {
+        Spacer(Modifier.height(4.dp))
+        Text(
+            userMessage(state.exception),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
 
-        update.releaseNotes?.let { notes ->
+    // The status/action block above is a plain, unboxed banner — always the first thing seen,
+    // never sharing a frame with the release notes below (see UpdatesTab.kt's own module KDoc for
+    // why): what to do about an update and what changed in it are different kinds of information,
+    // and only the latter is "read more" content worth setting apart in its own panel — matching
+    // how Sparkle/macOS's own Software Update present an update banner over a framed notes area.
+    update.releaseNotes?.let { notes ->
+        Spacer(Modifier.height(12.dp))
+        SettingsCard(modifier = Modifier.testTag(UPDATE_RELEASE_NOTES_CARD_TEST_TAG)) {
             Text(
                 plainTextReleaseNotes(notes),
                 style = MaterialTheme.typography.bodySmall,
@@ -200,10 +209,15 @@ internal fun UpdateResultSection(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-
-        LinkRow(label = stringResource(Res.string.settings_update_open_release_page), url = update.releaseUrl)
     }
+
+    Spacer(Modifier.height(8.dp))
+    LinkRow(label = stringResource(Res.string.settings_update_open_release_page), url = update.releaseUrl)
 }
+
+/** Exposed for `UpdatesTabTest` to confirm the release notes are the *only* thing inside this
+ * card — the status/action block above it is deliberately unboxed (see this file's own KDoc). */
+internal const val UPDATE_RELEASE_NOTES_CARD_TEST_TAG = "update-release-notes-card"
 
 /**
  * The card's single hero line: what's currently true about the update, and — trailing, on the

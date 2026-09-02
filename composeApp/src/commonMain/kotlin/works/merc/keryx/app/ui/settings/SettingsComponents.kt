@@ -26,11 +26,13 @@ import works.merc.keryx.app.ui.common.KeryxSettingRow
  * `weight(1f)`) together as one visible unit instead of floating disconnected across the dialog's
  * fixed 640dp width.
  *
+ * @param modifier Applied to the outer raised surface — e.g. a `testTag` for a call site a test
+ *   needs to locate directly (most callers can leave this at its default).
  * @param content The composable content displayed inside the card.
  */
 @Composable
-internal fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
-    KeryxRaisedSurface(modifier = Modifier.fillMaxWidth()) {
+internal fun SettingsCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    KeryxRaisedSurface(modifier = modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
