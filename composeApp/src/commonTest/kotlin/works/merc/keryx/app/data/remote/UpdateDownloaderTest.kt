@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import works.merc.keryx.app.core.MAX_REDIRECTS
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.UpdateException
 import works.merc.keryx.app.core.UpdateStage
@@ -328,8 +329,13 @@ class UpdateDownloaderTest {
 
         assertIs<Result.Err>(result)
         assertEquals(UpdateStage.DOWNLOAD, (result.exception as UpdateException).stage)
-        // MAX_REDIRECTS (5) further hops after the initial request, then it gives up.
-        assertTrue(requestCount in 1..10, "expected a small bounded number of requests, got $requestCount")
+        // The initial request plus MAX_REDIRECTS (5) further hops — streamToFile issues one
+        // request per redirectCount from 0 through MAX_REDIRECTS inclusive, then bails at
+        // MAX_REDIRECTS + 1 without a request. An exact count (not just "small and bounded") so a
+        // regression that loosens or removes the guard (e.g. MAX_REDIRECTS silently growing, or the
+        // `> MAX_REDIRECTS` check being dropped entirely) fails this test instead of only being
+        // caught by a much larger, arbitrary upper bound.
+        assertEquals(MAX_REDIRECTS + 1, requestCount)
     }
 
     // --- shouldEmitProgress ---
