@@ -243,9 +243,16 @@ separate, explicit click (Updates tab button, or the tray item once one is offer
   N%" (rounded to 5% to avoid flooding the Linux SNI D-Bus menu with layout-change signals),
   "Verifying…", "Restart to update to %1$s", and "Update failed" as `state` moves (`%1$s` is the
   target version — see `tray_update_download`/`tray_update_restart` in `strings.xml`) — absent
-  entirely for a `NotOffered`/non-installable plan, where the Updates tab's own "Download" button
-  likewise reduces to a plain "Check for update" instead (see `ui-guidelines`'s "prefer disabled over hidden" for the
-  general pattern this follows). The notification-center bell gets one row per meaningful moment —
+  entirely for a `NotOffered`/non-installable plan. The Updates tab's own headline row follows the
+  same rule — no "Download" button renders there at all for that plan, rather than a disabled one
+  (see `ui-guidelines`'s "prefer disabled over hidden" carve-out, which this is: there is nothing
+  *temporarily* inactive about a form the in-app installer can never handle) — replaced by the
+  `settings_update_manual_only` caption underneath explaining why, plus a link to the release page
+  (`LinkRow`, always present once a release is known, whether or not it's installable) as the
+  manual alternative. The tab's own "Check for updates" button is a separate element entirely,
+  underneath the check-interval control at the bottom of the tab — always present regardless of
+  `plan`, not something the headline row's own button "falls back" to. The notification-center bell
+  gets one row per meaningful moment —
   "a new version is available" when `check()` finds one, then that same row is dismissed and
   replaced (never left to accumulate alongside it) by "ready to install" once a download finishes —
   reusing the existing `ShowSettingsTab("updates")`/`OpenUrl(releaseUrl)` actions rather than adding
