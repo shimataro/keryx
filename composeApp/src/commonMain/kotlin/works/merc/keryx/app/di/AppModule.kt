@@ -35,6 +35,7 @@ import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.domain.UpdateRepository
 import works.merc.keryx.app.platform.SelfUpdateCheckSupport
+import works.merc.keryx.app.platform.detectInstallLocation
 import works.merc.keryx.app.platform.selfUpdateCheckSupported
 import works.merc.keryx.app.ui.home.HomeViewModel
 import works.merc.keryx.app.ui.home.NotificationCenterViewModel
@@ -95,9 +96,15 @@ val appModule: Module = module {
 
     single { FeedFetcher(get()) { get<SettingsRepository>().getReadTimeoutSeconds() } }
     single { FaviconResolver(get()) }
-    single { UpdateChecker(client = get(), currentVersion = AppInfo.version, repoSlug = AppInfo.updateRepo) }
+    // Resolved once here rather than left to each of UpdateChecker/UpdateRepository/
+    // DesktopUpdateInstaller's own constructor-default detectInstallLocation() call: that default
+    // exists only so tests can supply a fake location without DI, not as an invitation for three
+    // independent live filesystem probes (InstallLocation.parentWritable actually creates and
+    // deletes a temp file) to disagree with each other, or to run three times on the startup path.
+    single { detectInstallLocation() }
+    single { UpdateChecker(client = get(), currentVersion = AppInfo.version, repoSlug = AppInfo.updateRepo, location = get()) }
     single { UpdateDownloader(get()) }
-    single { UpdateRepository(checker = get(), downloader = get(), installer = get(), notificationCenter = get(), notificationMessages = get(), scope = get()) }
+    single { UpdateRepository(checker = get(), downloader = get(), installer = get(), notificationCenter = get(), notificationMessages = get(), scope = get(), location = get()) }
     single<SelfUpdateCheckSupport> { SelfUpdateCheckSupport { selfUpdateCheckSupported } }
 
     single { SettingsRepository(get(), get(), get(), get()) }

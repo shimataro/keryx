@@ -56,7 +56,7 @@ actual val platformModule: Module = module {
     // through this sink would show every new-article notification twice.
     single<OsNotificationSink> { OsNotificationSink { _, _ -> } }
 
-    single<UpdateInstaller> { DesktopUpdateInstaller() }
+    single<UpdateInstaller> { DesktopUpdateInstaller(get()) }
 
     single {
         HttpClient(CIO) {
