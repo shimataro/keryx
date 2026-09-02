@@ -17,7 +17,7 @@ internal fun isNewer(remote: String, local: String): Boolean =
  */
 private fun parseCore(version: String): List<Int>? {
     val core = version.substringBefore('+').substringBefore('-').split(".").map { it.toIntOrNull() }
-    return if (core.any { it == null }) null else core.map { it!! }
+    return if (core.any { it == null }) null else core.filterNotNull()
 }
 
 /**
@@ -31,7 +31,7 @@ internal fun compareReleaseVersions(a: String?, b: String?): Int {
     val aOk = a != null && parseCore(a) != null
     val bOk = b != null && parseCore(b) != null
     return when {
-        aOk && bOk -> compareVersions(a, b)!!
+        aOk && bOk -> checkNotNull(compareVersions(a, b))
         aOk -> 1
         bOk -> -1
         else -> 0
