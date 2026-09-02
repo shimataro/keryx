@@ -157,12 +157,12 @@ class UpdateRepository(
      * value — seeing a state [nextStateAfterCheck] never interrupts (Downloading/Verifying/
      * Installing) turns "apply" into a no-op, exactly as if this check had run instantaneously.
      *
-     * Suspends until the check completes and returns its [UpdateStatus] directly — unlike
-     * [startDownload]/[cancelDownload]/[install], which self-launch and return immediately — because
-     * [checkForUpdateAndNotify] needs the result to decide whether to update the automatic-check
-     * timestamp the same way it always has.
+     * Suspends until the check completes — unlike [startDownload]/[cancelDownload]/[install], which
+     * self-launch and return immediately — so a caller (e.g. [checkForUpdateAndNotify], stamping
+     * the automatic-check timestamp afterward) can rely on [state] already reflecting this check's
+     * result the moment this returns.
      */
-    suspend fun check(): UpdateStatus {
+    suspend fun check() {
         val before = mutex.withLock {
             _state.value.also { current ->
                 _state.value = when (current) {
@@ -202,7 +202,6 @@ class UpdateRepository(
             }
             postNotification(message, action)
         }
-        return status
     }
 
     /**

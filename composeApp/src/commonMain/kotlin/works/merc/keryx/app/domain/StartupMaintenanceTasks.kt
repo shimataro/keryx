@@ -69,7 +69,8 @@ internal suspend fun refreshFeedsAndNotify(koin: Koin) {
  * (a manual "check for update" in Settings deliberately never touches it — see
  * [works.merc.keryx.app.ui.settings.SettingsViewModel.checkForUpdate]'s own KDoc).
  *
- * @param koin The dependency injection container used to resolve update and notification services.
+ * @param koin The dependency injection container used to resolve [SelfUpdateCheckSupport],
+ *   [UpdateRepository], and [SettingsRepository].
  */
 internal suspend fun checkForUpdateAndNotify(koin: Koin) {
     if (!koin.get<SelfUpdateCheckSupport>().isSupported()) return
