@@ -3,6 +3,7 @@ package works.merc.keryx.app.platform.update
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runInterruptible
 import works.merc.keryx.app.core.APP_NAME
+import works.merc.keryx.app.core.untrustedText
 import works.merc.keryx.app.domain.AvailableUpdate
 import works.merc.keryx.app.domain.InstallLaunchResult
 import works.merc.keryx.app.domain.UpdateAssetKind
@@ -71,7 +72,7 @@ class DesktopUpdateInstaller internal constructor(
     // canInstall, the guard-rail tests — don't all need to name a verifier they never exercise
     // (verifyExtractedApp only ever calls it for MAC_APP_ZIP). Production never sees this default:
     // the public constructor below always supplies RealCodeSigningVerifier().
-    private val codeSigningVerifier: CodeSigningVerifier = CodeSigningVerifier { true },
+    private val codeSigningVerifier: CodeSigningVerifier = CodeSigningVerifier { null },
     // Defaulted to the in-process extractor for the same reason codeSigningVerifier is defaulted
     // above: the existing tests build synthetic ZIPs and expect them to actually land on disk, and
     // ditto is neither available nor meaningful on the Linux/Windows CI runners they also run on.
@@ -95,11 +96,18 @@ class DesktopUpdateInstaller internal constructor(
     /**
      * Everything below this point blocks: inflating the archive twice over (once to check it, once
      * to unpack it), two child processes bounded at 300 s and 30 s, and possibly a full copy of the
-     * bundle onto another volume. [runInterruptible] moves all of it to [Dispatchers.IO] — the
+     * bundle onto another volume. [runInterruptible] moves all of it to [Dispatchers.IO]: the
      * caller's `Dispatchers.Default` is the same pool every DB write and feed refresh shares, and a
-     * *failed* install (the case that doesn't exit the app) would leave it a worker short for the
-     * whole window — and turns coroutine cancellation into a thread interrupt, which
-     * [runLocalProcess] already answers by killing its child instead of waiting the timeout out.
+     * *failed* install (the case that doesn't exit the app) would otherwise leave it a worker short
+     * for the whole window.
+     *
+     * It also turns coroutine cancellation into a thread interrupt, but only the macOS path answers
+     * that: [runLocalProcess] kills its child rather than waiting out the timeout, while
+     * [InProcessArchiveExtractor] blocks in `FileInputStream`/`FileOutputStream`, which no JDK
+     * platform makes interruptible. Nothing cancels this coroutine today either — `install()` does
+     * not retain its `Job` and the app scope is never cancelled — so the interrupt path is latent
+     * correctness, not a live cancel button. A wedged child therefore still pins the UI at
+     * `Installing` for up to the two timeouts combined.
      */
     override suspend fun install(filePath: String, update: AvailableUpdate): InstallLaunchResult = runInterruptible(Dispatchers.IO) {
         val asset = update.asset ?: return@runInterruptible InstallLaunchResult.Failed("No update asset was selected for this install")
@@ -327,8 +335,7 @@ class DesktopUpdateInstaller internal constructor(
                     // Self-consistency only — not a publisher/identity check. See CodeSigningVerifier.kt's
                     // KDoc for why Developer-ID verification (`codesign --verify -R "notarized"`) can't be
                     // required yet: current releases are ad-hoc signed, which this check already accepts.
-                    !codeSigningVerifier.verify(extractedApp.path) -> "Extracted app failed its own code-signature self-check"
-                    else -> null
+                    else -> codeSigningVerifier.verify(extractedApp.path)
                 }
             }
             UpdateAssetKind.LINUX_ZIP -> {
@@ -370,11 +377,9 @@ internal fun cleanUpStaleSelfReplaceArtifacts(location: InstallLocation) {
  * non-attacker-controlled file (it comes from inside an already digest-verified ZIP), so this
  * avoids pulling in a plist/XML dependency for a single field. */
 /**
- * Longest value [readPlistStringValue] will hand back, and no control characters with it. A version
- * string is a handful of characters, so this costs nothing legitimate — it exists because the value
- * ends up inside an [InstallLaunchResult.Failed] reason, which `UpdateRepository` writes verbatim to
- * the rotating app log. Unbounded, a crafted `Info.plist` could forge log lines with newlines or
- * push earlier entries out through rotation.
+ * Longest value [readPlistStringValue] will hand back. A version string is a handful of characters,
+ * so this costs nothing legitimate — it exists because the value ends up inside an
+ * [InstallLaunchResult.Failed] reason, which `UpdateRepository` logs.
  */
 private const val MAX_PLIST_VALUE_LENGTH = 64
 
@@ -389,7 +394,5 @@ private fun readPlistStringValue(plistPath: String, key: String): String? {
     val valueStart = stringStart + "<string>".length
     val valueEnd = text.indexOf("</string>", valueStart)
     if (valueEnd < 0) return null
-    return text.substring(valueStart, valueEnd)
-        .filterNot { it.isISOControl() }
-        .take(MAX_PLIST_VALUE_LENGTH)
+    return untrustedText(text.substring(valueStart, valueEnd), MAX_PLIST_VALUE_LENGTH)
 }

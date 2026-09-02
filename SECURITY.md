@@ -136,13 +136,22 @@ Keryx is designed to minimize its attack surface:
   therefore hands off to `ditto -x -k`, with `ZipExtractor.validate` run first so the
   zip-slip, entry-count and uncompressed-size limits still apply to an extraction
   `ditto` performs with no limits of its own. A stored link's *target* cannot be
-  pre-checked (the same blind spot); what covers that is `ditto` itself, on an archive
-  that already had to match the digest above — it normalizes a `..` entry name into
-  the destination rather than escaping it, and refuses to write *through* a symlink at
-  all, exiting non-zero. The code-signature check is **not** a second line of defense
-  against an escape: it inspects the bundle directory only, so an entry written
-  *beside* the bundle is never looked at, and it is a self-consistency check, so an
-  attacker able to produce the whole archive could ad-hoc sign their own bundle. It
-  detects modification *inside* the bundle, which is what it is there for.
+  pre-checked (the same blind spot), so the extracted tree is walked afterwards
+  (`verifyExtractedTree`): every symlink is resolved **through the filesystem** and
+  rejected unless it stays inside the destination, and entry count and byte total are
+  re-checked against what actually landed. Resolving through the filesystem rather
+  than textually is what makes it sound — a `..` that follows another symlink
+  collapses against the link, not against what the link points at, so two entries
+  would otherwise be enough to look contained while pointing outside. `ditto` itself
+  is *not* that guard: it declines to *traverse* links, which is a different property
+  from declining to *create* one that points outside — it creates such a link and
+  exits 0. What `ditto` does contribute is normalizing a `..` entry **name** into the
+  destination, which is the only defense against something written *outside* the
+  destination, since a walk that starts there cannot see it. The code-signature check
+  is **not** a line of defense against an escape at all: it inspects the bundle
+  directory only, so an entry written *beside* the bundle is never looked at, and it
+  is a self-consistency check, so an attacker able to produce the whole archive could
+  ad-hoc sign their own bundle. It detects modification *inside* the bundle, which is
+  what it is there for.
 
 For the complete data-handling description, see [PRIVACY.md](PRIVACY.md).

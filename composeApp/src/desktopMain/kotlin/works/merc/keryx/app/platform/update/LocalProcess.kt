@@ -57,10 +57,18 @@ internal fun runLocalProcess(command: List<String>, timeoutSeconds: Long, tag: S
     } finally {
         if (process.isAlive) {
             process.destroyForcibly()
+            // Clear the interrupt for the duration of the wait, then put it back. Process.waitFor is
+            // Object.wait underneath, which throws immediately when the flag is already set — and on
+            // the Interrupted path above it always is, so the grace period would be skipped on
+            // exactly the path it exists for: the caller answers Interrupted by deleting the
+            // directory a just-SIGKILLed child may still have writes in flight into.
+            val wasInterrupted = Thread.interrupted()
             try {
                 process.waitFor(DESTROY_GRACE_SECONDS, TimeUnit.SECONDS)
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
+            } finally {
+                if (wasInterrupted) Thread.currentThread().interrupt()
             }
         }
     }

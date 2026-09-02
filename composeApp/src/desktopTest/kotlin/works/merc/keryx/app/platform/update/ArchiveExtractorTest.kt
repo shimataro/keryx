@@ -108,6 +108,58 @@ class ArchiveExtractorTest {
         )
     }
 
+    // The case a lexical `..` check gets wrong: `a` -> `.` is genuinely contained, and `b` -> `a/..`
+    // normalizes textually to the destination itself while really pointing at its parent, because
+    // normalize() collapses the `..` against the link rather than against what it points at.
+    @Test
+    fun anExtractedSymlinkThatEscapesThroughAnotherSymlinkIsRejected() {
+        if (!isMacOs) return
+
+        val root = newTempDir("archive-extractor-chain")
+        val source = File(root, "src").apply { mkdirs() }
+        Files.createSymbolicLink(File(source, "a").toPath(), Path.of("."))
+        Files.createSymbolicLink(File(source, "b").toPath(), Path.of("a/.."))
+        val zip = File(root, "archive.zip")
+        // Zipped from *inside* src, so both links land at the extraction root. One level deeper and
+        // `a/..` would resolve to the destination itself, which is legitimately contained.
+        val zipExit = ProcessBuilder("/usr/bin/zip", "-qry", zip.path, "a", "b").directory(source).start().waitFor()
+        assertEquals(0, zipExit, "fixture archive could not be built")
+        val dest = File(root, "out")
+
+        val failure = assertFailsWith<IllegalStateException> {
+            DittoArchiveExtractor().extract(zip.path, dest.path, maxBytes = 1_000_000, executableEntries = emptySet())
+        }
+
+        assertTrue(
+            failure.message.orEmpty().contains("outside"),
+            "the chained escape must be caught, not just the direct one: ${failure.message}",
+        )
+    }
+
+    // Every one of a jpackage bundle's 43 legal-notices links is dangling: jlink emits
+    // legal/<module>/LICENSE -> ../java.base/LICENSE without shipping legal/java.base at all. A
+    // resolver that requires the target to exist would therefore reject every real release, which
+    // is why the containment check canonicalizes rather than calling toRealPath.
+    @Test
+    fun anExtractedDanglingSymlinkThatStaysInsideIsAccepted() {
+        if (!isMacOs) return
+
+        val root = newTempDir("archive-extractor-dangling")
+        val source = File(root, "src").apply { mkdirs() }
+        val moduleDir = File(source, "legal/java.security.jgss").apply { mkdirs() }
+        Files.createSymbolicLink(File(moduleDir, "LICENSE").toPath(), Path.of("../java.base/LICENSE"))
+        val zip = File(root, "archive.zip")
+        val zipExit = ProcessBuilder("/usr/bin/zip", "-qry", zip.path, "legal").directory(source).start().waitFor()
+        assertEquals(0, zipExit, "fixture archive could not be built")
+        val dest = File(root, "out")
+
+        DittoArchiveExtractor().extract(zip.path, dest.path, maxBytes = 1_000_000, executableEntries = emptySet())
+
+        val link = File(dest, "legal/java.security.jgss/LICENSE").toPath()
+        assertTrue(Files.isSymbolicLink(link), "the link must survive as a link")
+        assertFalse(Files.exists(link), "and it is expected to dangle, exactly as jlink emits it")
+    }
+
     // `ditto` is macOS-only, so this is the one test that cannot run on the Linux/Windows runners —
     // and the only one that exercises the behavior the whole seam exists for.
     @Test

@@ -24,8 +24,17 @@ private const val VERIFY_TIMEOUT_SECONDS = 30L
  * Developer ID and notarized, this should be tightened to a publisher check; see `SECURITY.md`.
  */
 internal fun interface CodeSigningVerifier {
-    /** Returns whether the app bundle at [appPath] passes `codesign`'s own signature self-check. */
-    fun verify(appPath: String): Boolean
+    /**
+     * Checks the app bundle at [appPath] against `codesign`'s own signature self-check.
+     *
+     * @return `null` when it passes, otherwise why not — a reason rather than a `Boolean` so
+     *   "the signature is bad" stays distinguishable from "the check could not be completed".
+     *   That distinction reaches the user's log through
+     *   [works.merc.keryx.app.domain.UpdateRepository], where reporting a cancelled or wedged check
+     *   as a *corrupt bundle* would point the next investigation at the packaging pipeline instead
+     *   of at the timeout.
+     */
+    fun verify(appPath: String): String?
 }
 
 /**
@@ -38,12 +47,19 @@ internal fun interface CodeSigningVerifier {
  * itself, since either way the answer [DesktopUpdateInstaller] needs is the same: don't swap it in.
  */
 internal class RealCodeSigningVerifier : CodeSigningVerifier {
-    override fun verify(appPath: String): Boolean = try {
+    override fun verify(appPath: String): String? = try {
         // Absolute path for the same reason DittoArchiveExtractor uses one.
-        val result = runLocalProcess(listOf("/usr/bin/codesign", "--verify", "--strict", "--deep", appPath), VERIFY_TIMEOUT_SECONDS, TAG)
-        result is LocalProcessResult.Exited && result.code == 0
+        val command = listOf("/usr/bin/codesign", "--verify", "--strict", "--deep", appPath)
+        when (val result = runLocalProcess(command, VERIFY_TIMEOUT_SECONDS, TAG)) {
+            is LocalProcessResult.Exited ->
+                if (result.code == 0) null else "Extracted app failed its own code-signature self-check (codesign exit ${result.code})"
+            LocalProcessResult.TimedOut ->
+                "Could not complete the code-signature check: codesign timed out after $VERIFY_TIMEOUT_SECONDS seconds"
+            LocalProcessResult.Interrupted ->
+                "Could not complete the code-signature check: interrupted"
+        }
     } catch (e: IOException) {
         Log.error(TAG, "Failed to run codesign --verify for $appPath", e)
-        false
+        "Could not run the code-signature check: ${e.message}"
     }
 }

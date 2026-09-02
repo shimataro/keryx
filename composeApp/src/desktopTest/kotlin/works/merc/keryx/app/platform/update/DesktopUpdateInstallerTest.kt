@@ -315,7 +315,7 @@ class DesktopUpdateInstallerTest {
         val zip = macAppZip(downloadDir)
         val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, File(appRoot, "Contents/MacOS/Keryx").path, parentWritable = true, translocated = false)
         val launcher = FakeProcessLauncher()
-        val installer = DesktopUpdateInstaller(location, launcher, CodeSigningVerifier { false })
+        val installer = DesktopUpdateInstaller(location, launcher, CodeSigningVerifier { "simulated signature failure" })
 
         val result = runBlocking {
             installer.install(zip.path, update("1.2.3", macAsset("1.2.3"), UpdatePlan.SelfReplace(macAsset("1.2.3"))))
@@ -335,7 +335,7 @@ class DesktopUpdateInstallerTest {
         val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, File(appRoot, "Contents/MacOS/Keryx").path, parentWritable = true, translocated = false)
         val launcher = FakeProcessLauncher()
         val verifiedPaths = mutableListOf<String>()
-        val installer = DesktopUpdateInstaller(location, launcher, CodeSigningVerifier { path -> verifiedPaths.add(path); true })
+        val installer = DesktopUpdateInstaller(location, launcher, CodeSigningVerifier { path -> verifiedPaths.add(path); null })
 
         val result = runBlocking {
             installer.install(zip.path, update("1.2.3", macAsset("1.2.3"), UpdatePlan.SelfReplace(macAsset("1.2.3"))))
@@ -357,7 +357,7 @@ class DesktopUpdateInstallerTest {
         val installer = DesktopUpdateInstaller(
             location,
             launcher,
-            CodeSigningVerifier { true },
+            CodeSigningVerifier { null },
             ArchiveExtractor { _, _, _, _ -> error("ditto could not extract the update archive (exit 1)") },
         )
 
@@ -387,7 +387,7 @@ class DesktopUpdateInstallerTest {
         val installer = DesktopUpdateInstaller(
             location,
             launcher,
-            CodeSigningVerifier { true },
+            CodeSigningVerifier { null },
             ArchiveExtractor { _, _, _, _ -> throw IOException("boom") },
         )
 
@@ -415,7 +415,7 @@ class DesktopUpdateInstallerTest {
         File(downloadDir, "extracted/leftover.txt").writeText("undeletable")
         val location = InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot.path, File(appRoot, "Contents/MacOS/Keryx").path, parentWritable = true, translocated = false)
         val launcher = FakeProcessLauncher()
-        val installer = DesktopUpdateInstaller(location, launcher, CodeSigningVerifier { true })
+        val installer = DesktopUpdateInstaller(location, launcher, CodeSigningVerifier { null })
 
         downloadDir.setWritable(false)
         val result = try {
@@ -447,7 +447,7 @@ class DesktopUpdateInstallerTest {
         val installer = DesktopUpdateInstaller(
             location,
             launcher,
-            CodeSigningVerifier { true },
+            CodeSigningVerifier { null },
             ArchiveExtractor { zipPath, destDir, maxBytes, executableEntries ->
                 staleWasStillThere = File(destDir, "Keryx.app/Contents/leftover.txt").exists()
                 InProcessArchiveExtractor.extract(zipPath, destDir, maxBytes, executableEntries)

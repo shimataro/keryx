@@ -321,6 +321,57 @@ class UpdateRepositoryTest {
     }
 
     @Test
+    fun aCheckCompletingDuringAnInstallKeepsTheDownloadThatInstallIsUsing() {
+        val payload = Random(31).nextBytes(64 * 1024)
+        val downloaderClient = HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }
+        val body = releaseJson(
+            "2.0.0", "Keryx-2.0.0-macos-arm64.zip",
+            "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256Hex(payload),
+        )
+        // The second check parks inside the network call, which is the window a user can click
+        // Install through: check() leaves Ready untouched and disables nothing in the Updates tab.
+        val checkGate = CompletableDeferred<Unit>()
+        var checkCount = 0
+        val checkerClient = HttpClient(
+            MockEngine {
+                checkCount++
+                if (checkCount >= 2) checkGate.await()
+                respond(body, HttpStatusCode.OK)
+            },
+        ) { expectSuccess = false }
+        val installGate = CompletableDeferred<Unit>()
+        val installer = GatedInstaller(InstallLaunchResult.Launched, installGate)
+        val repo = UpdateRepository(
+            checker = UpdateChecker(checkerClient, currentVersion = "1.0.0", repoSlug = "owner/repo", location = WRITABLE_MAC_LOCATION),
+            downloader = UpdateDownloader(downloaderClient),
+            installer = installer,
+            notificationCenter = NotificationCenter(),
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+        )
+        runBlocking { repo.check() }
+        repo.startDownload()
+        awaitState(repo) { it is UpdateState.Ready }
+        val filePath = (repo.state.value as UpdateState.Ready).filePath
+
+        trackedScope().launch { repo.check() } // snapshots `before = Ready`, then parks
+        await(describe = { "the second check never reached the network" }) { checkCount >= 2 }
+        repo.install()
+        runBlocking { withTimeout(5_000) { installer.started.await() } }
+        checkGate.complete(Unit) // the check now folds in on top of Installing
+
+        // nextStateAfterCheck passes Installing straight through, so `after` is not Ready — which a
+        // `after !is Ready` supersede-check would read as "this version was replaced" and delete out
+        // from under the running extraction.
+        await(describe = { "the check never finished" }) { checkCount >= 2 && repo.state.value is UpdateState.Installing }
+        Thread.sleep(200)
+        assertTrue(File(filePath).exists(), "a check must not delete the download the running install is reading")
+        installGate.complete(Unit)
+    }
+
+    @Test
     fun retryingAnInstallStageFailureTwiceStartsOnlyOneInstall() {
         val payload = Random(29).nextBytes(64 * 1024)
         val downloaderClient = HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }

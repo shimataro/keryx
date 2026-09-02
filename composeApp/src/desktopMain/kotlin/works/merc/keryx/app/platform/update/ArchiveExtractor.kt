@@ -1,5 +1,6 @@
 package works.merc.keryx.app.platform.update
 
+import works.merc.keryx.app.core.untrustedText
 import works.merc.keryx.app.platform.MAX_ZIP_ENTRIES
 import works.merc.keryx.app.platform.ZipExtractor
 import java.io.File
@@ -23,6 +24,11 @@ private const val EXTRACT_TIMEOUT_SECONDS = 300L
 /** How much of `ditto`'s own complaint to carry into the failure reason. Its messages are one short
  * line ("Not a directory"), and that reason is the only trace an install failure leaves. */
 private const val MAX_EXTRACT_ERROR_CHARS = 200
+
+/** How much of the stderr file to read before flattening it. `ditto` emits one line per problem and
+ * embeds archive entry names in them, so a crafted archive can make the file large; reading a
+ * bounded prefix keeps the peak proportional to what is actually reported, not to the input. */
+private const val MAX_EXTRACT_ERROR_READ_CHARS = 8 * 1024
 
 /**
  * How [DesktopUpdateInstaller] unpacks a downloaded self-replace ZIP.
@@ -95,7 +101,9 @@ internal object InProcessArchiveExtractor : ArchiveExtractor {
 internal class DittoArchiveExtractor : ArchiveExtractor {
     override fun extract(zipPath: String, destDir: String, maxBytes: Long, executableEntries: Set<String>) {
         ZipExtractor.validate(zipPath, destDir, maxBytes)
-        val errorLog = File.createTempFile("keryx-ditto", ".log")
+        // Files.createTempFile, not File.createTempFile: the NIO form creates the file owner-only
+        // on POSIX instead of at the process umask.
+        val errorLog = Files.createTempFile("keryx-ditto", ".log").toFile()
         try {
             // Absolute path, not a PATH lookup: this runs the moment the user consents to an
             // install, so a planted `ditto` earlier on an inherited PATH would run with the app's
@@ -122,23 +130,37 @@ internal class DittoArchiveExtractor : ArchiveExtractor {
      * leaves no trace when it fires, and reads exactly like a corrupt archive. */
     private fun errorDetail(errorLog: File): String {
         val text = try {
-            errorLog.readText()
+            errorLog.reader().use { reader ->
+                val buffer = CharArray(MAX_EXTRACT_ERROR_READ_CHARS)
+                val read = reader.read(buffer)
+                if (read <= 0) "" else String(buffer, 0, read)
+            }
         } catch (_: IOException) {
             return ""
         }
-        val flattened = text.lineSequence().joinToString(" ") { it.trim() }.trim().filterNot { it.isISOControl() }
-        return if (flattened.isEmpty()) "" else ": " + flattened.take(MAX_EXTRACT_ERROR_CHARS)
+        // Control characters (newlines included) are dropped rather than turned into spaces, so this
+        // cannot contribute a second line to a log entry — see core/UntrustedText.kt for the sink
+        // this feeds and why that matters.
+        val flattened = untrustedText(text, MAX_EXTRACT_ERROR_CHARS).trim()
+        return if (flattened.isEmpty()) "" else ": $flattened"
     }
 
     /**
      * Checks the tree `ditto` actually produced, not the archive that described it.
      *
-     * [ZipExtractor.validate] inspects the *input*, and check and write now live in two processes
-     * with two different ZIP readers: `ZipInputStream` walks local file headers and never consults
-     * the central directory, while `ditto` treats the central directory as authoritative. An archive
+     * [ZipExtractor.validate] inspects the *input*, and check and write live in two processes with
+     * two different ZIP readers: `ZipInputStream` walks local file headers and never consults the
+     * central directory, while `ditto` treats the central directory as authoritative. An archive
      * whose two views disagree passes `validate` on the harmless one and is extracted by `ditto` on
-     * the other. `validate` also cannot resolve a symlink target at all. Walking the result closes
-     * both gaps against the one thing that matters: nothing may end up outside [destDir].
+     * the other. `validate` also cannot resolve a symlink target at all, since it cannot tell which
+     * entries are links.
+     *
+     * **This is the guard for stored link targets** — `ditto` is not. It declines to *traverse*
+     * links, which is a different property from declining to *create* one that points outside; it
+     * creates such a link and exits 0 (pinned by `ArchiveExtractorTest`). What this walk cannot
+     * establish is anything written *outside* [destDir], because that is where it starts: for that
+     * half, the only defense is `ditto`'s own normalization of a `..` entry name into the
+     * destination.
      */
     private fun verifyExtractedTree(destDir: String, maxBytes: Long) {
         val root = File(destDir).canonicalFile.toPath()
@@ -147,12 +169,29 @@ internal class DittoArchiveExtractor : ArchiveExtractor {
         Files.walkFileTree( // does not follow links: a symlinked directory is visited as a link
             root,
             object : SimpleFileVisitor<Path>() {
+                override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
+                    countEntry()
+                    return FileVisitResult.CONTINUE
+                }
+
                 override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-                    entries++
-                    check(entries <= MAX_ZIP_ENTRIES) { "Extracted update has too many entries" }
+                    countEntry()
                     if (attrs.isSymbolicLink) {
                         val target = Files.readSymbolicLink(file)
-                        val resolved = (if (target.isAbsolute) target else file.parent.resolve(target)).normalize()
+                        val candidate = if (target.isAbsolute) target else file.parent.resolve(target)
+                        // canonicalFile, not normalize(): normalize() collapses `..` textually, so a
+                        // `..` that follows a *link* component is resolved against the link rather
+                        // than against what it points at. Two entries are enough to exploit that —
+                        // `a` -> `.` and `b` -> `a/..` both look contained lexically, while `b`
+                        // really points at the destination's parent. It is also not toRealPath():
+                        // that requires the target to exist, and a jpackage bundle's 43
+                        // legal-notices links are all **dangling** (jlink emits `legal/<module>/…`
+                        // links to a `legal/java.base/` it does not ship), so rejecting an
+                        // unresolvable link would reject every real release. canonicalFile is
+                        // exactly the middle ground: it follows symlinks for the components that
+                        // exist and stays lexical for the rest, which cannot be links precisely
+                        // because they do not exist.
+                        val resolved = candidate.toFile().canonicalFile.toPath()
                         check(resolved.startsWith(root)) {
                             "Extracted update contains a symlink pointing outside it: ${root.relativize(file)}"
                         }
@@ -161,6 +200,12 @@ internal class DittoArchiveExtractor : ArchiveExtractor {
                         check(bytes <= maxBytes) { "Extracted update exceeds the $maxBytes-byte limit" }
                     }
                     return FileVisitResult.CONTINUE
+                }
+
+                /** Directories count too, or an archive made only of them is bounded by nothing. */
+                private fun countEntry() {
+                    entries++
+                    check(entries <= MAX_ZIP_ENTRIES) { "Extracted update has too many entries" }
                 }
             },
         )

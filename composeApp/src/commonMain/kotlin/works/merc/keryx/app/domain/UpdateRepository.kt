@@ -29,6 +29,7 @@ import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.core.UpdateException
 import works.merc.keryx.app.core.UpdateStage
+import works.merc.keryx.app.core.untrustedText
 import works.merc.keryx.app.data.remote.UpdateDownloader
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
@@ -37,6 +38,10 @@ import works.merc.keryx.app.platform.InstallLocation
 import works.merc.keryx.app.platform.detectInstallLocation
 
 private const val TAG = "UpdateRepository"
+
+/** How much of a failure reason to keep. Long enough for any message this pipeline composes,
+ * short enough that a crafted archive cannot consume a meaningful share of the rotating log. */
+private const val MAX_FAILURE_REASON_LENGTH = 300
 
 /** Free space an in-app update download requires as a multiple of the asset size — headroom for
  * the `.part` file, the final renamed copy briefly coexisting with it, and general safety margin. */
@@ -186,7 +191,14 @@ class UpdateRepository(
 
         // A Ready version this check just superseded (replaced by a newer Available) would
         // otherwise sit on disk, unprotected, until whenever the *next* check happens to run.
-        if (before is UpdateState.Ready && (after !is UpdateState.Ready || after.update.version != before.update.version)) {
+        //
+        // Asks updateVersionInUse the same question sweepStaleUpdateDownloads asks, rather than
+        // testing `after !is Ready`: the state can also leave Ready by legitimately *advancing*.
+        // A user who clicks Install while a check is in flight — which the Updates tab allows,
+        // since a check leaves Ready untouched and disables nothing — ends at Installing on the
+        // same version, and `!is Ready` would then delete the ZIP the extraction is reading and
+        // the tree it is writing.
+        if (before is UpdateState.Ready && updateVersionInUse(after) != before.update.version) {
             withContext(dispatcher) { FileSystemExtras.deleteRecursively(updateDownloadDir(before.update.version)) }
         }
 
@@ -320,7 +332,7 @@ class UpdateRepository(
                     )
                 }
                 is Result.Err -> {
-                    Log.warn(TAG, "Update download failed: ${result.exception.messageText}")
+                    Log.warn(TAG, "Update download failed: ${untrustedText(result.exception.messageText, MAX_FAILURE_REASON_LENGTH)}")
                     val exception = result.exception as? UpdateException
                         ?: UpdateException(UpdateStage.DOWNLOAD, result.exception.messageText)
                     _state.value = UpdateState.Failed(update, exception)
@@ -366,8 +378,14 @@ class UpdateRepository(
                         // failure leaves no trace anywhere at all, in the app log included. That is
                         // exactly how a macOS bundle that failed its code-signature check went
                         // undiagnosed: the UI said "update failed" and nothing else existed.
-                        Log.warn(TAG, "Update install failed: ${result.reason}")
-                        _state.value = UpdateState.Failed(ready.update, UpdateException(UpdateStage.INSTALL, result.reason))
+                        //
+                        // Sanitized here rather than by each producer: several reasons interpolate
+                        // archive-derived text (a ZIP entry name may be 64 KB and contain newlines,
+                        // an extracted filename likewise), and one rule at the sink covers every
+                        // current and future one. See core/UntrustedText.kt.
+                        val reason = untrustedText(result.reason, MAX_FAILURE_REASON_LENGTH)
+                        Log.warn(TAG, "Update install failed: $reason")
+                        _state.value = UpdateState.Failed(ready.update, UpdateException(UpdateStage.INSTALL, reason))
                     }
                 }
             } catch (e: CancellationException) {

@@ -48,7 +48,7 @@ actual object ZipExtractor {
                     target.mkdirs()
                 } else {
                     target.parentFile?.mkdirs()
-                    totalBytes = copyEntry(zip, target.outputStream().buffered(), buffer, totalBytes, maxBytes)
+                    totalBytes = copyEntry(zip, target.outputStream(), buffer, totalBytes, maxBytes)
                     if (entry.name in executableEntries) target.setExecutable(true)
                 }
                 zip.closeEntry()

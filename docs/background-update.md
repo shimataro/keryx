@@ -240,12 +240,18 @@ separate, explicit click (Updates tab button, or the tray item once one is offer
     it from the central directory instead would mean trusting the archive's own metadata for a bound
     whose whole purpose is to survive a crafted one, and overlapping the pass with `ditto` would give
     up the property that a rejected archive leaves nothing on disk at all.
-    What `validate` cannot check is a stored link's *target* (same `java.util.zip` blind spot);
-    `ditto` itself is what covers that, on an archive already SHA-256-verified against the release:
-    it normalizes a `..` entry name into the destination rather than escaping it, and refuses to
-    write *through* a symlink at all, exiting non-zero. The `codesign` check is deliberately not
-    counted as a second line of defense against an *escape* — it inspects the bundle directory only,
-    so an entry written beside the bundle is never looked at (see [SECURITY.md](../SECURITY.md)).
+    What `validate` cannot check is a stored link's *target* (same `java.util.zip` blind spot), so
+    `DittoArchiveExtractor.verifyExtractedTree` walks the extracted tree afterwards and rejects any
+    symlink that, resolved **through the filesystem**, lands outside the destination — textual
+    resolution is not enough, since a `..` following another symlink collapses against the link
+    rather than its target. `ditto` is not that guard (it declines to *traverse* links, not to
+    *create* an escaping one, and exits 0 having done so); what it does contribute is normalizing a
+    `..` entry *name* into the destination, which is the only defense against something written
+    *outside* the destination, where a walk that starts there cannot look. The `codesign` check is
+    deliberately not counted as a defense against an *escape* at all — it inspects the bundle
+    directory only, so an entry written beside the bundle is never looked at (see
+    [SECURITY.md](../SECURITY.md)). All of this sits on top of the SHA-256 digest the archive
+    already had to match.
     Windows and Linux, whose app images carry no signature for a flattened link to invalidate, stay
     on the in-process path (`InProcessArchiveExtractor` → `platform/ZipExtractor.kt`, which
     restores the executable bit only on the entries the caller names). Their `legal/` links do come

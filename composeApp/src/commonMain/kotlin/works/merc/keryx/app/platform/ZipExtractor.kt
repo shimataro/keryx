@@ -39,11 +39,11 @@ expect object ZipExtractor {
      * what keeps those guards in force.
      *
      * Cannot check a stored symbolic link's *target*: `java.util.zip` can't identify a symlink
-     * entry in the first place (see this object's own KDoc). What covers that on macOS is `ditto`
-     * itself — it normalizes a `..` entry name into the destination rather than escaping it, and
-     * refuses to write *through* a symlink at all, exiting non-zero. The code-signature check that
-     * follows is **not** a second line of defense here: it only inspects the bundle directory, so
-     * it detects modification *inside* the bundle but not an entry placed beside it.
+     * entry in the first place (see this object's own KDoc). On macOS that is covered afterwards
+     * instead, by `DittoArchiveExtractor.verifyExtractedTree` walking the extracted tree and
+     * resolving each link through the filesystem. `ditto` itself only contributes normalization of
+     * a `..` entry *name*; the code-signature check that follows contributes nothing against an
+     * escape at all, since it inspects the bundle directory only.
      *
      * @param zipPath The `.zip` file to check — already downloaded and digest-verified.
      * @param destDir The directory the caller is about to extract into. Only used to resolve entry
