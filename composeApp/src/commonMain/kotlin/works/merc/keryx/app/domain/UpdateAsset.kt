@@ -30,6 +30,15 @@ data class UpdateAsset(
     val kind: UpdateAssetKind,
 )
 
+/**
+ * A generous sanity ceiling on a release asset's declared size, checked before anything downstream
+ * (the free-space guard, the download itself) ever trusts it. Real update assets top out at a few
+ * hundred MB; this exists only to reject a wildly implausible value — a compromised or malformed
+ * release response — before it can push [hasEnoughFreeSpaceForUpdate]'s arithmetic anywhere near an
+ * overflow, not to police legitimate release growth.
+ */
+private const val MAX_PLAUSIBLE_UPDATE_ASSET_SIZE_BYTES = 1024L * 1024 * 1024 // 1 GiB
+
 /** The asset name suffix each [UpdateAssetKind] is matched by, e.g. `Keryx-0.14.0-macos-arm64.zip`. */
 private val ASSET_SUFFIX_BY_KIND = mapOf(
     UpdateAssetKind.MAC_APP_ZIP to "-macos-arm64.zip",
@@ -70,7 +79,8 @@ internal fun parseSha256Digest(digest: String?): String? {
  * Picks the one release asset appropriate for [location], or `null` when this build/install form
  * has no in-app update path here — no matching [InstallKind] ([assetKindFor]), no asset of that
  * kind in this release (e.g. a prerelease that omits the `.msi`), an upload GitHub hasn't finished
- * processing yet (`state` present and not `"uploaded"`), or one with no verifiable `sha256` digest.
+ * processing yet (`state` present and not `"uploaded"`), a size that's zero/negative or exceeds
+ * [MAX_PLAUSIBLE_UPDATE_ASSET_SIZE_BYTES], or one with no verifiable `sha256` digest.
  * `.aab` is never matched (no [UpdateAssetKind] suffix ends in `.aab`) — it is a Play submission
  * format, not something [works.merc.keryx.app.domain.UpdateInstaller] can install.
  */
@@ -78,7 +88,8 @@ internal fun selectUpdateAsset(assets: List<ReleaseAsset>, location: InstallLoca
     val kind = assetKindFor(location) ?: return null
     val suffix = ASSET_SUFFIX_BY_KIND.getValue(kind)
     val candidate = assets.firstOrNull { a ->
-        (a.state == null || a.state == "uploaded") && a.name.startsWith("Keryx-") && a.name.endsWith(suffix)
+        (a.state == null || a.state == "uploaded") && a.name.startsWith("Keryx-") && a.name.endsWith(suffix) &&
+            a.sizeBytes in 1..MAX_PLAUSIBLE_UPDATE_ASSET_SIZE_BYTES
     } ?: return null
     val sha256 = parseSha256Digest(candidate.digest) ?: return null
     return UpdateAsset(candidate.name, candidate.downloadUrl, candidate.sizeBytes, sha256, kind)

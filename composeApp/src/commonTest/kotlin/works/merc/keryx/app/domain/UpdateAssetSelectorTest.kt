@@ -134,6 +134,40 @@ class UpdateAssetSelectorTest {
         assertNull(selectUpdateAsset(assets, location(InstallKind.MAC_APP_BUNDLE)))
     }
 
+    @Test
+    fun assetAtOrBelowTheSizeCeilingIsSelected() {
+        // 1 GiB, exactly at the ceiling — see selectUpdateAsset's own KDoc.
+        val atCeiling = 1024L * 1024 * 1024
+        val assets = listOf(
+            ReleaseAsset("Keryx-0.13.0-macos-arm64.zip", "https://x", atCeiling, "sha256:${"a".repeat(64)}", "uploaded"),
+        )
+        assertEquals(atCeiling, selectUpdateAsset(assets, location(InstallKind.MAC_APP_BUNDLE))?.sizeBytes)
+    }
+
+    /**
+     * Regression guard: an implausibly large declared size (a compromised or malformed release
+     * response) must never reach [hasEnoughFreeSpaceForUpdate]'s arithmetic, where it could overflow
+     * a `Long` and read as "plenty of free space" no matter how little actually is.
+     */
+    @Test
+    fun assetAboveTheSizeCeilingIsNeverSelected() {
+        val justOverCeiling = 1024L * 1024 * 1024 + 1
+        val assets = listOf(
+            ReleaseAsset("Keryx-0.13.0-macos-arm64.zip", "https://x", justOverCeiling, "sha256:${"a".repeat(64)}", "uploaded"),
+        )
+        assertNull(selectUpdateAsset(assets, location(InstallKind.MAC_APP_BUNDLE)))
+    }
+
+    @Test
+    fun assetWithAZeroOrNegativeSizeIsNeverSelected() {
+        for (size in listOf(0L, -1L, Long.MIN_VALUE)) {
+            val assets = listOf(
+                ReleaseAsset("Keryx-0.13.0-macos-arm64.zip", "https://x", size, "sha256:${"a".repeat(64)}", "uploaded"),
+            )
+            assertNull(selectUpdateAsset(assets, location(InstallKind.MAC_APP_BUNDLE)), "size=$size must not be selected")
+        }
+    }
+
     // --- parseSha256Digest ---
 
     @Test

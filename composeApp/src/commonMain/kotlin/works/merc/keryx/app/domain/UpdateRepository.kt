@@ -43,6 +43,19 @@ private const val TAG = "UpdateRepository"
 private const val REQUIRED_FREE_SPACE_MULTIPLE = 3
 
 /**
+ * Whether [usableBytes] of free space is enough to safely download an asset of [assetSizeBytes] —
+ * [REQUIRED_FREE_SPACE_MULTIPLE] times over, for the headroom that constant's own KDoc describes.
+ * Compares via division rather than `usableBytes < assetSizeBytes * REQUIRED_FREE_SPACE_MULTIPLE`,
+ * which silently overflows into a negative `Long` for a large enough [assetSizeBytes] and would then
+ * wrongly report "enough space" no matter how little is actually free — a real, if narrow, concern
+ * given [assetSizeBytes] ultimately comes from the release JSON `UpdateChecker` parses.
+ * [selectUpdateAsset] already rejects implausibly large assets before one ever reaches here, but this
+ * stays overflow-safe on its own rather than relying solely on that earlier gate.
+ */
+internal fun hasEnoughFreeSpaceForUpdate(usableBytes: Long, assetSizeBytes: Long): Boolean =
+    assetSizeBytes >= 0 && usableBytes / REQUIRED_FREE_SPACE_MULTIPLE >= assetSizeBytes
+
+/**
  * Orchestrates an in-app update end to end — checking, downloading, verifying, and handing off to
  * [installer] — behind a single [state] every UI surface (tray, notification center, the Updates
  * settings tab) reads from. A Koin `single`, so [state] and any in-flight download outlive whatever
@@ -262,8 +275,7 @@ class UpdateRepository(
         val destPath = FileIO.join(destDir, asset.name)
         _state.value = UpdateState.Downloading(update, 0L, asset.sizeBytes)
         try {
-            val requiredBytes = asset.sizeBytes * REQUIRED_FREE_SPACE_MULTIPLE
-            if (FileSystemExtras.usableSpaceBytes(cacheDir) < requiredBytes) {
+            if (!hasEnoughFreeSpaceForUpdate(FileSystemExtras.usableSpaceBytes(cacheDir), asset.sizeBytes)) {
                 _state.value = UpdateState.Failed(update, UpdateException(UpdateStage.DOWNLOAD, "Not enough free disk space"))
                 return
             }
