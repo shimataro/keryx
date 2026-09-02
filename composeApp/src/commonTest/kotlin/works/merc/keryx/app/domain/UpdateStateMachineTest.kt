@@ -135,4 +135,27 @@ class UpdateStateMachineTest {
         val next = nextStateAfterCheck(failed, UpdateStatus.UpToDate, WRITABLE_MAC_LOCATION)
         assertEquals(UpdateState.UpToDate, next)
     }
+
+    /**
+     * Regression guard: [AvailableUpdate.installable] must reflect the live platform check passed
+     * in, not just [UpdatePlan.isInstallable] — a plan that *would* self-replace/run an installer
+     * (asset selected, location writable) can still be something the platform actual currently
+     * refuses (Android's install-unknown-apps consent, most notably). Both the Updates tab and the
+     * tray read [AvailableUpdate.installable] to decide whether to offer "Download" at all, so this
+     * is what keeps that decision in sync with what [UpdateRepository.startDownload] would actually
+     * do if clicked.
+     */
+    @Test
+    fun installableReflectsTheSuppliedCanInstallRatherThanThePlanAlone() {
+        val status = UpdateStatus.Available("2.0.0", "https://ex.com/2.0.0", null, MAC_ASSET)
+
+        val whenPlatformRefuses = nextStateAfterCheck(UpdateState.Idle, status, WRITABLE_MAC_LOCATION, canInstall = { false })
+        assertIs<UpdateState.Available>(whenPlatformRefuses)
+        assertIs<UpdatePlan.SelfReplace>(whenPlatformRefuses.update.plan) // the plan itself is installable...
+        assertEquals(false, whenPlatformRefuses.update.installable) // ...but the platform says no
+
+        val whenPlatformAllows = nextStateAfterCheck(UpdateState.Idle, status, WRITABLE_MAC_LOCATION, canInstall = { true })
+        assertIs<UpdateState.Available>(whenPlatformAllows)
+        assertEquals(true, whenPlatformAllows.update.installable)
+    }
 }

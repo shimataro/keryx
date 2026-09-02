@@ -12,6 +12,13 @@ package works.merc.keryx.app.domain
  * @param asset The release asset selected for this install form ([selectUpdateAsset]), or `null`
  *   when none applies here.
  * @param plan What an in-app update should do with [asset] here ([updatePlan]).
+ * @param installable Whether [plan] can actually be carried out *right now* — [UpdatePlan.isInstallable]
+ *   folded together with the platform `actual`'s own live [UpdateInstaller.canInstall] answer (e.g.
+ *   Android's install-unknown-apps consent), resolved once when this update was found
+ *   ([nextStateAfterCheck]) so the Updates tab and the tray read the exact same fact
+ *   [UpdateRepository.startDownload] gates on, rather than [plan] alone — which can look
+ *   installable while the platform would refuse it. Defaults to [UpdatePlan.isInstallable] for
+ *   callers (mostly tests) that don't care about that distinction.
  */
 data class AvailableUpdate(
     val version: String,
@@ -19,4 +26,5 @@ data class AvailableUpdate(
     val releaseNotes: String?,
     val asset: UpdateAsset?,
     val plan: UpdatePlan,
+    val installable: Boolean = plan.isInstallable,
 )

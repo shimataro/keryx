@@ -30,10 +30,13 @@ sealed interface UpdatePlan {
     data class RunInstaller(val asset: UpdateAsset) : UpdatePlan
 }
 
-/** Whether [UpdatePlan] represents something an in-app update can actually carry out, as opposed
- * to falling back to the release page or not being offered at all — the one thing the Updates tab
- * (`UpdatesTab.kt`) and the tray (`tray/KeryxTray.kt`'s `trayUpdateEntry`) both need to decide
- * whether an [UpdateState.Available] update gets a "download" affordance at all. */
+/** Whether [UpdatePlan] alone — with no platform-specific runtime check — represents something an
+ * in-app update can carry out, as opposed to falling back to the release page or not being offered
+ * at all. The Updates tab (`UpdatesTab.kt`) and the tray (`tray/KeryxTray.kt`'s `trayUpdateEntry`)
+ * do **not** read this directly; both read [AvailableUpdate.installable] instead, which folds this
+ * together with [UpdateInstaller.canInstall] — see that property's own KDoc for why the platform
+ * check matters too (Android's install-unknown-apps consent, most notably). This is only [installable]'s
+ * pure fallback default, and [nextStateAfterCheck]'s. */
 internal val UpdatePlan.isInstallable: Boolean
     get() = this is UpdatePlan.SelfReplace || this is UpdatePlan.RunInstaller
 

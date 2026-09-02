@@ -14,7 +14,6 @@ import kotlinx.coroutines.flow.SharedFlow
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.domain.UpdateState
-import works.merc.keryx.app.domain.isInstallable
 import works.merc.keryx.app.drawUnreadDot
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.isWindows
@@ -207,7 +206,7 @@ internal fun ApplicationScope.KeryxTray(
 @Composable
 private fun trayUpdateEntry(state: UpdateState): TrayUpdateEntry? = when (state) {
     is UpdateState.Available ->
-        if (state.update.plan.isInstallable) {
+        if (state.update.installable) {
             TrayUpdateEntry(stringResource(Res.string.tray_update_download, state.update.version), enabled = true)
         } else {
             null

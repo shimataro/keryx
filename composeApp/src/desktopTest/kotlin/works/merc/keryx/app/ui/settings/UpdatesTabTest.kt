@@ -39,6 +39,11 @@ private fun installableUpdate(version: String = "2.0.0") =
 private fun manualOnlyUpdate(version: String = "2.0.0") =
     AvailableUpdate(version, "https://ex.com/$version", null, null, UpdatePlan.OpenReleasePage)
 
+/** A plan that would self-replace, but the platform currently refuses it (Android's
+ * install-unknown-apps consent, most notably) — see [AvailableUpdate.installable]'s own KDoc. */
+private fun platformRefusedUpdate(version: String = "2.0.0") =
+    AvailableUpdate(version, "https://ex.com/$version", null, SOME_ASSET, UpdatePlan.SelfReplace(SOME_ASSET), installable = false)
+
 private fun noop() = Unit
 
 /**
@@ -108,6 +113,25 @@ class UpdatesTabTest {
         onAllNodesWithText("ダウンロード").assertCountEquals(0)
         onNodeWithText("このインストール形態はアプリ内更新に対応していません").assertIsDisplayed()
         onNodeWithText("リリースページを開く").assertIsDisplayed()
+    }
+
+    /**
+     * Regression guard: a plan that's technically self-replaceable but the platform actual
+     * currently refuses ([AvailableUpdate.installable] `== false` despite [UpdatePlan.isInstallable]
+     * being `true`) must read the same as [manualOnlyUpdate] here — no enabled "Download" that
+     * [UpdateRepository.startDownload] would then silently no-op on.
+     */
+    @Test
+    fun availablePlanInstallableButPlatformRefusedShowsNoDownloadButton() = runDesktopComposeUiTest {
+        setContent {
+            Column(Modifier.width(360.dp)) {
+                UpdateResultSection(UpdateState.Available(platformRefusedUpdate()), ::noop, ::noop, ::noop, ::noop)
+            }
+        }
+        waitForIdle()
+
+        onAllNodesWithText("ダウンロード").assertCountEquals(0)
+        onNodeWithText("このインストール形態はアプリ内更新に対応していません").assertIsDisplayed()
     }
 
     @Test

@@ -148,7 +148,7 @@ class UpdateRepository(
         val status = checker.check()
 
         val after = mutex.withLock {
-            _state.update { current -> nextStateAfterCheck(current, status, location) }
+            _state.update { current -> nextStateAfterCheck(current, status, location, canInstall = ::canInstall) }
             _state.value
         }
 
@@ -160,7 +160,10 @@ class UpdateRepository(
 
         if (status is UpdateStatus.Available && after is UpdateState.Available) {
             val message = notificationMessages.updateAvailable(status.version)
-            val action = if (canInstall(after.update.plan)) {
+            // Reuses after.update.installable (resolved moments ago by nextStateAfterCheck via the
+            // same canInstall) rather than asking installer.canInstall(after.update.plan) again —
+            // one live query, one fact, shared with whatever the Updates tab/tray display for it.
+            val action = if (after.update.installable) {
                 AppNotificationAction.ShowSettingsTab("updates")
             } else {
                 AppNotificationAction.OpenUrl(status.url)

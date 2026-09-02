@@ -162,7 +162,11 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
   `UpdateInstaller.canInstall(plan)` はこれとは別の、より狭い問いにプラットフォームの `actual` が
   実行時に答えるもの——「何をすべきか」ではなく「この実行環境に今それが許されているか」
   （典型的には Android の「提供元不明のアプリ」同意）——であり、ダウンロードを始めるかどうかを
-  ゲートする。
+  ゲートする。`check()` は更新が見つかるたびにこれを一度解決し、`AvailableUpdate.installable` に
+  畳み込む——Updates タブとトレイはどちらも `plan` 自身の `isInstallable` ではなくこちらを読む。
+  `plan` は `SelfReplace`/`RunInstaller` を指していてもプラットフォームが拒否している場合があり、
+  両サーフェスとも「ダウンロード」を押して実際に何か起きるかについて `startDownload()` 自身の
+  ゲートと食い違ってはならないため。
 - **ダウンロード。** `data/remote/UpdateDownloader` は手動でリダイレクトを追う（共有 HTTP
   クライアントにはリダイレクトプラグイン自体が入っていない）。小さなホスト allowlist
   （`github.com`、`*.githubusercontent.com`。先頭ドット必須——`evilgithubusercontent.com` を

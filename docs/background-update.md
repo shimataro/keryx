@@ -160,7 +160,11 @@ separate, explicit click (Updates tab button, or the tray item once one is offer
   Google Play). `UpdateInstaller.canInstall(plan)` is a separate, narrower question the platform
   `actual` answers at runtime — not just "what should happen" but "is this instance currently
   allowed to" (Android's install-unknown-apps consent, most notably) — and gates whether a download
-  even starts.
+  even starts. `check()` resolves this once per found update and folds it into
+  `AvailableUpdate.installable`, so the Updates tab and the tray read that instead of `plan`'s own
+  `isInstallable` — a plan can call for `SelfReplace`/`RunInstaller` while the platform still
+  refuses it, and both surfaces need to agree with `startDownload()`'s own gate about whether
+  "Download" does anything.
 - **Downloading.** `data/remote/UpdateDownloader` manually follows redirects (the shared HTTP client
   has no redirect plugin at all) against a small host allowlist (`github.com`,
   `*.githubusercontent.com`, leading dot required — `evilgithubusercontent.com` must never match),

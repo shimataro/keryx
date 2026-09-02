@@ -435,6 +435,33 @@ class UpdateRepositoryTest {
         assertContentEqualsFile(payload, finalState.filePath)
     }
 
+    /**
+     * Regression guard: check() must fold installer.canInstall(plan) into
+     * AvailableUpdate.installable, so a plan that's technically self-replaceable/runnable but the
+     * platform actual currently refuses (Android consent, most notably) doesn't leave the Updates
+     * tab/tray showing an enabled "Download" that startDownload() then silently no-ops on.
+     */
+    @Test
+    fun checkFoldsInstallerCanInstallIntoAvailableUpdate() {
+        val repo = UpdateRepository(
+            checker = checkerFor { """{"tag_name":"v2.0.0","html_url":"https://ex.com/2.0.0","prerelease":false,"draft":false,"assets":[{"name":"Keryx-2.0.0-macos-arm64.zip","browser_download_url":"https://release-assets.githubusercontent.com/x.zip","size":1,"digest":"sha256:${"a".repeat(64)}","state":"uploaded"}]}""" },
+            downloader = UpdateDownloader(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }) { expectSuccess = false }),
+            installer = noOpInstaller(canInstall = false),
+            notificationCenter = NotificationCenter(),
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+        )
+
+        runBlocking { repo.check() }
+
+        val available = repo.state.value
+        assertIs<UpdateState.Available>(available)
+        assertIs<UpdatePlan.SelfReplace>(available.update.plan) // the plan itself would self-replace...
+        assertFalse(available.update.installable) // ...but the installer refuses right now
+    }
+
     @Test
     fun sweepPreservesTheCurrentlyReadyVersionsDirectory() {
         val payload = Random(5).nextBytes(1024)

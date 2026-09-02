@@ -54,7 +54,15 @@ internal fun updateVersionInUse(state: UpdateState): String? = when (state) {
  *   [UpdateState.Ready] either — a transient check failure is not a reason to forget an update
  *   that's already sitting on disk, verified and ready to install.
  */
-internal fun nextStateAfterCheck(current: UpdateState, status: UpdateStatus, location: InstallLocation): UpdateState {
+internal fun nextStateAfterCheck(
+    current: UpdateState,
+    status: UpdateStatus,
+    location: InstallLocation,
+    // Resolves AvailableUpdate.installable — see its own KDoc. Defaulted to the plan alone (no
+    // platform check) so the many call sites in UpdateStateMachineTest that don't care about this
+    // distinction don't all need to supply one; UpdateRepository.check() passes its own canInstall.
+    canInstall: (UpdatePlan) -> Boolean = UpdatePlan::isInstallable,
+): UpdateState {
     if (current is UpdateState.Downloading || current is UpdateState.Verifying || current is UpdateState.Installing) {
         return current
     }
@@ -67,7 +75,9 @@ internal fun nextStateAfterCheck(current: UpdateState, status: UpdateStatus, loc
                 current
             } else {
                 val plan = updatePlan(location, status.asset)
-                UpdateState.Available(AvailableUpdate(status.version, status.url, status.releaseNotes, status.asset, plan))
+                UpdateState.Available(
+                    AvailableUpdate(status.version, status.url, status.releaseNotes, status.asset, plan, canInstall(plan)),
+                )
             }
         }
     }
