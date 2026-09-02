@@ -16,7 +16,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -69,25 +71,25 @@ import works.merc.keryx.app.resources.settings_update_verifying
  * rewritten against the full [UpdateState] machine — equivalent to one press of "check now", so it
  * never perturbs the automatic check schedule.
  *
+ * [vm.updateState] is deliberately *not* collected here: a download in progress emits an
+ * [UpdateState.Downloading] tick per percent, and collecting it in this outer function would
+ * invalidate this whole composable — including [SegmentedControl] and the "check now" button below
+ * the divider, neither of which cares about download progress — on every one of those ticks. Each
+ * of [UpdateStatusAndAction] and [CheckNowButton] below collects the flow itself instead, confining
+ * that recomposition to the (small) scope that actually needs it.
+ *
  * @param vm The view model providing update settings, state, and actions.
  */
 @Composable
 internal fun UpdatesTabContent(vm: SettingsViewModel) {
     val settings by vm.localSettings.collectAsState()
-    val state by vm.updateState.collectAsState()
 
     LaunchedEffect(Unit) {
-        if (state is UpdateState.Idle) vm.checkForUpdate()
+        if (vm.updateState.value is UpdateState.Idle) vm.checkForUpdate()
     }
 
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
-        UpdateResultSection(
-            state = state,
-            onCheckForUpdate = { vm.checkForUpdate() },
-            onStartDownload = { vm.startDownload() },
-            onCancelDownload = { vm.cancelDownload() },
-            onInstall = { vm.installUpdate() },
-        )
+        UpdateStatusAndAction(vm)
 
         Spacer(Modifier.height(16.dp))
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
@@ -111,17 +113,42 @@ internal fun UpdatesTabContent(vm: SettingsViewModel) {
         )
 
         Spacer(Modifier.height(12.dp))
-        val checking = state is UpdateState.Checking
-        FlatTonalButton(onClick = { vm.checkForUpdate() }, enabled = !checking) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (checking) {
-                    SmallSpinner()
-                } else {
-                    KeryxIcon(KeryxIcons.Update, contentDescription = null, modifier = Modifier.size(18.dp))
-                }
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(Res.string.settings_update_check_now))
+        CheckNowButton(vm)
+    }
+}
+
+/** The status/action block that leads the tab (see [UpdatesTabContent]'s own KDoc for why this is
+ * its own composable rather than inlined). */
+@Composable
+private fun UpdateStatusAndAction(vm: SettingsViewModel) {
+    val state by vm.updateState.collectAsState()
+    UpdateResultSection(
+        state = state,
+        onCheckForUpdate = { vm.checkForUpdate() },
+        onStartDownload = { vm.startDownload() },
+        onCancelDownload = { vm.cancelDownload() },
+        onInstall = { vm.installUpdate() },
+    )
+}
+
+/** The manual "check for update" button (see [UpdatesTabContent]'s own KDoc for why this is its
+ * own composable). [checking] is a [derivedStateOf] rather than a plain `is` check against the
+ * collected state directly, so this button's own recomposition scope only re-runs when that
+ * boolean actually flips — not on every [UpdateState.Downloading]/[UpdateState.Verifying] tick,
+ * which this button has no visual dependency on in the first place. */
+@Composable
+private fun CheckNowButton(vm: SettingsViewModel) {
+    val state = vm.updateState.collectAsState()
+    val checking by remember { derivedStateOf { state.value is UpdateState.Checking } }
+    FlatTonalButton(onClick = { vm.checkForUpdate() }, enabled = !checking) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (checking) {
+                SmallSpinner()
+            } else {
+                KeryxIcon(KeryxIcons.Update, contentDescription = null, modifier = Modifier.size(18.dp))
             }
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(Res.string.settings_update_check_now))
         }
     }
 }
@@ -201,8 +228,9 @@ internal fun UpdateResultSection(
     update.releaseNotes?.let { notes ->
         Spacer(Modifier.height(12.dp))
         SettingsCard(modifier = Modifier.testTag(UPDATE_RELEASE_NOTES_CARD_TEST_TAG)) {
+            val text = remember(notes) { plainTextReleaseNotes(notes) }
             Text(
-                plainTextReleaseNotes(notes),
+                text,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 12,
