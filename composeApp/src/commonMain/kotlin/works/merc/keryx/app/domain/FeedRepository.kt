@@ -299,14 +299,16 @@ class FeedRepository(
         fetched: FetchedFeed,
         existing: Feeds?,
     ): Boolean {
-        val current = feeds.getByUrl(effectiveUrl).executeAsOneOrNull()
-        val sortOrder = when {
-            current == null -> insertionSortOrderForNewFeed(feedId, folderId, afterFeedId, beforeFeedId, now)
-            current.deleted_at == null -> current.sort_order
-            else -> feeds.nextSortOrderInGroup(current.folder_id).executeAsOne()
-        }
+        return db.transactionWithResult {
+            // Re-read under the lock: the snapshot taken before the fetch/favicon calls can be
+            // stale, so a concurrent subscribe of the same url may already have created the row.
+            val current = feeds.getByUrl(effectiveUrl).executeAsOneOrNull()
+            val sortOrder = when {
+                current == null -> insertionSortOrderForNewFeed(feedId, folderId, afterFeedId, beforeFeedId, now)
+                current.deleted_at == null -> current.sort_order
+                else -> feeds.nextSortOrderInGroup(current.folder_id).executeAsOne()
+            }
 
-        db.transaction {
             feeds.upsert(
                 id = feedId,
                 url = effectiveUrl,
@@ -331,8 +333,9 @@ class FeedRepository(
             // Re-subscribing (feed was soft-deleted) is a subscription-state change: stamp its
             // last-wins timestamp so it propagates over another device's refresh on the next sync.
             if (current?.deleted_at != null) feeds.stampResubscribed(now, feedId)
+
+            current == null
         }
-        return current == null
     }
 
     /**
