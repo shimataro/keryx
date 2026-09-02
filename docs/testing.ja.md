@@ -229,7 +229,7 @@ heavyweight ポップアップの強制。置き換え対象の AWT ウィジェ
 `canInstallAndroidApkUpdate` のプラン種別／OS 同意状態によるゲーティング——`AndroidUpdateInstaller`
 の判断のうちここだけ純粋関数として切り出してあるのは、`androidMain` 自体には JVM でテストできる
 ユニットテストのソースセットが存在しないため（下記「既知の未カバー範囲」参照）；
-`UpdateDownloaderTest.kt`/`UpdateDownloadHostTest.kt`：ホストの allowlist（先頭ドット必須の
+`UpdateDownloaderTest.kt`：ホストの allowlist（先頭ドット必須の
 サフィックス一致、生 IP や紛らわしいホスト名を拒否）、`MAX_REDIRECTS` で頭打ちになる手動リダイレクト
 追従、digest やサイズの不一致時に `.part` ファイルも本体ファイルも残らないこと、進捗通知が単調に
 増加して `bytesTotal` に到達すること；`UpdateStateMachineTest.kt`：`Ready` が `UpToDate`／同一
@@ -245,7 +245,9 @@ heavyweight ポップアップの強制。置き換え対象の AWT ウィジェ
 macOS/Windows/Linux の自己置換と Windows MSI 経路それぞれで実際に起動されるコマンドライン一式を、
 実際には何も起動しないフェイクの `ProcessLauncher` 経由で検証すること、バージョン不一致や実行権限の
 無い展開済みバンドルはランチャーが呼ばれる前に失敗すること；`ZipExtractorTest.kt`：zip slip の拒否、
-エントリ数上限と `maxBytes` の上限、指定したエントリだけ実行ビットが復元されること；
+`maxBytes` の上限、指定したエントリだけ実行ビットが復元されること（エントリ数上限自体——
+`ZipExtractor.kt` の `MAX_ZIP_ENTRIES`、10 万——は未検証: 実際に 10 万件超のエントリを持つ ZIP を
+ユニットテストで生成・展開することになるため、実用的なフィクスチャが作れない）；
 `FileSystemExtrasTest.kt`/`InstallLocationDesktopTest.kt` を `setExecutable`/`isDirectoryWritable`/
 `move` と OS ごとの `InstallLocation` 判定向けに拡張したもの）などを網羅する。
 `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` の失敗は DB スキーマ・
