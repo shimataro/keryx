@@ -110,18 +110,28 @@ class DesktopUpdateInstaller internal constructor(
         val workDir = File(filePath).parentFile
             ?: return InstallLaunchResult.Failed("Downloaded file has no parent directory")
 
-        val entryDirName = when (assetKind) {
-            UpdateAssetKind.MAC_APP_ZIP -> "$APP_NAME.app"
-            UpdateAssetKind.WINDOWS_ZIP, UpdateAssetKind.LINUX_ZIP -> APP_NAME
+        // entryDirName and executableEntries are layout facts about assetKind's extracted ZIP —
+        // computed together so there's one place, not two, that has to agree on what each kind's
+        // archive actually looks like inside.
+        val entryDirName: String
+        val executableEntries: Set<String>
+        when (assetKind) {
+            UpdateAssetKind.MAC_APP_ZIP -> {
+                entryDirName = "$APP_NAME.app"
+                executableEntries = setOf(
+                    "$entryDirName/Contents/MacOS/$APP_NAME",
+                    "$entryDirName/Contents/runtime/Contents/Home/lib/jspawnhelper",
+                )
+            }
+            UpdateAssetKind.LINUX_ZIP -> {
+                entryDirName = APP_NAME
+                executableEntries = setOf("$entryDirName/bin/$APP_NAME")
+            }
+            UpdateAssetKind.WINDOWS_ZIP -> {
+                entryDirName = APP_NAME
+                executableEntries = emptySet()
+            }
             else -> return InstallLaunchResult.Failed("Unsupported self-replace asset kind: $assetKind")
-        }
-        val executableEntries = when (assetKind) {
-            UpdateAssetKind.MAC_APP_ZIP -> setOf(
-                "$entryDirName/Contents/MacOS/$APP_NAME",
-                "$entryDirName/Contents/runtime/Contents/Home/lib/jspawnhelper",
-            )
-            UpdateAssetKind.LINUX_ZIP -> setOf("$entryDirName/bin/$APP_NAME")
-            else -> emptySet()
         }
 
         val zipSize = File(filePath).length()
@@ -192,34 +202,35 @@ class DesktopUpdateInstaller internal constructor(
         val logFile = File(workDir, "apply.log")
         val pid = ProcessHandle.current().pid().toString()
 
+        // MAC_APP_ZIP and LINUX_ZIP differ only in which script text POSIX gets — same interpreter,
+        // same argument shape (pid/app/new/old/log), same "mark it executable" requirement. Only
+        // WINDOWS_ZIP's cmd invocation genuinely differs (no executable bit, and its script takes no
+        // log argument — see UpdateScriptWriter.windowsSelfReplace's own KDoc). scriptFile is bound
+        // once per branch and reused for both the file written to and the path embedded in command,
+        // rather than being reconstructed a second time to do the latter.
         return when (assetKind) {
-            UpdateAssetKind.MAC_APP_ZIP -> launchScript(
-                scriptFile = File(workDir, "apply.sh"),
-                scriptText = UpdateScriptWriter.macSelfReplace(),
-                command = listOf(
-                    "/bin/sh", File(workDir, "apply.sh").path, pid,
-                    appRootFile.path, newDir.path, oldDir.path, logFile.path,
-                ),
-                executableScript = true,
-            )
-            UpdateAssetKind.LINUX_ZIP -> launchScript(
-                scriptFile = File(workDir, "apply.sh"),
-                scriptText = UpdateScriptWriter.linuxSelfReplace(),
-                command = listOf(
-                    "/bin/sh", File(workDir, "apply.sh").path, pid,
-                    appRootFile.path, newDir.path, oldDir.path, logFile.path,
-                ),
-                executableScript = true,
-            )
-            UpdateAssetKind.WINDOWS_ZIP -> launchScript(
-                scriptFile = File(workDir, "apply.cmd"),
-                scriptText = UpdateScriptWriter.windowsSelfReplace(),
-                command = listOf(
-                    "cmd", "/c", File(workDir, "apply.cmd").path, pid,
-                    appRootFile.path, newDir.path, oldDir.path,
-                ),
-                executableScript = false,
-            )
+            UpdateAssetKind.MAC_APP_ZIP, UpdateAssetKind.LINUX_ZIP -> {
+                val scriptFile = File(workDir, "apply.sh")
+                launchScript(
+                    scriptFile = scriptFile,
+                    scriptText = if (assetKind == UpdateAssetKind.MAC_APP_ZIP) {
+                        UpdateScriptWriter.macSelfReplace()
+                    } else {
+                        UpdateScriptWriter.linuxSelfReplace()
+                    },
+                    command = listOf("/bin/sh", scriptFile.path, pid, appRootFile.path, newDir.path, oldDir.path, logFile.path),
+                    executableScript = true,
+                )
+            }
+            UpdateAssetKind.WINDOWS_ZIP -> {
+                val scriptFile = File(workDir, "apply.cmd")
+                launchScript(
+                    scriptFile = scriptFile,
+                    scriptText = UpdateScriptWriter.windowsSelfReplace(),
+                    command = listOf("cmd", "/c", scriptFile.path, pid, appRootFile.path, newDir.path, oldDir.path),
+                    executableScript = false,
+                )
+            }
         }
     }
 
