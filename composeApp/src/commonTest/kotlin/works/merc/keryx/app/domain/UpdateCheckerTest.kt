@@ -16,6 +16,8 @@ import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.core.compareReleaseVersions
 import works.merc.keryx.app.core.isBelowStable
 import works.merc.keryx.app.core.isNewer
+import works.merc.keryx.app.platform.InstallKind
+import works.merc.keryx.app.platform.InstallLocation
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -24,6 +26,12 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class UpdateCheckerTest {
+
+    private val fakeMacLocation =
+        InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot = "/Applications/Keryx.app", launcherPath = null, parentWritable = true, translocated = false)
+    private val fakeUnsupportedLocation =
+        InstallLocation(InstallKind.ANDROID_STORE, appRoot = null, launcherPath = null, parentWritable = false, translocated = false)
+
 
     /**
      * Builds a checker whose MockEngine routes by request path: `releases/latest` (the stable-build
@@ -37,6 +45,10 @@ class UpdateCheckerTest {
         listStatus: HttpStatusCode = HttpStatusCode.OK,
         latestBody: String? = null,
         latestStatus: HttpStatusCode = HttpStatusCode.OK,
+        // A fixed, writable macOS install by default — asset-selection tests below rely on this
+        // to actually get a non-null UpdateStatus.Available.asset; every pre-existing test in this
+        // file only reads .version/.url and is unaffected by which InstallLocation is plugged in.
+        location: InstallLocation = fakeMacLocation,
     ): UpdateChecker {
         val client = HttpClient(MockEngine { request ->
             if (request.url.encodedPath.endsWith("/releases/latest")) {
@@ -47,7 +59,7 @@ class UpdateCheckerTest {
         }) {
             expectSuccess = false
         }
-        return UpdateChecker(client, currentVersion, repoSlug = "owner/repo")
+        return UpdateChecker(client, currentVersion, repoSlug = "owner/repo", location = location)
     }
 
     // --- Stable build (1.0.0+) → releases/latest ---
@@ -295,6 +307,96 @@ class UpdateCheckerTest {
         job.cancel()
         job.join()
         assertNull(status)
+    }
+
+    // --- Release notes / asset selection (assets[] and body parsing) ---
+
+    @Test
+    fun releaseNotesIsParsedFromBody() = runTest {
+        val status = checker(
+            latestBody = """{"tag_name":"v1.2.3","html_url":"https://ex.com/1.2.3","body":"- swipe navigation\n- lower search minimum"}""",
+        ).check()
+        assertIs<UpdateStatus.Available>(status)
+        assertEquals("- swipe navigation\n- lower search minimum", status.releaseNotes)
+    }
+
+    @Test
+    fun releaseNotesIsNullWhenBodyIsMissing() = runTest {
+        val status = checker(latestBody = """{"tag_name":"v1.2.3","html_url":"https://ex.com/1.2.3"}""").check()
+        assertIs<UpdateStatus.Available>(status)
+        assertNull(status.releaseNotes)
+    }
+
+    @Test
+    fun assetIsSelectedForTheCurrentInstallLocation() = runTest {
+        val sha256 = "a".repeat(64)
+        val status = checker(
+            latestBody = """
+                {"tag_name":"v1.2.3","html_url":"https://ex.com/1.2.3","assets":[
+                    {"name":"Keryx-1.2.3-macos-arm64.zip","browser_download_url":"https://dl/mac.zip",
+                     "size":12345,"digest":"sha256:$sha256","state":"uploaded"},
+                    {"name":"Keryx-1.2.3-windows-x86_64.msi","browser_download_url":"https://dl/win.msi",
+                     "size":6789,"digest":"sha256:$sha256","state":"uploaded"}
+                ]}
+            """.trimIndent(),
+            location = fakeMacLocation,
+        ).check()
+        assertIs<UpdateStatus.Available>(status)
+        val asset = status.asset
+        assertEquals("Keryx-1.2.3-macos-arm64.zip", asset?.name)
+        assertEquals("https://dl/mac.zip", asset?.downloadUrl)
+        assertEquals(12345L, asset?.sizeBytes)
+        assertEquals(sha256, asset?.sha256)
+        assertEquals(UpdateAssetKind.MAC_APP_ZIP, asset?.kind)
+    }
+
+    @Test
+    fun assetIsNullWhenInstallLocationHasNoUpdatePath() = runTest {
+        val sha256 = "a".repeat(64)
+        val status = checker(
+            latestBody = """
+                {"tag_name":"v1.2.3","html_url":"https://ex.com/1.2.3","assets":[
+                    {"name":"Keryx-1.2.3-macos-arm64.zip","browser_download_url":"https://dl/mac.zip",
+                     "size":12345,"digest":"sha256:$sha256","state":"uploaded"}
+                ]}
+            """.trimIndent(),
+            location = fakeUnsupportedLocation,
+        ).check()
+        assertIs<UpdateStatus.Available>(status)
+        assertNull(status.asset)
+    }
+
+    @Test
+    fun assetStillBeingProcessedByGitHubIsNotSelected() = runTest {
+        val sha256 = "a".repeat(64)
+        val status = checker(
+            latestBody = """
+                {"tag_name":"v1.2.3","html_url":"https://ex.com/1.2.3","assets":[
+                    {"name":"Keryx-1.2.3-macos-arm64.zip","browser_download_url":"https://dl/mac.zip",
+                     "size":12345,"digest":"sha256:$sha256","state":"open"}
+                ]}
+            """.trimIndent(),
+            location = fakeMacLocation,
+        ).check()
+        assertIs<UpdateStatus.Available>(status)
+        assertNull(status.asset)
+    }
+
+    @Test
+    fun malformedAssetEntryIsSkippedWithoutFailingTheWholeCheck() = runTest {
+        val sha256 = "a".repeat(64)
+        val status = checker(
+            latestBody = """
+                {"tag_name":"v1.2.3","html_url":"https://ex.com/1.2.3","assets":[
+                    {"browser_download_url":"https://dl/no-name.zip","size":1,"digest":"sha256:$sha256"},
+                    {"name":"Keryx-1.2.3-macos-arm64.zip","browser_download_url":"https://dl/mac.zip",
+                     "size":12345,"digest":"sha256:$sha256","state":"uploaded"}
+                ]}
+            """.trimIndent(),
+            location = fakeMacLocation,
+        ).check()
+        assertIs<UpdateStatus.Available>(status)
+        assertEquals("Keryx-1.2.3-macos-arm64.zip", status.asset?.name)
     }
 }
 

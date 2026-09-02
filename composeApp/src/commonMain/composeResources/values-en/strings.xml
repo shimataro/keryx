@@ -302,4 +302,5 @@
     <string name="error_feed_not_found">Feed not found</string>
     <string name="error_invalid_url">Invalid feed URL</string>
     <string name="error_generic">An error occurred</string>
+    <string name="error_update">Update failed</string>
 </resources>

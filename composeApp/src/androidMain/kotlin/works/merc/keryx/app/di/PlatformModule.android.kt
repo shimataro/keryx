@@ -24,8 +24,10 @@ import works.merc.keryx.app.domain.OAuthCallbackParams
 import works.merc.keryx.app.domain.OAuthConnectFlow
 import works.merc.keryx.app.domain.OsNotificationSink
 import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.domain.UpdateInstaller
 import works.merc.keryx.app.platform.AndroidAppContext
 import works.merc.keryx.app.platform.AndroidNotificationSink
+import works.merc.keryx.app.platform.update.AndroidUpdateInstaller
 
 /**
  * One secure-store instance per provider (never shared — [KeystoreTokenStorage] holds a
@@ -50,6 +52,8 @@ private fun providerTokenStorage(type: CloudStorageType): TokenStorage =
  */
 actual val platformModule: Module = module {
     single<OsNotificationSink> { AndroidNotificationSink(AndroidAppContext.application) }
+
+    single<UpdateInstaller> { AndroidUpdateInstaller }
 
     single {
         HttpClient(OkHttp) {

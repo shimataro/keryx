@@ -11,19 +11,41 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.MILLIS_PER_HOUR
 import works.merc.keryx.app.core.compareReleaseVersions
 import works.merc.keryx.app.core.isBelowStable
 import works.merc.keryx.app.core.isNewer
+import works.merc.keryx.app.platform.InstallLocation
+import works.merc.keryx.app.platform.detectInstallLocation
 
 private const val TAG = "UpdateChecker"
 
 sealed interface UpdateStatus {
     data object UpToDate : UpdateStatus
-    data class Available(val version: String, val url: String) : UpdateStatus
+
+    /**
+     * @param version The release version (`tag_name` with its leading `v`/`V` stripped).
+     * @param url The release page (`html_url`) — the only actionable destination for a caller
+     *   that hasn't been updated to know about [asset]/[UpdatePlan] yet.
+     * @param releaseNotes The release's Markdown body (`body`), or `null` when GitHub didn't
+     *   return one. Defaulted so every pre-existing call site (all of which predate this field)
+     *   keeps compiling unchanged.
+     * @param asset The release asset [selectUpdateAsset] picked for the current install form, or
+     *   `null` when none applies (no matching asset in this release, or an unrecognized/unsupported
+     *   install form). Defaulted for the same reason as [releaseNotes].
+     */
+    data class Available(
+        val version: String,
+        val url: String,
+        val releaseNotes: String? = null,
+        val asset: UpdateAsset? = null,
+    ) : UpdateStatus
+
     data object Failed : UpdateStatus
 }
 
@@ -49,6 +71,9 @@ class UpdateChecker(
     private val currentVersion: String,
     private val repoSlug: String,
     private val json: Json = Json { ignoreUnknownKeys = true },
+    // Defaulted (rather than injected via Koin) so every pre-existing call site keeps compiling
+    // unchanged — see the KDoc on [UpdateStatus.Available]'s new fields for the same reasoning.
+    private val location: InstallLocation = detectInstallLocation(),
 ) {
     suspend fun check(): UpdateStatus {
         return try {
@@ -75,7 +100,9 @@ class UpdateChecker(
                 ?: return UpdateStatus.Failed.also { Log.warn(TAG, "Update check failed: missing html_url") }
 
             if (isNewer(remoteVersion, currentVersion)) {
-                UpdateStatus.Available(remoteVersion, htmlUrl)
+                val releaseNotes = candidate["body"]?.jsonPrimitive?.contentOrNull
+                val asset = selectUpdateAsset(releaseAssetsOf(candidate), location)
+                UpdateStatus.Available(remoteVersion, htmlUrl, releaseNotes, asset)
             } else {
                 UpdateStatus.UpToDate
             }
@@ -122,6 +149,21 @@ class UpdateChecker(
         val obj = json.parseToJsonElement(response.bodyAsText()) as? JsonObject
             ?: return null.also { Log.warn(TAG, "Update check failed: unexpected response body") }
         return listOf(obj)
+    }
+
+    /** Parses the release's `assets[]` array into [ReleaseAsset]s, skipping any entry missing a
+     * required field rather than failing the whole check over one malformed asset. */
+    private fun releaseAssetsOf(release: JsonObject): List<ReleaseAsset> {
+        val array = release["assets"] as? JsonArray ?: return emptyList()
+        return array.mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            val url = obj["browser_download_url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            val size = obj["size"]?.jsonPrimitive?.longOrNull ?: return@mapNotNull null
+            val digest = obj["digest"]?.jsonPrimitive?.contentOrNull
+            val state = obj["state"]?.jsonPrimitive?.contentOrNull
+            ReleaseAsset(name, url, size, digest, state)
+        }
     }
 
     private fun HttpRequestBuilder.applyGitHubHeaders() {

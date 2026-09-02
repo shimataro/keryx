@@ -298,4 +298,5 @@
     <string name="error_feed_not_found">フィードが見つかりませんでした</string>
     <string name="error_invalid_url">フィード URL が正しくありません</string>
     <string name="error_generic">エラーが発生しました</string>
+    <string name="error_update">アップデートに失敗しました</string>
 </resources>
