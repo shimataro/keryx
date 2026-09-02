@@ -204,6 +204,75 @@ class UpdateRepositoryTest {
         assertEquals(repo.state.value, seenByFirst.last())
     }
 
+    /**
+     * Regression guard: [UpdateRepository.check] used to capture `state` once, before its network
+     * call, then unconditionally write that stale snapshot back once the call returned — so a
+     * download that ran to completion *while* the check was in flight got its finished
+     * [UpdateState.Ready] clobbered by a resurrected, no-longer-true [UpdateState.Downloading]. The
+     * fix re-reads `state` at the moment the result is applied, not when the check started.
+     */
+    @Test
+    fun aCheckInFlightWhileADownloadCompletesNeverStompsTheResultingReadyState() {
+        val payload = Random(12).nextBytes(64 * 1024)
+        val sha256 = sha256Hex(payload)
+        val downloadGate = CompletableDeferred<Unit>()
+        val downloaderClient = HttpClient(MockEngine { downloadGate.await(); respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }
+
+        var checkRequestCount = 0
+        val checkStarted = CompletableDeferred<Unit>()
+        val checkGate = CompletableDeferred<Unit>()
+        val checkerClient = HttpClient(
+            MockEngine {
+                checkRequestCount++
+                if (checkRequestCount == 2) {
+                    checkStarted.complete(Unit)
+                    checkGate.await()
+                }
+                respond(
+                    releaseJson("2.0.0", "Keryx-2.0.0-macos-arm64.zip", "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256),
+                    HttpStatusCode.OK,
+                )
+            },
+        ) { expectSuccess = false }
+
+        val repo = UpdateRepository(
+            checker = UpdateChecker(checkerClient, currentVersion = "1.0.0", repoSlug = "owner/repo", location = WRITABLE_MAC_LOCATION),
+            downloader = UpdateDownloader(downloaderClient),
+            installer = noOpInstaller(),
+            notificationCenter = NotificationCenter(),
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+        )
+
+        // First check (request #1, ungated) reaches Available; starting the download then parks
+        // state at Downloading(0, total) — synchronously, before the gated HTTP call — until
+        // downloadGate is released below.
+        runBlocking { repo.check() }
+        repo.startDownload()
+        awaitState(repo) { it is UpdateState.Downloading }
+
+        // A second check begins while state is still that Downloading snapshot: it captures it as
+        // "before", then blocks on request #2's gate before it can apply anything.
+        val checkJob = trackedScope().launch { repo.check() }
+        runBlocking { withTimeout(5_000) { checkStarted.await() } }
+
+        // The download now runs to completion *while the second check is still in flight* — this
+        // is the race: state moves on to Ready behind the in-flight check's back.
+        downloadGate.complete(Unit)
+        awaitState(repo) { it is UpdateState.Ready }
+
+        // Only now does the second check's network call return and its result get applied.
+        checkGate.complete(Unit)
+        runBlocking { withTimeout(5_000) { checkJob.join() } }
+
+        val finalState = repo.state.value
+        assertIs<UpdateState.Ready>(finalState, "a check in flight during a download must not resurrect a stale pre-check state")
+        assertEquals("2.0.0", finalState.update.version)
+        assertContentEqualsFile(payload, finalState.filePath)
+    }
+
     @Test
     fun sweepPreservesTheCurrentlyReadyVersionsDirectory() {
         val payload = Random(5).nextBytes(1024)

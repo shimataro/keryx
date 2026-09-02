@@ -104,28 +104,43 @@ class UpdateRepository(
      * this repository stops referencing (a completed install, or a newer version superseding a
      * [UpdateState.Ready] one) doesn't accumulate on disk forever.
      *
+     * [mutex] is only held for the two brief, non-suspending-on-network steps — "start" (recording
+     * [state] as it was and, where appropriate, marking it [UpdateState.Checking]) and "apply" (folding
+     * [checker]'s result back in) — never across [checker.check] itself, which can take up to
+     * [works.merc.keryx.app.core.REQUEST_TIMEOUT_MS]. Holding it for the whole call once blocked [startDownload]/
+     * [install] from even beginning their own decision for as long as a slow check was in flight.
+     * The "apply" step reads [state] fresh via [MutableStateFlow.update] rather than reusing the
+     * "start" step's snapshot, so a download that ran to completion *while* this check's network
+     * call was in flight is folded in correctly instead of being clobbered by a stale pre-check
+     * value — seeing a state [nextStateAfterCheck] never interrupts (Downloading/Verifying/
+     * Installing) turns "apply" into a no-op, exactly as if this check had run instantaneously.
+     *
      * Suspends until the check completes and returns its [UpdateStatus] directly — unlike
      * [startDownload]/[cancelDownload]/[install], which self-launch and return immediately — because
      * [checkForUpdateAndNotify] needs the result to decide whether to update the automatic-check
      * timestamp the same way it always has.
      */
-    suspend fun check(): UpdateStatus = mutex.withLock {
-        val before = _state.value
-        _state.update { current ->
-            when (current) {
-                UpdateState.Idle, UpdateState.UpToDate,
-                is UpdateState.Available, is UpdateState.Failed,
-                -> UpdateState.Checking
-                // Downloading/Verifying/Ready/Installing/Checking: a check must never visibly
-                // interrupt these, even momentarily.
-                else -> current
+    suspend fun check(): UpdateStatus {
+        val before = mutex.withLock {
+            _state.value.also { current ->
+                _state.value = when (current) {
+                    UpdateState.Idle, UpdateState.UpToDate,
+                    is UpdateState.Available, is UpdateState.Failed,
+                    -> UpdateState.Checking
+                    // Downloading/Verifying/Ready/Installing/Checking: a check must never visibly
+                    // interrupt these, even momentarily.
+                    else -> current
+                }
             }
         }
         sweepStaleUpdateDownloads(before)
 
         val status = checker.check()
-        val after = nextStateAfterCheck(before, status, location)
-        _state.value = after
+
+        val after = mutex.withLock {
+            _state.update { current -> nextStateAfterCheck(current, status, location) }
+            _state.value
+        }
 
         // A Ready version this check just superseded (replaced by a newer Available) would
         // otherwise sit on disk, unprotected, until whenever the *next* check happens to run.
@@ -142,7 +157,7 @@ class UpdateRepository(
             }
             postNotification(message, action)
         }
-        status
+        return status
     }
 
     /**
