@@ -1,6 +1,7 @@
 package works.merc.keryx.app
 
 import java.io.File
+import java.net.URI
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -16,10 +17,14 @@ class UriSchemeRegistrationTest {
 
     @Test
     fun normalizesAFileUriArgToAPlainPath() {
-        assertEquals(
-            "/home/user/subscriptions.opml",
-            normalizeFileUriArg("file:///home/user/subscriptions.opml"),
-        )
+        val expected = File(URI("file:///home/user/subscriptions.opml")).path
+        assertEquals(expected, normalizeFileUriArg("file:///home/user/subscriptions.opml"))
+    }
+
+    @Test
+    fun normalizesAFileUriArgWithLocalhostAuthorityToAPlainPath() {
+        val expected = File(URI("file:///home/user/subscriptions.opml")).path
+        assertEquals(expected, normalizeFileUriArg("file://localhost/home/user/subscriptions.opml"))
     }
 
     @Test

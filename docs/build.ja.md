@@ -163,6 +163,12 @@ sudo snap install snapcraft --classic   # 未インストールの場合
 snapcraft pack --destructive-mode
 ```
 
+`--destructive-mode`はサンドボックスなしでホスト上に直接ビルドするため、ホスト自体が
+`snap/snapcraft.yaml`の`base: core24`（Ubuntu 24.04）に一致している必要があり、
+root権限も必要になる——さらにホスト環境を変更してしまう可能性がある。CI（`release.yml`）は
+既に一致する`ubuntu-latest`ランナー上でこれを実行している。別のホストでローカルビルドする
+場合は、代わりに分離されたLXDコンテナ内でビルドする`snapcraft pack --use-lxd`を使うこと。
+
 `confinement: strict`（UbuntuのSnap Store配布時の既定）は、`snap/snapcraft.yaml`の
 `apps.keryx.plugs`で宣言したプラグのみをアプリに与える —
 `network`、`password-manager-service`（Secret Service、`java-keyring`のトークン保存用 —

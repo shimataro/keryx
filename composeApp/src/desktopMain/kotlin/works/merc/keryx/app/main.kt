@@ -111,10 +111,23 @@ internal val activationRequests = MutableSharedFlow<Unit>(replay = 1)
  * desktop entry's `Exec=keryx %u` field code covers both the `keryx://` callback and an `.opml`
  * file with a single field code, but some desktop environments hand a local file to `%u` as a
  * `file://` URI rather than a bare path — [classifyLaunchArg] itself stays a pure, JVM-independent
- * string check (it lives in commonMain), so the URI decoding happens here instead.
+ * string check (it lives in commonMain), so the URI decoding happens here instead. A `null` or
+ * `localhost` authority (e.g. `file://localhost/...`, RFC 8089's equivalent of `file:///...`) is
+ * normalized to empty before constructing the `File`, since `File(URI)` otherwise rejects any
+ * non-empty authority outright.
  */
-internal fun normalizeFileUriArg(arg: String): String =
-    if (arg.startsWith("file://")) runCatching { File(URI(arg)).path }.getOrDefault(arg) else arg
+internal fun normalizeFileUriArg(arg: String): String {
+    if (!arg.startsWith("file://")) return arg
+    return runCatching {
+        val uri = URI(arg)
+        val localUri = if (uri.authority == null || uri.authority.equals("localhost", ignoreCase = true)) {
+            URI(uri.scheme, null, uri.path, uri.query, uri.fragment)
+        } else {
+            uri
+        }
+        File(localUri).path
+    }.getOrDefault(arg)
+}
 
 /**
  * Starts the Keryx desktop application and coordinates its initialization, single-instance behavior,

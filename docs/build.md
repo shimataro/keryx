@@ -163,6 +163,12 @@ sudo snap install snapcraft --classic   # if not already installed
 snapcraft pack --destructive-mode
 ```
 
+`--destructive-mode` builds directly on the host with no sandboxing, so the host itself
+must match `snap/snapcraft.yaml`'s `base: core24` (Ubuntu 24.04) and the command needs
+root access — and it can modify the host environment. CI (`release.yml`) already runs it
+on a matching `ubuntu-latest` runner; for a local build on a different host, use
+`snapcraft pack --use-lxd` instead, which builds inside an isolated LXD container.
+
 `confinement: strict` (Ubuntu's default for Store distribution) means the app only gets the
 plugs declared in `snap/snapcraft.yaml`'s `apps.keryx.plugs` — `network`,
 `password-manager-service` (Secret Service, for `java-keyring`'s token storage — **not**
