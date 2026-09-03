@@ -158,6 +158,8 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
   アセット（無ければその不在）だけから、ネットワークにもファイルシステムにも一切触れず純粋に決める:
   `SelfReplace`（その場でファイルを置き換えて再起動）、`RunInstaller`（OS 自身のインストーラーへ
   引き渡す）、`OpenReleasePage`（この形態はその場で更新できない——Linux の deb/rpm インストール、
+  Linux の Snap インストール（`InstallKind.LINUX_SNAP`。snapd が設定する環境変数 `SNAP` で検出する
+  ——`/snap/keryx/<revision>/` マウントは読み取り専用のため、配布経路によらず自己置換は不可能）、
   macOS App Translocation、書き込めないインストール先、このリリースに合致するアセットが無い、
   など）、`NotOffered`（開発実行、または Google Play 経由でインストールされた Android ビルド）。
   `UpdateInstaller.canInstall(plan)` はこれとは別の、より狭い問いにプラットフォームの `actual` が
@@ -225,7 +227,12 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
     何も動いていない状態にはせず、元の動作していたインストールを再起動する。Linux の deb/rpm
     インストールは自己置換の対象に一切ならない（上記の `updatePlan` が既に `OpenReleasePage` へ
     振り分けている）——GUI から `pkexec`/`sudo` を呼び、失敗時の回復手段も無いという構成はリスクに
-    見合わないと判断した。
+    見合わないと判断した。Linux の Snap インストールも同じ扱いになるが、理由はより単純で、
+    `/snap/keryx/…` マウントが読み取り専用の squashfs イメージだからである——アプリ内アップデートが
+    書き込みたくても書き込む先が無い。これはまた、Snap インストールが現時点では snapd 自身の
+    バックグラウンド自動リフレッシュの恩恵を受けられないことも意味する（今のところ Snap Store へは
+    公開せず、GitHub Release への添付のみで配布しているため）——その隙間でも新バージョンの存在を
+    ユーザーに伝えるのが `OpenReleasePage` の役目である。
 
     展開がシームになっているのは、**署名済みの** macOS バンドルはそもそもインプロセスで展開できない
     から: `CodeResources` は同梱 JDK の legal ディレクトリにある 43 個のシンボリックリンクを

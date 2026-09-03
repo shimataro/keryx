@@ -157,9 +157,11 @@ separate, explicit click (Updates tab button, or the tray item once one is offer
   its absence) — touching neither the network nor the filesystem itself: `SelfReplace` (replace
   files in place, then relaunch), `RunInstaller` (hand
   off to the OS's own installer), `OpenReleasePage` (this install form can't be updated in place —
-  a Linux deb/rpm install, macOS App Translocation, an unwritable install directory, no matching
-  asset in this release), or `NotOffered` (a development run, or an Android build installed through
-  Google Play). `UpdateInstaller.canInstall(plan)` is a separate, narrower question the platform
+  a Linux deb/rpm install, a Linux Snap install (`InstallKind.LINUX_SNAP`, detected via the `SNAP`
+  environment variable snapd sets — its `/snap/keryx/<revision>/` mount is read-only, so self-replace
+  is impossible there regardless of the distribution channel), macOS App Translocation, an unwritable
+  install directory, no matching asset in this release), or `NotOffered` (a development run, or an
+  Android build installed through Google Play). `UpdateInstaller.canInstall(plan)` is a separate, narrower question the platform
   `actual` answers at runtime — not just "what should happen" but "is this instance currently
   allowed to" (Android's install-unknown-apps consent, most notably) — and gates whether a download
   even starts. `check()` resolves this once per found update and folds it into
@@ -223,7 +225,13 @@ separate, explicit click (Updates tab button, or the tray item once one is offer
     ends up at the exe path either way — a declined UAC prompt or a failed upgrade relaunches the
     previous, still-working install rather than leaving nothing running. A Linux deb/rpm install is
     never self-replaced at all (`updatePlan` above already routes it to `OpenReleasePage`) — running
-    `pkexec`/`sudo` from a GUI with no recovery path if it fails was judged not worth the risk.
+    `pkexec`/`sudo` from a GUI with no recovery path if it fails was judged not worth the risk. A
+    Linux Snap install is routed the same way, for the more basic reason that its `/snap/keryx/…`
+    mount is a read-only squashfs image — there is nothing an in-app update could write to even if
+    it wanted to. This also means a Snap install currently gets no benefit from snapd's own
+    background auto-refresh, since the app is only distributed via a GitHub Release attachment (not
+    published to the Snap Store) for now — `OpenReleasePage` is what still tells the user a new
+    version exists in that gap.
 
     Extraction sits behind a seam because a **signed** macOS bundle cannot be unpacked in process at
     all: its `CodeResources` seals the 43 symbolic links in the bundled JDK's legal-notices directory

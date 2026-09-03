@@ -202,9 +202,23 @@ jobs:
           dest="Keryx-${{ steps.version.outputs.version }}-linux-x86_64.zip"
           (cd "$(dirname "$src")" && zip -ry "$OLDPWD/$dest" "$(basename "$src")")
 
+      - name: Install snapcraft
+        run: sudo snap install snapcraft --classic
+
+      # snapcraft's `version:` accepts the full SemVer string (pre-release suffix included),
+      # unlike jpackage's numeric-only packageVersion, so the snap is built for every tag,
+      # not just stable releases.
+      - name: Build Snap package
+        run: |
+          sed -i "s/^version: .*/version: '${{ steps.version.outputs.version }}'/" snap/snapcraft.yaml
+          snapcraft pack --destructive-mode --output "Keryx-${{ steps.version.outputs.version }}-linux-x86_64.snap"
+
       - name: Attach to release
         run: |
-          assets=("Keryx-${{ steps.version.outputs.version }}-linux-x86_64.zip")
+          assets=(
+            "Keryx-${{ steps.version.outputs.version }}-linux-x86_64.zip"
+            "Keryx-${{ steps.version.outputs.version }}-linux-x86_64.snap"
+          )
           if [ "${{ steps.version.outputs.is_prerelease }}" != "true" ]; then
             assets+=(${{ steps.artifact.outputs.paths }})
           fi

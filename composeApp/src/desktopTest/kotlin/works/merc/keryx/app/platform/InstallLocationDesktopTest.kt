@@ -165,4 +165,32 @@ class InstallLocationDesktopTest {
         assertEquals(InstallKind.UNKNOWN, location.kind)
     }
 
+    @Test
+    fun linuxSnapDetectedFromSnapEnvironmentVariable() {
+        // Purely path-based (like the /opt and /usr package cases above) — the SNAP env var short-circuits
+        // detectLinuxInstallLocation before it ever touches the filesystem, so a non-existent path is fine here.
+        val launcherFile = File("/snap/keryx/123/bin/Keryx")
+
+        val location = detectLinuxInstallLocation(launcherFile.path, launcherFile, snapDir = "/snap/keryx/123")
+
+        assertEquals(InstallKind.LINUX_SNAP, location.kind)
+        assertEquals("/snap/keryx/123", location.appRoot)
+        assertFalse(location.parentWritable)
+    }
+
+    @Test
+    fun linuxSnapDetectionIsSkippedWhenSnapDirIsNullOrBlank() {
+        // Regression guard: a null/blank SNAP env var must fall through to the existing path
+        // heuristic unchanged, rather than the new early-return branch swallowing normal cases.
+        val root = newTempDir("install-location-linux-not-snap")
+        val binDir = File(root, "Keryx/bin").apply { mkdirs() }
+        val launcherFile = File(binDir, "Keryx")
+
+        val nullSnap = detectLinuxInstallLocation(launcherFile.path, launcherFile, snapDir = null)
+        val blankSnap = detectLinuxInstallLocation(launcherFile.path, launcherFile, snapDir = "  ")
+
+        assertEquals(InstallKind.LINUX_PORTABLE, nullSnap.kind)
+        assertEquals(InstallKind.LINUX_PORTABLE, blankSnap.kind)
+    }
+
 }

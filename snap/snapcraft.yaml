@@ -1,0 +1,29 @@
+name: keryx
+version: '0.0.0' # overwritten by release.yml with the tag-derived version before packing
+summary: Local-first, cross-platform RSS reader
+description: |
+  A local-first, cross-platform RSS reader with multi-device sync via your own
+  cloud storage (Dropbox / Google Drive / OneDrive). No account required.
+grade: stable
+confinement: strict
+base: core24
+license: MIT
+
+apps:
+  keryx:
+    command: bin/Keryx
+    plugs:
+      - network
+      - password-manager-service # Secret Service (java-keyring) — Dropbox token storage
+      - desktop
+      - desktop-legacy
+      - wayland
+      - x11
+      - opengl # Compose Desktop (Skia) GPU rendering
+      - home # keryx:// URI scheme / .opml association self-registration
+             # (~/.local/share/applications, ~/.config/mimeapps.list)
+
+parts:
+  keryx:
+    plugin: dump
+    source: composeApp/build/compose/binaries/main/app/Keryx

@@ -60,6 +60,7 @@ private fun assetKindFor(location: InstallLocation): UpdateAssetKind? = when (lo
     InstallKind.LINUX_PORTABLE -> UpdateAssetKind.LINUX_ZIP
     InstallKind.ANDROID_SIDELOADED -> UpdateAssetKind.ANDROID_APK
     InstallKind.LINUX_PACKAGE,
+    InstallKind.LINUX_SNAP,
     InstallKind.ANDROID_STORE,
     InstallKind.DEVELOPMENT,
     InstallKind.UNKNOWN,

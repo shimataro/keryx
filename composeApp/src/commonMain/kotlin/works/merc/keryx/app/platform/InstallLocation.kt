@@ -21,6 +21,10 @@ enum class InstallKind {
      * self-replaced; an in-app update falls back to the release page. */
     LINUX_PACKAGE,
 
+    /** Installed as a Snap (`/snap/keryx/<revision>/…`, a read-only squashfs mount) — never
+     * self-replaced, same as [LINUX_PACKAGE]; an in-app update falls back to the release page. */
+    LINUX_SNAP,
+
     /** A `.zip` app image extracted somewhere the user can write to. */
     LINUX_PORTABLE,
 

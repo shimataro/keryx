@@ -71,8 +71,19 @@ internal fun detectWindowsInstallLocation(launcher: String, launcherFile: File):
 
 private val LINUX_SYSTEM_ROOTS = listOf("/opt", "/usr", "/usr/local")
 
-/** `<install>/bin/Keryx` → the app-image root is the launcher's grandparent. */
-internal fun detectLinuxInstallLocation(launcher: String, launcherFile: File): InstallLocation {
+/**
+ * `<install>/bin/Keryx` → the app-image root is the launcher's grandparent, except under a Snap,
+ * where snapd's own `SNAP` environment variable (set for every confined process) identifies the
+ * read-only squashfs mount directly and is more reliable than any path heuristic.
+ */
+internal fun detectLinuxInstallLocation(
+    launcher: String,
+    launcherFile: File,
+    snapDir: String? = System.getenv("SNAP"),
+): InstallLocation {
+    if (!snapDir.isNullOrBlank()) {
+        return InstallLocation(InstallKind.LINUX_SNAP, snapDir, launcher, parentWritable = false, translocated = false)
+    }
     val binDir = launcherFile.parentFile
     val appRoot = binDir?.parentFile
     if (appRoot == null || binDir.name != "bin") {

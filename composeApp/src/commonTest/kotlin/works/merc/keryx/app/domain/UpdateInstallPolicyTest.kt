@@ -36,6 +36,12 @@ class UpdateInstallPolicyTest {
     }
 
     @Test
+    fun linuxSnapAlwaysOpensTheReleasePageRegardlessOfAsset() {
+        assertEquals(UpdatePlan.OpenReleasePage, updatePlan(location(InstallKind.LINUX_SNAP), SOME_ASSET))
+        assertEquals(UpdatePlan.OpenReleasePage, updatePlan(location(InstallKind.LINUX_SNAP), null))
+    }
+
+    @Test
     fun macAppBundleSelfReplacesWhenWritableAndNotTranslocated() {
         val plan = updatePlan(location(InstallKind.MAC_APP_BUNDLE), SOME_ASSET)
         assertIs<UpdatePlan.SelfReplace>(plan)

@@ -150,6 +150,31 @@ Only the platform matching the execution platform can be built (cross-compilatio
 ./gradlew :composeApp:packageRpm
 ```
 
+### Linux Snap package
+
+Unlike `.deb`/`.rpm` (built by jpackage via the tasks above), the Snap is built by `snapcraft`
+directly from `snap/snapcraft.yaml`, which `dump`s the same `createDistributable` app image
+(`composeApp/build/compose/binaries/main/app/Keryx`) rather than rebuilding anything — so run
+`createDistributable` first:
+
+```bash
+./gradlew :composeApp:createDistributable
+sudo snap install snapcraft --classic   # if not already installed
+snapcraft pack --destructive-mode
+```
+
+`confinement: strict` (Ubuntu's default for Store distribution) means the app only gets the
+plugs declared in `snap/snapcraft.yaml`'s `apps.keryx.plugs` — `network`,
+`password-manager-service` (Secret Service, for `java-keyring`'s token storage),
+`desktop`/`desktop-legacy`/`wayland`/`x11` (window/tray/notification integration), `opengl`
+(Compose Desktop's Skia rendering), and `home` (the `keryx://` URI scheme and `.opml`
+association self-registration described above, which write into the real
+`~/.local/share/applications` and `~/.config/mimeapps.list`). Whether every one of these plugs
+is actually sufficient under strict confinement (tray D-Bus ownership and Secret Service access
+in particular) has not yet been verified on a real snapd install — `java-keyring` falls back to
+a plain file if Secret Service is unreachable, so that path degrades gracefully if the plug
+turns out to be insufficient.
+
 ### Android (APK / AAB)
 
 Unlike the desktop packages above, an APK/AAB can be built on **any** OS — there is no
@@ -319,7 +344,7 @@ Flow:
 3. Four independent jobs run in parallel:
 
    - `:composeApp:packageDmg` (macOS runner), attached as `Keryx-<version>-macos-arm64.dmg` **and `Keryx-<version>-macos-arm64.zip`**. **For a pre-release tag, `packageDmg` is skipped and only the `.zip` is attached** (same reasoning as the Windows MSI case below).
-   - `:composeApp:packageDeb :composeApp:packageRpm` (Linux runner, after installing `fakeroot`/`rpm` for jpackage), attached as `Keryx-<version>-linux-x86_64.deb`, `Keryx-<version>-linux-x86_64.rpm` **and `Keryx-<version>-linux-x86_64.zip`**. **For a pre-release tag, `packageDeb`/`packageRpm` are skipped and only the `.zip` is attached** (same reasoning as the Windows MSI case below).
+   - `:composeApp:packageDeb :composeApp:packageRpm` (Linux runner, after installing `fakeroot`/`rpm` for jpackage), attached as `Keryx-<version>-linux-x86_64.deb`, `Keryx-<version>-linux-x86_64.rpm` **and `Keryx-<version>-linux-x86_64.zip`**. **For a pre-release tag, `packageDeb`/`packageRpm` are skipped and only the `.zip` is attached** (same reasoning as the Windows MSI case below). The same job also runs `snapcraft pack --destructive-mode` against `snap/snapcraft.yaml` (after `sudo snap install snapcraft --classic`) and attaches `Keryx-<version>-linux-x86_64.snap` — unlike `.deb`/`.rpm`, this **is** attached for pre-release tags too, since snapcraft's `version:` field isn't restricted to `MAJOR.MINOR.PATCH` the way jpackage's packaging metadata is.
    - `:composeApp:createDistributable :composeApp:packageMsi` (Windows runner — `windows-latest` ships WiX Toolset v3.14.1 preinstalled, so no separate WiX setup step is needed), attached as `Keryx-<version>-windows-x86_64.msi` **and `Keryx-<version>-windows-x86_64.zip`**. **For a pre-release tag, `packageMsi` is skipped and only the `.zip` is attached** — MSI's `ProductVersion` must be purely numeric (see below), so every pre-release of a given target version would collapse to the same `ProductVersion` under the fixed `upgradeUuid`, and WiX would not recognize a later pre-release or the eventual final release as an upgrade of an earlier one.
    - `:androidApp:assembleGithubRelease` and `:androidApp:bundlePlayRelease` (Ubuntu runner), attached as `Keryx-<version>-android-universal.apk` and `Keryx-<version>-android-universal.aab`. The APK comes from the `github` flavor (carries `REQUEST_INSTALL_PACKAGES`, since it's the one an in-app update installs over — see the "Android (APK / AAB)" section above) and the AAB from `play` (the Play Console submission artifact, which must not carry that permission). Unlike the desktop installers, Android packages are built and attached for pre-release tags too, because Android has no equivalent version-metadata restriction and testers need a signed APK. **Pre-release APK/AAB files produced by the workflow are GitHub test artifacts only.** `androidApp/build.gradle.kts` derives `versionCode` from `appVersion.substringBefore('-')`, so a pre-release tag such as `v1.2.0-beta.1` and the final `v1.2.0` produce the same `versionCode` (e.g. `10200`). Before submitting to Google Play, assign a strictly increasing `versionCode` by adjusting `androidApp/build.gradle.kts` (or the release tag that drives it) and rebuilding the APK/AAB — the value is baked into the signed artifact at build time and cannot be edited afterward.
 

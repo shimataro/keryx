@@ -67,8 +67,8 @@ data exists in the cloud it is automatically merged (imported) during the initia
   "open with Keryx" from a file manager or mail attachment on Android
 - Feed health management: 301/308 auto-updates the subscription URL (notification), 410 Gone shows a warning in the notification center, consecutive errors show an indicator in the feed list
 - In-app update (download and install, not just a link to the release page): supported for a macOS
-  `.app`, a Windows MSI install or portable ZIP, a Linux portable ZIP (a deb/rpm install falls back
-  to opening the release page, as does any install form the app can't recognize), and a sideloaded
+  `.app`, a Windows MSI install or portable ZIP, a Linux portable ZIP (a deb/rpm or Snap install
+  falls back to opening the release page, as does any install form the app can't recognize), and a sideloaded
   Android install (never through Google Play, which already updates the app itself). Presented from
   the moment an update is detected, via the notification-center bell and the desktop task tray;
   every download and every install remains a separate, explicit user action — nothing installs
