@@ -160,14 +160,22 @@ directly from `snap/snapcraft.yaml`, which `dump`s the same `createDistributable
 ```bash
 ./gradlew :composeApp:createDistributable
 sudo snap install snapcraft --classic   # if not already installed
-snapcraft pack --destructive-mode
+sudo env "PATH=$PATH" snapcraft pack --destructive-mode
 ```
 
 `--destructive-mode` builds directly on the host with no sandboxing, so the host itself
 must match `snap/snapcraft.yaml`'s `base: core24` (Ubuntu 24.04) and the command needs
 root access — and it can modify the host environment. CI (`release.yml`) already runs it
 on a matching `ubuntu-latest` runner; for a local build on a different host, use
-`snapcraft pack --use-lxd` instead, which builds inside an isolated LXD container.
+`snapcraft pack --use-lxd` instead, which builds inside an isolated LXD container — this
+needs LXD installed, initialized, and accessible to the current user first:
+
+```bash
+sudo snap install lxd
+sudo usermod -a -G lxd "$USER" && newgrp lxd   # logging out and back in also works instead of newgrp
+sudo lxd init --auto
+snapcraft pack --use-lxd
+```
 
 `confinement: strict` (Ubuntu's default for Store distribution) means the app only gets the
 plugs declared in `snap/snapcraft.yaml`'s `apps.keryx.plugs` — `network`,

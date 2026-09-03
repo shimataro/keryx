@@ -160,14 +160,22 @@ Google Play イメージ（Chrome 入り）— [setup.ja.md](setup.ja.md) を参
 ```bash
 ./gradlew :composeApp:createDistributable
 sudo snap install snapcraft --classic   # 未インストールの場合
-snapcraft pack --destructive-mode
+sudo env "PATH=$PATH" snapcraft pack --destructive-mode
 ```
 
 `--destructive-mode`はサンドボックスなしでホスト上に直接ビルドするため、ホスト自体が
 `snap/snapcraft.yaml`の`base: core24`（Ubuntu 24.04）に一致している必要があり、
 root権限も必要になる——さらにホスト環境を変更してしまう可能性がある。CI（`release.yml`）は
 既に一致する`ubuntu-latest`ランナー上でこれを実行している。別のホストでローカルビルドする
-場合は、代わりに分離されたLXDコンテナ内でビルドする`snapcraft pack --use-lxd`を使うこと。
+場合は、代わりに分離されたLXDコンテナ内でビルドする`snapcraft pack --use-lxd`を使うこと——
+事前にLXDをインストール・初期化し、現在のユーザーからアクセスできる状態にしておく必要がある:
+
+```bash
+sudo snap install lxd
+sudo usermod -a -G lxd "$USER" && newgrp lxd   # newgrpの代わりにログアウト・再ログインでも可
+sudo lxd init --auto
+snapcraft pack --use-lxd
+```
 
 `confinement: strict`（UbuntuのSnap Store配布時の既定）は、`snap/snapcraft.yaml`の
 `apps.keryx.plugs`で宣言したプラグのみをアプリに与える —
