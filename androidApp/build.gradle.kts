@@ -35,6 +35,12 @@ val androidVersionCode: Int = appVersion.substringBefore('-').split('.')
     }
     .coerceAtLeast(1)
 
+// Fixed versionCode for every debug variant — see the onVariants block at the bottom of this file
+// for why. Below Play's 2_100_000_000 ceiling (a debug build is never uploaded, but staying inside
+// the documented range keeps the value from looking arbitrary) and far above anything
+// androidVersionCode can fold to, which would take a MAJOR of 200000.
+val debugVersionCode = 2_000_000_000
+
 // -P > environment variable > local.properties, the repo-wide order local.properties.example's
 // "Priority" header documents — so a `-PandroidRelease...` value can override an ANDROID_RELEASE_*
 // one already exported into the shell (release.yml passes all four via the environment).
@@ -176,6 +182,23 @@ android {
 androidComponents {
     beforeVariants(selector().withFlavor("distribution" to "play").withBuildType("debug")) { variantBuilder ->
         variantBuilder.enable = false
+    }
+
+    // A debug install must never be rejected as a downgrade. A local build passes no -PappVersion,
+    // so appVersion falls back to "0.0.0" and folds to versionCode 1 — lower than any real-version
+    // APK already on the device (e.g. a release build sideloaded to exercise the in-app update
+    // flow), and the package manager refuses that with INSTALL_FAILED_VERSION_DOWNGRADE before it
+    // looks at anything else. Debug builds are never published, so their versionCode only has to
+    // satisfy the package manager: pinning it above every code the fold above can produce makes
+    // `installGithubDebug` work whatever is installed. `versionName` is deliberately left alone —
+    // the About screen and the update check read BuildConfig.VERSION (composeApp's, from the same
+    // appVersion), and 0.0.0 is what makes a dev build see every release as an update. This does
+    // not make the reverse direction any harder either: a release-signed APK and a debug one carry
+    // different signing keys, so swapping between them needs an uninstall regardless.
+    // The androidTest APK is unaffected: it is its own package (`works.merc.keryx.test`), so it
+    // never competes with an installed build.
+    onVariants(selector().withBuildType("debug")) { variant ->
+        variant.outputs.forEach { it.versionCode.set(debugVersionCode) }
     }
 }
 

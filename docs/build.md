@@ -179,6 +179,14 @@ be invoked explicitly — see "Release (CD)" below for how `release.yml` uses bo
 derives them from the flavor/build-type names, and a rename there silently breaks the workflow only
 once a release tag is pushed.
 
+Debug variants do not take their `versionCode` from `appVersion` at all: `androidApp/build.gradle.kts`
+pins every debug output to a fixed `debugVersionCode` (2,000,000,000 — below Play's ceiling, far above
+anything the `MAJOR*10000 + MINOR*100 + PATCH` fold can produce). A local build passes no
+`-PappVersion`, so it would otherwise be `versionCode` 1 and the package manager would reject
+`installGithubDebug` as a downgrade over any real-version APK already on the device. Release variants
+are unaffected. See [setup.md](setup.md)'s "Common Issues" for the install failure this leaves — a
+release-signed and a debug-signed APK still cannot replace each other.
+
 Release signing is resolved from three sources, in this priority order — a Gradle project property,
 an environment variable, then `local.properties` — and all four values are required together (an
 incomplete set fails the build immediately rather than falling back to an unsigned/half-signed

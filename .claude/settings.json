@@ -16,6 +16,9 @@
       "Bash(git ls-files:*)",
       "WebSearch"
     ],
-    "defaultMode": "plan"
+    "defaultMode": "plan",
+    "deny": [
+      "Bash(git push:*)"
+    ]
   }
 }

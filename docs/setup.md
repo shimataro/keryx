@@ -280,6 +280,33 @@ build. **Setting only some of the four is always a configuration mistake** — t
 immediately, naming which values are missing, rather than silently going unsigned or using a
 half-formed signing identity.
 
+### (Android) The install fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE` or `INSTALL_FAILED_VERSION_DOWNGRADE`
+
+Both mean the APK already on the device cannot be replaced by the one being installed, and both are
+fixed by removing the installed one first (this **wipes that app's data** — `keryx.db`,
+`local_settings.json`, the stored cloud token):
+
+```bash
+./gradlew :androidApp:uninstallGithubDebug
+./gradlew :androidApp:installGithubDebug
+```
+
+`INSTALL_FAILED_UPDATE_INCOMPATIBLE` (`... signatures do not match ...`) is the one that genuinely
+needs the uninstall: a release build is signed with the release keystore and a debug build with the
+local debug one, so **neither can ever overwrite the other** — including a release APK downloaded
+from GitHub Releases and sideloaded to exercise the in-app update flow (see
+[testing.md](testing.md)'s in-app-update manual QA). Both carry the same `applicationId`
+(`works.merc.keryx`), which is why `uninstallGithubDebug` removes whichever of them is installed.
+Use separate devices/AVDs if you need a sideloaded release build and a debug build at the same
+time; a debug-only `applicationIdSuffix` is deliberately not used, since a second
+`keryx://oauth2/callback` and `.opml` handler would make the OAuth redirect and the file
+association ambiguous.
+
+`INSTALL_FAILED_VERSION_DOWNGRADE` used to be hit first, for an unrelated reason: a local build
+passes no `-PappVersion`, so it was `versionCode` 1 and could not install over any real-version APK.
+Debug variants now pin a fixed `versionCode` (see [build.md](build.md)'s "Android (APK / AAB)"), so
+this no longer applies to them — seeing it now means a non-debug APK is being installed.
+
 ### `UnsupportedClassVersionError` (at runtime)
 
 The JVM that launched `./gradlew` is older than 25. Set `JAVA_HOME` to JDK 25+.

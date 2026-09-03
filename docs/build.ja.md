@@ -180,6 +180,14 @@ variant をビルドする）が、`bundlePlayRelease` はどの集約ライフ�
 — これらは AGP が flavor／buildType 名から導出するものなので、リネームするとリリースタグを打った
 瞬間に初めてワークフローが壊れる。
 
+debug バリアントの `versionCode` は `appVersion` 由来ではない: `androidApp/build.gradle.kts` が
+debug の出力すべてを固定値 `debugVersionCode`（2,000,000,000 — Play の上限未満で、
+`MAJOR*10000 + MINOR*100 + PATCH` の畳み込みが到達し得ない大きさ）に固定している。ローカル
+ビルドは `-PappVersion` を渡さないため、そのままだと `versionCode` が 1 になり、実バージョン付きの
+APK が入っている端末では `installGithubDebug` がダウングレードとして拒否される。release バリアントは
+従来どおり。これでも残る失敗（リリース署名の APK と debug 署名の APK は互いに置き換えられない）は
+[setup.ja.md](setup.ja.md) の「よくある問題」を参照。
+
 リリース署名は 3 つのソースから、この優先順で解決される — Gradle プロジェクトプロパティ、
 環境変数、`local.properties` の順 — 4 つの値はすべて揃って初めて有効になる（一部だけの設定は
 未署名/半端な署名結果へフォールバックせず即座にビルド失敗する）。ローカル用のキーストア

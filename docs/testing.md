@@ -789,7 +789,11 @@ a rollback path has a bug that leaves it damaged.
   download at all (`canInstallAndroidApkUpdate` requires `REQUEST_INSTALL_PACKAGES`, which only the
   `github` manifest declares). If "install unknown apps" hasn't been granted yet, confirm clicking
   install opens that system settings screen instead of a session, and that returning without
-  granting it leaves the Updates tab back at "ready to install" rather than stuck.
+  granting it leaves the Updates tab back at "ready to install" rather than stuck. Both the
+  sideloaded APK and the release it updates to have to be signed with the **same** key, since
+  Android will not let one replace the other otherwise — so a debug build cannot stand in for
+  either half, and going back to `installGithubDebug` afterwards needs
+  `./gradlew :androidApp:uninstallGithubDebug` first (see [setup.md](setup.md)'s "Common Issues").
 - **Failure paths, each platform**: cancel a download mid-transfer (state returns to `Available`,
   not `Failed`, and the `.part` file is gone); disconnect the network mid-download (state becomes
   `Failed` with a retry action); fill the disk before starting a download (the pre-flight free-space

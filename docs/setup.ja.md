@@ -274,6 +274,33 @@ release APK が生成される（App Bundle は生成されない — `:androidA
 設定するのは常に設定ミス** — 未署名で静かに進んだり不完全な署名情報のまま進んだりせず、
 どの値が足りないかを示して即座にビルドが失敗する。
 
+### （Android）インストールが `INSTALL_FAILED_UPDATE_INCOMPATIBLE` / `INSTALL_FAILED_VERSION_DOWNGRADE` で失敗する
+
+どちらも「すでに端末に入っている APK を、いまインストールしようとしている APK では置き換えられない」
+という意味で、対処も同じ——先に既存のものをアンインストールする（**そのアプリのデータは消える**
+——`keryx.db`、`local_settings.json`、保存済みのクラウドトークン）:
+
+```bash
+./gradlew :androidApp:uninstallGithubDebug
+./gradlew :androidApp:installGithubDebug
+```
+
+本当にアンインストールが必要なのは `INSTALL_FAILED_UPDATE_INCOMPATIBLE`
+（`... signatures do not match ...`）の方。release ビルドはリリースキーストアで、debug ビルドは
+ローカルの debug キーストアで署名されるため、**どちらも他方を上書きできない** — GitHub Releases から
+落としてアプリ内アップデートの動作確認のためにサイドロードした release APK も同じ
+（[testing.ja.md](testing.ja.md) のアプリ内アップデート手動 QA 参照）。`applicationId` は双方とも
+`works.merc.keryx` なので、`uninstallGithubDebug` はどちらが入っていても削除できる。サイドロードした
+release ビルドと debug ビルドを同時に使いたい場合は、端末／AVD を分ける。debug だけ
+`applicationIdSuffix` を付ける方式は意図的に採っていない — `keryx://oauth2/callback` と `.opml` の
+ハンドラーが 2 つになり、OAuth リダイレクトとファイル関連付けが曖昧になるため。
+
+`INSTALL_FAILED_VERSION_DOWNGRADE` は以前これより先に当たっていたもので、原因は別。ローカル
+ビルドは `-PappVersion` を渡さないため `versionCode` が 1 になり、実バージョン付きの APK には
+上書きインストールできなかった。現在は debug バリアントが固定の `versionCode` を使うので
+（[build.ja.md](build.ja.md) の「Android（APK / AAB）」参照）debug には当てはまらない —
+いま出るとすれば debug 以外の APK をインストールしている。
+
 ### `UnsupportedClassVersionError`（実行時エラー）
 
 `./gradlew` を起動した JVM が 25 未満。`JAVA_HOME` を JDK 25+ に設定する。
