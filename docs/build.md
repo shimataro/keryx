@@ -165,15 +165,28 @@ snapcraft pack --destructive-mode
 
 `confinement: strict` (Ubuntu's default for Store distribution) means the app only gets the
 plugs declared in `snap/snapcraft.yaml`'s `apps.keryx.plugs` — `network`,
-`password-manager-service` (Secret Service, for `java-keyring`'s token storage),
-`desktop`/`desktop-legacy`/`wayland`/`x11` (window/tray/notification integration), `opengl`
-(Compose Desktop's Skia rendering), and `home` (the `keryx://` URI scheme and `.opml`
-association self-registration described above, which write into the real
-`~/.local/share/applications` and `~/.config/mimeapps.list`). Whether every one of these plugs
-is actually sufficient under strict confinement (tray D-Bus ownership and Secret Service access
-in particular) has not yet been verified on a real snapd install — `java-keyring` falls back to
-a plain file if Secret Service is unreachable, so that path degrades gracefully if the plug
-turns out to be insufficient.
+`password-manager-service` (Secret Service, for `java-keyring`'s token storage — **not**
+auto-connected by snapd policy, so a user must run `snap connect keryx:password-manager-service`
+before Secret Service is actually reachable; until then, `java-keyring` falls back to the same
+permission-restricted plaintext file every platform already uses when the OS store is
+unavailable, see `SECURITY.md`), `desktop`/`desktop-legacy`/`wayland`/`x11`
+(window/tray/notification integration), `opengl` (Compose Desktop's Skia rendering), and `home`.
+
+`home` is what lets the OPML import/export file picker (`JFileChooser`, see
+`app-architecture.md`) reach non-hidden files anywhere under the user's home directory — but it
+explicitly excludes hidden files and directories, so it does **not** let the `keryx://` URI
+scheme and `.opml` association self-registration described above
+(`LinuxUriSchemeRegistrar`/`LinuxOpmlAssociationRegistrar`, which write into
+`~/.local/share/applications` and `~/.config/mimeapps.list`) actually do anything under strict
+confinement: those writes are denied, silently caught and logged as a warning rather than
+crashing. The Snap build's host-side registration instead comes from `snap/gui/keryx.desktop`
+itself declaring `MimeType=` for both `x-scheme-handler/keryx` and the `.opml` MIME types plus an
+`Exec=keryx %u` field code — the mechanism snapd processes at install time. A `file://` URI that
+some desktop environments hand to `%u` for a local file is normalized back to a plain path in
+`main()` (`normalizeFileUriArg`) before classification. Whether every one of these plugs is
+actually sufficient under strict confinement (tray D-Bus ownership in particular) and whether
+this desktop-entry registration actually takes effect on a real snapd install have not yet been
+verified.
 
 ### Android (APK / AAB)
 

@@ -165,14 +165,28 @@ snapcraft pack --destructive-mode
 
 `confinement: strict`（UbuntuのSnap Store配布時の既定）は、`snap/snapcraft.yaml`の
 `apps.keryx.plugs`で宣言したプラグのみをアプリに与える —
-`network`、`password-manager-service`（Secret Service、`java-keyring`のトークン保存用）、
-`desktop`/`desktop-legacy`/`wayland`/`x11`（ウィンドウ・トレイ・通知の統合）、`opengl`
-（Compose DesktopのSkiaレンダリング）、`home`（上述の`keryx://` URIスキームと`.opml`関連付けの
-自己登録— 実際の `~/.local/share/applications` と `~/.config/mimeapps.list` に書き込む）。
-これらのプラグがstrict confinement下で実際に十分か（特にトレイのD-Bus所有権とSecret Service
-アクセス）は実機のsnapd環境ではまだ検証していない — Secret Serviceに到達できない場合
-`java-keyring`は単純なファイルにフォールバックするため、プラグが不足していてもその経路は
-段階的に劣化するだけで済む。
+`network`、`password-manager-service`（Secret Service、`java-keyring`のトークン保存用 —
+snapdのポリシー上**自動接続されない**ため、Secret Serviceに実際にアクセスできるように
+なるには利用者が事前に`snap connect keryx:password-manager-service`を実行する必要がある。
+接続するまでは、OSのセキュアストアが使えない場合に他のプラットフォームでもすでに使っている
+権限制限付きの平文フォールバックファイルへ`java-keyring`がフォールバックする。`SECURITY.md`
+参照）、`desktop`/`desktop-legacy`/`wayland`/`x11`（ウィンドウ・トレイ・通知の統合）、`opengl`
+（Compose DesktopのSkiaレンダリング）、`home`。
+
+`home`は、OPMLインポート/エクスポートのファイル選択ダイアログ（`JFileChooser`、
+`app-architecture.md`参照）がユーザーのホームディレクトリ配下の非隠しファイルへ
+アクセスするためのものである — ただし隠しファイル・隠しディレクトリへのアクセスは
+明示的に除外されるため、上述の`keryx://` URIスキームと`.opml`関連付けの自己登録
+（`LinuxUriSchemeRegistrar`/`LinuxOpmlAssociationRegistrar`。実際には
+`~/.local/share/applications`と`~/.config/mimeapps.list`に書き込む）は、strict confinement下
+では**機能しない**。これらの書き込みは拒否され、クラッシュはせずに警告としてログに
+握りつぶされるだけである。Snap版のホスト側登録は代わりに`snap/gui/keryx.desktop`自体が
+`x-scheme-handler/keryx`と`.opml`のMIMEタイプ両方に対する`MimeType=`と`Exec=keryx %u`という
+フィールドコードを宣言することで行っている — これはsnapdがインストール時に処理する仕組みである。
+一部のデスクトップ環境がローカルファイルを`%u`経由で`file://` URIとして渡してくる場合に備え、
+`main()`内で分類前にプレーンなパスへ正規化している（`normalizeFileUriArg`）。これらのプラグが
+strict confinement下で実際に十分か（特にトレイのD-Bus所有権）、およびこのデスクトップエントリ
+による登録が実機のsnapd環境で実際に機能するかは、まだ検証していない。
 
 ### Android（APK / AAB）
 

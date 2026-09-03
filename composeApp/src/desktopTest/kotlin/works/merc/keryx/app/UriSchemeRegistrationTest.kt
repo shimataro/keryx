@@ -15,6 +15,21 @@ class UriSchemeRegistrationTest {
     }
 
     @Test
+    fun normalizesAFileUriArgToAPlainPath() {
+        assertEquals(
+            "/home/user/subscriptions.opml",
+            normalizeFileUriArg("file:///home/user/subscriptions.opml"),
+        )
+    }
+
+    @Test
+    fun leavesNonFileUriArgsUnchanged() {
+        assertEquals("keryx://oauth2/callback?code=abc", normalizeFileUriArg("keryx://oauth2/callback?code=abc"))
+        assertEquals("/home/user/subscriptions.opml", normalizeFileUriArg("/home/user/subscriptions.opml"))
+        assertEquals("--some-unrelated-flag", normalizeFileUriArg("--some-unrelated-flag"))
+    }
+
+    @Test
     fun macOsNeedsNoRuntimeRegistration() {
         assertEquals(UriSchemeRegistration.NONE, uriSchemeRegistrationFor("Mac OS X"))
     }
