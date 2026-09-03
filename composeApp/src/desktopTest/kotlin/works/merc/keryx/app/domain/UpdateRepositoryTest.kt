@@ -73,6 +73,8 @@ private class RecordingNotificationMessages : NotificationMessages {
     override suspend fun opmlImported(added: Int, failed: Int) = "opmlImported:$added/$failed"
     override suspend fun updateAvailable(version: String) = "updateAvailable:$version"
     override suspend fun updateReadyToInstall(version: String) = "updateReadyToInstall:$version"
+    override suspend fun tokenStorageFallback() = "tokenStorageFallback"
+    override suspend fun tokenStorageFallbackDetail() = "tokenStorageFallbackDetail"
 }
 
 /**

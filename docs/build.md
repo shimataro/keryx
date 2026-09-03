@@ -183,7 +183,9 @@ plugs declared in `snap/snapcraft.yaml`'s `apps.keryx.plugs` — `network`,
 auto-connected by snapd policy, so a user must run `snap connect keryx:password-manager-service`
 before Secret Service is actually reachable; until then, `java-keyring` falls back to the same
 permission-restricted plaintext file every platform already uses when the OS store is
-unavailable, see `SECURITY.md`), `desktop`/`desktop-legacy`/`wayland`/`x11`
+unavailable, see `SECURITY.md` — this is not silent: `CloudSession` raises a notification-center
+warning whose `ShowInfoDialog` action names this `snap connect` as the fix, see
+`error-design.md`), `desktop`/`desktop-legacy`/`wayland`/`x11`
 (window/tray/notification integration), `opengl` (Compose Desktop's Skia rendering), and `home`.
 
 `home` is what lets the OPML import/export file picker (`JFileChooser`, see

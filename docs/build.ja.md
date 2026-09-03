@@ -184,7 +184,8 @@ snapdのポリシー上**自動接続されない**ため、Secret Serviceに実
 なるには利用者が事前に`snap connect keryx:password-manager-service`を実行する必要がある。
 接続するまでは、OSのセキュアストアが使えない場合に他のプラットフォームでもすでに使っている
 権限制限付きの平文フォールバックファイルへ`java-keyring`がフォールバックする。`SECURITY.md`
-参照）、`desktop`/`desktop-legacy`/`wayland`/`x11`（ウィンドウ・トレイ・通知の統合）、`opengl`
+参照。これは黙って行われるわけではなく、`CloudSession`が通知センターに警告を出し、その
+`ShowInfoDialog`アクションが対処法としてこの`snap connect`を案内する。`error-design.ja.md`参照）、`desktop`/`desktop-legacy`/`wayland`/`x11`（ウィンドウ・トレイ・通知の統合）、`opengl`
 （Compose DesktopのSkiaレンダリング）、`home`。
 
 `home`は、OPMLインポート/エクスポートのファイル選択ダイアログ（`JFileChooser`、

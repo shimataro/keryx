@@ -101,6 +101,7 @@ sealed class KeryxException(message: String) : Exception(message)
 | `ShowFeedDetail(feedId)` | フィード消失(410) / URL 変更(301/308) | フィード一覧で該当フィードを選択（一覧をクリックしたときと同じ）。シングルペイン幅ではフィード一覧が独立した画面のため、選択ハイライトすら描かれない画面へ戻るのではなく、そのフィードの記事一覧まで進む — `ui/home/HomePaneLayout.kt` の `paneForFeedDetail` を参照 |
 | `ShowSettingsTab(tabId)` | 同期エラー（`SchemaVersionException` は `updates`、その他は `cloud_sync`）；アプリ内アップデート経路がある場合の新バージョン通知（`updates`） | 設定ダイアログを該当タブで開く。`cloud_sync` タブは `SyncRepository.lastSyncError` を失敗理由として表示し、`updates` タブは開いた時点で自動的に更新確認を行う |
 | `ShowInfoDialog(detail)` | macOS の translocated 警告 | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
+| `ShowInfoDialog(detail)` | トークンの保存が平文ファイルへフォールバックしたとき（`CloudSession`）——OS のセキュアな認証情報ストアに到達できず `TokenStorage.save()` が false を返した場合 | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
 | `ResetCloudData` | `CloudDataIncompatibleException` | 専用のインラインボタン → 確認ダイアログ → クラウドDBをタイムスタンプ付き名前で退避してから作り直す（[sync-architecture.ja.md](sync-architecture.ja.md)「クラウドデータのリセット（退避）」参照） |
 
 `AppNotification(id, level: INFO|WARNING|ERROR, message, timestampMillis, action)`。

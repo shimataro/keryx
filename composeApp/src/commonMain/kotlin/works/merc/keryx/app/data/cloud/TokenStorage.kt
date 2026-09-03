@@ -8,7 +8,17 @@ package works.merc.keryx.app.data.cloud
  * [works.merc.keryx.app.core.CloudStorageType.id].
  */
 interface TokenStorage {
-    fun save(tokens: OAuthTokens)
+    /**
+     * Persists [tokens]. Implementations never throw — a backend failure degrades to the
+     * plaintext-file fallback instead (see `SECURITY.md`), so the connect flow can never be
+     * aborted by a storage problem.
+     *
+     * @return true when the tokens landed in the OS secure store (or, on Android, the
+     * Keystore-encrypted file); false when they were only persisted via the plaintext fallback.
+     * This is a signal about *how securely* the tokens were stored, not about success or failure —
+     * a false return still means the tokens are persisted.
+     */
+    fun save(tokens: OAuthTokens): Boolean
     fun load(): OAuthTokens?
     fun clear()
 }

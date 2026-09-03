@@ -13,19 +13,26 @@ import works.merc.keryx.app.core.Log
  * the shared [KEYCHAIN_SERVICE]. Falls back to [FileTokenStorage] if no backend is
  * available or an operation fails.
  */
-class KeyringTokenStorage(
+class KeyringTokenStorage internal constructor(
     private val fallback: TokenStorage,
-    private val account: String = CloudStorageType.DROPBOX.id,
-    private val json: Json = Json { ignoreUnknownKeys = true },
+    private val account: String,
+    private val json: Json,
+    /**
+     * The OS secret store, or null when none is available. Injectable so tests can exercise the
+     * "no backend → plaintext fallback" path without touching (or depending on) a real keyring.
+     */
+    private val keyring: Keyring?,
 ) : TokenStorage {
+
+    constructor(
+        fallback: TokenStorage,
+        account: String = CloudStorageType.DROPBOX.id,
+        json: Json = Json { ignoreUnknownKeys = true },
+    ) : this(fallback, account, json, createKeyring())
 
     private val domain = KEYCHAIN_SERVICE
 
-    private val keyring: Keyring? = runCatching { Keyring.create() }
-        .onFailure { Log.warn(TOKEN_STORAGE_LOG_TAG, "No OS secret store available; falling back to file storage", it) }
-        .getOrNull()
-
-    override fun save(tokens: OAuthTokens) {
+    override fun save(tokens: OAuthTokens): Boolean {
         val payload = json.encodeToString(tokens)
         val stored = keyring?.let {
             runCatching { it.setPassword(domain, account, payload) }
@@ -33,6 +40,7 @@ class KeyringTokenStorage(
                 .isSuccess
         } ?: false
         if (!stored) fallback.save(tokens)
+        return stored
     }
 
     override fun load(): OAuthTokens? {
@@ -61,6 +69,11 @@ class KeyringTokenStorage(
         fallback.clear()
     }
 }
+
+/** Opens the platform's secret store, or returns null (and logs) when none is available. */
+private fun createKeyring(): Keyring? = runCatching { Keyring.create() }
+    .onFailure { Log.warn(TOKEN_STORAGE_LOG_TAG, "No OS secret store available; falling back to file storage", it) }
+    .getOrNull()
 
 /**
  * java-keyring reports a missing entry by throwing [PasswordAccessException]

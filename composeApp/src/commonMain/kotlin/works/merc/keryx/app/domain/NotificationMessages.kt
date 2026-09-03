@@ -25,4 +25,14 @@ interface NotificationMessages {
     /** Localized message for the notification-center row [UpdateRepository] replaces its "an
      * update is available" one with once [version] has finished downloading and verifying. */
     suspend fun updateReadyToInstall(version: String): String
+
+    /**
+     * Localized bell-row text for a cloud sign-in that could only be persisted in the plaintext
+     * fallback file because the OS secure credential store was unreachable. No provider name is
+     * threaded through: only one provider is ever connected at a time.
+     */
+    suspend fun tokenStorageFallback(): String
+
+    /** The explanatory dialog body (cause + fix) behind [tokenStorageFallback]. */
+    suspend fun tokenStorageFallbackDetail(): String
 }

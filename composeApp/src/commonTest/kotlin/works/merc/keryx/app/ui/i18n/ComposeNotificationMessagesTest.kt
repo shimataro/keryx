@@ -2,8 +2,11 @@ package works.merc.keryx.app.ui.i18n
 
 import kotlinx.coroutines.test.runTest
 import org.jetbrains.compose.resources.getPluralString
+import org.jetbrains.compose.resources.getString
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.feed_new_articles
+import works.merc.keryx.app.resources.notification_token_storage_fallback
+import works.merc.keryx.app.resources.notification_token_storage_fallback_detail
 import works.merc.keryx.app.resources.settings_import_failed
 import works.merc.keryx.app.resources.settings_import_success
 import kotlin.test.Test
@@ -30,5 +33,21 @@ class ComposeNotificationMessagesTest {
         val addedText = getPluralString(Res.plurals.settings_import_success, 2, 2)
         val failedText = getPluralString(Res.plurals.settings_import_failed, 1, 1)
         assertEquals("$addedText / $failedText", messages.opmlImported(added = 2, failed = 1))
+    }
+
+    @Test
+    fun tokenStorageFallbackResolvesTheBellRowString() = runTest {
+        assertEquals(
+            getString(Res.string.notification_token_storage_fallback),
+            messages.tokenStorageFallback(),
+        )
+    }
+
+    @Test
+    fun tokenStorageFallbackDetailResolvesTheExplanatoryDialogString() = runTest {
+        assertEquals(
+            getString(Res.string.notification_token_storage_fallback_detail),
+            messages.tokenStorageFallbackDetail(),
+        )
     }
 }

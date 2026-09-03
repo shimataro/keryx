@@ -23,7 +23,11 @@ class FileTokenStorage(
 
     private val file = File(dirOverride ?: AppDirs.appDataDir(), fileName)
 
-    override fun save(tokens: OAuthTokens) {
+    /**
+     * Always returns false: this class *is* the plaintext fallback, so a token persisted here was
+     * never in a secure store — regardless of whether the write itself succeeded.
+     */
+    override fun save(tokens: OAuthTokens): Boolean {
         // Persisting must never throw: this is the last-resort store, and a failure here (unwritable
         // data dir, a pre-existing root-owned/read-only token file) would otherwise propagate up
         // through CloudSession.saveTokens() and abort the connect flow *after* the token is already
@@ -51,6 +55,7 @@ class FileTokenStorage(
                 throw e
             }
         }.onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Token file could not be written", e) }
+        return false
     }
 
     /**

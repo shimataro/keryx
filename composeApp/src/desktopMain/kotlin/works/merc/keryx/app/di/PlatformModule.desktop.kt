@@ -135,6 +135,8 @@ actual val platformModule: Module = module {
                 CloudStorageType.fromId(get<SettingsRepository>().getLocalSettings().cloudStorageType)
             },
             clock = get(),
+            notificationCenter = get(),
+            notificationMessages = get(),
         )
     }
 }

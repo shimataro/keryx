@@ -9,7 +9,9 @@ import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class SecurityCliTokenStorageTest {
     private val dir = FileIO.join(AppDirs.tempDir(), "security-token-test-${Random.nextInt()}")
@@ -59,7 +61,7 @@ class SecurityCliTokenStorageTest {
     @Test
     fun saveThenLoadRoundTripsViaKeychainNotFile() {
         val storage = SecurityCliTokenStorage(file(), FakeSecurity(), json)
-        storage.save(tokens)
+        assertTrue(storage.save(tokens), "a verified Keychain write must report a secure store")
         assertEquals(tokens, storage.load())
         assertNull(file().load()) // stored in keychain, not the file fallback
     }
@@ -90,8 +92,9 @@ class SecurityCliTokenStorageTest {
 
     @Test
     fun saveFallsBackToFileWhenKeychainAddFails() {
-        SecurityCliTokenStorage(file(), FakeSecurity(addExit = 1), json).save(tokens)
+        val storedSecurely = SecurityCliTokenStorage(file(), FakeSecurity(addExit = 1), json).save(tokens)
         // keychain empty (add failed) -> a fresh backend reads from the file fallback
+        assertFalse(storedSecurely, "a failed Keychain add must report the plaintext fallback")
         assertEquals(tokens, SecurityCliTokenStorage(file(), FakeSecurity(), json).load())
     }
 
@@ -99,7 +102,8 @@ class SecurityCliTokenStorageTest {
     fun saveFallsBackToFileWhenKeychainWriteNotVerified() {
         // `add` reports success but nothing persists (detached-session silent failure);
         // the read-back verification must catch it and route the token to the file.
-        SecurityCliTokenStorage(file(), FakeSecurity(persistOnAdd = false), json).save(tokens)
+        val storedSecurely = SecurityCliTokenStorage(file(), FakeSecurity(persistOnAdd = false), json).save(tokens)
+        assertFalse(storedSecurely, "an unverifiable Keychain write must report the plaintext fallback")
         assertEquals(tokens, SecurityCliTokenStorage(file(), FakeSecurity(), json).load())
     }
 

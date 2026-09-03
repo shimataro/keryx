@@ -63,6 +63,7 @@ Helper extensions: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `
 | `ShowFeedDetail(feedId)` | Feed gone (410) / URL changed (301/308) | Selects that feed in the feed list (same as clicking it there). At a single-pane width the feed list is a screen of its own, so this advances to that feed's article list instead of navigating backwards onto a list whose selection isn't even painted — see `ui/home/HomePaneLayout.kt`'s `paneForFeedDetail` |
 | `ShowSettingsTab(tabId)` | Sync errors (`SchemaVersionException` → `updates`, everything else → `cloud_sync`); a new-version notification when an in-app update path applies here (`updates`) | Opens the settings dialog on that tab. The `cloud_sync` tab shows `SyncRepository.lastSyncError` as the failure reason; the `updates` tab auto-checks for an update when opened |
 | `ShowInfoDialog(detail)` | macOS translocated warning | Shows an explanatory dialog (cause + fix) without navigating |
+| `ShowInfoDialog(detail)` | Token save fell back to the plaintext file (`CloudSession`) — the OS secure credential store was unreachable, so `TokenStorage.save()` returned false | Shows an explanatory dialog (cause + fix) without navigating |
 | `ResetCloudData` | `CloudDataIncompatibleException` | Dedicated inline button → confirmation dialog → archives the cloud DB under a timestamped name, then recreates it (see "Resetting (Archiving) Cloud Data" in [sync-architecture.md](sync-architecture.md)) |
 
 `AppNotification(id, level: INFO|WARNING|ERROR, message, timestampMillis, action)`.

@@ -84,8 +84,9 @@ private class HomeViewModelTestTokenStorage : TokenStorage {
     var loadCount = 0
         private set
 
-    override fun save(tokens: OAuthTokens) {
+    override fun save(tokens: OAuthTokens): Boolean {
         stored = tokens
+        return true
     }
 
     override fun load(): OAuthTokens? {

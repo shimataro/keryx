@@ -97,6 +97,23 @@ class FileTokenStorageTest {
         assertEquals(tokens, loaded)
     }
 
+    /**
+     * This class *is* the plaintext fallback, so it must never report a secure save — not even on
+     * the happy path. That false is what makes `CloudSession` raise its bell warning.
+     */
+    @Test
+    fun saveAlwaysReportsAnInsecureStore() {
+        assertFalse(storage.save(OAuthTokens(accessToken = "access-123")), "a successful plaintext write is still not secure")
+
+        val blockingFile = FileIO.join(AppDirs.tempDir(), "token-block-${Random.nextInt()}")
+        FileIO.writeText(blockingFile, "not a directory")
+        try {
+            assertFalse(FileTokenStorage(dirOverride = blockingFile).save(OAuthTokens(accessToken = "access-123")))
+        } finally {
+            FileIO.delete(blockingFile)
+        }
+    }
+
     @Test
     fun loadReturnsNullWhenNoFileExists() {
         assertNull(storage.load())

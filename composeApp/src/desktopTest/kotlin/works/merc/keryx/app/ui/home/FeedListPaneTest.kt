@@ -391,7 +391,10 @@ class FeedListPaneTest {
 
 private class FeedListPaneTestTokenStorage : TokenStorage {
     private var stored: OAuthTokens? = null
-    override fun save(tokens: OAuthTokens) { stored = tokens }
+    override fun save(tokens: OAuthTokens): Boolean {
+        stored = tokens
+        return true
+    }
     override fun load(): OAuthTokens? = stored
     override fun clear() { stored = null }
 }

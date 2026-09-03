@@ -85,11 +85,13 @@ class SecurityCliTokenStorage internal constructor(
     private var loaded: Boolean = false
 
     @Synchronized
-    override fun save(tokens: OAuthTokens) {
+    override fun save(tokens: OAuthTokens): Boolean {
         val payload = json.encodeToString(tokens)
-        if (!writeToKeychainVerified(payload)) fallback.save(tokens)
+        val storedInKeychain = writeToKeychainVerified(payload)
+        if (!storedInKeychain) fallback.save(tokens)
         cached = tokens
         loaded = true
+        return storedInKeychain
     }
 
     @Synchronized
