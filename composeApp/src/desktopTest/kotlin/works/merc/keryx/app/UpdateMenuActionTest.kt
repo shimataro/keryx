@@ -203,6 +203,9 @@ class UpdateMenuActionTest {
         awaitState(f.repo) { it is UpdateState.Ready }
         assertEquals(1, f.downloadRequestCount())
         assertTrue(openedUrls.isEmpty(), "an installable update must never open the release page")
+        // Starting the download closes the tray/menu with no other feedback, so this also opens the
+        // Updates tab — see main.kt's startAndShowUpdatesTab.
+        assertEquals(AppNotificationAction.ShowSettingsTab("updates"), f.viewModel.pendingAction?.action)
     }
 
     @Test
@@ -217,6 +220,7 @@ class UpdateMenuActionTest {
         assertEquals(listOf(available.update.releaseUrl), openedUrls.toList())
         assertEquals(0, f.downloadRequestCount(), "nothing is downloadable here")
         assertIs<UpdateState.Available>(f.repo.state.value)
+        assertNull(f.viewModel.pendingAction, "the release page is the entire hand-off here")
     }
 
     // --- Ready / Failed ---
@@ -232,6 +236,9 @@ class UpdateMenuActionTest {
 
         await(describe = { "the installer was never invoked" }) { f.installer.installedVersions.isNotEmpty() }
         assertEquals(listOf("2.0.0"), f.installer.installedVersions.toList())
+        // Install is followed shortly by the app restarting, so there's nothing worth opening the
+        // Updates tab for here — unlike Available/Failed.
+        assertNull(f.viewModel.pendingAction)
     }
 
     @Test
@@ -245,6 +252,7 @@ class UpdateMenuActionTest {
         click(f)
 
         await(describe = { "the retry never issued a second request" }) { f.downloadRequestCount() == 2 }
+        assertEquals(AppNotificationAction.ShowSettingsTab("updates"), f.viewModel.pendingAction?.action)
     }
 
     // --- states with an action already in flight ---
