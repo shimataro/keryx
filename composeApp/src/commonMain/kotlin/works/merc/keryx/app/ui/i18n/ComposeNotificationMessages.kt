@@ -21,6 +21,8 @@ import works.merc.keryx.app.resources.feed_new_articles
 import works.merc.keryx.app.resources.feed_url_changed
 import works.merc.keryx.app.resources.settings_import_failed
 import works.merc.keryx.app.resources.settings_import_success
+import works.merc.keryx.app.resources.update_available_notification
+import works.merc.keryx.app.resources.update_ready_notification
 
 /** The "N imported" text, with a " / N failed" suffix appended when [failed] is non-zero. */
 /**
@@ -80,4 +82,10 @@ class ComposeNotificationMessages : NotificationMessages {
     )
 
     override suspend fun opmlImported(added: Int, failed: Int): String = opmlImportedText(added, failed)
+
+    override suspend fun updateAvailable(version: String): String =
+        getString(Res.string.update_available_notification, version)
+
+    override suspend fun updateReadyToInstall(version: String): String =
+        getString(Res.string.update_ready_notification, version)
 }

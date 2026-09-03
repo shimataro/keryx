@@ -7,15 +7,19 @@ import io.ktor.client.engine.mock.respondError
 import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import works.merc.keryx.app.core.APP_NAME
+import works.merc.keryx.app.core.UpdateStage
 import works.merc.keryx.app.core.compareReleaseVersions
 import works.merc.keryx.app.core.isBelowStable
 import works.merc.keryx.app.core.isNewer
+import works.merc.keryx.app.platform.InstallKind
+import works.merc.keryx.app.platform.InstallLocation
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -24,6 +28,12 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class UpdateCheckerTest {
+
+    private val fakeMacLocation =
+        InstallLocation(InstallKind.MAC_APP_BUNDLE, appRoot = "/Applications/Keryx.app", launcherPath = null, parentWritable = true, translocated = false)
+    private val fakeUnsupportedLocation =
+        InstallLocation(InstallKind.ANDROID_STORE, appRoot = null, launcherPath = null, parentWritable = false, translocated = false)
+
 
     /**
      * Builds a checker whose MockEngine routes by request path: `releases/latest` (the stable-build
@@ -37,6 +47,10 @@ class UpdateCheckerTest {
         listStatus: HttpStatusCode = HttpStatusCode.OK,
         latestBody: String? = null,
         latestStatus: HttpStatusCode = HttpStatusCode.OK,
+        // A fixed, writable macOS install by default — asset-selection tests below rely on this
+        // to actually get a non-null UpdateStatus.Available.asset; every pre-existing test in this
+        // file only reads .version/.url and is unaffected by which InstallLocation is plugged in.
+        location: InstallLocation = fakeMacLocation,
     ): UpdateChecker {
         val client = HttpClient(MockEngine { request ->
             if (request.url.encodedPath.endsWith("/releases/latest")) {
@@ -47,7 +61,7 @@ class UpdateCheckerTest {
         }) {
             expectSuccess = false
         }
-        return UpdateChecker(client, currentVersion, repoSlug = "owner/repo")
+        return UpdateChecker(client, currentVersion, repoSlug = "owner/repo", location = location)
     }
 
     // --- Stable build (1.0.0+) → releases/latest ---
@@ -118,15 +132,49 @@ class UpdateCheckerTest {
         assertIs<UpdateStatus.UpToDate>(status)
     }
 
+    /**
+     * Regression guard: the underlying failure reason (here, the HTTP status) must survive into
+     * the returned UpdateStatus.Failed rather than being discarded in favor of a generic message -
+     * see UpdateChecker.kt's own UpdateStatus.Failed KDoc and data/remote/ReleaseFeedSource, which
+     * is what actually classifies this one.
+     */
     @Test
     fun latestServerErrorIsFailed() = runTest {
         val status = checker(currentVersion = "1.0.0", latestStatus = HttpStatusCode.InternalServerError).check()
         assertIs<UpdateStatus.Failed>(status)
+        assertEquals(UpdateStage.CHECK, status.exception.stage)
+        assertTrue(
+            status.exception.messageText.contains("500"),
+            "the failure reason must mention the HTTP status, not a generic message: ${status.exception.messageText}",
+        )
     }
 
     @Test
     fun missingHtmlUrlIsFailed() = runTest {
         val status = checker(latestBody = """{"tag_name":"v2.0.0"}""").check()
+        assertIs<UpdateStatus.Failed>(status)
+        assertEquals(UpdateStage.CHECK, status.exception.stage)
+    }
+
+    /**
+     * Regression guard: the version this returns ends up as a path component
+     * (UpdateRepository.updateDownloadDir), so a tag_name that isn't a plain version string must be
+     * rejected outright rather than passed through — see UpdateChecker.kt's own
+     * isSafeVersionForPathUse.
+     */
+    @Test
+    fun tagNameWithAPathSeparatorIsFailedNotAvailable() = runTest {
+        val status = checker(
+            latestBody = """{"tag_name":"v9.9.9-../../../../Library/LaunchAgents","html_url":"https://ex.com/x"}""",
+        ).check()
+        assertIs<UpdateStatus.Failed>(status)
+    }
+
+    @Test
+    fun tagNameWithABackslashIsFailedNotAvailable() = runTest {
+        val status = checker(
+            latestBody = """{"tag_name":"v9.9.9-..\\..\\evil","html_url":"https://ex.com/x"}""",
+        ).check()
         assertIs<UpdateStatus.Failed>(status)
     }
 
@@ -295,6 +343,167 @@ class UpdateCheckerTest {
         job.cancel()
         job.join()
         assertNull(status)
+    }
+
+    // --- Release notes / asset selection (assets[] and body parsing) ---
+
+    @Test
+    fun releaseNotesIsParsedFromBody() = runTest {
+        val status = checker(
+            latestBody = """{"tag_name":"v1.2.3","html_url":"https://ex.com/1.2.3","body":"- swipe navigation\n- lower search minimum"}""",
+        ).check()
+        assertIs<UpdateStatus.Available>(status)
+        assertEquals("- swipe navigation\n- lower search minimum", status.releaseNotes)
+    }
+
+    @Test
+    fun releaseNotesIsNullWhenBodyIsMissing() = runTest {
+        val status = checker(latestBody = """{"tag_name":"v1.2.3","html_url":"https://ex.com/1.2.3"}""").check()
+        assertIs<UpdateStatus.Available>(status)
+        assertNull(status.releaseNotes)
+    }
+
+    @Test
+    fun assetIsSelectedForTheCurrentInstallLocation() = runTest {
+        val sha256 = "a".repeat(64)
+        val status = checker(
+            latestBody = """
+                {"tag_name":"v1.2.3","html_url":"https://ex.com/1.2.3","assets":[
+                    {"name":"Keryx-1.2.3-macos-arm64.zip","browser_download_url":"https://dl/mac.zip",
+                     "size":12345,"digest":"sha256:$sha256","state":"uploaded"},
+                    {"name":"Keryx-1.2.3-windows-x86_64.msi","browser_download_url":"https://dl/win.msi",
+                     "size":6789,"digest":"sha256:$sha256","state":"uploaded"}
+                ]}
+            """.trimIndent(),
+            location = fakeMacLocation,
+        ).check()
+        assertIs<UpdateStatus.Available>(status)
+        val asset = status.asset
+        assertEquals("Keryx-1.2.3-macos-arm64.zip", asset?.name)
+        assertEquals("https://dl/mac.zip", asset?.downloadUrl)
+        assertEquals(12345L, asset?.sizeBytes)
+        assertEquals(sha256, asset?.sha256)
+        assertEquals(UpdateAssetKind.MAC_APP_ZIP, asset?.kind)
+    }
+
+    @Test
+    fun assetIsNullWhenInstallLocationHasNoUpdatePath() = runTest {
+        val sha256 = "a".repeat(64)
+        val status = checker(
+            latestBody = """
+                {"tag_name":"v1.2.3","html_url":"https://ex.com/1.2.3","assets":[
+                    {"name":"Keryx-1.2.3-macos-arm64.zip","browser_download_url":"https://dl/mac.zip",
+                     "size":12345,"digest":"sha256:$sha256","state":"uploaded"}
+                ]}
+            """.trimIndent(),
+            location = fakeUnsupportedLocation,
+        ).check()
+        assertIs<UpdateStatus.Available>(status)
+        assertNull(status.asset)
+    }
+
+    @Test
+    fun assetStillBeingProcessedByGitHubIsNotSelected() = runTest {
+        val sha256 = "a".repeat(64)
+        val status = checker(
+            latestBody = """
+                {"tag_name":"v1.2.3","html_url":"https://ex.com/1.2.3","assets":[
+                    {"name":"Keryx-1.2.3-macos-arm64.zip","browser_download_url":"https://dl/mac.zip",
+                     "size":12345,"digest":"sha256:$sha256","state":"open"}
+                ]}
+            """.trimIndent(),
+            location = fakeMacLocation,
+        ).check()
+        assertIs<UpdateStatus.Available>(status)
+        assertNull(status.asset)
+    }
+
+    @Test
+    fun malformedAssetEntryIsSkippedWithoutFailingTheWholeCheck() = runTest {
+        val sha256 = "a".repeat(64)
+        val status = checker(
+            latestBody = """
+                {"tag_name":"v1.2.3","html_url":"https://ex.com/1.2.3","assets":[
+                    {"browser_download_url":"https://dl/no-name.zip","size":1,"digest":"sha256:$sha256"},
+                    {"name":"Keryx-1.2.3-macos-arm64.zip","browser_download_url":"https://dl/mac.zip",
+                     "size":12345,"digest":"sha256:$sha256","state":"uploaded"}
+                ]}
+            """.trimIndent(),
+            location = fakeMacLocation,
+        ).check()
+        assertIs<UpdateStatus.Available>(status)
+        assertEquals("Keryx-1.2.3-macos-arm64.zip", status.asset?.name)
+    }
+
+    // --- Conditional requests (ETag / If-None-Match) — data/remote/ReleaseFeedSource ---
+
+    /**
+     * Regression guard: a second check() on the same UpdateChecker instance must send back
+     * whichever validator the first response's ETag header supplied, and a 304 in response must
+     * resolve to the exact same result the cached ETag was stored against — not a failure, and not
+     * a re-parse of a body a 304 doesn't even carry.
+     */
+    @Test
+    fun secondCheckSendsIfNoneMatchAndReplaysTheCachedReleaseOn304() = runTest {
+        var requestCount = 0
+        val client = HttpClient(
+            MockEngine { request ->
+                requestCount++
+                if (requestCount == 1) {
+                    respond(
+                        """{"tag_name":"v2.0.0","html_url":"https://ex.com/2.0.0"}""",
+                        HttpStatusCode.OK,
+                        headersOf(HttpHeaders.ETag, listOf("\"abc123\"")),
+                    )
+                } else {
+                    assertEquals("\"abc123\"", request.headers[HttpHeaders.IfNoneMatch])
+                    respond("", HttpStatusCode.NotModified)
+                }
+            },
+        ) { expectSuccess = false }
+        val checker = UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo")
+
+        val first = checker.check()
+        val second = checker.check()
+
+        assertIs<UpdateStatus.Available>(first)
+        assertIs<UpdateStatus.Available>(second)
+        assertEquals(first.version, second.version)
+        assertEquals(first.url, second.url)
+        assertEquals(2, requestCount)
+    }
+
+    @Test
+    fun firstCheckSendsNoIfNoneMatchWithoutAPriorETag() = runTest {
+        val history = mutableListOf<HttpRequestData>()
+        val client = HttpClient(
+            MockEngine { request ->
+                history.add(request)
+                respond("""{"tag_name":"v1.0.0","html_url":"https://ex.com"}""")
+            },
+        ) { expectSuccess = false }
+        UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo").check()
+
+        assertEquals(1, history.size)
+        assertNull(history[0].headers[HttpHeaders.IfNoneMatch])
+    }
+
+    @Test
+    fun aResponseWithNoETagIsNeverCachedSoLaterChecksStayUnconditional() = runTest {
+        var requestCount = 0
+        val client = HttpClient(
+            MockEngine { request ->
+                requestCount++
+                assertNull(request.headers[HttpHeaders.IfNoneMatch], "request #$requestCount must not carry a validator")
+                respond("""{"tag_name":"v2.0.0","html_url":"https://ex.com/2.0.0"}""") // no ETag header
+            },
+        ) { expectSuccess = false }
+        val checker = UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo")
+
+        checker.check()
+        checker.check()
+
+        assertEquals(2, requestCount)
     }
 }
 

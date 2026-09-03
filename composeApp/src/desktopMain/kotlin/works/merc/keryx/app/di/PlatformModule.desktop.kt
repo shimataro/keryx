@@ -30,7 +30,9 @@ import works.merc.keryx.app.domain.OAuthCallbackParams
 import works.merc.keryx.app.domain.OAuthConnectFlow
 import works.merc.keryx.app.domain.OsNotificationSink
 import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.domain.UpdateInstaller
 import works.merc.keryx.app.platform.isMacOs
+import works.merc.keryx.app.platform.update.DesktopUpdateInstaller
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.oauth_loopback_success
 
@@ -53,6 +55,8 @@ actual val platformModule: Module = module {
     // lifetime and posts tray notifications from there (see that flow's own KDoc). Posting again
     // through this sink would show every new-article notification twice.
     single<OsNotificationSink> { OsNotificationSink { _, _ -> } }
+
+    single<UpdateInstaller> { DesktopUpdateInstaller(get()) }
 
     single {
         HttpClient(CIO) {

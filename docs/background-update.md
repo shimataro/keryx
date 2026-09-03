@@ -134,6 +134,197 @@ mechanism or downloading executable code from elsewhere, neither of which this f
 reason is that Play already auto-updates the app, so a second, GitHub-flavored update path next to
 it would only confuse the user about which one to use.
 
+## In-App Update
+
+Where `selfUpdateCheckSupported` offers a check at all, `domain/UpdateRepository` (a Koin `single`,
+so it and any in-flight download outlive a closed settings dialog) drives it past a plain
+"here's a link" into an actual download-and-install, behind one `StateFlow<UpdateState>`:
+`Idle → Checking → (UpToDate | Available) → Downloading → Verifying → Ready → Installing`, with
+`Failed` reachable from `Checking`/`Downloading`/`Verifying`. Every surface — the Updates settings
+tab, the desktop tray's one update menu item, the notification-center bell — reads this same state,
+so they can never disagree about what's currently true. **No step ever runs unattended**: a check
+never auto-downloads, and a downloaded file never auto-installs — download and install are each a
+separate, explicit click (Updates tab button, or the tray item once one is offered).
+
+- **Which file, and what to do with it.** `UpdateChecker` parses the GitHub release's `assets[]`;
+  `domain/UpdateAsset.kt`'s `selectUpdateAsset` picks the one matching this build's install form
+  (never an asset GitHub hasn't finished processing, and never one with no verifiable `sha256`
+  digest — see "Integrity verification" below) — `.aab` is never a candidate at all, since no
+  `UpdateAssetKind` suffix ends in it. `domain/UpdateInstallPolicy.kt`'s `updatePlan` then decides
+  what an update should actually *do* with that asset, purely from the install location
+  (`platform/InstallLocation.kt`'s `detectInstallLocation()` — a macOS `.app`, a Windows/Linux
+  portable ZIP, a Windows MSI install, an Android sideload, …) and the already-selected asset (or
+  its absence) — touching neither the network nor the filesystem itself: `SelfReplace` (replace
+  files in place, then relaunch), `RunInstaller` (hand
+  off to the OS's own installer), `OpenReleasePage` (this install form can't be updated in place —
+  a Linux deb/rpm install, macOS App Translocation, an unwritable install directory, no matching
+  asset in this release), or `NotOffered` (a development run, or an Android build installed through
+  Google Play). `UpdateInstaller.canInstall(plan)` is a separate, narrower question the platform
+  `actual` answers at runtime — not just "what should happen" but "is this instance currently
+  allowed to" (Android's install-unknown-apps consent, most notably) — and gates whether a download
+  even starts. `check()` resolves this once per found update and folds it into
+  `AvailableUpdate.installable`, so the Updates tab and the tray read that instead of `plan`'s own
+  `isInstallable` — a plan can call for `SelfReplace`/`RunInstaller` while the platform still
+  refuses it, and both surfaces need to agree with `startDownload()`'s own gate about whether
+  "Download" does anything.
+- **Downloading.** `data/remote/UpdateDownloader` manually follows redirects (the shared HTTP client
+  has no redirect plugin at all) against a small host allowlist — exact-match `github.com` and
+  `api.github.com` (where the Releases API itself answers), plus a leading-dot-required suffix
+  match against `.githubusercontent.com` (the signed-asset redirect target, e.g.
+  `release-assets.githubusercontent.com`; the leading dot means `evilgithubusercontent.com` must
+  never match) — re-validated at every hop, `https` only, capped at `MAX_REDIRECTS`. The file streams to a `.part`
+  path under `<cacheDir>/updates/<version>/`; only once its exact size and SHA-256 both match the
+  release's own values does it get an atomic rename to its final name — "the final name exists" is
+  the invariant the rest of the pipeline relies on for "this file is verified". A per-request
+  timeout override replaces the shared client's ordinary (much shorter) request timeout, since an
+  update asset can be 100MB+. Every request goes through `prepareGet(…).execute { … }` rather than
+  a plain `client.get()`, and that is load-bearing rather than stylistic: Ktor installs its
+  `SaveBody` plugin by default, which reads the *whole* response body into memory before a plain
+  `get()` even returns — which froze the real progress bar at 0% for the entire transfer and then
+  jumped it straight to done, besides holding 100MB+ in RAM (`skipSavingBody()` is a deprecated
+  no-op in Ktor 3.5; the streaming form is the only way out). Progress is throttled to once per
+  whole-percent change (`shouldEmitProgress` — gated on the percentage itself, not a fixed byte
+  delta, since that's the finest resolution any consumer can show and scales correctly regardless
+  of asset size), and cancelling reverts to `Available` rather than `Failed` — a
+  user-requested stop is not a failure. There is no resume-from-partial: the redirect target is a
+  signed URL that expires in about an hour, so a failed/cancelled download is simply restarted, not
+  resumed. `check()` also sweeps `<cacheDir>/updates/` of every version except whichever one the
+  current state is still using (protecting an in-progress `.part` as well as a `Ready` file), so an
+  update this repository stops referencing doesn't accumulate on disk forever.
+- **Installing.** The two platform `UpdateInstaller` actuals do not share an approach:
+  - **Desktop** (`platform/update/DesktopUpdateInstaller.kt`) extracts a self-replace ZIP into a
+    staging directory through `platform/update/ArchiveExtractor.kt` (zip-slip rejection,
+    entry-count and byte-size limits — see below for why this is a seam), health-checks it
+    (the executable exists; on macOS, its `Info.plist` version and its own code signature also
+    match — `codesign --verify --strict --deep`), moves the extraction
+    onto the same volume as the current install (so the swap is a plain rename), and hands off to a
+    detached helper script (`platform/update/UpdateScriptWriter.kt`) via `ProcessLauncher`. Only
+    once that hand-off has actually happened — the installer returning `Launched`, which makes
+    `UpdateRepository` emit its `installLaunched` signal — does `main.kt` exit the app. The app
+    deliberately does **not** exit on `UpdateState.Installing`: that state is set the moment an
+    install starts, while the extraction is still running, so exiting on it killed the process
+    before the script had even been written. Every script follows the same shape regardless of OS:
+    wait for this process's
+    PID to exit, **retreat** the running install aside (`mv`, never delete first), **place** the new
+    one, **verify** it, and **roll back** to the retreated copy on any failure along the way — so a
+    crash mid-swap never leaves the install directory empty. Because that retreat is always a plain
+    `mv` rather than delete-then-move, `DesktopUpdateInstaller` clears both the `.new` staging
+    directory and the `.old` retreat directory immediately before staging a fresh attempt (a stale
+    one from a past attempt that failed before the script could run would otherwise make the `mv`
+    nest into it instead of overwriting it). The `extracted/` staging directory is cleared first for
+    a different reason: an attempt killed *mid-extraction* leaves a partial tree, and both extractors
+    merge into an existing destination rather than replacing it, so without the clear a retried
+    install would blend two versions into one bundle. `cleanUpStaleSelfReplaceArtifacts` sweeps the
+    other two on every startup — safe unconditionally, since reaching that line at all means the current
+    `appRoot` is the live install this process is running from, which a script mid-swap never
+    leaves behind. A Windows MSI-installed build instead
+    launches a script that waits out the PID and then runs `msiexec /i ... /passive /norestart`
+    (WiX's fixed `upgradeUuid` makes this a MajorUpgrade, not a fresh install), relaunching whatever
+    ends up at the exe path either way — a declined UAC prompt or a failed upgrade relaunches the
+    previous, still-working install rather than leaving nothing running. A Linux deb/rpm install is
+    never self-replaced at all (`updatePlan` above already routes it to `OpenReleasePage`) — running
+    `pkexec`/`sudo` from a GUI with no recovery path if it fails was judged not worth the risk.
+
+    Extraction sits behind a seam because a **signed** macOS bundle cannot be unpacked in process at
+    all: its `CodeResources` seals the 43 symbolic links in the bundled JDK's legal-notices directory
+    *as links*, and `java.util.zip` exposes no way to tell a stored link from a regular file — it
+    writes each one out as a file holding the link target, which fails the `codesign` check above
+    every single time. macOS therefore extracts with `ditto -x -k` (`DittoArchiveExtractor`),
+    preceded by `ZipExtractor.validate` so the zip-slip, entry-count and uncompressed-size guards
+    still apply to an extraction `ditto` performs with no limits of its own — and are the only limits
+    in play, since `ditto` itself is bounded only by a 300-second ceiling, past which the child is
+    force-destroyed and the install fails (rather than hanging) with the exit status in its reason.
+    `validate` establishes the size bound by inflating every entry and discarding it, so a macOS
+    install decompresses the archive twice (order of +1-2 s for a ~190MB bundle, on a path the user
+    triggered by hand). That is deliberate: a local header's declared size can be absent, so reading
+    it from the central directory instead would mean trusting the archive's own metadata for a bound
+    whose whole purpose is to survive a crafted one, and overlapping the pass with `ditto` would give
+    up the property that a rejected archive leaves nothing on disk at all.
+    What `validate` cannot check is a stored link's *target* (same `java.util.zip` blind spot), so
+    `DittoArchiveExtractor.verifyExtractedTree` walks the extracted tree afterwards and rejects any
+    symlink that, resolved **through the filesystem**, lands outside the destination — textual
+    resolution is not enough, since a `..` following another symlink collapses against the link
+    rather than its target. `ditto` is not that guard (it declines to *traverse* links, not to
+    *create* an escaping one, and exits 0 having done so); what it does contribute is normalizing a
+    `..` entry *name* into the destination, which is the only defense against something written
+    *outside* the destination, where a walk that starts there cannot look. The `codesign` check is
+    deliberately not counted as a defense against an *escape* at all — it inspects the bundle
+    directory only, so an entry written beside the bundle is never looked at (see
+    [SECURITY.md](../SECURITY.md)). All of this sits on top of the SHA-256 digest the archive
+    already had to match.
+    Windows and Linux, whose app images carry no signature for a flattened link to invalidate, stay
+    on the in-process path (`InProcessArchiveExtractor` → `platform/ZipExtractor.kt`, which
+    restores the executable bit only on the entries the caller names). Their `legal/` links do come
+    out of an in-app update flattened into files holding a relative path, which is accepted rather
+    than overlooked: they are license text, never a path the app executes. The staging move has the same requirement and the same
+    trap: `FileSystemExtras`'s cross-volume fallback copies with `NOFOLLOW_LINKS`, since both
+    `Files.copy` and `Files.isDirectory` follow links by default and would otherwise flatten them
+    right back on any install whose cache and install directory sit on different volumes.
+  - **Android** (`platform/update/AndroidUpdateInstaller.kt`) streams the downloaded APK into a
+    `PackageInstaller` session and commits it; the OS takes over from there (showing its own install
+    confirmation, and — on success — killing this process itself, so nothing here has to). If
+    `canRequestPackageInstalls()` is false when Install is clicked (declared but not yet granted, or
+    revoked since the download started), the app instead opens the "install unknown apps" system
+    settings screen and leaves state at `Ready` rather than failing outright, so a later click
+    retries once consent is granted. `REQUEST_INSTALL_PACKAGES` is declared only in the `github`
+    distribution flavor's manifest (`androidApp/build.gradle.kts`'s `flavorDimensions` — see
+    `build.md`) — not the one submitted to Google Play, both because Play policy restricts that
+    permission to apps whose primary purpose is installing other apps and because Play already
+    updates the app itself. The gate this drives, `canInstallAndroidApkUpdate`
+    (`domain/UpdateInstallPolicy.kt`), reads the *merged manifest's* permission via
+    `canRequestPackageInstalls()` rather than branching on which flavor built the running APK, since
+    a `play`-flavored APK can still reach this code sideloaded outside Play (a Play Console test
+    track, `bundletool`, internal distribution) and must still correctly refuse there. A terminal
+    failure after the session is committed (most notably `STATUS_FAILURE_INCOMPATIBLE` — a
+    signing-key mismatch between this install and the one being installed over, see `build.md`'s
+    Play App Signing note) is logged but not fed back into `UpdateRepository.state`, which already
+    moved to `Installing` synchronously on commit and has no channel for a later async result to
+    revise it — a known, narrow UX gap this installer accepts for now rather than adding a
+    cross-layer callback for a case a successful install never even reaches (the OS kills the
+    process first).
+- **Presentation.** Surfaced from the moment `check()` finds something, not only once it's ready:
+  the desktop tray's single update menu item cycles through "Download update %1$s", "Downloading…
+  N%" (rounded to 5% to avoid flooding the Linux SNI D-Bus menu with layout-change signals),
+  "Verifying…", "Restart to update to %1$s", and "Update failed" as `state` moves (`%1$s` is the
+  target version — see `tray_update_download`/`tray_update_restart` in `strings.xml`) — absent
+  entirely for a `NotOffered`/non-installable plan. The Updates tab's own headline row follows the
+  same rule — no "Download" button renders there at all for that plan, rather than a disabled one
+  (see `ui-guidelines`'s "prefer disabled over hidden" carve-out, which this is: there is nothing
+  *temporarily* inactive about a form the in-app installer can never handle) — replaced by the
+  `settings_update_manual_only` caption underneath explaining why, plus a link to the release page
+  (`LinkRow`, always present once a release is known, whether or not it's installable) as the
+  manual alternative. The tab's own "Check for updates" button is a separate element entirely,
+  underneath the check-interval control at the bottom of the tab — always present regardless of
+  `plan`, not something the headline row's own button "falls back" to. The notification-center bell
+  gets one row per meaningful moment —
+  "a new version is available" when `check()` finds one, then that same row is dismissed and
+  replaced (never left to accumulate alongside it) by "ready to install" once a download finishes —
+  reusing the existing `ShowSettingsTab("updates")`/`OpenUrl(releaseUrl)` actions rather than adding
+  a dedicated one (see "Notification Center" in [error-design.md](error-design.md)). A download
+  failure itself is deliberately **not** posted to the bell — the tray item and the Updates tab
+  (with its own "Retry" button) already surface it, and a `postNotification` call for every
+  transient network hiccup would be noisier than useful.
+
+**Integrity verification** relies entirely on the GitHub Releases API's own `assets[].digest`
+(`"sha256:…"`) matching the downloaded file's own SHA-256 — no `release.yml` change was needed for
+this, since the API already returns it. This detects transport corruption and a tampered download,
+but **not** publisher compromise: if the GitHub account/token that produces a release were itself
+compromised, the attacker-substituted asset and its digest would still match each other. See
+[SECURITY.md](../SECURITY.md) for this limitation and what a stronger guarantee (e.g. a
+minisign/cosign detached signature) would require.
+
+**Conditional requests.** `ReleaseFeedSource` caches each endpoint's `ETag` in memory (one slot for
+`releases/latest`, one for the `releases` list — an `UpdateChecker` instance only ever calls the one
+its `currentVersion` picks, per its own KDoc) and sends it back as `If-None-Match` on the next call;
+a 304 replays the cached parsed result rather than a fresh, empty-bodied response being treated as
+"nothing found". This is intentionally **not** persisted to `local_settings.json` the way
+`FeedFetcher`'s validators are saved in the `feeds` table (see "Feed Update Efficiency" below) —
+`ReleaseFeedSource` already lives for the app's whole process lifetime as part of the
+`UpdateChecker` Koin `single`, so an in-memory cache already covers what actually matters (skipping
+a re-fetch/re-parse on every periodic background re-check); persisting release payloads across
+restarts as well would add real complexity for the comparatively rare case of a restart landing
+between two checks.
+
 ## Feed Update Efficiency
 
 `FeedFetcher` sends `If-None-Match` (ETag) / `If-Modified-Since` (Last-Modified), and returns empty on 304 (no new articles). Updated ETag / Last-Modified values are saved in the `feeds` table.

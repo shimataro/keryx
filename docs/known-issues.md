@@ -1016,10 +1016,12 @@ while a window is displayable but not yet visible — which is the only way this
 ### How this was resolved
 
 `KeryxTabDialog`'s tab-content area now has a fixed height (`KERYX_TAB_DIALOG_CONTENT_HEIGHT`, 416dp
-— the tallest tab's natural content height at `fontScale = 1.0`, plus slack), so every tab measures
-the same and the window is never resized on a tab switch. Since the artifact is inseparable from
-resizing an already-visible window, and forcing the ordering makes it worse, removing the resize is
-the only fix available from application code.
+— `general`'s own natural content height at `fontScale = 1.0`, measured at 399dp, plus a little
+slack; `updates` with an update available is the closest runner-up, measured at ~397dp — see that
+constant's own KDoc for both measurements), so every tab measures the same and the window is never
+resized on a tab switch. Since the artifact is inseparable from resizing an already-visible window,
+and forcing the ordering makes it worse, removing the resize is the only fix available from
+application code.
 
 The trade-off is deliberate: the shortest tab (notifications, under 100dp of content) shows most of
 the area as the dialog's own background. Content taller than the area — a tab that grows later, or a

@@ -67,15 +67,6 @@ private const val RSS_WITH_NEW_SEARCHABLE_ARTICLE = """<?xml version="1.0"?><rss
 <item><title>Serialization Deep Dive</title><link>https://ex.com/2</link><guid>g2</guid></item>
 </channel></rss>"""
 
-/** A [NotificationMessages] fake returning canned, recognizable strings. */
-private class FakeNotificationMessages : NotificationMessages {
-    override suspend fun feedGone(feedTitle: String): String = "gone:$feedTitle"
-    override suspend fun feedUrlChanged(feedTitle: String): String = "urlChanged:$feedTitle"
-    override suspend fun newArticles(count: Int): String = "new:$count"
-    override suspend fun syncFailed(exception: works.merc.keryx.app.core.KeryxException): String = "syncFailed:${exception::class.simpleName}"
-    override suspend fun opmlImported(added: Int, failed: Int): String = "opmlImported:$added/$failed"
-}
-
 /**
  * Pauses the first `nextSortOrderInGroup` SELECT on a latch and records whether a second,
  * overlapping call reaches the same statement while the first is still gated, so

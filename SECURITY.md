@@ -98,5 +98,60 @@ Keryx is designed to minimize its attack surface:
   your device and the provider — no credentials pass through any developer server.
 - **Local data** (subscriptions, cached articles, settings) stays on your device
   unless you explicitly enable cloud sync.
+- **In-app update downloads are verified, but not authenticated to a publisher
+  identity.** When Keryx offers to download and install an update in-app (see
+  `docs/background-update.md`'s "In-App Update" for which platforms/install forms
+  this applies to), the downloaded file is checked against the SHA-256 digest the
+  GitHub Releases API itself reports for that asset before anything is installed,
+  over an HTTPS connection to an allowlisted GitHub host only. This detects
+  transport corruption and a tampered-in-transit download, but **it does not
+  verify who published the release** — the digest is computed and served by the
+  same GitHub Releases API the asset itself comes from, so if the GitHub
+  account/token used to publish Keryx releases were ever compromised, a
+  substituted asset and its digest would still match each other. Trust in a
+  release's authenticity currently rests on GitHub account security (2FA, token
+  scoping) and HTTPS/TLS to GitHub, the same as any other software distributed
+  without a separate, independently-verifiable release signature. A stronger
+  guarantee (e.g. a detached minisign/cosign signature published alongside each
+  release, with the verifying public key embedded in the app) is a considered
+  future improvement, not yet implemented.
+- **On macOS, an extracted update also passes a code-signature self-consistency
+  check** (`codesign --verify --strict --deep`) before it is swapped into place —
+  this catches an extracted bundle whose signed contents were altered or
+  corrupted after signing, independent of the digest check above. It is **not** a
+  publisher-identity check: current release builds are signed ad-hoc rather than
+  with a Developer ID certificate and notarized, so there is no certificate chain
+  to verify the signer against (`codesign --verify -R "anchor apple generic and
+  certificate leaf[subject.OU] = <team id>"` would reject every ad-hoc-signed
+  release unconditionally, including legitimate ones). Tightening this to an
+  actual publisher check is planned once releases are signed with a real
+  Developer ID and notarized. For the same ad-hoc-signing reason, the self-replace
+  script also strips any `com.apple.quarantine` flag from the new bundle before
+  relaunching it — an ad-hoc signature gives Gatekeeper nothing to clear a
+  quarantine flag against, so leaving one in place could block the relaunch.
+- **The macOS bundle is unpacked with `ditto`, not in process.** A signed bundle's
+  `CodeResources` seals the symbolic links in its bundled JDK *as links*, and
+  `java.util.zip` cannot tell a stored link from a regular file — so an in-process
+  extraction flattens them and the check above rejects the result. Extraction
+  therefore hands off to `ditto -x -k`, with `ZipExtractor.validate` run first so the
+  zip-slip, entry-count and uncompressed-size limits still apply to an extraction
+  `ditto` performs with no limits of its own. A stored link's *target* cannot be
+  pre-checked (the same blind spot), so the extracted tree is walked afterwards
+  (`verifyExtractedTree`): every symlink is resolved **through the filesystem** and
+  rejected unless it stays inside the destination, and entry count and byte total are
+  re-checked against what actually landed. Resolving through the filesystem rather
+  than textually is what makes it sound — a `..` that follows another symlink
+  collapses against the link, not against what the link points at, so two entries
+  would otherwise be enough to look contained while pointing outside. `ditto` itself
+  is *not* that guard: it declines to *traverse* links, which is a different property
+  from declining to *create* one that points outside — it creates such a link and
+  exits 0. What `ditto` does contribute is normalizing a `..` entry **name** into the
+  destination, which is the only defense against something written *outside* the
+  destination, since a walk that starts there cannot see it. The code-signature check
+  is **not** a line of defense against an escape at all: it inspects the bundle
+  directory only, so an entry written *beside* the bundle is never looked at, and it
+  is a self-consistency check, so an attacker able to produce the whole archive could
+  ad-hoc sign their own bundle. It detects modification *inside* the bundle, which is
+  what it is there for.
 
 For the complete data-handling description, see [PRIVACY.md](PRIVACY.md).

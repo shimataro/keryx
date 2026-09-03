@@ -72,6 +72,14 @@ const val MAX_REDIRECTS = 5 // redirect loop guard
 /** HTTP request timeout for the shared client (distinct from [CONNECTION_TIMEOUT_MS], the connect phase). */
 const val REQUEST_TIMEOUT_MS = 60_000L
 
+/**
+ * Per-chunk socket timeout for an in-app update download
+ * ([works.merc.keryx.app.data.remote.UpdateDownloader]), which overrides [REQUEST_TIMEOUT_MS] to
+ * effectively unlimited for the *whole* request — a 100+ MB asset takes far longer than 60 seconds
+ * end to end, but a socket that stops delivering bytes entirely for this long is genuinely stuck.
+ */
+const val UPDATE_DOWNLOAD_SOCKET_TIMEOUT_MS = 60_000L
+
 /** Clock-skew tolerance for [works.merc.keryx.app.data.cloud.OAuthTokens.isExpired]'s default. */
 const val TOKEN_EXPIRY_SKEW_MS = 60_000L
 

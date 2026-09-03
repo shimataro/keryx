@@ -587,13 +587,96 @@ compose.resources {
  * "app-version cannot start with 0" check, a stripped SemVer pre-release suffix (see
  * [appPackageVersion]), or both. CFBundleVersion deliberately keeps the packaged value: it is an
  * internal build identifier that never surfaces in Finder or the UI.
+ *
+ * @return whether the file was actually rewritten. jpackage signs the bundle *before* this runs, so
+ *   `true` means the seal is now stale and the caller must re-sign (see [resealMacOsBundle]).
  */
-fun restoreMacOsShortVersion(infoPlist: java.io.File, version: String) {
-    if (!infoPlist.exists()) return
+fun restoreMacOsShortVersion(infoPlist: java.io.File, version: String): Boolean {
+    if (!infoPlist.exists()) return false
     val content = infoPlist.readText()
     val patched = Regex("""(<key>CFBundleShortVersionString</key>\s*<string>)[^<]*(</string>)""")
         .replace(content) { "${it.groupValues[1]}$version${it.groupValues[2]}" }
-    if (patched != content) infoPlist.writeText(patched)
+    if (patched == content) return false
+    infoPlist.writeText(patched)
+    return true
+}
+
+/**
+ * Runs [args] to completion, failing the build on a non-zero exit. Shared by both macOS
+ * post-processing steps (`createDistributable`'s re-sign/verify and `packageDmg`'s volume-icon
+ * hook) so a change to how this build reports a failed external tool only has to be made once.
+ *
+ * @param captureOutput return the command's stdout instead of inheriting it.
+ * @param errorMessage what to say instead of naming the command line, for a caller whose failure
+ *   deserves an explanation rather than an invocation.
+ */
+fun runCommand(vararg args: String, captureOutput: Boolean = false, errorMessage: String? = null): String {
+    val process = ProcessBuilder(*args).apply { if (!captureOutput) inheritIO() }.start()
+    val output = if (captureOutput) process.inputStream.bufferedReader().readText() else ""
+    val exit = process.waitFor()
+    if (exit != 0) error(errorMessage?.let { "$it (exited $exit)" } ?: "Command failed (exit $exit): ${args.joinToString(" ")}")
+    return output
+}
+
+/** Runs `codesign` with [args], failing the build via [errorMessage] on a non-zero exit. */
+fun runCodesign(errorMessage: String, vararg args: String) {
+    runCommand("/usr/bin/codesign", *args, errorMessage = errorMessage)
+}
+
+/**
+ * The signature properties a re-sign must not silently change, read off `codesign -dv`'s
+ * `CodeDirectory` line: `flags=` (is the hardened runtime on?) and `hashes=13+N`, whose `N` counts
+ * the special slots and is therefore what reveals whether an **entitlement blob exists at all**.
+ * That pairing is the whole point — a bundle hardened with `runtime` but stripped of its
+ * entitlements is killed by AMFI on launch, and `codesign --verify` cannot see it, since the seal
+ * itself is perfectly valid. `size=` is deliberately excluded: it varies legitimately.
+ */
+fun macSignatureProperties(appDir: java.io.File): List<String> {
+    val process = ProcessBuilder("/usr/bin/codesign", "-dv", appDir.absolutePath)
+        .redirectErrorStream(true) // codesign -dv reports on stderr
+        .start()
+    val output = process.inputStream.bufferedReader().readText()
+    process.waitFor()
+    val line = output.lineSequence().firstOrNull { it.startsWith("CodeDirectory ") } ?: return emptyList()
+    return line.split(' ').filter { it.startsWith("flags=") || it.startsWith("hashes=") }
+}
+
+/**
+ * Re-applies the signature that [restoreMacOsShortVersion]'s write-back invalidated, carrying over
+ * everything the previous signature declared.
+ *
+ * `--preserve-metadata=entitlements,flags,runtime` is load-bearing, not defensive. Compose Desktop
+ * signs the app image with `default-entitlements.plist` — `allow-jit`,
+ * `allow-unsigned-executable-memory`, `disable-library-validation` — **and** the hardened-runtime
+ * flag, all three of which a JVM needs to run at all on Apple Silicon. Naming `--options runtime`
+ * by hand reproduced the flag while dropping the entitlements (`hashes=13+7` became `13+3`), which
+ * leaves a bundle that passes `codesign --verify` and is then killed by AMFI the moment it launches.
+ * Preserving the previous signature's metadata reproduces whatever was there instead of restating a
+ * guess, so it cannot drift if Compose or jpackage change what they sign with.
+ *
+ * `-` (ad-hoc) is hardcoded because this build configures no signing identity at all; adopting a
+ * Developer ID means passing that identity here instead — re-signing ad-hoc over it would silently
+ * discard it and defeat notarization (see docs/build.md).
+ */
+fun resealMacOsBundle(appDir: java.io.File) {
+    runCodesign(
+        "Failed to re-sign $appDir after restoring CFBundleShortVersionString",
+        "--force", "--deep", "--preserve-metadata=entitlements,flags,runtime",
+        "--sign", "-", appDir.absolutePath,
+    )
+}
+
+/**
+ * Fails the build if [appDir]'s signature no longer matches its own contents. The in-app updater
+ * runs this exact check against every downloaded bundle before swapping it in (see
+ * docs/background-update.md), so an app image that can't pass it must never leave this machine —
+ * the release ZIP is made from this very directory.
+ */
+fun verifyMacOsBundleSeal(appDir: java.io.File) {
+    runCodesign(
+        "$appDir has a broken code-signature seal and must not be shipped",
+        "--verify", "--strict", "--deep", appDir.absolutePath,
+    )
 }
 
 // Silences the sqlite-jdbc restricted-method (System::load) warning on JDK 22+.
@@ -613,19 +696,37 @@ tasks.withType<Test>().configureEach {
 // The `run` task is registered lazily by the Compose/KMP desktop plugins, so other
 // run-specific configuration is deferred until after project evaluation.
 afterEvaluate {
-    // Needed whenever what actually got packaged (macOsPackageVersion) differs from the real,
-    // full appVersion: the 0.x-major placeholder, a stripped pre-release suffix, or both at once.
-    // This breaks the ad-hoc bundle seal, which is acceptable while the app is effectively
-    // unsigned (see docs/build.md). A plain (non-prerelease), major-1-or-higher version needs no
-    // post-processing at all and keeps a valid signature. packageDmg depends on
-    // createDistributable, so patching here also reaches the app bundle inside the DMG.
+    // macOS-only post-processing: no other platform produces an .app, so every step below is a
+    // no-op there. The version write-back is needed whenever what actually got packaged
+    // (macOsPackageVersion) differs from the real, full appVersion — the 0.x-major placeholder, a
+    // stripped pre-release suffix, or both at once. jpackage signs the bundle *before* this runs,
+    // so the write-back invalidates the ad-hoc seal and the bundle must be re-signed: the in-app
+    // updater's own `codesign --verify --strict --deep` gate would otherwise reject every release
+    // ZIP made from this directory (the DMG never showed the problem, because jpackage re-signs its
+    // own copy of the app image while building it). The verify runs whether or not anything was
+    // patched, so a broken seal can never leave this machine unnoticed. packageDmg depends on
+    // createDistributable, so all of this also reaches the app bundle inside the DMG.
     tasks.findByName("createDistributable")?.doLast {
+        val appDir = file("build/compose/binaries/main/app/$appName.app")
+        if (!appDir.isDirectory) return@doLast
         if (macOsPackageVersion != appVersion) {
-            restoreMacOsShortVersion(
-                file("build/compose/binaries/main/app/$appName.app/Contents/Info.plist"),
-                appVersion,
-            )
+            val before = macSignatureProperties(appDir)
+            // appDir.resolve(...), not java.io.File(...): inside a task action `java` resolves to
+            // the JavaPluginExtension, not the package, so the qualified name doesn't compile here.
+            if (restoreMacOsShortVersion(appDir.resolve("Contents/Info.plist"), appVersion)) {
+                resealMacOsBundle(appDir)
+                val after = macSignatureProperties(appDir)
+                // The seal verify below cannot catch a re-sign that produced a *valid* signature
+                // with different properties than jpackage's — most consequentially a hardened
+                // runtime that lost its entitlements. Comparing before and after is the only thing
+                // that can, so a drift here fails the build rather than shipping a bundle that
+                // verifies cleanly and dies at launch.
+                check(before == after) {
+                    "Re-signing $appDir changed its signature properties: $before -> $after"
+                }
+            }
         }
+        verifyMacOsBundleSeal(appDir)
     }
 
     // Set DMG volume icon to the app icon instead of the default Java logo.
@@ -637,16 +738,6 @@ afterEvaluate {
         val volumeName = appName
         val rwDmg = File("${dmgFile.absolutePath}.rw.dmg")
         val iconFile = file("icons/keryx.icns")
-
-        fun runCommand(vararg args: String, captureOutput: Boolean = false): String {
-            val process = ProcessBuilder(*args).apply {
-                if (!captureOutput) inheritIO()
-            }.start()
-            val output = if (captureOutput) process.inputStream.bufferedReader().readText() else ""
-            val exit = process.waitFor()
-            if (exit != 0) error("Command failed (exit $exit): ${args.joinToString(" ")}")
-            return output
-        }
 
         try {
             // Convert to read-write so we can modify the volume contents

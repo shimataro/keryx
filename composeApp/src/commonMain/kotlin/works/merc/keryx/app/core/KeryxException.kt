@@ -44,6 +44,16 @@ class SchemaVersionException(val localVersion: Long, val cloudVersion: Long) :
  */
 class CloudDataIncompatibleException(message: String) : KeryxException(message)
 
+// --- Update ---
+
+/** Which step of an in-app update ([works.merc.keryx.app.domain.UpdateRepository]) failed. */
+enum class UpdateStage { CHECK, DOWNLOAD, VERIFY, INSTALL }
+
+/** An in-app update failed at [stage]. Never auto-retried and never sent to the notification
+ * center — the Updates settings tab shows it inline (a "Retry" button), the same restrained
+ * treatment [works.merc.keryx.app.domain.NotificationCenter] already gives [SyncConflictException]. */
+class UpdateException(val stage: UpdateStage, message: String) : KeryxException(message)
+
 // --- User input ---
 
 class InvalidFeedUrlException(message: String) : KeryxException(message)

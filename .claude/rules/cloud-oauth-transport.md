@@ -27,7 +27,7 @@ schemes (e.g. Google's "Desktop app" clients accept only `http://127.0.0.1` loop
 
 How the scheme gets registered differs per platform: macOS declares it in Info.plist
 (`CFBundleURLTypes`) at packaging time, while Windows and Linux register it at startup from
-`registerCustomUriScheme()` — the registry on Windows, a user-level `.desktop` entry plus a
+`registerFileAssociations()` — the registry on Windows, a user-level `.desktop` entry plus a
 `mimeapps.list` association on Linux (`LinuxUriSchemeRegistrar`).
 
 ## Accepted tradeoff

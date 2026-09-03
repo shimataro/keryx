@@ -1,6 +1,7 @@
 package works.merc.keryx.app.di
 
 import app.cash.sqldelight.db.SqlDriver
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -8,6 +9,7 @@ import org.koin.core.module.Module
 import org.koin.dsl.module
 import works.merc.keryx.app.core.AppInfo
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.data.local.DatabaseDriverFactory
 import works.merc.keryx.app.data.local.FtsManager
@@ -16,6 +18,7 @@ import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
+import works.merc.keryx.app.data.remote.UpdateDownloader
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.CloudSession
@@ -30,7 +33,9 @@ import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.domain.UpdateChecker
+import works.merc.keryx.app.domain.UpdateRepository
 import works.merc.keryx.app.platform.SelfUpdateCheckSupport
+import works.merc.keryx.app.platform.detectInstallLocation
 import works.merc.keryx.app.platform.selfUpdateCheckSupported
 import works.merc.keryx.app.ui.home.HomeViewModel
 import works.merc.keryx.app.ui.home.NotificationCenterViewModel
@@ -60,8 +65,16 @@ val appModule: Module = module {
     single { NewArticleNotifier(get()) }
     single<NotificationMessages> { ComposeNotificationMessages() }
 
-    // Long-lived scope for debounced sync + background work.
-    single { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
+    // Long-lived scope for debounced sync + background work. The handler doesn't change any
+    // existing behavior (SupervisorJob's semantics and every launch/async's own exception handling
+    // are unaffected) — it only keeps an exception that would otherwise reach the platform default
+    // handler (stderr, invisible in a packaged .app with no attached console) from vanishing
+    // without a trace. That silence is exactly what made a launch()-time IllegalArgumentException
+    // in the in-app updater look like a hang instead of a logged failure (see DetachedProcess.kt).
+    single {
+        val exceptionHandler = CoroutineExceptionHandler { _, e -> Log.error("AppScope", "Uncaught coroutine exception", e) }
+        CoroutineScope(SupervisorJob() + Dispatchers.Default + exceptionHandler)
+    }
 
     single {
         SyncRepository(
@@ -83,7 +96,15 @@ val appModule: Module = module {
 
     single { FeedFetcher(get()) { get<SettingsRepository>().getReadTimeoutSeconds() } }
     single { FaviconResolver(get()) }
-    single { UpdateChecker(client = get(), currentVersion = AppInfo.version, repoSlug = AppInfo.updateRepo) }
+    // Resolved once here rather than left to each of UpdateChecker/UpdateRepository/
+    // DesktopUpdateInstaller's own constructor-default detectInstallLocation() call: that default
+    // exists only so tests can supply a fake location without DI, not as an invitation for three
+    // independent live filesystem probes (InstallLocation.parentWritable actually creates and
+    // deletes a temp file) to disagree with each other, or to run three times on the startup path.
+    single { detectInstallLocation() }
+    single { UpdateChecker(client = get(), currentVersion = AppInfo.version, repoSlug = AppInfo.updateRepo, location = get()) }
+    single { UpdateDownloader(get()) }
+    single { UpdateRepository(checker = get(), downloader = get(), installer = get(), notificationCenter = get(), notificationMessages = get(), scope = get(), location = get()) }
     single<SelfUpdateCheckSupport> { SelfUpdateCheckSupport { selfUpdateCheckSupported } }
 
     single { SettingsRepository(get(), get(), get(), get()) }

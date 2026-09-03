@@ -12,7 +12,6 @@ import org.koin.dsl.koinApplication
 import org.koin.dsl.module
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Clock
-import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
@@ -28,15 +27,6 @@ private const val RSS = """<?xml version="1.0"?><rss version="2.0"><channel>
 
 private const val OPML_ONE_FEED = """<?xml version="1.0"?>
 <opml version="2.0"><body><outline text="Feed" xmlUrl="https://ex.com/feed"/></body></opml>"""
-
-/** A [NotificationMessages] fake returning a canned, recognizable string. */
-private class OpmlOpenHandlerTestNotificationMessages : NotificationMessages {
-    override suspend fun feedGone(feedTitle: String): String = error("not used")
-    override suspend fun feedUrlChanged(feedTitle: String): String = error("not used")
-    override suspend fun newArticles(count: Int): String = error("not used")
-    override suspend fun syncFailed(exception: KeryxException): String = error("not used")
-    override suspend fun opmlImported(added: Int, failed: Int): String = "opmlImported:$added/$failed"
-}
 
 /**
  * Verifies [importOpmlAndNotify] — the platform-independent half of the `.opml` "open with Keryx"
@@ -65,7 +55,7 @@ class OpmlOpenHandlerTest {
         val ftsManager = works.merc.keryx.app.ftsManagerIndexed(driver)
         val feedRepository = FeedRepository(
             db, FeedFetcher(client), FaviconResolver(faviconClient), articleRepository, ftsManager,
-            SyncScheduler {}, NotificationCenter(), OpmlOpenHandlerTestNotificationMessages(), clock, Dispatchers.Unconfined,
+            SyncScheduler {}, NotificationCenter(), FakeNotificationMessages(), clock, Dispatchers.Unconfined,
         )
         val folderRepository = FolderRepository(db, feedRepository, SyncScheduler {}, clock, Dispatchers.Unconfined)
         val tagRepository = TagRepository(db, SyncScheduler {}, clock, Dispatchers.Unconfined)
@@ -74,7 +64,7 @@ class OpmlOpenHandlerTest {
             modules(
                 module {
                     single { importer }
-                    single<NotificationMessages> { OpmlOpenHandlerTestNotificationMessages() }
+                    single<NotificationMessages> { FakeNotificationMessages() }
                     single { NotificationCenter() }
                 },
             )

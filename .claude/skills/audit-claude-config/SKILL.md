@@ -42,9 +42,9 @@ cross-checking against the current source code**, then output recommended fixes 
   `ui-guidelines.md` was missing even though `docs/*.md` were expanded).
 - **`@` imports do not work in `agents/*.md`.** They are expanded in `CLAUDE.md`, but an agent
   definition's own `@path` is not — an agent that needs a document must be told to `Read` it by path.
-  Flag any `@` import found in `.claude/agents/`: it is silently doing nothing. (Detected when
-  `reviewer.md`'s `@../../docs/sync-architecture.md` turned out never to reach the agent, while
-  `app-architecture.md` appeared only because `CLAUDE.md` imports it.)
+  Flag any `@` import found in `.claude/agents/`: it is silently doing nothing. (Found once in
+  `reviewer.md`, whose `@`-imported design doc turned out never to reach the agent; it has since
+  been removed, so there is currently no `@` import under `.claude/agents/` to compare against.)
 - **Shared fragments under `.claude/etc/`** are not auto-loaded and are not `@`-imported either;
   they reach an agent only because the agent is instructed to read them. Check that every file in
   `.claude/etc/` still has at least one reader, and that each reader names the correct path.

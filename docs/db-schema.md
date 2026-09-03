@@ -152,7 +152,7 @@ Setup completion = file exists.
 | `fontSizeScale` | number | 1.0 |
 | `refreshIntervalMinutes` | int | 30 |
 | `startMinimized` | boolean | false |
-| `cloudStorageType` | string\|null (`"dropbox"` / `"google_drive"` / null=local only. `CloudStorageType.id`) | null |
+| `cloudStorageType` | string\|null (`"dropbox"` / `"google_drive"` / `"onedrive"` / null=local only. `CloudStorageType.id`) | null |
 | `notificationEnabled` | boolean | true |
 | `lastCacheCleanupAt` | int\|null | null |
 | `lastFtsRebuiltAt` | int\|null | null (24h gate for FTS full rebuild. Updated by daily heal) |
@@ -160,6 +160,16 @@ Setup completion = file exists.
 | `lastUpdateCheckAt` | int\|null | null |
 | `windowWidth` / `windowHeight` | number\|null | null |
 | `feedListPaneWidth` / `articleListPaneWidth` | number | 260 / 360 |
+| `collapsedFolderIds` | string[] | `[]` (folders default to *expanded*, so only the collapsed ones are tracked) |
+| `expandedTagIds` | string[] | `[]` (tags are the opposite — they default to *collapsed*, so the sidebar stays as short as it was before this list existed) |
+| `lastFilter` | string\|null | null |
+| `lastArticleId` | string\|null | null |
+| `recentArticleScrollPositions` | `{articleId, scrollOffset}[]` | `[]` |
+| `lastFocusedPane` | string\|null | null |
+| `lastUnreadOnly` | boolean\|null | null |
+| `lastUnreadOnlyStarred` | boolean\|null | null (scoped to the Starred filter alone, independent of `lastUnreadOnly`) |
+| `lastUnreadOnlySearch` | boolean\|null | null (same, for the Search filter) |
+| `lastNewestFirst` | boolean\|null | null |
 | `appMenuBarVisible` | boolean\|null | null (Linux KDE Global Menu: null=auto (shown until `RegisterWindow` succeeds, then hidden); true/false=explicit override via Ctrl+M / the exported "Show Menu Bar" checkbox. No effect where no `com.canonical.AppMenu.Registrar` is present) |
 
 ## Cache Cleanup

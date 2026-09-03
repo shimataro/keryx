@@ -120,7 +120,7 @@
   される）。4つは常にセットで必要 — 一部だけ設定するのは常に設定ミスであり、未署名で
   静かに進んだり、不完全な署名情報のまま進んだりせず、即座にビルドが失敗する。`.gitignore` は
   `*.keystore` / `*.jks` を除外済みなので、リポジトリ直下に置いても誤ってコミットされることは
-  ない。Google Play 配布用の本番キーストアの発行手順は [build.md](build.md) を参照。
+  ない。Google Play 配布用の本番キーストアの発行手順は [build.ja.md](build.ja.md) を参照。
 - **実機または起動中の Android エミュレータ**: Android の計装テストスイート2つ
   ——`androidDeviceTest`（`DatabaseMerger`/`DatabaseSnapshot` の Android 実装を実際の
   バンドル SQLite に対して検証）と `androidApp` 自身のスイート（Compose UI のジェスチャテスト）
@@ -171,7 +171,7 @@
 フォームのランタイムが必要（ヘッドレスな Linux 環境での Xvfb は除く）。ルートの
 `./gradlew build` は前述のとおり Android SDK も追加で必要になる。ネイティブパッケージング系
 タスク（`createDistributable`, `packageDmg`, `packageMsi`, `packageDeb`, `packageRpm` —
-詳細は [build.md](build.md)）は OS ごとに以下も必要。
+詳細は [build.ja.md](build.ja.md)）は OS ごとに以下も必要。
 
 - **Linux**
   - `fakeroot` — `packageDeb` に必要（jpackage が `.deb` 生成のために呼び出す）
@@ -195,7 +195,7 @@
 必要になるのは配布可能な（`debug` ではない）ビルドを作る場合のリリース署名キーストアだけ。
 前述の「Android リリース署名キーストア」を参照。デスクトップのネイティブパッケージが対象 OS
 上でしかビルドできない（クロスコンパイル不可）のとは違い、APK/AAB はどの OS からでもビルド
-できる — コマンドは [build.md](build.md) を参照。
+できる — コマンドは [build.ja.md](build.ja.md) を参照。
 
 ## 初回
 
@@ -217,8 +217,10 @@ keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
 
 ./gradlew build
 
-# Android: 実機を接続済み（または前述のエミュレータを起動済み）の場合
-./gradlew :androidApp:installDebug
+# Android: 実機を接続済み（または前述のエミュレータを起動済み）の場合。
+# installDebug ではなくバリアント単位のタスク: :androidApp には github/play のプロダクト
+# フレーバーがあり、有効なデバッグバリアントは githubDebug だけ（build.ja.md 参照）
+./gradlew :androidApp:installGithubDebug
 ```
 
 `build` が通れば SQLDelight / Compose Resources / BuildConfig のコード生成、コンパイル、`build`
@@ -259,8 +261,9 @@ Android SDK を必要とする。
 Gradle の既定 `build` ライフサイクルは `:androidApp` の `assembleRelease` を含んでおり、
 release APK が生成される（App Bundle は生成されない — `:androidApp:bundleRelease` を明示的に
 叩く必要がある）。Android リリース署名キーストアを設定していない場合、
-`androidApp/build.gradle.kts` はビルド警告を出したうえで**未署名**の release APK
-（`androidApp-release-unsigned.apk`）を生成する — これはインストール可否だけに関わる話なので、
+`androidApp/build.gradle.kts` はビルド警告を出したうえでフレーバーごとに**未署名**の release APK
+（`androidApp/build/outputs/apk/github/release/androidApp-github-release-unsigned.apk` と
+`play` 側の同等物）を生成する — これはインストール可否だけに関わる話なので、
 `./gradlew build` 自体は（デスクトップの作業しかしていなくても）成功する。未署名 APK は実機に
 インストールすることも Google Play にアップロードすることもできない。
 
@@ -270,6 +273,33 @@ release APK が生成される（App Bundle は生成されない — `:androidA
 `android.release.key.alias` / `android.release.key.password`）を設定する。**4つのうち一部だけ
 設定するのは常に設定ミス** — 未署名で静かに進んだり不完全な署名情報のまま進んだりせず、
 どの値が足りないかを示して即座にビルドが失敗する。
+
+### （Android）インストールが `INSTALL_FAILED_UPDATE_INCOMPATIBLE` / `INSTALL_FAILED_VERSION_DOWNGRADE` で失敗する
+
+どちらも「すでに端末に入っている APK を、いまインストールしようとしている APK では置き換えられない」
+という意味で、対処も同じ——先に既存のものをアンインストールする（**そのアプリのデータは消える**
+——`keryx.db`、`local_settings.json`、保存済みのクラウドトークン）:
+
+```bash
+./gradlew :androidApp:uninstallGithubDebug
+./gradlew :androidApp:installGithubDebug
+```
+
+本当にアンインストールが必要なのは `INSTALL_FAILED_UPDATE_INCOMPATIBLE`
+（`... signatures do not match ...`）の方。release ビルドはリリースキーストアで、debug ビルドは
+ローカルの debug キーストアで署名されるため、**どちらも他方を上書きできない** — GitHub Releases から
+落としてアプリ内アップデートの動作確認のためにサイドロードした release APK も同じ
+（[testing.ja.md](testing.ja.md) のアプリ内アップデート手動 QA 参照）。`applicationId` は双方とも
+`works.merc.keryx` なので、`uninstallGithubDebug` はどちらが入っていても削除できる。サイドロードした
+release ビルドと debug ビルドを同時に使いたい場合は、端末／AVD を分ける。debug だけ
+`applicationIdSuffix` を付ける方式は意図的に採っていない — `keryx://oauth2/callback` と `.opml` の
+ハンドラーが 2 つになり、OAuth リダイレクトとファイル関連付けが曖昧になるため。
+
+`INSTALL_FAILED_VERSION_DOWNGRADE` は以前これより先に当たっていたもので、原因は別。ローカル
+ビルドは `-PappVersion` を渡さないため `versionCode` が 1 になり、実バージョン付きの APK には
+上書きインストールできなかった。現在は debug バリアントが固定の `versionCode` を使うので
+（[build.ja.md](build.ja.md) の「Android（APK / AAB）」参照）debug には当てはまらない —
+いま出るとすれば debug 以外の APK をインストールしている。
 
 ### `UnsupportedClassVersionError`（実行時エラー）
 

@@ -221,8 +221,10 @@ keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
 
 ./gradlew build
 
-# Android: with a device connected (or an emulator already running, see Prerequisites above)
-./gradlew :androidApp:installDebug
+# Android: with a device connected (or an emulator already running, see Prerequisites above).
+# Per-variant task, not installDebug: :androidApp has github/play product flavors and only
+# githubDebug is enabled (see build.md).
+./gradlew :androidApp:installGithubDebug
 ```
 
 If `build` passes, code generation for SQLDelight / Compose Resources / BuildConfig, compilation,
@@ -265,8 +267,9 @@ Android SDK.
 Gradle's default `build` lifecycle includes `:androidApp`'s `assembleRelease`, so it produces the
 release APK (the App Bundle does not come out of it — `:androidApp:bundleRelease` has to be invoked
 explicitly). Without an Android release signing keystore configured,
-`androidApp/build.gradle.kts` prints a build warning and produces an **unsigned** release APK
-(`androidApp-release-unsigned.apk`) — `./gradlew build` still succeeds, since this only affects
+`androidApp/build.gradle.kts` prints a build warning and produces an **unsigned** release APK per
+flavor (`androidApp/build/outputs/apk/github/release/androidApp-github-release-unsigned.apk` and
+the `play` equivalent) — `./gradlew build` still succeeds, since this only affects
 distributability, not desktop work. The unsigned APK cannot be installed on a device or uploaded
 to Google Play.
 
@@ -276,6 +279,33 @@ Generate a development keystore per Prerequisites' "Software Required to Build" 
 build. **Setting only some of the four is always a configuration mistake** — the build fails
 immediately, naming which values are missing, rather than silently going unsigned or using a
 half-formed signing identity.
+
+### (Android) The install fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE` or `INSTALL_FAILED_VERSION_DOWNGRADE`
+
+Both mean the APK already on the device cannot be replaced by the one being installed, and both are
+fixed by removing the installed one first (this **wipes that app's data** — `keryx.db`,
+`local_settings.json`, the stored cloud token):
+
+```bash
+./gradlew :androidApp:uninstallGithubDebug
+./gradlew :androidApp:installGithubDebug
+```
+
+`INSTALL_FAILED_UPDATE_INCOMPATIBLE` (`... signatures do not match ...`) is the one that genuinely
+needs the uninstall: a release build is signed with the release keystore and a debug build with the
+local debug one, so **neither can ever overwrite the other** — including a release APK downloaded
+from GitHub Releases and sideloaded to exercise the in-app update flow (see
+[testing.md](testing.md)'s in-app-update manual QA). Both carry the same `applicationId`
+(`works.merc.keryx`), which is why `uninstallGithubDebug` removes whichever of them is installed.
+Use separate devices/AVDs if you need a sideloaded release build and a debug build at the same
+time; a debug-only `applicationIdSuffix` is deliberately not used, since a second
+`keryx://oauth2/callback` and `.opml` handler would make the OAuth redirect and the file
+association ambiguous.
+
+`INSTALL_FAILED_VERSION_DOWNGRADE` used to be hit first, for an unrelated reason: a local build
+passes no `-PappVersion`, so it was `versionCode` 1 and could not install over any real-version APK.
+Debug variants now pin a fixed `versionCode` (see [build.md](build.md)'s "Android (APK / AAB)"), so
+this no longer applies to them — seeing it now means a non-debug APK is being installed.
 
 ### `UnsupportedClassVersionError` (at runtime)
 

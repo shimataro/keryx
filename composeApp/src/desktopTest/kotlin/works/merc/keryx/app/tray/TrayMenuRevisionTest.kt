@@ -192,4 +192,64 @@ class TrayMenuRevisionTest {
         backgroundScope.launch { flow.collect { received.add(it) } }
         return received
     }
+
+    // --- update entry ---
+
+    @Test
+    fun `clicking an enabled update item emits an update request`() = runTest {
+        val menu = menu(hidden.copy(update = TrayUpdateEntry("Download update 2.0.0", enabled = true)))
+        val updates = collect(menu.updateRequests)
+        runCurrent()
+
+        menu.Event(MENU_UPDATE_ID, "clicked", Variant(""), UInt32(0))
+        runCurrent()
+
+        assertEquals(1, updates.size)
+    }
+
+    @Test
+    fun `clicking a disabled update item is silently ignored`() = runTest {
+        val menu = menu(hidden.copy(update = TrayUpdateEntry("Downloading… 60%", enabled = false)))
+        val updates = collect(menu.updateRequests)
+        runCurrent()
+
+        menu.Event(MENU_UPDATE_ID, "clicked", Variant(""), UInt32(0))
+        runCurrent()
+
+        assertTrue(updates.isEmpty())
+    }
+
+    @Test
+    fun `clicking the update item when no update is offered is silently ignored`() = runTest {
+        val menu = menu(hidden) // update == null
+        val updates = collect(menu.updateRequests)
+        runCurrent()
+
+        menu.Event(MENU_UPDATE_ID, "clicked", Variant(""), UInt32(0))
+        runCurrent()
+
+        assertTrue(updates.isEmpty())
+    }
+
+    @Test
+    fun `aboutToShowGroup recognizes the update and separator ids even with no update offered`() {
+        val menu = menu(hidden)
+        menu.fetchLayout()
+
+        val reply = menu.AboutToShowGroup(listOf(MENU_UPDATE_ID, MENU_SEPARATOR_ID, 99))
+
+        assertEquals(emptyList(), reply.updatesNeeded) // nothing stale yet
+        assertEquals(listOf(99), reply.idErrors) // only the genuinely unknown id is flagged
+    }
+
+    @Test
+    fun `the layout reply includes the update entry once one is offered`() {
+        val menu = menu()
+        menu.updateState(shown.copy(update = TrayUpdateEntry("Download update 2.0.0", enabled = true)))
+
+        val reply = menu.fetchLayout()
+
+        val childIds = reply.layout.children.map { (it.value as DBusMenuLayoutItem).id }
+        assertEquals(listOf(MENU_UPDATE_ID, MENU_SEPARATOR_ID, MENU_TOGGLE_ID, MENU_QUIT_ID), childIds)
+    }
 }

@@ -9,6 +9,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -29,8 +30,8 @@ import works.merc.keryx.app.domain.OpmlImporter
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
-import works.merc.keryx.app.domain.UpdateChecker
-import works.merc.keryx.app.domain.UpdateStatus
+import works.merc.keryx.app.domain.UpdateRepository
+import works.merc.keryx.app.domain.UpdateState
 import works.merc.keryx.app.platform.FileSelector
 import works.merc.keryx.app.platform.OpenFileRequest
 import works.merc.keryx.app.platform.PlatformFileSelector
@@ -64,7 +65,7 @@ class SettingsViewModel(
     private val folderRepository: FolderRepository,
     private val tagRepository: TagRepository,
     private val opmlImporter: OpmlImporter,
-    private val updateChecker: UpdateChecker,
+    private val updateRepository: UpdateRepository,
     private val activityCenter: ActivityCenter,
     // Token store / sync touch the OS Keychain (macOS shells out to `security`, which may
     // block and show an authorization dialog), so keep them off the Main/EDT dispatcher.
@@ -112,8 +113,10 @@ class SettingsViewModel(
     var exportingOpml by mutableStateOf(false)
         private set
 
-    var checkingForUpdate by mutableStateOf(false)
-        private set
+    /** The in-app update's state machine (idle/checking/available/downloading/…), shared
+     * process-wide via [UpdateRepository] — the tray and notification center read the same
+     * instance. */
+    val updateState: StateFlow<UpdateState> = updateRepository.state
 
     /** True while a "reset cloud data" (delete + fresh re-upload) is running. */
     var resetting by mutableStateOf(false)
@@ -129,10 +132,6 @@ class SettingsViewModel(
      * Distinct from [connectFailedType], which only covers a failed connect (OAuth) flow.
      */
     var lastSyncErrorText by mutableStateOf<String?>(null)
-        private set
-
-    /** Set by [checkForUpdate]. Does not affect the automatic update-check schedule. */
-    var updateCheckResult by mutableStateOf<UpdateStatus?>(null)
         private set
 
     init {
@@ -177,16 +176,22 @@ class SettingsViewModel(
      * Manual "check for update" (About section). Deliberately does not touch
      * [LocalSettings.lastUpdateCheckAt] — that timestamp belongs to the automatic
      * startup/background schedule (see main.kt's `checkForUpdateAndNotify`), so a manual check
-     * never perturbs it.
+     * never perturbs it. A no-op while [updateState] is already [UpdateState.Checking].
      */
     fun checkForUpdate() {
-        if (checkingForUpdate) return
-        viewModelScope.launch {
-            checkingForUpdate = true
-            updateCheckResult = updateChecker.check()
-            checkingForUpdate = false
-        }
+        if (updateState.value is UpdateState.Checking) return
+        viewModelScope.launch(dispatcher) { updateRepository.check() }
     }
+
+    /** Starts downloading the update currently reported by [updateState], if one can be installed
+     * here. See [UpdateRepository.startDownload]. */
+    fun startDownload() = updateRepository.startDownload()
+
+    /** Cancels an in-progress download started by [startDownload]. */
+    fun cancelDownload() = updateRepository.cancelDownload()
+
+    /** Hands the current [UpdateState.Ready] download off to the OS installer. */
+    fun installUpdate() = updateRepository.install()
 
     fun updateReadTimeout(seconds: Int) {
         settingsRepository.setReadTimeoutSeconds(seconds)

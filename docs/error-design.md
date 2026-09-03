@@ -30,7 +30,7 @@ sealed class KeryxException(message: String) : Exception(message)
 
 Main subclasses: `FeedFetchException(statusCode)`, `FeedParseException`, `FeedDiscoveryException(candidates)`,
 `FeedTimeoutException`, `FeedNotFoundException(isGone)`, `CloudAuthException`, `CloudStorageException`,
-`SyncConflictException`, `SchemaVersionException(localVersion, cloudVersion)`, `CloudDataIncompatibleException`, `InvalidFeedUrlException`.
+`SyncConflictException`, `SchemaVersionException(localVersion, cloudVersion)`, `CloudDataIncompatibleException`, `InvalidFeedUrlException`, `UpdateException(stage)`.
 
 Helper extensions: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `onOk` / `onErr` / `map`.
 
@@ -59,9 +59,9 @@ Helper extensions: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `
 
 | Next action | Source | Behavior |
 | --- | --- | --- |
-| `OpenUrl(url)` | New-version notification | Opens the release page in the external browser |
+| `OpenUrl(url)` | New-version notification, when no in-app update path applies here (`UpdatePlan.OpenReleasePage`/`NotOffered` — see "In-App Update" in [background-update.md](background-update.md)) | Opens the release page in the external browser |
 | `ShowFeedDetail(feedId)` | Feed gone (410) / URL changed (301/308) | Selects that feed in the feed list (same as clicking it there). At a single-pane width the feed list is a screen of its own, so this advances to that feed's article list instead of navigating backwards onto a list whose selection isn't even painted — see `ui/home/HomePaneLayout.kt`'s `paneForFeedDetail` |
-| `ShowSettingsTab(tabId)` | Sync errors (`SchemaVersionException` → `updates`, everything else → `cloud_sync`) | Opens the settings dialog on that tab. The `cloud_sync` tab shows `SyncRepository.lastSyncError` as the failure reason; the `updates` tab auto-checks for an update when opened |
+| `ShowSettingsTab(tabId)` | Sync errors (`SchemaVersionException` → `updates`, everything else → `cloud_sync`); a new-version notification when an in-app update path applies here (`updates`) | Opens the settings dialog on that tab. The `cloud_sync` tab shows `SyncRepository.lastSyncError` as the failure reason; the `updates` tab auto-checks for an update when opened |
 | `ShowInfoDialog(detail)` | macOS translocated warning | Shows an explanatory dialog (cause + fix) without navigating |
 | `ResetCloudData` | `CloudDataIncompatibleException` | Dedicated inline button → confirmation dialog → archives the cloud DB under a timestamped name, then recreates it (see "Resetting (Archiving) Cloud Data" in [sync-architecture.md](sync-architecture.md)) |
 
@@ -79,8 +79,10 @@ When emitting notifications from the Repository, text is localized via `Notifica
 | `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ |
 | `CloudDataIncompatibleException` (corrupt / incompatible cloud DB / constraint-violating data) | ❌ (further **automatic** syncs are suspended entirely — `SyncTrigger.AUTOMATIC` gate, see "Automatic-Sync Suspension" in [sync-architecture.md](sync-architecture.md) — until a reset or a successful manual sync) | ✅ |
 | `FeedNotFoundException(isGone=true)` | ❌ | ✅ |
+| `UpdateException` (check/download/verify/install failure) | ❌ (retried only via the user clicking Retry — the Updates settings tab or the tray's own item) | ❌ (surfaced there instead — see "In-App Update" in [background-update.md](background-update.md); only the informational "update available"/"ready to install" notices reach the bell, via `ShowSettingsTab`/`OpenUrl` above) |
 
 ## Constants (`core/Constants.kt`)
 
 `SYNC_MAX_RETRY=3`, `FEED_TIMEOUT_RETRY_COUNT=1`, `SYNC_DEBOUNCE_MS=5000`,
-`CONNECTION_TIMEOUT_MS=10000`, `READ_TIMEOUT_SECONDS_DEFAULT=30`, `MAX_REDIRECTS=5`.
+`CONNECTION_TIMEOUT_MS=10000`, `READ_TIMEOUT_SECONDS_DEFAULT=30`, `MAX_REDIRECTS=5`,
+`UPDATE_DOWNLOAD_SOCKET_TIMEOUT_MS=60000`.

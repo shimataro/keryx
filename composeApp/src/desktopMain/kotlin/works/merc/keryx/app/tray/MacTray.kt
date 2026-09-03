@@ -8,6 +8,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import kotlinx.coroutines.flow.SharedFlow
 import works.merc.keryx.app.core.APP_NAME
+import java.awt.Component
 import java.awt.Frame
 import java.awt.Image
 import java.awt.MenuItem
@@ -18,13 +19,93 @@ import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 
 /**
+ * The macOS tray icon's popup menu, as raw AWT widgets — built and mutated outside composition,
+ * the same shape as [WindowsTrayMenu] (see that class's own KDoc for why the AWT-menu operations
+ * live in a plain class rather than inline in the composable: testability, without needing a real
+ * display or tray).
+ *
+ * Internal rather than private so tests can check what actually ended up in the menu, mirroring
+ * `WindowsTrayMenuTest`.
+ *
+ * @param onToggle Invoked when the toggle entry is chosen.
+ * @param onQuit Invoked when the quit entry is chosen.
+ */
+internal class MacTrayMenu(
+    onToggle: () -> Unit,
+    onQuit: () -> Unit,
+    onUpdateAction: () -> Unit = {},
+) {
+    private val toggleItem = MenuItem().apply { addActionListener { onToggle() } }
+    private val quitItem = MenuItem().apply { addActionListener { onQuit() } }
+    private val updateItem = MenuItem().apply { addActionListener { onUpdateAction() } }
+
+    // "-" is the exact idiom java.awt.Menu.addSeparator() itself uses (see NativeMenu.desktop.kt) —
+    // built directly (rather than via addSeparator()) so this class keeps its own reference, needed
+    // to insert/remove it alongside updateItem in setUpdateEntry.
+    private val updateSeparator = MenuItem("-")
+
+    /** Internal rather than private so tests can check what actually ended up in the menu. */
+    internal val popupMenu = PopupMenu().apply {
+        add(toggleItem)
+        add(quitItem)
+    }
+
+    /**
+     * Pushes the current labels onto the already-built widgets.
+     *
+     * @param toggle The label for the toggle entry — already resolved by the caller from
+     * `windowVisible`/`showLabel`/`hideLabel`, since that resolution is presentation logic tied to
+     * Compose state, not something this AWT-facing class needs to know about.
+     * @param quit The label for the quit entry.
+     */
+    fun setLabels(toggle: String, quit: String) {
+        toggleItem.label = toggle
+        quitItem.label = quit
+    }
+
+    /**
+     * Inserts, updates, or removes the in-app update entry, ahead of [toggleItem]/[quitItem] —
+     * absent by default (`null`), so a menu that never sees an update keeps its original two-item
+     * shape (see [TrayMenuState.update]'s own KDoc for why this is opt-in rather than
+     * disabled-and-always-present).
+     */
+    fun setUpdateEntry(entry: TrayUpdateEntry?) {
+        val alreadyInserted = popupMenu.itemCount > 0 && popupMenu.getItem(0) === updateItem
+        if (entry == null) {
+            if (alreadyInserted) {
+                popupMenu.remove(updateSeparator)
+                popupMenu.remove(updateItem)
+            }
+        } else {
+            updateItem.label = entry.label
+            updateItem.isEnabled = entry.enabled
+            if (!alreadyInserted) {
+                popupMenu.insert(updateSeparator, 0)
+                popupMenu.insert(updateItem, 0)
+            }
+        }
+    }
+
+    /**
+     * Shows the menu.
+     *
+     * @param origin The component the menu is positioned against.
+     * @param x The horizontal coordinate within [origin].
+     * @param y The vertical coordinate within [origin].
+     */
+    fun show(origin: Component, x: Int, y: Int) {
+        popupMenu.show(origin, x, y)
+    }
+}
+
+/**
  * macOS-only replacement for the Compose `Tray()` composable.
  *
  * `Tray()` wires the icon's popup menu via `TrayIcon.setPopupMenu()`, which on
  * macOS shows the popup on *any* click (left or right) - a long-standing
  * AWT/macOS limitation (Compose upstream has an unresolved TODO for this). To
  * get "right-click = menu, left-click = toggle", this bypasses `setPopupMenu`
- * and drives a raw `TrayIcon`/`PopupMenu` pair with a manual `MouseListener`.
+ * and drives a raw `TrayIcon`/[MacTrayMenu] pair with a manual `MouseListener`.
  *
  * @param image The tray icon image; when `null`, no tray UI is displayed.
  * @param tooltip The tray icon tooltip.
@@ -44,14 +125,25 @@ internal fun MacTray(
     hideLabel: String,
     quitLabel: String,
     windowVisible: Boolean,
+    updateEntry: TrayUpdateEntry?,
     onToggle: () -> Unit,
     onQuit: () -> Unit,
+    onUpdateAction: () -> Unit,
     newArticleNotifications: SharedFlow<String>,
 ) {
     val image = image ?: return
 
     val currentOnToggle by rememberUpdatedState(onToggle)
     val currentOnQuit by rememberUpdatedState(onQuit)
+    val currentOnUpdateAction by rememberUpdatedState(onUpdateAction)
+
+    val menu = remember {
+        MacTrayMenu(
+            onToggle = { currentOnToggle() },
+            onQuit = { currentOnQuit() },
+            onUpdateAction = { currentOnUpdateAction() },
+        )
+    }
 
     // TrayIcon isn't a java.awt.Component, so PopupMenu.show(...) needs some
     // origin Component. This Frame exists only to host the PopupMenu and is
@@ -67,16 +159,8 @@ internal fun MacTray(
             isVisible = true
         }
     }
-    val toggleItem = remember { MenuItem() }
-    val quitItem = remember { MenuItem() }
-    val popupMenu = remember {
-        PopupMenu().apply {
-            add(toggleItem)
-            add(quitItem)
-        }
-    }
-    DisposableEffect(dummyFrame, popupMenu) {
-        dummyFrame.add(popupMenu)
+    DisposableEffect(dummyFrame, menu) {
+        dummyFrame.add(menu.popupMenu)
         onDispose { dummyFrame.dispose() }
     }
 
@@ -84,7 +168,7 @@ internal fun MacTray(
     LaunchedEffect(trayIcon, image) {
         trayIcon.image = image
     }
-    DisposableEffect(trayIcon, popupMenu) {
+    DisposableEffect(trayIcon, menu) {
         val listener = object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
                 when (e.button) {
@@ -96,7 +180,7 @@ internal fun MacTray(
                         // stays exactly at (0,0)) so the menu opens at the
                         // click location instead of wherever the frame is.
                         val origin = dummyFrame.locationOnScreen
-                        popupMenu.show(dummyFrame, e.xOnScreen - origin.x, e.yOnScreen - origin.y)
+                        menu.show(dummyFrame, e.xOnScreen - origin.x, e.yOnScreen - origin.y)
                     }
                 }
             }
@@ -110,20 +194,14 @@ internal fun MacTray(
         }
     }
 
-    LaunchedEffect(toggleItem) {
-        toggleItem.addActionListener { currentOnToggle() }
-    }
-    LaunchedEffect(quitItem) {
-        quitItem.addActionListener { currentOnQuit() }
-    }
     LaunchedEffect(trayIcon, tooltip) {
         trayIcon.toolTip = tooltip
     }
-    LaunchedEffect(toggleItem, windowVisible, showLabel, hideLabel) {
-        toggleItem.label = if (windowVisible) hideLabel else showLabel
+    LaunchedEffect(menu, windowVisible, showLabel, hideLabel, quitLabel) {
+        menu.setLabels(toggle = if (windowVisible) hideLabel else showLabel, quit = quitLabel)
     }
-    LaunchedEffect(quitItem, quitLabel) {
-        quitItem.label = quitLabel
+    LaunchedEffect(menu, updateEntry) {
+        menu.setUpdateEntry(updateEntry)
     }
 
     // Tray()'s own composable body is what turns a queued TrayState notification

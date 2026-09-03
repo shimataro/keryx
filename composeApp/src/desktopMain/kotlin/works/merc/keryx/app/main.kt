@@ -57,6 +57,8 @@ import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.OAuthCallbackParams
 import works.merc.keryx.app.domain.parseOAuthUri
 import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.domain.UpdateRepository
+import works.merc.keryx.app.domain.UpdateState
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.isLinux
 import works.merc.keryx.app.platform.isMacOs
@@ -233,6 +235,8 @@ fun main(args: Array<String>) {
     val newArticleNotifications = newArticleNotifier.trayEvents
     appScope.launch { backgroundUpdateLoop(koin) }
 
+    val updateRepository = koin.get<UpdateRepository>()
+
     val menuController = koin.get<MenuController>()
 
     // Replace the JVM's default "About" panel (which shows "java" + the JVM version) with our
@@ -344,7 +348,29 @@ fun main(args: Array<String>) {
             newArticleNotifications.collect { lastNotificationSentAtMillis = SystemClock.nowMillis() }
         }
 
-        val unreadCount by koin.get<ArticleRepository>().watchUnreadCount().collectAsState(0L)
+        // Stabilized with remember: without it, koin.get<ArticleRepository>().watchUnreadCount()
+        // built a brand-new Flow instance on every recomposition of this application {} scope
+        // (including one triggered by every download-progress tick below), and collectAsState's own
+        // key1 is the flow instance itself — so an unstable Flow kept cancelling and restarting its
+        // underlying SQLDelight query collection instead of ever settling.
+        val unreadCountFlow = remember { koin.get<ArticleRepository>().watchUnreadCount() }
+        val unreadCount by unreadCountFlow.collectAsState(0L)
+
+        // Deliberately NOT collected here (`.collectAsState()`) — this application {} scope
+        // composes the window, the Dock icon, and single-instance/reopen handling, all of which
+        // would otherwise recompose on every download-progress tick. KeryxTray collects the flow
+        // itself, confining that recomposition to the tray's own composable.
+        // Exit only once the OS installer / self-replace script has actually been launched — that
+        // process is already waiting for this one to exit (see UpdateInstaller's own KDoc on
+        // desktop), and nothing else in this state needs the app still running.
+        //
+        // Deliberately NOT keyed on `updateState is UpdateState.Installing`: that state is set the
+        // moment an install starts, while the installer is still extracting and staging, so exiting
+        // on it killed this process (and the extraction coroutine with it) before the script had
+        // even been written. See UpdateRepository.installLaunched.
+        LaunchedEffect(Unit) {
+            updateRepository.installLaunched.collect { exitApplication() }
+        }
 
         // Dock/taskbar icon override (used below) needs the full branded icon, not the
         // small transparent tray glyph windowBaseImage uses for the window's own
@@ -378,8 +404,10 @@ fun main(args: Array<String>) {
             notificationIcon = dockBaseImage,
             unreadCount = unreadCount,
             windowVisible = windowVisible,
+            updateStateFlow = updateRepository.state,
             onToggle = { windowVisible = !windowVisible },
             onQuit = ::exitApplication,
+            onUpdateAction = { updateRepository.performPrimaryAction() },
             // Reuses the same activation signal as the single-instance/reopen paths below
             // (window.toFront/requestFocus, de-iconify, activateIgnoringOtherApps) - see the
             // LaunchedEffect(Unit) collecting activationRequests further down.

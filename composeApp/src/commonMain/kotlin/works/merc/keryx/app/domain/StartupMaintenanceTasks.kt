@@ -1,19 +1,13 @@
 package works.merc.keryx.app.domain
 
 import kotlinx.coroutines.CancellationException
-import org.jetbrains.compose.resources.getString
 import org.koin.core.Koin
-import works.merc.keryx.app.core.AppNotification
-import works.merc.keryx.app.core.AppNotificationAction
-import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.MILLIS_PER_DAY
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.platform.SelfUpdateCheckSupport
-import works.merc.keryx.app.resources.Res
-import works.merc.keryx.app.resources.update_available_notification
 
 private const val LOG_TAG = "StartupMaintenanceTasks"
 
@@ -67,29 +61,21 @@ internal suspend fun refreshFeedsAndNotify(koin: Koin) {
 }
 
 /**
- * Checks for an available application update and notifies the user when one is found.
+ * Checks for an available application update on the automatic/background schedule.
  *
- * @param koin The dependency injection container used to resolve update and notification services.
+ * The check itself, and posting/replacing the update-related notification-center row, are entirely
+ * [UpdateRepository]'s responsibility now — this only adds the one thing specific to the
+ * *automatic* schedule: stamping [works.merc.keryx.app.data.local.db.LocalSettings.lastUpdateCheckAt]
+ * (a manual "check for update" in Settings deliberately never touches it — see
+ * [works.merc.keryx.app.ui.settings.SettingsViewModel.checkForUpdate]'s own KDoc).
+ *
+ * @param koin The dependency injection container used to resolve [SelfUpdateCheckSupport],
+ *   [UpdateRepository], and [SettingsRepository].
  */
 internal suspend fun checkForUpdateAndNotify(koin: Koin) {
     if (!koin.get<SelfUpdateCheckSupport>().isSupported()) return
-    val settingsRepository = koin.get<SettingsRepository>()
-    val status = koin.get<UpdateChecker>().check()
-    settingsRepository.mutateLocalSettings { it.copy(lastUpdateCheckAt = SystemClock.nowMillis()) }
-    if (status is UpdateStatus.Available) {
-        val message = getString(Res.string.update_available_notification, status.version)
-        koin.get<NotificationCenter>().add(
-            AppNotification(
-                id = IdGenerator.newId(),
-                level = AppNotificationLevel.INFO,
-                message = message,
-                timestampMillis = SystemClock.nowMillis(),
-                // Acting on the notification goes straight to the release page — the only useful
-                // next step for "a new version exists".
-                action = AppNotificationAction.OpenUrl(status.url),
-            ),
-        )
-    }
+    koin.get<UpdateRepository>().check()
+    koin.get<SettingsRepository>().mutateLocalSettings { it.copy(lastUpdateCheckAt = SystemClock.nowMillis()) }
 }
 
 /**

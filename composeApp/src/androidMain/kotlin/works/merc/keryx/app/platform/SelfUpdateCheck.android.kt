@@ -12,8 +12,12 @@ import works.merc.keryx.app.core.isSelfUpdateCheckSupported
  * The app's own package name is always installed (we're running as it), so
  * [android.content.pm.PackageManager.NameNotFoundException] should never actually throw here, but
  * [runCatching] treats any failure as "unknown" rather than crashing a non-critical UX check.
+ *
+ * `internal` rather than `private`: [detectInstallLocation] reuses this exact same signal so the
+ * "is this build allowed to check for updates" and "how would an update actually install" checks
+ * can never disagree about what counts as a Play install.
  */
-private fun installerPackageName(context: Context): String? = runCatching {
+internal fun installerPackageName(context: Context): String? = runCatching {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         context.packageManager.getInstallSourceInfo(context.packageName).installingPackageName
     } else {

@@ -24,9 +24,14 @@ If toolchain auto-download is blocked in a sandbox:
 ./gradlew :composeApp:desktopTest     # Tests only
 ./gradlew :composeApp:run             # Launch the desktop app
 
-./gradlew :androidApp:assembleDebug   # Build a debug APK
-./gradlew :androidApp:installDebug    # Build + install it on a connected device/emulator
+./gradlew :androidApp:assembleDebug        # Build a debug APK
+./gradlew :androidApp:installGithubDebug   # Build + install it on a connected device/emulator
 ```
+
+`:androidApp` has a `distribution` product-flavor dimension (see "Android (APK / AAB)" below), so
+installing is a per-variant task — there is no `installDebug`, and `githubDebug` is the only debug
+variant (`playDebug` is disabled). `assembleDebug` remains an aggregate over the enabled debug
+variants and so still works as written.
 
 ## Cloud Storage Integration
 
@@ -150,15 +155,37 @@ Only the platform matching the execution platform can be built (cross-compilatio
 Unlike the desktop packages above, an APK/AAB can be built on **any** OS — there is no
 cross-compilation restriction here.
 
+`androidApp` splits into two product flavors on a `distribution` dimension — `github` and `play`,
+same `applicationId` — that differ in exactly one thing: `androidApp/src/github/AndroidManifest.xml`
+declares `REQUEST_INSTALL_PACKAGES`, needed for the in-app update installer's `PackageInstaller`
+session (see [background-update.md](background-update.md)'s "In-App Update"); the `play` flavor's
+manifest omits it, since Play already updates the app itself and Play policy restricts that
+permission to apps whose primary purpose is installing other apps. `composeApp` (a KMP library
+module) has no flavor dimension of its own and is consumed identically by both.
+
 ```bash
-./gradlew :androidApp:assembleRelease -PappVersion=1.2.3   # APK
-./gradlew :androidApp:bundleRelease   -PappVersion=1.2.3   # AAB (Play Store submission format)
+./gradlew :androidApp:assembleGithubRelease -PappVersion=1.2.3   # APK (GitHub Releases)
+./gradlew :androidApp:bundlePlayRelease     -PappVersion=1.2.3   # AAB (Play Store submission format)
 ```
 
-Output goes to `androidApp/build/outputs/apk/release/` and `androidApp/build/outputs/bundle/release/`
-respectively (a different location than the desktop packages' `composeApp/build/compose/binaries/main`
-above). `assembleRelease` is part of the default `build` lifecycle; `bundleRelease` is not and must
-be invoked explicitly — see "Release (CD)" below for how `release.yml` uses both.
+Output goes to `androidApp/build/outputs/apk/github/release/` and
+`androidApp/build/outputs/bundle/playRelease/` respectively (a different location than the desktop
+packages' `composeApp/build/compose/binaries/main` above). `assembleGithubRelease` is reachable
+through the default `build` lifecycle's aggregate `assembleRelease`/`build` tasks (which build both
+flavors' release variants); `bundlePlayRelease` is not part of any aggregate lifecycle task and must
+be invoked explicitly — see "Release (CD)" below for how `release.yml` uses both. Run
+`./gradlew :androidApp:tasks --all | grep -i release` after touching `androidApp/build.gradle.kts`'s
+`flavorDimensions` to confirm these task names and output paths before changing `release.yml` — AGP
+derives them from the flavor/build-type names, and a rename there silently breaks the workflow only
+once a release tag is pushed.
+
+Debug variants do not take their `versionCode` from `appVersion` at all: `androidApp/build.gradle.kts`
+pins every debug output to a fixed `debugVersionCode` (2,000,000,000 — below Play's ceiling, far above
+anything the `MAJOR*10000 + MINOR*100 + PATCH` fold can produce). A local build passes no
+`-PappVersion`, so it would otherwise be `versionCode` 1 and the package manager would reject
+`installGithubDebug` as a downgrade over any real-version APK already on the device. Release variants
+are unaffected. See [setup.md](setup.md)'s "Common Issues" for the install failure this leaves — a
+release-signed and a debug-signed APK still cannot replace each other.
 
 Release signing is resolved from three sources, in this priority order — a Gradle project property,
 an environment variable, then `local.properties` — and all four values are required together (an
@@ -294,7 +321,7 @@ Flow:
    - `:composeApp:packageDmg` (macOS runner), attached as `Keryx-<version>-macos-arm64.dmg` **and `Keryx-<version>-macos-arm64.zip`**. **For a pre-release tag, `packageDmg` is skipped and only the `.zip` is attached** (same reasoning as the Windows MSI case below).
    - `:composeApp:packageDeb :composeApp:packageRpm` (Linux runner, after installing `fakeroot`/`rpm` for jpackage), attached as `Keryx-<version>-linux-x86_64.deb`, `Keryx-<version>-linux-x86_64.rpm` **and `Keryx-<version>-linux-x86_64.zip`**. **For a pre-release tag, `packageDeb`/`packageRpm` are skipped and only the `.zip` is attached** (same reasoning as the Windows MSI case below).
    - `:composeApp:createDistributable :composeApp:packageMsi` (Windows runner — `windows-latest` ships WiX Toolset v3.14.1 preinstalled, so no separate WiX setup step is needed), attached as `Keryx-<version>-windows-x86_64.msi` **and `Keryx-<version>-windows-x86_64.zip`**. **For a pre-release tag, `packageMsi` is skipped and only the `.zip` is attached** — MSI's `ProductVersion` must be purely numeric (see below), so every pre-release of a given target version would collapse to the same `ProductVersion` under the fixed `upgradeUuid`, and WiX would not recognize a later pre-release or the eventual final release as an upgrade of an earlier one.
-   - `:androidApp:assembleRelease` and `:androidApp:bundleRelease` (Ubuntu runner), attached as `Keryx-<version>-android-universal.apk` and `Keryx-<version>-android-universal.aab`. Unlike the desktop installers, Android packages are built and attached for pre-release tags too, because Android has no equivalent version-metadata restriction and testers need a signed APK. **Pre-release APK/AAB files produced by the workflow are GitHub test artifacts only.** `androidApp/build.gradle.kts` derives `versionCode` from `appVersion.substringBefore('-')`, so a pre-release tag such as `v1.2.0-beta.1` and the final `v1.2.0` produce the same `versionCode` (e.g. `10200`). Before submitting to Google Play, assign a strictly increasing `versionCode` by adjusting `androidApp/build.gradle.kts` (or the release tag that drives it) and rebuilding the APK/AAB — the value is baked into the signed artifact at build time and cannot be edited afterward.
+   - `:androidApp:assembleGithubRelease` and `:androidApp:bundlePlayRelease` (Ubuntu runner), attached as `Keryx-<version>-android-universal.apk` and `Keryx-<version>-android-universal.aab`. The APK comes from the `github` flavor (carries `REQUEST_INSTALL_PACKAGES`, since it's the one an in-app update installs over — see the "Android (APK / AAB)" section above) and the AAB from `play` (the Play Console submission artifact, which must not carry that permission). Unlike the desktop installers, Android packages are built and attached for pre-release tags too, because Android has no equivalent version-metadata restriction and testers need a signed APK. **Pre-release APK/AAB files produced by the workflow are GitHub test artifacts only.** `androidApp/build.gradle.kts` derives `versionCode` from `appVersion.substringBefore('-')`, so a pre-release tag such as `v1.2.0-beta.1` and the final `v1.2.0` produce the same `versionCode` (e.g. `10200`). Before submitting to Google Play, assign a strictly increasing `versionCode` by adjusting `androidApp/build.gradle.kts` (or the release tag that drives it) and rebuilding the APK/AAB — the value is baked into the signed artifact at build time and cannot be edited afterward.
 
    The `.zip` files are archives of the non-packaged app bundle/image produced by `:composeApp:createDistributable`, for users who prefer not to use an installer package. The `deploy-pages` job (which triggers the Cloudflare Pages deploy hook) waits on all four packaging jobs before running.
 
@@ -331,6 +358,31 @@ suffix, or both at once — `restoreMacOsShortVersion` rewrites `CFBundleShortVe
 version in `createDistributable`'s `doLast`; when they already match (a plain, non-prerelease, major-1-or-higher
 tag) it is a no-op.
 
+jpackage signs the bundle *before* that `doLast` runs, so a write-back invalidates the ad-hoc seal — which is
+why the same `doLast` then **re-signs** the bundle (`resealMacOsBundle`: `codesign --force --deep
+--preserve-metadata=entitlements,flags,runtime --sign -`), **checks that the re-sign changed nothing about the
+signature but its hashes** (`macSignatureProperties` compares `codesign -dv`'s `flags=` and `hashes=13+N`
+before and after), and finally **verifies** it (`verifyMacOsBundleSeal`: `codesign --verify --strict --deep`),
+failing the build outright at either step.
+
+`--preserve-metadata` is what makes that middle step pass, and it is load-bearing rather than defensive.
+Compose Desktop signs the app image with its own `default-entitlements.plist` — `allow-jit`,
+`allow-unsigned-executable-memory`, `disable-library-validation` — **and** the hardened-runtime flag, all of
+which a JVM needs to run at all on Apple Silicon. Naming `--options runtime` by hand reproduces the flag while
+silently dropping the entitlements (`hashes=13+7` becomes `13+3`), which yields a bundle that passes
+`codesign --verify` and is then killed by AMFI the moment it launches — a failure `verifyMacOsBundleSeal` alone
+cannot see, since the seal really is valid. Hence both the metadata preservation and the before/after
+comparison; neither is redundant with the seal verify. The verify runs on every macOS build whether or not anything was patched; on Windows and
+Linux all three steps are no-ops, since no `.app` exists there. This is not cosmetic: the in-app updater runs
+that exact check against every downloaded bundle before swapping it in (see
+[background-update.md](background-update.md)), so an app image that cannot pass it leaves the release ZIP
+un-installable **by the in-app updater** — a manual install of the very same ZIP keeps working, since the kernel
+never re-hashes `Info.plist` at launch. That asymmetry is why every 0.x release shipped this way unnoticed until
+the in-app updater first exercised the check, and why the build-time verify is the only thing that catches it:
+ordinary manual smoke-testing cannot. The DMG never exposed it either, because jpackage re-signs its own copy of
+the app image while building it — only the ZIP asset, made straight from `binaries/main/app`, carried the broken
+seal.
+
 The net effect for `0.1.1`: the tag, `BuildConfig.VERSION` (About screen), the update checker, and the version
 Finder shows are all `0.1.1`. Only `CFBundleVersion` keeps the `1.0.0` placeholder, which is an internal build
 identifier that never surfaces. The intermediate artifact is named `Keryx-1.0.0.dmg`, but the workflow's rename
@@ -343,7 +395,7 @@ Set `DROPBOX_APP_KEY` / `GOOGLE_DRIVE_CLIENT_ID` / `GOOGLE_DRIVE_CLIENT_SECRET` 
 **repository secrets**. If they are unset the build still succeeds, but the released app has the corresponding
 cloud integration hidden entirely (see `CloudStorageAvailability`).
 
-For Android release signing, set `ANDROID_RELEASE_KEYSTORE_BASE64`, `ANDROID_RELEASE_KEYSTORE_PASSWORD`, `ANDROID_RELEASE_KEY_ALIAS`, and `ANDROID_RELEASE_KEY_PASSWORD` as repository secrets. The keystore is a Base64-encoded PKCS12/JKS file; the workflow decodes it at build time. To keep the same signing key on GitHub Releases and Google Play, generate the keystore locally and, when creating the app in Google Play Console, enroll it as the **existing app signing key**: Play Console never accepts the raw JKS/PKCS12 file directly — first encrypt it with Google's PEPK (Play Encrypt Private Key) tool (`java -jar pepk.jar --keystore=<path> --alias=<alias> --output=<encrypted-file> --encryptionkey=<key-from-play-console>`, downloaded from the Play App Signing enrollment page), then upload the resulting encrypted file. This registers the keystore as the **app signing key** — the key Google holds and uses to re-sign the app before it reaches users, distinct from the **upload key** used to sign each `.aab` submitted through Play Console afterward. The same keystore can serve both roles (Google explicitly allows reusing the app signing key as its own upload key), which is what keeps a single keystore sufficient for both GitHub Releases (where the APK/AAB is signed with it directly) and Google Play; a separate, dedicated upload key is Google's recommended hardening, not a requirement. `release.yml` passes `-PandroidReleaseSigningRequired=true` to `:androidApp:assembleRelease`/`:androidApp:bundleRelease`, which turns a missing (or half-configured) secret into an immediate build failure — since this workflow publishes its output, it must never succeed with an unsigned artifact — so all four secrets are required for the release workflow to succeed.
+For Android release signing, set `ANDROID_RELEASE_KEYSTORE_BASE64`, `ANDROID_RELEASE_KEYSTORE_PASSWORD`, `ANDROID_RELEASE_KEY_ALIAS`, and `ANDROID_RELEASE_KEY_PASSWORD` as repository secrets. The keystore is a Base64-encoded PKCS12/JKS file; the workflow decodes it at build time. To keep the same signing key on GitHub Releases and Google Play, generate the keystore locally and, when creating the app in Google Play Console, enroll it as the **existing app signing key**: Play Console never accepts the raw JKS/PKCS12 file directly — first encrypt it with Google's PEPK (Play Encrypt Private Key) tool (`java -jar pepk.jar --keystore=<path> --alias=<alias> --output=<encrypted-file> --encryptionkey=<key-from-play-console>`, downloaded from the Play App Signing enrollment page), then upload the resulting encrypted file. This registers the keystore as the **app signing key** — the key Google holds and uses to re-sign the app before it reaches users, distinct from the **upload key** used to sign each `.aab` submitted through Play Console afterward. The same keystore can serve both roles (Google explicitly allows reusing the app signing key as its own upload key), which is what keeps a single keystore sufficient for both GitHub Releases (where the APK/AAB is signed with it directly) and Google Play; a separate, dedicated upload key is Google's recommended hardening, not a requirement. `release.yml` passes `-PandroidReleaseSigningRequired=true` to `:androidApp:assembleGithubRelease`/`:androidApp:bundlePlayRelease`, which turns a missing (or half-configured) secret into an immediate build failure — since this workflow publishes its output, it must never succeed with an unsigned artifact — so all four secrets are required for the release workflow to succeed. Both flavors are signed with the same keystore (the `signingConfigs` block isn't flavor-scoped), which is exactly what the app-signing-key enrollment above requires: the sideloaded `github` APK and the Play-resigned `play` AAB need to trace back to the same signing identity, or a device that already has one installed can never receive the other as an in-place update (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`).
 
 `ci.yml`'s ordinary build job never receives these secrets — deliberately, since it runs on every
 push and never publishes anything. AGP wires `assembleRelease` into `:androidApp`'s default
@@ -371,10 +423,12 @@ Currently, packaged artifacts are **ad-hoc signed** (effectively unsigned). This
 > **Signing while still on a 0.x version needs care.** jpackage signs the `.app`, so anything that edits
 > `Info.plist` *afterwards* breaks the bundle seal. The custom URI scheme no longer does this — it goes through
 > `macOS { infoPlist { extraKeysRawXml } }` and is therefore already in the plist jpackage signs. What remains is
-> `restoreMacOsShortVersion`, which only runs when the major version is `0`: at 1.0.0 and beyond there is no
-> post-processing at all and `codesign --verify --strict` passes. If Developer ID signing is adopted **while still
-> on 0.x**, the version write-back will invalidate it, so the bundle must be re-signed with the same identity
-> afterwards — re-signing ad-hoc would silently replace the Developer ID signature and defeat notarization.
+> `restoreMacOsShortVersion`, which only runs when the major version is `0`. Its write-back is already followed by
+> `resealMacOsBundle` (see the version-handling section above), but that re-signs **ad-hoc**, with `-` hardcoded
+> because this build configures no signing identity at all. Adopting Developer ID signing therefore means passing
+> that identity to `resealMacOsBundle` instead: re-signing ad-hoc over a Developer ID signature would silently
+> replace it and defeat notarization. At 1.0.0 and beyond there is no write-back and no re-sign — jpackage's own
+> signature is left exactly as produced.
 
 Overview:
 

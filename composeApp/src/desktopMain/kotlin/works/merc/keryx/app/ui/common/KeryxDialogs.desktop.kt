@@ -200,6 +200,11 @@ private val KERYX_TAB_DIALOG_WIDTH = 640.dp
  * same reason. `Modifier.height` enforces the incoming constraints, so a screen too short for this
  * (see [MAX_HEIGHT_FRACTION]) shrinks the area instead of overflowing — equally for every tab, which
  * is what matters.
+ *
+ * `updates` is the closest runner-up, not `general`, once an update is actually available: measured
+ * (a 20-line synthetic release-notes body, the worst case the 6-line cap in `UpdatesTab.kt` still
+ * lets through) at ~397dp — under this budget, but only just. See that file's own `maxLines` comment
+ * for the full measurement; re-measure both if either tab's content grows again.
  */
 private val KERYX_TAB_DIALOG_CONTENT_HEIGHT = 416.dp
 

@@ -38,13 +38,16 @@ internal fun LinuxTray(
     unreadCount: Long,
     toggleLabel: String,
     quitLabel: String,
+    updateEntry: TrayUpdateEntry?,
     onToggle: () -> Unit,
     onQuit: () -> Unit,
+    onUpdateAction: () -> Unit,
     onNotificationClicked: () -> Unit,
     newArticleNotifications: SharedFlow<String>,
 ) {
     val currentOnToggle by rememberUpdatedState(onToggle)
     val currentOnQuit by rememberUpdatedState(onQuit)
+    val currentOnUpdateAction by rememberUpdatedState(onUpdateAction)
     val currentOnNotificationClicked by rememberUpdatedState(onNotificationClicked)
 
     val item = remember(connection) {
@@ -58,7 +61,7 @@ internal fun LinuxTray(
     val menu = remember(connection) {
         SniDBusMenu(
             objectPath = SniConnection.MENU_PATH,
-            initialState = TrayMenuState(toggleLabel, quitLabel),
+            initialState = TrayMenuState(toggleLabel, quitLabel, updateEntry),
             onLayoutUpdated = { revision ->
                 connection.emit {
                     DBusMenu.LayoutUpdated(SniConnection.MENU_PATH, UInt32(revision.toLong()), MENU_ROOT_ID)
@@ -91,8 +94,8 @@ internal fun LinuxTray(
     LaunchedEffect(item, unreadCount) {
         item.updateToolTip(if (unreadCount > 0) "$APP_NAME ($unreadCount)" else APP_NAME)
     }
-    LaunchedEffect(menu, toggleLabel, quitLabel) {
-        menu.updateState(TrayMenuState(toggleLabel, quitLabel))
+    LaunchedEffect(menu, toggleLabel, quitLabel, updateEntry) {
+        menu.updateState(TrayMenuState(toggleLabel, quitLabel, updateEntry))
     }
 
     LaunchedEffect(connection) {
@@ -108,6 +111,9 @@ internal fun LinuxTray(
     }
     LaunchedEffect(menu) {
         menu.quitRequests.collect { currentOnQuit() }
+    }
+    LaunchedEffect(menu) {
+        menu.updateRequests.collect { currentOnUpdateAction() }
     }
 
     LaunchedEffect(notifier) {

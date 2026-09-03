@@ -51,6 +51,20 @@ Download the latest release from the [Releases page](https://github.com/shimatar
 > allow installing from this source the first time you open it. The `.aab` is a Google Play
 > submission format, not something you can install directly — download the `.apk` instead.
 
+Once Keryx is running, it can check for, download, and install newer releases on its own — from
+the notification bell, the task tray, or Settings → Updates — so the manual steps above are only
+needed for this first install. A file Keryx downloads itself never triggers Gatekeeper's
+quarantine warning or Windows SmartScreen's "unsigned file" prompt the way a browser download
+does, since neither is something a browser saved to disk. On Android, the one-time "allow
+installing from this source" permission above still applies, but you only grant it once, not on
+every update afterward.
+
+This applies to a macOS `.app`, a Windows `.msi`/portable install, a Linux portable install, and a
+sideloaded Android `.apk`. A Linux `.deb`/`.rpm` install and an Android install from Google Play
+instead open the release page for you to update through your usual channel (your package manager,
+or Play's own auto-update) — Keryx still tells you a new version exists, just not by installing it
+itself there.
+
 ## Development Documentation
 
 - [design documents](docs/README.md)

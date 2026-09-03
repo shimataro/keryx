@@ -1,0 +1,251 @@
+package works.merc.keryx.app.data.remote
+
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.HttpTimeoutConfig
+import io.ktor.client.plugins.timeout
+import io.ktor.client.request.header
+import io.ktor.client.request.prepareGet
+import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsChannel
+import io.ktor.http.HttpHeaders
+import io.ktor.http.Url
+import io.ktor.utils.io.readRemaining
+import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ensureActive
+import kotlinx.io.buffered
+import kotlinx.io.files.Path
+import kotlinx.io.files.SystemFileSystem
+import works.merc.keryx.app.core.APP_NAME
+import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.MAX_REDIRECTS
+import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.core.UPDATE_DOWNLOAD_SOCKET_TIMEOUT_MS
+import works.merc.keryx.app.core.UpdateException
+import works.merc.keryx.app.core.UpdateStage
+import works.merc.keryx.app.platform.ContentDigest
+import works.merc.keryx.app.platform.FileSystemExtras
+
+private const val TAG = "UpdateDownloader"
+
+/** Bytes moved per read while streaming the download to disk — see [CloudFileTransfer]'s
+ * `TRANSFER_CHUNK_BYTES` for why this is a chunked copy rather than a single in-memory read. */
+private const val DOWNLOAD_CHUNK_BYTES = 64 * 1024
+
+private val REDIRECT_STATUSES = setOf(301, 302, 303, 307, 308)
+
+/**
+ * Hosts an update asset download may land on after following a redirect from GitHub. The Releases
+ * API itself answers on `github.com`/`api.github.com`; the signed asset URL it redirects to lives
+ * on a `*.githubusercontent.com` subdomain (observed in practice: `release-assets.
+ * githubusercontent.com`). Suffix-matched with a leading dot, so `evilgithubusercontent.com` is
+ * never mistaken for a subdomain of it. Checked on every hop, including the first — not just the
+ * final destination — so a compromised or malformed redirect chain is rejected as soon as it
+ * leaves the allowlist rather than only once it stops moving.
+ */
+internal fun isAllowedUpdateDownloadHost(host: String): Boolean =
+    host == "github.com" || host == "api.github.com" || host.endsWith(".githubusercontent.com")
+
+/**
+ * Whether [UpdateDownloader.download] should actually invoke its progress callback for [bytesDone]
+ * out of [total], given the last reading it emitted ([lastEmitted]) — gated on the *whole-percent*
+ * value changing, not a fixed byte delta. Every consumer of this progress (the Updates tab's
+ * integer percent, the tray's label rounded to 5%) can't distinguish anything finer than that
+ * anyway, and unlike a fixed byte threshold this scales correctly regardless of how large [total]
+ * happens to be — a small asset never emits more often than its own percent resolution allows, and
+ * a large one never emits far less often than its consumers could actually show. Always emits the
+ * final reading ([bytesDone] `>=` [total]) so a caller driving a progress bar or an assertion never
+ * misses 100%.
+ */
+internal fun shouldEmitProgress(bytesDone: Long, lastEmitted: Long, total: Long): Boolean {
+    if (bytesDone >= total) return true
+    if (total <= 0) return false
+    return wholePercentOf(bytesDone, total) != wholePercentOf(lastEmitted, total)
+}
+
+private fun wholePercentOf(bytesDone: Long, total: Long): Long = bytesDone * 100 / total
+
+/**
+ * Downloads a single GitHub release asset to [destPath], verifying its exact size and SHA-256
+ * digest before the result becomes visible there.
+ *
+ * Deliberately has no resume/partial-download support: a GitHub-signed asset URL expires roughly an
+ * hour after it's issued, so "resuming" would still need the original request replayed from
+ * scratch to get a fresh one — there is nothing to resume *against*. A failed or cancelled download
+ * is simply retried in full from [url].
+ *
+ * The shared app [HttpClient] is configured with `followRedirects = false` (every other caller
+ * handles its own redirects explicitly too — see `FeedFetcher`), so this follows redirects itself,
+ * checking [isAllowedUpdateDownloadHost] on every hop and capping the chain at [MAX_REDIRECTS].
+ *
+ * **Every request here must go through `prepareGet(…).execute { … }`, never a plain `client.get()`.**
+ * Ktor's `SaveBody` plugin is installed by default and reads the *entire* response body into memory
+ * before a plain `client.get()` even returns, which would make [download]'s `onProgress` fire only
+ * once the transfer is already over (a progress bar frozen at 0%, then jumping straight to done) —
+ * and would hold a 100 MB+ asset in RAM besides. Only the streaming form skips that
+ * (`HttpStatement.execute` → `fetchStreamingResponse()` → `skipSaveBody()`); `skipSavingBody()` on
+ * a regular request is a deprecated no-op that merely logs.
+ */
+class UpdateDownloader(private val client: HttpClient) {
+
+    /**
+     * @param url The asset's `browser_download_url` (or a redirect target reached from it).
+     * @param destPath Final path the verified download is moved to. A `$destPath.part` sibling
+     *   holds the in-progress download; its presence after a crash means a previous attempt never
+     *   finished verifying, and it should be swept the same as any other stale download.
+     * @param expectedSizeBytes The asset's `size` field, checked exactly (not just as an upper
+     *   bound) once the download completes — short *or* long is a failure.
+     * @param expectedSha256 The asset's parsed `digest` — see
+     *   [works.merc.keryx.app.domain.parseSha256Digest].
+     * @param onProgress Invoked as bytes arrive, throttled to once per whole-percent change (see
+     *   [shouldEmitProgress]) — always invoked once more at completion.
+     */
+    suspend fun download(
+        url: String,
+        destPath: String,
+        expectedSizeBytes: Long,
+        expectedSha256: String,
+        onProgress: suspend (bytesDone: Long, bytesTotal: Long) -> Unit = { _, _ -> },
+    ): Result<Unit> {
+        val partPath = "$destPath.part"
+        return try {
+            val streamed = streamToFile(url, redirectCount = 0, partPath, expectedSizeBytes, onProgress)
+            if (streamed is Result.Err) {
+                FileSystemExtras.deleteRecursively(partPath)
+                return streamed
+            }
+
+            val actualSha256 = ContentDigest.sha256File(partPath)
+            // sha256File is a plain blocking call with no cancellation checks of its own (shared
+            // with SyncRepository's snapshot digest, which this deliberately leaves untouched — see
+            // this method's own cancellation handling below), so a large asset's hash can take long
+            // enough that a Cancel click during it would otherwise go unnoticed until well after —
+            // this is the first point that can actually observe it.
+            coroutineContext.ensureActive()
+            if (actualSha256 != expectedSha256) {
+                FileSystemExtras.deleteRecursively(partPath)
+                return Result.Err(UpdateException(UpdateStage.VERIFY, "Downloaded file's digest does not match"))
+            }
+
+            SystemFileSystem.atomicMove(Path(partPath), Path(destPath))
+            Result.Ok(Unit)
+        } catch (e: CancellationException) {
+            FileSystemExtras.deleteRecursively(partPath)
+            throw e // a cancelled download is not a failed one — the caller (UpdateRepository) treats it as such
+        } catch (e: Exception) {
+            // Only genuinely unexpected exceptions reach here now — every ordinary remote-response
+            // condition (bad status, disallowed host, size/digest mismatch, too many redirects) is
+            // classified explicitly as a Result.Err by streamToFile/writeVerifiedBody/
+            // requireAllowedDownloadUrl instead of thrown, per this codebase's error-design
+            // convention that classification belongs to the DataSource layer, not a catch-all.
+            FileSystemExtras.deleteRecursively(partPath)
+            Log.warn(TAG, "Update download failed unexpectedly", e)
+            Result.Err(UpdateException(UpdateStage.DOWNLOAD, e.message ?: "Download failed"))
+        }
+    }
+
+    /**
+     * Streams the response for [url] straight into [partPath], following a redirect by recursing
+     * *inside* the enclosing `execute` block rather than returning its [HttpResponse] outward — a
+     * streaming response is only readable for the duration of that block, so there is nothing
+     * useful to hand back to a caller. Nesting is bounded by [MAX_REDIRECTS] and each outer hop is
+     * a redirect whose body is empty, so the handful of briefly-overlapping connections costs
+     * nothing. (Resolving the final URL up front instead would not work: the resolving request that
+     * finally answers `200` is exactly the one whose body would be buffered into memory.)
+     */
+    private suspend fun streamToFile(
+        url: String,
+        redirectCount: Int,
+        partPath: String,
+        expectedSizeBytes: Long,
+        onProgress: suspend (Long, Long) -> Unit,
+    ): Result<Unit> {
+        if (redirectCount > MAX_REDIRECTS) {
+            return Result.Err(UpdateException(UpdateStage.DOWNLOAD, "Too many redirects"))
+        }
+        val allowed = requireAllowedDownloadUrl(url)
+        if (allowed is Result.Err) return allowed
+
+        return client.prepareGet(url) {
+            header(HttpHeaders.UserAgent, APP_NAME)
+            timeout {
+                // The overall request has no useful upper bound for an asset this size (see this
+                // class's own KDoc); only a stalled *socket* — no bytes at all for this long — is
+                // actually stuck.
+                requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
+                socketTimeoutMillis = UPDATE_DOWNLOAD_SOCKET_TIMEOUT_MS
+            }
+        }.execute { response ->
+            if (response.status.value in REDIRECT_STATUSES) {
+                val location = response.headers[HttpHeaders.Location]
+                    ?: return@execute Result.Err(
+                        UpdateException(UpdateStage.DOWNLOAD, "${response.status.value} without Location header"),
+                    )
+                val target = UrlResolver.resolve(url, location) ?: location
+                streamToFile(target, redirectCount + 1, partPath, expectedSizeBytes, onProgress)
+            } else if (response.status.value !in 200..299) {
+                Result.Err(UpdateException(UpdateStage.DOWNLOAD, "HTTP ${response.status.value}"))
+            } else {
+                writeVerifiedBody(response, partPath, expectedSizeBytes, onProgress)
+            }
+        }
+    }
+
+    private fun requireAllowedDownloadUrl(url: String): Result<Unit> {
+        val parsed = Url(url)
+        if (parsed.protocol.name != "https") {
+            return Result.Err(UpdateException(UpdateStage.DOWNLOAD, "Refusing a non-HTTPS update download URL"))
+        }
+        if (!isAllowedUpdateDownloadHost(parsed.host)) {
+            return Result.Err(UpdateException(UpdateStage.DOWNLOAD, "Refusing update download from disallowed host: ${parsed.host}"))
+        }
+        return Result.Ok(Unit)
+    }
+
+    private suspend fun writeVerifiedBody(
+        response: HttpResponse,
+        partPath: String,
+        expectedSizeBytes: Long,
+        onProgress: suspend (Long, Long) -> Unit,
+    ): Result<Unit> {
+        val declaredLength = response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+        if (declaredLength != null && declaredLength != expectedSizeBytes) {
+            return Result.Err(
+                UpdateException(UpdateStage.DOWNLOAD, "Content-Length ($declaredLength) does not match the expected size ($expectedSizeBytes)"),
+            )
+        }
+
+        val channel = response.bodyAsChannel()
+        var total = 0L
+        var lastEmitted = 0L
+        SystemFileSystem.sink(Path(partPath)).buffered().use { sink ->
+            while (true) {
+                val packet = channel.readRemaining(DOWNLOAD_CHUNK_BYTES.toLong())
+                if (packet.exhausted()) break
+                // transferTo copies straight into sink and reports how much it moved, rather than
+                // materializing this chunk into a ByteArray just to measure its size and hand it to
+                // sink.write(bytes) — one fewer full-chunk copy and allocation per iteration. The
+                // "exceeds expected size" check below now runs after the chunk is already written
+                // (packet.buffer.size, which would let it run before, is an @InternalIoApi); the
+                // .part file this could over-write into is deleted on any error path regardless
+                // (see download()'s own catch/error handling), so this only ever costs at most one
+                // extra chunk of transient disk usage, never a correctness difference.
+                val chunkSize = packet.transferTo(sink)
+                total += chunkSize
+                if (total > expectedSizeBytes) {
+                    return Result.Err(
+                        UpdateException(UpdateStage.DOWNLOAD, "Downloaded body exceeds the expected $expectedSizeBytes-byte size"),
+                    )
+                }
+                if (shouldEmitProgress(total, lastEmitted, expectedSizeBytes)) {
+                    lastEmitted = total
+                    onProgress(total, expectedSizeBytes)
+                }
+            }
+        }
+        if (total != expectedSizeBytes) {
+            return Result.Err(UpdateException(UpdateStage.DOWNLOAD, "Downloaded $total bytes, expected $expectedSizeBytes"))
+        }
+        return Result.Ok(Unit)
+    }
+}

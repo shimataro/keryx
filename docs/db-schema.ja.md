@@ -177,7 +177,7 @@ SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundli
 | `fontSizeScale` | number | 1.0 |
 | `refreshIntervalMinutes` | int | 30 |
 | `startMinimized` | boolean | false |
-| `cloudStorageType` | string\|null（`"dropbox"` / `"google_drive"` / null=ローカルのみ。`CloudStorageType.id`） | null |
+| `cloudStorageType` | string\|null（`"dropbox"` / `"google_drive"` / `"onedrive"` / null=ローカルのみ。`CloudStorageType.id`） | null |
 | `notificationEnabled` | boolean | true |
 | `lastCacheCleanupAt` | int\|null | null |
 | `lastFtsRebuiltAt` | int\|null | null（FTS 全再構築の 24h ゲート。日次 heal で更新） |
@@ -185,6 +185,16 @@ SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundli
 | `lastUpdateCheckAt` | int\|null | null |
 | `windowWidth` / `windowHeight` | number\|null | null |
 | `feedListPaneWidth` / `articleListPaneWidth` | number | 260 / 360 |
+| `collapsedFolderIds` | string[] | `[]`（フォルダの既定は*展開*なので、畳まれている方だけを記録する） |
+| `expandedTagIds` | string[] | `[]`（タグは逆に既定が*折り畳み*。このリストが無かった頃と同じだけサイドバーが短いままになるようにするため） |
+| `lastFilter` | string\|null | null |
+| `lastArticleId` | string\|null | null |
+| `recentArticleScrollPositions` | `{articleId, scrollOffset}[]` | `[]` |
+| `lastFocusedPane` | string\|null | null |
+| `lastUnreadOnly` | boolean\|null | null |
+| `lastUnreadOnlyStarred` | boolean\|null | null（スター付きフィルタ専用。`lastUnreadOnly` とは独立） |
+| `lastUnreadOnlySearch` | boolean\|null | null（検索フィルタについて同上） |
+| `lastNewestFirst` | boolean\|null | null |
 | `appMenuBarVisible` | boolean\|null | null（Linux KDE Global Menu: null=自動（`RegisterWindow` が成功するまで表示し、その後非表示）。true/false は Ctrl+M またはエクスポートされた「メニューバーを表示」チェックボックスによる明示的な上書き。`com.canonical.AppMenu.Registrar` が存在しない環境では効果なし） |
 
 ## キャッシュ削除

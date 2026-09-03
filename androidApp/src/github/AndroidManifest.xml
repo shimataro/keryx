@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Merged into src/main/AndroidManifest.xml only for the "github" product flavor (see
+     androidApp/build.gradle.kts's flavorDimensions). Declares the one permission an in-app
+     update's PackageInstaller session needs to prompt for "install unknown apps" consent
+     (AndroidUpdateInstaller.kt) — omitted from the "play" flavor submitted to Google Play, since
+     Play already updates the app itself and a Play-review policy specifically restricts this
+     permission to apps whose primary purpose is installing other apps. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+</manifest>

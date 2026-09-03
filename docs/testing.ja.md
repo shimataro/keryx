@@ -77,7 +77,18 @@
 - `runTest`（仮想時間）と Ktor `MockEngine` の `HttpTimeout` や実ソケット I/O を組み合わせると、
   タイムアウトが誤検知されて flaky になることがある。該当するテストは `kotlinx.coroutines.runBlocking`
   （または実時間ポーリング）に切り替える（`FeedFetcherTest.kt`, `FeedRepositoryTest.kt`,
-  `OAuthLoopbackServerTest.kt` 等の実績あり）。
+  `OAuthConnectFlowTest.kt` 等の実績あり）。
+- **同一の `StateFlow` を 2 つのコレクタで観測し、その列が一致することをアサートしてはならない。**
+  `StateFlow` は conflating で、「最新値が届くこと」しか保証しない。中間値は**コレクタごとに独立に**
+  間引かれる。したがって 2 本の記録列の比較は、「一方だけ間引かれる」ことが起きないほど速いマシンで
+  しか成立せず、低速・低コア数の CI ランナーでは落ちる（実測: `windows-latest`（2 コア）の
+  `UpdateRepositoryTest.everyCollectorObservesTheSameSharedStateProgression` が、2 本のリストを
+  `assertEquals` で比較していた当時に落ちた）。代わりに、各記録列がその実行で発生する唯一の正典列の
+  **部分列**であること（同ファイルの `assertSubsequenceOf`）を、各状態が運ぶペイロードまで含めて
+  アサートし、両者が同一の最終値に収束することを確認する。付随して 2 点: `flow.value` ではなく
+  **コレクタ側**が最終値に到達するのを待つこと（コレクタは別スレッドで動くので `flow.value` に遅れる）。
+  記録先はスレッドセーフなリスト（`CopyOnWriteArrayList`）にすること —— `Dispatchers.Default` から
+  追記し、テストスレッドから読む素の `ArrayList` には両者間の happens-before がない。
 - 実スレッドで DB への並行書き込みを行うテストは `inMemoryDb()` ではなく `fileDb()` を使うこと —— 前者は全呼び出し元を、同期機構を持たない 1 本の共有 JDBC コネクションに固定するため、実スレッド 2 本で SQLDelight のトランザクション管理そのものが壊れ得る。`fileDb()` を使う場合でも、テスト対象と無関係な書き込みを fixture に残さないこと: SQLite の deferred `BEGIN` により、write の前に read を行うトランザクションは、無関係な並行書き込み側のロック昇格を、`busy_timeout` では救済されないリトライ不能な `SQLITE_BUSY` で失敗させることがある —— 詳細は `known-issues.md` の「並行書き込みにより read→write トランザクションがリトライ不能な SQLITE_BUSY で失敗する」を参照。
 - 新規の Android Compose UI 計装テストは `androidApp/src/androidTest/` に置く（`composeApp` は
   ライブラリモジュールなので、その計装テストはアプリケーションモジュール側に置く — 上記「構成」
@@ -109,7 +120,7 @@ Android には計装テストスイートが 2 つある。CI に組み込まれ
 | スイート | タスク | 対象 | CI |
 | --- | --- | --- | --- |
 | `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | 実際のバンドル SQLite に対する `DatabaseMerger`/`DatabaseSnapshot` | ✗ ローカルのみ |
-| `androidApp/src/androidTest/` | `:androidApp:connectedDebugAndroidTest` | Compose UI（長押しジェスチャ、検索バー） | ✓ 毎プッシュ |
+| `androidApp/src/androidTest/` | `:androidApp:connectedGithubDebugAndroidTest` | Compose UI（長押しジェスチャ、検索バー） | ✓ 毎プッシュ |
 
 どちらも実機または起動中のエミュレータが必要 — AVD（`<name>`）の作り方は
 [setup.ja.md](setup.ja.md) を参照:
@@ -126,12 +137,30 @@ $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
 がまだ導入していない別種の CI 課題のため、現状はローカル実行のみ。
 
 `androidApp` 自身の計装テストスイート（Compose UI のジェスチャテスト。上記の
-`androidApp/src/androidTest/` を参照）は、通常の `com.android.application` のタスク命名を使う:
+`androidApp/src/androidTest/` を参照）は、通常の `com.android.application` のタスク命名を使う——
+`androidApp` が `github`/`play` の product flavor に分かれた分だけタスク名も flavor 修飾される
+（`build.ja.md` の「Android (APK / AAB)」を参照）:
 
 ```bash
 $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
-./gradlew :androidApp:connectedDebugAndroidTest
+./gradlew :androidApp:connectedGithubDebugAndroidTest
 ```
+
+CI で実行する（そしてローカルでも実行すべき）のは `github` だけ——このスイートは flavor 固有の
+挙動を何も検証していない（2 つの flavor の違いは `REQUEST_INSTALL_PACKAGES` マニフェスト権限の
+有無だけ）。そもそも `connectedPlayDebugAndroidTest` にフォールバックする先すら無い:
+`androidApp/build.gradle.kts` が `playDebug` バリアント自体を無効化しているためで（`githubDebug`
+がすでにカバーしていない、デバッグビルド固有の検証対象は無い——同ファイル自身のコメント参照）、
+`connectedAndroidTest`（flavor 指定なし）は今では唯一残るデバッグバリアントである `githubDebug`
+のみを実行する。
+
+「2 つの flavor の違いがその権限*だけ*である」こと自体も、`ci.yml` の
+「Verify REQUEST_INSTALL_PACKAGES is github-only (Linux)」ステップが毎 push で検証している。
+`:androidApp:processGithubReleaseManifest`/`processPlayReleaseManifest` を実行し、**マージ後の**
+マニフェスト 2 つを grep するので、flavor のソースセットではなく AGP が実際に生成したものに対する
+アサーションになる。マージ後であることが重要で、どちらの flavor の `AndroidManifest.xml` も変えずに
+推移的なライブラリのマニフェストが `play` 側へこの権限を復活させることがあり得る——そしてそれこそが
+Google Play に弾かれるケースである。
 
 `androidDeviceTest` と同様、これも `./gradlew build` には含まれない — アプリケーションモジュールの
 AGP の `build` ライフサイクルは `androidTest` ソースセットに対して静的解析タスクの
@@ -211,7 +240,40 @@ heavyweight ポップアップの強制。置き換え対象の AWT ウィジェ
 （`SyncRepositoryTest.kt`：`AUTOMATIC` トリガーの同期が `autoSyncSuspended` 中はスキップされること、
 `MANUAL` は決してゲートされないこと、`scheduleSync()` も同様に抑制されること、成功した同期／リセット／
 `clearSyncFailureState()` でゲートがクリアされること——`SchemaVersionException` は意図的にゲートを
-一切起動しない）などを網羅する。
+一切起動しない）、アプリ内アップデートのパイプライン（`UpdateCheckerTest.kt`：`assets[]`/`body` を
+`asset`/`releaseNotes` へパースすること、`sha256` 以外や不正な `digest` はアセットなし扱いになる
+こと、`state` が `"uploaded"` でないアセットは除外されること；`UpdateAssetSelectorTest.kt`：
+`InstallKind` ごとのアセットのサフィックス一致、リリースに何が含まれていても `.aab` は絶対に
+選ばれないこと；`UpdateInstallPolicyTest.kt`：`InstallLocation` × アセット → `UpdatePlan`、および
+`canInstallAndroidApkUpdate` のプラン種別／OS 同意状態によるゲーティング——`AndroidUpdateInstaller`
+の判断のうちここだけ純粋関数として切り出してあるのは、`androidMain` 自体には JVM でテストできる
+ユニットテストのソースセットが存在しないため（下記「既知の未カバー範囲」参照）；
+`UpdateDownloaderTest.kt`：ホストの allowlist（先頭ドット必須の
+サフィックス一致、生 IP や紛らわしいホスト名を拒否）、`MAX_REDIRECTS` で頭打ちになる手動リダイレクト
+追従、digest やサイズの不一致時に `.part` ファイルも本体ファイルも残らないこと、進捗通知が単調に
+増加して `bytesTotal` に到達すること；`UpdateStateMachineTest.kt`：`Ready` が `UpToDate`／同一
+バージョンの再チェックでは潰れないが、より新しいバージョンでは潰れること、`Downloading`/
+`Verifying`/`Installing` には一切割り込まれないこと；`UpdateRepositoryTest.kt`：`startDownload()`
+を2回呼んでもダウンロードは1本だけ開始されること、`cancelDownload()` が `.part` ファイルを削除し
+`Failed` ではなく `Available` に戻すこと、sweep が進行中の `.part` と現在の `Ready` ファイルを保護
+しつつそれ以外を削除すること、より新しいバージョンのチェックが旧 `Ready` バージョンのディレクトリを
+削除すること；`ReleaseNotesTextTest.kt`）、デスクトップの自己置換／インストーラースクリプト
+（`UpdateScriptWriterTest.kt`：生成されたスクリプト本文そのものをテンプレートごとに検証——退避して
+から削除する順序、配置に失敗した際のロールバック分岐、旧コピーの削除を許可する前のヘルスチェック；
+`DesktopUpdateInstallerTest.kt`：`canInstall` の `InstallKind`／アセット種別ごとのゲーティング、
+macOS/Windows/Linux の自己置換と Windows MSI 経路それぞれで実際に起動されるコマンドライン一式を、
+実際には何も起動しないフェイクの `ProcessLauncher` 経由で検証すること、バージョン不一致や実行権限の
+無い展開済みバンドルはランチャーが呼ばれる前に失敗すること、書庫を拒否する `ArchiveExtractor` も
+同様にランチャーより手前で失敗し、その理由が呼び出し側まで伝わること、展開開始前に古い
+`extracted/` ツリーが消されること；`ZipExtractorTest.kt`：zip slip の拒否、
+`maxBytes` の上限、指定したエントリだけ実行ビットが復元されること、および同じ 2 つのガードを
+`validate` 経由でも検証すること（`validate` はさらに、解決先としてしか使わない展開先ディレクトリを
+作らないこと）（エントリ数上限自体——`ZipExtractor.kt` の `MAX_ZIP_ENTRIES`、10 万——は
+どちらの関数についても未検証: 実際に 10 万件超のエントリを持つ ZIP を
+ユニットテストで生成・展開することになるため、実用的なフィクスチャが作れない）；
+`FileSystemExtrasTest.kt`/`InstallLocationDesktopTest.kt` を `setExecutable`/`isDirectoryWritable`/
+`move`、`copyTree` が symlink（ファイル・ディレクトリとも）をたどらずリンクのまま複製すること、
+OS ごとの `InstallLocation` 判定向けに拡張したもの）などを網羅する。
 `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` の失敗は DB スキーマ・
 マージ SQL・同期オーケストレーションの退行を意味するので特に注意する。
 
@@ -221,7 +283,7 @@ heavyweight ポップアップの強制。置き換え対象の AWT ウィジェ
 ため、下記の手動確認に留まる）と、`FilePicker.desktop.kt` の `resolveDialogOwner()` を実ウインドウに
 対して動かす部分（委譲先の純粋な `chooseDialogOwner` の選択ロジックのみテスト済み）である。
 `OAuthConnectFlow.connect()` のブラウザー起動〜コールバック待受〜
-コード交換部分（`BrowserOpener`/`OAuthLoopbackServer` の実I/Oに依存し、シームなしにはモック不可。
+コード交換部分（`BrowserOpener`/`LoopbackRedirectTransport` の実I/Oに依存し、シームなしにはモック不可。
 App Key 空チェックで即エラーになる分岐のみ `OAuthConnectFlowTest` でカバー済み）、
 `DatabaseDriverFactory.create()` そのもの（`AppDirs.appDataDir()` を直接参照しておりテスト用の
 ディレクトリ差し替えができない）。ただし本質的な部分である接続設定は `sqliteConnectionProperties()`
@@ -231,7 +293,7 @@ App Key 空チェックで即エラーになる分岐のみ `OAuthConnectFlowTes
 ことで、まさにこの部分をテスト可能にするために書き直された経緯があり、`FeedListDragTest.kt` が
 `performMouseInput`/`performKeyInput` を使って実際にエンドツーエンドで検証する（ドラッグによる並べ替え、
 しきい値判定、フォルダー/タグへのドロップ、ドラッグ中の右クリック、ゴーストのライフサイクル、
-Escape によるキャンセル）。並び替えの計算ロジック自体（`ReorderUtil.reorderIds`）と、それを使う
+Escape によるキャンセル）。並び替えの計算ロジック自体（`ReorderUtil.kt` のトップレベル関数 `reorderIds`）と、それを使う
 `FeedRepository.moveFeed`/`FolderRepository.reorderFolders` の DB 反映は通常どおりテストする。
 新規に追加されたものとして、`SqliteConnectionPropertiesTest`（本番の接続プロパティが実際にすべての
 接続へ届くこと — 外部キーが効き `busy_timeout` が適用されること。JVM ドライバは文ごとに接続を開くため
@@ -257,7 +319,27 @@ Linux の SNI トレイでは `SniConnection`（接続・バス名取得・expor
 2 つの計装スイート以外はすべて同様に未カバーである: `WorkManager` の実際の定期ジョブスケジューリング
 と実行（純粋なスケジュール算出ロジック `BackgroundRefreshSchedule.kt` のみテスト済み）、
 `NotificationManagerCompat` 経由の実通知投稿、Storage Access Framework のファイルピッカー、
-Keystore を使ったトークン保存。
+Keystore を使ったトークン保存、そして `AndroidUpdateInstaller` の `PackageInstaller` セッション／
+`BroadcastReceiver`／`canRequestPackageInstalls()` の扱い（委譲先の純粋なプラン／同意判断である
+`canInstallAndroidApkUpdate` のみテスト済み——上記「アプリ内アップデートのパイプライン」参照）。
+同様にデスクトップ側でも、自己置換／`msiexec` スクリプト（`UpdateScriptWriter` の出力）を実際に
+実行する部分は手動確認のみ——生成されたスクリプト本文そのものは直接検証しており、
+`DesktopUpdateInstaller` はテスト内で実際にスクリプトを起動することがない（上記のフェイク
+`ProcessLauncher` を参照）。詳細は下記「アプリ内アップデート」を参照。この経路にはさらに、
+*ユニット*テストでは到達できない箇所が 2 つあり、それぞれ別の形でカバーしている。
+`DittoArchiveExtractor` が実際に `ditto` を実行する部分は `ArchiveExtractorTest.kt` の
+`isMacOs` ゲート付きテストがカバーしている（CI マトリクスに `macos-latest` があるので実際に走る。
+Linux / Windows のランナーには `ditto` が無く、インストーラー自身のテストは既定で
+`InProcessArchiveExtractor` を注入する）。実署名済みの `.app` が
+`zip -ry` → `ditto` → `codesign --verify --strict --deep` の往復を通ること自体は macOS **かつ**
+jpackage バンドルを要し、どのテストソースセットにも用意できない——そこで `ci.yml` の
+「Verify packaging (macOS)」ステップがビルドしたてのアプリイメージに対してまさにその往復を実行し、
+symlink の数が変わらないことと展開後のバンドルが検証を通ることをアサートする。対になるのが
+`createDistributable` 自身の `verifyMacOsBundleSeal`／署名特性のガードで、zip より*前*の段階で
+バンドルが既に壊れていればビルドを失敗させる（[build.ja.md](build.ja.md) 参照）。両者により、
+当初の欠陥のどちらの半分も気付かれずリリースへ届くことはない。`FileSystemExtras.move` のボリューム跨ぎフォールバックも同様に
+テストから到達できない（2 つ目のファイルシステムを用意できない）ため、その委譲先である
+リンク保持コピーを `copyTree` として切り出し、直接テストしている。
 
 ## 手動確認（UI）
 
@@ -716,3 +798,58 @@ OS 側のルーティングではない）。パッケージ版をインスト�
     ティール地の上で判別できることを確認する。各アイコンを長押ししてツールチップを確認。
   リセット実行中はスピナーが器の上で見えること・行の高さが変わらないこと。ライト／ダーク両テーマで
   確認する。
+
+### アプリ内アップデート
+
+`canInstallAndroidApkUpdate` と純粋な状態機械の関数群より先は何も自動テストで検証していない
+（上記「既知の未カバー範囲」参照）——自己置換／インストーラー経路はすべて実際にパッケージ化した
+ビルドが必要になる。`./gradlew :composeApp:createDistributable` でビルドし（`:run` は
+`jpackage.app-path` が存在せず常に開発用インストールとして扱われるため不可——
+`InstallLocation.desktop.kt` を参照）、パッケージ化されたアプリを起動する。開発者本人が普段使って
+いる既存のインストール先ではなく、必ず**複製したコピー**に対して行うこと——各プラットフォームで
+最初に自己置換を試す際は、ロールバック経路にバグがあってインストール先を壊してしまう場合に備える。
+
+- **macOS**: 旧バージョンを起動し、トレイまたは Updates タブからダウンロードを開始、検証を経て
+  「インストール準備完了」に達したらインストールする。アプリが新バージョンで再起動すること、
+  新しい `.app` に対する `xattr -l` が `com.apple.quarantine` を示さないこと（このアプリ自身が
+  ファイルを書き込んでいるため——`background-update.ja.md` の「アプリ内アップデート」を参照）、
+  旧 `.app` が跡形もなく消えていること（`.old` ディレクトリが隣に残っていないこと）を確認する。
+  そのうえで差し替わったバンドル自体も確認する。以下はどのプラットフォームの自動テストからも
+  到達できず、しかも「再起動した」ことからは何も導けない項目である:
+  - 再起動した `.app` に対する `codesign --verify --strict --deep` が通り、`codesign -dv` が
+    ダウンロードした資産と同じ `flags=`／`hashes=13+N` を報告すること——バンドルは正常に再起動しても
+    エンタイトルメントやシールを失っていることがある（[build.ja.md](build.ja.md) 参照）。
+  - `find <app>/Contents/runtime -type l | wc -l` が 0 でないこと。つまり同梱 JDK の `legal/` の
+    symlink が書庫の往復をリンクとして通り抜けていること。ここが退行すると「インストールが失敗した」
+    としか現れず、原因を名指しするものが何も残らない。
+  - インストール先を**別ボリューム**（RAM ディスク——`hdiutil attach -nomount ram://…`——または
+    スクラッチの APFS ボリューム）に置いてもう一度実行し、ボリューム跨ぎのステージングコピー
+    （`FileSystemExtras.copyTree`）を実際に通すこと。既定の `~/Library/Caches` ＋ `/Applications`
+    の構成は常に同一ボリュームなので、通常の実行ではこのコードに一度も入らない。
+- **Windows（MSI インストール済み）**: 同じ流れ。UAC 昇格プロンプトが一度だけ出ること、アプリが
+  同じインストール先から新バージョンで再起動すること、UAC を拒否した場合（またはアップグレードが
+  それ以外の理由で失敗した場合）でも、何も起動していない状態にはならず元の動いていたインストールが
+  再起動されることを確認する。
+- **Windows / Linux（portable ZIP）**: macOS と同じ自己置換の流れ。再起動したアプリが同じ
+  ディレクトリから動くこと、`.new`/`.old` の兄弟ディレクトリが残らないことを確認する。
+- **Linux（deb/rpm）**: Updates タブとトレイのどちらも、ダウンロードを提示せず「リリースページを
+  開く」にフォールバックすることを確認する——`updatePlan` は `LINUX_PACKAGE` に対して常に
+  `OpenReleasePage` を返す。
+- **Android**: `github` flavor の APK をサイドロードし（`build.ja.md` の flavor 分割を参照）、
+  ダウンロードとインストールを行い、OS 自身のインストール確認ダイアログが出てその場でアプリが
+  更新されることを確認する。別途、`play` flavor の APK をサイドロードし、Updates タブが一切
+  ダウンロードを提示しないことを確認する（`canInstallAndroidApkUpdate` は `REQUEST_INSTALL_PACKAGES`
+  を要求するが、これを宣言しているのは `github` のマニフェストだけ）。「提供元不明のアプリ」が
+  まだ許可されていない場合、インストールをクリックするとセッションではなくこのシステム設定画面が
+  開くこと、許可せずに戻ってきても Updates タブが固まらず「インストール準備完了」のままであることを
+  確認する。サイドロードする APK と更新先のリリースは**同じ鍵**で署名されている必要がある（そうでないと
+  Android が上書きを許さない）ため、どちら側も debug ビルドで代用できず、確認後に
+  `installGithubDebug` へ戻るには先に `./gradlew :androidApp:uninstallGithubDebug` が必要
+  （[setup.ja.md](setup.ja.md) の「よくある問題」参照）。
+- **各プラットフォームの失敗経路**: ダウンロード途中でキャンセルする（`Failed` ではなく
+  `Available` に戻り、`.part` ファイルも消えていること）；ダウンロード中にネットワークを切断する
+  （`Failed` になり再試行アクションが出ること）；ダウンロード開始前にディスクを満杯にする
+  （事前の空き容量チェックが 1 バイトも書き込む前に拒否すること）。デスクトップでは、
+  「インストール準備完了」からインストールをクリックする前にアプリを強制終了し再起動した場合、
+  次回チェックで古い `Ready` を再開するのではなく同じバージョンが再び `Available` として
+  提示されることを確認する。

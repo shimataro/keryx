@@ -178,7 +178,7 @@ only act on what you actually measured.
 2. **Whole-list recomputation.** `HomeViewModel.articles` rebuilds a `HashSet`
    and runs `sortedWith` + `filter` + `reversed()` over *every* article on each
    emission — including a single read toggle. Same family: the linear scans in
-   `HomeCommon.groupFeedsByFolder` / `feedListItemIndex`, and the per-character
+   `HomeCommon.groupFeedsByFolder` / `feedListRowIndex`, and the per-character
    `AnnotatedString` build in `markedToAnnotatedString` for every search row.
 3. **SQL N+1.** `ArticleRepository.search` issues a `getById` per FTS hit;
    `upsertParsed` issues a `getByFeedAndGuid` per article purely to count new
@@ -231,8 +231,9 @@ headroom:
     (bounded semaphore) but applies DB writes serially — **DB writes must stay
     serialized** — the JVM driver opens a fresh connection per statement, so
     concurrent writes hit `SQLITE_BUSY`.
-14. **Dispatchers.** `Dispatchers.IO` is unused across the codebase; blocking JDBC
-    and file IO run on `Dispatchers.Default` (bounded by CPU count). But
+14. **Dispatchers.** Blocking JDBC and file IO mostly run on `Dispatchers.Default`
+    (bounded by CPU count). The one exception is `DesktopUpdateInstaller.install`,
+    which uses `runInterruptible(Dispatchers.IO)` because it blocks for minutes. But
     `HomeViewModel.dbWriteDispatcher` and `SettingsRepository.writeDispatcher` are
     single-threaded **on purpose, for serialization** — never widen those.
 15. **Lock hold time.** Axis-1 #1 is the known instance of CPU work inside a

@@ -181,44 +181,8 @@ class FeedRepository(
         // feed being re-subscribed is re-numbered to the end of the group it used to belong to (its
         // old relative position may no longer be meaningful after other feeds in that group moved
         // around while it was unsubscribed).
-        var wasNewlyCreated = false
-        subscribePlacementMutex.withLock {
-            db.transaction {
-                // Re-read under the lock: the snapshot taken before the fetch/favicon calls can be
-                // stale, so a concurrent subscribe of the same url may already have created the row.
-                val current = feeds.getByUrl(effectiveUrl).executeAsOneOrNull()
-                wasNewlyCreated = current == null
-                val sortOrder = when {
-                    current == null -> insertionSortOrderForNewFeed(feedId, folderId, afterFeedId, beforeFeedId, now)
-                    current.deleted_at == null -> current.sort_order
-                    else -> feeds.nextSortOrderInGroup(current.folder_id).executeAsOne()
-                }
-
-                feeds.upsert(
-                    id = feedId,
-                    url = effectiveUrl,
-                    site_url = fetched.siteUrl,
-                    title = fetched.title ?: effectiveUrl,
-                    description = fetched.description,
-                    favicon_url = favicon,
-                    etag = fetched.etag,
-                    last_modified = fetched.lastModified,
-                    error_count = 0,
-                    last_error = null,
-                    custom_title = current?.custom_title,
-                    deleted_at = null,
-                    updated_at = now,
-                    created_at = current?.created_at ?: now,
-                    sort_order = sortOrder,
-                )
-                // Files a brand-new feed into the folder selected in the feed list at add time. A
-                // re-subscribed feed (current != null) keeps its prior folder instead — upsert never
-                // touches folder_id, so there's nothing to do for that case.
-                if (current == null && folderId != null) feeds.updateFolder(folderId, now, now, feedId)
-                // Re-subscribing (feed was soft-deleted) is a subscription-state change: stamp its
-                // last-wins timestamp so it propagates over another device's refresh on the next sync.
-                if (current?.deleted_at != null) feeds.stampResubscribed(now, feedId)
-            }
+        val wasNewlyCreated = subscribePlacementMutex.withLock {
+            doSubscribeFeedWrite(effectiveUrl, feedId, folderId, afterFeedId, beforeFeedId, now, favicon, fetched, existing)
         }
         articleRepository.upsertParsed(feedId, fetched.articles)
         syncScheduler.scheduleSync()
@@ -280,15 +244,7 @@ class FeedRepository(
         }
         val newOrder = reorderIds(groupIds, feedId, targetFeedId)
         val sortOrderOf = group.associate { it.id to it.sort_order }
-        var newFeedSortOrder = 0L
-        newOrder.forEachIndexed { index, id ->
-            if (id == feedId) {
-                newFeedSortOrder = index.toLong()
-            } else if (sortOrderOf[id] != index.toLong()) {
-                feeds.updateSortOrder(index.toLong(), now, now, id)
-            }
-        }
-        return newFeedSortOrder
+        return applyReorderUpdates(newOrder, sortOrderOf, feedId, now, feeds)
     }
 
     /**
@@ -304,12 +260,8 @@ class FeedRepository(
         val newOrder = reorderIds(current.map { it.id }, feedId, targetFeedId)
         val now = clock.nowMillis()
         db.transaction {
-            newOrder.forEachIndexed { index, id ->
-                if (id == feedId) {
-                    feeds.updateFolderAndSortOrder(folderId, index.toLong(), now, now, now, id)
-                } else if (sortOrderOf[id] != index.toLong()) {
-                    feeds.updateSortOrder(index.toLong(), now, now, id)
-                }
+            applyReorderUpdates(newOrder, sortOrderOf, feedId, now, feeds) { index ->
+                feeds.updateFolderAndSortOrder(folderId, index.toLong(), now, now, now, feedId)
             }
         }
         syncScheduler.scheduleSync()
@@ -322,12 +274,67 @@ class FeedRepository(
      * @param now The timestamp to apply to the moved feeds.
      */
     fun moveFeedsOutOfFolder(folderId: String, now: Long = clock.nowMillis()) {
+        val feedsInFolder = feeds.getByFolder(folderId).executeAsList()
+        val startOrder = feeds.nextSortOrderInGroup(null).executeAsOne()
         db.transaction {
-            var next = feeds.nextSortOrderInGroup(null).executeAsOne()
-            for (feed in feeds.getByFolder(folderId).executeAsList()) {
-                feeds.updateFolderAndSortOrder(null, next, now, now, now, feed.id)
-                next++
+            feedsInFolder.forEachIndexed { index, feed ->
+                feeds.updateFolderAndSortOrder(null, startOrder + index, now, now, now, feed.id)
             }
+        }
+    }
+
+    /**
+     * The locked internals of [subscribeFeedWrite]. Re-reads the current feed row under the mutex
+     * (the pre-lock snapshot may be stale), computes its sort order, upserts the feed, and returns
+     * whether the row was newly created.
+     */
+    private fun doSubscribeFeedWrite(
+        effectiveUrl: String,
+        feedId: String,
+        folderId: String?,
+        afterFeedId: String?,
+        beforeFeedId: String?,
+        now: Long,
+        favicon: String?,
+        fetched: FetchedFeed,
+        existing: Feeds?,
+    ): Boolean {
+        return db.transactionWithResult {
+            // Re-read under the lock: the snapshot taken before the fetch/favicon calls can be
+            // stale, so a concurrent subscribe of the same url may already have created the row.
+            val current = feeds.getByUrl(effectiveUrl).executeAsOneOrNull()
+            val sortOrder = when {
+                current == null -> insertionSortOrderForNewFeed(feedId, folderId, afterFeedId, beforeFeedId, now)
+                current.deleted_at == null -> current.sort_order
+                else -> feeds.nextSortOrderInGroup(current.folder_id).executeAsOne()
+            }
+
+            feeds.upsert(
+                id = feedId,
+                url = effectiveUrl,
+                site_url = fetched.siteUrl,
+                title = fetched.title ?: effectiveUrl,
+                description = fetched.description,
+                favicon_url = favicon,
+                etag = fetched.etag,
+                last_modified = fetched.lastModified,
+                error_count = 0,
+                last_error = null,
+                custom_title = current?.custom_title,
+                deleted_at = null,
+                updated_at = now,
+                created_at = current?.created_at ?: now,
+                sort_order = sortOrder,
+            )
+            // Files a brand-new feed into the folder selected in the feed list at add time. A
+            // re-subscribed feed (current != null) keeps its prior folder instead — upsert never
+            // touches folder_id, so there's nothing to do for that case.
+            if (current == null && folderId != null) feeds.updateFolder(folderId, now, now, feedId)
+            // Re-subscribing (feed was soft-deleted) is a subscription-state change: stamp its
+            // last-wins timestamp so it propagates over another device's refresh on the next sync.
+            if (current?.deleted_at != null) feeds.stampResubscribed(now, feedId)
+
+            current == null
         }
     }
 
@@ -529,4 +536,31 @@ class FeedRepository(
             ),
         )
     }
+}
+
+/**
+ * Iterates over a reordered feed-id list and writes [newSortOrder]/[newSortOrderUpdatedAt]
+ * only for feeds whose sort order actually changed. The caller provides [onFeedId] for any
+ * extra action on the feed being moved/inserted (e.g. folder update).
+ *
+ * @return The new sort order of [feedId].
+ */
+private inline fun applyReorderUpdates(
+    newOrder: List<String>,
+    previousSortOrderOf: Map<String, Long>,
+    feedId: String,
+    now: Long,
+    feedsQueries: works.merc.keryx.app.data.local.db.FeedsQueries,
+    onFeedId: (index: Int) -> Unit = {},
+): Long {
+    var newFeedSortOrder = 0L
+    newOrder.forEachIndexed { index, id ->
+        if (id == feedId) {
+            newFeedSortOrder = index.toLong()
+            onFeedId(index)
+        } else if (previousSortOrderOf[id] != index.toLong()) {
+            feedsQueries.updateSortOrder(index.toLong(), now, now, id)
+        }
+    }
+    return newFeedSortOrder
 }

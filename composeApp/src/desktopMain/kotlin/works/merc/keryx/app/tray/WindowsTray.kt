@@ -43,9 +43,12 @@ import javax.swing.event.PopupMenuListener
 internal class WindowsTrayMenu(
     onToggle: () -> Unit,
     onQuit: () -> Unit,
+    onUpdateAction: () -> Unit = {},
 ) {
     private val toggleItem = JMenuItem().apply { addActionListener { onToggle() } }
     private val quitItem = JMenuItem().apply { addActionListener { onQuit() } }
+    private val updateItem = JMenuItem().apply { addActionListener { onUpdateAction() } }
+    private val updateSeparator = JPopupMenu.Separator()
 
     /** Internal rather than private so tests can check what actually ended up in the menu. */
     internal val popupMenu = JPopupMenu().apply {
@@ -66,6 +69,29 @@ internal class WindowsTrayMenu(
     fun setLabels(toggle: String, quit: String) {
         toggleItem.text = toggle
         quitItem.text = quit
+    }
+
+    /**
+     * Inserts, updates, or removes the in-app update entry, ahead of [toggleItem]/[quitItem] —
+     * absent by default (`null`), so a menu that never sees an update keeps its original two-item
+     * shape (see [TrayMenuState.update]'s own KDoc for why this is opt-in rather than
+     * disabled-and-always-present).
+     */
+    fun setUpdateEntry(entry: TrayUpdateEntry?) {
+        val alreadyInserted = popupMenu.componentCount > 0 && popupMenu.getComponent(0) === updateItem
+        if (entry == null) {
+            if (alreadyInserted) {
+                popupMenu.remove(updateSeparator)
+                popupMenu.remove(updateItem)
+            }
+        } else {
+            updateItem.text = entry.label
+            updateItem.isEnabled = entry.enabled
+            if (!alreadyInserted) {
+                popupMenu.insert(updateSeparator, 0)
+                popupMenu.insert(updateItem, 0)
+            }
+        }
     }
 
     /**
@@ -134,8 +160,10 @@ internal fun WindowsTray(
     tooltip: String,
     toggleLabel: String,
     quitLabel: String,
+    updateEntry: TrayUpdateEntry?,
     onToggle: () -> Unit,
     onQuit: () -> Unit,
+    onUpdateAction: () -> Unit,
     onTrayAction: () -> Unit,
     newArticleNotifications: SharedFlow<String>,
 ) {
@@ -144,10 +172,15 @@ internal fun WindowsTray(
 
     val currentOnToggle by rememberUpdatedState(onToggle)
     val currentOnQuit by rememberUpdatedState(onQuit)
+    val currentOnUpdateAction by rememberUpdatedState(onUpdateAction)
     val currentOnTrayAction by rememberUpdatedState(onTrayAction)
 
     val menu = remember {
-        WindowsTrayMenu(onToggle = { currentOnToggle() }, onQuit = { currentOnQuit() })
+        WindowsTrayMenu(
+            onToggle = { currentOnToggle() },
+            onQuit = { currentOnQuit() },
+            onUpdateAction = { currentOnUpdateAction() },
+        )
     }
 
     // A JPopupMenu needs an invoker Component, and a TrayIcon is not one. Unlike MacTray's
@@ -192,6 +225,9 @@ internal fun WindowsTray(
     }
     LaunchedEffect(menu, toggleLabel, quitLabel) {
         menu.setLabels(toggle = toggleLabel, quit = quitLabel)
+    }
+    LaunchedEffect(menu, updateEntry) {
+        menu.setUpdateEntry(updateEntry)
     }
 
     DisposableEffect(trayIcon, menu, invokerFrame) {

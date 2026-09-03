@@ -222,11 +222,24 @@
     <string name="settings_update_check_daily">毎日</string>
     <string name="settings_update_check_3days">3日ごと</string>
     <string name="settings_update_check_weekly">毎週</string>
-    <string name="settings_update_check_now">更新を確認</string>
+    <string name="settings_update_check_now">アップデートを確認</string>
     <string name="settings_update_check_up_to_date">最新版です</string>
     <string name="settings_update_check_available">新しいバージョン %1$s があります</string>
     <string name="settings_update_check_failed">確認できませんでした</string>
     <string name="settings_update_open_release_page">リリースページを開く</string>
+    <string name="settings_update_download">ダウンロード</string>
+    <string name="settings_update_downloading">ダウンロード中… %1$s</string>
+    <string name="settings_update_verifying">検証中…</string>
+    <string name="settings_update_ready">バージョン %1$s のインストール準備ができました</string>
+    <string name="settings_update_install">再起動してインストール</string>
+    <string name="settings_update_installing">再起動しています…</string>
+    <string name="settings_update_retry">再試行</string>
+    <string name="settings_update_manual_only">このインストール形態はアプリ内アップデートに対応していません</string>
+    <string name="tray_update_download">アップデート %1$s をダウンロード</string>
+    <string name="tray_update_downloading">ダウンロード中… %1$s</string>
+    <string name="tray_update_verifying">検証中…</string>
+    <string name="tray_update_restart">再起動して %1$s にアップデート</string>
+    <string name="tray_update_failed">アップデートに失敗しました</string>
 
     <!-- feed notifications -->
     <string name="feed_gone_title">フィードが削除されました</string>
@@ -238,6 +251,7 @@
     <string name="notification_channel_new_articles_name">新着記事</string>
     <string name="notification_channel_new_articles_description">新しい記事を取得したときに通知します</string>
     <string name="update_available_notification">新しいバージョン %1$s が利用可能です</string>
+    <string name="update_ready_notification">アップデート %1$s の準備ができました</string>
     <string name="notification_app_translocated">Keryx が一時的な場所で実行されています。Dropbox 連携などが失敗する場合は、Keryx を「アプリケーション」フォルダへ移動してから起動し直してください。</string>
     <string name="notification_app_translocated_detail">macOS は、ディスクイメージ（DMG）や「ダウンロード」フォルダから直接起動されたアプリを、App Translocation という仕組みによって毎回ランダムな一時的な場所にコピーして実行します。\n\nこのとき Keryx の実体のパスが変わるため、OS が keryx:// のリンクを Keryx に届けられず、Dropbox や OneDrive の連携（OAuth 認証）が完了しないことがあります。\n\n対処方法: Keryx.app を「アプリケーション」フォルダにコピーし、コピーしたものから起動し直してください。</string>
 
@@ -298,4 +312,5 @@
     <string name="error_feed_not_found">フィードが見つかりませんでした</string>
     <string name="error_invalid_url">フィード URL が正しくありません</string>
     <string name="error_generic">エラーが発生しました</string>
+    <string name="error_update">アップデートに失敗しました</string>
 </resources>

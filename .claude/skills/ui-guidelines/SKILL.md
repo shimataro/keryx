@@ -733,7 +733,7 @@ in place yet, and a new tag picks its name and color at once.
 The app does not embed AWT/Swing widgets via `SwingPanel` for ordinary controls
 (e.g. `Switch`/dropdowns) — JetBrains Compose Multiplatform has unresolved
 z-order/overdraw/crash bugs for `SwingPanel` inside scrollable containers, and
-every candidate control here lives inside one (`SettingsScreen`'s
+every candidate control here lives inside one (`SettingsDialog`'s
 `verticalScroll` `Column`, `FeedListPane`/`ArticleListPane`'s `LazyColumn`).
 This whole constraint — and everything under it about Swing interop — is desktop-only; Android has
 no AWT/Swing layer at all.
@@ -789,6 +789,18 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   "outlined" flat button. The Android `actual`s delegate straight to M3's own
   `Button`/`FilledTonalButton`/`TextButton` — see the `KeryxTextField`
   bullet below for why that's the right call on that platform.
+  **Desktop's `actual`s wrap their content in
+  `ProvideTextStyle(MaterialTheme.typography.labelLarge)`** — the same style M3's own `Button`
+  gives its label, so the Android `actual`s already have it — and that is load-bearing, not a
+  redundant wrapper to tidy away later: a bare `Text` would fall back to `TextStyle.Default`,
+  whose `lineHeight` is unspecified, making the label's height (and with it the button's) come
+  from whichever font the *host* resolves for the label's own glyphs. Two buttons whose labels are
+  worded differently then measure differently on one machine and identically on another — which is
+  how the Updates tab's headline row came to be 36dp beside "ダウンロード" and 40dp beside
+  "再起動しています…" on a CI runner and nowhere else. `desktopTest`'s `FlatButtonsTest` pins the
+  invariant (a flat button is 40dp tall regardless of its label). It also means these labels go
+  through the app's `Typography`, hence its OS-native font family (`AppFont.kt`), like every other
+  string in the app.
   **A button whose action destroys data takes `FlatTonalButton(destructive = true)`**
   (`CloudSyncTab`'s "reset sync data", `NotificationCenterSheet`'s
   `ResetCloudData` row button), which paints the container
@@ -808,7 +820,7 @@ side, Android's own Material 3 ripple/shapes/components on the other:
 - **`SegmentedControl<T>` / `ToggleChip`**
   (`ui/common/SegmentedControl.kt`, expect/actual): the replacement for
   Material3's `FilterChip` for both "pick one of N" (`SegmentedControl`, used
-  by `SettingsScreen`'s theme/font-size/cache/timeout/refresh-interval rows)
+  by `SettingsDialog`'s theme/font-size/cache/timeout/refresh-interval rows)
   and standalone boolean toggles (`ToggleChip`, used by `ArticleListPane`'s
   "unread only"), **at a `commonMain` call site** — reach for these, not
   `FilterChip`, there. The desktop `actual`s render as a bordered
@@ -1028,7 +1040,7 @@ side, Android's own Material 3 ripple/shapes/components on the other:
     `.searchable()`.
   - `selectionBackground()` (`ui/home/HomeCommon.kt`) row highlight in `ArticleListPane`/`FeedListPane` —
     hand-computed focused/unfocused-pane dimming → native `List` row selection already dims the same way.
-  - `SettingsScreen`'s `SwitchRow` — now uses `FlatSwitch` (`ui/common/FlatToggles.kt`), consistent with
+  - `SettingsDialog`'s `SwitchRow` — now uses `FlatSwitch` (`ui/common/FlatToggles.kt`), consistent with
     the app's other flat controls → SwiftUI's native `Toggle` on a future SwiftUI port.
   - The drag-and-drop insertion-marker system in `FeedListDragAndDrop.kt` (`insertionMarkers`,
     `DropBoundary`, `RowHalf`, `resolveRowHalf`) — hand-computed row-half hit-testing and a manually
