@@ -4,6 +4,7 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.platform.isMacOs
+import works.merc.keryx.app.tray.TrayUpdateEntry
 import works.merc.keryx.app.ui.navigation.Screen
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -44,6 +45,7 @@ class AppMenuTreeTest {
     private var toggledTagId: String? = null
     private var toggledTagAttached: Boolean? = null
     private var movedToFolderId: String? = null
+    private var updateActionInvoked = false
 
     private fun actions() = AppMenuActions(
         addFeed = {}, addFolder = {}, addTag = {}, importOpml = {}, exportOpml = {},
@@ -55,7 +57,7 @@ class AppMenuTreeTest {
         moveFeedToFolder = { movedToFolderId = it },
         renameSelectedFeed = {}, unsubscribeSelectedFeed = {},
         copyFeedUrl = {}, copyFeedSiteUrl = {}, openFeedSite = {},
-        openWebsite = {}, openProjectPage = {}, about = {},
+        openWebsite = {}, openProjectPage = {}, updateAction = { updateActionInvoked = true }, about = {},
     )
 
     private fun enabledUi() = computeMenuUiState(
@@ -98,7 +100,8 @@ class AppMenuTreeTest {
         ui: MenuUiState,
         toggle: MenuBarToggle? = null,
         feedMenu: SelectedFeedMenuData = selectedFeedMenu(),
-    ): AppMenuRoot = buildAppMenuTree(ui, labels(), actions(), toggle, feedMenu)
+        updateEntry: TrayUpdateEntry = TrayUpdateEntry("CheckForUpdate", enabled = true),
+    ): AppMenuRoot = buildAppMenuTree(ui, labels(), actions(), toggle, feedMenu, updateEntry)
 
     private fun AppMenuRoot.menu(label: String): AppMenuNode.Menu = menus.first { it.label == label }
 
@@ -246,6 +249,50 @@ class AppMenuTreeTest {
         val help = tree(enabledUi()).menu("Help")
         assertNotNull(help.items.filterIsInstance<AppMenuNode.Item>().firstOrNull { it.label == "Website" })
         assertNotNull(help.items.filterIsInstance<AppMenuNode.Item>().firstOrNull { it.label == "ProjectPage" })
+    }
+
+    // --- the update entry ---
+
+    /**
+     * The Help menu's update entry is the very same [TrayUpdateEntry] the tray shows, so it always
+     * exists (whatever the update state) and sits behind a separator, after the external links.
+     */
+    @Test
+    fun `the update entry sits behind a separator after the external links`() {
+        val help = tree(enabledUi(), updateEntry = TrayUpdateEntry("CheckForUpdate", enabled = true)).menu("Help")
+
+        val expected = buildList {
+            add("Website")
+            add("ProjectPage")
+            add("<separator>")
+            add("CheckForUpdate")
+            if (!isMacOs) add("About")
+        }
+        val actual = help.items.map { node ->
+            when (node) {
+                is AppMenuNode.Item -> node.label
+                AppMenuNode.Separator -> "<separator>"
+                else -> "<other>"
+            }
+        }
+        assertEquals(expected, actual)
+    }
+
+    @Test
+    fun `the update entry carries the supplied label and enabled state`() {
+        val disabled = tree(enabledUi(), updateEntry = TrayUpdateEntry("Checking…", enabled = false))
+            .menu("Help").item("Checking…")
+        assertEquals(false, disabled.enabled)
+
+        val enabled = tree(enabledUi(), updateEntry = TrayUpdateEntry("Up to date", enabled = true))
+            .menu("Help").item("Up to date")
+        assertTrue(enabled.enabled)
+    }
+
+    @Test
+    fun `clicking the update entry runs the update action`() {
+        tree(enabledUi()).menu("Help").item("CheckForUpdate").onClick()
+        assertTrue(updateActionInvoked)
     }
 
     @Test

@@ -9,10 +9,9 @@ import java.util.concurrent.atomic.AtomicReference
 /** The interface name the menu's properties live under. */
 internal const val DBUSMENU_INTERFACE = "com.canonical.dbusmenu"
 
-// MENU_UPDATE_ID/MENU_SEPARATOR_ID are always "known", even when no update is currently offered
-// (TrayMenuState.update == null): a host that cached an earlier layout where they existed can
-// still send an Event/AboutToShowGroup naming them, and handleEvent below already no-ops a click
-// on a currently-absent-or-disabled update entry — see its own comment.
+// MENU_UPDATE_ID/MENU_SEPARATOR_ID are always part of the layout, so a host can always name them
+// in an Event/AboutToShowGroup; handleEvent below still no-ops a click on a currently *disabled*
+// update entry, which a host working from a cached layout can send — see its own comment.
 private val MENU_KNOWN_IDS = setOf(MENU_ROOT_ID, MENU_TOGGLE_ID, MENU_QUIT_ID, MENU_UPDATE_ID, MENU_SEPARATOR_ID)
 
 /**
@@ -199,9 +198,9 @@ override fun getObjectPath(): String = objectPath
                 MENU_TOGGLE_ID -> _toggleRequests.tryEmit(Unit)
                 MENU_QUIT_ID -> _quitRequests.tryEmit(Unit)
                 // A stale host-side layout can still send a click for an update entry that is now
-                // absent or disabled — silently ignored rather than treated as invalid, since the
-                // id itself is still a known one (see MENU_KNOWN_IDS's own comment).
-                MENU_UPDATE_ID -> if (desired.get().state.update?.enabled == true) _updateRequests.tryEmit(Unit)
+                // disabled — silently ignored rather than treated as invalid, since the id itself
+                // is still a known one (see MENU_KNOWN_IDS's own comment).
+                MENU_UPDATE_ID -> if (desired.get().state.update.enabled) _updateRequests.tryEmit(Unit)
             }
         }
         // "hovered" / "opened" / "closed" need no action, but they are still ours to accept.

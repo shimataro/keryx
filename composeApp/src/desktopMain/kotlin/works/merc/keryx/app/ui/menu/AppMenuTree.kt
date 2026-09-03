@@ -4,6 +4,7 @@ import androidx.compose.ui.input.key.Key
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.platform.isMacOs
+import works.merc.keryx.app.tray.TrayUpdateEntry
 
 /**
  * The desktop application menu, modelled as a single tree that is built once per composition and
@@ -167,6 +168,9 @@ internal data class AppMenuActions(
     val openFeedSite: () -> Unit,
     val openWebsite: () -> Unit,
     val openProjectPage: () -> Unit,
+    /** Runs whatever the Help menu's single update entry currently stands for — the same
+     * `onUpdateMenuItemClicked` the tray's own entry calls. */
+    val updateAction: () -> Unit,
     val about: () -> Unit,
 )
 
@@ -197,6 +201,12 @@ internal data class SelectedFeedMenuData(
  * @param selectedFeedMenu the currently selected feed's tags/folder data, backing the Feed menu's
  *   Tags/Move-to-folder submenus (empty/`null` content when [MenuUiState.feedActionsEnabled] is
  *   `false` — see [SelectedFeedMenuData]).
+ * @param updateEntry the Help menu's in-app update entry — the very same label/enabled pair the
+ *   system tray shows, resolved by `tray/UpdateMenuEntry.kt`'s `updateMenuEntry` so the two menus
+ *   can never disagree. Passed directly rather than through [MenuUiState]/[AppMenuLabels] (like
+ *   [menuBarToggle] and [selectedFeedMenu] before it): those are `commonMain` types, and
+ *   `UpdateState`'s desktop-only tray mapping has no business in them. Its item is always present,
+ *   disabled in the states with nothing to act on.
  */
 internal fun buildAppMenuTree(
     ui: MenuUiState,
@@ -204,6 +214,7 @@ internal fun buildAppMenuTree(
     actions: AppMenuActions,
     menuBarToggle: MenuBarToggle?,
     selectedFeedMenu: SelectedFeedMenuData,
+    updateEntry: TrayUpdateEntry,
 ): AppMenuRoot {
     val fileItems = buildList {
         add(AppMenuNode.Item(labels.addFeed, ui.addItemsEnabled, AppMenuShortcut.AddFeed, actions.addFeed))
@@ -314,6 +325,9 @@ internal fun buildAppMenuTree(
     val helpItems = buildList {
         add(AppMenuNode.Item(labels.website, enabled = true, onClick = actions.openWebsite))
         add(AppMenuNode.Item(labels.projectPage, enabled = true, onClick = actions.openProjectPage))
+        // The in-app update entry, separated from the external links above it.
+        add(AppMenuNode.Separator)
+        add(AppMenuNode.Item(updateEntry.label, updateEntry.enabled, onClick = actions.updateAction))
         // On macOS, About lives in the native app menu (see main.kt).
         if (!isMacOs) {
             add(AppMenuNode.Item(labels.about, enabled = true, onClick = actions.about))

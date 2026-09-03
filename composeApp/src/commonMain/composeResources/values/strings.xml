@@ -235,6 +235,11 @@
     <string name="settings_update_installing">再起動しています…</string>
     <string name="settings_update_retry">再試行</string>
     <string name="settings_update_manual_only">このインストール形態はアプリ内アップデートに対応していません</string>
+    <string name="update_check_for_update">更新をチェック</string>
+    <string name="update_checking">更新を確認中…</string>
+    <string name="update_up_to_date">最新版です</string>
+    <string name="update_available_manual_only">新しいバージョンがあります</string>
+    <string name="update_installing">再起動しています…</string>
     <string name="tray_update_download">アップデート %1$s をダウンロード</string>
     <string name="tray_update_downloading">ダウンロード中… %1$s</string>
     <string name="tray_update_verifying">検証中…</string>

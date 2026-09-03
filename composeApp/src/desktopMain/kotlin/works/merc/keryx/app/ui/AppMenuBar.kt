@@ -8,9 +8,12 @@ import androidx.compose.ui.input.key.KeyShortcut
 import androidx.compose.ui.window.FrameWindowScope
 import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.MenuScope
+import kotlinx.coroutines.CoroutineScope
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import works.merc.keryx.app.core.ArticleFilter
+import works.merc.keryx.app.domain.UpdateRepository
+import works.merc.keryx.app.onUpdateMenuItemClicked
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.resources.Res
@@ -55,8 +58,10 @@ import works.merc.keryx.app.resources.menu_view_search
 import works.merc.keryx.app.resources.menu_view_show_menu_bar
 import works.merc.keryx.app.resources.menu_view_toggle_sort
 import works.merc.keryx.app.resources.menu_view_unread_only
+import works.merc.keryx.app.tray.updateMenuEntry
 import works.merc.keryx.app.ui.home.FeedListSelectionTarget
 import works.merc.keryx.app.ui.home.HomeViewModel
+import works.merc.keryx.app.ui.home.NotificationCenterViewModel
 import works.merc.keryx.app.ui.home.hasUsableUrl
 import works.merc.keryx.app.ui.home.resolveFeedListSelectionTarget
 import works.merc.keryx.app.ui.menu.AppMenuActions
@@ -106,6 +111,11 @@ internal fun FrameWindowScope.AppMenuBar(
     val menuController = koinInject<MenuController>()
     val homeVm = koinInject<HomeViewModel>()
     val settingsVm = koinInject<SettingsViewModel>()
+    val updateRepository = koinInject<UpdateRepository>()
+    val notificationCenterVm = koinInject<NotificationCenterViewModel>()
+    // The same application-lifetime scope `main.kt` uses as `appScope` (a single Koin registration,
+    // so there is no ambiguity): an update check must outlive this menu's own composition.
+    val appScope = koinInject<CoroutineScope>()
 
     val screen by menuController.currentScreen.collectAsState()
     val textInputFocused by menuController.textInputFocused.collectAsState()
@@ -119,6 +129,12 @@ internal fun FrameWindowScope.AppMenuBar(
     val tags by homeVm.tags.collectAsState()
     val folders by homeVm.folders.collectAsState()
     val feedTagMap by homeVm.feedTagMap.collectAsState()
+    // Collected here (rather than by main.kt's `application {}`, which deliberately passes the raw
+    // flow down to the tray) so a download-progress tick only rebuilds this menu tree. The label is
+    // already rounded to 5% steps by `updateMenuEntry` → `roundedTrayProgressPercent`, so the D-Bus
+    // `LayoutUpdated` traffic on Linux stays at exactly the tray's own existing rate.
+    val updateState by updateRepository.state.collectAsState()
+    val updateEntry = updateMenuEntry(updateState)
 
     val selectedFeed = (filter as? ArticleFilter.Feed)?.let { f -> feeds.find { it.id == f.feedId } }
     // Rename/delete act on any selected feed list item, so they resolve the same feed/folder/tag
@@ -222,6 +238,12 @@ internal fun FrameWindowScope.AppMenuBar(
         openFeedSite = { selectedFeed?.site_url?.takeIf { hasUsableUrl(it) }?.let(BrowserOpener::open) },
         openWebsite = { BrowserOpener.open(websiteUrl) },
         openProjectPage = { BrowserOpener.open(PROJECT_URL) },
+        // Reads `state.value` fresh rather than closing over the `updateState` snapshot above, so a
+        // state change between this composition and the click is honoured — the same wiring
+        // `main.kt` gives the tray's own entry.
+        updateAction = {
+            onUpdateMenuItemClicked(updateRepository.state.value, appScope, updateRepository, notificationCenterVm)
+        },
         about = { menuController.send(MenuCommand.About) },
     )
 
@@ -231,7 +253,7 @@ internal fun FrameWindowScope.AppMenuBar(
         folders = folders,
         currentFolderId = selectedFeed?.folder_id,
     )
-    val tree = buildAppMenuTree(ui, labels, actions, menuBarToggle, selectedFeedMenu)
+    val tree = buildAppMenuTree(ui, labels, actions, menuBarToggle, selectedFeedMenu, updateEntry)
 
     // Publish the tree to any D-Bus exporter on every (re)composition; harmless (a no-op default)
     // when there is no registrar.

@@ -5,33 +5,39 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class TrayMenuModelTest {
-    private val hidden = TrayMenuState(toggleLabel = "表示", quitLabel = "終了")
-    private val shown = TrayMenuState(toggleLabel = "非表示", quitLabel = "終了")
+    private val updateEntry = TrayUpdateEntry("Check for updates", enabled = true)
+    private val hidden = TrayMenuState(toggleLabel = "Show", quitLabel = "Quit", update = updateEntry)
+    private val shown = TrayMenuState(toggleLabel = "Hide", quitLabel = "Quit", update = updateEntry)
 
     private fun DBusMenuLayoutItem.childItems(): List<DBusMenuLayoutItem> =
         children.map { it.value as DBusMenuLayoutItem }
 
     private fun DBusMenuLayoutItem.label(): String? = properties["label"]?.value as String?
 
+    private fun DBusMenuLayoutItem.toggleItem(): DBusMenuLayoutItem = childItems().first { it.id == MENU_TOGGLE_ID }
+
     @Test
-    fun `root layout exposes the toggle and quit items in order`() {
+    fun `root layout exposes the update, separator, toggle and quit items in order`() {
         val layout = buildMenuLayout(MENU_ROOT_ID, recursionDepth = -1, propertyNames = emptyList(), state = hidden)
 
         assertEquals(MENU_ROOT_ID, layout.id)
         assertEquals("submenu", layout.properties["children-display"]?.value)
-        assertEquals(listOf(MENU_TOGGLE_ID, MENU_QUIT_ID), layout.childItems().map { it.id })
+        assertEquals(
+            listOf(MENU_UPDATE_ID, MENU_SEPARATOR_ID, MENU_TOGGLE_ID, MENU_QUIT_ID),
+            layout.childItems().map { it.id },
+        )
     }
 
     @Test
     fun `toggle label is the show label while the window is hidden`() {
         val layout = buildMenuLayout(MENU_ROOT_ID, -1, emptyList(), hidden)
-        assertEquals("表示", layout.childItems().first().label())
+        assertEquals("Show", layout.toggleItem().label())
     }
 
     @Test
     fun `toggle label is the hide label while the window is visible`() {
         val layout = buildMenuLayout(MENU_ROOT_ID, -1, emptyList(), shown)
-        assertEquals("非表示", layout.childItems().first().label())
+        assertEquals("Hide", layout.toggleItem().label())
     }
 
     @Test
@@ -45,7 +51,7 @@ class TrayMenuModelTest {
     fun `requesting a leaf returns just that leaf`() {
         val layout = buildMenuLayout(MENU_TOGGLE_ID, -1, emptyList(), hidden)
         assertEquals(MENU_TOGGLE_ID, layout.id)
-        assertEquals("表示", layout.label())
+        assertEquals("Show", layout.label())
         assertTrue(layout.children.isEmpty())
     }
 
@@ -84,8 +90,8 @@ class TrayMenuModelTest {
         assertEquals("____", escapeMenuLabel("__"))
         assertEquals("plain", escapeMenuLabel("plain"))
 
-        val layout = buildMenuLayout(MENU_ROOT_ID, -1, emptyList(), TrayMenuState("a_b", "c_d"))
-        assertEquals(listOf("a__b", "c__d"), layout.childItems().map { it.label() })
+        val layout = buildMenuLayout(MENU_ROOT_ID, -1, emptyList(), TrayMenuState("a_b", "c_d", TrayUpdateEntry("e_f", true)))
+        assertEquals(listOf("e__f", "a__b", "c__d"), layout.childItems().mapNotNull { it.label() })
     }
 
     @Test
@@ -97,19 +103,17 @@ class TrayMenuModelTest {
     // --- update entry ---
 
     @Test
-    fun `no update entry keeps the original two-item menu shape`() {
-        val layout = buildMenuLayout(MENU_ROOT_ID, -1, emptyList(), hidden)
-        assertEquals(listOf(MENU_TOGGLE_ID, MENU_QUIT_ID), layout.childItems().map { it.id })
-    }
-
-    @Test
-    fun `an update entry is inserted ahead of a separator then toggle and quit`() {
-        val withUpdate = hidden.copy(update = TrayUpdateEntry("Download update 2.0.0", enabled = true))
-        val layout = buildMenuLayout(MENU_ROOT_ID, -1, emptyList(), withUpdate)
-        assertEquals(
-            listOf(MENU_UPDATE_ID, MENU_SEPARATOR_ID, MENU_TOGGLE_ID, MENU_QUIT_ID),
-            layout.childItems().map { it.id },
-        )
+    fun `the update entry and its separator are always part of the menu`() {
+        // Every UpdateState maps to a label, so the layout's shape never changes — only the
+        // entry's own label/enabled do. A "disabled" state must not collapse the menu to two items.
+        val disabled = hidden.copy(update = TrayUpdateEntry("Downloading… 60%", enabled = false))
+        listOf(hidden, disabled).forEach { state ->
+            val layout = buildMenuLayout(MENU_ROOT_ID, -1, emptyList(), state)
+            assertEquals(
+                listOf(MENU_UPDATE_ID, MENU_SEPARATOR_ID, MENU_TOGGLE_ID, MENU_QUIT_ID),
+                layout.childItems().map { it.id },
+            )
+        }
     }
 
     @Test
@@ -121,15 +125,17 @@ class TrayMenuModelTest {
     }
 
     @Test
-    fun `the separator has no label and is typed as a separator`() {
-        val withUpdate = hidden.copy(update = TrayUpdateEntry("Download update 2.0.0", enabled = true))
-        val properties = menuItemProperties(MENU_SEPARATOR_ID, withUpdate)
-        assertEquals("separator", properties.getValue("type").value)
+    fun `an enabled update entry reports itself as enabled`() {
+        val properties = menuItemProperties(MENU_UPDATE_ID, hidden)
+        assertEquals("Check for updates", properties.getValue("label").value)
+        assertEquals(true, properties.getValue("enabled").value)
     }
 
     @Test
-    fun `the update entry properties are empty when no update is offered`() {
-        assertTrue(menuItemProperties(MENU_UPDATE_ID, hidden).isEmpty())
+    fun `the separator has no label and is typed as a separator`() {
+        val properties = menuItemProperties(MENU_SEPARATOR_ID, hidden)
+        assertEquals("separator", properties.getValue("type").value)
+        assertTrue("label" !in properties)
     }
 
     // --- roundedTrayProgressPercent ---

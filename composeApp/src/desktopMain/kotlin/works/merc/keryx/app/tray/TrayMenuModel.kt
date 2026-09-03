@@ -7,28 +7,28 @@ internal const val MENU_ROOT_ID = 0
 internal const val MENU_TOGGLE_ID = 1
 internal const val MENU_QUIT_ID = 2
 
-/** The in-app update entry, inserted ahead of [MENU_TOGGLE_ID] with [MENU_SEPARATOR_ID] between
- * them — see [TrayMenuState.update]'s own KDoc for why these ids exist even on hosts that never
- * see them (an id must be reserved/known before it can ever appear in a layout). */
+/** The in-app update entry, always the first child, ahead of [MENU_TOGGLE_ID] with
+ * [MENU_SEPARATOR_ID] between them. */
 internal const val MENU_UPDATE_ID = 3
 internal const val MENU_SEPARATOR_ID = 4
 
 /** The D-Bus signature of a dbusmenu node, needed to wrap children in a variant. */
 internal const val MENU_LAYOUT_SIGNATURE = "(ia{sv}av)"
 
-/** A tray update menu entry's label and whether it can currently be clicked — see
- * `UpdatesTab.kt`'s button-state table for the same state machine rendered in the settings dialog
- * instead of the tray. */
+/** The single update menu entry's label and whether it can currently be clicked — resolved from
+ * `UpdateState` by [updateMenuEntry], which is also what the application menu bar's Help menu uses.
+ * See `UpdatesTab.kt`'s button-state table for the same state machine rendered in the settings
+ * dialog instead. */
 internal data class TrayUpdateEntry(val label: String, val enabled: Boolean)
 
 /**
  * The labels currently shown in the tray menu.
  *
- * @param update The in-app update menu item, or `null` when nothing is offered right now (no
- *   update found, or this install form can't act on one at all) — absent by default so every
- *   existing call site (and every existing test) keeps its original two-item menu shape unchanged.
+ * @param update The in-app update menu item. Always present: every `UpdateState` maps to a label
+ *   (see [updateMenuEntry]), so the menu's shape is fixed and a state with nothing to act on right
+ *   now is shown disabled rather than removed.
  */
-internal data class TrayMenuState(val toggleLabel: String, val quitLabel: String, val update: TrayUpdateEntry? = null)
+internal data class TrayMenuState(val toggleLabel: String, val quitLabel: String, val update: TrayUpdateEntry)
 
 /**
  * Escapes a menu label for dbusmenu, where a single `_` marks the following character as a
@@ -50,7 +50,7 @@ internal fun menuItemProperties(
         MENU_ROOT_ID -> mapOf("children-display" to Variant("submenu"))
         MENU_TOGGLE_ID -> leafProperties(state.toggleLabel)
         MENU_QUIT_ID -> leafProperties(state.quitLabel)
-        MENU_UPDATE_ID -> state.update?.let { leafProperties(it.label, it.enabled) } ?: emptyMap()
+        MENU_UPDATE_ID -> leafProperties(state.update.label, state.update.enabled)
         MENU_SEPARATOR_ID -> mapOf("type" to Variant("separator"), "visible" to Variant(true))
         else -> emptyMap()
     }
@@ -93,11 +93,7 @@ internal fun buildMenuLayout(
 ): DBusMenuLayoutItem {
     val properties = menuItemProperties(parentId, state, propertyNames)
     val childIds = when (parentId) {
-        MENU_ROOT_ID -> if (state.update != null) {
-            listOf(MENU_UPDATE_ID, MENU_SEPARATOR_ID, MENU_TOGGLE_ID, MENU_QUIT_ID)
-        } else {
-            listOf(MENU_TOGGLE_ID, MENU_QUIT_ID)
-        }
+        MENU_ROOT_ID -> listOf(MENU_UPDATE_ID, MENU_SEPARATOR_ID, MENU_TOGGLE_ID, MENU_QUIT_ID)
         else -> emptyList()
     }
     val includeChildren = recursionDepth != 0

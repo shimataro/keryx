@@ -25,12 +25,14 @@ class WindowsTrayMenuTest {
         WindowsTrayMenu(onToggle = onToggle, onQuit = onQuit)
 
     @Test
-    fun buildsTheToggleAndQuitEntriesAsSwingItems() {
+    fun buildsTheUpdateSeparatorToggleAndQuitEntriesAsSwingItems() {
         val menu = menuOf()
 
-        assertEquals(2, menu.popupMenu.componentCount)
-        assertIs<JMenuItem>(menu.popupMenu.getComponent(0))
-        assertIs<JMenuItem>(menu.popupMenu.getComponent(1))
+        assertEquals(4, menu.popupMenu.componentCount)
+        assertIs<JMenuItem>(menu.popupMenu.getComponent(UPDATE_INDEX))
+        assertIs<JPopupMenu.Separator>(menu.popupMenu.getComponent(SEPARATOR_INDEX))
+        assertIs<JMenuItem>(menu.popupMenu.getComponent(TOGGLE_INDEX))
+        assertIs<JMenuItem>(menu.popupMenu.getComponent(QUIT_INDEX))
     }
 
     @Test
@@ -39,8 +41,8 @@ class WindowsTrayMenuTest {
 
         menu.setLabels(toggle = "Hide", quit = "Quit")
 
-        assertEquals("Hide", (menu.popupMenu.getComponent(0) as JMenuItem).text)
-        assertEquals("Quit", (menu.popupMenu.getComponent(1) as JMenuItem).text)
+        assertEquals("Hide", (menu.popupMenu.getComponent(TOGGLE_INDEX) as JMenuItem).text)
+        assertEquals("Quit", (menu.popupMenu.getComponent(QUIT_INDEX) as JMenuItem).text)
     }
 
     @Test
@@ -50,7 +52,7 @@ class WindowsTrayMenuTest {
         menu.setLabels(toggle = "Hide", quit = "Quit")
         menu.setLabels(toggle = "Show", quit = "Quit")
 
-        assertEquals("Show", (menu.popupMenu.getComponent(0) as JMenuItem).text)
+        assertEquals("Show", (menu.popupMenu.getComponent(TOGGLE_INDEX) as JMenuItem).text)
     }
 
     @Test
@@ -58,8 +60,8 @@ class WindowsTrayMenuTest {
         val fired = mutableListOf<String>()
         val menu = menuOf(onToggle = { fired += "toggle" }, onQuit = { fired += "quit" })
 
-        (menu.popupMenu.getComponent(0) as JMenuItem).doClick()
-        (menu.popupMenu.getComponent(1) as JMenuItem).doClick()
+        (menu.popupMenu.getComponent(TOGGLE_INDEX) as JMenuItem).doClick()
+        (menu.popupMenu.getComponent(QUIT_INDEX) as JMenuItem).doClick()
 
         assertEquals(listOf("toggle", "quit"), fired)
     }
@@ -94,45 +96,23 @@ class WindowsTrayMenuTest {
 
     // --- update entry ---
 
+    /**
+     * The entry is a permanent part of the menu, whatever the update state — a disabled one is
+     * grayed out, never removed (see [TrayMenuState.update]).
+     */
     @Test
-    fun noUpdateEntryKeepsTheOriginalTwoItemMenuShape() {
-        val menu = menuOf()
-
-        assertEquals(2, menu.popupMenu.componentCount)
-    }
-
-    @Test
-    fun settingAnUpdateEntryInsertsItAheadOfToggleAndQuit() {
+    fun theUpdateEntryStaysInPlaceAcrossEnabledAndDisabledStates() {
         val menu = menuOf()
 
         menu.setUpdateEntry(TrayUpdateEntry("Download update 2.0.0", enabled = true))
-
         assertEquals(4, menu.popupMenu.componentCount)
-        assertEquals("Download update 2.0.0", (menu.popupMenu.getComponent(0) as JMenuItem).text)
-        assertIs<JPopupMenu.Separator>(menu.popupMenu.getComponent(1))
-        // Toggle/quit keep their original positions relative to each other, just shifted by two.
-        assertIs<JMenuItem>(menu.popupMenu.getComponent(2))
-        assertIs<JMenuItem>(menu.popupMenu.getComponent(3))
-    }
+        assertEquals("Download update 2.0.0", (menu.popupMenu.getComponent(UPDATE_INDEX) as JMenuItem).text)
+        assertTrue((menu.popupMenu.getComponent(UPDATE_INDEX) as JMenuItem).isEnabled)
 
-    @Test
-    fun clearingTheUpdateEntryRemovesItAndRestoresTheOriginalShape() {
-        val menu = menuOf()
-
-        menu.setUpdateEntry(TrayUpdateEntry("Download update 2.0.0", enabled = true))
-        menu.setUpdateEntry(null)
-
-        assertEquals(2, menu.popupMenu.componentCount)
-        assertIs<JMenuItem>(menu.popupMenu.getComponent(0))
-    }
-
-    @Test
-    fun theUpdateEntryReflectsItsEnabledState() {
-        val menu = menuOf()
-
-        menu.setUpdateEntry(TrayUpdateEntry("Download update 2.0.0", enabled = false))
-
-        assertFalse((menu.popupMenu.getComponent(0) as JMenuItem).isEnabled)
+        menu.setUpdateEntry(TrayUpdateEntry("Downloading… 60%", enabled = false))
+        assertEquals(4, menu.popupMenu.componentCount)
+        assertEquals("Downloading… 60%", (menu.popupMenu.getComponent(UPDATE_INDEX) as JMenuItem).text)
+        assertFalse((menu.popupMenu.getComponent(UPDATE_INDEX) as JMenuItem).isEnabled)
     }
 
     @Test
@@ -141,8 +121,15 @@ class WindowsTrayMenuTest {
         val menu = WindowsTrayMenu(onToggle = {}, onQuit = {}, onUpdateAction = { invoked = true })
 
         menu.setUpdateEntry(TrayUpdateEntry("Download update 2.0.0", enabled = true))
-        (menu.popupMenu.getComponent(0) as JMenuItem).doClick()
+        (menu.popupMenu.getComponent(UPDATE_INDEX) as JMenuItem).doClick()
 
         assertTrue(invoked)
+    }
+
+    private companion object {
+        const val UPDATE_INDEX = 0
+        const val SEPARATOR_INDEX = 1
+        const val TOGGLE_INDEX = 2
+        const val QUIT_INDEX = 3
     }
 }

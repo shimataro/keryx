@@ -39,13 +39,13 @@ internal class MacTrayMenu(
     private val quitItem = MenuItem().apply { addActionListener { onQuit() } }
     private val updateItem = MenuItem().apply { addActionListener { onUpdateAction() } }
 
-    // "-" is the exact idiom java.awt.Menu.addSeparator() itself uses (see NativeMenu.desktop.kt) —
-    // built directly (rather than via addSeparator()) so this class keeps its own reference, needed
-    // to insert/remove it alongside updateItem in setUpdateEntry.
+    // "-" is the exact idiom java.awt.Menu.addSeparator() itself uses (see NativeMenu.desktop.kt).
     private val updateSeparator = MenuItem("-")
 
     /** Internal rather than private so tests can check what actually ended up in the menu. */
     internal val popupMenu = PopupMenu().apply {
+        add(updateItem)
+        add(updateSeparator)
         add(toggleItem)
         add(quitItem)
     }
@@ -64,26 +64,14 @@ internal class MacTrayMenu(
     }
 
     /**
-     * Inserts, updates, or removes the in-app update entry, ahead of [toggleItem]/[quitItem] —
-     * absent by default (`null`), so a menu that never sees an update keeps its original two-item
-     * shape (see [TrayMenuState.update]'s own KDoc for why this is opt-in rather than
-     * disabled-and-always-present).
+     * Pushes the in-app update entry's label and enabled state onto the already-built widget. The
+     * entry itself is a permanent part of the menu (see [TrayMenuState.update]'s own KDoc): every
+     * `UpdateState` maps to a label, and one with nothing to act on is shown disabled rather than
+     * removed.
      */
-    fun setUpdateEntry(entry: TrayUpdateEntry?) {
-        val alreadyInserted = popupMenu.itemCount > 0 && popupMenu.getItem(0) === updateItem
-        if (entry == null) {
-            if (alreadyInserted) {
-                popupMenu.remove(updateSeparator)
-                popupMenu.remove(updateItem)
-            }
-        } else {
-            updateItem.label = entry.label
-            updateItem.isEnabled = entry.enabled
-            if (!alreadyInserted) {
-                popupMenu.insert(updateSeparator, 0)
-                popupMenu.insert(updateItem, 0)
-            }
-        }
+    fun setUpdateEntry(entry: TrayUpdateEntry) {
+        updateItem.label = entry.label
+        updateItem.isEnabled = entry.enabled
     }
 
     /**
@@ -125,7 +113,7 @@ internal fun MacTray(
     hideLabel: String,
     quitLabel: String,
     windowVisible: Boolean,
-    updateEntry: TrayUpdateEntry?,
+    updateEntry: TrayUpdateEntry,
     onToggle: () -> Unit,
     onQuit: () -> Unit,
     onUpdateAction: () -> Unit,

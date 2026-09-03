@@ -56,6 +56,8 @@ internal class WindowsTrayMenu(
         // but a lightweight popup is still clipped to its invoker window — which here is a 1x1
         // frame, so it would have nothing to draw into at all.
         isLightWeightPopupEnabled = false
+        add(updateItem)
+        add(updateSeparator)
         add(toggleItem)
         add(quitItem)
     }
@@ -72,26 +74,14 @@ internal class WindowsTrayMenu(
     }
 
     /**
-     * Inserts, updates, or removes the in-app update entry, ahead of [toggleItem]/[quitItem] —
-     * absent by default (`null`), so a menu that never sees an update keeps its original two-item
-     * shape (see [TrayMenuState.update]'s own KDoc for why this is opt-in rather than
-     * disabled-and-always-present).
+     * Pushes the in-app update entry's label and enabled state onto the already-built widget. The
+     * entry itself is a permanent part of the menu (see [TrayMenuState.update]'s own KDoc): every
+     * `UpdateState` maps to a label, and one with nothing to act on is shown disabled rather than
+     * removed.
      */
-    fun setUpdateEntry(entry: TrayUpdateEntry?) {
-        val alreadyInserted = popupMenu.componentCount > 0 && popupMenu.getComponent(0) === updateItem
-        if (entry == null) {
-            if (alreadyInserted) {
-                popupMenu.remove(updateSeparator)
-                popupMenu.remove(updateItem)
-            }
-        } else {
-            updateItem.text = entry.label
-            updateItem.isEnabled = entry.enabled
-            if (!alreadyInserted) {
-                popupMenu.insert(updateSeparator, 0)
-                popupMenu.insert(updateItem, 0)
-            }
-        }
+    fun setUpdateEntry(entry: TrayUpdateEntry) {
+        updateItem.text = entry.label
+        updateItem.isEnabled = entry.enabled
     }
 
     /**
@@ -160,7 +150,7 @@ internal fun WindowsTray(
     tooltip: String,
     toggleLabel: String,
     quitLabel: String,
-    updateEntry: TrayUpdateEntry?,
+    updateEntry: TrayUpdateEntry,
     onToggle: () -> Unit,
     onQuit: () -> Unit,
     onUpdateAction: () -> Unit,

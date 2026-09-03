@@ -30,7 +30,7 @@ class DBusSignatureTest {
 
     private fun dbusMenu() = SniDBusMenu(
         objectPath = SniConnection.MENU_PATH,
-        initialState = TrayMenuState("表示", "終了"),
+        initialState = TrayMenuState("Show", "Quit", TrayUpdateEntry("Check for updates", enabled = true)),
         onLayoutUpdated = {},
     )
 
