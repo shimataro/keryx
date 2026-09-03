@@ -1,7 +1,6 @@
 package works.merc.keryx.app
 
 import java.io.File
-import java.net.URI
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -17,14 +16,24 @@ class UriSchemeRegistrationTest {
 
     @Test
     fun normalizesAFileUriArgToAPlainPath() {
-        val expected = File(URI("file:///home/user/subscriptions.opml")).path
-        assertEquals(expected, normalizeFileUriArg("file:///home/user/subscriptions.opml"))
+        // Uses a real, OS-native absolute path (not a hardcoded Unix literal) because
+        // java.io.File(URI)'s conversion is platform-dependent — a driveless "/home/user/..."
+        // path (never a value Windows would actually hand this app) round-trips differently
+        // through Windows' WinNTFileSystem than through Unix's, which broke this test on
+        // windows-latest CI. File.toURI()'s rawPath always starts with "/" (a drive letter on
+        // Windows, e.g. "/C:/Users/..."), so prefixing it with "file://" reproduces the
+        // RFC-8089 form a real OS launcher sends, and round-trips correctly through
+        // normalizeFileUriArg on whatever OS this test runs on.
+        val file = File("subscriptions.opml").absoluteFile
+        val uriArg = "file://" + file.toURI().rawPath
+        assertEquals(file.path, normalizeFileUriArg(uriArg))
     }
 
     @Test
     fun normalizesAFileUriArgWithLocalhostAuthorityToAPlainPath() {
-        val expected = File(URI("file:///home/user/subscriptions.opml")).path
-        assertEquals(expected, normalizeFileUriArg("file://localhost/home/user/subscriptions.opml"))
+        val file = File("subscriptions.opml").absoluteFile
+        val uriArg = "file://localhost" + file.toURI().rawPath
+        assertEquals(file.path, normalizeFileUriArg(uriArg))
     }
 
     @Test
