@@ -5,9 +5,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class TrayMenuModelTest {
-    private val updateEntry = TrayUpdateEntry("更新をチェック", enabled = true)
-    private val hidden = TrayMenuState(toggleLabel = "表示", quitLabel = "終了", update = updateEntry)
-    private val shown = TrayMenuState(toggleLabel = "非表示", quitLabel = "終了", update = updateEntry)
+    private val updateEntry = TrayUpdateEntry("Check for updates", enabled = true)
+    private val hidden = TrayMenuState(toggleLabel = "Show", quitLabel = "Quit", update = updateEntry)
+    private val shown = TrayMenuState(toggleLabel = "Hide", quitLabel = "Quit", update = updateEntry)
 
     private fun DBusMenuLayoutItem.childItems(): List<DBusMenuLayoutItem> =
         children.map { it.value as DBusMenuLayoutItem }
@@ -31,13 +31,13 @@ class TrayMenuModelTest {
     @Test
     fun `toggle label is the show label while the window is hidden`() {
         val layout = buildMenuLayout(MENU_ROOT_ID, -1, emptyList(), hidden)
-        assertEquals("表示", layout.toggleItem().label())
+        assertEquals("Show", layout.toggleItem().label())
     }
 
     @Test
     fun `toggle label is the hide label while the window is visible`() {
         val layout = buildMenuLayout(MENU_ROOT_ID, -1, emptyList(), shown)
-        assertEquals("非表示", layout.toggleItem().label())
+        assertEquals("Hide", layout.toggleItem().label())
     }
 
     @Test
@@ -51,7 +51,7 @@ class TrayMenuModelTest {
     fun `requesting a leaf returns just that leaf`() {
         val layout = buildMenuLayout(MENU_TOGGLE_ID, -1, emptyList(), hidden)
         assertEquals(MENU_TOGGLE_ID, layout.id)
-        assertEquals("表示", layout.label())
+        assertEquals("Show", layout.label())
         assertTrue(layout.children.isEmpty())
     }
 
@@ -106,7 +106,7 @@ class TrayMenuModelTest {
     fun `the update entry and its separator are always part of the menu`() {
         // Every UpdateState maps to a label, so the layout's shape never changes — only the
         // entry's own label/enabled do. A "disabled" state must not collapse the menu to two items.
-        val disabled = hidden.copy(update = TrayUpdateEntry("ダウンロード中… 60%", enabled = false))
+        val disabled = hidden.copy(update = TrayUpdateEntry("Downloading… 60%", enabled = false))
         listOf(hidden, disabled).forEach { state ->
             val layout = buildMenuLayout(MENU_ROOT_ID, -1, emptyList(), state)
             assertEquals(
@@ -127,7 +127,7 @@ class TrayMenuModelTest {
     @Test
     fun `an enabled update entry reports itself as enabled`() {
         val properties = menuItemProperties(MENU_UPDATE_ID, hidden)
-        assertEquals("更新をチェック", properties.getValue("label").value)
+        assertEquals("Check for updates", properties.getValue("label").value)
         assertEquals(true, properties.getValue("enabled").value)
     }
 

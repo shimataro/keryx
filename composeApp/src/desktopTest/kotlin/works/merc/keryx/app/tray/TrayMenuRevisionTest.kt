@@ -21,9 +21,9 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class TrayMenuRevisionTest {
-    private val updateEntry = TrayUpdateEntry("更新をチェック", enabled = true)
-    private val hidden = TrayMenuState(toggleLabel = "表示", quitLabel = "終了", update = updateEntry)
-    private val shown = TrayMenuState(toggleLabel = "非表示", quitLabel = "終了", update = updateEntry)
+    private val updateEntry = TrayUpdateEntry("Check for updates", enabled = true)
+    private val hidden = TrayMenuState(toggleLabel = "Show", quitLabel = "Quit", update = updateEntry)
+    private val shown = TrayMenuState(toggleLabel = "Hide", quitLabel = "Quit", update = updateEntry)
 
     private val emitted = mutableListOf<Int>()
 
@@ -89,7 +89,7 @@ class TrayMenuRevisionTest {
         val reply = menu.fetchLayout()
 
         assertEquals(menu.currentRevision, reply.revision.toInt())
-        assertEquals("非表示", reply.toggleItem().properties.getValue("label").value)
+        assertEquals("Hide", reply.toggleItem().properties.getValue("label").value)
     }
 
     @Test
