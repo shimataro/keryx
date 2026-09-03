@@ -408,8 +408,8 @@ class UpdateRepository(
 
     /**
      * Dispatches to whichever single action the tray's one update menu item (or the notification
-     * center's "updates" row) currently represents — see `tray/KeryxTray.kt`'s `trayUpdateEntry`
-     * for the label/enabled state this corresponds to. [UpdateState.Failed] goes through
+     * center's "updates" row) currently represents — see `tray/UpdateMenuEntry.kt`'s
+     * `updateMenuEntry` for the label/enabled state this corresponds to. [UpdateState.Failed] goes through
      * [startDownload] too — see its own KDoc for how it resumes a failure per-stage. A no-op for
      * every state with no action of its own ([UpdateState.Idle]/[UpdateState.Checking]/
      * [UpdateState.UpToDate]/[UpdateState.Downloading]/[UpdateState.Verifying]/

@@ -42,6 +42,7 @@ import org.jetbrains.compose.resources.painterResource
 import org.koin.core.context.startKoin
 import org.koin.mp.KoinPlatform
 import works.merc.keryx.app.core.APP_NAME
+import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.core.WINDOW_DEFAULT_HEIGHT
@@ -60,6 +61,7 @@ import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.UpdateRepository
 import works.merc.keryx.app.domain.UpdateState
 import works.merc.keryx.app.platform.AppDirs
+import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.isLinux
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.LocalNativeWindow
@@ -72,8 +74,10 @@ import works.merc.keryx.app.appmenu.AppMenuBarHost
 import works.merc.keryx.app.appmenu.AppMenuConnection
 import works.merc.keryx.app.tray.KeryxTray
 import works.merc.keryx.app.tray.shouldHideOnTrayAction
+import works.merc.keryx.app.tray.shouldOpenSettingsAfterUpdateCheck
 import works.merc.keryx.app.tray.SniConnection
 import works.merc.keryx.app.ui.home.HomeViewModel
+import works.merc.keryx.app.ui.home.NotificationCenterViewModel
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
 import works.merc.keryx.app.ui.theme.installLookAndFeel
@@ -236,6 +240,7 @@ fun main(args: Array<String>) {
     appScope.launch { backgroundUpdateLoop(koin) }
 
     val updateRepository = koin.get<UpdateRepository>()
+    val notificationCenterViewModel = koin.get<NotificationCenterViewModel>()
 
     val menuController = koin.get<MenuController>()
 
@@ -407,7 +412,9 @@ fun main(args: Array<String>) {
             updateStateFlow = updateRepository.state,
             onToggle = { windowVisible = !windowVisible },
             onQuit = ::exitApplication,
-            onUpdateAction = { updateRepository.performPrimaryAction() },
+            onUpdateAction = {
+                onUpdateMenuItemClicked(updateRepository.state.value, appScope, updateRepository, notificationCenterViewModel)
+            },
             // Reuses the same activation signal as the single-instance/reopen paths below
             // (window.toFront/requestFocus, de-iconify, activateIgnoringOtherApps) - see the
             // LaunchedEffect(Unit) collecting activationRequests further down.
@@ -611,6 +618,75 @@ fun main(args: Array<String>) {
             }
         }
         } // CompositionLocalProvider(LocalWindowExceptionHandlerFactory)
+    }
+}
+
+/**
+ * Runs whatever the single update menu entry currently stands for — the one shown in the system
+ * tray and, identically, in the application menu bar's Help menu (see `tray/UpdateMenuEntry.kt`'s
+ * `updateMenuEntry`, which resolves the matching label and enabled flag from the same [state]).
+ *
+ * - [UpdateState.Idle]/[UpdateState.UpToDate]: run a check, and surface the result where the user
+ *   can act on it (see [checkForUpdateAndShowIfAvailable]).
+ * - [UpdateState.Available]: start the download when this install form can actually apply it,
+ *   otherwise hand the release page to the browser — the same URL the notification center's own
+ *   `OpenUrl` action uses for a non-installable update.
+ * - [UpdateState.Ready]/[UpdateState.Failed]: install / retry, via
+ *   [UpdateRepository.performPrimaryAction].
+ * - Everything else is an action already in flight, and the menu entry is disabled in those states
+ *   anyway; a click from a stale menu is a deliberate no-op.
+ *
+ * [state] is passed in rather than read from [updateRepository] here so each call site can decide
+ * how fresh a value it wants; both existing ones read `updateRepository.state.value` at click time.
+ *
+ * @param openUrl Seam for the release-page hand-off, so tests can exercise the non-installable
+ * branch without launching a real browser ([BrowserOpener] is an `actual object` with no seam of
+ * its own).
+ */
+internal fun onUpdateMenuItemClicked(
+    state: UpdateState,
+    scope: CoroutineScope,
+    updateRepository: UpdateRepository,
+    notificationCenterViewModel: NotificationCenterViewModel,
+    openUrl: (String) -> Unit = BrowserOpener::open,
+) {
+    when (state) {
+        UpdateState.Idle, UpdateState.UpToDate ->
+            checkForUpdateAndShowIfAvailable(scope, updateRepository, notificationCenterViewModel)
+        is UpdateState.Available ->
+            if (state.update.installable) updateRepository.performPrimaryAction() else openUrl(state.update.releaseUrl)
+        is UpdateState.Ready, is UpdateState.Failed -> updateRepository.performPrimaryAction()
+        UpdateState.Checking, is UpdateState.Downloading, is UpdateState.Verifying, is UpdateState.Installing -> Unit
+    }
+}
+
+/**
+ * Checks for an update and, if an installable one turns up, brings the window to front and opens
+ * the settings dialog on its Updates tab.
+ *
+ * [UpdateRepository.check] is the only check implementation, and it already posts its own
+ * `ShowSettingsTab("updates")` notification for an installable find; rather than duplicating the
+ * navigation, this hands that very notification back to [NotificationCenterViewModel.requestAction]
+ * — exactly what clicking its row in the bell does — and `App.kt`'s `LaunchedEffect(pendingAction)`
+ * resolves it. The window is raised first via [activationRequests], since the click may well have
+ * come from the tray while the window was hidden.
+ *
+ * Re-entrancy guard: a check already in flight is left alone, so a double click can't stack two.
+ */
+private fun checkForUpdateAndShowIfAvailable(
+    scope: CoroutineScope,
+    updateRepository: UpdateRepository,
+    notificationCenterViewModel: NotificationCenterViewModel,
+) {
+    if (updateRepository.state.value is UpdateState.Checking) return
+    scope.launch {
+        updateRepository.check()
+        if (shouldOpenSettingsAfterUpdateCheck(updateRepository.state.value)) {
+            activationRequests.tryEmit(Unit)
+            notificationCenterViewModel.items.value
+                .firstOrNull { it.action == AppNotificationAction.ShowSettingsTab("updates") }
+                ?.let { notificationCenterViewModel.requestAction(it) }
+        }
     }
 }
 

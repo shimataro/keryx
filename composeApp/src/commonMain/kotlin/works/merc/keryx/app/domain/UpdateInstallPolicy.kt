@@ -32,7 +32,7 @@ sealed interface UpdatePlan {
 
 /** Whether [UpdatePlan] alone — with no platform-specific runtime check — represents something an
  * in-app update can carry out, as opposed to falling back to the release page or not being offered
- * at all. The Updates tab (`UpdatesTab.kt`) and the tray (`tray/KeryxTray.kt`'s `trayUpdateEntry`)
+ * at all. The Updates tab (`UpdatesTab.kt`) and the tray/Help menus (`tray/UpdateMenuEntry.kt`'s `updateMenuEntry`)
  * do **not** read this directly; both read [AvailableUpdate.installable] instead, which folds this
  * together with [UpdateInstaller.canInstall] — see that property's own KDoc for why the platform
  * check matters too (Android's install-unknown-apps consent, most notably). This is only [installable]'s

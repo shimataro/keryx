@@ -238,6 +238,11 @@
     <string name="settings_update_installing">Restarting…</string>
     <string name="settings_update_retry">Retry</string>
     <string name="settings_update_manual_only">In-app update isn’t available for this installation</string>
+    <string name="update_check_for_update">Check for updates</string>
+    <string name="update_checking">Checking for updates…</string>
+    <string name="update_up_to_date">Up to date</string>
+    <string name="update_available_manual_only">New version available</string>
+    <string name="update_installing">Restarting…</string>
     <string name="tray_update_download">Download update %1$s</string>
     <string name="tray_update_downloading">Downloading… %1$s</string>
     <string name="tray_update_verifying">Verifying…</string>

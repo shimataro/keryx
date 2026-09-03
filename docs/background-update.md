@@ -141,10 +141,11 @@ so it and any in-flight download outlive a closed settings dialog) drives it pas
 "here's a link" into an actual download-and-install, behind one `StateFlow<UpdateState>`:
 `Idle → Checking → (UpToDate | Available) → Downloading → Verifying → Ready → Installing`, with
 `Failed` reachable from `Checking`/`Downloading`/`Verifying`. Every surface — the Updates settings
-tab, the desktop tray's one update menu item, the notification-center bell — reads this same state,
-so they can never disagree about what's currently true. **No step ever runs unattended**: a check
-never auto-downloads, and a downloaded file never auto-installs — download and install are each a
-separate, explicit click (Updates tab button, or the tray item once one is offered).
+tab, the one update menu item the desktop tray and the Help menu share (both resolved by
+`tray/UpdateMenuEntry.kt`'s `updateMenuEntry`), the notification-center bell — reads this same
+state, so they can never disagree about what's currently true. **No step ever runs unattended**: a
+check never auto-downloads, and a downloaded file never auto-installs — download and install are
+each a separate, explicit click (Updates tab button, or that menu item).
 
 - **Which file, and what to do with it.** `UpdateChecker` parses the GitHub release's `assets[]`;
   `domain/UpdateAsset.kt`'s `selectUpdateAsset` picks the one matching this build's install form
@@ -283,11 +284,19 @@ separate, explicit click (Updates tab button, or the tray item once one is offer
     cross-layer callback for a case a successful install never even reaches (the OS kills the
     process first).
 - **Presentation.** Surfaced from the moment `check()` finds something, not only once it's ready:
-  the desktop tray's single update menu item cycles through "Download update %1$s", "Downloading…
-  N%" (rounded to 5% to avoid flooding the Linux SNI D-Bus menu with layout-change signals),
-  "Verifying…", "Restart to update to %1$s", and "Update failed" as `state` moves (`%1$s` is the
-  target version — see `tray_update_download`/`tray_update_restart` in `strings.xml`) — absent
-  entirely for a `NotOffered`/non-installable plan. The Updates tab's own headline row follows the
+  the single update menu item — shown identically in the desktop tray and in the application menu
+  bar's Help menu, both built by `tray/UpdateMenuEntry.kt`'s `updateMenuEntry` — cycles through
+  "Download update %1$s", "Downloading… N%" (rounded to 5% to avoid flooding the Linux SNI D-Bus
+  menu with layout-change signals), "Verifying…", "Restart to update to %1$s", and "Update failed"
+  as `state` moves (`%1$s` is the target version — see `tray_update_download`/`tray_update_restart`
+  in `strings.xml`). That item is **always present**, whatever the state: `Idle`/`UpToDate` show
+  "Check for updates"/"Up to date" and are the user's way to ask for a check on demand (clicking
+  one runs `check()` and, if it turns up an installable update, opens the Updates tab on it — see
+  `main.kt`'s `onUpdateMenuItemClicked` and `tray/TrayActionPolicy.kt`'s
+  `shouldOpenSettingsAfterUpdateCheck`), a non-installable find reads "New version available" and
+  opens the release page in the browser instead, and the states with an action already in flight
+  (`Checking`/`Downloading`/`Verifying`/`Installing`) are shown disabled rather than removed so the
+  menu never changes shape underneath the user. The Updates tab's own headline row follows the
   same rule — no "Download" button renders there at all for that plan, rather than a disabled one
   (see `ui-guidelines`'s "prefer disabled over hidden" carve-out, which this is: there is nothing
   *temporarily* inactive about a form the in-app installer can never handle) — replaced by the
