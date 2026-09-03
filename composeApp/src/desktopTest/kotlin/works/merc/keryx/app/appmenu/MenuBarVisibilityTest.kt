@@ -4,6 +4,7 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.platform.isMacOs
+import works.merc.keryx.app.tray.TrayUpdateEntry
 import works.merc.keryx.app.ui.menu.AppMenuActions
 import works.merc.keryx.app.ui.menu.AppMenuLabels
 import works.merc.keryx.app.ui.menu.AppMenuNode
@@ -58,7 +59,7 @@ class MenuBarVisibilityTest {
         refreshSelectedFeed = {}, toggleFeedTag = { _, _ -> }, moveFeedToFolder = {},
         renameSelectedFeed = {}, unsubscribeSelectedFeed = {},
         copyFeedUrl = {}, copyFeedSiteUrl = {}, openFeedSite = {},
-        openWebsite = {}, openProjectPage = {}, about = {},
+        openWebsite = {}, openProjectPage = {}, updateAction = {}, about = {},
     )
 
     private fun tree(menuBarVisible: Boolean = false) = buildAppMenuTree(
@@ -72,6 +73,7 @@ class MenuBarVisibilityTest {
         actions = actions(),
         menuBarToggle = MenuBarToggle(visible = menuBarVisible, onToggle = { toggledTo = it }),
         selectedFeedMenu = SelectedFeedMenuData(emptyList(), emptySet(), emptyList(), null),
+        updateEntry = TrayUpdateEntry("CheckForUpdate", enabled = true),
     )
 
     // --- AWT key-code mapping ---

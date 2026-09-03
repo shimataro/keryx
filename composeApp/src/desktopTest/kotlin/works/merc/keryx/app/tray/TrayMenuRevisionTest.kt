@@ -21,8 +21,9 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class TrayMenuRevisionTest {
-    private val hidden = TrayMenuState(toggleLabel = "表示", quitLabel = "終了")
-    private val shown = TrayMenuState(toggleLabel = "非表示", quitLabel = "終了")
+    private val updateEntry = TrayUpdateEntry("Check for updates", enabled = true)
+    private val hidden = TrayMenuState(toggleLabel = "Show", quitLabel = "Quit", update = updateEntry)
+    private val shown = TrayMenuState(toggleLabel = "Hide", quitLabel = "Quit", update = updateEntry)
 
     private val emitted = mutableListOf<Int>()
 
@@ -33,6 +34,11 @@ class TrayMenuRevisionTest {
     )
 
     private fun SniDBusMenu.fetchLayout() = GetLayout(MENU_ROOT_ID, -1, emptyList())
+
+    /** The toggle item out of a root layout reply — looked up by id rather than by position, since
+     * the update entry and its separator always sit ahead of it. */
+    private fun MenuLayoutReply.toggleItem(): DBusMenuLayoutItem =
+        layout.children.map { it.value as DBusMenuLayoutItem }.first { it.id == MENU_TOGGLE_ID }
 
     private fun clicked(id: Int) = DBusMenuEventEntry(id, "clicked", Variant(""), UInt32(0))
 
@@ -83,8 +89,7 @@ class TrayMenuRevisionTest {
         val reply = menu.fetchLayout()
 
         assertEquals(menu.currentRevision, reply.revision.toInt())
-        val toggle = reply.layout.children.first().value as DBusMenuLayoutItem
-        assertEquals("非表示", toggle.properties.getValue("label").value)
+        assertEquals("Hide", reply.toggleItem().properties.getValue("label").value)
     }
 
     @Test
@@ -100,9 +105,8 @@ class TrayMenuRevisionTest {
         repeat(20_000) {
             val reply = menu.fetchLayout()
             val revision = reply.revision.toInt()
-            val toggle = reply.layout.children.first().value as DBusMenuLayoutItem
             val expected = states[(revision - 1) % 2].toggleLabel
-            val actual = toggle.properties.getValue("label").value
+            val actual = reply.toggleItem().properties.getValue("label").value
             if (expected != actual) {
                 mismatches += "revision $revision served '$actual', expected '$expected'"
             }
@@ -220,19 +224,7 @@ class TrayMenuRevisionTest {
     }
 
     @Test
-    fun `clicking the update item when no update is offered is silently ignored`() = runTest {
-        val menu = menu(hidden) // update == null
-        val updates = collect(menu.updateRequests)
-        runCurrent()
-
-        menu.Event(MENU_UPDATE_ID, "clicked", Variant(""), UInt32(0))
-        runCurrent()
-
-        assertTrue(updates.isEmpty())
-    }
-
-    @Test
-    fun `aboutToShowGroup recognizes the update and separator ids even with no update offered`() {
+    fun `aboutToShowGroup recognizes the update and separator ids`() {
         val menu = menu(hidden)
         menu.fetchLayout()
 
@@ -243,7 +235,7 @@ class TrayMenuRevisionTest {
     }
 
     @Test
-    fun `the layout reply includes the update entry once one is offered`() {
+    fun `the layout reply always includes the update entry and its separator`() {
         val menu = menu()
         menu.updateState(shown.copy(update = TrayUpdateEntry("Download update 2.0.0", enabled = true)))
 
@@ -251,5 +243,17 @@ class TrayMenuRevisionTest {
 
         val childIds = reply.layout.children.map { (it.value as DBusMenuLayoutItem).id }
         assertEquals(listOf(MENU_UPDATE_ID, MENU_SEPARATOR_ID, MENU_TOGGLE_ID, MENU_QUIT_ID), childIds)
+    }
+
+    /** Only the update entry changing is still a layout change the host must be told about. */
+    @Test
+    fun `changing only the update entry bumps the revision and emits LayoutUpdated`() {
+        val menu = menu()
+        val before = menu.currentRevision
+
+        menu.updateState(hidden.copy(update = TrayUpdateEntry("Downloading… 60%", enabled = false)))
+
+        assertEquals(listOf(before + 1), emitted)
+        assertEquals(before + 1, menu.currentRevision)
     }
 }

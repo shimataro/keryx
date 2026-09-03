@@ -38,7 +38,7 @@ internal fun LinuxTray(
     unreadCount: Long,
     toggleLabel: String,
     quitLabel: String,
-    updateEntry: TrayUpdateEntry?,
+    updateEntry: TrayUpdateEntry,
     onToggle: () -> Unit,
     onQuit: () -> Unit,
     onUpdateAction: () -> Unit,
