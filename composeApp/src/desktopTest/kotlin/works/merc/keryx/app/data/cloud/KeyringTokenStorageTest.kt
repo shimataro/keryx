@@ -41,10 +41,13 @@ class KeyringTokenStorageTest {
 
     /**
      * Minimal in-memory [TokenStorage] standing in for the plaintext fallback. [outcome] is what
-     * its own [save] reports, so a test can model the fallback write itself failing.
+     * its own [save] reports, so a test can model the fallback write itself failing. [clearOutcome]
+     * is what its own [clear] reports; when it is [TokenClearOutcome.DATA_MAY_REMAIN], [stored] is
+     * left in place to model a delete that did not actually remove the file.
      */
     private class RecordingTokenStorage(
         private val outcome: TokenSaveOutcome = TokenSaveOutcome.PLAINTEXT_FILE,
+        private val clearOutcome: TokenClearOutcome = TokenClearOutcome.CLEARED,
     ) : TokenStorage {
         var stored: OAuthTokens? = null
 
@@ -56,9 +59,69 @@ class KeyringTokenStorageTest {
         override fun load(): OAuthTokens? = stored
 
         override fun clear(): TokenClearOutcome {
-            stored = null
-            return TokenClearOutcome.CLEARED
+            if (clearOutcome == TokenClearOutcome.CLEARED) stored = null
+            return clearOutcome
         }
+    }
+
+    /**
+     * [KeyringAccess] fake for testing [KeyringTokenStorage.clear]'s outcome composition —
+     * unreachable via the real `Keyring`, which cannot be instantiated or subclassed in a test
+     * (see [KeyringAccess]'s own KDoc). [deletePasswordThrows] models a keyring delete outcome:
+     * null succeeds, an exception is thrown as-is (letting a test pass either a genuine failure or
+     * the [com.github.javakeyring.PasswordAccessException] java-keyring uses for "no such entry").
+     */
+    private class FakeKeyring(
+        private val deletePasswordThrows: Throwable? = null,
+    ) : KeyringAccess {
+        override fun getPassword(service: String, account: String): String =
+            throw PasswordAccessException("not used by these tests")
+
+        override fun setPassword(service: String, account: String, password: String) = Unit
+
+        override fun deletePassword(service: String, account: String) {
+            deletePasswordThrows?.let { throw it }
+        }
+    }
+
+    /**
+     * Mirrors the "not found" carve-out already covered for [load] by
+     * [notFoundIsTreatedAsExpectedAndNotWarned]: a keyring with nothing stored must not make
+     * [KeyringTokenStorage.clear] claim the tokens might still be there.
+     */
+    @Test
+    fun clearReportsClearedWhenKeyringHasNoEntryAndFallbackIsCleared() {
+        val fallback = RecordingTokenStorage()
+        val keyring = FakeKeyring(deletePasswordThrows = PasswordAccessException("Password not Found"))
+        val storage = KeyringTokenStorage(fallback, CloudStorageType.DROPBOX.id, Json, keyring)
+
+        assertEquals(TokenClearOutcome.CLEARED, storage.clear())
+    }
+
+    /**
+     * A keyring deletion that genuinely fails must not be masked by a fallback that did clear —
+     * the caller needs to know the tokens may still be readable from *some* store.
+     */
+    @Test
+    fun clearReportsDataMayRemainWhenKeyringDeleteFailsUnexpectedly() {
+        val fallback = RecordingTokenStorage()
+        val keyring = FakeKeyring(deletePasswordThrows = RuntimeException("keyring backend blew up"))
+        val storage = KeyringTokenStorage(fallback, CloudStorageType.DROPBOX.id, Json, keyring)
+
+        assertEquals(TokenClearOutcome.DATA_MAY_REMAIN, storage.clear())
+    }
+
+    /**
+     * The keyring entry can be removed while the plaintext fallback file survives (e.g. a
+     * `File.delete()` that returned false) — the composed outcome must still surface that.
+     */
+    @Test
+    fun clearReportsDataMayRemainWhenTheFallbackFileSurvives() {
+        val fallback = RecordingTokenStorage(clearOutcome = TokenClearOutcome.DATA_MAY_REMAIN)
+        val keyring = FakeKeyring()
+        val storage = KeyringTokenStorage(fallback, CloudStorageType.DROPBOX.id, Json, keyring)
+
+        assertEquals(TokenClearOutcome.DATA_MAY_REMAIN, storage.clear())
     }
 
     @Test

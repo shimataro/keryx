@@ -7,6 +7,31 @@ import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Log
 
 /**
+ * Seam over the OS secret store, mirroring the three [Keyring] operations this class uses.
+ * java-keyring's own [Keyring] is a concrete class whose only constructor is private, so a test
+ * can neither subclass nor instantiate it — without this indirection the only reachable path
+ * would be `keyring = null`, leaving a successful write and a failed delete untestable. Same
+ * role (and same reason) as [CommandRunner] in `SecurityCliTokenStorage`.
+ */
+internal interface KeyringAccess {
+    fun getPassword(service: String, account: String): String
+    fun setPassword(service: String, account: String, password: String)
+    fun deletePassword(service: String, account: String)
+}
+
+/** [KeyringAccess] backed by the real java-keyring backend. */
+private class RealKeyringAccess(private val keyring: Keyring) : KeyringAccess {
+    override fun getPassword(service: String, account: String): String =
+        keyring.getPassword(service, account)
+
+    override fun setPassword(service: String, account: String, password: String) =
+        keyring.setPassword(service, account, password)
+
+    override fun deletePassword(service: String, account: String) =
+        keyring.deletePassword(service, account)
+}
+
+/**
  * Stores a cloud provider's tokens in the OS secure store via java-keyring (macOS
  * Keychain, Windows Credential Manager, Linux Secret Service). The [account]
  * (per-provider, derived from [CloudStorageType.id]) distinguishes providers under
@@ -19,9 +44,10 @@ class KeyringTokenStorage internal constructor(
     private val json: Json,
     /**
      * The OS secret store, or null when none is available. Injectable so tests can exercise the
-     * "no backend → plaintext fallback" path without touching (or depending on) a real keyring.
+     * "no backend → plaintext fallback" path — and the working-backend paths — without touching
+     * (or depending on) a real keyring.
      */
-    private val keyring: Keyring?,
+    private val keyring: KeyringAccess?,
 ) : TokenStorage {
 
     constructor(
@@ -87,7 +113,7 @@ class KeyringTokenStorage internal constructor(
 }
 
 /** Opens the platform's secret store, or returns null (and logs) when none is available. */
-private fun createKeyring(): Keyring? = runCatching { Keyring.create() }
+private fun createKeyring(): KeyringAccess? = runCatching { RealKeyringAccess(Keyring.create()) }
     .onFailure { Log.warn(TOKEN_STORAGE_LOG_TAG, "No OS secret store available; falling back to file storage", it) }
     .getOrNull()
 
