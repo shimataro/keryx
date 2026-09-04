@@ -19,6 +19,10 @@ import works.merc.keryx.app.resources.error_sync_conflict
 import works.merc.keryx.app.resources.feed_gone_message
 import works.merc.keryx.app.resources.feed_new_articles
 import works.merc.keryx.app.resources.feed_url_changed
+import works.merc.keryx.app.resources.notification_token_storage_fallback
+import works.merc.keryx.app.resources.notification_token_storage_fallback_detail
+import works.merc.keryx.app.resources.notification_token_storage_not_persisted
+import works.merc.keryx.app.resources.notification_token_storage_not_persisted_detail
 import works.merc.keryx.app.resources.settings_import_failed
 import works.merc.keryx.app.resources.settings_import_success
 import works.merc.keryx.app.resources.update_available_notification
@@ -88,4 +92,16 @@ class ComposeNotificationMessages : NotificationMessages {
 
     override suspend fun updateReadyToInstall(version: String): String =
         getString(Res.string.update_ready_notification, version)
+
+    override suspend fun tokenStorageFallback(): String =
+        getString(Res.string.notification_token_storage_fallback)
+
+    override suspend fun tokenStorageFallbackDetail(): String =
+        getString(Res.string.notification_token_storage_fallback_detail)
+
+    override suspend fun tokenStorageNotPersisted(): String =
+        getString(Res.string.notification_token_storage_not_persisted)
+
+    override suspend fun tokenStorageNotPersistedDetail(): String =
+        getString(Res.string.notification_token_storage_not_persisted_detail)
 }

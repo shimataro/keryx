@@ -80,6 +80,11 @@ class UpdateAssetSelectorTest {
     }
 
     @Test
+    fun linuxSnapNeverSelectsAnAssetRegardlessOfWhatShipped() {
+        assertNull(selectUpdateAsset(stableReleaseAssets(), location(InstallKind.LINUX_SNAP)))
+    }
+
+    @Test
     fun androidSideloadedPicksTheApkNeverTheAab() {
         val asset = selectUpdateAsset(stableReleaseAssets(), location(InstallKind.ANDROID_SIDELOADED))
         assertEquals("Keryx-0.13.0-android-universal.apk", asset?.name)

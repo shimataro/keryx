@@ -60,10 +60,10 @@ installing from this source" permission above still applies, but you only grant 
 every update afterward.
 
 This applies to a macOS `.app`, a Windows `.msi`/portable install, a Linux portable install, and a
-sideloaded Android `.apk`. A Linux `.deb`/`.rpm` install and an Android install from Google Play
-instead open the release page for you to update through your usual channel (your package manager,
-or Play's own auto-update) — Keryx still tells you a new version exists, just not by installing it
-itself there.
+sideloaded Android `.apk`. A Linux `.deb`/`.rpm` or Snap install, and an Android install from
+Google Play, instead open the release page for you to update through your usual channel (your
+package manager, or Play's own auto-update) — Keryx still tells you a new version exists, just not
+by installing it itself there.
 
 ## Development Documentation
 
@@ -78,6 +78,7 @@ itself there.
   - [x] macOS
   - [x] Linux ( `.deb` )
   - [x] Linux ( `.rpm` )
+  - [x] Linux ( Snap )
   - [x] Android
   - [ ] iOS
   - [ ] iPadOS

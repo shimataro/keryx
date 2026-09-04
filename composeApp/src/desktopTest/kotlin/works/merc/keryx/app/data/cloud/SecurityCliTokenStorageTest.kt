@@ -59,7 +59,7 @@ class SecurityCliTokenStorageTest {
     @Test
     fun saveThenLoadRoundTripsViaKeychainNotFile() {
         val storage = SecurityCliTokenStorage(file(), FakeSecurity(), json)
-        storage.save(tokens)
+        assertEquals(TokenSaveOutcome.SECURE, storage.save(tokens), "a verified Keychain write must report a secure store")
         assertEquals(tokens, storage.load())
         assertNull(file().load()) // stored in keychain, not the file fallback
     }
@@ -90,16 +90,43 @@ class SecurityCliTokenStorageTest {
 
     @Test
     fun saveFallsBackToFileWhenKeychainAddFails() {
-        SecurityCliTokenStorage(file(), FakeSecurity(addExit = 1), json).save(tokens)
+        val outcome = SecurityCliTokenStorage(file(), FakeSecurity(addExit = 1), json).save(tokens)
         // keychain empty (add failed) -> a fresh backend reads from the file fallback
+        assertEquals(TokenSaveOutcome.PLAINTEXT_FILE, outcome, "a failed Keychain add must report the plaintext fallback")
         assertEquals(tokens, SecurityCliTokenStorage(file(), FakeSecurity(), json).load())
+    }
+
+    /**
+     * Both stores unavailable: the Keychain add fails *and* the file fallback cannot be written
+     * either, so nothing is persisted. `CloudSession` warns about that differently from a plain
+     * plaintext fallback, so the fallback's own outcome has to reach it. The in-memory cache is
+     * still updated regardless — this session must keep using the tokens it was just handed.
+     */
+    @Test
+    fun saveReportsNotPersistedWhenTheFileFallbackAlsoFails() {
+        // A regular file where the data directory is expected makes the fallback's write fail.
+        val blockingFile = FileIO.join(AppDirs.tempDir(), "security-token-block-${Random.nextInt()}")
+        FileIO.writeText(blockingFile, "not a directory")
+        try {
+            val storage = SecurityCliTokenStorage(
+                FileTokenStorage(dirOverride = blockingFile),
+                FakeSecurity(addExit = 1),
+                json,
+            )
+
+            assertEquals(TokenSaveOutcome.NOT_PERSISTED, storage.save(tokens))
+            assertEquals(tokens, storage.load(), "the tokens must stay usable for this session")
+        } finally {
+            FileIO.delete(blockingFile)
+        }
     }
 
     @Test
     fun saveFallsBackToFileWhenKeychainWriteNotVerified() {
         // `add` reports success but nothing persists (detached-session silent failure);
         // the read-back verification must catch it and route the token to the file.
-        SecurityCliTokenStorage(file(), FakeSecurity(persistOnAdd = false), json).save(tokens)
+        val outcome = SecurityCliTokenStorage(file(), FakeSecurity(persistOnAdd = false), json).save(tokens)
+        assertEquals(TokenSaveOutcome.PLAINTEXT_FILE, outcome, "an unverifiable Keychain write must report the plaintext fallback")
         assertEquals(tokens, SecurityCliTokenStorage(file(), FakeSecurity(), json).load())
     }
 
@@ -138,5 +165,58 @@ class SecurityCliTokenStorageTest {
         assertNull(storage.load())
         assertNull(storage.load())
         assertEquals(1, fake.findCalls) // "not connected" state is cached too
+    }
+
+    /**
+     * A prior run may have left the tokens readable in the plaintext fallback file (e.g. Keychain
+     * writes were unverifiable under a detached `gradlew run` session — see the class doc). Once a
+     * verified Keychain write succeeds, that stale copy must be cleared rather than left sitting on
+     * disk, so a long-lived refresh token doesn't stay readable in plaintext once storage is secure.
+     */
+    @Test
+    fun saveClearsAStalePlaintextFileOnceTheKeychainWorks() {
+        file().save(tokens) // pre-existing stale plaintext copy
+        val outcome = SecurityCliTokenStorage(file(), FakeSecurity(), json).save(tokens.copy(accessToken = "AT2"))
+
+        assertEquals(TokenSaveOutcome.SECURE, outcome, "a verified Keychain write must clear the stale plaintext copy")
+        assertNull(file().load())
+    }
+
+    /**
+     * When the stale fallback copy cannot actually be removed, the caller must be told the tokens
+     * are still readable in plaintext rather than being falsely reassured with
+     * [TokenSaveOutcome.SECURE]. [StubFileFallback] stands in for the real [FileTokenStorage] here
+     * because coercing a real file delete to fail deterministically would need filesystem
+     * permission tricks that are brittle across platforms.
+     */
+    @Test
+    fun saveReportsThePlaintextFileWhenTheStaleFallbackCopySurvivesCleanup() {
+        val fallback = StubFileFallback(TokenClearOutcome.DATA_MAY_REMAIN)
+        fallback.save(tokens)
+        val outcome = SecurityCliTokenStorage(fallback, FakeSecurity(), json).save(tokens.copy(accessToken = "AT2"))
+
+        assertEquals(TokenSaveOutcome.PLAINTEXT_FILE, outcome)
+    }
+
+    /**
+     * Minimal in-memory [TokenStorage] standing in for the plaintext fallback, used only to model
+     * a [clear] that does not fully succeed.
+     */
+    private class StubFileFallback(
+        private val clearOutcome: TokenClearOutcome,
+    ) : TokenStorage {
+        var stored: OAuthTokens? = null
+
+        override fun save(tokens: OAuthTokens): TokenSaveOutcome {
+            stored = tokens
+            return TokenSaveOutcome.PLAINTEXT_FILE
+        }
+
+        override fun load(): OAuthTokens? = stored
+
+        override fun clear(): TokenClearOutcome {
+            if (clearOutcome == TokenClearOutcome.CLEARED) stored = null
+            return clearOutcome
+        }
     }
 }

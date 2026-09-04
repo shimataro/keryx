@@ -49,7 +49,7 @@ class KeystoreTokenStorage(
     private val keyAlias = "keryx_token_$account"
     private val file = File(dirOverride ?: AndroidAppContext.application.filesDir.absolutePath, ".${account}_tokens.enc")
 
-    override fun save(tokens: OAuthTokens) {
+    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
         val result = runCatching {
             val key = getOrCreateKey()
             val cipher = Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key) }
@@ -73,12 +73,25 @@ class KeystoreTokenStorage(
                 runCatching { atomicWrite(ByteArray(0)) }
                     .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Failed to invalidate stale encrypted token file", e) }
             }
-            fallback.save(tokens)
+            // Report the fallback's own outcome: its write can fail too, and that leaves the
+            // tokens nowhere at all instead of in a plaintext file.
+            return fallback.save(tokens)
         } else {
             // A previous run may have written the plaintext fallback before Keystore became
             // available again; clear it so a stale plaintext copy doesn't linger once encrypted
-            // storage is working.
-            fallback.clear()
+            // storage is working, and report a copy that survived — it still hands out a readable
+            // (stale, but possibly still valid) refresh token, which is exactly what the caller's
+            // plaintext warning exists for.
+            //
+            // The answer comes from clear() itself rather than from a follow-up fallback.load():
+            // FileTokenStorage.load() reports a file whose JSON no longer decodes as "nothing
+            // stored", so a failed delete of a corrupt-but-readable file would have looked like a
+            // successful cleanup and claimed SECURE with the tokens still on disk.
+            return if (fallback.clear() == TokenClearOutcome.CLEARED) {
+                TokenSaveOutcome.SECURE
+            } else {
+                TokenSaveOutcome.PLAINTEXT_FILE
+            }
         }
     }
 
@@ -128,15 +141,22 @@ class KeystoreTokenStorage(
         return decrypted ?: fallback.load()
     }
 
-    override fun clear() {
-        runCatching {
+    override fun clear(): TokenClearOutcome {
+        val encryptedGone = runCatching {
             if (file.exists() && !file.delete()) {
                 Log.warn(TOKEN_STORAGE_LOG_TAG, "Encrypted token file delete returned false")
             }
+            !file.exists()
         }.onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Encrypted token file delete failed", e) }
+            .getOrDefault(false)
+        // The key alias is not itself token data: without the ciphertext file it decrypts nothing,
+        // so a key that outlives the file leaves nothing readable behind and must not downgrade the
+        // outcome. (KeyStore.deleteEntry's behavior on an absent alias is provider-specific too, so
+        // folding it in would risk reporting DATA_MAY_REMAIN for an already-empty store.)
         runCatching { keyStore().deleteEntry(keyAlias) }
             .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Keystore key delete failed", e) }
-        fallback.clear()
+        val fallbackCleared = fallback.clear() == TokenClearOutcome.CLEARED
+        return if (encryptedGone && fallbackCleared) TokenClearOutcome.CLEARED else TokenClearOutcome.DATA_MAY_REMAIN
     }
 
     private fun keyStore(): KeyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }

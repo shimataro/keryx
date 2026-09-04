@@ -97,6 +97,34 @@ class FileTokenStorageTest {
         assertEquals(tokens, loaded)
     }
 
+    /**
+     * This class *is* the plaintext fallback, so it never reports a secure save — not even on the
+     * happy path. It does have to tell a landed write apart from one that failed outright, though:
+     * `CloudSession` raises a different bell warning for each, and only the second one loses the
+     * tokens when the app exits.
+     */
+    @Test
+    fun saveReportsThePlaintextFileOnSuccessAndNotPersistedOnFailure() {
+        assertEquals(
+            TokenSaveOutcome.PLAINTEXT_FILE,
+            storage.save(OAuthTokens(accessToken = "access-123")),
+            "a successful plaintext write is still not secure",
+        )
+
+        // A regular file where the data directory is expected makes both mkdirs() and the write fail.
+        val blockingFile = FileIO.join(AppDirs.tempDir(), "token-block-${Random.nextInt()}")
+        FileIO.writeText(blockingFile, "not a directory")
+        try {
+            assertEquals(
+                TokenSaveOutcome.NOT_PERSISTED,
+                FileTokenStorage(dirOverride = blockingFile).save(OAuthTokens(accessToken = "access-123")),
+                "a failed write must not claim the tokens are readable in the fallback file",
+            )
+        } finally {
+            FileIO.delete(blockingFile)
+        }
+    }
+
     @Test
     fun loadReturnsNullWhenNoFileExists() {
         assertNull(storage.load())
@@ -147,7 +175,7 @@ class FileTokenStorageTest {
         storage.save(OAuthTokens(accessToken = "access-123"))
         assertEquals("access-123", storage.load()?.accessToken)
 
-        storage.clear()
+        assertEquals(TokenClearOutcome.CLEARED, storage.clear(), "a delete that landed must report a cleared store")
 
         assertNull(storage.load())
     }
@@ -176,13 +204,45 @@ class FileTokenStorageTest {
         storage.save(OAuthTokens(accessToken = "access-123"))
 
         val records = mutableListOf<LogRecord>()
+        var outcome: TokenClearOutcome? = null
         withReadOnlyTokenTarget {
-            records += withCapturedLogRecords { storage.clear() } // must not throw
+            records += withCapturedLogRecords { outcome = storage.clear() } // must not throw
         }
 
+        assertEquals(
+            TokenClearOutcome.DATA_MAY_REMAIN,
+            outcome,
+            "a token file that survived the delete must not be reported as cleared",
+        )
         assertTrue(
             records.any { it.message.contains("delete returned false") },
             "expected a warning about the failed delete, got: ${records.map { it.message }}",
         )
+    }
+
+    /**
+     * The regression [TokenClearOutcome] exists for: `load()` cannot stand in for "the file is
+     * gone". A token file whose JSON no longer decodes is reported as absent by [FileTokenStorage.load]
+     * while the refresh token inside it stays perfectly readable on disk, so a failed delete of such
+     * a file must still report [TokenClearOutcome.DATA_MAY_REMAIN]. `KeystoreTokenStorage.save()`
+     * used to infer its plaintext cleanup from `load()` and therefore claimed
+     * [TokenSaveOutcome.SECURE] in exactly this state, leaving the copy unreported and unwarned.
+     */
+    @Test
+    fun clearReportsDataMayRemainForASurvivingMalformedFile() {
+        // Truncated mid-value: no longer decodes, yet both tokens are plainly readable in the bytes.
+        FileIO.writeText(
+            FileIO.join(dir, ".dropbox_tokens.json"),
+            "{\"accessToken\":\"access-123\",\"refreshToken\":\"refresh-456",
+        )
+
+        withReadOnlyTokenTarget {
+            assertNull(storage.load(), "a malformed token file must decode to null")
+            assertEquals(
+                TokenClearOutcome.DATA_MAY_REMAIN,
+                storage.clear(),
+                "a malformed file that survived the delete must not be reported as cleared",
+            )
+        }
     }
 }

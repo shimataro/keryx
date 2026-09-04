@@ -150,6 +150,59 @@ Google Play イメージ（Chrome 入り）— [setup.ja.md](setup.ja.md) を参
 ./gradlew :composeApp:packageRpm
 ```
 
+### Linux Snap パッケージ
+
+`.deb`/`.rpm`（上記タスクでjpackage経由でビルド）と異なり、Snapは`snap/snapcraft.yaml`から
+`snapcraft`で直接ビルドする。同じ`createDistributable`のアプリイメージ
+（`composeApp/build/compose/binaries/main/app/Keryx`）を再ビルドせずそのまま`dump`するため、
+先に`createDistributable`を実行しておく必要がある:
+
+```bash
+./gradlew :composeApp:createDistributable
+sudo snap install snapcraft --classic   # 未インストールの場合
+sudo env "PATH=$PATH" snapcraft pack --destructive-mode
+```
+
+`--destructive-mode`はサンドボックスなしでホスト上に直接ビルドするため、ホスト自体が
+`snap/snapcraft.yaml`の`base: core24`（Ubuntu 24.04）に一致している必要があり、
+root権限も必要になる——さらにホスト環境を変更してしまう可能性がある。CI（`release.yml`）は
+既に一致する`ubuntu-latest`ランナー上でこれを実行している。別のホストでローカルビルドする
+場合は、代わりに分離されたLXDコンテナ内でビルドする`snapcraft pack --use-lxd`を使うこと——
+事前にLXDをインストール・初期化し、現在のユーザーからアクセスできる状態にしておく必要がある:
+
+```bash
+sudo snap install lxd
+sudo usermod -a -G lxd "$USER" && newgrp lxd   # newgrpの代わりにログアウト・再ログインでも可
+sudo lxd init --auto
+snapcraft pack --use-lxd
+```
+
+`confinement: strict`（UbuntuのSnap Store配布時の既定）は、`snap/snapcraft.yaml`の
+`apps.keryx.plugs`で宣言したプラグのみをアプリに与える —
+`network`、`password-manager-service`（Secret Service、`java-keyring`のトークン保存用 —
+snapdのポリシー上**自動接続されない**ため、Secret Serviceに実際にアクセスできるように
+なるには利用者が事前に`snap connect keryx:password-manager-service`を実行する必要がある。
+接続するまでは、OSのセキュアストアが使えない場合に他のプラットフォームでもすでに使っている
+権限制限付きの平文フォールバックファイルへ`java-keyring`がフォールバックする。`SECURITY.md`
+参照。これは黙って行われるわけではなく、`CloudSession`が通知センターに警告を出し、その
+`ShowInfoDialog`アクションが対処法としてこの`snap connect`を案内する。`error-design.ja.md`参照）、`desktop`/`desktop-legacy`/`wayland`/`x11`（ウィンドウ・トレイ・通知の統合）、`opengl`
+（Compose DesktopのSkiaレンダリング）、`home`。
+
+`home`は、OPMLインポート/エクスポートのファイル選択ダイアログ（`JFileChooser`、
+`app-architecture.md`参照）がユーザーのホームディレクトリ配下の非隠しファイルへ
+アクセスするためのものである — ただし隠しファイル・隠しディレクトリへのアクセスは
+明示的に除外されるため、上述の`keryx://` URIスキームと`.opml`関連付けの自己登録
+（`LinuxUriSchemeRegistrar`/`LinuxOpmlAssociationRegistrar`。実際には
+`~/.local/share/applications`と`~/.config/mimeapps.list`に書き込む）は、strict confinement下
+では**機能しない**。これらの書き込みは拒否され、クラッシュはせずに警告としてログに
+握りつぶされるだけである。Snap版のホスト側登録は代わりに`snap/gui/keryx.desktop`自体が
+`x-scheme-handler/keryx`と`.opml`のMIMEタイプ両方に対する`MimeType=`と`Exec=keryx %u`という
+フィールドコードを宣言することで行っている — これはsnapdがインストール時に処理する仕組みである。
+一部のデスクトップ環境がローカルファイルを`%u`経由で`file://` URIとして渡してくる場合に備え、
+`main()`内で分類前にプレーンなパスへ正規化している（`normalizeFileUriArg`）。これらのプラグが
+strict confinement下で実際に十分か（特にトレイのD-Bus所有権）、およびこのデスクトップエントリ
+による登録が実機のsnapd環境で実際に機能するかは、まだ検証していない。
+
 ### Android（APK / AAB）
 
 上記のデスクトップパッケージと違い、APK/AAB は**どの OS からでも**ビルドできる —
@@ -330,7 +383,7 @@ URI がプロセスに届かないからである。代わりにアプリが初�
 3. 4つの独立したジョブが並行して実行される:
 
    - macOS ランナーで `:composeApp:packageDmg` を実行し、`Keryx-<version>-macos-arm64.dmg` に加えて **`Keryx-<version>-macos-arm64.zip`** としても添付する。**プレリリースタグの場合は `packageDmg` をスキップし、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。
-   - Linux ランナーで（jpackage 用に `fakeroot`/`rpm` をインストールした上で）`:composeApp:packageDeb :composeApp:packageRpm` を実行し、`Keryx-<version>-linux-x86_64.deb` と `Keryx-<version>-linux-x86_64.rpm` に加えて **`Keryx-<version>-linux-x86_64.zip`** としても添付する。**プレリリースタグの場合は `packageDeb`/`packageRpm` をスキップし、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。
+   - Linux ランナーで（jpackage 用に `fakeroot`/`rpm` をインストールした上で）`:composeApp:packageDeb :composeApp:packageRpm` を実行し、`Keryx-<version>-linux-x86_64.deb` と `Keryx-<version>-linux-x86_64.rpm` に加えて **`Keryx-<version>-linux-x86_64.zip`** としても添付する。**プレリリースタグの場合は `packageDeb`/`packageRpm` をスキップし、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。同じジョブで（`sudo snap install snapcraft --classic` の後）`snap/snapcraft.yaml` に対して `snapcraft pack --destructive-mode` も実行し、`Keryx-<version>-linux-x86_64.snap` を添付する — `.deb`/`.rpm` と異なり、snapcraftの`version:`フィールドはjpackageのパッケージメタデータのような `MAJOR.MINOR.PATCH` 限定ではないため、**プレリリースタグでもスキップせず添付する**。
    - Windows ランナーで `:composeApp:createDistributable :composeApp:packageMsi` を実行し（`windows-latest` には WiX Toolset v3.14.1 がプリインストール済みのため、別途 WiX のセットアップ手順は不要）、`Keryx-<version>-windows-x86_64.msi` に加えて **`Keryx-<version>-windows-x86_64.zip`** としても添付する。**プレリリースタグの場合は `packageMsi` をスキップし、`.zip` のみを添付する** — MSI の `ProductVersion`（後述）は数値のみでなければならず、同一の対象バージョンに属するプレリリースはすべて同じ `ProductVersion` に潰れてしまうため、固定の `upgradeUuid` の下では WiX が後続のプレリリースや最終的な正式版を「アップグレード」として認識できない。
    - Ubuntu ランナーで `:androidApp:assembleGithubRelease` と `:androidApp:bundlePlayRelease` を実行し、`Keryx-<version>-android-universal.apk` と `Keryx-<version>-android-universal.aab` として添付する。APK は `github` flavor（`REQUEST_INSTALL_PACKAGES` を持つ——アプリ内アップデートがこの上に上書きインストールするため。上記「Android（APK / AAB）」参照）から、AAB は `play`（Play Console 提出用の成果物で、この権限を持ってはならない）から生成する。Android 版はデスクトップのインストーラーとは異なり、プレリリースタグでもビルド・添付する — Android には該当するバージョンメタデータ制約が無く、テスターが署名済み APK を必要とするため。**ワークフローが出力するプレリリースの APK/AAB は、GitHub 用のテストアーティファクトに過ぎない。** `androidApp/build.gradle.kts` は `versionCode` を `appVersion.substringBefore('-')` から導出しているため、`v1.2.0-beta.1` のようなプレリリースタグと最終的な `v1.2.0` は同じ `versionCode`（例: `10200`）になる。Google Play に提出する際は、`androidApp/build.gradle.kts`（またはそれを駆動するリリースタグ）を調整し、厳密に増加した `versionCode` で再ビルドすること — この値はビルド時に署名済みアーティファクトへ焼き込まれるため、ビルド後に書き換えることはできない。
 

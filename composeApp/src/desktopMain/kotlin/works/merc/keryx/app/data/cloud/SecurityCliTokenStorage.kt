@@ -85,11 +85,34 @@ class SecurityCliTokenStorage internal constructor(
     private var loaded: Boolean = false
 
     @Synchronized
-    override fun save(tokens: OAuthTokens) {
+    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
         val payload = json.encodeToString(tokens)
-        if (!writeToKeychainVerified(payload)) fallback.save(tokens)
+        val storedInKeychain = writeToKeychainVerified(payload)
+        // The cache is updated either way — this session must use the tokens it was just handed
+        // even when nothing could be persisted.
+        val outcome = if (!storedInKeychain) {
+            // Report the fallback's own outcome: its write can fail too, and that leaves the
+            // tokens nowhere at all instead of in a plaintext file.
+            fallback.save(tokens)
+        } else {
+            // A previous run may have written the plaintext fallback before the Keychain became
+            // available again (see the class doc's `gradlew run` caveat); clear it so a stale
+            // plaintext copy doesn't linger once a verified Keychain write is working, and report
+            // a copy that survived — it still hands out a readable (stale, but possibly still
+            // valid) refresh token, which is exactly what the caller's plaintext warning exists
+            // for. The check has to be fallback.clear()'s own answer, not a follow-up
+            // fallback.load(): FileTokenStorage.load() reports a file whose JSON no longer decodes
+            // as "nothing stored", so a failed delete of a corrupt-but-readable file would have
+            // looked like a successful cleanup and claimed SECURE with the tokens still on disk.
+            if (fallback.clear() == TokenClearOutcome.CLEARED) {
+                TokenSaveOutcome.SECURE
+            } else {
+                TokenSaveOutcome.PLAINTEXT_FILE
+            }
+        }
         cached = tokens
         loaded = true
+        return outcome
     }
 
     @Synchronized
@@ -107,13 +130,25 @@ class SecurityCliTokenStorage internal constructor(
     }
 
     @Synchronized
-    override fun clear() {
+    override fun clear(): TokenClearOutcome {
         val result = runSecurity("delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account, loginKeychain)
-        // Exit 44 (not found) is a no-op; a null result means `security` could not run.
-        if (result == null) Log.warn(TOKEN_STORAGE_LOG_TAG, "security delete-generic-password could not run")
-        fallback.clear()
+        val keychainCleared = when {
+            // A null result means `security` could not run, so the entry's fate is unknown.
+            result == null -> {
+                Log.warn(TOKEN_STORAGE_LOG_TAG, "security delete-generic-password could not run")
+                false
+            }
+            // Exit 44 (not found) is a no-op: there was nothing there to remove.
+            result.exitCode == 0 || result.exitCode == ITEM_NOT_FOUND -> true
+            else -> {
+                Log.warn(TOKEN_STORAGE_LOG_TAG, "security delete-generic-password failed (${describe(result)})")
+                false
+            }
+        }
+        val fallbackCleared = fallback.clear() == TokenClearOutcome.CLEARED
         cached = null
         loaded = true
+        return if (keychainCleared && fallbackCleared) TokenClearOutcome.CLEARED else TokenClearOutcome.DATA_MAY_REMAIN
     }
 
     /**

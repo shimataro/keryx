@@ -8,11 +8,14 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.runBlocking
 import works.merc.keryx.app.FakeTokenStorage
+import works.merc.keryx.app.core.AppNotificationAction
+import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
+import works.merc.keryx.app.data.cloud.TokenSaveOutcome
 import works.merc.keryx.app.singleProviderCloudSession
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -34,6 +37,7 @@ class CloudSessionTest {
         authHandler: MockRequestHandler = { respond("{}", HttpStatusCode.OK) },
         clock: Clock = Clock { 0L },
         selectedType: () -> CloudStorageType? = { CloudStorageType.DROPBOX },
+        notificationCenter: NotificationCenter = NotificationCenter(),
     ) = singleProviderCloudSession(
         client = client(authHandler),
         tokenStorage = tokenStorage,
@@ -41,6 +45,7 @@ class CloudSessionTest {
         clientId = clientId,
         clock = clock,
         selectedType = selectedType,
+        notificationCenter = notificationCenter,
     )
 
     @Test
@@ -110,7 +115,7 @@ class CloudSessionTest {
     }
 
     @Test
-    fun saveTokensPersistsToTokenStorage() {
+    fun saveTokensPersistsToTokenStorage() = runBlocking {
         val storage = FakeTokenStorage(null)
         val s = session(storage, clientId = "APPKEY")
 
@@ -118,6 +123,87 @@ class CloudSessionTest {
 
         assertEquals("AT", storage.stored?.accessToken)
         assertEquals("RT", storage.stored?.refreshToken)
+    }
+
+    @Test
+    fun saveTokensRaisesNoNotificationWhenStoredSecurely() = runBlocking {
+        val center = NotificationCenter()
+        val s = session(FakeTokenStorage(null, outcome = TokenSaveOutcome.SECURE), notificationCenter = center)
+
+        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
+
+        assertEquals(emptyList(), center.items.value)
+    }
+
+    @Test
+    fun saveTokensWarnsWhenTheTokenOnlyReachedThePlaintextFallback() = runBlocking {
+        val center = NotificationCenter()
+        val s = session(FakeTokenStorage(null, outcome = TokenSaveOutcome.PLAINTEXT_FILE), notificationCenter = center)
+
+        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
+
+        val notification = center.items.value.single()
+        assertEquals(AppNotificationLevel.WARNING, notification.level)
+        assertEquals("tokenStorageFallback", notification.message)
+        assertEquals(
+            AppNotificationAction.ShowInfoDialog("tokenStorageFallbackDetail"),
+            notification.action,
+        )
+    }
+
+    /**
+     * "Saved in a plaintext file" and "not saved anywhere" need different messages: only the
+     * second one means the tokens vanish on exit and the account has to be connected again. A
+     * shared message would tell the user their sign-in is in a file that was never written.
+     */
+    @Test
+    fun saveTokensWarnsDistinctlyWhenTheTokenCouldNotBePersistedAtAll() = runBlocking {
+        val center = NotificationCenter()
+        val s = session(FakeTokenStorage(null, outcome = TokenSaveOutcome.NOT_PERSISTED), notificationCenter = center)
+
+        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
+
+        val notification = center.items.value.single()
+        assertEquals(AppNotificationLevel.WARNING, notification.level)
+        assertEquals("tokenStorageNotPersisted", notification.message)
+        assertEquals(
+            AppNotificationAction.ShowInfoDialog("tokenStorageNotPersistedDetail"),
+            notification.action,
+        )
+    }
+
+    /**
+     * A connect followed by a refresh that also falls back must leave one bell entry, not two:
+     * the refresh path recurs on every expiry, so the warning has to coalesce.
+     */
+    @Test
+    fun repeatedFallbackSavesCoalesceIntoASingleNotification() = runBlocking {
+        val center = NotificationCenter()
+        val storage = FakeTokenStorage(null, outcome = TokenSaveOutcome.PLAINTEXT_FILE)
+        val refreshBody = """{"access_token":"FRESH","expires_in":14400}"""
+        val s = session(
+            storage,
+            authHandler = { request ->
+                if (request.url.encodedPath.contains("oauth2/token")) {
+                    respond(refreshBody, HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
+                } else {
+                    respond("{}", HttpStatusCode.OK)
+                }
+            },
+            clock = Clock { 2_000_000L },
+            notificationCenter = center,
+        )
+
+        // 1st fallback save: the initial connect.
+        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("STALE", "RT", expiresAtMillis = 1_000L))
+        // 2nd fallback save: the expired token is refreshed and persisted again.
+        val cloudStorage = s.current()
+        assertNotNull(cloudStorage)
+        cloudStorage.authenticate()
+
+        assertEquals("FRESH", storage.stored?.accessToken) // the refresh really did save again
+        assertEquals(1, center.items.value.size)
+        assertEquals(AppNotificationLevel.WARNING, center.items.value.single().level)
     }
 
     @Test

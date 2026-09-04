@@ -442,7 +442,20 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
 - macOS: Apple 署名の `/usr/bin/security` CLI に委譲（`SecurityCliTokenStorage`）。java-keyring は共有 JVM
   から Keychain 書き込みに失敗するため、macOS のみ `security` 経由にしている。
 - いずれも失敗時はデータディレクトリの `.{CloudStorageType.id}_tokens.json`（0600。Dropbox は `.dropbox_tokens.json`）へ
-  フォールバック。DI が `isMacOs` で両者を切り替える。
+  フォールバック。DI が `isMacOs` で両者を切り替える。`TokenStorage.save()` はトークンが実際にどこに残ったかを
+  返す（`TokenSaveOutcome.SECURE` = セキュアストア / Android の Keystore 暗号化ファイル、`PLAINTEXT_FILE` =
+  平文フォールバックファイルから読める（セキュアストアに到達できなかった場合と、セキュアな書き込みは
+  成功したが古いフォールバックのコピーを削除できなかった場合の両方を含む）、`NOT_PERSISTED` = どちらにも書けず、アプリ終了までしか残らないため
+  再起動後に再接続が必要）。劣化した 2 つの結果については、`CloudSession` がそれぞれ別のメッセージで、
+  集約（coalescing）した `WARNING` 通知（原因と対処法を示す `ShowInfoDialog` アクション付き）を発行する。
+  初回接続時もバックグラウンドのトークンリフレッシュ時も同様。フォールバック自体は引き続き許容する
+  （`SECURITY.md` に記載のとおり、意図的な graceful degradation）が、黙って行われてはならず、また何も
+  保存できなかった場合を「平文ファイルに保存した」と報告してはならない、という位置づけ。
+  セキュアな書き込みが成功した際、`KeyringTokenStorage`/`SecurityCliTokenStorage` も以前の劣化した保存で
+  残った古いフォールバックファイルを削除する — Android の `KeystoreTokenStorage`（後述）と同じ
+  clear-on-success の挙動で、セキュアストレージが再び使えるようになった後も平文コピーがディスクに
+  残り続けないようにする。フォールバックの削除が成功を確認できなかった場合は、誤って `SECURE` と
+  報告せず `PLAINTEXT_FILE` に降格する。
 - macOS は書き込み後に **read-back 検証**（login keychain を明示指定して読み戻し）を行い、永続化を確認できない
   場合は file フォールバックへ回す。**書き込みの永続性は起動セッション依存**: パッケージ版（GUI ログイン
   セッション）では login keychain に永続化されるが、`gradlew run`（launchd 直下の Gradle daemon 配下の
@@ -456,7 +469,16 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
   通常のトランザクションごとの秘密情報とは異なる要件のため。復号失敗（Keystore のリセット、
   ハードウェア鍵を引き継げない端末/OS 移行など）はクラッシュとしてではなく「トークン未保存」と全く
   同様に扱い、復号不能なファイルは残さず削除する。Keystore 自体が使えない端末は、デスクトップが
-  最終手段として使うのと同じ平文の `FileTokenStorage` にフォールバックする。`.enc` ファイルと平文
+  最終手段として使うのと同じ平文の `FileTokenStorage` にフォールバックする。暗号化保存が成功した場合は
+  このフォールバックファイルを `clear()` し、`SECURE` / `PLAINTEXT_FILE` の判断はその `clear()` 自身の
+  報告から決める——`TokenStorage.clear()` は `TokenClearOutcome.CLEARED` / `DATA_MAY_REMAIN` を返し、
+  `FileTokenStorage` は削除試行後にファイルがまだディスク上にあるか（`File.delete()` が false を
+  返した場合は残る）で判定する。消し切れずに残った平文のコピーは `SECURE` ではなく `PLAINTEXT_FILE`
+  として報告し、気付かれないままディスク上に読める状態で残るのではなく警告の対象にする。
+  **判定は必ずファイルの存在で行い、後続の `fallback.load()` では行わない**——
+  `FileTokenStorage.load()` は JSON がデコードできなくなったファイルを「未保存」として報告する一方、
+  その中の refresh token はそのまま読める状態で残るため、`load()` から消去を推測すると、
+  まさに最も警告が必要なケースで `SECURE` を返してしまっていた。`.enc` ファイルと平文
   フォールバックの `.json` ファイルはどちらも Android の自動バックアップ/デバイス間転送から除外している
   （`AndroidManifest.xml` の `dataExtractionRules`/`fullBackupContent`）——長寿命の OAuth リフレッシュ
   トークンをバックアップに乗せるべきではなく、また Keystore 暗号化されたファイルはそもそも別端末に

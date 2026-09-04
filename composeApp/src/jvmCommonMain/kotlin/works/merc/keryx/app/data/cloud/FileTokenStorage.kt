@@ -23,13 +23,20 @@ class FileTokenStorage(
 
     private val file = File(dirOverride ?: AppDirs.appDataDir(), fileName)
 
-    override fun save(tokens: OAuthTokens) {
+    /**
+     * Never reports [TokenSaveOutcome.SECURE]: this class *is* the plaintext fallback, so a token
+     * persisted here was never in a secure store. It does distinguish a write that landed
+     * ([TokenSaveOutcome.PLAINTEXT_FILE]) from one that failed outright
+     * ([TokenSaveOutcome.NOT_PERSISTED]) — only the latter loses the tokens when the app exits, so
+     * the caller warns about the two differently.
+     */
+    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
         // Persisting must never throw: this is the last-resort store, and a failure here (unwritable
         // data dir, a pre-existing root-owned/read-only token file) would otherwise propagate up
         // through CloudSession.saveTokens() and abort the connect flow *after* the token is already
         // held in memory — leaving the user unable to link at all. Swallow and log instead; the
         // in-memory session still works, only cross-restart persistence is lost.
-        runCatching {
+        val result = runCatching {
             file.parentFile?.mkdirs()
             // Write to a sibling temp file, then atomically replace the target. writeText()
             // straight into the token file would truncate it first, so a crash or failed write
@@ -51,6 +58,7 @@ class FileTokenStorage(
                 throw e
             }
         }.onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Token file could not be written", e) }
+        return if (result.isSuccess) TokenSaveOutcome.PLAINTEXT_FILE else TokenSaveOutcome.NOT_PERSISTED
     }
 
     /**
@@ -85,13 +93,23 @@ class FileTokenStorage(
                     .getOrNull()
             }
 
-    override fun clear() {
-        runCatching {
+    /**
+     * Reports the postcondition that actually matters — whether the file is still on disk — rather
+     * than `File.delete()`'s own return value. A surviving file holds readable token text whether or
+     * not its JSON still decodes, which is exactly why a caller cannot substitute [load] returning
+     * null for this answer.
+     */
+    override fun clear(): TokenClearOutcome {
+        val gone = runCatching {
             // File.delete() returns false rather than throwing when it fails, which runCatching
             // alone would not observe — a lingering token file would then be reported as cleared.
             if (file.exists() && !file.delete()) {
                 Log.warn(TOKEN_STORAGE_LOG_TAG, "Token file delete returned false")
             }
+            !file.exists()
         }.onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Token file delete failed", e) }
+            // A throw left the file's fate unknown, so assume the worse of the two.
+            .getOrDefault(false)
+        return if (gone) TokenClearOutcome.CLEARED else TokenClearOutcome.DATA_MAY_REMAIN
     }
 }

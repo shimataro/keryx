@@ -15,6 +15,35 @@ class UriSchemeRegistrationTest {
     }
 
     @Test
+    fun normalizesAFileUriArgToAPlainPath() {
+        // Uses a real, OS-native absolute path (not a hardcoded Unix literal) because
+        // java.io.File(URI)'s conversion is platform-dependent — a driveless "/home/user/..."
+        // path (never a value Windows would actually hand this app) round-trips differently
+        // through Windows' WinNTFileSystem than through Unix's, which broke this test on
+        // windows-latest CI. File.toURI()'s rawPath always starts with "/" (a drive letter on
+        // Windows, e.g. "/C:/Users/..."), so prefixing it with "file://" reproduces the
+        // RFC-8089 form a real OS launcher sends, and round-trips correctly through
+        // normalizeFileUriArg on whatever OS this test runs on.
+        val file = File("subscriptions.opml").absoluteFile
+        val uriArg = "file://" + file.toURI().rawPath
+        assertEquals(file.path, normalizeFileUriArg(uriArg))
+    }
+
+    @Test
+    fun normalizesAFileUriArgWithLocalhostAuthorityToAPlainPath() {
+        val file = File("subscriptions.opml").absoluteFile
+        val uriArg = "file://localhost" + file.toURI().rawPath
+        assertEquals(file.path, normalizeFileUriArg(uriArg))
+    }
+
+    @Test
+    fun leavesNonFileUriArgsUnchanged() {
+        assertEquals("keryx://oauth2/callback?code=abc", normalizeFileUriArg("keryx://oauth2/callback?code=abc"))
+        assertEquals("/home/user/subscriptions.opml", normalizeFileUriArg("/home/user/subscriptions.opml"))
+        assertEquals("--some-unrelated-flag", normalizeFileUriArg("--some-unrelated-flag"))
+    }
+
+    @Test
     fun macOsNeedsNoRuntimeRegistration() {
         assertEquals(UriSchemeRegistration.NONE, uriSchemeRegistrationFor("Mac OS X"))
     }

@@ -18,6 +18,8 @@ import kotlinx.coroutines.job
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
+import works.merc.keryx.app.data.cloud.TokenClearOutcome
+import works.merc.keryx.app.data.cloud.TokenSaveOutcome
 import works.merc.keryx.app.data.cloud.TokenStorage
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
@@ -52,9 +54,15 @@ import kotlin.random.Random
 
 private class HomeViewModelFixtureTokenStorage : TokenStorage {
     private var stored: OAuthTokens? = null
-    override fun save(tokens: OAuthTokens) { stored = tokens }
+    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
+        stored = tokens
+        return TokenSaveOutcome.SECURE
+    }
     override fun load(): OAuthTokens? = stored
-    override fun clear() { stored = null }
+    override fun clear(): TokenClearOutcome {
+        stored = null
+        return TokenClearOutcome.CLEARED
+    }
 }
 
 private fun notFoundHttpClient(): HttpClient = HttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }) {

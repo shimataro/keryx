@@ -19,4 +19,8 @@ internal open class FakeNotificationMessages : NotificationMessages {
     override suspend fun opmlImported(added: Int, failed: Int): String = "opmlImported:$added/$failed"
     override suspend fun updateAvailable(version: String): String = "updateAvailable:$version"
     override suspend fun updateReadyToInstall(version: String): String = "updateReadyToInstall:$version"
+    override suspend fun tokenStorageFallback(): String = "tokenStorageFallback"
+    override suspend fun tokenStorageFallbackDetail(): String = "tokenStorageFallbackDetail"
+    override suspend fun tokenStorageNotPersisted(): String = "tokenStorageNotPersisted"
+    override suspend fun tokenStorageNotPersistedDetail(): String = "tokenStorageNotPersistedDetail"
 }

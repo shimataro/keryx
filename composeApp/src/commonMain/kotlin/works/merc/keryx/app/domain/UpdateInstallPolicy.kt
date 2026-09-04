@@ -63,7 +63,7 @@ internal fun canInstallAndroidApkUpdate(plan: UpdatePlan, canRequestPackageInsta
 fun updatePlan(location: InstallLocation, asset: UpdateAsset?): UpdatePlan = when (location.kind) {
     InstallKind.DEVELOPMENT, InstallKind.ANDROID_STORE, InstallKind.UNKNOWN -> UpdatePlan.NotOffered
 
-    InstallKind.LINUX_PACKAGE -> UpdatePlan.OpenReleasePage
+    InstallKind.LINUX_PACKAGE, InstallKind.LINUX_SNAP -> UpdatePlan.OpenReleasePage
 
     InstallKind.MAC_APP_BUNDLE ->
         if (asset == null || location.translocated || !location.parentWritable) {

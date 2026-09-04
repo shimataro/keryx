@@ -13,23 +13,37 @@ import works.merc.keryx.app.data.cloud.DropboxStorage
 import works.merc.keryx.app.data.cloud.GoogleDriveAuthManager
 import works.merc.keryx.app.data.cloud.GoogleDriveStorage
 import works.merc.keryx.app.data.cloud.OAuthTokens
+import works.merc.keryx.app.data.cloud.TokenClearOutcome
+import works.merc.keryx.app.data.cloud.TokenSaveOutcome
 import works.merc.keryx.app.data.cloud.TokenStorage
 import works.merc.keryx.app.domain.CloudConnectFlow
 import works.merc.keryx.app.domain.CloudSession
+import works.merc.keryx.app.domain.FakeNotificationMessages
+import works.merc.keryx.app.domain.NotificationCenter
+import works.merc.keryx.app.domain.NotificationMessages
 
-/** In-memory [TokenStorage] fake for tests. */
-class FakeTokenStorage(initial: OAuthTokens? = null) : TokenStorage {
+/**
+ * In-memory [TokenStorage] fake for tests. [outcome] is what [save] reports back — set it to
+ * [TokenSaveOutcome.PLAINTEXT_FILE] to model a storage that could only reach the plaintext
+ * fallback file, or to [TokenSaveOutcome.NOT_PERSISTED] to model one that could not write at all.
+ */
+class FakeTokenStorage(
+    initial: OAuthTokens? = null,
+    private val outcome: TokenSaveOutcome = TokenSaveOutcome.SECURE,
+) : TokenStorage {
     var stored: OAuthTokens? = initial
         private set
 
-    override fun save(tokens: OAuthTokens) {
+    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
         stored = tokens
+        return outcome
     }
 
     override fun load(): OAuthTokens? = stored
 
-    override fun clear() {
+    override fun clear(): TokenClearOutcome {
         stored = null
+        return TokenClearOutcome.CLEARED
     }
 }
 
@@ -59,6 +73,8 @@ fun singleProviderCloudSession(
     connectFlow: CloudConnectFlow = FakeCloudConnectFlow(),
     createStorage: (suspend () -> String?) -> CloudStorage = { tokenProvider -> DropboxStorage(client, tokenProvider) },
     selectedType: () -> CloudStorageType? = { type },
+    notificationCenter: NotificationCenter = NotificationCenter(),
+    notificationMessages: NotificationMessages = FakeNotificationMessages(),
 ): CloudSession = CloudSession(
     providers = mapOf(
         type to CloudSession.Provider(
@@ -71,6 +87,8 @@ fun singleProviderCloudSession(
     ),
     selectedType = selectedType,
     clock = clock,
+    notificationCenter = notificationCenter,
+    notificationMessages = notificationMessages,
 )
 
 /**
@@ -90,6 +108,8 @@ fun multiProviderCloudSession(
     dropboxConnectFlow: CloudConnectFlow = FakeCloudConnectFlow(),
     googleDriveConnectFlow: CloudConnectFlow = FakeCloudConnectFlow(),
     selectedType: () -> CloudStorageType? = { CloudStorageType.DROPBOX },
+    notificationCenter: NotificationCenter = NotificationCenter(),
+    notificationMessages: NotificationMessages = FakeNotificationMessages(),
 ): CloudSession = CloudSession(
     providers = mapOf(
         CloudStorageType.DROPBOX to CloudSession.Provider(
@@ -109,4 +129,6 @@ fun multiProviderCloudSession(
     ),
     selectedType = selectedType,
     clock = clock,
+    notificationCenter = notificationCenter,
+    notificationMessages = notificationMessages,
 )
