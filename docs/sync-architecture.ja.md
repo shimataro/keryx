@@ -451,6 +451,11 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
   初回接続時もバックグラウンドのトークンリフレッシュ時も同様。フォールバック自体は引き続き許容する
   （`SECURITY.md` に記載のとおり、意図的な graceful degradation）が、黙って行われてはならず、また何も
   保存できなかった場合を「平文ファイルに保存した」と報告してはならない、という位置づけ。
+  セキュアな書き込みが成功した際、`KeyringTokenStorage`/`SecurityCliTokenStorage` も以前の劣化した保存で
+  残った古いフォールバックファイルを削除する — Android の `KeystoreTokenStorage`（後述）と同じ
+  clear-on-success の挙動で、セキュアストレージが再び使えるようになった後も平文コピーがディスクに
+  残り続けないようにする。フォールバックの削除が成功を確認できなかった場合は、誤って `SECURE` と
+  報告せず `PLAINTEXT_FILE` に降格する。
 - macOS は書き込み後に **read-back 検証**（login keychain を明示指定して読み戻し）を行い、永続化を確認できない
   場合は file フォールバックへ回す。**書き込みの永続性は起動セッション依存**: パッケージ版（GUI ログイン
   セッション）では login keychain に永続化されるが、`gradlew run`（launchd 直下の Gradle daemon 配下の

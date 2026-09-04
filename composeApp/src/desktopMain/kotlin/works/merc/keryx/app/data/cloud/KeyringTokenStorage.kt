@@ -65,9 +65,24 @@ class KeyringTokenStorage internal constructor(
                 .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Keyring save failed; falling back to file storage", e) }
                 .isSuccess
         } ?: false
-        // Report the fallback's own outcome rather than a flat "not secure": its write can fail
-        // too, and that leaves the tokens nowhere at all instead of in a plaintext file.
-        return if (stored) TokenSaveOutcome.SECURE else fallback.save(tokens)
+        if (!stored) {
+            // Report the fallback's own outcome rather than a flat "not secure": its write can
+            // fail too, and that leaves the tokens nowhere at all instead of in a plaintext file.
+            return fallback.save(tokens)
+        }
+        // A previous run may have written the plaintext fallback before the keyring became
+        // available again; clear it so a stale plaintext copy doesn't linger once secure storage
+        // is working, and report a copy that survived — it still hands out a readable (stale, but
+        // possibly still valid) refresh token, which is exactly what the caller's plaintext
+        // warning exists for. The check has to be fallback.clear()'s own answer, not a follow-up
+        // fallback.load(): FileTokenStorage.load() reports a file whose JSON no longer decodes as
+        // "nothing stored", so a failed delete of a corrupt-but-readable file would have looked
+        // like a successful cleanup and claimed SECURE with the tokens still on disk.
+        return if (fallback.clear() == TokenClearOutcome.CLEARED) {
+            TokenSaveOutcome.SECURE
+        } else {
+            TokenSaveOutcome.PLAINTEXT_FILE
+        }
     }
 
     override fun load(): OAuthTokens? {

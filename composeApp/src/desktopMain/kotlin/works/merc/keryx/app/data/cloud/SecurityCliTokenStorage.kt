@@ -88,10 +88,28 @@ class SecurityCliTokenStorage internal constructor(
     override fun save(tokens: OAuthTokens): TokenSaveOutcome {
         val payload = json.encodeToString(tokens)
         val storedInKeychain = writeToKeychainVerified(payload)
-        // Report the fallback's own outcome: its write can fail too, and that leaves the tokens
-        // nowhere at all instead of in a plaintext file. The cache is updated either way — this
-        // session must use the tokens it was just handed even when nothing could be persisted.
-        val outcome = if (storedInKeychain) TokenSaveOutcome.SECURE else fallback.save(tokens)
+        // The cache is updated either way — this session must use the tokens it was just handed
+        // even when nothing could be persisted.
+        val outcome = if (!storedInKeychain) {
+            // Report the fallback's own outcome: its write can fail too, and that leaves the
+            // tokens nowhere at all instead of in a plaintext file.
+            fallback.save(tokens)
+        } else {
+            // A previous run may have written the plaintext fallback before the Keychain became
+            // available again (see the class doc's `gradlew run` caveat); clear it so a stale
+            // plaintext copy doesn't linger once a verified Keychain write is working, and report
+            // a copy that survived — it still hands out a readable (stale, but possibly still
+            // valid) refresh token, which is exactly what the caller's plaintext warning exists
+            // for. The check has to be fallback.clear()'s own answer, not a follow-up
+            // fallback.load(): FileTokenStorage.load() reports a file whose JSON no longer decodes
+            // as "nothing stored", so a failed delete of a corrupt-but-readable file would have
+            // looked like a successful cleanup and claimed SECURE with the tokens still on disk.
+            if (fallback.clear() == TokenClearOutcome.CLEARED) {
+                TokenSaveOutcome.SECURE
+            } else {
+                TokenSaveOutcome.PLAINTEXT_FILE
+            }
+        }
         cached = tokens
         loaded = true
         return outcome

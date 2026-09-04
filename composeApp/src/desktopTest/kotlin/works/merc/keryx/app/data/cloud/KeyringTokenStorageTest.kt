@@ -40,6 +40,36 @@ class KeyringTokenStorageTest {
     }
 
     /**
+     * A prior run without a secret store may have left the tokens readable in the plaintext
+     * fallback file. Once the keyring becomes available again and a save succeeds there, that
+     * stale copy must be cleared rather than left sitting on disk — otherwise a long-lived
+     * refresh token stays readable in plaintext even though storage has since become secure.
+     */
+    @Test
+    fun saveClearsAStalePlaintextFallbackCopyOnceTheKeyringWorks() {
+        val fallback = RecordingTokenStorage()
+        fallback.save(OAuthTokens(accessToken = "STALE_AT", refreshToken = "STALE_RT"))
+        val storage = KeyringTokenStorage(fallback, CloudStorageType.DROPBOX.id, Json, FakeKeyring())
+
+        assertEquals(TokenSaveOutcome.SECURE, storage.save(OAuthTokens(accessToken = "AT", refreshToken = "RT")))
+        assertEquals(null, fallback.stored)
+    }
+
+    /**
+     * When the stale fallback copy cannot actually be removed (e.g. `File.delete()` returning
+     * false), the caller must be told the tokens are still readable in plaintext rather than
+     * being falsely reassured with [TokenSaveOutcome.SECURE].
+     */
+    @Test
+    fun saveReportsThePlaintextFileWhenTheStaleFallbackCopySurvivesCleanup() {
+        val fallback = RecordingTokenStorage(clearOutcome = TokenClearOutcome.DATA_MAY_REMAIN)
+        fallback.save(OAuthTokens(accessToken = "STALE_AT", refreshToken = "STALE_RT"))
+        val storage = KeyringTokenStorage(fallback, CloudStorageType.DROPBOX.id, Json, FakeKeyring())
+
+        assertEquals(TokenSaveOutcome.PLAINTEXT_FILE, storage.save(OAuthTokens(accessToken = "AT", refreshToken = "RT")))
+    }
+
+    /**
      * Minimal in-memory [TokenStorage] standing in for the plaintext fallback. [outcome] is what
      * its own [save] reports, so a test can model the fallback write itself failing. [clearOutcome]
      * is what its own [clear] reports; when it is [TokenClearOutcome.DATA_MAY_REMAIN], [stored] is

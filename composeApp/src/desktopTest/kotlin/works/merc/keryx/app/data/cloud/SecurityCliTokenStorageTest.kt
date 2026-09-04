@@ -166,4 +166,57 @@ class SecurityCliTokenStorageTest {
         assertNull(storage.load())
         assertEquals(1, fake.findCalls) // "not connected" state is cached too
     }
+
+    /**
+     * A prior run may have left the tokens readable in the plaintext fallback file (e.g. Keychain
+     * writes were unverifiable under a detached `gradlew run` session — see the class doc). Once a
+     * verified Keychain write succeeds, that stale copy must be cleared rather than left sitting on
+     * disk, so a long-lived refresh token doesn't stay readable in plaintext once storage is secure.
+     */
+    @Test
+    fun saveClearsAStalePlaintextFileOnceTheKeychainWorks() {
+        file().save(tokens) // pre-existing stale plaintext copy
+        val outcome = SecurityCliTokenStorage(file(), FakeSecurity(), json).save(tokens.copy(accessToken = "AT2"))
+
+        assertEquals(TokenSaveOutcome.SECURE, outcome, "a verified Keychain write must clear the stale plaintext copy")
+        assertNull(file().load())
+    }
+
+    /**
+     * When the stale fallback copy cannot actually be removed, the caller must be told the tokens
+     * are still readable in plaintext rather than being falsely reassured with
+     * [TokenSaveOutcome.SECURE]. [StubFileFallback] stands in for the real [FileTokenStorage] here
+     * because coercing a real file delete to fail deterministically would need filesystem
+     * permission tricks that are brittle across platforms.
+     */
+    @Test
+    fun saveReportsThePlaintextFileWhenTheStaleFallbackCopySurvivesCleanup() {
+        val fallback = StubFileFallback(TokenClearOutcome.DATA_MAY_REMAIN)
+        fallback.save(tokens)
+        val outcome = SecurityCliTokenStorage(fallback, FakeSecurity(), json).save(tokens.copy(accessToken = "AT2"))
+
+        assertEquals(TokenSaveOutcome.PLAINTEXT_FILE, outcome)
+    }
+
+    /**
+     * Minimal in-memory [TokenStorage] standing in for the plaintext fallback, used only to model
+     * a [clear] that does not fully succeed.
+     */
+    private class StubFileFallback(
+        private val clearOutcome: TokenClearOutcome,
+    ) : TokenStorage {
+        var stored: OAuthTokens? = null
+
+        override fun save(tokens: OAuthTokens): TokenSaveOutcome {
+            stored = tokens
+            return TokenSaveOutcome.PLAINTEXT_FILE
+        }
+
+        override fun load(): OAuthTokens? = stored
+
+        override fun clear(): TokenClearOutcome {
+            if (clearOutcome == TokenClearOutcome.CLEARED) stored = null
+            return clearOutcome
+        }
+    }
 }
