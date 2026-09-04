@@ -105,20 +105,22 @@ class KeyringTokenStorage internal constructor(
 
     override fun clear(): TokenClearOutcome {
         // No backend at all means nothing was ever stored there, so only the fallback can still be
-        // holding anything. A "not found" throw says the same thing — java-keyring reports a missing
-        // entry with the very exception type it uses for genuine failures (see
-        // isExpectedKeyringMissingEntry) — and counting that as a failed removal would make every
-        // disconnect of a never-connected provider claim the tokens might still be there.
+        // holding anything. A deletePassword failure is reported through the very same exception
+        // type java-keyring uses for a missing entry (see isExpectedKeyringMissingEntry), with no
+        // reliable cross-backend way to tell "already gone" apart from "the delete itself failed"
+        // (permission error, locked keychain, …). So any such failure is conservatively treated as
+        // data that may remain — even for the common case of disconnecting a never-connected
+        // provider — rather than risk a false CLEARED while a secret is still readable in the OS
+        // store. isExpectedKeyringMissingEntry is still used to suppress the warning log for that
+        // common case.
         val keyringCleared = keyring?.let {
             runCatching { it.deletePassword(domain, account) }.fold(
                 onSuccess = { true },
                 onFailure = { e ->
-                    if (isExpectedKeyringMissingEntry(e)) {
-                        true
-                    } else {
+                    if (!isExpectedKeyringMissingEntry(e)) {
                         Log.warn(TOKEN_STORAGE_LOG_TAG, "Keyring clear failed", e)
-                        false
                     }
+                    false
                 },
             )
         } ?: true
@@ -135,12 +137,14 @@ private fun createKeyring(): KeyringAccess? = runCatching { RealKeyringAccess(Ke
 /**
  * java-keyring reports a missing entry by throwing [PasswordAccessException]
  * (macOS: "No stored credentials match…", Windows: "Password not Found", Linux:
- * its own message) — the same type it uses for genuine failures. A missing entry is
- * benign for both operations that can hit it: [KeyringTokenStorage.load] falls back
- * to file storage and yields null when nothing is stored, which is the normal "not
- * connected" state, and [KeyringTokenStorage.clear] simply has nothing left to
- * remove. So this type is neither logged as a warning (a full stack trace on every
- * startup was pure noise) nor counted as a removal that failed; only unexpected
- * throwables are surfaced.
+ * its own message) — the same type it uses for genuine failures, with no reliable
+ * way to tell the two apart. A missing entry is benign for
+ * [KeyringTokenStorage.load], which falls back to file storage and yields null when
+ * nothing is stored — the normal "not connected" state — so this type is not logged
+ * as a warning there (a full stack trace on every startup was pure noise); only
+ * unexpected throwables are surfaced. [KeyringTokenStorage.clear] uses this same
+ * carve-out to suppress that log noise, but — because the type can't be trusted to
+ * mean "nothing to remove" — still counts a matching deletePassword failure as data
+ * that may remain, rather than as a successful removal.
  */
 internal fun isExpectedKeyringMissingEntry(t: Throwable): Boolean = t is PasswordAccessException

@@ -121,17 +121,18 @@ class KeyringTokenStorageTest {
     }
 
     /**
-     * Mirrors the "not found" carve-out already covered for [load] by
-     * [notFoundIsTreatedAsExpectedAndNotWarned]: a keyring with nothing stored must not make
-     * [KeyringTokenStorage.clear] claim the tokens might still be there.
+     * java-keyring reports a missing entry with the very same [PasswordAccessException] type it
+     * uses for a genuine delete failure (see [isExpectedKeyringMissingEntry]'s KDoc), so
+     * [KeyringTokenStorage.clear] cannot trust it to mean "nothing to remove" and must report
+     * [TokenClearOutcome.DATA_MAY_REMAIN] rather than falsely claim the tokens are gone.
      */
     @Test
-    fun clearReportsClearedWhenKeyringHasNoEntryAndFallbackIsCleared() {
+    fun clearReportsDataMayRemainWhenKeyringHasNoEntryAndFallbackIsCleared() {
         val fallback = RecordingTokenStorage()
         val keyring = FakeKeyring(deletePasswordThrows = PasswordAccessException("Password not Found"))
         val storage = KeyringTokenStorage(fallback, CloudStorageType.DROPBOX.id, Json, keyring)
 
-        assertEquals(TokenClearOutcome.CLEARED, storage.clear())
+        assertEquals(TokenClearOutcome.DATA_MAY_REMAIN, storage.clear())
     }
 
     /**
