@@ -175,7 +175,7 @@ class FileTokenStorageTest {
         storage.save(OAuthTokens(accessToken = "access-123"))
         assertEquals("access-123", storage.load()?.accessToken)
 
-        storage.clear()
+        assertEquals(TokenClearOutcome.CLEARED, storage.clear(), "a delete that landed must report a cleared store")
 
         assertNull(storage.load())
     }
@@ -204,13 +204,45 @@ class FileTokenStorageTest {
         storage.save(OAuthTokens(accessToken = "access-123"))
 
         val records = mutableListOf<LogRecord>()
+        var outcome: TokenClearOutcome? = null
         withReadOnlyTokenTarget {
-            records += withCapturedLogRecords { storage.clear() } // must not throw
+            records += withCapturedLogRecords { outcome = storage.clear() } // must not throw
         }
 
+        assertEquals(
+            TokenClearOutcome.DATA_MAY_REMAIN,
+            outcome,
+            "a token file that survived the delete must not be reported as cleared",
+        )
         assertTrue(
             records.any { it.message.contains("delete returned false") },
             "expected a warning about the failed delete, got: ${records.map { it.message }}",
         )
+    }
+
+    /**
+     * The regression [TokenClearOutcome] exists for: `load()` cannot stand in for "the file is
+     * gone". A token file whose JSON no longer decodes is reported as absent by [FileTokenStorage.load]
+     * while the refresh token inside it stays perfectly readable on disk, so a failed delete of such
+     * a file must still report [TokenClearOutcome.DATA_MAY_REMAIN]. `KeystoreTokenStorage.save()`
+     * used to infer its plaintext cleanup from `load()` and therefore claimed
+     * [TokenSaveOutcome.SECURE] in exactly this state, leaving the copy unreported and unwarned.
+     */
+    @Test
+    fun clearReportsDataMayRemainForASurvivingMalformedFile() {
+        // Truncated mid-value: no longer decodes, yet both tokens are plainly readable in the bytes.
+        FileIO.writeText(
+            FileIO.join(dir, ".dropbox_tokens.json"),
+            "{\"accessToken\":\"access-123\",\"refreshToken\":\"refresh-456",
+        )
+
+        withReadOnlyTokenTarget {
+            assertNull(storage.load(), "a malformed token file must decode to null")
+            assertEquals(
+                TokenClearOutcome.DATA_MAY_REMAIN,
+                storage.clear(),
+                "a malformed file that survived the delete must not be reported as cleared",
+            )
+        }
     }
 }

@@ -55,8 +55,9 @@ class KeyringTokenStorageTest {
 
         override fun load(): OAuthTokens? = stored
 
-        override fun clear() {
+        override fun clear(): TokenClearOutcome {
             stored = null
+            return TokenClearOutcome.CLEARED
         }
     }
 
@@ -64,17 +65,17 @@ class KeyringTokenStorageTest {
     fun notFoundIsTreatedAsExpectedAndNotWarned() {
         // macOS wording
         assertTrue(
-            isExpectedKeyringLoadFailure(
+            isExpectedKeyringMissingEntry(
                 PasswordAccessException("No stored credentials match works.merc.keryx account: dropbox"),
             ),
         )
         // Windows wording — same type, still expected (message matching would miss this)
-        assertTrue(isExpectedKeyringLoadFailure(PasswordAccessException("Password not Found")))
+        assertTrue(isExpectedKeyringMissingEntry(PasswordAccessException("Password not Found")))
     }
 
     @Test
     fun unexpectedThrowableIsNotExpected() {
-        assertFalse(isExpectedKeyringLoadFailure(RuntimeException("driver blew up")))
-        assertFalse(isExpectedKeyringLoadFailure(IllegalStateException()))
+        assertFalse(isExpectedKeyringMissingEntry(RuntimeException("driver blew up")))
+        assertFalse(isExpectedKeyringMissingEntry(IllegalStateException()))
     }
 }

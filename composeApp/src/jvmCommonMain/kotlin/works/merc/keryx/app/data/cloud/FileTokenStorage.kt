@@ -93,13 +93,23 @@ class FileTokenStorage(
                     .getOrNull()
             }
 
-    override fun clear() {
-        runCatching {
+    /**
+     * Reports the postcondition that actually matters — whether the file is still on disk — rather
+     * than `File.delete()`'s own return value. A surviving file holds readable token text whether or
+     * not its JSON still decodes, which is exactly why a caller cannot substitute [load] returning
+     * null for this answer.
+     */
+    override fun clear(): TokenClearOutcome {
+        val gone = runCatching {
             // File.delete() returns false rather than throwing when it fails, which runCatching
             // alone would not observe — a lingering token file would then be reported as cleared.
             if (file.exists() && !file.delete()) {
                 Log.warn(TOKEN_STORAGE_LOG_TAG, "Token file delete returned false")
             }
+            !file.exists()
         }.onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Token file delete failed", e) }
+            // A throw left the file's fate unknown, so assume the worse of the two.
+            .getOrDefault(false)
+        return if (gone) TokenClearOutcome.CLEARED else TokenClearOutcome.DATA_MAY_REMAIN
     }
 }

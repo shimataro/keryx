@@ -31,6 +31,7 @@ import org.koin.dsl.koinConfiguration
 import org.koin.dsl.module
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.cloud.OAuthTokens
+import works.merc.keryx.app.data.cloud.TokenClearOutcome
 import works.merc.keryx.app.data.cloud.TokenSaveOutcome
 import works.merc.keryx.app.data.cloud.TokenStorage
 import works.merc.keryx.app.domain.ActivityCenter
@@ -397,7 +398,10 @@ private class FeedListPaneTestTokenStorage : TokenStorage {
         return TokenSaveOutcome.SECURE
     }
     override fun load(): OAuthTokens? = stored
-    override fun clear() { stored = null }
+    override fun clear(): TokenClearOutcome {
+        stored = null
+        return TokenClearOutcome.CLEARED
+    }
 }
 
 private const val ROOT_TEST_TAG = "feed-list-pane-test-root"

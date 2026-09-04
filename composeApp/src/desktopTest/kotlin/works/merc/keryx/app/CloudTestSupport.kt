@@ -13,6 +13,7 @@ import works.merc.keryx.app.data.cloud.DropboxStorage
 import works.merc.keryx.app.data.cloud.GoogleDriveAuthManager
 import works.merc.keryx.app.data.cloud.GoogleDriveStorage
 import works.merc.keryx.app.data.cloud.OAuthTokens
+import works.merc.keryx.app.data.cloud.TokenClearOutcome
 import works.merc.keryx.app.data.cloud.TokenSaveOutcome
 import works.merc.keryx.app.data.cloud.TokenStorage
 import works.merc.keryx.app.domain.CloudConnectFlow
@@ -40,8 +41,9 @@ class FakeTokenStorage(
 
     override fun load(): OAuthTokens? = stored
 
-    override fun clear() {
+    override fun clear(): TokenClearOutcome {
         stored = null
+        return TokenClearOutcome.CLEARED
     }
 }
 

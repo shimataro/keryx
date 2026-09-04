@@ -465,10 +465,15 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
   ハードウェア鍵を引き継げない端末/OS 移行など）はクラッシュとしてではなく「トークン未保存」と全く
   同様に扱い、復号不能なファイルは残さず削除する。Keystore 自体が使えない端末は、デスクトップが
   最終手段として使うのと同じ平文の `FileTokenStorage` にフォールバックする。暗号化保存が成功した場合は
-  このフォールバックファイルを `clear()` し、さらに実際に消えたかどうかを確認する——
-  `FileTokenStorage.clear()` は `File.delete()` が false を返しても記録するだけで失敗を報告できないため。
-  消し切れずに残った平文のコピーは `SECURE` ではなく `PLAINTEXT_FILE` として報告し、気付かれないまま
-  ディスク上に読める状態で残るのではなく警告の対象にする。`.enc` ファイルと平文
+  このフォールバックファイルを `clear()` し、`SECURE` / `PLAINTEXT_FILE` の判断はその `clear()` 自身の
+  報告から決める——`TokenStorage.clear()` は `TokenClearOutcome.CLEARED` / `DATA_MAY_REMAIN` を返し、
+  `FileTokenStorage` は削除試行後にファイルがまだディスク上にあるか（`File.delete()` が false を
+  返した場合は残る）で判定する。消し切れずに残った平文のコピーは `SECURE` ではなく `PLAINTEXT_FILE`
+  として報告し、気付かれないままディスク上に読める状態で残るのではなく警告の対象にする。
+  **判定は必ずファイルの存在で行い、後続の `fallback.load()` では行わない**——
+  `FileTokenStorage.load()` は JSON がデコードできなくなったファイルを「未保存」として報告する一方、
+  その中の refresh token はそのまま読める状態で残るため、`load()` から消去を推測すると、
+  まさに最も警告が必要なケースで `SECURE` を返してしまっていた。`.enc` ファイルと平文
   フォールバックの `.json` ファイルはどちらも Android の自動バックアップ/デバイス間転送から除外している
   （`AndroidManifest.xml` の `dataExtractionRules`/`fullBackupContent`）——長寿命の OAuth リフレッシュ
   トークンをバックアップに乗せるべきではなく、また Keystore 暗号化されたファイルはそもそも別端末に

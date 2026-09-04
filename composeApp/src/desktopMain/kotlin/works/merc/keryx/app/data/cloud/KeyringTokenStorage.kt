@@ -48,7 +48,7 @@ class KeyringTokenStorage internal constructor(
         val raw = keyring?.let {
             runCatching { it.getPassword(domain, account) }
                 .onFailure { e ->
-                    if (!isExpectedKeyringLoadFailure(e)) {
+                    if (!isExpectedKeyringMissingEntry(e)) {
                         Log.warn(TOKEN_STORAGE_LOG_TAG, "Keyring load failed; falling back to file storage", e)
                     }
                 }
@@ -62,12 +62,27 @@ class KeyringTokenStorage internal constructor(
         return decoded ?: fallback.load()
     }
 
-    override fun clear() {
-        keyring?.let {
-            runCatching { it.deletePassword(domain, account) }
-                .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Keyring clear failed", e) }
-        }
-        fallback.clear()
+    override fun clear(): TokenClearOutcome {
+        // No backend at all means nothing was ever stored there, so only the fallback can still be
+        // holding anything. A "not found" throw says the same thing — java-keyring reports a missing
+        // entry with the very exception type it uses for genuine failures (see
+        // isExpectedKeyringMissingEntry) — and counting that as a failed removal would make every
+        // disconnect of a never-connected provider claim the tokens might still be there.
+        val keyringCleared = keyring?.let {
+            runCatching { it.deletePassword(domain, account) }.fold(
+                onSuccess = { true },
+                onFailure = { e ->
+                    if (isExpectedKeyringMissingEntry(e)) {
+                        true
+                    } else {
+                        Log.warn(TOKEN_STORAGE_LOG_TAG, "Keyring clear failed", e)
+                        false
+                    }
+                },
+            )
+        } ?: true
+        val fallbackCleared = fallback.clear() == TokenClearOutcome.CLEARED
+        return if (keyringCleared && fallbackCleared) TokenClearOutcome.CLEARED else TokenClearOutcome.DATA_MAY_REMAIN
     }
 }
 
@@ -79,10 +94,12 @@ private fun createKeyring(): Keyring? = runCatching { Keyring.create() }
 /**
  * java-keyring reports a missing entry by throwing [PasswordAccessException]
  * (macOS: "No stored credentials match…", Windows: "Password not Found", Linux:
- * its own message) — the same type it uses for genuine read failures. A failed
- * [KeyringTokenStorage.load] is benign either way: it falls back to file storage
- * and yields null when nothing is stored, which is the normal "not connected"
- * state. So we do not log a warning for this type (a full stack trace on every
- * startup was pure noise); only unexpected throwables are surfaced.
+ * its own message) — the same type it uses for genuine failures. A missing entry is
+ * benign for both operations that can hit it: [KeyringTokenStorage.load] falls back
+ * to file storage and yields null when nothing is stored, which is the normal "not
+ * connected" state, and [KeyringTokenStorage.clear] simply has nothing left to
+ * remove. So this type is neither logged as a warning (a full stack trace on every
+ * startup was pure noise) nor counted as a removal that failed; only unexpected
+ * throwables are surfaced.
  */
-internal fun isExpectedKeyringLoadFailure(t: Throwable): Boolean = t is PasswordAccessException
+internal fun isExpectedKeyringMissingEntry(t: Throwable): Boolean = t is PasswordAccessException

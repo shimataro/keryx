@@ -175,8 +175,64 @@ class KeystoreTokenStorageDeviceTest {
 
         override fun load(): OAuthTokens? = tokens
 
-        override fun clear() {
+        override fun clear(): TokenClearOutcome {
             clearCalls++ // deliberately keeps `tokens`: models a delete that failed
+            return TokenClearOutcome.DATA_MAY_REMAIN
+        }
+    }
+
+    /**
+     * The regression [TokenClearOutcome] was introduced for. [KeystoreTokenStorage.save] used to
+     * confirm its plaintext cleanup with `fallback.load() == null`, but [FileTokenStorage.load]
+     * reports a file whose JSON no longer decodes as "nothing stored" — so a corrupt-but-readable
+     * copy that a failed `File.delete()` left behind looked like a successful cleanup and was
+     * reported as [TokenSaveOutcome.SECURE], leaving the refresh token inside it readable on disk
+     * with no warning raised at all.
+     *
+     * The real [FileTokenStorage] end of this — a malformed surviving file still reporting
+     * [TokenClearOutcome.DATA_MAY_REMAIN] — is covered by
+     * `FileTokenStorageTest.clearReportsDataMayRemainForASurvivingMalformedFile`, which can force a
+     * delete failure portably (it strips write permission from the containing directory). This test
+     * pins the other half: the outcome [KeystoreTokenStorage] derives from that report.
+     */
+    @Test
+    fun saveReportsThePlaintextFileWhenTheSurvivingFallbackCopyIsMalformed() {
+        val account = "devicetest-${UUID.randomUUID()}"
+        val encryptedDir = tempDir("encrypted")
+        val fallback = MalformedStubbornFallback()
+        keyAliasesToCleanup += "keryx_token_$account"
+        val storage = KeystoreTokenStorage(fallback = fallback, account = account, dirOverride = encryptedDir.absolutePath)
+
+        val outcome = storage.save(OAuthTokens(accessToken = "fresh-access", refreshToken = "fresh-refresh"))
+
+        assertTrue(fallback.clearCalls > 0, "save() must still try to clear the plaintext fallback")
+        assertEquals(
+            TokenSaveOutcome.PLAINTEXT_FILE,
+            outcome,
+            "a surviving plaintext copy must be reported even when its JSON no longer decodes",
+        )
+        assertTrue(
+            File(encryptedDir, ".${account}_tokens.enc").length() > 0,
+            "the fresh tokens must still have reached the encrypted file",
+        )
+    }
+
+    /**
+     * A plaintext fallback holding a file whose JSON no longer decodes — [load] therefore reports it
+     * as absent, exactly as [FileTokenStorage] does — and whose `clear()` could not remove it.
+     */
+    private class MalformedStubbornFallback : TokenStorage {
+        var clearCalls = 0
+            private set
+
+        override fun save(tokens: OAuthTokens): TokenSaveOutcome = TokenSaveOutcome.PLAINTEXT_FILE
+
+        /** Undecodable content reads back as "nothing stored" — the blind spot this guards. */
+        override fun load(): OAuthTokens? = null
+
+        override fun clear(): TokenClearOutcome {
+            clearCalls++ // models a delete that failed on a file load() cannot see
+            return TokenClearOutcome.DATA_MAY_REMAIN
         }
     }
 

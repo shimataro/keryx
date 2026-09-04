@@ -112,13 +112,25 @@ class SecurityCliTokenStorage internal constructor(
     }
 
     @Synchronized
-    override fun clear() {
+    override fun clear(): TokenClearOutcome {
         val result = runSecurity("delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account, loginKeychain)
-        // Exit 44 (not found) is a no-op; a null result means `security` could not run.
-        if (result == null) Log.warn(TOKEN_STORAGE_LOG_TAG, "security delete-generic-password could not run")
-        fallback.clear()
+        val keychainCleared = when {
+            // A null result means `security` could not run, so the entry's fate is unknown.
+            result == null -> {
+                Log.warn(TOKEN_STORAGE_LOG_TAG, "security delete-generic-password could not run")
+                false
+            }
+            // Exit 44 (not found) is a no-op: there was nothing there to remove.
+            result.exitCode == 0 || result.exitCode == ITEM_NOT_FOUND -> true
+            else -> {
+                Log.warn(TOKEN_STORAGE_LOG_TAG, "security delete-generic-password failed (${describe(result)})")
+                false
+            }
+        }
+        val fallbackCleared = fallback.clear() == TokenClearOutcome.CLEARED
         cached = null
         loaded = true
+        return if (keychainCleared && fallbackCleared) TokenClearOutcome.CLEARED else TokenClearOutcome.DATA_MAY_REMAIN
     }
 
     /**

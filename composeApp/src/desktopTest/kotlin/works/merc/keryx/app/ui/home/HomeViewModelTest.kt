@@ -32,6 +32,7 @@ import works.merc.keryx.app.core.encode
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.singleProviderCloudSession
+import works.merc.keryx.app.data.cloud.TokenClearOutcome
 import works.merc.keryx.app.data.cloud.TokenSaveOutcome
 import works.merc.keryx.app.data.cloud.TokenStorage
 import works.merc.keryx.app.data.local.FtsManager
@@ -95,8 +96,9 @@ private class HomeViewModelTestTokenStorage : TokenStorage {
         return stored
     }
 
-    override fun clear() {
+    override fun clear(): TokenClearOutcome {
         stored = null
+        return TokenClearOutcome.CLEARED
     }
 }
 
