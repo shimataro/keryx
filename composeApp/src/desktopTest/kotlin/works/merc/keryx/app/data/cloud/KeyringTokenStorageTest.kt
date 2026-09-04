@@ -49,9 +49,11 @@ class KeyringTokenStorageTest {
     fun saveClearsAStalePlaintextFallbackCopyOnceTheKeyringWorks() {
         val fallback = RecordingTokenStorage()
         fallback.save(OAuthTokens(accessToken = "STALE_AT", refreshToken = "STALE_RT"))
-        val storage = KeyringTokenStorage(fallback, CloudStorageType.DROPBOX.id, Json, FakeKeyring())
+        val keyring = FakeKeyring()
+        val storage = KeyringTokenStorage(fallback, CloudStorageType.DROPBOX.id, Json, keyring)
 
         assertEquals(TokenSaveOutcome.SECURE, storage.save(OAuthTokens(accessToken = "AT", refreshToken = "RT")))
+        assertEquals("""{"accessToken":"AT","refreshToken":"RT"}""", keyring.storedPassword)
         assertEquals(null, fallback.stored)
     }
 
@@ -104,10 +106,14 @@ class KeyringTokenStorageTest {
     private class FakeKeyring(
         private val deletePasswordThrows: Throwable? = null,
     ) : KeyringAccess {
+        var storedPassword: String? = null
+
         override fun getPassword(service: String, account: String): String =
             throw PasswordAccessException("not used by these tests")
 
-        override fun setPassword(service: String, account: String, password: String) = Unit
+        override fun setPassword(service: String, account: String, password: String) {
+            storedPassword = password
+        }
 
         override fun deletePassword(service: String, account: String) {
             deletePasswordThrows?.let { throw it }
