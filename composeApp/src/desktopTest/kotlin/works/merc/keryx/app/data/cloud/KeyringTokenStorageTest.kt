@@ -136,6 +136,20 @@ class KeyringTokenStorageTest {
     }
 
     /**
+     * A null keyring is not proof that nothing was ever stored there — this instance is rebuilt on
+     * every app launch, so an earlier run's backend may have succeeded and left a secret behind
+     * even though this run's `createKeyring()` failed. A successful fallback clear alone must not
+     * be reported as [TokenClearOutcome.CLEARED].
+     */
+    @Test
+    fun clearReportsDataMayRemainWhenNoKeyringIsAvailableEvenIfFallbackClears() {
+        val fallback = RecordingTokenStorage()
+        val storage = KeyringTokenStorage(fallback, CloudStorageType.DROPBOX.id, Json, keyring = null)
+
+        assertEquals(TokenClearOutcome.DATA_MAY_REMAIN, storage.clear())
+    }
+
+    /**
      * A keyring deletion that genuinely fails must not be masked by a fallback that did clear —
      * the caller needs to know the tokens may still be readable from *some* store.
      */

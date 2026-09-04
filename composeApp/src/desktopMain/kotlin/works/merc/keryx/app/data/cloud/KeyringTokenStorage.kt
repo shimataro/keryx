@@ -104,15 +104,17 @@ class KeyringTokenStorage internal constructor(
     }
 
     override fun clear(): TokenClearOutcome {
-        // No backend at all means nothing was ever stored there, so only the fallback can still be
-        // holding anything. A deletePassword failure is reported through the very same exception
-        // type java-keyring uses for a missing entry (see isExpectedKeyringMissingEntry), with no
-        // reliable cross-backend way to tell "already gone" apart from "the delete itself failed"
+        // A deletePassword failure is reported through the very same exception type java-keyring
+        // uses for a missing entry (see isExpectedKeyringMissingEntry), with no reliable
+        // cross-backend way to tell "already gone" apart from "the delete itself failed"
         // (permission error, locked keychain, …). So any such failure is conservatively treated as
         // data that may remain — even for the common case of disconnecting a never-connected
         // provider — rather than risk a false CLEARED while a secret is still readable in the OS
         // store. isExpectedKeyringMissingEntry is still used to suppress the warning log for that
-        // common case.
+        // common case. A null keyring gets the same conservative treatment: this instance is
+        // rebuilt fresh on every app launch, so createKeyring() returning null here only means the
+        // backend is unavailable *this* run — an earlier run's backend may well have succeeded and
+        // left a secret sitting in the OS store, which a null keyring can neither confirm nor deny.
         val keyringCleared = keyring?.let {
             runCatching { it.deletePassword(domain, account) }.fold(
                 onSuccess = { true },
@@ -123,7 +125,7 @@ class KeyringTokenStorage internal constructor(
                     false
                 },
             )
-        } ?: true
+        } ?: false
         val fallbackCleared = fallback.clear() == TokenClearOutcome.CLEARED
         return if (keyringCleared && fallbackCleared) TokenClearOutcome.CLEARED else TokenClearOutcome.DATA_MAY_REMAIN
     }
