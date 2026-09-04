@@ -32,6 +32,7 @@ import works.merc.keryx.app.core.encode
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.singleProviderCloudSession
+import works.merc.keryx.app.data.cloud.TokenSaveOutcome
 import works.merc.keryx.app.data.cloud.TokenStorage
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
@@ -84,9 +85,9 @@ private class HomeViewModelTestTokenStorage : TokenStorage {
     var loadCount = 0
         private set
 
-    override fun save(tokens: OAuthTokens): Boolean {
+    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
         stored = tokens
-        return true
+        return TokenSaveOutcome.SECURE
     }
 
     override fun load(): OAuthTokens? {

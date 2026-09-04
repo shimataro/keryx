@@ -49,7 +49,7 @@ class KeystoreTokenStorage(
     private val keyAlias = "keryx_token_$account"
     private val file = File(dirOverride ?: AndroidAppContext.application.filesDir.absolutePath, ".${account}_tokens.enc")
 
-    override fun save(tokens: OAuthTokens): Boolean {
+    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
         val result = runCatching {
             val key = getOrCreateKey()
             val cipher = Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key) }
@@ -73,14 +73,15 @@ class KeystoreTokenStorage(
                 runCatching { atomicWrite(ByteArray(0)) }
                     .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Failed to invalidate stale encrypted token file", e) }
             }
-            fallback.save(tokens)
-            return false
+            // Report the fallback's own outcome: its write can fail too, and that leaves the
+            // tokens nowhere at all instead of in a plaintext file.
+            return fallback.save(tokens)
         } else {
             // A previous run may have written the plaintext fallback before Keystore became
             // available again; clear it so a stale plaintext copy doesn't linger once encrypted
             // storage is working.
             fallback.clear()
-            return true
+            return TokenSaveOutcome.SECURE
         }
     }
 

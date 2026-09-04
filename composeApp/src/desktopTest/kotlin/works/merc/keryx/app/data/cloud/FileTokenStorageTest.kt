@@ -98,17 +98,28 @@ class FileTokenStorageTest {
     }
 
     /**
-     * This class *is* the plaintext fallback, so it must never report a secure save — not even on
-     * the happy path. That false is what makes `CloudSession` raise its bell warning.
+     * This class *is* the plaintext fallback, so it never reports a secure save — not even on the
+     * happy path. It does have to tell a landed write apart from one that failed outright, though:
+     * `CloudSession` raises a different bell warning for each, and only the second one loses the
+     * tokens when the app exits.
      */
     @Test
-    fun saveAlwaysReportsAnInsecureStore() {
-        assertFalse(storage.save(OAuthTokens(accessToken = "access-123")), "a successful plaintext write is still not secure")
+    fun saveReportsThePlaintextFileOnSuccessAndNotPersistedOnFailure() {
+        assertEquals(
+            TokenSaveOutcome.PLAINTEXT_FILE,
+            storage.save(OAuthTokens(accessToken = "access-123")),
+            "a successful plaintext write is still not secure",
+        )
 
+        // A regular file where the data directory is expected makes both mkdirs() and the write fail.
         val blockingFile = FileIO.join(AppDirs.tempDir(), "token-block-${Random.nextInt()}")
         FileIO.writeText(blockingFile, "not a directory")
         try {
-            assertFalse(FileTokenStorage(dirOverride = blockingFile).save(OAuthTokens(accessToken = "access-123")))
+            assertEquals(
+                TokenSaveOutcome.NOT_PERSISTED,
+                FileTokenStorage(dirOverride = blockingFile).save(OAuthTokens(accessToken = "access-123")),
+                "a failed write must not claim the tokens are readable in the fallback file",
+            )
         } finally {
             FileIO.delete(blockingFile)
         }

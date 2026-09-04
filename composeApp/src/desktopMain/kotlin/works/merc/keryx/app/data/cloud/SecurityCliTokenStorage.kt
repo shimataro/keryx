@@ -85,13 +85,16 @@ class SecurityCliTokenStorage internal constructor(
     private var loaded: Boolean = false
 
     @Synchronized
-    override fun save(tokens: OAuthTokens): Boolean {
+    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
         val payload = json.encodeToString(tokens)
         val storedInKeychain = writeToKeychainVerified(payload)
-        if (!storedInKeychain) fallback.save(tokens)
+        // Report the fallback's own outcome: its write can fail too, and that leaves the tokens
+        // nowhere at all instead of in a plaintext file. The cache is updated either way — this
+        // session must use the tokens it was just handed even when nothing could be persisted.
+        val outcome = if (storedInKeychain) TokenSaveOutcome.SECURE else fallback.save(tokens)
         cached = tokens
         loaded = true
-        return storedInKeychain
+        return outcome
     }
 
     @Synchronized

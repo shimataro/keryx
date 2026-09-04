@@ -11,7 +11,6 @@ import javax.crypto.SecretKey
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -55,7 +54,11 @@ class KeystoreTokenStorageDeviceTest {
         keyAliasesToCleanup += keyAlias
 
         val oldTokens = OAuthTokens(accessToken = "old-access", refreshToken = "old-refresh")
-        assertTrue(storage.save(oldTokens), "the first save must report a Keystore-encrypted store")
+        assertEquals(
+            TokenSaveOutcome.SECURE,
+            storage.save(oldTokens),
+            "the first save must report a Keystore-encrypted store",
+        )
         val encryptedFile = File(encryptedDir, ".${account}_tokens.enc")
         assertTrue(encryptedFile.exists() && encryptedFile.length() > 0, "the first save must produce a real encrypted file")
 
@@ -70,9 +73,13 @@ class KeystoreTokenStorageDeviceTest {
         assertTrue(keyStore.getKey(keyAlias, null) !is SecretKey, "the replacement Keystore entry must not be a SecretKey")
 
         val newTokens = OAuthTokens(accessToken = "new-access", refreshToken = "new-refresh")
-        // false = "only the plaintext fallback holds this token" — what CloudSession turns into a
-        // notification-center warning.
-        assertFalse(storage.save(newTokens), "a failed encryption must report the plaintext fallback")
+        // PLAINTEXT_FILE = "only the plaintext fallback holds this token" — what CloudSession turns
+        // into a notification-center warning.
+        assertEquals(
+            TokenSaveOutcome.PLAINTEXT_FILE,
+            storage.save(newTokens),
+            "a failed encryption must report the plaintext fallback",
+        )
 
         // Checked before calling load() below, deliberately: load()'s own truncated-file handling
         // (bytes.size <= GCM_IV_LENGTH_BYTES) deletes a file this short as its next side effect —
@@ -106,7 +113,11 @@ class KeystoreTokenStorageDeviceTest {
         val fixture = newStorage()
         val tokens = OAuthTokens(accessToken = "access-1", refreshToken = "refresh-1", expiresAtMillis = 12345L)
 
-        assertTrue(fixture.storage.save(tokens), "a Keystore-encrypted save must report a secure store")
+        assertEquals(
+            TokenSaveOutcome.SECURE,
+            fixture.storage.save(tokens),
+            "a Keystore-encrypted save must report a secure store",
+        )
 
         // Assert the round trip actually went through Keystore encryption, not KeystoreTokenStorage's
         // own fallback path: save() falls back to FileTokenStorage silently on encryption failure, and

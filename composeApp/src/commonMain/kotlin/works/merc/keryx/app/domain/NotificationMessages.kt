@@ -35,4 +35,14 @@ interface NotificationMessages {
 
     /** The explanatory dialog body (cause + fix) behind [tokenStorageFallback]. */
     suspend fun tokenStorageFallbackDetail(): String
+
+    /**
+     * Localized bell-row text for a cloud sign-in that could not be persisted at all: neither the
+     * OS secure credential store nor the plaintext fallback file accepted it, so it survives only
+     * until the app exits and the account has to be connected again afterwards.
+     */
+    suspend fun tokenStorageNotPersisted(): String
+
+    /** The explanatory dialog body (cause + fix) behind [tokenStorageNotPersisted]. */
+    suspend fun tokenStorageNotPersistedDetail(): String
 }

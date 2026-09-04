@@ -32,15 +32,16 @@ class KeyringTokenStorage internal constructor(
 
     private val domain = KEYCHAIN_SERVICE
 
-    override fun save(tokens: OAuthTokens): Boolean {
+    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
         val payload = json.encodeToString(tokens)
         val stored = keyring?.let {
             runCatching { it.setPassword(domain, account, payload) }
                 .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Keyring save failed; falling back to file storage", e) }
                 .isSuccess
         } ?: false
-        if (!stored) fallback.save(tokens)
-        return stored
+        // Report the fallback's own outcome rather than a flat "not secure": its write can fail
+        // too, and that leaves the tokens nowhere at all instead of in a plaintext file.
+        return if (stored) TokenSaveOutcome.SECURE else fallback.save(tokens)
     }
 
     override fun load(): OAuthTokens? {

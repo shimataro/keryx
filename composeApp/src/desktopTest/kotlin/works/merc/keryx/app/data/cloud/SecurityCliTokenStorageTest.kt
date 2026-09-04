@@ -9,9 +9,7 @@ import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertNull
-import kotlin.test.assertTrue
 
 class SecurityCliTokenStorageTest {
     private val dir = FileIO.join(AppDirs.tempDir(), "security-token-test-${Random.nextInt()}")
@@ -61,7 +59,7 @@ class SecurityCliTokenStorageTest {
     @Test
     fun saveThenLoadRoundTripsViaKeychainNotFile() {
         val storage = SecurityCliTokenStorage(file(), FakeSecurity(), json)
-        assertTrue(storage.save(tokens), "a verified Keychain write must report a secure store")
+        assertEquals(TokenSaveOutcome.SECURE, storage.save(tokens), "a verified Keychain write must report a secure store")
         assertEquals(tokens, storage.load())
         assertNull(file().load()) // stored in keychain, not the file fallback
     }
@@ -92,18 +90,43 @@ class SecurityCliTokenStorageTest {
 
     @Test
     fun saveFallsBackToFileWhenKeychainAddFails() {
-        val storedSecurely = SecurityCliTokenStorage(file(), FakeSecurity(addExit = 1), json).save(tokens)
+        val outcome = SecurityCliTokenStorage(file(), FakeSecurity(addExit = 1), json).save(tokens)
         // keychain empty (add failed) -> a fresh backend reads from the file fallback
-        assertFalse(storedSecurely, "a failed Keychain add must report the plaintext fallback")
+        assertEquals(TokenSaveOutcome.PLAINTEXT_FILE, outcome, "a failed Keychain add must report the plaintext fallback")
         assertEquals(tokens, SecurityCliTokenStorage(file(), FakeSecurity(), json).load())
+    }
+
+    /**
+     * Both stores unavailable: the Keychain add fails *and* the file fallback cannot be written
+     * either, so nothing is persisted. `CloudSession` warns about that differently from a plain
+     * plaintext fallback, so the fallback's own outcome has to reach it. The in-memory cache is
+     * still updated regardless — this session must keep using the tokens it was just handed.
+     */
+    @Test
+    fun saveReportsNotPersistedWhenTheFileFallbackAlsoFails() {
+        // A regular file where the data directory is expected makes the fallback's write fail.
+        val blockingFile = FileIO.join(AppDirs.tempDir(), "security-token-block-${Random.nextInt()}")
+        FileIO.writeText(blockingFile, "not a directory")
+        try {
+            val storage = SecurityCliTokenStorage(
+                FileTokenStorage(dirOverride = blockingFile),
+                FakeSecurity(addExit = 1),
+                json,
+            )
+
+            assertEquals(TokenSaveOutcome.NOT_PERSISTED, storage.save(tokens))
+            assertEquals(tokens, storage.load(), "the tokens must stay usable for this session")
+        } finally {
+            FileIO.delete(blockingFile)
+        }
     }
 
     @Test
     fun saveFallsBackToFileWhenKeychainWriteNotVerified() {
         // `add` reports success but nothing persists (detached-session silent failure);
         // the read-back verification must catch it and route the token to the file.
-        val storedSecurely = SecurityCliTokenStorage(file(), FakeSecurity(persistOnAdd = false), json).save(tokens)
-        assertFalse(storedSecurely, "an unverifiable Keychain write must report the plaintext fallback")
+        val outcome = SecurityCliTokenStorage(file(), FakeSecurity(persistOnAdd = false), json).save(tokens)
+        assertEquals(TokenSaveOutcome.PLAINTEXT_FILE, outcome, "an unverifiable Keychain write must report the plaintext fallback")
         assertEquals(tokens, SecurityCliTokenStorage(file(), FakeSecurity(), json).load())
     }
 

@@ -11,7 +11,7 @@ import kotlin.test.assertTrue
 class KeyringTokenStorageTest {
     /**
      * With no OS secret store available, [KeyringTokenStorage.save] must route the token to the
-     * fallback *and* report that it did — that false is what makes `CloudSession` raise its bell
+     * fallback *and* report that it did — that outcome is what makes `CloudSession` raise its bell
      * warning. The keyring is injected as null rather than left to `Keyring.create()`: on a
      * developer machine that would open (and write to) the real login keyring.
      */
@@ -21,17 +21,36 @@ class KeyringTokenStorageTest {
         val storage = KeyringTokenStorage(fallback, CloudStorageType.DROPBOX.id, Json, keyring = null)
         val tokens = OAuthTokens(accessToken = "AT", refreshToken = "RT")
 
-        assertFalse(storage.save(tokens))
+        assertEquals(TokenSaveOutcome.PLAINTEXT_FILE, storage.save(tokens))
         assertEquals(tokens, fallback.stored)
     }
 
-    /** Minimal in-memory [TokenStorage] standing in for the plaintext fallback. */
-    private class RecordingTokenStorage : TokenStorage {
+    /**
+     * The fallback's own write can fail too (an unwritable data directory, a pre-existing token
+     * file owned by another user). `CloudSession` warns about that differently from "stored in
+     * plaintext", so the fallback's outcome has to be propagated rather than flattened into a
+     * plain "not secure".
+     */
+    @Test
+    fun saveReportsNotPersistedWhenTheFallbackWriteAlsoFails() {
+        val fallback = RecordingTokenStorage(TokenSaveOutcome.NOT_PERSISTED)
+        val storage = KeyringTokenStorage(fallback, CloudStorageType.DROPBOX.id, Json, keyring = null)
+
+        assertEquals(TokenSaveOutcome.NOT_PERSISTED, storage.save(OAuthTokens(accessToken = "AT")))
+    }
+
+    /**
+     * Minimal in-memory [TokenStorage] standing in for the plaintext fallback. [outcome] is what
+     * its own [save] reports, so a test can model the fallback write itself failing.
+     */
+    private class RecordingTokenStorage(
+        private val outcome: TokenSaveOutcome = TokenSaveOutcome.PLAINTEXT_FILE,
+    ) : TokenStorage {
         var stored: OAuthTokens? = null
 
-        override fun save(tokens: OAuthTokens): Boolean {
+        override fun save(tokens: OAuthTokens): TokenSaveOutcome {
             stored = tokens
-            return false
+            return outcome
         }
 
         override fun load(): OAuthTokens? = stored

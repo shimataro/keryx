@@ -7,6 +7,8 @@ import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.feed_new_articles
 import works.merc.keryx.app.resources.notification_token_storage_fallback
 import works.merc.keryx.app.resources.notification_token_storage_fallback_detail
+import works.merc.keryx.app.resources.notification_token_storage_not_persisted
+import works.merc.keryx.app.resources.notification_token_storage_not_persisted_detail
 import works.merc.keryx.app.resources.settings_import_failed
 import works.merc.keryx.app.resources.settings_import_success
 import kotlin.test.Test
@@ -48,6 +50,22 @@ class ComposeNotificationMessagesTest {
         assertEquals(
             getString(Res.string.notification_token_storage_fallback_detail),
             messages.tokenStorageFallbackDetail(),
+        )
+    }
+
+    @Test
+    fun tokenStorageNotPersistedResolvesTheBellRowString() = runTest {
+        assertEquals(
+            getString(Res.string.notification_token_storage_not_persisted),
+            messages.tokenStorageNotPersisted(),
+        )
+    }
+
+    @Test
+    fun tokenStorageNotPersistedDetailResolvesTheExplanatoryDialogString() = runTest {
+        assertEquals(
+            getString(Res.string.notification_token_storage_not_persisted_detail),
+            messages.tokenStorageNotPersistedDetail(),
         )
     }
 }

@@ -75,6 +75,8 @@ private class RecordingNotificationMessages : NotificationMessages {
     override suspend fun updateReadyToInstall(version: String) = "updateReadyToInstall:$version"
     override suspend fun tokenStorageFallback() = "tokenStorageFallback"
     override suspend fun tokenStorageFallbackDetail() = "tokenStorageFallbackDetail"
+    override suspend fun tokenStorageNotPersisted() = "tokenStorageNotPersisted"
+    override suspend fun tokenStorageNotPersistedDetail() = "tokenStorageNotPersistedDetail"
 }
 
 /**

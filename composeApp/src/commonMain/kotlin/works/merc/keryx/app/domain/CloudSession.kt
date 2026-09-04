@@ -9,6 +9,7 @@ import works.merc.keryx.app.core.fold
 import works.merc.keryx.app.data.cloud.CloudAuthManager
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.cloud.OAuthTokens
+import works.merc.keryx.app.data.cloud.TokenSaveOutcome
 import works.merc.keryx.app.data.cloud.TokenStorage
 
 /**
@@ -24,9 +25,10 @@ import works.merc.keryx.app.data.cloud.TokenStorage
  * flow, and a factory that builds its [CloudStorage].
  *
  * Every token write goes through [saveTokensReportingFallback], which raises a
- * notification-center warning whenever a [TokenStorage] could not reach the OS secure store and
- * had to persist the token in the plaintext fallback file instead (see `SECURITY.md`). The
- * fallback itself is deliberate and not blocked; it just must not be silent.
+ * notification-center warning whenever a [TokenStorage] could not reach the OS secure store —
+ * with its own message for a token that landed in the plaintext fallback file and for one that
+ * could not be persisted at all (see `SECURITY.md`). The fallback itself is deliberate and not
+ * blocked; it just must not be silent.
  */
 class CloudSession(
     private val providers: Map<CloudStorageType, Provider>,
@@ -101,24 +103,34 @@ class CloudSession(
     }
 
     /**
-     * Persists [tokens] via [provider]'s storage and, when the storage could only reach the
-     * plaintext fallback file, records a warning in the notification center.
+     * Persists [tokens] via [provider]'s storage and records a warning in the notification center
+     * unless they reached the OS secure store. The two degraded outcomes get their own message:
+     * [TokenSaveOutcome.PLAINTEXT_FILE] means the tokens are readable in the plaintext fallback
+     * file, [TokenSaveOutcome.NOT_PERSISTED] that they were not written anywhere and the account
+     * has to be connected again after a restart.
      *
      * Used by both the initial connect ([saveTokens]) and the background refresh
      * ([validAccessToken]): a refreshed token is exactly as sensitive as the original, and the
      * refresh path recurs — which is why the entry is added with
      * [NotificationCenter.addCoalescing], so a persistently unavailable secret store leaves one
-     * bell entry rather than one per refresh.
+     * bell entry rather than one per refresh. Coalescing keys on the message, so the two outcomes
+     * above collapse independently of each other.
      */
     private suspend fun saveTokensReportingFallback(provider: Provider, tokens: OAuthTokens) {
-        if (provider.tokenStorage.save(tokens)) return
+        val (message, detail) = when (provider.tokenStorage.save(tokens)) {
+            TokenSaveOutcome.SECURE -> return
+            TokenSaveOutcome.PLAINTEXT_FILE ->
+                notificationMessages.tokenStorageFallback() to notificationMessages.tokenStorageFallbackDetail()
+            TokenSaveOutcome.NOT_PERSISTED ->
+                notificationMessages.tokenStorageNotPersisted() to notificationMessages.tokenStorageNotPersistedDetail()
+        }
         notificationCenter.addCoalescing(
             AppNotification(
                 id = IdGenerator.newId(),
                 level = AppNotificationLevel.WARNING,
-                message = notificationMessages.tokenStorageFallback(),
+                message = message,
                 timestampMillis = clock.nowMillis(),
-                action = AppNotificationAction.ShowInfoDialog(notificationMessages.tokenStorageFallbackDetail()),
+                action = AppNotificationAction.ShowInfoDialog(detail),
             ),
         )
     }

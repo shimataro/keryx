@@ -60,6 +60,8 @@ private object SetupViewModelTestNotificationMessages : NotificationMessages {
     override suspend fun updateReadyToInstall(version: String): String = "updateReadyToInstall:$version"
     override suspend fun tokenStorageFallback(): String = "tokenStorageFallback"
     override suspend fun tokenStorageFallbackDetail(): String = "tokenStorageFallbackDetail"
+    override suspend fun tokenStorageNotPersisted(): String = "tokenStorageNotPersisted"
+    override suspend fun tokenStorageNotPersistedDetail(): String = "tokenStorageNotPersistedDetail"
 }
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)

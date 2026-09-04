@@ -442,12 +442,14 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
 - macOS: Apple 署名の `/usr/bin/security` CLI に委譲（`SecurityCliTokenStorage`）。java-keyring は共有 JVM
   から Keychain 書き込みに失敗するため、macOS のみ `security` 経由にしている。
 - いずれも失敗時はデータディレクトリの `.{CloudStorageType.id}_tokens.json`（0600。Dropbox は `.dropbox_tokens.json`）へ
-  フォールバック。DI が `isMacOs` で両者を切り替える。`TokenStorage.save()` はどちらに保存できたかを返し
-  （`true` = セキュアストア / Keystore 暗号化ファイル、`false` = 平文フォールバック）、実際にフォールバック
-  ファイルへ保存された場合は `CloudSession` が集約（coalescing）した `WARNING` 通知（原因と対処法を示す
-  `ShowInfoDialog` アクション付き）を発行する。初回接続時もバックグラウンドのトークンリフレッシュ時も同様。
-  フォールバック自体は引き続き許容する（`SECURITY.md` に記載のとおり、意図的な graceful degradation）が、
-  黙って行われてはならない、という位置づけ。
+  フォールバック。DI が `isMacOs` で両者を切り替える。`TokenStorage.save()` はトークンが実際にどこに残ったかを
+  返す（`TokenSaveOutcome.SECURE` = セキュアストア / Android の Keystore 暗号化ファイル、`PLAINTEXT_FILE` =
+  平文フォールバックファイルから読める、`NOT_PERSISTED` = どちらにも書けず、アプリ終了までしか残らないため
+  再起動後に再接続が必要）。劣化した 2 つの結果については、`CloudSession` がそれぞれ別のメッセージで、
+  集約（coalescing）した `WARNING` 通知（原因と対処法を示す `ShowInfoDialog` アクション付き）を発行する。
+  初回接続時もバックグラウンドのトークンリフレッシュ時も同様。フォールバック自体は引き続き許容する
+  （`SECURITY.md` に記載のとおり、意図的な graceful degradation）が、黙って行われてはならず、また何も
+  保存できなかった場合を「平文ファイルに保存した」と報告してはならない、という位置づけ。
 - macOS は書き込み後に **read-back 検証**（login keychain を明示指定して読み戻し）を行い、永続化を確認できない
   場合は file フォールバックへ回す。**書き込みの永続性は起動セッション依存**: パッケージ版（GUI ログイン
   セッション）では login keychain に永続化されるが、`gradlew run`（launchd 直下の Gradle daemon 配下の

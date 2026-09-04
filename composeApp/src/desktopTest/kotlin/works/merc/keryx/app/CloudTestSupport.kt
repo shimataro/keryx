@@ -13,6 +13,7 @@ import works.merc.keryx.app.data.cloud.DropboxStorage
 import works.merc.keryx.app.data.cloud.GoogleDriveAuthManager
 import works.merc.keryx.app.data.cloud.GoogleDriveStorage
 import works.merc.keryx.app.data.cloud.OAuthTokens
+import works.merc.keryx.app.data.cloud.TokenSaveOutcome
 import works.merc.keryx.app.data.cloud.TokenStorage
 import works.merc.keryx.app.domain.CloudConnectFlow
 import works.merc.keryx.app.domain.CloudSession
@@ -21,16 +22,20 @@ import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.NotificationMessages
 
 /**
- * In-memory [TokenStorage] fake for tests. [secure] is what [save] reports back — set it to false
- * to model a storage that could only reach the plaintext fallback file.
+ * In-memory [TokenStorage] fake for tests. [outcome] is what [save] reports back — set it to
+ * [TokenSaveOutcome.PLAINTEXT_FILE] to model a storage that could only reach the plaintext
+ * fallback file, or to [TokenSaveOutcome.NOT_PERSISTED] to model one that could not write at all.
  */
-class FakeTokenStorage(initial: OAuthTokens? = null, private val secure: Boolean = true) : TokenStorage {
+class FakeTokenStorage(
+    initial: OAuthTokens? = null,
+    private val outcome: TokenSaveOutcome = TokenSaveOutcome.SECURE,
+) : TokenStorage {
     var stored: OAuthTokens? = initial
         private set
 
-    override fun save(tokens: OAuthTokens): Boolean {
+    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
         stored = tokens
-        return secure
+        return outcome
     }
 
     override fun load(): OAuthTokens? = stored

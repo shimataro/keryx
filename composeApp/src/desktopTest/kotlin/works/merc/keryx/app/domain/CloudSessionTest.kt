@@ -15,6 +15,7 @@ import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
+import works.merc.keryx.app.data.cloud.TokenSaveOutcome
 import works.merc.keryx.app.singleProviderCloudSession
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -127,7 +128,7 @@ class CloudSessionTest {
     @Test
     fun saveTokensRaisesNoNotificationWhenStoredSecurely() = runBlocking {
         val center = NotificationCenter()
-        val s = session(FakeTokenStorage(null, secure = true), notificationCenter = center)
+        val s = session(FakeTokenStorage(null, outcome = TokenSaveOutcome.SECURE), notificationCenter = center)
 
         s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
 
@@ -137,7 +138,7 @@ class CloudSessionTest {
     @Test
     fun saveTokensWarnsWhenTheTokenOnlyReachedThePlaintextFallback() = runBlocking {
         val center = NotificationCenter()
-        val s = session(FakeTokenStorage(null, secure = false), notificationCenter = center)
+        val s = session(FakeTokenStorage(null, outcome = TokenSaveOutcome.PLAINTEXT_FILE), notificationCenter = center)
 
         s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
 
@@ -151,13 +152,34 @@ class CloudSessionTest {
     }
 
     /**
+     * "Saved in a plaintext file" and "not saved anywhere" need different messages: only the
+     * second one means the tokens vanish on exit and the account has to be connected again. A
+     * shared message would tell the user their sign-in is in a file that was never written.
+     */
+    @Test
+    fun saveTokensWarnsDistinctlyWhenTheTokenCouldNotBePersistedAtAll() = runBlocking {
+        val center = NotificationCenter()
+        val s = session(FakeTokenStorage(null, outcome = TokenSaveOutcome.NOT_PERSISTED), notificationCenter = center)
+
+        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
+
+        val notification = center.items.value.single()
+        assertEquals(AppNotificationLevel.WARNING, notification.level)
+        assertEquals("tokenStorageNotPersisted", notification.message)
+        assertEquals(
+            AppNotificationAction.ShowInfoDialog("tokenStorageNotPersistedDetail"),
+            notification.action,
+        )
+    }
+
+    /**
      * A connect followed by a refresh that also falls back must leave one bell entry, not two:
      * the refresh path recurs on every expiry, so the warning has to coalesce.
      */
     @Test
     fun repeatedFallbackSavesCoalesceIntoASingleNotification() = runBlocking {
         val center = NotificationCenter()
-        val storage = FakeTokenStorage(null, secure = false)
+        val storage = FakeTokenStorage(null, outcome = TokenSaveOutcome.PLAINTEXT_FILE)
         val refreshBody = """{"access_token":"FRESH","expires_in":14400}"""
         val s = session(
             storage,

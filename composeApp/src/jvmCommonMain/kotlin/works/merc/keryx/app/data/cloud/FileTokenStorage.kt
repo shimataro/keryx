@@ -24,16 +24,19 @@ class FileTokenStorage(
     private val file = File(dirOverride ?: AppDirs.appDataDir(), fileName)
 
     /**
-     * Always returns false: this class *is* the plaintext fallback, so a token persisted here was
-     * never in a secure store — regardless of whether the write itself succeeded.
+     * Never reports [TokenSaveOutcome.SECURE]: this class *is* the plaintext fallback, so a token
+     * persisted here was never in a secure store. It does distinguish a write that landed
+     * ([TokenSaveOutcome.PLAINTEXT_FILE]) from one that failed outright
+     * ([TokenSaveOutcome.NOT_PERSISTED]) — only the latter loses the tokens when the app exits, so
+     * the caller warns about the two differently.
      */
-    override fun save(tokens: OAuthTokens): Boolean {
+    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
         // Persisting must never throw: this is the last-resort store, and a failure here (unwritable
         // data dir, a pre-existing root-owned/read-only token file) would otherwise propagate up
         // through CloudSession.saveTokens() and abort the connect flow *after* the token is already
         // held in memory — leaving the user unable to link at all. Swallow and log instead; the
         // in-memory session still works, only cross-restart persistence is lost.
-        runCatching {
+        val result = runCatching {
             file.parentFile?.mkdirs()
             // Write to a sibling temp file, then atomically replace the target. writeText()
             // straight into the token file would truncate it first, so a crash or failed write
@@ -55,7 +58,7 @@ class FileTokenStorage(
                 throw e
             }
         }.onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Token file could not be written", e) }
-        return false
+        return if (result.isSuccess) TokenSaveOutcome.PLAINTEXT_FILE else TokenSaveOutcome.NOT_PERSISTED
     }
 
     /**
