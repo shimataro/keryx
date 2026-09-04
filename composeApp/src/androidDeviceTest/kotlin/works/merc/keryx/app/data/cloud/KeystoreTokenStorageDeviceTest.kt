@@ -131,6 +131,55 @@ class KeystoreTokenStorageDeviceTest {
         assertEquals(tokens, fixture.storage.load())
     }
 
+    /**
+     * A successful encrypted save may report [TokenSaveOutcome.SECURE] only once the plaintext
+     * copy is actually gone. `clear()` swallows a `File.delete()` that returned false, so a
+     * fallback that keeps handing out tokens has to downgrade the outcome — otherwise an old (and
+     * possibly still valid) refresh token stays readable on disk while `save()` claims a secure
+     * store, and the caller raises no warning about it.
+     */
+    @Test
+    fun saveReportsThePlaintextFileWhenTheStaleFallbackCopySurvivesCleanup() {
+        val account = "devicetest-${UUID.randomUUID()}"
+        val encryptedDir = tempDir("encrypted")
+        val fallback = StubbornFallback(OAuthTokens(accessToken = "stale-access", refreshToken = "stale-refresh"))
+        keyAliasesToCleanup += "keryx_token_$account"
+        val storage = KeystoreTokenStorage(fallback = fallback, account = account, dirOverride = encryptedDir.absolutePath)
+
+        val outcome = storage.save(OAuthTokens(accessToken = "fresh-access", refreshToken = "fresh-refresh"))
+
+        assertTrue(fallback.clearCalls > 0, "save() must still try to clear the plaintext fallback")
+        assertEquals(
+            TokenSaveOutcome.PLAINTEXT_FILE,
+            outcome,
+            "a plaintext copy that survived cleanup must not be reported as a secure store",
+        )
+        assertTrue(
+            File(encryptedDir, ".${account}_tokens.enc").length() > 0,
+            "the fresh tokens must still have reached the encrypted file",
+        )
+    }
+
+    /**
+     * A plaintext fallback whose `clear()` does nothing — the shape [FileTokenStorage] degrades to
+     * when `File.delete()` fails and it can only log the failure.
+     */
+    private class StubbornFallback(private var tokens: OAuthTokens?) : TokenStorage {
+        var clearCalls = 0
+            private set
+
+        override fun save(tokens: OAuthTokens): TokenSaveOutcome {
+            this.tokens = tokens
+            return TokenSaveOutcome.PLAINTEXT_FILE
+        }
+
+        override fun load(): OAuthTokens? = tokens
+
+        override fun clear() {
+            clearCalls++ // deliberately keeps `tokens`: models a delete that failed
+        }
+    }
+
     @Test
     fun loadReturnsNullWhenNothingWasEverSaved() {
         val fixture = newStorage()

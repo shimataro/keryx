@@ -27,9 +27,10 @@ interface NotificationMessages {
     suspend fun updateReadyToInstall(version: String): String
 
     /**
-     * Localized bell-row text for a cloud sign-in that could only be persisted in the plaintext
-     * fallback file because the OS secure credential store was unreachable. No provider name is
-     * threaded through: only one provider is ever connected at a time.
+     * Localized bell-row text for a cloud sign-in that is readable in the plaintext fallback file
+     * — either because the OS secure credential store was unreachable, or because a stale fallback
+     * copy could not be removed after a successful secure write. No provider name is threaded
+     * through: only one provider is ever connected at a time.
      */
     suspend fun tokenStorageFallback(): String
 

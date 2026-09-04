@@ -444,7 +444,8 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
 - いずれも失敗時はデータディレクトリの `.{CloudStorageType.id}_tokens.json`（0600。Dropbox は `.dropbox_tokens.json`）へ
   フォールバック。DI が `isMacOs` で両者を切り替える。`TokenStorage.save()` はトークンが実際にどこに残ったかを
   返す（`TokenSaveOutcome.SECURE` = セキュアストア / Android の Keystore 暗号化ファイル、`PLAINTEXT_FILE` =
-  平文フォールバックファイルから読める、`NOT_PERSISTED` = どちらにも書けず、アプリ終了までしか残らないため
+  平文フォールバックファイルから読める（セキュアストアに到達できなかった場合と、セキュアな書き込みは
+  成功したが古いフォールバックのコピーを削除できなかった場合の両方を含む）、`NOT_PERSISTED` = どちらにも書けず、アプリ終了までしか残らないため
   再起動後に再接続が必要）。劣化した 2 つの結果については、`CloudSession` がそれぞれ別のメッセージで、
   集約（coalescing）した `WARNING` 通知（原因と対処法を示す `ShowInfoDialog` アクション付き）を発行する。
   初回接続時もバックグラウンドのトークンリフレッシュ時も同様。フォールバック自体は引き続き許容する
@@ -463,7 +464,11 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
   通常のトランザクションごとの秘密情報とは異なる要件のため。復号失敗（Keystore のリセット、
   ハードウェア鍵を引き継げない端末/OS 移行など）はクラッシュとしてではなく「トークン未保存」と全く
   同様に扱い、復号不能なファイルは残さず削除する。Keystore 自体が使えない端末は、デスクトップが
-  最終手段として使うのと同じ平文の `FileTokenStorage` にフォールバックする。`.enc` ファイルと平文
+  最終手段として使うのと同じ平文の `FileTokenStorage` にフォールバックする。暗号化保存が成功した場合は
+  このフォールバックファイルを `clear()` し、さらに実際に消えたかどうかを確認する——
+  `FileTokenStorage.clear()` は `File.delete()` が false を返しても記録するだけで失敗を報告できないため。
+  消し切れずに残った平文のコピーは `SECURE` ではなく `PLAINTEXT_FILE` として報告し、気付かれないまま
+  ディスク上に読める状態で残るのではなく警告の対象にする。`.enc` ファイルと平文
   フォールバックの `.json` ファイルはどちらも Android の自動バックアップ/デバイス間転送から除外している
   （`AndroidManifest.xml` の `dataExtractionRules`/`fullBackupContent`）——長寿命の OAuth リフレッシュ
   トークンをバックアップに乗せるべきではなく、また Keystore 暗号化されたファイルはそもそも別端末に

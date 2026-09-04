@@ -34,7 +34,10 @@ enum class TokenSaveOutcome {
      */
     SECURE,
 
-    /** Readable in the 0600 plaintext fallback file, because the secure store was unreachable. */
+    /**
+     * Readable in the 0600 plaintext fallback file: either the secure store could not be reached,
+     * or a secure write succeeded but a stale fallback copy could not be removed afterwards.
+     */
     PLAINTEXT_FILE,
 
     /**

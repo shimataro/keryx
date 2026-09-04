@@ -81,7 +81,15 @@ class KeystoreTokenStorage(
             // available again; clear it so a stale plaintext copy doesn't linger once encrypted
             // storage is working.
             fallback.clear()
-            return TokenSaveOutcome.SECURE
+            // clear() cannot report a failure — FileTokenStorage logs a delete() that returned
+            // false and then returns normally — so confirm the copy is really gone rather than
+            // trusting it: a surviving fallback file still hands out a readable (stale, but
+            // possibly still valid) refresh token, which is exactly what the caller's plaintext
+            // warning exists for. Asserting on load() checks the postcondition that matters
+            // instead of clear()'s delete() result; its one blind spot is a fallback file whose
+            // JSON is corrupt, which load() reports as absent. save() only runs on a connect and
+            // on a token refresh, so the extra read costs nothing that matters.
+            return if (fallback.load() == null) TokenSaveOutcome.SECURE else TokenSaveOutcome.PLAINTEXT_FILE
         }
     }
 
