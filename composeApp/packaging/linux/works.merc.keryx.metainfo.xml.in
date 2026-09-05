@@ -16,20 +16,19 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
   <name>Keryx</name>
-  <summary>A local-first, cross-platform RSS reader</summary>
-  <summary xml:lang="ja">ローカルファースト・クロスプラットフォームな RSS リーダー</summary>
+  <summary>A cloud-sync, multi-platform RSS reader</summary>
+  <summary xml:lang="ja">クラウド同期・マルチプラットフォーム対応の RSS リーダー</summary>
   <!-- AppStream requires exactly one <description> element; per-language text is carried by
        xml:lang on each <p>, not by repeating <description> (a repeated, localized <description>
        tag fails pedantic appstreamcli validation). -->
   <description>
     <p>
-      A local-first, cross-platform RSS reader with multi-device sync via your own cloud storage
-      (Dropbox / Google Drive / OneDrive). No account required.
+      Keeps your subscriptions in sync across every device through your own cloud storage
+      (Dropbox / Google Drive / OneDrive).
     </p>
     <p xml:lang="ja">
-      ローカルファーストなクロスプラットフォーム RSS リーダーです。お使いのクラウドストレージ
-      （Dropbox / Google Drive / OneDrive）経由でマルチデバイス同期に対応しており、アカウント
-      登録は不要です。
+      お使いのクラウドストレージ（Dropbox / Google Drive / OneDrive）を通じて、複数端末間で
+      購読を同期できます。
     </p>
   </description>
   <launchable type="desktop-id">@DESKTOP_ID@</launchable>
