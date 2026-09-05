@@ -336,6 +336,7 @@ private fun SearchListPane(
                 navigateUpContentDescription = stringResource(Res.string.common_back),
                 clearContentDescription = stringResource(Res.string.home_search_clear),
                 onSearchAction = { keyboardController?.hide() },
+                modifier = Modifier.padding(top = 4.dp),
                 fieldModifier = Modifier
                     .focusRequester(searchFocusRequester)
                     .onFocusChanged { onTextInputFocusChange(it.isFocused) },
