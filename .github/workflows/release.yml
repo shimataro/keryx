@@ -227,6 +227,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
 
+      # Skipped entirely until SNAPCRAFT_STORE_CREDENTIALS is configured (see docs/build.md),
+      # so this job keeps succeeding for every release in the meantime instead of failing on a
+      # secret that doesn't exist yet — the same pattern the cloud-provider keys above already
+      # use (missing key -> feature absent, not a build failure). A pre-release tag publishes to
+      # the `edge` channel and a stable tag to `stable`, reusing the same is_prerelease output
+      # the deb/rpm/msi skip checks above already compute.
+      - name: Publish to Snap Store
+        if: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS != '' }}
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        run: |
+          channel=stable
+          if [ "${{ steps.version.outputs.is_prerelease }}" = "true" ]; then
+            channel=edge
+          fi
+          snapcraft upload --release="$channel" "Keryx-${{ steps.version.outputs.version }}-linux-x86_64.snap"
+
   package-windows:
     name: Package (Windows x86_64)
     runs-on: windows-latest
