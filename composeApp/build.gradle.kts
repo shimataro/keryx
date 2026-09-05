@@ -458,6 +458,12 @@ compose.desktop {
             packageVersion = appPackageVersion
             description = "Local-first, cross-platform RSS reader"
             vendor = appVendor
+            // NSHumanReadableCopyright (macOS Info.plist, shown in Finder's "Get Info") — without
+            // this, Compose's own Info.plist builder falls back to the generic
+            // "Copyright (C) <year>" with no attribution at all. Confirmed against Compose's
+            // AbstractJPackageTask source that no other target format's template (deb/rpm/msi)
+            // reads this value, so it's a no-op there, not just unused.
+            copyright = "Copyright (c) ${LocalDate.now().year} Mercury Works"
             // Linux-only: an unconditional licenseFile would also add a license-acceptance page
             // to the Windows MSI, changing its install flow for a problem that is Linux-specific
             // (the deb's /usr/share/doc/<pkg>/copyright and the rpm's %license section).
@@ -617,12 +623,14 @@ compose.desktop {
     }
 }
 
-// --about-url is the only way to fill the deb's `Homepage:` and the rpm's `URL:` fields — the
-// Compose nativeDistributions DSL has no matching property, so it goes to jpackage directly.
-// Scoped to Deb/Rpm only so it never reaches the Dmg/Msi/AppImage tasks, whose own metadata this
-// problem report has nothing to do with.
+// --about-url is the only way to fill the deb's `Homepage:`, the rpm's `URL:`, and the MSI's
+// "Support link" (ARPURLINFOABOUT, shown in Windows Settings > Apps) — the Compose
+// nativeDistributions DSL has no matching property for any of them, so it goes to jpackage
+// directly. Not passed to Dmg/AppImage: confirmed against Compose's own macOS Info.plist builder
+// (setInfoPlistValues) that no key there reads it, so it would be a silent no-op — jpackage
+// itself never errors on an option a given target format's template doesn't use.
 tasks.withType<org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask>().configureEach {
-    if (targetFormat == TargetFormat.Deb || targetFormat == TargetFormat.Rpm) {
+    if (targetFormat == TargetFormat.Deb || targetFormat == TargetFormat.Rpm || targetFormat == TargetFormat.Msi) {
         freeArgs.addAll("--about-url", appHomepageUrl)
     }
 }
