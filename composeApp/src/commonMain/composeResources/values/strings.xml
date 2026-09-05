@@ -109,7 +109,7 @@
     <string name="home_feed_error_count">%1$d 回連続でエラーが発生しています</string>
     <string name="home_feed_error_refresh_now">今すぐ更新</string>
     <string name="home_mark_all_read">すべて既読にする</string>
-    <string name="home_no_feeds">フィードが登録されていません\n「+」ボタンで追加してください</string>
+    <string name="home_no_feeds">フィードが登録されていません</string>
     <string name="home_no_articles">記事がありません</string>
     <string name="home_unread_only">未読のみ</string>
     <string name="home_sort_newest">新しい順</string>

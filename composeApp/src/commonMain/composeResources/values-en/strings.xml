@@ -110,7 +110,7 @@
     <string name="home_feed_error_count">Failed %1$d time(s) in a row</string>
     <string name="home_feed_error_refresh_now">Refresh now</string>
     <string name="home_mark_all_read">Mark all as read</string>
-    <string name="home_no_feeds">No feeds yet\nUse the “+” button to add one</string>
+    <string name="home_no_feeds">No feeds yet</string>
     <string name="home_no_articles">No articles</string>
     <string name="home_unread_only">Unread only</string>
     <string name="home_sort_newest">Newest first</string>

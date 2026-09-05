@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -63,7 +64,9 @@ import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_back
 import works.merc.keryx.app.resources.home_all_feeds
 import works.merc.keryx.app.resources.home_mark_all_read
+import works.merc.keryx.app.resources.home_add_feed
 import works.merc.keryx.app.resources.home_no_articles
+import works.merc.keryx.app.resources.home_no_feeds
 import works.merc.keryx.app.resources.home_search_clear
 import works.merc.keryx.app.resources.home_search_no_results
 import works.merc.keryx.app.resources.home_search_placeholder
@@ -74,6 +77,7 @@ import works.merc.keryx.app.resources.home_sort_newest
 import works.merc.keryx.app.resources.home_sort_oldest
 import works.merc.keryx.app.resources.home_starred
 import works.merc.keryx.app.resources.home_unread_only
+import works.merc.keryx.app.ui.common.FlatButton
 import works.merc.keryx.app.ui.common.KeryxExpandedSearchBar
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
@@ -110,6 +114,9 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  *   non-null — the search icon `ui-guidelines`' "Pane structure & tonal roles" section places at
  *   the head of this pane's header row. Not forwarded to [SearchListPane]: once [filter] is already
  *   [ArticleFilter.Search] there is nowhere further to advance to.
+ * @param onAddFeedClick Invoked from the empty state's "Add feed" button, shown instead of the
+ *   usual "no articles" message when there are no feeds at all — see [ArticleListPaneContent]'s own
+ *   KDoc. `null` hides the button (leaving the message on its own); every real caller supplies it.
  */
 @Composable
 fun ArticleListPane(
@@ -121,6 +128,7 @@ fun ArticleListPane(
     onSelectionAdvance: () -> Unit = {},
     onNavigateUp: (() -> Unit)? = null,
     navigateUpEnabled: Boolean = true,
+    onAddFeedClick: (() -> Unit)? = null,
     onTextInputFocusChange: (Boolean) -> Unit = {},
     onSearchClick: (() -> Unit)? = null,
     returnRipplePulse: Int = 0,
@@ -229,6 +237,8 @@ fun ArticleListPane(
         navigateUpEnabled = navigateUpEnabled,
         title = title,
         onSearchClick = onSearchClick,
+        hasNoFeeds = feeds.isEmpty(),
+        onAddFeedClick = onAddFeedClick,
     )
 }
 
@@ -528,6 +538,13 @@ internal fun ripplePulseFor(articleId: String, selectedId: String?, returnRipple
  *   selection. `false` elsewhere, including the analogous `NarrowPaneRow` remount case: there the
  *   restored position is already guaranteed to already show the selection (see
  *   `doesNotScrollAwayFromARestoredPositionThatAlreadyShowsTheSelection`), so this isn't needed.
+ * @param hasNoFeeds Swaps the empty-state message from `home_no_articles` ("no articles yet, but
+ *   you're subscribed to something") to `home_no_feeds` plus an "Add feed" button ([onAddFeedClick])
+ *   when there are no feeds at all — otherwise a narrow layout, where the "+" button lives inside
+ *   the feed-list drawer, would leave a phone-width user with no visible way to add their first
+ *   feed. Only [articles] being empty renders either message; a non-empty [articles] always wins.
+ * @param onAddFeedClick Invoked from the "Add feed" button shown when [hasNoFeeds]. `null` (the
+ *   default) omits the button, leaving just the message.
  */
 @Composable
 internal fun ArticleListPaneContent(
@@ -554,6 +571,8 @@ internal fun ArticleListPaneContent(
     onSearchClick: (() -> Unit)? = null,
     preserveScrollPositionOnMount: Boolean = false,
     returnRipplePulse: Int = 0,
+    hasNoFeeds: Boolean = false,
+    onAddFeedClick: (() -> Unit)? = null,
 ) {
     // Consumed on this composable's first LaunchedEffect run, whatever that run turns out to do —
     // not just when it actually finds selectedId in articles — so a mount where the selection isn't
@@ -601,7 +620,20 @@ internal fun ArticleListPaneContent(
 
         if (articles.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(stringResource(Res.string.home_no_articles), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (hasNoFeeds) {
+                    // A narrow layout's "+" button lives inside the feed-list drawer (closed by
+                    // default), so this is the one reachable entry point to add a first feed —
+                    // without it a phone-width user with no feeds yet would have no visible way
+                    // forward. See ArticleListPaneContent's own KDoc.
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(stringResource(Res.string.home_no_feeds), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (onAddFeedClick != null) {
+                            FlatButton(onClick = onAddFeedClick) { Text(stringResource(Res.string.home_add_feed)) }
+                        }
+                    }
+                } else {
+                    Text(stringResource(Res.string.home_no_articles), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         } else {
             val rowMetrics = rememberArticleRowMetrics()

@@ -330,6 +330,58 @@ class ArticleListPaneTest {
     }
 
     @Test
+    fun emptyStateShowsNoFeedsMessageAndAddButtonWhenThereAreNoFeeds() = runDesktopComposeUiTest {
+        var addFeedClicked = false
+
+        setContent {
+            ArticleListPaneContent(
+                articles = emptyList(),
+                feedTitles = emptyMap(),
+                selectedId = null,
+                unreadOnly = false,
+                onToggleUnreadOnly = {},
+                onToggleSort = {},
+                onMarkAllRead = {},
+                onSelectArticle = {},
+                modifier = Modifier.size(360.dp, 400.dp),
+                hasNoFeeds = true,
+                onAddFeedClick = { addFeedClicked = true },
+            )
+        }
+        waitForIdle()
+
+        onNodeWithText("フィードが登録されていません").assertIsDisplayed()
+        onNodeWithText("フィードを追加").assertIsDisplayed()
+        onNodeWithText("フィードを追加").performClick()
+        waitForIdle()
+
+        assertTrue(addFeedClicked)
+    }
+
+    @Test
+    fun emptyStateShowsNoArticlesMessageWithoutAddButtonWhenFeedsExistButArticlesDoNot() = runDesktopComposeUiTest {
+        setContent {
+            ArticleListPaneContent(
+                articles = emptyList(),
+                feedTitles = emptyMap(),
+                selectedId = null,
+                unreadOnly = false,
+                onToggleUnreadOnly = {},
+                onToggleSort = {},
+                onMarkAllRead = {},
+                onSelectArticle = {},
+                modifier = Modifier.size(360.dp, 400.dp),
+                hasNoFeeds = false,
+                onAddFeedClick = { error("must not be reachable when hasNoFeeds is false") },
+            )
+        }
+        waitForIdle()
+
+        onNodeWithText("記事がありません").assertIsDisplayed()
+        onNodeWithText("フィードを追加").assertDoesNotExist()
+    }
+
+    @Test
     fun rightClickOnArticleRowSelectsWithoutActivatingPaneFocus() = runDesktopComposeUiTest {
         val items = articles(3)
         var activateCount = 0

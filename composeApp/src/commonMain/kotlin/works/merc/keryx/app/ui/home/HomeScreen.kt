@@ -373,6 +373,7 @@ fun HomeScreen() {
                             onActivated = { setFocusedPane(HomePane.ArticleList) },
                             modifier = Modifier.width(displayedArticleWidth),
                             notifVm = notifVm,
+                            onAddFeedClick = { showAddFeed = true },
                         )
                         ResizableDivider(onDrag = { deltaPx ->
                             vm.setArticleListPaneWidth(articleListPaneWidth + with(density) { deltaPx.toDp().value })
@@ -455,6 +456,7 @@ fun HomeScreen() {
                                     vm.enterSearchScope(HomePane.ArticleList)
                                 },
                                 returnRipplePulse = articleReturnRipplePulse,
+                                onAddFeedClick = { showAddFeed = true },
                             )
                             HomePane.ArticleDetail -> ArticleDetailPane(
                                 vm,
