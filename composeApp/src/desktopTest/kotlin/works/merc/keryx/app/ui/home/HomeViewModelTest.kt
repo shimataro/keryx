@@ -282,6 +282,19 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun hasAnyFeedIsFalseWithNoFeedsAndTrueOnceOneExists() = runTest {
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(false, vm.hasAnyFeed())
+
+        db.insertFeed("f1")
+
+        assertEquals(true, vm.hasAnyFeed())
+    }
+
+    @Test
     fun feedRefreshingReflectsActivityCenter() = runTest {
         // Unconfined scope so the ActivityCenter's stateIn reflects counter changes inline.
         val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))

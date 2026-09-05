@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
@@ -92,6 +93,16 @@ class HomeViewModel(
 
     val feeds: StateFlow<List<Feeds>> =
         feedRepository.watchAllFeeds().stateIn(viewModelScope, started, emptyList())
+
+    /**
+     * A one-shot check for whether any feed exists at all, read directly from
+     * [FeedRepository.watchAllFeeds] rather than the already-collected [feeds] above: [feeds]'
+     * `Eagerly`-shared `StateFlow` starts at `emptyList()` before its first real emission lands, so
+     * reading `feeds.value` here couldn't tell "genuinely zero feeds" apart from "not loaded yet".
+     * `watchAllFeeds()` is backed by a SQLDelight query, so its first emission is already the real
+     * DB content — see `HomePaneLayout.kt`'s `shouldAutoOpenFeedDrawer`, the only caller.
+     */
+    suspend fun hasAnyFeed(): Boolean = feedRepository.watchAllFeeds().first().isNotEmpty()
 
     val tags: StateFlow<List<Tags>> =
         tagRepository.watchAllTags().stateIn(viewModelScope, started, emptyList())

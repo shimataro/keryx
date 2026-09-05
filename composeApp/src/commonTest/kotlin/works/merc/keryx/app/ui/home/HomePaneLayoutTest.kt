@@ -356,4 +356,40 @@ class HomePaneLayoutTest {
         assertEquals(HomePane.ArticleList, initialPaneFor(PaneLayout.Dual, HomePane.ArticleList))
     }
 
+    // --- shouldAutoOpenFeedDrawer ---
+
+    @Test
+    fun shouldAutoOpenFeedDrawerIsFalseAtTripleRegardlessOfFeedsOrCloud() {
+        // feedListIsDrawer(Triple) == false: there is no drawer to open at all.
+        for (cloudConfigured in listOf(true, false)) {
+            for (hasAnyFeed in listOf(true, false)) {
+                assertEquals(
+                    false,
+                    shouldAutoOpenFeedDrawer(PaneLayout.Triple, cloudConfigured, hasAnyFeed),
+                    "cloudConfigured=$cloudConfigured hasAnyFeed=$hasAnyFeed",
+                )
+            }
+        }
+    }
+
+    @Test
+    fun shouldAutoOpenFeedDrawerIsFalseWhenCloudIsConfigured() {
+        // A fresh cloud connection can take a moment to deliver its first batch — opening the
+        // drawer out from under that sync would be noise, not help.
+        assertEquals(false, shouldAutoOpenFeedDrawer(PaneLayout.Single, cloudConfigured = true, hasAnyFeed = false))
+        assertEquals(false, shouldAutoOpenFeedDrawer(PaneLayout.Dual, cloudConfigured = true, hasAnyFeed = false))
+    }
+
+    @Test
+    fun shouldAutoOpenFeedDrawerIsFalseWhenFeedsAlreadyExist() {
+        assertEquals(false, shouldAutoOpenFeedDrawer(PaneLayout.Single, cloudConfigured = false, hasAnyFeed = true))
+        assertEquals(false, shouldAutoOpenFeedDrawer(PaneLayout.Dual, cloudConfigured = false, hasAnyFeed = true))
+    }
+
+    @Test
+    fun shouldAutoOpenFeedDrawerIsTrueOnlyAtANarrowLocalOnlyLayoutWithNoFeeds() {
+        assertEquals(true, shouldAutoOpenFeedDrawer(PaneLayout.Single, cloudConfigured = false, hasAnyFeed = false))
+        assertEquals(true, shouldAutoOpenFeedDrawer(PaneLayout.Dual, cloudConfigured = false, hasAnyFeed = false))
+    }
+
 }

@@ -334,6 +334,13 @@ fun HomeScreen() {
                         initialPaneClamped = true
                         val clamped = initialPaneFor(layout, focusedPane)
                         if (clamped != focusedPane) setFocusedPane(clamped)
+                        // A one-time nudge into the drawer for the dead end it exists to remove —
+                        // see shouldAutoOpenFeedDrawer's own KDoc. Runs in the same once-per-session
+                        // effect as the clamp above, so a later resize/rotation/feed deletion can't
+                        // re-trigger it.
+                        if (shouldAutoOpenFeedDrawer(layout, vm.cloudConnected.value, vm.hasAnyFeed())) {
+                            drawerState.open()
+                        }
                     }
                 }
                 // BackHandler is always called (its own `enabled` gates the actual interception).

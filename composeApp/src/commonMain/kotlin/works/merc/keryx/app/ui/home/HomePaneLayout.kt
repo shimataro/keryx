@@ -196,3 +196,20 @@ fun initialPaneFor(layout: PaneLayout, saved: HomePane): HomePane =
  */
 fun paneForFeedDetail(layout: PaneLayout): HomePane =
     if (feedListIsDrawer(layout)) HomePane.ArticleList else HomePane.FeedList
+
+/**
+ * Whether Home should open the feed-list drawer on entry. True only for the dead end this exists
+ * to remove: a narrow layout (where the "+" button lives inside the drawer and is therefore
+ * invisible while it's closed) with no feeds to show and no cloud account about to deliver any.
+ *
+ * A deliberate departure from M3's own "a drawer starts closed" guidance — but there is nothing on
+ * the content behind it for the scrim to obscure in this state, so the departure costs nothing,
+ * and it gives the drawer's own contents (All/Starred/folders/tags/Settings) a one-time
+ * introduction the same way Gmail's drawer is the very first thing a new inbox shows.
+ *
+ * [cloudConfigured] gates a sync still in flight from being mistaken for "truly no feeds": a fresh
+ * cloud connection can take a moment to deliver its first batch, and opening the drawer out from
+ * under that would be noise, not help.
+ */
+fun shouldAutoOpenFeedDrawer(layout: PaneLayout, cloudConfigured: Boolean, hasAnyFeed: Boolean): Boolean =
+    feedListIsDrawer(layout) && !cloudConfigured && !hasAnyFeed
