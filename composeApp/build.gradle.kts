@@ -737,21 +737,22 @@ fun verifyMacOsBundleSeal(appDir: java.io.File) {
 }
 
 /**
- * The single `.desktop` filename jpackage placed inside the `.deb` payload — emitted because
+ * The single `.desktop` file jpackage placed inside the `.deb` payload — emitted because
  * `linux.shortcut = true` is set above. jpackage names it `<packageName>-<launcher>.desktop`
  * (LinuxAppImageBuilder), a convention that already satisfies xdg-desktop-menu's own
  * vendor-prefix requirement, so the same name is what ends up registered under
  * /usr/share/applications after install — exactly what AppStream's <launchable> needs to name.
- * Discovered by walking the extracted payload rather than reconstructed from packageName/appName,
- * so a future change to either can't silently produce a metainfo file pointing at nothing.
+ * Its *pre-install* location inside the payload is jpackage's own choice (not
+ * `usr/share/applications`; a postinst script is what actually installs it there), so this walks
+ * the extracted payload to find wherever it actually is, rather than assuming a path.
  *
  * Must check [java.io.File.isFile]: the bundled JDK runtime's `legal/` directory has one
  * subdirectory per module, and `legal/java.desktop/` (license notices for the `java.desktop`
  * platform module — AWT/Swing) is a directory whose name also ends in ".desktop".
  */
-fun findPackagedDesktopFileName(payloadDir: java.io.File): String {
+fun findPackagedDesktopFile(payloadDir: java.io.File): java.io.File {
     val desktopFiles = payloadDir.walkTopDown().filter { it.isFile && it.extension == "desktop" }.toList()
-    return desktopFiles.singleOrNull()?.name
+    return desktopFiles.singleOrNull()
         ?: error("Expected exactly one .desktop file under $payloadDir, found: ${desktopFiles.map { it.path }}")
 }
 
@@ -805,9 +806,9 @@ fun injectDebMetainfo(debFile: java.io.File, metainfoTemplate: java.io.File, pac
     try {
         runCommand("dpkg-deb", "-R", debFile.absolutePath, workDir.absolutePath)
 
-        val desktopId = findPackagedDesktopFileName(workDir)
+        val desktopFile = findPackagedDesktopFile(workDir)
         val metainfoContent = metainfoTemplate.readText()
-            .replace("@DESKTOP_ID@", desktopId)
+            .replace("@DESKTOP_ID@", desktopFile.name)
             .replace("@VERSION@", packageVersion)
             .replace("@DATE@", LocalDate.now().toString())
 
@@ -817,9 +818,8 @@ fun injectDebMetainfo(debFile: java.io.File, metainfoTemplate: java.io.File, pac
         metainfoFile.writeText(metainfoContent)
         recordDebMd5Sum(workDir, metainfoRelativePath)
 
-        val desktopRelativePath = "usr/share/applications/$desktopId"
-        addJapaneseDesktopComment(workDir.resolve(desktopRelativePath))
-        recordDebMd5Sum(workDir, desktopRelativePath)
+        addJapaneseDesktopComment(desktopFile)
+        recordDebMd5Sum(workDir, desktopFile.relativeTo(workDir).path)
 
         debFile.delete()
         runCommand("dpkg-deb", "--build", "--root-owner-group", workDir.absolutePath, debFile.absolutePath)
