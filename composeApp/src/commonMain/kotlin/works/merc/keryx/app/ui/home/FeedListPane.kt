@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -18,6 +17,7 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -73,9 +73,9 @@ import works.merc.keryx.app.platform.NativeMenuSeparator
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.platform.WindowChrome
 import works.merc.keryx.app.platform.WindowDragArea
-import works.merc.keryx.app.platform.hasNativeAppMenu
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.resources.Res
+import works.merc.keryx.app.resources.app_name
 import works.merc.keryx.app.resources.home_add_feed
 import works.merc.keryx.app.resources.home_add_folder
 import works.merc.keryx.app.resources.home_add_tag
@@ -167,6 +167,10 @@ internal const val FEED_LIST_DRAG_HOST_TEST_TAG = "feed-list-drag-host"
  *   alongside this one. `null` at every other layout/depth, so the bell is never drawn twice; see
  *   `HomeScreen`'s pane-layout wiring, which derives it from `visiblePanes`.
  * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
+ * @param hasNativeAppMenu Overridable for tests only — see `platform/PlatformOs.kt`'s own KDoc.
+ *   Gates this pane's header (an `app_name` title instead of none) and its settings footer row
+ *   (see `FeedListToolbarRow`'s own KDoc) — the two in-pane entry points a platform with no native
+ *   application menu bar (Android) needs in place of it.
  * @param returnRipplePulse A nonzero value plays a one-shot ripple on the currently selected
  *   row (feed/folder/tag/quick-filter) — see `HomePaneLayout.kt`'s `shouldFlashReturnedFeedListRow`
  *   and this file's own `feedListRipplePulseFor`. `0` (the default) never plays one.
@@ -186,6 +190,7 @@ internal fun FeedListPane(
     onEnterArticleList: (() -> Unit)? = null,
     notifVm: NotificationCenterViewModel? = null,
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
+    hasNativeAppMenu: Boolean = works.merc.keryx.app.platform.hasNativeAppMenu,
     returnRipplePulse: Int = 0,
 ) {
     val feeds by vm.feeds.collectAsStateSafe(emptyList())
@@ -416,6 +421,7 @@ internal fun FeedListPane(
             cloudConnected = cloudConnected,
             onAddFeedClick = onAddFeedClick,
             notifVm = notifVm,
+            hasNativeAppMenu = hasNativeAppMenu,
         )
 
         if (onSelectionAdvance == null) {
@@ -529,15 +535,7 @@ internal fun FeedListPane(
                 // and hands a slot that held, say, a folder header to a feed row. Keying them pins
                 // each slot to its identity, and the contentType keeps each kind in its own reuse
                 // pool so a recycled slot is only ever refilled with the same kind of row.
-                // contentPadding's bottom: on Android this pane draws edge-to-edge (see
-                // HomeScreen's Scaffold), so the list needs its own bottom inset to clear the
-                // navigation bar; WindowInsets.safeDrawing is zero on desktop, so this is a no-op
-                // there.
-                LazyColumn(
-                    Modifier.fillMaxSize(),
-                    state = listState,
-                    contentPadding = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues(),
-                ) {
+                LazyColumn(Modifier.fillMaxSize(), state = listState) {
                     stickyHeader(key = "folders-header", contentType = "section-header") {
                         Row(
                             Modifier.fillMaxWidth()
@@ -788,6 +786,33 @@ internal fun FeedListPane(
             }
             VerticalScrollbarIfNeeded(listState)
         }
+
+        // A platform with no native application menu bar (Android — see hasNativeAppMenu's own
+        // KDoc) needs its own in-pane entry point to Settings; this pane's header carries the
+        // app's title instead (FeedListToolbarRow), so the entry point lives down here as a fixed
+        // footer row instead. No HorizontalDivider above it: the ui-guidelines skill's divider
+        // policy reserves that for semantic section breaks within the scrolling list, not for a
+        // fixed-row/scroll-area boundary, which the shared surfaceContainerLow tone already reads
+        // clearly enough on its own (see FeedListToolbarRow just above, which gets the same
+        // treatment at the opposite edge).
+        if (!hasNativeAppMenu) {
+            // The bottom inset clears the navigation bar on Android's edge-to-edge layout (see
+            // HomeScreen's Scaffold) — this footer, not the scrolling list above it, is now the
+            // pane's last element, so the inset moved here instead of the list's contentPadding.
+            // Zero on desktop (WindowInsets.safeDrawing), and this branch never renders there
+            // anyway (hasNativeAppMenu is true).
+            Box(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))) {
+                SidebarRow(
+                    icon = { KeryxIcon(KeryxIcons.Tune, null) },
+                    label = stringResource(Res.string.menu_settings),
+                    count = null,
+                    selected = false,
+                    focused = false,
+                    onClick = { menuController.send(MenuCommand.OpenSettings) },
+                    isTouchPrimary = isTouchPrimary,
+                )
+            }
+        }
     }
 
     FeedListDialogs(
@@ -865,10 +890,17 @@ private fun FeedListAutoScrollEffect(
 }
 
 /**
- * [FeedListPane]'s top toolbar row: the notification bell (when [notifVm] is given — see
+ * [FeedListPane]'s top toolbar row: an `app_name` title on a platform with no native application
+ * menu bar (see [hasNativeAppMenu] below — desktop's own window title bar already names the app,
+ * so this stays untitled there), the notification bell (when [notifVm] is given — see
  * [FeedListPane]'s own KDoc), then add feed / refresh all / cloud sync (when [cloudConnected]).
  * Reads [vm]'s refreshing/syncing state itself (rather than taking it as a parameter) so a
  * refresh/sync toggle only invalidates this row's own restart scope, not the whole pane.
+ *
+ * Settings, this pane's other in-pane entry point on such a platform, is *not* rendered here —
+ * see [FeedListPane]'s own settings footer row, below its drag-host `Box`.
+ *
+ * @param hasNativeAppMenu See [FeedListPane]'s own KDoc.
  */
 @Composable
 private fun FeedListToolbarRow(
@@ -876,27 +908,14 @@ private fun FeedListToolbarRow(
     cloudConnected: Boolean,
     onAddFeedClick: () -> Unit,
     notifVm: NotificationCenterViewModel?,
+    hasNativeAppMenu: Boolean,
 ) {
     val refreshing by vm.feedRefreshing.collectAsStateSafe(false)
     val syncing by vm.syncing.collectAsStateSafe(false)
     WindowDragArea(Modifier.fillMaxWidth()) {
         KeryxPaneTopBar(
             modifier = Modifier.padding(top = WindowChrome.titleBarInsetDp.dp, start = 4.dp, end = 4.dp),
-            // Desktop's only entry point to Settings is the native application menu bar
-            // (AppMenuBar / macOS Preferences… / KDE Global Menu). Android has none of those, so
-            // this pane needs its own button — see `platform/PlatformOs.kt`'s `hasNativeAppMenu` KDoc.
-            navigationIcon = if (hasNativeAppMenu) {
-                null
-            } else {
-                val menuController = koinInject<MenuController>()
-                val settingsTooltip = stringResource(Res.string.menu_settings)
-                val icon: @Composable () -> Unit = {
-                    TooltipIconButton(tooltip = settingsTooltip, onClick = { menuController.send(MenuCommand.OpenSettings) }) {
-                        KeryxIcon(KeryxIcons.Tune, settingsTooltip)
-                    }
-                }
-                icon
-            },
+            title = if (hasNativeAppMenu) null else stringResource(Res.string.app_name),
         ) {
             // Notifications are their own concern, not part of the add/refresh/sync cluster, so
             // they get their own (single-icon, therefore uncapsuled) slot separated by the

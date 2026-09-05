@@ -63,6 +63,10 @@ class FeedListPaneTest {
         onSelectionAdvance: (() -> Unit)? = null,
         onEnterArticleList: (() -> Unit)? = null,
         onTextInputFocusChange: (Boolean) -> Unit = {},
+        // Defaults to the real desktop value (see DesktopOs.kt) so every existing test here keeps
+        // exercising the "native app menu" branch (no app_name header, no settings footer)
+        // unchanged; only the tests exercising the Android branch below override it.
+        hasNativeAppMenu: Boolean = true,
     ) {
         KoinApplication(configuration = koinConfiguration { modules(module { single { testMenuController } }) }) {
             Box(Modifier.testTag(ROOT_TEST_TAG).size(320.dp, height)) {
@@ -74,8 +78,33 @@ class FeedListPaneTest {
                     onSelectionAdvance = onSelectionAdvance,
                     onEnterArticleList = onEnterArticleList,
                     onTextInputFocusChange = onTextInputFocusChange,
+                    hasNativeAppMenu = hasNativeAppMenu,
                 )
             }
+        }
+    }
+
+    @Test
+    fun showsTheAppNameHeaderAndSettingsFooterWhenThereIsNoNativeAppMenu() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        useHomeViewModel(driver, db) { fixture ->
+            setContent { FeedListPaneTestHost(fixture.vm, TEST_PANE_HEIGHT, hasNativeAppMenu = false) }
+            waitForIdle()
+
+            onNodeWithText("Keryx").assertIsDisplayed()
+            onNodeWithText("設定…").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun omitsTheAppNameHeaderAndSettingsFooterWhenThereIsANativeAppMenu() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        useHomeViewModel(driver, db) { fixture ->
+            setContent { FeedListPaneTestHost(fixture.vm, TEST_PANE_HEIGHT, hasNativeAppMenu = true) }
+            waitForIdle()
+
+            onNodeWithText("Keryx").assertDoesNotExist()
+            onNodeWithText("設定…").assertDoesNotExist()
         }
     }
 
