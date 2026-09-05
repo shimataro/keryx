@@ -214,6 +214,14 @@ sudo snap install snapcraft --classic   # 未インストールの場合
 sudo env "PATH=$PATH" snapcraft pack --destructive-mode
 ```
 
+deb/rpm（上記「Linux パッケージのメタデータ」参照）と異なり、`snap/snapcraft.yaml` はライセンス・
+リンク情報を運ぶのに Gradle 側の手助けを一切必要としない: `license: MIT` と `website` /
+`contact` / `issues` / `source-code` のトップレベルキーは、このファイル自体から Snap Store /
+`snap info` が直接読み取る——AppStream metainfo のような別ファイルや追加のビルドステップは
+関与しない。`contact` と `issues` はメールアドレスか URL のどちらでも受け付け、`website` と
+`source-code` は URL のみ（正確なキーの型は
+[Snapcraft のリファレンス](https://ubuntu.com/docs/snapcraft/stable/reference/snapcraft-yaml/)を参照）。
+
 `--destructive-mode`はサンドボックスなしでホスト上に直接ビルドするため、ホスト自体が
 `snap/snapcraft.yaml`の`base: core24`（Ubuntu 24.04）に一致している必要があり、
 root権限も必要になる——さらにホスト環境を変更してしまう可能性がある。CI（`release.yml`）は

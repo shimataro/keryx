@@ -216,6 +216,14 @@ sudo snap install snapcraft --classic   # if not already installed
 sudo env "PATH=$PATH" snapcraft pack --destructive-mode
 ```
 
+Unlike deb/rpm (see "Linux package metadata" above), `snap/snapcraft.yaml` needs no Gradle-side
+help to carry its license and links: `license: MIT` and the `website` / `contact` / `issues` /
+`source-code` top-level keys are read directly by the Snap Store / `snap info` from the file
+itself — no AppStream metainfo or extra build step involved. `contact` and `issues` accept either
+an email address or a URL; `website` and `source-code` are URL-only (see the
+[Snapcraft reference](https://ubuntu.com/docs/snapcraft/stable/reference/snapcraft-yaml/) for the
+exact key types).
+
 `--destructive-mode` builds directly on the host with no sandboxing, so the host itself
 must match `snap/snapcraft.yaml`'s `base: core24` (Ubuntu 24.04) and the command needs
 root access — and it can modify the host environment. CI (`release.yml`) already runs it
