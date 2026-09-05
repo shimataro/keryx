@@ -1,16 +1,11 @@
 package works.merc.keryx.app.ui.common
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,71 +17,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.drop
-
-/**
- * Android `actual`: a read-only pill built from M3's own [SearchBarDefaults] tokens (shape, height,
- * container color) — see the `expect`'s KDoc in `commonMain`.
- *
- * Deliberately `Modifier.clickable(role = Role.Button)` rather than an M3 `Surface(onClick = …)`:
- * `Surface`'s click handling adds a ripple but sets neither a semantics [Role] nor an
- * `onClickLabel`, and the `ui-guidelines` skill's Accessibility section requires every new
- * expect/actual control to carry a [Role].
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-actual fun KeryxCollapsedSearchBar(
-    text: String,
-    isPlaceholder: Boolean,
-    onClick: () -> Unit,
-    onClickLabel: String,
-    modifier: Modifier,
-) {
-    Row(
-        modifier = modifier
-            .heightIn(min = SearchBarDefaults.InputFieldHeight)
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh, SearchBarDefaults.inputFieldShape)
-            .clickable(onClickLabel = onClickLabel, role = Role.Button, onClick = onClick)
-            .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        KeryxIcon(
-            KeryxIcons.Search,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Box(Modifier.padding(start = 16.dp)) {
-            Text(
-                text = text,
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (isPlaceholder) {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
 
 /**
  * Android `actual`: M3's own [SearchBarDefaults.InputField] (the [TextFieldState]-based overload),
  * held permanently expanded — see the `expect`'s KDoc in `commonMain`. This is the real M3 search
  * field, so it inherits the same pill shape, container color, and `minHeight` (56dp, which grows
- * rather than clips under the app's font-size setting) as [KeryxCollapsedSearchBar], and the two
- * read as one continuous surface across the tap that expands one into the other.
+ * rather than clips under the app's font-size setting) as M3's own collapsed search bar.
  *
  * The [TextFieldState]-based overload is deliberate, not the simpler `query: String`/
  * `onQueryChange` one: that overload's internal `BasicTextField(value = query, ...)` resets the
  * caret to the *start* of the text on every remount whose initial `query` is already non-empty —
  * confirmed on-device (`KeryxSearchBarAndroidTest`) — which is exactly the case every time the
- * user reopens this pane with a query left over from an earlier visit (type a query, back out to
- * the collapsed bar, tap it again). [rememberQueryFieldState] owns a [TextFieldState] instead,
+ * user reopens this pane with a query left over from an earlier visit (type a query, exit Search,
+ * come back to it). [rememberQueryFieldState] owns a [TextFieldState] instead,
  * whose own constructor already defaults `initialSelection` to the end of `initialText` — the
  * same "external value places the caret at the end" contract [KeryxTextField] already guarantees
  * for the same reason.

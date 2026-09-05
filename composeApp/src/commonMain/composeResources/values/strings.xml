@@ -111,6 +111,7 @@
     <string name="home_mark_all_read">すべて既読にする</string>
     <string name="home_no_feeds">フィードが登録されていません</string>
     <string name="home_no_articles">記事がありません</string>
+    <string name="home_open_feed_list">フィード一覧を開く</string>
     <string name="home_unread_only">未読のみ</string>
     <string name="home_sort_newest">新しい順</string>
     <string name="home_sort_oldest">古い順</string>

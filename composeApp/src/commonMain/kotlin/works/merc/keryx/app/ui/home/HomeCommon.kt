@@ -430,13 +430,18 @@ internal fun reorderTargetWithinScope(orderedIds: List<String>, index: Int, delt
 
 /**
  * Whether a keyboard shortcut that acts on the selected feed-list item (rename/edit,
- * unsubscribe/delete) should fire while [pane] has keyboard focus. These mirror the feed/folder/tag
- * row context-menu items, so they only make sense while the feed list itself is focused. (Toggle
- * read/star, open in browser, copy URL, and refresh-selected-feed have no bare-key equivalent
- * scoped this way — they are Ctrl+Shift+<letter> app-menu accelerators instead, gated by
+ * unsubscribe/delete) should fire, given the currently focused [pane] and whether the feed-list
+ * drawer is open ([drawerOpen] — `false` at [PaneLayout.Triple], where the feed list is a pane, not
+ * a drawer, and [pane] alone already answers this). These mirror the feed/folder/tag row
+ * context-menu items, so they only make sense while the feed list itself has the user's attention —
+ * either [PaneLayout.Triple]'s own focused pane, or a narrow layout's open drawer, which is always
+ * the topmost thing on screen while open regardless of [pane]. (Toggle read/star, open in browser,
+ * copy URL, and refresh-selected-feed have no bare-key equivalent scoped this way — they are
+ * Ctrl+Shift+<letter> app-menu accelerators instead, gated by
  * `MenuUiState.articleActionsEnabled`/`urlActionsEnabled`/`feedActionsEnabled`.)
  */
-fun feedListActionAllowed(pane: HomePane): Boolean = pane == HomePane.FeedList
+fun feedListActionAllowed(pane: HomePane, drawerOpen: Boolean = false): Boolean =
+    pane == HomePane.FeedList || drawerOpen
 
 /** Whether the refresh-all / sync actions (toolbar buttons and app-menu items alike) are
  * available — each is blocked while the other operation is in flight, since running both at

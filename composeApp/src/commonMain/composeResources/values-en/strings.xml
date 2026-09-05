@@ -112,6 +112,7 @@
     <string name="home_mark_all_read">Mark all as read</string>
     <string name="home_no_feeds">No feeds yet</string>
     <string name="home_no_articles">No articles</string>
+    <string name="home_open_feed_list">Open feed list</string>
     <string name="home_unread_only">Unread only</string>
     <string name="home_sort_newest">Newest first</string>
     <string name="home_sort_oldest">Oldest first</string>

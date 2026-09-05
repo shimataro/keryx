@@ -305,6 +305,28 @@ class ArticleDetailPaneTest {
     }
 
     @Test
+    fun swipeAccessibilityActionsArePresentWithNoBackButton() = runDesktopComposeUiTest {
+        // PaneLayout.Dual: the reader is a permanent neighbor of the article list there, like
+        // Gmail's own tablet reading pane, so onNavigateUp is null (no back button) — but
+        // swipeNavigation is still supplied, since it's an independent signal from onNavigateUp
+        // (see ArticleSwipeNavigation's own KDoc). external-spec.md §9 requires the swipe at every
+        // narrow layout regardless of whether that layout's reader has a back button.
+        setContent {
+            ArticleDetailPaneContent(
+                article = testArticle(),
+                modifier = Modifier.size(400.dp, 500.dp),
+                onNavigateUp = null,
+                swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
+                isTouchPrimary = true,
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        assertEquals(listOf("前の記事", "次の記事"), readerCustomActionLabels())
+    }
+
+    @Test
     fun swipeAccessibilityActionsOmitADirectionWithNothingToMoveTo() = runDesktopComposeUiTest {
         setContent {
             ArticleDetailPaneContent(

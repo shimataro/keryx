@@ -52,18 +52,24 @@ class PendingNotificationActionHostTest {
     }
 
     @Test
-    fun showFeedDetailFocusesTheFeedListWhereTheArticleListIsBesideIt() {
-        for (layout in listOf(PaneLayout.Triple, PaneLayout.Dual)) {
-            val (focused, filter) = focusedPaneAfterShowFeedDetail(layout)
-            assertEquals(HomePane.FeedList, focused, layout.name)
-            assertEquals(ArticleFilter.Feed("feed-1"), filter, layout.name)
-        }
+    fun showFeedDetailFocusesTheFeedListAtTriple() {
+        // Triple is the only layout where the feed list is an on-screen pane at all (see
+        // HomePaneLayout.kt's feedListIsDrawer) — focusing it puts the selected feed's row on
+        // screen next to its articles.
+        val (focused, filter) = focusedPaneAfterShowFeedDetail(PaneLayout.Triple)
+        assertEquals(HomePane.FeedList, focused)
+        assertEquals(ArticleFilter.Feed("feed-1"), filter)
     }
 
     @Test
-    fun showFeedDetailAdvancesToTheFeedsArticlesAtASinglePaneWidth() {
-        val (focused, filter) = focusedPaneAfterShowFeedDetail(PaneLayout.Single)
-        assertEquals(HomePane.ArticleList, focused)
-        assertEquals(ArticleFilter.Feed("feed-1"), filter)
+    fun showFeedDetailAdvancesToTheFeedsArticlesAtEveryNarrowLayout() {
+        // The feed list is a drawer at both Dual and Single — focusing it isn't meaningful, and
+        // opening the drawer unprompted would be a surprising side effect of a background
+        // notification, so this advances to the article list instead at both.
+        for (layout in listOf(PaneLayout.Dual, PaneLayout.Single)) {
+            val (focused, filter) = focusedPaneAfterShowFeedDetail(layout)
+            assertEquals(HomePane.ArticleList, focused, layout.name)
+            assertEquals(ArticleFilter.Feed("feed-1"), filter, layout.name)
+        }
     }
 }

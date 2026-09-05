@@ -28,6 +28,7 @@ import works.merc.keryx.app.resources.ic_folder_material
 import works.merc.keryx.app.resources.ic_info_material
 import works.merc.keryx.app.resources.ic_link_material
 import works.merc.keryx.app.resources.ic_link_off_material
+import works.merc.keryx.app.resources.ic_menu_material
 import works.merc.keryx.app.resources.ic_new_label_material
 import works.merc.keryx.app.resources.ic_notifications_material
 import works.merc.keryx.app.resources.ic_public_filled_material
@@ -76,6 +77,7 @@ actual object KeryxIcons {
     actual val Info: DrawableResource = Res.drawable.ic_info_material
     actual val Link: DrawableResource = Res.drawable.ic_link_material
     actual val LinkOff: DrawableResource = Res.drawable.ic_link_off_material
+    actual val Menu: DrawableResource = Res.drawable.ic_menu_material
     actual val NewLabel: DrawableResource = Res.drawable.ic_new_label_material
     actual val Notifications: DrawableResource = Res.drawable.ic_notifications_material
     actual val Refresh: DrawableResource = Res.drawable.ic_refresh_material

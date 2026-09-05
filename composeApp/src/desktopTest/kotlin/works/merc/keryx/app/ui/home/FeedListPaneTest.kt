@@ -305,23 +305,11 @@ class FeedListPaneTest {
         }
     }
 
-    @Test
-    fun narrowLayoutRendersACollapsedSearchBarInsteadOfAnEditableField() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
-        useHomeViewModel(driver, db) { fixture ->
-            val vm = fixture.vm
-            setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = {}) }
-            waitForIdle()
-
-            onNode(hasSetTextAction()).assertDoesNotExist()
-            onNodeWithText("記事を検索…").assertIsDisplayed()
-        }
-    }
-
     /**
-     * At a narrow layout the collapsed search bar above is already the screen's search entry point,
-     * so the "Search" quick-filter row — which would run the identical action — is not rendered at
-     * all; see `FeedListPane`'s `onSelectionAdvance` KDoc.
+     * At a narrow layout the feed list has no search entry point of its own at all (see
+     * `FeedListPane`'s `onSelectionAdvance` KDoc) — search lives on `ArticleListPane` instead — so
+     * the "Search" quick-filter row, which would be redundant with that and unreachable-feeling
+     * besides (this drawer has nowhere to show results), is not rendered at all.
      */
     @Test
     fun omitsSearchQuickFilterRowWhenOnSelectionAdvanceIsProvided() = runDesktopComposeUiTest {
@@ -353,44 +341,10 @@ class FeedListPaneTest {
             onNodeWithText("記事を検索").performClick()
             waitForIdle()
 
-            // The row enters search scope just like the collapsed bar does at a narrow layout,
-            // so a back action can restore the previous pane/filter.
+            // The row enters search scope just like ArticleListTopBar's own search icon does at
+            // a narrow layout, so a back action can restore the previous pane/filter.
             assertEquals(HomePane.FeedList, vm.searchScopeEntry.value?.returnPane)
             assertEquals(ArticleFilter.Search, vm.filter.value)
-        }
-    }
-
-    @Test
-    fun tappingTheCollapsedSearchBarSelectsSearchAdvancesAndRaisesAFocusRequest() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
-        useHomeViewModel(driver, db) { fixture ->
-            val vm = fixture.vm
-            var advanceCount = 0
-            setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = { advanceCount++ }) }
-            waitForIdle()
-
-            onNodeWithText("記事を検索…").performClick()
-            waitForIdle()
-
-            assertEquals(ArticleFilter.Search, vm.filter.value)
-            assertEquals(1, advanceCount)
-            assertEquals(true, vm.pendingSearchFocus.value)
-            // Snapshotted so a later back action can restore this pane and filter — see
-            // HomeViewModel.enterSearchScope's own KDoc.
-            assertEquals(HomePane.FeedList, vm.searchScopeEntry.value?.returnPane)
-        }
-    }
-
-    @Test
-    fun theCollapsedSearchBarShowsTheCurrentQueryRatherThanThePlaceholder() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
-        useHomeViewModel(driver, db) { fixture ->
-            val vm = fixture.vm
-            vm.setSearchQuery("kotlin")
-            setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = {}) }
-            waitForIdle()
-
-            onNodeWithText("kotlin").assertIsDisplayed()
         }
     }
 
