@@ -154,13 +154,6 @@ internal const val FEED_LIST_DRAG_HOST_TEST_TAG = "feed-list-drag-host"
  *   its own on this pane at all: the field the user actually types into lives in
  *   `ArticleListPane`'s `SearchListPane` alongside the results (see that composable's own KDoc),
  *   reachable through the article list's own search icon.
- * @param onEnterArticleList A *different* null boundary than [onSelectionAdvance]'s: non-null only
- *   when the article list pane isn't on screen next to this one at all — [PaneLayout.Single]'s
- *   depth 1 (`null` at [PaneLayout.Dual] too, unlike [onSelectionAdvance]). Called right before a
- *   filter-selecting row's `vm.selectFilter`, so `HomeScreen` can discard that pane's saved scroll
- *   state — opening the list is an *entrance* there, not a return to where the user left off, even
- *   when the filter selected is the one already active (see `selectFilter`'s own `reentering`
- *   param, which this parameter's non-nullness also drives).
  * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
  * @param hasNativeAppMenu Overridable for tests only — see `platform/PlatformOs.kt`'s own KDoc.
  *   Gates this pane's header (an `app_name` title instead of none) and its settings footer row
@@ -182,7 +175,6 @@ internal fun FeedListPane(
     renameSelectedRequestId: Int = 0,
     deleteSelectedRequestId: Int = 0,
     onSelectionAdvance: (() -> Unit)? = null,
-    onEnterArticleList: (() -> Unit)? = null,
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     hasNativeAppMenu: Boolean = works.merc.keryx.app.platform.hasNativeAppMenu,
     returnRipplePulse: Int = 0,
@@ -246,17 +238,12 @@ internal fun FeedListPane(
 
     // Shared by every filter-selecting row below (quick filters, feeds, folders, tags): selecting a
     // filter from this pane, rather than moving the keyboard cursor over an already-visible list
-    // (see HomeScreen's moveFeedSelection), always goes through here. onEnterArticleList is fired
-    // first so a narrow layout's saved article-list scroll state is gone before vm.selectFilter's
-    // own `reentering` flag (mirroring onEnterArticleList's non-nullness) rebuilds the browsing
-    // context — see onEnterArticleList's own KDoc for why re-selecting the same filter must still
-    // reset it there.
+    // (see HomeScreen's moveFeedSelection), always goes through here.
     fun selectFilterFromRow(
         filter: ArticleFilter,
         instance: FeedListRowSelection = FeedListRowSelection.canonicalFor(filter),
     ) {
-        onEnterArticleList?.invoke()
-        vm.selectFilter(filter, instance, reentering = onEnterArticleList != null)
+        vm.selectFilter(filter, instance)
         onActivated()
         onSelectionAdvance?.invoke()
     }

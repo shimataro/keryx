@@ -124,11 +124,9 @@ fun HomeScreen() {
     var feedListDeleteRequestId by remember { mutableStateOf(0) }
     val focusRequester = remember { FocusRequester() }
     var focusedPane by remember { mutableStateOf(vm.getInitialFocusedPane()) }
-    // Hoisted (not NarrowPaneRow's own internal default) so a feed-list row selection that
-    // *enters* the article list pane (PaneLayout.Single depth 1, see FeedListPane's
-    // onEnterArticleList) can discard that pane's saved scroll state itself, rather than
-    // restoring wherever the user scrolled to last time it was open. Declared outside
-    // BoxWithConstraints below so it isn't recreated across a Triple<->narrow layout flip.
+    // Hoisted (not NarrowPaneRow's own internal default) so it isn't recreated across a
+    // Triple<->narrow layout flip — declared outside BoxWithConstraints below, alongside
+    // drawerState.
     val paneState = rememberSaveableStateHolder()
     // The feed list is a modal drawer at every narrow PaneLayout (see feedListIsDrawer). Hoisted
     // here — outside BoxWithConstraints, like paneState above — so it isn't recreated across a
