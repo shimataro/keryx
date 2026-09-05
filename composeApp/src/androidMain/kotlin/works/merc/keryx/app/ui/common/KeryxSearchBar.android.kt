@@ -1,8 +1,13 @@
 package works.merc.keryx.app.ui.common
 
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -39,6 +44,12 @@ import kotlinx.coroutines.flow.drop
  * [onExpandedChange] is a no-op: this bar is always rendered already expanded (it *is* the search
  * screen's header, not a collapsible overlay above it), so there is no separate expanded/collapsed
  * state to toggle here.
+ *
+ * This is the pane's topmost element at a narrow layout (`SearchListPane`'s own header), and
+ * `HomeScreen`'s `Scaffold` draws content edge-to-edge (`contentWindowInsets = WindowInsets(0)`),
+ * so — same contract as [KeryxPaneTopBar]'s Android `actual` — this bar must reserve its own top
+ * inset rather than rely on a `TopAppBar`'s default (avoided here per this file's own KDoc, above,
+ * for the font-scale clipping reason) or an ancestor already having consumed it.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,7 +67,10 @@ actual fun KeryxExpandedSearchBar(
 ) {
     val textFieldState = rememberQueryFieldState(query, onQueryChange)
     Row(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         TooltipIconButton(
