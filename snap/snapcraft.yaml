@@ -8,6 +8,10 @@ grade: stable
 confinement: strict
 base: core24
 license: MIT
+website: https://keryx.merc.works
+contact: keryx@merc.works
+issues: https://github.com/shimataro/keryx/issues
+source-code: https://github.com/shimataro/keryx
 
 apps:
   keryx:

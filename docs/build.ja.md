@@ -150,6 +150,58 @@ Google Play イメージ（Chrome 入り）— [setup.ja.md](setup.ja.md) を参
 ./gradlew :composeApp:packageRpm
 ```
 
+### Linux パッケージのメタデータ（ライセンス・ホームページ・発行元）
+
+`nativeDistributions` では、jpackage 自身の Linux 既定値では誤った値・空になってしまうメタデータと、
+Compose の DSL に対応プロパティが一切無いフィールドを 1 つ設定している。
+
+- `vendor = "Mercury Works"` — 発行元としての人格。アプリ自体の表示名である `appName`（"Keryx"）とは
+  別に保持する。rpm の `Vendor:` タグと Windows インストーラーの発行元（Publisher）表示に出る。
+- `linux { rpmLicenseType = "MIT" }` — 未設定だと jpackage 自身の既定値であるリテラル `Unknown` が
+  rpm の `License:` タグにそのまま入る。
+- `licenseFile`（Linux でビルドする場合のみ `System.getProperty("os.name")` で条件付け）— `LICENSE`
+  を deb の `/usr/share/doc/<pkg>/copyright` と rpm の `%license` ファイルとしてインストールする。
+  Windows の MSI にライセンス同意ページを追加しないよう Linux 限定にしている。
+- `linux { debMaintainer = "keryx@merc.works" }` — deb の `Maintainer:` タグに書き込まれるメール
+  アドレス。jpackage は設定された `vendor` を前に付けるため、結果として "Mercury Works <keryx@merc.works>"
+  になる。未設定だと jpackage 自身の既定値である `<ビルドユーザー>@<ビルドホスト>`
+  （CI ランナー自身のアカウント）が入る。個人アドレスではなく role アドレス — 公開される全ての
+  `.deb` に恒久的に残り、`apt show` で誰でも読めるため。
+- `linux { appCategory = "net" }` — deb の `Section:` / rpm の `Group:` タグ。`.desktop` ファイルの
+  `Categories=` にマップされる `menuGroup` とは別物。
+- `--about-url` — deb の `Homepage:` と rpm の `URL:` タグにプロジェクトのウェブサイトを入れる。
+  Compose の `nativeDistributions` DSL には対応プロパティが無いため、`composeApp/build.gradle.kts` の
+  `tasks.withType<AbstractJPackageTask>().configureEach { freeArgs.addAll(...) }` で
+  `packageDeb`/`packageRpm` の jpackage 呼び出しに直接追加している。
+
+ただし上記だけでは、Linux の**ソフトウェアセンター**（GNOME ソフトウェア、Ubuntu App Center、
+KDE Discover）にライセンスやホームページのリンクは表示されない。これらは
+[AppStream metainfo](https://www.freedesktop.org/software/appstream/docs/) を読むのであって、
+パッケージの control ファイルは読まない — そもそも `.deb` の control ファイルにはライセンス欄自体が
+存在しない。そのため `packageDeb` はビルド後処理（`composeApp/build.gradle.kts` の
+`injectDebMetainfo`）も実行する。これは `dpkg-deb -R` でビルド済みの `.deb` を展開し、
+`composeApp/packaging/linux/works.merc.keryx.metainfo.xml.in` のプレースホルダーを置換した内容を
+`usr/share/metainfo/works.merc.keryx.metainfo.xml` として書き込み（`@DESKTOP_ID@` は jpackage が
+パッケージに入れた実際の `.desktop` ファイル名 — `packageName`/ランチャー名から jpackage が導出する
+ため、決め打ちにせず展開済みペイロードを走査して見つける。ほかに `@VERSION@`、`@DATE@`）、
+`dpkg-deb --build --root-owner-group` で再パックする。`dpkg-deb` が `PATH` に無い場合は何もしない
+（macOS/Windows のローカルビルドではそもそも `.deb` は作られない）。
+
+`.rpm` には同等の metainfo 注入を**行わない** — これは意図的な非対称である。jpackage 自身の
+`--resource-dir` は Compose プラグインがタスク実行中にクリアする一時ディレクトリに固定されており、
+`.deb` の control ファイル群のように rpm の `.spec` テンプレートを差し替えることができず、
+ビルド済みの `.rpm` を再パックするには本プロジェクトが他で依存していない追加ツール
+（`rpmrebuild`）が必要になる。とはいえ機能的な欠落ではない：`.deb` と異なり rpm の `.spec`
+テンプレートにはもともと `License:` と `URL:` のタグがあるため、`rpmLicenseType` と `--about-url`
+だけで `rpm -qi` にも PackageKit 系のソフトウェアセンターにも正しい値が表示される。
+
+AppStream の metainfo は、`<launchable type="desktop-id">` で指すファイルがインストール後に実際に
+`/usr/share/applications` 配下に存在しないと正しく検証・リンクされない。上記の
+`linux { shortcut = true }` がここでも意味を持つのはそのためで、これが無いと jpackage 自身の
+`DesktopIntegration` は `.deb` に `.desktop` ファイルを一切出さない（その条件は「ショートカットか
+ファイル関連付けがあること」）ため、注入した metainfo の `<launchable>` が何も指さない状態になって
+しまう。これは `keryx://` カスタム URI スキームの登録方法自体を変えるものではない — 詳細は後述。
+
 ### Linux Snap パッケージ
 
 `.deb`/`.rpm`（上記タスクでjpackage経由でビルド）と異なり、Snapは`snap/snapcraft.yaml`から
@@ -162,6 +214,14 @@ Google Play イメージ（Chrome 入り）— [setup.ja.md](setup.ja.md) を参
 sudo snap install snapcraft --classic   # 未インストールの場合
 sudo env "PATH=$PATH" snapcraft pack --destructive-mode
 ```
+
+deb/rpm（上記「Linux パッケージのメタデータ」参照）と異なり、`snap/snapcraft.yaml` はライセンス・
+リンク情報を運ぶのに Gradle 側の手助けを一切必要としない: `license: MIT` と `website` /
+`contact` / `issues` / `source-code` のトップレベルキーは、このファイル自体から Snap Store /
+`snap info` が直接読み取る——AppStream metainfo のような別ファイルや追加のビルドステップは
+関与しない。`contact` と `issues` はメールアドレスか URL のどちらでも受け付け、`website` と
+`source-code` は URL のみ（正確なキーの型は
+[Snapcraft のリファレンス](https://ubuntu.com/docs/snapcraft/stable/reference/snapcraft-yaml/)を参照）。
 
 `--destructive-mode`はサンドボックスなしでホスト上に直接ビルドするため、ホスト自体が
 `snap/snapcraft.yaml`の`base: core24`（Ubuntu 24.04）に一致している必要があり、
@@ -273,9 +333,11 @@ macOS は `appCategory = "public.app-category.news"`（`LSApplicationCategoryTyp
 カテゴリーの概念自体が無い（`menuGroup` はスタートメニューのフォルダ名でしかない）ため、
 Windows 側は何も設定していない。
 
-`keryx://` のカスタム URI スキームは deb/rpm パッケージでは**登録されない**。jpackage はショートカットか
-ファイル関連付けを指定しない限り `.desktop` を生成せず、そのテンプレートの `Exec` 行には `%u` が付かないため、
-URI がプロセスに届かないからである。代わりにアプリが初回起動時に自身を登録し（`LinuxUriSchemeRegistrar`）、
+deb/rpm パッケージは現在システム側の `.desktop` ファイルを同梱している（`linux { shortcut = true }`。
+AppStream の `<launchable>` のために追加した — 上記「Linux パッケージのメタデータ」参照）が、それでも
+`keryx://` カスタム URI スキームは**登録されない**: jpackage 自身の `.desktop` テンプレートの `Exec` 行には
+そもそも `%u` が付かないため、この経路では URI がプロセスに届かないからである。代わりにアプリが初回起動時に
+自身を登録し（`LinuxUriSchemeRegistrar`）、
 `$XDG_DATA_HOME/applications/keryx-url-handler.desktop`（既定 `~/.local/share/applications`）と
 `$XDG_CONFIG_HOME/mimeapps.list`（既定 `~/.config/mimeapps.list`）の関連付けを書き出す。
 これにより `createDistributable` の app image や tarball 配置もカバーされる。この 2 ファイルはユーザーの
