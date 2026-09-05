@@ -253,8 +253,6 @@ internal fun Modifier.insertionMarkers(top: InsertionMarker? = null, bottom: Ins
  * @param onMoveUp Moves this folder one position up in the folder order, or `null` when it is
  *   already the first one (see [reorderTargetWithinScope]).
  * @param onMoveDown Moves this folder one position down, or `null` when it is already the last one.
- * @param ripplePulse A nonzero value plays a one-shot ripple on this row's interaction source —
- *   see `FeedListPane.kt`'s `feedListRipplePulseFor`. `0` (the default) never plays one.
  */
 @Composable
 internal fun FolderGroupHeader(
@@ -280,7 +278,6 @@ internal fun FolderGroupHeader(
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     onMoveUp: (() -> Unit)? = null,
     onMoveDown: (() -> Unit)? = null,
-    ripplePulse: Int = 0,
 ) {
     val editFolderLabel = stringResource(Res.string.home_edit_folder_menu)
     val deleteFolderLabel = stringResource(Res.string.home_delete_folder_menu)
@@ -304,7 +301,6 @@ internal fun FolderGroupHeader(
     }
 
     val rowInteraction = remember { MutableInteractionSource() }
-    PulseRippleEffect(ripplePulse, rowInteraction)
     val currentBoundary = activeBoundaryState.value
     // Always unpaired: no folder ever checks the boundary before the *next* folder from its own
     // bottom edge, so a folder's own top edge is the only place `BeforeFolder` is ever painted.
@@ -479,8 +475,6 @@ internal fun NoFolderHeader(
  *   it is already the first one there (see [reorderTargetWithinScope]).
  * @param onMoveDown Moves this feed one position down in the same group, or `null` when it is
  *   already the last one there.
- * @param ripplePulse A nonzero value plays a one-shot ripple on this row's interaction source —
- *   see `FeedListPane.kt`'s `feedListRipplePulseFor`. `0` (the default) never plays one.
  */
 @Composable
 internal fun FeedRow(
@@ -511,7 +505,6 @@ internal fun FeedRow(
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     onMoveUp: (() -> Unit)? = null,
     onMoveDown: (() -> Unit)? = null,
-    ripplePulse: Int = 0,
 ) {
     val refreshLabel = stringResource(Res.string.home_refresh)
     val assignTagsLabel = stringResource(Res.string.home_assign_tags)
@@ -525,7 +518,6 @@ internal fun FeedRow(
     val siteUrlUsable = hasUsableUrl(feed.site_url)
     val belowBoundary = nextFeedId?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(folderId)
     val rowInteraction = remember { MutableInteractionSource() }
-    PulseRippleEffect(ripplePulse, rowInteraction)
     val currentBoundary = activeBoundaryState.value
     // Both edges, not just the last row's: for any feed but the last in its group, the row after
     // this one paints the other half of `belowBoundary` from its own top edge, and the two halves

@@ -159,9 +159,6 @@ internal const val FEED_LIST_DRAG_HOST_TEST_TAG = "feed-list-drag-host"
  *   Gates this pane's header (an `app_name` title instead of none) and its settings footer row
  *   (see `FeedListToolbarRow`'s own KDoc) — the two in-pane entry points a platform with no native
  *   application menu bar (Android) needs in place of it.
- * @param returnRipplePulse A nonzero value plays a one-shot ripple on the currently selected
- *   row (feed/folder/tag/quick-filter) — see `HomePaneLayout.kt`'s `shouldFlashReturnedFeedListRow`
- *   and this file's own `feedListRipplePulseFor`. `0` (the default) never plays one.
  */
 @Composable
 internal fun FeedListPane(
@@ -177,7 +174,6 @@ internal fun FeedListPane(
     onSelectionAdvance: (() -> Unit)? = null,
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     hasNativeAppMenu: Boolean = works.merc.keryx.app.platform.hasNativeAppMenu,
-    returnRipplePulse: Int = 0,
 ) {
     val feeds by vm.feeds.collectAsStateSafe(emptyList())
     val tags by vm.tags.collectAsStateSafe(emptyList())
@@ -444,7 +440,6 @@ internal fun FeedListPane(
             focused = focused,
             onClick = { selectFilterFromRow(ArticleFilter.All) },
             isTouchPrimary = isTouchPrimary,
-            ripplePulse = feedListRipplePulseFor(FeedListRowSelection.All, selectedRowInstance, returnRipplePulse),
         )
         SidebarRow(
             icon = { KeryxIcon(KeryxIcons.Star, null) },
@@ -454,7 +449,6 @@ internal fun FeedListPane(
             focused = focused,
             onClick = { selectFilterFromRow(ArticleFilter.Starred) },
             isTouchPrimary = isTouchPrimary,
-            ripplePulse = feedListRipplePulseFor(FeedListRowSelection.Starred, selectedRowInstance, returnRipplePulse),
         )
         // At a narrow layout the feed list is a drawer with no search entry point of its own at
         // all (see ArticleListTopBar's own search icon, which opens SearchListPane's real field
@@ -472,7 +466,6 @@ internal fun FeedListPane(
                 focused = focused,
                 onClick = { vm.enterSearchScope(HomePane.FeedList); onActivated() },
                 isTouchPrimary = isTouchPrimary,
-                ripplePulse = feedListRipplePulseFor(FeedListRowSelection.Search, selectedRowInstance, returnRipplePulse),
             )
         }
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
@@ -578,7 +571,6 @@ internal fun FeedListPane(
                                 onCopySiteUrl = { feed.site_url?.let(copyUrl) },
                                 onOpenSite = { feed.site_url?.let(BrowserOpener::open) },
                                 isTouchPrimary = isTouchPrimary,
-                                ripplePulse = feedListRipplePulseFor(instance, selectedRowInstance, returnRipplePulse),
                                 // Same mutation the drop of a real drag applies (see
                                 // FeedListDragController.end), just with the landing position
                                 // resolved from the group's own order instead of a pointer.
@@ -649,11 +641,6 @@ internal fun FeedListPane(
                                     },
                                     isDragSource = folder.id == draggedFeedFolderId,
                                     isTouchPrimary = isTouchPrimary,
-                                    ripplePulse = feedListRipplePulseFor(
-                                        FeedListRowSelection.Folder(folder.id),
-                                        selectedRowInstance,
-                                        returnRipplePulse,
-                                    ),
                                     // A folder's reorder scope is the top-level folder order, so
                                     // these resolve against `folders` — the same list
                                     // FeedListDropIndex.nextFolderId is built from.
@@ -718,11 +705,6 @@ internal fun FeedListPane(
                                 },
                                 onSelectColor = { vm.updateTag(tag.id, tag.name, it) },
                                 isTouchPrimary = isTouchPrimary,
-                                ripplePulse = feedListRipplePulseFor(
-                                    FeedListRowSelection.Tag(tag.id),
-                                    selectedRowInstance,
-                                    returnRipplePulse,
-                                ),
                             )
                         }
                         if (tag.id in expandedTagIds) {
@@ -749,7 +731,6 @@ internal fun FeedListPane(
                                     onCopySiteUrl = { feed.site_url?.let(copyUrl) },
                                     onOpenSite = { feed.site_url?.let(BrowserOpener::open) },
                                     isTouchPrimary = isTouchPrimary,
-                                    ripplePulse = feedListRipplePulseFor(instance, selectedRowInstance, returnRipplePulse),
                                 )
                             }
                         }
@@ -803,23 +784,6 @@ internal fun FeedListPane(
         onConfirmingUnsubscribeFeedChange = { confirmingUnsubscribeFeed = it },
     )
 }
-
-/**
- * The [returnRipplePulse] a specific row ([instance]) should receive: [returnRipplePulse] itself
- * when [instance] is the currently selected row (the one a return-from-article-list flash
- * targets), `0` (no ripple) for every other row — mirroring `ArticleListPane.kt`'s own
- * `ripplePulseFor`.
- *
- * Compared by [FeedListRowSelection] instance, not by feed id: a feed can render twice at once
- * (once under its folder group, once under an expanded tag — see [FeedListRowSelection]'s own
- * KDoc), and only the copy the user actually navigated through should flash, matching how
- * [toneFor] paints only one of them [RowSelectionTone.PRIMARY].
- */
-internal fun feedListRipplePulseFor(
-    instance: FeedListRowSelection,
-    selectedInstance: FeedListRowSelection,
-    returnRipplePulse: Int,
-): Int = if (instance == selectedInstance) returnRipplePulse else 0
 
 /**
  * Drives feed-list auto-scroll while a drag's pointer sits in an edge zone: while
@@ -934,8 +898,6 @@ private fun FeedListToolbarRow(
  * @param focused Whether the sidebar is focused.
  * @param onClick The action invoked when the row is clicked.
  * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
- * @param ripplePulse A nonzero value plays a one-shot ripple on [rowInteraction] — see
- *   `feedListRipplePulseFor`. `0` (the default) never plays one.
  */
 @Composable
 private fun SidebarRow(
@@ -946,10 +908,8 @@ private fun SidebarRow(
     focused: Boolean,
     onClick: () -> Unit,
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
-    ripplePulse: Int = 0,
 ) {
     val rowInteraction = remember { MutableInteractionSource() }
-    PulseRippleEffect(ripplePulse, rowInteraction)
     Row(
         Modifier.fillMaxWidth()
             .listRowClickable(rowInteraction, selected, onClick)
@@ -999,8 +959,6 @@ private fun SidebarRow(
  * @param onSelectColor Applies a color picked from the color dot's popover. Independent of name
  *   editing: the dot is clickable whether or not the row is currently being renamed.
  * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
- * @param ripplePulse A nonzero value plays a one-shot ripple on this row's interaction source —
- *   see `feedListRipplePulseFor`. `0` (the default) never plays one.
  */
 @Composable
 private fun TagRow(
@@ -1020,7 +978,6 @@ private fun TagRow(
     nameError: (String) -> String? = { null },
     onSelectColor: (String?) -> Unit = {},
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
-    ripplePulse: Int = 0,
 ) {
     val editLabel = stringResource(Res.string.home_edit_tag_menu)
     val deleteLabel = stringResource(Res.string.home_delete_tag_menu)
@@ -1028,7 +985,6 @@ private fun TagRow(
     var showColorPicker by remember { mutableStateOf(false) }
     val contentColor = dropTargetContentColorOrNull(isDropTarget, selected, focused, MaterialTheme.colorScheme.onTertiaryContainer)
     val rowInteraction = remember { MutableInteractionSource() }
-    PulseRippleEffect(ripplePulse, rowInteraction)
     Row(
         Modifier.testTag(tagRowTestTag(tag.id))
             .fillMaxWidth()
@@ -1174,8 +1130,6 @@ internal fun tagRowTestTag(tagId: String): String = "tag-row-$tagId"
  * @param onCopySiteUrl Copies the feed's website URL to the clipboard.
  * @param onOpenSite Opens the feed's website in the external browser.
  * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
- * @param ripplePulse A nonzero value plays a one-shot ripple on this row's interaction source —
- *   see `feedListRipplePulseFor`. `0` (the default) never plays one.
  */
 @Composable
 private fun TagFeedRow(
@@ -1193,7 +1147,6 @@ private fun TagFeedRow(
     onCopySiteUrl: () -> Unit,
     onOpenSite: () -> Unit,
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
-    ripplePulse: Int = 0,
 ) {
     val renameLabel = stringResource(Res.string.home_rename_feed)
     val removeLabel = stringResource(Res.string.home_remove_feed_from_tag_menu)
@@ -1202,7 +1155,6 @@ private fun TagFeedRow(
     val openSiteLabel = stringResource(Res.string.home_open_site)
     val siteUrlUsable = hasUsableUrl(feed.site_url)
     val rowInteraction = remember { MutableInteractionSource() }
-    PulseRippleEffect(ripplePulse, rowInteraction)
     Row(
         Modifier.fillMaxWidth()
             .listRowClickable(rowInteraction, selectionTone == RowSelectionTone.PRIMARY, onClick)
