@@ -256,8 +256,7 @@ class ArticleDetailPaneTest {
                 article = testArticle(),
                 modifier = Modifier.size(400.dp, 500.dp),
                 onNavigateUp = {},
-                canSelectNext = { true },
-                canSelectPrevious = { true },
+                swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
                 isTouchPrimary = true,
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
@@ -274,8 +273,7 @@ class ArticleDetailPaneTest {
                 article = testArticle(),
                 modifier = Modifier.size(400.dp, 500.dp),
                 onNavigateUp = {},
-                canSelectNext = { true },
-                canSelectPrevious = { true },
+                swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
                 isTouchPrimary = false,
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
@@ -287,15 +285,16 @@ class ArticleDetailPaneTest {
 
     @Test
     fun swipeAccessibilityActionsAreAbsentAtTriplePaneWidth() = runDesktopComposeUiTest {
-        // onNavigateUp == null is how this codebase signals PaneLayout.Triple everywhere else in
-        // this pane (see the ui-guidelines skill's "Adaptive pane layout & touch affordances").
+        // swipeNavigation == null is how this codebase signals PaneLayout.Triple for the reader's
+        // swipe boundary (see ArticleSwipeNavigation's own KDoc) — onNavigateUp is a separate
+        // signal (whether the pane draws a back button) and is left non-null here on purpose, to
+        // show the two are independent.
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(),
                 modifier = Modifier.size(400.dp, 500.dp),
-                onNavigateUp = null,
-                canSelectNext = { true },
-                canSelectPrevious = { true },
+                onNavigateUp = {},
+                swipeNavigation = null,
                 isTouchPrimary = true,
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
@@ -312,8 +311,7 @@ class ArticleDetailPaneTest {
                 article = testArticle(),
                 modifier = Modifier.size(400.dp, 500.dp),
                 onNavigateUp = {},
-                canSelectNext = { false },
-                canSelectPrevious = { true },
+                swipeNavigation = ArticleSwipeNavigation({}, {}, { false }, { true }),
                 isTouchPrimary = true,
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
@@ -331,9 +329,7 @@ class ArticleDetailPaneTest {
                 article = testArticle(),
                 modifier = Modifier.size(400.dp, 500.dp),
                 onNavigateUp = {},
-                onSelectNext = { invoked = true },
-                canSelectNext = { true },
-                canSelectPrevious = { true },
+                swipeNavigation = ArticleSwipeNavigation({ invoked = true }, {}, { true }, { true }),
                 isTouchPrimary = true,
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )

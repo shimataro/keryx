@@ -100,6 +100,7 @@ fun HomeScreen() {
     // Bumped on each keyboard-shortcut copy; ArticleDetailPane watches it to flash its copy button's
     // inline ✓ (the keyboard copies the selected article, which that pane already shows).
     var copyPulse by remember { mutableStateOf(0) }
+    val articleSwipeNavigation = rememberArticleSwipeNavigation(vm)
     // Bumped by goBack() whenever shouldFlashReturnedArticle says so; ArticleListPane threads it
     // down to the returned-to article's own row, which plays a one-shot ripple so the user can
     // tell where they were reading (see ListRowChrome.kt's playPulseRipple).
@@ -452,6 +453,7 @@ fun HomeScreen() {
                                 onActivated = { setFocusedPane(HomePane.ArticleDetail) },
                                 copyPulse = copyPulse,
                                 onNavigateUp = ::goBack,
+                                swipeNavigation = articleSwipeNavigation,
                             )
                         }
                     }

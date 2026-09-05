@@ -261,6 +261,39 @@ internal class ArticleSwipeController(
 }
 
 /**
+ * Sibling-article navigation supplied by the caller when the reader is a narrow-layout
+ * destination (a phone-width or tablet-width [PaneLayout], as opposed to [PaneLayout.Triple]'s
+ * permanent, keyboard-driven pane). `null` is how a caller signals "no swipe here" — the same
+ * null-means-Triple idiom every other narrow-layout affordance in this codebase uses (see the
+ * `ui-guidelines` skill's "Adaptive pane layout & touch affordances"), just expressed as its own
+ * type instead of piggybacking on `onNavigateUp`'s presence: a reader that has nowhere to
+ * navigate *back* to (e.g. a permanently visible detail pane beside its list) can still have
+ * somewhere to swipe *to*, so the two are independent signals a caller sets separately.
+ */
+data class ArticleSwipeNavigation(
+    val onSelectNext: () -> Unit,
+    val onSelectPrevious: () -> Unit,
+    val canSelectNext: () -> Boolean,
+    val canSelectPrevious: () -> Boolean,
+)
+
+/**
+ * Bundles [HomeViewModel]'s next/previous-article operations into an [ArticleSwipeNavigation] for
+ * [ArticleDetailPane] to pass down. A stable [remember]ed instance so passing it doesn't force a
+ * recomposition of the reader below on every call.
+ */
+@Composable
+internal fun rememberArticleSwipeNavigation(vm: HomeViewModel): ArticleSwipeNavigation =
+    remember(vm) {
+        ArticleSwipeNavigation(
+            onSelectNext = { vm.selectNext() },
+            onSelectPrevious = { vm.selectPrevious() },
+            canSelectNext = { vm.canSelectNext() },
+            canSelectPrevious = { vm.canSelectPrevious() },
+        )
+    }
+
+/**
  * Creates and remembers an [ArticleSwipeController] for the article reader.
  *
  * @param canSelectNext `HomeViewModel.canSelectNext`. Read fresh on every drag event (not snapshot
@@ -359,7 +392,7 @@ internal fun Modifier.articleSwipeNavigation(controller: ArticleSwipeController)
  * direction at all, rather than one that would do nothing.
  *
  * @param enabled Gated by the caller on the same conditions [articleSwipeNavigation] itself is
- *   gated on (`isTouchPrimary && onNavigateUp != null && article != null`). Checked before
+ *   gated on (`isTouchPrimary && swipeNavigation != null && article != null`). Checked before
  *   resolving the string resources below, so a desktop composition (where this is always `false`)
  *   never pays for two `stringResource` lookups on every recomposition.
  */
