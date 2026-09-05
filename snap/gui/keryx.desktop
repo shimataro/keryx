@@ -1,6 +1,7 @@
 [Desktop Entry]
 Name=Keryx
-Comment=Local-first, cross-platform RSS reader
+Comment=Cloud-sync, multi-platform RSS reader
+Comment[ja]=クラウド同期・マルチプラットフォーム対応の RSS リーダー
 Exec=keryx %u
 Icon=${SNAP}/meta/gui/keryx.png
 Terminal=false

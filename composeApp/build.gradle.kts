@@ -456,7 +456,7 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = appName
             packageVersion = appPackageVersion
-            description = "Local-first, cross-platform RSS reader"
+            description = "Cloud-sync, multi-platform RSS reader"
             vendor = appVendor
             // NSHumanReadableCopyright (macOS Info.plist, shown in Finder's "Get Info") — without
             // this, Compose's own Info.plist builder falls back to the generic
@@ -756,11 +756,42 @@ fun findPackagedDesktopFileName(payloadDir: java.io.File): String {
 }
 
 /**
+ * Appends an MD5 digest line for [relativePath] (resolved under [workDir]) to `DEBIAN/md5sums`,
+ * so a payload file edited after jpackage built the `.deb` doesn't leave the control file's
+ * checksum stale. `dpkg-deb --build` does not itself validate `md5sums` against the payload, but
+ * keeping it accurate matches how a normal Debian package is built.
+ */
+fun recordDebMd5Sum(workDir: java.io.File, relativePath: String) {
+    val file = workDir.resolve(relativePath)
+    val md5 = MessageDigest.getInstance("MD5").digest(file.readBytes())
+        .joinToString("") { "%02x".format(it) }
+    val md5sumsFile = workDir.resolve("DEBIAN/md5sums")
+    val existingMd5sums = md5sumsFile.takeIf { it.exists() }?.readText().orEmpty()
+    val separator = if (existingMd5sums.isNotEmpty() && !existingMd5sums.endsWith("\n")) "\n" else ""
+    md5sumsFile.writeText("$existingMd5sums$separator$md5  $relativePath\n")
+}
+
+/**
+ * Adds a `Comment[ja]=` line right after the `.desktop` file's own `Comment=` line, per the
+ * freedesktop.org Desktop Entry Specification's locale-suffixed-key convention (read by a menu/
+ * app-launcher according to the user's locale). jpackage's own template only ever emits the
+ * unsuffixed `Comment=`, so this is additive — the English line is untouched.
+ */
+fun addJapaneseDesktopComment(desktopFile: java.io.File) {
+    val content = desktopFile.readText()
+    val patched = Regex("""(?m)^(Comment=.*)$""").replace(content) {
+        "${it.groupValues[1]}\nComment[ja]=クラウド同期・マルチプラットフォーム対応の RSS リーダー"
+    }
+    desktopFile.writeText(patched)
+}
+
+/**
  * Injects AppStream metainfo into a built `.deb` so software centers (GNOME Software, Ubuntu App
  * Center, KDE Discover) can show the license and homepage links the `.deb` control file has no
- * fields for at all (see composeApp/packaging/linux/works.merc.keryx.metainfo.xml.in). No-op when
- * `dpkg-deb` isn't on PATH — a `.deb` is only ever actually produced on a Linux CI runner or a
- * Linux dev machine, never by a macOS/Windows local build.
+ * fields for at all (see composeApp/packaging/linux/works.merc.keryx.metainfo.xml.in), and adds a
+ * `Comment[ja]=` line to the package's own `.desktop` entry (see [addJapaneseDesktopComment]).
+ * No-op when `dpkg-deb` isn't on PATH — a `.deb` is only ever actually produced on a Linux CI
+ * runner or a Linux dev machine, never by a macOS/Windows local build.
  */
 fun injectDebMetainfo(debFile: java.io.File, metainfoTemplate: java.io.File, packageVersion: String) {
     val dpkgDebAvailable = runCatching {
@@ -784,15 +815,11 @@ fun injectDebMetainfo(debFile: java.io.File, metainfoTemplate: java.io.File, pac
         val metainfoFile = workDir.resolve(metainfoRelativePath)
         metainfoFile.parentFile.mkdirs()
         metainfoFile.writeText(metainfoContent)
+        recordDebMd5Sum(workDir, metainfoRelativePath)
 
-        // Best-effort: dpkg-deb --build does not itself validate md5sums against the payload, but
-        // keeping the control file accurate matches how a normal Debian package is built.
-        val md5 = MessageDigest.getInstance("MD5").digest(metainfoFile.readBytes())
-            .joinToString("") { "%02x".format(it) }
-        val md5sumsFile = workDir.resolve("DEBIAN/md5sums")
-        val existingMd5sums = md5sumsFile.takeIf { it.exists() }?.readText().orEmpty()
-        val separator = if (existingMd5sums.isNotEmpty() && !existingMd5sums.endsWith("\n")) "\n" else ""
-        md5sumsFile.writeText("$existingMd5sums$separator$md5  $metainfoRelativePath\n")
+        val desktopRelativePath = "usr/share/applications/$desktopId"
+        addJapaneseDesktopComment(workDir.resolve(desktopRelativePath))
+        recordDebMd5Sum(workDir, desktopRelativePath)
 
         debFile.delete()
         runCommand("dpkg-deb", "--build", "--root-owner-group", workDir.absolutePath, debFile.absolutePath)
