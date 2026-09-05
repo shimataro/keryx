@@ -3,7 +3,7 @@ version: '0.0.0' # overwritten by release.yml with the tag-derived version befor
 summary: Cloud-sync, multi-platform RSS reader
 description: |
   Keeps your subscriptions in sync across every device through your own cloud storage
-  (Dropbox / Google Drive / OneDrive) — no account required.
+  (Dropbox / Google Drive / OneDrive).
 grade: stable
 confinement: strict
 base: core24
