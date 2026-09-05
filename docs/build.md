@@ -163,10 +163,11 @@ plus one field it has no Compose DSL property for at all:
 - `licenseFile` (set only when building on Linux, gated on `System.getProperty("os.name")`) —
   installs `LICENSE` as the deb's `/usr/share/doc/<pkg>/copyright` and the rpm's `%license` file.
   Gated to Linux so it doesn't also add a license-acceptance page to the Windows MSI.
-- `linux { debMaintainer = "Mercury Works <keryx@merc.works>" }` — without it, jpackage's own
-  default is `<build-user>@<build-host>` (the CI runner's own account) in the deb's `Maintainer:`
-  tag. A role address, not a personal one — it lands in every published `.deb` permanently and is
-  readable via `apt show`.
+- `linux { debMaintainer = "keryx@merc.works" }` — the email written into the deb's
+  `Maintainer:` tag. jpackage prefixes the configured `vendor`, so the output is
+  "Mercury Works <keryx@merc.works>". Without it, jpackage's own default is
+  `<build-user>@<build-host>` (the CI runner's own account). A role address, not a personal
+  one — it lands in every published `.deb` permanently and is readable via `apt show`.
 - `linux { appCategory = "net" }` — the deb `Section:` / rpm `Group:` tag. Distinct from
   `menuGroup`, which maps to the `.desktop` file's `Categories=`.
 - `--about-url` — fills the deb's `Homepage:` and the rpm's `URL:` tags with the project's

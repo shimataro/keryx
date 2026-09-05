@@ -162,10 +162,11 @@ Compose の DSL に対応プロパティが一切無いフィールドを 1 つ�
 - `licenseFile`（Linux でビルドする場合のみ `System.getProperty("os.name")` で条件付け）— `LICENSE`
   を deb の `/usr/share/doc/<pkg>/copyright` と rpm の `%license` ファイルとしてインストールする。
   Windows の MSI にライセンス同意ページを追加しないよう Linux 限定にしている。
-- `linux { debMaintainer = "Mercury Works <keryx@merc.works>" }` — 未設定だと jpackage 自身の既定値
-  である `<ビルドユーザー>@<ビルドホスト>`（CI ランナー自身のアカウント）が deb の `Maintainer:` タグに
-  入る。個人アドレスではなく role アドレス — 公開される全ての `.deb` に恒久的に残り、`apt show` で
-  誰でも読めるため。
+- `linux { debMaintainer = "keryx@merc.works" }` — deb の `Maintainer:` タグに書き込まれるメール
+  アドレス。jpackage は設定された `vendor` を前に付けるため、結果として "Mercury Works <keryx@merc.works>"
+  になる。未設定だと jpackage 自身の既定値である `<ビルドユーザー>@<ビルドホスト>`
+  （CI ランナー自身のアカウント）が入る。個人アドレスではなく role アドレス — 公開される全ての
+  `.deb` に恒久的に残り、`apt show` で誰でも読めるため。
 - `linux { appCategory = "net" }` — deb の `Section:` / rpm の `Group:` タグ。`.desktop` ファイルの
   `Categories=` にマップされる `menuGroup` とは別物。
 - `--about-url` — deb の `Homepage:` と rpm の `URL:` タグにプロジェクトのウェブサイトを入れる。
