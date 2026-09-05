@@ -8,10 +8,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -524,7 +529,15 @@ internal fun FeedListPane(
                 // and hands a slot that held, say, a folder header to a feed row. Keying them pins
                 // each slot to its identity, and the contentType keeps each kind in its own reuse
                 // pool so a recycled slot is only ever refilled with the same kind of row.
-                LazyColumn(Modifier.fillMaxSize(), state = listState) {
+                // contentPadding's bottom: on Android this pane draws edge-to-edge (see
+                // HomeScreen's Scaffold), so the list needs its own bottom inset to clear the
+                // navigation bar; WindowInsets.safeDrawing is zero on desktop, so this is a no-op
+                // there.
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    state = listState,
+                    contentPadding = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues(),
+                ) {
                     stickyHeader(key = "folders-header", contentType = "section-header") {
                         Row(
                             Modifier.fillMaxWidth()

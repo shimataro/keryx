@@ -5,10 +5,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -243,6 +248,11 @@ internal fun ArticleDetailPaneContent(
         // is also the node ARTICLE_READER_TEST_TAG's tests already query with useUnmergedTree.
         Box(
             Modifier.fillMaxSize()
+                // Bottom inset clears the navigation bar on Android's edge-to-edge layout (see
+                // HomeScreen's Scaffold); zero on desktop (WindowInsets.safeDrawing), so it
+                // doesn't change readerBoundsAreIdenticalWithAndWithoutASelection there — both
+                // measurements below still shrink by the same (zero) amount.
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
                 .clipToBounds()
                 .onSizeChanged { swipeController.widthPx = it.width.toFloat() }
                 .let { if (swipeEnabled) it.articleSwipeNavigation(swipeController) else it },

@@ -4,11 +4,15 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
@@ -250,10 +254,15 @@ fun HomeScreen() {
     // Desktop has no in-app snackbar convention (see LocalSnackbarHostState's own KDoc), so the
     // host is only created — and provided — on a touch-primary platform.
     val snackbarHostState = if (isTouchPrimary) remember { SnackbarHostState() } else null
-    Scaffold { padding ->
+    // contentWindowInsets = WindowInsets(0): each pane applies its own inset instead of one
+    // consumed here — see KeryxPaneTopBar's Android `actual` (top), FeedListPane's and
+    // ArticleListPane's LazyColumn `contentPadding` (bottom), and the horizontal inset applied to
+    // this root Box below. This is what lets a narrow layout's modal navigation drawer scrim
+    // reach all the way to the status/navigation bars instead of stopping at this padding's edge.
+    Scaffold(contentWindowInsets = WindowInsets(0)) { _ ->
         CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {
         Box(
-            Modifier.padding(padding).consumeWindowInsets(padding).fillMaxSize()
+            Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)).fillMaxSize()
                 .focusRequester(focusRequester)
                 .focusable()
                 .homeKeyboardShortcuts(
