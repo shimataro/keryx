@@ -161,10 +161,6 @@ internal const val FEED_LIST_DRAG_HOST_TEST_TAG = "feed-list-drag-host"
  *   state — opening the list is an *entrance* there, not a return to where the user left off, even
  *   when the filter selected is the one already active (see `selectFilter`'s own `reentering`
  *   param, which this parameter's non-nullness also drives).
- * @param notifVm The notification center, when this pane is the one that has to host its bell —
- *   i.e. when the article list pane (which owns the bell everywhere else) is not on screen
- *   alongside this one. `null` at every other layout/depth, so the bell is never drawn twice; see
- *   `HomeScreen`'s pane-layout wiring, which derives it from `visiblePanes`.
  * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
  * @param hasNativeAppMenu Overridable for tests only — see `platform/PlatformOs.kt`'s own KDoc.
  *   Gates this pane's header (an `app_name` title instead of none) and its settings footer row
@@ -187,7 +183,6 @@ internal fun FeedListPane(
     deleteSelectedRequestId: Int = 0,
     onSelectionAdvance: (() -> Unit)? = null,
     onEnterArticleList: (() -> Unit)? = null,
-    notifVm: NotificationCenterViewModel? = null,
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     hasNativeAppMenu: Boolean = works.merc.keryx.app.platform.hasNativeAppMenu,
     returnRipplePulse: Int = 0,
@@ -421,7 +416,6 @@ internal fun FeedListPane(
             vm = vm,
             cloudConnected = cloudConnected,
             onAddFeedClick = onAddFeedClick,
-            notifVm = notifVm,
             hasNativeAppMenu = hasNativeAppMenu,
         )
 
@@ -883,10 +877,14 @@ private fun FeedListAutoScrollEffect(
 /**
  * [FeedListPane]'s top toolbar row: an `app_name` title on a platform with no native application
  * menu bar (see [hasNativeAppMenu] below — desktop's own window title bar already names the app,
- * so this stays untitled there), the notification bell (when [notifVm] is given — see
- * [FeedListPane]'s own KDoc), then add feed / refresh all / cloud sync (when [cloudConnected]).
+ * so this stays untitled there), then add feed / refresh all / cloud sync (when [cloudConnected]).
  * Reads [vm]'s refreshing/syncing state itself (rather than taking it as a parameter) so a
  * refresh/sync toggle only invalidates this row's own restart scope, not the whole pane.
+ *
+ * The bell lives on `ArticleListPane`'s own header at every layout/depth this pane can be on
+ * screen at (Triple's permanent pane, or the narrow drawer, which never displaces the article
+ * list the way the old sliding-window Dual/depth-1-Single narrow layouts used to) — see
+ * `HomePaneLayout.kt`'s `feedListIsDrawer`/`visiblePanes` — so this row never has to host one.
  *
  * Settings, this pane's other in-pane entry point on such a platform, is *not* rendered here —
  * see [FeedListPane]'s own settings footer row, below its drag-host `Box`.
@@ -898,7 +896,6 @@ private fun FeedListToolbarRow(
     vm: HomeViewModel,
     cloudConnected: Boolean,
     onAddFeedClick: () -> Unit,
-    notifVm: NotificationCenterViewModel?,
     hasNativeAppMenu: Boolean,
 ) {
     val refreshing by vm.feedRefreshing.collectAsStateSafe(false)
@@ -908,15 +905,6 @@ private fun FeedListToolbarRow(
             modifier = Modifier.padding(top = WindowChrome.titleBarInsetDp.dp, start = 4.dp, end = 4.dp),
             title = if (hasNativeAppMenu) null else stringResource(Res.string.app_name),
         ) {
-            // Notifications are their own concern, not part of the add/refresh/sync cluster, so
-            // they get their own (single-icon, therefore uncapsuled) slot separated by the
-            // standard 8dp — and sit ahead of it, matching where the bell sits relative to
-            // ArticleListTopBar's own icons, so it keeps the same relative position across the
-            // two top bars a narrow layout swaps between.
-            if (notifVm != null) {
-                NotificationsBell(notifVm)
-                Spacer(Modifier.width(8.dp))
-            }
             ToolbarIconGroup {
                 val addFeedTooltip = stringResource(Res.string.home_add_feed)
                 TooltipIconButton(tooltip = addFeedTooltip, onClick = onAddFeedClick) {
