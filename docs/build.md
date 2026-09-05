@@ -274,6 +274,12 @@ actually sufficient under strict confinement (tray D-Bus ownership in particular
 this desktop-entry registration actually takes effect on a real snapd install have not yet been
 verified.
 
+The app also writes its own data (database, settings, lock file, and log file) under the same
+`~/.local/share` path, which would also be blocked by the strict `home` plug. To prevent a startup
+crash, `snap/snapcraft.yaml` remaps `XDG_DATA_HOME` and `XDG_CACHE_HOME` to
+`$SNAP_USER_COMMON/.local/share` and `$SNAP_USER_COMMON/.cache`. `AppDirs.desktop.kt` already
+reads those environment variables, so no source code change is needed.
+
 ### Android (APK / AAB)
 
 Unlike the desktop packages above, an APK/AAB can be built on **any** OS — there is no

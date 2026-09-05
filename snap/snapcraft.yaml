@@ -16,6 +16,9 @@ source-code: https://github.com/shimataro/keryx
 apps:
   keryx:
     command: bin/Keryx
+    environment:
+      XDG_DATA_HOME: $SNAP_USER_COMMON/.local/share
+      XDG_CACHE_HOME: $SNAP_USER_COMMON/.cache
     plugs:
       - network
       - password-manager-service # Secret Service (java-keyring) — Dropbox token storage

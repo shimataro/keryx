@@ -272,6 +272,13 @@ snapdのポリシー上**自動接続されない**ため、Secret Serviceに実
 strict confinement下で実際に十分か（特にトレイのD-Bus所有権）、およびこのデスクトップエントリ
 による登録が実機のsnapd環境で実際に機能するかは、まだ検証していない。
 
+アプリ自身のデータ（データベース、設定、ロックファイル、ログファイル）も同じ
+`~/.local/share` 配下に書き込むが、これも strict confinement 下の `home` プラグでは
+ブロックされる。起動時のクラッシュを防ぐため、`snap/snapcraft.yaml` では `XDG_DATA_HOME`
+と `XDG_CACHE_HOME` を `$SNAP_USER_COMMON/.local/share` と `$SNAP_USER_COMMON/.cache` に
+リマップしている。`AppDirs.desktop.kt` は既にこれらの環境変数を読んでいるため、ソースコードの
+変更は不要である。
+
 ### Android（APK / AAB）
 
 上記のデスクトップパッケージと違い、APK/AAB は**どの OS からでも**ビルドできる —
