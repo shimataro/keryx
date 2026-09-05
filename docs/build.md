@@ -150,6 +150,59 @@ Only the platform matching the execution platform can be built (cross-compilatio
 ./gradlew :composeApp:packageRpm
 ```
 
+### Linux package metadata (license, homepage, vendor)
+
+`nativeDistributions` fills in metadata that jpackage's own Linux defaults leave wrong or blank,
+plus one field it has no Compose DSL property for at all:
+
+- `vendor = "Mercury Works"` — the publishing identity, kept separate from `appName` ("Keryx", the
+  product's own display name). Surfaces as the rpm `Vendor:` tag and the Windows installer's
+  Publisher property.
+- `linux { rpmLicenseType = "MIT" }` — without it, jpackage's own default is the literal string
+  `Unknown` in the rpm's `License:` tag.
+- `licenseFile` (set only when building on Linux, gated on `System.getProperty("os.name")`) —
+  installs `LICENSE` as the deb's `/usr/share/doc/<pkg>/copyright` and the rpm's `%license` file.
+  Gated to Linux so it doesn't also add a license-acceptance page to the Windows MSI.
+- `linux { debMaintainer = "Mercury Works <keryx@merc.works>" }` — without it, jpackage's own
+  default is `<build-user>@<build-host>` (the CI runner's own account) in the deb's `Maintainer:`
+  tag. A role address, not a personal one — it lands in every published `.deb` permanently and is
+  readable via `apt show`.
+- `linux { appCategory = "net" }` — the deb `Section:` / rpm `Group:` tag. Distinct from
+  `menuGroup`, which maps to the `.desktop` file's `Categories=`.
+- `--about-url` — fills the deb's `Homepage:` and the rpm's `URL:` tags with the project's
+  website. The Compose `nativeDistributions` DSL has no matching property, so this is added
+  directly to the `packageDeb`/`packageRpm` jpackage invocations via
+  `tasks.withType<AbstractJPackageTask>().configureEach { freeArgs.addAll(...) }` in
+  `composeApp/build.gradle.kts`.
+
+None of the above makes a Linux **software center** (GNOME Software, Ubuntu App Center, KDE
+Discover) show a license or a homepage link, though: those read
+[AppStream metainfo](https://www.freedesktop.org/software/appstream/docs/), not the package
+control file — the `.deb` control file has no license field at all. So `packageDeb` also runs a
+finalizer (`injectDebMetainfo` in `composeApp/build.gradle.kts`) that extracts the built `.deb`
+with `dpkg-deb -R`, writes `composeApp/packaging/linux/works.merc.keryx.metainfo.xml.in` into
+`usr/share/metainfo/works.merc.keryx.metainfo.xml` with its placeholders substituted
+(`@DESKTOP_ID@` — the actual `.desktop` filename jpackage placed in the package, discovered by
+walking the extracted payload rather than assumed, since jpackage derives the name from
+`packageName`/the launcher name; `@VERSION@`; `@DATE@`), and repacks with
+`dpkg-deb --build --root-owner-group`. This finalizer is a no-op when `dpkg-deb` isn't on `PATH`
+(a local macOS/Windows build never produces a `.deb` at all).
+
+`.rpm` gets no equivalent metainfo injection — deliberately asymmetric. jpackage's own
+`--resource-dir` is fixed by the Compose plugin to a temp directory it clears mid-task, so the rpm
+`.spec` template can't be substituted the way the `.deb` control files can, and repacking an
+already-built `.rpm` needs an extra tool (`rpmrebuild`) this project doesn't otherwise depend on.
+This isn't a functional gap, though: unlike `.deb`, the rpm `.spec` template already has native
+`License:` and `URL:` tags, so `rpmLicenseType` and `--about-url` alone are enough for both
+`rpm -qi` and PackageKit-based software centers to show correct values.
+
+AppStream metainfo requires the `<launchable type="desktop-id">` file to actually exist under
+`/usr/share/applications` after install for the entry to validate and link correctly, which is
+why `linux { shortcut = true }` is load-bearing here too: without it, jpackage's own
+`DesktopIntegration` never emits a `.desktop` file into the `.deb` at all (its condition is "has a
+shortcut or a file association"), leaving the injected metainfo's `<launchable>` pointing at
+nothing. This does not change how the `keryx://` custom URI scheme is registered — see below.
+
 ### Linux Snap package
 
 Unlike `.deb`/`.rpm` (built by jpackage via the tasks above), the Snap is built by `snapcraft`
@@ -271,9 +324,11 @@ category in the freedesktop.org Desktop Menu Specification, with `News` and `Fee
 registered additional categories. Windows/jpackage has no category concept (its `menuGroup` is only
 the Start Menu folder name), so nothing is set there.
 
-The `keryx://` custom URI scheme is **not** registered by the deb/rpm package. jpackage only emits a `.desktop` file when
-given a shortcut or a file association, and its template's `Exec` line has no `%u`, so the URI would never reach the
-process. Instead the app registers itself on first launch (`LinuxUriSchemeRegistrar`), writing
+The deb/rpm package now ships a system `.desktop` file (`linux { shortcut = true }`, added for
+AppStream's `<launchable>` — see "Linux package metadata" above), but it still does **not**
+register the `keryx://` custom URI scheme: jpackage's own `.desktop` template has no `%u` on its
+`Exec` line, so the URI would never reach the process that way regardless. Instead the app
+registers itself on first launch (`LinuxUriSchemeRegistrar`), writing
 `$XDG_DATA_HOME/applications/keryx-url-handler.desktop` (default `~/.local/share/applications`) and an
 association in `$XDG_CONFIG_HOME/mimeapps.list` (default `~/.config/mimeapps.list`). This also covers
 `createDistributable` app images and tarball installs. Both files live in the user's home and are **not removed when the

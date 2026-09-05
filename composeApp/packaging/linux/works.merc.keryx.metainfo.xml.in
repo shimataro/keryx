@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream metainfo template for the .deb package (injected by the packageDeb finalizer in
+  composeApp/build.gradle.kts). GNOME Software / Ubuntu App Center / KDE Discover read this file
+  for the license and homepage/links they show — the .deb control file itself has neither field.
+
+  Placeholders substituted at build time:
+    @DESKTOP_ID@ — the actual .desktop filename jpackage produced (see the injection task; not
+                   hardcoded here because jpackage derives it from linux-package-name + launcher
+                   name and this template must not assume that exact casing).
+    @VERSION@    — appPackageVersion (numeric MAJOR.MINOR.PATCH, matching the .deb's own Version:).
+    @DATE@       — the build date (ISO 8601), for the <release> entry below.
+-->
+<component type="desktop-application">
+  <id>works.merc.keryx</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Keryx</name>
+  <summary>A local-first, cross-platform RSS reader</summary>
+  <summary xml:lang="ja">ローカルファースト・クロスプラットフォームな RSS リーダー</summary>
+  <!-- AppStream requires exactly one <description> element; per-language text is carried by
+       xml:lang on each <p>, not by repeating <description> (a repeated, localized <description>
+       tag fails pedantic appstreamcli validation). -->
+  <description>
+    <p>
+      A local-first, cross-platform RSS reader with multi-device sync via your own cloud storage
+      (Dropbox / Google Drive / OneDrive). No account required.
+    </p>
+    <p xml:lang="ja">
+      ローカルファーストなクロスプラットフォーム RSS リーダーです。お使いのクラウドストレージ
+      （Dropbox / Google Drive / OneDrive）経由でマルチデバイス同期に対応しており、アカウント
+      登録は不要です。
+    </p>
+  </description>
+  <launchable type="desktop-id">@DESKTOP_ID@</launchable>
+  <url type="homepage">https://keryx.merc.works</url>
+  <url type="bugtracker">https://github.com/shimataro/keryx/issues</url>
+  <url type="vcs-browser">https://github.com/shimataro/keryx</url>
+  <developer id="works.merc">
+    <name>Mercury Works</name>
+  </developer>
+  <update_contact>keryx_AT_merc.works</update_contact>
+  <categories>
+    <category>Network</category>
+    <category>News</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="@VERSION@" date="@DATE@"/>
+  </releases>
+</component>

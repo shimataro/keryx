@@ -1,6 +1,9 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.nio.file.Files
+import java.security.MessageDigest
+import java.time.LocalDate
 import java.util.Properties
 
 plugins {
@@ -74,9 +77,20 @@ val appVersion: String =
 // Single source of truth for the app's display name within this build script. Mirrors (but is a
 // separate literal from) core/Constants.kt's APP_NAME: this script evaluates before composeApp's
 // own commonMain is compiled, so it cannot reference that Kotlin constant directly. Every
-// packaging-metadata spot below (packageName, vendor, the macOS Dock-name jvmArg, the Windows
-// Start Menu group, the Info.plist patch path, the DMG volume name) reads from this one val.
+// packaging-metadata spot below (packageName, the macOS Dock-name jvmArg, the Windows Start Menu
+// group, the Info.plist patch path, the DMG volume name) reads from this one val.
 val appName = "Keryx"
+
+// The publishing entity, independent of appName (the product's own display name). Feeds
+// nativeDistributions.vendor, which surfaces as the rpm `Vendor:` tag and the Windows installer's
+// Publisher property — kept separate from appName so a product name and its publisher's identity
+// don't collide, matching the "Mercury Works <keryx@merc.works>" identity used for the deb
+// Maintainer / AppStream <developer> (see the linux { } block below).
+val appVendor = "Mercury Works"
+
+// Project homepage, shared by the Linux packages' `--about-url` (deb `Homepage:` / rpm `URL:`)
+// and the AppStream metainfo's <url type="homepage">. Mirrors README.md's "Website" line.
+val appHomepageUrl = "https://keryx.merc.works"
 
 // jpackage's packaging metadata (CFBundleVersion, RPM %version, MSI ProductVersion) must stay
 // purely numeric MAJOR.MINOR.PATCH — unlike BuildConfig.VERSION, it cannot carry a SemVer
@@ -443,7 +457,13 @@ compose.desktop {
             packageName = appName
             packageVersion = appPackageVersion
             description = "Local-first, cross-platform RSS reader"
-            vendor = appName
+            vendor = appVendor
+            // Linux-only: an unconditional licenseFile would also add a license-acceptance page
+            // to the Windows MSI, changing its install flow for a problem that is Linux-specific
+            // (the deb's /usr/share/doc/<pkg>/copyright and the rpm's %license section).
+            if (System.getProperty("os.name").startsWith("Linux")) {
+                licenseFile.set(rootProject.file("LICENSE"))
+            }
             // java.sql: sqlite-jdbc, java.naming: keyring, java.desktop: AWT tray,
             // jdk.httpserver: OAuth loopback callback server,
             // jdk.security.auth: dbus-java's SASL EXTERNAL auth resolves the uid through
@@ -568,13 +588,42 @@ compose.desktop {
             linux {
                 iconFile.set(project.file("icons/keryx.png"))
                 menuGroup = "Network;News;Feed;"
-                // The keryx:// scheme is not registered here. jpackage only emits a .desktop file
-                // when given a shortcut or a file association, and its template's Exec line has no
-                // %u — so the URI would never reach the process. LinuxUriSchemeRegistrar writes a
-                // user-level .desktop entry at startup instead, which also covers app-image and
-                // tarball installs.
+                // rpm's `License:` tag — jpackage's own default is the literal "Unknown" without this.
+                rpmLicenseType = "MIT"
+                // deb's `Maintainer:` — an email address only; jpackage itself renders the tag as
+                // "<vendor> <this address>" (verified against `jpackage --help`'s own description
+                // of the option), so passing a "Name <email>" pair here doubles up into
+                // "Mercury Works <Mercury Works <keryx@merc.works>>". Without this property at
+                // all, jpackage's own default is <build-user>@<build-host>. A role address, not a
+                // personal one: it ends up permanently in every published .deb, readable via
+                // `apt show`. Matches the AppStream <developer> / <update_contact> identity below.
+                debMaintainer = "keryx@merc.works"
+                // deb's `Section:` / rpm's `Group:` — distinct from menuGroup above (which maps to
+                // the .desktop file's Categories).
+                appCategory = "net"
+                // Makes jpackage emit and register a system .desktop file (DesktopIntegration only
+                // does this given a shortcut or a file association — otherwise deb/rpm ship no
+                // .desktop at all). Needed for the app to show up in the applications menu, and for
+                // AppStream metainfo's <launchable type="desktop-id"> to have a target to point at.
+                // The keryx:// scheme is still NOT registered through this: jpackage's own .desktop
+                // template has no %u on its Exec line, so the URI would never reach the process
+                // this way. LinuxUriSchemeRegistrar keeps writing its own user-level .desktop entry
+                // at startup for that — under a different filename (see its own doc comment) so the
+                // two never collide — which also covers app-image and tarball installs that have no
+                // packaged .desktop at all.
+                shortcut = true
             }
         }
+    }
+}
+
+// --about-url is the only way to fill the deb's `Homepage:` and the rpm's `URL:` fields — the
+// Compose nativeDistributions DSL has no matching property, so it goes to jpackage directly.
+// Scoped to Deb/Rpm only so it never reaches the Dmg/Msi/AppImage tasks, whose own metadata this
+// problem report has nothing to do with.
+tasks.withType<org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask>().configureEach {
+    if (targetFormat == TargetFormat.Deb || targetFormat == TargetFormat.Rpm) {
+        freeArgs.addAll("--about-url", appHomepageUrl)
     }
 }
 
@@ -679,6 +728,71 @@ fun verifyMacOsBundleSeal(appDir: java.io.File) {
     )
 }
 
+/**
+ * The single `.desktop` filename jpackage placed inside the `.deb` payload — emitted because
+ * `linux.shortcut = true` is set above. jpackage names it `<packageName>-<launcher>.desktop`
+ * (LinuxAppImageBuilder), a convention that already satisfies xdg-desktop-menu's own
+ * vendor-prefix requirement, so the same name is what ends up registered under
+ * /usr/share/applications after install — exactly what AppStream's <launchable> needs to name.
+ * Discovered by walking the extracted payload rather than reconstructed from packageName/appName,
+ * so a future change to either can't silently produce a metainfo file pointing at nothing.
+ *
+ * Must check [java.io.File.isFile]: the bundled JDK runtime's `legal/` directory has one
+ * subdirectory per module, and `legal/java.desktop/` (license notices for the `java.desktop`
+ * platform module — AWT/Swing) is a directory whose name also ends in ".desktop".
+ */
+fun findPackagedDesktopFileName(payloadDir: java.io.File): String {
+    val desktopFiles = payloadDir.walkTopDown().filter { it.isFile && it.extension == "desktop" }.toList()
+    return desktopFiles.singleOrNull()?.name
+        ?: error("Expected exactly one .desktop file under $payloadDir, found: ${desktopFiles.map { it.path }}")
+}
+
+/**
+ * Injects AppStream metainfo into a built `.deb` so software centers (GNOME Software, Ubuntu App
+ * Center, KDE Discover) can show the license and homepage links the `.deb` control file has no
+ * fields for at all (see composeApp/packaging/linux/works.merc.keryx.metainfo.xml.in). No-op when
+ * `dpkg-deb` isn't on PATH — a `.deb` is only ever actually produced on a Linux CI runner or a
+ * Linux dev machine, never by a macOS/Windows local build.
+ */
+fun injectDebMetainfo(debFile: java.io.File, metainfoTemplate: java.io.File, packageVersion: String) {
+    val dpkgDebAvailable = runCatching {
+        ProcessBuilder("dpkg-deb", "--version").redirectErrorStream(true).start().waitFor() == 0
+    }.getOrDefault(false)
+    if (!dpkgDebAvailable) return
+
+    // A path dpkg-deb can create itself: -R/--raw-extract refuses to write into a directory that
+    // already exists.
+    val workDir = Files.createTempFile("keryx-deb-metainfo", "").toFile().apply { delete() }
+    try {
+        runCommand("dpkg-deb", "-R", debFile.absolutePath, workDir.absolutePath)
+
+        val desktopId = findPackagedDesktopFileName(workDir)
+        val metainfoContent = metainfoTemplate.readText()
+            .replace("@DESKTOP_ID@", desktopId)
+            .replace("@VERSION@", packageVersion)
+            .replace("@DATE@", LocalDate.now().toString())
+
+        val metainfoRelativePath = "usr/share/metainfo/works.merc.keryx.metainfo.xml"
+        val metainfoFile = workDir.resolve(metainfoRelativePath)
+        metainfoFile.parentFile.mkdirs()
+        metainfoFile.writeText(metainfoContent)
+
+        // Best-effort: dpkg-deb --build does not itself validate md5sums against the payload, but
+        // keeping the control file accurate matches how a normal Debian package is built.
+        val md5 = MessageDigest.getInstance("MD5").digest(metainfoFile.readBytes())
+            .joinToString("") { "%02x".format(it) }
+        val md5sumsFile = workDir.resolve("DEBIAN/md5sums")
+        val existingMd5sums = md5sumsFile.takeIf { it.exists() }?.readText().orEmpty()
+        val separator = if (existingMd5sums.isNotEmpty() && !existingMd5sums.endsWith("\n")) "\n" else ""
+        md5sumsFile.writeText("$existingMd5sums$separator$md5  $metainfoRelativePath\n")
+
+        debFile.delete()
+        runCommand("dpkg-deb", "--build", "--root-owner-group", workDir.absolutePath, debFile.absolutePath)
+    } finally {
+        workDir.deleteRecursively()
+    }
+}
+
 // Silences the sqlite-jdbc restricted-method (System::load) warning on JDK 22+.
 // Covers JavaExec tasks (run) and Test tasks (desktopTest/commonTest).
 tasks.withType<JavaExec>().configureEach {
@@ -776,6 +890,25 @@ afterEvaluate {
             runCommand("hdiutil", "convert", rwDmg.absolutePath, "-format", "UDZO", "-o", dmgFile.absolutePath)
         } finally {
             rwDmg.delete()
+        }
+    }
+
+    // Linux-only in effect: this task object exists on every host (Compose registers it
+    // unconditionally) but only actually runs on Linux — Compose disables it elsewhere via
+    // `packageTask.enabled = packageTask.targetFormat.isCompatibleWithCurrentOS` — so this doLast
+    // never fires on a macOS/Windows build.
+    tasks.findByName("packageDeb")?.let { packageDebTask ->
+        val metainfoTemplate = file("packaging/linux/works.merc.keryx.metainfo.xml.in")
+        // Declared explicitly: the template is read inside doLast via a plain file() call, which
+        // Gradle's up-to-date check does not see on its own — without this, editing the template
+        // alone would leave packageDeb UP-TO-DATE and silently keep shipping the old metainfo.
+        packageDebTask.inputs.file(metainfoTemplate)
+        packageDebTask.doLast {
+            val debFile = file("build/compose/binaries/main/deb")
+                .listFiles { _, name -> name.endsWith(".deb") }
+                ?.singleOrNull()
+                ?: return@doLast
+            injectDebMetainfo(debFile, metainfoTemplate, appPackageVersion)
         }
     }
 }
