@@ -16,7 +16,6 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
@@ -34,15 +33,15 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 /**
- * End-to-end coverage for the bug this app's Android narrow layout used to have: typing into the
- * feed list's search field never advanced the navigation stack (so the results were never on
- * screen — see `FeedListPane.kt`'s old `KeryxTextField` block), and drilling into the article list
- * made the field disappear along with `FeedListPane` itself.
+ * End-to-end coverage for the article list's own search entry point at a narrow `PaneLayout`
+ * (`ArticleListTopBar`'s search icon, `onSearchClick`) — the feed list is a modal navigation
+ * drawer at every narrow layout (see `HomePaneLayout.kt`'s `feedListIsDrawer`) and has no search
+ * entry point of its own there, so this pane's own field is the only one that exists.
  *
- * This drives `FeedListPane` + `ArticleListPane` together exactly as `HomeScreen` wires them at
- * `PaneLayout.Single`, using a plain depth cursor in place of `HomeScreen`'s own
- * `focusedPane`/menu-bar machinery — `FeedListPaneTest.kt`'s own host is why only `FeedListPane`
- * needs Koin at all (`ArticleListPane` injects nothing).
+ * This drives `ArticleListPane` alone with a plain depth cursor (`NarrowHomeTestHost`) or a
+ * `focusedPane: HomePane` cursor (`DualHomeTestHost`), in place of `HomeScreen`'s own
+ * `focusedPane`/menu-bar machinery — `FeedListPaneTest.kt`'s own host is where `FeedListPane`
+ * (the drawer's content) is exercised on its own.
  */
 @OptIn(ExperimentalTestApi::class)
 class SearchPaneNavigationTest {
@@ -62,22 +61,15 @@ class SearchPaneNavigationTest {
             }
             NarrowPaneRow(visible, Modifier.size(320.dp, 600.dp)) { pane, paneModifier ->
                 when (pane) {
-                    HomePane.FeedList -> FeedListPane(
-                        vm = vm,
-                        focused = true,
-                        dragOverlay = remember { FeedDragOverlayState() },
-                        onActivated = {},
-                        modifier = paneModifier,
-                        onSelectionAdvance = { onDepthChange(2) },
-                    )
+                    HomePane.FeedList -> error("The feed list is a drawer at PaneLayout.Single, never a NarrowPaneRow pane.")
                     HomePane.ArticleList -> ArticleListPane(
                         vm = vm,
                         focused = true,
                         onActivated = {},
                         modifier = paneModifier,
                         onSelectionAdvance = { onDepthChange(3) },
-                        onNavigateUp = ::goBack,
-                        navigateUpEnabled = homeBackAction(layout, depth, searchScopeEntry != null) != HomeBackAction.None,
+                        onOpenDrawer = {},
+                        onExitSearch = ::goBack,
                         onSearchClick = { vm.enterSearchScope(HomePane.ArticleList) },
                     )
                     // A plain stand-in for ArticleDetailPane: its own reader is a genuine
@@ -100,10 +92,11 @@ class SearchPaneNavigationTest {
      * Mirrors `HomeScreen`'s real [PaneLayout.Dual] wiring (its `focusedPane`/`goBack` state, plus
      * the same [NarrowPaneRow] host it lays the panes out with), using a genuine `focusedPane: HomePane` state instead of
      * [NarrowHomeTestHost]'s plain depth cursor — `homeBackAction` is driven off
-     * `focusedPane.ordinal + 1`, exactly as `HomeScreen`'s own `goBack()`/`navigateUpEnabled` are,
-     * which is what the regression below actually depends on: at `Dual`, both
-     * [FeedListPane] and [ArticleListPane] are on screen together, so which one is "focused" is
-     * independent of which panes are visible.
+     * `focusedPane.ordinal + 1`, exactly as `HomeScreen`'s own `goBack()` is, which is what the
+     * regression below actually depends on: `focusedPane` can still land on `HomePane.FeedList`
+     * (e.g. left-arrow keyboard nav — see `HomeScreen`'s own KDoc), even though the feed list
+     * itself is a drawer rather than a pane at this layout, and which one is "focused" is
+     * independent of which panes [visiblePanes] actually shows.
      */
     @Composable
     private fun DualHomeTestHost(vm: HomeViewModel, focusedPane: HomePane, onFocusedPaneChange: (HomePane) -> Unit) {
@@ -126,21 +119,14 @@ class SearchPaneNavigationTest {
             }
             NarrowPaneRow(visible, Modifier.size(640.dp, 600.dp)) { pane, paneModifier ->
                 when (pane) {
-                    HomePane.FeedList -> FeedListPane(
-                        vm = vm,
-                        focused = focusedPane == HomePane.FeedList,
-                        dragOverlay = remember { FeedDragOverlayState() },
-                        onActivated = { setFocusedPane(HomePane.FeedList) },
-                        modifier = paneModifier,
-                        onSelectionAdvance = { setFocusedPane(HomePane.ArticleList) },
-                    )
+                    HomePane.FeedList -> error("The feed list is a drawer at PaneLayout.Dual, never a NarrowPaneRow pane.")
                     HomePane.ArticleList -> ArticleListPane(
                         vm = vm,
                         focused = focusedPane == HomePane.ArticleList,
                         onActivated = { setFocusedPane(HomePane.ArticleList) },
                         modifier = paneModifier,
-                        onNavigateUp = ::goBack,
-                        navigateUpEnabled = homeBackAction(layout, focusedPane.ordinal + 1, searchScopeEntry != null) != HomeBackAction.None,
+                        onOpenDrawer = {},
+                        onExitSearch = ::goBack,
                         onSearchClick = {
                             setFocusedPane(HomePane.ArticleList)
                             vm.enterSearchScope(HomePane.ArticleList)
@@ -163,8 +149,10 @@ class SearchPaneNavigationTest {
 
             assertEquals(ArticleFilter.All, vm.filter.value)
 
-            // Bug precondition: the feed list, not the article list, is focused when the
-            // article list's own search icon is tapped.
+            // Bug precondition: focusedPane is HomePane.FeedList (e.g. left-arrow keyboard nav)
+            // when the article list's own search icon is tapped — the feed list itself has no
+            // on-screen row to focus at this layout (it's a drawer), but the cursor value alone
+            // must not stop homeBackAction from resolving correctly afterward.
             onNodeWithContentDescription("記事を検索").performClick()
             waitForIdle()
 
@@ -181,29 +169,6 @@ class SearchPaneNavigationTest {
             // article list (enterSearchScope's own returnPane), not the feed list.
             assertEquals(ArticleFilter.All, vm.filter.value)
             assertEquals(HomePane.ArticleList, focusedPane)
-        }
-    }
-
-    @Test
-    fun tappingTheCollapsedSearchBarNavigatesToTheResultsPaneWhoseFieldCarriesTheQuery() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
-        useHomeViewModel(driver, db) { fixture ->
-            val vm = fixture.vm
-            var depth by mutableStateOf(1)
-            setContent { NarrowHomeTestHost(vm, depth, { depth = it }) }
-            waitForIdle()
-
-            // Depth 1: only the collapsed bar is on screen — no editable field anywhere yet.
-            onNode(hasSetTextAction()).assertDoesNotExist()
-
-            onNodeWithText("記事を検索…").performClick()
-            waitForIdle()
-
-            // Depth 2: the navigation stack advanced, and the query field is now on the same
-            // pane as the results — the exact bug this design fixes.
-            assertEquals(2, depth)
-            assertEquals(ArticleFilter.Search, vm.filter.value)
-            onNode(hasSetTextAction()).assertIsDisplayed()
         }
     }
 
@@ -235,27 +200,7 @@ class SearchPaneNavigationTest {
     }
 
     @Test
-    fun exactlyOnePaneConsumesASearchFocusRequest() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
-        useHomeViewModel(driver, db) { fixture ->
-            val vm = fixture.vm
-            var depth by mutableStateOf(1)
-            setContent { NarrowHomeTestHost(vm, depth, { depth = it }) }
-            waitForIdle()
-
-            onNodeWithText("記事を検索…").performClick()
-            waitForIdle()
-
-            // The latch (raised by the collapsed bar's own onClick, via requestSearchFocus())
-            // must have been consumed by exactly the field that appeared at depth 2 — not left
-            // dangling to steal focus at some later, unrelated field.
-            assertEquals(2, depth)
-            assertEquals(false, vm.pendingSearchFocus.value)
-        }
-    }
-
-    @Test
-    fun switchingAwayFromSearchAtDepthOneDropsThePendingFocusRequest() {
+    fun switchingAwayFromSearchBeforeAnyFieldMountedDropsThePendingFocusRequest() {
         val (driver, db) = inMemoryDb()
         val fixture = newHomeViewModel(driver, db)
         val vm = fixture.vm
@@ -287,9 +232,9 @@ class SearchPaneNavigationTest {
             onNodeWithContentDescription("記事を検索").performClick()
             waitForIdle()
 
-            // The regression this whole feature fixes: entering Search from the article list's
-            // own search icon must not push a new depth (the field lives on this same pane), so
-            // going back afterwards doesn't overshoot past the list the user was actually on.
+            // Entering Search from the article list's own search icon must not push a new depth
+            // (the field lives on this same pane), so going back afterwards doesn't overshoot
+            // past the list the user was actually on.
             assertEquals(2, depth)
             assertEquals(ArticleFilter.Search, vm.filter.value)
 
@@ -298,33 +243,6 @@ class SearchPaneNavigationTest {
 
             assertEquals(2, depth)
             assertEquals(ArticleFilter.All, vm.filter.value)
-        }
-    }
-
-    @Test
-    fun theCollapsedSearchBarsBackArrowRestoresTheFeedListAndKeepsTheQuery() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
-        useHomeViewModel(driver, db) { fixture ->
-            val vm = fixture.vm
-            var depth by mutableStateOf(1)
-            setContent { NarrowHomeTestHost(vm, depth, { depth = it }) }
-            waitForIdle()
-
-            onNodeWithText("記事を検索…").performClick()
-            waitForIdle()
-            assertEquals(2, depth)
-            onNode(hasSetTextAction()).performTextInput("kotlin")
-            waitForIdle()
-
-            onNodeWithContentDescription("戻る").performClick()
-            waitForIdle()
-
-            // Back from the search screen returns to the feed list (where it was entered from,
-            // not depth 1 as an incidental side effect of popping), with the filter restored —
-            // not left on Search — and the query kept for the collapsed bar to show.
-            assertEquals(1, depth)
-            assertEquals(ArticleFilter.All, vm.filter.value)
-            assertEquals("kotlin", vm.searchQuery.value)
         }
     }
 }

@@ -13,11 +13,9 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 /**
- * Compose-level coverage for `ListRowChrome.kt`'s [PulseRippleEffect] — the shared wiring both
- * [ArticleRow] (see `ArticleRowHighlightTest`'s own `ripplePulse` cases) and the feed-list rows
- * (`FeedListPane.kt`'s `SidebarRow`/`TagRow`/`TagFeedRow`, `FeedListDragAndDrop.kt`'s
- * `FolderGroupHeader`/`FeedRow`) call into. The pure-function/timing coverage of
- * `feedListRipplePulseFor`/`playPulseRipple` itself lives in `FeedListReturnRippleTest` and
+ * Compose-level coverage for `ListRowChrome.kt`'s [PulseRippleEffect] — the shared wiring
+ * [ArticleRow] calls into (see `ArticleRowHighlightTest`'s own `ripplePulse` cases). The
+ * pure-function/timing coverage of `ripplePulseFor`/`playPulseRipple` itself lives in
  * `ArticleReturnRippleTest`.
  */
 @OptIn(ExperimentalTestApi::class)

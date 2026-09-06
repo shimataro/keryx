@@ -63,20 +63,41 @@ class HomePaneLayoutTest {
     }
 
     @Test
-    fun visiblePanesAtSingleShowsExactlyTheDepthsOwnPane() {
-        assertEquals(listOf(HomePane.FeedList), visiblePanes(PaneLayout.Single, 1))
+    fun visiblePanesAtSingleShowsArticleListOrArticleDetailNeverFeedList() {
+        // Depth 1 (a stale saved value from before the drawer existed, or from PaneLayout.Triple)
+        // resolves the same as depth 2: the feed list is a drawer at this layout, not a pane, so
+        // there is no depth-1 screen to distinguish it from.
+        assertEquals(listOf(HomePane.ArticleList), visiblePanes(PaneLayout.Single, 1))
         assertEquals(listOf(HomePane.ArticleList), visiblePanes(PaneLayout.Single, 2))
         assertEquals(listOf(HomePane.ArticleDetail), visiblePanes(PaneLayout.Single, 3))
     }
 
     @Test
-    fun visiblePanesAtDualSlidesFromFeedListToDetailKeepingArticleListOnScreen() {
-        // depth 1 and 2 both show feed list + article list — selecting a filter (staying at
-        // depth 1 or moving to depth 2) doesn't change which panes are visible.
-        assertEquals(listOf(HomePane.FeedList, HomePane.ArticleList), visiblePanes(PaneLayout.Dual, 1))
-        assertEquals(listOf(HomePane.FeedList, HomePane.ArticleList), visiblePanes(PaneLayout.Dual, 2))
-        // Only drilling into an article (depth 3) swaps the feed list out for the detail pane.
-        assertEquals(listOf(HomePane.ArticleList, HomePane.ArticleDetail), visiblePanes(PaneLayout.Dual, 3))
+    fun visiblePanesAtDualAlwaysShowsArticleListAndDetailRegardlessOfDepth() {
+        // The feed list is a drawer at Dual, not a third on-screen pane, so there is nothing to
+        // slide in or out as the stack's depth changes — unlike before this layout had a drawer.
+        for (depth in 1..3) {
+            assertEquals(listOf(HomePane.ArticleList, HomePane.ArticleDetail), visiblePanes(PaneLayout.Dual, depth), "depth $depth")
+        }
+    }
+
+    @Test
+    fun visiblePanesNeverIncludesTheFeedListAtANarrowLayout() {
+        // The invariant NarrowPaneRow's own require() depends on — see its KDoc.
+        for (layout in listOf(PaneLayout.Single, PaneLayout.Dual)) {
+            for (depth in 1..3) {
+                assertTrue(HomePane.FeedList !in visiblePanes(layout, depth), "$layout depth $depth")
+            }
+        }
+    }
+
+    // --- feedListIsDrawer ---
+
+    @Test
+    fun feedListIsDrawerIsFalseOnlyAtTriple() {
+        assertEquals(false, feedListIsDrawer(PaneLayout.Triple))
+        assertEquals(true, feedListIsDrawer(PaneLayout.Dual))
+        assertEquals(true, feedListIsDrawer(PaneLayout.Single))
     }
 
     // --- triplePaneWidths ---
@@ -164,26 +185,22 @@ class HomePaneLayoutTest {
     }
 
     @Test
-    fun canNavigateBackIsTrueAtSingleForEveryDeeperDepth() {
-        // Single shows exactly one pane per depth, so stepping back always changes the screen.
-        assertEquals(true, canNavigateBack(PaneLayout.Single, 2))
+    fun canNavigateBackAtSingleIsTrueOnlyFromArticleListToArticleDetail() {
+        // depth 1->2 stays on the same pane (ArticleList, see visiblePanesAtSingle...'s own KDoc) —
+        // going back would change nothing on screen. Only depth 2->3 (ArticleList -> ArticleDetail)
+        // is a real, visible change.
+        assertEquals(false, canNavigateBack(PaneLayout.Single, 2))
         assertEquals(true, canNavigateBack(PaneLayout.Single, 3))
     }
 
     @Test
-    fun canNavigateBackIsFalseAtDualDepthTwoBecauseTheSlidingWindowDidNotMove() {
-        // Dual shows [FeedList, ArticleList] at both depth 1 and depth 2 (see visiblePanes'
-        // sliding-window KDoc) — going back from depth 2 to depth 1 changes nothing on screen, so
-        // this must resolve to false (the bug this function exists to fix: HomeScreen's old
-        // BackHandler intercepted this back press and produced no visible change).
-        assertEquals(false, canNavigateBack(PaneLayout.Dual, 2))
-    }
-
-    @Test
-    fun canNavigateBackIsTrueAtDualDepthThreeBecauseTheFeedListSlidesOut() {
-        // Depth 3 swaps the feed list pane out for the detail pane (visiblePanes(Dual, 3) ==
-        // [ArticleList, ArticleDetail]) — a real, visible change from depth 2.
-        assertEquals(true, canNavigateBack(PaneLayout.Dual, 3))
+    fun canNavigateBackIsAlwaysFalseAtDual() {
+        // Dual shows the same two panes at every depth (see visiblePanes' own KDoc) — going back
+        // never changes what's on screen there (the bug this function exists to fix: HomeScreen's
+        // old BackHandler used to intercept such a back press and produce no visible change).
+        for (depth in 1..3) {
+            assertEquals(false, canNavigateBack(PaneLayout.Dual, depth), "depth $depth")
+        }
     }
 
     // --- shouldFlashReturnedArticle ---
@@ -206,28 +223,6 @@ class HomePaneLayoutTest {
         // be redundant.
         assertEquals(false, shouldFlashReturnedArticle(PaneLayout.Dual, HomePane.ArticleDetail))
         assertEquals(false, shouldFlashReturnedArticle(PaneLayout.Triple, HomePane.ArticleDetail))
-    }
-
-    // --- shouldFlashReturnedFeedListRow ---
-
-    @Test
-    fun shouldFlashReturnedFeedListRowIsTrueAtSingleBackingOutOfArticleList() {
-        assertEquals(true, shouldFlashReturnedFeedListRow(PaneLayout.Single, HomePane.ArticleList))
-    }
-
-    @Test
-    fun shouldFlashReturnedFeedListRowIsFalseAtSingleFromAnyOtherPane() {
-        assertEquals(false, shouldFlashReturnedFeedListRow(PaneLayout.Single, HomePane.FeedList))
-        assertEquals(false, shouldFlashReturnedFeedListRow(PaneLayout.Single, HomePane.ArticleDetail))
-    }
-
-    @Test
-    fun shouldFlashReturnedFeedListRowIsFalseAtDualAndTripleEvenFromArticleList() {
-        // At Dual, backing out of the article list toward the feed list is already a no-op
-        // (canNavigateBack is false there — both panes are already on screen), and Triple never
-        // has anywhere to back out to at all.
-        assertEquals(false, shouldFlashReturnedFeedListRow(PaneLayout.Dual, HomePane.ArticleList))
-        assertEquals(false, shouldFlashReturnedFeedListRow(PaneLayout.Triple, HomePane.ArticleList))
     }
 
     // --- homeBackAction ---
@@ -253,12 +248,31 @@ class HomePaneLayoutTest {
     }
 
     @Test
-    fun homeBackActionStillPopsThePaneAtDepthThreeEvenWithASearchScopePending() {
+    fun homeBackActionStillPopsThePaneAtSingleDepthThreeEvenWithASearchScopePending() {
         // A result opened from the search screen into ArticleDetail (depth 3) still pops one pane
-        // at a time — landing back on the search screen with the scope intact, not exiting it in
-        // one step.
+        // at a time at Single — landing back on the search screen with the scope intact, not
+        // exiting it in one step. ArticleList isn't visible at this depth (visiblePanes(Single, 3)
+        // == [ArticleDetail]), which is what keeps ExitSearch from taking priority here.
         assertEquals(HomeBackAction.PopPane, homeBackAction(PaneLayout.Single, 3, searchScopeReturnPending = true))
-        assertEquals(HomeBackAction.PopPane, homeBackAction(PaneLayout.Dual, 3, searchScopeReturnPending = true))
+    }
+
+    @Test
+    fun homeBackActionExitsSearchAtDualDepthThreeBecauseTheArticleListIsAlwaysVisibleThere() {
+        // Unlike Single, Dual keeps the article list on screen at every depth (visiblePanes(Dual,
+        // 3) == [ArticleList, ArticleDetail]) — so exiting Search takes priority over popping the
+        // pane at every depth there, not just depth 2.
+        assertEquals(HomeBackAction.ExitSearch, homeBackAction(PaneLayout.Dual, 3, searchScopeReturnPending = true))
+    }
+
+    @Test
+    fun backOnTheArticleListIsNotSwallowedSoTheOsCanExitTheApp() {
+        // Single/Dual's article list (depth 2), with no Search scope pending: homeBackAction must
+        // resolve to None so HomeScreen's BackHandler disables itself and the platform's own back
+        // gesture/button takes over — on Android, exiting the app — rather than this codebase
+        // swallowing the press with nowhere to go.
+        assertEquals(HomeBackAction.None, homeBackAction(PaneLayout.Single, 2, searchScopeReturnPending = false))
+        assertEquals(HomeBackAction.None, homeBackAction(PaneLayout.Dual, 2, searchScopeReturnPending = false))
+        assertEquals(HomeBackAction.None, homeBackAction(PaneLayout.Dual, 3, searchScopeReturnPending = false))
     }
 
     @Test
@@ -274,19 +288,20 @@ class HomePaneLayoutTest {
     // --- paneForFeedDetail ---
 
     @Test
-    fun paneForFeedDetailFocusesTheFeedListWhereTheArticleListIsVisibleBesideIt() {
-        // Triple always shows all three panes; Dual's depth 1 shows [FeedList, ArticleList]. In
-        // both, focusing the feed list puts the selected feed's row on screen next to its
-        // articles — the original "select that feed in the feed list" behaviour.
+    fun paneForFeedDetailFocusesTheFeedListAtTriple() {
+        // Triple shows all three panes as permanent on-screen panes — focusing the feed list puts
+        // the selected feed's row on screen next to its articles, the original "select that feed
+        // in the feed list" behaviour.
         assertEquals(HomePane.FeedList, paneForFeedDetail(PaneLayout.Triple))
-        assertEquals(HomePane.FeedList, paneForFeedDetail(PaneLayout.Dual))
     }
 
     @Test
-    fun paneForFeedDetailAdvancesToTheArticleListAtSingle() {
-        // Single shows one pane per depth, so focusing the feed list would navigate *backwards*
-        // from wherever the user was — and onto a list whose selection highlight isn't even
-        // painted (LocalRowSelectionVisible is false there).
+    fun paneForFeedDetailAdvancesToTheArticleListAtEveryNarrowLayout() {
+        // The feed list is a drawer at both narrow layouts (feedListIsDrawer) — focusing it isn't
+        // meaningful (there's no on-screen pane to select a row in), and opening the drawer
+        // unprompted would be a surprising side effect of a background notification. Advancing to
+        // the article list instead shows the feed's own articles, titled with the feed's name.
+        assertEquals(HomePane.ArticleList, paneForFeedDetail(PaneLayout.Dual))
         assertEquals(HomePane.ArticleList, paneForFeedDetail(PaneLayout.Single))
     }
 
@@ -308,11 +323,51 @@ class HomePaneLayoutTest {
     }
 
     @Test
-    fun initialPaneForLeavesFeedListAndArticleListUnchangedAtANarrowLayout() {
-        assertEquals(HomePane.FeedList, initialPaneFor(PaneLayout.Single, HomePane.FeedList))
+    fun initialPaneForAlwaysReturnsArticleListAtANarrowLayoutEvenWhenSavedIsFeedList() {
+        // A saved HomePane.FeedList (left over from a version before the drawer existed) can no
+        // longer be returned unchanged at a narrow layout — it isn't a destination this can name
+        // any more (see feedListIsDrawer's own KDoc) — so it clamps to ArticleList exactly like an
+        // already-narrow-valid ArticleList does.
+        assertEquals(HomePane.ArticleList, initialPaneFor(PaneLayout.Single, HomePane.FeedList))
         assertEquals(HomePane.ArticleList, initialPaneFor(PaneLayout.Single, HomePane.ArticleList))
-        assertEquals(HomePane.FeedList, initialPaneFor(PaneLayout.Dual, HomePane.FeedList))
+        assertEquals(HomePane.ArticleList, initialPaneFor(PaneLayout.Dual, HomePane.FeedList))
         assertEquals(HomePane.ArticleList, initialPaneFor(PaneLayout.Dual, HomePane.ArticleList))
+    }
+
+    // --- shouldAutoOpenFeedDrawer ---
+
+    @Test
+    fun shouldAutoOpenFeedDrawerIsFalseAtTripleRegardlessOfFeedsOrCloud() {
+        // feedListIsDrawer(Triple) == false: there is no drawer to open at all.
+        for (cloudConfigured in listOf(true, false)) {
+            for (hasAnyFeed in listOf(true, false)) {
+                assertEquals(
+                    false,
+                    shouldAutoOpenFeedDrawer(PaneLayout.Triple, cloudConfigured, hasAnyFeed),
+                    "cloudConfigured=$cloudConfigured hasAnyFeed=$hasAnyFeed",
+                )
+            }
+        }
+    }
+
+    @Test
+    fun shouldAutoOpenFeedDrawerIsFalseWhenCloudIsConfigured() {
+        // A fresh cloud connection can take a moment to deliver its first batch — opening the
+        // drawer out from under that sync would be noise, not help.
+        assertEquals(false, shouldAutoOpenFeedDrawer(PaneLayout.Single, cloudConfigured = true, hasAnyFeed = false))
+        assertEquals(false, shouldAutoOpenFeedDrawer(PaneLayout.Dual, cloudConfigured = true, hasAnyFeed = false))
+    }
+
+    @Test
+    fun shouldAutoOpenFeedDrawerIsFalseWhenFeedsAlreadyExist() {
+        assertEquals(false, shouldAutoOpenFeedDrawer(PaneLayout.Single, cloudConfigured = false, hasAnyFeed = true))
+        assertEquals(false, shouldAutoOpenFeedDrawer(PaneLayout.Dual, cloudConfigured = false, hasAnyFeed = true))
+    }
+
+    @Test
+    fun shouldAutoOpenFeedDrawerIsTrueOnlyAtANarrowLocalOnlyLayoutWithNoFeeds() {
+        assertEquals(true, shouldAutoOpenFeedDrawer(PaneLayout.Single, cloudConfigured = false, hasAnyFeed = false))
+        assertEquals(true, shouldAutoOpenFeedDrawer(PaneLayout.Dual, cloudConfigured = false, hasAnyFeed = false))
     }
 
 }

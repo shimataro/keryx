@@ -4,7 +4,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -15,65 +14,13 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 /**
- * Both `actual`s never render in production (desktop always resolves `PaneLayout.Triple`, where
- * `FeedListPane` keeps its original editable field instead of [KeryxCollapsedSearchBar], and
- * narrow layouts only exist on Android) — this exercises the desktop `actual` so the narrow-layout
- * search screen is still covered by `desktopTest` (see the `expect`'s own KDoc).
+ * The `actual` never renders in production (desktop always resolves `PaneLayout.Triple`, where
+ * the feed list is a permanent pane with its own editable field instead, and narrow layouts only
+ * exist on Android) — this exercises the desktop `actual` so the narrow-layout search screen is
+ * still covered by `desktopTest` (see the `expect`'s own KDoc).
  */
 @OptIn(ExperimentalTestApi::class)
 class KeryxSearchBarTest {
-
-    @Test
-    fun collapsedBarShowsTheQueryAndHasNoEditableField() = runDesktopComposeUiTest {
-        setContent {
-            MaterialTheme {
-                KeryxCollapsedSearchBar(
-                    text = "kotlin",
-                    isPlaceholder = false,
-                    onClick = {},
-                    onClickLabel = "Search articles",
-                )
-            }
-        }
-
-        onNodeWithText("kotlin").assertIsDisplayed()
-        onNode(hasSetTextAction()).assertDoesNotExist()
-    }
-
-    @Test
-    fun collapsedBarShowsThePlaceholderWhenTheQueryIsEmpty() = runDesktopComposeUiTest {
-        setContent {
-            MaterialTheme {
-                KeryxCollapsedSearchBar(
-                    text = "Search articles…",
-                    isPlaceholder = true,
-                    onClick = {},
-                    onClickLabel = "Search articles",
-                )
-            }
-        }
-
-        onNodeWithText("Search articles…").assertIsDisplayed()
-    }
-
-    @Test
-    fun clickingTheCollapsedBarInvokesOnClick() = runDesktopComposeUiTest {
-        var clicked = false
-        setContent {
-            MaterialTheme {
-                KeryxCollapsedSearchBar(
-                    text = "",
-                    isPlaceholder = true,
-                    onClick = { clicked = true },
-                    onClickLabel = "Search articles",
-                )
-            }
-        }
-
-        onNode(hasClickAction()).performClick()
-
-        assertEquals(true, clicked)
-    }
 
     @Test
     fun expandedBarShowsTheQueryAndReportsEdits() = runDesktopComposeUiTest {
