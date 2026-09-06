@@ -36,7 +36,9 @@ internal fun LinuxTray(
     trayBaseImage: BufferedImage?,
     notificationIcon: BufferedImage?,
     unreadCount: Long,
-    toggleLabel: String,
+    windowVisible: Boolean,
+    showLabel: String,
+    hideLabel: String,
     quitLabel: String,
     updateEntry: TrayUpdateEntry,
     onToggle: () -> Unit,
@@ -49,6 +51,8 @@ internal fun LinuxTray(
     val currentOnQuit by rememberUpdatedState(onQuit)
     val currentOnUpdateAction by rememberUpdatedState(onUpdateAction)
     val currentOnNotificationClicked by rememberUpdatedState(onNotificationClicked)
+
+    val toggleLabel = if (windowVisible) hideLabel else showLabel
 
     val item = remember(connection) {
         SniStatusNotifierItem(
@@ -94,7 +98,7 @@ internal fun LinuxTray(
     LaunchedEffect(item, unreadCount) {
         item.updateToolTip(if (unreadCount > 0) "$APP_NAME ($unreadCount)" else APP_NAME)
     }
-    LaunchedEffect(menu, toggleLabel, quitLabel, updateEntry) {
+    LaunchedEffect(menu, windowVisible, quitLabel, updateEntry) {
         menu.updateState(TrayMenuState(toggleLabel, quitLabel, updateEntry))
     }
 
