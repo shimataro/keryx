@@ -32,20 +32,23 @@ parts:
   keryx:
     plugin: dump
     source: composeApp/build/compose/binaries/main/app/Keryx
+    # WebKitGTK (the article reader's WebView) is deliberately NOT staged here. The gnome
+    # extension's gnome-46-2404 platform snap already ships libwebkit2gtk-4.1-0 together with the
+    # libjavascriptcoregtk-4.1-0 / libsoup-3.0-0 / libsecret-1-0 it depends on, its libraries are
+    # on LD_LIBRARY_PATH at runtime, and the extension binds /usr/lib/<triplet>/webkit2gtk-4.1 —
+    # the injected bundle plus the WebKitWebProcess/WebKitNetworkProcess helpers — to that snap's
+    # copy regardless of what we stage. Staging our own therefore duplicates a library that is
+    # already mounted (and risks pairing our .so with the platform's helper processes), while
+    # dragging in WebKitGTK's whole apt closure (GStreamer, libicu74, libvpx, ...) and roughly
+    # doubling the size of the .snap.
     stage-packages:
-      # WebKitGTK runtime (article reader WebView) — not covered by gnome extension
-      - libwebkit2gtk-4.1-0
-      - libjavascriptcoregtk-4.1-0
-      - libsoup-3.0-0
-      - libsecret-1-0
       # AWT X11 extension (gnome extension may not include this)
       - libxtst6
       # JNA native dispatch library
       - libffi8
 
 # The library linter only inspects ELF DT_NEEDED entries, so it cannot see that the JVM
-# dlopen()s its own runtime libraries, nor that WebKitGTK's transitive apt dependencies are
-# loaded as GStreamer/GIO plugins. Both are reported as "unused library" — false positives
+# dlopen()s its own runtime libraries. They are reported as "unused library" — false positives
 # snapcraft's own documentation says not to act on.
 #
 # NOTE: ignoring a path disables the linter for it entirely, so *missing* dependency reports
@@ -59,19 +62,3 @@ lint:
       # because the file set changes with every JDK version.
       - lib/libapplauncher.so
       - lib/runtime/lib/*.so
-      # Transitive apt dependencies of libwebkit2gtk-4.1-0. Listed by name on purpose: if a
-      # stage-packages change drags in a *new* unused library, its warning comes back.
-      - usr/lib/**/libcaca++.so*
-      - usr/lib/**/libcolordprivate.so*
-      - usr/lib/**/libdconf.so*
-      - usr/lib/**/libexslt.so*
-      - usr/lib/**/libform.so*
-      - usr/lib/**/libgstcheck-1.0.so*
-      - usr/lib/**/libgstcontroller-1.0.so*
-      - usr/lib/**/libmenu.so*
-      - usr/lib/**/liborc-test-0.4.so*
-      - usr/lib/**/libpanel.so*
-      - usr/lib/**/libpulse-simple.so*
-      - usr/lib/**/libunwind-coredump.so*
-      - usr/lib/**/libunwind-ptrace.so*
-      - usr/lib/**/libunwind-x86_64.so*

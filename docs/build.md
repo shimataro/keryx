@@ -289,21 +289,30 @@ WebKitGTK's nested sandbox (`bwrap`) cannot start inside strict confinement, so
 renderer sandbox for the article reader's WebView only; the snap's own strict confinement
 still isolates the process from the host.
 
-Only a handful of packages remain in manual `stage-packages` — WebKitGTK, its JS engine
-and HTTP soup library, the AWT `libxtst6` extension, and `libffi8` for JNA — everything
-else is covered by the `gnome` extension.
+Manual `stage-packages` is down to two entries — the AWT `libxtst6` extension and `libffi8`
+for JNA — because everything else is covered by the `gnome` extension.
+
+**WebKitGTK in particular must not be staged.** The `gnome-46-2404` platform snap the extension
+plugs into already ships `libwebkit2gtk-4.1-0` along with the `libjavascriptcoregtk-4.1-0` /
+`libsoup-3.0-0` / `libsecret-1-0` it depends on; the extension's launcher puts that snap's
+`usr/lib/<triplet>` on `LD_LIBRARY_PATH`, and it also adds a `layout` binding
+`/usr/lib/<triplet>/webkit2gtk-4.1` — the injected bundle plus the
+`WebKitWebProcess`/`WebKitNetworkProcess` helpers — to the platform's copy no matter what the
+snap itself stages. Staging our own copy therefore duplicates a library that is already mounted
+(and pairs our `.so` with the platform's helper processes, which only works while the two
+versions happen to agree), while pulling in WebKitGTK's entire apt dependency closure —
+GStreamer's base/good plugin sets, `libicu74`, `libvpx`, `libwoff1`, `libenchant`, … — which by
+itself roughly doubled the size of the `.snap` against the equivalent `.deb`.
 
 `snapcraft pack` also runs a set of built-in linters, and two of its findings are worth
 explaining rather than "fixing":
 
 - The `library` linter only inspects ELF `DT_NEEDED` entries, so it cannot see libraries
-  loaded at runtime via `dlopen()` — it reports both the JVM's own runtime libraries
-  (`lib/runtime/lib/*.so`, `lib/libapplauncher.so`) and WebKitGTK's transitive apt
-  dependencies (GStreamer/GIO plugins pulled in by `libwebkit2gtk-4.1-0`) as "unused
-  library". These are false positives snapcraft's own documentation says not to act on;
-  removing any of them would break the app (`libfontmanager.so` in particular is the file
-  the harfbuzz dependency fix in `0394c79e` was for). `snap/snapcraft.yaml`'s `lint.ignore`
-  suppresses these specific paths.
+  loaded at runtime via `dlopen()` — it reports the JVM's own runtime libraries
+  (`lib/runtime/lib/*.so`, `lib/libapplauncher.so`) as "unused library". These are false
+  positives snapcraft's own documentation says not to act on; removing any of them would break
+  the app (`libfontmanager.so` in particular is the file the harfbuzz dependency fix in
+  `0394c79e` was for). `snap/snapcraft.yaml`'s `lint.ignore` suppresses these specific paths.
 - **That suppression also disables the linter's *missing*-dependency detection for the
   same paths** — the check that previously caught the X11/font gap (`88ceff7e`) and the
   harfbuzz gap (`0394c79e`). Whenever `stage-packages` or the bundled JDK version changes,

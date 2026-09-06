@@ -285,18 +285,29 @@ WebKitGTK のネストされたサンドボックス（`bwrap`）は strict conf
 WebView のレンダラーサンドボックスのみを無効化するものであり、スナップ自身の strict confinement
 によるプロセスのホストからの分離は維持される。
 
-`stage-packages` に手動で列挙するパッケージは少数に留まる — WebKitGTK およびそのJSエンジン・
-HTTPライブラリ、AWT で必要な `libxtst6`、JNA 用の `libffi8` のみ — その他はすべて `gnome` 拡張機能で
-カバーされる。
+`stage-packages` に手動で列挙するパッケージは 2 つだけ — AWT で必要な `libxtst6` と JNA 用の
+`libffi8` — で、その他はすべて `gnome` 拡張機能でカバーされる。
+
+**特に WebKitGTK はステージしてはならない。** 拡張機能が接続する `gnome-46-2404`
+プラットフォームスナップは、`libwebkit2gtk-4.1-0` とその依存である
+`libjavascriptcoregtk-4.1-0` / `libsoup-3.0-0` / `libsecret-1-0` をすでに同梱している。
+拡張機能のランチャーがそのスナップの `usr/lib/<triplet>` を `LD_LIBRARY_PATH` に追加し、
+さらに `/usr/lib/<triplet>/webkit2gtk-4.1`（injected bundle と
+`WebKitWebProcess`/`WebKitNetworkProcess` ヘルパープロセス）をプラットフォーム側へ bind する
+`layout` を、スナップ側が何をステージしているかに関わらず自動で追加する。
+したがって自前でステージすると、すでにマウントされているライブラリを二重に抱えたうえ
+（しかも自前の `.so` とプラットフォーム側のヘルパープロセスを組み合わせることになり、
+両者のバージョンが一致している間しか動かない）、WebKitGTK の apt 推移依存クロージャ
+（GStreamer の base/good プラグイン群、`libicu74`、`libvpx`、`libwoff1`、`libenchant` …）を
+まるごと引き込む。これだけで `.snap` のサイズが同等の `.deb` の約 2 倍に膨らんでいた。
 
 `snapcraft pack` は組み込みの linter 群も実行するが、その指摘のうち2件は「修正」ではなく
 説明が必要なものである。
 
 - `library` linter は ELF の `DT_NEEDED` エントリしか見ないため、実行時に `dlopen()` で
   ロードされるライブラリを検出できない。JVM 自身のランタイムライブラリ
-  （`lib/runtime/lib/*.so`、`lib/libapplauncher.so`）と、WebKitGTK の推移的な apt 依存
-  （`libwebkit2gtk-4.1-0` が引き込む GStreamer/GIO プラグイン）の両方が「未使用ライブラリ」
-  として報告される。これらは snapcraft 自身のドキュメントが「対応するな」と明記している
+  （`lib/runtime/lib/*.so`、`lib/libapplauncher.so`）が「未使用ライブラリ」として報告される。
+  これらは snapcraft 自身のドキュメントが「対応するな」と明記している
   false positive であり、削除すればアプリが壊れる（`libfontmanager.so` は特に、
   `0394c79e` で harfbuzz 依存を追加した当のファイルである）。
   `snap/snapcraft.yaml` の `lint.ignore` でこれらのパスを個別に抑制している。
