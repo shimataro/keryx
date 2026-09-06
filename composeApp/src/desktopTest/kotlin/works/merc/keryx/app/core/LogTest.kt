@@ -1,5 +1,6 @@
 package works.merc.keryx.app.core
 
+import org.slf4j.LoggerFactory
 import java.util.logging.Handler
 import java.util.logging.Level
 import java.util.logging.LogRecord
@@ -64,12 +65,15 @@ class LogTest {
     }
 
     /**
-     * A third-party `slf4j-jdk14` caller (e.g. dbus-java's `TransportBuilder`) logs through its
-     * own JUL logger name, not [Log.LOGGER_NAME]. It reaches the app's log sink only via JUL's
-     * default parent-handler propagation up to the root logger, which is where
-     * [Log.debug]/[Log.info]/etc.'s own handlers actually live (see `Log.desktop.kt`'s
-     * `createLogger`). This attaches a capturing handler directly to the root logger instead of
-     * [Log.LOGGER_NAME] to prove that propagation path, rather than assuming it.
+     * A third-party `slf4j-jdk14` caller (e.g. dbus-java's `TransportBuilder`) logs through
+     * `org.slf4j.LoggerFactory`, not [Log.LOGGER_NAME], and never touches `java.util.logging`
+     * directly. It reaches the app's log sink only if (a) `slf4j-jdk14` is actually the resolved
+     * SLF4J provider, bridging that call into JUL, and (b) JUL's default parent-handler
+     * propagation carries it up to the root logger, which is where [Log.debug]/[Log.info]/etc.'s
+     * own handlers actually live (see `Log.desktop.kt`'s `createLogger`). This test emits through
+     * [LoggerFactory] (as the real caller would) and attaches a capturing handler directly to the
+     * root logger instead of [Log.LOGGER_NAME], to prove both the provider resolution and the
+     * propagation path, rather than assuming either.
      */
     @Test
     fun thirdPartyLoggerPropagatesThroughRoot() {
@@ -86,7 +90,7 @@ class LogTest {
         handler.level = Level.ALL
         root.addHandler(handler)
         try {
-            Logger.getLogger("org.freedesktop.dbus.connections.transports.TransportBuilder")
+            LoggerFactory.getLogger("org.freedesktop.dbus.connections.transports.TransportBuilder")
                 .info("Using transport dbus-java-transport-native-unixsocket to connect to unix:path=/run/user/1000/bus")
         } finally {
             root.removeHandler(handler)
