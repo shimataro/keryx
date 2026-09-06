@@ -248,15 +248,20 @@ snapcraft pack --use-lxd
 ```
 
 `confinement: strict` (Ubuntu's default for Store distribution) means the app only gets the
-plugs declared in `snap/snapcraft.yaml`'s `apps.keryx.plugs` — `network`,
+plugs declared in `snap/snapcraft.yaml` plus any [extensions](https://snapcraft.io/docs/supported-extensions).
+To avoid manually enumerating every X11 client library, font stack, and GTK dependency that
+AWT/Swing, FlatLaf, Skiko, and WebKitGTK need, the snap uses the `gnome` extension, which
+stages the common GNOME/GTK runtime libraries automatically. The `gpu-2404` content
+interface (plug) provides Mesa GPU drivers without bloating the snap with `libllvm17`
+(~100 MB) that would come from staging `libgl1-mesa-dri` directly.
+
 `password-manager-service` (Secret Service, for `java-keyring`'s token storage — **not**
 auto-connected by snapd policy, so a user must run `snap connect keryx:password-manager-service`
 before Secret Service is actually reachable; until then, `java-keyring` falls back to the same
 permission-restricted plaintext file every platform already uses when the OS store is
 unavailable, see `SECURITY.md` — this is not silent: `CloudSession` raises a notification-center
 warning whose `ShowInfoDialog` action names this `snap connect` as the fix, see
-`error-design.md`), `desktop`/`desktop-legacy`/`wayland`/`x11`
-(window/tray/notification integration), `opengl` (Compose Desktop's Skia rendering), and `home`.
+`error-design.md`).
 
 `home` is what lets the OPML import/export file picker (`JFileChooser`, see
 `app-architecture.md`) reach non-hidden files anywhere under the user's home directory — but it
@@ -269,16 +274,22 @@ crashing. The Snap build's host-side registration instead comes from `snap/gui/k
 itself declaring `MimeType=` for both `x-scheme-handler/keryx` and the `.opml` MIME types plus an
 `Exec=keryx %u` field code — the mechanism snapd processes at install time. A `file://` URI that
 some desktop environments hand to `%u` for a local file is normalized back to a plain path in
-`main()` (`normalizeFileUriArg`) before classification. Whether every one of these plugs is
-actually sufficient under strict confinement (tray D-Bus ownership in particular) and whether
-this desktop-entry registration actually takes effect on a real snapd install have not yet been
-verified.
+`main()` (`normalizeFileUriArg`) before classification.
 
 The app also writes its own data (database, settings, lock file, and log file) under the same
 `~/.local/share` path, which would also be blocked by the strict `home` plug. To prevent a startup
 crash, `snap/snapcraft.yaml` remaps `XDG_DATA_HOME` and `XDG_CACHE_HOME` to
 `$SNAP_USER_COMMON/.local/share` and `$SNAP_USER_COMMON/.cache`. `AppDirs.desktop.kt` already
 reads those environment variables, so no source code change is needed.
+
+WebKitGTK's nested sandbox (`bwrap`) cannot start inside strict confinement, so
+`WEBKIT_DISABLE_SANDBOX=1` is set in the app's environment block. This disables the
+renderer sandbox for the article reader's WebView only; the snap's own strict confinement
+still isolates the process from the host.
+
+Only a handful of packages remain in manual `stage-packages` — WebKitGTK, its JS engine
+and HTTP soup library, the AWT `libxtst6` extension, and `libffi8` for JNA — everything
+else is covered by the `gnome` extension.
 
 ### Android (APK / AAB)
 

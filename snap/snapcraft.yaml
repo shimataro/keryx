@@ -15,37 +15,29 @@ source-code: https://github.com/shimataro/keryx
 
 apps:
   keryx:
+    extensions: [gnome]
     command: bin/Keryx
     environment:
       XDG_DATA_HOME: $SNAP_USER_COMMON/.local/share
       XDG_CACHE_HOME: $SNAP_USER_COMMON/.cache
+      # WebKit's nested sandbox (bwrap) does not start inside strict confinement
+      WEBKIT_DISABLE_SANDBOX: "1"
     plugs:
       - network
-      - password-manager-service # Secret Service (java-keyring) — Dropbox token storage
-      - desktop
-      - desktop-legacy
-      - wayland
-      - x11
-      - opengl # Compose Desktop (Skia) GPU rendering
-      - home # keryx:// URI scheme / .opml association self-registration
-             # (~/.local/share/applications, ~/.config/mimeapps.list)
+      - password-manager-service
+      - home
 
 parts:
   keryx:
     plugin: dump
     source: composeApp/build/compose/binaries/main/app/Keryx
     stage-packages:
-      # AWT/Swing (JMenuBar, JFileChooser, FlatLaf) needs the X11 client libraries even under Wayland
-      - libx11-6
-      - libxext6
-      - libxi6
-      - libxrender1
+      # WebKitGTK runtime (article reader WebView) — not covered by gnome extension
+      - libwebkit2gtk-4.1-0
+      - libjavascriptcoregtk-4.1-0
+      - libsoup-3.0-0
+      - libsecret-1-0
+      # AWT X11 extension (gnome extension may not include this)
       - libxtst6
-      # Font rendering (Skiko + JDK fontmanager)
-      - libfontconfig1
-      - libfreetype6
-      - libharfbuzz0b
-      - libgraphite2-3
-      - libglib2.0-0
-      # OpenGL (Skiko / Compose Desktop GPU rendering)
-      - libgl1
+      # JNA native dispatch library
+      - libffi8

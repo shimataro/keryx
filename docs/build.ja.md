@@ -246,16 +246,17 @@ sudo lxd init --auto
 snapcraft pack --use-lxd
 ```
 
-`confinement: strict`（UbuntuのSnap Store配布時の既定）は、`snap/snapcraft.yaml`の
-`apps.keryx.plugs`で宣言したプラグのみをアプリに与える —
-`network`、`password-manager-service`（Secret Service、`java-keyring`のトークン保存用 —
+`confinement: strict`（UbuntuのSnap Store配布時の既定）は、`snap/snapcraft.yaml` で宣言したプラグと[拡張機能](https://snapcraft.io/docs/supported-extensions)のみがアプリに与えられる。
+AWT/Swing・FlatLaf・Skiko・WebKitGTK が必要とするすべての X11 クライアントライブラリやフォントスタック、GTK 依存を個別に列挙するのを避けるため、スナップは `gnome` 拡張機能を使う。これにより、共通の GNOME/GTK ランタイムライブラリが自動的にステージされる。
+`gpu-2404` コンテンツインターフェース（プラグ）は、`libgl1-mesa-dri` を直接ステージする場合に引き込まれる `libllvm17`（約100MB）による肥大化を回避しつつ、Mesa GPU ドライバーを提供する。
+
+`password-manager-service`（Secret Service、`java-keyring`のトークン保存用 —
 snapdのポリシー上**自動接続されない**ため、Secret Serviceに実際にアクセスできるように
 なるには利用者が事前に`snap connect keryx:password-manager-service`を実行する必要がある。
 接続するまでは、OSのセキュアストアが使えない場合に他のプラットフォームでもすでに使っている
 権限制限付きの平文フォールバックファイルへ`java-keyring`がフォールバックする。`SECURITY.md`
 参照。これは黙って行われるわけではなく、`CloudSession`が通知センターに警告を出し、その
-`ShowInfoDialog`アクションが対処法としてこの`snap connect`を案内する。`error-design.ja.md`参照）、`desktop`/`desktop-legacy`/`wayland`/`x11`（ウィンドウ・トレイ・通知の統合）、`opengl`
-（Compose DesktopのSkiaレンダリング）、`home`。
+`ShowInfoDialog`アクションが対処法としてこの`snap connect`を案内する。`error-design.ja.md`参照）。
 
 `home`は、OPMLインポート/エクスポートのファイル選択ダイアログ（`JFileChooser`、
 `app-architecture.md`参照）がユーザーのホームディレクトリ配下の非隠しファイルへ
@@ -268,9 +269,7 @@ snapdのポリシー上**自動接続されない**ため、Secret Serviceに実
 `x-scheme-handler/keryx`と`.opml`のMIMEタイプ両方に対する`MimeType=`と`Exec=keryx %u`という
 フィールドコードを宣言することで行っている — これはsnapdがインストール時に処理する仕組みである。
 一部のデスクトップ環境がローカルファイルを`%u`経由で`file://` URIとして渡してくる場合に備え、
-`main()`内で分類前にプレーンなパスへ正規化している（`normalizeFileUriArg`）。これらのプラグが
-strict confinement下で実際に十分か（特にトレイのD-Bus所有権）、およびこのデスクトップエントリ
-による登録が実機のsnapd環境で実際に機能するかは、まだ検証していない。
+`main()`内で分類前にプレーンなパスへ正規化している（`normalizeFileUriArg`）。
 
 アプリ自身のデータ（データベース、設定、ロックファイル、ログファイル）も同じ
 `~/.local/share` 配下に書き込むが、これも strict confinement 下の `home` プラグでは
@@ -278,6 +277,15 @@ strict confinement下で実際に十分か（特にトレイのD-Bus所有権）
 と `XDG_CACHE_HOME` を `$SNAP_USER_COMMON/.local/share` と `$SNAP_USER_COMMON/.cache` に
 リマップしている。`AppDirs.desktop.kt` は既にこれらの環境変数を読んでいるため、ソースコードの
 変更は不要である。
+
+WebKitGTK のネストされたサンドボックス（`bwrap`）は strict confinement 内で起動できないため、
+`WEBKIT_DISABLE_SANDBOX=1` がアプリの環境変数ブロックに設定されている。これは記事リーダーの
+WebView のレンダラーサンドボックスのみを無効化するものであり、スナップ自身の strict confinement
+によるプロセスのホストからの分離は維持される。
+
+`stage-packages` に手動で列挙するパッケージは少数に留まる — WebKitGTK およびそのJSエンジン・
+HTTPライブラリ、AWT で必要な `libxtst6`、JNA 用の `libffi8` のみ — その他はすべて `gnome` 拡張機能で
+カバーされる。
 
 ### Android（APK / AAB）
 
