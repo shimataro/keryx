@@ -18,9 +18,14 @@ apps:
   keryx:
     extensions: [gnome]
     command: bin/Keryx
+    # Appended *after* the gnome extension's own snap/command-chain/desktop-launch, which exports
+    # XDG_DATA_HOME=$SNAP_USER_DATA/.local/share unconditionally. An `environment:` entry cannot
+    # win against that (snapd applies the block before the command chain runs), so the remap onto
+    # the revision-independent $SNAP_USER_COMMON is done from this wrapper instead. XDG_CACHE_HOME
+    # needs nothing: the extension already sets it to $SNAP_USER_COMMON/.cache.
+    command-chain:
+      - bin/keryx-xdg-launch
     environment:
-      XDG_DATA_HOME: $SNAP_USER_COMMON/.local/share
-      XDG_CACHE_HOME: $SNAP_USER_COMMON/.cache
       # WebKit's nested sandbox (bwrap) does not start inside strict confinement
       WEBKIT_DISABLE_SANDBOX: "1"
     plugs:
@@ -46,6 +51,12 @@ parts:
       - libxtst6
       # JNA native dispatch library
       - libffi8
+
+  xdg-launcher:
+    plugin: dump
+    source: snap/local
+    organize:
+      keryx-xdg-launch: bin/keryx-xdg-launch
 
 # The library linter only inspects ELF DT_NEEDED entries, so it cannot see that the JVM
 # dlopen()s its own runtime libraries. They are reported as "unused library" — false positives

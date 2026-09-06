@@ -267,22 +267,38 @@ warning whose `ShowInfoDialog` action names this `snap connect` as the fix, see
 
 `home` is what lets the OPML import/export file picker (`JFileChooser`, see
 `app-architecture.md`) reach non-hidden files anywhere under the user's home directory — but it
-explicitly excludes hidden files and directories, so it does **not** let the `keryx://` URI
-scheme and `.opml` association self-registration described above
-(`LinuxUriSchemeRegistrar`/`LinuxOpmlAssociationRegistrar`, which write into
-`~/.local/share/applications` and `~/.config/mimeapps.list`) actually do anything under strict
-confinement: those writes are denied, silently caught and logged as a warning rather than
-crashing. The Snap build's host-side registration instead comes from `snap/gui/keryx.desktop`
-itself declaring `MimeType=` for both `x-scheme-handler/keryx` and the `.opml` MIME types plus an
-`Exec=keryx %u` field code — the mechanism snapd processes at install time. A `file://` URI that
+explicitly excludes hidden files and directories, so it could never let the `keryx://` URI scheme
+and `.opml` association self-registration described above
+(`LinuxUriSchemeRegistrar`/`LinuxOpmlAssociationRegistrar`) reach the host's
+`~/.local/share/applications` and `~/.config/mimeapps.list`. In the snap they never even reach for
+them: both registrars resolve their targets from `XDG_DATA_HOME` / `XDG_CONFIG_HOME`, and under
+the `gnome` extension those already point into the snap's own writable area (see the next
+paragraph), so the writes *succeed* — into a private directory no host desktop ever reads. Either
+way the self-registration has no effect on the host, and neither outcome crashes (a failure is
+caught and logged as a warning). The Snap build's host-side registration instead comes from
+`snap/gui/keryx.desktop` itself declaring `MimeType=` for both `x-scheme-handler/keryx` and the
+`.opml` MIME types plus an `Exec=keryx %u` field code — the mechanism snapd processes at install time. A `file://` URI that
 some desktop environments hand to `%u` for a local file is normalized back to a plain path in
 `main()` (`normalizeFileUriArg`) before classification.
 
-The app also writes its own data (database, settings, lock file, and log file) under the same
-`~/.local/share` path, which would also be blocked by the strict `home` plug. To prevent a startup
-crash, `snap/snapcraft.yaml` remaps `XDG_DATA_HOME` and `XDG_CACHE_HOME` to
-`$SNAP_USER_COMMON/.local/share` and `$SNAP_USER_COMMON/.cache`. `AppDirs.desktop.kt` already
-reads those environment variables, so no source code change is needed.
+The app also writes its own data (database, settings, lock file, and log file) under
+`~/.local/share`, which the strict `home` plug blocks just the same, so those XDG variables have
+to be remapped into the snap's own writable area or the app cannot even start. The `gnome`
+extension already does most of that: its `snap/command-chain/desktop-launch` unconditionally
+exports `XDG_CONFIG_HOME=$SNAP_USER_DATA/.config`,
+`XDG_DATA_HOME=$SNAP_USER_DATA/.local/share` and `XDG_CACHE_HOME=$SNAP_USER_COMMON/.cache`.
+
+`$SNAP_USER_DATA` (`~/snap/keryx/<revision>`) is the wrong home for the database, though: it is
+revision-scoped, so snapd copies the whole directory on every `snap refresh` and rolls it back on
+`snap revert` — taking the article database, and the sync bookkeeping in `sync_state`, with it. An
+`environment:` entry cannot move it, because snapd applies that block *before* the command chain
+runs and `desktop-launch`'s own `export` then wins. `snap/snapcraft.yaml` therefore declares its
+own `command-chain` entry, `bin/keryx-xdg-launch` (staged from `snap/local/keryx-xdg-launch`,
+which must keep its executable bit), which snapcraft appends *after* the extension's; it
+re-exports `XDG_DATA_HOME=$SNAP_USER_COMMON/.local/share` — `~/snap/keryx/common`, shared by every
+revision — and then execs the app. `XDG_CACHE_HOME` is deliberately left alone, since the
+extension already points it at `$SNAP_USER_COMMON`. `AppDirs.desktop.kt` reads these environment
+variables, so no source code change is needed.
 
 WebKitGTK's nested sandbox (`bwrap`) cannot start inside strict confinement, so
 `WEBKIT_DISABLE_SANDBOX=1` is set in the app's environment block. This disables the

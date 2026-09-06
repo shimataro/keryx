@@ -264,21 +264,39 @@ snapdのポリシー上**自動接続されない**ため、Secret Serviceに実
 `app-architecture.md`参照）がユーザーのホームディレクトリ配下の非隠しファイルへ
 アクセスするためのものである — ただし隠しファイル・隠しディレクトリへのアクセスは
 明示的に除外されるため、上述の`keryx://` URIスキームと`.opml`関連付けの自己登録
-（`LinuxUriSchemeRegistrar`/`LinuxOpmlAssociationRegistrar`。実際には
-`~/.local/share/applications`と`~/.config/mimeapps.list`に書き込む）は、strict confinement下
-では**機能しない**。これらの書き込みは拒否され、クラッシュはせずに警告としてログに
-握りつぶされるだけである。Snap版のホスト側登録は代わりに`snap/gui/keryx.desktop`自体が
-`x-scheme-handler/keryx`と`.opml`のMIMEタイプ両方に対する`MimeType=`と`Exec=keryx %u`という
+（`LinuxUriSchemeRegistrar`/`LinuxOpmlAssociationRegistrar`）がホスト側の
+`~/.local/share/applications`や`~/.config/mimeapps.list`へ届くことは、そもそもあり得ない。
+さらにsnap内ではそれらのパスに手を伸ばすことすらない — 両レジストラは書き込み先を
+`XDG_DATA_HOME` / `XDG_CONFIG_HOME`から解決しており、`gnome`拡張機能の下ではこれらが
+snap自身の書き込み可能領域を指しているため（次の段落を参照）、書き込みは**成功する** —
+ただしホストのデスクトップが決して読まないプライベートディレクトリに対して、である。
+いずれにせよ自己登録はホストに対して何の効果も持たず、どちらの経路でもクラッシュはしない
+（失敗した場合は警告としてログに記録されるだけである）。Snap版のホスト側登録は代わりに
+`snap/gui/keryx.desktop`自体が`x-scheme-handler/keryx`と`.opml`のMIMEタイプ両方に対する`MimeType=`と`Exec=keryx %u`という
 フィールドコードを宣言することで行っている — これはsnapdがインストール時に処理する仕組みである。
 一部のデスクトップ環境がローカルファイルを`%u`経由で`file://` URIとして渡してくる場合に備え、
 `main()`内で分類前にプレーンなパスへ正規化している（`normalizeFileUriArg`）。
 
-アプリ自身のデータ（データベース、設定、ロックファイル、ログファイル）も同じ
-`~/.local/share` 配下に書き込むが、これも strict confinement 下の `home` プラグでは
-ブロックされる。起動時のクラッシュを防ぐため、`snap/snapcraft.yaml` では `XDG_DATA_HOME`
-と `XDG_CACHE_HOME` を `$SNAP_USER_COMMON/.local/share` と `$SNAP_USER_COMMON/.cache` に
-リマップしている。`AppDirs.desktop.kt` は既にこれらの環境変数を読んでいるため、ソースコードの
-変更は不要である。
+アプリ自身のデータ（データベース、設定、ロックファイル、ログファイル）も `~/.local/share`
+配下に書き込むが、これも strict confinement 下の `home` プラグではブロックされるため、
+これらの XDG 変数を snap 自身の書き込み可能領域へリマップしないと起動すらできない。
+その大部分は `gnome` 拡張機能がすでに行っている — 拡張機能の
+`snap/command-chain/desktop-launch` が `XDG_CONFIG_HOME=$SNAP_USER_DATA/.config`、
+`XDG_DATA_HOME=$SNAP_USER_DATA/.local/share`、`XDG_CACHE_HOME=$SNAP_USER_COMMON/.cache` を
+**無条件に** export する。
+
+ただし `$SNAP_USER_DATA`（`~/snap/keryx/<revision>`）はデータベースの置き場所としては適切でない。
+リビジョン別のディレクトリなので、`snap refresh` のたびに snapd がディレクトリ全体をコピーし、
+`snap revert` すると記事データベースごと — `sync_state` の同期管理情報も含めて — 巻き戻ってしまう。
+`environment:` ブロックではこれを動かせない。snapd は command-chain の実行**前**に
+`environment:` を適用するため、後から走る `desktop-launch` の `export` が勝つからである。
+そこで `snap/snapcraft.yaml` は独自の `command-chain` エントリ `bin/keryx-xdg-launch`
+（`snap/local/keryx-xdg-launch` から配置。実行ビットを保つ必要がある）を宣言している。
+snapcraft はこれを拡張機能側の command-chain の**後ろ**に連結するので、この中で
+`XDG_DATA_HOME=$SNAP_USER_COMMON/.local/share`（`~/snap/keryx/common`。全リビジョン共通）を
+再 export してからアプリを exec する。`XDG_CACHE_HOME` は拡張機能がすでに
+`$SNAP_USER_COMMON` を指しているため、意図的に手を加えていない。
+`AppDirs.desktop.kt` はこれらの環境変数を読んでいるため、ソースコードの変更は不要である。
 
 WebKitGTK のネストされたサンドボックス（`bwrap`）は strict confinement 内で起動できないため、
 `WEBKIT_DISABLE_SANDBOX=1` がアプリの環境変数ブロックに設定されている。これは記事リーダーの

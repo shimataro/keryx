@@ -1,0 +1,13 @@
+#!/bin/sh
+# The gnome extension's own command-chain entry (snap/command-chain/desktop-launch) exports
+# XDG_DATA_HOME=$SNAP_USER_DATA/.local/share unconditionally, which beats anything the app's
+# `environment:` block sets: snapd applies that block *before* the command chain runs.
+#
+# $SNAP_USER_DATA is revision-scoped (~/snap/keryx/<revision>): snapd copies it wholesale on every
+# refresh and rolls it back on `snap revert`, which would take the article database — and the
+# cloud-sync bookkeeping in sync_state — with it. Keryx's data belongs in the revision-independent
+# $SNAP_USER_COMMON (~/snap/keryx/common) instead, so the remap has to happen here, after that
+# script has already run. XDG_CACHE_HOME is deliberately left alone: the extension already points
+# it at $SNAP_USER_COMMON/.cache.
+export XDG_DATA_HOME="$SNAP_USER_COMMON/.local/share"
+exec "$@"
