@@ -338,6 +338,39 @@ WebView のレンダラーサンドボックスのみを無効化するもので
   トップレベルの `title: Keryx` キーで解消している。これは Snap Store / GNOME Software に
   表示される表示名であり、デスクトップシェルが使う `snap/gui/keryx.desktop` の `Name=` とは別物。
 
+**strict confinement 下で起動時に見える無害なログ行。** 一見エラーに見えても対応不要な行がいくつか
+あり、特に GPU の無い VM ゲスト（VMware など）や、サンドボックスから GL スタックへ到達できない
+ホストで見られる:
+
+- `[SKIKO] warn: Fallback to next API` に続く `org.jetbrains.skiko.RenderException: Cannot
+  create Linux GL context`、さらに一連の `libEGL warning: ... DRI3 ...` / `... failed to create
+  dri2 screen` / `VMware: No 3D enabled`: Skiko（Compose の Skia レンダラー）がまずハードウェア
+  アクセラレーション GL を試み、GPU に到達できずソフトウェアレンダリングにフォールバックした
+  だけ。3D アクセラレーション付きの `virtio`/`vmwgfx` パススルーが無い VM 内、または
+  `gpu-2404` content interface が未接続のホストで発生する。1行目はそのフォールバック自体が
+  成功したことを報告しており、アプリは（CPU 描画になるだけで）正しく描画され続ける。
+- `/sys/class/dmi/id/chassis_type` / `/sys/firmware/acpi/pm_profile` の
+  `Permission denied`: GLib/GTK がハードウェアのシャーシ種別（タブレット/コンバーチブルの
+  フォームファクタ推測に使われる）をプローブしようとして、strict confinement の
+  デバイス cgroup にブロックされているだけ。GTK は取得できない場合を既に問題なく処理しており、
+  このアプリ自身はどちらのパスも読んでいない。
+- `GDBus.Error:org.freedesktop.portal.Error.NotAllowed: This call is not available inside the
+  sandbox`: 下層のネイティブツールキット（GTK/AWT）が、strict サンドボックスでは提供されない
+  xdg-desktop-portal 呼び出しをプローブしているだけ。Keryx 自身のファイルダイアログやメニューは
+  `JFileChooser` / `java.awt.FileDialog` / AWT のポップアップを使っており（`external-spec.md`
+  の「UI Direction」参照）、portal は一切使っていないため、これはアプリ自身の呼び出しが
+  失敗しているわけではない。
+
+一方、実際に修正が必要だった行が `TransportBuilder - Using transport
+dbus-java-transport-native-unixsocket` である。これは dbus-java 自身の `slf4j` ログが、
+`slf4j-simple` 経由で直接 stderr に出力されており、アプリのログファイルを経由せず、
+（独自のタイムスタンプ・`[tag]` 無しという）別フォーマットで出ていたことが原因。デスクトップ
+ランタイムの `slf4j` プロバイダを `slf4j-simple` から `slf4j-jdk14`
+（`composeApp/build.gradle.kts` / `gradle/libs.versions.toml`）に切り替えることで、この行を
+含め他のあらゆる第三者 `slf4j` 呼び出しが `java.util.logging` 経由になり、`Log.desktop.kt` が
+JUL のルートロガーに仕込んだ formatter/handler を通るようになった。これにより、第三者ライブラリの
+ログ行もアプリ本体と同じフォーマットで `keryx.<n>.log` に残るようになっている。
+
 ### Android（APK / AAB）
 
 上記のデスクトップパッケージと違い、APK/AAB は**どの OS からでも**ビルドできる —

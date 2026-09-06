@@ -339,6 +339,36 @@ explaining rather than "fixing":
   Store / GNOME Software, separate from `snap/gui/keryx.desktop`'s `Name=` used by the
   desktop shell.
 
+**Benign startup log lines under strict confinement.** A few lines that look like errors at
+launch are expected and need no fix, seen especially inside a GPU-less VM guest (e.g. VMware) or
+a host where no GL stack is reachable from the sandbox:
+
+- `[SKIKO] warn: Fallback to next API` followed by `org.jetbrains.skiko.RenderException: Cannot
+  create Linux GL context`, then a run of `libEGL warning: ... DRI3 ...` / `... failed to create
+  dri2 screen` / `VMware: No 3D enabled`: Skiko (Compose's Skia renderer) tried hardware-accelerated
+  GL first and fell back to software rendering because no GPU is reachable — inside a VM without
+  3D-accelerated `virtio`/`vmwgfx` passthrough, or on a host where the `gpu-2404` content interface
+  isn't connected. The first line is that fallback itself succeeding; the app still renders
+  correctly, just off the CPU.
+- `Could not open /sys/class/dmi/id/chassis_type` / `/sys/firmware/acpi/pm_profile:
+  Permission denied`: GLib/GTK probing hardware chassis info (used elsewhere to guess a
+  tablet/convertible form factor), blocked by snapd's device cgroup under strict confinement.
+  GTK already handles a missing answer here gracefully; nothing in this app reads either path.
+- `GDBus.Error:org.freedesktop.portal.Error.NotAllowed: This call is not available inside the
+  sandbox`: an underlying native toolkit (GTK/AWT) probing an xdg-desktop-portal call the strict
+  sandbox doesn't expose. Keryx's own file dialogs and menus go through `JFileChooser` /
+  `java.awt.FileDialog` / AWT popups (see "UI Direction" in `external-spec.md`), never a portal,
+  so this is not the app's own call failing.
+
+The one line that *did* need a fix — `TransportBuilder - Using transport
+dbus-java-transport-native-unixsocket` — was dbus-java's own `slf4j` logging bypassing the app's
+log file and printing in a different format (its own timestamp, no `[tag]` prefix) because it went
+straight through `slf4j-simple` to stderr. Switching the desktop runtime's `slf4j` provider from
+`slf4j-simple` to `slf4j-jdk14` (`composeApp/build.gradle.kts`, `gradle/libs.versions.toml`) routes
+it — and any other third-party `slf4j` caller — through `java.util.logging`, where
+`Log.desktop.kt` now installs its own formatter/handlers on the JUL root logger, so third-party log
+lines land in `keryx.<n>.log` with the same format as the app's own.
+
 ### Android (APK / AAB)
 
 Unlike the desktop packages above, an APK/AAB can be built on **any** OS — there is no

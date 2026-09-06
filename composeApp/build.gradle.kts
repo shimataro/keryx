@@ -378,7 +378,7 @@ kotlin {
                 implementation(libs.jna.jpms)
                 implementation(libs.jna.platform.jpms)
 
-                implementation(libs.slf4j.simple)
+                implementation(libs.slf4j.jdk14)
 
                 // Linux tray (StatusNotifierItem) + desktop notifications. Added
                 // unconditionally so the cross-platform CI matrix resolves the same

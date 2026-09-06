@@ -159,8 +159,11 @@ dbus-java-transport-unixsocket = { module = "com.github.hypfvieh:dbus-java-trans
 # --- WebView (spike: OS-native WebView for article content view) ---
 composewebview = { module = "io.github.kdroidfilter:composewebview", version.ref = "composewebview" }
 
-# --- Logging (desktop runtime; silences "No SLF4J providers were found") ---
-slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
+# --- Logging (desktop runtime) ---
+# jdk14 (not simple): routes every slf4j caller (dbus-java included) through
+# java.util.logging, so Log.desktop.kt's root-logger handlers capture their
+# output with the same format/destination as the app's own logging.
+slf4j-jdk14 = { module = "org.slf4j:slf4j-jdk14", version.ref = "slf4j" }
 
 # --- Test ---
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }

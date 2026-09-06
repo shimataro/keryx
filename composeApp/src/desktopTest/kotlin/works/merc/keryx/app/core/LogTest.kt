@@ -62,4 +62,38 @@ class LogTest {
         assertEquals(Level.WARNING, records.first { it.message.endsWith("w") }.level)
         assertEquals(Level.SEVERE, records.first { it.message.endsWith("e") }.level)
     }
+
+    /**
+     * A third-party `slf4j-jdk14` caller (e.g. dbus-java's `TransportBuilder`) logs through its
+     * own JUL logger name, not [Log.LOGGER_NAME]. It reaches the app's log sink only via JUL's
+     * default parent-handler propagation up to the root logger, which is where
+     * [Log.debug]/[Log.info]/etc.'s own handlers actually live (see `Log.desktop.kt`'s
+     * `createLogger`). This attaches a capturing handler directly to the root logger instead of
+     * [Log.LOGGER_NAME] to prove that propagation path, rather than assuming it.
+     */
+    @Test
+    fun thirdPartyLoggerPropagatesThroughRoot() {
+        System.setProperty("keryx.log.dir", System.getProperty("java.io.tmpdir"))
+        Log.info("Warm", "up") // forces Log's lazy root-logger setup before the test attaches its own handler
+
+        val root = Logger.getLogger("")
+        val captured = mutableListOf<LogRecord>()
+        val handler = object : Handler() {
+            override fun publish(record: LogRecord) { captured.add(record) }
+            override fun flush() {}
+            override fun close() {}
+        }
+        handler.level = Level.ALL
+        root.addHandler(handler)
+        try {
+            Logger.getLogger("org.freedesktop.dbus.connections.transports.TransportBuilder")
+                .info("Using transport dbus-java-transport-native-unixsocket to connect to unix:path=/run/user/1000/bus")
+        } finally {
+            root.removeHandler(handler)
+        }
+
+        val record = captured.firstOrNull { it.message.contains("Using transport") }
+        assertNotNull(record, "expected the third-party logger's record to reach the root handler")
+        assertEquals(Level.INFO, record.level)
+    }
 }
