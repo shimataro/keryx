@@ -1,9 +1,9 @@
 name: keryx
 version: '0.0.0' # overwritten by release.yml with the tag-derived version before packing
-summary: Local-first, cross-platform RSS reader
+summary: Cloud-sync, multi-platform RSS reader
 description: |
-  A local-first, cross-platform RSS reader with multi-device sync via your own
-  cloud storage (Dropbox / Google Drive / OneDrive). No account required.
+  Keeps your subscriptions in sync across every device through your own cloud storage
+  (Dropbox / Google Drive / OneDrive).
 grade: stable
 confinement: strict
 base: core24

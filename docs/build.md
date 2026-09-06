@@ -185,9 +185,14 @@ with `dpkg-deb -R`, writes `composeApp/packaging/linux/works.merc.keryx.metainfo
 `usr/share/metainfo/works.merc.keryx.metainfo.xml` with its placeholders substituted
 (`@DESKTOP_ID@` — the actual `.desktop` filename jpackage placed in the package, discovered by
 walking the extracted payload rather than assumed, since jpackage derives the name from
-`packageName`/the launcher name; `@VERSION@`; `@DATE@`), and repacks with
-`dpkg-deb --build --root-owner-group`. This finalizer is a no-op when `dpkg-deb` isn't on `PATH`
-(a local macOS/Windows build never produces a `.deb` at all).
+`packageName`/the launcher name; `@VERSION@`; `@DATE@`). The same finalizer also adds a
+`Comment[ja]=` line to that same `.desktop` file (right after its own `Comment=`, per the
+freedesktop.org Desktop Entry Specification's locale-suffixed-key convention), so a Japanese
+desktop environment shows a localized tooltip in the applications menu — `snap/gui/keryx.desktop`
+carries the same `Comment[ja]=` independently, since it's a separately-maintained static file, not
+jpackage-generated. Both edits are done in the same `dpkg-deb -R` extraction before a single
+`dpkg-deb --build --root-owner-group` repack. This finalizer is a no-op when `dpkg-deb` isn't on
+`PATH` (a local macOS/Windows build never produces a `.deb` at all).
 
 `.rpm` gets no equivalent metainfo injection — deliberately asymmetric. jpackage's own
 `--resource-dir` is fixed by the Compose plugin to a temp directory it clears mid-task, so the rpm
@@ -195,7 +200,10 @@ walking the extracted payload rather than assumed, since jpackage derives the na
 already-built `.rpm` needs an extra tool (`rpmrebuild`) this project doesn't otherwise depend on.
 This isn't a functional gap, though: unlike `.deb`, the rpm `.spec` template already has native
 `License:` and `URL:` tags, so `rpmLicenseType` and `--about-url` alone are enough for both
-`rpm -qi` and PackageKit-based software centers to show correct values.
+`rpm -qi` and PackageKit-based software centers to show correct values. The same limitation
+applies to `Comment[ja]=`: the rpm's own `.desktop` entry only ever carries the unlocalized
+`Comment=` (from the shared `description` above), since adding a localized variant would need the
+same kind of `.rpm` unpack/repack this project already declined to depend on for metainfo.
 
 AppStream metainfo requires the `<launchable type="desktop-id">` file to actually exist under
 `/usr/share/applications` after install for the entry to validate and link correctly, which is

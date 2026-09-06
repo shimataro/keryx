@@ -184,8 +184,14 @@ KDE Discover）にライセンスやホームページのリンクは表示さ�
 `usr/share/metainfo/works.merc.keryx.metainfo.xml` として書き込み（`@DESKTOP_ID@` は jpackage が
 パッケージに入れた実際の `.desktop` ファイル名 — `packageName`/ランチャー名から jpackage が導出する
 ため、決め打ちにせず展開済みペイロードを走査して見つける。ほかに `@VERSION@`、`@DATE@`）、
-`dpkg-deb --build --root-owner-group` で再パックする。`dpkg-deb` が `PATH` に無い場合は何もしない
-（macOS/Windows のローカルビルドではそもそも `.deb` は作られない）。
+`dpkg-deb --build --root-owner-group` で再パックする。同じ finalizer は、同じ `.desktop`
+ファイルの `Comment=` の直後に `Comment[ja]=` 行も追加する（freedesktop.org の Desktop Entry
+Specification が定めるロケール接尾辞キーの慣習に従う）。これにより日本語環境のアプリケーション
+メニューでツールチップがローカライズされる — `snap/gui/keryx.desktop` は jpackage 生成物ではなく
+独立して管理している静的ファイルのため、同じ `Comment[ja]=` を別途持たせている。両方の編集は
+同じ `dpkg-deb -R` 展開の中で行い、`dpkg-deb --build --root-owner-group` による再パックは1回のみ
+実行する。`dpkg-deb` が `PATH` に無い場合は何もしない（macOS/Windows のローカルビルドでは
+そもそも `.deb` は作られない）。
 
 `.rpm` には同等の metainfo 注入を**行わない** — これは意図的な非対称である。jpackage 自身の
 `--resource-dir` は Compose プラグインがタスク実行中にクリアする一時ディレクトリに固定されており、
@@ -193,7 +199,10 @@ KDE Discover）にライセンスやホームページのリンクは表示さ�
 ビルド済みの `.rpm` を再パックするには本プロジェクトが他で依存していない追加ツール
 （`rpmrebuild`）が必要になる。とはいえ機能的な欠落ではない：`.deb` と異なり rpm の `.spec`
 テンプレートにはもともと `License:` と `URL:` のタグがあるため、`rpmLicenseType` と `--about-url`
-だけで `rpm -qi` にも PackageKit 系のソフトウェアセンターにも正しい値が表示される。
+だけで `rpm -qi` にも PackageKit 系のソフトウェアセンターにも正しい値が表示される。同じ制約は
+`Comment[ja]=` にも当てはまる：rpm 側の `.desktop` エントリは（上記の共通 `description` から来る）
+ローカライズされていない `Comment=` のみを持つ。ローカライズ版を追加するには、metainfo と同様に
+本プロジェクトが依存しないと決めた `.rpm` の展開・再パックが必要になるためである。
 
 AppStream の metainfo は、`<launchable type="desktop-id">` で指すファイルがインストール後に実際に
 `/usr/share/applications` 配下に存在しないと正しく検証・リンクされない。上記の
