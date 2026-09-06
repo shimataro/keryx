@@ -34,3 +34,15 @@ parts:
   keryx:
     plugin: dump
     source: composeApp/build/compose/binaries/main/app/Keryx
+    stage-packages:
+      # AWT/Swing (JMenuBar, JFileChooser, FlatLaf) needs the X11 client libraries even under Wayland
+      - libx11-6
+      - libxext6
+      - libxi6
+      - libxrender1
+      - libxtst6
+      # Font rendering (Skiko + JDK fontmanager)
+      - libfontconfig1
+      - libfreetype6
+      # OpenGL (Skiko / Compose Desktop GPU rendering)
+      - libgl1
