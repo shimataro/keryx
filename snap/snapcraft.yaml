@@ -44,5 +44,8 @@ parts:
       # Font rendering (Skiko + JDK fontmanager)
       - libfontconfig1
       - libfreetype6
+      - libharfbuzz0b
+      - libgraphite2-3
+      - libglib2.0-0
       # OpenGL (Skiko / Compose Desktop GPU rendering)
       - libgl1
