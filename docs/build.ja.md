@@ -252,7 +252,9 @@ AWT/Swing・FlatLaf・Skiko・WebKitGTK が必要とするすべての X11 ク�
 
 `password-manager-service`（Secret Service、`java-keyring`のトークン保存用 —
 snapdのポリシー上**自動接続されない**ため、Secret Serviceに実際にアクセスできるように
-なるには利用者が事前に`snap connect keryx:password-manager-service`を実行する必要がある。
+なるには利用者が事前に`snap connect keryx:password-manager-service`を実行する必要がある
+（`--dangerous`によるローカルインストール時はこの手動接続が必須。Snap Store公開後は
+フォーラムでauto-connectを申請でき、利用者はインストール時に自動的に接続される）。
 接続するまでは、OSのセキュアストアが使えない場合に他のプラットフォームでもすでに使っている
 権限制限付きの平文フォールバックファイルへ`java-keyring`がフォールバックする。`SECURITY.md`
 参照。これは黙って行われるわけではなく、`CloudSession`が通知センターに警告を出し、その

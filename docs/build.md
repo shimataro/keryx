@@ -257,7 +257,9 @@ interface (plug) provides Mesa GPU drivers without bloating the snap with `libll
 
 `password-manager-service` (Secret Service, for `java-keyring`'s token storage — **not**
 auto-connected by snapd policy, so a user must run `snap connect keryx:password-manager-service`
-before Secret Service is actually reachable; until then, `java-keyring` falls back to the same
+before Secret Service is actually reachable (for local `--dangerous` installs this manual step is
+always required; once published to the Snap Store, auto-connection can be requested on the
+Snapcraft forum so end users get it automatically). Until then, `java-keyring` falls back to the same
 permission-restricted plaintext file every platform already uses when the OS store is
 unavailable, see `SECURITY.md` — this is not silent: `CloudSession` raises a notification-center
 warning whose `ShowInfoDialog` action names this `snap connect` as the fix, see
