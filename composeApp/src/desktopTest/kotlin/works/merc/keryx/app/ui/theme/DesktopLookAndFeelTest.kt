@@ -175,7 +175,7 @@ class DesktopLookAndFeelTest {
 
         ensureTextAntialiasing()
 
-        val hint = UIManager.getLookAndFeelDefaults()[RenderingHints.KEY_TEXT_ANTIALIASING]
+        val hint = UIManager.getDefaults()[RenderingHints.KEY_TEXT_ANTIALIASING]
         assertEquals(hint, resolveTextAntialiasingHint(hint), "the installed defaults hold an unusable hint: $hint")
     }
 }
