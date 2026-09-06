@@ -11,21 +11,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.platform.LocalWindowInfo
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.LocalWindowExceptionHandlerFactory
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowExceptionHandler
 import androidx.compose.ui.window.WindowExceptionHandlerFactory
-import androidx.compose.ui.window.WindowPlacement
-import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
 import io.ktor.client.HttpClient
@@ -36,7 +31,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.swing.Swing
@@ -50,10 +45,9 @@ import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.SystemClock
-import works.merc.keryx.app.core.WINDOW_DEFAULT_HEIGHT
-import works.merc.keryx.app.core.WINDOW_DEFAULT_WIDTH
 import works.merc.keryx.app.core.WINDOW_MIN_HEIGHT
 import works.merc.keryx.app.core.WINDOW_MIN_WIDTH
+import works.merc.keryx.app.core.WINDOW_STATE_PERSIST_DEBOUNCE_MS
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.di.appModule
 import works.merc.keryx.app.di.configureImageLoader
@@ -216,21 +210,28 @@ fun main(args: Array<String>) {
     runBlocking { koin.get<FtsManager>().ensureIndexed() }
 
     val settingsRepository = koin.get<SettingsRepository>()
+    // Holds the most recently observed window placement/size/position, updated from inside the
+    // Compose window content below (see the LaunchedEffect collecting observedWindowState) and read
+    // here by the shutdown hook, which runs on its own JVM thread with no access to Compose state.
+    // This matters because macOS's own Quit menu item (Cmd+Q) — unlike the tray's own Quit, which
+    // goes through exitApp/persistWindowStateImmediately — terminates the JVM directly without ever
+    // calling back into application code, so the shutdown hook is the only chance to persist a
+    // resize/move/maximize that happened just before quitting that way.
+    val latestWindowState = java.util.concurrent.atomic.AtomicReference<ObservedWindowState?>(null)
     // Local settings are persisted off-thread and coalesced (see SettingsRepository), so a change
     // made shortly before quitting may not have hit disk yet. Flush on JVM shutdown so the latest
     // value (theme, pane widths, last-selected article, setup completion, …) is never lost on exit.
     Runtime.getRuntime().addShutdownHook(
         Thread {
             runCatching {
-                println("[SHUTDOWN] Flushing local_settings.json")
+                latestWindowState.get()?.let { observed ->
+                    settingsRepository.mutateLocalSettings { persistedWindowState(it, observed) }
+                }
                 runBlocking { settingsRepository.flush() }
-                println("[SHUTDOWN] Flush complete")
             }
         },
     )
     val saved = settingsRepository.getLocalSettings()
-    println("[STARTUP] appDataDir: ${AppDirs.appDataDir()}")
-    println("[STARTUP] windowMaximized=${saved.windowMaximized}, width=${saved.windowWidth}, height=${saved.windowHeight}")
 
     // Both still before any AWT/Compose initialization (SingleInstanceCoordinator/Koin/settings
     // loading above don't touch AWT) — kept together since it's unconfirmed whether
@@ -365,56 +366,38 @@ fun main(args: Array<String>) {
         // landing while the window happens to already be visible and focused still activates
         // instead of hiding it, on the Windows/Linux fallback where the two clicks share one hook.
         var lastNotificationSentAtMillis by remember { mutableStateOf(0L) }
-        val savedMaximized = saved.windowMaximized
         val windowState = remember {
-            val restorePlacement = when {
-                !savedMaximized -> WindowPlacement.Floating
-                isMacOs -> WindowPlacement.Fullscreen
-                else -> WindowPlacement.Maximized
-            }
+            val restored = restoredWindowState(saved, screenBounds())
             WindowState(
-                placement = restorePlacement,
-                position = if (savedMaximized) WindowPosition.PlatformDefault else WindowPosition.Aligned(Alignment.Center),
-                width = if (savedMaximized) Dp.Unspecified else (saved.windowWidth ?: WINDOW_DEFAULT_WIDTH.toDouble()).coerceAtLeast(WINDOW_MIN_WIDTH.toDouble()).dp,
-                height = if (savedMaximized) Dp.Unspecified else (saved.windowHeight ?: WINDOW_DEFAULT_HEIGHT.toDouble()).coerceAtLeast(WINDOW_MIN_HEIGHT.toDouble()).dp,
+                placement = restored.placement,
+                position = restored.position,
+                size = restored.size,
             )
         }
 
-        val debugLogFile = java.io.File(AppDirs.tempDir(), "keryx-window-debug.log")
-        fun log(msg: String) {
-            debugLogFile.appendText("${java.time.Instant.now()} $msg\n")
-            println(msg)
-        }
-
-        val persistWindowState = {
-            val isNotFloating = windowState.placement != WindowPlacement.Floating
-            log("[PERSIST] placement=${windowState.placement}, isNotFloating=$isNotFloating, size=${windowState.size}")
-            settingsRepository.mutateLocalSettings {
-                it.copy(
-                    windowMaximized = isNotFloating,
-                    windowWidth = if (!isNotFloating) windowState.size.width.value.toDouble() else it.windowWidth,
-                    windowHeight = if (!isNotFloating) windowState.size.height.value.toDouble() else it.windowHeight,
-                )
-            }
+        val persistWindowStateImmediately = {
+            val observed = observedWindowState(windowState)
+            latestWindowState.set(observed)
+            settingsRepository.mutateLocalSettings { persistedWindowState(it, observed) }
         }
 
         val exitApp = {
-            persistWindowState()
+            persistWindowStateImmediately()
             runBlocking { settingsRepository.flush() }
             exitApplication()
         }
 
-        // Persist window size and placement (debounced).
+        // Tracks the window's placement/size/position and persists it (debounced, so a transient
+        // mid-transition value while animating into/out of fullscreen isn't the one saved) — see
+        // WindowStatePersistence.kt. Also updates latestWindowState on every change (not debounced)
+        // so the shutdown hook always has an up-to-date snapshot even if the debounce window hasn't
+        // elapsed yet when the JVM exits.
         LaunchedEffect(windowState) {
-            // Watch placement and size independently so a size change doesn't swallow a placement change.
-            merge(
-                snapshotFlow { windowState.placement }.distinctUntilChanged().map { "placement" to it },
-                snapshotFlow { windowState.size }.distinctUntilChanged().map { "size" to it },
-            )
-                .debounce(100)
-                .collect { (what, value) ->
-                    log("[FLOW] $what changed to $value")
-                    persistWindowState()
+            snapshotFlow { observedWindowState(windowState) }
+                .onEach { latestWindowState.set(it) }
+                .debounce(WINDOW_STATE_PERSIST_DEBOUNCE_MS)
+                .collect { observed ->
+                    settingsRepository.mutateLocalSettings { persistedWindowState(it, observed) }
                 }
         }
 
@@ -529,7 +512,7 @@ fun main(args: Array<String>) {
         CompositionLocalProvider(LocalWindowExceptionHandlerFactory provides exceptionHandlerFactory) {
         Window(
             onCloseRequest = {
-                persistWindowState()
+                persistWindowStateImmediately()
                 runBlocking { settingsRepository.flush() }
                 windowVisible = false
             },
@@ -591,7 +574,7 @@ fun main(args: Array<String>) {
                 appMenuConnection = appMenuConnection,
                 windowVisible = windowVisible,
                 onCloseWindow = {
-                    persistWindowState()
+                    persistWindowStateImmediately()
                     runBlocking { settingsRepository.flush() }
                     windowVisible = false
                 },

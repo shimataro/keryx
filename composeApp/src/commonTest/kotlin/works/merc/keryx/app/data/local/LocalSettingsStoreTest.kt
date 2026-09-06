@@ -87,19 +87,34 @@ class LocalSettingsStoreTest {
     }
 
     @Test
-    fun windowMaximizedDefaultsToFalse() {
-        assertEquals(false, store.load().windowMaximized)
+    fun windowPlacementDefaultsToFloating() {
+        assertEquals("floating", store.load().windowPlacement)
     }
 
     @Test
-    fun windowMaximizedRoundTrips() {
-        store.save(LocalSettings(windowMaximized = true))
-        assertEquals(true, store.load().windowMaximized)
+    fun windowPlacementRoundTrips() {
+        store.save(LocalSettings(windowPlacement = "maximized"))
+        assertEquals("maximized", store.load().windowPlacement)
     }
 
     @Test
-    fun loadingOldSettingsFileWithoutWindowMaximizedKeyStillWorks() {
-        // Simulates a `local_settings.json` written before `windowMaximized` existed.
+    fun windowPositionDefaultsToNull() {
+        val s = store.load()
+        assertEquals(null, s.windowX)
+        assertEquals(null, s.windowY)
+    }
+
+    @Test
+    fun windowPositionRoundTrips() {
+        store.save(LocalSettings(windowX = 100.0, windowY = 50.0))
+        val s = store.load()
+        assertEquals(100.0, s.windowX)
+        assertEquals(50.0, s.windowY)
+    }
+
+    @Test
+    fun loadingOldSettingsFileWithoutWindowPlacementKeyStillWorks() {
+        // Simulates a `local_settings.json` written before `windowPlacement`/`windowX`/`windowY` existed.
         FileIO.writeText(
             FileIO.join(dir, "local_settings.json"),
             """{"themeMode":"dark","windowWidth":800.0,"windowHeight":600.0}""",
@@ -108,7 +123,9 @@ class LocalSettingsStoreTest {
         val s = store.load()
 
         assertEquals("dark", s.themeMode)
-        assertEquals(false, s.windowMaximized)
+        assertEquals("floating", s.windowPlacement)
+        assertEquals(null, s.windowX)
+        assertEquals(null, s.windowY)
     }
 
     @Test

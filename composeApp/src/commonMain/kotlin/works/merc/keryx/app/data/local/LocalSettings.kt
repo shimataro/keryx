@@ -20,9 +20,16 @@ data class LocalSettings(
     val cloudStorageType: String? = null, // CloudStorageType.id: "dropbox" | "google_drive" | "onedrive" | null (local only)
     val notificationEnabled: Boolean = true,
     val lastCacheCleanupAt: Long? = null,
+    /** Size/position while floating (neither maximized nor fullscreen); the restore target once
+     * [windowPlacement] leaves that state. `null` = never recorded (first run). */
     val windowWidth: Double? = null,
     val windowHeight: Double? = null,
-    val windowMaximized: Boolean = false,
+    val windowX: Double? = null,
+    val windowY: Double? = null,
+    /** "floating" | "maximized" | "fullscreen" (an unrecognized value restores as floating).
+     * Minimized is deliberately not a value here: minimizing hides the window without changing
+     * where it restores to, so the placement from before the minimize is what gets kept. */
+    val windowPlacement: String = "floating",
     val feedListPaneWidth: Double = FEED_LIST_PANE_WIDTH_DEFAULT.toDouble(),
     val articleListPaneWidth: Double = ARTICLE_LIST_PANE_WIDTH_DEFAULT.toDouble(),
     val collapsedFolderIds: Set<String> = emptySet(),
