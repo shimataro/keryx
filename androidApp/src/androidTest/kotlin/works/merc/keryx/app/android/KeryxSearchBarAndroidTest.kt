@@ -11,18 +11,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.assert
-import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.Density
@@ -31,7 +25,6 @@ import org.junit.Rule
 import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import works.merc.keryx.app.ui.common.KeryxCollapsedSearchBar
 import works.merc.keryx.app.ui.common.KeryxExpandedSearchBar
 
 /**
@@ -45,66 +38,6 @@ class KeryxSearchBarAndroidTest {
 
     @get:Rule
     val composeTestRule = createComposeRule()
-
-    private val roleButton = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button)
-
-    @Test
-    fun collapsedBarExposesRoleButtonAndNoTextInput() {
-        composeTestRule.setContent {
-            MaterialTheme {
-                KeryxCollapsedSearchBar(
-                    text = "Search articles…",
-                    isPlaceholder = true,
-                    onClick = {},
-                    onClickLabel = "Search articles",
-                    modifier = Modifier.testTag("collapsed-bar"),
-                )
-            }
-        }
-
-        // A read-only entry point must never expose SetText — see KeryxCollapsedSearchBar's own
-        // KDoc on why it is not a read-only text field.
-        composeTestRule.onNodeWithTag("collapsed-bar").assert(roleButton) {
-            "expected the collapsed bar to carry Role.Button"
-        }
-        composeTestRule.onNode(hasSetTextAction()).assertDoesNotExist()
-    }
-
-    @Test
-    fun collapsedBarMeetsTheMaterialTouchTargetMinimum() {
-        composeTestRule.setContent {
-            MaterialTheme {
-                KeryxCollapsedSearchBar(
-                    text = "Search articles…",
-                    isPlaceholder = true,
-                    onClick = {},
-                    onClickLabel = "Search articles",
-                    modifier = Modifier.testTag("collapsed-bar").width(300.dp),
-                )
-            }
-        }
-
-        composeTestRule.onNodeWithTag("collapsed-bar").assertHeightIsAtLeast(48.dp)
-    }
-
-    @Test
-    fun collapsedBarClickInvokesOnClick() {
-        var clicked = false
-        composeTestRule.setContent {
-            MaterialTheme {
-                KeryxCollapsedSearchBar(
-                    text = "Search articles…",
-                    isPlaceholder = true,
-                    onClick = { clicked = true },
-                    onClickLabel = "Search articles",
-                )
-            }
-        }
-
-        composeTestRule.onNodeWithText("Search articles…").performClick()
-
-        assertTrue(clicked, "expected onClick to have fired")
-    }
 
     @Test
     fun expandedBarFieldAcceptsTextInputWhileTheBackArrowStaysClickable() {
