@@ -1,5 +1,6 @@
 package works.merc.keryx.app.ui.common
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -21,6 +22,7 @@ import androidx.compose.ui.unit.dp
 actual fun KeryxPaneTopBar(
     modifier: Modifier,
     title: String?,
+    titleContent: (@Composable () -> Unit)?,
     navigationIcon: (@Composable () -> Unit)?,
     actions: @Composable RowScope.() -> Unit,
 ) {
@@ -29,7 +31,11 @@ actual fun KeryxPaneTopBar(
             navigationIcon()
             if (title != null) Spacer(Modifier.width(4.dp))
         }
-        if (title != null) {
+        if (titleContent != null) {
+            Box(Modifier.weight(1f)) {
+                titleContent()
+            }
+        } else if (title != null) {
             Text(
                 title,
                 modifier = Modifier.weight(1f),

@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -58,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import works.merc.keryx.app.core.ArticleFilter
@@ -75,6 +77,7 @@ import works.merc.keryx.app.platform.WindowChrome
 import works.merc.keryx.app.platform.WindowDragArea
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.resources.Res
+import works.merc.keryx.app.resources.app_icon
 import works.merc.keryx.app.resources.app_name
 import works.merc.keryx.app.resources.home_add_feed
 import works.merc.keryx.app.resources.home_add_folder
@@ -854,7 +857,20 @@ private fun FeedListToolbarRow(
     WindowDragArea(Modifier.fillMaxWidth()) {
         KeryxPaneTopBar(
             modifier = Modifier.padding(top = WindowChrome.titleBarInsetDp.dp, start = 4.dp, end = 4.dp),
-            title = if (hasNativeAppMenu) null else stringResource(Res.string.app_name),
+            title = if (hasNativeAppMenu) null else null,
+            titleContent = if (hasNativeAppMenu) null else {
+                {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Image(
+                            painter = painterResource(Res.drawable.app_icon),
+                            contentDescription = null,
+                            modifier = Modifier.size(28.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(Res.string.app_name))
+                    }
+                }
+            },
         ) {
             ToolbarIconGroup {
                 val addFeedTooltip = stringResource(Res.string.home_add_feed)

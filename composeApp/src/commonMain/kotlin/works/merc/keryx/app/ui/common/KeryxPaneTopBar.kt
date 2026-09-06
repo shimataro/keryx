@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 expect fun KeryxPaneTopBar(
     modifier: Modifier = Modifier,
     title: String? = null,
+    titleContent: (@Composable () -> Unit)? = null,
     navigationIcon: (@Composable () -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
 )

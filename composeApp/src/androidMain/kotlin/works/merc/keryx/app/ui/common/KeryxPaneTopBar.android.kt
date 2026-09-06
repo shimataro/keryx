@@ -27,14 +27,14 @@ import androidx.compose.ui.text.style.TextOverflow
 actual fun KeryxPaneTopBar(
     modifier: Modifier,
     title: String?,
+    titleContent: (@Composable () -> Unit)?,
     navigationIcon: (@Composable () -> Unit)?,
     actions: @Composable RowScope.() -> Unit,
 ) {
     TopAppBar(
         title = {
-            if (title != null) {
-                Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
+            titleContent?.invoke()
+                ?: title?.let { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) }
         },
         modifier = modifier,
         navigationIcon = navigationIcon ?: {},
