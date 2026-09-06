@@ -320,10 +320,10 @@ fun HomeScreen() {
                 // which paneLayoutFor resolves to Single regardless of the eventual layout, and
                 // clamping against that would misfire even on desktop. See initialPaneFor's own
                 // KDoc for why restoring straight into ArticleDetail at a narrow layout is wrong;
-                // this LaunchedEffect composes only until initialPaneClamped flips true, and never
-                // again after that, so a later resize/rotation can't re-trigger it.
-                if (!initialPaneClamped && maxWidth > 0.dp) {
-                    LaunchedEffect(Unit) {
+                // this effect fires whenever maxWidth changes, but the body is gated by
+                // initialPaneClamped so it only runs once per composition instance.
+                LaunchedEffect(maxWidth) {
+                    if (!initialPaneClamped && maxWidth > 0.dp) {
                         initialPaneClamped = true
                         val clamped = initialPaneFor(layout, focusedPane)
                         if (clamped != focusedPane) setFocusedPane(clamped)
