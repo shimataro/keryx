@@ -174,6 +174,10 @@ const val SEARCH_DEBOUNCE_MS = 250L
 /** Debounce for persisting a pane's width to disk while it's being dragged. */
 const val PANE_WIDTH_PERSIST_DEBOUNCE_MS = 500L
 
+/** Debounce for persisting window size/position/placement while resized/moved/(un)maximized, so a
+ * transient mid-transition value (e.g. while animating into fullscreen) isn't the one saved. */
+const val WINDOW_STATE_PERSIST_DEBOUNCE_MS = 500L
+
 // How long after a new-article notification is sent onTrayAction still treats a click as an
 // activation rather than a deliberate hide - see tray/TrayActionPolicy.kt.
 const val TRAY_ACTION_NOTIFICATION_RECENCY_MS = 5_000L
