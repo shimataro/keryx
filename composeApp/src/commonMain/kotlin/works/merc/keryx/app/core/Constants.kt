@@ -139,6 +139,9 @@ const val ARTICLE_LIST_PANE_MIN_WIDTH = 240
 const val ARTICLE_LIST_PANE_MAX_WIDTH = 600
 const val DETAIL_PANE_MIN_WIDTH = 280
 
+/** End inset (Dp) reserved on the right side of a [ModalDrawerSheet] so the scrim remains visible. */
+const val DRAWER_SHEET_END_INSET = 56
+
 /** Width of a [works.merc.keryx.app.ui.home.ResizableDivider] between two panes. */
 const val PANE_DIVIDER_WIDTH = 8
 

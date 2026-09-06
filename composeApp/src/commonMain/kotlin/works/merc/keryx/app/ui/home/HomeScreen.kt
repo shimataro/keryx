@@ -52,6 +52,7 @@ import works.merc.keryx.app.core.ARTICLE_LIST_PANE_WIDTH_DEFAULT
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.DETAIL_PANE_MIN_WIDTH
+import works.merc.keryx.app.core.DRAWER_SHEET_END_INSET
 import works.merc.keryx.app.core.FEED_LIST_PANE_WIDTH_DEFAULT
 import works.merc.keryx.app.core.PANE_DIVIDER_WIDTH
 import works.merc.keryx.app.data.local.db.Feeds
@@ -430,7 +431,12 @@ fun HomeScreen() {
                             // Single-only suppression above doesn't apply here: this is an overlay
                             // the user is looking at right now, not a screen navigated away from.
                             CompositionLocalProvider(LocalRowSelectionVisible provides true) {
-                                ModalDrawerSheet(drawerState = drawerState, modifier = Modifier.width(maxWidth - 56.dp)) {
+                                ModalDrawerSheet(
+                                    drawerState = drawerState,
+                                    modifier = Modifier.width(
+                                        (maxWidth - DRAWER_SHEET_END_INSET.dp).coerceAtLeast(0.dp),
+                                    ),
+                                ) {
                                     FeedListPane(
                                         vm,
                                         focused = false,
