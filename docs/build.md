@@ -293,6 +293,27 @@ Only a handful of packages remain in manual `stage-packages` — WebKitGTK, its 
 and HTTP soup library, the AWT `libxtst6` extension, and `libffi8` for JNA — everything
 else is covered by the `gnome` extension.
 
+`snapcraft pack` also runs a set of built-in linters, and two of its findings are worth
+explaining rather than "fixing":
+
+- The `library` linter only inspects ELF `DT_NEEDED` entries, so it cannot see libraries
+  loaded at runtime via `dlopen()` — it reports both the JVM's own runtime libraries
+  (`lib/runtime/lib/*.so`, `lib/libapplauncher.so`) and WebKitGTK's transitive apt
+  dependencies (GStreamer/GIO plugins pulled in by `libwebkit2gtk-4.1-0`) as "unused
+  library". These are false positives snapcraft's own documentation says not to act on;
+  removing any of them would break the app (`libfontmanager.so` in particular is the file
+  the harfbuzz dependency fix in `0394c79e` was for). `snap/snapcraft.yaml`'s `lint.ignore`
+  suppresses these specific paths.
+- **That suppression also disables the linter's *missing*-dependency detection for the
+  same paths** — the check that previously caught the X11/font gap (`88ceff7e`) and the
+  harfbuzz gap (`0394c79e`). Whenever `stage-packages` or the bundled JDK version changes,
+  comment out the `lint:` block in `snap/snapcraft.yaml` and re-pack once to confirm no new
+  missing-dependency warnings appear, then restore it.
+- The `metadata` linter's "title is missing" finding is real (unlike the library ones) and
+  is fixed by the top-level `title: Keryx` key — the display name shown in the Snap
+  Store / GNOME Software, separate from `snap/gui/keryx.desktop`'s `Name=` used by the
+  desktop shell.
+
 ### Android (APK / AAB)
 
 Unlike the desktop packages above, an APK/AAB can be built on **any** OS — there is no

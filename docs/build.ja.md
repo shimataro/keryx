@@ -289,6 +289,26 @@ WebView のレンダラーサンドボックスのみを無効化するもので
 HTTPライブラリ、AWT で必要な `libxtst6`、JNA 用の `libffi8` のみ — その他はすべて `gnome` 拡張機能で
 カバーされる。
 
+`snapcraft pack` は組み込みの linter 群も実行するが、その指摘のうち2件は「修正」ではなく
+説明が必要なものである。
+
+- `library` linter は ELF の `DT_NEEDED` エントリしか見ないため、実行時に `dlopen()` で
+  ロードされるライブラリを検出できない。JVM 自身のランタイムライブラリ
+  （`lib/runtime/lib/*.so`、`lib/libapplauncher.so`）と、WebKitGTK の推移的な apt 依存
+  （`libwebkit2gtk-4.1-0` が引き込む GStreamer/GIO プラグイン）の両方が「未使用ライブラリ」
+  として報告される。これらは snapcraft 自身のドキュメントが「対応するな」と明記している
+  false positive であり、削除すればアプリが壊れる（`libfontmanager.so` は特に、
+  `0394c79e` で harfbuzz 依存を追加した当のファイルである）。
+  `snap/snapcraft.yaml` の `lint.ignore` でこれらのパスを個別に抑制している。
+- **この抑制は、同じパスに対する「不足依存」の検出も同時に無効化してしまう** —
+  以前 X11/フォント不足（`88ceff7e`）と harfbuzz 不足（`0394c79e`）を発見したのは、
+  まさにこのチェックである。`stage-packages` やバンドルする JDK のバージョンを変更した際は、
+  `snap/snapcraft.yaml` の `lint:` ブロックを一時的にコメントアウトして一度再パックし、
+  新たな不足依存の警告が出ないことを確認してから元に戻すこと。
+- `metadata` linter の「title が未設定」という指摘は（library の警告と異なり）実在の不備であり、
+  トップレベルの `title: Keryx` キーで解消している。これは Snap Store / GNOME Software に
+  表示される表示名であり、デスクトップシェルが使う `snap/gui/keryx.desktop` の `Name=` とは別物。
+
 ### Android（APK / AAB）
 
 上記のデスクトップパッケージと違い、APK/AAB は**どの OS からでも**ビルドできる —

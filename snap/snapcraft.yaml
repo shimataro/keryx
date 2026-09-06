@@ -1,4 +1,5 @@
 name: keryx
+title: Keryx
 version: '0.0.0' # overwritten by release.yml with the tag-derived version before packing
 summary: Cloud-sync, multi-platform RSS reader
 description: |
@@ -41,3 +42,36 @@ parts:
       - libxtst6
       # JNA native dispatch library
       - libffi8
+
+# The library linter only inspects ELF DT_NEEDED entries, so it cannot see that the JVM
+# dlopen()s its own runtime libraries, nor that WebKitGTK's transitive apt dependencies are
+# loaded as GStreamer/GIO plugins. Both are reported as "unused library" — false positives
+# snapcraft's own documentation says not to act on.
+#
+# NOTE: ignoring a path disables the linter for it entirely, so *missing* dependency reports
+# for these files are suppressed too (that check is what surfaced the X11/font gap in 88ceff7e
+# and the harfbuzz gap in 0394c79e). Comment this block out and re-pack whenever stage-packages
+# or the JDK version changes, so those reports are visible again.
+lint:
+  ignore:
+    - library:
+      # jpackage launcher + JDK runtime: dlopen()ed by the JVM. Globbed rather than enumerated
+      # because the file set changes with every JDK version.
+      - lib/libapplauncher.so
+      - lib/runtime/lib/*.so
+      # Transitive apt dependencies of libwebkit2gtk-4.1-0. Listed by name on purpose: if a
+      # stage-packages change drags in a *new* unused library, its warning comes back.
+      - usr/lib/**/libcaca++.so*
+      - usr/lib/**/libcolordprivate.so*
+      - usr/lib/**/libdconf.so*
+      - usr/lib/**/libexslt.so*
+      - usr/lib/**/libform.so*
+      - usr/lib/**/libgstcheck-1.0.so*
+      - usr/lib/**/libgstcontroller-1.0.so*
+      - usr/lib/**/libmenu.so*
+      - usr/lib/**/liborc-test-0.4.so*
+      - usr/lib/**/libpanel.so*
+      - usr/lib/**/libpulse-simple.so*
+      - usr/lib/**/libunwind-coredump.so*
+      - usr/lib/**/libunwind-ptrace.so*
+      - usr/lib/**/libunwind-x86_64.so*
