@@ -90,40 +90,40 @@ share a common `TopAppBar`. Each action icon lives in the pane it operates on,
 not in global chrome:
 
 - Feed-management icons (add feed / refresh all / cloud sync) — top of
-  `FeedListPane`
+  `FeedListPane` (unchanged whether it renders as `Triple`'s permanent pane or
+  a narrow layout's drawer content — see "Adaptive pane layout & touch
+  affordances" below)
 - Settings — reached through the native application menu bar (macOS
   Preferences…/AppMenuBar/KDE Global Menu — see `MenuCommand.OpenSettings`).
   On platforms with no such menu (Android — `platform/PlatformOs.kt`'s
-  `hasNativeAppMenu == false`), `FeedListToolbarRow` grows its own settings
-  icon button at the top of `FeedListPane` instead, sending the same command;
-  About gets the equivalent treatment as an `ActionLinkRow` at the bottom of
-  `GeneralTab`
+  `hasNativeAppMenu == false`), `FeedListPane` grows its own settings entry
+  point instead, sending the same command — a labelled row fixed to the
+  bottom of the pane, below its scrolling drag-host `Box`, with
+  `FeedListToolbarRow`'s header showing the app's own name (`app_name`) in
+  the space that button used to occupy. About gets the equivalent treatment
+  as an `ActionLinkRow` at the bottom of `GeneralTab`.
 - Search is layout-dependent rather than a fixed icon: at `PaneLayout.Triple`
-  the real, editable field lives in `FeedListPane` (unchanged from before this
-  section's rewrite); at a narrow layout it folds into a read-only
-  `KeryxCollapsedSearchBar` there instead, and the real field moves into
-  `ArticleListPane`'s `SearchListPane` (a `KeryxExpandedSearchBar`, alongside
-  the results it filters — see "Adaptive pane layout & touch affordances"
-  below for why). Outside the Search scope at a narrow layout,
-  `ArticleListPane`'s own header row (`ArticleListTopBar`) also gets a search
-  icon (`onSearchClick`) as its entry point, in the position (before
-  notifications/sort/mark all read) this bullet used to describe as fixed.
+  the real, editable field lives in `FeedListPane`, unchanged; at a narrow
+  layout the feed list has no search field of its own at all — it's a modal
+  drawer there (see "Adaptive pane layout & touch affordances" below), not a
+  screen search results could live on — so `ArticleListPane`'s own header row
+  (`ArticleListTopBar`) is the only entry point, folding into
+  `SearchListPane`'s `KeryxExpandedSearchBar` once the Search scope is active
+  and otherwise showing a search icon (`onSearchClick`) in its
+  hamburger-and-title row.
 - Sort / mark all read — header row of `ArticleListPane`, unchanged at every
   layout.
-- Notifications (the bell) — normally the same `ArticleListPane` header row,
-  but it is the one action that follows the *user* rather than a pane: an alert
-  entry point that only exists on one of three screens is not reachable from
-  the app's own launch destination. `FeedListPane` therefore grows its own bell
-  exactly when the article list is not on screen beside it (only
-  `PaneLayout.Single`'s depth 1 today), driven from `HomeScreen`'s
-  `visiblePanes` result — `notifVm.takeIf { HomePane.ArticleList !in visible }`
-  — so the two panes can never both draw one, or both skip it. It is a single
-  icon and therefore stays bare (no `ToolbarIconGroup` capsule), separated from
-  the add/refresh/sync cluster by the standard 8dp and placed ahead of it, the
-  same relative position it holds in `ArticleListTopBar`. `ArticleDetailPane`
-  deliberately has none at any layout — a reading screen carries no
-  notification entry point, matching how Android's own apps treat a detail
-  destination.
+- Notifications (the bell) — `ArticleListPane`'s own header row, at every
+  layout and every reachable depth: the article list is visible everywhere
+  except `PaneLayout.Single`'s article-detail depth (see `visiblePanes` in
+  `app-architecture.md`), so unlike before the feed list became a drawer,
+  there is no narrow-layout screen the bell would otherwise be unreachable
+  from, and `FeedListPane` never has to host a second one. It is a single
+  icon and therefore stays bare (no `ToolbarIconGroup` capsule), separated
+  from the add/refresh/sync cluster by the standard 8dp and placed ahead of
+  it. `ArticleDetailPane` deliberately has none at any layout — a reading
+  screen carries no notification entry point, matching how Android's own
+  apps treat a detail destination.
 
 Panes are tinted left-to-right with increasingly bright Material3 tonal
 surface roles, so boundaries read from tone alone rather than requiring a
@@ -141,98 +141,93 @@ only to the pane that sits in the window's top-left corner — currently
 `ui/home/HomePaneLayout.kt`'s `paneLayoutFor` resolves how many of the 3 panes fit side by side at
 the current width (`PaneLayout.Triple`/`Dual`/`Single`), derived from the same per-pane minimum
 widths this file already uses for tonal roles — not an independent breakpoint. Desktop always
-resolves `Triple` (`WINDOW_MIN_WIDTH >= TRIPLE_PANE_MIN_WIDTH`); narrower widths (phones) resolve
-`Single`, showing one pane at a time as a hierarchical stack with its own back button
-(`ArticleListPane`/`ArticleDetailPane`'s `onNavigateUp`) and — on Android — the OS back
-gesture/button (`platform/BackHandler`). Nothing about the panes' own internal layout (tonal
-roles, dividers, row chrome) changes between layouts; only how many are mounted at once does —
-with two deliberate exceptions, both about an affordance that has nowhere else to live once the
-panes become separate screens: the search field (see below) and the notification bell (see "Pane
-structure & tonal roles" above). That unmounting is state-preserving: `ui/home/NarrowPaneRow.kt`
-hosts the panes so each one keeps (or gets restored to) its own scroll position across the stack's
-comings and goings, which is why **a pane added there must be emitted from its own fixed `if`, never
-a loop iteration** — every iteration of a loop shares one compose group key, so a pane that merely
-changes position is torn down and rebuilt. See that file's KDoc and `app-architecture.md`.
-
-One case deliberately opts out of that preservation: at `PaneLayout.Single`'s depth 1 the article
-list pane isn't on screen at all, so a feed-list row selection is always an *entrance* into it, even
-when the row names the filter already active — restoring a stale scroll position (and the stale
-read/star pins that go with it, see "Optimistic read/star pins" in `app-architecture.md`) would be
-wrong there in a way it isn't when the pane is already visible. `FeedListPane`'s
-`onEnterArticleList` fires right before the row's own `vm.selectFilter`, and `HomeScreen` uses it to
-call `NarrowPaneRow`'s hoisted `SaveableStateHolder.removeState(HomePane.ArticleList)` — discarding
-the saved state outright rather than letting it be restored — while its own non-nullness also
-becomes `selectFilter`'s `reentering` argument, forcing the same-filter early return past its guard
-so the browsing context is rebuilt fresh.
+resolves `Triple` (`WINDOW_MIN_WIDTH >= TRIPLE_PANE_MIN_WIDTH`), where the feed list is a permanent
+on-screen pane. `feedListIsDrawer(layout)` (`layout != Triple`) is the single source of truth every
+other layout decision below branches on: at any narrower width, the feed list instead becomes a
+Gmail-style modal navigation drawer (`ModalNavigationDrawer`) — opened by a hamburger button on
+`ArticleListPane`'s own header (`onOpenDrawer`), closed by selecting anything in it
+(`onSelectionAdvance`), or auto-opened once, on first launch, when there are no feeds yet and no
+cloud account configured (`shouldAutoOpenFeedDrawer` — the "+" button that would fix that otherwise
+lives inside a drawer closed by default). The two remaining panes — article list, article detail —
+show one at a time at a phone width (`PaneLayout.Single`) as a hierarchical stack with its own back
+button (`ArticleListPane`'s `onExitSearch` while in Search, `ArticleDetailPane`'s `onNavigateUp`
+outside it) and — on Android — the OS back gesture/button (`platform/BackHandler`); at a tablet
+width (`PaneLayout.Dual`) both stay on screen together, permanently — `visiblePanes(Dual, depth)`
+returns the same `[ArticleList, ArticleDetail]` at every depth, unlike before the drawer existed.
+Nothing about either pane's own internal layout (tonal roles, dividers, row chrome) changes between
+layouts; only how many are mounted at once does — with one deliberate exception, an affordance that
+has nowhere else to live once the drawer replaces the sidebar: the search field (see below). That
+unmounting is state-preserving: `ui/home/NarrowPaneRow.kt` hosts the panes so each one keeps (or
+gets restored to) its own scroll position across the stack's comings and goings, which is why **a
+pane added there must be emitted from its own fixed `if`, never a loop iteration** — every iteration
+of a loop shares one compose group key, so a pane that merely changes position is torn down and
+rebuilt. `PaneLayout.Dual` never unmounts either pane at all any more (`visiblePanes` never changes
+there); only `PaneLayout.Single`'s article-list↔article-detail transition does. See that file's
+KDoc and `app-architecture.md`.
 
 `ui/home/HomePaneLayout.kt`'s `canNavigateBack(layout, depth)` is the pane-only half of "does
 going back one step actually change anything on screen" — `false` at `PaneLayout.Triple` (nothing
-ever changes there) and at `PaneLayout.Dual` depth 1→2 (the sliding window shows the same two
-panes at both depths, see `visiblePanes`' own KDoc). `HomeScreen`'s own `BackHandler` and
-`ArticleListPane`'s `navigateUpEnabled` are driven by `homeBackAction` instead, which wraps
-`canNavigateBack` and adds the other half: exiting the Search scope (see below) whenever a
-snapshot is waiting to be restored, which takes priority over popping the pane stack and applies
-even where `canNavigateBack` alone says `false` (`PaneLayout.Dual`'s otherwise-inert depth 1→2 —
-exiting Search there still changes what's on screen). Either way, a back press that would produce
-no visible change is never silently swallowed.
+ever changes there) and at `PaneLayout.Dual` (every depth, not just some — the same two panes show
+regardless, see `visiblePanes`' own KDoc), `true` only at `PaneLayout.Single`'s article-list→
+article-detail step. `HomeScreen`'s own `BackHandler` is driven by `homeBackAction` instead, which
+wraps `canNavigateBack` and adds the other half: exiting the Search scope (see below) whenever a
+snapshot is waiting to be restored, which takes priority over popping the pane stack wherever the
+article list is actually visible (`Single`'s own depth, every depth at `Dual`) — exiting Search
+always changes what's on screen there. **A back press on the article list itself, with no Search
+scope pending, is deliberately left unhandled (`HomeBackAction.None`)** — `HomeScreen`'s
+`BackHandler` disables itself for `None`, so the press falls through to the platform's own default
+(exiting the app on Android) rather than this codebase swallowing it with nowhere to go.
 
 **Search at a narrow layout.** The search field itself moves, not just its surrounding chrome: at
 `PaneLayout.Triple` it stays the plain, always-editable `KeryxTextField` this app has always had,
 in `FeedListPane`'s own sidebar (results render reactively in `ArticleListPane`'s `SearchListPane`
-beside it). At `PaneLayout.Single` there is no second pane to show those results in at all; at
-`PaneLayout.Dual` there is one, but the article list is the pane a narrow layout always keeps on
-screen (`visiblePanes` includes it at every `Dual` depth), and the field has to live in exactly one
-place, never as two editable copies bound to the same `HomeViewModel.searchQuery`. So both narrow
-layouts put the field on the results pane instead, which also leaves it where it is across a
-`Single`↔`Dual` rotation — `FeedListPane` folds its copy into a read-only
-`KeryxCollapsedSearchBar` (`ui/common/KeryxSearchBar.kt`; tapping it selects
-`ArticleFilter.Search` and advances the navigation stack, it never itself takes focus or a
-keystroke), and the real, editable field becomes `SearchListPane`'s own header
-(`KeryxExpandedSearchBar`), sitting directly above the results it filters. At a narrow layout
-`FeedListPane` also hides its own "Search" quick-filter row entirely (kept only at
-`PaneLayout.Triple`, where it is a filter scope rather than an entry point) — otherwise the same
-screen would carry two controls for the identical action, the collapsed bar above it and this row
-below it. Outside the Search scope at a narrow layout, `ArticleListTopBar`'s own `onSearchClick`
-gives `ArticleListPane` a matching entry point (a search icon, ahead of
-notifications/sort/mark-all-read) — otherwise a user who lands on the article list first (the
-narrow layout's own default) would have no way in.
+beside it). At every narrower layout the feed list has no search field of its own at all — it's a
+drawer there, not a screen search results could live on — so `ArticleListPane`'s own header row
+(`ArticleListTopBar`) is the only entry point, whether at `Single` or `Dual`: a search icon
+(`onSearchClick`) sits in its hamburger-and-title row, and tapping it swaps that row for
+`SearchListPane`'s own header (`KeryxExpandedSearchBar`), sitting directly above the results it
+filters, bound to the same `HomeViewModel.searchQuery` `Triple`'s sidebar field would otherwise
+also be editing — never two editable copies of it at once. `FeedListPane` also hides its own
+"Search" quick-filter row entirely at a narrow layout (kept only at `PaneLayout.Triple`, where it
+is a filter scope rather than an entry point) — a drawer that had one would be a second control for
+the identical action, and one unreachable-feeling besides, since the drawer has nowhere to show
+results even if tapped.
 
 This split is driven by the same nullable-callback idiom the rest of this file already uses for
-"is this pane narrow": `FeedListPane`'s `onSelectionAdvance` and `ArticleListPane`'s `onNavigateUp`
-are `null` at `PaneLayout.Triple` and non-null otherwise — **not** a `PaneLayout` or
+"is this pane narrow": `FeedListPane`'s `onSelectionAdvance` and `ArticleListPane`'s `onOpenDrawer`/
+`onExitSearch` are `null` at `PaneLayout.Triple` and non-null otherwise — **not** a `PaneLayout` or
 `isTouchPrimary` parameter passed down. `isTouchPrimary` in particular would be wrong here: a
 touch-primary Android device in landscape at a tablet width can still resolve `PaneLayout.Triple`
 (the same threshold desktop uses), where the field must stay in `FeedListPane` exactly as it does
-on desktop. `FeedListPane`'s `onEnterArticleList` (the entrance exception described earlier in
-this section) is *not* built on this same boundary, despite living on the same composable: it's
-`null` at `PaneLayout.Dual` too, since the article list stays visible there the whole time —
-non-null only where that pane isn't on screen to return to at all, i.e. `Single`'s depth 1
-specifically.
+on desktop. `onOpenDrawer` (opens the drawer; the hamburger button) and `onExitSearch` (leaves the
+Search scope; the field's own back arrow) are two distinct actions on two distinct rows, both
+sharing that one null boundary — unlike a "back" action, opening the drawer is never contextually
+unavailable, so there is no enabled/disabled state to track the way `ArticleDetailPane`'s own back
+button (below) has to.
 
 `HomeViewModel.pendingSearchFocus` is a latched `StateFlow<Boolean>`, not a one-shot
-`SharedFlow` — requests from the collapsed bar and narrow-layout menu-bar Search can be raised
-before the destination field composes. At `PaneLayout.Triple`, the sidebar's own "Search" row
-focuses the already-composed field without advancing the navigation stack.
+`SharedFlow` — a request raised in the same click that opens the Search scope can arrive before the
+destination field composes. At `PaneLayout.Triple`, the sidebar's own "Search" row
+focuses the already-composed field without opening any scope transition at all.
 A `SharedFlow` with no subscriber yet would drop a request silently, which is exactly what
 used to make Android's search feel broken. The latch stays set until whichever field composes
 next consumes it (`consumeSearchFocusRequest()`), and `HomeViewModel.selectFilter` clears an
 unconsumed one when the user navigates elsewhere first.
 
 **Going back out of Search.** Search has no `HomePane` of its own — every entry point above just
-sets `ArticleFilter.Search` on `HomePane.ArticleList` (see "Search is layout-dependent" above) —
-so a plain "pop one pane" back action would either overshoot (from `ArticleListTopBar`'s own
-search icon, which never advances the stack: popping would land on the feed list, not the article
-list the user actually came from) or leave the filter stuck on `Search` after popping back to it
-(from the collapsed bar, which does advance). `HomeViewModel.enterSearchScope(returnPane)`
-snapshots the filter/row-selection active right before the switch, plus the pane a narrow-layout
-back action should land on; `exitSearchScope()` restores both and hands back that pane.
-`ui/home/HomePaneLayout.kt`'s `homeBackAction(layout, depth, searchScopeReturnPending)` is where
-`HomeScreen`'s `goBack()`, `BackHandler`, and `ArticleListPane`'s `navigateUpEnabled` all resolve
-whether a back action means `ExitSearch` or the ordinary `PopPane` — `ExitSearch` only applies at
-`HomePane.ArticleList`'s own depth and never at `PaneLayout.Triple` (the field stays in
-`FeedListPane`'s sidebar there, and back navigation is disabled at every depth regardless). The
-search query itself is never cleared by any of this — it survives on the collapsed bar exactly as
-it was, so re-opening Search shows the same results.
+sets `ArticleFilter.Search` on `HomePane.ArticleList` (see "Search is layout-dependent" above)
+without advancing the stack — so a plain "pop one pane" back action can't undo it either way.
+`HomeViewModel.enterSearchScope(returnPane)` snapshots the filter/row-selection active right before
+the switch, plus the pane a narrow-layout back action should land on — always `ArticleList` at a
+narrow layout, since that's the only pane a search entry point is ever reached from;
+`exitSearchScope()` restores both and hands back that pane. `ui/home/HomePaneLayout.kt`'s
+`homeBackAction(layout, depth, searchScopeReturnPending)` is where `HomeScreen`'s `goBack()` and
+`BackHandler` resolve whether a back action means `ExitSearch` or the ordinary `PopPane` —
+`ExitSearch` applies wherever the article list is actually visible (`Single`'s own depth, every
+depth at `Dual`) and never at `PaneLayout.Triple` (the field stays in `FeedListPane`'s sidebar
+there, and back navigation is disabled at every depth regardless). The search query itself is
+never cleared by any of this — it survives on the field exactly as it was, so re-opening Search
+shows the same results.
 
 **Touch input on the feed list.** A mouse can drag a draggable row (a folder header, or a feed row
 inside a folder group — tag rows and tag-nested feed copies were never drag sources) from anywhere
@@ -244,21 +239,27 @@ gating logic in `ui/home/FeedListDragGestures.kt`'s `feedListReorderDrag`). Ever
 row falls through to the `LazyColumn`'s own scroll gesture untouched. Long-press for the row's
 context menu (`nativeContextMenu`) and drag-from-handle for reordering are deliberately different
 gestures on the same row — see `platform/NativeMenu.android.kt`'s KDoc for how the two coexist
-without one stealing the other's press.
+without one stealing the other's press. All of this works the same way whether `FeedListPane` is
+rendering as `Triple`'s sidebar or a narrow layout's drawer content — reordering, renaming,
+deleting, and the context menu are unaffected by which one it is.
 
 **Touch input on the article reader.** At a narrow layout, the article detail pane
 (`ui/home/ArticleDetailPane.kt`) also accepts a horizontal swipe to move to the next/previous
 article — `ui/home/ArticleSwipeNav.kt`'s `articleSwipeNavigation`, driven by
 `HomeViewModel.selectNext`/`selectPrevious`/`canSelectNext`/`canSelectPrevious` (the same calls
-desktop's J/K keyboard shortcut already used — see `ui/home/KeyboardNav.kt`). It is gated on
-`isTouchPrimary && onNavigateUp != null && article != null`, not on `PaneLayout` or a phone/tablet
-distinction: `onNavigateUp` being non-`null` is this file's existing signal for "the reader is a
-drilled-into destination with somewhere to navigate back from" (see "Adaptive pane layout & touch
-affordances" above), which covers both `Single` and `Dual` — a tablet-width landscape session
-still gets the gesture, matching how Gmail/Feedly/Reeder-style readers treat it as a property of
-the detail screen itself rather than of how many other panes happen to be visible beside it — and
-excludes `PaneLayout.Triple`, where the reader is a permanent, keyboard-driven pane shared with
-desktop and has no back action to gate on in the first place.
+desktop's J/K keyboard shortcut already used — see `ui/home/KeyboardNav.kt`) via an
+`ArticleSwipeNavigation` bundle. It is gated on `isTouchPrimary && swipeNavigation != null &&
+article != null`, not on `PaneLayout` or a phone/tablet distinction — and deliberately **not** on
+`onNavigateUp` either, despite that being this file's usual narrow-layout signal: `onNavigateUp` is
+`null` at `PaneLayout.Dual` (the reader is a permanent neighbor of the article list there, with no
+back button of its own, the same as Gmail's own tablet reading pane), but the swipe must still work
+there per `external-spec.md` §9 ("not only in portrait"). `swipeNavigation` is therefore its own,
+independent null boundary — non-null at every narrow layout regardless of whether that layout's
+reader happens to have a back button beside it — matching how Gmail/Feedly/Reeder-style readers
+treat the swipe as a property of the detail screen itself rather than of how many other panes
+happen to be visible beside it. It excludes only `PaneLayout.Triple`, where the reader is a
+permanent, keyboard-driven pane shared with desktop and has nowhere for a swipe gesture to go in
+the first place.
 
 The reader's content is two nested `Box`es, not one: the outer one owns the gesture and the clip
 (so a sliding reader can't spill into a neighboring pane at `Dual`); the inner one carries the
@@ -974,21 +975,20 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   keeps `WindowDragArea`/`WindowChrome.titleBarInsetDp` wrapped *around* the call, since neither is
   shared across all three panes either) via its own `modifier`. Android's `actual` is a real M3
   `TopAppBar`.
-- **`KeryxCollapsedSearchBar`/`KeryxExpandedSearchBar`** (`ui/common/KeryxSearchBar.kt`,
-  expect/actual): the narrow-layout search pair described in "Adaptive pane layout & touch
-  affordances" above — a read-only entry point and an editable search-screen header,
-  respectively. **Deliberately not built on `KeryxPaneTopBar`**: an editable field's own minimum
-  height (56dp) grows past `TopAppBar`'s fixed 64dp container once the font-size setting scales it
-  up (to 1.4×), clipping it — a plain pill shape has no fixed height to clip against. Android's
-  `actual` matches M3's own search-bar tokens (`SearchBarDefaults.inputFieldShape`/
-  `InputFieldHeight`/`TonalElevation`/`ShadowElevation`) for both, and uses
-  `SearchBarDefaults.InputField` itself (not a self-drawn `BasicTextField`) for the editable one —
-  so the two read as one continuous surface expanding, the way search does in Gmail/Drive/Photos.
-  The collapsed one's `Modifier.clickable(onClickLabel = …, role = Role.Button)` is explicit rather
-  than an M3 `Surface(onClick = …)`, which sets neither (see "Accessibility" below). Desktop's
-  `actual` never renders in production (desktop always resolves `PaneLayout.Triple`, where
-  `FeedListPane` keeps its original editable field instead), and exists only so `desktopTest` can
-  render and assert this composable directly.
+- **`KeryxExpandedSearchBar`** (`ui/common/KeryxSearchBar.kt`, expect/actual): the narrow-layout
+  search-screen header described in "Adaptive pane layout & touch affordances" above — a back
+  arrow, an editable query field, and a clear action, all on one bar. **Deliberately not built on
+  `KeryxPaneTopBar`**: an editable field's own minimum height (56dp) grows past `TopAppBar`'s fixed
+  64dp container once the font-size setting scales it up (to 1.4×), clipping it — a plain pill
+  shape has no fixed height to clip against. Android's `actual` matches M3's own search-bar tokens
+  (`SearchBarDefaults.inputFieldShape`/`InputFieldHeight`/`TonalElevation`/`ShadowElevation`), and
+  uses `SearchBarDefaults.InputField` itself (not a self-drawn `BasicTextField`) — a `TextFieldState`
+  overload specifically, since the simpler `query`/`onQueryChange` one resets the caret to the
+  start of the text on every remount whose initial query is already non-empty (confirmed
+  on-device), which is exactly the case every time the user reopens this pane with a query left
+  over from an earlier visit. Desktop's `actual` never renders in production (desktop always
+  resolves `PaneLayout.Triple`, where the feed list is a permanent pane with its own editable field
+  instead), and exists only so `desktopTest` can render and assert this composable directly.
 - **Raised surfaces — `KeryxRaisedSurface`** (`ui/common/KeryxSurface.kt`, expect/actual): the
   container `NotificationCenterSheet`, `SetupScreen`'s `OptionCard`, `TagColorPicker`'s popup, and
   `SettingsCard` all use for a "raised" panel instead of M3's tonal-elevation `Card` **at a
@@ -1035,9 +1035,9 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   - Article search — at `PaneLayout.Triple`, `FeedListPane`'s search `KeryxTextField` bound to
     `HomeViewModel.searchQuery` (results render reactively in `ArticleListPane`'s `SearchListPane`;
     `SearchResults.kt`'s `CenteredHint` covers the too-short-query / no-results states); at a
-    narrow layout, `KeryxCollapsedSearchBar`/`KeryxExpandedSearchBar` (`ui/common/KeryxSearchBar.kt`)
-    instead — see "Adaptive pane layout & touch affordances" below → either way, SwiftUI's
-    `.searchable()`.
+    narrow layout, `SearchListPane`'s own `KeryxExpandedSearchBar` (`ui/common/KeryxSearchBar.kt`)
+    instead, reached through `ArticleListTopBar`'s search icon — see "Adaptive pane layout & touch
+    affordances" below → either way, SwiftUI's `.searchable()`.
   - `selectionBackground()` (`ui/home/HomeCommon.kt`) row highlight in `ArticleListPane`/`FeedListPane` —
     hand-computed focused/unfocused-pane dimming → native `List` row selection already dims the same way.
   - `SettingsDialog`'s `SwitchRow` — now uses `FlatSwitch` (`ui/common/FlatToggles.kt`), consistent with
@@ -1145,12 +1145,11 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   Android, M3's own `ExpandedFullScreenSearchBar` dialog, which was
   considered and deliberately not used: it can't host the search results,
   which is exactly the problem the narrow-layout redesign exists to fix. It
-  is instead a plain step of the existing 3-pane navigation stack — an
-  editable field at `PaneLayout.Triple` (`FeedListPane`), or, at a narrow
-  layout, a `KeryxCollapsedSearchBar` entry point plus a
-  `KeryxExpandedSearchBar` header on `ArticleListPane`'s `SearchListPane`
-  alongside the results — see "Adaptive pane layout & touch affordances"
-  below.) Don't reach for `KeryxAnchoredPanel` for anything that should block
+  is instead a plain step of Home's navigation — an editable field at
+  `PaneLayout.Triple` (`FeedListPane`), or, at a narrow layout, the `[🔍]`
+  icon in `ArticleListPane`'s own title row opening a `KeryxExpandedSearchBar`
+  header on its `SearchListPane` alongside the results — see "Adaptive pane
+  layout & touch affordances" below.) Don't reach for `KeryxAnchoredPanel` for anything that should block
   interaction with the rest of the window, and don't reach for `Dialog` for
   something that's meant to feel like a lightweight, dismissable overlay.
 - **Nothing Compose-drawn can appear over the article detail pane's content area**: the article
@@ -1175,6 +1174,17 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   window-level layer, above the WebView) rather than `Scaffold`'s own slot — see
   `LocalSnackbarHostState`'s own KDoc. Any future Android-side "float something over the current
   pane" UI needs the same `Popup`/`KeryxAnchoredPanel`-style treatment, not a plain Compose overlay.
+  **This bullet's own claim (a bare `Popup` composites *above* the WebView) and the
+  `KeryxAnchoredPanel` bullet's claim above it (a bare `Popup` composites *below* the WebView, the
+  reason `ModalBottomSheet` is necessary on Android) are in direct tension and have not been
+  reconciled against a real device — treat neither as settled until one is. This matters concretely
+  for `HomeScreen`'s narrow-layout feed-list drawer (`ModalNavigationDrawer`): unlike a `Popup`, it
+  renders as ordinary same-window Compose content, so its z-order against the WebView at
+  `PaneLayout.Dual` (where the reader is on screen behind an open drawer) is itself unverified — see
+  `docs/testing.md`'s manual QA item for the on-device check this needs (scrim/sheet visibility,
+  and separately whether the scrim still intercepts taps if it turns out to lose the paint order)
+  and the fallback (`platform/NativeWebViewVisibility.kt`'s Android `actual`, currently a no-op,
+  hiding the WebView for as long as the drawer is open) if it does.
 
 ## Accessibility
 

@@ -13,18 +13,11 @@ import androidx.compose.ui.Modifier
  * layout in `HomeScreen`), and keeps each pane's scroll position across the navigation stack's
  * comings and goings.
  *
- * Two separate mechanisms are at work, one per layout, because the two lose a pane's state for
- * different reasons:
+ * [PaneLayout.Dual] always shows the same two panes (see [visiblePanes]'s own KDoc) regardless of
+ * depth, so it never loses a pane's state at all — [visible] itself never changes there, and this
+ * row's own emission order is what's left over from the era when it did (see below), rather than
+ * something this layout still needs. [PaneLayout.Single] is the layout this row exists for:
  *
- * - **[PaneLayout.Dual]** never unmounts the article list — [visiblePanes]' sliding window keeps it
- *   on screen at every depth — but drilling into an article moves it from index 1 to index 0 of
- *   [visible]. Emitting the panes from a `visible.forEach` loop (as this used to) gives every
- *   iteration the same compose group key, so a pane that changes position is torn down and rebuilt
- *   even though it never left the screen, discarding its `LazyListState`. Emitting each pane from
- *   its own fixed source position instead gives it a group key of its own, so it is simply never
- *   disposed and keeps its list state outright. **A pane added here must likewise get its own
- *   fixed `if`, never a loop iteration.** [visiblePanes] always returns its panes in [HomePane]
- *   ordinal order, so the unrolled form renders exactly the same `Row`.
  * - **[PaneLayout.Single]** genuinely unmounts every pane but the one on screen, so nothing can be
  *   kept alive there. [rememberSaveableStateHolder] instead saves each pane's `rememberSaveable`
  *   state (in practice its `LazyListState`, which `rememberLazyListState` stores that way) as it
@@ -38,11 +31,14 @@ import androidx.compose.ui.Modifier
  * node of its own, so each pane stays a direct `Row` child and the `Modifier.weight` handed to
  * [pane] still applies.
  *
+ * [HomePane.FeedList] never appears in [visible] here — it's a modal navigation drawer at every
+ * narrow [PaneLayout] (see `HomePaneLayout.kt`'s `feedListIsDrawer`), not a pane this row lays out —
+ * so only [HomePane.ArticleList]/[HomePane.ArticleDetail] ever reach [pane].
+ *
  * @param visible The panes to show, from [visiblePanes].
  * @param paneState The [SaveableStateHolder] backing the mechanism above, hoisted (rather than
- *   `remember`ed internally) so a caller can call [SaveableStateHolder.removeState] itself — e.g.
- *   `HomeScreen` discarding the article list's saved scroll position when a feed-list row selection
- *   *enters* that pane rather than returning to it (see `FeedListPane`'s `onEnterArticleList`).
+ *   `remember`ed internally) by `HomeScreen` — outside its `BoxWithConstraints`, alongside
+ *   `drawerState` — so it isn't recreated across a [PaneLayout.Triple]<->narrow layout flip.
  *   Defaults to a freshly remembered one, so existing call sites are unaffected.
  * @param pane Renders one pane, with the [Modifier] it should be laid out with.
  */
@@ -57,11 +53,12 @@ internal fun NarrowPaneRow(
         "NarrowPaneRow's unrolled pane layout assumes exactly three HomePane entries; " +
             "add a new fixed branch when expanding HomePane."
     }
+    require(HomePane.FeedList !in visible) {
+        "The feed list is a modal navigation drawer at a narrow PaneLayout, not a NarrowPaneRow " +
+            "pane; see HomePaneLayout.kt's feedListIsDrawer."
+    }
     Row(modifier) {
         val paneModifier = if (visible.size > 1) Modifier.weight(1f) else Modifier.fillMaxSize()
-        if (HomePane.FeedList in visible) {
-            paneState.SaveableStateProvider(HomePane.FeedList) { pane(HomePane.FeedList, paneModifier) }
-        }
         if (HomePane.ArticleList in visible) {
             paneState.SaveableStateProvider(HomePane.ArticleList) { pane(HomePane.ArticleList, paneModifier) }
         }

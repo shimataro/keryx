@@ -69,10 +69,7 @@ sealed class KeryxException(message: String) : Exception(message)
   エラー・警告に加え、`INFO` は新バージョンの通知のみ。**新着記事は通知センターには記録しない**
   （`NewArticleNotifier` は OS 通知（トレイ）にのみ流す）——記事一覧と未読バッジという永続的な手段で
   既に把握できるため。手動更新も同様に、一覧・未読バッジの更新で示す。
-- ベルアイコンにバッジ（件数）。ベルは `ArticleListPane` のヘッダ行にあり、シングルペイン幅
-  （3 ペインが 3 つの別画面になり、そのヘッダがアプリの起動先の画面に存在しない）では
-  `FeedListPane` のヘッダ行にも置かれる（正確な規則は `ui-guidelines` スキルを参照。
-  両方に同時に出ることはない）。`ArticleDetailPane` には意図的に置かない。
+- ベルアイコンにバッジ（件数）。ベルは `ArticleListPane` のヘッダ行にある（正確な規則は `ui-guidelines` スキルを参照）。`ArticleDetailPane` には意図的に置かない。
 - バックグラウンド更新中の警告は UI コンテキストが無いため通知センターにのみ記録し、
   **OS 通知には出さない**（OS 通知は新着記事専用。上記参照）。そのため Android では
   `ForegroundAlertSnackbar`（`ui/home/HomeScreen.kt`）が、`WARNING`/`ERROR` の発生時点で
@@ -98,7 +95,7 @@ sealed class KeryxException(message: String) : Exception(message)
 | ネクストアクション | 発生源 | 挙動 |
 | --- | --- | --- |
 | `OpenUrl(url)` | 新バージョン通知（アプリ内アップデート経路が無い場合——`UpdatePlan.OpenReleasePage`/`NotOffered`。[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照） | リリースページを外部ブラウザで開く |
-| `ShowFeedDetail(feedId)` | フィード消失(410) / URL 変更(301/308) | フィード一覧で該当フィードを選択（一覧をクリックしたときと同じ）。シングルペイン幅ではフィード一覧が独立した画面のため、選択ハイライトすら描かれない画面へ戻るのではなく、そのフィードの記事一覧まで進む — `ui/home/HomePaneLayout.kt` の `paneForFeedDetail` を参照 |
+| `ShowFeedDetail(feedId)` | フィード消失(410) / URL 変更(301/308) | フィード一覧で該当フィードを選択（一覧をクリックしたときと同じ）。狭い幅ではフィード一覧はペインではなくモーダルナビゲーションドロワーであり、バックグラウンドの通知でこれを不意に開くのは驚きの副作用になってしまうため、ドロワーには触れずそのフィードの記事一覧まで進む — `ui/home/HomePaneLayout.kt` の `paneForFeedDetail` を参照 |
 | `ShowSettingsTab(tabId)` | 同期エラー（`SchemaVersionException` は `updates`、その他は `cloud_sync`）；アプリ内アップデート経路がある場合の新バージョン通知（`updates`） | 設定ダイアログを該当タブで開く。`cloud_sync` タブは `SyncRepository.lastSyncError` を失敗理由として表示し、`updates` タブは開いた時点で自動的に更新確認を行う |
 | `ShowInfoDialog(detail)` | macOS の translocated 警告 | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
 | `ShowInfoDialog(detail)` | トークンが平文ファイルに残ったとき（`CloudSession`）——`TokenStorage.save()` が `TokenSaveOutcome.PLAINTEXT_FILE` を返した場合。OS のセキュアな認証情報ストアに到達できなかったか、（Android で）セキュアな書き込みは成功したが古い平文のコピーを削除できなかった場合 | 原因と対処法の説明ダイアログを表示（画面遷移しない） |

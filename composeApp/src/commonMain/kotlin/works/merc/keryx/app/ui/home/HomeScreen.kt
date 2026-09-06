@@ -4,18 +4,26 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -44,6 +52,7 @@ import works.merc.keryx.app.core.ARTICLE_LIST_PANE_WIDTH_DEFAULT
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.DETAIL_PANE_MIN_WIDTH
+import works.merc.keryx.app.core.DRAWER_SHEET_END_INSET
 import works.merc.keryx.app.core.FEED_LIST_PANE_WIDTH_DEFAULT
 import works.merc.keryx.app.core.PANE_DIVIDER_WIDTH
 import works.merc.keryx.app.data.local.db.Feeds
@@ -100,14 +109,11 @@ fun HomeScreen() {
     // Bumped on each keyboard-shortcut copy; ArticleDetailPane watches it to flash its copy button's
     // inline ✓ (the keyboard copies the selected article, which that pane already shows).
     var copyPulse by remember { mutableStateOf(0) }
+    val articleSwipeNavigation = rememberArticleSwipeNavigation(vm)
     // Bumped by goBack() whenever shouldFlashReturnedArticle says so; ArticleListPane threads it
     // down to the returned-to article's own row, which plays a one-shot ripple so the user can
     // tell where they were reading (see ListRowChrome.kt's playPulseRipple).
     var articleReturnRipplePulse by remember { mutableStateOf(0) }
-    // Bumped by goBack() whenever shouldFlashReturnedFeedListRow says so; FeedListPane threads it
-    // down to the returned-to row's own composable (feed/folder/tag/quick-filter), mirroring
-    // articleReturnRipplePulse above for the article list's own rows.
-    var feedListReturnRipplePulse by remember { mutableStateOf(0) }
     // Bumped by the F2(Enter)/Delete feed-list shortcuts; FeedListPane observes these and resolves
     // the currently selected filter (feed/folder/tag) against its own already-collected rows to
     // trigger the same rename/edit and delete/unsubscribe dialogs the context menu uses.
@@ -115,12 +121,16 @@ fun HomeScreen() {
     var feedListDeleteRequestId by remember { mutableStateOf(0) }
     val focusRequester = remember { FocusRequester() }
     var focusedPane by remember { mutableStateOf(vm.getInitialFocusedPane()) }
-    // Hoisted (not NarrowPaneRow's own internal default) so a feed-list row selection that
-    // *enters* the article list pane (PaneLayout.Single depth 1, see FeedListPane's
-    // onEnterArticleList) can discard that pane's saved scroll state itself, rather than
-    // restoring wherever the user scrolled to last time it was open. Declared outside
-    // BoxWithConstraints below so it isn't recreated across a Triple<->narrow layout flip.
+    // Hoisted (not NarrowPaneRow's own internal default) so it isn't recreated across a
+    // Triple<->narrow layout flip — declared outside BoxWithConstraints below, alongside
+    // drawerState.
     val paneState = rememberSaveableStateHolder()
+    // The feed list is a modal drawer at every narrow PaneLayout (see feedListIsDrawer). Hoisted
+    // here — outside BoxWithConstraints, like paneState above — so it isn't recreated across a
+    // Triple<->narrow layout flip, and deliberately NOT rememberSaveable: an overlay must not be
+    // restored as "the screen you were on" after process death, unlike focusedPane (which is also
+    // a persisted setting shared with PaneLayout.Triple, where there is no drawer to restore).
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
     // Two separate flags, one per pane that can host a text input — not a single shared
     // `textInputFocused` — because at PaneLayout.Dual (depth <= 2) FeedListPane and ArticleListPane
     // are both on screen at once, and a single `var` would let one pane's `false` (e.g. its field
@@ -169,7 +179,6 @@ fun HomeScreen() {
             HomeBackAction.ExitSearch -> vm.exitSearchScope()?.let { setFocusedPane(it) }
             HomeBackAction.PopPane -> {
                 if (shouldFlashReturnedArticle(paneLayout, focusedPane)) articleReturnRipplePulse++
-                if (shouldFlashReturnedFeedListRow(paneLayout, focusedPane)) feedListReturnRipplePulse++
                 val previous = focusedPane.ordinal - 1
                 if (previous >= 0) setFocusedPane(HomePane.entries[previous])
             }
@@ -249,10 +258,15 @@ fun HomeScreen() {
     // Desktop has no in-app snackbar convention (see LocalSnackbarHostState's own KDoc), so the
     // host is only created — and provided — on a touch-primary platform.
     val snackbarHostState = if (isTouchPrimary) remember { SnackbarHostState() } else null
-    Scaffold { padding ->
+    // contentWindowInsets = WindowInsets(0): each pane applies its own inset instead of one
+    // consumed here — see KeryxPaneTopBar's Android `actual` (top), FeedListPane's and
+    // ArticleListPane's LazyColumn `contentPadding` (bottom), and the horizontal inset applied to
+    // this root Box below. This is what lets a narrow layout's modal navigation drawer scrim
+    // reach all the way to the status/navigation bars instead of stopping at this padding's edge.
+    Scaffold(contentWindowInsets = WindowInsets(0)) { _ ->
         CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {
         Box(
-            Modifier.padding(padding).consumeWindowInsets(padding).fillMaxSize()
+            Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)).fillMaxSize()
                 .focusRequester(focusRequester)
                 .focusable()
                 .homeKeyboardShortcuts(
@@ -294,8 +308,8 @@ fun HomeScreen() {
                     },
                     onNextArticle = { vm.selectNext() },
                     onPreviousArticle = { vm.selectPrevious() },
-                    onFeedListRename = { if (feedListActionAllowed(focusedPane)) feedListRenameRequestId++ },
-                    onFeedListDelete = { if (feedListActionAllowed(focusedPane)) feedListDeleteRequestId++ },
+                    onFeedListRename = { if (feedListActionAllowed(focusedPane, drawerState.isOpen)) feedListRenameRequestId++ },
+                    onFeedListDelete = { if (feedListActionAllowed(focusedPane, drawerState.isOpen)) feedListDeleteRequestId++ },
                     onSearch = { focusSearch() },
                 ),
         ) {
@@ -307,13 +321,20 @@ fun HomeScreen() {
                 // which paneLayoutFor resolves to Single regardless of the eventual layout, and
                 // clamping against that would misfire even on desktop. See initialPaneFor's own
                 // KDoc for why restoring straight into ArticleDetail at a narrow layout is wrong;
-                // this LaunchedEffect composes only until initialPaneClamped flips true, and never
-                // again after that, so a later resize/rotation can't re-trigger it.
-                if (!initialPaneClamped && maxWidth > 0.dp) {
-                    LaunchedEffect(Unit) {
+                // this effect fires whenever maxWidth changes, but the body is gated by
+                // initialPaneClamped so it only runs once per composition instance.
+                LaunchedEffect(maxWidth) {
+                    if (!initialPaneClamped && maxWidth > 0.dp) {
                         initialPaneClamped = true
                         val clamped = initialPaneFor(layout, focusedPane)
                         if (clamped != focusedPane) setFocusedPane(clamped)
+                        // A one-time nudge into the drawer for the dead end it exists to remove —
+                        // see shouldAutoOpenFeedDrawer's own KDoc. Runs in the same once-per-session
+                        // effect as the clamp above, so a later resize/rotation/feed deletion can't
+                        // re-trigger it.
+                        if (shouldAutoOpenFeedDrawer(layout, vm.cloudConnected.value, vm.hasAnyFeed())) {
+                            drawerState.open()
+                        }
                     }
                 }
                 // BackHandler is always called (its own `enabled` gates the actual interception).
@@ -326,14 +347,19 @@ fun HomeScreen() {
                 // through instead of being swallowed — but ExitSearch still applies there while
                 // Search is active, since exiting it always changes what's on screen.
                 val backAction = homeBackAction(layout, focusedPane.ordinal + 1, searchScopeEntry != null)
-                BackHandler(enabled = backAction != HomeBackAction.None) { goBack() }
+                // The drawer's own back handling lives in ModalDrawerSheet(drawerState = ...) ->
+                // PredictiveBackHandler(enabled = drawerState.isOpen) — this gate makes this
+                // BackHandler stand down while it's open, independent of registration order, so
+                // the drawer always wins a back press over whatever's behind it (the only case
+                // where the two could otherwise race is Dual + a pending Search scope + the
+                // drawer open).
+                BackHandler(enabled = backAction != HomeBackAction.None && !drawerState.isOpen) { goBack() }
 
-                // Single: tapping a row navigates away from it (drills into the article list, or
-                // the article detail), so a lingering selection highlight there would mark a row
-                // the user can no longer see — see LocalRowSelectionVisible's own KDoc. Dual/Triple
-                // keep it: the selected row's pane stays on screen alongside the pane it opened.
-                CompositionLocalProvider(LocalRowSelectionVisible provides (layout != PaneLayout.Single)) {
                 if (layout == PaneLayout.Triple) {
+                    // Dual/Triple keep the selection highlight: the selected row's pane stays on
+                    // screen alongside the pane it opened. (Single's narrow-only suppression lives
+                    // in the drawer branch below, alongside its own drawer-content override.)
+                    CompositionLocalProvider(LocalRowSelectionVisible provides true) {
                     val dividerWidth = PANE_DIVIDER_WIDTH.dp
                     // coerceAtLeast(0.dp): with WINDOW_MIN_WIDTH >= the pane-minimum sum, this
                     // shouldn't go negative in steady state, but a transient pre-layout frame
@@ -363,6 +389,7 @@ fun HomeScreen() {
                             onActivated = { setFocusedPane(HomePane.ArticleList) },
                             modifier = Modifier.width(displayedArticleWidth),
                             notifVm = notifVm,
+                            onAddFeedClick = { showAddFeed = true },
                         )
                         ResizableDivider(onDrag = { deltaPx ->
                             vm.setArticleListPaneWidth(articleListPaneWidth + with(density) { deltaPx.toDp().value })
@@ -374,88 +401,112 @@ fun HomeScreen() {
                             copyPulse = copyPulse,
                         )
                     }
+                    }
                 } else {
-                    // Single/Dual: no resizable dividers (nothing to drag on a phone/narrow window)
-                    // and no persisted pane widths — visible panes just split the width evenly.
-                    // See HomePaneLayout.kt's visiblePanes for what's shown at each depth, and
-                    // NarrowPaneRow for why the panes are emitted from fixed positions there
+                    // Single/Dual: the feed list is a modal navigation drawer rather than an
+                    // on-screen pane (see HomePaneLayout.kt's feedListIsDrawer) — no resizable
+                    // dividers (nothing to drag on a phone/narrow window) and no persisted pane
+                    // widths for the two panes NarrowPaneRow does show, which just split the width
+                    // evenly. See HomePaneLayout.kt's visiblePanes for what those are at each
+                    // depth, and NarrowPaneRow for why they're emitted from fixed positions there
                     // rather than iterated over (it is what preserves each pane's scroll position
                     // across the stack's comings and goings).
                     val visible = visiblePanes(layout, focusedPane.ordinal + 1)
-                    // Also gates onEnterArticleList below: the article list pane only needs its
-                    // saved scroll state discarded when a row selection is what brings it on
-                    // screen in the first place — PaneLayout.Single's depth 1 — never at Dual,
-                    // where it was already visible beside the feed list.
-                    val articleListOffScreen = HomePane.ArticleList !in visible
-                    NarrowPaneRow(visible, Modifier.fillMaxSize(), paneState) { pane, paneModifier ->
-                        when (pane) {
-                            HomePane.FeedList -> FeedListPane(
-                                vm,
-                                focused = focusedPane == HomePane.FeedList && keyboardNavActive,
-                                dragOverlay = dragOverlay,
-                                onActivated = { setFocusedPane(HomePane.FeedList) },
-                                modifier = paneModifier,
-                                onAddFeedClick = { showAddFeed = true },
-                                onTextInputFocusChange = { feedListTextInputFocused = it },
-                                renameSelectedRequestId = feedListRenameRequestId,
-                                deleteSelectedRequestId = feedListDeleteRequestId,
-                                onSelectionAdvance = { setFocusedPane(HomePane.ArticleList) },
-                                // Non-null only where the article list isn't already on screen to
-                                // return to — see FeedListPane's own KDoc for why this is a
-                                // distinct null boundary from onSelectionAdvance above.
-                                onEnterArticleList = { paneState.removeState(HomePane.ArticleList) }
-                                    .takeIf { articleListOffScreen },
-                                // The bell lives in ArticleListPane's header everywhere it is
-                                // on screen; this pane only has to host it when it isn't —
-                                // PaneLayout.Single's depth 1. Derived from `visible` rather
-                                // than from a layout/depth check of its own, so the two panes
-                                // can never both draw one (or both skip it).
-                                notifVm = notifVm.takeIf { articleListOffScreen },
-                                returnRipplePulse = feedListReturnRipplePulse,
-                            )
-                            HomePane.ArticleList -> ArticleListPane(
-                                vm,
-                                focused = focusedPane == HomePane.ArticleList && keyboardNavActive,
-                                onActivated = { setFocusedPane(HomePane.ArticleList) },
-                                modifier = paneModifier,
-                                notifVm = notifVm,
-                                onSelectionAdvance = { setFocusedPane(HomePane.ArticleDetail) },
-                                // Every narrow layout gives this pane its own back-button row
-                                // (the Triple branch above passes none at all), and only the
-                                // button's enabled state tracks whether there is anywhere to go
-                                // back to — see homeBackAction's own KDoc (None at Dual depth
-                                // 1->2 outside Search, where the feed list is still on screen
-                                // beside this pane). Hiding the row instead would shift the
-                                // controls row and the whole list under it every time Dual slides.
-                                onNavigateUp = ::goBack,
-                                navigateUpEnabled = backAction != HomeBackAction.None,
-                                onTextInputFocusChange = { articleListTextInputFocused = it },
-                                // Only outside the Search scope: once already there, there is
-                                // nowhere further to advance to (see ArticleListTopBar's own
-                                // KDoc on onSearchClick). Doesn't advance the navigation stack —
-                                // the field lives on this same pane (see enterSearchScope's own
-                                // KDoc on returnPane). setFocusedPane is still required at
-                                // PaneLayout.Dual: the search icon's own onClick never reaches
-                                // paneActivation (a separate, unchained click handler — see
-                                // ArticleListPaneContent), so without this, focusedPane could
-                                // still be FeedList (both panes are on screen at Dual) and
-                                // homeBackAction would never resolve to ExitSearch.
-                                onSearchClick = {
-                                    setFocusedPane(HomePane.ArticleList)
-                                    vm.enterSearchScope(HomePane.ArticleList)
-                                },
-                                returnRipplePulse = articleReturnRipplePulse,
-                            )
-                            HomePane.ArticleDetail -> ArticleDetailPane(
-                                vm,
-                                modifier = paneModifier,
-                                onActivated = { setFocusedPane(HomePane.ArticleDetail) },
-                                copyPulse = copyPulse,
-                                onNavigateUp = ::goBack,
-                            )
+                    ModalNavigationDrawer(
+                        drawerState = drawerState,
+                        // ModalNavigationDrawer claims the whole root Box for an edge-swipe-to-open
+                        // gesture, which would otherwise fight the reader's own swipe-to-navigate
+                        // (ArticleSwipeNav) for the same horizontal drag. Open: always enabled, so
+                        // a swipe-to-dismiss and a scrim tap both still close it. Closed: only
+                        // where the reader isn't on screen to swipe (Single's article list depth) —
+                        // Dual and Single's article-detail depth open the drawer via the hamburger
+                        // button only. dragOverlay.item == null additionally guards a feed drag in
+                        // progress inside the drawer from being misread as this same gesture.
+                        gesturesEnabled = dragOverlay.item == null &&
+                            (drawerState.isOpen || HomePane.ArticleDetail !in visible),
+                        drawerContent = {
+                            // The drawer's whole purpose is showing *where you are* — the current
+                            // feed/folder/tag/quick-filter selection must stay highlighted while
+                            // it's open, exactly like Gmail highlighting the current label. The
+                            // Single-only suppression above doesn't apply here: this is an overlay
+                            // the user is looking at right now, not a screen navigated away from.
+                            CompositionLocalProvider(LocalRowSelectionVisible provides true) {
+                                ModalDrawerSheet(
+                                    drawerState = drawerState,
+                                    modifier = Modifier.width(
+                                        (maxWidth - DRAWER_SHEET_END_INSET.dp).coerceAtLeast(0.dp),
+                                    ),
+                                ) {
+                                    FeedListPane(
+                                        vm,
+                                        focused = false,
+                                        dragOverlay = dragOverlay,
+                                        onActivated = {},
+                                        onAddFeedClick = { showAddFeed = true },
+                                        onTextInputFocusChange = { feedListTextInputFocused = it },
+                                        renameSelectedRequestId = feedListRenameRequestId,
+                                        deleteSelectedRequestId = feedListDeleteRequestId,
+                                        onSelectionAdvance = { scope.launch { drawerState.close() } },
+                                    )
+                                }
+                            }
+                        },
+                    ) {
+                        // Single: tapping a row navigates away from it (drills into the article
+                        // list, or the article detail), so a lingering selection highlight there
+                        // would mark a row the user can no longer see — see
+                        // LocalRowSelectionVisible's own KDoc. Dual keeps it: both panes it shows
+                        // stay on screen throughout.
+                        CompositionLocalProvider(LocalRowSelectionVisible provides (layout != PaneLayout.Single)) {
+                        NarrowPaneRow(visible, Modifier.fillMaxSize(), paneState) { pane, paneModifier ->
+                            when (pane) {
+                                HomePane.FeedList ->
+                                    error("The feed list is a drawer at a narrow PaneLayout, never a NarrowPaneRow pane.")
+                                HomePane.ArticleList -> ArticleListPane(
+                                    vm,
+                                    focused = focusedPane == HomePane.ArticleList && keyboardNavActive,
+                                    onActivated = { setFocusedPane(HomePane.ArticleList) },
+                                    modifier = paneModifier,
+                                    notifVm = notifVm,
+                                    onSelectionAdvance = { setFocusedPane(HomePane.ArticleDetail) },
+                                    onOpenDrawer = { scope.launch { drawerState.open() } },
+                                    onExitSearch = ::goBack,
+                                    onTextInputFocusChange = { articleListTextInputFocused = it },
+                                    // Only outside the Search scope: once already there, there is
+                                    // nowhere further to advance to (see ArticleListTopBar's own
+                                    // KDoc on onSearchClick). Doesn't advance the navigation stack —
+                                    // the field lives on this same pane (see enterSearchScope's own
+                                    // KDoc on returnPane). setFocusedPane is still required at
+                                    // PaneLayout.Dual: the search icon's own onClick never reaches
+                                    // paneActivation (a separate, unchained click handler — see
+                                    // ArticleListPaneContent), so without this, focusedPane could
+                                    // still be ArticleDetail (both panes are on screen at Dual) and
+                                    // homeBackAction would never resolve to ExitSearch.
+                                    onSearchClick = {
+                                        setFocusedPane(HomePane.ArticleList)
+                                        vm.enterSearchScope(HomePane.ArticleList)
+                                    },
+                                    returnRipplePulse = articleReturnRipplePulse,
+                                    onAddFeedClick = { showAddFeed = true },
+                                )
+                                HomePane.ArticleDetail -> ArticleDetailPane(
+                                    vm,
+                                    modifier = paneModifier,
+                                    onActivated = { setFocusedPane(HomePane.ArticleDetail) },
+                                    copyPulse = copyPulse,
+                                    // Only where the article list isn't on screen beside this one
+                                    // to return to — PaneLayout.Single's article-detail depth. At
+                                    // Dual the reader is a permanent neighbor of the article list,
+                                    // like Gmail's own tablet reading pane, with no back button —
+                                    // swipeNavigation below is what still lets it move between
+                                    // articles there.
+                                    onNavigateUp = if (HomePane.ArticleList !in visible) ::goBack else null,
+                                    swipeNavigation = articleSwipeNavigation,
+                                )
+                            }
+                        }
                         }
                     }
-                }
                 }
             }
             // Last child of the root Box, so the floating drag chip paints above every pane.

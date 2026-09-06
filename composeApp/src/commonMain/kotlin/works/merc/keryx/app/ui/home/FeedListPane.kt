@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -8,11 +9,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -53,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import works.merc.keryx.app.core.ArticleFilter
@@ -68,9 +75,10 @@ import works.merc.keryx.app.platform.NativeMenuSeparator
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.platform.WindowChrome
 import works.merc.keryx.app.platform.WindowDragArea
-import works.merc.keryx.app.platform.hasNativeAppMenu
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.resources.Res
+import works.merc.keryx.app.resources.app_icon
+import works.merc.keryx.app.resources.app_name
 import works.merc.keryx.app.resources.home_add_feed
 import works.merc.keryx.app.resources.home_add_folder
 import works.merc.keryx.app.resources.home_add_tag
@@ -96,7 +104,6 @@ import works.merc.keryx.app.resources.home_tag_color
 import works.merc.keryx.app.resources.home_tag_name_duplicate
 import works.merc.keryx.app.resources.home_tags
 import works.merc.keryx.app.resources.menu_settings
-import works.merc.keryx.app.ui.common.KeryxCollapsedSearchBar
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.KeryxPaneTopBar
@@ -143,28 +150,18 @@ internal const val FEED_LIST_DRAG_HOST_TEST_TAG = "feed-list-drag-host"
  * @param onSelectionAdvance Called after a filter selection (a quick filter, feed, folder, or
  *   tag row), in addition to [onActivated] — see `HomeScreen`'s pane-layout wiring. `null` means
  *   [PaneLayout.Triple], where every pane is already visible and there is nowhere to advance to —
- *   this is also what keeps this pane's search field editable (see the `KeryxTextField`/
- *   `KeryxCollapsedSearchBar` branch below) and its "Search" quick-filter row visible (see the
- *   SidebarRow below it): a narrow layout instead folds the field into a read-only entry point,
- *   since the field the user would actually type into now lives in `ArticleListPane`'s
- *   `SearchListPane` alongside the results (see that composable's own KDoc), and hides the
- *   quick-filter row entirely since the collapsed bar above is already its narrow-layout
- *   equivalent.
- * @param onEnterArticleList A *different* null boundary than [onSelectionAdvance]'s: non-null only
- *   when the article list pane isn't on screen next to this one at all — [PaneLayout.Single]'s
- *   depth 1 (`null` at [PaneLayout.Dual] too, unlike [onSelectionAdvance]). Called right before a
- *   filter-selecting row's `vm.selectFilter`, so `HomeScreen` can discard that pane's saved scroll
- *   state — opening the list is an *entrance* there, not a return to where the user left off, even
- *   when the filter selected is the one already active (see `selectFilter`'s own `reentering`
- *   param, which this parameter's non-nullness also drives).
- * @param notifVm The notification center, when this pane is the one that has to host its bell —
- *   i.e. when the article list pane (which owns the bell everywhere else) is not on screen
- *   alongside this one. `null` at every other layout/depth, so the bell is never drawn twice; see
- *   `HomeScreen`'s pane-layout wiring, which derives it from `visiblePanes`.
+ *   this is also what keeps this pane's search field editable (see the `KeryxTextField` branch
+ *   below) and its "Search" quick-filter row visible (see the SidebarRow below it). At a narrow
+ *   layout this pane is a modal navigation drawer instead (see `HomePaneLayout.kt`'s
+ *   `feedListIsDrawer`), non-null here means "close the drawer", and search has no entry point of
+ *   its own on this pane at all: the field the user actually types into lives in
+ *   `ArticleListPane`'s `SearchListPane` alongside the results (see that composable's own KDoc),
+ *   reachable through the article list's own search icon.
  * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
- * @param returnRipplePulse A nonzero value plays a one-shot ripple on the currently selected
- *   row (feed/folder/tag/quick-filter) — see `HomePaneLayout.kt`'s `shouldFlashReturnedFeedListRow`
- *   and this file's own `feedListRipplePulseFor`. `0` (the default) never plays one.
+ * @param hasNativeAppMenu Overridable for tests only — see `platform/PlatformOs.kt`'s own KDoc.
+ *   Gates this pane's header (an `app_name` title instead of none) and its settings footer row
+ *   (see `FeedListToolbarRow`'s own KDoc) — the two in-pane entry points a platform with no native
+ *   application menu bar (Android) needs in place of it.
  */
 @Composable
 internal fun FeedListPane(
@@ -178,10 +175,8 @@ internal fun FeedListPane(
     renameSelectedRequestId: Int = 0,
     deleteSelectedRequestId: Int = 0,
     onSelectionAdvance: (() -> Unit)? = null,
-    onEnterArticleList: (() -> Unit)? = null,
-    notifVm: NotificationCenterViewModel? = null,
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
-    returnRipplePulse: Int = 0,
+    hasNativeAppMenu: Boolean = works.merc.keryx.app.platform.hasNativeAppMenu,
 ) {
     val feeds by vm.feeds.collectAsStateSafe(emptyList())
     val tags by vm.tags.collectAsStateSafe(emptyList())
@@ -209,10 +204,12 @@ internal fun FeedListPane(
         searchFocusRequester.requestFocus()
         vm.consumeSearchFocusRequest()
     }
-    // A field that unmounts (this pane itself, at a narrow layout past depth 1) must report its
-    // focus as gone — a LaunchedEffect merely being cancelled does not report false on its own,
-    // and a stuck `true` would permanently suppress bare-key shortcuts (see HomeScreen's own
-    // textInputFocused KDoc). Never fires at PaneLayout.Triple, where this pane is never unmounted.
+    // A field that unmounts must report its focus as gone — a LaunchedEffect merely being
+    // cancelled does not report false on its own, and a stuck `true` would permanently suppress
+    // bare-key shortcuts (see HomeScreen's own textInputFocused KDoc). At a narrow layout this pane
+    // is a drawer's content, which `ModalNavigationDrawer` keeps composed even while closed, so
+    // this in practice guards only the (currently theoretical) case of this composable leaving
+    // composition outright — not the open/closed drawer transition, which never unmounts it.
     DisposableEffect(Unit) {
         onDispose { onTextInputFocusChange(false) }
     }
@@ -240,17 +237,12 @@ internal fun FeedListPane(
 
     // Shared by every filter-selecting row below (quick filters, feeds, folders, tags): selecting a
     // filter from this pane, rather than moving the keyboard cursor over an already-visible list
-    // (see HomeScreen's moveFeedSelection), always goes through here. onEnterArticleList is fired
-    // first so a narrow layout's saved article-list scroll state is gone before vm.selectFilter's
-    // own `reentering` flag (mirroring onEnterArticleList's non-nullness) rebuilds the browsing
-    // context — see onEnterArticleList's own KDoc for why re-selecting the same filter must still
-    // reset it there.
+    // (see HomeScreen's moveFeedSelection), always goes through here.
     fun selectFilterFromRow(
         filter: ArticleFilter,
         instance: FeedListRowSelection = FeedListRowSelection.canonicalFor(filter),
     ) {
-        onEnterArticleList?.invoke()
-        vm.selectFilter(filter, instance, reentering = onEnterArticleList != null)
+        vm.selectFilter(filter, instance)
         onActivated()
         onSelectionAdvance?.invoke()
     }
@@ -410,9 +402,13 @@ internal fun FeedListPane(
             vm = vm,
             cloudConnected = cloudConnected,
             onAddFeedClick = onAddFeedClick,
-            notifVm = notifVm,
+            hasNativeAppMenu = hasNativeAppMenu,
         )
 
+        // Only at PaneLayout.Triple (onSelectionAdvance == null): a narrow layout's feed list is
+        // a modal drawer, not a screen of its own, and the search results have nowhere to live
+        // beside it — the entry point there is the article list's own search icon instead, which
+        // opens SearchListPane's real editable field directly (see ArticleListTopBar's own KDoc).
         if (onSelectionAdvance == null) {
             KeryxTextField(
                 value = searchQuery,
@@ -433,21 +429,6 @@ internal fun FeedListPane(
                     .focusRequester(searchFocusRequester)
                     .onFocusChanged { searchFieldFocused = it.isFocused },
             )
-        } else {
-            // A narrow layout has nowhere on this pane to show results, so the field here is a
-            // read-only entry point rather than something to type into — see SearchListPane's own
-            // KDoc for where the editable field (and the results) actually live at this layout.
-            KeryxCollapsedSearchBar(
-                text = searchQuery.ifEmpty { stringResource(Res.string.home_search_placeholder) },
-                isPlaceholder = searchQuery.isEmpty(),
-                onClick = {
-                    vm.enterSearchScope(HomePane.FeedList)
-                    onActivated()
-                    onSelectionAdvance()
-                },
-                onClickLabel = stringResource(Res.string.home_search),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-            )
         }
 
         // Kept outside the drag-host Box below (rather than as the LazyColumn's first item): these
@@ -462,7 +443,6 @@ internal fun FeedListPane(
             focused = focused,
             onClick = { selectFilterFromRow(ArticleFilter.All) },
             isTouchPrimary = isTouchPrimary,
-            ripplePulse = feedListRipplePulseFor(FeedListRowSelection.All, selectedRowInstance, returnRipplePulse),
         )
         SidebarRow(
             icon = { KeryxIcon(KeryxIcons.Star, null) },
@@ -472,14 +452,14 @@ internal fun FeedListPane(
             focused = focused,
             onClick = { selectFilterFromRow(ArticleFilter.Starred) },
             isTouchPrimary = isTouchPrimary,
-            ripplePulse = feedListRipplePulseFor(FeedListRowSelection.Starred, selectedRowInstance, returnRipplePulse),
         )
-        // At a narrow layout the collapsed search bar above is already this row's entry point, and
-        // a second control with the same action on the same screen is the redundancy this avoids.
-        // At PaneLayout.Triple the row is not an entry point but a filter scope alongside
-        // All/Starred — it carries the unread badge, and it is the only way back to the results
-        // after switching filters, which a narrow layout gets from the collapsed bar's retained
-        // query instead.
+        // At a narrow layout the feed list is a drawer with no search entry point of its own at
+        // all (see ArticleListTopBar's own search icon, which opens SearchListPane's real field
+        // directly) — a Search row here would be redundant with that, and unreachable-feeling
+        // besides, since this drawer has nowhere to show results even if tapped. At
+        // PaneLayout.Triple the row is not an entry point but a filter scope alongside All/Starred
+        // — it carries the unread badge, and it is the only way back to the results after
+        // switching filters.
         if (onSelectionAdvance == null) {
             SidebarRow(
                 icon = { KeryxIcon(KeryxIcons.Search, null) },
@@ -489,7 +469,6 @@ internal fun FeedListPane(
                 focused = focused,
                 onClick = { vm.enterSearchScope(HomePane.FeedList); onActivated() },
                 isTouchPrimary = isTouchPrimary,
-                ripplePulse = feedListRipplePulseFor(FeedListRowSelection.Search, selectedRowInstance, returnRipplePulse),
             )
         }
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
@@ -595,7 +574,6 @@ internal fun FeedListPane(
                                 onCopySiteUrl = { feed.site_url?.let(copyUrl) },
                                 onOpenSite = { feed.site_url?.let(BrowserOpener::open) },
                                 isTouchPrimary = isTouchPrimary,
-                                ripplePulse = feedListRipplePulseFor(instance, selectedRowInstance, returnRipplePulse),
                                 // Same mutation the drop of a real drag applies (see
                                 // FeedListDragController.end), just with the landing position
                                 // resolved from the group's own order instead of a pointer.
@@ -666,11 +644,6 @@ internal fun FeedListPane(
                                     },
                                     isDragSource = folder.id == draggedFeedFolderId,
                                     isTouchPrimary = isTouchPrimary,
-                                    ripplePulse = feedListRipplePulseFor(
-                                        FeedListRowSelection.Folder(folder.id),
-                                        selectedRowInstance,
-                                        returnRipplePulse,
-                                    ),
                                     // A folder's reorder scope is the top-level folder order, so
                                     // these resolve against `folders` — the same list
                                     // FeedListDropIndex.nextFolderId is built from.
@@ -735,11 +708,6 @@ internal fun FeedListPane(
                                 },
                                 onSelectColor = { vm.updateTag(tag.id, tag.name, it) },
                                 isTouchPrimary = isTouchPrimary,
-                                ripplePulse = feedListRipplePulseFor(
-                                    FeedListRowSelection.Tag(tag.id),
-                                    selectedRowInstance,
-                                    returnRipplePulse,
-                                ),
                             )
                         }
                         if (tag.id in expandedTagIds) {
@@ -766,7 +734,6 @@ internal fun FeedListPane(
                                     onCopySiteUrl = { feed.site_url?.let(copyUrl) },
                                     onOpenSite = { feed.site_url?.let(BrowserOpener::open) },
                                     isTouchPrimary = isTouchPrimary,
-                                    ripplePulse = feedListRipplePulseFor(instance, selectedRowInstance, returnRipplePulse),
                                 )
                             }
                         }
@@ -774,6 +741,33 @@ internal fun FeedListPane(
                 }
             }
             VerticalScrollbarIfNeeded(listState)
+        }
+
+        // A platform with no native application menu bar (Android — see hasNativeAppMenu's own
+        // KDoc) needs its own in-pane entry point to Settings; this pane's header carries the
+        // app's title instead (FeedListToolbarRow), so the entry point lives down here as a fixed
+        // footer row instead. No HorizontalDivider above it: the ui-guidelines skill's divider
+        // policy reserves that for semantic section breaks within the scrolling list, not for a
+        // fixed-row/scroll-area boundary, which the shared surfaceContainerLow tone already reads
+        // clearly enough on its own (see FeedListToolbarRow just above, which gets the same
+        // treatment at the opposite edge).
+        if (!hasNativeAppMenu) {
+            // The bottom inset clears the navigation bar on Android's edge-to-edge layout (see
+            // HomeScreen's Scaffold) — this footer, not the scrolling list above it, is now the
+            // pane's last element, so the inset moved here instead of the list's contentPadding.
+            // Zero on desktop (WindowInsets.safeDrawing), and this branch never renders there
+            // anyway (hasNativeAppMenu is true).
+            Box(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))) {
+                SidebarRow(
+                    icon = { KeryxIcon(KeryxIcons.Tune, null) },
+                    label = stringResource(Res.string.menu_settings),
+                    count = null,
+                    selected = false,
+                    focused = false,
+                    onClick = { menuController.send(MenuCommand.OpenSettings) },
+                    isTouchPrimary = isTouchPrimary,
+                )
+            }
         }
     }
 
@@ -793,23 +787,6 @@ internal fun FeedListPane(
         onConfirmingUnsubscribeFeedChange = { confirmingUnsubscribeFeed = it },
     )
 }
-
-/**
- * The [returnRipplePulse] a specific row ([instance]) should receive: [returnRipplePulse] itself
- * when [instance] is the currently selected row (the one a return-from-article-list flash
- * targets), `0` (no ripple) for every other row — mirroring `ArticleListPane.kt`'s own
- * `ripplePulseFor`.
- *
- * Compared by [FeedListRowSelection] instance, not by feed id: a feed can render twice at once
- * (once under its folder group, once under an expanded tag — see [FeedListRowSelection]'s own
- * KDoc), and only the copy the user actually navigated through should flash, matching how
- * [toneFor] paints only one of them [RowSelectionTone.PRIMARY].
- */
-internal fun feedListRipplePulseFor(
-    instance: FeedListRowSelection,
-    selectedInstance: FeedListRowSelection,
-    returnRipplePulse: Int,
-): Int = if (instance == selectedInstance) returnRipplePulse else 0
 
 /**
  * Drives feed-list auto-scroll while a drag's pointer sits in an edge zone: while
@@ -852,48 +829,49 @@ private fun FeedListAutoScrollEffect(
 }
 
 /**
- * [FeedListPane]'s top toolbar row: the notification bell (when [notifVm] is given — see
- * [FeedListPane]'s own KDoc), then add feed / refresh all / cloud sync (when [cloudConnected]).
+ * [FeedListPane]'s top toolbar row: an `app_name` title on a platform with no native application
+ * menu bar (see [hasNativeAppMenu] below — desktop's own window title bar already names the app,
+ * so this stays untitled there), then add feed / refresh all / cloud sync (when [cloudConnected]).
  * Reads [vm]'s refreshing/syncing state itself (rather than taking it as a parameter) so a
  * refresh/sync toggle only invalidates this row's own restart scope, not the whole pane.
+ *
+ * The bell lives on `ArticleListPane`'s own header at every layout/depth this pane can be on
+ * screen at (Triple's permanent pane, or the narrow drawer, which never displaces the article
+ * list the way the old sliding-window Dual/depth-1-Single narrow layouts used to) — see
+ * `HomePaneLayout.kt`'s `feedListIsDrawer`/`visiblePanes` — so this row never has to host one.
+ *
+ * Settings, this pane's other in-pane entry point on such a platform, is *not* rendered here —
+ * see [FeedListPane]'s own settings footer row, below its drag-host `Box`.
+ *
+ * @param hasNativeAppMenu See [FeedListPane]'s own KDoc.
  */
 @Composable
 private fun FeedListToolbarRow(
     vm: HomeViewModel,
     cloudConnected: Boolean,
     onAddFeedClick: () -> Unit,
-    notifVm: NotificationCenterViewModel?,
+    hasNativeAppMenu: Boolean,
 ) {
     val refreshing by vm.feedRefreshing.collectAsStateSafe(false)
     val syncing by vm.syncing.collectAsStateSafe(false)
     WindowDragArea(Modifier.fillMaxWidth()) {
         KeryxPaneTopBar(
             modifier = Modifier.padding(top = WindowChrome.titleBarInsetDp.dp, start = 4.dp, end = 4.dp),
-            // Desktop's only entry point to Settings is the native application menu bar
-            // (AppMenuBar / macOS Preferences… / KDE Global Menu). Android has none of those, so
-            // this pane needs its own button — see `platform/PlatformOs.kt`'s `hasNativeAppMenu` KDoc.
-            navigationIcon = if (hasNativeAppMenu) {
-                null
-            } else {
-                val menuController = koinInject<MenuController>()
-                val settingsTooltip = stringResource(Res.string.menu_settings)
-                val icon: @Composable () -> Unit = {
-                    TooltipIconButton(tooltip = settingsTooltip, onClick = { menuController.send(MenuCommand.OpenSettings) }) {
-                        KeryxIcon(KeryxIcons.Tune, settingsTooltip)
+            title = if (hasNativeAppMenu) null else null,
+            titleContent = if (hasNativeAppMenu) null else {
+                {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Image(
+                            painter = painterResource(Res.drawable.app_icon),
+                            contentDescription = null,
+                            modifier = Modifier.size(28.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(Res.string.app_name))
                     }
                 }
-                icon
             },
         ) {
-            // Notifications are their own concern, not part of the add/refresh/sync cluster, so
-            // they get their own (single-icon, therefore uncapsuled) slot separated by the
-            // standard 8dp — and sit ahead of it, matching where the bell sits relative to
-            // ArticleListTopBar's own icons, so it keeps the same relative position across the
-            // two top bars a narrow layout swaps between.
-            if (notifVm != null) {
-                NotificationsBell(notifVm)
-                Spacer(Modifier.width(8.dp))
-            }
             ToolbarIconGroup {
                 val addFeedTooltip = stringResource(Res.string.home_add_feed)
                 TooltipIconButton(tooltip = addFeedTooltip, onClick = onAddFeedClick) {
@@ -936,8 +914,6 @@ private fun FeedListToolbarRow(
  * @param focused Whether the sidebar is focused.
  * @param onClick The action invoked when the row is clicked.
  * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
- * @param ripplePulse A nonzero value plays a one-shot ripple on [rowInteraction] — see
- *   `feedListRipplePulseFor`. `0` (the default) never plays one.
  */
 @Composable
 private fun SidebarRow(
@@ -948,10 +924,8 @@ private fun SidebarRow(
     focused: Boolean,
     onClick: () -> Unit,
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
-    ripplePulse: Int = 0,
 ) {
     val rowInteraction = remember { MutableInteractionSource() }
-    PulseRippleEffect(ripplePulse, rowInteraction)
     Row(
         Modifier.fillMaxWidth()
             .listRowClickable(rowInteraction, selected, onClick)
@@ -1001,8 +975,6 @@ private fun SidebarRow(
  * @param onSelectColor Applies a color picked from the color dot's popover. Independent of name
  *   editing: the dot is clickable whether or not the row is currently being renamed.
  * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
- * @param ripplePulse A nonzero value plays a one-shot ripple on this row's interaction source —
- *   see `feedListRipplePulseFor`. `0` (the default) never plays one.
  */
 @Composable
 private fun TagRow(
@@ -1022,7 +994,6 @@ private fun TagRow(
     nameError: (String) -> String? = { null },
     onSelectColor: (String?) -> Unit = {},
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
-    ripplePulse: Int = 0,
 ) {
     val editLabel = stringResource(Res.string.home_edit_tag_menu)
     val deleteLabel = stringResource(Res.string.home_delete_tag_menu)
@@ -1030,7 +1001,6 @@ private fun TagRow(
     var showColorPicker by remember { mutableStateOf(false) }
     val contentColor = dropTargetContentColorOrNull(isDropTarget, selected, focused, MaterialTheme.colorScheme.onTertiaryContainer)
     val rowInteraction = remember { MutableInteractionSource() }
-    PulseRippleEffect(ripplePulse, rowInteraction)
     Row(
         Modifier.testTag(tagRowTestTag(tag.id))
             .fillMaxWidth()
@@ -1176,8 +1146,6 @@ internal fun tagRowTestTag(tagId: String): String = "tag-row-$tagId"
  * @param onCopySiteUrl Copies the feed's website URL to the clipboard.
  * @param onOpenSite Opens the feed's website in the external browser.
  * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
- * @param ripplePulse A nonzero value plays a one-shot ripple on this row's interaction source —
- *   see `feedListRipplePulseFor`. `0` (the default) never plays one.
  */
 @Composable
 private fun TagFeedRow(
@@ -1195,7 +1163,6 @@ private fun TagFeedRow(
     onCopySiteUrl: () -> Unit,
     onOpenSite: () -> Unit,
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
-    ripplePulse: Int = 0,
 ) {
     val renameLabel = stringResource(Res.string.home_rename_feed)
     val removeLabel = stringResource(Res.string.home_remove_feed_from_tag_menu)
@@ -1204,7 +1171,6 @@ private fun TagFeedRow(
     val openSiteLabel = stringResource(Res.string.home_open_site)
     val siteUrlUsable = hasUsableUrl(feed.site_url)
     val rowInteraction = remember { MutableInteractionSource() }
-    PulseRippleEffect(ripplePulse, rowInteraction)
     Row(
         Modifier.fillMaxWidth()
             .listRowClickable(rowInteraction, selectionTone == RowSelectionTone.PRIMARY, onClick)
