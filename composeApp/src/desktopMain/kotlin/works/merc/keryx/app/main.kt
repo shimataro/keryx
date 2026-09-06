@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.LocalWindowExceptionHandlerFactory
 import androidx.compose.ui.window.Window
@@ -35,6 +36,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.swing.Swing
@@ -218,9 +220,17 @@ fun main(args: Array<String>) {
     // made shortly before quitting may not have hit disk yet. Flush on JVM shutdown so the latest
     // value (theme, pane widths, last-selected article, setup completion, …) is never lost on exit.
     Runtime.getRuntime().addShutdownHook(
-        Thread { runCatching { runBlocking { settingsRepository.flush() } } },
+        Thread {
+            runCatching {
+                println("[SHUTDOWN] Flushing local_settings.json")
+                runBlocking { settingsRepository.flush() }
+                println("[SHUTDOWN] Flush complete")
+            }
+        },
     )
     val saved = settingsRepository.getLocalSettings()
+    println("[STARTUP] appDataDir: ${AppDirs.appDataDir()}")
+    println("[STARTUP] windowMaximized=${saved.windowMaximized}, width=${saved.windowWidth}, height=${saved.windowHeight}")
 
     // Both still before any AWT/Compose initialization (SingleInstanceCoordinator/Koin/settings
     // loading above don't touch AWT) — kept together since it's unconfirmed whether
@@ -355,27 +365,56 @@ fun main(args: Array<String>) {
         // landing while the window happens to already be visible and focused still activates
         // instead of hiding it, on the Windows/Linux fallback where the two clicks share one hook.
         var lastNotificationSentAtMillis by remember { mutableStateOf(0L) }
+        val savedMaximized = saved.windowMaximized
         val windowState = remember {
+            val restorePlacement = when {
+                !savedMaximized -> WindowPlacement.Floating
+                isMacOs -> WindowPlacement.Fullscreen
+                else -> WindowPlacement.Maximized
+            }
             WindowState(
-                placement = if (saved.windowMaximized) WindowPlacement.Maximized else WindowPlacement.Floating,
-                position = WindowPosition.Aligned(Alignment.Center),
-                width = (saved.windowWidth ?: WINDOW_DEFAULT_WIDTH.toDouble()).coerceAtLeast(WINDOW_MIN_WIDTH.toDouble()).dp,
-                height = (saved.windowHeight ?: WINDOW_DEFAULT_HEIGHT.toDouble()).coerceAtLeast(WINDOW_MIN_HEIGHT.toDouble()).dp,
+                placement = restorePlacement,
+                position = if (savedMaximized) WindowPosition.PlatformDefault else WindowPosition.Aligned(Alignment.Center),
+                width = if (savedMaximized) Dp.Unspecified else (saved.windowWidth ?: WINDOW_DEFAULT_WIDTH.toDouble()).coerceAtLeast(WINDOW_MIN_WIDTH.toDouble()).dp,
+                height = if (savedMaximized) Dp.Unspecified else (saved.windowHeight ?: WINDOW_DEFAULT_HEIGHT.toDouble()).coerceAtLeast(WINDOW_MIN_HEIGHT.toDouble()).dp,
             )
+        }
+
+        val debugLogFile = java.io.File(AppDirs.tempDir(), "keryx-window-debug.log")
+        fun log(msg: String) {
+            debugLogFile.appendText("${java.time.Instant.now()} $msg\n")
+            println(msg)
+        }
+
+        val persistWindowState = {
+            val isNotFloating = windowState.placement != WindowPlacement.Floating
+            log("[PERSIST] placement=${windowState.placement}, isNotFloating=$isNotFloating, size=${windowState.size}")
+            settingsRepository.mutateLocalSettings {
+                it.copy(
+                    windowMaximized = isNotFloating,
+                    windowWidth = if (!isNotFloating) windowState.size.width.value.toDouble() else it.windowWidth,
+                    windowHeight = if (!isNotFloating) windowState.size.height.value.toDouble() else it.windowHeight,
+                )
+            }
+        }
+
+        val exitApp = {
+            persistWindowState()
+            runBlocking { settingsRepository.flush() }
+            exitApplication()
         }
 
         // Persist window size and placement (debounced).
         LaunchedEffect(windowState) {
-            snapshotFlow { windowState.placement to windowState.size }
-                .debounce(500)
-                .collect { (placement, size) ->
-                    settingsRepository.mutateLocalSettings {
-                        it.copy(
-                            windowMaximized = placement == WindowPlacement.Maximized,
-                            windowWidth = if (placement == WindowPlacement.Floating) size.width.value.toDouble() else it.windowWidth,
-                            windowHeight = if (placement == WindowPlacement.Floating) size.height.value.toDouble() else it.windowHeight,
-                        )
-                    }
+            // Watch placement and size independently so a size change doesn't swallow a placement change.
+            merge(
+                snapshotFlow { windowState.placement }.distinctUntilChanged().map { "placement" to it },
+                snapshotFlow { windowState.size }.distinctUntilChanged().map { "size" to it },
+            )
+                .debounce(100)
+                .collect { (what, value) ->
+                    log("[FLOW] $what changed to $value")
+                    persistWindowState()
                 }
         }
 
@@ -444,7 +483,7 @@ fun main(args: Array<String>) {
             windowVisible = windowVisible,
             updateStateFlow = updateRepository.state,
             onToggle = { windowVisible = !windowVisible },
-            onQuit = ::exitApplication,
+            onQuit = exitApp,
             onUpdateAction = {
                 onUpdateMenuItemClicked(updateRepository.state.value, appScope, updateRepository, notificationCenterViewModel)
             },
@@ -489,7 +528,11 @@ fun main(args: Array<String>) {
         }
         CompositionLocalProvider(LocalWindowExceptionHandlerFactory provides exceptionHandlerFactory) {
         Window(
-            onCloseRequest = { windowVisible = false },
+            onCloseRequest = {
+                persistWindowState()
+                runBlocking { settingsRepository.flush() }
+                windowVisible = false
+            },
             title = APP_NAME,
             state = windowState,
             visible = windowVisible,
@@ -547,8 +590,12 @@ fun main(args: Array<String>) {
             AppMenuBarHost(
                 appMenuConnection = appMenuConnection,
                 windowVisible = windowVisible,
-                onCloseWindow = { windowVisible = false },
-                onQuit = ::exitApplication,
+                onCloseWindow = {
+                    persistWindowState()
+                    runBlocking { settingsRepository.flush() }
+                    windowVisible = false
+                },
+                onQuit = exitApp,
                 resolvedXid = resolvedAppMenuXid,
             )
 
