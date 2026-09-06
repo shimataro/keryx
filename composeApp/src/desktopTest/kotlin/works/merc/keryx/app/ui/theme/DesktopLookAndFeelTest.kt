@@ -3,6 +3,7 @@ package works.merc.keryx.app.ui.theme
 import com.formdev.flatlaf.FlatDarkLaf
 import com.formdev.flatlaf.FlatLaf
 import com.formdev.flatlaf.FlatLightLaf
+import java.awt.RenderingHints
 import javax.swing.LookAndFeel
 import javax.swing.UIManager
 import kotlin.test.AfterTest
@@ -125,5 +126,56 @@ class DesktopLookAndFeelTest {
     fun goesThroughWhenNothingWasInstalledEvenIfTheAppliedFlagIsAlreadySet() {
         assertTrue(shouldApplyLookAndFeel(installedDark = null, appliedSinceStartup = true, dark = true))
         assertTrue(shouldApplyLookAndFeel(installedDark = null, appliedSinceStartup = true, dark = false))
+    }
+
+    /**
+     * The case the whole hint fallback exists for: FlatLaf leaves the key out of its defaults
+     * whenever the desktop reports nothing usable, and `JComponent.setUI` then snapshots a `null`
+     * that makes every Swing surface paint aliased text.
+     */
+    @Test
+    fun anUnusableDesktopHintResolvesToGreyscaleAntialiasing() {
+        for (desktopHint in listOf(null, RenderingHints.VALUE_TEXT_ANTIALIAS_OFF, RenderingHints.VALUE_TEXT_ANTIALIAS_DEFAULT)) {
+            assertEquals(
+                RenderingHints.VALUE_TEXT_ANTIALIAS_ON,
+                resolveTextAntialiasingHint(desktopHint),
+                "desktop hint $desktopHint should have fallen back to greyscale antialiasing",
+            )
+        }
+    }
+
+    /**
+     * A desktop that does express a usable preference keeps it — filling the gap must not cost a
+     * user their subpixel rendering by flattening every value to plain greyscale.
+     */
+    @Test
+    fun aUsableDesktopHintIsKept() {
+        val usable = listOf(
+            RenderingHints.VALUE_TEXT_ANTIALIAS_ON,
+            RenderingHints.VALUE_TEXT_ANTIALIAS_GASP,
+            RenderingHints.VALUE_TEXT_ANTIALIAS_LCD_HRGB,
+            RenderingHints.VALUE_TEXT_ANTIALIAS_LCD_HBGR,
+            RenderingHints.VALUE_TEXT_ANTIALIAS_LCD_VRGB,
+            RenderingHints.VALUE_TEXT_ANTIALIAS_LCD_VBGR,
+        )
+        for (desktopHint in usable) {
+            assertEquals(desktopHint, resolveTextAntialiasingHint(desktopHint), "desktop hint $desktopHint was not kept")
+        }
+    }
+
+    /**
+     * The end of the chain, against a real FlatLaf setup: whatever this machine's desktop reports,
+     * the installed defaults must come out holding a hint that paints antialiased text, since that
+     * is the value `JComponent.setUI` snapshots into every Swing component the app creates.
+     */
+    @Test
+    fun installedDefaultsAlwaysCarryAUsableTextAntialiasingHint() {
+        FlatLaf.setGlobalExtraDefaults(keryxFlatLafDefaults(dark = false))
+        assertTrue(FlatLightLaf.setup(), "FlatLightLaf.setup() returned false")
+
+        ensureTextAntialiasing()
+
+        val hint = UIManager.getLookAndFeelDefaults()[RenderingHints.KEY_TEXT_ANTIALIASING]
+        assertEquals(hint, resolveTextAntialiasingHint(hint), "the installed defaults hold an unusable hint: $hint")
     }
 }
