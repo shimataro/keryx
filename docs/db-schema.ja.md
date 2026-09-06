@@ -183,7 +183,8 @@ SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundli
 | `lastFtsRebuiltAt` | int\|null | null（FTS 全再構築の 24h ゲート。日次 heal で更新） |
 | `updateCheckIntervalHours` | int | 24 |
 | `lastUpdateCheckAt` | int\|null | null |
-| `windowWidth` / `windowHeight` | number\|null | null |
+| `windowWidth` / `windowHeight` / `windowX` / `windowY` | number\|null | null（ウィンドウの floating 状態の位置・サイズ。`windowPlacement` とは独立に保持し、最大化/フルスクリーン解除時の復帰先になる） |
+| `windowPlacement` | string | "floating"（"floating" \| "maximized" \| "fullscreen"。未知の値は floating として復元） |
 | `feedListPaneWidth` / `articleListPaneWidth` | number | 260 / 360 |
 | `collapsedFolderIds` | string[] | `[]`（フォルダの既定は*展開*なので、畳まれている方だけを記録する） |
 | `expandedTagIds` | string[] | `[]`（タグは逆に既定が*折り畳み*。このリストが無かった頃と同じだけサイドバーが短いままになるようにするため） |
