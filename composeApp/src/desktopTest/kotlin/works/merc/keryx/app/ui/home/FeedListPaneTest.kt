@@ -61,8 +61,11 @@ class FeedListPaneTest {
         vm: HomeViewModel,
         height: Dp,
         onSelectionAdvance: (() -> Unit)? = null,
-        onEnterArticleList: (() -> Unit)? = null,
         onTextInputFocusChange: (Boolean) -> Unit = {},
+        // Defaults to the real desktop value (see DesktopOs.kt) so every existing test here keeps
+        // exercising the "native app menu" branch (no app_name header, no settings footer)
+        // unchanged; only the tests exercising the Android branch below override it.
+        hasNativeAppMenu: Boolean = true,
     ) {
         KoinApplication(configuration = koinConfiguration { modules(module { single { testMenuController } }) }) {
             Box(Modifier.testTag(ROOT_TEST_TAG).size(320.dp, height)) {
@@ -72,10 +75,34 @@ class FeedListPaneTest {
                     dragOverlay = remember { FeedDragOverlayState() },
                     onActivated = {},
                     onSelectionAdvance = onSelectionAdvance,
-                    onEnterArticleList = onEnterArticleList,
                     onTextInputFocusChange = onTextInputFocusChange,
+                    hasNativeAppMenu = hasNativeAppMenu,
                 )
             }
+        }
+    }
+
+    @Test
+    fun showsTheAppNameHeaderAndSettingsFooterWhenThereIsNoNativeAppMenu() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        useHomeViewModel(driver, db) { fixture ->
+            setContent { FeedListPaneTestHost(fixture.vm, TEST_PANE_HEIGHT, hasNativeAppMenu = false) }
+            waitForIdle()
+
+            onNodeWithText("Keryx").assertIsDisplayed()
+            onNodeWithText("設定…").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun omitsTheAppNameHeaderAndSettingsFooterWhenThereIsANativeAppMenu() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        useHomeViewModel(driver, db) { fixture ->
+            setContent { FeedListPaneTestHost(fixture.vm, TEST_PANE_HEIGHT, hasNativeAppMenu = true) }
+            waitForIdle()
+
+            onNodeWithText("Keryx").assertDoesNotExist()
+            onNodeWithText("設定…").assertDoesNotExist()
         }
     }
 
@@ -276,23 +303,11 @@ class FeedListPaneTest {
         }
     }
 
-    @Test
-    fun narrowLayoutRendersACollapsedSearchBarInsteadOfAnEditableField() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
-        useHomeViewModel(driver, db) { fixture ->
-            val vm = fixture.vm
-            setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = {}) }
-            waitForIdle()
-
-            onNode(hasSetTextAction()).assertDoesNotExist()
-            onNodeWithText("記事を検索…").assertIsDisplayed()
-        }
-    }
-
     /**
-     * At a narrow layout the collapsed search bar above is already the screen's search entry point,
-     * so the "Search" quick-filter row — which would run the identical action — is not rendered at
-     * all; see `FeedListPane`'s `onSelectionAdvance` KDoc.
+     * At a narrow layout the feed list has no search entry point of its own at all (see
+     * `FeedListPane`'s `onSelectionAdvance` KDoc) — search lives on `ArticleListPane` instead — so
+     * the "Search" quick-filter row, which would be redundant with that and unreachable-feeling
+     * besides (this drawer has nowhere to show results), is not rendered at all.
      */
     @Test
     fun omitsSearchQuickFilterRowWhenOnSelectionAdvanceIsProvided() = runDesktopComposeUiTest {
@@ -324,71 +339,13 @@ class FeedListPaneTest {
             onNodeWithText("記事を検索").performClick()
             waitForIdle()
 
-            // The row enters search scope just like the collapsed bar does at a narrow layout,
-            // so a back action can restore the previous pane/filter.
+            // The row enters search scope just like ArticleListTopBar's own search icon does at
+            // a narrow layout, so a back action can restore the previous pane/filter.
             assertEquals(HomePane.FeedList, vm.searchScopeEntry.value?.returnPane)
             assertEquals(ArticleFilter.Search, vm.filter.value)
         }
     }
 
-    @Test
-    fun tappingTheCollapsedSearchBarSelectsSearchAdvancesAndRaisesAFocusRequest() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
-        useHomeViewModel(driver, db) { fixture ->
-            val vm = fixture.vm
-            var advanceCount = 0
-            setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = { advanceCount++ }) }
-            waitForIdle()
-
-            onNodeWithText("記事を検索…").performClick()
-            waitForIdle()
-
-            assertEquals(ArticleFilter.Search, vm.filter.value)
-            assertEquals(1, advanceCount)
-            assertEquals(true, vm.pendingSearchFocus.value)
-            // Snapshotted so a later back action can restore this pane and filter — see
-            // HomeViewModel.enterSearchScope's own KDoc.
-            assertEquals(HomePane.FeedList, vm.searchScopeEntry.value?.returnPane)
-        }
-    }
-
-    @Test
-    fun theCollapsedSearchBarShowsTheCurrentQueryRatherThanThePlaceholder() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
-        useHomeViewModel(driver, db) { fixture ->
-            val vm = fixture.vm
-            vm.setSearchQuery("kotlin")
-            setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = {}) }
-            waitForIdle()
-
-            onNodeWithText("kotlin").assertIsDisplayed()
-        }
-    }
-
-    @Test
-    fun onEnterArticleListFiresEvenWhenReselectingTheAlreadyActiveFilter() = runDesktopComposeUiTest {
-        // At PaneLayout.Single's depth 1, tapping a row is always an entrance into the article list
-        // pane, even when it names the filter already active — unlike onSelectionAdvance alone
-        // (which HomeViewModel.selectFilter would otherwise no-op on), this callback must still
-        // fire so the caller can discard that pane's saved scroll state. See HomeViewModel's own
-        // `reentering` param and FeedListPane's onEnterArticleList KDoc.
-        val (driver, db) = inMemoryDb()
-        useHomeViewModel(driver, db) { fixture ->
-            val vm = fixture.vm
-            var enterCount = 0
-            vm.selectFilter(ArticleFilter.All)
-            setContent {
-                FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = {}, onEnterArticleList = { enterCount++ })
-            }
-            waitForIdle()
-
-            onNodeWithText("すべてのフィード").performClick()
-            waitForIdle()
-
-            assertEquals(ArticleFilter.All, vm.filter.value)
-            assertEquals(1, enterCount)
-        }
-    }
 }
 
 private class FeedListPaneTestTokenStorage : TokenStorage {

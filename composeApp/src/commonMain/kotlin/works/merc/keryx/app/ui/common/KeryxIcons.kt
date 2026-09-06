@@ -51,6 +51,7 @@ expect object KeryxIcons {
     val Info: DrawableResource
     val Link: DrawableResource
     val LinkOff: DrawableResource
+    val Menu: DrawableResource
     val NewLabel: DrawableResource
     val Notifications: DrawableResource
     val Refresh: DrawableResource

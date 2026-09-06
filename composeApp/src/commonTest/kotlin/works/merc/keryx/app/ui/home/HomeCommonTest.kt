@@ -365,6 +365,16 @@ class HomeCommonTest {
     }
 
     @Test
+    fun feedListActionAllowedIsTrueWhenTheDrawerIsOpenRegardlessOfPane() {
+        // At a narrow layout, focusedPane is never HomePane.FeedList (the feed list is a drawer,
+        // not a pane there — see feedListIsDrawer), so drawerOpen is what stands in for "the feed
+        // list is what has the user's attention" instead.
+        assertEquals(true, feedListActionAllowed(HomePane.ArticleList, drawerOpen = true))
+        assertEquals(true, feedListActionAllowed(HomePane.ArticleDetail, drawerOpen = true))
+        assertEquals(false, feedListActionAllowed(HomePane.ArticleList, drawerOpen = false))
+    }
+
+    @Test
     fun feedOperationsAvailableRequiresNeitherRefreshNorSyncInFlight() {
         assertEquals(true, feedOperationsAvailable(feedRefreshing = false, syncing = false))
         assertEquals(false, feedOperationsAvailable(feedRefreshing = true, syncing = false))
