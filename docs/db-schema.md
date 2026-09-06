@@ -159,6 +159,7 @@ Setup completion = file exists.
 | `updateCheckIntervalHours` | int | 24 |
 | `lastUpdateCheckAt` | int\|null | null |
 | `windowWidth` / `windowHeight` | number\|null | null |
+| `windowMaximized` | boolean | false |
 | `feedListPaneWidth` / `articleListPaneWidth` | number | 260 / 360 |
 | `collapsedFolderIds` | string[] | `[]` (folders default to *expanded*, so only the collapsed ones are tracked) |
 | `expandedTagIds` | string[] | `[]` (tags are the opposite — they default to *collapsed*, so the sidebar stays as short as it was before this list existed) |

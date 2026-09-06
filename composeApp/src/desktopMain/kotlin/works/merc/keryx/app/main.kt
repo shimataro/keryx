@@ -23,6 +23,7 @@ import androidx.compose.ui.window.LocalWindowExceptionHandlerFactory
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowExceptionHandler
 import androidx.compose.ui.window.WindowExceptionHandlerFactory
+import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
@@ -356,22 +357,26 @@ fun main(args: Array<String>) {
         var lastNotificationSentAtMillis by remember { mutableStateOf(0L) }
         val windowState = remember {
             WindowState(
+                placement = if (saved.windowMaximized) WindowPlacement.Maximized else WindowPlacement.Floating,
                 position = WindowPosition.Aligned(Alignment.Center),
                 width = (saved.windowWidth ?: WINDOW_DEFAULT_WIDTH.toDouble()).coerceAtLeast(WINDOW_MIN_WIDTH.toDouble()).dp,
                 height = (saved.windowHeight ?: WINDOW_DEFAULT_HEIGHT.toDouble()).coerceAtLeast(WINDOW_MIN_HEIGHT.toDouble()).dp,
             )
         }
 
-        // Persist window size (debounced).
+        // Persist window size and placement (debounced).
         LaunchedEffect(windowState) {
-            snapshotFlow { windowState.size }.debounce(500).collect { size ->
-                settingsRepository.mutateLocalSettings {
-                    it.copy(
-                        windowWidth = size.width.value.toDouble(),
-                        windowHeight = size.height.value.toDouble(),
-                    )
+            snapshotFlow { windowState.placement to windowState.size }
+                .debounce(500)
+                .collect { (placement, size) ->
+                    settingsRepository.mutateLocalSettings {
+                        it.copy(
+                            windowMaximized = placement == WindowPlacement.Maximized,
+                            windowWidth = if (placement == WindowPlacement.Floating) size.width.value.toDouble() else it.windowWidth,
+                            windowHeight = if (placement == WindowPlacement.Floating) size.height.value.toDouble() else it.windowHeight,
+                        )
+                    }
                 }
-            }
         }
 
         // Tracks when a new-article notification was last sent, for onTrayAction's recency bias

@@ -184,6 +184,7 @@ SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundli
 | `updateCheckIntervalHours` | int | 24 |
 | `lastUpdateCheckAt` | int\|null | null |
 | `windowWidth` / `windowHeight` | number\|null | null |
+| `windowMaximized` | boolean | false |
 | `feedListPaneWidth` / `articleListPaneWidth` | number | 260 / 360 |
 | `collapsedFolderIds` | string[] | `[]`（フォルダの既定は*展開*なので、畳まれている方だけを記録する） |
 | `expandedTagIds` | string[] | `[]`（タグは逆に既定が*折り畳み*。このリストが無かった頃と同じだけサイドバーが短いままになるようにするため） |

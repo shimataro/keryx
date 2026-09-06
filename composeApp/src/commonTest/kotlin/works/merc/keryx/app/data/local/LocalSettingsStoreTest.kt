@@ -87,6 +87,31 @@ class LocalSettingsStoreTest {
     }
 
     @Test
+    fun windowMaximizedDefaultsToFalse() {
+        assertEquals(false, store.load().windowMaximized)
+    }
+
+    @Test
+    fun windowMaximizedRoundTrips() {
+        store.save(LocalSettings(windowMaximized = true))
+        assertEquals(true, store.load().windowMaximized)
+    }
+
+    @Test
+    fun loadingOldSettingsFileWithoutWindowMaximizedKeyStillWorks() {
+        // Simulates a `local_settings.json` written before `windowMaximized` existed.
+        FileIO.writeText(
+            FileIO.join(dir, "local_settings.json"),
+            """{"themeMode":"dark","windowWidth":800.0,"windowHeight":600.0}""",
+        )
+
+        val s = store.load()
+
+        assertEquals("dark", s.themeMode)
+        assertEquals(false, s.windowMaximized)
+    }
+
+    @Test
     fun loadingOldSettingsFileWithoutCollapsedFolderIdsKeyStillWorks() {
         // Simulates a `local_settings.json` written before `collapsedFolderIds` existed.
         FileIO.writeText(

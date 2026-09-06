@@ -22,6 +22,7 @@ data class LocalSettings(
     val lastCacheCleanupAt: Long? = null,
     val windowWidth: Double? = null,
     val windowHeight: Double? = null,
+    val windowMaximized: Boolean = false,
     val feedListPaneWidth: Double = FEED_LIST_PANE_WIDTH_DEFAULT.toDouble(),
     val articleListPaneWidth: Double = ARTICLE_LIST_PANE_WIDTH_DEFAULT.toDouble(),
     val collapsedFolderIds: Set<String> = emptySet(),
