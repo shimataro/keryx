@@ -217,7 +217,7 @@ internal fun WindowsTray(
     LaunchedEffect(trayIcon, tooltip) {
         trayIcon.toolTip = tooltip
     }
-    LaunchedEffect(menu, windowVisible, quitLabel) {
+    LaunchedEffect(menu, windowVisible, showLabel, hideLabel, quitLabel) {
         menu.setLabels(toggle = toggleLabel, quit = quitLabel)
     }
     LaunchedEffect(menu, updateEntry) {

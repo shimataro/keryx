@@ -145,11 +145,22 @@ fun AboutToShow(id: Int): Boolean
  */
 fun AboutToShowGroup(ids: List<@JvmSuppressWildcards Int>): AboutToShowGroupReply
 
+    /**
+     * Declared for introspection completeness only. Keryx's menu shape is fixed (see
+     * `TrayMenuModel.kt`'s `buildMenuLayout`), so nothing here ever changes it, and property
+     * changes are emitted via [ItemsPropertiesUpdated] instead — see that class's own KDoc for
+     * why a plain revision bump isn't enough on its own.
+     */
     class LayoutUpdated(path: String, revision: UInt32, parent: Int) : DBusSignal(path, revision, parent)
 
     /**
-     * Declared for introspection completeness. Keryx only ever emits [LayoutUpdated]: hosts
-     * implement it far more consistently, and re-fetching a two-item layout costs nothing.
+     * Emitted whenever a menu item's properties change (currently just a label and/or an
+     * `enabled` flag — see `TrayMenuModel.kt`'s `changedItemProperties`). Some clients — notably
+     * GNOME Shell's AppIndicator extension — never re-request `label`/`enabled` via `GetLayout`
+     * on their own once an item exists; without this signal a menu that's already been opened
+     * once stays stuck showing its original labels forever, even after `AboutToShow` reports the
+     * layout stale (that only makes such a client re-fetch the *layout*, which on those clients
+     * never asks for `label` either).
      */
     class ItemsPropertiesUpdated(
         path: String,

@@ -646,7 +646,7 @@ likely each is to be wrong):
   — a missing jlink module (`jdk.security.auth`) only shows up there, never under `run`.
 - Left-click toggles the window (this depends on `ItemIsMenu = false`; if the menu opens instead, that property is wrong).
 - Right-click shows the menu with the correct labels, and the Show/Hide label flips after toggling the window
-  *without* reopening the menu (exercises `AboutToShow` + `LayoutUpdated`).
+  *without* reopening the menu (exercises `AboutToShow` + `ItemsPropertiesUpdated`).
 - The unread dot appears/disappears live (`NewIcon` reaches the host).
 - After `systemctl --user restart plasma-plasmashell` the icon comes back without restarting Keryx.
 - A background refresh raises a desktop notification with the app icon.
@@ -654,6 +654,14 @@ likely each is to be wrong):
   auto-expired) - trigger several notifications, let some expire/dismiss without clicking, and
   confirm no leftover state affects later click-to-front handling (best confirmed indirectly,
   since PendingNotificationIds has no visible size counter).
+- On GNOME **with** the AppIndicator extension, repeat the Show/Hide label check above — **this is
+  the one Plasma cannot stand in for**: GNOME's dbusmenu client never re-requests `label`/`enabled`
+  via `GetLayout` on its own, so it only sees a change through `ItemsPropertiesUpdated`, never by
+  reopening the menu. Toggle the window several times in a row and confirm the label keeps up every
+  time (a regression here previously left it stuck on its very first value forever). Do the same for
+  the in-app update entry: start a download from Settings and confirm the tray item's label/enabled
+  actually progress through "Download update…" → "Downloading… N%" → "Restart to update…" instead of
+  staying frozen.
 - On GNOME without the AppIndicator extension it silently falls back to the AWT tray (no crash, no stack trace), and
   launching without `DBUS_SESSION_BUS_ADDRESS` neither hangs nor throws.
 - Same behaviour on a Plasma Wayland session.

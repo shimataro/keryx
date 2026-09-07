@@ -10,7 +10,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.withContext
-import org.freedesktop.dbus.types.UInt32
 import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.drawUnreadDot
@@ -66,9 +65,9 @@ internal fun LinuxTray(
         SniDBusMenu(
             objectPath = SniConnection.MENU_PATH,
             initialState = TrayMenuState(toggleLabel, quitLabel, updateEntry),
-            onLayoutUpdated = { revision ->
+            onItemsPropertiesUpdated = { updated ->
                 connection.emit {
-                    DBusMenu.LayoutUpdated(SniConnection.MENU_PATH, UInt32(revision.toLong()), MENU_ROOT_ID)
+                    DBusMenu.ItemsPropertiesUpdated(SniConnection.MENU_PATH, updated, emptyList())
                 }
             },
         )
@@ -98,7 +97,7 @@ internal fun LinuxTray(
     LaunchedEffect(item, unreadCount) {
         item.updateToolTip(if (unreadCount > 0) "$APP_NAME ($unreadCount)" else APP_NAME)
     }
-    LaunchedEffect(menu, windowVisible, quitLabel, updateEntry) {
+    LaunchedEffect(menu, windowVisible, showLabel, hideLabel, quitLabel, updateEntry) {
         menu.updateState(TrayMenuState(toggleLabel, quitLabel, updateEntry))
     }
 

@@ -338,8 +338,13 @@ SNI ならパネルへ生の ARGB ピクセルを渡せる。
   バッジ付きグリフをビッグエンディアン ARGB32（`TrayPixmap.kt`）で複数サイズ提供する。`ItemIsMenu = false`
   にすることで、左クリックがメニューではなく `Activate` に届く。
 - `/StatusNotifierItem/menu` — `SniDBusMenu`（`com.canonical.dbusmenu`。表示/非表示 + 終了）。
-  ラベル変更時に revision を上げて `LayoutUpdated` を発火し、`AboutToShow` は現在のラベルと
-  `GetLayout` が最後に返した内容を比較するため、シグナルが落ちても復旧する。
+  ラベル／enabled 変更時は revision を上げつつ、変化した項目だけを名指しした
+  `ItemsPropertiesUpdated`（`TrayMenuModel.kt` の `changedItemProperties`）を発火する ——
+  `LayoutUpdated` ではない。メニューの形は一切変化せず、かつ一部のクライアント（GNOME Shell の
+  AppIndicator 拡張）は `label`／`enabled` を `GetLayout` で自発的に再取得しないため、
+  `LayoutUpdated` だけを送ると既に開いたメニューが古いラベルのまま固まってしまう。
+  `AboutToShow` は引き続き現在のラベルと `GetLayout` が最後に返した内容を比較するため、
+  シグナルが落ちても復旧する。
 
 アイコンのアセットも同じ分岐に従う。透過が効いて 22px 以上で合成される 2 経路は outlined
 （`tray_icon_outlined.png`）、Windows の通知領域と Linux の AWT フォールバックはフルカラー
