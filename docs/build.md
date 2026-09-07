@@ -248,31 +248,126 @@ snapcraft pack --use-lxd
 ```
 
 `confinement: strict` (Ubuntu's default for Store distribution) means the app only gets the
-plugs declared in `snap/snapcraft.yaml`'s `apps.keryx.plugs` — `network`,
+plugs declared in `snap/snapcraft.yaml` plus any [extensions](https://snapcraft.io/docs/supported-extensions).
+To avoid manually enumerating every X11 client library, font stack, and GTK dependency that
+AWT/Swing, FlatLaf, Skiko, and WebKitGTK need, the snap uses the `gnome` extension, which
+stages the common GNOME/GTK runtime libraries automatically. The `gpu-2404` content
+interface (plug) provides Mesa GPU drivers without bloating the snap with `libllvm17`
+(~100 MB) that would come from staging `libgl1-mesa-dri` directly.
+
 `password-manager-service` (Secret Service, for `java-keyring`'s token storage — **not**
 auto-connected by snapd policy, so a user must run `snap connect keryx:password-manager-service`
-before Secret Service is actually reachable; until then, `java-keyring` falls back to the same
+before Secret Service is actually reachable (for local `--dangerous` installs this manual step is
+always required; once published to the Snap Store, auto-connection can be requested on the
+Snapcraft forum so end users get it automatically). Until then, `java-keyring` falls back to the same
 permission-restricted plaintext file every platform already uses when the OS store is
 unavailable, see `SECURITY.md` — this is not silent: `CloudSession` raises a notification-center
 warning whose `ShowInfoDialog` action names this `snap connect` as the fix, see
-`error-design.md`), `desktop`/`desktop-legacy`/`wayland`/`x11`
-(window/tray/notification integration), `opengl` (Compose Desktop's Skia rendering), and `home`.
+`error-design.md`).
 
 `home` is what lets the OPML import/export file picker (`JFileChooser`, see
 `app-architecture.md`) reach non-hidden files anywhere under the user's home directory — but it
-explicitly excludes hidden files and directories, so it does **not** let the `keryx://` URI
-scheme and `.opml` association self-registration described above
-(`LinuxUriSchemeRegistrar`/`LinuxOpmlAssociationRegistrar`, which write into
-`~/.local/share/applications` and `~/.config/mimeapps.list`) actually do anything under strict
-confinement: those writes are denied, silently caught and logged as a warning rather than
-crashing. The Snap build's host-side registration instead comes from `snap/gui/keryx.desktop`
-itself declaring `MimeType=` for both `x-scheme-handler/keryx` and the `.opml` MIME types plus an
-`Exec=keryx %u` field code — the mechanism snapd processes at install time. A `file://` URI that
+explicitly excludes hidden files and directories, so it could never let the `keryx://` URI scheme
+and `.opml` association self-registration described above
+(`LinuxUriSchemeRegistrar`/`LinuxOpmlAssociationRegistrar`) reach the host's
+`~/.local/share/applications` and `~/.config/mimeapps.list`. In the snap they never even reach for
+them: both registrars resolve their targets from `XDG_DATA_HOME` / `XDG_CONFIG_HOME`, and under
+the `gnome` extension those already point into the snap's own writable area (see the next
+paragraph), so the writes *succeed* — into a private directory no host desktop ever reads. Either
+way the self-registration has no effect on the host, and neither outcome crashes (a failure is
+caught and logged as a warning). The Snap build's host-side registration instead comes from
+`snap/gui/keryx.desktop` itself declaring `MimeType=` for both `x-scheme-handler/keryx` and the
+`.opml` MIME types plus an `Exec=keryx %u` field code — the mechanism snapd processes at install time. A `file://` URI that
 some desktop environments hand to `%u` for a local file is normalized back to a plain path in
-`main()` (`normalizeFileUriArg`) before classification. Whether every one of these plugs is
-actually sufficient under strict confinement (tray D-Bus ownership in particular) and whether
-this desktop-entry registration actually takes effect on a real snapd install have not yet been
-verified.
+`main()` (`normalizeFileUriArg`) before classification.
+
+The app also writes its own data (database, settings, lock file, and log file) under
+`~/.local/share`, which the strict `home` plug blocks just the same, so those XDG variables have
+to be remapped into the snap's own writable area or the app cannot even start. The `gnome`
+extension already does most of that: its `snap/command-chain/desktop-launch` unconditionally
+exports `XDG_CONFIG_HOME=$SNAP_USER_DATA/.config`,
+`XDG_DATA_HOME=$SNAP_USER_DATA/.local/share` and `XDG_CACHE_HOME=$SNAP_USER_COMMON/.cache`.
+
+`$SNAP_USER_DATA` (`~/snap/keryx/<revision>`) is the wrong home for the database, though: it is
+revision-scoped, so snapd copies the whole directory on every `snap refresh` and rolls it back on
+`snap revert` — taking the article database, and the sync bookkeeping in `sync_state`, with it. An
+`environment:` entry cannot move it, because snapd applies that block *before* the command chain
+runs and `desktop-launch`'s own `export` then wins. `snap/snapcraft.yaml` therefore declares its
+own `command-chain` entry, `bin/keryx-xdg-launch` (staged from `snap/local/keryx-xdg-launch`,
+which must keep its executable bit), which snapcraft appends *after* the extension's; it
+re-exports `XDG_DATA_HOME=$SNAP_USER_COMMON/.local/share` — `~/snap/keryx/common`, shared by every
+revision — and then execs the app. `XDG_CACHE_HOME` is deliberately left alone, since the
+extension already points it at `$SNAP_USER_COMMON`. `AppDirs.desktop.kt` reads these environment
+variables, so no source code change is needed.
+
+WebKitGTK's nested sandbox (`bwrap`) cannot start inside strict confinement, so
+`WEBKIT_DISABLE_SANDBOX=1` is set in the app's environment block. This disables the
+renderer sandbox for the article reader's WebView only; the snap's own strict confinement
+still isolates the process from the host.
+
+Manual `stage-packages` is down to two entries — the AWT `libxtst6` extension and `libffi8`
+for JNA — because everything else is covered by the `gnome` extension.
+
+**WebKitGTK in particular must not be staged.** The `gnome-46-2404` platform snap the extension
+plugs into already ships `libwebkit2gtk-4.1-0` along with the `libjavascriptcoregtk-4.1-0` /
+`libsoup-3.0-0` / `libsecret-1-0` it depends on; the extension's launcher puts that snap's
+`usr/lib/<triplet>` on `LD_LIBRARY_PATH`, and it also adds a `layout` binding
+`/usr/lib/<triplet>/webkit2gtk-4.1` — the injected bundle plus the
+`WebKitWebProcess`/`WebKitNetworkProcess` helpers — to the platform's copy no matter what the
+snap itself stages. Staging our own copy therefore duplicates a library that is already mounted
+(and pairs our `.so` with the platform's helper processes, which only works while the two
+versions happen to agree), while pulling in WebKitGTK's entire apt dependency closure —
+GStreamer's base/good plugin sets, `libicu74`, `libvpx`, `libwoff1`, `libenchant`, … — which by
+itself roughly doubled the size of the `.snap` against the equivalent `.deb`.
+
+`snapcraft pack` also runs a set of built-in linters, and two of its findings are worth
+explaining rather than "fixing":
+
+- The `library` linter only inspects ELF `DT_NEEDED` entries, so it cannot see libraries
+  loaded at runtime via `dlopen()` — it reports the JVM's own runtime libraries
+  (`lib/runtime/lib/*.so`, `lib/libapplauncher.so`) as "unused library". These are false
+  positives snapcraft's own documentation says not to act on; removing any of them would break
+  the app (`libfontmanager.so` in particular is the file the harfbuzz dependency fix in
+  `0394c79e` was for). `snap/snapcraft.yaml`'s `lint.ignore` suppresses these specific paths.
+- **That suppression also disables the linter's *missing*-dependency detection for the
+  same paths** — the check that previously caught the X11/font gap (`88ceff7e`) and the
+  harfbuzz gap (`0394c79e`). Whenever `stage-packages` or the bundled JDK version changes,
+  comment out the `lint:` block in `snap/snapcraft.yaml` and re-pack once to confirm no new
+  missing-dependency warnings appear, then restore it.
+- The `metadata` linter's "title is missing" finding is real (unlike the library ones) and
+  is fixed by the top-level `title: Keryx` key — the display name shown in the Snap
+  Store / GNOME Software, separate from `snap/gui/keryx.desktop`'s `Name=` used by the
+  desktop shell.
+
+**Benign startup log lines under strict confinement.** A few lines that look like errors at
+launch are expected and need no fix, seen especially inside a GPU-less VM guest (e.g. VMware) or
+a host where no GL stack is reachable from the sandbox:
+
+- `[SKIKO] warn: Fallback to next API` followed by `org.jetbrains.skiko.RenderException: Cannot
+  create Linux GL context`, then a run of `libEGL warning: ... DRI3 ...` / `... failed to create
+  dri2 screen` / `VMware: No 3D enabled`: Skiko (Compose's Skia renderer) tried hardware-accelerated
+  GL first and fell back to software rendering because no GPU is reachable — inside a VM without
+  3D-accelerated `virtio`/`vmwgfx` passthrough, or on a host where the `gpu-2404` content interface
+  isn't connected. The first line is that fallback itself succeeding; the app still renders
+  correctly, just off the CPU.
+- `Could not open /sys/class/dmi/id/chassis_type` / `/sys/firmware/acpi/pm_profile:
+  Permission denied`: GLib/GTK probing hardware chassis info (used elsewhere to guess a
+  tablet/convertible form factor), blocked by snapd's device cgroup under strict confinement.
+  GTK already handles a missing answer here gracefully; nothing in this app reads either path.
+- `GDBus.Error:org.freedesktop.portal.Error.NotAllowed: This call is not available inside the
+  sandbox`: an underlying native toolkit (GTK/AWT) probing an xdg-desktop-portal call the strict
+  sandbox doesn't expose. Keryx's own file dialogs and menus go through `JFileChooser` /
+  `java.awt.FileDialog` / AWT popups (see "UI Direction" in `external-spec.md`), never a portal,
+  so this is not the app's own call failing.
+
+The one line that *did* need a fix — `TransportBuilder - Using transport
+dbus-java-transport-native-unixsocket` — was dbus-java's own `slf4j` logging bypassing the app's
+log file and printing in a different format (its own timestamp, no `[tag]` prefix) because it went
+straight through `slf4j-simple` to stderr. Switching the desktop runtime's `slf4j` provider from
+`slf4j-simple` to `slf4j-jdk14` (`composeApp/build.gradle.kts`, `gradle/libs.versions.toml`) routes
+it — and any other third-party `slf4j` caller — through `java.util.logging`, where
+`Log.desktop.kt` now installs its own formatter/handlers on the JUL root logger, so third-party log
+lines land in `keryx.<n>.log` with the same format as the app's own.
 
 ### Android (APK / AAB)
 

@@ -246,31 +246,130 @@ sudo lxd init --auto
 snapcraft pack --use-lxd
 ```
 
-`confinement: strict`（UbuntuのSnap Store配布時の既定）は、`snap/snapcraft.yaml`の
-`apps.keryx.plugs`で宣言したプラグのみをアプリに与える —
-`network`、`password-manager-service`（Secret Service、`java-keyring`のトークン保存用 —
+`confinement: strict`（UbuntuのSnap Store配布時の既定）は、`snap/snapcraft.yaml` で宣言したプラグと[拡張機能](https://snapcraft.io/docs/supported-extensions)のみがアプリに与えられる。
+AWT/Swing・FlatLaf・Skiko・WebKitGTK が必要とするすべての X11 クライアントライブラリやフォントスタック、GTK 依存を個別に列挙するのを避けるため、スナップは `gnome` 拡張機能を使う。これにより、共通の GNOME/GTK ランタイムライブラリが自動的にステージされる。
+`gpu-2404` コンテンツインターフェース（プラグ）は、`libgl1-mesa-dri` を直接ステージする場合に引き込まれる `libllvm17`（約100MB）による肥大化を回避しつつ、Mesa GPU ドライバーを提供する。
+
+`password-manager-service`（Secret Service、`java-keyring`のトークン保存用 —
 snapdのポリシー上**自動接続されない**ため、Secret Serviceに実際にアクセスできるように
-なるには利用者が事前に`snap connect keryx:password-manager-service`を実行する必要がある。
+なるには利用者が事前に`snap connect keryx:password-manager-service`を実行する必要がある
+（`--dangerous`によるローカルインストール時はこの手動接続が必須。Snap Store公開後は
+フォーラムでauto-connectを申請でき、利用者はインストール時に自動的に接続される）。
 接続するまでは、OSのセキュアストアが使えない場合に他のプラットフォームでもすでに使っている
 権限制限付きの平文フォールバックファイルへ`java-keyring`がフォールバックする。`SECURITY.md`
 参照。これは黙って行われるわけではなく、`CloudSession`が通知センターに警告を出し、その
-`ShowInfoDialog`アクションが対処法としてこの`snap connect`を案内する。`error-design.ja.md`参照）、`desktop`/`desktop-legacy`/`wayland`/`x11`（ウィンドウ・トレイ・通知の統合）、`opengl`
-（Compose DesktopのSkiaレンダリング）、`home`。
+`ShowInfoDialog`アクションが対処法としてこの`snap connect`を案内する。`error-design.ja.md`参照）。
 
 `home`は、OPMLインポート/エクスポートのファイル選択ダイアログ（`JFileChooser`、
 `app-architecture.md`参照）がユーザーのホームディレクトリ配下の非隠しファイルへ
 アクセスするためのものである — ただし隠しファイル・隠しディレクトリへのアクセスは
 明示的に除外されるため、上述の`keryx://` URIスキームと`.opml`関連付けの自己登録
-（`LinuxUriSchemeRegistrar`/`LinuxOpmlAssociationRegistrar`。実際には
-`~/.local/share/applications`と`~/.config/mimeapps.list`に書き込む）は、strict confinement下
-では**機能しない**。これらの書き込みは拒否され、クラッシュはせずに警告としてログに
-握りつぶされるだけである。Snap版のホスト側登録は代わりに`snap/gui/keryx.desktop`自体が
-`x-scheme-handler/keryx`と`.opml`のMIMEタイプ両方に対する`MimeType=`と`Exec=keryx %u`という
+（`LinuxUriSchemeRegistrar`/`LinuxOpmlAssociationRegistrar`）がホスト側の
+`~/.local/share/applications`や`~/.config/mimeapps.list`へ届くことは、そもそもあり得ない。
+さらにsnap内ではそれらのパスに手を伸ばすことすらない — 両レジストラは書き込み先を
+`XDG_DATA_HOME` / `XDG_CONFIG_HOME`から解決しており、`gnome`拡張機能の下ではこれらが
+snap自身の書き込み可能領域を指しているため（次の段落を参照）、書き込みは**成功する** —
+ただしホストのデスクトップが決して読まないプライベートディレクトリに対して、である。
+いずれにせよ自己登録はホストに対して何の効果も持たず、どちらの経路でもクラッシュはしない
+（失敗した場合は警告としてログに記録されるだけである）。Snap版のホスト側登録は代わりに
+`snap/gui/keryx.desktop`自体が`x-scheme-handler/keryx`と`.opml`のMIMEタイプ両方に対する`MimeType=`と`Exec=keryx %u`という
 フィールドコードを宣言することで行っている — これはsnapdがインストール時に処理する仕組みである。
 一部のデスクトップ環境がローカルファイルを`%u`経由で`file://` URIとして渡してくる場合に備え、
-`main()`内で分類前にプレーンなパスへ正規化している（`normalizeFileUriArg`）。これらのプラグが
-strict confinement下で実際に十分か（特にトレイのD-Bus所有権）、およびこのデスクトップエントリ
-による登録が実機のsnapd環境で実際に機能するかは、まだ検証していない。
+`main()`内で分類前にプレーンなパスへ正規化している（`normalizeFileUriArg`）。
+
+アプリ自身のデータ（データベース、設定、ロックファイル、ログファイル）も `~/.local/share`
+配下に書き込むが、これも strict confinement 下の `home` プラグではブロックされるため、
+これらの XDG 変数を snap 自身の書き込み可能領域へリマップしないと起動すらできない。
+その大部分は `gnome` 拡張機能がすでに行っている — 拡張機能の
+`snap/command-chain/desktop-launch` が `XDG_CONFIG_HOME=$SNAP_USER_DATA/.config`、
+`XDG_DATA_HOME=$SNAP_USER_DATA/.local/share`、`XDG_CACHE_HOME=$SNAP_USER_COMMON/.cache` を
+**無条件に** export する。
+
+ただし `$SNAP_USER_DATA`（`~/snap/keryx/<revision>`）はデータベースの置き場所としては適切でない。
+リビジョン別のディレクトリなので、`snap refresh` のたびに snapd がディレクトリ全体をコピーし、
+`snap revert` すると記事データベースごと — `sync_state` の同期管理情報も含めて — 巻き戻ってしまう。
+`environment:` ブロックではこれを動かせない。snapd は command-chain の実行**前**に
+`environment:` を適用するため、後から走る `desktop-launch` の `export` が勝つからである。
+そこで `snap/snapcraft.yaml` は独自の `command-chain` エントリ `bin/keryx-xdg-launch`
+（`snap/local/keryx-xdg-launch` から配置。実行ビットを保つ必要がある）を宣言している。
+snapcraft はこれを拡張機能側の command-chain の**後ろ**に連結するので、この中で
+`XDG_DATA_HOME=$SNAP_USER_COMMON/.local/share`（`~/snap/keryx/common`。全リビジョン共通）を
+再 export してからアプリを exec する。`XDG_CACHE_HOME` は拡張機能がすでに
+`$SNAP_USER_COMMON` を指しているため、意図的に手を加えていない。
+`AppDirs.desktop.kt` はこれらの環境変数を読んでいるため、ソースコードの変更は不要である。
+
+WebKitGTK のネストされたサンドボックス（`bwrap`）は strict confinement 内で起動できないため、
+`WEBKIT_DISABLE_SANDBOX=1` がアプリの環境変数ブロックに設定されている。これは記事リーダーの
+WebView のレンダラーサンドボックスのみを無効化するものであり、スナップ自身の strict confinement
+によるプロセスのホストからの分離は維持される。
+
+`stage-packages` に手動で列挙するパッケージは 2 つだけ — AWT で必要な `libxtst6` と JNA 用の
+`libffi8` — で、その他はすべて `gnome` 拡張機能でカバーされる。
+
+**特に WebKitGTK はステージしてはならない。** 拡張機能が接続する `gnome-46-2404`
+プラットフォームスナップは、`libwebkit2gtk-4.1-0` とその依存である
+`libjavascriptcoregtk-4.1-0` / `libsoup-3.0-0` / `libsecret-1-0` をすでに同梱している。
+拡張機能のランチャーがそのスナップの `usr/lib/<triplet>` を `LD_LIBRARY_PATH` に追加し、
+さらに `/usr/lib/<triplet>/webkit2gtk-4.1`（injected bundle と
+`WebKitWebProcess`/`WebKitNetworkProcess` ヘルパープロセス）をプラットフォーム側へ bind する
+`layout` を、スナップ側が何をステージしているかに関わらず自動で追加する。
+したがって自前でステージすると、すでにマウントされているライブラリを二重に抱えたうえ
+（しかも自前の `.so` とプラットフォーム側のヘルパープロセスを組み合わせることになり、
+両者のバージョンが一致している間しか動かない）、WebKitGTK の apt 推移依存クロージャ
+（GStreamer の base/good プラグイン群、`libicu74`、`libvpx`、`libwoff1`、`libenchant` …）を
+まるごと引き込む。これだけで `.snap` のサイズが同等の `.deb` の約 2 倍に膨らんでいた。
+
+`snapcraft pack` は組み込みの linter 群も実行するが、その指摘のうち2件は「修正」ではなく
+説明が必要なものである。
+
+- `library` linter は ELF の `DT_NEEDED` エントリしか見ないため、実行時に `dlopen()` で
+  ロードされるライブラリを検出できない。JVM 自身のランタイムライブラリ
+  （`lib/runtime/lib/*.so`、`lib/libapplauncher.so`）が「未使用ライブラリ」として報告される。
+  これらは snapcraft 自身のドキュメントが「対応するな」と明記している
+  false positive であり、削除すればアプリが壊れる（`libfontmanager.so` は特に、
+  `0394c79e` で harfbuzz 依存を追加した当のファイルである）。
+  `snap/snapcraft.yaml` の `lint.ignore` でこれらのパスを個別に抑制している。
+- **この抑制は、同じパスに対する「不足依存」の検出も同時に無効化してしまう** —
+  以前 X11/フォント不足（`88ceff7e`）と harfbuzz 不足（`0394c79e`）を発見したのは、
+  まさにこのチェックである。`stage-packages` やバンドルする JDK のバージョンを変更した際は、
+  `snap/snapcraft.yaml` の `lint:` ブロックを一時的にコメントアウトして一度再パックし、
+  新たな不足依存の警告が出ないことを確認してから元に戻すこと。
+- `metadata` linter の「title が未設定」という指摘は（library の警告と異なり）実在の不備であり、
+  トップレベルの `title: Keryx` キーで解消している。これは Snap Store / GNOME Software に
+  表示される表示名であり、デスクトップシェルが使う `snap/gui/keryx.desktop` の `Name=` とは別物。
+
+**strict confinement 下で起動時に見える無害なログ行。** 一見エラーに見えても対応不要な行がいくつか
+あり、特に GPU の無い VM ゲスト（VMware など）や、サンドボックスから GL スタックへ到達できない
+ホストで見られる:
+
+- `[SKIKO] warn: Fallback to next API` に続く `org.jetbrains.skiko.RenderException: Cannot
+  create Linux GL context`、さらに一連の `libEGL warning: ... DRI3 ...` / `... failed to create
+  dri2 screen` / `VMware: No 3D enabled`: Skiko（Compose の Skia レンダラー）がまずハードウェア
+  アクセラレーション GL を試み、GPU に到達できずソフトウェアレンダリングにフォールバックした
+  だけ。3D アクセラレーション付きの `virtio`/`vmwgfx` パススルーが無い VM 内、または
+  `gpu-2404` content interface が未接続のホストで発生する。1行目はそのフォールバック自体が
+  成功したことを報告しており、アプリは（CPU 描画になるだけで）正しく描画され続ける。
+- `/sys/class/dmi/id/chassis_type` / `/sys/firmware/acpi/pm_profile` の
+  `Permission denied`: GLib/GTK がハードウェアのシャーシ種別（タブレット/コンバーチブルの
+  フォームファクタ推測に使われる）をプローブしようとして、strict confinement の
+  デバイス cgroup にブロックされているだけ。GTK は取得できない場合を既に問題なく処理しており、
+  このアプリ自身はどちらのパスも読んでいない。
+- `GDBus.Error:org.freedesktop.portal.Error.NotAllowed: This call is not available inside the
+  sandbox`: 下層のネイティブツールキット（GTK/AWT）が、strict サンドボックスでは提供されない
+  xdg-desktop-portal 呼び出しをプローブしているだけ。Keryx 自身のファイルダイアログやメニューは
+  `JFileChooser` / `java.awt.FileDialog` / AWT のポップアップを使っており（`external-spec.md`
+  の「UI Direction」参照）、portal は一切使っていないため、これはアプリ自身の呼び出しが
+  失敗しているわけではない。
+
+一方、実際に修正が必要だった行が `TransportBuilder - Using transport
+dbus-java-transport-native-unixsocket` である。これは dbus-java 自身の `slf4j` ログが、
+`slf4j-simple` 経由で直接 stderr に出力されており、アプリのログファイルを経由せず、
+（独自のタイムスタンプ・`[tag]` 無しという）別フォーマットで出ていたことが原因。デスクトップ
+ランタイムの `slf4j` プロバイダを `slf4j-simple` から `slf4j-jdk14`
+（`composeApp/build.gradle.kts` / `gradle/libs.versions.toml`）に切り替えることで、この行を
+含め他のあらゆる第三者 `slf4j` 呼び出しが `java.util.logging` 経由になり、`Log.desktop.kt` が
+JUL のルートロガーに仕込んだ formatter/handler を通るようになった。これにより、第三者ライブラリの
+ログ行もアプリ本体と同じフォーマットで `keryx.<n>.log` に残るようになっている。
 
 ### Android（APK / AAB）
 
