@@ -34,7 +34,7 @@ composeApp/src/
     API にも依存しない）: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage, AppInfo,
     CloudStorageAvailability（後者2つは共有生成 BuildConfig を読むだけ）, FileSystemExtras,
     ZipExtractor（アプリ内アップデート——下記「アプリ内アップデート」参照）
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ jvmCommonMain がカバーしない expect の actual（DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule, InstallLocation）+ LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）, DesktopOs（isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf）
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ jvmCommonMain がカバーしない expect の actual（DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule, InstallLocation）+ LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）, DesktopOs（isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）
     tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray + StatusNotifierItem/dbusmenu の D-Bus オブジェクト
     platform/update/  DesktopUpdateInstaller, UpdateScriptWriter（純粋な自己置換／msiexec スクリプトのテンプレート）, ProcessLauncher/RealProcessLauncher（テストがフェイクに差し替える detached 起動のシーム）, ArchiveExtractor（macOS は DittoArchiveExtractor——署名済みバンドルが自身の symlink を封印しているため。それ以外はインプロセスの InProcessArchiveExtractor）, CodeSigningVerifier/RealCodeSigningVerifier（`codesign --verify` のシーム）
   androidMain/kotlin/…/  jvmCommonMain がカバーしない expect の actual: DatabaseDriverFactory（バンドル
@@ -338,8 +338,16 @@ SNI ならパネルへ生の ARGB ピクセルを渡せる。
   バッジ付きグリフをビッグエンディアン ARGB32（`TrayPixmap.kt`）で複数サイズ提供する。`ItemIsMenu = false`
   にすることで、左クリックがメニューではなく `Activate` に届く。
 - `/StatusNotifierItem/menu` — `SniDBusMenu`（`com.canonical.dbusmenu`。表示/非表示 + 終了）。
-  ラベル変更時に revision を上げて `LayoutUpdated` を発火し、`AboutToShow` は現在のラベルと
-  `GetLayout` が最後に返した内容を比較するため、シグナルが落ちても復旧する。
+  ラベル／enabled 変更時は revision を上げつつ、変化した項目だけを名指しした
+  `ItemsPropertiesUpdated`（`TrayMenuModel.kt` の `changedItemProperties`）を発火する ——
+  `LayoutUpdated` ではない。メニューの形は一切変化せず、かつ一部のクライアント（GNOME Shell の
+  AppIndicator 拡張）は `label`／`enabled` を `GetLayout` で自発的に再取得しないため、
+  `LayoutUpdated` だけを送ると既に開いたメニューが古いラベルのまま固まってしまう。
+  `AboutToShow` は引き続き現在のラベルと `GetLayout` が最後に返した内容を比較するため、
+  シグナルが落ちても復旧する。なお GNOME はメニューが開くまでシグナルを退避し、開いた後も初回
+  描画をブロックせずに貼り替えるため、変化したラベルは一瞬だけ直前の値が見える。これは既知の
+  アーティファクトであり（`known-issues.md` 参照）、こちら側では解消できない。再び
+  `LayoutUpdated` に手を出す理由にはならない。
 
 アイコンのアセットも同じ分岐に従う。透過が効いて 22px 以上で合成される 2 経路は outlined
 （`tray_icon_outlined.png`）、Windows の通知領域と Linux の AWT フォールバックはフルカラー
@@ -467,35 +475,53 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 `ui/home/HomePaneLayout.kt` は、Home の3ペイン（フィード一覧・記事一覧・記事詳細）のうち
 いくつを横並びで表示するかを、利用可能な幅だけから解決する: `PaneLayout.Triple`（3ペインすべて —
 デスクトップは `WINDOW_MIN_WIDTH` が常に `TRIPLE_PANE_MIN_WIDTH` 以上であるため常にここに解決される。
-`core/Constants.kt` の当該定数の KDoc 参照）、`PaneLayout.Dual`（記事一覧 + どちらか一方の隣接ペイン）、
-`PaneLayout.Single`（1ペインのみ、スマートフォン幅）のいずれか。ナビゲーションスタック自体は常に
-3段（`HomePane.FeedList` → `ArticleList` → `ArticleDetail`）であり、狭いレイアウトはそのうち表示する
-段数を減らしているに過ぎない。`HomePane.ordinal + 1` がそのままスタックの現在の深さを兼ねるため、
-`HomeScreen` は別途深さの状態を持つ必要がない — フィルターや記事の選択で深さが進み
-（`FeedListPane` / `ArticleListPane` それぞれの `onSelectionAdvance`。どちらも `Triple` では
-`null` — 全ペインが既に見えており、進む先がない）、`platform/BackHandler`（Android では実際の戻る
-ジェスチャー/ボタンを横取りし、デスクトップでは no-op）が1段戻す — その有効/無効は
-`homeBackAction(layout, depth, searchScopeReturnPending)` で決まる。これは、ペインだけを見る
-純関数 `canNavigateBack(layout, depth)`（「1段戻っても実際には画面が変わらない」場合に常に
-`false` を返す — `Triple` では常に。`PaneLayout.Dual` の深さ 1→2 でも、下記のスライド窓が同じ
-2ペインを表示するため同様 — この関数が無かった頃は、そこでの戻る操作が何も起こさず黙って消費されて
-いた）に、「戻る操作が実際に何をするか」のもう半分——復元待ちのスナップショットがあるときは
-ペインを1段戻すのではなく検索スコープを抜けること（下記「狭いレイアウトでの検索」参照）——を
-組み合わせたものであり、`canNavigateBack` だけでは「何もしない」はずの場面でもこちらが優先される
-（検索を抜けることは常に画面を変えるため）。`PaneLayout.Dual` は、そのスタック上を
-スライドする2ペインの窓であり、単純な隣接ペア表示ではない: 記事一覧はどの深さでも表示される2ペインの
-一方であり続けるため、記事にドリルインするとフィード一覧が記事詳細ペインに入れ替わる形になり、
-一覧自体が画面外にスライドすることはない。
+`core/Constants.kt` の当該定数の KDoc 参照）、`PaneLayout.Dual`（記事一覧 + 記事詳細）、
+`PaneLayout.Single`（1ペインのみ、スマートフォン幅）のいずれか。`feedListIsDrawer(layout)`
+（`layout != Triple`）が、以下のあらゆるレイアウト判断が分岐する唯一の情報源である:
+`Triple` 以外のすべてのレイアウトでは、フィード一覧はオンスクリーンのペインではなく Gmail 風の
+モーダルナビゲーションドロワー（`ModalNavigationDrawer`）となり、`ArticleListPane` 自身のヘッダー
+にあるハンバーガーボタン（`onOpenDrawer`）で開き、中の何かを選択する（`onSelectionAdvance`）と
+閉じる。`HomePane.FeedList` という enum の値自体は今も存在する——`Triple` が描画するのはこれ
+だからだが、狭いレイアウトで `visiblePanes` がこれを返すことは無く、`NarrowPaneRow` はこの不変
+条件を自前の `require()` で強制している。
 
-狭いレイアウトでは、3ペインは `ui/home/NarrowPaneRow.kt` がホストする。これが、スタックの
-出入りをまたいで各ペインのスクロール位置を保つ仕組みであり、2つのレイアウトは別々の理由で
-それを失うため、両方に対処している。`Dual` は記事一覧をアンマウントしないが、スライドによって
-`visiblePanes` の結果の index 1 から 0 へ移動する。`visible.forEach` ループでは全イテレーションが
-同じ compose グループキーを共有するため、位置が変わったペインは画面から消えていないにもかかわらず
-破棄・再構築されていた。`NarrowPaneRow` は代わりに各ペインをそれぞれ固定のソース位置から出力する
-（ペインを追加する場合も、ループのイテレーションではなく必ず専用の `if` として足すこと）ので、
-ペインは一度も dispose されず `LazyListState` をそのまま保持する。`Single` は1つを除く全ペインを
-実際にアンマウントするため、そちらは `rememberSaveableStateHolder` が各ペインの `rememberSaveable`
+ナビゲーションスタック自体は常に3段（`HomePane.FeedList` → `ArticleList` → `ArticleDetail`）だが、
+狭いレイアウトでは depth 1（フィード一覧）に到達できない——ドロワーは `focusedPane` が指す
+スタックの一部ではなく、開いても `focusedPane` は進まないし、`initialPaneFor`/`paneForFeedDetail`
+（後述）もそこには決して解決されない。`HomePane.ordinal + 1` がそのままスタックの現在の深さを
+兼ねるため、`HomeScreen` は別途深さの状態を持つ必要がない — 記事の選択で深さが進み
+（`ArticleListPane` の `onSelectionAdvance`。`Triple` では `null` — 全ペインが既に見えており、
+進む先がない）、`platform/BackHandler`（Android では実際の戻るジェスチャー/ボタンを横取りし、
+デスクトップでは no-op）が1段戻す — その有効/無効は `homeBackAction(layout, depth,
+searchScopeReturnPending)` で決まる。これは、ペインだけを見る純関数 `canNavigateBack(layout,
+depth)`（「1段戻っても実際には画面が変わらない」場合に常に `false` を返す — `Triple` では常に。
+`Dual` でも常に——`visiblePanes(Dual, *)` はどの深さでも同じ2ペインを返すため——`canNavigateBack`
+が無かった頃は、そこでの戻る操作が何も起こさず黙って消費されていた）に、「戻る操作が実際に何を
+するか」のもう半分——復元待ちのスナップショットがあるときはペインを1段戻すのではなく検索
+スコープを抜けること（下記「狭いレイアウトでの検索」参照）——を組み合わせたものであり、記事一覧が
+実際に見えている場所（`Single` の depth 2、`Dual` の全深さ）では `canNavigateBack` より
+優先される（検索を抜けることは常にそこでの画面を変えるため）。**記事一覧自身の深さで（検索スコープの
+復元待ちが無い場合に）`canNavigateBack`/`homeBackAction` が `false`/`None` に解決されるのは
+見落としではなく意図的である**——`HomeScreen` の `BackHandler` は `None` のとき自身を無効化するため、
+そこでの戻る操作はプラットフォームの既定動作（Android ではアプリの終了）へフォールスルーし、
+このコードベースが戻り先の無い操作を握りつぶすことはない。
+
+ドロワーが存在する以前と異なり、`PaneLayout.Dual` はもはやスタック上をスライドする窓では
+**ない**: フィード一覧がペインではなくドロワーになったことで、`visiblePanes(Dual, depth)` は
+深さに関わらず常に同じ `[ArticleList, ArticleDetail]` を返す——記事詳細ペインは記事一覧の常設の
+隣人であり、Gmail 自身のタブレット閲覧ペインと同じ形で、自身の戻る操作を持たない
+（`ArticleDetailPane` の `onNavigateUp` はそこでは `null`。`swipeNavigation` がそれとは独立した
+別のシグナルである理由は下記「狭いレイアウトでの検索」参照）。
+
+狭いレイアウトでは、残る2ペインを `ui/home/NarrowPaneRow.kt` がホストする。これが、スタックの
+出入りをまたいで各ペインのスクロール位置を保つ仕組みである。`Dual` はどちらのペインも一切
+アンマウントしない（`visiblePanes` がそこでは変化しないため）が、`NarrowPaneRow` はそれでも
+`visible.forEach` ループではなく各ペインをそれぞれ固定のソース位置から出力する——ループでは
+全イテレーションが同じ compose グループキーを共有するため、将来リスト内での位置が変わりうる
+ペインが追加された場合、画面から消えていないにもかかわらず破棄・再構築されてしまう（ペインを
+追加する場合も、ループのイテレーションではなく必ず専用の `if` として足すこと）。`Single` は
+スタックの深さが `ArticleList` と `ArticleDetail` の間で変わるたびに、1つを除く全ペインを実際に
+アンマウントするため、そちらは `rememberSaveableStateHolder` が各ペインの `rememberSaveable`
 由来の state（実質は `LazyListState`。`rememberLazyListState` がその形で保持している）を保存し、
 リスト state の**初期** index/offset として復元する。よってスクロールは一切走らず、
 `known-issues.md` が未修正の上流 Compose クラッシュの要因として挙げている `scrollToIndexIfNeeded`
@@ -508,35 +534,45 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 これが、記事リーダーの WebView を無条件にコンポーズし続けること（下記「記事リーダー」参照）が
 デスクトップにおいて安全である理由でもある: デスクトップは常に `Triple` にしか解決されないため、
 WebView をホストするペインを含む3ペインすべてがアプリのライフタイム全体でマウントされ続ける。
-`Single`/`Dual` は、対象のペインが現在表示されていない場合にそれをアンマウントするが、これは
-Android では（重量級 AWT インターロップの懸念が無いため）問題ない。
+`Dual` も今ではこれを一切アンマウントしない（記事詳細ペインが常に表示される2ペインの一方であるため）。
+アンマウントが起きるのは `Single` の depth 2↔3 の遷移だけであり、Android では（重量級 AWT
+インターロップの懸念が無いため）問題ない。
 
-狭いレイアウトでは、`initialPaneFor(layout, saved)` が起動時に `HomeScreen` が復元するペインも
-クランプする: `Triple` では `HomePane.ArticleDetail` をそのまま復元する（これまでどおり、最後に
-読んでいた記事）が、`Single`/`Dual` では `ArticleList` に切り下げる — 一覧も無く、どうやってそこへ
-たどり着いたかという文脈も無いまま記事詳細にいきなり着地するのは、スマートフォンのセッションでは
-使い勝手が悪い。このクランプは、レイアウト後の実際の幅が判明した最初のフレームで一度だけ適用され、
-以後は二度と適用されない — 後からのリサイズや回転で、読んでいる最中のユーザーを弾き出してはならない
-ため。
+狭いレイアウトでは、`initialPaneFor(layout, saved)` は `saved` の値に関わらず常に `ArticleList`
+に解決される——ドロワーが登場する前のバージョンが保存した `HomePane.FeedList` も、もはや
+復元先として成立しないため（そもそも復元できるペインが存在しない）——一方 `Triple` では `saved`
+をそのまま返す（これまでどおり、最後に読んでいた記事）。一覧も無く、どうやってそこへたどり着いたか
+という文脈も無いまま記事詳細にいきなり着地するのは、スマートフォンのセッションでは使い勝手が
+悪いためである。このクランプは、レイアウト後の実際の幅が判明した最初のフレームで一度だけ適用され、
+以後は二度と適用されない — 後からのリサイズや回転で、読んでいる最中のユーザーを弾き出しては
+ならないため。同じ最初のフレームの副作用として、`shouldAutoOpenFeedDrawer` が真を返す場合——
+フィードが1件も無くクラウド連携も未設定の狭いレイアウトで、それを解消するはずの「+」ボタンが
+既定で閉じているドロワーの中にある場合——にはフィードドロワーも自動的に開く
+（`HomeViewModel.hasAnyFeed()` は、DB への一回きりの問い合わせであり、既に collect 済みの
+`feeds` `StateFlow`——`Eagerly` 共有の初期値が「空」と「まだ読み込んでいない」を区別できない——
+とは別物である）。
 
 **狭いレイアウトでの検索**は、周囲のクロームだけでなく入力欄自体が移動する — 詳しい設計は
 `ui-guidelines` スキルの「Adaptive pane layout & touch affordances」節を参照
-（`ui/common/KeryxSearchBar.kt` の `KeryxCollapsedSearchBar`/`KeryxExpandedSearchBar`、および
-narrow/`Triple` の分岐が `PaneLayout` や `isTouchPrimary` ではなく `onSelectionAdvance`/
-`onNavigateUp` が `null` かどうかで決まる理由）。`HomeViewModel.pendingSearchFocus` が一発
-イベントではなく latch された `StateFlow<Boolean>` なのも、上記の深さカーソルと同じ理由による:
-入力欄へフォーカスを要求する操作は、スタックを進めるのと同じクリックの中で発生するため、実際に
-入力欄を持つことになるペインはまだコンポーズされておらず、購読者のいない `SharedFlow` では要求が
-黙って失われてしまう。
+（`ArticleListTopBar` のハンバーガー＋タイトル行は、検索スコープが有効な間 `SearchListPane` の
+`ui/common/KeryxSearchBar.kt` の `KeryxExpandedSearchBar` に入れ替わる。narrow/`Triple` の分岐が
+`PaneLayout` や `isTouchPrimary` ではなく `onOpenDrawer`/`onExitSearch` が `null` かどうかで
+決まる理由も同節参照）。フィード一覧は狭いレイアウトでは検索欄を一切持たない——ドロワーであって、
+検索結果を表示できる画面ではないためである——ので、記事一覧自身の検索アイコン（スタックを進めない）
+がそこでの唯一の入口となる。`HomeViewModel.pendingSearchFocus` が一発イベントではなく latch
+された `StateFlow<Boolean>` なのも、上記の深さカーソルと同じ理由による: 入力欄へフォーカスを
+要求する操作は、検索スコープを開くのと同じクリックの中で発生するため、実際に入力欄を持つことに
+なるペインはまだコンポーズされておらず、購読者のいない `SharedFlow` では要求が黙って失われて
+しまう。
 
 検索専用の `HomePane` は存在しない — どの入口も `HomePane.ArticleList` の中身を差し替えて
-`ArticleFilter.Search` を設定するだけで、スタックを進めるとは限らない（記事一覧自身の検索アイコンは
-進めないが、折りたたみバーは進める）— そのため単純な「1段ポップ」では、どちらの
-経路でも正しく元に戻せない。`HomeViewModel.enterSearchScope(returnPane)` が、切り替え直前の
-filter・選択行と、狭いレイアウトの戻る操作が着地すべきペインをスナップショットし、
+`ArticleFilter.Search` を設定するだけで、スタックを進めることはない — そのため単純な「1段
+ポップ」ではどちらの経路でも正しく元に戻せない。`HomeViewModel.enterSearchScope(returnPane)` が、
+切り替え直前の filter・選択行と、狭いレイアウトの戻る操作が着地すべきペイン（狭いレイアウトでは
+常に `ArticleList` になる——検索の入口が到達可能なのはそこだけであるため）をスナップショットし、
 `exitSearchScope()` がその両方を復元してそのペインを返す。これを上記 `homeBackAction` の
 `ExitSearch` が `PopPane` の代わりに使う。検索クエリ自体はこの一連の処理では一切触れられず、
-折りたたみバー上にそのまま残る。
+入力欄上にそのまま残る。
 
 `enterSearchScope` のスナップショットには、その瞬間の閲覧コンテキスト — 既読ピン留め・未読
 スターピン留めのマップ、選択中の記事、キーボード操作用カーソル（下記「楽観的な既読/スター
@@ -568,22 +604,33 @@ filter・選択行と、狭いレイアウトの戻る操作が着地すべき�
 `ArticleListPane` は検索が閉じた直後の1回のコンポジションだけこれを立て、mount 時の最初の評価
 だけそのスクロールを抑止する — その後の正当な選択変更では通常どおりスクロールする。
 
-**`PaneLayout.Single` での記事一覧への入り直し。** ここまでに述べたどの箇所でも、既に選択中の
-フィルタを選び直す操作は行のハイライトが動くだけの no-op である（`selectFilter` 自身の早期
-return。下記「楽観的な既読/スターピン留め」参照）——記事一覧ペインが既に画面上にあり、何も
-変える必要がない場合はそれで妥当である。`Single` の depth 1 ではこの前提が崩れる: 記事一覧
-ペインはそもそも画面上に存在しないため、フィード一覧の行をタップする操作は、それが既に選択中の
-フィルターを指していたとしても常に記事一覧への**入場**である——読みかけのセッション（一覧から
-一度完全に抜けたあとも、未読のみ一覧に既読済み記事がピン留めされたまま残っている状態）は、遷移先が
-たまたま同じフィルターだったからといって復活してよいものではない。`FeedListPane` の
-`onEnterArticleList`（その depth でのみ非 null。記事一覧が隣に表示され続ける `Dual` でも
-`null`）は、行自身の `vm.selectFilter` 呼び出しの直前に呼ばれ、2つのことを行う:
-`HomeScreen` はこれを使って、ペインをホストする `NarrowPaneRow` からホイストされた
-`SaveableStateHolder.removeState(HomePane.ArticleList)` を呼び出し、保存済みの `LazyListState`
-を復元するのではなく捨てる——これにより一覧は最後にスクロールしていた位置ではなく先頭から開く。
-そしてその非 null であること自体が `selectFilter` の `reentering` 引数としてそのまま渡され、
-同一フィルタの早期 return を突破させて、閲覧コンテキスト（ピン・選択・カーソル）を別のフィルタが
-選ばれたときと同じように作り直させる。
+#### iOS
+
+`external-spec.md` は iOS/iPadOS をまず Compose、のちにネイティブ SwiftUI と計画している。
+本節のモデルはそのまま持ち越せない箇所がある:
+
+- **ドロワーは Android のイディオムであり、狭いレイアウト全般に普遍的なものではない。**
+  iOS/iPadOS は compact 幅で `NavigationSplitView` のサイドバーを押し込まれたナビゲーション
+  スタックに畳む（Mail.app、NetNewsWire、Reeder）——これはドロワーが存在する以前にこのアプリが
+  していたことであり、`git log` にも今なお残っている: `Single` の depth 1 で `visiblePanes` が
+  `[FeedList]` を返していたこと、`FeedListPane` 自身の通知ベル、`onEnterArticleList`、戻り
+  リップル、これらはすべてドロワーと引き換えに削除された。`paneLayoutFor` と `visiblePanes` の
+  `Triple`/`Dual` の場合分けは iPadOS にそのまま持ち越せる（`NavigationSplitView` の3カラム・
+  2カラムモードにそのまま対応し、`Dual` の常設の閲覧ペインは iPad 自身のスプリットビューとも
+  一致する）——持ち越せないのは `Single` の見せ方だけである。
+- **`hasNativeAppMenu`（`platform/PlatformOs.kt` 参照）は「ネイティブなアプリメニューバーが
+  無い」ことを表す Android 側の代用であって、iOS 用ではない**——iOS もそこでは `false` になる
+  ため、このフラグが今新たに担っているヘッダーの `app_name`/設定フッターの判断は、iOS が
+  実装される前にプラットフォームごとに分割する必要がある。
+- **`HomeBackAction.None` が OS へフォールスルーする挙動には iOS の対応物が無い**——
+  `OnBackPressedDispatcher` に相当する戻るジェスチャーも、「アプリを終了する」という概念自体も
+  無い。iOS 自身の戻るナビゲーションは、このコードベース自身が描く UI 要素である。
+- **ドロワーのエッジスワイプで開くジェスチャー（`gesturesEnabled`）は iOS 自身の
+  `interactivePopGestureRecognizer`（左端スワイプ ＝ 戻る）と衝突する**——ドロワー自体を
+  Android 限定に留めておく限りは問題にならない。
+- edge-to-edge レイアウト（root の `Box` が `WindowInsets.safeDrawing` の水平方向のみを適用し、
+  各ペインが残りの方向を自分で適用する）はそのまま持ち越せる——これは iOS 自身のセーフエリア
+  対応（ノッチ／Dynamic Island／ホームインジケータ）が必要とするのと同じ形である。
 
 ### 楽観的な既読/スターピン留め
 
@@ -615,11 +662,13 @@ tombstone）を、書き込みが in-flight の短い間だけでなく**永久�
 スケジューラのテストスイートでは直接再現できない — この不変条件はコードレビューと各呼び出し
 箇所のコメントによって担保されており、専用の競合テストによるものではない。
 
-同一フィルタの選び直しは通常、両方のピン・選択・カーソルをすべてそのまま残す（上記の
-`selectFilter` の早期 return）——ただし、それが記事一覧ペインへの**入場**である場合はこの限りで
-ない（`PaneLayout.Single` の depth 1。上記「Home の適応的ペインレイアウト」参照）: そこでは
-`selectFilter` の `reentering` 引数が、実際にフィルタが変わった場合と同じリセットを強制し、
-`_selectedArticle` を両方のピンと一緒にクリアする。ピンそのものにとって本質的に重要なのは選択の
-クリアの方である——選択を残したままだと、次にユーザーが「未読のみ」を再度 ON にした瞬間に
-`HomeViewModel.pinnedReadArticlesKeepingSelected` がそこから既読ピンを再シードしてしまい、このリセット
-自体が意味を失ってしまう。
+同一フィルタの選び直しは、両方のピン・選択・カーソルをすべてそのまま残す（上記の
+`selectFilter` の早期 return）。記事一覧は今や、常に画面上のペインである（`Triple`/`Dual`）か、
+リーダーで読んでいる間を除き narrow レイアウトが画面上に保ち続ける唯一のペインである
+（`Single`）かのどちらかなので、これは妥当な挙動になった——現在のフィルタを選び直すことが、
+かつてのように「そこへの**復帰**」と「そこへの**入場**」を区別する必要が二度となくなったためである
+（この、今は削除された仕組みについては上記「Home の適応的ペインレイアウト」の「iOS」を参照）。
+一方、実際のフィルタ変更はそこに至るどの経路でも変わらず `_selectedArticle` を両方のピンと
+一緒にクリアする。これはピンそのものにとって本質的に重要である——選択を残したままだと、次に
+ユーザーが「未読のみ」を再度 ON にした瞬間に `HomeViewModel.pinnedReadArticlesKeepingSelected`
+がそこから既読ピンを再シードしてしまい、このリセット自体が意味を失ってしまう。

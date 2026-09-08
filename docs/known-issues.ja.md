@@ -1398,3 +1398,88 @@ read を行っている箇所:
 記事が無くなるため、1 本目の呼び出しが mutex 解放後に行う処理は読み取りのみになり、
 昇格と競合し得る 2 本目の書き込み側が存在しなくなる。並行書き込みテストの一般的な指針は
 `docs/testing.md` の該当箇所を参照。
+
+## Linux/GNOME: トレイメニューを開いた瞬間、直前のラベルが一瞬表示される
+
+**状態**: 未修正 — 外部（GNOME Shell の AppIndicator 拡張）の設計上の制限であり、そもそも
+Keryx 側からは解消できない（下記「送信タイミングを変えても無駄な理由」を参照）。表示上のみの
+問題で、ラベルは 1〜2 フレームで正しい値に落ち着き、クリックの動作は常に正しい。影響を受けるのは
+AppIndicator 拡張を入れた GNOME だけで、しかもメニューを閉じている間にラベルが変わった場合のみ。
+KDE Plasma・macOS・Windows・Linux の AWT トレイフォールバックはいずれも影響を受けない
+（どれもホスト側のキャッシュからラベルを読み直さないため）。
+
+### 症状
+
+GNOME（AppIndicator 拡張）でウインドウをトレイに収納した状態でトレイメニューを開くと、
+一瞬「非表示」が見えてから「表示」に切り替わる。最終的なラベルは正しく、直前の値が乗るのは
+最初に描画される 1 フレームだけである。ダウンロード実行中のアプリ内アップデート項目も同様で、
+ラベルとグレーアウト状態がその最初の 1 フレームだけ 1 拍遅れる。
+
+これは、GNOME でラベルが**恒久的に**古いままになっていた**別の**不具合（修正済み。
+`app-architecture.md` の `ItemsPropertiesUpdated` の段落を参照）の残りかすである。混同しないこと。
+
+### 診断
+
+Keryx 側は正しく動作しており、まずそこを検証済みである: `SniDBusMenu.updateState` が変化した
+プロパティを算出し（`TrayMenuModel.kt` の `changedItemProperties`）、ラベルが変わった時点で
+遅延なく `ItemsPropertiesUpdated` を発火している。アプリ側に調べ直すべきものは無い。
+
+遅延はすべて拡張側の dbusmenu クライアント（`ubuntu/gnome-shell-extension-appindicator` の
+`dbusMenu.js`）にあり、3 段階からなる:
+
+1. 受信したプロパティシグナルはクライアント自身の `active` フラグで足切りされ、それが false の
+   間は単に退避されるだけである:
+
+   ```js
+   if (signal === 'ItemsPropertiesUpdated') {
+       if (!this._active && this.getRoot()?.hasChildren()) {
+           this._flagItemsUpdateRequired = true;
+           return;                                    // 適用せず退避するだけ
+       }
+       this._onPropertiesUpdated(params.deep_unpack());
+   }
+   ```
+
+2. `active` の代入箇所はただ 1 つ —— `_onMenuOpenStateChanged(menu, state)` の
+   `this._client.active = state` —— なので、true になるのはメニューが開いている間だけである。
+   Keryx のラベル変更は常にメニューが閉じている間に起きる（ウインドウ自身の閉じるボタン、
+   あるいはこのメニュー項目自体のクリック。後者は発火と同時にメニューが閉じる）ため、
+   実際には必ず退避側に落ちる。
+
+3. メニューを開くと `set active(true)` が走り、`_doPropertiesUpdate()` が `GetGroupProperties`
+   で既知の全項目を読み直す。ただしこの呼び出しは `IdlePromise` と D-Bus 往復による
+   fire-and-forget であり、メニューの描画を**待たせない**。
+
+したがってメニューは古いキャッシュで描画され、1 アイドルサイクル + 1 往復のあとに再描画される。
+
+### 送信タイミングを変えても無駄な理由
+
+1 の退避分岐はメニューが閉じている間は無条件なので、前倒しでも遅延でも複数回送信でも、すべて
+同じ分岐に落ちる。まだ聞く気の無いクライアントにプロパティを押し込めるような dbusmenu の
+呼び出しは、サーバー側には存在しない。
+
+### 除外した仮説
+
+- **`ItemsPropertiesUpdated` と `LayoutUpdated` の併送**。`active` のセッターは
+  `if (this._flagLayoutUpdateRequired) … else if (this._flagItemsUpdateRequired) …` なので
+  レイアウト側が優先され、プロパティの更新が**次にメニューを開くときまで**先送りされる。
+  現状の 1 回のちらつきより明確に悪い。
+- **`AboutToShow` で常にレイアウトが stale だと答える**。クライアントは stale の報告に対して
+  同じ `_requestLayoutUpdate()` を呼ぶが、その `GetLayout` が要求するのは
+  `['type', 'children-display']` だけで `label` を含まない。ラベルの更新には一切ならない。
+- **`changedItemProperties` が送る内容の変更**。クライアントは項目を最初に作る際に何らかの値を
+  取得する必要があり、その値はその時点で最新だったものになる。差分から外しても、キャッシュが
+  より古くなるだけである。
+
+### 本当の修正に必要なこと
+
+拡張側が初回描画の前に退避分を適用すること（open 経路で `_doPropertiesUpdate()` を await
+する。これは上流の変更であって Keryx 側の話ではない）か、あるいは Keryx がトグル項目のラベルを
+ウインドウの可視状態に依存させない設計にすること（固定ラベルの「ウインドウの表示/非表示」1 項目、
+または「表示」「非表示」の常設 2 項目）。
+
+後者は検討のうえ**却下**した。1 つのデスクトップ環境における 1 フレーム未満の描画
+アーティファクトを消すために、全プラットフォームでメニューの状態表示を失う（あるいは
+プラットフォームごとにメニューの形を変える）ことになるためである。動的なラベルは
+macOS・Windows・KDE Plasma・AWT フォールバックでは正しく即座に反映されており、それを
+手放すほどの価値はない。

@@ -74,6 +74,42 @@ private fun leafProperties(label: String, enabled: Boolean = true): Map<String, 
 )
 
 /**
+ * The dbusmenu items whose properties changed between [previous] and [next], each carrying only
+ * the properties that actually changed — the shape `ItemsPropertiesUpdated` expects, and the
+ * signal a properties-driven client (e.g. GNOME's AppIndicator extension) relies on to refresh a
+ * menu it already has open. Unlike [buildMenuLayout] / `GetLayout`, this never re-derives the
+ * unchanged properties: some hosts never re-request `label`/`enabled` via `GetLayout` at all once
+ * an item exists, so a full leaf-properties map here would silently overwrite nothing on those
+ * hosts but risks masking the real diff on ones that do apply every key blindly.
+ *
+ * The menu's structure never changes (see [buildMenuLayout]'s fixed `childIds`), so [MENU_ROOT_ID]
+ * and [MENU_SEPARATOR_ID] never appear here — only the three leaves can carry a property change.
+ */
+internal fun changedItemProperties(previous: TrayMenuState, next: TrayMenuState): List<DBusMenuItemProperties> {
+    val entries = mutableListOf<DBusMenuItemProperties>()
+
+    if (previous.toggleLabel != next.toggleLabel) {
+        entries += DBusMenuItemProperties(MENU_TOGGLE_ID, mapOf("label" to Variant(escapeMenuLabel(next.toggleLabel))))
+    }
+    if (previous.quitLabel != next.quitLabel) {
+        entries += DBusMenuItemProperties(MENU_QUIT_ID, mapOf("label" to Variant(escapeMenuLabel(next.quitLabel))))
+    }
+
+    val updateProperties = mutableMapOf<String, Variant<*>>()
+    if (previous.update.label != next.update.label) {
+        updateProperties["label"] = Variant(escapeMenuLabel(next.update.label))
+    }
+    if (previous.update.enabled != next.update.enabled) {
+        updateProperties["enabled"] = Variant(next.update.enabled)
+    }
+    if (updateProperties.isNotEmpty()) {
+        entries += DBusMenuItemProperties(MENU_UPDATE_ID, updateProperties)
+    }
+
+    return entries
+}
+
+/**
  * Builds a menu layout item for the requested node.
  *
  * Child items are included when [recursionDepth] is not zero; for this menu, `-1` and positive

@@ -343,39 +343,37 @@ real app UI, so confirm manually on a device or emulator:
 - Long-pressing a feed row, a folder header, and a tag row shows the menu with the correct actions,
   and the row's selection does not change as a side effect of the long-press itself.
 
-(Android, phone width) Search — `KeryxSearchBarAndroidTest.kt` covers the two `actual`s'
+(Android, narrow layout) Search — `KeryxSearchBarAndroidTest.kt` covers `KeryxExpandedSearchBar`'s
 semantics/text-input/font-scale behavior in isolation (see `androidApp/src/androidTest/` above);
 confirm the full navigation flow manually on a device or emulator:
 
-- On launch, a saved `HomePane.ArticleDetail` comes back as the article list (depth 2), not the
-  last-read article — `initialPaneFor`'s clamp. A saved `HomePane.FeedList` is restored as-is
-  (depth 1); the article list is only what a session with nothing saved falls back to.
-- Tapping the article list's own search icon, or the feed list's collapsed search bar, opens the
-  search screen with the keyboard already up and the field focused.
+- On launch, a saved `HomePane.ArticleDetail` comes back as the article list, not the last-read
+  article — `initialPaneFor`'s clamp. A saved `HomePane.FeedList` (left over from before the feed
+  list became a drawer) also comes back as the article list now, not a screen of its own.
+- Tapping the article list's own search icon opens the search screen with the keyboard already up
+  and the field focused. The feed list/drawer has no search entry point of its own at all.
 - Typing 2+ characters shows results on the same screen, below the field — no pane change needed.
 - With the keyboard still open, the results list scrolls all the way to its last item without the
   keyboard covering it.
 - Opening a result, then going back, returns to the search screen with the query and results still
   in place (no keyboard auto-reopening).
 - From an article list already showing some other feed/tag/folder, tapping its own search icon and
-  then going back returns to **that same article list**, with the original scope selected again —
-  not to the feed list (`homeBackAction`'s `ExitSearch`, the fix for the bug where the article
-  list's search icon didn't advance the stack but going back still popped a pane).
-- From the feed list's collapsed search bar, going back returns to the feed list with the scope
-  restored to what it was before; the query itself survives on the collapsed bar, and tapping it
-  again reopens the search screen with the same results.
+  then going back returns to **that same article list**, with the original scope selected again
+  (`homeBackAction`'s `ExitSearch`, since the search icon never advances the stack).
 - Rotating to a tablet-width landscape (`PaneLayout.Dual`) mid-session does not eject the user from
-  whatever they were reading, and the first back press from the article list there is not silently
-  swallowed (`canNavigateBack`'s fix). Entering search there and pressing back exits the search
-  scope the same way it does at phone width — the back arrow stays enabled while searching even
-  though `PaneLayout.Dual`'s depth 1→2 step is otherwise a no-op for back navigation.
+  whatever they were reading, and a back press from the article list there (with nothing else
+  pending) exits the app rather than doing nothing — `Dual` always shows the same two panes now, so
+  there is no "no-op" depth transition left to guard against, only the article-list-itself case
+  (see "The feed-list navigation drawer" below for that). Entering search at `Dual` and pressing
+  back exits the search scope the same way it does at phone width, at every depth.
 - At a tablet-width landscape wide enough to reach `PaneLayout.Triple`, the layout matches desktop
   exactly — the search field is back in the feed list sidebar, and the article list carries no
   search bar of its own. Back navigation stays disabled at every depth there, same as desktop.
 - Opening an article from partway down the article list and then going back returns to the list at
   the same scroll position, with **no visible scroll animation** — at phone width (where the pane is
-  genuinely unmounted) and at tablet-width landscape alike (where the sliding window keeps it on
-  screen). The same holds for the feed list and for a search results list.
+  genuinely unmounted) and at tablet-width landscape alike (where the article list is never
+  unmounted at all, since `PaneLayout.Dual` shows it at every depth). The same holds for a search
+  results list.
 - With an article open, using a notification's "show feed" action to switch to a different feed and
   then going back opens that feed's list at the **top**, not at the previous feed's scroll position.
 - Scroll the article list down, open Search from its own icon, then close Search without picking
@@ -392,6 +390,45 @@ confirm the full navigation flow manually on a device or emulator:
   a "mark unread" for that same article — it must switch to showing unread reactively, without
   needing a filter switch or app restart. The same for a re-star synced in while browsing under
   "unstarred" browsing of the Starred filter.
+
+(Android) The feed-list navigation drawer — `HomeDrawerTest.kt` covers the drawer's own wiring
+(closing on selection, `LocalRowSelectionVisible`, no search field) against a desktop Compose UI
+test; what it can't cover is real touch input, a real WebView, and real system-bar insets. Confirm
+on a device or emulator:
+
+- **★ Highest priority — z-order against the reader's `WebView` at `PaneLayout.Dual`.** Force a
+  width in the `Dual` range (a 7–8" tablet emulator, or `adb shell wm size 1600x1000 && adb shell wm
+  density 240`), select an article so the reader actually renders its body, then open the drawer
+  via the hamburger button. Judge from a **screenshot**, not the on-device GPU-overdraw debug
+  option: does the sheet visibly overlap the WebView, does the scrim darken it, and — tapping the
+  WebView area while the drawer is open — does the scrim intercept the tap and close the drawer
+  (checked separately from the first two, since paint order and hit-test order can disagree). Repeat
+  on API 33 and 34+ (predictive back differs). `PaneLayout.Single` never shows the drawer and the
+  reader at once, so this risk is `Dual`-only — confirm that too, for the record. See the
+  `ui-guidelines` skill's own note on this (an unresolved contradiction between two existing claims
+  about `Popup` vs. the WebView) and its fallback (`setNativeWebViewVisible`'s Android `actual`,
+  currently a no-op) if the drawer loses.
+- Single: a back press from the article list exits the app (does not reopen the feed list); a back
+  press from the article detail returns to the article list; a back press while the drawer is open
+  only closes the drawer.
+- Dual: a back press with an article open exits the app (the article list stays visible beside it,
+  with nowhere further to go back to).
+- Dual: swipe-to-navigate between articles works in both orientations. An edge swipe does not open
+  the drawer while the reader is on screen (`gesturesEnabled`) — only the hamburger button does.
+- Inside the drawer: drag-and-drop reordering (including auto-scroll), the long-press context menu,
+  inline rename (IME), and the currently selected feed/folder/tag staying highlighted while the
+  drawer is open.
+- The drawer's header shows "Keryx" and its footer shows a "Settings" row that opens Settings; with
+  many feeds, the footer stays fixed and does not scroll away.
+- Edge-to-edge: the scrim reaches the status/navigation bars; no pane's top bar or list bottom is
+  cut off by a system bar.
+- Raise a sync error while the drawer is open: the Snackbar still appears above the drawer.
+- Rotating through Single ⇄ Dual ⇄ Triple preserves scroll position and the article being read.
+- **No feeds yet**: clear app data and finish Setup as "local only" — Home appears with the drawer
+  already open, and the article list shows the no-feeds message with an "Add feed" button. Add a
+  feed and relaunch — the drawer is closed. Finishing Setup with cloud sync connected instead does
+  not auto-open the drawer, even before the first sync delivers any feeds. Deleting the last feed
+  while the app is running does not reopen the drawer on its own.
 
 **Display scaling.** Every check above must also be run at a **non-100% display scale**, on Windows
 in particular — 200% first, then 150%. The AWT menu backend was mispositioning menus and painting
@@ -609,7 +646,7 @@ likely each is to be wrong):
   — a missing jlink module (`jdk.security.auth`) only shows up there, never under `run`.
 - Left-click toggles the window (this depends on `ItemIsMenu = false`; if the menu opens instead, that property is wrong).
 - Right-click shows the menu with the correct labels, and the Show/Hide label flips after toggling the window
-  *without* reopening the menu (exercises `AboutToShow` + `LayoutUpdated`).
+  *without* reopening the menu (exercises `AboutToShow` + `ItemsPropertiesUpdated`).
 - The unread dot appears/disappears live (`NewIcon` reaches the host).
 - After `systemctl --user restart plasma-plasmashell` the icon comes back without restarting Keryx.
 - A background refresh raises a desktop notification with the app icon.
@@ -617,6 +654,18 @@ likely each is to be wrong):
   auto-expired) - trigger several notifications, let some expire/dismiss without clicking, and
   confirm no leftover state affects later click-to-front handling (best confirmed indirectly,
   since PendingNotificationIds has no visible size counter).
+- On GNOME **with** the AppIndicator extension, repeat the Show/Hide label check above — **this is
+  the one Plasma cannot stand in for**: GNOME's dbusmenu client never re-requests `label`/`enabled`
+  via `GetLayout` on its own — it only learns of a change through `ItemsPropertiesUpdated`, and if
+  that signal arrives while the menu is closed, applying it waits until the menu reopens and the
+  client re-reads every item via `GetGroupProperties`. Toggle the window several times in a row and
+  confirm the label keeps up every
+  time (a regression here previously left it stuck on its very first value forever). Do the same for
+  the in-app update entry: start a download from Settings and confirm the tray item's label/enabled
+  actually progress through "Download update…" → "Downloading… N%" → "Restart to update…" instead of
+  staying frozen. **A brief flash of the previous label as the menu opens is expected here and is
+  not a regression** — the extension applies parked property updates without blocking the first
+  paint; see `known-issues.md`. What must not happen is the old label *staying*.
 - On GNOME without the AppIndicator extension it silently falls back to the AWT tray (no crash, no stack trace), and
   launching without `DBUS_SESSION_BUS_ADDRESS` neither hangs nor throws.
 - Same behaviour on a Plasma Wayland session.
@@ -717,14 +766,14 @@ confirmation, on all three desktop platforms (build with `createDistributable`/`
 
 ### (Android) The notification bell and the foreground alert Snackbar
 
-Where the bell is drawn is covered by `NotificationBellPlacementTest.kt`, and the Snackbar's own
-policy by `ForegroundAlertSnackbarTest.kt` / `NotificationCenterViewModelTest.kt`. What no test can
-cover is that the Snackbar is actually *visible* where the platform draws it, and whether
-`LocalWindowInfo`'s focus flag behaves as assumed on a real device. Confirm on a phone-sized
+Where the bell is drawn is covered by `NotificationBellPlacementTest.kt` (it's always
+`ArticleListPane`'s own header now — see "Home's adaptive pane layout" in `app-architecture.md` for
+why the feed list, a modal drawer at every narrow layout, never has to host a second one), and the
+Snackbar's own policy by `ForegroundAlertSnackbarTest.kt` / `NotificationCenterViewModelTest.kt`.
+What no test can cover is that the Snackbar is actually *visible* where the platform draws it, and
+whether `LocalWindowInfo`'s focus flag behaves as assumed on a real device. Confirm on a phone-sized
 device/emulator:
 
-- Leave the app while the feed list is showing, then relaunch: the bell is on the feed list's own
-  toolbar (this is the case that had no entry point at all before).
 - With a cloud provider connected, launch in airplane mode: the startup sync fails and a Snackbar
   announces it, with an action that opens the settings dialog on the sync tab.
 - Subscribe to an unreachable feed URL, then refresh: the Snackbar's action lands on **that feed's

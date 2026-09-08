@@ -25,8 +25,8 @@ private data class MenuRevision(val revision: Int, val state: TrayMenuState)
 /**
  * The `/StatusNotifierItem/menu` object exported on the session bus.
  *
- * Like [SniStatusNotifierItem] it holds no `DBusConnection` - [onLayoutUpdated] injects the
- * signal emission - so the revision bookkeeping and event dispatch below are unit-testable
+ * Like [SniStatusNotifierItem] it holds no `DBusConnection` - [onItemsPropertiesUpdated] injects
+ * the signal emission - so the revision bookkeeping and event dispatch below are unit-testable
  * without a bus.
  *
  * Thread ownership:
@@ -39,7 +39,7 @@ private data class MenuRevision(val revision: Int, val state: TrayMenuState)
 internal class SniDBusMenu(
     private val objectPath: String,
     initialState: TrayMenuState,
-    private val onLayoutUpdated: (revision: Int) -> Unit,
+    private val onItemsPropertiesUpdated: (updated: List<DBusMenuItemProperties>) -> Unit,
 ) : DBusMenu, ReadOnlyDBusProperties {
 
     private val desired = AtomicReference(MenuRevision(revision = 1, state = initialState))
@@ -65,7 +65,8 @@ override fun getObjectPath(): String = objectPath
     val currentRevision: Int get() = desired.get().revision
 
     /**
-     * Updates the menu state and notifies listeners when it changes.
+     * Updates the menu state and, if anything actually changed, notifies listeners of exactly
+     * which item properties did.
      *
      * @param state The new menu state.
      */
@@ -76,7 +77,7 @@ override fun getObjectPath(): String = objectPath
         if (previous.state == state) return
         val next = MenuRevision(previous.revision + 1, state)
         desired.set(next)
-        onLayoutUpdated(next.revision)
+        onItemsPropertiesUpdated(changedItemProperties(previous.state, state))
     }
 
     /**

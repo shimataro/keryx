@@ -158,7 +158,8 @@ Setup completion = file exists.
 | `lastFtsRebuiltAt` | int\|null | null (24h gate for FTS full rebuild. Updated by daily heal) |
 | `updateCheckIntervalHours` | int | 24 |
 | `lastUpdateCheckAt` | int\|null | null |
-| `windowWidth` / `windowHeight` | number\|null | null |
+| `windowWidth` / `windowHeight` / `windowX` / `windowY` | number\|null | null (the window's floating-state bounds, independent of `windowPlacement` — this is what a maximized/fullscreen window restores to once un-maximized) |
+| `windowPlacement` | string | "floating" ("floating" \| "maximized" \| "fullscreen"; an unrecognized value restores as floating) |
 | `feedListPaneWidth` / `articleListPaneWidth` | number | 260 / 360 |
 | `collapsedFolderIds` | string[] | `[]` (folders default to *expanded*, so only the collapsed ones are tracked) |
 | `expandedTagIds` | string[] | `[]` (tags are the opposite — they default to *collapsed*, so the sidebar stays as short as it was before this list existed) |

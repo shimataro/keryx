@@ -20,7 +20,16 @@ expect val isTouchPrimary: Boolean
  * bar, the desktop `AppMenuBar`/KDE Global Menu on Windows/Linux — see `app-architecture.md`'s
  * "Desktop Tray" section for the Linux D-Bus paths). When `false`, screens must offer their own
  * in-pane entry points to actions the menu bar would otherwise be the only way to reach —
- * currently Settings and About (see `FeedListToolbarRow` / `GeneralTab`).
+ * currently Settings and About (see `FeedListPane`'s settings footer row / `GeneralTab`), and
+ * (`FeedListToolbarRow`) an `app_name` title in the header space a settings icon used to occupy.
+ *
+ * **iOS will also resolve `false` here** — it has no menu bar either — so this flag is currently
+ * an Android-specific stand-in for "no native app menu", not a true "does this platform have one"
+ * predicate. The two decisions it drives today (the header title, the settings footer) both need
+ * their own, more specific flag once iOS lands, since iOS's own conventions for reaching Settings
+ * and naming a screen are not the same as Android's. `isTouchPrimary` (below) has no such problem:
+ * its uses (swipe, row height, Snackbar, bottom sheets) are genuinely about touch vs. a precise
+ * pointer, which iOS shares with Android.
  */
 expect val hasNativeAppMenu: Boolean
 

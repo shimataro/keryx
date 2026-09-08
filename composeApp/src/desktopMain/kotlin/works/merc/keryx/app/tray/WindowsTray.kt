@@ -148,7 +148,9 @@ internal fun trayMenuAnchor(pointerLocation: Point?, eventX: Int, eventY: Int): 
 internal fun WindowsTray(
     image: Image?,
     tooltip: String,
-    toggleLabel: String,
+    windowVisible: Boolean,
+    showLabel: String,
+    hideLabel: String,
     quitLabel: String,
     updateEntry: TrayUpdateEntry,
     onToggle: () -> Unit,
@@ -164,6 +166,8 @@ internal fun WindowsTray(
     val currentOnQuit by rememberUpdatedState(onQuit)
     val currentOnUpdateAction by rememberUpdatedState(onUpdateAction)
     val currentOnTrayAction by rememberUpdatedState(onTrayAction)
+
+    val toggleLabel = if (windowVisible) hideLabel else showLabel
 
     val menu = remember {
         WindowsTrayMenu(
@@ -213,7 +217,7 @@ internal fun WindowsTray(
     LaunchedEffect(trayIcon, tooltip) {
         trayIcon.toolTip = tooltip
     }
-    LaunchedEffect(menu, toggleLabel, quitLabel) {
+    LaunchedEffect(menu, windowVisible, showLabel, hideLabel, quitLabel) {
         menu.setLabels(toggle = toggleLabel, quit = quitLabel)
     }
     LaunchedEffect(menu, updateEntry) {

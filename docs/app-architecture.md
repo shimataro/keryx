@@ -35,7 +35,7 @@ composeApp/src/
     target lacks: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage, AppInfo,
     CloudStorageAvailability (the last two just read the shared generated BuildConfig),
     FileSystemExtras, ZipExtractor (in-app update — see "In-App Update" below)
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of each expect not covered by jvmCommonMain (DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule, InstallLocation) + LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage), DesktopOs (isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux)
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of each expect not covered by jvmCommonMain (DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule, InstallLocation) + LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage), DesktopOs (isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux, plus text-antialiasing hint normalization — missing hint, VALUE_TEXT_ANTIALIAS_DEFAULT, and VALUE_TEXT_ANTIALIAS_OFF are resolved to greyscale antialiasing so Swing surfaces do not look jagged next to the Compose-rendered UI)
     tray/      KeryxTray (platform branch), MacTray, LinuxTray + the StatusNotifierItem/dbusmenu D-Bus objects
     platform/update/  DesktopUpdateInstaller, UpdateScriptWriter (pure self-replace/msiexec script templates), ProcessLauncher/RealProcessLauncher (the detached-launch seam a test fakes), ArchiveExtractor (DittoArchiveExtractor on macOS, where the signed bundle seals its own symlinks; InProcessArchiveExtractor in process elsewhere), CodeSigningVerifier/RealCodeSigningVerifier (the `codesign --verify` seam)
   androidMain/kotlin/…/  actual implementations not covered by jvmCommonMain: DatabaseDriverFactory
@@ -320,8 +320,15 @@ well-known name `org.kde.StatusNotifierItem-<pid>-1`):
   carries the badged glyph as big-endian ARGB32 (`TrayPixmap.kt`) at several sizes; `ItemIsMenu = false`
   so a primary click reaches `Activate` instead of opening the menu.
 - `/StatusNotifierItem/menu` — `SniDBusMenu`, serving `com.canonical.dbusmenu` (Show/Hide + Quit).
-  A label change bumps a revision and emits `LayoutUpdated`; `AboutToShow` compares the desired labels
-  against what `GetLayout` last served, so a dropped signal still heals.
+  A label/enabled change bumps a revision and emits `ItemsPropertiesUpdated` naming just the item(s)
+  that changed (`changedItemProperties` in `TrayMenuModel.kt`) — **not** `LayoutUpdated`, since the
+  menu's shape never changes and some clients (GNOME Shell's AppIndicator extension) never re-request
+  `label`/`enabled` via `GetLayout` on their own, so a `LayoutUpdated`-only host update would leave an
+  already-open menu stuck on stale labels forever. `AboutToShow` still compares the desired labels
+  against what `GetLayout` last served, so a dropped signal still heals. GNOME parks the signal until
+  its menu opens and then repaints without blocking the first frame, so a changed label flashes its
+  previous value there for an instant — a known, unfixable-from-here artifact (`known-issues.md`),
+  not a reason to reach for `LayoutUpdated` again.
 
 The icon asset follows the same split as the branch: the outlined glyph (`tray_icon_outlined.png`) on the two
 paths that composite it with real alpha at 22px or more, and the full-colour one (`tray_icon.png`) on the Windows
@@ -452,74 +459,102 @@ A simple stack navigator in `ui/navigation/Navigator.kt` switches between Setup 
 article detail) `HomeScreen` renders side by side, purely as a function of the available width:
 `PaneLayout.Triple` (all three — desktop always resolves here, since `WINDOW_MIN_WIDTH` is
 guaranteed `>= TRIPLE_PANE_MIN_WIDTH`, see that constant's KDoc in `core/Constants.kt`),
-`PaneLayout.Dual` (article list + one neighbor), or `PaneLayout.Single` (one pane, phone width).
-The navigation stack itself is always three deep (`HomePane.FeedList` → `ArticleList` →
-`ArticleDetail`); a narrower layout just shows fewer of those three at once. `HomePane.ordinal + 1`
-doubles as the stack's current depth, so `HomeScreen` needs no separate depth state — selecting a
-filter or an article advances it (`FeedListPane`'s `onSelectionAdvance` / `ArticleListPane`'s
-`onSelectionAdvance`, both `null` at `Triple`, where every pane is already visible and there is
-nowhere to advance to), and `platform/BackHandler` (a real back-gesture/button interception on
-Android, a no-op on desktop) pops it by one — gated on `homeBackAction(layout, depth,
-searchScopeReturnPending)`, which wraps the pane-only predicate `canNavigateBack(layout, depth)`
-(`false` whenever stepping back wouldn't actually change what's on screen: always at `Triple`;
-also at `PaneLayout.Dual` depth 1→2, since the sliding window below shows the same two panes at
-both — a back press there used to be silently swallowed before this existed) with the other half
-of "what does going back actually do": exiting the Search scope instead of popping a pane, when a
-snapshot is waiting to be restored (see "Search at a narrow layout" below) — this takes priority
-even where `canNavigateBack` alone says there's nothing to do, since exiting Search always changes
-what's on screen. `PaneLayout.Dual` is a two-pane *sliding window* over that stack, not a plain adjacent pair: the
-article list stays one of the two panes shown at every depth, so drilling into an article swaps the
-feed list out for the detail pane rather than sliding the list itself off-screen.
+`PaneLayout.Dual` (article list + article detail), or `PaneLayout.Single` (one pane, phone width).
+`feedListIsDrawer(layout)` (`layout != Triple`) is the single source of truth every layout decision
+below branches on: at every layout but `Triple`, the feed list is a Gmail-style modal navigation
+drawer (`ModalNavigationDrawer`) rather than an on-screen pane, opened by a hamburger button on
+`ArticleListPane`'s own header (`onOpenDrawer`) and closed by selecting anything in it
+(`onSelectionAdvance`). `HomePane.FeedList` itself still exists as an enum entry — it's what
+`Triple` renders — but `visiblePanes` never returns it at a narrow layout, and `NarrowPaneRow`
+enforces that invariant with its own `require()`.
 
-At a narrow layout the panes are hosted by `ui/home/NarrowPaneRow.kt`, which is what keeps each
-one's scroll position across the stack's comings and goings — the two layouts lose it for different
-reasons, so it addresses both. `Dual` never unmounts the article list, but the slide moves it from
-index 1 to index 0 of `visiblePanes`' result, and a `visible.forEach` loop gives every iteration the
-same compose group key, so a pane that changes position used to be torn down and rebuilt even though
-it never left the screen. `NarrowPaneRow` emits each pane from its own fixed source position instead
-(a pane added there must likewise get its own `if`, never a loop iteration), so it is simply never
-disposed and keeps its `LazyListState` outright. `Single` genuinely unmounts every pane but one, and
-there a `rememberSaveableStateHolder` saves each pane's `rememberSaveable` state — in practice its
-`LazyListState`, which `rememberLazyListState` stores that way — and restores it as the list state's
-*initial* index/offset, so nothing scrolls and no new call lands in the `scrollToIndexIfNeeded` code
-path `known-issues.md` implicates in an unfixed upstream Compose crash. `ArticleListPane`'s
-`lastFilter` is a `rememberSaveable` holding `ArticleFilter.encode()`'s string for the same reason:
-the filter can change while the pane is unmounted (a notification's `ShowFeedDetail`, or deleting the
-feed being viewed), and a plain `remember` would re-initialize to the new filter on remount, leaving
-the restored position pointing into the previous filter's list with no reset to the top.
+The navigation stack itself is always three deep (`HomePane.FeedList` → `ArticleList` →
+`ArticleDetail`), but at a narrow layout depth 1 (the feed list) is unreachable — the drawer isn't
+part of the stack `focusedPane` ever points into; opening it doesn't advance `focusedPane`, and
+`initialPaneFor`/`paneForFeedDetail` (below) never resolve to it there either. `HomePane.ordinal +
+1` doubles as the stack's current depth, so `HomeScreen` needs no separate depth state — selecting
+an article advances it (`ArticleListPane`'s `onSelectionAdvance`, `null` at `Triple`, where every
+pane is already visible and there is nowhere to advance to), and `platform/BackHandler` (a real
+back-gesture/button interception on Android, a no-op on desktop) pops it by one — gated on
+`homeBackAction(layout, depth, searchScopeReturnPending)`, which wraps the pane-only predicate
+`canNavigateBack(layout, depth)` (`false` whenever stepping back wouldn't actually change what's on
+screen: always at `Triple`; always at `Dual`, since `visiblePanes(Dual, *)` returns the same two
+panes at every depth — a back press there used to be silently swallowed before `canNavigateBack`
+existed) with the other half of "what does going back actually do": exiting the Search scope
+instead of popping a pane, when a snapshot is waiting to be restored (see "Search at a narrow
+layout" below) — this takes priority over `canNavigateBack` wherever the article list is actually
+visible (`Single` depth 2, `Dual` at every depth), since exiting Search always changes what's on
+screen there. **`canNavigateBack`/`homeBackAction` resolving to `false`/`None` for the article
+list's own depth (with no Search scope pending) is deliberate, not an oversight** — `HomeScreen`'s
+`BackHandler` disables itself for `None`, so a back press there falls through to the platform's own
+default (exiting the app on Android) rather than this codebase swallowing it with nowhere to go.
+
+Unlike before the drawer existed, `PaneLayout.Dual` is *not* a sliding window over the stack: the
+feed list being a drawer rather than a pane means `visiblePanes(Dual, depth)` returns the same
+`[ArticleList, ArticleDetail]` regardless of depth — the article detail pane is a permanent neighbor
+of the article list, the same shape as Gmail's own tablet reading pane, with no back control of its
+own (`ArticleDetailPane`'s `onNavigateUp` is `null` there; see "Search at a narrow layout" below for
+why `swipeNavigation` is a separate, still-non-null signal).
+
+At a narrow layout the two remaining panes are hosted by `ui/home/NarrowPaneRow.kt`, which is what
+keeps each one's scroll position across the stack's comings and goings. `Dual` never unmounts
+either pane at all (`visiblePanes` never changes there), but `NarrowPaneRow` still emits each pane
+from its own fixed source position rather than a `visible.forEach` loop — a loop gives every
+iteration the same compose group key, so a future pane whose position in the list *can* change
+would be torn down and rebuilt even though it never left the screen (a pane added here must
+likewise get its own `if`, never a loop iteration). `Single` genuinely unmounts every pane but one
+as the stack's depth changes between `ArticleList` and `ArticleDetail`, and there a
+`rememberSaveableStateHolder` saves each pane's `rememberSaveable` state — in practice its
+`LazyListState`, which `rememberLazyListState` stores that way — and restores it as the list
+state's *initial* index/offset, so nothing scrolls and no new call lands in the
+`scrollToIndexIfNeeded` code path `known-issues.md` implicates in an unfixed upstream Compose
+crash. `ArticleListPane`'s `lastFilter` is a `rememberSaveable` holding `ArticleFilter.encode()`'s
+string for the same reason: the filter can change while the pane is unmounted (a notification's
+`ShowFeedDetail`, or deleting the feed being viewed), and a plain `remember` would re-initialize to
+the new filter on remount, leaving the restored position pointing into the previous filter's list
+with no reset to the top.
 
 This is why the article reader's WebView being unconditionally composed (see "Article Reader"
 below) is safe on desktop specifically: desktop can only ever resolve `Triple`, where all three
-panes — including the one hosting the WebView — stay mounted for the app's whole lifetime.
-`Single`/`Dual` do unmount it when its pane isn't among those currently shown, which is fine on
-Android (no heavyweight AWT interop concern there).
+panes — including the one hosting the WebView — stay mounted for the app's whole lifetime. `Dual`
+now never unmounts it either (the article detail pane is always one of the two shown), and only
+`Single`'s depth 2↔3 transition unmounts it, which is fine on Android (no heavyweight AWT interop
+concern there).
 
-At a narrow layout, `initialPaneFor(layout, saved)` also clamps the pane `HomeScreen` restores on
-launch: `HomePane.ArticleDetail` is left alone at `Triple` (the article the user was last reading,
-same as ever), but clamped down to `ArticleList` at `Single`/`Dual` — restoring straight into a
+At a narrow layout, `initialPaneFor(layout, saved)` always resolves to `ArticleList` regardless of
+`saved` — including a saved `HomePane.FeedList` left over from a version before the drawer existed,
+which can no longer be honored (there's no pane to restore it as any more) — while `Triple` returns
+`saved` unchanged (the article the user was last reading, same as ever): restoring straight into a
 detail pane with no list around it and no context for how the user got there would be disorienting
 on a phone-shaped session. This clamp is applied exactly once, on the first frame with a real
 (post-layout) width, and never again — a later resize or rotation must not yank the user off
-whatever they're reading.
+whatever they're reading. The same first-frame effect also opens the feed drawer automatically when
+`shouldAutoOpenFeedDrawer` says so — a narrow layout with no feeds and no cloud account configured,
+where the "+" button that would otherwise fix that lives inside a drawer closed by default (see
+`HomeViewModel.hasAnyFeed()`, a one-shot DB query distinct from the already-collected `feeds`
+`StateFlow`, whose `Eagerly`-shared initial value can't tell "empty" apart from "not loaded yet").
 
 **Search at a narrow layout** moves the field itself, not just its surrounding chrome — see the
 `ui-guidelines` skill's "Adaptive pane layout & touch affordances" section for the full design
-(`ui/common/KeryxSearchBar.kt`'s `KeryxCollapsedSearchBar`/`KeryxExpandedSearchBar`, and why the
-narrow/`Triple` split is driven by `onSelectionAdvance`/`onNavigateUp` being `null` rather than a
-`PaneLayout` or `isTouchPrimary` parameter). `HomeViewModel.pendingSearchFocus` is a latched
-`StateFlow<Boolean>` rather than a one-shot event for the same reason as the depth cursor above: a
-request to focus the field is raised in the same click that advances the stack, so the pane that
-will own the field hasn't composed yet, and a `SharedFlow` with no subscriber yet would drop the
-request silently.
+(`ArticleListTopBar`'s hamburger-and-title row folds into `SearchListPane`'s
+`ui/common/KeryxSearchBar.kt`'s `KeryxExpandedSearchBar` while the Search scope is active, and why
+the narrow/`Triple` split is driven by `onOpenDrawer`/`onExitSearch` being `null` rather than a
+`PaneLayout` or `isTouchPrimary` parameter). The feed list has no search field of its own at a
+narrow layout at all — it's a drawer, not a screen search results could live on — so the article
+list's own search icon (which does not advance the stack) is the only entry point there.
+`HomeViewModel.pendingSearchFocus` is a latched `StateFlow<Boolean>` rather than a one-shot event
+for the same reason as the depth cursor above: a request to focus the field is raised in the same
+click that opens the Search scope, so the pane that will own the field hasn't composed yet, and a
+`SharedFlow` with no subscriber yet would drop the request silently.
 
 Search has no `HomePane` of its own — every entry point just sets `ArticleFilter.Search` on
-`HomePane.ArticleList` with its content swapped out, without necessarily advancing the stack (the
-article list's own search icon doesn't; the collapsed bar does) — so a plain "pop
-one pane" back action can't undo it correctly either way. `HomeViewModel.enterSearchScope(returnPane)`
+`HomePane.ArticleList` with its content swapped out, without advancing the stack — so a plain "pop
+one pane" back action can't undo it either way. `HomeViewModel.enterSearchScope(returnPane)`
 snapshots the filter/row-selection active right before the switch, plus the pane a narrow-layout
-back action should land on; `exitSearchScope()` restores both and hands back that pane, which
-`homeBackAction`'s `ExitSearch` case (above) resolves to instead of `PopPane`. The search query
-itself is never touched by any of this — it survives on the collapsed bar exactly as it was.
+back action should land on (always `ArticleList` at a narrow layout, since that's the only pane a
+search entry point can be reached from); `exitSearchScope()` restores both and hands back that
+pane, which `homeBackAction`'s `ExitSearch` case (above) resolves to instead of `PopPane`. The
+search query itself is never touched by any of this — it survives on the field exactly as it was.
 
 `enterSearchScope`'s snapshot also carries the browsing context active at that moment — the
 pinned-read/pinned-unstarred maps, the selected article, and the keyboard-navigation cursor (see
@@ -552,22 +587,31 @@ restored selection come from independent snapshots. `ArticleListPaneContent`'s
 one composition right after Search closes, suppressing that scroll for the mount's first evaluation
 only — a later, genuine selection change still scrolls normally.
 
-**Re-entering the article list at `PaneLayout.Single`.** Everywhere above, re-selecting the filter
-already active is a no-op past moving the row highlight (`selectFilter`'s own early return, see
-"Optimistic read/star pins" below) — reasonable when the article list pane is already on screen and
-nothing about it needs to change. At `Single`'s depth 1 that assumption breaks: the article list
-isn't on screen at all, so tapping a feed-list row is always an *entrance* into it, even when the
-row names the filter already selected — a stale reading session (a just-read article still pinned
-into an unread-only list from before the user backed all the way out) must not resurface just
-because the destination happens to match. `FeedListPane`'s `onEnterArticleList` (non-null only at
-that depth — `null` even at `Dual`, where the article list stays visible beside the feed list) is
-invoked immediately before the row's own `vm.selectFilter` call, and does two things: `HomeScreen`
-uses it to call the pane-hosting `NarrowPaneRow`'s hoisted `SaveableStateHolder.removeState
-(HomePane.ArticleList)`, discarding the saved `LazyListState` outright (rather than restoring it)
-so the list opens at the top instead of wherever it last scrolled to; and its own non-nullness is
-passed through as `selectFilter`'s `reentering` argument, which forces that call past its same-filter
-early return so the browsing context — pins, selection, cursor — is rebuilt as if a different filter
-had been chosen.
+#### iOS
+
+`external-spec.md` plans iOS/iPadOS as Compose first, then native SwiftUI later. This section's
+model does not carry over unchanged:
+
+- **The drawer is Android's idiom, not a universal narrow-layout one.** iOS/iPadOS collapse a
+  `NavigationSplitView`'s sidebar into a pushed navigation stack at a compact width (Mail.app,
+  NetNewsWire, Reeder) instead — which is what this app did before the drawer, and what `git log`
+  still holds: `visiblePanes` returning `[FeedList]` at `Single` depth 1, `FeedListPane`'s own
+  notification bell, `onEnterArticleList`, and the return ripple, all removed alongside it.
+  `paneLayoutFor` and `visiblePanes`' `Triple`/`Dual` cases carry over to iPadOS unchanged (they map
+  onto `NavigationSplitView`'s three- and two-column modes, and `Dual`'s permanent reading pane
+  matches iPad's own split view); only `Single`'s presentation does not.
+- **`hasNativeAppMenu` (see `platform/PlatformOs.kt`) is Android's own stand-in for "no native app
+  menu bar", not iOS's** — iOS is `false` there too, so the header `app_name`/settings-footer
+  decisions this flag now also drives need to be split out per-platform before iOS lands.
+- **`HomeBackAction.None` falling through to the OS has no iOS equivalent** — there is no
+  `OnBackPressedDispatcher`-like back gesture to fall through to, and no "exit the app" concept;
+  iOS's own back navigation is a UI element this codebase draws itself.
+- **The drawer's edge-swipe-to-open gesture (`gesturesEnabled`) would conflict with iOS's own
+  `interactivePopGestureRecognizer`** (left-edge swipe = back) — not a concern as long as the
+  drawer itself stays Android-only.
+- The edge-to-edge layout (root `Box` applying only `WindowInsets.safeDrawing`'s horizontal side,
+  each pane applying its own remaining side) is a clean carryover — it's the same shape iOS's own
+  safe-area handling needs (notch / Dynamic Island / home indicator).
 
 ### Optimistic read/star pins
 
@@ -600,10 +644,12 @@ genuine multi-threaded dispatchers (`Dispatchers.Default`), not something the ex
 scheduler test suite can reproduce directly — the invariant is enforced by code review and the
 comments at each call site, not a dedicated race test.
 
-A same-filter re-selection ordinarily leaves both pins, the selection, and the cursor untouched
-(`selectFilter`'s early return above) — but not when it *enters* the article list pane rather than
-returning to it (`PaneLayout.Single`'s depth 1, see "Home's adaptive pane layout" above): there,
-`selectFilter`'s `reentering` argument forces the same reset a genuine filter change gets, clearing
-`_selectedArticle` along with both pins. Clearing the selection is what actually matters for the
-pins' own sake — left set, `HomeViewModel.pinnedReadArticlesKeepingSelected` would simply re-seed the read
-pin from it the next time the user toggles unread-only back on, defeating the reset entirely.
+A same-filter re-selection leaves both pins, the selection, and the cursor untouched
+(`selectFilter`'s early return above) — reasonable now that the article list is always either an
+on-screen pane (`Triple`/`Dual`) or the one pane a narrow layout keeps on screen except while
+reading (`Single`), so re-selecting the active filter never has to distinguish a *return* to it
+from an *entrance* into it the way it once did (see "iOS" in "Home's adaptive pane layout" above
+for that removed mechanism). A genuine filter change still clears `_selectedArticle` along with
+both pins on every path that reaches it, which matters for the pins' own sake — left set,
+`HomeViewModel.pinnedReadArticlesKeepingSelected` would simply re-seed the read pin from it the
+next time the user toggles unread-only back on, defeating the reset entirely.

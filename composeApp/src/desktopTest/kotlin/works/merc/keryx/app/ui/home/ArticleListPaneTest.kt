@@ -330,6 +330,58 @@ class ArticleListPaneTest {
     }
 
     @Test
+    fun emptyStateShowsNoFeedsMessageAndAddButtonWhenThereAreNoFeeds() = runDesktopComposeUiTest {
+        var addFeedClicked = false
+
+        setContent {
+            ArticleListPaneContent(
+                articles = emptyList(),
+                feedTitles = emptyMap(),
+                selectedId = null,
+                unreadOnly = false,
+                onToggleUnreadOnly = {},
+                onToggleSort = {},
+                onMarkAllRead = {},
+                onSelectArticle = {},
+                modifier = Modifier.size(360.dp, 400.dp),
+                hasNoFeeds = true,
+                onAddFeedClick = { addFeedClicked = true },
+            )
+        }
+        waitForIdle()
+
+        onNodeWithText("フィードが登録されていません").assertIsDisplayed()
+        onNodeWithText("フィードを追加").assertIsDisplayed()
+        onNodeWithText("フィードを追加").performClick()
+        waitForIdle()
+
+        assertTrue(addFeedClicked)
+    }
+
+    @Test
+    fun emptyStateShowsNoArticlesMessageWithoutAddButtonWhenFeedsExistButArticlesDoNot() = runDesktopComposeUiTest {
+        setContent {
+            ArticleListPaneContent(
+                articles = emptyList(),
+                feedTitles = emptyMap(),
+                selectedId = null,
+                unreadOnly = false,
+                onToggleUnreadOnly = {},
+                onToggleSort = {},
+                onMarkAllRead = {},
+                onSelectArticle = {},
+                modifier = Modifier.size(360.dp, 400.dp),
+                hasNoFeeds = false,
+                onAddFeedClick = { error("must not be reachable when hasNoFeeds is false") },
+            )
+        }
+        waitForIdle()
+
+        onNodeWithText("記事がありません").assertIsDisplayed()
+        onNodeWithText("フィードを追加").assertDoesNotExist()
+    }
+
+    @Test
     fun rightClickOnArticleRowSelectsWithoutActivatingPaneFocus() = runDesktopComposeUiTest {
         val items = articles(3)
         var activateCount = 0
@@ -447,59 +499,13 @@ class ArticleListPaneTest {
     }
 
     /**
-     * At [PaneLayout.Dual] the feed list slides in and out beside this pane as the user drills into
-     * an article and back, which flips whether there is anywhere to navigate up to. The
-     * back-button-and-title row must stay laid out across that flip — only the button's `enabled`
-     * state may follow it — or the controls row below (and the whole article list under that) jumps
-     * by the row's height every time. See the `ui-guidelines` skill, "Layout stability under state
-     * changes": prefer disabled over hidden.
+     * The hamburger-and-title row is omitted entirely when [ArticleListTopBar] gets no
+     * `onOpenDrawer` at all — [PaneLayout.Triple], the only case where it doesn't apply, since
+     * opening the drawer (unlike a "back" action) is never contextually unavailable while the row
+     * itself stays on screen — there is no disabled state to keep the controls row stable across.
      */
     @Test
-    fun articleListTopBarKeepsTheControlsRowInPlaceWhenNavigateUpBecomesUnavailable() = runDesktopComposeUiTest {
-        var navigateUpEnabled by mutableStateOf(true)
-        var backCount = 0
-
-        setContent {
-            ArticleListTopBar(
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
-                newestFirst = true,
-                onToggleSort = {},
-                onMarkAllRead = {},
-                onNavigateUp = { backCount++ },
-                navigateUpEnabled = navigateUpEnabled,
-                title = "Feed a",
-            )
-        }
-        waitForIdle()
-
-        val boundsWhenEnabled = onNodeWithText("未読のみ").fetchSemanticsNode().boundsInRoot
-        onNodeWithContentDescription("戻る").assertIsEnabled()
-        onNodeWithContentDescription("戻る").performClick()
-        waitForIdle()
-        assertEquals(1, backCount)
-
-        navigateUpEnabled = false
-        waitForIdle()
-
-        assertEquals(
-            boundsWhenEnabled,
-            onNodeWithText("未読のみ").fetchSemanticsNode().boundsInRoot,
-            "the controls row must not move when navigating up becomes unavailable",
-        )
-        onNodeWithContentDescription("戻る").assertIsNotEnabled()
-        onNodeWithContentDescription("戻る").performClick()
-        waitForIdle()
-        assertEquals(1, backCount, "a disabled back button must not invoke onNavigateUp")
-    }
-
-    /**
-     * The row is omitted entirely only where it is conceptually never relevant — a
-     * [PaneLayout.Triple] pane, which passes no `onNavigateUp` at all — not merely where navigating
-     * up is temporarily unavailable (covered above).
-     */
-    @Test
-    fun articleListTopBarOmitsTheNavigationRowWhenNoNavigateUpIsGivenAtAll() = runDesktopComposeUiTest {
+    fun articleListTopBarOmitsTheNavigationRowWhenNoDrawerCallbackIsGivenAtAll() = runDesktopComposeUiTest {
         setContent {
             ArticleListTopBar(
                 unreadOnly = false,
@@ -511,7 +517,7 @@ class ArticleListPaneTest {
         }
         waitForIdle()
 
-        onNodeWithContentDescription("戻る").assertDoesNotExist()
+        onNodeWithContentDescription("フィード一覧を開く").assertDoesNotExist()
         onNodeWithText("未読のみ").assertIsDisplayed()
     }
 
@@ -546,7 +552,7 @@ class ArticleListPaneTest {
         useHomeViewModel(driver, db) { fixture ->
             val vm = fixture.vm
             setContent {
-                ArticleListPane(vm = vm, focused = true, onActivated = {}, onNavigateUp = {}, navigateUpEnabled = true)
+                ArticleListPane(vm = vm, focused = true, onActivated = {}, onOpenDrawer = {}, onExitSearch = {})
             }
             waitForIdle()
 
@@ -559,7 +565,7 @@ class ArticleListPaneTest {
     }
 
     /**
-     * Desktop regression guard: at [PaneLayout.Triple] (no `onNavigateUp`), `FeedListPane`'s own
+     * Desktop regression guard: at [PaneLayout.Triple] (no `onOpenDrawer`), `FeedListPane`'s own
      * field already covers search input, so `SearchListPane` must not render its own editable
      * field even while the Search scope is active.
      */
@@ -586,7 +592,7 @@ class ArticleListPaneTest {
         useHomeViewModel(driver, db) { fixture ->
             val vm = fixture.vm
             setContent {
-                ArticleListPane(vm = vm, focused = true, onActivated = {}, onNavigateUp = {}, navigateUpEnabled = true)
+                ArticleListPane(vm = vm, focused = true, onActivated = {}, onOpenDrawer = {}, onExitSearch = {})
             }
             waitForIdle()
 
@@ -607,7 +613,9 @@ class ArticleListPaneTest {
      * The search icon this test targets is [ArticleListTopBar]'s own entry point into search at a
      * narrow layout ("Native-feel restyle"/"Pane structure" in the `ui-guidelines` skill) — distinct
      * from the query field inside [SearchListPane]'s `KeryxExpandedSearchBar`, which is never
-     * present at the same time (the icon only shows outside the Search scope).
+     * present at the same time (the icon only shows outside the Search scope). It sits in the same
+     * leading row [onOpenDrawer] draws (see that composable's own KDoc), so both must be supplied
+     * together to reach it — exactly how every real caller wires it.
      */
     @Test
     fun articleListTopBarSearchIconInvokesOnSearchClickWhenProvided() = runDesktopComposeUiTest {
@@ -619,6 +627,7 @@ class ArticleListPaneTest {
                 newestFirst = true,
                 onToggleSort = {},
                 onMarkAllRead = {},
+                onOpenDrawer = {},
                 onSearchClick = { clicked = true },
             )
         }
@@ -630,7 +639,7 @@ class ArticleListPaneTest {
     }
 
     @Test
-    fun articleListTopBarOmitsTheSearchIconWhenNotProvided() = runDesktopComposeUiTest {
+    fun articleListTopBarOmitsTheSearchIconWhenNotProvidedEvenWithTheDrawerRowPresent() = runDesktopComposeUiTest {
         setContent {
             ArticleListTopBar(
                 unreadOnly = false,
@@ -638,11 +647,32 @@ class ArticleListPaneTest {
                 newestFirst = true,
                 onToggleSort = {},
                 onMarkAllRead = {},
+                onOpenDrawer = {},
             )
         }
         waitForIdle()
 
         onNodeWithContentDescription("記事を検索").assertDoesNotExist()
+    }
+
+    @Test
+    fun articleListTopBarOmitsTheEntireLeadingRowAtTriple() = runDesktopComposeUiTest {
+        // No onOpenDrawer at all (PaneLayout.Triple) omits the leading row itself, so the search
+        // icon has nowhere to sit even if onSearchClick were supplied alongside it.
+        setContent {
+            ArticleListTopBar(
+                unreadOnly = false,
+                onToggleUnreadOnly = {},
+                newestFirst = true,
+                onToggleSort = {},
+                onMarkAllRead = {},
+                onSearchClick = {},
+            )
+        }
+        waitForIdle()
+
+        onNodeWithContentDescription("記事を検索").assertDoesNotExist()
+        onNodeWithContentDescription("フィード一覧を開く").assertDoesNotExist()
     }
 
     /**
@@ -735,9 +765,8 @@ class ArticleListPaneTest {
     /**
      * `KeryxExpandedSearchBar` and `ArticleListTopBar` are two separate composables stacked in the
      * same `Column` (see `SearchListPane`) — the clear button appearing/disappearing inside the
-     * former must not shift the latter's controls row, the same "Layout stability under state
-     * changes" concern `articleListTopBarKeepsTheControlsRowInPlaceWhenNavigateUpBecomesUnavailable`
-     * already covers for the back-button row.
+     * former must not shift the latter's controls row (see the `ui-guidelines` skill's "Layout
+     * stability under state changes").
      */
     @Test
     fun theSearchFieldsClearButtonAppearingDoesNotMoveTheControlsRowBelowIt() = runDesktopComposeUiTest {
@@ -745,7 +774,7 @@ class ArticleListPaneTest {
         useHomeViewModel(driver, db) { fixture ->
             val vm = fixture.vm
             setContent {
-                ArticleListPane(vm = vm, focused = true, onActivated = {}, onNavigateUp = {}, navigateUpEnabled = true)
+                ArticleListPane(vm = vm, focused = true, onActivated = {}, onOpenDrawer = {}, onExitSearch = {})
             }
             waitForIdle()
 

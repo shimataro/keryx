@@ -7,6 +7,7 @@ import com.formdev.flatlaf.FlatLaf
 import com.formdev.flatlaf.FlatLightLaf
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.platform.isLinux
+import java.awt.RenderingHints
 import javax.swing.UIManager
 
 private const val LOG_TAG = "DesktopLookAndFeel"
@@ -127,6 +128,53 @@ internal fun updateLookAndFeel(dark: Boolean) {
 }
 
 /**
+ * The text-antialiasing hint the Swing surfaces should paint with, given the one the desktop
+ * published (`awt.font.desktophints`, which is what FlatLaf copies into its UI defaults).
+ *
+ * A usable desktop value is kept as-is, so a desktop asking for LCD subpixel rendering still gets
+ * it. Everything else — the key missing entirely, `DEFAULT`, or an explicit `OFF` — resolves to
+ * greyscale antialiasing, because Swing text with no hint at all is painted aliased, and Compose
+ * draws its own text through Skia, which antialiases unconditionally and never consults this hint.
+ * Honouring an `OFF` would therefore not produce an aliased app, only an app whose menu bar,
+ * context menus and dialog buttons look jagged next to the Compose surface beside them.
+ */
+internal fun resolveTextAntialiasingHint(desktopHint: Any?): Any =
+    if (desktopHint == null ||
+        desktopHint == RenderingHints.VALUE_TEXT_ANTIALIAS_OFF ||
+        desktopHint == RenderingHints.VALUE_TEXT_ANTIALIAS_DEFAULT
+    ) {
+        RenderingHints.VALUE_TEXT_ANTIALIAS_ON
+    } else {
+        desktopHint
+    }
+
+/**
+ * Makes sure the installed defaults carry a text-antialiasing hint.
+ *
+ * Swing resolves antialiasing exactly once per component: `JComponent.setUI` snapshots
+ * `UIManager.getDefaults()`'s [RenderingHints.KEY_TEXT_ANTIALIASING] into the component, and
+ * `SwingUtilities2.drawString` paints with whatever that snapshot holds — nothing, and the text is
+ * aliased. The only code that ever puts that key is FlatLaf, which copies the desktop's own hint
+ * and simply leaves the key out when the desktop reports `OFF`/`DEFAULT` or reports nothing; its
+ * own fallback covers just the case where *neither* `gnome.Xft/Antialias` nor
+ * `fontconfig/Antialias` exists, so a desktop that publishes one of them with antialiasing
+ * disabled leaves every Swing surface in the app aliased. This fills that gap.
+ *
+ * Must run after each `FlatLaf.setup()` (which rebuilds the defaults) and before the
+ * `FlatLaf.updateUI()` pass that makes existing components re-take their snapshot.
+ */
+internal fun ensureTextAntialiasing() {
+    val defaults = UIManager.getLookAndFeelDefaults()
+    val desktopHint = defaults[RenderingHints.KEY_TEXT_ANTIALIASING]
+    val hint = resolveTextAntialiasingHint(desktopHint)
+    if (hint != desktopHint) defaults[RenderingHints.KEY_TEXT_ANTIALIASING] = hint
+    // Logged unconditionally for the same reason as the look and feel itself: aliased Swing text is
+    // the kind of degradation that is invisible from the outside, and the desktop's own value is
+    // the only thing that explains it.
+    Log.info(LOG_TAG, "Swing text antialiasing: desktop=$desktopHint, applied=$hint")
+}
+
+/**
  * @return whether FlatLaf actually became the installed Look & Feel. [installedDark] is only
  * recorded on success, so a failed attempt leaves [updateLookAndFeel] free to retry on the next
  * theme change rather than latching the app to whatever it fell back to.
@@ -138,6 +186,9 @@ private fun setupFlatLaf(dark: Boolean): Boolean {
     // setup() swallows any failure and reports it by returning false, so the result carries the
     // only signal there is. FlatLaf's own explanation goes to java.util.logging, not here.
     val ok = if (dark) FlatDarkLaf.setup() else FlatLightLaf.setup()
-    if (ok) installedDark = dark
+    if (ok) {
+        installedDark = dark
+        ensureTextAntialiasing()
+    }
     return ok
 }

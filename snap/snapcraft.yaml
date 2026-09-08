@@ -1,9 +1,10 @@
 name: keryx
+title: Keryx
 version: '0.0.0' # overwritten by release.yml with the tag-derived version before packing
-summary: Local-first, cross-platform RSS reader
+summary: Cloud-sync, multi-platform RSS reader
 description: |
-  A local-first, cross-platform RSS reader with multi-device sync via your own
-  cloud storage (Dropbox / Google Drive / OneDrive). No account required.
+  Keeps your subscriptions in sync across every device through your own cloud storage
+  (Dropbox / Google Drive / OneDrive).
 grade: stable
 confinement: strict
 base: core24
@@ -15,19 +16,60 @@ source-code: https://github.com/shimataro/keryx
 
 apps:
   keryx:
+    extensions: [gnome]
     command: bin/Keryx
+    # Appended *after* the gnome extension's own snap/command-chain/desktop-launch, which exports
+    # XDG_DATA_HOME=$SNAP_USER_DATA/.local/share unconditionally. An `environment:` entry cannot
+    # win against that (snapd applies the block before the command chain runs), so the remap onto
+    # the revision-independent $SNAP_USER_COMMON is done from this wrapper instead. XDG_CACHE_HOME
+    # needs nothing: the extension already sets it to $SNAP_USER_COMMON/.cache.
+    command-chain:
+      - bin/keryx-xdg-launch
+    environment:
+      # WebKit's nested sandbox (bwrap) does not start inside strict confinement
+      WEBKIT_DISABLE_SANDBOX: "1"
     plugs:
       - network
-      - password-manager-service # Secret Service (java-keyring) — Dropbox token storage
-      - desktop
-      - desktop-legacy
-      - wayland
-      - x11
-      - opengl # Compose Desktop (Skia) GPU rendering
-      - home # keryx:// URI scheme / .opml association self-registration
-             # (~/.local/share/applications, ~/.config/mimeapps.list)
+      - password-manager-service
+      - home
 
 parts:
   keryx:
     plugin: dump
     source: composeApp/build/compose/binaries/main/app/Keryx
+    # WebKitGTK (the article reader's WebView) is deliberately NOT staged here. The gnome
+    # extension's gnome-46-2404 platform snap already ships libwebkit2gtk-4.1-0 together with the
+    # libjavascriptcoregtk-4.1-0 / libsoup-3.0-0 / libsecret-1-0 it depends on, its libraries are
+    # on LD_LIBRARY_PATH at runtime, and the extension binds /usr/lib/<triplet>/webkit2gtk-4.1 —
+    # the injected bundle plus the WebKitWebProcess/WebKitNetworkProcess helpers — to that snap's
+    # copy regardless of what we stage. Staging our own therefore duplicates a library that is
+    # already mounted (and risks pairing our .so with the platform's helper processes), while
+    # dragging in WebKitGTK's whole apt closure (GStreamer, libicu74, libvpx, ...) and roughly
+    # doubling the size of the .snap.
+    stage-packages:
+      # AWT X11 extension (gnome extension may not include this)
+      - libxtst6
+      # JNA native dispatch library
+      - libffi8
+
+  xdg-launcher:
+    plugin: dump
+    source: snap/local
+    organize:
+      keryx-xdg-launch: bin/keryx-xdg-launch
+
+# The library linter only inspects ELF DT_NEEDED entries, so it cannot see that the JVM
+# dlopen()s its own runtime libraries. They are reported as "unused library" — false positives
+# snapcraft's own documentation says not to act on.
+#
+# NOTE: ignoring a path disables the linter for it entirely, so *missing* dependency reports
+# for these files are suppressed too (that check is what surfaced the X11/font gap in 88ceff7e
+# and the harfbuzz gap in 0394c79e). Comment this block out and re-pack whenever stage-packages
+# or the JDK version changes, so those reports are visible again.
+lint:
+  ignore:
+    - library:
+      # jpackage launcher + JDK runtime: dlopen()ed by the JVM. Globbed rather than enumerated
+      # because the file set changes with every JDK version.
+      - lib/libapplauncher.so
+      - lib/runtime/lib/*.so

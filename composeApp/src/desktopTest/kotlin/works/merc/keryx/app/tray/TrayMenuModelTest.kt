@@ -138,6 +138,75 @@ class TrayMenuModelTest {
         assertTrue("label" !in properties)
     }
 
+    // --- changedItemProperties ---
+
+    @Test
+    fun `identical states change nothing`() {
+        assertTrue(changedItemProperties(hidden, hidden).isEmpty())
+    }
+
+    @Test
+    fun `a toggle label change reports only the toggle item's label`() {
+        val changed = changedItemProperties(hidden, shown)
+        assertEquals(listOf(MENU_TOGGLE_ID), changed.map { it.id })
+        assertEquals(mapOf("label" to "Hide"), changed.single().properties.mapValues { it.value.value })
+    }
+
+    @Test
+    fun `a quit label change reports only the quit item's label`() {
+        val next = hidden.copy(quitLabel = "Exit")
+        val changed = changedItemProperties(hidden, next)
+        assertEquals(listOf(MENU_QUIT_ID), changed.map { it.id })
+        assertEquals(mapOf("label" to "Exit"), changed.single().properties.mapValues { it.value.value })
+    }
+
+    @Test
+    fun `an update label change alone omits the unchanged enabled flag`() {
+        val next = hidden.copy(update = updateEntry.copy(label = "Download update 2.0.0"))
+        val changed = changedItemProperties(hidden, next)
+        assertEquals(listOf(MENU_UPDATE_ID), changed.map { it.id })
+        assertEquals(setOf("label"), changed.single().properties.keys)
+    }
+
+    @Test
+    fun `an update enabled change alone omits the unchanged label`() {
+        val next = hidden.copy(update = updateEntry.copy(enabled = false))
+        val changed = changedItemProperties(hidden, next)
+        assertEquals(listOf(MENU_UPDATE_ID), changed.map { it.id })
+        assertEquals(setOf("enabled"), changed.single().properties.keys)
+    }
+
+    @Test
+    fun `an update entry changing both label and enabled reports both`() {
+        val next = hidden.copy(update = TrayUpdateEntry("Downloading… 60%", enabled = false))
+        val changed = changedItemProperties(hidden, next)
+        val properties = changed.single { it.id == MENU_UPDATE_ID }.properties
+        assertEquals("Downloading… 60%", properties.getValue("label").value)
+        assertEquals(false, properties.getValue("enabled").value)
+    }
+
+    @Test
+    fun `several items changing at once each get their own entry`() {
+        val next = TrayMenuState("Hide", "Exit", TrayUpdateEntry("Downloading… 60%", enabled = false))
+        val changed = changedItemProperties(hidden, next)
+        assertEquals(setOf(MENU_TOGGLE_ID, MENU_QUIT_ID, MENU_UPDATE_ID), changed.map { it.id }.toSet())
+    }
+
+    @Test
+    fun `changed labels are escaped the same way GetLayout labels are`() {
+        val next = hidden.copy(toggleLabel = "a_b")
+        val changed = changedItemProperties(hidden, next)
+        assertEquals("a__b", changed.single().properties.getValue("label").value)
+    }
+
+    @Test
+    fun `the root and separator never appear, since the menu's shape never changes`() {
+        val next = TrayMenuState("Hide", "Exit", TrayUpdateEntry("Downloading… 60%", enabled = false))
+        val changed = changedItemProperties(hidden, next)
+        assertTrue(MENU_ROOT_ID !in changed.map { it.id })
+        assertTrue(MENU_SEPARATOR_ID !in changed.map { it.id })
+    }
+
     // --- roundedTrayProgressPercent ---
 
     @Test

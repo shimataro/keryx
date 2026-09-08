@@ -5,10 +5,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -92,6 +97,7 @@ fun ArticleDetailPane(
     onActivated: () -> Unit = {},
     copyPulse: Int = 0,
     onNavigateUp: (() -> Unit)? = null,
+    swipeNavigation: ArticleSwipeNavigation? = null,
 ) {
     val article by vm.selectedArticle.collectAsStateSafe(null)
 
@@ -103,10 +109,7 @@ fun ArticleDetailPane(
         onToggleStar = { vm.toggleStarSelected() },
         onMarkUnread = { vm.markSelectedUnread() },
         onNavigateUp = onNavigateUp,
-        onSelectNext = { vm.selectNext() },
-        onSelectPrevious = { vm.selectPrevious() },
-        canSelectNext = { vm.canSelectNext() },
-        canSelectPrevious = { vm.canSelectPrevious() },
+        swipeNavigation = swipeNavigation,
     )
 }
 
@@ -138,10 +141,7 @@ internal fun ArticleDetailPaneContent(
     onToggleStar: () -> Unit = {},
     onMarkUnread: () -> Unit = {},
     onNavigateUp: (() -> Unit)? = null,
-    onSelectNext: () -> Unit = {},
-    onSelectPrevious: () -> Unit = {},
-    canSelectNext: () -> Boolean = { false },
-    canSelectPrevious: () -> Boolean = { false },
+    swipeNavigation: ArticleSwipeNavigation? = null,
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     reader: @Composable (html: String, body: String, baseUrl: String?, articleUrl: String?) -> Unit =
         { html, body, baseUrl, articleUrl -> ArticleWebView(html, body, baseUrl, articleUrl) },
@@ -203,19 +203,19 @@ internal fun ArticleDetailPaneContent(
         }
     }
 
-    // Only enabled where the reader is a "drilled-into" destination with somewhere to navigate
-    // back from (onNavigateUp != null — the same narrow-layout signal every other touch-only
-    // affordance in this codebase keys off, see the ui-guidelines skill's "Adaptive pane layout &
-    // touch affordances") and only while an article is actually on screen to swipe away from.
-    // At PaneLayout.Triple (onNavigateUp == null) the reader is a permanent, keyboard-driven pane
-    // shared with desktop, exactly like J/K there — a swipe gesture has no place in that state.
-    val swipeEnabled = isTouchPrimary && onNavigateUp != null && article != null
+    // Only enabled where the caller supplied sibling-article navigation (swipeNavigation != null
+    // — see ArticleSwipeNavigation's own KDoc for why this, not onNavigateUp, is the swipe
+    // boundary) and only while an article is actually on screen to swipe away from. At
+    // PaneLayout.Triple the reader is a permanent, keyboard-driven pane shared with desktop,
+    // exactly like J/K there — a swipe gesture has no place in that state, and no caller passes
+    // swipeNavigation there.
+    val swipeEnabled = isTouchPrimary && swipeNavigation != null && article != null
     val currentArticleId by rememberUpdatedState(article?.id)
     val swipeController = rememberArticleSwipeController(
-        canSelectNext = canSelectNext,
-        canSelectPrevious = canSelectPrevious,
-        onSelectNext = onSelectNext,
-        onSelectPrevious = onSelectPrevious,
+        canSelectNext = swipeNavigation?.canSelectNext ?: { false },
+        canSelectPrevious = swipeNavigation?.canSelectPrevious ?: { false },
+        onSelectNext = swipeNavigation?.onSelectNext ?: {},
+        onSelectPrevious = swipeNavigation?.onSelectPrevious ?: {},
         currentArticleId = { currentArticleId },
     )
 
@@ -248,6 +248,11 @@ internal fun ArticleDetailPaneContent(
         // is also the node ARTICLE_READER_TEST_TAG's tests already query with useUnmergedTree.
         Box(
             Modifier.fillMaxSize()
+                // Bottom inset clears the navigation bar on Android's edge-to-edge layout (see
+                // HomeScreen's Scaffold); zero on desktop (WindowInsets.safeDrawing), so it
+                // doesn't change readerBoundsAreIdenticalWithAndWithoutASelection there — both
+                // measurements below still shrink by the same (zero) amount.
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
                 .clipToBounds()
                 .onSizeChanged { swipeController.widthPx = it.width.toFloat() }
                 .let { if (swipeEnabled) it.articleSwipeNavigation(swipeController) else it },
@@ -259,10 +264,10 @@ internal fun ArticleDetailPaneContent(
                     .testTag(ARTICLE_READER_TEST_TAG)
                     .articleSwipeAccessibilityActions(
                         enabled = swipeEnabled,
-                        canNext = swipeEnabled && canSelectNext(),
-                        canPrevious = swipeEnabled && canSelectPrevious(),
-                        onNext = onSelectNext,
-                        onPrevious = onSelectPrevious,
+                        canNext = swipeEnabled && swipeNavigation?.canSelectNext?.invoke() == true,
+                        canPrevious = swipeEnabled && swipeNavigation?.canSelectPrevious?.invoke() == true,
+                        onNext = swipeNavigation?.onSelectNext ?: {},
+                        onPrevious = swipeNavigation?.onSelectPrevious ?: {},
                     ),
             ) {
                 reader(html, body.orEmpty(), article?.url, article?.url)

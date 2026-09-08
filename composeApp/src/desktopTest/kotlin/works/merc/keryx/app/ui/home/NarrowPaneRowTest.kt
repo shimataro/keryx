@@ -30,9 +30,11 @@ import kotlin.test.assertTrue
 
 /**
  * `NarrowPaneRow` is what keeps a home pane's scroll position across the navigation stack's
- * comings and goings at a narrow `PaneLayout` — see its own KDoc for the two separate mechanisms
- * (fixed source positions for [PaneLayout.Dual]'s slide, a saveable-state holder for
- * [PaneLayout.Single]'s real unmount) and why a `visible.forEach` loop defeats the first of them.
+ * comings and goings at a narrow `PaneLayout` — see its own KDoc for why emitting each pane from
+ * its own fixed source position (rather than a `visible.forEach` loop) is what keeps
+ * [PaneLayout.Dual]'s article list pane alive across a depth change (it's one of the same two
+ * panes shown at every depth there — see `visiblePanes`' own KDoc), and for the separate
+ * saveable-state-holder mechanism that instead restores [PaneLayout.Single]'s real unmount.
  *
  * The panes here are stubs rather than the real ones: what is under test is the hosting structure,
  * not any pane's own content.
@@ -95,7 +97,7 @@ class NarrowPaneRowTest {
     }
 
     @Test
-    fun keepsPaneCompositionAliveAcrossDualSlide() = runDesktopComposeUiTest {
+    fun keepsPaneCompositionAliveAcrossEveryDepthAtDual() = runDesktopComposeUiTest {
         var depth by mutableStateOf(2)
         lateinit var state: LazyListState
 
@@ -109,8 +111,8 @@ class NarrowPaneRowTest {
         val offset = scrolled.firstVisibleItemScrollOffset
         assertTrue(index > 0, "precondition: the list should be scrolled away from the top")
 
-        // The sliding window keeps the article list on screen at both depths, only swapping its
-        // neighbor — so it must never be disposed, let alone restored from a saved snapshot.
+        // visiblePanes(Dual, depth) always includes the article list, regardless of depth — so it
+        // must never be disposed, let alone restored from a saved snapshot, as the depth changes.
         depth = 3
         waitForIdle()
         depth = 2
@@ -119,36 +121,5 @@ class NarrowPaneRowTest {
         assertSame(scrolled, state, "the pane stayed on screen, so it must keep the same state")
         assertEquals(index, state.firstVisibleItemIndex)
         assertEquals(offset, state.firstVisibleItemScrollOffset)
-    }
-
-    @Test
-    fun hoistedPaneStateLetsACallerDiscardASavedScrollPosition() = runDesktopComposeUiTest {
-        // Mirrors HomeScreen's onEnterArticleList: a feed-list row selection that *enters* the
-        // article list pane (rather than returning to it) discards its saved scroll state via the
-        // hoisted SaveableStateHolder, so the pane opens at the top instead of restoring where the
-        // user scrolled to last time it was open.
-        var depth by mutableStateOf(2)
-        lateinit var state: LazyListState
-        lateinit var paneState: SaveableStateHolder
-
-        setContent {
-            paneState = rememberSaveableStateHolder()
-            Host(PaneLayout.Single, depth, paneState) { state = it }
-        }
-        waitForIdle()
-
-        onNodeWithTag("stub-list").performMouseInput { moveTo(center); repeat(12) { scroll(3f) } }
-        waitForIdle()
-        assertTrue(state.firstVisibleItemIndex > 0, "precondition: scrolled away from the top")
-
-        // Unmount the article list (depth 3), discard its saved state, then bring it back.
-        depth = 3
-        waitForIdle()
-        paneState.removeState(HomePane.ArticleList)
-        depth = 2
-        waitForIdle()
-
-        assertEquals(0, state.firstVisibleItemIndex, "the discarded state must not be restored")
-        assertEquals(0, state.firstVisibleItemScrollOffset)
     }
 }

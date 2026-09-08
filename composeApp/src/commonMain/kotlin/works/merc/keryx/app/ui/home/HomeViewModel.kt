@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
@@ -92,6 +93,16 @@ class HomeViewModel(
 
     val feeds: StateFlow<List<Feeds>> =
         feedRepository.watchAllFeeds().stateIn(viewModelScope, started, emptyList())
+
+    /**
+     * A one-shot check for whether any feed exists at all, read directly from
+     * [FeedRepository.watchAllFeeds] rather than the already-collected [feeds] above: [feeds]'
+     * `Eagerly`-shared `StateFlow` starts at `emptyList()` before its first real emission lands, so
+     * reading `feeds.value` here couldn't tell "genuinely zero feeds" apart from "not loaded yet".
+     * `watchAllFeeds()` is backed by a SQLDelight query, so its first emission is already the real
+     * DB content — see `HomePaneLayout.kt`'s `shouldAutoOpenFeedDrawer`, the only caller.
+     */
+    suspend fun hasAnyFeed(): Boolean = feedRepository.watchAllFeeds().first().isNotEmpty()
 
     val tags: StateFlow<List<Tags>> =
         tagRepository.watchAllTags().stateIn(viewModelScope, started, emptyList())
@@ -673,21 +684,12 @@ class HomeViewModel(
      *   Selecting a *different rendered instance of the already-selected filter* (e.g. the
      *   tag-nested copy of a feed already selected under its folder) only moves the highlight: the
      *   article/cursor/epoch side effects below stay gated on the filter itself changing.
-     * @param reentering Whether this selection *enters* the article list from a screen that doesn't
-     *   show it — `PaneLayout.Single`'s depth 1, where the feed list is a screen of its own (see
-     *   `FeedListPane`'s `onEnterArticleList`). The browsing context is then rebuilt even when
-     *   [filter] is unchanged, because opening the list anew is not a back-navigation and must show
-     *   the list's current state: a row pinned read while reading it last time would otherwise stay
-     *   in an unread-only list indefinitely. Clearing [_selectedArticle] is load-bearing for that
-     *   too — left set, [pinnedReadArticlesKeepingSelected] re-seeds the pin from it every time the
-     *   user toggles unread-only back on, so the row could not be dismissed at all.
      */
     fun selectFilter(
         filter: ArticleFilter,
         instance: FeedListRowSelection = FeedListRowSelection.canonicalFor(filter),
-        reentering: Boolean = false,
     ) {
-        if (filter == _filter.value && !reentering) {
+        if (filter == _filter.value) {
             _selectedRowInstance.value = instance
             return
         }

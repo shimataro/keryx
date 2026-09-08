@@ -139,6 +139,9 @@ const val ARTICLE_LIST_PANE_MIN_WIDTH = 240
 const val ARTICLE_LIST_PANE_MAX_WIDTH = 600
 const val DETAIL_PANE_MIN_WIDTH = 280
 
+/** End inset (Dp) reserved on the right side of a [ModalDrawerSheet] so the scrim remains visible. */
+const val DRAWER_SHEET_END_INSET = 56
+
 /** Width of a [works.merc.keryx.app.ui.home.ResizableDivider] between two panes. */
 const val PANE_DIVIDER_WIDTH = 8
 
@@ -170,6 +173,10 @@ const val SEARCH_DEBOUNCE_MS = 250L
 
 /** Debounce for persisting a pane's width to disk while it's being dragged. */
 const val PANE_WIDTH_PERSIST_DEBOUNCE_MS = 500L
+
+/** Debounce for persisting window size/position/placement while resized/moved/(un)maximized, so a
+ * transient mid-transition value (e.g. while animating into fullscreen) isn't the one saved. */
+const val WINDOW_STATE_PERSIST_DEBOUNCE_MS = 500L
 
 // How long after a new-article notification is sent onTrayAction still treats a click as an
 // activation rather than a deliberate hide - see tray/TrayActionPolicy.kt.
