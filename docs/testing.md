@@ -656,8 +656,10 @@ likely each is to be wrong):
   since PendingNotificationIds has no visible size counter).
 - On GNOME **with** the AppIndicator extension, repeat the Show/Hide label check above — **this is
   the one Plasma cannot stand in for**: GNOME's dbusmenu client never re-requests `label`/`enabled`
-  via `GetLayout` on its own, so it only sees a change through `ItemsPropertiesUpdated`, never by
-  reopening the menu. Toggle the window several times in a row and confirm the label keeps up every
+  via `GetLayout` on its own — it only learns of a change through `ItemsPropertiesUpdated`, and if
+  that signal arrives while the menu is closed, applying it waits until the menu reopens and the
+  client re-reads every item via `GetGroupProperties`. Toggle the window several times in a row and
+  confirm the label keeps up every
   time (a regression here previously left it stuck on its very first value forever). Do the same for
   the in-app update entry: start a download from Settings and confirm the tray item's label/enabled
   actually progress through "Download update…" → "Downloading… N%" → "Restart to update…" instead of
