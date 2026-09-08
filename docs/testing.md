@@ -661,7 +661,9 @@ likely each is to be wrong):
   time (a regression here previously left it stuck on its very first value forever). Do the same for
   the in-app update entry: start a download from Settings and confirm the tray item's label/enabled
   actually progress through "Download update…" → "Downloading… N%" → "Restart to update…" instead of
-  staying frozen.
+  staying frozen. **A brief flash of the previous label as the menu opens is expected here and is
+  not a regression** — the extension applies parked property updates without blocking the first
+  paint; see `known-issues.md`. What must not happen is the old label *staying*.
 - On GNOME without the AppIndicator extension it silently falls back to the AWT tray (no crash, no stack trace), and
   launching without `DBUS_SESSION_BUS_ADDRESS` neither hangs nor throws.
 - Same behaviour on a Plasma Wayland session.

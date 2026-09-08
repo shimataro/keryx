@@ -325,7 +325,10 @@ well-known name `org.kde.StatusNotifierItem-<pid>-1`):
   menu's shape never changes and some clients (GNOME Shell's AppIndicator extension) never re-request
   `label`/`enabled` via `GetLayout` on their own, so a `LayoutUpdated`-only host update would leave an
   already-open menu stuck on stale labels forever. `AboutToShow` still compares the desired labels
-  against what `GetLayout` last served, so a dropped signal still heals.
+  against what `GetLayout` last served, so a dropped signal still heals. GNOME parks the signal until
+  its menu opens and then repaints without blocking the first frame, so a changed label flashes its
+  previous value there for an instant — a known, unfixable-from-here artifact (`known-issues.md`),
+  not a reason to reach for `LayoutUpdated` again.
 
 The icon asset follows the same split as the branch: the outlined glyph (`tray_icon_outlined.png`) on the two
 paths that composite it with real alpha at 22px or more, and the full-colour one (`tray_icon.png`) on the Windows
