@@ -230,9 +230,11 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
     振り分けている）——GUI から `pkexec`/`sudo` を呼び、失敗時の回復手段も無いという構成はリスクに
     見合わないと判断した。Linux の Snap インストールも同じ扱いになるが、理由はより単純で、
     `/snap/keryx/…` マウントが読み取り専用の squashfs イメージだからである——アプリ内アップデートが
-    書き込みたくても書き込む先が無い。アプリは現在 Snap Store にも公開されている
-    （`release.yml` の `package-snap` ジョブ）ため、Store からインストールされた snap は
-    snapd 自身のバックグラウンド自動リフレッシュの恩恵を受ける。それでも `LINUX_SNAP`
+    書き込みたくても書き込む先が無い。`release.yml` の `package-snap` ジョブは
+    `SNAPCRAFT_STORE_CREDENTIALS` が設定されていれば Snap Store への公開を行う（`build.md` 参照）が、
+    `keryx` のストア掲載はまだ存在しないため、現時点でこの恩恵を受けている snap インストールは無い——
+    公開されれば、Store からインストールされた snap は snapd 自身のバックグラウンド自動リフレッシュの
+    恩恵を受けることになる。それでも `LINUX_SNAP`
     インストールはすべて変わらず `OpenReleasePage` に振り分けられる——GitHub Release の添付ファイル
     （Store 公開物と同一の `.snap`）を `--dangerous` でサイドロードした場合は自動リフレッシュされず、
     `InstallLocation` は実行時にこの二つを区別する手段を持たないためである。

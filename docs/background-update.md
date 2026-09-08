@@ -229,8 +229,10 @@ each a separate, explicit click (Updates tab button, or that menu item).
     `pkexec`/`sudo` from a GUI with no recovery path if it fails was judged not worth the risk. A
     Linux Snap install is routed the same way, for the more basic reason that its `/snap/keryx/…`
     mount is a read-only squashfs image — there is nothing an in-app update could write to even if
-    it wanted to. The app is now also published to the Snap Store (`release.yml`'s `package-snap`
-    job), so a Store-installed snap does get snapd's own background auto-refresh; `OpenReleasePage`
+    it wanted to. `release.yml`'s `package-snap` job publishes to the Snap Store once
+    `SNAPCRAFT_STORE_CREDENTIALS` is configured (see `build.md`) — the `keryx` listing isn't live yet,
+    so no installed snap benefits from it today, but once it is, a Store-installed snap will get
+    snapd's own background auto-refresh; `OpenReleasePage`
     stays the routing for every `LINUX_SNAP` install regardless, because a `.snap` sideloaded
     `--dangerous` from a GitHub Release attachment — the same asset — is never auto-refreshed, and
     `InstallLocation` has no way to tell the two apart at runtime.
