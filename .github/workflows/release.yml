@@ -234,10 +234,13 @@ jobs:
       # the `edge` channel and a stable tag to `stable`, reusing the same is_prerelease output
       # the deb/rpm/msi skip checks above already compute.
       - name: Publish to Snap Store
-        if: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS != '' }}
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
         run: |
+          if [ -z "$SNAPCRAFT_STORE_CREDENTIALS" ]; then
+            echo "SNAPCRAFT_STORE_CREDENTIALS not configured, skipping publish"
+            exit 0
+          fi
           channel=stable
           if [ "${{ steps.version.outputs.is_prerelease }}" = "true" ]; then
             channel=edge
