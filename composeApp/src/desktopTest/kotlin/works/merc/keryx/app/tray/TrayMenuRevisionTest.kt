@@ -17,7 +17,7 @@ import kotlin.test.assertTrue
 /**
  * Covers the parts of [SniDBusMenu] that need no bus: revision bookkeeping, the
  * `AboutToShow` staleness answer, and event dispatch. Possible because the object takes an
- * `onLayoutUpdated` callback instead of holding a `DBusConnection`.
+ * `onItemsPropertiesUpdated` callback instead of holding a `DBusConnection`.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class TrayMenuRevisionTest {
@@ -25,12 +25,12 @@ class TrayMenuRevisionTest {
     private val hidden = TrayMenuState(toggleLabel = "Show", quitLabel = "Quit", update = updateEntry)
     private val shown = TrayMenuState(toggleLabel = "Hide", quitLabel = "Quit", update = updateEntry)
 
-    private val emitted = mutableListOf<Int>()
+    private val emitted = mutableListOf<List<DBusMenuItemProperties>>()
 
     private fun menu(initial: TrayMenuState = hidden) = SniDBusMenu(
         objectPath = SniConnection.MENU_PATH,
         initialState = initial,
-        onLayoutUpdated = { emitted.add(it) },
+        onItemsPropertiesUpdated = { emitted.add(it) },
     )
 
     private fun SniDBusMenu.fetchLayout() = GetLayout(MENU_ROOT_ID, -1, emptyList())
@@ -43,14 +43,15 @@ class TrayMenuRevisionTest {
     private fun clicked(id: Int) = DBusMenuEventEntry(id, "clicked", Variant(""), UInt32(0))
 
     @Test
-    fun `changing the labels bumps the revision and emits LayoutUpdated once`() {
+    fun `changing the toggle label emits ItemsPropertiesUpdated for just that item's label`() {
         val menu = menu()
-        val before = menu.currentRevision
 
         menu.updateState(shown)
 
-        assertEquals(listOf(before + 1), emitted)
-        assertEquals(before + 1, menu.currentRevision)
+        assertEquals(1, emitted.size)
+        val batch = emitted.single()
+        assertEquals(listOf(MENU_TOGGLE_ID), batch.map { it.id }, "the quit and update entries did not change")
+        assertEquals("Hide", batch.single().properties.getValue("label").value)
     }
 
     @Test
@@ -93,10 +94,23 @@ class TrayMenuRevisionTest {
     }
 
     @Test
+    fun `getGroupProperties returns the new label right after updateState, independent of GetLayout`() {
+        // Exercises the path a properties-driven host (e.g. GNOME's AppIndicator extension) takes
+        // when it reactivates: it re-reads properties for already-known ids rather than refetching
+        // the layout - see ItemsPropertiesUpdated's own KDoc in SniInterfaces.kt.
+        val menu = menu()
+
+        menu.updateState(shown)
+
+        val properties = menu.GetGroupProperties(listOf(MENU_TOGGLE_ID), emptyList())
+        assertEquals("Hide", properties.single { it.id == MENU_TOGGLE_ID }.properties.getValue("label").value)
+    }
+
+    @Test
     fun `a layout reply never stamps one revision's labels with another revision`() {
         // Built locally with a no-op callback: the shared `emitted` list is not thread-safe.
         val states = listOf(hidden, shown)
-        val menu = SniDBusMenu(SniConnection.MENU_PATH, states[0], onLayoutUpdated = {})
+        val menu = SniDBusMenu(SniConnection.MENU_PATH, states[0], onItemsPropertiesUpdated = {})
         val mismatches = ConcurrentLinkedQueue<String>()
 
         // The menu starts at revision 1 with states[0] and the writer's first call passes
@@ -245,15 +259,33 @@ class TrayMenuRevisionTest {
         assertEquals(listOf(MENU_UPDATE_ID, MENU_SEPARATOR_ID, MENU_TOGGLE_ID, MENU_QUIT_ID), childIds)
     }
 
-    /** Only the update entry changing is still a layout change the host must be told about. */
+    /**
+     * Only the update entry changing still has to reach the host - as an `ItemsPropertiesUpdated`
+     * naming just [MENU_UPDATE_ID], never a `LayoutUpdated` (the menu's shape never changes).
+     */
     @Test
-    fun `changing only the update entry bumps the revision and emits LayoutUpdated`() {
+    fun `changing only the update entry emits ItemsPropertiesUpdated for just that item`() {
         val menu = menu()
-        val before = menu.currentRevision
 
         menu.updateState(hidden.copy(update = TrayUpdateEntry("Downloading… 60%", enabled = false)))
 
-        assertEquals(listOf(before + 1), emitted)
-        assertEquals(before + 1, menu.currentRevision)
+        assertEquals(1, emitted.size)
+        val batch = emitted.single()
+        assertEquals(listOf(MENU_UPDATE_ID), batch.map { it.id })
+        val properties = batch.single().properties
+        assertEquals("Downloading… 60%", properties.getValue("label").value)
+        assertEquals(false, properties.getValue("enabled").value)
+    }
+
+    /** A partial property change must not resend a key that didn't actually change. */
+    @Test
+    fun `changing only the update entry's enabled flag omits its unchanged label`() {
+        val menu = menu()
+
+        menu.updateState(hidden.copy(update = updateEntry.copy(enabled = false)))
+
+        val properties = emitted.single().single { it.id == MENU_UPDATE_ID }.properties
+        assertEquals(setOf("enabled"), properties.keys)
+        assertEquals(false, properties.getValue("enabled").value)
     }
 }

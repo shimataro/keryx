@@ -1429,3 +1429,86 @@ transaction (`FeedRepository.kt`, around `applyFetch`), which only writes.
 a feed with no `<item>`s. With nothing for `articleRepository.upsertParsed` to insert, the first
 call's post-mutex work is read-only, so there is no longer a second writer left to race the upgrade.
 See `docs/testing.md`'s note on concurrent-write tests for the general pattern.
+
+## Linux/GNOME: the tray menu briefly shows the previous label when it opens
+
+**Status**: not fixed — external (GNOME Shell AppIndicator extension) design limitation, and not
+fixable from Keryx's side at all (see "Why no emission timing helps" below). Cosmetic only: the
+label settles on the correct value within a frame or two, and every click does the right thing.
+Affects GNOME with the AppIndicator extension only, and only when the label changed while the menu
+was closed. KDE Plasma, macOS, Windows and the Linux AWT tray fallback are all unaffected — none of
+them read the label back out of a host-side cache.
+
+### Symptom
+
+With the window hidden to the tray on GNOME (AppIndicator extension), opening the tray menu shows
+"非表示" (Hide) for an instant before it switches to "表示" (Show). The final label is correct; only
+the first painted frame carries the previous one. The in-app update entry behaves the same way while
+a download is running — its label and greyed-out state are a beat behind on that first frame.
+
+This is the residue of a *different*, already-fixed bug, where the label stayed stale **forever** on
+GNOME (see the `ItemsPropertiesUpdated` paragraph in `app-architecture.md`). Do not confuse the two.
+
+### Diagnosis
+
+Keryx's own side works correctly and was verified first: `SniDBusMenu.updateState` computes the
+changed properties (`changedItemProperties` in `TrayMenuModel.kt`) and emits `ItemsPropertiesUpdated`
+the moment the label changes, with no delay of its own. There is nothing to re-investigate in the app.
+
+The delay is entirely in the extension's dbusmenu client (`dbusMenu.js` in
+`ubuntu/gnome-shell-extension-appindicator`), in three steps:
+
+1. An incoming property signal is gated on the client's own `active` flag, and simply parked while
+   that flag is false:
+
+   ```js
+   if (signal === 'ItemsPropertiesUpdated') {
+       if (!this._active && this.getRoot()?.hasChildren()) {
+           this._flagItemsUpdateRequired = true;
+           return;                                    // parked, not applied
+       }
+       this._onPropertiesUpdated(params.deep_unpack());
+   }
+   ```
+
+2. `active` is assigned in exactly one place — `_onMenuOpenStateChanged(menu, state)` does
+   `this._client.active = state` — so it is true only while the menu is open. Keryx's label changes
+   always happen while it is closed (the window is hidden either from its own close button, or from
+   this very menu item, which closes the menu as it fires), so in practice the signal is always parked.
+
+3. Opening the menu runs `set active(true)`, which calls `_doPropertiesUpdate()` to re-read every
+   known item through `GetGroupProperties`. That call is fire-and-forget — an `IdlePromise` plus a
+   D-Bus round trip — and is **not** awaited before the menu is drawn.
+
+So the menu is painted from the stale cache, then repainted an idle cycle plus one round trip later.
+
+### Why no emission timing helps
+
+The parking branch in step 1 is unconditional while the menu is closed, so emitting earlier, later,
+or repeatedly all land in it. There is no dbusmenu call a server can make to push a property into a
+client that has decided not to listen yet.
+
+### Ruled out
+
+- **Emitting `ItemsPropertiesUpdated` and `LayoutUpdated` together.** The `active` setter is
+  `if (this._flagLayoutUpdateRequired) … else if (this._flagItemsUpdateRequired) …`, so the layout
+  branch wins and the property refresh is postponed to the *next* open — strictly worse than the
+  single flash we have now.
+- **Making `AboutToShow` always report the layout stale.** The client answers a stale report with
+  the same `_requestLayoutUpdate()`, whose `GetLayout` asks for `['type', 'children-display']` only
+  and never `label`. It cannot refresh a label at all.
+- **Any change to what `changedItemProperties` sends.** The client has to fetch *some* value when it
+  first creates the item, and that value is whatever was current at the time; keeping properties out
+  of the diff only makes its cache staler.
+
+### What a real fix would need
+
+Either the extension applying its parked updates before the first paint (awaiting
+`_doPropertiesUpdate()` on the open path — an upstream change, not ours), or Keryx giving the toggle
+item a label that does not depend on window visibility at all: one static "Show/Hide window" entry,
+or two permanent "Show" / "Hide" entries.
+
+The second was considered and **rejected**: it removes the menu's state indication on every platform
+(or forces a platform-conditional menu shape) to erase a sub-frame artifact on one desktop
+environment. The dynamic label is correct and instant on macOS, Windows, KDE Plasma and the AWT
+fallback, and that is not worth trading away.

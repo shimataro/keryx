@@ -31,7 +31,7 @@ class DBusSignatureTest {
     private fun dbusMenu() = SniDBusMenu(
         objectPath = SniConnection.MENU_PATH,
         initialState = TrayMenuState("Show", "Quit", TrayUpdateEntry("Check for updates", enabled = true)),
-        onLayoutUpdated = {},
+        onItemsPropertiesUpdated = {},
     )
 
     private fun assertContains(haystack: String, needle: String) {
