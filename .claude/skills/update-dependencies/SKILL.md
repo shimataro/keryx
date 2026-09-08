@@ -46,7 +46,7 @@ for coord in \
   "com.fleeksoft.ksoup:ksoup" \
   "net.java.dev.jna:jna-jpms" \
   "io.github.kdroidfilter:composewebview" \
-  "org.slf4j:slf4j-simple" \
+  "org.slf4j:slf4j-jdk14" \
 ; do
   g="${coord%%:*}"; a="${coord##*:}"; gpath=$(echo "$g" | tr '.' '/')
   meta=$(curl -s "https://repo1.maven.org/maven2/$gpath/$a/maven-metadata.xml")
