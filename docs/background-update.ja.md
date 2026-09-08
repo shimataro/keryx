@@ -230,10 +230,12 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
     振り分けている）——GUI から `pkexec`/`sudo` を呼び、失敗時の回復手段も無いという構成はリスクに
     見合わないと判断した。Linux の Snap インストールも同じ扱いになるが、理由はより単純で、
     `/snap/keryx/…` マウントが読み取り専用の squashfs イメージだからである——アプリ内アップデートが
-    書き込みたくても書き込む先が無い。これはまた、Snap インストールが現時点では snapd 自身の
-    バックグラウンド自動リフレッシュの恩恵を受けられないことも意味する（今のところ Snap Store へは
-    公開せず、GitHub Release への添付のみで配布しているため）——その隙間でも新バージョンの存在を
-    ユーザーに伝えるのが `OpenReleasePage` の役目である。
+    書き込みたくても書き込む先が無い。アプリは現在 Snap Store にも公開されている
+    （`release.yml` の `package-snap` ジョブ）ため、Store からインストールされた snap は
+    snapd 自身のバックグラウンド自動リフレッシュの恩恵を受ける。それでも `LINUX_SNAP`
+    インストールはすべて変わらず `OpenReleasePage` に振り分けられる——GitHub Release の添付ファイル
+    （Store 公開物と同一の `.snap`）を `--dangerous` でサイドロードした場合は自動リフレッシュされず、
+    `InstallLocation` は実行時にこの二つを区別する手段を持たないためである。
 
     展開がシームになっているのは、**署名済みの** macOS バンドルはそもそもインプロセスで展開できない
     から: `CodeResources` は同梱 JDK の legal ディレクトリにある 43 個のシンボリックリンクを

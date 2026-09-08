@@ -236,9 +236,11 @@ exact key types).
 `--destructive-mode` builds directly on the host with no sandboxing, so the host itself
 must match `snap/snapcraft.yaml`'s `base: core24` (Ubuntu 24.04) and the command needs
 root access — and it can modify the host environment. CI (`release.yml`) already runs it
-on a matching `ubuntu-latest` runner; for a local build on a different host, use
-`snapcraft pack --use-lxd` instead, which builds inside an isolated LXD container — this
-needs LXD installed, initialized, and accessible to the current user first:
+in a dedicated `package-snap` job pinned to `ubuntu-24.04` — not `ubuntu-latest`, which
+would silently drift away from `base: core24` whenever GitHub retargets that label to a
+newer LTS. Bump `base:` and that `runs-on:` together. For a local build on a different
+host, use `snapcraft pack --use-lxd` instead, which builds inside an isolated LXD
+container — this needs LXD installed, initialized, and accessible to the current user first:
 
 ```bash
 sudo snap install lxd
@@ -537,14 +539,20 @@ Flow:
 1. Publish a GitHub Release with a `vMAJOR.MINOR.PATCH` tag, optionally with a SemVer-style
    pre-release suffix (e.g. `v0.1.0`, `v1.2.0-beta.1`).
 2. The workflow triggers on `release: published`, strips the leading `v`, and passes the result as `-PappVersion`.
-3. Four independent jobs run in parallel:
+3. Five independent jobs run in parallel:
 
    - `:composeApp:packageDmg` (macOS runner), attached as `Keryx-<version>-macos-arm64.dmg` **and `Keryx-<version>-macos-arm64.zip`**. **For a pre-release tag, `packageDmg` is skipped and only the `.zip` is attached** (same reasoning as the Windows MSI case below).
-   - `:composeApp:packageDeb :composeApp:packageRpm` (Linux runner, after installing `fakeroot`/`rpm` for jpackage), attached as `Keryx-<version>-linux-x86_64.deb`, `Keryx-<version>-linux-x86_64.rpm` **and `Keryx-<version>-linux-x86_64.zip`**. **For a pre-release tag, `packageDeb`/`packageRpm` are skipped and only the `.zip` is attached** (same reasoning as the Windows MSI case below). The same job also runs `snapcraft pack --destructive-mode` against `snap/snapcraft.yaml` (after `sudo snap install snapcraft --classic`) and attaches `Keryx-<version>-linux-x86_64.snap` — unlike `.deb`/`.rpm`, this **is** attached for pre-release tags too, since snapcraft's `version:` field isn't restricted to `MAJOR.MINOR.PATCH` the way jpackage's packaging metadata is. After the GitHub Release attachment, the same job also **publishes the snap to the Snap Store** (`snapcraft upload --release=<channel>`, gated on the `SNAPCRAFT_STORE_CREDENTIALS` secret below being set at all) — a pre-release tag goes to the `edge` channel, a stable tag to `stable`.
+   - `:composeApp:packageDeb :composeApp:packageRpm` (Linux runner, after installing `fakeroot`/`rpm` for jpackage), attached as `Keryx-<version>-linux-x86_64.deb`, `Keryx-<version>-linux-x86_64.rpm` **and `Keryx-<version>-linux-x86_64.zip`**. **For a pre-release tag, `packageDeb`/`packageRpm` are skipped and only the `.zip` is attached** (same reasoning as the Windows MSI case below).
+   - `package-snap`, a separate job so a `snapcraft` failure can never block the deb/rpm/zip job above from reaching the release (see "Linux Snap package" above for why it also needs its own `ubuntu-24.04`-pinned runner rather than `ubuntu-latest`). It runs `snapcraft pack --destructive-mode` against `snap/snapcraft.yaml` (after `sudo snap install snapcraft --classic`) and attaches `Keryx-<version>-linux-x86_64.snap` — unlike `.deb`/`.rpm`, this **is** attached for pre-release tags too, since snapcraft's `version:` field isn't restricted to `MAJOR.MINOR.PATCH` the way jpackage's packaging metadata is. After the GitHub Release attachment, the same job also **publishes the snap to the Snap Store** (`snapcraft upload --release=<channel>`, gated on the `SNAPCRAFT_STORE_CREDENTIALS` secret below being set at all) — the channel is `edge` when the tag carries a pre-release suffix **or** the GitHub Release itself is marked as a pre-release, and `stable` otherwise (the deb/rpm/msi skip checks above key on the tag suffix alone; only the Snap Store channel also honours the Release's own pre-release flag, since a snap mis-channelled to `stable` is pushed to every Store user by snapd's own auto-refresh with no way to recall it).
    - `:composeApp:createDistributable :composeApp:packageMsi` (Windows runner — `windows-latest` ships WiX Toolset v3.14.1 preinstalled, so no separate WiX setup step is needed), attached as `Keryx-<version>-windows-x86_64.msi` **and `Keryx-<version>-windows-x86_64.zip`**. **For a pre-release tag, `packageMsi` is skipped and only the `.zip` is attached** — MSI's `ProductVersion` must be purely numeric (see below), so every pre-release of a given target version would collapse to the same `ProductVersion` under the fixed `upgradeUuid`, and WiX would not recognize a later pre-release or the eventual final release as an upgrade of an earlier one.
    - `:androidApp:assembleGithubRelease` and `:androidApp:bundlePlayRelease` (Ubuntu runner), attached as `Keryx-<version>-android-universal.apk` and `Keryx-<version>-android-universal.aab`. The APK comes from the `github` flavor (carries `REQUEST_INSTALL_PACKAGES`, since it's the one an in-app update installs over — see the "Android (APK / AAB)" section above) and the AAB from `play` (the Play Console submission artifact, which must not carry that permission). Unlike the desktop installers, Android packages are built and attached for pre-release tags too, because Android has no equivalent version-metadata restriction and testers need a signed APK. **Pre-release APK/AAB files produced by the workflow are GitHub test artifacts only.** `androidApp/build.gradle.kts` derives `versionCode` from `appVersion.substringBefore('-')`, so a pre-release tag such as `v1.2.0-beta.1` and the final `v1.2.0` produce the same `versionCode` (e.g. `10200`). Before submitting to Google Play, assign a strictly increasing `versionCode` by adjusting `androidApp/build.gradle.kts` (or the release tag that drives it) and rebuilding the APK/AAB — the value is baked into the signed artifact at build time and cannot be edited afterward.
 
-   The `.zip` files are archives of the non-packaged app bundle/image produced by `:composeApp:createDistributable`, for users who prefer not to use an installer package. The `deploy-pages` job (which triggers the Cloudflare Pages deploy hook) waits on all four packaging jobs before running.
+   `deploy-pages` (triggers the Cloudflare Pages deploy hook for the download page) waits on
+   `package-macos` / `package-linux` / `package-windows` / `package-android`, but deliberately
+   **not** `package-snap` — a Store publish delay shouldn't hold back updating the page once every
+   other installer is already live.
+
+   The `.zip` files are archives of the non-packaged app bundle/image produced by `:composeApp:createDistributable`, for users who prefer not to use an installer package.
 
 The **tag is the single source of truth for the version**. `appVersion` in `composeApp/build.gradle.kts` resolves
 `-PappVersion` > `APP_VERSION` env var > the literal in the file, and drives `BuildConfig.VERSION` (shown in the
@@ -623,6 +631,12 @@ ACLs), not a plain username/password. Like the cloud-provider keys above, an uns
 fail the build: the "Publish to Snap Store" step is skipped entirely (the `.snap` is still built and
 attached to the GitHub Release), so the workflow only starts publishing once this secret is
 configured.
+
+After the first successful Store publish, request auto-connection for
+`password-manager-service` on the [Snapcraft forum](https://forum.snapcraft.io/c/store-requests/16)
+(see "Linux Snap package" above) — until that request is granted, every Store-installed user has
+to run `snap connect keryx:password-manager-service` themselves, or `java-keyring` falls back to
+the plaintext token file (surfaced to the user via a notification-center warning, not silently).
 
 For Android release signing, set `ANDROID_RELEASE_KEYSTORE_BASE64`, `ANDROID_RELEASE_KEYSTORE_PASSWORD`, `ANDROID_RELEASE_KEY_ALIAS`, and `ANDROID_RELEASE_KEY_PASSWORD` as repository secrets. The keystore is a Base64-encoded PKCS12/JKS file; the workflow decodes it at build time. To keep the same signing key on GitHub Releases and Google Play, generate the keystore locally and, when creating the app in Google Play Console, enroll it as the **existing app signing key**: Play Console never accepts the raw JKS/PKCS12 file directly — first encrypt it with Google's PEPK (Play Encrypt Private Key) tool (`java -jar pepk.jar --keystore=<path> --alias=<alias> --output=<encrypted-file> --encryptionkey=<key-from-play-console>`, downloaded from the Play App Signing enrollment page), then upload the resulting encrypted file. This registers the keystore as the **app signing key** — the key Google holds and uses to re-sign the app before it reaches users, distinct from the **upload key** used to sign each `.aab` submitted through Play Console afterward. The same keystore can serve both roles (Google explicitly allows reusing the app signing key as its own upload key), which is what keeps a single keystore sufficient for both GitHub Releases (where the APK/AAB is signed with it directly) and Google Play; a separate, dedicated upload key is Google's recommended hardening, not a requirement. `release.yml` passes `-PandroidReleaseSigningRequired=true` to `:androidApp:assembleGithubRelease`/`:androidApp:bundlePlayRelease`, which turns a missing (or half-configured) secret into an immediate build failure — since this workflow publishes its output, it must never succeed with an unsigned artifact — so all four secrets are required for the release workflow to succeed. Both flavors are signed with the same keystore (the `signingConfigs` block isn't flavor-scoped), which is exactly what the app-signing-key enrollment above requires: the sideloaded `github` APK and the Play-resigned `play` AAB need to trace back to the same signing identity, or a device that already has one installed can never receive the other as an in-place update (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`).
 
