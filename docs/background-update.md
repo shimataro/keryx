@@ -229,10 +229,13 @@ each a separate, explicit click (Updates tab button, or that menu item).
     `pkexec`/`sudo` from a GUI with no recovery path if it fails was judged not worth the risk. A
     Linux Snap install is routed the same way, for the more basic reason that its `/snap/keryx/…`
     mount is a read-only squashfs image — there is nothing an in-app update could write to even if
-    it wanted to. This also means a Snap install currently gets no benefit from snapd's own
-    background auto-refresh, since the app is only distributed via a GitHub Release attachment (not
-    published to the Snap Store) for now — `OpenReleasePage` is what still tells the user a new
-    version exists in that gap.
+    it wanted to. `release.yml`'s `package-snap` job publishes to the Snap Store once
+    `SNAPCRAFT_STORE_CREDENTIALS` is configured (see `build.md`) — the `keryx` listing isn't live yet,
+    so no installed snap benefits from it today, but once it is, a Store-installed snap will get
+    snapd's own background auto-refresh; `OpenReleasePage`
+    stays the routing for every `LINUX_SNAP` install regardless, because a `.snap` sideloaded
+    `--dangerous` from a GitHub Release attachment — the same asset — is never auto-refreshed, and
+    `InstallLocation` has no way to tell the two apart at runtime.
 
     Extraction sits behind a seam because a **signed** macOS bundle cannot be unpacked in process at
     all: its `CodeResources` seals the 43 symbolic links in the bundled JDK's legal-notices directory
