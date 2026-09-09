@@ -30,8 +30,15 @@ apps:
       WEBKIT_DISABLE_SANDBOX: "1"
     plugs:
       - network
-      - password-manager-service
       - home
+      # No password-manager-service plug: it is not auto-connected by snapd policy, Snapcraft's
+      # reviewers decline auto-connect requests for it on principle (it would grant access to
+      # every secret in the user's session, not just this app's own), and — unlike a plain deb/rpm
+      # install — nothing in this app would actually use a manual `snap connect
+      # keryx:password-manager-service` even if a user ran it: token storage inside the snap always
+      # goes through LibSecretTokenStorage (libsecret's own Secret portal integration, which needs
+      # no privileged interface at all), never through raw Secret Service. See docs/build.md's
+      # "Linux Snap package" for the full reasoning.
 
 parts:
   keryx:
@@ -51,6 +58,9 @@ parts:
       - libxtst6
       # JNA native dispatch library
       - libffi8
+      # libsecret-1-0 is NOT staged here: the gnome extension's platform snap already ships it (see
+      # the WebKitGTK comment above) and puts it on LD_LIBRARY_PATH, which is what
+      # LibSecretTokenStorage's JNA Native.load("libsecret-1.so.0") resolves against.
 
   xdg-launcher:
     plugin: dump

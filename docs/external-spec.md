@@ -202,7 +202,7 @@ Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
 ## 10. Privacy & Security
 
 - No data sent to external servers, no account registration required, HTTPS only.
-- Dropbox token is stored in the OS secure storage (Keychain / Credential Manager / Secret Service, via java-keyring). Falls back to a file in the data directory when unavailable.
+- Dropbox token is stored in the OS secure storage — Keychain on macOS (via the `security` CLI), Credential Manager / Secret Service on Windows/Linux via java-keyring, or, inside the Snap package specifically, a local store encrypted with a per-app key from the desktop's Secret portal (via libsecret, not java-keyring) — see `docs/sync-architecture.md`'s "Token Storage". Falls back to a file in the data directory when unavailable.
 
 ## 11. Technology Choices
 

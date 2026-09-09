@@ -92,8 +92,10 @@ Keryx is designed to minimize its attack surface:
   opt in, directly to Dropbox or Google Drive.
 - **Cloud credentials** (OAuth access / refresh tokens) are stored in the
   operating system's secure credential storage (Keychain on macOS, Credential
-  Manager on Windows, Secret Service on Linux), falling back to a permission-
-  restricted (`0600`) local file only when the OS store is unavailable.
+  Manager on Windows, Secret Service on Linux — inside the Snap package, an
+  encrypted local store keyed by a per-app master secret from your desktop's
+  Secret portal), falling back to a permission-restricted (`0600`) local file
+  only when the OS store is unavailable.
 - **OAuth** uses the authorization-code flow with PKCE, performed directly between
   your device and the provider — no credentials pass through any developer server.
 - **Local data** (subscriptions, cached articles, settings) stays on your device

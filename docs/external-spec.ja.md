@@ -200,8 +200,11 @@ Linux は Look & Feel が解決したフォント、次にデスクトップの�
 ## 10. プライバシー・セキュリティ
 
 - サーバーへのデータ送信なし、アカウント登録不要、通信は HTTPS のみ。
-- Dropbox トークンは OS のセキュアストレージ（Keychain / Credential Manager / Secret Service、
-  java-keyring 経由）に保存。利用不可時はデータディレクトリのファイルにフォールバック。
+- Dropbox トークンは OS のセキュアストレージに保存——macOS は Keychain（`security` CLI 経由）、
+  Windows/Linux は Credential Manager / Secret Service（java-keyring 経由）、Snap 版だけは
+  デスクトップの Secret portal から得たアプリ専用の鍵で暗号化されたローカルストア（libsecret 経由。
+  java-keyring は使わない）。詳細は `docs/sync-architecture.ja.md`「Token Storage」参照。
+  利用不可時はデータディレクトリのファイルにフォールバック。
 
 ## 11. 技術選定
 

@@ -88,8 +88,10 @@ OneDrive (one provider active at a time), here is exactly what happens:
   sync file is stored in an app-specific folder within your OneDrive.
 - **Credential storage:** on desktop, access and refresh tokens are stored
   using your operating system's secure credential storage (Keychain on macOS,
-  Credential Manager on Windows, Secret Service on Linux), falling back to a
-  permission-restricted local file only if the OS store is unavailable. On
+  Credential Manager on Windows, Secret Service on Linux — inside the Snap
+  package, an encrypted local store keyed by a per-app master secret from your
+  desktop's Secret portal), falling back to a permission-restricted local file
+  only if the OS store is unavailable. On
   Android, tokens are encrypted with a key held in the Android Keystore before
   being written to a file in the app's private storage; this file is explicitly
   excluded from Android's automatic backup and device transfer. Tokens are never
