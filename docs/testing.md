@@ -418,6 +418,11 @@ on a device or emulator:
 - Inside the drawer: drag-and-drop reordering (including auto-scroll), the long-press context menu,
   inline rename (IME), and the currently selected feed/folder/tag staying highlighted while the
   drawer is open.
+- At `PaneLayout.Triple` (tablet landscape), select a feed and then an article: the feed-list row's
+  selection highlight must stay the same `secondaryContainer` strength it started at, not dim the
+  instant the article list gains focus (`rowSelectionColors()`'s `ListRowChrome.android.kt` `actual`
+  deliberately drops the desktop pane-focus dimming, since a touch platform has no keyboard focus to
+  move between panes). Confirm in both light and dark theme.
 - The drawer's header shows "Keryx" and its footer shows a "Settings" row that opens Settings; with
   many feeds, the footer stays fixed and does not scroll away.
 - Edge-to-edge: the scrim reaches the status/navigation bars; no pane's top bar or list bottom is

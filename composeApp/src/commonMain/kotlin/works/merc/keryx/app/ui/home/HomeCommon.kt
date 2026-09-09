@@ -6,7 +6,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
@@ -20,6 +19,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.datetime.TimeZone
@@ -105,15 +105,31 @@ internal fun Modifier.paneActivation(
 }
 
 /**
+ * The square [ExpandCollapseChevron] occupies: M3's 48dp touch target on a touch-primary platform,
+ * the bare 20dp icon everywhere else.
+ *
+ * Exposed as a function rather than left inline because it is also the horizontal step a row nested
+ * *under* a chevron-bearing row is indented past — see `feedRowIndent` in `FeedListDragAndDrop.kt`.
+ * Deriving that indent from this is what keeps the hierarchy from inverting when the touch density
+ * changes: a 36dp indent that reads as nesting beside a 20dp chevron reads as *outdenting* beside a
+ * 48dp one.
+ *
+ * @param isTouchPrimary Overridable for tests only (mirrors `feedListReorderDrag`'s own
+ *   `isTouchPrimary` parameter) — production call sites always use the platform default.
+ */
+internal fun expandChevronSlotSize(isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary): Dp =
+    if (isTouchPrimary) 48.dp else 20.dp
+
+/**
  * The expand/collapse chevron used by [TagRow] and `FolderGroupHeader` — a two-asset toggle
  * (never a single flipped/rotated asset, per the `ui-guidelines` skill's icon-set section) with an
  * `onClickLabel` for accessibility, since the icon's own `contentDescription` is `null` (the label
  * would otherwise be announced twice, once for the icon and once for the click action).
  *
- * On a touch-primary platform the click target grows to a 48dp box around the (still 20dp) icon —
- * unlike the tag color dot's own 8dp-margin-absorbing trick, there's no spare margin here to
- * absorb, so this relies on the row's own [listRowMinHeight] density pass to keep the row from
- * being forced taller than its neighbors just by this one control.
+ * On a touch-primary platform the click target grows to a [expandChevronSlotSize] box around the
+ * (still 20dp) icon — unlike the tag color dot's own 8dp-margin-absorbing trick, there's no spare
+ * margin here to absorb, so this relies on the row's own [listRowMinHeight] density pass to keep the
+ * row from being forced taller than its neighbors just by this one control.
  *
  * @param isTouchPrimary Overridable for tests only (mirrors `feedListReorderDrag`'s own
  *   `isTouchPrimary` parameter) — production call sites always use the platform default.
@@ -128,7 +144,7 @@ internal fun ExpandCollapseChevron(
     val icon = if (expanded) KeryxIcons.ExpandMore else KeryxIcons.ChevronRight
     if (isTouchPrimary) {
         Box(
-            Modifier.size(48.dp).clickable(onClickLabel = label, onClick = onToggle),
+            Modifier.size(expandChevronSlotSize(isTouchPrimary)).clickable(onClickLabel = label, onClick = onToggle),
             contentAlignment = Alignment.Center,
         ) {
             KeryxIcon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
@@ -143,39 +159,54 @@ internal fun ExpandCollapseChevron(
 }
 
 /**
- * Background for a selectable row: full-strength when its pane is focused, dimmed when the
- * item is selected but its pane isn't the logically-focused one, transparent otherwise. Matches
- * the "on" color of [works.merc.keryx.app.ui.common.ToggleChip]/`SegmentedControl` so selection
- * highlighting reads consistently across the app.
+ * Background for a selectable row, taken from this platform's [RowSelectionColors]: on desktop
+ * full-strength when its pane is focused and dimmed when the row is selected but its pane isn't the
+ * logically-focused one, on a touch platform the same either way (there is no keyboard focus to
+ * move between panes). Transparent when the row isn't selected at all.
  *
  * Returns [Color.Transparent] whenever [LocalRowSelectionVisible] reads `false` — set by `HomeScreen`
  * at [PaneLayout.Single], where "selected" doesn't mean "on screen" the way it does at [PaneLayout.Dual]/
  * [PaneLayout.Triple]: tapping a row navigates away from it, so a lingering highlight on a row the
  * user can no longer see would read as stale rather than as "your place."
+ *
+ * @param colors Overridable for tests only — production call sites always use the platform default.
  */
 @Composable
-fun selectionBackground(selected: Boolean, focused: Boolean): Color = when {
-    !LocalRowSelectionVisible.current -> Color.Transparent
-    selected && focused -> MaterialTheme.colorScheme.primary
-    selected -> MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-    else -> Color.Transparent
+internal fun selectionBackground(
+    selected: Boolean,
+    focused: Boolean,
+    colors: RowSelectionColors = rowSelectionColors(),
+): Color = when {
+    !LocalRowSelectionVisible.current || !selected -> Color.Transparent
+    focused -> colors.focusedBackground
+    else -> colors.unfocusedBackground
 }
 
 /**
- * Content color to pair with an opaque [selectionBackground] (`selected && focused` only) — null
- * otherwise, so callers fall back to each element's normal color (the 0.4-alpha background still
- * has enough contrast with the default text/icon colors). Also `null` whenever
- * [LocalRowSelectionVisible] reads `false`, matching [selectionBackground] never painting an opaque
- * background there either.
+ * Content color to pair with [selectionBackground] — `null` where the platform's own
+ * [RowSelectionColors] leaves one unset, so callers fall back to each element's normal color
+ * (desktop's dimmed unfocused background still has enough contrast with the default text/icon
+ * colors, so it sets none). Also `null` whenever [LocalRowSelectionVisible] reads `false`, matching
+ * [selectionBackground] never painting a background there either.
+ *
+ * @param colors Overridable for tests only — production call sites always use the platform default.
  */
 @Composable
-fun selectionContentColorOrNull(selected: Boolean, focused: Boolean): Color? =
-    if (LocalRowSelectionVisible.current && selected && focused) MaterialTheme.colorScheme.onPrimary else null
+internal fun selectionContentColorOrNull(
+    selected: Boolean,
+    focused: Boolean,
+    colors: RowSelectionColors = rowSelectionColors(),
+): Color? = when {
+    !LocalRowSelectionVisible.current || !selected -> null
+    focused -> colors.focusedContent
+    else -> colors.unfocusedContent
+}
 
 /**
- * Alpha of the [RowSelectionTone.SECONDARY] tint — deliberately well below the 0.4 alpha of an
- * unfocused [RowSelectionTone.PRIMARY] row, so a duplicate row of the selected feed reads as
- * "same feed, not the row you're on" rather than as a second selection.
+ * Alpha of the [RowSelectionTone.SECONDARY] tint, applied by each platform's own
+ * [RowSelectionColors.echoBackground] — deliberately far below any [RowSelectionTone.PRIMARY]
+ * background, so a duplicate row of the selected feed reads as "same feed, not the row you're on"
+ * rather than as a second selection.
  */
 internal const val SECONDARY_SELECTION_ALPHA = 0.15f
 
@@ -188,32 +219,43 @@ internal const val SECONDARY_SELECTION_ALPHA = 0.15f
 enum class RowSelectionTone { NONE, SECONDARY, PRIMARY }
 
 /**
- * Background for a row that can render as more than one instance (see [RowSelectionTone]). [PRIMARY]
- * matches the boolean [selectionBackground] exactly, so a feed with no duplicates looks unchanged.
- * Gated on [LocalRowSelectionVisible] the same way the boolean overload is — see that overload's
- * own KDoc.
+ * Background for a row that can render as more than one instance (see [RowSelectionTone]).
+ * [RowSelectionTone.PRIMARY] matches the boolean [selectionBackground] exactly, so a feed with no
+ * duplicates looks unchanged. Gated on [LocalRowSelectionVisible] the same way the boolean overload
+ * is — see that overload's own KDoc.
+ *
+ * @param colors Overridable for tests only — production call sites always use the platform default.
  */
 @Composable
-fun selectionBackground(tone: RowSelectionTone, focused: Boolean): Color = when {
+internal fun selectionBackground(
+    tone: RowSelectionTone,
+    focused: Boolean,
+    colors: RowSelectionColors = rowSelectionColors(),
+): Color = when {
     !LocalRowSelectionVisible.current -> Color.Transparent
-    tone == RowSelectionTone.PRIMARY ->
-        if (focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-    tone == RowSelectionTone.SECONDARY -> MaterialTheme.colorScheme.primary.copy(alpha = SECONDARY_SELECTION_ALPHA)
+    tone == RowSelectionTone.PRIMARY -> if (focused) colors.focusedBackground else colors.unfocusedBackground
+    tone == RowSelectionTone.SECONDARY -> colors.echoBackground
     else -> Color.Transparent
 }
 
 /**
- * Content color to pair with the tone-aware [selectionBackground] — only the opaque
- * `PRIMARY && focused` background needs one, exactly as in the boolean overload. Also gated on
- * [LocalRowSelectionVisible].
+ * Content color to pair with the tone-aware [selectionBackground] — only a
+ * [RowSelectionTone.PRIMARY] row takes one, exactly as in the boolean overload (a
+ * [RowSelectionTone.SECONDARY] echo is a faint tint that every element's default color still reads
+ * against). Also gated on [LocalRowSelectionVisible].
+ *
+ * @param colors Overridable for tests only — production call sites always use the platform default.
  */
 @Composable
-fun selectionContentColorOrNull(tone: RowSelectionTone, focused: Boolean): Color? =
-    if (LocalRowSelectionVisible.current && tone == RowSelectionTone.PRIMARY && focused) {
-        MaterialTheme.colorScheme.onPrimary
-    } else {
-        null
-    }
+internal fun selectionContentColorOrNull(
+    tone: RowSelectionTone,
+    focused: Boolean,
+    colors: RowSelectionColors = rowSelectionColors(),
+): Color? = when {
+    !LocalRowSelectionVisible.current || tone != RowSelectionTone.PRIMARY -> null
+    focused -> colors.focusedContent
+    else -> colors.unfocusedContent
+}
 
 /**
  * One specific *rendered row instance* of the feed list, as opposed to [ArticleFilter], which only

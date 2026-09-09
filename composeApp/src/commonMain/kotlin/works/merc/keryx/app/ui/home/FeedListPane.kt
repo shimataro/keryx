@@ -1192,7 +1192,7 @@ private fun TagFeedRow(
             )
             .listRowSurface(selectionBackground(selectionTone, focused), ListRowKind.NavItem, rowInteraction)
             .heightIn(min = listRowMinHeight(isTouchPrimary))
-            .padding(start = FEED_ROW_INDENT, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            .padding(start = feedRowIndent(), end = 8.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FeedAvatar(feed.displayTitle(), feed.favicon_url)

@@ -58,8 +58,11 @@ composeApp/src/
     PlatformTheme（`platformShapes` は M3 既定の `Shapes()`、`ProvidePlatformInteraction` は
     no-op — `LocalIndication`/`LocalRippleConfiguration` を M3 既定のままにすることで、あらゆる
     `clickable` と M3 部品が本物のリップルを持つようになる。external-spec.ja.md の「UI 方針」参照）、
-    `ListRowChrome.android.kt` の `listRowSurface`（`ListRowKind.NavItem` 行は
-    `NavigationDrawerItem` 風のピル形ハイライト、`ListRowKind.ListItem` 行はフルブリード —
+    `ListRowChrome.android.kt` の `listRowSurface`（両 `ListRowKind` で同じインセットを共有し、
+    `listRowShape(kind)` でクリップ形状のみ切り替える — `NavItem` 行は `NavigationDrawerItem` 風の
+    ピル、`ListItem` 行は角丸長方形。選択色は `rowSelectionColors()` の
+    `secondaryContainer`/`onSecondaryContainer` で、ペインがフォーカスを持つかどうかに関わらず
+    同じ値を使う — タッチ操作にはペイン間を移動するキーボードフォーカスの概念がないため。
     詳細は同ファイル自身の KDoc）、TooltipIconButton/ToolbarIconGroup/FlatTooltipContent
     （それぞれ、独自のネイティブな長押しトリガーを持つ `TooltipBox` の中に置いた M3 自身の
     アイコンボタン群 — どれを使うかは `IconButtonKind` が決める: `IconButton`（`Standard`）、

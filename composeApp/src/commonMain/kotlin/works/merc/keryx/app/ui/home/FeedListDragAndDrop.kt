@@ -32,6 +32,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
@@ -102,7 +103,13 @@ internal fun dropTargetContentColorOrNull(
      */
 @Composable
 internal fun dropTargetBorderModifier(isDropTarget: Boolean, color: Color): Modifier =
-    if (isDropTarget) Modifier.border(2.dp, color, MaterialTheme.shapes.small) else Modifier
+    if (isDropTarget) {
+        // Every call site is a NavItem row (FolderGroupHeader / TagRow / NoFolderHeader), and the
+        // outline must trace the very shape listRowSurface clips that row to.
+        Modifier.border(2.dp, color, listRowShape(ListRowKind.NavItem))
+    } else {
+        Modifier
+    }
 
 /** Test tag on a [FeedRow]'s whole clickable band. */
 internal fun feedRowTestTag(feedId: String): String = "feed-row-$feedId"
@@ -150,13 +157,27 @@ internal sealed interface DropBoundary {
 internal data class InsertionMarker(val indented: Boolean, val unpaired: Boolean = false)
 
 /**
+ * How far an indented feed row's content is set in *past the chevron slot* of the folder/tag row it
+ * nests under — the hierarchy step itself, as opposed to the chevron's own width.
+ */
+private val FEED_ROW_HIERARCHY_STEP = 16.dp
+
+/**
  * Where an indented feed row's own content starts, inside the row's [listRowSurface] margin — the
  * single value that indent is expressed in. `FeedRow` (nested in a folder) and `TagFeedRow` (nested
  * under a tag) apply it as their leading padding, and an [InsertionMarker] with
  * [InsertionMarker.indented] set takes its left edge *from here* rather than carrying its own
  * number, so the marker and the row title it lines up with can only ever move together.
+ *
+ * Derived from [expandChevronSlotSize] rather than fixed, so the nesting survives a touch platform
+ * widening the chevron's own slot: a constant 36dp indent sits *inside* a 48dp chevron slot, which
+ * would put a nested feed's title to the left of its own folder's title.
+ *
+ * @param isTouchPrimary Overridable for tests only (mirrors `feedListReorderDrag`'s own
+ *   `isTouchPrimary` parameter) — production call sites always use the platform default.
  */
-internal val FEED_ROW_INDENT = 36.dp
+internal fun feedRowIndent(isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary): Dp =
+    expandChevronSlotSize(isTouchPrimary) + FEED_ROW_HIERARCHY_STEP
 
 /**
  * Draws drag insertion markers at this row's top and/or bottom edge, `null` for an edge that is
@@ -198,6 +219,7 @@ internal val FEED_ROW_INDENT = 36.dp
 internal fun Modifier.insertionMarkers(top: InsertionMarker? = null, bottom: InsertionMarker? = null): Modifier {
     val color = MaterialTheme.colorScheme.primary
     val horizontalMargin = LIST_ROW_HORIZONTAL_MARGIN
+    val indent = feedRowIndent()
     val halfGuideThickness = LIST_ROW_GUIDE_THICKNESS / 2f
     val fullGuideThickness = LIST_ROW_GUIDE_THICKNESS
     return drawWithContent {
@@ -205,7 +227,7 @@ internal fun Modifier.insertionMarkers(top: InsertionMarker? = null, bottom: Ins
         val halfThicknessPx = halfGuideThickness.toPx()
         val fullThicknessPx = fullGuideThickness.toPx()
         val horizontalMarginPx = horizontalMargin.toPx()
-        val indentPx = FEED_ROW_INDENT.toPx()
+        val indentPx = indent.toPx()
         val right = size.width - horizontalMarginPx
 
         fun draw(marker: InsertionMarker, atTop: Boolean) {
@@ -579,7 +601,7 @@ internal fun FeedRow(
             .insertionMarkers(top = topMarker, bottom = bottomMarker)
             .listRowSurface(selectionBackground(selectionTone, focused), ListRowKind.NavItem, rowInteraction)
             .heightIn(min = listRowMinHeight(isTouchPrimary))
-            .padding(start = if (indented) FEED_ROW_INDENT else 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            .padding(start = if (indented) feedRowIndent() else 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FeedAvatar(feed.displayTitle(), feed.favicon_url)

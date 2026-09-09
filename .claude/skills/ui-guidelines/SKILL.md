@@ -406,17 +406,24 @@ their drawn/visible size.
 
 `listRowSurface` (see above) is `expect`/`actual` and takes a `ListRowKind` — `NavItem` for
 feed/folder/tag rows, `ListItem` for article rows — because the two platforms don't just differ in
-color/shape here, they follow genuinely different native row idioms:
+color/shape here, they follow genuinely different native row idioms. The inset itself
+(`LIST_ROW_HORIZONTAL_MARGIN`/`LIST_ROW_VERTICAL_MARGIN`) is the same for both `kind`s on both
+platforms — the two panes sit side by side at `PaneLayout.Triple`, so a row that bled to the pane
+edge in one and floated inside an inset in the other would read as two unrelated designs rather than
+two levels of one hierarchy. Only the corner treatment differs, via `listRowShape(kind)` (its own
+`expect`/`actual`, also used by `dropTargetBorderModifier` so a drop-target outline always traces
+the exact shape the row itself is clipped to):
 
 - **Desktop**: one look regardless of `kind` — the inset, rounded-rectangle highlight described
-  throughout the Divider policy section above. Desktop has no equivalent split between "nav item"
-  and "content list item" chrome, so the desktop `actual` ignores `kind` entirely.
-- **Android**: `NavItem` keeps the same inset (`LIST_ROW_HORIZONTAL_MARGIN`/`LIST_ROW_VERTICAL_MARGIN`
-  are unchanged — the drag insertion marker's geometry, per the Divider policy section above, depends
-  on the vertical one specifically) but clips to a full pill (`CircleShape`) instead of a lightly
-  rounded rectangle, matching M3's `NavigationDrawerItem`. `ListItem` is full-bleed — no horizontal
-  inset, no corner clip — matching M3's plain `ListItem`; article rows are never a drag target, so
-  nothing depends on the exact vertical spacing there the way `NavItem`'s does.
+  throughout the Divider policy section above (`MaterialTheme.shapes.small`). Desktop has no
+  equivalent split between "nav item" and "content list item" chrome, so the desktop `actual`
+  ignores `kind` entirely.
+- **Android**: `NavItem` clips to a full pill (`CircleShape`), matching M3's `NavigationDrawerItem`.
+  `ListItem` clips to `MaterialTheme.shapes.large` — a card-like rounded rectangle, distinct from the
+  pill so the two panes stay visually distinguishable while sharing one selection language, rather
+  than M3's plain (unclipped, full-bleed) `ListItem`. Article rows are never a drag target, so
+  nothing depends on the vertical spacing there the way `NavItem`'s does, but the horizontal inset is
+  shared with `NavItem` regardless (see above).
 
 **When adding a new list row**, decide which `ListRowKind` it is by asking the same question M3
 asks: does this row represent a navigation/filter target (a feed, folder, tag — something you tap to
@@ -424,14 +431,30 @@ change what's showing), or a content item in a list (an article — something yo
 `kind` explicitly; it has no default (see `listRowSurface`'s own KDoc for why — a forgotten `kind`
 should be a compile error, not a silently wrong Android row style).
 
-`selectionBackground`/`selectionContentColorOrNull` (`ui/home/HomeCommon.kt`) — the color functions
-list rows pass into `listRowSurface`'s `background` parameter — additionally read
+`selectionBackground`/`selectionContentColorOrNull` (`ui/home/HomeCommon.kt`) resolve their actual
+colors from `rowSelectionColors()` (`ui/home/ListRowChrome.kt`'s `expect`/`actual`,
+`RowSelectionColors`) — the shared logic in `HomeCommon.kt` only handles the `LocalRowSelectionVisible`
+gate and the `RowSelectionTone` fan-out (a feed rendered once under its folder and again under every
+expanded tag; the non-primary instances get `RowSelectionColors.echoBackground`, a faint tint at
+`SECONDARY_SELECTION_ALPHA` — see the KDoc there). The palette itself is per-platform:
+
+- **Desktop**: `primary`/`onPrimary` when the row's pane holds keyboard focus, a dimmed
+  (`alpha = 0.4`) `primary` with no content-color override otherwise — the focused/unfocused split
+  is "which pane will keyboard input land in", a concept a pointer-and-keyboard platform has and a
+  touch one doesn't.
+- **Android**: `secondaryContainer`/`onSecondaryContainer`, M3's own "selected item" pair, for both
+  focus states alike — there is no keyboard focus to move between panes on a touch platform, so a
+  selected row must look identical no matter which pane it's in (previously it didn't: a `focused`
+  axis leaking in from desktop's model made a feed-list selection visibly dim the instant a device
+  tapped an article, which read as the feed selection being lost).
+
 `LocalRowSelectionVisible`, a `CompositionLocal` `HomeScreen` sets to `false` at `PaneLayout.Single`
 (see "Adaptive pane layout & touch affordances" above): on a phone-width screen, tapping a row
 navigates *away* from it (drills into the article list or the article detail), so a lingering
 highlight there would mark a row the user can no longer see, unlike at `Dual`/`Triple` where the
-selected row's pane stays on screen alongside whichever pane it opened. This is desktop-and-Android
-shared logic (desktop is unaffected — it never resolves `Single`), not a per-platform `actual`.
+selected row's pane stays on screen alongside whichever pane it opened. This gate is
+desktop-and-Android shared logic (desktop is unaffected — it never resolves `Single`), not a
+per-platform `actual`.
 
 ## Sticky section headers in scrollable lists
 

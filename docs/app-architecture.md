@@ -59,9 +59,12 @@ composeApp/src/
     (`platformShapes` = M3's own default `Shapes()`,
     `ProvidePlatformInteraction` a no-op — leaving `LocalIndication`/`LocalRippleConfiguration` at
     their M3 defaults is what gives every `clickable` and M3 component a real ripple; see "UI
-    Direction" in external-spec.md), `ListRowChrome.android.kt`'s `listRowSurface` (a pill-shaped
-    `NavigationDrawerItem`-style highlight for `ListRowKind.NavItem` rows, full-bleed for
-    `ListRowKind.ListItem` rows — see that file's own KDoc), TooltipIconButton/ToolbarIconGroup/
+    Direction" in external-spec.md), `ListRowChrome.android.kt`'s `listRowSurface` (the same inset
+    for both `ListRowKind`s, clipped to `listRowShape(kind)` — a `NavigationDrawerItem`-style pill
+    for `NavItem` rows, a large rounded rectangle for `ListItem` rows — with selection colors from
+    `rowSelectionColors()`'s `secondaryContainer`/`onSecondaryContainer` pair, applied the same
+    whether or not the row's pane holds focus (a touch platform has no keyboard focus to move
+    between panes); see that file's own KDoc), TooltipIconButton/ToolbarIconGroup/
     FlatTooltipContent (M3's own icon-button family inside a `TooltipBox` with its own native
     long-press trigger — `IconButtonKind` picks the member: `IconButton` (`Standard`),
     `FilledIconButton` (`Primary`), `OutlinedIconButton` (`Secondary`) and `FilledTonalIconButton`

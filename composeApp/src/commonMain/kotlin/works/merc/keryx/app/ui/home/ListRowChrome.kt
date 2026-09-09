@@ -9,6 +9,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -229,3 +230,46 @@ internal expect fun Modifier.listRowSurface(
     decoration: Modifier = Modifier,
     extraBottomMargin: Dp = 0.dp,
 ): Modifier
+
+/**
+ * The shape a list row's selection surface is clipped to (and that a drop-target border traces).
+ * Desktop's `actual` ignores [kind] entirely — its one macOS-leaning row style applies to every
+ * row — while Android's gives each [ListRowKind] the corner treatment of the M3 component it is
+ * modeled on. Kept out of [listRowSurface] as a value of its own so a decoration drawn *around* a
+ * row (currently `dropTargetBorderModifier` in `FeedListDragAndDrop.kt`) traces the very shape the
+ * row is clipped to, instead of repeating a shape constant that could drift from it.
+ */
+@Composable
+internal expect fun listRowShape(kind: ListRowKind): Shape
+
+/**
+ * The palette a selectable list row paints its selection from — resolved per platform, applied by
+ * the shared `selectionBackground` / `selectionContentColorOrNull` logic in `HomeCommon.kt` (which
+ * keeps the [LocalRowSelectionVisible] gate and the [RowSelectionTone] fan-out common to both).
+ *
+ * The focused/unfocused split is desktop's "which pane holds logical focus" axis: a selected row in
+ * the non-focused pane dims so the user can see where their keyboard input will land. A touch
+ * platform has no such axis — there is no keyboard focus to move between panes — so Android's
+ * `actual` deliberately returns the same values for both, making a selected row look identical
+ * wherever it lives.
+ *
+ * @property focusedBackground Background of a selected row in the focused pane.
+ * @property focusedContent Content color to pair with [focusedBackground]; `null` leaves each
+ *   element at its own default color.
+ * @property unfocusedBackground Background of a selected row whose pane is not focused.
+ * @property unfocusedContent Content color to pair with [unfocusedBackground]; `null` leaves each
+ *   element at its own default color.
+ * @property echoBackground Background of a [RowSelectionTone.SECONDARY] row — another rendered
+ *   instance of the same selected feed, which must read as an echo rather than a second selection.
+ */
+internal data class RowSelectionColors(
+    val focusedBackground: Color,
+    val focusedContent: Color?,
+    val unfocusedBackground: Color,
+    val unfocusedContent: Color?,
+    val echoBackground: Color,
+)
+
+/** This platform's list-row selection palette — see [RowSelectionColors]. */
+@Composable
+internal expect fun rowSelectionColors(): RowSelectionColors
