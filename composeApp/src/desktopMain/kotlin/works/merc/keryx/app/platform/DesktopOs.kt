@@ -40,3 +40,22 @@ internal val isWindows = osName.contains("win")
  * a JDK peer that ignores display scaling entirely — see `platform/NativeMenu.desktop.kt`.
  */
 internal val isLinux = osName.contains("linux") || osName.contains("nix") || osName.contains("nux")
+
+/** `snap/snapcraft.yaml`'s `name:`, duplicated here so [isSnap] can confirm it's *our own* snap. */
+private const val KERYX_SNAP_NAME = "keryx"
+
+/**
+ * Whether this desktop JVM is running inside *this app's own* Snap confinement. Unlike the other
+ * `is*` checks above (which sniff `os.name`), this reads snapd's own `SNAP_NAME` environment
+ * variable — the same one libsecret's `secret-backend.c` checks to decide whether to route
+ * through the Secret portal instead of Secret Service (see
+ * `works.merc.keryx.app.data.cloud.LibSecretTokenStorage`) — but it isn't enough to check that
+ * the variable is merely *set*: a **classic**-confinement snap (e.g. an IDE) does not isolate the
+ * mount namespace, so launching a deb/rpm/portable Keryx from its integrated terminal inherits
+ * that snap's `SNAP_NAME` (e.g. `code`) into a process that is not confined at all. Comparing
+ * against [KERYX_SNAP_NAME] rules that out. Deliberately not the `SNAP` variable
+ * `platform/InstallLocation.desktop.kt`'s `detectLinuxInstallLocation` reads (both are set for
+ * every confined process, but this needs to stay in lockstep with libsecret's own detection,
+ * which keys on `SNAP_NAME`, not with that unrelated install-location check).
+ */
+internal val isSnap = System.getenv("SNAP_NAME") == KERYX_SNAP_NAME
