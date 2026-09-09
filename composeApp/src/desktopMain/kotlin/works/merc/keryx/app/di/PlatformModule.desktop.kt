@@ -19,6 +19,7 @@ import works.merc.keryx.app.data.cloud.FileTokenStorage
 import works.merc.keryx.app.data.cloud.GoogleDriveAuthManager
 import works.merc.keryx.app.data.cloud.GoogleDriveStorage
 import works.merc.keryx.app.data.cloud.KeyringTokenStorage
+import works.merc.keryx.app.data.cloud.LibSecretTokenStorage
 import works.merc.keryx.app.data.cloud.OneDriveAuthManager
 import works.merc.keryx.app.data.cloud.OneDriveStorage
 import works.merc.keryx.app.data.cloud.SecurityCliTokenStorage
@@ -32,6 +33,7 @@ import works.merc.keryx.app.domain.OsNotificationSink
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.UpdateInstaller
 import works.merc.keryx.app.platform.isMacOs
+import works.merc.keryx.app.platform.isSnap
 import works.merc.keryx.app.platform.update.DesktopUpdateInstaller
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.oauth_loopback_success
@@ -42,12 +44,35 @@ import works.merc.keryx.app.resources.oauth_loopback_success
  * Dropbox's values (`dropbox`) match the pre-multi-provider hardcoded ones, so no
  * migration is needed for existing users' stored tokens. macOS Keychain writes
  * fail from the shared JVM via java-keyring, so delegate to the Apple-signed
- * `security` CLI there; Windows/Linux keep the java-keyring backend.
+ * `security` CLI there; Windows/Linux normally keep the java-keyring backend, but
+ * inside the snap [LibSecretTokenStorage] is used instead — `password-manager-service`
+ * is not auto-connected by snapd policy (and Snapcraft reviewers decline that
+ * request for this interface on principle, see `docs/build.md`), so java-keyring's
+ * direct Secret Service access would silently fall back to the plaintext file for
+ * every Store-installed user. Deliberately not applied outside the snap: it would
+ * make existing deb/rpm users' Secret Service tokens unreadable (different item
+ * schema/attributes), forcing a needless re-authorization.
+ *
+ * **No migration the other way either**: a user who manually ran
+ * `snap connect keryx:password-manager-service` before this class existed has tokens sitting in a
+ * `KeyringTokenStorage`/java-keyring Secret Service item that this class's different schema simply
+ * cannot see. They see "not connected" once and need to reconnect (and may want to manually remove
+ * the orphaned Secret Service item themselves, e.g. via `seahorse`/`secret-tool`) — accepted because
+ * no tagged release has ever shipped the Snap package (it was only ever built manually or via
+ * `release.yml`'s untagged `package-snap` job), so the affected population is at most a handful of
+ * pre-release testers, not the general Store install base.
+ *
+ * [snap] and [macOs] are parameters (rather than reading [works.merc.keryx.app.platform.isSnap] /
+ * [works.merc.keryx.app.platform.isMacOs] directly) so a test can pin all three branches without
+ * depending on the real OS/environment this test JVM happens to run under.
  */
-private fun providerTokenStorage(type: CloudStorageType, macOs: Boolean): TokenStorage {
+internal fun providerTokenStorage(type: CloudStorageType, macOs: Boolean, snap: Boolean): TokenStorage {
     val fallback = FileTokenStorage(fileName = ".${type.id}_tokens.json")
-    return if (macOs) SecurityCliTokenStorage(fallback = fallback, account = type.id)
-    else KeyringTokenStorage(fallback = fallback, account = type.id)
+    return when {
+        macOs -> SecurityCliTokenStorage(fallback = fallback, account = type.id)
+        snap -> LibSecretTokenStorage(fallback = fallback, account = type.id)
+        else -> KeyringTokenStorage(fallback = fallback, account = type.id)
+    }
 }
 
 actual val platformModule: Module = module {
@@ -81,7 +106,7 @@ actual val platformModule: Module = module {
         val dropboxAuth: CloudAuthManager = DropboxAuthManager(client)
         val dropboxProvider = CloudSession.Provider(
             clientId = BuildConfig.DROPBOX_APP_KEY,
-            tokenStorage = providerTokenStorage(CloudStorageType.DROPBOX, isMacOs),
+            tokenStorage = providerTokenStorage(CloudStorageType.DROPBOX, isMacOs, isSnap),
             authManager = dropboxAuth,
             connectFlow = OAuthConnectFlow(
                 authManager = dropboxAuth,
@@ -98,7 +123,7 @@ actual val platformModule: Module = module {
             GoogleDriveAuthManager(client, DesktopBuildConfig.GOOGLE_DRIVE_CLIENT_SECRET)
         val driveProvider = CloudSession.Provider(
             clientId = DesktopBuildConfig.GOOGLE_DRIVE_CLIENT_ID,
-            tokenStorage = providerTokenStorage(CloudStorageType.GOOGLE_DRIVE, isMacOs),
+            tokenStorage = providerTokenStorage(CloudStorageType.GOOGLE_DRIVE, isMacOs, isSnap),
             authManager = driveAuth,
             connectFlow = OAuthConnectFlow(
                 authManager = driveAuth,
@@ -115,7 +140,7 @@ actual val platformModule: Module = module {
         val oneDriveAuth: CloudAuthManager = OneDriveAuthManager(client)
         val oneDriveProvider = CloudSession.Provider(
             clientId = BuildConfig.ONEDRIVE_CLIENT_ID,
-            tokenStorage = providerTokenStorage(CloudStorageType.ONEDRIVE, isMacOs),
+            tokenStorage = providerTokenStorage(CloudStorageType.ONEDRIVE, isMacOs, isSnap),
             authManager = oneDriveAuth,
             connectFlow = OAuthConnectFlow(
                 authManager = oneDriveAuth,

@@ -257,15 +257,44 @@ stages the common GNOME/GTK runtime libraries automatically. The `gpu-2404` cont
 interface (plug) provides Mesa GPU drivers without bloating the snap with `libllvm17`
 (~100 MB) that would come from staging `libgl1-mesa-dri` directly.
 
-`password-manager-service` (Secret Service, for `java-keyring`'s token storage — **not**
-auto-connected by snapd policy, so a user must run `snap connect keryx:password-manager-service`
-before Secret Service is actually reachable (for local `--dangerous` installs this manual step is
-always required; once published to the Snap Store, auto-connection can be requested on the
-Snapcraft forum so end users get it automatically). Until then, `java-keyring` falls back to the same
-permission-restricted plaintext file every platform already uses when the OS store is
-unavailable, see `SECURITY.md` — this is not silent: `CloudSession` raises a notification-center
-warning whose `ShowInfoDialog` action names this `snap connect` as the fix, see
-`error-design.md`).
+Token storage inside the snap does **not** go through `java-keyring`/Secret Service the way the
+deb/rpm builds do, and the snap declares **no `password-manager-service` plug at all**. That
+interface is not auto-connected by snapd policy, and Snapcraft's reviewers decline auto-connect
+requests for it on principle — it would grant a snap access to every secret in the user's
+session, not just its own (see recent forum outcomes such as the
+[NordPass](https://forum.snapcraft.io/t/nordpass-auto-connection-request-to-password-manager-service/50469)
+request and others in
+[store-requests › privileged-interfaces](https://forum.snapcraft.io/c/store-requests/privileged-interfaces/27),
+all declined with "use the Secret portal instead") — but declaring the plug anyway, for a user to
+manually `snap connect`, would be pointless here regardless of that policy: `LibSecretTokenStorage`
+is used for every provider inside the snap (wired in `PlatformModule.desktop.kt`'s
+`providerTokenStorage`, gated on `platform.isSnap`), and it never falls through to raw Secret
+Service — `KeyringTokenStorage` (the class deb/rpm use for that) is simply not reachable from
+inside the snap at all, by design. So the plug would sit declared without anything in the app ever
+using the access it grants, needlessly widening the snap's declared privilege for no benefit.
+
+`LibSecretTokenStorage` calls libsecret directly via JNA rather than going through
+`org.freedesktop.secrets`. libsecret itself detects the snap sandbox (via `SNAP_NAME`) and
+transparently routes through `org.freedesktop.portal.Secret` instead, storing the actual token
+JSON in a local file it encrypts with a per-app master secret it obtains from that portal — access
+to the portal comes from the `desktop` plug the `gnome` extension already adds, so neither a
+privileged interface nor a manual `snap connect` is needed. Whenever libsecret (or the portal)
+cannot be reached, `LibSecretTokenStorage` falls back to the same permission-restricted plaintext
+file every platform already uses when the OS store is unavailable, see `SECURITY.md` — this is not
+silent: `CloudSession` raises a notification-center warning, see `error-design.md`. In that
+(expected to be rare, given the portal is part of the desktop baseline the `gnome` extension
+already requires) case there is no privileged-interface fallback to reach for — updating
+`xdg-desktop-portal` and its desktop-specific backend is the actual fix, which is what the
+warning's own detail text says.
+
+**Manual verification (no CI coverage — `ci.yml` never builds the Snap):** that the `gnome`
+extension's platform snap actually resolves `libsecret-1.so.0` at runtime is a runtime-only
+assumption (the lint step can't see a `dlopen`, see the `lint.ignore` comment above). Before a
+release, `snapcraft pack --destructive-mode` (or `--use-lxd`) → `snap install --dangerous` the
+result, connect a cloud provider, and confirm (a) no plaintext-fallback warning appears in the
+notification center, and (b) that this holds **without** ever running
+`snap connect keryx:password-manager-service` (there is nothing to connect — see above). If
+libsecret failed to resolve, `stage-packages: [libsecret-1-0]` under `parts.keryx` is the fix.
 
 `home` is what lets the OPML import/export file picker (`JFileChooser`, see
 `app-architecture.md`) reach non-hidden files anywhere under the user's home directory — but it
@@ -632,11 +661,9 @@ fail the build: the "Publish to Snap Store" step is skipped entirely (the `.snap
 attached to the GitHub Release), so the workflow only starts publishing once this secret is
 configured.
 
-After the first successful Store publish, request auto-connection for
-`password-manager-service` on the [Snapcraft forum](https://forum.snapcraft.io/c/store-requests/16)
-(see "Linux Snap package" above) — until that request is granted, every Store-installed user has
-to run `snap connect keryx:password-manager-service` themselves, or `java-keyring` falls back to
-the plaintext token file (surfaced to the user via a notification-center warning, not silently).
+No `password-manager-service` auto-connect request is filed after publishing — see "Linux Snap
+package" above for why (Snapcraft reviewers decline this interface's auto-connect on principle)
+and for the `LibSecretTokenStorage`/Secret-portal path used instead, which needs no such request.
 
 For Android release signing, set `ANDROID_RELEASE_KEYSTORE_BASE64`, `ANDROID_RELEASE_KEYSTORE_PASSWORD`, `ANDROID_RELEASE_KEY_ALIAS`, and `ANDROID_RELEASE_KEY_PASSWORD` as repository secrets. The keystore is a Base64-encoded PKCS12/JKS file; the workflow decodes it at build time. To keep the same signing key on GitHub Releases and Google Play, generate the keystore locally and, when creating the app in Google Play Console, enroll it as the **existing app signing key**: Play Console never accepts the raw JKS/PKCS12 file directly — first encrypt it with Google's PEPK (Play Encrypt Private Key) tool (`java -jar pepk.jar --keystore=<path> --alias=<alias> --output=<encrypted-file> --encryptionkey=<key-from-play-console>`, downloaded from the Play App Signing enrollment page), then upload the resulting encrypted file. This registers the keystore as the **app signing key** — the key Google holds and uses to re-sign the app before it reaches users, distinct from the **upload key** used to sign each `.aab` submitted through Play Console afterward. The same keystore can serve both roles (Google explicitly allows reusing the app signing key as its own upload key), which is what keeps a single keystore sufficient for both GitHub Releases (where the APK/AAB is signed with it directly) and Google Play; a separate, dedicated upload key is Google's recommended hardening, not a requirement. `release.yml` passes `-PandroidReleaseSigningRequired=true` to `:androidApp:assembleGithubRelease`/`:androidApp:bundlePlayRelease`, which turns a missing (or half-configured) secret into an immediate build failure — since this workflow publishes its output, it must never succeed with an unsigned artifact — so all four secrets are required for the release workflow to succeed. Both flavors are signed with the same keystore (the `signingConfigs` block isn't flavor-scoped), which is exactly what the app-signing-key enrollment above requires: the sideloaded `github` APK and the Play-resigned `play` AAB need to trace back to the same signing identity, or a device that already has one installed can never receive the other as an in-place update (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`).
 

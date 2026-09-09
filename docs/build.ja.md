@@ -253,15 +253,44 @@ snapcraft pack --use-lxd
 AWT/Swing・FlatLaf・Skiko・WebKitGTK が必要とするすべての X11 クライアントライブラリやフォントスタック、GTK 依存を個別に列挙するのを避けるため、スナップは `gnome` 拡張機能を使う。これにより、共通の GNOME/GTK ランタイムライブラリが自動的にステージされる。
 `gpu-2404` コンテンツインターフェース（プラグ）は、`libgl1-mesa-dri` を直接ステージする場合に引き込まれる `libllvm17`（約100MB）による肥大化を回避しつつ、Mesa GPU ドライバーを提供する。
 
-`password-manager-service`（Secret Service、`java-keyring`のトークン保存用 —
-snapdのポリシー上**自動接続されない**ため、Secret Serviceに実際にアクセスできるように
-なるには利用者が事前に`snap connect keryx:password-manager-service`を実行する必要がある
-（`--dangerous`によるローカルインストール時はこの手動接続が必須。Snap Store公開後は
-フォーラムでauto-connectを申請でき、利用者はインストール時に自動的に接続される）。
-接続するまでは、OSのセキュアストアが使えない場合に他のプラットフォームでもすでに使っている
-権限制限付きの平文フォールバックファイルへ`java-keyring`がフォールバックする。`SECURITY.md`
-参照。これは黙って行われるわけではなく、`CloudSession`が通知センターに警告を出し、その
-`ShowInfoDialog`アクションが対処法としてこの`snap connect`を案内する。`error-design.ja.md`参照）。
+スナップ内のトークン保存は、deb/rpm ビルドのように `java-keyring`／Secret Service を経由**しない**。
+スナップは `password-manager-service` プラグを**まったく宣言していない**。このインターフェースは
+snapd のポリシー上自動接続されないうえ、Snapcraft のレビュアーは原則としてこのインターフェースの
+自動接続申請を却下する——セッション内の全シークレットへのアクセスを許してしまい、そのアプリ自身の
+ものだけに限定されないためだ（
+[NordPass](https://forum.snapcraft.io/t/nordpass-auto-connection-request-to-password-manager-service/50469)
+をはじめとする
+[store-requests › privileged-interfaces](https://forum.snapcraft.io/c/store-requests/privileged-interfaces/27)
+での申請は、いずれも「Secret portal を使え」として却下されている）——が、そのポリシーとは無関係に、
+このプラグを宣言して利用者に手動 `snap connect` させること自体が無意味だ。スナップ内では
+すべてのプロバイダで `LibSecretTokenStorage` を使う（配線は `PlatformModule.desktop.kt` の
+`providerTokenStorage`、`platform.isSnap` で分岐）ため、生の Secret Service に落ちる経路が
+一切ない——deb/rpm と同じ `KeyringTokenStorage` はスナップ内からは意図的に到達不能である。
+つまりこのプラグを宣言しても、アプリのどこもその権限を使わないまま、宣言された特権だけが
+無駄に広がる。
+
+`LibSecretTokenStorage` は `org.freedesktop.secrets` を直接叩くのではなく JNA 経由で libsecret を
+直接呼び出す実装で、libsecret 自身が（`SNAP_NAME` を見て）スナップのサンドボックスを検知し、
+`org.freedesktop.portal.Secret` 経由に自動的に切り替える。実際のトークン JSON は、その portal から
+得たアプリ専用のマスターシークレットで暗号化されたローカルファイルに保存される。この portal への
+アクセスは `gnome` 拡張機能がすでに付与している `desktop` プラグで足りるため、特権インターフェースも
+手動の `snap connect` も不要になる。libsecret（や portal）に到達できない場合、
+`LibSecretTokenStorage` は、OS のセキュアストアが使えない場合に他のプラットフォームでもすでに
+使っている権限制限付きの平文フォールバックファイルへフォールバックする。`SECURITY.md` 参照。
+これは黙って行われるわけではなく、`CloudSession`が通知センターに警告を出す。`error-design.ja.md`
+参照。この（`gnome` 拡張機能がすでに前提とするデスクトップ基盤の一部である portal が相手なので、
+稀であるはずの）ケースには、逃げ込める特権インターフェースは存在しない——実際の対処法は
+`xdg-desktop-portal` とデスクトップ固有のバックエンドを更新することであり、警告の詳細文言も
+そう案内している。
+
+**手動検証（CI ではカバーされない——`ci.yml` は Snap を一切ビルドしない）**: `gnome` 拡張機能の
+プラットフォーム snap が実行時に `libsecret-1.so.0` を実際に解決できるかは、実行時のみ検証可能な
+前提である（lint ステップは `dlopen` を検知できない。上記 `lint.ignore` のコメント参照）。
+リリース前に `snapcraft pack --destructive-mode`（または `--use-lxd`）→ `snap install --dangerous`
+した結果でクラウド連携を接続し、(a) 通知センターに平文フォールバック警告が出ないこと、
+(b) それが `snap connect keryx:password-manager-service` を一度も実行せずに成立すること
+（接続すべきプラグ自体が存在しない——上記参照）を確認する。libsecret の解決に失敗していた場合は
+`parts.keryx` の `stage-packages: [libsecret-1-0]` が対処法になる。
 
 `home`は、OPMLインポート/エクスポートのファイル選択ダイアログ（`JFileChooser`、
 `app-architecture.md`参照）がユーザーのホームディレクトリ配下の非隠しファイルへ
@@ -663,12 +692,10 @@ package_update,package_release` の ACL を指定）で生成したものを使�
 （`.snap` のビルドと GitHub Release への添付は行われる）ため、このシークレットを設定して初めて
 実際の公開が始まる。
 
-初回の Store 公開が成功したら、`password-manager-service`（上記「Linux Snap パッケージ」参照）の
-auto-connect を [Snapcraft フォーラム](https://forum.snapcraft.io/c/store-requests/16) で申請
-すること——申請が承認されるまでは、Store からインストールした利用者は各自
-`snap connect keryx:password-manager-service` を実行する必要があり、実行しないと
-`java-keyring` は平文のトークンファイルにフォールバックする（これは通知センターの警告で
-利用者に伝わり、サイレントではない）。
+公開後に `password-manager-service` の auto-connect は申請しない——理由（Snapcraft の
+レビュアーはこのインターフェースの auto-connect を原則却下する）と、その代わりに使っている
+`LibSecretTokenStorage`／Secret portal 経路（申請が一切不要）は上記「Linux Snap パッケージ」
+参照。
 
 Android のリリース署名には、`ANDROID_RELEASE_KEYSTORE_BASE64`、`ANDROID_RELEASE_KEYSTORE_PASSWORD`、`ANDROID_RELEASE_KEY_ALIAS`、`ANDROID_RELEASE_KEY_PASSWORD` をリポジトリの Secrets に設定する。keystore は Base64 エンコードした PKCS12/JKS ファイルであり、ワークフローがビルド時に復元する。GitHub Releases と Google Play で同じ署名キーを使いたい場合は、ローカルで生成した keystore を、アプリ作成時に Google Play Console で**既存のアプリ署名キー**として登録する: Play Console は生の JKS/PKCS12 ファイルをそのままでは受け付けず、まず Google の PEPK（Play Encrypt Private Key）ツールで暗号化する必要がある（`java -jar pepk.jar --keystore=<path> --alias=<alias> --output=<encrypted-file> --encryptionkey=<key-from-play-console>`。Play App Signing の登録ページからダウンロードできる）。生成された暗号化ファイルをアップロードすると、その keystore が**アプリ署名キー**として登録される — これは Google が保持し、ユーザーに届く前にアプリを再署名するために使う鍵であり、以降 Play Console にアップロードする各 `.aab` に署名する**アップロードキー**とは区別される。同じ keystore を両方の役割に使うこともでき（Google はアプリ署名キーをそのままアップロードキーとして再利用することを明示的に許可している）、これにより GitHub Releases（APK/AAB に直接その keystore で署名する）と Google Play の双方で単一の keystore のみで済む。専用のアップロードキーを別に用意するのは Google が推奨する追加の防御策であり、必須ではない。`release.yml` は `:androidApp:assembleGithubRelease`/`:androidApp:bundlePlayRelease` に `-PandroidReleaseSigningRequired=true` を渡しており、これは Secrets が未設定（または一部だけ設定）の場合に**即座のビルド失敗**へつなげるためのフラグ — このワークフローは成果物を公開するので、未署名のまま成功させてはならない。そのため release ワークフローの成功には4つすべての Secrets が必須。両方の flavor は同じ keystore で署名される（`signingConfigs` は flavor スコープではない）——これはまさに上記のアプリ署名キー登録が要求する構成そのもの: サイドロードされる `github` の APK と、Play が再署名する `play` の AAB は同一の署名 ID に遡れる必要があり、そうでなければ一方が既にインストールされている端末が他方をその場でのアップデートとして受け取れなくなる（`INSTALL_FAILED_UPDATE_INCOMPATIBLE`）。
 
