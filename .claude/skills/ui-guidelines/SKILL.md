@@ -138,9 +138,13 @@ only to the pane that sits in the window's top-left corner — currently
 
 ## Adaptive pane layout & touch affordances
 
-`ui/home/HomePaneLayout.kt`'s `paneLayoutFor` resolves how many of the 3 panes fit side by side at
-the current width (`PaneLayout.Triple`/`Dual`/`Single`), derived from the same per-pane minimum
-widths this file already uses for tonal roles — not an independent breakpoint. Desktop always
+`ui/home/HomePaneLayout.kt`'s `paneLayoutFor` resolves how many of the 3 panes belong side by side
+at the current width (`PaneLayout.Triple`/`Dual`/`Single`), derived from the same per-pane width
+constants this file already uses for tonal roles — not an independent breakpoint. `Triple`'s
+threshold is summed from the two resizable panes' *default* widths rather than their minimums: a
+width that fits three panes only by putting all three on their floors at once (an Android tablet in
+portrait) is treated as narrow instead, which matters most on touch, where `ResizableDivider` has
+no drag affordance to widen one back out. Desktop always
 resolves `Triple` (`WINDOW_MIN_WIDTH >= TRIPLE_PANE_MIN_WIDTH`), where the feed list is a permanent
 on-screen pane. `feedListIsDrawer(layout)` (`layout != Triple`) is the single source of truth every
 other layout decision below branches on: at any narrower width, the feed list instead becomes a
