@@ -18,9 +18,12 @@ import works.merc.keryx.app.core.TRIPLE_PANE_MIN_WIDTH
 enum class HomePane { FeedList, ArticleList, ArticleDetail }
 
 /**
- * How many of the three home panes ([HomePane]) fit side by side at the current width. See
- * [TRIPLE_PANE_MIN_WIDTH] / [DUAL_PANE_MIN_WIDTH] for the thresholds this is derived from —
- * they, not an independent breakpoint, are this app's source of truth for "does it fit".
+ * How many of the three home panes ([HomePane]) belong side by side at the current width. See
+ * [TRIPLE_PANE_MIN_WIDTH] / [DUAL_PANE_MIN_WIDTH] for the thresholds this is derived from — they,
+ * not an independent breakpoint, are this app's source of truth. [TRIPLE_PANE_MIN_WIDTH] is
+ * summed from the two resizable panes' *default* widths (three panes squeezed onto their floors
+ * are not worth showing as three — see its own KDoc); [DUAL_PANE_MIN_WIDTH] from the minimums,
+ * since the two panes it governs are split evenly by `NarrowPaneRow` with no preference to honor.
  */
 enum class PaneLayout { Single, Dual, Triple }
 
@@ -57,10 +60,16 @@ internal data class TriplePaneWidths(val feedWidth: Dp, val articleWidth: Dp)
  * Each pane's minimum ([FEED_LIST_PANE_MIN_WIDTH] / [ARTICLE_LIST_PANE_MIN_WIDTH]) is reserved
  * first, and only what each preference asks for *above* its minimum competes for whatever width is
  * left, proportionally. Scaling both preferences by one shared factor instead — as this used to —
- * gives away width in proportion to a pane's total size rather than to its slack, so at
- * [TRIPLE_PANE_MIN_WIDTH] exactly (where nothing is left over) the narrower pane was pushed below
- * its minimum: with the default 260dp/360dp preferences the feed pane landed at ~176dp, under its
- * own 180dp floor.
+ * gives away width in proportion to a pane's total size rather than to its slack, which pushes the
+ * narrower pane below its own minimum as the squeeze tightens: back when [TRIPLE_PANE_MIN_WIDTH]
+ * was derived from the pane minimums, the default 260dp/360dp preferences landed the feed pane at
+ * ~176dp there, under its own 180dp floor.
+ *
+ * At [TRIPLE_PANE_MIN_WIDTH] exactly there is nothing to scale — that threshold is the sum of the
+ * two defaults plus the reader's minimum, so an untouched pair of preferences fits it precisely.
+ * The squeeze only arises once a preference has been dragged above its default: both panes at
+ * their 480dp/600dp maximums (`FEED_LIST_PANE_MAX_WIDTH`/`ARTICLE_LIST_PANE_MAX_WIDTH`) ask for
+ * 1080dp between them, which a window only a little above [TRIPLE_PANE_MIN_WIDTH] cannot give.
  */
 internal fun triplePaneWidths(availableForPanes: Dp, feedPreference: Dp, articlePreference: Dp): TriplePaneWidths {
     val minFeed = FEED_LIST_PANE_MIN_WIDTH.dp

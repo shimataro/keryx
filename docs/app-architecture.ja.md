@@ -476,7 +476,12 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 いくつを横並びで表示するかを、利用可能な幅だけから解決する: `PaneLayout.Triple`（3ペインすべて —
 デスクトップは `WINDOW_MIN_WIDTH` が常に `TRIPLE_PANE_MIN_WIDTH` 以上であるため常にここに解決される。
 `core/Constants.kt` の当該定数の KDoc 参照）、`PaneLayout.Dual`（記事一覧 + 記事詳細）、
-`PaneLayout.Single`（1ペインのみ、スマートフォン幅）のいずれか。`feedListIsDrawer(layout)`
+`PaneLayout.Single`（1ペインのみ、スマートフォン幅）のいずれか。どちらの閾値も独立した
+ブレークポイントではなくペイン幅の定数から合算しており、とくに `TRIPLE_PANE_MIN_WIDTH` は最小幅では
+なくリサイズ可能な2ペインの *既定* 幅から求めている: 3枚すべてを同時に下限へ張り付かせなければ収まらない
+程度の幅——Android タブレットの縦向き——は狭いレイアウトとして扱う。これはタッチ環境でとくに効く。
+`ResizableDivider` にドラッグのアフォーダンスが無く、ユーザーがペインを広げ直せないためである
+（当該定数の KDoc 参照）。`feedListIsDrawer(layout)`
 （`layout != Triple`）が、以下のあらゆるレイアウト判断が分岐する唯一の情報源である:
 `Triple` 以外のすべてのレイアウトでは、フィード一覧はオンスクリーンのペインではなく Gmail 風の
 モーダルナビゲーションドロワー（`ModalNavigationDrawer`）となり、`ArticleListPane` 自身のヘッダー

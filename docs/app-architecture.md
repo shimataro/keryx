@@ -460,6 +460,12 @@ article detail) `HomeScreen` renders side by side, purely as a function of the a
 `PaneLayout.Triple` (all three — desktop always resolves here, since `WINDOW_MIN_WIDTH` is
 guaranteed `>= TRIPLE_PANE_MIN_WIDTH`, see that constant's KDoc in `core/Constants.kt`),
 `PaneLayout.Dual` (article list + article detail), or `PaneLayout.Single` (one pane, phone width).
+Both thresholds are summed from the pane-width constants rather than being independent
+breakpoints, and `TRIPLE_PANE_MIN_WIDTH` specifically from the two resizable panes' *default*
+widths, not their minimums: a width that fits three panes only by putting all three on their floors
+at once — an Android tablet held in portrait — is treated as narrow instead. That matters most on a
+touch-primary platform, where `ResizableDivider` has no drag affordance and the user cannot widen a
+pane back out (see that constant's KDoc).
 `feedListIsDrawer(layout)` (`layout != Triple`) is the single source of truth every layout decision
 below branches on: at every layout but `Triple`, the feed list is a Gmail-style modal navigation
 drawer (`ModalNavigationDrawer`) rather than an on-screen pane, opened by a hamburger button on
