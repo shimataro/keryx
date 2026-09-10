@@ -50,6 +50,21 @@ class HomePaneLayoutTest {
         assertEquals(PaneLayout.Single, paneLayoutFor(0.dp))
     }
 
+    @Test
+    fun paneLayoutForResolvesTheWidthsRealDevicesReportAsIntended() {
+        // The logical widths (physical pixels / density) this app actually meets, pinned so that a
+        // change to any pane-width constant which moves one of them across a threshold has to be a
+        // deliberate one.
+        assertEquals(PaneLayout.Single, paneLayoutFor(411.dp), "phone, portrait")
+        assertEquals(PaneLayout.Dual, paneLayoutFor(914.dp), "phone, landscape")
+        // A 2560x1600 / 320dpi tablet held in portrait. Three panes do *fit* here — this used to
+        // resolve Triple, squeezing all three onto their floors at once (214 / 290 / 280) — which
+        // is exactly what summing TRIPLE_PANE_MIN_WIDTH from the defaults rather than the minimums
+        // rules out. See that constant's KDoc.
+        assertEquals(PaneLayout.Dual, paneLayoutFor(800.dp), "tablet, portrait")
+        assertEquals(PaneLayout.Triple, paneLayoutFor(1280.dp), "tablet, landscape")
+    }
+
     // --- visiblePanes ---
 
     @Test
@@ -107,19 +122,18 @@ class HomePaneLayoutTest {
         (windowWidth - PANE_DIVIDER_WIDTH * 2 - DETAIL_PANE_MIN_WIDTH).dp
 
     @Test
-    fun triplePaneWidthsNeverDropsBelowPaneMinimumsAtTheTripleThreshold() {
-        // The exact width at which paneLayoutFor first resolves Triple: there is nothing left over
-        // above the two minimums, so both panes must sit exactly on their own floor. Scaling both
-        // preferences by one shared factor used to land the feed pane at ~176dp here, below its
-        // own FEED_LIST_PANE_MIN_WIDTH.
+    fun triplePaneWidthsFitsBothDefaultsExactlyAtTheTripleThreshold() {
+        // TRIPLE_PANE_MIN_WIDTH is the sum of the two defaults plus the reader's own minimum, so at
+        // the exact width where paneLayoutFor first resolves Triple an untouched pair of
+        // preferences fits precisely: nothing to scale down, and nothing left over either.
         val widths = triplePaneWidths(
             availableForPanes(TRIPLE_PANE_MIN_WIDTH),
             FEED_LIST_PANE_WIDTH_DEFAULT.dp,
             ARTICLE_LIST_PANE_WIDTH_DEFAULT.dp,
         )
 
-        assertEquals(FEED_LIST_PANE_MIN_WIDTH.dp, widths.feedWidth)
-        assertEquals(ARTICLE_LIST_PANE_MIN_WIDTH.dp, widths.articleWidth)
+        assertEquals(FEED_LIST_PANE_WIDTH_DEFAULT.dp, widths.feedWidth)
+        assertEquals(ARTICLE_LIST_PANE_WIDTH_DEFAULT.dp, widths.articleWidth)
     }
 
     @Test

@@ -27,6 +27,11 @@ private class FakeWindowState(
 private val PRIMARY_SCREEN = Rectangle(0, 0, 1920, 1080)
 private val SECONDARY_SCREEN = Rectangle(1920, 0, 1920, 1080)
 
+/** A floating width comfortably clear of [WINDOW_MIN_WIDTH], so a test asserting that a saved size
+ * survives the round trip exercises exactly that, and not `restoredWindowState`'s own minimum clamp
+ * (which `restoredWindowStateClampsSizeBelowMinimum` covers on its own). */
+private const val FLOATING_WIDTH = WINDOW_MIN_WIDTH + 100
+
 class WindowStatePersistenceTest {
     @Test
     fun observedWindowStateSnapshotsAllFields() {
@@ -174,7 +179,7 @@ class WindowStatePersistenceTest {
         // shown regardless of placement, so this is what the OS remembers as the un-maximize target.
         val saved = LocalSettings(
             windowPlacement = "maximized",
-            windowWidth = 900.0,
+            windowWidth = FLOATING_WIDTH.toDouble(),
             windowHeight = 650.0,
             windowX = 30.0,
             windowY = 40.0,
@@ -183,18 +188,19 @@ class WindowStatePersistenceTest {
         val restored = restoredWindowState(saved, listOf(PRIMARY_SCREEN))
 
         assertEquals(WindowPlacement.Maximized, restored.placement)
-        assertEquals(DpSize(900.dp, 650.dp), restored.size)
+        assertEquals(DpSize(FLOATING_WIDTH.dp, 650.dp), restored.size)
         assertEquals(WindowPosition.Absolute(30.dp, 40.dp), restored.position)
     }
 
     @Test
     fun restoredWindowStateForFullscreenAlsoReturnsRealFloatingSize() {
-        val saved = LocalSettings(windowPlacement = "fullscreen", windowWidth = 900.0, windowHeight = 650.0)
+        val saved =
+            LocalSettings(windowPlacement = "fullscreen", windowWidth = FLOATING_WIDTH.toDouble(), windowHeight = 650.0)
 
         val restored = restoredWindowState(saved, listOf(PRIMARY_SCREEN))
 
         assertEquals(WindowPlacement.Fullscreen, restored.placement)
-        assertEquals(DpSize(900.dp, 650.dp), restored.size)
+        assertEquals(DpSize(FLOATING_WIDTH.dp, 650.dp), restored.size)
     }
 
     @Test

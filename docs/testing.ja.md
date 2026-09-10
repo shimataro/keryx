@@ -339,7 +339,14 @@ symlink の数が変わらないことと展開後のバンドルが検証を通
 バンドルが既に壊れていればビルドを失敗させる（[build.ja.md](build.ja.md) 参照）。両者により、
 当初の欠陥のどちらの半分も気付かれずリリースへ届くことはない。`FileSystemExtras.move` のボリューム跨ぎフォールバックも同様に
 テストから到達できない（2 つ目のファイルシステムを用意できない）ため、その委譲先である
-リンク保持コピーを `copyTree` として切り出し、直接テストしている。
+リンク保持コピーを `copyTree` として切り出し、直接テストしている。デスクトップでは、
+`LibSecretTokenStorage` の実際の libsecret バインディング——`libsecret-1.so.0` の `Native.load`、
+`SecretSchema`／`GError` の JNA 構造体、`org.freedesktop.portal.Secret` への実際の D-Bus
+ラウンドトリップ——は実機の Linux デスクトップセッションが必要で、意味のある形で動くのは
+Snap パッケージ内だけである。その背後にある `LibSecretAccess` seam（store/lookup/clear の
+成功・失敗）だけが `LibSecretTokenStorageTest` でテストされており、`KeyringAccess`／
+`KeyringTokenStorageTest` や `CommandRunner`／`SecurityCliTokenStorage` と同じ切り分け方である。
+手動で確認すべき内容は `docs/build.ja.md`「Linux Snap パッケージ」の手動検証手順を参照。
 
 ## 手動確認（UI）
 

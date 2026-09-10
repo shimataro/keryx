@@ -361,7 +361,7 @@ fun HomeScreen() {
                     // in the drawer branch below, alongside its own drawer-content override.)
                     CompositionLocalProvider(LocalRowSelectionVisible provides true) {
                     val dividerWidth = PANE_DIVIDER_WIDTH.dp
-                    // coerceAtLeast(0.dp): with WINDOW_MIN_WIDTH >= the pane-minimum sum, this
+                    // coerceAtLeast(0.dp): with WINDOW_MIN_WIDTH >= TRIPLE_PANE_MIN_WIDTH, this
                     // shouldn't go negative in steady state, but a transient pre-layout frame
                     // (maxWidth == 0) must not produce a negative Dp, which Modifier.width() rejects.
                     val availableForPanes = (maxWidth - dividerWidth * 2 - DETAIL_PANE_MIN_WIDTH.dp).coerceAtLeast(0.dp)

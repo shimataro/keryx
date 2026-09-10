@@ -146,11 +146,24 @@ const val DRAWER_SHEET_END_INSET = 56
 const val PANE_DIVIDER_WIDTH = 8
 
 /**
- * Minimum width at which all three home panes (feed list / article list / article detail) fit
- * side by side — the sum of each pane's own minimum width plus one divider between each pair.
+ * Minimum width at which all three home panes (feed list / article list / article detail) belong
+ * side by side — the two resizable panes at their **default** widths, plus the article reader's
+ * own minimum, plus one divider between each pair.
  * [works.merc.keryx.app.ui.home.paneLayoutFor] resolves to
  * [works.merc.keryx.app.ui.home.PaneLayout.Triple] at or above this width, [DUAL_PANE_MIN_WIDTH]
  * up to it, and [works.merc.keryx.app.ui.home.PaneLayout.Single] below that.
+ *
+ * Deliberately the sum of the *default* widths rather than of [FEED_LIST_PANE_MIN_WIDTH] /
+ * [ARTICLE_LIST_PANE_MIN_WIDTH], which is what this used to be: the minimums answer "do three
+ * panes fit", not "is the result worth reading". At the pane-minimum sum, an Android tablet held
+ * in portrait (800dp on a 2560x1600 panel) put all three panes on their floors at once — 214 /
+ * 290 / 280 — wrapping a headline over six lines in the reader. The minimums still govern how far
+ * a drag may shrink a pane and [works.merc.keryx.app.ui.home.triplePaneWidths]' own floor; they
+ * just no longer decide how many panes a width is worth.
+ *
+ * The distinction matters most where the user cannot resolve it themselves: on a touch-primary
+ * platform `ResizableDivider` renders as a static line with no drag affordance at all (see its own
+ * KDoc), so the default widths *are* the widths the panes get, with no way to widen them.
  *
  * [WINDOW_MIN_WIDTH] is deliberately `>=` this value: the article reader's WebView must stay
  * composed for the pane's whole lifetime (see `ArticleDetailPane`'s KDoc and `known-issues.md`),
@@ -159,14 +172,14 @@ const val PANE_DIVIDER_WIDTH = 8
  * pins this at [WINDOW_MIN_WIDTH].
  */
 const val TRIPLE_PANE_MIN_WIDTH =
-    FEED_LIST_PANE_MIN_WIDTH + ARTICLE_LIST_PANE_MIN_WIDTH + DETAIL_PANE_MIN_WIDTH + PANE_DIVIDER_WIDTH * 2
+    FEED_LIST_PANE_WIDTH_DEFAULT + ARTICLE_LIST_PANE_WIDTH_DEFAULT + DETAIL_PANE_MIN_WIDTH + PANE_DIVIDER_WIDTH * 2
 
 /** Minimum width at which the article list and article detail panes fit side by side (see
  * [TRIPLE_PANE_MIN_WIDTH]). */
 const val DUAL_PANE_MIN_WIDTH = ARTICLE_LIST_PANE_MIN_WIDTH + DETAIL_PANE_MIN_WIDTH + PANE_DIVIDER_WIDTH
 
 /** Must be `>= TRIPLE_PANE_MIN_WIDTH` — see [TRIPLE_PANE_MIN_WIDTH]'s KDoc. */
-const val WINDOW_MIN_WIDTH = 720
+const val WINDOW_MIN_WIDTH = 920
 
 /** Debounce for re-running search as the user types, so every keystroke doesn't trigger an FTS query. */
 const val SEARCH_DEBOUNCE_MS = 250L

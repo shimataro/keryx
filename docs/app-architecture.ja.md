@@ -34,7 +34,7 @@ composeApp/src/
     API にも依存しない）: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage, AppInfo,
     CloudStorageAvailability（後者2つは共有生成 BuildConfig を読むだけ）, FileSystemExtras,
     ZipExtractor（アプリ内アップデート——下記「アプリ内アップデート」参照）
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ jvmCommonMain がカバーしない expect の actual（DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule, InstallLocation）+ LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage）, DesktopOs（isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ jvmCommonMain がカバーしない expect の actual（DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule, InstallLocation）+ LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage/LibSecretTokenStorage。outcome 合成ロジックは共通の SecretStoreTokenStorage に集約）, DesktopOs（isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）
     tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray + StatusNotifierItem/dbusmenu の D-Bus オブジェクト
     platform/update/  DesktopUpdateInstaller, UpdateScriptWriter（純粋な自己置換／msiexec スクリプトのテンプレート）, ProcessLauncher/RealProcessLauncher（テストがフェイクに差し替える detached 起動のシーム）, ArchiveExtractor（macOS は DittoArchiveExtractor——署名済みバンドルが自身の symlink を封印しているため。それ以外はインプロセスの InProcessArchiveExtractor）, CodeSigningVerifier/RealCodeSigningVerifier（`codesign --verify` のシーム）
   androidMain/kotlin/…/  jvmCommonMain がカバーしない expect の actual: DatabaseDriverFactory（バンドル
@@ -479,7 +479,12 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 いくつを横並びで表示するかを、利用可能な幅だけから解決する: `PaneLayout.Triple`（3ペインすべて —
 デスクトップは `WINDOW_MIN_WIDTH` が常に `TRIPLE_PANE_MIN_WIDTH` 以上であるため常にここに解決される。
 `core/Constants.kt` の当該定数の KDoc 参照）、`PaneLayout.Dual`（記事一覧 + 記事詳細）、
-`PaneLayout.Single`（1ペインのみ、スマートフォン幅）のいずれか。`feedListIsDrawer(layout)`
+`PaneLayout.Single`（1ペインのみ、スマートフォン幅）のいずれか。どちらの閾値も独立した
+ブレークポイントではなくペイン幅の定数から合算しており、とくに `TRIPLE_PANE_MIN_WIDTH` は最小幅では
+なくリサイズ可能な2ペインの *既定* 幅から求めている: 3枚すべてを同時に下限へ張り付かせなければ収まらない
+程度の幅——Android タブレットの縦向き——は狭いレイアウトとして扱う。これはタッチ環境でとくに効く。
+`ResizableDivider` にドラッグのアフォーダンスが無く、ユーザーがペインを広げ直せないためである
+（当該定数の KDoc 参照）。`feedListIsDrawer(layout)`
 （`layout != Triple`）が、以下のあらゆるレイアウト判断が分岐する唯一の情報源である:
 `Triple` 以外のすべてのレイアウトでは、フィード一覧はオンスクリーンのペインではなく Gmail 風の
 モーダルナビゲーションドロワー（`ModalNavigationDrawer`）となり、`ArticleListPane` 自身のヘッダー

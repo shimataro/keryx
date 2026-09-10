@@ -441,8 +441,18 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
 - Windows/Linux: OS セキュアストレージ（java-keyring — Credential Manager / Secret Service, `KeyringTokenStorage`）。
 - macOS: Apple 署名の `/usr/bin/security` CLI に委譲（`SecurityCliTokenStorage`）。java-keyring は共有 JVM
   から Keychain 書き込みに失敗するため、macOS のみ `security` 経由にしている。
-- いずれも失敗時はデータディレクトリの `.{CloudStorageType.id}_tokens.json`（0600。Dropbox は `.dropbox_tokens.json`）へ
-  フォールバック。DI が `isMacOs` で両者を切り替える。`TokenStorage.save()` はトークンが実際にどこに残ったかを
+- Linux のうち Snap パッケージ内だけは、`KeyringTokenStorage` の代わりに `LibSecretTokenStorage` を使う
+  （`platform.isSnap` で分岐）。JNA 経由で libsecret を直接呼び出す実装で、libsecret がサンドボックスを
+  検知して生の Secret Service ではなく Secret portal（`org.freedesktop.portal.Secret`）経由にルーティング
+  し、その portal から得たアプリ専用のマスターシークレットでトークン JSON をローカルファイルに暗号化
+  して保存する。スナップは `password-manager-service` プラグを一切宣言していない（Snapcraft の
+  レビュアーはこのインターフェースの auto-connect を原則却下するうえ、手動で接続したところで
+  使い道もない——`KeyringTokenStorage` はスナップ内からは意図的に到達不能）。詳しい理由は
+  `docs/build.ja.md` の「Linux Snap パッケージ」参照。スナップ外では適用しないため、既存の
+  deb/rpm 利用者の Secret Service アイテムには影響しない。
+- 上記いずれも失敗時はデータディレクトリの `.{CloudStorageType.id}_tokens.json`（0600。Dropbox は `.dropbox_tokens.json`）へ
+  フォールバック。DI が `isMacOs`／`isSnap` で3つを切り替える（`PlatformModule.desktop.kt` の
+  `providerTokenStorage`）。`TokenStorage.save()` はトークンが実際にどこに残ったかを
   返す（`TokenSaveOutcome.SECURE` = セキュアストア / Android の Keystore 暗号化ファイル、`PLAINTEXT_FILE` =
   平文フォールバックファイルから読める（セキュアストアに到達できなかった場合と、セキュアな書き込みは
   成功したが古いフォールバックのコピーを削除できなかった場合の両方を含む）、`NOT_PERSISTED` = どちらにも書けず、アプリ終了までしか残らないため
@@ -451,10 +461,12 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
   初回接続時もバックグラウンドのトークンリフレッシュ時も同様。フォールバック自体は引き続き許容する
   （`SECURITY.md` に記載のとおり、意図的な graceful degradation）が、黙って行われてはならず、また何も
   保存できなかった場合を「平文ファイルに保存した」と報告してはならない、という位置づけ。
-  セキュアな書き込みが成功した際、`KeyringTokenStorage`/`SecurityCliTokenStorage` も以前の劣化した保存で
-  残った古いフォールバックファイルを削除する — Android の `KeystoreTokenStorage`（後述）と同じ
-  clear-on-success の挙動で、セキュアストレージが再び使えるようになった後も平文コピーがディスクに
-  残り続けないようにする。フォールバックの削除が成功を確認できなかった場合は、誤って `SECURE` と
+  セキュアな書き込みが成功した際、デスクトップのセキュアストア実装はいずれも
+  （`KeyringTokenStorage`/`SecurityCliTokenStorage`/`LibSecretTokenStorage` — この合成ロジック自体は
+  共通の `SecretStoreTokenStorage` に集約されている）以前の劣化した保存で残った古いフォールバック
+  ファイルを削除する — Android の `KeystoreTokenStorage`（後述）と同じ clear-on-success の挙動で、
+  セキュアストレージが再び使えるようになった後も平文コピーがディスクに残り続けないようにする。
+  フォールバックの削除が成功を確認できなかった場合は、誤って `SECURE` と
   報告せず `PLAINTEXT_FILE` に降格する。
 - macOS は書き込み後に **read-back 検証**（login keychain を明示指定して読み戻し）を行い、永続化を確認できない
   場合は file フォールバックへ回す。**書き込みの永続性は起動セッション依存**: パッケージ版（GUI ログイン

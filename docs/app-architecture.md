@@ -35,7 +35,7 @@ composeApp/src/
     target lacks: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage, AppInfo,
     CloudStorageAvailability (the last two just read the shared generated BuildConfig),
     FileSystemExtras, ZipExtractor (in-app update — see "In-App Update" below)
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of each expect not covered by jvmCommonMain (DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule, InstallLocation) + LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage), DesktopOs (isMacOs/isWindows/isLinux/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux, plus text-antialiasing hint normalization — missing hint, VALUE_TEXT_ANTIALIAS_DEFAULT, and VALUE_TEXT_ANTIALIAS_OFF are resolved to greyscale antialiasing so Swing surfaces do not look jagged next to the Compose-rendered UI)
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of each expect not covered by jvmCommonMain (DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule, InstallLocation) + LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage/LibSecretTokenStorage, sharing outcome-composition logic via SecretStoreTokenStorage), DesktopOs (isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux, plus text-antialiasing hint normalization — missing hint, VALUE_TEXT_ANTIALIAS_DEFAULT, and VALUE_TEXT_ANTIALIAS_OFF are resolved to greyscale antialiasing so Swing surfaces do not look jagged next to the Compose-rendered UI)
     tray/      KeryxTray (platform branch), MacTray, LinuxTray + the StatusNotifierItem/dbusmenu D-Bus objects
     platform/update/  DesktopUpdateInstaller, UpdateScriptWriter (pure self-replace/msiexec script templates), ProcessLauncher/RealProcessLauncher (the detached-launch seam a test fakes), ArchiveExtractor (DittoArchiveExtractor on macOS, where the signed bundle seals its own symlinks; InProcessArchiveExtractor in process elsewhere), CodeSigningVerifier/RealCodeSigningVerifier (the `codesign --verify` seam)
   androidMain/kotlin/…/  actual implementations not covered by jvmCommonMain: DatabaseDriverFactory
@@ -463,6 +463,12 @@ article detail) `HomeScreen` renders side by side, purely as a function of the a
 `PaneLayout.Triple` (all three — desktop always resolves here, since `WINDOW_MIN_WIDTH` is
 guaranteed `>= TRIPLE_PANE_MIN_WIDTH`, see that constant's KDoc in `core/Constants.kt`),
 `PaneLayout.Dual` (article list + article detail), or `PaneLayout.Single` (one pane, phone width).
+Both thresholds are summed from the pane-width constants rather than being independent
+breakpoints, and `TRIPLE_PANE_MIN_WIDTH` specifically from the two resizable panes' *default*
+widths, not their minimums: a width that fits three panes only by putting all three on their floors
+at once — an Android tablet held in portrait — is treated as narrow instead. That matters most on a
+touch-primary platform, where `ResizableDivider` has no drag affordance and the user cannot widen a
+pane back out (see that constant's KDoc).
 `feedListIsDrawer(layout)` (`layout != Triple`) is the single source of truth every layout decision
 below branches on: at every layout but `Triple`, the feed list is a Gmail-style modal navigation
 drawer (`ModalNavigationDrawer`) rather than an on-screen pane, opened by a hamburger button on
