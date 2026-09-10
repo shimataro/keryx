@@ -247,11 +247,19 @@ fun HomeScreen() {
     // Feed menu's bare-key items (F2/Delete) while the user is actually typing.
     LaunchedEffect(textInputFocused) { menuController.textInputFocused.value = textInputFocused }
 
-    val orderedRows = remember(tags, folders, feeds, collapsedFolderIds, expandedTagIds, feedTagMap) {
-        buildOrderedFeedListRows(tags, folders, feeds, collapsedFolderIds, expandedTagIds, feedTagMap)
+    // The sidebar's own "Search" quick-filter row only renders at PaneLayout.Triple (FeedListPane's
+    // own `if (onSelectionAdvance == null)` guard) — the keyboard-navigable row order must match,
+    // or an arrow key could select a row that isn't actually on screen (behind the drawer, whose
+    // own FeedListPane content omits it entirely).
+    val searchRowRendered = !feedListIsDrawer(paneLayout)
+    val orderedRows = remember(tags, folders, feeds, collapsedFolderIds, expandedTagIds, feedTagMap, searchRowRendered) {
+        buildOrderedFeedListRows(tags, folders, feeds, collapsedFolderIds, expandedTagIds, feedTagMap, searchRowRendered)
     }
     fun moveFeedSelection(delta: Int) {
-        nextFeedListRow(selectedRowInstance, orderedRows, delta)?.let { vm.selectFilter(it.filter, it) }
+        // HomePane.FeedList as the Search row's own return pane is only correct because
+        // searchRowRendered above keeps that row out of orderedRows whenever the feed list isn't a
+        // pane — see HomeViewModel.selectFeedListRow's own KDoc.
+        nextFeedListRow(selectedRowInstance, orderedRows, delta)?.let { vm.selectFeedListRow(it, HomePane.FeedList) }
     }
 
     // Shared by the keyboard shortcuts and the menu bar (via MenuController). Read the current

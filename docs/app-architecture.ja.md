@@ -622,6 +622,23 @@ WebView をホストするペインを含む3ペインすべてがアプリの�
 `ExitSearch` が `PopPane` の代わりに使う。検索クエリ自体はこの一連の処理では一切触れられず、
 入力欄上にそのまま残る。
 
+サイドバー自身の「検索」クイックフィルター行（`FeedListPane`、`PaneLayout.Triple` のみ）には2つの
+到達手段があり、意図的にスナップショットは揃えつつフォーカスの扱いだけ変えている。タップは
+`enterSearchScope` を直接呼ぶ。フィード一覧の行に対する矢印キー移動
+（`HomeScreen.moveFeedSelection` → `HomeViewModel.selectFeedListRow`）でも同じ行に着地しうる
+——`buildOrderedFeedListRows` がこの行を含むため——その場合も同じ方法でスナップショットを取る
+（`captureSearchScopeEntry`。`enterSearchScope` と `selectFeedListRow` の両方が呼ぶ共有部分）ので、
+後の戻る操作でこの行が押し出したフィルター/選択行を正しく復元できる。ただし
+**`requestSearchFocus()` は呼ばない**——移動中に入力欄へフォーカスを移すと、次の ↓ がサイドバーの
+次の行ではなく結果一覧へ吸収されてしまう（1行入力欄にとってこのキーはキャレット移動の意味を
+持たない——`KeyboardNav.kt` 自身の KDoc 参照）ため、Search より下の行がキーボードで到達不能に
+なってしまう。タップは「検索したい」という明示的な意思表示だが、一覧を辿る途中で矢印キーが
+この行を通過するのは一時的な通過にすぎない——検索欄へフォーカスを移すキーボード操作は引き続き
+Cmd/Ctrl+F が担う。`orderedRows` は狭いレイアウトではこの行を完全に除外する
+（`buildOrderedFeedListRows` の `includeSearchRow`。`feedListIsDrawer(paneLayout)` のとき
+`false`）——`FeedListPane` 自身が `onSelectionAdvance` の有無でこの行を省略するのと同じ条件で、
+画面に存在しない行をキーボードで選択できてはならないため。
+
 `enterSearchScope` のスナップショットには、その瞬間の閲覧コンテキスト — 既読ピン留め・未読
 スターピン留めのマップ、選択中の記事、キーボード操作用カーソル（下記「楽観的な既読/スター
 ピン留め」参照）— も含まれる。検索に入るのも他のフィルタ変更と同じく `selectFilter` を経由する

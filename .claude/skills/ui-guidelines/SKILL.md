@@ -223,6 +223,17 @@ used to make Android's search feel broken. The latch stays set until whichever f
 next consumes it (`consumeSearchFocusRequest()`), and `HomeViewModel.selectFilter` clears an
 unconsumed one when the user navigates elsewhere first.
 
+Arrow-key navigation over the feed list's own rows (`HomeScreen.moveFeedSelection` →
+`HomeViewModel.selectFeedListRow`) can land on this same "Search" row — `buildOrderedFeedListRows`
+includes it — and snapshots the filter/row to restore later exactly like a tap does
+(`captureSearchScopeEntry`, shared by both `enterSearchScope` and `selectFeedListRow`), but
+deliberately does **not** call `requestSearchFocus()`: focusing the field mid-navigation would
+swallow the next ↓ into the result list instead of the next sidebar row, making everything below
+Search unreachable by keyboard. Cmd/Ctrl+F remains the keyboard path that does focus the field.
+`orderedRows` excludes the row entirely at a narrow layout (`includeSearchRow`, `false` whenever
+`feedListIsDrawer(paneLayout)`) — `FeedListPane` renders no such row there either, so keyboard
+navigation must not be able to select one that isn't actually on screen.
+
 **Going back out of Search.** Search has no `HomePane` of its own — every entry point above just
 sets `ArticleFilter.Search` on `HomePane.ArticleList` (see "Search is layout-dependent" above)
 without advancing the stack — so a plain "pop one pane" back action can't undo it either way.

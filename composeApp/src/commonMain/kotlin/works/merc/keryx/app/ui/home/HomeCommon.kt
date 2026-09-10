@@ -504,6 +504,12 @@ fun articleListTitle(
  * @param collapsedFolderIds The IDs of folders whose feed rows are hidden.
  * @param expandedTagIds The IDs of tags whose attached feed rows are rendered.
  * @param feedTagMap Mapping of feed IDs to their attached tag IDs.
+ * @param includeSearchRow Whether [FeedListRowSelection.Search] belongs in the order — `false` at a
+ *   narrow `PaneLayout`, where the feed list is a modal drawer and `FeedListPane` renders no
+ *   "Search" row at all (its own `onSelectionAdvance != null` guard), so keyboard navigation must
+ *   not be able to select a row that isn't actually on screen. Defaults to `true` (every other
+ *   caller — chiefly the existing tests — cares about the rest of the order, not this row's
+ *   presence) since the only production call site (`HomeScreen`) is the one that needs `false`.
  * @return The rows in visual top-to-bottom order.
  */
 fun buildOrderedFeedListRows(
@@ -513,8 +519,13 @@ fun buildOrderedFeedListRows(
     collapsedFolderIds: Set<String>,
     expandedTagIds: Set<String>,
     feedTagMap: Map<String, Set<String>>,
+    includeSearchRow: Boolean = true,
 ): List<FeedListRowSelection> =
-    listOf(FeedListRowSelection.All, FeedListRowSelection.Starred, FeedListRowSelection.Search) +
+    listOfNotNull(
+        FeedListRowSelection.All,
+        FeedListRowSelection.Starred,
+        FeedListRowSelection.Search.takeIf { includeSearchRow },
+    ) +
         groupFeedsByFolder(feeds, folders).flatMap { (folder, feedsInFolder) ->
             if (folder == null) {
                 feedsInFolder.map { FeedListRowSelection.FeedInFolderGroup(it.id) }

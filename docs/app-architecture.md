@@ -603,6 +603,23 @@ search entry point can be reached from); `exitSearchScope()` restores both and h
 pane, which `homeBackAction`'s `ExitSearch` case (above) resolves to instead of `PopPane`. The
 search query itself is never touched by any of this — it survives on the field exactly as it was.
 
+The sidebar's own "Search" quick-filter row (`FeedListPane`, `PaneLayout.Triple` only) is reachable
+two ways, and they deliberately snapshot alike but focus differently. A tap goes through
+`enterSearchScope` directly. Arrow-key navigation over the feed list's rows
+(`HomeScreen.moveFeedSelection` → `HomeViewModel.selectFeedListRow`) can land on this same row too
+— `buildOrderedFeedListRows` includes it — and takes the snapshot the same way
+(`captureSearchScopeEntry`, the shared half both `enterSearchScope` and `selectFeedListRow` call),
+so a later back action can still restore the filter/row it displaced, but deliberately does **not**
+also call `requestSearchFocus()`: focusing the field mid-navigation would swallow the very next ↓
+into the result list rather than the next sidebar row (a single-line field has no caret use for
+that key — see `KeyboardNav.kt`'s own KDoc), making every row below Search unreachable by keyboard.
+A tap is an explicit "I want to search" action; arrow-navigating onto the row while walking the
+list is transient — Cmd/Ctrl+F remains the keyboard path that does focus the field. `orderedRows`
+excludes this row entirely at a narrow layout (`buildOrderedFeedListRows`'s `includeSearchRow`,
+`false` whenever `feedListIsDrawer(paneLayout)`), matching `FeedListPane`'s own
+`onSelectionAdvance`-gated omission of the row there — keyboard navigation must never be able to
+select a row that isn't actually on screen.
+
 `enterSearchScope`'s snapshot also carries the browsing context active at that moment — the
 pinned-read/pinned-unstarred maps, the selected article, and the keyboard-navigation cursor (see
 "Optimistic read/star pins" below) — because `selectFilter` (which entering Search goes through

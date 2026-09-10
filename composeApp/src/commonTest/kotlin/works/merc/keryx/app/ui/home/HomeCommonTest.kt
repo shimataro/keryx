@@ -73,6 +73,30 @@ class HomeCommonTest {
     }
 
     @Test
+    fun buildOrderedFeedListRowsOmitsTheSearchRowWhenNotIncluded() {
+        // At a narrow PaneLayout, FeedListPane renders no "Search" row at all (it's a drawer, not
+        // a screen search results could live on) — the keyboard-navigable order must match that,
+        // or an arrow key could select a row that isn't actually on screen.
+        val tags = listOf(tag("t1"))
+        val feeds = listOf(feed("f1"))
+
+        val ordered = buildOrderedFeedListRows(
+            tags, emptyList(), feeds, emptySet(), emptySet(), emptyMap(),
+            includeSearchRow = false,
+        )
+
+        assertEquals(
+            listOf(
+                FeedListRowSelection.All,
+                FeedListRowSelection.Starred,
+                FeedListRowSelection.FeedInFolderGroup("f1"),
+                FeedListRowSelection.Tag("t1"),
+            ),
+            ordered,
+        )
+    }
+
+    @Test
     fun buildOrderedFeedListRowsPutsFolderGroupsBeforeUnassignedFeedsAndTags() {
         val tags = listOf(tag("t1"))
         val folders = listOf(folder("d1"))
