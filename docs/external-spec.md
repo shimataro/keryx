@@ -174,7 +174,10 @@ gets a `secondary` outline to show where a keypress will land — Android's own 
 does not change with pane focus the way desktop's dimming does, so the outline is the only
 on-screen difference between the focused and unfocused pane's own selection there. This outline
 only ever appears once a hardware key has actually been pressed, so a touch-only session never
-shows a focus indicator meant for keyboard navigation.
+shows a focus indicator meant for keyboard navigation. Pressing ↓/↑ while the search field itself
+is focused moves down into the result list instead of typing a caret movement the field has no use
+for, so a keyboard can move straight from typing a query to browsing its results without an
+intermediate tap.
 
 At a narrow layout (both phone- and tablet-width), the article detail pane also gains a touch-only
 affordance with no desktop counterpart: a horizontal swipe on the reader moves to the next/previous

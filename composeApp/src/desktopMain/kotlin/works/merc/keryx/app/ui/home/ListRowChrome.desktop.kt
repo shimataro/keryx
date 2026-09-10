@@ -46,26 +46,21 @@ internal actual fun listRowShape(kind: ListRowKind): Shape = MaterialTheme.shape
 
 /**
  * Desktop's selection palette: full-strength `primary` (with `onPrimary` content) in the focused
- * pane, a 0.4-alpha `primary` elsewhere — dim enough that each element's own default text/icon
- * color still reads against it, which is why [RowSelectionColors.unfocusedContent] is `null` here.
- * [RowSelectionColors.focusRing] is `null`: desktop represents pane focus entirely through this
- * dimming, not a separate outline (see that property's own KDoc).
+ * pane, dimmed to [UNFOCUSED_SELECTION_ALPHA] elsewhere via [PaneFocusIndication.Dim] — dim enough
+ * that each element's own default text/icon color still reads against it, which is why
+ * `HomeCommon.kt`'s non-focused content resolution leaves no override for [PaneFocusIndication.Dim]
+ * (`selectedContent` stays `null` there). Desktop represents pane focus entirely through this
+ * dimming, not a separate outline (see [PaneFocusIndication.Dim]'s own KDoc).
  */
 @Composable
-internal actual fun rowSelectionColors(): RowSelectionColors {
-    val primary = MaterialTheme.colorScheme.primary
-    return RowSelectionColors(
-        focusedBackground = primary,
-        focusedContent = MaterialTheme.colorScheme.onPrimary,
-        unfocusedBackground = primary.copy(alpha = UNFOCUSED_SELECTION_ALPHA),
-        unfocusedContent = null,
-        echoBackground = primary.copy(alpha = SECONDARY_SELECTION_ALPHA),
-        focusRing = null,
-    )
-}
+internal actual fun rowSelectionColors(): RowSelectionColors = RowSelectionColors(
+    selectedBackground = MaterialTheme.colorScheme.primary,
+    selectedContent = MaterialTheme.colorScheme.onPrimary,
+    paneFocus = PaneFocusIndication.Dim(UNFOCUSED_SELECTION_ALPHA),
+)
 
 /**
  * Alpha of a selected row whose pane does not hold logical focus — desktop-only, since the
- * focused/unfocused axis itself is (see [RowSelectionColors]).
+ * focused/unfocused axis itself is (see [PaneFocusIndication.Dim]).
  */
 private const val UNFOCUSED_SELECTION_ALPHA = 0.4f

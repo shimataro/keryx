@@ -64,18 +64,11 @@ internal actual fun listRowShape(kind: ListRowKind): Shape = when (kind) {
  * item" pair (what `NavigationDrawerItem` uses), the same whether or not the row's pane holds
  * keyboard focus — M3 itself doesn't change this pair on focus (`ActiveFocusLabelTextColor` equals
  * `ActiveLabelTextColor`). Pane focus is instead expressed as a separate `secondary` outline via
- * [focusRing] — see [RowSelectionColors]'s own KDoc.
+ * [PaneFocusIndication.Ring] — see that type's own KDoc.
  */
 @Composable
-internal actual fun rowSelectionColors(): RowSelectionColors {
-    val secondaryContainer = MaterialTheme.colorScheme.secondaryContainer
-    val onSecondaryContainer = MaterialTheme.colorScheme.onSecondaryContainer
-    return RowSelectionColors(
-        focusedBackground = secondaryContainer,
-        focusedContent = onSecondaryContainer,
-        unfocusedBackground = secondaryContainer,
-        unfocusedContent = onSecondaryContainer,
-        echoBackground = secondaryContainer.copy(alpha = SECONDARY_SELECTION_ALPHA),
-        focusRing = MaterialTheme.colorScheme.secondary,
-    )
-}
+internal actual fun rowSelectionColors(): RowSelectionColors = RowSelectionColors(
+    selectedBackground = MaterialTheme.colorScheme.secondaryContainer,
+    selectedContent = MaterialTheme.colorScheme.onSecondaryContainer,
+    paneFocus = PaneFocusIndication.Ring(MaterialTheme.colorScheme.secondary),
+)

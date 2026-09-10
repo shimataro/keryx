@@ -432,7 +432,28 @@ on a device or emulator:
   without closing the drawer; → closes it). With no keyboard ever attached (touch only), no ring
   should ever appear.
 - Rotate a narrow layout into `PaneLayout.Triple` while the drawer is open: the feed-list pane and
-  the article-list pane must not both show a keyboard-focus ring at once.
+  the article-list pane must not both show a keyboard-focus ring at once. At `PaneLayout.Dual`,
+  open the drawer via the hamburger button (not by rotation) and confirm the same thing — this is
+  the case `keyboardPaneFor` (`HomePaneLayout.kt`) exists to make structurally impossible: only the
+  drawer's `FeedListPane` should ever show the ring while it's open, never the article list beside
+  it too.
+- Dual: tap an article row, then press ↑/↓ with a hardware keyboard — the selection must keep
+  moving from the tapped article, not stop dead. (Regression check for a bug where selecting an
+  article at `PaneLayout.Dual` silently advanced `focusedPane` to `HomePane.ArticleDetail`, even
+  though the reader has no on-screen change to show for it there — see `ArticleListPane`'s own
+  `onSelectionAdvance` KDoc.)
+- Triple: focus the sidebar search field (tap it, or the "Search" row), then tap an article row or
+  a feed row. The field must lose focus (its border color reverts, the soft keyboard — if it was
+  showing — dismisses), and a following ↑/↓ must move the tapped pane's selection on the **first**
+  press, not the second. (Regression check for a bug where a tap left the field holding real
+  Compose focus, and the first arrow-key press was silently absorbed reassigning that focus rather
+  than moving any selection.)
+- Triple: tap "All Feeds", then press ↓ twice with a hardware keyboard — selection must land on
+  "Starred", and "All Feeds" must show no lingering gray background afterward. (Regression check
+  for the same bug above: the stray background was Android's own M3 ripple painting its
+  focus-state layer on a row that had picked up real Compose focus — `ListRowChrome.kt`'s
+  `listRowClickable` now disables that with `Modifier.focusProperties { canFocus = false }`, so no
+  row can take real focus at all any more.)
 - At `PaneLayout.Triple` (tablet landscape), select a feed and then an article: the feed-list
   row's selection highlight and the article-list row's must be the **same large-rounded-rectangle
   shape** (`listRowShape`'s `LocalFeedListInDrawer`-gated branch) — not the feed-list one a pill.

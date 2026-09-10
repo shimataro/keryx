@@ -53,6 +53,25 @@ fun paneLayoutFor(availableWidth: Dp): PaneLayout = when {
  */
 fun feedListIsDrawer(layout: PaneLayout): Boolean = layout != PaneLayout.Triple
 
+/**
+ * The single [HomePane] that keyboard input (arrow-key pane navigation, J/K, F2/Delete) actually
+ * targets right now, and therefore the single source of truth for which pane's selected row should
+ * show the keyboard-focus ring/dimming (see `ui-guidelines`'s per-platform selection palette).
+ *
+ * An open feed-list drawer always wins over [focusedPane]: it is the topmost thing on screen while
+ * open, regardless of which [HomePane] the navigation stack itself points at (the drawer isn't part
+ * of that stack at all — see [HomePane]'s own KDoc). Every other case falls straight through to
+ * [focusedPane]. This replaces the old `feedListActionAllowed(pane, drawerOpen)` +
+ * `feedDrawerOpen`-guarded-`when(focusedPane)` duplication that used to be repeated at every one of
+ * `HomeScreen`'s keyboard-routing and pane-focus call sites — each of those is exactly "is this the
+ * pane [keyboardPaneFor] resolves to right now", which used to require re-deriving the drawer
+ * precedence by hand at each call site (and was the source of a real bug: two call sites deriving
+ * it independently could disagree, painting a focus ring on two panes at once — see
+ * `docs/app-architecture.md`'s "focused pane" section).
+ */
+fun keyboardPaneFor(focusedPane: HomePane, feedDrawerOpen: Boolean): HomePane =
+    if (feedDrawerOpen) HomePane.FeedList else focusedPane
+
 /** The widths the feed list and article list panes are laid out at, per [triplePaneWidths]. */
 internal data class TriplePaneWidths(val feedWidth: Dp, val articleWidth: Dp)
 

@@ -140,8 +140,10 @@ internal const val FEED_LIST_DRAG_HOST_TEST_TAG = "feed-list-drag-host"
  * @param modifier Modifier applied to the pane.
  * @param onAddFeedClick Called when the user requests to add a feed.
  * @param onTextInputFocusChange Called when this pane starts or stops holding text-entry focus —
- *   the search field or a row's inline name editor. Bare-key shortcuts (J/K, arrows, F2, Delete)
- *   must stand aside for both, so they report through one channel.
+ *   the search field or a row's inline name editor — with which one, or `null` when neither does.
+ *   Bare-key shortcuts (J/K, arrows, F2, Delete) must stand aside for both, and `HomeScreen` also
+ *   uses the distinction itself to decide what ↓/↑ do while a field is focused (see
+ *   `KeyboardNav.kt`'s [HomeTextInput]).
  * @param renameSelectedRequestId Bumped by the keyboard rename/edit shortcut (F2/Return); on change,
  *   starts inline name editing on whichever feed/folder/tag the current filter selects.
  * @param deleteSelectedRequestId Bumped by the keyboard delete shortcut (Delete/Backspace); on
@@ -171,7 +173,7 @@ internal fun FeedListPane(
     onActivated: () -> Unit,
     modifier: Modifier = Modifier,
     onAddFeedClick: () -> Unit = {},
-    onTextInputFocusChange: (Boolean) -> Unit = {},
+    onTextInputFocusChange: (HomeTextInput?) -> Unit = {},
     renameSelectedRequestId: Int = 0,
     deleteSelectedRequestId: Int = 0,
     onSelectionAdvance: (() -> Unit)? = null,
@@ -211,7 +213,7 @@ internal fun FeedListPane(
     // this in practice guards only the (currently theoretical) case of this composable leaving
     // composition outright — not the open/closed drawer transition, which never unmounts it.
     DisposableEffect(Unit) {
-        onDispose { onTextInputFocusChange(false) }
+        onDispose { onTextInputFocusChange(null) }
     }
     // Shared by every feed row's "copy feed URL"/"copy site URL" context-menu item, mirroring
     // ArticleListPane's rememberCopyUrlAction() for article rows.
@@ -232,7 +234,16 @@ internal fun FeedListPane(
     // Typed characters must reach an open editor rather than the root's bare-key shortcuts, and the
     // menu bar's own F2/Delete accelerators must stand down too (see MenuController).
     LaunchedEffect(searchFieldFocused, inlineEdit != null) {
-        onTextInputFocusChange(searchFieldFocused || inlineEdit != null)
+        // inlineEdit wins on the rare transition frame where both are momentarily true (starting
+        // an inline edit is a deliberate action that should read as RowNameEditor immediately, even
+        // before the previous field's own onFocusChanged(false) has landed).
+        onTextInputFocusChange(
+            when {
+                inlineEdit != null -> HomeTextInput.RowNameEditor
+                searchFieldFocused -> HomeTextInput.SearchField
+                else -> null
+            },
+        )
     }
 
     // Shared by every filter-selecting row below (quick filters, feeds, folders, tags): selecting a

@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -180,18 +181,32 @@ internal val LIST_ROW_VERTICAL_MARGIN = LIST_ROW_GUIDE_CLEARANCE + LIST_ROW_GUID
  * `NavigationDrawerItem` and `Tab` both report this same role for "pick one of a set, the pick
  * changes what's shown elsewhere" selection, which is exactly what every one of these rows does —
  * `ListRowChrome.android.kt`'s [ListRowKind.NavItem] style is itself modeled on `NavigationDrawerItem`.
+ *
+ * `Modifier.selectable` is focusable by default (it accepts Enter/Space as a click, the same as
+ * `clickable`), which this app does not want for a list row: this app's own arrow-key/J-K model —
+ * not Tab order — is how a row is reached from the keyboard, and a row that *could* still take real
+ * focus left Android's own M3 ripple showing its focus-state layer on whichever row last actually
+ * received it (a tap, or a stray Tab), even after keyboard/tap selection had since moved elsewhere
+ * — indistinguishable from a stuck selection highlight. `InlineRename.kt`'s cancel icon uses the
+ * same `focusProperties { canFocus = false }` technique for a different reason (keeping its click
+ * from running the adjacent field's blur-commit path first). `canFocus = false` here removes the
+ * row as a possible destination for *any* focus-moving mechanism (Tab order, click-to-focus,
+ * arrow-key focus search) while leaving [selected] and [Role.Tab] intact, so a screen reader still
+ * reports which row is selected exactly as before.
  */
 internal fun Modifier.listRowClickable(
     interactionSource: MutableInteractionSource,
     selected: Boolean,
     onClick: () -> Unit,
-): Modifier = selectable(
-    selected = selected,
-    interactionSource = interactionSource,
-    indication = null,
-    role = Role.Tab,
-    onClick = onClick,
-)
+): Modifier = this
+    .focusProperties { canFocus = false }
+    .selectable(
+        selected = selected,
+        interactionSource = interactionSource,
+        indication = null,
+        role = Role.Tab,
+        onClick = onClick,
+    )
 
 /**
  * Which native row idiom a list row should follow — see [listRowSurface]'s own KDoc and the
@@ -284,39 +299,50 @@ internal val LocalFeedListInDrawer = staticCompositionLocalOf { false }
 internal val ROW_OUTLINE_WIDTH = 2.dp
 
 /**
+ * How a platform shows *which pane holds keyboard focus* on a selected row — the two mechanisms are
+ * mutually exclusive by construction (a platform picks exactly one), which is why this is a sealed
+ * type rather than a set of nullable fields on [RowSelectionColors] a given platform leaves unused.
+ *
+ * @see RowSelectionColors
+ */
+internal sealed interface PaneFocusIndication {
+    /**
+     * Desktop: a selected row in the pane that does *not* hold keyboard focus dims to [alpha], so
+     * the user can see where their keyboard input will land. The full-strength color itself already
+     * carries pane focus, so desktop draws no separate outline.
+     */
+    data class Dim(val alpha: Float) : PaneFocusIndication
+
+    /**
+     * Android: the selection color itself never changes with pane focus (M3's `NavigationDrawerItem`
+     * keeps the same `secondaryContainer`/`onSecondaryContainer` pair whether or not the item holds
+     * focus) — a physical keyboard can be attached to an Android tablet, though, so pane focus still
+     * needs to be shown somewhere, and here it's a `secondary` outline (`listRowOutline` in
+     * `HomeCommon.kt`) around the selected row in whichever pane holds it — M3's own
+     * `FocusIndicatorColor` concept, which ships as a token but has no Compose implementation yet,
+     * so this platform's `actual` supplies its own [color].
+     */
+    data class Ring(val color: Color) : PaneFocusIndication
+}
+
+/**
  * The palette a selectable list row paints its selection from — resolved per platform, applied by
  * the shared `selectionBackground` / `selectionContentColorOrNull` / `rowOutlineColorOrNull` logic
- * in `HomeCommon.kt` (which keeps the [LocalRowSelectionVisible] gate and the [RowSelectionTone]
- * fan-out common to both).
+ * in `HomeCommon.kt` (which keeps the [LocalRowSelectionVisible] gate, the [RowSelectionTone]
+ * fan-out, and the derivation of a non-focused row's/an echo row's actual color from
+ * [selectedBackground]/[paneFocus] common to both platforms — see those functions' own KDoc).
  *
- * The focused/unfocused split is desktop's "which pane holds logical focus" axis: a selected row in
- * the non-focused pane dims so the user can see where their keyboard input will land. Android has
- * the same axis — a physical keyboard can be attached to an Android tablet — but represents it
- * differently: the selection color itself never changes with focus (M3's `NavigationDrawerItem`
- * keeps the same `secondaryContainer`/`onSecondaryContainer` pair whether or not the item holds
- * focus), and the focused pane's selected row instead gets a `secondary` outline via [focusRing]
- * (`listRowOutline` in `HomeCommon.kt`) — M3's own `FocusIndicatorColor` concept, which ships as a
- * token but has no Compose implementation yet, so Android's `actual` here supplies its own.
- *
- * @property focusedBackground Background of a selected row in the focused pane.
- * @property focusedContent Content color to pair with [focusedBackground]; `null` leaves each
+ * @property selectedBackground Background of a selected row in the pane that holds keyboard focus
+ *   — also the row's background regardless of focus on a platform whose [paneFocus] is [Ring].
+ * @property selectedContent Content color to pair with [selectedBackground]; `null` leaves each
  *   element at its own default color.
- * @property unfocusedBackground Background of a selected row whose pane is not focused.
- * @property unfocusedContent Content color to pair with [unfocusedBackground]; `null` leaves each
- *   element at its own default color.
- * @property echoBackground Background of a [RowSelectionTone.SECONDARY] row — another rendered
- *   instance of the same selected feed, which must read as an echo rather than a second selection.
- * @property focusRing Outline color for a selected row in the focused pane, or `null` on a platform
- *   that represents pane focus entirely through [focusedBackground]/[unfocusedBackground] dimming
- *   instead (desktop) rather than a separate outline (Android).
+ * @property paneFocus How this platform shows pane focus on the selected row — see
+ *   [PaneFocusIndication].
  */
 internal data class RowSelectionColors(
-    val focusedBackground: Color,
-    val focusedContent: Color?,
-    val unfocusedBackground: Color,
-    val unfocusedContent: Color?,
-    val echoBackground: Color,
-    val focusRing: Color?,
+    val selectedBackground: Color,
+    val selectedContent: Color?,
+    val paneFocus: PaneFocusIndication,
 )
 
 /** This platform's list-row selection palette — see [RowSelectionColors]. */

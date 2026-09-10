@@ -1,7 +1,6 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
@@ -75,12 +74,9 @@ class ListRowShapeTest {
                     val primary = MaterialTheme.colorScheme.primary
                     val onPrimary = MaterialTheme.colorScheme.onPrimary
                     expected = RowSelectionColors(
-                        focusedBackground = primary,
-                        focusedContent = onPrimary,
-                        unfocusedBackground = primary.copy(alpha = 0.4f),
-                        unfocusedContent = null,
-                        echoBackground = primary.copy(alpha = SECONDARY_SELECTION_ALPHA),
-                        focusRing = null,
+                        selectedBackground = primary,
+                        selectedContent = onPrimary,
+                        paneFocus = PaneFocusIndication.Dim(0.4f),
                     )
                     actual = rowSelectionColors()
                 }
@@ -90,50 +86,23 @@ class ListRowShapeTest {
     }
 
     @Test
-    fun rowSelectionColorsUnfocusedBackgroundIsDimmerThanFocusedBackground() {
-        var focusedAlpha = 0f
-        var unfocusedAlpha = 0f
+    fun rowSelectionColorsPaneFocusIsDimAtFortyPercentOnDesktop() {
+        // A single assertion that the mechanism is exactly Dim (never Ring) captures both "pane
+        // focus is shown as background dimming" and "there is no separate outline" at once — the
+        // two used to be three separate field-by-field assertions (a dimmer unfocusedBackground, a
+        // null unfocusedContent, a null focusRing) before RowSelectionColors collapsed those
+        // per-platform-redundant fields into this one PaneFocusIndication value. See
+        // SelectionBackgroundTest's selectedButNotFocusedIsDimmedPrimary for the derived color this
+        // produces through selectionBackground(selected, focused).
+        var paneFocus: PaneFocusIndication? = null
         runDesktopComposeUiTest {
             setContent {
                 MaterialTheme {
-                    val colors = rowSelectionColors()
-                    focusedAlpha = colors.focusedBackground.alpha
-                    unfocusedAlpha = colors.unfocusedBackground.alpha
+                    paneFocus = rowSelectionColors().paneFocus
                 }
             }
         }
-        assertEquals(1f, focusedAlpha)
-        assertEquals(0.4f, unfocusedAlpha)
-    }
-
-    @Test
-    fun rowSelectionColorsUnfocusedContentIsNullOnDesktop() {
-        // Desktop's dimmed unfocused background is a mild-enough overlay that each element's own
-        // default text/icon color still reads against it — see RowSelectionColors' own KDoc.
-        var unfocusedContent: Color? = Color.Unspecified
-        runDesktopComposeUiTest {
-            setContent {
-                MaterialTheme {
-                    unfocusedContent = rowSelectionColors().unfocusedContent
-                }
-            }
-        }
-        kotlin.test.assertNull(unfocusedContent)
-    }
-
-    @Test
-    fun rowSelectionColorsFocusRingIsNullOnDesktop() {
-        // Desktop represents pane focus entirely through unfocusedBackground's own dimming, not a
-        // separate outline — see RowSelectionColors' own KDoc on focusRing.
-        var focusRing: Color? = Color.Unspecified
-        runDesktopComposeUiTest {
-            setContent {
-                MaterialTheme {
-                    focusRing = rowSelectionColors().focusRing
-                }
-            }
-        }
-        kotlin.test.assertNull(focusRing)
+        assertEquals(PaneFocusIndication.Dim(0.4f), paneFocus)
     }
 
     // --- listRowHorizontalMargin (pure function, no composition needed) ---

@@ -234,21 +234,23 @@ class SelectionBackgroundTest {
 
     // --- explicit RowSelectionColors injection (platform-independent branch logic) ---
 
+    // Distinct from desktop's own real palette values so a test asserting against this fixture
+    // cannot pass by accident against the real desktop `actual`.
+    private val ANDROID_LIKE_BACKGROUND = Color(0xFF112233)
+    private val ANDROID_LIKE_CONTENT = Color(0xFF445566)
+    private val ANDROID_LIKE_FOCUS_RING = Color(0xFF778899)
+
     /**
      * An arbitrary [RowSelectionColors] shaped like Android's `actual` (see
-     * `ListRowChrome.android.kt`'s `rowSelectionColors()`): the focused/unfocused background/content
-     * pair collapses to the *same* value regardless of pane focus (M3's `NavigationDrawerItem` itself
-     * doesn't recolor on focus) — pane focus is instead carried by a non-null [focusRing]. Distinct
-     * from desktop's own palette so a test asserting against this fixture cannot pass by accident
-     * against the real desktop `actual`.
+     * `ListRowChrome.android.kt`'s `rowSelectionColors()`): [PaneFocusIndication.Ring] means the
+     * background/content pair a row paints is the *same* regardless of pane focus (M3's
+     * `NavigationDrawerItem` itself doesn't recolor on focus) — pane focus is instead carried by
+     * the ring's own color.
      */
     private val androidLikeColors = RowSelectionColors(
-        focusedBackground = Color(0xFF112233),
-        focusedContent = Color(0xFF445566),
-        unfocusedBackground = Color(0xFF112233),
-        unfocusedContent = Color(0xFF445566),
-        echoBackground = Color(0xFF112233).copy(alpha = SECONDARY_SELECTION_ALPHA),
-        focusRing = Color(0xFF778899),
+        selectedBackground = ANDROID_LIKE_BACKGROUND,
+        selectedContent = ANDROID_LIKE_CONTENT,
+        paneFocus = PaneFocusIndication.Ring(ANDROID_LIKE_FOCUS_RING),
     )
 
     private fun colorFor(selected: Boolean, focused: Boolean, colors: RowSelectionColors): Color {
@@ -286,7 +288,7 @@ class SelectionBackgroundTest {
     @Test
     fun explicitColorsBooleanOverloadPicksFocusedBackgroundWhenFocused() {
         assertEquals(
-            androidLikeColors.focusedBackground,
+            ANDROID_LIKE_BACKGROUND,
             colorFor(selected = true, focused = true, colors = androidLikeColors),
         )
     }
@@ -294,7 +296,7 @@ class SelectionBackgroundTest {
     @Test
     fun explicitColorsBooleanOverloadPicksUnfocusedBackgroundWhenSelectedButNotFocused() {
         assertEquals(
-            androidLikeColors.unfocusedBackground,
+            ANDROID_LIKE_BACKGROUND,
             colorFor(selected = true, focused = false, colors = androidLikeColors),
         )
     }
@@ -308,11 +310,11 @@ class SelectionBackgroundTest {
     @Test
     fun explicitColorsBooleanContentColorMatchesFocusedAndUnfocusedContentRespectively() {
         assertEquals(
-            androidLikeColors.focusedContent,
+            ANDROID_LIKE_CONTENT,
             contentColorFor(selected = true, focused = true, colors = androidLikeColors),
         )
         assertEquals(
-            androidLikeColors.unfocusedContent,
+            ANDROID_LIKE_CONTENT,
             contentColorFor(selected = true, focused = false, colors = androidLikeColors),
         )
     }
@@ -324,12 +326,12 @@ class SelectionBackgroundTest {
 
     /**
      * The behavior that makes Android's selection look "the same either way": a palette whose
-     * [RowSelectionColors.unfocusedContent]/[RowSelectionColors.unfocusedBackground] equal its
-     * focused counterparts must produce identical results with `focused` true or false — i.e. a
-     * platform without a focus axis genuinely can't tell the two apart. Desktop's own palette
-     * (`unfocusedContent = null`, a dimmer `unfocusedBackground`) would fail this same assertion,
-     * which is exactly the point: this is Android's behavior, verified without depending on
-     * Android's `actual` ever running in this (desktop) test target.
+     * [RowSelectionColors.paneFocus] is [PaneFocusIndication.Ring] must produce identical
+     * background/content results with `focused` true or false — i.e. a platform that shows pane
+     * focus as an outline rather than a color change genuinely can't tell the two apart in the
+     * background/content it paints. Desktop's own palette ([PaneFocusIndication.Dim]) would fail
+     * this same assertion, which is exactly the point: this is Android's behavior, verified without
+     * depending on Android's `actual` ever running in this (desktop) test target.
      */
     @Test
     fun aColorsInstanceWithEqualFocusedAndUnfocusedValuesLooksIdenticalRegardlessOfFocus() {
@@ -345,11 +347,11 @@ class SelectionBackgroundTest {
     @Test
     fun explicitColorsToneOverloadPicksEchoBackgroundForSecondaryTone() {
         assertEquals(
-            androidLikeColors.echoBackground,
+            ANDROID_LIKE_BACKGROUND.copy(alpha = SECONDARY_SELECTION_ALPHA),
             colorFor(RowSelectionTone.SECONDARY, focused = true, colors = androidLikeColors),
         )
         assertEquals(
-            androidLikeColors.echoBackground,
+            ANDROID_LIKE_BACKGROUND.copy(alpha = SECONDARY_SELECTION_ALPHA),
             colorFor(RowSelectionTone.SECONDARY, focused = false, colors = androidLikeColors),
         )
     }
@@ -363,25 +365,25 @@ class SelectionBackgroundTest {
     @Test
     fun explicitColorsToneOverloadPicksFocusedOrUnfocusedBackgroundForPrimaryTone() {
         assertEquals(
-            androidLikeColors.focusedBackground,
+            ANDROID_LIKE_BACKGROUND,
             colorFor(RowSelectionTone.PRIMARY, focused = true, colors = androidLikeColors),
         )
         assertEquals(
-            androidLikeColors.unfocusedBackground,
+            ANDROID_LIKE_BACKGROUND,
             colorFor(RowSelectionTone.PRIMARY, focused = false, colors = androidLikeColors),
         )
     }
 
     /**
-     * Regression guard for the tone-aware content color now taking [RowSelectionColors.unfocusedContent]
-     * instead of always returning `null` for an unfocused [RowSelectionTone.PRIMARY] row — desktop's own
-     * `null` unfocusedContent kept the old behavior invisible, so this only shows up with a palette
-     * (like Android's) that actually sets one.
+     * Regression guard for the tone-aware content color resolving a non-`null` value for an
+     * unfocused [RowSelectionTone.PRIMARY] row on a [PaneFocusIndication.Ring] platform — desktop's
+     * own [PaneFocusIndication.Dim] resolves `null` there instead (see `nonFocusedSelectionContent`
+     * in `HomeCommon.kt`), which kept this behavior invisible until a palette like Android's did.
      */
     @Test
     fun explicitColorsTonePrimaryContentColorUsesUnfocusedContentWhenNotFocused() {
         assertEquals(
-            androidLikeColors.unfocusedContent,
+            ANDROID_LIKE_CONTENT,
             contentColorFor(RowSelectionTone.PRIMARY, focused = false, colors = androidLikeColors),
         )
     }
@@ -496,7 +498,7 @@ class SelectionBackgroundTest {
 
     @Test
     fun outlineBooleanOverloadShowsFocusRingWhenSelectedFocusedAndKeyboardEngaged() {
-        assertEquals(androidLikeColors.focusRing, outlineColorFor(selected = true, focused = true))
+        assertEquals(ANDROID_LIKE_FOCUS_RING, outlineColorFor(selected = true, focused = true))
     }
 
     @Test
@@ -522,10 +524,10 @@ class SelectionBackgroundTest {
     }
 
     @Test
-    fun outlineBooleanOverloadIsNullWhenColorsHasNoFocusRing() {
-        // Desktop's own palette (focusRing = null) — represents pane focus through background
-        // dimming instead, never a separate outline.
-        assertNull(outlineColorFor(selected = true, focused = true, colors = androidLikeColors.copy(focusRing = null)))
+    fun outlineBooleanOverloadIsNullWhenPaneFocusIsDimNotRing() {
+        // Desktop's own indication (PaneFocusIndication.Dim) — represents pane focus through
+        // background dimming instead, never a separate outline.
+        assertNull(outlineColorFor(selected = true, focused = true, colors = androidLikeColors.copy(paneFocus = PaneFocusIndication.Dim(0.4f))))
     }
 
     @Test
@@ -544,7 +546,7 @@ class SelectionBackgroundTest {
 
     @Test
     fun outlineToneOverloadShowsFocusRingOnlyForPrimaryToneWhenFocusedAndEngaged() {
-        assertEquals(androidLikeColors.focusRing, outlineColorFor(RowSelectionTone.PRIMARY, focused = true))
+        assertEquals(ANDROID_LIKE_FOCUS_RING, outlineColorFor(RowSelectionTone.PRIMARY, focused = true))
         assertNull(outlineColorFor(RowSelectionTone.SECONDARY, focused = true))
         assertNull(outlineColorFor(RowSelectionTone.NONE, focused = true))
     }

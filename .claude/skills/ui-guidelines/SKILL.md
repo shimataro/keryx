@@ -159,8 +159,13 @@ outside it) and — on Android — the OS back gesture/button (`platform/BackHan
 width (`PaneLayout.Dual`) both stay on screen together, permanently — `visiblePanes(Dual, depth)`
 returns the same `[ArticleList, ArticleDetail]` at every depth, unlike before the drawer existed.
 Nothing about either pane's own internal layout (tonal roles, dividers, row chrome) changes between
-layouts; only how many are mounted at once does — with one deliberate exception, an affordance that
-has nowhere else to live once the drawer replaces the sidebar: the search field (see below). That
+layouts; only how many are mounted at once does — with two deliberate exceptions. The first is an
+affordance that has nowhere else to live once the drawer replaces the sidebar: the search field
+(see below). The second is Android's own `NavItem` row shape (`ListRowChrome.android.kt`'s
+`listRowShape`), which clips to a full pill only while actually rendered as drawer content
+(`LocalFeedListInDrawer`) and to the article list's own large rounded rectangle at
+`PaneLayout.Triple`, where the two panes sit side by side and read as one shared design instead —
+see "Platform-native list rows" below for the full rationale. That
 unmounting is state-preserving: `ui/home/NarrowPaneRow.kt` hosts the panes so each one keeps (or
 gets restored to) its own scroll position across the stack's comings and goings, which is why **a
 pane added there must be emitted from its own fixed `if`, never a loop iteration** — every iteration
@@ -340,7 +345,15 @@ their drawn/visible size.
     the click/drag hit area, applied with **nothing** before it in the chain
     (no padding, no clip) so it covers the row's entire reported bounds.
     Passes `indication = null` deliberately; press feedback is `listRowSurface`'s
-    job, confined to the inset highlight.
+    job, confined to the inset highlight. Also disables real Compose focus on
+    the row itself (`Modifier.focusProperties { canFocus = false }`, ahead of
+    the `selectable` it wraps) — a list row is reached by this app's own
+    arrow-key/J-K model, never by Tab order or click-to-focus, and leaving a
+    row focusable let Android's own M3 ripple keep showing its focus-state
+    layer on whichever row last actually took focus, independent of where
+    keyboard/tap selection had since moved on to. `selected`/`Role.Tab` still
+    reach accessibility services exactly as before; only real focusability is
+    removed.
   - `.nativeContextMenu(...)`, then — for a feed-list row that can be a drag
     insertion boundary — `.insertionMarkers(top, bottom)`
     (`ui/home/FeedListDragAndDrop.kt`), then
@@ -450,24 +463,31 @@ should be a compile error, not a silently wrong Android row style).
 `selectionBackground`/`selectionContentColorOrNull` (`ui/home/HomeCommon.kt`) resolve their actual
 colors from `rowSelectionColors()` (`ui/home/ListRowChrome.kt`'s `expect`/`actual`,
 `RowSelectionColors`) — the shared logic in `HomeCommon.kt` only handles the `LocalRowSelectionVisible`
-gate and the `RowSelectionTone` fan-out (a feed rendered once under its folder and again under every
-expanded tag; the non-primary instances get `RowSelectionColors.echoBackground`, a faint tint at
-`SECONDARY_SELECTION_ALPHA` — see the KDoc there). The palette itself is per-platform:
+gate, the `RowSelectionTone` fan-out (a feed rendered once under its folder and again under every
+expanded tag; the non-primary instances get a faint tint of `RowSelectionColors.selectedBackground`
+at `SECONDARY_SELECTION_ALPHA`), and deriving a non-focused row's actual color from
+`RowSelectionColors.paneFocus`, a `PaneFocusIndication` (`Dim` or `Ring`) that names *how* this
+platform shows pane focus rather than each platform repeating its own copy of the derivation logic.
+The palette itself is per-platform:
 
-- **Desktop**: `primary`/`onPrimary` when the row's pane holds keyboard focus, a dimmed
-  (`alpha = 0.4`) `primary` with no content-color override otherwise — the focused/unfocused split
-  is "which pane will keyboard input land in", a concept a pointer-and-keyboard platform has and a
-  touch one doesn't.
-- **Android**: `secondaryContainer`/`onSecondaryContainer`, M3's own "selected item" pair, the same
+- **Desktop**: `primary`/`onPrimary` at `RowSelectionColors.selectedBackground`/`selectedContent`,
+  with `paneFocus = PaneFocusIndication.Dim(0.4f)` — a selected row in the pane that does *not*
+  hold keyboard focus dims to that alpha, with no content-color override (the dimmed background
+  still has enough contrast with each element's own default color). The focused/unfocused split
+  itself is "which pane will keyboard input land in", a concept a pointer-and-keyboard platform has
+  and a touch one doesn't.
+- **Android**: `secondaryContainer`/`onSecondaryContainer` at the same two properties, the same
   regardless of pane focus — M3's own `NavigationDrawerItem` tokens don't recolor on focus either
   (`ActiveFocusLabelTextColor` equals `ActiveLabelTextColor`). An Android tablet can have a physical
   keyboard attached, though, so pane focus still exists there and still needs to be shown somewhere:
-  it's carried by `RowSelectionColors.focusRing` instead — a `secondary` outline drawn by
-  `listRowOutline` (`ui/home/HomeCommon.kt`, shared logic; see below) around the selected row in
-  whichever pane holds keyboard focus, M3's own `FocusIndicatorColor` concept (a token that ships
-  with no Compose implementation, so Android's `actual` supplies its own). Desktop's
-  `RowSelectionColors.focusRing` is `null` — its dimming already carries pane focus, so it needs no
-  separate ring.
+  it's carried by `paneFocus = PaneFocusIndication.Ring(secondary)` instead — a `secondary` outline
+  drawn by `listRowOutline` (`ui/home/HomeCommon.kt`, shared logic; see below) around the selected
+  row in whichever pane holds keyboard focus, M3's own `FocusIndicatorColor` concept (a token that
+  ships with no Compose implementation, so Android's `actual` supplies its own).
+
+`PaneFocusIndication`'s two cases are mutually exclusive by construction — a platform picks exactly
+one — which is why it is a sealed type rather than a `RowSelectionColors` carrying both a nullable
+dim alpha and a nullable ring color, each platform leaving the other's field unused.
 
 `listRowOutline` (`ui/home/HomeCommon.kt`, two overloads mirroring `selectionBackground`'s
 boolean/`RowSelectionTone` split) draws a row's outline decoration: a drop-target border when the row

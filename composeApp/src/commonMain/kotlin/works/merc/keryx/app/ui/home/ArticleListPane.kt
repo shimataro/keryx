@@ -96,8 +96,10 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  * @param modifier Modifier applied to the pane.
  * @param notifVm Optional view model providing notifications for the toolbar.
  * @param onSelectionAdvance Called after an article is selected, in addition to [onActivated] —
- *   see `HomeScreen`'s pane-layout wiring. No-op at [PaneLayout.Triple], where every pane is
- *   already visible and there is nowhere to advance to.
+ *   see `HomeScreen`'s pane-layout wiring. No-op at both [PaneLayout.Triple] and [PaneLayout.Dual],
+ *   where every pane `visiblePanes` returns is already on screen and there is nowhere to advance
+ *   to (`HomeScreen` itself gates this to fire only at [PaneLayout.Single], the one layout where
+ *   selecting an article actually changes which panes are visible).
  * @param onOpenDrawer Renders the pane's own leading hamburger-button-and-title row when non-null
  *   — this pane is being shown at a narrow [PaneLayout], where the feed list is a modal navigation
  *   drawer (see `HomePaneLayout.kt`'s `feedListIsDrawer`) rather than an on-screen pane, and this is
@@ -105,10 +107,11 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  *   disabled, since a [PaneLayout.Triple] pane has no drawer to open at all — the row's presence
  *   therefore depends only on the layout, never on the navigation stack's current depth. Always
  *   enabled when non-null: unlike a "back" action, opening the drawer is never contextually unavailable.
- * @param onTextInputFocusChange Reports whether this pane's own search field (the one hosted here
- *   when [filter] is [ArticleFilter.Search] at a narrow layout) currently holds focus — same
- *   contract as `FeedListPane`'s own parameter of that name, so `HomeScreen` can suppress bare-key
- *   shortcuts while the user is typing regardless of which pane the field currently lives in.
+ * @param onTextInputFocusChange Reports [HomeTextInput.SearchField] while this pane's own search
+ *   field (the one hosted here when [filter] is [ArticleFilter.Search] at a narrow layout) holds
+ *   focus, `null` otherwise — same contract as `FeedListPane`'s own parameter of that name, so
+ *   `HomeScreen` can suppress bare-key shortcuts while the user is typing regardless of which pane
+ *   the field currently lives in.
  * @param onSearchClick Adds a search entry point to [ArticleListPaneContent]'s own top bar when
  *   non-null — the search icon `ui-guidelines`' "Pane structure & tonal roles" section places at
  *   the head of this pane's header row. Not forwarded to [SearchListPane]: once [filter] is already
@@ -132,7 +135,7 @@ fun ArticleListPane(
     onOpenDrawer: (() -> Unit)? = null,
     onExitSearch: (() -> Unit)? = null,
     onAddFeedClick: (() -> Unit)? = null,
-    onTextInputFocusChange: (Boolean) -> Unit = {},
+    onTextInputFocusChange: (HomeTextInput?) -> Unit = {},
     onSearchClick: (() -> Unit)? = null,
     returnRipplePulse: Int = 0,
 ) {
@@ -262,8 +265,8 @@ fun ArticleListPane(
  * @param onActivated Called when the pane is activated.
  * @param onExitSearch Leaves the Search scope — see `ArticleListPane`'s own KDoc on the parameter
  *   of the same name, which this is forwarded straight from.
- * @param onTextInputFocusChange Reports whether this pane's own query field currently holds focus
- *   — see `ArticleListPane`'s own parameter of the same name.
+ * @param onTextInputFocusChange Reports [HomeTextInput.SearchField] while this pane's own query
+ *   field holds focus, `null` otherwise — see `ArticleListPane`'s own parameter of the same name.
  */
 @Composable
 private fun SearchListPane(
@@ -274,7 +277,7 @@ private fun SearchListPane(
     notifVm: NotificationCenterViewModel? = null,
     onExitSearch: (() -> Unit)? = null,
     onSelectionAdvance: () -> Unit = {},
-    onTextInputFocusChange: (Boolean) -> Unit = {},
+    onTextInputFocusChange: (HomeTextInput?) -> Unit = {},
 ) {
     val query by vm.searchQuery.collectAsStateSafe("")
     val results by vm.searchResults.collectAsStateSafe(emptyList())
@@ -313,7 +316,7 @@ private fun SearchListPane(
     // report false on its own, and a stuck `true` would permanently suppress bare-key shortcuts
     // (see HomeScreen's own textInputFocused KDoc).
     DisposableEffect(Unit) {
-        onDispose { onTextInputFocusChange(false) }
+        onDispose { onTextInputFocusChange(null) }
     }
 
     Column(
@@ -339,7 +342,7 @@ private fun SearchListPane(
                 modifier = Modifier.padding(top = 4.dp),
                 fieldModifier = Modifier
                     .focusRequester(searchFocusRequester)
-                    .onFocusChanged { onTextInputFocusChange(it.isFocused) },
+                    .onFocusChanged { onTextInputFocusChange(if (it.isFocused) HomeTextInput.SearchField else null) },
             )
         }
         ArticleListTopBar(

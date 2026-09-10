@@ -10,6 +10,21 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 
 /**
+ * Which kind of text input currently holds focus inside `FeedListPane`/`ArticleListPane` — reported
+ * through each pane's own `onTextInputFocusChange(HomeTextInput?)`, `null` meaning neither. Distinct
+ * from the plain suppression `textInputFocused` (below) still needs at the shortcut-dispatch level:
+ * `HomeScreen` uses this finer-grained value to decide what ↓/↑ should do while typing (see
+ * `KeyboardNav.kt`'s own KDoc on why ↓/↑ alone pass through the [homeKeyboardShortcuts] guard) —
+ * [SearchField] descends into the results list, [RowNameEditor] is left alone entirely so the
+ * caret stays put and the editor doesn't accidentally commit. Before this type existed, both cases
+ * were folded into one `Boolean`, which is exactly why ↓/↑ reaching an inline row editor used to
+ * both move the keyboard-navigated feed selection *and* leave the editor open with nothing to show
+ * for the keypress — one signal, two unrelated fields, and no way to tell them apart at the point
+ * that needed to.
+ */
+enum class HomeTextInput { SearchField, RowNameEditor }
+
+/**
  * Keyboard shortcuts for the home screen (attach to a focused root):
  * - ↓ / ↑ / ← / → : pane-dependent navigation (selection change, scroll, or focus move —
  *   the caller decides based on which pane is logically focused)
@@ -30,16 +45,28 @@ import androidx.compose.ui.input.key.type
  * - Esc : abort an in-progress feed/folder drag (handled by [onEscape], which reports whether
  *   there was one — if not, the key is left alone for anything else to handle)
  *
- * When [textInputFocused] is true, all shortcuts are suppressed so the focused text field (the
+ * When [textInputFocused] is true, most shortcuts are suppressed so the focused text field (the
  * sidebar search field, or a feed-list row's inline name editor — both live inside a pane, under
- * this root `onPreviewKeyEvent`) receives typed letters/arrows normally.
- * Escape is the one exception: a drag can be in progress while the search field holds focus, and
- * aborting it must always be possible.
+ * this root `onPreviewKeyEvent`) receives typed letters/arrows normally. Two exceptions:
+ * - Escape: a drag can be in progress while the search field holds focus, and aborting it must
+ *   always be possible.
+ * - ↓ / ↑: still call [onDown]/[onUp] even while the *search* field holds focus (`HomeScreen`
+ *   routes a row's own inline name editor back to a no-op instead — see its own `HomeTextInput`
+ *   dispatch). A single-line field has no caret use for either key, so this is what lets the
+ *   result list be browsed by keyboard without leaving the field first — descending into the list
+ *   is `HomeScreen`'s job once it sees the key reach here; this function's only job is to let ↓/↑
+ *   reach it in the first place. Returning `true` here also means the key event is fully consumed
+ *   at this root `onPreviewKeyEvent`, before it can reach whatever a descendant (the field itself,
+ *   a nearby row, or the host platform) would otherwise do with an unconsumed arrow key — which
+ *   matters concretely on Android, where an unhandled D-pad/arrow key can fall through to the
+ *   platform's own View-level focus search. ← / → and every letter key stay fully suppressed here —
+ *   neither has a role once the result list is reachable via ↓/↑ alone, so there is no reason to
+ *   grow a second special case for them.
  *
  * [onKeyboardEngaged] fires on the first `KeyDown` that reaches past the [textInputFocused] guard —
  * i.e. a genuine physical-key press, not a soft-keyboard key routed to a focused text field (those
  * never reach this point). `HomeScreen` latches this into [LocalKeyboardEngaged] to gate Android's
- * keyboard-focus ring (see `ListRowChrome.kt`'s `RowSelectionColors.focusRing`): a touch-only
+ * keyboard-focus ring (see `ListRowChrome.kt`'s `PaneFocusIndication.Ring`): a touch-only
  * session should never show a focus indicator meant for keyboard navigation.
  */
 fun Modifier.homeKeyboardShortcuts(
@@ -59,7 +86,15 @@ fun Modifier.homeKeyboardShortcuts(
 ): Modifier = onPreviewKeyEvent { event ->
     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
     if (event.key == Key.Escape) return@onPreviewKeyEvent onEscape()
-    if (textInputFocused) return@onPreviewKeyEvent false
+    if (textInputFocused) {
+        // Only ↓/↑ pass through here — see this function's own KDoc for why. A real hardware key
+        // still reached this handler either way, so it still latches onKeyboardEngaged.
+        return@onPreviewKeyEvent when (event.key) {
+            Key.DirectionDown -> { onKeyboardEngaged(); onDown(); true }
+            Key.DirectionUp -> { onKeyboardEngaged(); onUp(); true }
+            else -> false
+        }
+    }
     onKeyboardEngaged()
     when {
         (event.isMetaPressed || event.isCtrlPressed) && event.key == Key.F -> { onSearch(); true }

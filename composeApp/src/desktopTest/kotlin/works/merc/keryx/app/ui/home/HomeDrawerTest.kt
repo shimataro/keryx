@@ -52,6 +52,10 @@ class HomeDrawerTest {
      * @param onDrawerStateReady Reports the composed `DrawerState` back to the test.
      * @param onDrawerContentRowSelectionVisible Reports the `LocalRowSelectionVisible` value
      *   actually seen inside `drawerContent`'s own composition scope.
+     * @param onFocusedPaneChange Mirrors `HomeScreen`'s own `onSelectionAdvance` on the drawer's
+     *   `FeedListPane` — a row selection there also moves `focusedPane` to `HomePane.ArticleList`,
+     *   not just closing the drawer, so a subsequent ↑/↓ has somewhere to land (see
+     *   `HomeScreen.kt`'s own comment on this call site for the bug this fixes).
      */
     @Composable
     private fun DrawerTestHost(
@@ -59,6 +63,7 @@ class HomeDrawerTest {
         bodyProvidesSelectionVisible: Boolean = true,
         onDrawerStateReady: (DrawerState) -> Unit = {},
         onDrawerContentRowSelectionVisible: (Boolean) -> Unit = {},
+        onFocusedPaneChange: (HomePane) -> Unit = {},
     ) {
         KoinApplication(configuration = koinConfiguration { modules(module { single { testMenuController } }) }) {
             val drawerState = rememberDrawerState(DrawerValue.Open)
@@ -75,7 +80,10 @@ class HomeDrawerTest {
                                 focused = false,
                                 dragOverlay = remember { FeedDragOverlayState() },
                                 onActivated = {},
-                                onSelectionAdvance = { scope.launch { drawerState.close() } },
+                                onSelectionAdvance = {
+                                    onFocusedPaneChange(HomePane.ArticleList)
+                                    scope.launch { drawerState.close() }
+                                },
                             )
                         }
                     }
@@ -103,6 +111,29 @@ class HomeDrawerTest {
 
             assertEquals(ArticleFilter.Starred, vm.filter.value)
             assertFalse(drawerState.isOpen)
+        }
+    }
+
+    /**
+     * Regression test for a bug where a drawer row selection left `focusedPane` wherever it was
+     * before the drawer opened (possibly `HomePane.ArticleDetail`) — closing the drawer then left
+     * ↑/↓ unable to move the very selection the user just made, since neither `HomePane.FeedList`
+     * (the drawer, now closed) nor `HomePane.ArticleDetail` (whatever `focusedPane` was stuck at)
+     * routes to the article list.
+     */
+    @Test
+    fun tappingAFeedRowMovesFocusedPaneToTheArticleList() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            var focusedPane: HomePane? = null
+            setContent { DrawerTestHost(vm, onFocusedPaneChange = { focusedPane = it }) }
+            waitForIdle()
+
+            onNodeWithText("スター付き").performClick()
+            waitForIdle()
+
+            assertEquals(HomePane.ArticleList, focusedPane)
         }
     }
 

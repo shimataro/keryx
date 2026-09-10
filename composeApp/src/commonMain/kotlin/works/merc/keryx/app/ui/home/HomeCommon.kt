@@ -102,7 +102,7 @@ internal val LocalSnackbarHostState = staticCompositionLocalOf<SnackbarHostState
  * (see each pane's own call sites), so a *dedicated* empty-background click handler moves focus
  * nothing else already moves — this is unrelated to whether keyboard focus itself exists on
  * Android (it does; a physical keyboard can be attached to a tablet and arrow keys still move it —
- * see `ListRowChrome.kt`'s `RowSelectionColors.focusRing`). Keeping this modifier there anyway
+ * see `ListRowChrome.kt`'s `PaneFocusIndication.Ring`). Keeping this modifier there anyway
  * would only add an unlabeled, full-size accessibility click node sitting behind every other
  * control in the pane.
  *
@@ -175,57 +175,6 @@ internal fun ExpandCollapseChevron(
 }
 
 /**
- * Background for a selectable row, taken from this platform's [RowSelectionColors]: full-strength
- * when its pane holds keyboard focus, dimmed (desktop) or an added [listRowOutline] ring (Android
- * — see [RowSelectionColors]'s own KDoc) otherwise. Transparent when the row isn't selected at all.
- *
- * Returns [Color.Transparent] whenever [LocalRowSelectionVisible] reads `false` — set by `HomeScreen`
- * at [PaneLayout.Single], where "selected" doesn't mean "on screen" the way it does at [PaneLayout.Dual]/
- * [PaneLayout.Triple]: tapping a row navigates away from it, so a lingering highlight on a row the
- * user can no longer see would read as stale rather than as "your place."
- *
- * @param colors Overridable for tests only — production call sites always use the platform default.
- */
-@Composable
-internal fun selectionBackground(
-    selected: Boolean,
-    focused: Boolean,
-    colors: RowSelectionColors = rowSelectionColors(),
-): Color = when {
-    !LocalRowSelectionVisible.current || !selected -> Color.Transparent
-    focused -> colors.focusedBackground
-    else -> colors.unfocusedBackground
-}
-
-/**
- * Content color to pair with [selectionBackground] — `null` where the platform's own
- * [RowSelectionColors] leaves one unset, so callers fall back to each element's normal color
- * (desktop's dimmed unfocused background still has enough contrast with the default text/icon
- * colors, so it sets none). Also `null` whenever [LocalRowSelectionVisible] reads `false`, matching
- * [selectionBackground] never painting a background there either.
- *
- * @param colors Overridable for tests only — production call sites always use the platform default.
- */
-@Composable
-internal fun selectionContentColorOrNull(
-    selected: Boolean,
-    focused: Boolean,
-    colors: RowSelectionColors = rowSelectionColors(),
-): Color? = when {
-    !LocalRowSelectionVisible.current || !selected -> null
-    focused -> colors.focusedContent
-    else -> colors.unfocusedContent
-}
-
-/**
- * Alpha of the [RowSelectionTone.SECONDARY] tint, applied by each platform's own
- * [RowSelectionColors.echoBackground] — deliberately far below any [RowSelectionTone.PRIMARY]
- * background, so a duplicate row of the selected feed reads as "same feed, not the row you're on"
- * rather than as a second selection.
- */
-internal const val SECONDARY_SELECTION_ALPHA = 0.15f
-
-/**
  * How strongly a feed-list row paints its selection. A feed renders once under its folder group and
  * again under every expanded tag it carries, so "selected" is not a single row: exactly one rendered
  * instance is the one actually clicked/keyboard-navigated to ([PRIMARY]), and every other instance of
@@ -234,10 +183,77 @@ internal const val SECONDARY_SELECTION_ALPHA = 0.15f
 enum class RowSelectionTone { NONE, SECONDARY, PRIMARY }
 
 /**
- * Background for a row that can render as more than one instance (see [RowSelectionTone]).
- * [RowSelectionTone.PRIMARY] matches the boolean [selectionBackground] exactly, so a feed with no
- * duplicates looks unchanged. Gated on [LocalRowSelectionVisible] the same way the boolean overload
- * is — see that overload's own KDoc.
+ * Alpha of a [RowSelectionTone.SECONDARY] row's tint, applied to [RowSelectionColors.selectedBackground]
+ * by the tone-aware [selectionBackground] below — deliberately far below a [RowSelectionTone.PRIMARY]
+ * background, so a duplicate row of the selected feed reads as "same feed, not the row you're on"
+ * rather than as a second selection. The same fraction of the same base color on every platform,
+ * which is what makes this a shared constant rather than a per-platform [RowSelectionColors] field.
+ */
+internal const val SECONDARY_SELECTION_ALPHA = 0.15f
+
+/**
+ * A selected row's background in the pane that does *not* hold keyboard focus — [colors.selectedBackground]
+ * unchanged on a platform whose [PaneFocusIndication] is [PaneFocusIndication.Ring] (Android: the
+ * color itself never moves with pane focus, see that type's own KDoc), or dimmed to
+ * [PaneFocusIndication.Dim.alpha] on a platform whose indication is [PaneFocusIndication.Dim]
+ * (desktop: this dimming *is* how pane focus is shown, so it needs to actually differ from the
+ * focused color).
+ */
+private fun nonFocusedSelectionBackground(colors: RowSelectionColors): Color = when (val focus = colors.paneFocus) {
+    is PaneFocusIndication.Dim -> colors.selectedBackground.copy(alpha = focus.alpha)
+    is PaneFocusIndication.Ring -> colors.selectedBackground
+}
+
+/**
+ * A selected row's content color in the pane that does *not* hold keyboard focus — mirrors
+ * [nonFocusedSelectionBackground]'s own per-[PaneFocusIndication] split. `null` on [PaneFocusIndication.Dim]
+ * (desktop's dimmed background still has enough contrast with each element's own default color, so
+ * it sets none — see [RowSelectionColors.selectedContent]'s own KDoc), [colors.selectedContent]
+ * unchanged on [PaneFocusIndication.Ring] (Android: content color never moves with pane focus
+ * either).
+ */
+private fun nonFocusedSelectionContent(colors: RowSelectionColors): Color? = when (colors.paneFocus) {
+    is PaneFocusIndication.Dim -> null
+    is PaneFocusIndication.Ring -> colors.selectedContent
+}
+
+/**
+ * Background for a selectable row, taken from this platform's [RowSelectionColors]. Delegates to
+ * the [RowSelectionTone] overload below ([selected] is exactly [RowSelectionTone.PRIMARY] vs.
+ * [RowSelectionTone.NONE] — the two are mathematically equivalent for a row that never renders more
+ * than one instance of itself, e.g. every article row).
+ *
+ * @param colors Overridable for tests only — production call sites always use the platform default.
+ */
+@Composable
+internal fun selectionBackground(
+    selected: Boolean,
+    focused: Boolean,
+    colors: RowSelectionColors = rowSelectionColors(),
+): Color = selectionBackground(if (selected) RowSelectionTone.PRIMARY else RowSelectionTone.NONE, focused, colors)
+
+/**
+ * Content color to pair with [selectionBackground] — see the [RowSelectionTone] overload below,
+ * which this delegates to the same way [selectionBackground] does.
+ *
+ * @param colors Overridable for tests only — production call sites always use the platform default.
+ */
+@Composable
+internal fun selectionContentColorOrNull(
+    selected: Boolean,
+    focused: Boolean,
+    colors: RowSelectionColors = rowSelectionColors(),
+): Color? = selectionContentColorOrNull(if (selected) RowSelectionTone.PRIMARY else RowSelectionTone.NONE, focused, colors)
+
+/**
+ * Background for a row that can render as more than one instance (see [RowSelectionTone]):
+ * [colors.selectedBackground] in the focused pane, [nonFocusedSelectionBackground] otherwise, for
+ * [RowSelectionTone.PRIMARY]; a faint [SECONDARY_SELECTION_ALPHA] tint of [colors.selectedBackground]
+ * for [RowSelectionTone.SECONDARY] regardless of focus (an echo of the selection, not a second one).
+ * Transparent whenever [LocalRowSelectionVisible] reads `false` — set by `HomeScreen` at
+ * [PaneLayout.Single], where "selected" doesn't mean "on screen" the way it does at
+ * [PaneLayout.Dual]/[PaneLayout.Triple]: tapping a row navigates away from it, so a lingering
+ * highlight on a row the user can no longer see would read as stale rather than as "your place."
  *
  * @param colors Overridable for tests only — production call sites always use the platform default.
  */
@@ -248,8 +264,8 @@ internal fun selectionBackground(
     colors: RowSelectionColors = rowSelectionColors(),
 ): Color = when {
     !LocalRowSelectionVisible.current -> Color.Transparent
-    tone == RowSelectionTone.PRIMARY -> if (focused) colors.focusedBackground else colors.unfocusedBackground
-    tone == RowSelectionTone.SECONDARY -> colors.echoBackground
+    tone == RowSelectionTone.PRIMARY -> if (focused) colors.selectedBackground else nonFocusedSelectionBackground(colors)
+    tone == RowSelectionTone.SECONDARY -> colors.selectedBackground.copy(alpha = SECONDARY_SELECTION_ALPHA)
     else -> Color.Transparent
 }
 
@@ -268,25 +284,16 @@ internal fun selectionContentColorOrNull(
     colors: RowSelectionColors = rowSelectionColors(),
 ): Color? = when {
     !LocalRowSelectionVisible.current || tone != RowSelectionTone.PRIMARY -> null
-    focused -> colors.focusedContent
-    else -> colors.unfocusedContent
+    focused -> colors.selectedContent
+    else -> nonFocusedSelectionContent(colors)
 }
 
 /**
  * The color a list row's outline decoration should paint, or `null` for no outline at all — the
  * judgment half of [listRowOutline], kept separate from the `Modifier`-returning half so it can be
  * unit-tested the same way [selectionContentColorOrNull] already is (a `Modifier`'s contents can't
- * be inspected by a test the way a `Color?` can).
- *
- * A non-null [dropTargetColor] always wins over the keyboard-focus ring below — a drop target is a
- * transient, high-urgency signal, and a row can only paint one outline at a time. Otherwise, the
- * ring shows only when **all** of these hold: [LocalRowSelectionVisible] is showing highlights at
- * all, [LocalKeyboardEngaged] has latched (see its own KDoc), this platform's [colors] actually
- * defines a [RowSelectionColors.focusRing] (desktop's is `null` — its dimming already carries pane
- * focus, see that property's KDoc), [focused] is true (this row's pane holds keyboard focus), and
- * [selected] is true. A row that is merely a [RowSelectionTone.SECONDARY] echo of the selected feed
- * (see the tone overload below) never gets a focus ring — only the one *actual* selected instance
- * does.
+ * be inspected by a test the way a `Color?` can). Delegates to the [RowSelectionTone] overload below
+ * the same way [selectionBackground] does.
  *
  * @param colors Overridable for tests only — production call sites always use the platform default.
  */
@@ -296,17 +303,24 @@ internal fun rowOutlineColorOrNull(
     focused: Boolean,
     dropTargetColor: Color? = null,
     colors: RowSelectionColors = rowSelectionColors(),
-): Color? = when {
-    dropTargetColor != null -> dropTargetColor
-    LocalRowSelectionVisible.current && LocalKeyboardEngaged.current && selected && focused ->
-        colors.focusRing
-    else -> null
-}
+): Color? = rowOutlineColorOrNull(
+    if (selected) RowSelectionTone.PRIMARY else RowSelectionTone.NONE,
+    focused,
+    dropTargetColor,
+    colors,
+)
 
 /**
- * Tone-aware overload of [rowOutlineColorOrNull] — mirrors [selectionBackground]'s own tone
- * overload: only [RowSelectionTone.PRIMARY] (the one actual selected row instance, not a
- * [RowSelectionTone.SECONDARY] echo) is eligible for a focus ring.
+ * Tone-aware [rowOutlineColorOrNull] — see [rowOutlineColorOrNull]'s boolean overload for the
+ * general contract. A non-null [dropTargetColor] always wins over the keyboard-focus ring below — a
+ * drop target is a transient, high-urgency signal, and a row can only paint one outline at a time.
+ * Otherwise, the ring shows only when **all** of these hold: [LocalRowSelectionVisible] is showing
+ * highlights at all, [LocalKeyboardEngaged] has latched (see its own KDoc), this platform's
+ * [PaneFocusIndication] is actually [PaneFocusIndication.Ring] (desktop's is [PaneFocusIndication.Dim]
+ * — its dimming already carries pane focus, see that type's own KDoc), [focused] is true (this
+ * row's pane holds keyboard focus), and [tone] is [RowSelectionTone.PRIMARY] — a row that is merely
+ * a [RowSelectionTone.SECONDARY] echo of the selected feed never gets a focus ring, only the one
+ * *actual* selected instance does.
  *
  * @param colors Overridable for tests only — production call sites always use the platform default.
  */
@@ -319,7 +333,7 @@ internal fun rowOutlineColorOrNull(
 ): Color? = when {
     dropTargetColor != null -> dropTargetColor
     LocalRowSelectionVisible.current && LocalKeyboardEngaged.current && tone == RowSelectionTone.PRIMARY && focused ->
-        colors.focusRing
+        (colors.paneFocus as? PaneFocusIndication.Ring)?.color
     else -> null
 }
 
@@ -564,21 +578,6 @@ internal fun reorderTargetWithinScope(orderedIds: List<String>, index: Int, delt
     // goes after it — i.e. before that row's own successor, or at the very end when there is none.
     return if (delta < 0) ReorderTarget(orderedIds[landsAt]) else ReorderTarget(orderedIds.getOrNull(landsAt + 1))
 }
-
-/**
- * Whether a keyboard shortcut that acts on the selected feed-list item (rename/edit,
- * unsubscribe/delete) should fire, given the currently focused [pane] and whether the feed-list
- * drawer is open ([drawerOpen] — `false` at [PaneLayout.Triple], where the feed list is a pane, not
- * a drawer, and [pane] alone already answers this). These mirror the feed/folder/tag row
- * context-menu items, so they only make sense while the feed list itself has the user's attention —
- * either [PaneLayout.Triple]'s own focused pane, or a narrow layout's open drawer, which is always
- * the topmost thing on screen while open regardless of [pane]. (Toggle read/star, open in browser,
- * copy URL, and refresh-selected-feed have no bare-key equivalent scoped this way — they are
- * Ctrl+Shift+<letter> app-menu accelerators instead, gated by
- * `MenuUiState.articleActionsEnabled`/`urlActionsEnabled`/`feedActionsEnabled`.)
- */
-fun feedListActionAllowed(pane: HomePane, drawerOpen: Boolean = false): Boolean =
-    pane == HomePane.FeedList || drawerOpen
 
 /** Whether the refresh-all / sync actions (toolbar buttons and app-menu items alike) are
  * available — each is blocked while the other operation is in flight, since running both at

@@ -68,9 +68,9 @@ composeApp/src/
     navigation-drawer content instead (`LocalFeedListInDrawer`, provided by `FeedListPane`'s own
     `onSelectionAdvance` nullness) — with selection colors from `rowSelectionColors()`'s
     `secondaryContainer`/`onSecondaryContainer` pair, unchanged by which pane holds keyboard
-    focus (pane focus is instead shown as a `secondary` outline,
-    `RowSelectionColors.focusRing`, via `HomeCommon.kt`'s `listRowOutline` — see that file's own
-    KDoc), TooltipIconButton/ToolbarIconGroup/
+    focus (pane focus is instead shown as a `secondary` outline via
+    `RowSelectionColors.paneFocus`'s `PaneFocusIndication.Ring`, drawn by `HomeCommon.kt`'s
+    `listRowOutline` — see that file's own KDoc), TooltipIconButton/ToolbarIconGroup/
     FlatTooltipContent (M3's own icon-button family inside a `TooltipBox` with its own native
     long-press trigger — `IconButtonKind` picks the member: `IconButton` (`Standard`),
     `FilledIconButton` (`Primary`), `OutlinedIconButton` (`Secondary`) and `FilledTonalIconButton`
@@ -488,15 +488,41 @@ The navigation stack itself is always three deep (`HomePane.FeedList` → `Artic
 part of the stack `focusedPane` ever points into; opening it doesn't advance `focusedPane`, and
 `initialPaneFor`/`paneForFeedDetail` (below) never resolve to it there either. Because of this,
 `focusedPane` alone can't answer "is the feed list what the user is keyboard-navigating right
-now" at a narrow layout (a physical keyboard can be attached to an Android tablet) —
-`HomeScreen`'s own `feedDrawerOpen` (`feedListIsDrawer(paneLayout) && drawerState.isOpen`) stands
-in wherever that question matters: `feedListActionAllowed`'s `drawerOpen` parameter (arrow-key
-routing, and the F2/Delete feed-list shortcuts) takes `feedDrawerOpen`, not `focusedPane`, so a
-drawer left open across a Dual↔Triple layout flip never keeps that stale state. `HomePane.ordinal +
-1` doubles as the stack's current depth, so `HomeScreen` needs no separate depth state — selecting
-an article advances it (`ArticleListPane`'s `onSelectionAdvance`, `null` at `Triple`, where every
-pane is already visible and there is nowhere to advance to), and `platform/BackHandler` (a real
-back-gesture/button interception on Android, a no-op on desktop) pops it by one — gated on
+now" at a narrow layout (a physical keyboard can be attached to an Android tablet) — every call
+site that needs that answer (arrow-key routing, the F2/Delete feed-list shortcuts, and each pane's
+own `focused` parameter that drives its selected row's keyboard-focus ring/dimming) instead reads
+`HomePaneLayout.kt`'s **`keyboardPaneFor(focusedPane, feedDrawerOpen)`** — a single pure function
+that resolves to `HomePane.FeedList` whenever the drawer is open (`feedDrawerOpen =
+feedListIsDrawer(paneLayout) && drawerState.isOpen`, always the topmost thing on screen while
+open, regardless of `focusedPane`) and to `focusedPane` itself otherwise. Reading `focusedPane` and
+`feedDrawerOpen` separately at each call site used to require re-deriving that same drawer
+precedence by hand every time, and disagreeing about it once was a real bug: `HomeScreen`'s
+`Triple`/drawer `FeedListPane` and its `ArticleListPane` each computed their own `focused` flag,
+which could both resolve `true` at once (`PaneLayout.Dual` with the drawer open) and paint a
+keyboard-focus ring on two panes simultaneously — `keyboardPaneFor` makes that structurally
+impossible, since every consumer now reads the one value it resolves to at most once.
+
+**`focusedPane` itself only ever *advances* at `PaneLayout.Single`.** `HomePane.ordinal + 1`
+doubles as the navigation stack's current depth, so `HomeScreen` needs no separate depth state —
+`platform/BackHandler` (a real back-gesture/button interception on Android, a no-op on desktop)
+pops it by one, gated on `homeBackAction(layout, depth, searchScopeReturnPending)` (below), and
+selecting an article advances it forward the same way — but only where `visiblePanes` actually
+changes with depth: `ArticleListPane`'s `onSelectionAdvance` (and the drawer `FeedListPane`'s own,
+which additionally always moves `focusedPane` to `HomePane.ArticleList` on a row selection, not
+just closing the drawer) is a no-op at both `PaneLayout.Triple` and `PaneLayout.Dual`, where every
+pane `visiblePanes` returns is already on screen and advancing `focusedPane` further would only
+leave the article list pane reporting `focused = false` on the very next frame with nothing to
+show for it — see `ArticleListPane`'s own KDoc on that parameter. **Real Compose keyboard focus,
+independent of this `focusedPane` state, lives in exactly two places for the whole screen: the
+root `Box` `homeKeyboardShortcuts` is attached to, and whichever text field (the sidebar search
+field, a narrow layout's own search field, or a feed-list row's inline name editor) is currently
+being typed into.** A list row itself never takes real focus (`ListRowChrome.kt`'s
+`listRowClickable` disables it via `Modifier.focusProperties { canFocus = false }`) — row
+reachability is entirely this app's own arrow-key/J-K model, not Tab order or click-to-focus, and
+every pane's own `onActivated` routes through a small `HomeScreen` helper that returns real focus
+to the root `Box` on top of whatever it does to `focusedPane`, which is what lets a tap on any row
+or button also move focus off whichever text field it had been on.
+
 `homeBackAction(layout, depth, searchScopeReturnPending)`, which wraps the pane-only predicate
 `canNavigateBack(layout, depth)` (`false` whenever stepping back wouldn't actually change what's on
 screen: always at `Triple`; always at `Dual`, since `visiblePanes(Dual, *)` returns the same two

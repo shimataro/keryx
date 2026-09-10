@@ -419,4 +419,23 @@ class HomePaneLayoutTest {
         assertEquals(true, shouldAutoOpenFeedDrawer(PaneLayout.Dual, cloudConfigured = false, hasAnyFeed = false))
     }
 
+    // --- keyboardPaneFor ---
+
+    @Test
+    fun keyboardPaneForReturnsFocusedPaneWhenTheDrawerIsClosed() {
+        for (pane in HomePane.entries) {
+            assertEquals(pane, keyboardPaneFor(pane, feedDrawerOpen = false), "pane=$pane")
+        }
+    }
+
+    @Test
+    fun keyboardPaneForReturnsFeedListWheneverTheDrawerIsOpenRegardlessOfFocusedPane() {
+        // An open drawer is always the topmost thing on screen — it wins over whatever focusedPane
+        // itself says, which at a narrow layout can still be ArticleList or ArticleDetail (the
+        // drawer isn't part of the navigation stack focusedPane points into — see HomePane's KDoc).
+        for (pane in HomePane.entries) {
+            assertEquals(HomePane.FeedList, keyboardPaneFor(pane, feedDrawerOpen = true), "pane=$pane")
+        }
+    }
+
 }
