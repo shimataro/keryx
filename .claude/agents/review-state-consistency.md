@@ -57,14 +57,16 @@ layout" and "Optimistic read/star pins" headings and read only those sections.
 ## Checklist — reachable, selectable, still there
 
 - **Anything the keyboard can select must be something the screen renders.**
-  `buildOrderedFeedListRows`'s `includeSearchRow` — fed by `HomeScreen`'s
-  `searchRowRendered = !feedListIsDrawer(paneLayout)` — must stay the same predicate `FeedListPane`
-  renders that row under; when they drifted, arrow keys selected a Search row that was not on screen.
-  Ask the same question of a collapsed folder's children and a collapsed tag's nested feed rows.
+  `buildOrderedFeedListRows`'s row order and `FeedListPane`'s actual rendered rows must stay in sync
+  — a collapsed folder's children, and a collapsed tag's nested feed rows, must be excluded from
+  both at once, or an arrow key can select a row that is not on screen (this is exactly the failure
+  mode a since-removed sidebar "Search" quick-filter row used to hit, when its own presence
+  predicate and the keyboard order's `includeSearchRow` drifted apart — the row is gone now, but the
+  general invariant still applies to every other conditionally-rendered row).
 - **A selection whose target disappears must be re-resolved, not left dangling.** A filter restored
-  from settings or from a Search-scope snapshot goes through `validateFilterTarget`, and a
-  `FeedListRowSelection.FeedInTag` is demoted to `FeedInFolderGroup` when its tag is no longer
-  expanded. A feed deleted or a tag collapsed under a selection must move it, not orphan it.
+  from settings goes through `validateFilterTarget`, and a `FeedListRowSelection.FeedInTag` is
+  demoted to `FeedInFolderGroup` when its tag is no longer expanded. A feed deleted or a tag
+  collapsed under a selection must move it, not orphan it.
 - **A row must not vanish because a background write changed it.** The article being read stays in
   the list through the optimistic pin caches (`_pinnedReadArticles` / `_pinnedUnstarredArticles`,
   reconciled by `reconcilePinnedArticlesAndSelection` off `articleChangeSignal`) even when a refresh
@@ -87,9 +89,11 @@ layout" and "Optimistic read/star pins" headings and read only those sections.
   scroll positions are read back next launch. A new key needs a default and a decode path, and a
   saved `HomePane` a narrow layout cannot show must be clamped (`initialPaneFor`), not restored.
 - **Scoped state must stay scoped.** "Unread only" is per-scope (`_unreadOnly`, `_unreadOnlyStarred`,
-  `_unreadOnlySearch`), and entering Search snapshots the whole browsing context (`SearchScopeEntry`)
-  so backing out restores it. Flag a new per-scope toggle collapsed onto one shared field, and any
-  new entry point into Search that reaches it without `captureSearchScopeEntry`.
+  `_unreadOnlySearch`), selected by `HomeViewModel.searchActive`/the current filter — flag a new
+  per-scope toggle collapsed onto one shared field. Search itself is orthogonal to `ArticleFilter`
+  (there is no `Search` case, and no filter/selection is ever displaced by starting one — see
+  `app-architecture.md`'s "Search is orthogonal to `ArticleFilter`"), so there is no browsing-context
+  snapshot to keep in sync here any more; flag any new code that tries to reintroduce one.
 
 ## Investigation
 

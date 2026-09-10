@@ -1,6 +1,5 @@
 package works.merc.keryx.app.appmenu
 
-import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.platform.isMacOs
@@ -66,7 +65,7 @@ class MenuBarVisibilityTest {
         ui = computeMenuUiState(
             screen = Screen.Home, hasSelectedArticle = true, selectedArticleHasUrl = true,
             feedRefreshing = false, syncing = false, cloudConnected = true,
-            filter = ArticleFilter.All, unreadOnly = false,
+            searchActive = false, unreadOnly = false,
             hasSelectedFeed = true, hasRenamableSelection = true,
         ),
         labels = labels(),

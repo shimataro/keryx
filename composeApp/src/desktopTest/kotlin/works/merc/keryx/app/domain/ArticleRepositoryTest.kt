@@ -533,7 +533,26 @@ class ArticleRepositoryTest {
             ftsManagerIndexed(driver)
 
             val repo = newRepo(db, driver)
-            val results = repo.search("Kotlin")
+            val results = repo.search("Kotlin", ArticleFilter.All)
+
+            assertEquals(listOf("a1"), results.map { it.article.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun searchPassesTheScopeThroughToFtsSearch() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertFeed("f2")
+            db.insertArticle("a1", "f1", title = "Kotlin in f1", content = "cross platform apps")
+            db.insertArticle("a2", "f2", title = "Kotlin in f2", content = "cross platform apps")
+            ftsManagerIndexed(driver)
+
+            val repo = newRepo(db, driver)
+            val results = repo.search("Kotlin", ArticleFilter.Feed("f1"))
 
             assertEquals(listOf("a1"), results.map { it.article.id })
         } finally {
@@ -550,7 +569,7 @@ class ArticleRepositoryTest {
             ftsManagerIndexed(driver)
 
             val repo = newRepo(db, driver)
-            val result = repo.search("Kotlin").single()
+            val result = repo.search("Kotlin", ArticleFilter.All).single()
 
             assertEquals("a1", result.article.id)
             // Markup wraps the match; stripping the sentinels restores the article's real title.
@@ -577,8 +596,8 @@ class ArticleRepositoryTest {
             ftsManagerIndexed(driver)
 
             val repo = newRepo(db, driver)
-            val fromFts = FtsSearch(driver).search("kotlin")
-            val results = repo.search("kotlin")
+            val fromFts = FtsSearch(driver).search("kotlin", ArticleFilter.All)
+            val results = repo.search("kotlin", ArticleFilter.All)
 
             // The repository must return exactly FtsSearch's hits, in the same rank order, with the
             // same title markup — only the full row is additionally attached (batched fetch must not
@@ -605,8 +624,8 @@ class ArticleRepositoryTest {
             ftsManagerIndexed(driver)
 
             val repo = newRepo(db, driver)
-            val fromFts = FtsSearch(driver).search("kotlin")
-            val results = repo.search("kotlin")
+            val fromFts = FtsSearch(driver).search("kotlin", ArticleFilter.All)
+            val results = repo.search("kotlin", ArticleFilter.All)
 
             assertEquals(1000, results.size)
             assertEquals(fromFts.map { it.id }, results.map { it.article.id })

@@ -1,5 +1,6 @@
 package works.merc.keryx.app.domain
 
+import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.remote.ParsedArticle
@@ -127,9 +128,9 @@ class ArticleUpsertTest {
 
             ftsManagerIndexed(driver)
             // The visible word is searchable; the HTML tag name / attribute is not.
-            assertContains(FtsSearch(driver).search("Kotlin").map { it.id }, a.id)
-            assertTrue(FtsSearch(driver).search("div").isEmpty())
-            assertTrue(FtsSearch(driver).search("class").isEmpty())
+            assertContains(FtsSearch(driver).search("Kotlin", ArticleFilter.All).map { it.id }, a.id)
+            assertTrue(FtsSearch(driver).search("div", ArticleFilter.All).isEmpty())
+            assertTrue(FtsSearch(driver).search("class", ArticleFilter.All).isEmpty())
         } finally {
             driver.close()
         }

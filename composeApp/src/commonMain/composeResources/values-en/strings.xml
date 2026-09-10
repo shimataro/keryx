@@ -127,6 +127,7 @@
     <string name="home_search_placeholder">Search articles…</string>
     <string name="home_search_too_short">Enter at least 2 characters</string>
     <string name="home_search_no_results">No matching articles</string>
+    <string name="home_search_try_all_feeds">To search every feed, select "All Feeds"</string>
     <string name="home_search_hint">↑↓ to navigate · Enter to open</string>
     <string name="home_search_clear">Clear</string>
 

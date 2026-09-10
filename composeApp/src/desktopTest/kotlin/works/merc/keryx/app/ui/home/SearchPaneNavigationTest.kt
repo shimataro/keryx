@@ -25,7 +25,6 @@ import kotlinx.coroutines.runBlocking
 import org.koin.compose.KoinApplication
 import org.koin.dsl.koinConfiguration
 import org.koin.dsl.module
-import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.insertFeed
@@ -58,10 +57,10 @@ class SearchPaneNavigationTest {
         KoinApplication(configuration = koinConfiguration { modules(module { single { testMenuController } }) }) {
             val layout = PaneLayout.Single
             val visible = visiblePanes(layout, depth)
-            val searchScopeEntry by vm.searchScopeEntry.collectAsStateSafe(null)
+            val searchBarVisible by vm.searchBarVisible.collectAsStateSafe(false)
             fun goBack() {
-                when (homeBackAction(layout, depth, searchScopeEntry != null)) {
-                    HomeBackAction.ExitSearch -> vm.exitSearchScope()?.let { onDepthChange(it.ordinal + 1) }
+                when (homeBackAction(layout, depth, searchBarVisible)) {
+                    HomeBackAction.ExitSearch -> { vm.setSearchBarVisible(false); onDepthChange(HomePane.ArticleList.ordinal + 1) }
                     HomeBackAction.PopPane -> onDepthChange(depth - 1)
                     HomeBackAction.None -> {}
                 }
@@ -77,7 +76,7 @@ class SearchPaneNavigationTest {
                         onSelectionAdvance = { onDepthChange(3) },
                         onOpenDrawer = {},
                         onExitSearch = ::goBack,
-                        onSearchClick = { vm.enterSearchScope(HomePane.ArticleList) },
+                        onSearchClick = { vm.setSearchBarVisible(true); vm.requestSearchFocus() },
                     )
                     // A plain stand-in for ArticleDetailPane: its own reader is a genuine
                     // native WebView this test harness cannot host (see
@@ -110,13 +109,13 @@ class SearchPaneNavigationTest {
         KoinApplication(configuration = koinConfiguration { modules(module { single { testMenuController } }) }) {
             val layout = PaneLayout.Dual
             val visible = visiblePanes(layout, focusedPane.ordinal + 1)
-            val searchScopeEntry by vm.searchScopeEntry.collectAsStateSafe(null)
+            val searchBarVisible by vm.searchBarVisible.collectAsStateSafe(false)
             fun setFocusedPane(pane: HomePane) {
                 if (pane != focusedPane) onFocusedPaneChange(pane)
             }
             fun goBack() {
-                when (homeBackAction(layout, focusedPane.ordinal + 1, searchScopeEntry != null)) {
-                    HomeBackAction.ExitSearch -> vm.exitSearchScope()?.let { setFocusedPane(it) }
+                when (homeBackAction(layout, focusedPane.ordinal + 1, searchBarVisible)) {
+                    HomeBackAction.ExitSearch -> { vm.setSearchBarVisible(false); setFocusedPane(HomePane.ArticleList) }
                     HomeBackAction.PopPane -> {
                         val previous = focusedPane.ordinal - 1
                         if (previous >= 0) setFocusedPane(HomePane.entries[previous])
@@ -140,7 +139,8 @@ class SearchPaneNavigationTest {
                         onExitSearch = ::goBack,
                         onSearchClick = {
                             setFocusedPane(HomePane.ArticleList)
-                            vm.enterSearchScope(HomePane.ArticleList)
+                            vm.setSearchBarVisible(true)
+                            vm.requestSearchFocus()
                         },
                     )
                     HomePane.ArticleDetail -> Box(paneModifier.testTag(ARTICLE_DETAIL_STUB_TAG)) {}
@@ -158,7 +158,7 @@ class SearchPaneNavigationTest {
             setContent { DualHomeTestHost(vm, focusedPane, { focusedPane = it }) }
             waitForIdle()
 
-            assertEquals(ArticleFilter.All, vm.filter.value)
+            assertEquals(false, vm.searchBarVisible.value)
 
             // Bug precondition: focusedPane is HomePane.FeedList (e.g. left-arrow keyboard nav)
             // when the article list's own search icon is tapped — the feed list itself has no
@@ -167,8 +167,8 @@ class SearchPaneNavigationTest {
             onNodeWithContentDescription("記事を検索").performClick()
             waitForIdle()
 
-            assertEquals(ArticleFilter.Search, vm.filter.value)
-            // The fix: entering Search from this icon also focuses the article list, so
+            assertEquals(true, vm.searchBarVisible.value)
+            // The fix: opening the bar from this icon also focuses the article list, so
             // homeBackAction resolves to ExitSearch instead of None.
             assertEquals(HomePane.ArticleList, focusedPane)
             onNodeWithContentDescription("戻る").assertIsEnabled()
@@ -176,9 +176,9 @@ class SearchPaneNavigationTest {
             onNodeWithContentDescription("戻る").performClick()
             waitForIdle()
 
-            // Back actually exits Search: the filter is restored and focus lands back on the
-            // article list (enterSearchScope's own returnPane), not the feed list.
-            assertEquals(ArticleFilter.All, vm.filter.value)
+            // Back actually closes the bar, and focus lands back on the article list, not the
+            // feed list.
+            assertEquals(false, vm.searchBarVisible.value)
             assertEquals(HomePane.ArticleList, focusedPane)
         }
     }
@@ -188,6 +188,7 @@ class SearchPaneNavigationTest {
         val (driver, db) = inMemoryDb()
         useHomeViewModel(driver, db) { fixture ->
             val vm = fixture.vm
+            vm.setSearchBarVisible(true)
             vm.setSearchQuery("kotlin")
             var depth by mutableStateOf(2)
             setContent { NarrowHomeTestHost(vm, depth, { depth = it }) }
@@ -211,18 +212,18 @@ class SearchPaneNavigationTest {
     }
 
     @Test
-    fun switchingAwayFromSearchBeforeAnyFieldMountedDropsThePendingFocusRequest() {
+    fun closingTheSearchBarBeforeAnyFieldMountedDropsThePendingFocusRequest() {
         val (driver, db) = inMemoryDb()
         val fixture = newHomeViewModel(driver, db)
         val vm = fixture.vm
         try {
-            vm.selectFilter(ArticleFilter.Search)
+            vm.setSearchBarVisible(true)
             vm.requestSearchFocus()
             assertEquals(true, vm.pendingSearchFocus.value)
 
-            // Navigating away before any field consumed the request (e.g. the user picked a
-            // different quick filter before the search screen ever composed) must drop it.
-            vm.selectFilter(ArticleFilter.All)
+            // Closing the bar before any field consumed the request (e.g. the user picked a
+            // different quick filter before the search field ever composed) must drop it.
+            vm.setSearchBarVisible(false)
 
             assertEquals(false, vm.pendingSearchFocus.value)
         } finally {
@@ -239,21 +240,21 @@ class SearchPaneNavigationTest {
             setContent { NarrowHomeTestHost(vm, depth, { depth = it }) }
             waitForIdle()
 
-            assertEquals(ArticleFilter.All, vm.filter.value)
+            assertEquals(false, vm.searchBarVisible.value)
             onNodeWithContentDescription("記事を検索").performClick()
             waitForIdle()
 
-            // Entering Search from the article list's own search icon must not push a new depth
+            // Opening the bar from the article list's own search icon must not push a new depth
             // (the field lives on this same pane), so going back afterwards doesn't overshoot
             // past the list the user was actually on.
             assertEquals(2, depth)
-            assertEquals(ArticleFilter.Search, vm.filter.value)
+            assertEquals(true, vm.searchBarVisible.value)
 
             onNodeWithContentDescription("戻る").performClick()
             waitForIdle()
 
             assertEquals(2, depth)
-            assertEquals(ArticleFilter.All, vm.filter.value)
+            assertEquals(false, vm.searchBarVisible.value)
         }
     }
 

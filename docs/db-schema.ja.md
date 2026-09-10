@@ -166,6 +166,22 @@ SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundli
 3 文字以上の語と 2 文字の語が混在するクエリは、従来どおり `articles_fts MATCH`（ランク順）を実行し、
 短い語はマッチした行に対する追加の `LIKE` フィルタとして AND で効かせる。
 
+**検索は `ArticleFilter` でスコープされており、全記事に対して走るわけではない。**
+`FtsSearch.search(rawQuery, scope)`（`data/local/FtsSearch.kt`）は現在選択中の `ArticleFilter` を
+受け取り、`articleScopeSql` を介して、同じフィルタを普通の（検索でない）記事一覧として表示する場合に
+対応する `articles.sq` のクエリ（`watchAll`/`watchStarred`/`watchByFeed`/`watchByTag`/
+`watchByFolder`）とまったく同じ行集合になる `WHERE` 句フラグメントを付加する——これら5つのクエリが
+`feeds` への JOIN について対称ではないことも含めて: `Starred` と `Feed` は JOIN しないため、購読解除
+（論理削除）済みフィードに属するスター付き記事（や、そのフィードの任意の記事）もこの2つのスコープ
+では引き続きマッチするが、`All`/`Tag`/`Folder` はそれを除外する。スコープ述語は `feed_id IN (...)`
+ではなく `EXISTS (...)` として表現されており、多数のフィードにまたがるフォルダ/タグのスコープでも
+バインドパラメータは最大1個で済む——これは上記の短語 `LIKE` 句と同じクエリのバインドパラメータ予算を
+共有するため重要である。`SEARCH_FALLBACK_RESULT_LIMIT` はスコープの**内側**に適用される（`WHERE` が
+先に行を絞り込んだ上で `LIMIT` がそれに対して数える）のであってその前ではない——そのため、1つの
+フィードにスコープされた検索が、無関係な別フィードのヒットに上限を埋められて飢えることはない。
+`HomeViewModel` がどのスコープを渡すかについては [app-architecture.md](app-architecture.md) の
+「`ArticleFilter` から独立した検索」を参照。
+
 ## local_settings.json（keryx.db 外・非同期）
 
 保存先: アプリデータディレクトリ直下（`AppDirs.appDataDir()`。macOS: `~/Library/Application Support/Keryx`）。

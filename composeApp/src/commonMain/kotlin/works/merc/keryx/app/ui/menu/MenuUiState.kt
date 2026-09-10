@@ -1,6 +1,5 @@
 package works.merc.keryx.app.ui.menu
 
-import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.ui.home.feedOperationsAvailable
 import works.merc.keryx.app.ui.navigation.Screen
 
@@ -66,7 +65,7 @@ fun computeMenuUiState(
     feedRefreshing: Boolean,
     syncing: Boolean,
     cloudConnected: Boolean,
-    filter: ArticleFilter,
+    searchActive: Boolean,
     unreadOnly: Boolean,
     hasSelectedFeed: Boolean = false,
     textInputFocused: Boolean = false,
@@ -80,7 +79,7 @@ fun computeMenuUiState(
         searchEnabled = onHome,
         unreadOnlyEnabled = onHome,
         unreadOnlyChecked = unreadOnly,
-        toggleSortEnabled = onHome && filter != ArticleFilter.Search,
+        toggleSortEnabled = onHome && !searchActive,
         markAllReadEnabled = onHome,
         articleActionsEnabled = onHome && hasSelectedArticle,
         urlActionsEnabled = onHome && hasSelectedArticle && selectedArticleHasUrl,

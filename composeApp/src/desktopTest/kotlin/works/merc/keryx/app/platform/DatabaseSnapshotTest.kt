@@ -1,6 +1,7 @@
 package works.merc.keryx.app.platform
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.ftsManagerIndexed
@@ -75,7 +76,7 @@ class DatabaseSnapshotTest {
             assertTrue(liveTables.contains("articles_fts"), "the live DB's articles_fts must never be dropped")
             val liveDriver = JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
             try {
-                assertEquals(listOf("a1"), FtsSearch(liveDriver).search("body").map { it.id })
+                assertEquals(listOf("a1"), FtsSearch(liveDriver).search("body", ArticleFilter.All).map { it.id })
             } finally {
                 liveDriver.close()
             }

@@ -522,7 +522,7 @@ feedListIsDrawer(paneLayout) && drawerState.isOpen`——開いている間は `
 **`focusedPane` 自体が「進む」のは `PaneLayout.Single` のときだけである。**
 `HomePane.ordinal + 1` がそのままスタックの現在の深さを兼ねるため、`HomeScreen` は別途深さの
 状態を持つ必要がない——`platform/BackHandler`（Android では実際の戻るジェスチャー/ボタンを
-横取りし、デスクトップでは no-op）が `homeBackAction(layout, depth, searchScopeReturnPending)`
+横取りし、デスクトップでは no-op）が `homeBackAction(layout, depth, searchBarOpen)`
 （後述）の有効/無効に従って1段戻し、記事の選択も同じ軸で前に進める——ただし `visiblePanes` が
 depth によって実際に変化するレイアウトでのみ。`ArticleListPane` の `onSelectionAdvance`
 （ドロワーの `FeedListPane` 自身の同名の引数も同様——こちらは行選択時にドロワーを閉じるだけでなく
@@ -541,15 +541,15 @@ depth によって実際に変化するレイアウトでのみ。`ArticleListPa
 作用に加えて実フォーカスをルート `Box` へ戻す——これが、どのテキストフィールドにフォーカスが
 あっても、行やボタンへのタップでそこからフォーカスを外せる理由である。
 
-`homeBackAction(layout, depth, searchScopeReturnPending)` は、ペインだけを見る純関数 `canNavigateBack(layout,
+`homeBackAction(layout, depth, searchBarOpen)` は、ペインだけを見る純関数 `canNavigateBack(layout,
 depth)`（「1段戻っても実際には画面が変わらない」場合に常に `false` を返す — `Triple` では常に。
 `Dual` でも常に——`visiblePanes(Dual, *)` はどの深さでも同じ2ペインを返すため——`canNavigateBack`
 が無かった頃は、そこでの戻る操作が何も起こさず黙って消費されていた）に、「戻る操作が実際に何を
-するか」のもう半分——復元待ちのスナップショットがあるときはペインを1段戻すのではなく検索
-スコープを抜けること（下記「狭いレイアウトでの検索」参照）——を組み合わせたものであり、記事一覧が
+するか」のもう半分——展開された検索バーが開いているときはペインを1段戻すのではなくそれを閉じる
+こと（下記「`ArticleFilter` から独立した検索」参照）——を組み合わせたものであり、記事一覧が
 実際に見えている場所（`Single` の depth 2、`Dual` の全深さ）では `canNavigateBack` より
-優先される（検索を抜けることは常にそこでの画面を変えるため）。**記事一覧自身の深さで（検索スコープの
-復元待ちが無い場合に）`canNavigateBack`/`homeBackAction` が `false`/`None` に解決されるのは
+優先される（バーを閉じることは常にそこでの画面を変えるため）。**記事一覧自身の深さで（バーが
+閉じている場合に）`canNavigateBack`/`homeBackAction` が `false`/`None` に解決されるのは
 見落としではなく意図的である**——`HomeScreen` の `BackHandler` は `None` のとき自身を無効化するため、
 そこでの戻る操作はプラットフォームの既定動作（Android ではアプリの終了）へフォールスルーし、
 このコードベースが戻り先の無い操作を握りつぶすことはない。
@@ -559,7 +559,7 @@ depth)`（「1段戻っても実際には画面が変わらない」場合に常
 深さに関わらず常に同じ `[ArticleList, ArticleDetail]` を返す——記事詳細ペインは記事一覧の常設の
 隣人であり、Gmail 自身のタブレット閲覧ペインと同じ形で、自身の戻る操作を持たない
 （`ArticleDetailPane` の `onNavigateUp` はそこでは `null`。`swipeNavigation` がそれとは独立した
-別のシグナルである理由は下記「狭いレイアウトでの検索」参照）。
+別のシグナルである理由は下記「`ArticleFilter` から独立した検索」参照）。
 
 狭いレイアウトでは、残る2ペインを `ui/home/NarrowPaneRow.kt` がホストする。これが、スタックの
 出入りをまたいで各ペインのスクロール位置を保つ仕組みである。`Dual` はどちらのペインも一切
@@ -600,74 +600,66 @@ WebView をホストするペインを含む3ペインすべてがアプリの�
 `feeds` `StateFlow`——`Eagerly` 共有の初期値が「空」と「まだ読み込んでいない」を区別できない——
 とは別物である）。
 
-**狭いレイアウトでの検索**は、周囲のクロームだけでなく入力欄自体が移動する — 詳しい設計は
-`ui-guidelines` スキルの「Adaptive pane layout & touch affordances」節を参照
-（`ArticleListTopBar` のハンバーガー＋タイトル行は、検索スコープが有効な間 `SearchListPane` の
-`ui/common/KeryxSearchBar.kt` の `KeryxExpandedSearchBar` に入れ替わる。narrow/`Triple` の分岐が
-`PaneLayout` や `isTouchPrimary` ではなく `onOpenDrawer`/`onExitSearch` が `null` かどうかで
-決まる理由も同節参照）。フィード一覧は狭いレイアウトでは検索欄を一切持たない——ドロワーであって、
-検索結果を表示できる画面ではないためである——ので、記事一覧自身の検索アイコン（スタックを進めない）
-がそこでの唯一の入口となる。`HomeViewModel.pendingSearchFocus` が一発イベントではなく latch
-された `StateFlow<Boolean>` なのも、上記の深さカーソルと同じ理由による: 入力欄へフォーカスを
-要求する操作は、検索スコープを開くのと同じクリックの中で発生するため、実際に入力欄を持つことに
-なるペインはまだコンポーズされておらず、購読者のいない `SharedFlow` では要求が黙って失われて
-しまう。
+**検索は `ArticleFilter` から独立しており、そのバリアントではない。** `core/ArticleFilter.kt` が
+持つのは `All`/`Starred`/`Feed`/`Tag`/`Folder` のみで、`Search` というケースは存在しない。クエリ
+（`HomeViewModel.searchQuery`）は、選択中のフィルタを置き換えるのではなく、それを絞り込む。
+`HomeViewModel.searchActive`（`_searchBarVisible && searchQuery.value.isNotEmpty()`）が、記事一覧
+が今表示しているのが検索結果（`HomeViewModel.searchResults`。これ自体が現在のフィルタでスコープ
+されている——下記 `FtsSearch.articleScopeSql` 参照）かフィルタ自身の一覧（`HomeViewModel.articles`）
+かを示す唯一の派生フラグであり、`ArticleListPane` はこれを読んで、どちらを1つの
+`ArticleListPaneContent` 呼び出しに渡すかを選ぶ。フィルタが決して置き換えられないため、検索が
+終わるときにスナップショットを取ることも復元することも一切不要になる——以前の設計がまさにそれの
+ために必要としていた `SearchScopeEntry`/`enterSearchScope`/`exitSearchScope` の仕組みはもはや
+存在しない。
 
-検索専用の `HomePane` は存在しない — どの入口も `HomePane.ArticleList` の中身を差し替えて
-`ArticleFilter.Search` を設定するだけで、スタックを進めることはない — そのため単純な「1段
-ポップ」ではどちらの経路でも正しく元に戻せない。`HomeViewModel.enterSearchScope(returnPane)` が、
-切り替え直前の filter・選択行と、狭いレイアウトの戻る操作が着地すべきペイン（狭いレイアウトでは
-常に `ArticleList` になる——検索の入口が到達可能なのはそこだけであるため）をスナップショットし、
-`exitSearchScope()` がその両方を復元してそのペインを返す。これを上記 `homeBackAction` の
-`ExitSearch` が `PopPane` の代わりに使う。検索クエリ自体はこの一連の処理では一切触れられず、
-入力欄上にそのまま残る。
+**`_searchBarVisible` は検索にまだ残っている唯一の実体的な状態**であり、狭いレイアウトのためだけに
+存在する: `PaneLayout.Triple` では `FeedListPane` 自身のクエリ欄が常設なので、`HomeScreen` 自身の
+`LaunchedEffect(layout)` がそこでは常に `true` に保つ。狭いレイアウトでは `false` から始まり、
+`ArticleListTopBar` の検索アイコン（`onSearchClick` → `setSearchBarVisible(true)`）と、展開された
+バー自身の戻る矢印（`onExitSearch` → `homeBackAction` の `ExitSearch` ケース →
+`setSearchBarVisible(false)`）で切り替わる。その存在理由は「クエリにまだ文字が残っている」ことと
+「バーが今開いている」ことの間のまさにその隙間である: 狭いレイアウトでバーを閉じるときは、クエリを
+消さずにフィルタ自身の一覧を再び表示しなければならず、それにより後で検索アイコンを再度タップした
+ときに同じ結果が再び表示される——`searchActive` が両方を要求することがそれを実現している。
+`HomeViewModel.pendingSearchFocus` は、依然として一発イベントではなく latch された
+`StateFlow<Boolean>` である。理由も変わらない: 入力欄へフォーカスを要求する操作は、バーを開くのと
+同じクリックの中で発生するため、実際に入力欄を持つことになるコンポーザブルはまだコンポーズされて
+おらず、購読者のいない `SharedFlow` では要求が黙って失われてしまう。`setSearchBarVisible(false)` は、
+以前フィルタを離れることでクリアしていたのと同じように、消費されなかった要求を落とす。
 
-サイドバー自身の「検索」クイックフィルター行（`FeedListPane`、`PaneLayout.Triple` のみ）には2つの
-到達手段があり、意図的にスナップショットは揃えつつフォーカスの扱いだけ変えている。タップは
-`enterSearchScope` を直接呼ぶ。フィード一覧の行に対する矢印キー移動
-（`HomeScreen.moveFeedSelection` → `HomeViewModel.selectFeedListRow`）でも同じ行に着地しうる
-——`buildOrderedFeedListRows` がこの行を含むため——その場合も同じ方法でスナップショットを取る
-（`captureSearchScopeEntry`。`enterSearchScope` と `selectFeedListRow` の両方が呼ぶ共有部分）ので、
-後の戻る操作でこの行が押し出したフィルター/選択行を正しく復元できる。ただし
-**`requestSearchFocus()` は呼ばない**——移動中に入力欄へフォーカスを移すと、次の ↓ がサイドバーの
-次の行ではなく結果一覧へ吸収されてしまう（1行入力欄にとってこのキーはキャレット移動の意味を
-持たない——`KeyboardNav.kt` 自身の KDoc 参照）ため、Search より下の行がキーボードで到達不能に
-なってしまう。タップは「検索したい」という明示的な意思表示だが、一覧を辿る途中で矢印キーが
-この行を通過するのは一時的な通過にすぎない——検索欄へフォーカスを移すキーボード操作は引き続き
-Cmd/Ctrl+F が担う。`orderedRows` は狭いレイアウトではこの行を完全に除外する
-（`buildOrderedFeedListRows` の `includeSearchRow`。`feedListIsDrawer(paneLayout)` のとき
-`false`）——`FeedListPane` 自身が `onSelectionAdvance` の有無でこの行を省略するのと同じ条件で、
-画面に存在しない行をキーボードで選択できてはならないため。
+**サイドバーにはもう「検索」クイックフィルター行が存在しない。** `FeedListPane` の常設欄
+（あるいは狭いレイアウトでバーが開いた後の展開欄）へ直接入力することが唯一の入口である——
+`searchActive` はクエリだけから導かれるため、タップ・入力欄に乗ったキーボードカーソル・矢印キー
+によるナビゲーションはすべて同じに振る舞う。選択的にトリガーする別個の「検索に入る」アクションは
+存在せず、したがってタップとキー入力とで検索の始まり方が非対称になることもない。これはまた、
+`buildOrderedFeedListRows` が `includeSearchRow` パラメータを必要とせず、`feedListRowIndex` も
+もはや「検索」行を特別扱いしないことを意味する——その行はどのレイアウトであれ、そもそも
+存在しないからである。
 
-`enterSearchScope` のスナップショットには、その瞬間の閲覧コンテキスト — 既読ピン留め・未読
-スターピン留めのマップ、選択中の記事、キーボード操作用カーソル（下記「楽観的な既読/スター
-ピン留め」参照）— も含まれる。検索に入るのも他のフィルタ変更と同じく `selectFilter` を経由する
-ため、それらが全部クリアされてしまうからである。`exitSearchScope` はこれを復元するが、そのまま
-再生するわけではない: スナップショットされた全 ID を、下記の再検証と同じ
-`ArticleRepository.aliveArticleFlags` を使って DB の**現在の**フラグに照らして再解決する。これに
-より、検索結果自体から加えられた変更や、検索中に同期で届いた変更が、凍結されたスナップショット
-で上書きされることがない。検索の**中で**付いたピンはこの対象に一切含まれない — 含まれるのは
-検索に入る**前**にピン留めされていたものだけである。含めてしまうと、戻った先のフィルタの一覧に
-無関係なフィードの記事が混入してしまう（下記 `articles` の combine の `extra` 処理を参照）。
-フィルタ自体が別のものにフォールバックした場合（`validateFilterTarget` が対象の削除を検知した
-場合）は、復元自体を行わない — スナップショットのピン・選択は**元の**フィルタに属するものであり、
-フォールバック先のものではないため。
+**検索自体のスコープは常に「すべてのフィード」ではなく、現在選択中のフィルタである。** クエリが
+有効な間に別のフィード/フォルダ/タグを選択すると、即座に**同じ**検索がその範囲に再スコープされる
+（`_rawSearchResults` はデバウンスされたクエリと並んで `_filter` も combine する）。「すべての
+フィード」に切り替えればすべてを検索する。`FtsSearch.articleScopeSql` は、`ArticleFilter` の
+各バリアントに対応する `WHERE` 句フラグメントを、`articles.sq` 自身の `watchAll`/`watchStarred`/
+`watchByFeed`/`watchByTag`/`watchByFolder` クエリと一行単位で一致するように構築する——それらの
+既存の非対称性（`Starred` と `Feed` は `feeds` に一切 JOIN しないため、購読解除済みフィードの
+スター付き記事・自身の記事もそのスコープでは表示される。`All`/`Tag`/`Folder` は JOIN する）も
+含めて。このクエリ機構と組み合わさる部分については `sync-architecture.md` の「FTS5 handling」と
+`db-schema.md` 自身の `articles_fts` 節を参照。
 
-検索専用の `HomePane` が存在しないため、`ArticleListPane` は `NarrowPaneRow` のペイン単位の
-`SaveableStateHolder` を経由せず、同じコンポーザブル内の早期 `return` から `SearchListPane` を
-描画している。そのため記事一覧自身の `listState`/`lastFilter` は、検索が有効な間もコンポジション
-に残り続けられるよう、その `return` より**前**で宣言しておく必要がある — それらを使う側の
-コンテンツのすぐ近く（`return` より後）で宣言すると、検索を開くたびに破棄・再生成され、戻る
-たびに一覧が先頭にリセットされてしまう。`filter is ArticleFilter.Search` の間は `lastFilter` を
-更新しないようにもしてあり、検索に入る前と同じ filter に戻った時は「変化なし」と判定されて、
-通常のフィルタ変更時に働く先頭へのリセットがスキップされる。選択中の記事を復元すると、
-`ArticleListPaneContent` 自身の「選択を表示範囲に収める」スクロールが remount 時に再発火しうる
-— ペインが実際にアンマウントされたケース（選択は常に復元直後のビューポート内に収まっている。
-上記「Adaptive pane layout」参照）では無害だが、ここではその保証がない。一覧自身のスクロール
-位置と復元された選択は、それぞれ独立したスナップショット由来だからである。
-`ArticleListPaneContent` の `preserveScrollPositionOnMount` パラメータはまさにこのために存在する:
-`ArticleListPane` は検索が閉じた直後の1回のコンポジションだけこれを立て、mount 時の最初の評価
-だけそのスクロールを抑止する — その後の正当な選択変更では通常どおりスクロールする。
+**検索を終えても何も復元されない。** クエリを消す（あるいは狭いレイアウトではバーを閉じる）ことは、
+単に `ArticleListPane` の表示内容をフィルタ自身の一覧に戻すだけである——`selectFilter` と
+`setSearchQuery` は互いに独立している（フィルタの切り替えはクエリに一切触れず、クエリの変更は
+フィルタに一切触れない）。そして `_pinnedReadArticles` は、クエリの変更でクリアされるのではなく、
+フィルタ自身の一覧とその検索結果との間で意図的に共有される——そのため、検索の中から既読にした
+記事は、あたかも普通の一覧から既読にしたかのように、未読のみ表示の下でも引き続き表示され続ける。
+
+したがって `ArticleListPane` は `searchActive` に関わらず1つの連続したコンポーザブルを描画する
+——早期 `return` はなく、`PaneLayout.Single` の `NarrowPaneRow` の各ペインのような分岐ごとの
+（アン）マウントも無い。`baseListState`/`searchListState`（独立した2つの `LazyListState`）と
+`lastFilter` はすべて最上部で無条件に宣言されており、検索の内外を切り替えてもどちらの一覧の
+スクロール位置も破棄されない——検索を経て戻ってきたときにフィルタ自身の一覧が元の位置のままである
+ために、スナップショット・復元の手順は一切不要である。
 
 #### iOS
 

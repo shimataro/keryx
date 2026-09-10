@@ -304,45 +304,22 @@ class FeedListPaneTest {
     }
 
     /**
-     * At a narrow layout the feed list has no search entry point of its own at all (see
-     * `FeedListPane`'s `onSelectionAdvance` KDoc) — search lives on `ArticleListPane` instead — so
-     * the "Search" quick-filter row, which would be redundant with that and unreachable-feeling
-     * besides (this drawer has nowhere to show results), is not rendered at all.
+     * The sidebar never has a "Search" quick-filter row, at either layout — search is orthogonal
+     * to the article filter (see `HomeViewModel`'s own "Search" section), narrowing whichever
+     * filter/row is already selected rather than being a filter (and a row) of its own. The
+     * editable field itself (asserted above at `PaneLayout.Triple`) is the only entry point.
      */
     @Test
-    fun omitsSearchQuickFilterRowWhenOnSelectionAdvanceIsProvided() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
-        useHomeViewModel(driver, db) { fixture ->
-            val vm = fixture.vm
-            setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT, onSelectionAdvance = {}) }
-            waitForIdle()
-
-            // onNodeWithText matches exactly by default, so the quick-filter label is never
-            // confused with the collapsed search bar placeholder.
-            onNodeWithText("記事を検索").assertDoesNotExist()
-        }
-    }
-
-    /**
-     * At `PaneLayout.Triple` the same row is not an entry point but a filter scope alongside
-     * All/Starred (unread badge, selection highlight), so it stays.
-     */
-    @Test
-    fun keepsSearchQuickFilterRowWhenOnSelectionAdvanceIsNull() = runDesktopComposeUiTest {
+    fun neverRendersASearchQuickFilterRowAtEitherLayout() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         useHomeViewModel(driver, db) { fixture ->
             val vm = fixture.vm
             setContent { FeedListPaneTestHost(vm, TEST_PANE_HEIGHT) }
             waitForIdle()
 
-            onNodeWithText("記事を検索").assertIsDisplayed()
-            onNodeWithText("記事を検索").performClick()
-            waitForIdle()
-
-            // The row enters search scope just like ArticleListTopBar's own search icon does at
-            // a narrow layout, so a back action can restore the previous pane/filter.
-            assertEquals(HomePane.FeedList, vm.searchScopeEntry.value?.returnPane)
-            assertEquals(ArticleFilter.Search, vm.filter.value)
+            // onNodeWithText matches exactly by default, so the quick-filter label is never
+            // confused with the sidebar search field's own placeholder.
+            onNodeWithText("記事を検索").assertDoesNotExist()
         }
     }
 

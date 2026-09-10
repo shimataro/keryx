@@ -58,9 +58,13 @@ import works.merc.keryx.app.domain.SubscribeOutcome
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
 
-/** Debounced FTS results tagged with the query that produced them (see [HomeViewModel.searching]). */
+/**
+ * Debounced FTS results tagged with the query/filter that produced them (see
+ * [HomeViewModel.searching]).
+ */
 private data class SearchSnapshot(
     val query: String,
+    val filter: ArticleFilter,
     val results: List<ArticleSearchResult>,
 )
 
@@ -136,17 +140,13 @@ class HomeViewModel(
     private fun restoreFilter(): ArticleFilter {
         val encoded = settingsRepository.getLocalSettings().lastFilter ?: return ArticleFilter.All
         val decoded = decodeArticleFilter(encoded) ?: return ArticleFilter.All
-        // Search results depend on a query that isn't persisted, so a restored "search" filter
-        // would show an empty view — fall back to All.
-        if (decoded == ArticleFilter.Search) return ArticleFilter.All
         return validateFilterTarget(decoded)
     }
 
     /**
      * Falls back to [ArticleFilter.All] when [filter] references a feed/tag/folder that no longer
-     * exists (soft-deleted locally, or since the snapshot this filter came from was taken — see
-     * [restoreFilter] and [exitSearchScope]). Filters with no target of their own pass through
-     * unchanged.
+     * exists (soft-deleted locally, or since [restoreFilter] read it). Filters with no target of
+     * their own pass through unchanged.
      */
     private fun validateFilterTarget(filter: ArticleFilter): ArticleFilter = when (filter) {
         is ArticleFilter.Feed -> {
@@ -161,7 +161,7 @@ class HomeViewModel(
             val folder = folderRepository.getFolderById(filter.folderId)
             if (folder != null && folder.deleted_at == null) filter else ArticleFilter.All
         }
-        ArticleFilter.All, ArticleFilter.Starred, ArticleFilter.Search -> filter
+        ArticleFilter.All, ArticleFilter.Starred -> filter
     }
 
     // One-time migration: the persisted "unread" filter (removed as a selectable option) is
@@ -179,6 +179,38 @@ class HomeViewModel(
     // starts at that filter's canonical (folder-group) row, matching pre-instance behavior.
     private val _selectedRowInstance = MutableStateFlow(FeedListRowSelection.canonicalFor(_filter.value))
     val selectedRowInstance: StateFlow<FeedListRowSelection> = _selectedRowInstance
+
+    // --- Search ---
+    //
+    // Search is orthogonal to `_filter`, not a variant of it: the query narrows whatever filter is
+    // already selected (see `searchActive`/`searchResults` below), rather than displacing it. This
+    // means there is nothing to restore when search ends — the filter, its row selection, and the
+    // browsing context (pins/selection/cursor) were never touched in the first place.
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery
+
+    // Whether the expanded search bar/field is open. At PaneLayout.Triple this is always true —
+    // FeedListPane's own field is permanent there — kept true by HomeScreen's own
+    // LaunchedEffect(layout); at a narrow layout it starts false and is toggled by the search
+    // icon/back arrow (see ArticleListPane's own KDoc). searchActive (below) additionally requires
+    // a non-empty query, so opening the bar alone never disturbs the article list underneath it.
+    private val _searchBarVisible = MutableStateFlow(false)
+    val searchBarVisible: StateFlow<Boolean> = _searchBarVisible.asStateFlow()
+
+    fun setSearchBarVisible(visible: Boolean) {
+        _searchBarVisible.value = visible
+        // Drops a focus request no field ever consumed (e.g. Cmd+F, then navigating elsewhere
+        // before the bar composed), so it can't steal focus at whatever field appears next.
+        if (!visible) _pendingSearchFocus.value = false
+    }
+
+    // Whether the article list is currently showing search results rather than `_filter`'s own
+    // list. Deliberately keyed on the query being non-empty (not on `searchTerms` having any valid
+    // ones) — a single short character still needs to show the "too short" hint instead of the
+    // filter's own list; see ArticleListPane's own 4-state body.
+    val searchActive: StateFlow<Boolean> =
+        combine(_searchBarVisible, _searchQuery) { visible, query -> visible && query.isNotEmpty() }
+            .stateIn(viewModelScope, started, false)
 
     private val _unreadOnly = MutableStateFlow(
         legacyUnreadFilter ||
@@ -205,23 +237,25 @@ class HomeViewModel(
         settingsRepository.getLocalSettings().lastUnreadOnlySearch ?: false,
     )
 
-    // Selects which backing toggle is currently in effect. Starred's own toggle still filters
-    // "starred ∩ unread" correctly when turned on (a state sync merge can legitimately produce,
-    // since read/star are merged independently — see MergeSql), only which toggle is consulted
-    // differs by filter.
+    // Selects which backing toggle is currently in effect. searchActive takes priority over the
+    // underlying filter (searching Starred still reads the search-scoped toggle, not Starred's own
+    // — the same reasoning that scopes Starred's own toggle away from the general one applies one
+    // level deeper). Starred's own toggle still filters "starred ∩ unread" correctly when turned
+    // on (a state sync merge can legitimately produce, since read/star are merged independently —
+    // see MergeSql), only which toggle is consulted differs by filter/search state.
     val unreadOnly: StateFlow<Boolean> =
-        combine(_filter, _unreadOnly, _unreadOnlyStarred, _unreadOnlySearch) { f, general, starred, search ->
-            when (f) {
-                ArticleFilter.Starred -> starred
-                ArticleFilter.Search -> search
+        combine(_filter, searchActive, _unreadOnly, _unreadOnlyStarred, _unreadOnlySearch) { f, active, general, starred, search ->
+            when {
+                active -> search
+                f == ArticleFilter.Starred -> starred
                 else -> general
             }
         }.stateIn(
             viewModelScope,
             started,
-            when (_filter.value) {
-                ArticleFilter.Starred -> _unreadOnlyStarred.value
-                ArticleFilter.Search -> _unreadOnlySearch.value
+            when {
+                searchActive.value -> _unreadOnlySearch.value
+                _filter.value == ArticleFilter.Starred -> _unreadOnlyStarred.value
                 else -> _unreadOnly.value
             },
         )
@@ -328,11 +362,7 @@ class HomeViewModel(
      */
     private var browsingEpoch = 0
 
-    // --- Search ---
-    private val _searchQuery = MutableStateFlow("")
-    val searchQuery: StateFlow<String> = _searchQuery
-
-    // markAllRead() marks Search results as read after the fact, but search is a one-shot
+    // markAllRead() marks search results as read after the fact, but search is a one-shot
     // snapshot rather than a DB-reactive flow like `articles` — this forces _rawSearchResults
     // to re-run against the same query text so the freshly-read state actually shows up.
     private val _searchRefreshTrigger = MutableStateFlow(0)
@@ -343,29 +373,33 @@ class HomeViewModel(
             .flowOn(dispatcher)
             .stateIn(viewModelScope, started, 0)
 
-    // The debounced FTS results tagged with the query that produced them, so `searching` can tell
-    // whether the current live query has been searched yet (see below).
+    // The debounced FTS results tagged with the query/filter that produced them, so `searching` can
+    // tell whether the current live query (against the current scope) has been searched yet (see
+    // below). Only the query is debounced — a filter change is a discrete user action, not a run of
+    // keystrokes, so it re-searches immediately.
     private val _rawSearchResults: StateFlow<SearchSnapshot> =
         combine(
             _searchQuery.debounce(SEARCH_DEBOUNCE_MS),
+            _filter,
             _searchRefreshTrigger,
             // Re-run search whenever the articles table changes (read/star toggles, refresh, sync
             // merge) so results stay in sync — search() reads a raw-SQL FTS index that SQLDelight
             // doesn't auto-notify. search() absorbs the transient articles_fts-dropped case itself.
             articleChangeSignal,
-        ) { q, _, _ -> q }
-            .map { q ->
-                SearchSnapshot(q, if (searchTerms(q).isEmpty()) emptyList() else articleRepository.search(q))
+        ) { q, f, _, _ -> q to f }
+            .map { (q, f) ->
+                SearchSnapshot(q, f, if (searchTerms(q).isEmpty()) emptyList() else articleRepository.search(q, f))
             }
             .flowOn(dispatcher)
-            .stateIn(viewModelScope, started, SearchSnapshot("", emptyList()))
+            .stateIn(viewModelScope, started, SearchSnapshot("", _filter.value, emptyList()))
 
-    // True while the live query has usable terms but its results haven't arrived yet (still inside
-    // the 250ms debounce, or the FTS query is running). Lets the search pane hold instead of
-    // flashing "no results" between keystrokes before the real results land.
+    // True while the live query has usable terms but its results haven't arrived yet — still
+    // inside the 250ms debounce, the FTS query is running, or the filter it should be scoped to has
+    // moved on since the snapshot was taken. Lets the search pane hold instead of flashing "no
+    // results" between keystrokes (or right after switching filters) before the real results land.
     val searching: StateFlow<Boolean> =
-        combine(_searchQuery, _rawSearchResults) { live, snapshot ->
-            searchTerms(live).isNotEmpty() && live != snapshot.query
+        combine(_searchQuery, _filter, _rawSearchResults) { live, filter, snapshot ->
+            searchTerms(live).isNotEmpty() && (live != snapshot.query || filter != snapshot.filter)
         }.stateIn(viewModelScope, started, false)
 
     // _newestFirst is deliberately never consulted here (search order is always relevance-rank).
@@ -387,30 +421,17 @@ class HomeViewModel(
             if (unread) merged.filter { it.article.is_read == 0L || it.article.id in pinned } else merged
         }.flowOn(dispatcher).stateIn(viewModelScope, started, emptyList())
 
-    // Unread count shown on the sidebar's "Search" row. Counts the raw (pre-unread-only) hits, so
-    // it means "total unread matches" regardless of the unread-only toggle — matching the other
-    // sidebar rows. The effective is_read reflects pinned articles so the badge decrements as the
-    // user opens results and increments when a result is marked unread.
-    val searchUnreadCount: StateFlow<Long> =
-        combine(_rawSearchResults, _pinnedReadArticles) { snapshot, pinned ->
-            snapshot.results.count { result ->
-                val effectiveIsRead = pinned[result.article.id]?.is_read ?: result.article.is_read
-                effectiveIsRead == 0L
-            }.toLong()
-        }.flowOn(dispatcher).stateIn(viewModelScope, started, 0L)
-
-    // Requests to move keyboard focus into whichever pane currently owns the search field —
-    // FeedListPane's own KeryxTextField at PaneLayout.Triple, or SearchListPane's KeryxExpandedSearchBar
-    // at a narrow layout (Cmd+F, or tapping the collapsed search bar, both call requestSearchFocus()
-    // — the sidebar's own "Search" row does too, but only exists at PaneLayout.Triple). Deliberately
-    // a *latched* StateFlow rather than a one-shot
-    // SharedFlow: at a narrow layout the request is raised in the same click that advances the
-    // navigation stack, so the pane that will own the field has not composed yet — a SharedFlow
-    // emission (as this used to be) is dropped silently when no collector exists yet, which is
-    // exactly what happened here. The latch stays set until the field that actually gains focus
-    // consumes it (consumeSearchFocusRequest()), and selectFilter clears it when the user leaves the
-    // Search scope without any field ever consuming it, so a stale request can never steal focus from
-    // an unrelated field later.
+    // Requests to move keyboard focus into whichever composable currently owns the search field —
+    // FeedListPane's own KeryxTextField at PaneLayout.Triple, or ArticleListPane's
+    // KeryxExpandedSearchBar at a narrow layout (Cmd+F, or tapping the search icon, both call
+    // requestSearchFocus()). Deliberately a *latched* StateFlow rather than a one-shot SharedFlow:
+    // at a narrow layout the request is raised in the same click that opens the bar, so the
+    // composable that will own the field has not composed yet — a SharedFlow emission (as this used
+    // to be) is dropped silently when no collector exists yet, which is exactly what happened here.
+    // The latch stays set until the field that actually gains focus consumes it
+    // (consumeSearchFocusRequest()), and setSearchBarVisible(false) clears it when the bar closes
+    // without any field ever consuming it, so a stale request can never steal focus from an
+    // unrelated field later.
     private val _pendingSearchFocus = MutableStateFlow(false)
     val pendingSearchFocus: StateFlow<Boolean> = _pendingSearchFocus.asStateFlow()
 
@@ -420,182 +441,6 @@ class HomeViewModel(
 
     fun consumeSearchFocusRequest() {
         _pendingSearchFocus.value = false
-    }
-
-    /**
-     * The state to restore when a narrow-layout back action exits the Search scope: the pane to
-     * return focus to, the [filter]/row selection that was active right before entering Search, and
-     * the browsing context ([pinnedRead]/[pinnedUnstarred]/[selectedArticle]/[cursorId]) active at
-     * that same moment — [selectFilter] clears all of that the instant [enterSearchScope] switches
-     * to [ArticleFilter.Search], the same as any other filter change, so it has to be carried
-     * forward here to come back at all.
-     *
-     * Captured only on the *first* [captureSearchScopeEntry] call after leaving Search (a re-entry
-     * while already in Search — e.g. re-tapping the sidebar's own "Search" row, or arrow-navigating
-     * back onto its row — must not overwrite it with Search-scope state). Cleared by [selectFilter]
-     * whenever the user leaves Search by any other means (e.g. tapping an unrelated feed at
-     * [PaneLayout.Dual], where both panes are on screen at once), so a stale snapshot can never
-     * resurface a filter the user already moved past.
-     */
-    internal data class SearchScopeEntry(
-        val returnPane: HomePane,
-        val filter: ArticleFilter,
-        val row: FeedListRowSelection,
-        val pinnedRead: Map<String, ArticleListRow>,
-        val pinnedUnstarred: Map<String, ArticleListRow>,
-        val selectedArticle: Articles?,
-        val cursorId: String?,
-    )
-
-    private val _searchScopeEntry = MutableStateFlow<SearchScopeEntry?>(null)
-    internal val searchScopeEntry: StateFlow<SearchScopeEntry?> = _searchScopeEntry.asStateFlow()
-
-    /**
-     * Snapshots the current filter/row/browsing-context under [returnPane] so [exitSearchScope] can
-     * restore them later — the shared half of [enterSearchScope] and [selectFeedListRow]'s own
-     * handling of the sidebar "Search" row, both of which switch into [ArticleFilter.Search].
-     *
-     * Must run before the caller's own [selectFilter] call: [selectFilter] clears `_filter`,
-     * `_selectedRowInstance`, the read/unstarred pins, `_selectedArticle`, and the selection cursor
-     * the instant it switches to a new filter, so snapshotting after it would capture the emptied
-     * post-Search state instead of the state to return to.
-     */
-    private fun captureSearchScopeEntry(returnPane: HomePane) {
-        if (_filter.value != ArticleFilter.Search) {
-            _searchScopeEntry.value = SearchScopeEntry(
-                returnPane, _filter.value, _selectedRowInstance.value,
-                _pinnedReadArticles.value, _pinnedUnstarredArticles.value,
-                _selectedArticle.value, selectionCursorId,
-            )
-        }
-    }
-
-    /**
-     * Enters the Search scope, snapshotting the current filter/row/browsing-context/[returnPane] so
-     * [exitSearchScope] can restore them later. [returnPane] is the pane a narrow-layout back action
-     * should focus on exit — the caller's own pane, since entering Search never advances the
-     * navigation stack past it (the field itself lives on [HomePane.ArticleList], see
-     * `ArticleListPane`'s `SearchListPane`).
-     */
-    fun enterSearchScope(returnPane: HomePane) {
-        captureSearchScopeEntry(returnPane)
-        selectFilter(ArticleFilter.Search)
-        requestSearchFocus()
-    }
-
-    /**
-     * Moves the feed list's keyboard-navigated selection to [row] — the arrow-key counterpart of a
-     * row tap (`FeedListPane`'s `selectFilterFromRow`). Landing on the sidebar's own "Search" row
-     * ([FeedListRowSelection.Search]) still needs [captureSearchScopeEntry] so a later back action
-     * can restore the filter/row/browsing context this displaces — the same reason a tap on that
-     * row goes through [enterSearchScope] rather than a bare [selectFilter] — but deliberately does
-     * *not* also call [requestSearchFocus]: unlike a tap (an explicit "I want to search" action),
-     * arrow-navigating onto this row while walking the list is transient, and focusing the field
-     * would swallow the very next ↓ into the result list (a single-line field has no caret use for
-     * it — see `KeyboardNav.kt`'s own KDoc on that), making the rows below Search unreachable by
-     * keyboard. Reaching the field this way still works via the existing Cmd/Ctrl+F shortcut.
-     *
-     * [searchReturnPane] should always be [HomePane.FeedList] in practice: this is a
-     * [PaneLayout.Triple]-only path — arrow-key navigation over the feed list's own rows requires
-     * `FeedListPane` to be on screen as a pane, and its "Search" row exists only there in the first
-     * place (`FeedListPane`'s own `if (onSelectionAdvance == null)` guard) — the same reason its tap
-     * handler passes [HomePane.FeedList] to [enterSearchScope] for this row too.
-     */
-    fun selectFeedListRow(row: FeedListRowSelection, searchReturnPane: HomePane) {
-        if (row == FeedListRowSelection.Search) captureSearchScopeEntry(searchReturnPane)
-        selectFilter(row.filter, row)
-    }
-
-    /**
-     * Exits the Search scope, restoring the filter/row snapshotted by [enterSearchScope]
-     * synchronously, then the rest of the browsing context (pins/selection/cursor) asynchronously —
-     * see [restoreSearchScopeBrowsingContext]'s own KDoc for why the latter needs a DB read and
-     * cannot be applied inline.
-     *
-     * The snapshot can go stale while Search was active — its filter's target may have been
-     * deleted ([validateFilterTarget]), or its row may be a [FeedListRowSelection.FeedInTag] whose
-     * tag has since been collapsed (the same staleness [toggleTagExpanded] guards against for the
-     * live selection) — so both are re-validated here rather than restored verbatim. The browsing
-     * context is restored only when the filter itself came back unchanged: a fallback target
-     * (deleted meanwhile) is a *different* filter than the one the snapshot's pins/selection belong
-     * to, and attaching them to it would be wrong the same way carrying a pin across an ordinary
-     * filter switch would be.
-     *
-     * @return The pane a narrow-layout back action should focus, or `null` if there is no snapshot
-     *   to restore (Search was entered some other way, e.g. directly via [setSearchQuery] in a test).
-     */
-    fun exitSearchScope(): HomePane? {
-        val entry = _searchScopeEntry.value ?: return null
-        val validatedFilter = validateFilterTarget(entry.filter)
-        val row = when {
-            validatedFilter != entry.filter -> FeedListRowSelection.canonicalFor(validatedFilter)
-            entry.row is FeedListRowSelection.FeedInTag && entry.row.tagId !in _expandedTagIds.value ->
-                FeedListRowSelection.FeedInFolderGroup(entry.row.feedId)
-            else -> entry.row
-        }
-        selectFilter(validatedFilter, row)
-        if (validatedFilter == entry.filter) {
-            // Stamped after selectFilter (which bumps browsingEpoch itself), so anything that
-            // changes the browsing context again before the read below lands — another filter
-            // switch, another Search round trip — is detected and this restoration backs off
-            // instead of clobbering it. See restoreSearchScopeBrowsingContext's own KDoc.
-            val epoch = browsingEpoch
-            viewModelScope.launch { restoreSearchScopeBrowsingContext(entry, epoch) }
-        }
-        return entry.returnPane
-    }
-
-    /**
-     * Restores [entry]'s pinned-read/pinned-unstarred/selected-article/cursor state, resolved
-     * against the DB's *current* flags rather than replayed verbatim — a change made from the
-     * search results themselves, or one that arrived via sync while Search was active, must not be
-     * hidden behind a frozen snapshot. Only entries whose article is still alive *and* whose flags
-     * still match what was snapshotted survive.
-     *
-     * A pin the user set from inside the Search results themselves is deliberately never part of
-     * this restoration — [entry] only carries what was pinned *before* Search was entered, and
-     * restoring anything pinned during Search would resurface a possibly unrelated feed's article
-     * in the returned filter's list (see the `articles` combine's own handling of a pinned id
-     * missing from its query result).
-     *
-     * Needs a DB read (there is no other way to learn whether something changed while Search was
-     * active), so this cannot run inline inside [exitSearchScope] the way the filter/row restoration
-     * does — see [reconcilePinnedArticlesAndSelection]'s own KDoc for why that read is routed through
-     * [dbWriteDispatcher] rather than [dispatcher], which is the same reason it is routed that way
-     * here. [epoch] is [exitSearchScope]'s [browsingEpoch] snapshot, and pins/selection are merged
-     * in (never replacing the maps outright) so a pin set by an unrelated action that lands in the
-     * gap before this read completes is not stomped by this restoration finishing after it.
-     */
-    private suspend fun restoreSearchScopeBrowsingContext(entry: SearchScopeEntry, epoch: Int) {
-        val ids = entry.pinnedRead.keys + entry.pinnedUnstarred.keys +
-            listOfNotNull(entry.selectedArticle?.id, entry.cursorId)
-        if (ids.isEmpty()) return
-        val flags = withContext(dbWriteDispatcher) { articleRepository.aliveArticleFlags(ids) }
-        // A filter switch (or another Search round trip) that landed while this read was in flight
-        // already reset the browsing context to its own fresh state; applying this stale snapshot on
-        // top of it now would attach state that belongs to a filter no longer being shown.
-        if (epoch != browsingEpoch) return
-
-        val restoredRead = entry.pinnedRead.filterKeys { flags[it]?.isRead == 1L }
-        if (restoredRead.isNotEmpty()) _pinnedReadArticles.update { it + restoredRead }
-
-        val restoredUnstarred = entry.pinnedUnstarred.filterKeys {
-            flags[it]?.isStarred == entry.pinnedUnstarred.getValue(it).is_starred
-        }
-        if (restoredUnstarred.isNotEmpty()) _pinnedUnstarredArticles.update { it + restoredUnstarred }
-
-        // Only restored when nothing has claimed the selection/cursor in the meantime (selectFilter
-        // left both null) — an article picked from the freshly-unpinned list while this read was in
-        // flight must win over a stale snapshot from before the trip through Search.
-        val selected = entry.selectedArticle
-        if (selected != null && _selectedArticle.value == null && flags[selected.id] != null) {
-            val current = flags.getValue(selected.id)
-            _selectedArticle.value = selected.copy(is_read = current.isRead, is_starred = current.isStarred)
-            settingsRepository.mutateLocalSettings { it.copy(lastArticleId = selected.id) }
-        }
-        if (entry.cursorId != null && selectionCursorId == null && flags[entry.cursorId] != null) {
-            selectionCursorId = entry.cursorId
-        }
     }
 
     // --- Pane widths ---
@@ -716,9 +561,13 @@ class HomeViewModel(
     /**
      * Selects the active article filter and clears the current article selection and pinned read articles.
      *
+     * Deliberately does not touch [searchQuery] or [searchBarVisible] — search is orthogonal to the
+     * filter (see this class's own "Search" section), so switching feeds/folders/tags while
+     * actively searching keeps the query and simply re-scopes the search to the new filter.
+     *
      * @param filter The article filter to select.
      * @param instance Which rendered feed-list row was selected — defaults to [filter]'s canonical
-     *   (folder-group) row for callers with no specific row in mind (search, notification actions).
+     *   (folder-group) row for callers with no specific row in mind (notification actions).
      *   Selecting a *different rendered instance of the already-selected filter* (e.g. the
      *   tag-nested copy of a feed already selected under its folder) only moves the highlight: the
      *   article/cursor/epoch side effects below stay gated on the filter itself changing.
@@ -730,16 +579,6 @@ class HomeViewModel(
         if (filter == _filter.value) {
             _selectedRowInstance.value = instance
             return
-        }
-        // Drops a focus request no field ever consumed (e.g. Cmd+F at a narrow layout, then
-        // navigating elsewhere before the search pane composed), so it can't steal focus at
-        // whatever field appears next. Placed after the early return above, so reselecting the
-        // already-active Search filter never clears a request still waiting to be consumed.
-        // Also drops the exitSearchScope() snapshot the same way — once the user has left Search
-        // by any means, there is nothing left for a later back action to restore.
-        if (filter != ArticleFilter.Search) {
-            _pendingSearchFocus.value = false
-            _searchScopeEntry.value = null
         }
         _filter.value = filter
         _selectedRowInstance.value = instance
@@ -840,10 +679,10 @@ class HomeViewModel(
     /**
      * Provides the article rows currently displayed in the center pane.
      *
-     * @return Search-result rows for the search filter, or the filtered article rows otherwise.
+     * @return Search-result rows while [searchActive], or the filtered article rows otherwise.
      */
     fun currentArticles(): List<ArticleListRow> =
-        if (_filter.value is ArticleFilter.Search) searchResults.value.map { it.article } else articles.value
+        if (searchActive.value) searchResults.value.map { it.article } else articles.value
 
     private fun moveSelection(delta: Int) {
         val list = currentArticles()
@@ -962,10 +801,15 @@ class HomeViewModel(
      */
     fun markAllRead() {
         val filter = _filter.value
+        val active = searchActive.value
         // Starred's markAllAsRead is a no-op (you don't "read" the starred view), so mark-all-read
-        // must not force the selected article read there; every other scope does mark it read.
-        val marksSelectedRead = filter != ArticleFilter.Starred
-        val idsToMark = if (filter == ArticleFilter.Search) {
+        // must not force the selected article read there — except while actively searching within
+        // it: search results are an explicit, scoped-down selection the user chose to act on, not
+        // the plain Starred list, so idsToMark below marks them regardless of the filter beneath.
+        // Without the `active ||` here, marksSelectedRead would say "false" while idsToMark still
+        // marked every matched id — leaving the selected article inconsistently unmarked among them.
+        val marksSelectedRead = active || filter != ArticleFilter.Starred
+        val idsToMark = if (active) {
             val resultIds = _rawSearchResults.value.results
                 .filter { it.article.is_read == 0L }
                 .map { it.article.id }
@@ -992,13 +836,13 @@ class HomeViewModel(
         // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
         // pass can never observe (and revert) this optimistic pin/selection using DB flags from
         // before this write has landed.
-        if (filter == ArticleFilter.Search && idsToMark.isEmpty()) {
+        if (active && idsToMark.isEmpty()) {
             // Nothing in the current search results needs marking read; skip both the DB write and
             // the dependent search refresh.
             return
         }
         viewModelScope.launch(dbWriteDispatcher) {
-            if (filter == ArticleFilter.Search) {
+            if (active) {
                 articleRepository.markArticlesAsRead(idsToMark)
                 // Re-run search only after the write lands so the freshly-read state shows up.
                 _searchRefreshTrigger.update { it + 1 }
@@ -1038,14 +882,14 @@ class HomeViewModel(
         if (value) {
             _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         }
-        when (_filter.value) {
-            ArticleFilter.Starred -> {
-                _unreadOnlyStarred.value = value
-                settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnlyStarred = value) }
-            }
-            ArticleFilter.Search -> {
+        when {
+            searchActive.value -> {
                 _unreadOnlySearch.value = value
                 settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnlySearch = value) }
+            }
+            _filter.value == ArticleFilter.Starred -> {
+                _unreadOnlyStarred.value = value
+                settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnlyStarred = value) }
             }
             else -> {
                 _unreadOnly.value = value
@@ -1178,25 +1022,21 @@ class HomeViewModel(
     // --- Search controls ---
 
     /**
-     * Updates the search query and switches to the Search filter when the query is non-empty.
+     * Updates the search query.
      *
-     * Clears pinned read-state when the query changes.
+     * Deliberately does not touch [_pinnedReadArticles] or [browsingEpoch] — unlike a filter
+     * switch, a query change doesn't start a fresh browsing context, it narrows the *same* one.
+     * `_pinnedReadArticles` is shared between the underlying filter's own list and search results
+     * over it (see [searchResults]' own combine), so clearing it here would drop a just-read
+     * article from the filter's list the instant the user types a character into an
+     * always-visible field ([PaneLayout.Triple]'s sidebar). [searchResults] never merges a pinned
+     * id back in that the fresh query no longer matches (see its own KDoc), so nothing pinned
+     * under a previous query can leak into results that don't match it.
      *
      * @param query The new search query.
      */
     fun setSearchQuery(query: String) {
-        // Start a fresh browsing context when the text actually changes (already in Search scope).
-        if (query != _searchQuery.value) {
-            _pinnedReadArticles.value = emptyMap()
-            // Same veto as selectFilter: a body load still in flight from the previous query must
-            // not re-add a pin into the fresh context. Unlike a filter switch, the cursor and the
-            // selection deliberately survive a query change — only the pin does not.
-            browsingEpoch++
-        }
         _searchQuery.value = query
-        if (query.isNotEmpty() && _filter.value != ArticleFilter.Search) {
-            selectFilter(ArticleFilter.Search)
-        }
     }
 
     private val addFeedPreviewResolver = AddFeedPreviewResolver(feedRepository, tagRepository)
@@ -1217,7 +1057,7 @@ class HomeViewModel(
     /**
      * The folder a newly subscribed feed should be filed into, derived from the feed list's
      * current selection: the selected folder itself, or the folder of the selected feed. Any
-     * other selection (all/starred/search/tag) yields `null` (no folder).
+     * other selection (all/starred/tag) yields `null` (no folder).
      */
     private fun folderIdForNewFeed(): String? = when (val f = _filter.value) {
         is ArticleFilter.Folder -> f.folderId
@@ -1228,7 +1068,7 @@ class HomeViewModel(
     /**
      * The feed a newly subscribed feed should be inserted directly after, derived from the feed
      * list's current selection: the selected feed itself, whether it's filed in a folder or
-     * unfiled. Any other selection (folder/all/starred/search/tag) yields `null`, which appends
+     * unfiled. Any other selection (folder/all/starred/tag) yields `null`, which appends
      * the new feed to the end of its target group instead (unchanged from before this feature).
      */
     private fun afterFeedIdForNewFeed(): String? = when (val f = _filter.value) {
@@ -1250,8 +1090,8 @@ class HomeViewModel(
     /**
      * The tag a newly subscribed feed should be tagged with: the currently selected tag, whether
      * selected directly or via a feed selected within an expanded tag's feed sub-list. `null` for
-     * any other selection (folder, feed outside a tag, starred, search, or nothing selected) — no
-     * tag is applied.
+     * any other selection (folder, feed outside a tag, starred, or nothing selected) — no tag is
+     * applied.
      */
     private fun tagIdForNewFeed(): String? = when (val selection = _selectedRowInstance.value) {
         is FeedListRowSelection.Tag -> selection.tagId

@@ -386,10 +386,6 @@ sealed interface FeedListRowSelection {
         override val filter: ArticleFilter get() = ArticleFilter.Starred
     }
 
-    data object Search : FeedListRowSelection {
-        override val filter: ArticleFilter get() = ArticleFilter.Search
-    }
-
     /** A feed's row under its folder group (or the unassigned group) — its canonical row. */
     data class FeedInFolderGroup(val feedId: String) : FeedListRowSelection {
         override val filter: ArticleFilter get() = ArticleFilter.Feed(feedId)
@@ -410,14 +406,13 @@ sealed interface FeedListRowSelection {
 
     companion object {
         /**
-         * Canonical instance for a bare [ArticleFilter] change (search jump, notification-center
-         * "show feed detail", any caller with no specific row in mind) — always the folder-group
-         * instance for a feed.
+         * Canonical instance for a bare [ArticleFilter] change (notification-center "show feed
+         * detail", any caller with no specific row in mind) — always the folder-group instance for
+         * a feed.
          */
         fun canonicalFor(filter: ArticleFilter): FeedListRowSelection = when (filter) {
             ArticleFilter.All -> All
             ArticleFilter.Starred -> Starred
-            ArticleFilter.Search -> Search
             is ArticleFilter.Feed -> FeedInFolderGroup(filter.feedId)
             is ArticleFilter.Folder -> Folder(filter.folderId)
             is ArticleFilter.Tag -> Tag(filter.tagId)
@@ -473,6 +468,10 @@ fun feedsForTag(feeds: List<Feeds>, feedTagMap: Map<String, Set<String>>, tagId:
  * [PaneLayout.Triple]. Falls back to [allLabel] for a feed/tag/folder id that no
  * longer exists (e.g. deleted on another device and not yet synced here), matching
  * `groupFeedsByFolder`'s own defensive "no folder" treatment.
+ *
+ * Search has no title of its own here — its own query field replaces this title row entirely
+ * while it's expanded (see `ArticleListPane`'s own KDoc) — so [filter] alone (never displaced by
+ * search) is what this always reflects.
  */
 fun articleListTitle(
     filter: ArticleFilter,
@@ -481,11 +480,9 @@ fun articleListTitle(
     tags: List<Tags>,
     allLabel: String,
     starredLabel: String,
-    searchLabel: String,
 ): String = when (filter) {
     ArticleFilter.All -> allLabel
     ArticleFilter.Starred -> starredLabel
-    ArticleFilter.Search -> searchLabel
     is ArticleFilter.Feed -> feeds.find { it.id == filter.feedId }?.displayTitle() ?: allLabel
     is ArticleFilter.Folder -> folders.find { it.id == filter.folderId }?.name ?: allLabel
     is ArticleFilter.Tag -> tags.find { it.id == filter.tagId }?.name ?: allLabel
@@ -504,12 +501,6 @@ fun articleListTitle(
  * @param collapsedFolderIds The IDs of folders whose feed rows are hidden.
  * @param expandedTagIds The IDs of tags whose attached feed rows are rendered.
  * @param feedTagMap Mapping of feed IDs to their attached tag IDs.
- * @param includeSearchRow Whether [FeedListRowSelection.Search] belongs in the order — `false` at a
- *   narrow `PaneLayout`, where the feed list is a modal drawer and `FeedListPane` renders no
- *   "Search" row at all (its own `onSelectionAdvance != null` guard), so keyboard navigation must
- *   not be able to select a row that isn't actually on screen. Defaults to `true` (every other
- *   caller — chiefly the existing tests — cares about the rest of the order, not this row's
- *   presence) since the only production call site (`HomeScreen`) is the one that needs `false`.
  * @return The rows in visual top-to-bottom order.
  */
 fun buildOrderedFeedListRows(
@@ -519,12 +510,10 @@ fun buildOrderedFeedListRows(
     collapsedFolderIds: Set<String>,
     expandedTagIds: Set<String>,
     feedTagMap: Map<String, Set<String>>,
-    includeSearchRow: Boolean = true,
 ): List<FeedListRowSelection> =
-    listOfNotNull(
+    listOf(
         FeedListRowSelection.All,
         FeedListRowSelection.Starred,
-        FeedListRowSelection.Search.takeIf { includeSearchRow },
     ) +
         groupFeedsByFolder(feeds, folders).flatMap { (folder, feedsInFolder) ->
             if (folder == null) {
@@ -628,12 +617,9 @@ fun feedListRowIndex(
     feedTagMap: Map<String, Set<String>> = emptyMap(),
     expandedTagIds: Set<String> = emptySet(),
 ): Int? {
-    // All, Starred, and Search are rendered outside the LazyColumn entirely (as fixed SidebarRows
-    // above it), so they never correspond to a LazyColumn item and selecting them must not scroll it.
-    if (instance is FeedListRowSelection.All ||
-        instance is FeedListRowSelection.Starred ||
-        instance is FeedListRowSelection.Search
-    ) {
+    // All and Starred are rendered outside the LazyColumn entirely (as fixed SidebarRows above
+    // it), so they never correspond to a LazyColumn item and selecting them must not scroll it.
+    if (instance is FeedListRowSelection.All || instance is FeedListRowSelection.Starred) {
         return null
     }
 
@@ -682,8 +668,8 @@ internal sealed interface FeedListSelectionTarget {
 /**
  * Resolves [filter] against the current feed/folder/tag lists, for the rename/delete keyboard
  * shortcuts and the equivalent Feed-menu commands (both need "what is currently selected" without
- * duplicating this lookup). Returns `null` for `All`/`Starred`/`Search`, or if the selected item no
- * longer exists in its list (e.g. unsubscribed between selection and the shortcut firing).
+ * duplicating this lookup). Returns `null` for `All`/`Starred`, or if the selected item no longer
+ * exists in its list (e.g. unsubscribed between selection and the shortcut firing).
  */
 internal fun resolveFeedListSelectionTarget(
     filter: ArticleFilter,

@@ -505,7 +505,7 @@ impossible, since every consumer now reads the one value it resolves to at most 
 **`focusedPane` itself only ever *advances* at `PaneLayout.Single`.** `HomePane.ordinal + 1`
 doubles as the navigation stack's current depth, so `HomeScreen` needs no separate depth state —
 `platform/BackHandler` (a real back-gesture/button interception on Android, a no-op on desktop)
-pops it by one, gated on `homeBackAction(layout, depth, searchScopeReturnPending)` (below), and
+pops it by one, gated on `homeBackAction(layout, depth, searchBarOpen)` (below), and
 selecting an article advances it forward the same way — but only where `visiblePanes` actually
 changes with depth: `ArticleListPane`'s `onSelectionAdvance` (and the drawer `FeedListPane`'s own,
 which additionally always moves `focusedPane` to `HomePane.ArticleList` on a row selection, not
@@ -523,25 +523,25 @@ every pane's own `onActivated` routes through a small `HomeScreen` helper that r
 to the root `Box` on top of whatever it does to `focusedPane`, which is what lets a tap on any row
 or button also move focus off whichever text field it had been on.
 
-`homeBackAction(layout, depth, searchScopeReturnPending)`, which wraps the pane-only predicate
+`homeBackAction(layout, depth, searchBarOpen)`, which wraps the pane-only predicate
 `canNavigateBack(layout, depth)` (`false` whenever stepping back wouldn't actually change what's on
 screen: always at `Triple`; always at `Dual`, since `visiblePanes(Dual, *)` returns the same two
 panes at every depth — a back press there used to be silently swallowed before `canNavigateBack`
-existed) with the other half of "what does going back actually do": exiting the Search scope
-instead of popping a pane, when a snapshot is waiting to be restored (see "Search at a narrow
-layout" below) — this takes priority over `canNavigateBack` wherever the article list is actually
-visible (`Single` depth 2, `Dual` at every depth), since exiting Search always changes what's on
-screen there. **`canNavigateBack`/`homeBackAction` resolving to `false`/`None` for the article
-list's own depth (with no Search scope pending) is deliberate, not an oversight** — `HomeScreen`'s
-`BackHandler` disables itself for `None`, so a back press there falls through to the platform's own
-default (exiting the app on Android) rather than this codebase swallowing it with nowhere to go.
+existed) with the other half of "what does going back actually do": closing the expanded search bar
+instead of popping a pane, when it's open (see "Search is orthogonal to `ArticleFilter`" below) —
+this takes priority over `canNavigateBack` wherever the article list is actually visible (`Single`
+depth 2, `Dual` at every depth), since closing the bar always changes what's on screen there.
+**`canNavigateBack`/`homeBackAction` resolving to `false`/`None` for the article list's own depth
+(with the bar closed) is deliberate, not an oversight** — `HomeScreen`'s `BackHandler` disables
+itself for `None`, so a back press there falls through to the platform's own default (exiting the
+app on Android) rather than this codebase swallowing it with nowhere to go.
 
 Unlike before the drawer existed, `PaneLayout.Dual` is *not* a sliding window over the stack: the
 feed list being a drawer rather than a pane means `visiblePanes(Dual, depth)` returns the same
 `[ArticleList, ArticleDetail]` regardless of depth — the article detail pane is a permanent neighbor
 of the article list, the same shape as Gmail's own tablet reading pane, with no back control of its
-own (`ArticleDetailPane`'s `onNavigateUp` is `null` there; see "Search at a narrow layout" below for
-why `swipeNavigation` is a separate, still-non-null signal).
+own (`ArticleDetailPane`'s `onNavigateUp` is `null` there; see "Search is orthogonal to
+`ArticleFilter`" below for why `swipeNavigation` is a separate, still-non-null signal).
 
 At a narrow layout the two remaining panes are hosted by `ui/home/NarrowPaneRow.kt`, which is what
 keeps each one's scroll position across the stack's comings and goings. `Dual` never unmounts
@@ -581,75 +581,65 @@ where the "+" button that would otherwise fix that lives inside a drawer closed 
 `HomeViewModel.hasAnyFeed()`, a one-shot DB query distinct from the already-collected `feeds`
 `StateFlow`, whose `Eagerly`-shared initial value can't tell "empty" apart from "not loaded yet").
 
-**Search at a narrow layout** moves the field itself, not just its surrounding chrome — see the
-`ui-guidelines` skill's "Adaptive pane layout & touch affordances" section for the full design
-(`ArticleListTopBar`'s hamburger-and-title row folds into `SearchListPane`'s
-`ui/common/KeryxSearchBar.kt`'s `KeryxExpandedSearchBar` while the Search scope is active, and why
-the narrow/`Triple` split is driven by `onOpenDrawer`/`onExitSearch` being `null` rather than a
-`PaneLayout` or `isTouchPrimary` parameter). The feed list has no search field of its own at a
-narrow layout at all — it's a drawer, not a screen search results could live on — so the article
-list's own search icon (which does not advance the stack) is the only entry point there.
-`HomeViewModel.pendingSearchFocus` is a latched `StateFlow<Boolean>` rather than a one-shot event
-for the same reason as the depth cursor above: a request to focus the field is raised in the same
-click that opens the Search scope, so the pane that will own the field hasn't composed yet, and a
-`SharedFlow` with no subscriber yet would drop the request silently.
+**Search is orthogonal to `ArticleFilter`, not a variant of it.** `core/ArticleFilter.kt` only has
+`All`/`Starred`/`Feed`/`Tag`/`Folder` — there is no `Search` case. The query
+(`HomeViewModel.searchQuery`) narrows whichever filter is already selected instead of displacing it:
+`HomeViewModel.searchActive` (`_searchBarVisible && searchQuery.value.isNotEmpty()`) is the single
+derived flag that says whether the article list is currently showing search results
+(`HomeViewModel.searchResults`, itself scoped to the current filter — see `FtsSearch.articleScopeSql`
+below) or the filter's own list (`HomeViewModel.articles`); `ArticleListPane` reads it to pick which
+one to feed into the one `ArticleListPaneContent` call that renders either. Because the filter is
+never displaced, there is nothing to snapshot and nothing to restore when search ends — the
+`SearchScopeEntry`/`enterSearchScope`/`exitSearchScope` machinery an earlier design needed for
+exactly that no longer exists.
 
-Search has no `HomePane` of its own — every entry point just sets `ArticleFilter.Search` on
-`HomePane.ArticleList` with its content swapped out, without advancing the stack — so a plain "pop
-one pane" back action can't undo it either way. `HomeViewModel.enterSearchScope(returnPane)`
-snapshots the filter/row-selection active right before the switch, plus the pane a narrow-layout
-back action should land on (always `ArticleList` at a narrow layout, since that's the only pane a
-search entry point can be reached from); `exitSearchScope()` restores both and hands back that
-pane, which `homeBackAction`'s `ExitSearch` case (above) resolves to instead of `PopPane`. The
-search query itself is never touched by any of this — it survives on the field exactly as it was.
+**`_searchBarVisible` is the one piece of real state search still needs**, and it exists only for
+narrow layouts: at `PaneLayout.Triple`, `FeedListPane`'s own query field is permanent, so
+`HomeScreen`'s own `LaunchedEffect(layout)` keeps it `true` there the whole time; at a narrow
+layout it starts `false` and is toggled by `ArticleListTopBar`'s search icon
+(`onSearchClick` → `setSearchBarVisible(true)`) and the expanded bar's own back arrow
+(`onExitSearch` → `homeBackAction`'s `ExitSearch` case → `setSearchBarVisible(false)`). Its purpose
+is exactly the gap between "the query still has text" and "the bar is currently open": closing the
+bar at a narrow layout must show the filter's own list again without erasing the query, so a later
+tap on the search icon re-shows the same results — `searchActive` requiring both is what makes that
+true. `HomeViewModel.pendingSearchFocus` is still a latched `StateFlow<Boolean>` rather than a
+one-shot event, for the same reason as before: a request to focus the field is raised in the same
+click that opens the bar, so the composable that will own the field hasn't composed yet, and a
+`SharedFlow` with no subscriber yet would drop the request silently. `setSearchBarVisible(false)`
+drops an unconsumed request the same way leaving the filter used to.
 
-The sidebar's own "Search" quick-filter row (`FeedListPane`, `PaneLayout.Triple` only) is reachable
-two ways, and they deliberately snapshot alike but focus differently. A tap goes through
-`enterSearchScope` directly. Arrow-key navigation over the feed list's rows
-(`HomeScreen.moveFeedSelection` → `HomeViewModel.selectFeedListRow`) can land on this same row too
-— `buildOrderedFeedListRows` includes it — and takes the snapshot the same way
-(`captureSearchScopeEntry`, the shared half both `enterSearchScope` and `selectFeedListRow` call),
-so a later back action can still restore the filter/row it displaced, but deliberately does **not**
-also call `requestSearchFocus()`: focusing the field mid-navigation would swallow the very next ↓
-into the result list rather than the next sidebar row (a single-line field has no caret use for
-that key — see `KeyboardNav.kt`'s own KDoc), making every row below Search unreachable by keyboard.
-A tap is an explicit "I want to search" action; arrow-navigating onto the row while walking the
-list is transient — Cmd/Ctrl+F remains the keyboard path that does focus the field. `orderedRows`
-excludes this row entirely at a narrow layout (`buildOrderedFeedListRows`'s `includeSearchRow`,
-`false` whenever `feedListIsDrawer(paneLayout)`), matching `FeedListPane`'s own
-`onSelectionAdvance`-gated omission of the row there — keyboard navigation must never be able to
-select a row that isn't actually on screen.
+**The sidebar has no "Search" quick-filter row any more.** Typing directly into `FeedListPane`'s
+permanent field (or into the narrow layout's expanded bar once open) is the whole entry point —
+`searchActive` follows from the query alone, so a tap, a keyboard cursor landing on the field, and
+arrow-key navigation all behave identically; there is no separate "enter Search" action to trigger
+selectively, and therefore no asymmetry between how a tap and a keystroke start a search. This also
+means `buildOrderedFeedListRows` needs no `includeSearchRow` parameter and `feedListRowIndex` no
+longer special-cases a "Search" row — the row simply does not exist, at any layout.
 
-`enterSearchScope`'s snapshot also carries the browsing context active at that moment — the
-pinned-read/pinned-unstarred maps, the selected article, and the keyboard-navigation cursor (see
-"Optimistic read/star pins" below) — because `selectFilter` (which entering Search goes through
-like any other filter change) clears all of that. `exitSearchScope` restores it, but not verbatim:
-it re-resolves every snapshotted id against the DB's *current* flags (via the same
-`ArticleRepository.aliveArticleFlags` the reactive reconciliation below uses), so a change made from
-the search results themselves, or one that arrived via sync while Search was active, is not
-overwritten by the frozen pre-Search snapshot. A pin set *from inside* Search is never part of this
-at all — only what was pinned *before* Search was entered is — since restoring it would resurface a
-possibly unrelated feed's article in the returned filter's list (see the `articles` combine's `extra`
-handling below). Restoration is skipped entirely when the filter itself fell back to a different one
-(`validateFilterTarget` found its target deleted meanwhile): the snapshot's pins/selection belong to
-the *original* filter, not the fallback.
+**Search's own scope is the currently selected filter, not always every feed.** Selecting a
+different feed/folder/tag while a query is active re-scopes the *same* search immediately
+(`_rawSearchResults` combines `_filter` alongside the debounced query); switching to "All Feeds"
+searches everywhere. `FtsSearch.articleScopeSql` builds the `WHERE`-clause fragment for each
+`ArticleFilter` variant, matching `articles.sq`'s own `watchAll`/`watchStarred`/`watchByFeed`/
+`watchByTag`/`watchByFolder` queries row-for-row — including their existing asymmetry (`Starred`
+and `Feed` don't join `feeds` at all, so an unsubscribed feed's starred articles/own articles still
+show under those scopes; `All`/`Tag`/`Folder` do). See "FTS5 handling" in `sync-architecture.md` and
+`db-schema.md`'s own `articles_fts` section for the query mechanics this composes with.
 
-Because Search has no `HomePane` of its own, `ArticleListPane` renders `SearchListPane` from an
-early `return` inside the same composable rather than through `NarrowPaneRow`'s pane-level
-`SaveableStateHolder` — so the article list's own `listState`/`lastFilter` have to stay declared
-*above* that `return` to remain part of composition (and therefore alive) while Search is active;
-declaring them below it, next to the content that uses them, would dispose and recreate them every
-time Search opens, resetting the list to the top on every return. `lastFilter` is also left
-untouched while `filter is ArticleFilter.Search`, so returning to the same filter Search was
-entered from reads as "unchanged" and skips the reset-to-top the same mechanism otherwise applies
-on a genuine filter change. Restoring the selected article on return can re-trigger
-`ArticleListPaneContent`'s own "keep the selection in view" scroll on remount — harmless when a
-pane genuinely unmounted (the selection is always inside the just-restored viewport there, see
-"Adaptive pane layout" above), but not guaranteed here, since the list's own scroll position and the
-restored selection come from independent snapshots. `ArticleListPaneContent`'s
-`preserveScrollPositionOnMount` parameter exists for exactly this: `ArticleListPane` sets it for the
-one composition right after Search closes, suppressing that scroll for the mount's first evaluation
-only — a later, genuine selection change still scrolls normally.
+**Nothing about ending a search restores anything.** Clearing the query (or, at a narrow layout,
+closing the bar) simply switches `ArticleListPane`'s content back to the filter's own list —
+`selectFilter` and `setSearchQuery` are independent of each other (switching filters never touches
+the query; changing the query never touches the filter), and `_pinnedReadArticles` is deliberately
+shared between the filter's own list and its search results rather than cleared on a query change,
+so an article read from inside a search stays visible under unread-only exactly as if it had been
+read from the plain list.
+
+`ArticleListPane` therefore renders one continuous composable regardless of `searchActive` — no
+early `return`, and no per-branch (un)mounting the way `PaneLayout.Single`'s `NarrowPaneRow` panes
+get. Its `baseListState`/`searchListState` (two independent `LazyListState`s) and `lastFilter` are
+all declared unconditionally at the top, so switching in and out of search never disposes either
+list's scroll position — there is no snapshot/restore step needed to make a round trip through
+search leave the filter's own list exactly where it was.
 
 #### iOS
 

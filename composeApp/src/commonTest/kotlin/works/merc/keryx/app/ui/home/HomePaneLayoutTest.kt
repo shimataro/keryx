@@ -281,8 +281,8 @@ class HomePaneLayoutTest {
         // Triple never has anywhere to go back to (see canNavigateBackIsAlwaysFalseAtTriple), and
         // exiting Search isn't assigned there either — the field stays in FeedListPane's sidebar.
         for (depth in 1..3) {
-            assertEquals(HomeBackAction.None, homeBackAction(PaneLayout.Triple, depth, searchScopeReturnPending = true), "depth $depth")
-            assertEquals(HomeBackAction.None, homeBackAction(PaneLayout.Triple, depth, searchScopeReturnPending = false), "depth $depth")
+            assertEquals(HomeBackAction.None, homeBackAction(PaneLayout.Triple, depth, searchBarOpen = true), "depth $depth")
+            assertEquals(HomeBackAction.None, homeBackAction(PaneLayout.Triple, depth, searchBarOpen = false), "depth $depth")
         }
     }
 
@@ -292,8 +292,8 @@ class HomePaneLayoutTest {
         // lives (see homeBackAction's own KDoc). This is the fix for both bugs a pending scope used
         // to trip over: Single unconditionally popped to the feed list instead of exiting Search,
         // and Dual's back arrow was disabled outright (canNavigateBack(Dual, 2) == false).
-        assertEquals(HomeBackAction.ExitSearch, homeBackAction(PaneLayout.Single, 2, searchScopeReturnPending = true))
-        assertEquals(HomeBackAction.ExitSearch, homeBackAction(PaneLayout.Dual, 2, searchScopeReturnPending = true))
+        assertEquals(HomeBackAction.ExitSearch, homeBackAction(PaneLayout.Single, 2, searchBarOpen = true))
+        assertEquals(HomeBackAction.ExitSearch, homeBackAction(PaneLayout.Dual, 2, searchBarOpen = true))
     }
 
     @Test
@@ -302,7 +302,7 @@ class HomePaneLayoutTest {
         // at a time at Single — landing back on the search screen with the scope intact, not
         // exiting it in one step. ArticleList isn't visible at this depth (visiblePanes(Single, 3)
         // == [ArticleDetail]), which is what keeps ExitSearch from taking priority here.
-        assertEquals(HomeBackAction.PopPane, homeBackAction(PaneLayout.Single, 3, searchScopeReturnPending = true))
+        assertEquals(HomeBackAction.PopPane, homeBackAction(PaneLayout.Single, 3, searchBarOpen = true))
     }
 
     @Test
@@ -310,7 +310,7 @@ class HomePaneLayoutTest {
         // Unlike Single, Dual keeps the article list on screen at every depth (visiblePanes(Dual,
         // 3) == [ArticleList, ArticleDetail]) — so exiting Search takes priority over popping the
         // pane at every depth there, not just depth 2.
-        assertEquals(HomeBackAction.ExitSearch, homeBackAction(PaneLayout.Dual, 3, searchScopeReturnPending = true))
+        assertEquals(HomeBackAction.ExitSearch, homeBackAction(PaneLayout.Dual, 3, searchBarOpen = true))
     }
 
     @Test
@@ -319,9 +319,9 @@ class HomePaneLayoutTest {
         // resolve to None so HomeScreen's BackHandler disables itself and the platform's own back
         // gesture/button takes over — on Android, exiting the app — rather than this codebase
         // swallowing the press with nowhere to go.
-        assertEquals(HomeBackAction.None, homeBackAction(PaneLayout.Single, 2, searchScopeReturnPending = false))
-        assertEquals(HomeBackAction.None, homeBackAction(PaneLayout.Dual, 2, searchScopeReturnPending = false))
-        assertEquals(HomeBackAction.None, homeBackAction(PaneLayout.Dual, 3, searchScopeReturnPending = false))
+        assertEquals(HomeBackAction.None, homeBackAction(PaneLayout.Single, 2, searchBarOpen = false))
+        assertEquals(HomeBackAction.None, homeBackAction(PaneLayout.Dual, 2, searchBarOpen = false))
+        assertEquals(HomeBackAction.None, homeBackAction(PaneLayout.Dual, 3, searchBarOpen = false))
     }
 
     @Test
@@ -329,7 +329,7 @@ class HomePaneLayoutTest {
         for (layout in PaneLayout.entries) {
             for (depth in 1..3) {
                 val expected = if (canNavigateBack(layout, depth)) HomeBackAction.PopPane else HomeBackAction.None
-                assertEquals(expected, homeBackAction(layout, depth, searchScopeReturnPending = false), "$layout depth $depth")
+                assertEquals(expected, homeBackAction(layout, depth, searchBarOpen = false), "$layout depth $depth")
             }
         }
     }

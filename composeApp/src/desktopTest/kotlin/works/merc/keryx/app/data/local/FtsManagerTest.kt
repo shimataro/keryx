@@ -2,6 +2,7 @@ package works.merc.keryx.app.data.local
 
 import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlDriver
+import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.ftsManager
@@ -149,12 +150,12 @@ class FtsManagerTest {
             assertTrue(manager.exists())
 
             val search = FtsSearch(driver)
-            assertEquals(listOf("a1"), search.search("Hello").map { it.id })
+            assertEquals(listOf("a1"), search.search("Hello", ArticleFilter.All).map { it.id })
 
             // Calling again backfills nothing (already indexed) and must not wipe or duplicate data.
             runBlocking { manager.ensureIndexed() }
             assertTrue(manager.exists())
-            assertEquals(listOf("a1"), search.search("Hello").map { it.id })
+            assertEquals(listOf("a1"), search.search("Hello", ArticleFilter.All).map { it.id })
         } finally {
             driver.close()
         }
@@ -174,7 +175,7 @@ class FtsManagerTest {
             manager.createTable()
             runBlocking { manager.rebuildIndex() }
 
-            val ids = FtsSearch(driver).search("Kotlin").map { it.id }
+            val ids = FtsSearch(driver).search("Kotlin", ArticleFilter.All).map { it.id }
             assertEquals(listOf("a1"), ids)
         } finally {
             driver.close()
@@ -189,14 +190,14 @@ class FtsManagerTest {
             db.insertArticle("a1", "f1", "Kotlin One", "first body")
             val manager = ftsManager(driver)
             runBlocking { manager.ensureIndexed() } // indexes a1
-            assertEquals(listOf("a1"), FtsSearch(driver).search("Kotlin").map { it.id })
+            assertEquals(listOf("a1"), FtsSearch(driver).search("Kotlin", ArticleFilter.All).map { it.id })
 
             // A newly-arrived article is picked up incrementally, and the already-indexed row is not
             // wiped (a concurrent search would never regress to zero hits).
             db.insertArticle("a2", "f1", "Kotlin Two", "second body")
             runBlocking { manager.indexMissing() }
 
-            assertEquals(setOf("a1", "a2"), FtsSearch(driver).search("Kotlin").map { it.id }.toSet())
+            assertEquals(setOf("a1", "a2"), FtsSearch(driver).search("Kotlin", ArticleFilter.All).map { it.id }.toSet())
             assertEquals(2L, driver.countOf("SELECT COUNT(*) FROM articles_fts_docsize"))
         } finally {
             driver.close()
@@ -216,7 +217,7 @@ class FtsManagerTest {
             // the in-memory driver every other FTS test uses. This is the gap that hid the bug.
             ftsManagerIndexed(driver)
 
-            assertEquals(listOf("a1"), FtsSearch(driver).search("Kotlin").map { it.id })
+            assertEquals(listOf("a1"), FtsSearch(driver).search("Kotlin", ArticleFilter.All).map { it.id })
         } finally {
             driver.close()
             file.delete()
@@ -234,11 +235,11 @@ class FtsManagerTest {
             // the index empty. The old ensureExists() no-opped here because the table was present.
             manager.createTable()
             db.insertArticle("a1", "f1", "Kotlin Multiplatform", "cross platform apps")
-            assertTrue(FtsSearch(driver).search("Kotlin").isEmpty())
+            assertTrue(FtsSearch(driver).search("Kotlin", ArticleFilter.All).isEmpty())
 
             runBlocking { manager.ensureIndexed() }
 
-            assertEquals(listOf("a1"), FtsSearch(driver).search("Kotlin").map { it.id })
+            assertEquals(listOf("a1"), FtsSearch(driver).search("Kotlin", ArticleFilter.All).map { it.id })
         } finally {
             driver.close()
         }
@@ -257,7 +258,7 @@ class FtsManagerTest {
             runBlocking { manager.ensureIndexedIfTableAbsent() }
 
             assertTrue(manager.exists())
-            assertEquals(listOf("a1"), FtsSearch(driver).search("Kotlin").map { it.id })
+            assertEquals(listOf("a1"), FtsSearch(driver).search("Kotlin", ArticleFilter.All).map { it.id })
         } finally {
             driver.close()
         }
@@ -279,11 +280,11 @@ class FtsManagerTest {
             val manager = ftsManager(driver)
             manager.createTable()
             db.insertArticle("a1", "f1", "Kotlin Multiplatform", "cross platform apps")
-            assertTrue(FtsSearch(driver).search("Kotlin").isEmpty())
+            assertTrue(FtsSearch(driver).search("Kotlin", ArticleFilter.All).isEmpty())
 
             runBlocking { manager.ensureIndexedIfTableAbsent() }
 
-            assertTrue(FtsSearch(driver).search("Kotlin").isEmpty(), "must not have backfilled once the table already existed")
+            assertTrue(FtsSearch(driver).search("Kotlin", ArticleFilter.All).isEmpty(), "must not have backfilled once the table already existed")
         } finally {
             driver.close()
         }
@@ -303,8 +304,8 @@ class FtsManagerTest {
 
             // Exactly one index document per article — the second call backfills nothing.
             assertEquals(2L, driver.countOf("SELECT COUNT(*) FROM articles_fts_docsize"))
-            assertEquals(listOf("a1"), FtsSearch(driver).search("Kotlin").map { it.id })
-            assertEquals(listOf("a2"), FtsSearch(driver).search("Serialization").map { it.id })
+            assertEquals(listOf("a1"), FtsSearch(driver).search("Kotlin", ArticleFilter.All).map { it.id })
+            assertEquals(listOf("a2"), FtsSearch(driver).search("Serialization", ArticleFilter.All).map { it.id })
         } finally {
             driver.close()
         }

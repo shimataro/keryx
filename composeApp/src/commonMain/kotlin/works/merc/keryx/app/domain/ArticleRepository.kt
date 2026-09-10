@@ -6,7 +6,6 @@ import app.cash.sqldelight.coroutines.mapToOne
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
@@ -88,15 +87,10 @@ class ArticleRepository(
     /**
      * Observes list-row articles matching the specified filter.
      *
-     * Search filters produce an empty flow because search results are provided separately.
-     *
      * @param filter The article filter to apply.
      * @return A flow of matching article list rows.
      */
     fun watchArticles(filter: ArticleFilter): Flow<List<ArticleListRow>> = when (filter) {
-        // Search results aren't a DB query; the article-list pane renders them from `search()`
-        // (via HomeViewModel.searchResults) instead of this flow.
-        ArticleFilter.Search -> return flowOf(emptyList())
         // ::ArticleListRow rather than the per-query generated types: narrowing a SELECT makes
         // SQLDelight emit a distinct data class per query, which would leave these five branches
         // with five mutually incompatible row types.
@@ -210,7 +204,7 @@ class ArticleRepository(
             is ArticleFilter.Feed -> articles.markAllReadByFeed(now, now, filter.feedId)
             is ArticleFilter.Tag -> articles.markAllReadByTag(now, now, filter.tagId)
             is ArticleFilter.Folder -> articles.markAllReadByFolder(now, now, filter.folderId)
-            ArticleFilter.Starred, ArticleFilter.Search -> return // no-op
+            ArticleFilter.Starred -> return // no-op
         }
         syncScheduler.scheduleSync()
     }
@@ -219,11 +213,13 @@ class ArticleRepository(
      * Searches articles and preserves the search engine's result order.
      *
      * @param query The full-text search query.
+     * @param scope Restricts results to the same row set [scope] would show as an ordinary
+     *   (non-search) article-list filter — see `FtsSearch.articleScopeSql`.
      * @return Matching articles with highlighted titles, or an empty list when the search index is temporarily unavailable.
      */
-    fun search(query: String): List<ArticleSearchResult> =
+    fun search(query: String, scope: ArticleFilter): List<ArticleSearchResult> =
         try {
-            val hits = ftsSearch.search(query)
+            val hits = ftsSearch.search(query, scope)
             // Load all hit rows with one `id IN (...)` query per chunk (chunked to stay under
             // SQLite's bound-parameter limit) instead of one getById per hit. Iterating `hits`
             // preserves rank order regardless of fetch/map order; mapNotNull drops ids whose row

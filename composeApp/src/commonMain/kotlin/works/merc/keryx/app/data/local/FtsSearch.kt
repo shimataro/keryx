@@ -3,6 +3,7 @@ package works.merc.keryx.app.data.local
 import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.db.SqlPreparedStatement
+import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.SEARCH_FALLBACK_RESULT_LIMIT
 import works.merc.keryx.app.core.TRIGRAM_MIN_TERM_LENGTH
 import works.merc.keryx.app.core.searchTerms
@@ -18,6 +19,48 @@ data class FtsHit(
 )
 
 /**
+ * A `WHERE`-clause fragment (referencing the `a` alias from [FtsSearch]'s own queries) plus the
+ * values it binds, restricting search to the same row set an [ArticleFilter] would show in the
+ * ordinary (non-search) article list. See [articleScopeSql].
+ */
+internal data class ArticleScopeSql(val clause: String, val args: List<String>)
+
+/**
+ * The scope predicate matching [scope] exactly as `ArticleRepository.watchArticles` would resolve
+ * it for the same filter (`composeApp/src/commonMain/sqldelight/.../db/articles.sq`'s `watchAll` /
+ * `watchStarred` / `watchByFeed` / `watchByTag` / `watchByFolder`) — including that non-JOIN
+ * asymmetry: `Starred` and `Feed` do **not** check `feeds.deleted_at`, matching their own `.sq`
+ * queries exactly, while `All`/`Tag`/`Folder` do. Do not "fix" that asymmetry here — it would
+ * diverge search results from the plain article list for the same filter.
+ *
+ * Expressed as `EXISTS` (not `feed_id IN (...)`) so a folder/tag scope never binds more than one
+ * parameter regardless of how many feeds it contains — relevant because this is combined with the
+ * short-term `LIKE` bindings in the same query, and SQLite's bound-parameter limit is shared.
+ */
+internal fun articleScopeSql(scope: ArticleFilter): ArticleScopeSql = when (scope) {
+    ArticleFilter.All -> ArticleScopeSql(
+        clause = "EXISTS (SELECT 1 FROM feeds f WHERE f.id = a.feed_id AND f.deleted_at IS NULL)",
+        args = emptyList(),
+    )
+    ArticleFilter.Starred -> ArticleScopeSql(clause = "a.is_starred = 1", args = emptyList())
+    is ArticleFilter.Feed -> ArticleScopeSql(clause = "a.feed_id = ?", args = listOf(scope.feedId))
+    is ArticleFilter.Tag -> ArticleScopeSql(
+        clause = """
+            EXISTS (
+                SELECT 1 FROM feed_tags ft
+                INNER JOIN feeds f ON f.id = ft.feed_id
+                WHERE ft.feed_id = a.feed_id AND ft.tag_id = ? AND ft.deleted_at IS NULL AND f.deleted_at IS NULL
+            )
+        """.trimIndent(),
+        args = listOf(scope.tagId),
+    )
+    is ArticleFilter.Folder -> ArticleScopeSql(
+        clause = "EXISTS (SELECT 1 FROM feeds f WHERE f.id = a.feed_id AND f.folder_id = ? AND f.deleted_at IS NULL)",
+        args = listOf(scope.folderId),
+    )
+}
+
+/**
  * Runs full-text search and returns matching active articles with matched title terms marked for
  * highlighting.
  *
@@ -27,7 +70,8 @@ data class FtsHit(
  * tokenizer produces no tokens under 3 characters — so they're applied as an additional `LIKE`
  * filter instead. A query made up entirely of short terms has no FTS query to rank by, so it
  * falls back to a plain `LIKE` scan over `articles`, ordered by recency and capped at
- * [SEARCH_FALLBACK_RESULT_LIMIT].
+ * [SEARCH_FALLBACK_RESULT_LIMIT] — applied *within* the scope, not before it, so a narrow scope
+ * (e.g. a single feed) isn't starved by an unrelated feed's hits filling the cap first.
  *
  * Highlighting is done in Kotlin (not via FTS5's `highlight()`) so that short (LIKE-only) terms get
  * marked the same way as trigram-matched ones — `highlight()` only knows about the FTS5 query, so
@@ -40,16 +84,19 @@ class FtsSearch(private val driver: SqlDriver) {
      * matched title terms marked for highlighting.
      *
      * @param rawQuery The user-entered search query.
+     * @param scope Restricts results to the same row set [scope] would show as an ordinary
+     *   (non-search) article-list filter — see [articleScopeSql].
      * @return The matching article identifiers and marked titles.
      */
-    fun search(rawQuery: String): List<FtsHit> {
+    fun search(rawQuery: String, scope: ArticleFilter): List<FtsHit> {
         val terms = searchTerms(rawQuery)
         if (terms.isEmpty()) return emptyList()
         val (longTerms, shortTerms) = terms.partition { it.length >= TRIGRAM_MIN_TERM_LENGTH }
+        val scopeSql = articleScopeSql(scope)
         return if (longTerms.isEmpty()) {
-            searchByLikeOnly(shortTerms)
+            searchByLikeOnly(shortTerms, scopeSql)
         } else {
-            searchByFts(longTerms, shortTerms)
+            searchByFts(longTerms, shortTerms, scopeSql)
         }
     }
 
@@ -59,7 +106,7 @@ class FtsSearch(private val driver: SqlDriver) {
      * narrowed the row set). Order is always FTS5 relevance rank, matching the FTS-only case exactly
      * when there are no short terms.
      */
-    private fun searchByFts(longTerms: List<String>, shortTerms: List<String>): List<FtsHit> {
+    private fun searchByFts(longTerms: List<String>, shortTerms: List<String>, scope: ArticleScopeSql): List<FtsHit> {
         // Each long term is wrapped as its own quoted FTS5 string so arbitrary user input (quotes,
         // operators like AND/OR/-/*, punctuation) is treated as literal text and can't produce a
         // MATCH syntax error. Embedded quotes are escaped. Order-independent (not a phrase search).
@@ -76,6 +123,7 @@ class FtsSearch(private val driver: SqlDriver) {
                 """.trimIndent(),
             )
             if (likeClause != null) append("\n  AND ").append(likeClause)
+            append("\n  AND ").append(scope.clause)
             append("\nORDER BY articles_fts.rank;")
         }
         val allTerms = longTerms + shortTerms
@@ -91,10 +139,11 @@ class FtsSearch(private val driver: SqlDriver) {
                 }
                 QueryResult.Unit
             },
-            parameters = 1 + shortTerms.size * 2,
+            parameters = 1 + shortTerms.size * 2 + scope.args.size,
             binders = {
                 bindString(0, matchArg)
                 bindLikeTerms(shortTerms, startIndex = 1)
+                bindScopeArgs(scope, startIndex = 1 + shortTerms.size * 2)
             },
         )
         return hits
@@ -107,13 +156,14 @@ class FtsSearch(private val driver: SqlDriver) {
      * UI. Mirrors [searchByFts]'s `a.deleted_at IS NULL` filter exactly (no `feeds` join either,
      * matching the FTS path's existing scope).
      */
-    private fun searchByLikeOnly(shortTerms: List<String>): List<FtsHit> {
+    private fun searchByLikeOnly(shortTerms: List<String>, scope: ArticleScopeSql): List<FtsHit> {
         val likeClause = requireNotNull(likeAndClause(shortTerms)) { "searchByLikeOnly requires at least one term" }
         val sql = """
             SELECT a.id, a.title
             FROM articles a
             WHERE a.deleted_at IS NULL
               AND $likeClause
+              AND ${scope.clause}
             ORDER BY a.published_at DESC, a.created_at DESC, a.id DESC
             LIMIT $SEARCH_FALLBACK_RESULT_LIMIT;
         """.trimIndent()
@@ -129,8 +179,11 @@ class FtsSearch(private val driver: SqlDriver) {
                 }
                 QueryResult.Unit
             },
-            parameters = shortTerms.size * 2,
-            binders = { bindLikeTerms(shortTerms, startIndex = 0) },
+            parameters = shortTerms.size * 2 + scope.args.size,
+            binders = {
+                bindLikeTerms(shortTerms, startIndex = 0)
+                bindScopeArgs(scope, startIndex = shortTerms.size * 2)
+            },
         )
         return hits
     }
@@ -151,12 +204,20 @@ class FtsSearch(private val driver: SqlDriver) {
         }
     }
 
+    /** Binds [scope]'s own args (0 or 1 of them), starting at [startIndex]. */
+    private fun SqlPreparedStatement.bindScopeArgs(scope: ArticleScopeSql, startIndex: Int) {
+        var index = startIndex
+        for (arg in scope.args) {
+            bindString(index++, arg)
+        }
+    }
+
     companion object {
         /** Sentinel wrapping the start of a matched span in [FtsHit] markup (ASCII STX, `char(2)`). */
-        const val MARK_START: Char = '\u0002'
+        const val MARK_START: Char = ''
 
         /** Sentinel wrapping the end of a matched span in [FtsHit] markup (ASCII ETX, `char(3)`). */
-        const val MARK_END: Char = '\u0003'
+        const val MARK_END: Char = ''
     }
 }
 

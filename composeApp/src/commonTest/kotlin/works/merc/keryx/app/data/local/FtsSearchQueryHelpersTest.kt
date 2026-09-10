@@ -1,13 +1,29 @@
 package works.merc.keryx.app.data.local
 
+import works.merc.keryx.app.core.ArticleFilter
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
- * Pure-function tests for [escapeLikePattern] and [markTerms]. The driver-backed MATCH/LIKE
- * behavior itself is covered by [FtsSearchTest] (desktopTest, needs a real SQLite connection).
+ * Pure-function tests for [escapeLikePattern], [markTerms], and [articleScopeSql]. The
+ * driver-backed MATCH/LIKE behavior itself is covered by [FtsSearchTest] (desktopTest, needs a
+ * real SQLite connection).
  */
 class FtsSearchQueryHelpersTest {
+
+    @Test
+    fun articleScopeSqlProducesNoArgumentsForAllAndStarred() {
+        assertTrue(articleScopeSql(ArticleFilter.All).args.isEmpty())
+        assertTrue(articleScopeSql(ArticleFilter.Starred).args.isEmpty())
+    }
+
+    @Test
+    fun articleScopeSqlProducesExactlyOneArgumentForFeedTagAndFolder() {
+        assertEquals(listOf("f1"), articleScopeSql(ArticleFilter.Feed("f1")).args)
+        assertEquals(listOf("t1"), articleScopeSql(ArticleFilter.Tag("t1")).args)
+        assertEquals(listOf("d1"), articleScopeSql(ArticleFilter.Folder("d1")).args)
+    }
 
     @Test
     fun escapeLikePatternEscapesWildcardsAndTheEscapeCharItself() {

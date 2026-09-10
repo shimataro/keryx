@@ -85,7 +85,7 @@ data exists in the cloud it is automatically merged (imported) during the initia
   not guarantee.
 - Article list / article view (reader view). **Articles are marked as read the instant they are selected**. An action to mark as unread is available.
 - Stars (persistent), open in external browser
-- Local full-text search with SQLite FTS5 (trigram, 2+ characters — terms of 3+ characters use the trigram index, a query made up only of 2-character terms falls back to a `LIKE` scan ordered by recency; mixed queries with any 3+ character term use FTS5 relevance ranking; see [db-schema.md](db-schema.md))
+- Local full-text search with SQLite FTS5 (trigram, 2+ characters — terms of 3+ characters use the trigram index, a query made up only of 2-character terms falls back to a `LIKE` scan ordered by recency; mixed queries with any 3+ character term use FTS5 relevance ranking; see [db-schema.md](db-schema.md)). Search narrows whichever subscription-list selection (all feeds, starred, a single feed, a folder, or a tag) is already active, rather than always searching everything — to search across every feed, select "All Feeds" first.
 - Desktop notifications, task tray residence (close minimizes to tray), notification center.
   On Linux the tray uses the D-Bus `org.kde.StatusNotifierItem` + `com.canonical.dbusmenu` protocols
   and notifications use `org.freedesktop.Notifications`, falling back to the AWT system tray when no
@@ -155,6 +155,11 @@ header, which is the one pane every narrower width always keeps on screen and th
 place the field can live without duplicating an editable copy of the same query. Tapping it moves
 the field to sit directly above the results it filters, in the same header a hamburger button
 normally occupies, and it stays put there when the device is rotated between phone and tablet width.
+At every width, search narrows whatever subscription-list item is currently selected rather than
+being a separate destination of its own: the sidebar's own selection stays visible and highlighted
+throughout, showing plainly what the query is being matched against, and clearing the query (or, at
+a narrower width, backing out of the expanded field) simply returns to that same selection's own
+unfiltered list.
 
 Where a mouse and a touchscreen need different affordances, both are supported without changing
 the underlying action: reordering a feed or folder is a plain click-and-drag with a mouse, and a
