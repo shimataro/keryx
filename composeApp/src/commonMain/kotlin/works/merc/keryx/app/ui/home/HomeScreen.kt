@@ -455,12 +455,14 @@ fun HomeScreen() {
                 } else {
                     // Single/Dual: the feed list is a modal navigation drawer rather than an
                     // on-screen pane (see HomePaneLayout.kt's feedListIsDrawer) — no resizable
-                    // dividers (nothing to drag on a phone/narrow window) and no persisted pane
-                    // widths for the two panes NarrowPaneRow does show, which just split the width
-                    // evenly. See HomePaneLayout.kt's visiblePanes for what those are at each
-                    // depth, and NarrowPaneRow for why they're emitted from fixed positions there
-                    // rather than iterated over (it is what preserves each pane's scroll position
-                    // across the stack's comings and goings).
+                    // dividers (nothing to drag on a phone/narrow window) and so no persisted pane
+                    // widths for the two panes NarrowPaneRow does show. Where both are on screen
+                    // (Dual) it sizes them the same way the Triple branch above does: the article
+                    // list at a fixed width capped at its own default (dualPaneArticleListWidth),
+                    // the reader taking whatever is left. See HomePaneLayout.kt's visiblePanes for
+                    // what those panes are at each depth, and NarrowPaneRow for why they're emitted
+                    // from fixed positions there rather than iterated over (it is what preserves
+                    // each pane's scroll position across the stack's comings and goings).
                     val visible = visiblePanes(layout, focusedPane.ordinal + 1)
                     ModalNavigationDrawer(
                         drawerState = drawerState,
@@ -508,7 +510,7 @@ fun HomeScreen() {
                         // LocalRowSelectionVisible's own KDoc. Dual keeps it: both panes it shows
                         // stay on screen throughout.
                         CompositionLocalProvider(LocalRowSelectionVisible provides (layout != PaneLayout.Single)) {
-                        NarrowPaneRow(visible, Modifier.fillMaxSize(), paneState) { pane, paneModifier ->
+                        NarrowPaneRow(visible, maxWidth, Modifier.fillMaxSize(), paneState) { pane, paneModifier ->
                             when (pane) {
                                 HomePane.FeedList ->
                                     error("The feed list is a drawer at a narrow PaneLayout, never a NarrowPaneRow pane.")

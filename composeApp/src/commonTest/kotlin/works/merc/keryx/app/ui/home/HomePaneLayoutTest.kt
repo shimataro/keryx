@@ -179,6 +179,41 @@ class HomePaneLayoutTest {
         assertEquals(ARTICLE_LIST_PANE_MIN_WIDTH.dp, widths.articleWidth)
     }
 
+    // --- dualPaneArticleListWidth ---
+
+    @Test
+    fun dualPaneArticleListWidthLeavesTheReaderExactlyItsMinimumAtTheDualThreshold() {
+        // The narrowest width paneLayoutFor ever resolves Dual at. The article list must still
+        // clear its own floor, and what's left for the reader (which takes the remainder via
+        // Modifier.weight(1f) — see NarrowPaneRow) must be exactly its own minimum, never less.
+        val available = DUAL_PANE_MIN_WIDTH.dp
+        val listWidth = dualPaneArticleListWidth(available)
+
+        assertTrue(listWidth >= ARTICLE_LIST_PANE_MIN_WIDTH.dp, "article list below its minimum: $listWidth")
+        assertEquals(DETAIL_PANE_MIN_WIDTH.dp, available - listWidth)
+    }
+
+    @Test
+    fun dualPaneArticleListWidthCapsAtTheArticleListDefaultWhenThereIsSlack() {
+        // Well above anything paneLayoutFor resolves Dual at (that's Triple's threshold), but a
+        // fine "plenty of slack" input to this pure function: the list stops growing at its own
+        // default and every further dp goes to the reader, exactly as the Triple branch does.
+        assertEquals(ARTICLE_LIST_PANE_WIDTH_DEFAULT.dp, dualPaneArticleListWidth(TRIPLE_PANE_MIN_WIDTH.dp))
+    }
+
+    @Test
+    fun dualPaneArticleListWidthStaysWithinTheArticleListsOwnBoundsInBetween() {
+        // Halfway between the Dual threshold and the width at which the list first reaches its
+        // default — the interior of the range, where neither end of the clamp is in play.
+        val listAtItsDefault = ARTICLE_LIST_PANE_WIDTH_DEFAULT + DETAIL_PANE_MIN_WIDTH
+        val available = ((DUAL_PANE_MIN_WIDTH + listAtItsDefault) / 2).dp
+        val listWidth = dualPaneArticleListWidth(available)
+
+        assertTrue(listWidth >= ARTICLE_LIST_PANE_MIN_WIDTH.dp, "article list below its minimum: $listWidth")
+        assertTrue(listWidth <= ARTICLE_LIST_PANE_WIDTH_DEFAULT.dp, "article list above its default: $listWidth")
+        assertTrue(available - listWidth >= DETAIL_PANE_MIN_WIDTH.dp, "reader below its minimum: ${available - listWidth}")
+    }
+
     // --- canNavigateBack ---
 
     @Test

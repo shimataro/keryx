@@ -2,10 +2,12 @@ package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.saveable.SaveableStateHolder
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Dp
 
 /**
  * Lays out the home panes currently [visible] side by side at a narrow [PaneLayout]
@@ -31,11 +33,18 @@ import androidx.compose.ui.Modifier
  * node of its own, so each pane stays a direct `Row` child and the `Modifier.weight` handed to
  * [pane] still applies.
  *
+ * With both panes on screen ([PaneLayout.Dual]) they are not split evenly: the article list gets
+ * a fixed [dualPaneArticleListWidth] and the reader takes everything left over, the same
+ * settled-list/growing-reader asymmetry [PaneLayout.Triple] already lays out (see that function's
+ * own KDoc). With only one pane on screen ([PaneLayout.Single]) it simply fills the row.
+ *
  * [HomePane.FeedList] never appears in [visible] here — it's a modal navigation drawer at every
  * narrow [PaneLayout] (see `HomePaneLayout.kt`'s `feedListIsDrawer`), not a pane this row lays out —
  * so only [HomePane.ArticleList]/[HomePane.ArticleDetail] ever reach [pane].
  *
  * @param visible The panes to show, from [visiblePanes].
+ * @param availableWidth The width this row has to divide between [visible] — `HomeScreen`'s own
+ *   `BoxWithConstraints` `maxWidth`. Only read when more than one pane is shown.
  * @param paneState The [SaveableStateHolder] backing the mechanism above, hoisted (rather than
  *   `remember`ed internally) by `HomeScreen` — outside its `BoxWithConstraints`, alongside
  *   `drawerState` — so it isn't recreated across a [PaneLayout.Triple]<->narrow layout flip.
@@ -45,6 +54,7 @@ import androidx.compose.ui.Modifier
 @Composable
 internal fun NarrowPaneRow(
     visible: List<HomePane>,
+    availableWidth: Dp,
     modifier: Modifier = Modifier,
     paneState: SaveableStateHolder = rememberSaveableStateHolder(),
     pane: @Composable (HomePane, Modifier) -> Unit,
@@ -58,12 +68,15 @@ internal fun NarrowPaneRow(
             "pane; see HomePaneLayout.kt's feedListIsDrawer."
     }
     Row(modifier) {
-        val paneModifier = if (visible.size > 1) Modifier.weight(1f) else Modifier.fillMaxSize()
+        val bothVisible = visible.size > 1
         if (HomePane.ArticleList in visible) {
-            paneState.SaveableStateProvider(HomePane.ArticleList) { pane(HomePane.ArticleList, paneModifier) }
+            val listModifier =
+                if (bothVisible) Modifier.width(dualPaneArticleListWidth(availableWidth)) else Modifier.fillMaxSize()
+            paneState.SaveableStateProvider(HomePane.ArticleList) { pane(HomePane.ArticleList, listModifier) }
         }
         if (HomePane.ArticleDetail in visible) {
-            paneState.SaveableStateProvider(HomePane.ArticleDetail) { pane(HomePane.ArticleDetail, paneModifier) }
+            val detailModifier = if (bothVisible) Modifier.weight(1f) else Modifier.fillMaxSize()
+            paneState.SaveableStateProvider(HomePane.ArticleDetail) { pane(HomePane.ArticleDetail, detailModifier) }
         }
     }
 }

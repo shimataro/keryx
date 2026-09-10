@@ -59,7 +59,7 @@ class SearchPaneNavigationTest {
                     HomeBackAction.None -> {}
                 }
             }
-            NarrowPaneRow(visible, Modifier.size(320.dp, 600.dp)) { pane, paneModifier ->
+            NarrowPaneRow(visible, 320.dp, Modifier.size(320.dp, 600.dp)) { pane, paneModifier ->
                 when (pane) {
                     HomePane.FeedList -> error("The feed list is a drawer at PaneLayout.Single, never a NarrowPaneRow pane.")
                     HomePane.ArticleList -> ArticleListPane(
@@ -117,7 +117,7 @@ class SearchPaneNavigationTest {
                     HomeBackAction.None -> {}
                 }
             }
-            NarrowPaneRow(visible, Modifier.size(640.dp, 600.dp)) { pane, paneModifier ->
+            NarrowPaneRow(visible, 640.dp, Modifier.size(640.dp, 600.dp)) { pane, paneModifier ->
                 when (pane) {
                     HomePane.FeedList -> error("The feed list is a drawer at PaneLayout.Dual, never a NarrowPaneRow pane.")
                     HomePane.ArticleList -> ArticleListPane(
