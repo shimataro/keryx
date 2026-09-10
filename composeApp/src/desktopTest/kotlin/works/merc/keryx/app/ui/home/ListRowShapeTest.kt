@@ -4,14 +4,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
+import androidx.compose.ui.unit.dp
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
 /**
- * Desktop's `actual`s for [listRowShape] and [rowSelectionColors] — see `ListRowChrome.desktop.kt`'s
- * own KDoc. Both are fixed derivations of `MaterialTheme`, so they are asserted against a value
- * derived independently from the same `MaterialTheme.colorScheme`/`shapes` rather than against a
- * literal, so a future theme change can't silently desync the assertion from the implementation.
+ * Desktop's row geometry and palette — [listRowShape], [rowSelectionColors], and
+ * [listRowHorizontalMargin] (see `ListRowChrome.kt`/`ListRowChrome.desktop.kt`'s own KDoc). The
+ * `MaterialTheme`-derived values are asserted against one derived independently from the same
+ * `MaterialTheme.colorScheme`/`shapes` rather than against a literal, so a future theme change
+ * can't silently desync the assertion from the implementation.
  */
 @OptIn(ExperimentalTestApi::class)
 class ListRowShapeTest {
@@ -78,6 +80,7 @@ class ListRowShapeTest {
                         unfocusedBackground = primary.copy(alpha = 0.4f),
                         unfocusedContent = null,
                         echoBackground = primary.copy(alpha = SECONDARY_SELECTION_ALPHA),
+                        focusRing = null,
                     )
                     actual = rowSelectionColors()
                 }
@@ -116,5 +119,34 @@ class ListRowShapeTest {
             }
         }
         kotlin.test.assertNull(unfocusedContent)
+    }
+
+    @Test
+    fun rowSelectionColorsFocusRingIsNullOnDesktop() {
+        // Desktop represents pane focus entirely through unfocusedBackground's own dimming, not a
+        // separate outline — see RowSelectionColors' own KDoc on focusRing.
+        var focusRing: Color? = Color.Unspecified
+        runDesktopComposeUiTest {
+            setContent {
+                MaterialTheme {
+                    focusRing = rowSelectionColors().focusRing
+                }
+            }
+        }
+        kotlin.test.assertNull(focusRing)
+    }
+
+    // --- listRowHorizontalMargin (pure function, no composition needed) ---
+
+    @Test
+    fun listRowHorizontalMarginIs8dpWhenNotTouchPrimary() {
+        assertEquals(8.dp, listRowHorizontalMargin(isTouchPrimary = false))
+    }
+
+    @Test
+    fun listRowHorizontalMarginIs12dpWhenTouchPrimary() {
+        // M3's own NavigationDrawerItemDefaults.ItemPadding (horizontal = 12.dp) — see
+        // ListRowChrome.kt's own KDoc.
+        assertEquals(12.dp, listRowHorizontalMargin(isTouchPrimary = true))
     }
 }

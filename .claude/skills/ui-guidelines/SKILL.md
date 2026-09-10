@@ -320,7 +320,7 @@ their drawn/visible size.
 - **Between individual rows in a list** (e.g. article rows): no divider.
   Separate rows with the selection-highlight background (`selectionBackground`)
   instead. The highlight is a rounded rectangle inset by
-  `LIST_ROW_HORIZONTAL_MARGIN` / `LIST_ROW_VERTICAL_MARGIN`, while the
+  `listRowHorizontalMargin()` / `LIST_ROW_VERTICAL_MARGIN`, while the
   **clickable/drag band is the row's whole reported bounds** — full width,
   margin included, no outer-margin dead strip and no unclickable wedge under
   the rounded corners — so every list row is a **single composable with a single
@@ -348,7 +348,7 @@ their drawn/visible size.
     is a `ListRowKind` (`NavItem` for feed/folder/tag rows, `ListItem` for
     article rows) that only matters on Android; see "Platform-native list
     rows" below for what each `expect`/`actual` does with it. On desktop this
-    is still the row's standard `LIST_ROW_HORIZONTAL_MARGIN`/
+    is still the row's standard `listRowHorizontalMargin()`/
     `LIST_ROW_VERTICAL_MARGIN` outer margin, `MaterialTheme.shapes.small`
     clip, `background`, an optional `decoration` (e.g. a drop-target border),
     then the shared `interactionSource`'s flat press feedback via
@@ -410,13 +410,16 @@ their drawn/visible size.
 
 `listRowSurface` (see above) is `expect`/`actual` and takes a `ListRowKind` — `NavItem` for
 feed/folder/tag rows, `ListItem` for article rows — because the two platforms don't just differ in
-color/shape here, they follow genuinely different native row idioms. The inset itself
-(`LIST_ROW_HORIZONTAL_MARGIN`/`LIST_ROW_VERTICAL_MARGIN`) is the same for both `kind`s on both
-platforms — the two panes sit side by side at `PaneLayout.Triple`, so a row that bled to the pane
-edge in one and floated inside an inset in the other would read as two unrelated designs rather than
-two levels of one hierarchy. Only the corner treatment differs, via `listRowShape(kind)` (its own
-`expect`/`actual`, also used by `dropTargetBorderModifier` so a drop-target outline always traces
-the exact shape the row itself is clipped to):
+color/shape here, they follow genuinely different native row idioms. The vertical inset
+(`LIST_ROW_VERTICAL_MARGIN`) is the same for both `kind`s on both platforms (see the Divider policy
+section above for why it must stay put). The horizontal inset (`listRowHorizontalMargin()`) is the
+same for both `kind`s on a given platform, but differs *between* platforms — `8dp` on desktop,
+`12dp` on Android (M3's own `NavigationDrawerItemDefaults.ItemPadding`) — while still keeping both
+`kind`s equal to each other: the two panes sit side by side at `PaneLayout.Triple`, so a row that
+used a different inset than its neighbor kind would read as two unrelated designs rather than two
+levels of one hierarchy. Only the corner treatment differs by `kind`, via `listRowShape(kind)` (its
+own `expect`/`actual`, also used by `listRowOutline` so a drop-target border or keyboard-focus ring
+always traces the exact shape the row itself is clipped to — see below):
 
 - **Desktop**: one look regardless of `kind` — the inset, rounded-rectangle highlight described
   throughout the Divider policy section above (`MaterialTheme.shapes.small`). Desktop has no
@@ -446,11 +449,27 @@ expanded tag; the non-primary instances get `RowSelectionColors.echoBackground`,
   (`alpha = 0.4`) `primary` with no content-color override otherwise — the focused/unfocused split
   is "which pane will keyboard input land in", a concept a pointer-and-keyboard platform has and a
   touch one doesn't.
-- **Android**: `secondaryContainer`/`onSecondaryContainer`, M3's own "selected item" pair, for both
-  focus states alike — there is no keyboard focus to move between panes on a touch platform, so a
-  selected row must look identical no matter which pane it's in (previously it didn't: a `focused`
-  axis leaking in from desktop's model made a feed-list selection visibly dim the instant a device
-  tapped an article, which read as the feed selection being lost).
+- **Android**: `secondaryContainer`/`onSecondaryContainer`, M3's own "selected item" pair, the same
+  regardless of pane focus — M3's own `NavigationDrawerItem` tokens don't recolor on focus either
+  (`ActiveFocusLabelTextColor` equals `ActiveLabelTextColor`). An Android tablet can have a physical
+  keyboard attached, though, so pane focus still exists there and still needs to be shown somewhere:
+  it's carried by `RowSelectionColors.focusRing` instead — a `secondary` outline drawn by
+  `listRowOutline` (`ui/home/HomeCommon.kt`, shared logic; see below) around the selected row in
+  whichever pane holds keyboard focus, M3's own `FocusIndicatorColor` concept (a token that ships
+  with no Compose implementation, so Android's `actual` supplies its own). Desktop's
+  `RowSelectionColors.focusRing` is `null` — its dimming already carries pane focus, so it needs no
+  separate ring.
+
+`listRowOutline` (`ui/home/HomeCommon.kt`, two overloads mirroring `selectionBackground`'s
+boolean/`RowSelectionTone` split) draws a row's outline decoration: a drop-target border when the row
+is an active drop target, otherwise — gated on `LocalKeyboardEngaged` (below) — the keyboard-focus
+ring above, for whichever selected row is `focused`. A drop target always wins over the focus ring;
+only the one actual `RowSelectionTone.PRIMARY` instance of a selected feed is ever eligible for a
+focus ring, never a `SECONDARY` echo. `LocalKeyboardEngaged`, a `CompositionLocal` `HomeScreen`
+latches `true` on the first hardware `KeyDown` `homeKeyboardShortcuts` observes (`ui/home/
+KeyboardNav.kt`'s `onKeyboardEngaged` parameter) and never resets, gates the ring the same way the
+web's `:focus-visible` gates its own outline: a touch-only session (no keyboard ever attached, or
+one attached but never used) should never show a focus indicator meant for keyboard navigation.
 
 `LocalRowSelectionVisible`, a `CompositionLocal` `HomeScreen` sets to `false` at `PaneLayout.Single`
 (see "Adaptive pane layout & touch affordances" above): on a phone-width screen, tapping a row

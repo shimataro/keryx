@@ -35,6 +35,12 @@ import androidx.compose.ui.input.key.type
  * this root `onPreviewKeyEvent`) receives typed letters/arrows normally.
  * Escape is the one exception: a drag can be in progress while the search field holds focus, and
  * aborting it must always be possible.
+ *
+ * [onKeyboardEngaged] fires on the first `KeyDown` that reaches past the [textInputFocused] guard —
+ * i.e. a genuine physical-key press, not a soft-keyboard key routed to a focused text field (those
+ * never reach this point). `HomeScreen` latches this into [LocalKeyboardEngaged] to gate Android's
+ * keyboard-focus ring (see `ListRowChrome.kt`'s `RowSelectionColors.focusRing`): a touch-only
+ * session should never show a focus indicator meant for keyboard navigation.
  */
 fun Modifier.homeKeyboardShortcuts(
     textInputFocused: Boolean,
@@ -48,11 +54,13 @@ fun Modifier.homeKeyboardShortcuts(
     onFeedListRename: () -> Unit,
     onFeedListDelete: () -> Unit,
     onSearch: () -> Unit,
+    onKeyboardEngaged: () -> Unit = {},
     isMacOs: Boolean = works.merc.keryx.app.platform.isMacOs,
 ): Modifier = onPreviewKeyEvent { event ->
     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
     if (event.key == Key.Escape) return@onPreviewKeyEvent onEscape()
     if (textInputFocused) return@onPreviewKeyEvent false
+    onKeyboardEngaged()
     when {
         (event.isMetaPressed || event.isCtrlPressed) && event.key == Key.F -> { onSearch(); true }
         event.key == Key.DirectionDown -> { onDown(); true }

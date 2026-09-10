@@ -1,6 +1,5 @@
 package works.merc.keryx.app.ui.home
 
-import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -94,22 +93,6 @@ internal fun dropTargetContentColorOrNull(
     isDragSource -> null
     else -> selectionContentColorOrNull(selected, focused)
 }
-
-/**
-     * Adds a colored outline when the row is an active drop target.
-     *
-     * @param isDropTarget Whether the row is currently an active drop target.
-     * @param color The outline color.
-     */
-@Composable
-internal fun dropTargetBorderModifier(isDropTarget: Boolean, color: Color): Modifier =
-    if (isDropTarget) {
-        // Every call site is a NavItem row (FolderGroupHeader / TagRow / NoFolderHeader), and the
-        // outline must trace the very shape listRowSurface clips that row to.
-        Modifier.border(2.dp, color, listRowShape(ListRowKind.NavItem))
-    } else {
-        Modifier
-    }
 
 /** Test tag on a [FeedRow]'s whole clickable band. */
 internal fun feedRowTestTag(feedId: String): String = "feed-row-$feedId"
@@ -218,7 +201,7 @@ internal fun feedRowIndent(isTouchPrimary: Boolean = works.merc.keryx.app.platfo
 @Composable
 internal fun Modifier.insertionMarkers(top: InsertionMarker? = null, bottom: InsertionMarker? = null): Modifier {
     val color = MaterialTheme.colorScheme.primary
-    val horizontalMargin = LIST_ROW_HORIZONTAL_MARGIN
+    val horizontalMargin = listRowHorizontalMargin()
     val indent = feedRowIndent()
     val halfGuideThickness = LIST_ROW_GUIDE_THICKNESS / 2f
     val fullGuideThickness = LIST_ROW_GUIDE_THICKNESS
@@ -363,7 +346,12 @@ internal fun FolderGroupHeader(
                 dropTargetBackground(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.secondaryContainer, isDragSource),
                 ListRowKind.NavItem,
                 rowInteraction,
-                decoration = dropTargetBorderModifier(isFeedDragHighlight, MaterialTheme.colorScheme.secondary),
+                decoration = listRowOutline(
+                    ListRowKind.NavItem,
+                    selected,
+                    focused,
+                    dropTargetColor = MaterialTheme.colorScheme.secondary.takeIf { isFeedDragHighlight },
+                ),
             )
             .heightIn(min = listRowMinHeight(isTouchPrimary))
             .padding(end = 8.dp),
@@ -460,7 +448,12 @@ internal fun NoFolderHeader(
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
                 ),
                 kind = ListRowKind.NavItem,
-                decoration = dropTargetBorderModifier(isFeedDragHighlight, MaterialTheme.colorScheme.secondary),
+                decoration = listRowOutline(
+                    ListRowKind.NavItem,
+                    selected = false,
+                    focused = false,
+                    dropTargetColor = MaterialTheme.colorScheme.secondary.takeIf { isFeedDragHighlight },
+                ),
                 extraBottomMargin = (LIST_ROW_GUIDE_THICKNESS / 2f).takeIf { isEmpty } ?: 0.dp,
             )
             .padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
@@ -599,7 +592,12 @@ internal fun FeedRow(
                 onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
             )
             .insertionMarkers(top = topMarker, bottom = bottomMarker)
-            .listRowSurface(selectionBackground(selectionTone, focused), ListRowKind.NavItem, rowInteraction)
+            .listRowSurface(
+                selectionBackground(selectionTone, focused),
+                ListRowKind.NavItem,
+                rowInteraction,
+                decoration = listRowOutline(ListRowKind.NavItem, selectionTone, focused),
+            )
             .heightIn(min = listRowMinHeight(isTouchPrimary))
             .padding(start = if (indented) feedRowIndent() else 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,

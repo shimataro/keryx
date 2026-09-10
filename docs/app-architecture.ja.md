@@ -58,12 +58,14 @@ composeApp/src/
     PlatformTheme（`platformShapes` は M3 既定の `Shapes()`、`ProvidePlatformInteraction` は
     no-op — `LocalIndication`/`LocalRippleConfiguration` を M3 既定のままにすることで、あらゆる
     `clickable` と M3 部品が本物のリップルを持つようになる。external-spec.ja.md の「UI 方針」参照）、
-    `ListRowChrome.android.kt` の `listRowSurface`（両 `ListRowKind` で同じインセットを共有し、
-    `listRowShape(kind)` でクリップ形状のみ切り替える — `NavItem` 行は `NavigationDrawerItem` 風の
-    ピル、`ListItem` 行は角丸長方形。選択色は `rowSelectionColors()` の
-    `secondaryContainer`/`onSecondaryContainer` で、ペインがフォーカスを持つかどうかに関わらず
-    同じ値を使う — タッチ操作にはペイン間を移動するキーボードフォーカスの概念がないため。
-    詳細は同ファイル自身の KDoc）、TooltipIconButton/ToolbarIconGroup/FlatTooltipContent
+    `ListRowChrome.android.kt` の `listRowSurface`（両 `ListRowKind` で同じ 12dp インセットを共有
+    — Android 独自の `listRowHorizontalMargin()`、M3 の `NavigationDrawerItemDefaults.ItemPadding`
+    — し、`listRowShape(kind)` でクリップ形状のみ切り替える — `NavItem` 行は
+    `NavigationDrawerItem` 風のピル、`ListItem` 行は角丸長方形。選択色は `rowSelectionColors()` の
+    `secondaryContainer`/`onSecondaryContainer` で、どのペインがキーボードフォーカスを持つかに
+    関わらず同じ値を使う（ペインフォーカスは代わりに `secondary` の輪郭線
+    `RowSelectionColors.focusRing`、`HomeCommon.kt` の `listRowOutline` で表す — 詳細は同ファイル
+    自身の KDoc）、TooltipIconButton/ToolbarIconGroup/FlatTooltipContent
     （それぞれ、独自のネイティブな長押しトリガーを持つ `TooltipBox` の中に置いた M3 自身の
     アイコンボタン群 — どれを使うかは `IconButtonKind` が決める: `IconButton`（`Standard`）、
     `FilledIconButton`（`Primary`）、`OutlinedIconButton`（`Secondary`）、`errorContainer` に
@@ -496,7 +498,14 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 ナビゲーションスタック自体は常に3段（`HomePane.FeedList` → `ArticleList` → `ArticleDetail`）だが、
 狭いレイアウトでは depth 1（フィード一覧）に到達できない——ドロワーは `focusedPane` が指す
 スタックの一部ではなく、開いても `focusedPane` は進まないし、`initialPaneFor`/`paneForFeedDetail`
-（後述）もそこには決して解決されない。`HomePane.ordinal + 1` がそのままスタックの現在の深さを
+（後述）もそこには決して解決されない。このため、狭いレイアウトでは「今キーボード操作の対象は
+フィード一覧か」という問いに `focusedPane` だけでは答えられない（Android タブレットには物理
+キーボードが接続されうる）——`HomeScreen` 自身の `feedDrawerOpen`
+（`feedListIsDrawer(paneLayout) && drawerState.isOpen`）がその判定を肩代わりする箇所がある:
+`feedListActionAllowed` の `drawerOpen` 引数（矢印キーのルーティング、F2/Delete のフィード一覧
+ショートカット）は `focusedPane` ではなく `feedDrawerOpen` を受け取るため、Dual↔Triple の
+レイアウト反転を跨いでドロワーが開いたままになっても、その古い状態を引きずらない。
+`HomePane.ordinal + 1` がそのままスタックの現在の深さを
 兼ねるため、`HomeScreen` は別途深さの状態を持つ必要がない — 記事の選択で深さが進み
 （`ArticleListPane` の `onSelectionAdvance`。`Triple` では `null` — 全ペインが既に見えており、
 進む先がない）、`platform/BackHandler`（Android では実際の戻るジェスチャー/ボタンを横取りし、

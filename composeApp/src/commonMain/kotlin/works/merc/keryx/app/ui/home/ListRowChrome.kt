@@ -18,8 +18,17 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
-/** The horizontal inset a list row's highlight keeps from the pane edge — see [listRowSurface]. */
-internal val LIST_ROW_HORIZONTAL_MARGIN = 8.dp
+/**
+ * The horizontal inset a list row's highlight keeps from the pane edge — see [listRowSurface].
+ * `8dp` everywhere except a touch-primary platform, which uses M3's own `NavigationDrawerItem`
+ * inset (`NavigationDrawerItemDefaults.ItemPadding`, `12dp`) instead — the same
+ * per-platform-density split [listRowMinHeight] already follows.
+ *
+ * @param isTouchPrimary Overridable for tests only (mirrors `feedListReorderDrag`'s own
+ *   `isTouchPrimary` parameter) — production call sites always use the platform default.
+ */
+internal fun listRowHorizontalMargin(isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary): Dp =
+    if (isTouchPrimary) 12.dp else 8.dp
 
 /** How long a pulse-triggered ripple holds its press state before releasing, so the indication has
  * time to visibly grow before it starts fading — an immediate press-then-release can render as
@@ -79,7 +88,7 @@ internal fun PulseRippleEffect(ripplePulse: Int, interactionSource: MutableInter
  *   `2 *` [LIST_ROW_VERTICAL_MARGIN] short of it. What this floors is the *highlight*, not the
  *   row's whole clickable band.
  *
- * Deliberately independent of [LIST_ROW_VERTICAL_MARGIN]/[LIST_ROW_HORIZONTAL_MARGIN]/
+ * Deliberately independent of [LIST_ROW_VERTICAL_MARGIN]/[listRowHorizontalMargin]/
  * [LIST_ROW_GUIDE_THICKNESS] — those govern the *gap* between two rows and the drag insertion
  * marker's geometry, which must stay put regardless of a row's own content height (see
  * [LIST_ROW_VERTICAL_MARGIN]'s own KDoc). It is a *minimum*, not a fixed height: a row whose
@@ -199,7 +208,7 @@ internal enum class ListRowKind {
 
 /**
  * The selection surface a list row paints inside its (wider) clickable band — see
- * [listRowClickable]. Applies the row's standard [LIST_ROW_HORIZONTAL_MARGIN] /
+ * [listRowClickable]. Applies the row's standard [listRowHorizontalMargin] /
  * [LIST_ROW_VERTICAL_MARGIN] outer margin, paints [background], then [decoration] (e.g. a
  * drop-target border), then the platform's own press feedback via [interactionSource] — `null` for
  * a row that carries no selection state of its own (e.g. `NoFolderHeader`, which only ever shows a
@@ -232,26 +241,35 @@ internal expect fun Modifier.listRowSurface(
 ): Modifier
 
 /**
- * The shape a list row's selection surface is clipped to (and that a drop-target border traces).
- * Desktop's `actual` ignores [kind] entirely — its one macOS-leaning row style applies to every
- * row — while Android's gives each [ListRowKind] the corner treatment of the M3 component it is
- * modeled on. Kept out of [listRowSurface] as a value of its own so a decoration drawn *around* a
- * row (currently `dropTargetBorderModifier` in `FeedListDragAndDrop.kt`) traces the very shape the
- * row is clipped to, instead of repeating a shape constant that could drift from it.
+ * The shape a list row's selection surface is clipped to (and that a drop-target border /
+ * keyboard-focus outline traces via `listRowOutline` in `HomeCommon.kt`). Desktop's `actual`
+ * ignores [kind] entirely — its one macOS-leaning row style applies to every row — while
+ * Android's gives each [ListRowKind] the corner treatment of the M3 component it is modeled on.
+ * Kept out of [listRowSurface] as a value of its own so a decoration drawn *around* a row traces
+ * the very shape the row is clipped to, instead of repeating a shape constant that could drift
+ * from it.
  */
 @Composable
 internal expect fun listRowShape(kind: ListRowKind): Shape
 
+/** Width of a list row's outline decoration — both the drop-target border and the keyboard-focus
+ * ring `listRowOutline` (`HomeCommon.kt`) draws share this one value. */
+internal val ROW_OUTLINE_WIDTH = 2.dp
+
 /**
  * The palette a selectable list row paints its selection from — resolved per platform, applied by
- * the shared `selectionBackground` / `selectionContentColorOrNull` logic in `HomeCommon.kt` (which
- * keeps the [LocalRowSelectionVisible] gate and the [RowSelectionTone] fan-out common to both).
+ * the shared `selectionBackground` / `selectionContentColorOrNull` / `rowOutlineColorOrNull` logic
+ * in `HomeCommon.kt` (which keeps the [LocalRowSelectionVisible] gate and the [RowSelectionTone]
+ * fan-out common to both).
  *
  * The focused/unfocused split is desktop's "which pane holds logical focus" axis: a selected row in
- * the non-focused pane dims so the user can see where their keyboard input will land. A touch
- * platform has no such axis — there is no keyboard focus to move between panes — so Android's
- * `actual` deliberately returns the same values for both, making a selected row look identical
- * wherever it lives.
+ * the non-focused pane dims so the user can see where their keyboard input will land. Android has
+ * the same axis — a physical keyboard can be attached to an Android tablet — but represents it
+ * differently: the selection color itself never changes with focus (M3's `NavigationDrawerItem`
+ * keeps the same `secondaryContainer`/`onSecondaryContainer` pair whether or not the item holds
+ * focus), and the focused pane's selected row instead gets a `secondary` outline via [focusRing]
+ * (`listRowOutline` in `HomeCommon.kt`) — M3's own `FocusIndicatorColor` concept, which ships as a
+ * token but has no Compose implementation yet, so Android's `actual` here supplies its own.
  *
  * @property focusedBackground Background of a selected row in the focused pane.
  * @property focusedContent Content color to pair with [focusedBackground]; `null` leaves each
@@ -261,6 +279,9 @@ internal expect fun listRowShape(kind: ListRowKind): Shape
  *   element at its own default color.
  * @property echoBackground Background of a [RowSelectionTone.SECONDARY] row — another rendered
  *   instance of the same selected feed, which must read as an echo rather than a second selection.
+ * @property focusRing Outline color for a selected row in the focused pane, or `null` on a platform
+ *   that represents pane focus entirely through [focusedBackground]/[unfocusedBackground] dimming
+ *   instead (desktop) rather than a separate outline (Android).
  */
 internal data class RowSelectionColors(
     val focusedBackground: Color,
@@ -268,6 +289,7 @@ internal data class RowSelectionColors(
     val unfocusedBackground: Color,
     val unfocusedContent: Color?,
     val echoBackground: Color,
+    val focusRing: Color?,
 )
 
 /** This platform's list-row selection palette — see [RowSelectionColors]. */

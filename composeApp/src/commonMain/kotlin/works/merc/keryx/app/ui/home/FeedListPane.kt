@@ -929,7 +929,12 @@ private fun SidebarRow(
     Row(
         Modifier.fillMaxWidth()
             .listRowClickable(rowInteraction, selected, onClick)
-            .listRowSurface(selectionBackground(selected, focused), ListRowKind.NavItem, rowInteraction)
+            .listRowSurface(
+                selectionBackground(selected, focused),
+                ListRowKind.NavItem,
+                rowInteraction,
+                decoration = listRowOutline(ListRowKind.NavItem, selected, focused),
+            )
             .heightIn(min = listRowMinHeight(isTouchPrimary))
             .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1018,7 +1023,12 @@ private fun TagRow(
                 dropTargetBackground(isDropTarget, selected, focused, MaterialTheme.colorScheme.tertiaryContainer),
                 ListRowKind.NavItem,
                 rowInteraction,
-                decoration = dropTargetBorderModifier(isDropTarget, MaterialTheme.colorScheme.tertiary),
+                decoration = listRowOutline(
+                    ListRowKind.NavItem,
+                    selected,
+                    focused,
+                    dropTargetColor = MaterialTheme.colorScheme.tertiary.takeIf { isDropTarget },
+                ),
             )
             .heightIn(min = listRowMinHeight(isTouchPrimary))
             .padding(start = 8.dp, end = 8.dp),
@@ -1190,7 +1200,12 @@ private fun TagFeedRow(
                 // right-click on it promotes it first, exactly as the old `!selected` check did.
                 onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
             )
-            .listRowSurface(selectionBackground(selectionTone, focused), ListRowKind.NavItem, rowInteraction)
+            .listRowSurface(
+                selectionBackground(selectionTone, focused),
+                ListRowKind.NavItem,
+                rowInteraction,
+                decoration = listRowOutline(ListRowKind.NavItem, selectionTone, focused),
+            )
             .heightIn(min = listRowMinHeight(isTouchPrimary))
             .padding(start = feedRowIndent(), end = 8.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,

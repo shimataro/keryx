@@ -421,8 +421,18 @@ on a device or emulator:
 - At `PaneLayout.Triple` (tablet landscape), select a feed and then an article: the feed-list row's
   selection highlight must stay the same `secondaryContainer` strength it started at, not dim the
   instant the article list gains focus (`rowSelectionColors()`'s `ListRowChrome.android.kt` `actual`
-  deliberately drops the desktop pane-focus dimming, since a touch platform has no keyboard focus to
-  move between panes). Confirm in both light and dark theme.
+  deliberately drops the desktop pane-focus dimming — Android's selection color never changes with
+  focus). Confirm in both light and dark theme.
+- With a hardware keyboard attached (an emulator's Extended Controls, or a Bluetooth keyboard on a
+  real tablet): pressing an arrow key latches `LocalKeyboardEngaged` and shows a `secondary`
+  keyboard-focus ring (`listRowOutline`, `HomeCommon.kt`) around the selected row in whichever pane
+  holds keyboard focus — the *background* color stays the same either way (see the bullet above).
+  Confirm at `PaneLayout.Triple` (the ring moves between the feed-list and article-list panes as
+  arrow-key focus moves) and inside the drawer at a narrower layout (↑/↓ move the feed selection
+  without closing the drawer; → closes it). With no keyboard ever attached (touch only), no ring
+  should ever appear.
+- Rotate a narrow layout into `PaneLayout.Triple` while the drawer is open: the feed-list pane and
+  the article-list pane must not both show a keyboard-focus ring at once.
 - The drawer's header shows "Keryx" and its footer shows a "Settings" row that opens Settings; with
   many feeds, the footer stays fixed and does not scroll away.
 - Edge-to-edge: the scrim reaches the status/navigation bars; no pane's top bar or list bottom is

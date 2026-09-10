@@ -15,11 +15,11 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 
 /**
- * Android's row surface — the same inset for both [ListRowKind]s ([LIST_ROW_HORIZONTAL_MARGIN] /
- * [LIST_ROW_VERTICAL_MARGIN], deliberately unchanged from desktop's; see `ListRowChrome.kt`'s KDoc
- * on `extraBottomMargin` for why the vertical one specifically must stay put, the drag insertion
- * marker's geometry depending on it), differing only in the corner treatment [listRowShape] gives
- * each.
+ * Android's row surface — the same inset for both [ListRowKind]s ([listRowHorizontalMargin] /
+ * [LIST_ROW_VERTICAL_MARGIN], the latter deliberately unchanged from desktop's; see
+ * `ListRowChrome.kt`'s KDoc on `extraBottomMargin` for why the vertical one specifically must stay
+ * put, the drag insertion marker's geometry depending on it), differing only in the corner
+ * treatment [listRowShape] gives each.
  *
  * The feed list and the article list sit side by side at `PaneLayout.Triple`, so a row that bled to
  * the pane edge in one and floated inside an inset in the other read as two unrelated designs
@@ -34,8 +34,8 @@ internal actual fun Modifier.listRowSurface(
     extraBottomMargin: Dp,
 ): Modifier = this
     .padding(
-        start = LIST_ROW_HORIZONTAL_MARGIN,
-        end = LIST_ROW_HORIZONTAL_MARGIN,
+        start = listRowHorizontalMargin(),
+        end = listRowHorizontalMargin(),
         top = LIST_ROW_VERTICAL_MARGIN,
         bottom = LIST_ROW_VERTICAL_MARGIN + extraBottomMargin,
     )
@@ -59,8 +59,10 @@ internal actual fun listRowShape(kind: ListRowKind): Shape = when (kind) {
 
 /**
  * Android's selection palette: `secondaryContainer` / `onSecondaryContainer`, M3's own "selected
- * item" pair (what `NavigationDrawerItem` uses), for both focus states alike — see
- * [RowSelectionColors] for why a touch platform collapses that axis.
+ * item" pair (what `NavigationDrawerItem` uses), the same whether or not the row's pane holds
+ * keyboard focus — M3 itself doesn't change this pair on focus (`ActiveFocusLabelTextColor` equals
+ * `ActiveLabelTextColor`). Pane focus is instead expressed as a separate `secondary` outline via
+ * [focusRing] — see [RowSelectionColors]'s own KDoc.
  */
 @Composable
 internal actual fun rowSelectionColors(): RowSelectionColors {
@@ -72,5 +74,6 @@ internal actual fun rowSelectionColors(): RowSelectionColors {
         unfocusedBackground = secondaryContainer,
         unfocusedContent = onSecondaryContainer,
         echoBackground = secondaryContainer.copy(alpha = SECONDARY_SELECTION_ALPHA),
+        focusRing = MaterialTheme.colorScheme.secondary,
     )
 }

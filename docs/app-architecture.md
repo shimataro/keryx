@@ -59,12 +59,15 @@ composeApp/src/
     (`platformShapes` = M3's own default `Shapes()`,
     `ProvidePlatformInteraction` a no-op — leaving `LocalIndication`/`LocalRippleConfiguration` at
     their M3 defaults is what gives every `clickable` and M3 component a real ripple; see "UI
-    Direction" in external-spec.md), `ListRowChrome.android.kt`'s `listRowSurface` (the same inset
-    for both `ListRowKind`s, clipped to `listRowShape(kind)` — a `NavigationDrawerItem`-style pill
-    for `NavItem` rows, a large rounded rectangle for `ListItem` rows — with selection colors from
-    `rowSelectionColors()`'s `secondaryContainer`/`onSecondaryContainer` pair, applied the same
-    whether or not the row's pane holds focus (a touch platform has no keyboard focus to move
-    between panes); see that file's own KDoc), TooltipIconButton/ToolbarIconGroup/
+    Direction" in external-spec.md), `ListRowChrome.android.kt`'s `listRowSurface` (a 12dp inset
+    for both `ListRowKind`s — Android's own `listRowHorizontalMargin()`, M3's
+    `NavigationDrawerItemDefaults.ItemPadding` — clipped to `listRowShape(kind)` — a
+    `NavigationDrawerItem`-style pill for `NavItem` rows, a large rounded rectangle for
+    `ListItem` rows — with selection colors from `rowSelectionColors()`'s
+    `secondaryContainer`/`onSecondaryContainer` pair, unchanged by which pane holds keyboard
+    focus (pane focus is instead shown as a `secondary` outline,
+    `RowSelectionColors.focusRing`, via `HomeCommon.kt`'s `listRowOutline` — see that file's own
+    KDoc), TooltipIconButton/ToolbarIconGroup/
     FlatTooltipContent (M3's own icon-button family inside a `TooltipBox` with its own native
     long-press trigger — `IconButtonKind` picks the member: `IconButton` (`Standard`),
     `FilledIconButton` (`Primary`), `OutlinedIconButton` (`Secondary`) and `FilledTonalIconButton`
@@ -480,7 +483,13 @@ enforces that invariant with its own `require()`.
 The navigation stack itself is always three deep (`HomePane.FeedList` → `ArticleList` →
 `ArticleDetail`), but at a narrow layout depth 1 (the feed list) is unreachable — the drawer isn't
 part of the stack `focusedPane` ever points into; opening it doesn't advance `focusedPane`, and
-`initialPaneFor`/`paneForFeedDetail` (below) never resolve to it there either. `HomePane.ordinal +
+`initialPaneFor`/`paneForFeedDetail` (below) never resolve to it there either. Because of this,
+`focusedPane` alone can't answer "is the feed list what the user is keyboard-navigating right
+now" at a narrow layout (a physical keyboard can be attached to an Android tablet) —
+`HomeScreen`'s own `feedDrawerOpen` (`feedListIsDrawer(paneLayout) && drawerState.isOpen`) stands
+in wherever that question matters: `feedListActionAllowed`'s `drawerOpen` parameter (arrow-key
+routing, and the F2/Delete feed-list shortcuts) takes `feedDrawerOpen`, not `focusedPane`, so a
+drawer left open across a Dual↔Triple layout flip never keeps that stale state. `HomePane.ordinal +
 1` doubles as the stack's current depth, so `HomeScreen` needs no separate depth state — selecting
 an article advances it (`ArticleListPane`'s `onSelectionAdvance`, `null` at `Triple`, where every
 pane is already visible and there is nowhere to advance to), and `platform/BackHandler` (a real

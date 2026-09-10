@@ -27,8 +27,8 @@ internal actual fun Modifier.listRowSurface(
     extraBottomMargin: Dp,
 ): Modifier = this
     .padding(
-        start = LIST_ROW_HORIZONTAL_MARGIN,
-        end = LIST_ROW_HORIZONTAL_MARGIN,
+        start = listRowHorizontalMargin(),
+        end = listRowHorizontalMargin(),
         top = LIST_ROW_VERTICAL_MARGIN,
         bottom = LIST_ROW_VERTICAL_MARGIN + extraBottomMargin,
     )
@@ -48,6 +48,8 @@ internal actual fun listRowShape(kind: ListRowKind): Shape = MaterialTheme.shape
  * Desktop's selection palette: full-strength `primary` (with `onPrimary` content) in the focused
  * pane, a 0.4-alpha `primary` elsewhere — dim enough that each element's own default text/icon
  * color still reads against it, which is why [RowSelectionColors.unfocusedContent] is `null` here.
+ * [RowSelectionColors.focusRing] is `null`: desktop represents pane focus entirely through this
+ * dimming, not a separate outline (see that property's own KDoc).
  */
 @Composable
 internal actual fun rowSelectionColors(): RowSelectionColors {
@@ -58,6 +60,7 @@ internal actual fun rowSelectionColors(): RowSelectionColors {
         unfocusedBackground = primary.copy(alpha = UNFOCUSED_SELECTION_ALPHA),
         unfocusedContent = null,
         echoBackground = primary.copy(alpha = SECONDARY_SELECTION_ALPHA),
+        focusRing = null,
     )
 }
 

@@ -236,10 +236,11 @@ class SelectionBackgroundTest {
 
     /**
      * An arbitrary [RowSelectionColors] shaped like Android's `actual` (see
-     * `ListRowChrome.android.kt`'s `rowSelectionColors()`): the focused/unfocused pair collapses to
-     * the *same* background/content color, because a touch platform has no keyboard-focus axis
-     * between panes. Distinct from desktop's own palette so a test asserting against this fixture
-     * cannot pass by accident against the real desktop `actual`.
+     * `ListRowChrome.android.kt`'s `rowSelectionColors()`): the focused/unfocused background/content
+     * pair collapses to the *same* value regardless of pane focus (M3's `NavigationDrawerItem` itself
+     * doesn't recolor on focus) — pane focus is instead carried by a non-null [focusRing]. Distinct
+     * from desktop's own palette so a test asserting against this fixture cannot pass by accident
+     * against the real desktop `actual`.
      */
     private val androidLikeColors = RowSelectionColors(
         focusedBackground = Color(0xFF112233),
@@ -247,6 +248,7 @@ class SelectionBackgroundTest {
         unfocusedBackground = Color(0xFF112233),
         unfocusedContent = Color(0xFF445566),
         echoBackground = Color(0xFF112233).copy(alpha = SECONDARY_SELECTION_ALPHA),
+        focusRing = Color(0xFF778899),
     )
 
     private fun colorFor(selected: Boolean, focused: Boolean, colors: RowSelectionColors): Color {
@@ -444,5 +446,122 @@ class SelectionBackgroundTest {
             }
         }
         assertNull(actual)
+    }
+
+    // --- rowOutlineColorOrNull (listRowOutline's judgment half) ---
+
+    private fun outlineColorFor(
+        selected: Boolean,
+        focused: Boolean,
+        dropTargetColor: Color? = null,
+        colors: RowSelectionColors = androidLikeColors,
+        keyboardEngaged: Boolean = true,
+        selectionVisible: Boolean = true,
+    ): Color? {
+        var actual: Color? = Color.Unspecified
+        runDesktopComposeUiTest {
+            setContent {
+                CompositionLocalProvider(
+                    LocalKeyboardEngaged provides keyboardEngaged,
+                    LocalRowSelectionVisible provides selectionVisible,
+                ) {
+                    actual = rowOutlineColorOrNull(selected, focused, dropTargetColor, colors)
+                }
+            }
+        }
+        return actual
+    }
+
+    private fun outlineColorFor(
+        tone: RowSelectionTone,
+        focused: Boolean,
+        dropTargetColor: Color? = null,
+        colors: RowSelectionColors = androidLikeColors,
+        keyboardEngaged: Boolean = true,
+        selectionVisible: Boolean = true,
+    ): Color? {
+        var actual: Color? = Color.Unspecified
+        runDesktopComposeUiTest {
+            setContent {
+                CompositionLocalProvider(
+                    LocalKeyboardEngaged provides keyboardEngaged,
+                    LocalRowSelectionVisible provides selectionVisible,
+                ) {
+                    actual = rowOutlineColorOrNull(tone, focused, dropTargetColor, colors)
+                }
+            }
+        }
+        return actual
+    }
+
+    @Test
+    fun outlineBooleanOverloadShowsFocusRingWhenSelectedFocusedAndKeyboardEngaged() {
+        assertEquals(androidLikeColors.focusRing, outlineColorFor(selected = true, focused = true))
+    }
+
+    @Test
+    fun outlineBooleanOverloadIsNullWhenSelectedButNotFocused() {
+        assertNull(outlineColorFor(selected = true, focused = false))
+    }
+
+    @Test
+    fun outlineBooleanOverloadIsNullWhenFocusedButNotSelected() {
+        assertNull(outlineColorFor(selected = false, focused = true))
+    }
+
+    @Test
+    fun outlineBooleanOverloadIsNullWhenKeyboardNotEngagedEvenIfSelectedAndFocused() {
+        // A touch-only session (no hardware key ever pressed) must never show a focus ring meant
+        // for keyboard navigation — see LocalKeyboardEngaged's own KDoc.
+        assertNull(outlineColorFor(selected = true, focused = true, keyboardEngaged = false))
+    }
+
+    @Test
+    fun outlineBooleanOverloadIsNullWhenSelectionVisibilityIsSuppressedEvenIfSelectedFocusedAndEngaged() {
+        assertNull(outlineColorFor(selected = true, focused = true, selectionVisible = false))
+    }
+
+    @Test
+    fun outlineBooleanOverloadIsNullWhenColorsHasNoFocusRing() {
+        // Desktop's own palette (focusRing = null) — represents pane focus through background
+        // dimming instead, never a separate outline.
+        assertNull(outlineColorFor(selected = true, focused = true, colors = androidLikeColors.copy(focusRing = null)))
+    }
+
+    @Test
+    fun outlineBooleanOverloadDropTargetColorWinsOverFocusRing() {
+        val dropColor = Color(0xFFAABBCC)
+        assertEquals(dropColor, outlineColorFor(selected = true, focused = true, dropTargetColor = dropColor))
+    }
+
+    @Test
+    fun outlineBooleanOverloadDropTargetColorAppliesEvenWhenNotSelected() {
+        // A row can be a drop target without being the selected row at all (e.g. NoFolderHeader,
+        // which is never selectable) — the drop-target outline is independent of selection.
+        val dropColor = Color(0xFFAABBCC)
+        assertEquals(dropColor, outlineColorFor(selected = false, focused = false, dropTargetColor = dropColor))
+    }
+
+    @Test
+    fun outlineToneOverloadShowsFocusRingOnlyForPrimaryToneWhenFocusedAndEngaged() {
+        assertEquals(androidLikeColors.focusRing, outlineColorFor(RowSelectionTone.PRIMARY, focused = true))
+        assertNull(outlineColorFor(RowSelectionTone.SECONDARY, focused = true))
+        assertNull(outlineColorFor(RowSelectionTone.NONE, focused = true))
+    }
+
+    @Test
+    fun outlineToneOverloadIsNullWhenPrimaryButNotFocused() {
+        assertNull(outlineColorFor(RowSelectionTone.PRIMARY, focused = false))
+    }
+
+    @Test
+    fun outlineToneOverloadIsNullWhenKeyboardNotEngagedEvenIfPrimaryAndFocused() {
+        assertNull(outlineColorFor(RowSelectionTone.PRIMARY, focused = true, keyboardEngaged = false))
+    }
+
+    @Test
+    fun outlineToneOverloadDropTargetColorWinsOverFocusRing() {
+        val dropColor = Color(0xFFAABBCC)
+        assertEquals(dropColor, outlineColorFor(RowSelectionTone.PRIMARY, focused = true, dropTargetColor = dropColor))
     }
 }

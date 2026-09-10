@@ -1,5 +1,6 @@
 package works.merc.keryx.app.ui.home
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -67,6 +68,16 @@ internal val deleteNativeShortcut = NativeMenuShortcut(Key.Delete)
 internal val LocalRowSelectionVisible = staticCompositionLocalOf { true }
 
 /**
+ * Whether a hardware key has been pressed at least once this session — `HomeScreen` latches this
+ * `true` on the first `KeyDown` `homeKeyboardShortcuts` observes (see `KeyboardNav.kt`'s
+ * `onKeyboardEngaged`) and never resets it. Gates [listRowOutline]'s keyboard-focus ring: a
+ * touch-only session (a phone, or a tablet with no keyboard ever attached) should never show a
+ * focus indicator meant for someone navigating by keyboard, matching the web's own
+ * `:focus-visible` convention of only drawing a focus ring once keyboard interaction is evidenced.
+ */
+internal val LocalKeyboardEngaged = staticCompositionLocalOf { false }
+
+/**
  * The [SnackbarHostState] backing the `SnackbarHost` `HomeScreen` renders — inside a `Popup`, not
  * `Scaffold`'s own slot, so it draws above the article reader's native WebView (see that call
  * site's own comment). `null` on desktop, which per the `ui-guidelines` skill has no in-app
@@ -86,9 +97,14 @@ internal val LocalSnackbarHostState = staticCompositionLocalOf<SnackbarHostState
  * click-to-focus for the panes inside this one window, so a plain click anywhere in a pane's
  * empty background is this app's only way to move keyboard focus onto it.
  *
- * Dropped entirely on a touch-primary platform ([isTouchPrimary]): touch has no keyboard focus to
- * move in the first place, so keeping this modifier there would only add an unlabeled, full-size
- * accessibility click node sitting behind every other control in the pane.
+ * Dropped entirely on a touch-primary platform ([isTouchPrimary]): every interactive control a
+ * touch pane actually contains (a row, a button) already calls its own `onActivated` when tapped
+ * (see each pane's own call sites), so a *dedicated* empty-background click handler moves focus
+ * nothing else already moves — this is unrelated to whether keyboard focus itself exists on
+ * Android (it does; a physical keyboard can be attached to a tablet and arrow keys still move it —
+ * see `ListRowChrome.kt`'s `RowSelectionColors.focusRing`). Keeping this modifier there anyway
+ * would only add an unlabeled, full-size accessibility click node sitting behind every other
+ * control in the pane.
  *
  * @param isTouchPrimary Overridable for tests only (mirrors `feedListReorderDrag`'s own
  *   `isTouchPrimary` parameter) — production call sites always use the platform default from
@@ -159,10 +175,9 @@ internal fun ExpandCollapseChevron(
 }
 
 /**
- * Background for a selectable row, taken from this platform's [RowSelectionColors]: on desktop
- * full-strength when its pane is focused and dimmed when the row is selected but its pane isn't the
- * logically-focused one, on a touch platform the same either way (there is no keyboard focus to
- * move between panes). Transparent when the row isn't selected at all.
+ * Background for a selectable row, taken from this platform's [RowSelectionColors]: full-strength
+ * when its pane holds keyboard focus, dimmed (desktop) or an added [listRowOutline] ring (Android
+ * — see [RowSelectionColors]'s own KDoc) otherwise. Transparent when the row isn't selected at all.
  *
  * Returns [Color.Transparent] whenever [LocalRowSelectionVisible] reads `false` — set by `HomeScreen`
  * at [PaneLayout.Single], where "selected" doesn't mean "on screen" the way it does at [PaneLayout.Dual]/
@@ -256,6 +271,86 @@ internal fun selectionContentColorOrNull(
     focused -> colors.focusedContent
     else -> colors.unfocusedContent
 }
+
+/**
+ * The color a list row's outline decoration should paint, or `null` for no outline at all — the
+ * judgment half of [listRowOutline], kept separate from the `Modifier`-returning half so it can be
+ * unit-tested the same way [selectionContentColorOrNull] already is (a `Modifier`'s contents can't
+ * be inspected by a test the way a `Color?` can).
+ *
+ * A non-null [dropTargetColor] always wins over the keyboard-focus ring below — a drop target is a
+ * transient, high-urgency signal, and a row can only paint one outline at a time. Otherwise, the
+ * ring shows only when **all** of these hold: [LocalRowSelectionVisible] is showing highlights at
+ * all, [LocalKeyboardEngaged] has latched (see its own KDoc), this platform's [colors] actually
+ * defines a [RowSelectionColors.focusRing] (desktop's is `null` — its dimming already carries pane
+ * focus, see that property's KDoc), [focused] is true (this row's pane holds keyboard focus), and
+ * [selected] is true. A row that is merely a [RowSelectionTone.SECONDARY] echo of the selected feed
+ * (see the tone overload below) never gets a focus ring — only the one *actual* selected instance
+ * does.
+ *
+ * @param colors Overridable for tests only — production call sites always use the platform default.
+ */
+@Composable
+internal fun rowOutlineColorOrNull(
+    selected: Boolean,
+    focused: Boolean,
+    dropTargetColor: Color? = null,
+    colors: RowSelectionColors = rowSelectionColors(),
+): Color? = when {
+    dropTargetColor != null -> dropTargetColor
+    LocalRowSelectionVisible.current && LocalKeyboardEngaged.current && selected && focused ->
+        colors.focusRing
+    else -> null
+}
+
+/**
+ * Tone-aware overload of [rowOutlineColorOrNull] — mirrors [selectionBackground]'s own tone
+ * overload: only [RowSelectionTone.PRIMARY] (the one actual selected row instance, not a
+ * [RowSelectionTone.SECONDARY] echo) is eligible for a focus ring.
+ *
+ * @param colors Overridable for tests only — production call sites always use the platform default.
+ */
+@Composable
+internal fun rowOutlineColorOrNull(
+    tone: RowSelectionTone,
+    focused: Boolean,
+    dropTargetColor: Color? = null,
+    colors: RowSelectionColors = rowSelectionColors(),
+): Color? = when {
+    dropTargetColor != null -> dropTargetColor
+    LocalRowSelectionVisible.current && LocalKeyboardEngaged.current && tone == RowSelectionTone.PRIMARY && focused ->
+        colors.focusRing
+    else -> null
+}
+
+/**
+ * A list row's outline decoration — a drop-target border, or (absent one) a keyboard-focus ring
+ * around the row currently selected in the pane that holds keyboard focus. Traces [kind]'s own
+ * [listRowShape] so the outline always matches the shape the row is clipped to, whichever it is.
+ * See [rowOutlineColorOrNull] for the color it resolves.
+ */
+@Composable
+internal fun listRowOutline(
+    kind: ListRowKind,
+    selected: Boolean,
+    focused: Boolean,
+    dropTargetColor: Color? = null,
+    colors: RowSelectionColors = rowSelectionColors(),
+): Modifier = rowOutlineColorOrNull(selected, focused, dropTargetColor, colors)?.let {
+    Modifier.border(ROW_OUTLINE_WIDTH, it, listRowShape(kind))
+} ?: Modifier
+
+/** Tone-aware overload of [listRowOutline] — see [rowOutlineColorOrNull]'s own tone overload. */
+@Composable
+internal fun listRowOutline(
+    kind: ListRowKind,
+    tone: RowSelectionTone,
+    focused: Boolean,
+    dropTargetColor: Color? = null,
+    colors: RowSelectionColors = rowSelectionColors(),
+): Modifier = rowOutlineColorOrNull(tone, focused, dropTargetColor, colors)?.let {
+    Modifier.border(ROW_OUTLINE_WIDTH, it, listRowShape(kind))
+} ?: Modifier
 
 /**
  * One specific *rendered row instance* of the feed list, as opposed to [ArticleFilter], which only

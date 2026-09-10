@@ -160,6 +160,19 @@ fun HomeScreen() {
     // different pane within this window.
     val windowFocused = LocalWindowInfo.current.isWindowFocused
     val keyboardNavActive = windowFocused && !textInputFocused
+    // Latches true on the first hardware KeyDown homeKeyboardShortcuts observes (see
+    // KeyboardNav.kt's onKeyboardEngaged) and never resets — gates the Android keyboard-focus ring
+    // (LocalKeyboardEngaged, provided below) so a touch-only session never shows a focus indicator
+    // meant for keyboard navigation.
+    var keyboardEngaged by remember { mutableStateOf(false) }
+    // Whether the feed-list drawer is actually open *and* currently rendered as a drawer — plain
+    // drawerState.isOpen is not enough on its own: drawerState is hoisted to survive a
+    // Triple<->narrow layout flip (see its own comment above), so a drawer left open at a narrow
+    // layout and then rotated into Triple would otherwise still read as "open" with nothing on
+    // screen to back that up. Used wherever "is the feed list the thing the user is keyboard-
+    // interacting with right now" matters: pane focus (below), and the F2/Delete feed-list
+    // shortcuts.
+    val feedDrawerOpen = feedListIsDrawer(paneLayout) && drawerState.isOpen
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboard.current
     val density = LocalDensity.current
@@ -272,47 +285,84 @@ fun HomeScreen() {
                 .homeKeyboardShortcuts(
                     textInputFocused = textInputFocused,
                     onEscape = { dragOverlay.cancel() },
+                    // Each handler below is guarded by feedDrawerOpen *before* the existing
+                    // when (focusedPane) branch — at a narrow layout with the drawer open, the
+                    // drawer is what the user is keyboard-navigating regardless of focusedPane
+                    // (which the drawer doesn't participate in; see app-architecture.md's own
+                    // note on the navigation stack). See HomeCommon.kt's feedListActionAllowed
+                    // for why this is the same "is the feed list what the user means right now"
+                    // question the F2/Delete shortcuts below already answer.
                     onUp = {
-                        when (focusedPane) {
-                            HomePane.FeedList -> moveFeedSelection(-1)
-                            HomePane.ArticleList -> vm.selectPrevious()
-                            // The article body scrolls inside the native WebView itself now
-                            // (see plan doc html-webview-os-wobbly-hammock.md), so there's no
-                            // Compose ScrollState left here to drive with the keyboard.
-                            HomePane.ArticleDetail -> {}
+                        if (feedDrawerOpen) {
+                            moveFeedSelection(-1)
+                        } else {
+                            when (focusedPane) {
+                                HomePane.FeedList -> moveFeedSelection(-1)
+                                HomePane.ArticleList -> vm.selectPrevious()
+                                // The article body scrolls inside the native WebView itself now
+                                // (see plan doc html-webview-os-wobbly-hammock.md), so there's no
+                                // Compose ScrollState left here to drive with the keyboard.
+                                HomePane.ArticleDetail -> {}
+                            }
                         }
                     },
                     onDown = {
-                        when (focusedPane) {
-                            HomePane.FeedList -> moveFeedSelection(1)
-                            HomePane.ArticleList -> vm.selectNext()
-                            HomePane.ArticleDetail -> {}
+                        if (feedDrawerOpen) {
+                            moveFeedSelection(1)
+                        } else {
+                            when (focusedPane) {
+                                HomePane.FeedList -> moveFeedSelection(1)
+                                HomePane.ArticleList -> vm.selectNext()
+                                HomePane.ArticleDetail -> {}
+                            }
                         }
                     },
                     onLeft = {
-                        when (focusedPane) {
-                            HomePane.FeedList -> {}
-                            HomePane.ArticleList -> setFocusedPane(HomePane.FeedList)
-                            HomePane.ArticleDetail -> setFocusedPane(HomePane.ArticleList)
+                        // No-op while the drawer is open — matching Triple's own FeedList branch
+                        // below, which also does nothing (there is nothing further left to move
+                        // to from the feed list).
+                        if (!feedDrawerOpen) {
+                            when (focusedPane) {
+                                HomePane.FeedList -> {}
+                                HomePane.ArticleList -> setFocusedPane(HomePane.FeedList)
+                                HomePane.ArticleDetail -> setFocusedPane(HomePane.ArticleList)
+                            }
                         }
                     },
                     onRight = {
-                        when (focusedPane) {
-                            HomePane.FeedList -> {
-                                if (vm.selectedArticle.value == null) vm.currentArticles().firstOrNull()?.let { vm.selectArticle(it) }
-                                setFocusedPane(HomePane.ArticleList)
+                        if (feedDrawerOpen) {
+                            // Closing the drawer *is* "advance to the article list" at a narrow
+                            // layout — mirrors selectFilterFromRow's own onSelectionAdvance.
+                            // Deliberately does not also call setFocusedPane: at PaneLayout.Dual,
+                            // ArticleListPane's own hamburger (onOpenDrawer) can open the drawer
+                            // without touching focusedPane, which can therefore already be
+                            // ArticleDetail (both panes stay on screen together at Dual) while
+                            // the drawer is open — advancing focusedPane here would step it
+                            // *backwards* instead.
+                            scope.launch { drawerState.close() }
+                        } else {
+                            when (focusedPane) {
+                                HomePane.FeedList -> {
+                                    if (vm.selectedArticle.value == null) vm.currentArticles().firstOrNull()?.let { vm.selectArticle(it) }
+                                    setFocusedPane(HomePane.ArticleList)
+                                }
+                                HomePane.ArticleList -> setFocusedPane(HomePane.ArticleDetail)
+                                HomePane.ArticleDetail -> {}
                             }
-                            HomePane.ArticleList -> setFocusedPane(HomePane.ArticleDetail)
-                            HomePane.ArticleDetail -> {}
                         }
                     },
                     onNextArticle = { vm.selectNext() },
                     onPreviousArticle = { vm.selectPrevious() },
-                    onFeedListRename = { if (feedListActionAllowed(focusedPane, drawerState.isOpen)) feedListRenameRequestId++ },
-                    onFeedListDelete = { if (feedListActionAllowed(focusedPane, drawerState.isOpen)) feedListDeleteRequestId++ },
+                    onFeedListRename = { if (feedListActionAllowed(focusedPane, feedDrawerOpen)) feedListRenameRequestId++ },
+                    onFeedListDelete = { if (feedListActionAllowed(focusedPane, feedDrawerOpen)) feedListDeleteRequestId++ },
                     onSearch = { focusSearch() },
+                    onKeyboardEngaged = { keyboardEngaged = true },
                 ),
         ) {
+            // Wraps both the Triple and narrow-layout branches below (and FeedDragGhost) in one
+            // place, rather than duplicating the provide call in each branch, where it would be
+            // easy to add a new branch later and forget it.
+            CompositionLocalProvider(LocalKeyboardEngaged provides keyboardEngaged) {
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 val layout = paneLayoutFor(maxWidth)
                 LaunchedEffect(layout) { paneLayout = layout }
@@ -371,7 +421,7 @@ fun HomeScreen() {
                     Row(Modifier.fillMaxSize()) {
                         FeedListPane(
                             vm,
-                            focused = focusedPane == HomePane.FeedList && keyboardNavActive,
+                            focused = feedListActionAllowed(focusedPane, feedDrawerOpen) && keyboardNavActive,
                             dragOverlay = dragOverlay,
                             onActivated = { setFocusedPane(HomePane.FeedList) },
                             modifier = Modifier.width(displayedFeedWidth),
@@ -439,7 +489,7 @@ fun HomeScreen() {
                                 ) {
                                     FeedListPane(
                                         vm,
-                                        focused = false,
+                                        focused = feedListActionAllowed(focusedPane, feedDrawerOpen) && keyboardNavActive,
                                         dragOverlay = dragOverlay,
                                         onActivated = {},
                                         onAddFeedClick = { showAddFeed = true },
@@ -511,6 +561,7 @@ fun HomeScreen() {
             }
             // Last child of the root Box, so the floating drag chip paints above every pane.
             FeedDragGhost(dragOverlay)
+            }
         }
         }
         LaunchedEffect(Unit) { focusRequester.requestFocus() }
