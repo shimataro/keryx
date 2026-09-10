@@ -60,8 +60,12 @@ composeApp/src/
     `clickable` と M3 部品が本物のリップルを持つようになる。external-spec.ja.md の「UI 方針」参照）、
     `ListRowChrome.android.kt` の `listRowSurface`（両 `ListRowKind` で同じ 12dp インセットを共有
     — Android 独自の `listRowHorizontalMargin()`、M3 の `NavigationDrawerItemDefaults.ItemPadding`
-    — し、`listRowShape(kind)` でクリップ形状のみ切り替える — `NavItem` 行は
-    `NavigationDrawerItem` 風のピル、`ListItem` 行は角丸長方形。選択色は `rowSelectionColors()` の
+    — し、`listRowShape(kind)` でクリップ形状を決める: `ListItem` 行は常に角丸長方形、`NavItem`
+    行も `PaneLayout.Triple` の常設サイドバーペインとして描画されている間（記事一覧の隣に
+    並ぶので、2 つが 1 つのデザインに見える）は同じ形。実際にフィード一覧のナビゲーション
+    ドロワーの中身として描画されているときだけ（`LocalFeedListInDrawer`、`FeedListPane` 自身の
+    `onSelectionAdvance` の非 null 性から提供される）`NavigationDrawerItem` 風のピルになる。
+    選択色は `rowSelectionColors()` の
     `secondaryContainer`/`onSecondaryContainer` で、どのペインがキーボードフォーカスを持つかに
     関わらず同じ値を使う（ペインフォーカスは代わりに `secondary` の輪郭線
     `RowSelectionColors.focusRing`、`HomeCommon.kt` の `listRowOutline` で表す — 詳細は同ファイル

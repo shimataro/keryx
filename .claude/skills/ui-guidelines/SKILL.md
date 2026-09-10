@@ -417,20 +417,29 @@ same for both `kind`s on a given platform, but differs *between* platforms — `
 `12dp` on Android (M3's own `NavigationDrawerItemDefaults.ItemPadding`) — while still keeping both
 `kind`s equal to each other: the two panes sit side by side at `PaneLayout.Triple`, so a row that
 used a different inset than its neighbor kind would read as two unrelated designs rather than two
-levels of one hierarchy. Only the corner treatment differs by `kind`, via `listRowShape(kind)` (its
-own `expect`/`actual`, also used by `listRowOutline` so a drop-target border or keyboard-focus ring
-always traces the exact shape the row itself is clipped to — see below):
+levels of one hierarchy. The corner treatment, via `listRowShape(kind)` (its own `expect`/`actual`,
+also used by `listRowOutline` so a drop-target border or keyboard-focus ring always traces the
+exact shape the row itself is clipped to — see below), differs by `kind` on Android and by more
+than `kind` alone:
 
 - **Desktop**: one look regardless of `kind` — the inset, rounded-rectangle highlight described
   throughout the Divider policy section above (`MaterialTheme.shapes.small`). Desktop has no
   equivalent split between "nav item" and "content list item" chrome, so the desktop `actual`
   ignores `kind` entirely.
-- **Android**: `NavItem` clips to a full pill (`CircleShape`), matching M3's `NavigationDrawerItem`.
-  `ListItem` clips to `MaterialTheme.shapes.large` — a card-like rounded rectangle, distinct from the
-  pill so the two panes stay visually distinguishable while sharing one selection language, rather
-  than M3's plain (unclipped, full-bleed) `ListItem`. Article rows are never a drag target, so
-  nothing depends on the vertical spacing there the way `NavItem`'s does, but the horizontal inset is
-  shared with `NavItem` regardless (see above).
+- **Android**: `ListItem` (article rows) always clips to `MaterialTheme.shapes.large` — a card-like
+  rounded rectangle, rather than M3's plain (unclipped, full-bleed) `ListItem`. `NavItem`
+  (feed/folder/tag rows) shares that *same* `shapes.large` shape while rendered as
+  `PaneLayout.Triple`'s permanent sidebar pane (`LocalFeedListInDrawer` false there) — the feed
+  list and article list sit side by side then, so one shared shape reads as one design rather than
+  two unrelated ones, the same reasoning the shared horizontal inset above already follows. Only
+  while `NavItem` is actually rendered as feed-list navigation-drawer content
+  (`LocalFeedListInDrawer` true — `FeedListPane` provides it from its own `onSelectionAdvance`
+  nullness) does it clip to a full pill (`CircleShape`) instead, matching M3's own
+  `NavigationDrawerItem`: a drawer overlay is never on screen at the same time as the pane it
+  replaces, so it has no need to visually match a sibling pane the way `Triple`'s two simultaneous
+  panes do. Article rows are never a drag target, so nothing depends on the vertical spacing there
+  the way `NavItem`'s does, but the horizontal inset is shared with `NavItem` regardless (see
+  above).
 
 **When adding a new list row**, decide which `ListRowKind` it is by asking the same question M3
 asks: does this row represent a navigation/filter target (a feed, folder, tag — something you tap to

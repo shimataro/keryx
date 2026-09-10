@@ -433,6 +433,12 @@ on a device or emulator:
   should ever appear.
 - Rotate a narrow layout into `PaneLayout.Triple` while the drawer is open: the feed-list pane and
   the article-list pane must not both show a keyboard-focus ring at once.
+- At `PaneLayout.Triple` (tablet landscape), select a feed and then an article: the feed-list
+  row's selection highlight and the article-list row's must be the **same large-rounded-rectangle
+  shape** (`listRowShape`'s `LocalFeedListInDrawer`-gated branch) — not the feed-list one a pill.
+  Confirm the drop-target border and keyboard-focus ring on a feed/folder row trace that same
+  rounded-rectangle shape too. Then rotate the device to a narrower width so the feed list becomes
+  the drawer: opening it must show the **same feed row back as a pill**.
 - The drawer's header shows "Keryx" and its footer shows a "Settings" row that opens Settings; with
   many feeds, the footer stays fixed and does not scroll away.
 - Edge-to-edge: the scrim reaches the status/navigation bars; no pane's top bar or list bottom is

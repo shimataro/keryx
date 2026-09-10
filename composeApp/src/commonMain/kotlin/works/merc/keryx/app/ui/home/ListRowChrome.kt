@@ -6,6 +6,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -196,7 +197,9 @@ internal fun Modifier.listRowClickable(
  * Which native row idiom a list row should follow — see [listRowSurface]'s own KDoc and the
  * `ui-guidelines` skill's "Platform-native list rows" section for the full rationale. Desktop's
  * `actual` ignores this entirely (its one, macOS-leaning row style applies regardless), so this
- * distinction is Android-only in practice.
+ * distinction is Android-only in practice. On Android, [NavItem] additionally depends on
+ * [LocalFeedListInDrawer] for its *shape* specifically (see [listRowShape]) — "Android's
+ * equivalent of a navigation-drawer item" below is literally true only while it actually is one.
  */
 internal enum class ListRowKind {
     /** A feed/folder/tag row — Android's equivalent of a navigation-drawer item. */
@@ -243,14 +246,38 @@ internal expect fun Modifier.listRowSurface(
 /**
  * The shape a list row's selection surface is clipped to (and that a drop-target border /
  * keyboard-focus outline traces via `listRowOutline` in `HomeCommon.kt`). Desktop's `actual`
- * ignores [kind] entirely — its one macOS-leaning row style applies to every row — while
- * Android's gives each [ListRowKind] the corner treatment of the M3 component it is modeled on.
- * Kept out of [listRowSurface] as a value of its own so a decoration drawn *around* a row traces
- * the very shape the row is clipped to, instead of repeating a shape constant that could drift
- * from it.
+ * ignores [kind] entirely — its one macOS-leaning row style applies to every row. Kept out of
+ * [listRowSurface] as a value of its own so a decoration drawn *around* a row traces the very
+ * shape the row is clipped to, instead of repeating a shape constant that could drift from it.
+ *
+ * On Android, the shape depends on more than just [kind]: an [ListRowKind.NavItem] row clips to a
+ * full pill (M3's own `NavigationDrawerItem` shape) only while it's actually rendered as
+ * navigation-drawer content ([LocalFeedListInDrawer]); at `PaneLayout.Triple`, where the same feed
+ * list is a permanent pane sitting beside the article list rather than a drawer, it instead shares
+ * the article list's own large-rounded-rectangle shape — two simultaneously visible panes read as
+ * one design that way, which a drawer overlay (never on screen at the same time as the pane it
+ * replaces) has no such need to match. [ListRowKind.ListItem] (article rows, which never render
+ * inside the drawer) is unaffected by [LocalFeedListInDrawer] and always gets that same
+ * large-rounded-rectangle shape.
  */
 @Composable
 internal expect fun listRowShape(kind: ListRowKind): Shape
+
+/**
+ * Whether the list row currently being laid out is rendered as feed-list navigation-drawer content
+ * (`ModalNavigationDrawer`) rather than `PaneLayout.Triple`'s permanent on-screen sidebar pane —
+ * see [listRowShape]'s own KDoc for what this changes. `FeedListPane` is the sole provider,
+ * derived from its own `onSelectionAdvance` parameter's nullness (the same "is this a drawer"
+ * signal its own KDoc and every other narrow-layout branch inside it already use — `null` means
+ * `PaneLayout.Triple`); Android's `listRowShape` `actual` is the sole consumer. The default
+ * `false` is correct for every row outside `FeedListPane`'s own subtree (in practice just
+ * `ArticleRow`, whose [ListRowKind.ListItem] never consults this local anyway) — unlike
+ * [listRowSurface]'s `kind` parameter, which deliberately has no default because it's set by many
+ * unrelated call sites across both `FeedListPane` and `ArticleListPane` and forgetting it there
+ * really could pick a silently wrong style, this local has exactly one provider and one consumer,
+ * the same low-risk shape as [LocalRowSelectionVisible]/[LocalKeyboardEngaged] (`HomeCommon.kt`).
+ */
+internal val LocalFeedListInDrawer = staticCompositionLocalOf { false }
 
 /** Width of a list row's outline decoration — both the drop-target border and the keyboard-focus
  * ring `listRowOutline` (`HomeCommon.kt`) draws share this one value. */

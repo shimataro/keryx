@@ -61,9 +61,12 @@ composeApp/src/
     their M3 defaults is what gives every `clickable` and M3 component a real ripple; see "UI
     Direction" in external-spec.md), `ListRowChrome.android.kt`'s `listRowSurface` (a 12dp inset
     for both `ListRowKind`s — Android's own `listRowHorizontalMargin()`, M3's
-    `NavigationDrawerItemDefaults.ItemPadding` — clipped to `listRowShape(kind)` — a
-    `NavigationDrawerItem`-style pill for `NavItem` rows, a large rounded rectangle for
-    `ListItem` rows — with selection colors from `rowSelectionColors()`'s
+    `NavigationDrawerItemDefaults.ItemPadding` — clipped to `listRowShape(kind)`: `ListItem` rows
+    always a large rounded rectangle, `NavItem` rows the same shape too while rendered as
+    `PaneLayout.Triple`'s permanent sidebar pane (beside the article list, so the two read as one
+    design) or a `NavigationDrawerItem`-style pill while actually rendered as feed-list
+    navigation-drawer content instead (`LocalFeedListInDrawer`, provided by `FeedListPane`'s own
+    `onSelectionAdvance` nullness) — with selection colors from `rowSelectionColors()`'s
     `secondaryContainer`/`onSecondaryContainer` pair, unchanged by which pane holds keyboard
     focus (pane focus is instead shown as a `secondary` outline,
     `RowSelectionColors.focusRing`, via `HomeCommon.kt`'s `listRowOutline` — see that file's own

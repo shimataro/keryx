@@ -45,15 +45,17 @@ internal actual fun Modifier.listRowSurface(
     .let { if (interactionSource != null) it.indication(interactionSource, LocalIndication.current) else it }
 
 /**
- * Each [ListRowKind] takes the corner treatment of the M3 component it is modeled on: a
- * [ListRowKind.NavItem] (feed/folder/tag) is a full pill like `NavigationDrawerItem`, a
- * [ListRowKind.ListItem] (article) a large rounded rectangle — a card-like sibling of the pill
- * rather than the same shape, so the two panes stay distinguishable while sharing one visual
- * language.
+ * [ListRowKind.ListItem] (article) always takes a large rounded rectangle. [ListRowKind.NavItem]
+ * (feed/folder/tag) takes the same shape while it's the permanent `PaneLayout.Triple` sidebar pane
+ * sitting beside the article list — the two simultaneously visible panes read as one design that
+ * way — but a full pill like M3's own `NavigationDrawerItem` while it's actually rendered as
+ * feed-list navigation-drawer content ([LocalFeedListInDrawer]), which is never on screen at the
+ * same time as the pane it replaces and so has no such need to match it.
  */
 @Composable
 internal actual fun listRowShape(kind: ListRowKind): Shape = when (kind) {
-    ListRowKind.NavItem -> CircleShape
+    ListRowKind.NavItem ->
+        if (LocalFeedListInDrawer.current) CircleShape else MaterialTheme.shapes.large
     ListRowKind.ListItem -> MaterialTheme.shapes.large
 }
 

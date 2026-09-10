@@ -391,6 +391,13 @@ internal fun FeedListPane(
 
     FeedListAutoScrollEffect(dragPointerYState, hostBoundsState, listState, dragController)
 
+    // Provided once here (not by HomeScreen) so every row composable below — all of them live
+    // only inside this Column — can read LocalFeedListInDrawer without a parameter of its own; see
+    // that CompositionLocal's own KDoc in ListRowChrome.kt for why onSelectionAdvance's nullness is
+    // the right signal (null only at PaneLayout.Triple, where this pane is the permanent sidebar
+    // rather than drawer content). FeedListDialogs below is deliberately outside this provider — it
+    // renders no list rows of its own.
+    CompositionLocalProvider(LocalFeedListInDrawer provides (onSelectionAdvance != null)) {
     Column(
         modifier
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
@@ -769,6 +776,7 @@ internal fun FeedListPane(
                 )
             }
         }
+    }
     }
 
     FeedListDialogs(
