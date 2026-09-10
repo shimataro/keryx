@@ -229,24 +229,12 @@ class HomeViewModel(
         settingsRepository.getLocalSettings().lastUnreadOnlyStarred ?: false,
     )
 
-    // Search is scoped independently for the same reason as Starred: the primary motivation for
-    // searching is finding an article already read, so inheriting the shared toggle would leave
-    // "unread only" users with empty/incomplete results with no obvious cause. Deliberately not
-    // seeded from getArticleListDefaultUnreadOnly() for the same reason as Starred.
-    private val _unreadOnlySearch = MutableStateFlow(
-        settingsRepository.getLocalSettings().lastUnreadOnlySearch ?: false,
-    )
-
-    // Selects which backing toggle is currently in effect. searchActive takes priority over the
-    // underlying filter (searching Starred still reads the search-scoped toggle, not Starred's own
-    // — the same reasoning that scopes Starred's own toggle away from the general one applies one
-    // level deeper). Starred's own toggle still filters "starred ∩ unread" correctly when turned
-    // on (a state sync merge can legitimately produce, since read/star are merged independently —
-    // see MergeSql), only which toggle is consulted differs by filter/search state.
+    // When search is active the same key as the underlying filter is used (general for
+    // All/Feed/Tag/Folder, starred for Starred).
     val unreadOnly: StateFlow<Boolean> =
-        combine(_filter, searchActive, _unreadOnly, _unreadOnlyStarred, _unreadOnlySearch) { f, active, general, starred, search ->
+        combine(_filter, searchActive, _unreadOnly, _unreadOnlyStarred) { f, active, general, starred ->
             when {
-                active -> search
+                active -> if (f == ArticleFilter.Starred) starred else general
                 f == ArticleFilter.Starred -> starred
                 else -> general
             }
@@ -254,7 +242,7 @@ class HomeViewModel(
             viewModelScope,
             started,
             when {
-                searchActive.value -> _unreadOnlySearch.value
+                searchActive.value -> if (_filter.value == ArticleFilter.Starred) _unreadOnlyStarred.value else _unreadOnly.value
                 _filter.value == ArticleFilter.Starred -> _unreadOnlyStarred.value
                 else -> _unreadOnly.value
             },
@@ -883,10 +871,6 @@ class HomeViewModel(
             _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         }
         when {
-            searchActive.value -> {
-                _unreadOnlySearch.value = value
-                settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnlySearch = value) }
-            }
             _filter.value == ArticleFilter.Starred -> {
                 _unreadOnlyStarred.value = value
                 settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnlyStarred = value) }

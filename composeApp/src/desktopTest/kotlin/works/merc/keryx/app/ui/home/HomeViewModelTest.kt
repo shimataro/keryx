@@ -1512,62 +1512,77 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun unreadOnlyIsScopedIndependentlyForTheSearchFilter() = runTest {
+    fun searchInheritsUnderlyingFilterUnreadOnlyState() = runTest {
         db.insertFeed("f1")
-        // Most searches are for an article already read, so a global toggle inherited from the
-        // feed list would leave search results looking empty/incomplete.
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 1L)
         ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
 
+        // All filter with unread-only on: search inherits it.
         vm.setUnreadOnly(true)
         testScheduler.advanceUntilIdle()
         assertTrue(vm.unreadOnly.value)
 
-        // Starting a search does not inherit the feed list's "unread only" state — it starts at
-        // its own (unset) default, so the already-read matching article still shows.
         vm.setSearchBarVisible(true)
         vm.setSearchQuery("Kotlin")
         advanceForSearchDebounce()
-        assertFalse(vm.unreadOnly.value)
-        assertEquals(listOf("a1"), vm.searchResults.value.map { it.article.id })
-
-        // Turning it on while searching filters correctly, and does not touch the feed list's toggle.
-        vm.setUnreadOnly(true)
-        testScheduler.advanceUntilIdle()
         assertTrue(vm.unreadOnly.value)
         assertEquals(emptyList(), vm.searchResults.value.map { it.article.id })
 
-        // Closing the bar restores the feed list's own (still-on) toggle state.
+        // Switch to Starred filter with its own unread-only on: search inherits Starred's toggle.
         vm.setSearchBarVisible(false)
         testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.unreadOnly.value)
+
+        vm.setSearchBarVisible(true)
+        vm.setSearchQuery("Kotlin")
+        advanceForSearchDebounce()
         assertTrue(vm.unreadOnly.value)
     }
 
     @Test
-    fun setUnreadOnlyWhileSearchingPersistsSeparatelyFromTheSharedToggle() = runTest {
+    fun setUnreadOnlyWhileSearchingWritesToUnderlyingFilterKey() = runTest {
         val store = LocalSettingsStore(dirOverride = dir)
         val vm = newViewModel()
         subscribeAll(vm)
+
+        // Searching on All writes to lastUnreadOnly.
         vm.setSearchBarVisible(true)
         vm.setSearchQuery("Kotlin")
         advanceForSearchDebounce()
-
         vm.setUnreadOnly(true)
 
-        assertEquals(true, store.load().lastUnreadOnlySearch)
-        assertNull(store.load().lastUnreadOnly)
+        assertEquals(true, store.load().lastUnreadOnly)
+        assertNull(store.load().lastUnreadOnlyStarred)
+
+        // Searching on Starred writes to lastUnreadOnlyStarred.
+        vm.setSearchBarVisible(false)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        vm.setSearchBarVisible(true)
+        vm.setSearchQuery("Kotlin")
+        advanceForSearchDebounce()
+        vm.setUnreadOnly(true)
+
+        assertEquals(true, store.load().lastUnreadOnlyStarred)
     }
 
     @Test
-    fun restartRestoresUnreadOnlySearchIndependentlyFromTheSharedToggle() = runTest {
+    fun restartRestoresUnderlyingFilterToggleUsedBySearch() = runTest {
         val vm1 = newViewModel()
         subscribeAll(vm1)
+        vm1.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
         vm1.setSearchBarVisible(true)
         vm1.setSearchQuery("Kotlin")
         advanceForSearchDebounce()
-        vm1.setUnreadOnly(true)
+        assertTrue(vm1.unreadOnly.value)
 
         val vm2 = newViewModel()
         subscribeAll(vm2)
@@ -1578,27 +1593,7 @@ class HomeViewModelTest {
 
         vm2.setSearchBarVisible(false)
         testScheduler.advanceUntilIdle()
-        assertFalse(vm2.unreadOnly.value)
-    }
-
-    @Test
-    fun unreadOnlySearchIgnoresTheDeviceWideDefaultUnlikeEveryOtherFilter() = runTest {
-        // article_list_default_unread_only is the fallback for the *shared* toggle only — the
-        // search-specific one always starts OFF regardless, so it never inherits the device-wide
-        // "start with unread only" preference.
-        val settingsRepository = SettingsRepository(
-            db, LocalSettingsStore(dirOverride = dir), SyncScheduler {}, Clock { 0L }, writeDispatcher = Dispatchers.Unconfined,
-        )
-        settingsRepository.setArticleListDefaultUnreadOnly(true)
-
-        val vm = newViewModel()
-        subscribeAll(vm)
-        assertTrue(vm.unreadOnly.value)
-
-        vm.setSearchBarVisible(true)
-        vm.setSearchQuery("Kotlin")
-        advanceForSearchDebounce()
-        assertFalse(vm.unreadOnly.value)
+        assertTrue(vm2.unreadOnly.value)
     }
 
     @Test

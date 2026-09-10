@@ -185,7 +185,6 @@ Setup completion = file exists.
 | `lastFocusedPane` | string\|null | null |
 | `lastUnreadOnly` | boolean\|null | null |
 | `lastUnreadOnlyStarred` | boolean\|null | null (scoped to the Starred filter alone, independent of `lastUnreadOnly`) |
-| `lastUnreadOnlySearch` | boolean\|null | null (same, for the Search filter) |
 | `lastNewestFirst` | boolean\|null | null |
 | `appMenuBarVisible` | boolean\|null | null (Linux KDE Global Menu: null=auto (shown until `RegisterWindow` succeeds, then hidden); true/false=explicit override via Ctrl+M / the exported "Show Menu Bar" checkbox. No effect where no `com.canonical.AppMenu.Registrar` is present) |
 
