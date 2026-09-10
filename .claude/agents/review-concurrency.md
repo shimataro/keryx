@@ -23,6 +23,9 @@ they survive testing and reach users as intermittent freezes, corrupted state, o
   thread* it runs, and whether it can race.
 - Merge SQL semantics → `review-sync-merge`.
 - Whether a new coroutine needs a test → `review-verification`.
+- A selection, focus, or rendered list that disagrees with its state **deterministically** →
+  `review-state-consistency`. Yours is the racing half only: "Latest-wins where it matters" below is
+  a concurrency finding, a value derived wrongly at a call site is not.
 
 ## Checklist — concurrency
 

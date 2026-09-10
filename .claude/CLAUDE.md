@@ -99,11 +99,11 @@ discipline of the `refactor` / `perf-tune` skills.)
 
 ## Review
 
-Code review runs through the **`reviewer` agent**, which dispatches to ten specialists
+Code review runs through the **`reviewer` agent**, which dispatches to eleven specialists
 (`review-security`, `review-data-integrity`, `review-sync-merge`, `review-concurrency`,
-`review-architecture`, `review-performance`, `review-ui`, `review-quality`,
-`review-verification`, `review-docs`) and merges their findings into one numbered report.
-Shared conventions: `.claude/etc/review/common.md`.
+`review-architecture`, `review-performance`, `review-ui`, `review-state-consistency`,
+`review-quality`, `review-verification`, `review-docs`) and merges their findings into one
+numbered report. Shared conventions: `.claude/etc/review/common.md`.
 
 - Start it in the **foreground** (`run_in_background: false`).
 - **Announce the range in one line before launching it** — the agent's own pre-flight output never

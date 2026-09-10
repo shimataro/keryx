@@ -15,8 +15,8 @@ If the target contains nothing your perspective covers, return exactly one line:
 
     Not applicable
 
-Do not read documentation, do not explore the codebase, do not speculate. This is what keeps a
-ten-agent review affordable.
+Do not read documentation, do not explore the codebase, do not speculate. This is what keeps an
+eleven-agent review affordable.
 
 ## 3. Report only what your perspective owns
 
@@ -31,6 +31,9 @@ report. The boundaries that are easiest to get wrong:
 | Oversized file or function, dead code, duplication, naming | `review-quality` | `review-architecture` reports layer violations only |
 | A user-facing string not going through Compose Resources; a key missing from one locale | `review-ui` | — |
 | The quality of the wording itself (ja / en) | `review-docs` | `review-ui` checks the mechanism, not the prose |
+| The row that is highlighted, the pane that is focused, or the list that is rendered disagreeing with the state behind it | `review-state-consistency` | `review-ui` owns the selection's colors, shape, and accessibility semantics — not which row is the correct one |
+| A displayed value going stale only because a slower async result landed last | `review-concurrency` | `review-state-consistency` takes the deterministic divergences: a value derived twice, a hardcoded flag, a non-saveable `remember` |
+| What the screen shows for a row vs. what the ViewModel holds for it | `review-state-consistency` | `review-data-integrity` owns the row in the database; it does not review what is rendered from it |
 | A missing or inadequate test | `review-verification` | others may mention a test inside their own finding's **Suggestion**, never as a separate finding |
 
 ## 4. Finding schema
@@ -91,6 +94,7 @@ own perspective by its label; never invent a variant.
 | `review-architecture` | Architecture |
 | `review-performance` | Performance |
 | `review-ui` | UI / i18n |
+| `review-state-consistency` | State vs. display |
 | `review-quality` | Code quality |
 | `review-verification` | Verification (tests / build) |
 | `review-docs` | Documentation |
