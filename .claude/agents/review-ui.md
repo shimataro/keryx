@@ -22,6 +22,9 @@ You review Keryx (a cross-platform RSS reader, Kotlin Multiplatform / Compose Mu
   through Compose Resources and that both locales have the key; you do not critique the prose.
 - Recomposition cost → `review-performance`.
 - Which thread a UI callback runs on → `review-concurrency`.
+- Whether the *right* row is selected, the right pane focused, or the rendered list still matching
+  the state behind it → `review-state-consistency`. You own how a selection looks and how it is
+  announced; that agent owns whether it is the correct one.
 
 ## Checklist — ui-guidelines conformance
 

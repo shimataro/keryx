@@ -25,6 +25,8 @@ cloud file format.
 - The merge SQL's own column lists, guards, statement order, and conflict semantics →
   `review-sync-merge`. You check only that the **parallel schema copies agree with each other**.
 - Concurrent access and locking → `review-concurrency`.
+- What the UI renders, selects, or focuses from a row → `review-state-consistency`. Your subject is
+  the row in the database; theirs is whether the screen still agrees with it.
 - Missing tests → `review-verification`.
 
 ## Checklist — correctness (space)

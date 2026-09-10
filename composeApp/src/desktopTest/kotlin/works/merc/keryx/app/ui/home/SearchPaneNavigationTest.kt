@@ -16,6 +16,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
@@ -26,6 +27,8 @@ import org.koin.dsl.koinConfiguration
 import org.koin.dsl.module
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.inMemoryDb
+import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.TooltipIconButton
@@ -42,6 +45,10 @@ import kotlin.test.assertEquals
  * `focusedPane: HomePane` cursor (`DualHomeTestHost`), in place of `HomeScreen`'s own
  * `focusedPane`/menu-bar machinery — `FeedListPaneTest.kt`'s own host is where `FeedListPane`
  * (the drawer's content) is exercised on its own.
+ *
+ * [DualHomeTestHost] is also `PaneLayout.Dual`'s reference `focusedPane` harness for any test that
+ * needs it, not just the search-scope tests below — see the article-selection tests near the
+ * bottom of this file for a case that has nothing to do with Search at all.
  */
 @OptIn(ExperimentalTestApi::class)
 class SearchPaneNavigationTest {
@@ -59,7 +66,7 @@ class SearchPaneNavigationTest {
                     HomeBackAction.None -> {}
                 }
             }
-            NarrowPaneRow(visible, Modifier.size(320.dp, 600.dp)) { pane, paneModifier ->
+            NarrowPaneRow(visible, 320.dp, Modifier.size(320.dp, 600.dp)) { pane, paneModifier ->
                 when (pane) {
                     HomePane.FeedList -> error("The feed list is a drawer at PaneLayout.Single, never a NarrowPaneRow pane.")
                     HomePane.ArticleList -> ArticleListPane(
@@ -117,7 +124,7 @@ class SearchPaneNavigationTest {
                     HomeBackAction.None -> {}
                 }
             }
-            NarrowPaneRow(visible, Modifier.size(640.dp, 600.dp)) { pane, paneModifier ->
+            NarrowPaneRow(visible, 640.dp, Modifier.size(640.dp, 600.dp)) { pane, paneModifier ->
                 when (pane) {
                     HomePane.FeedList -> error("The feed list is a drawer at PaneLayout.Dual, never a NarrowPaneRow pane.")
                     HomePane.ArticleList -> ArticleListPane(
@@ -125,6 +132,10 @@ class SearchPaneNavigationTest {
                         focused = focusedPane == HomePane.ArticleList,
                         onActivated = { setFocusedPane(HomePane.ArticleList) },
                         modifier = paneModifier,
+                        // Mirrors HomeScreen's own gate: a no-op at PaneLayout.Dual, since
+                        // visiblePanes never changes with depth there (both panes are already on
+                        // screen) — see ArticleListPane's own KDoc on this parameter.
+                        onSelectionAdvance = { if (layout == PaneLayout.Single) setFocusedPane(HomePane.ArticleDetail) },
                         onOpenDrawer = {},
                         onExitSearch = ::goBack,
                         onSearchClick = {
@@ -245,6 +256,42 @@ class SearchPaneNavigationTest {
             assertEquals(ArticleFilter.All, vm.filter.value)
         }
     }
+
+    /**
+     * Regression test for a bug where selecting an article at `PaneLayout.Dual` advanced
+     * `focusedPane` to `HomePane.ArticleDetail` (mirroring `PaneLayout.Single`'s own drill-in),
+     * even though `visiblePanes` shows the same two panes at every depth there — the article list
+     * pane then rendered `focused = false` on the very next frame, and ↑/↓ (routed through
+     * `keyboardPaneFor`) stopped moving the just-tapped selection at all.
+     */
+    @Test
+    fun articleRowSelectionAtDualLayoutDoesNotAdvanceFocusedPaneToArticleDetail() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("f1")
+        db.insertArticleRow("a1", "f1", createdAt = 0L)
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            var focusedPane by mutableStateOf(HomePane.ArticleList)
+            setContent { DualHomeTestHost(vm, focusedPane, { focusedPane = it }) }
+            waitForIdle()
+
+            onNodeWithText("Title a1").performClick()
+            waitForIdle()
+
+            assertEquals("a1", vm.selectedArticle.value?.id)
+            assertEquals(HomePane.ArticleList, focusedPane)
+        }
+    }
 }
 
 private const val ARTICLE_DETAIL_STUB_TAG = "article-detail-stub"
+
+/** Inserts an article row for the DB-backed test above (mirrors ArticleListPaneTest.kt's own). */
+private fun KeryxDatabase.insertArticleRow(id: String, feedId: String, createdAt: Long) {
+    articlesQueries.insert(
+        id = id, feed_id = feedId, guid = id, url = "https://article/$id", title = "Title $id",
+        summary = null, content = null, author = null, published_at = null, thumbnail_url = null,
+        is_read = 0L, read_at = null, is_starred = 0L, starred_at = null, cached_at = 0L,
+        search_text = "", updated_at = 0L, created_at = createdAt,
+    )
+}

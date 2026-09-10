@@ -166,7 +166,18 @@ has no menu bar: a labelled row fixed to the bottom of the feed list/drawer, bel
 folder/tag/feed list, with the drawer's own header showing the app's name in its place; the settings
 screen itself also carries its own back arrow, since its near-fullscreen dialog otherwise leaves no
 other tappable way out. List rows (feeds, folders, tags, articles) grow to a taller, M3-minimum
-touch density on Android.
+touch density on Android. Keyboard navigation (arrow keys between panes, J/K between articles,
+F2/Delete on the selected feed-list item) is not desktop-exclusive: an Android tablet can have a
+physical keyboard attached, and the same shortcuts work there too, including reaching into the
+feed-list drawer at a narrower layout. The selected row in whichever pane holds keyboard focus
+gets a `secondary` outline to show where a keypress will land — Android's own M3 selection color
+does not change with pane focus the way desktop's dimming does, so the outline is the only
+on-screen difference between the focused and unfocused pane's own selection there. This outline
+only ever appears once a hardware key has actually been pressed, so a touch-only session never
+shows a focus indicator meant for keyboard navigation. Pressing ↓/↑ while the search field itself
+is focused moves down into the result list instead of typing a caret movement the field has no use
+for, so a keyboard can move straight from typing a query to browsing its results without an
+intermediate tap.
 
 At a narrow layout (both phone- and tablet-width), the article detail pane also gains a touch-only
 affordance with no desktop counterpart: a horizontal swipe on the reader moves to the next/previous

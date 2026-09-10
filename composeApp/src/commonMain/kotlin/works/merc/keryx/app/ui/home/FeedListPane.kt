@@ -140,8 +140,10 @@ internal const val FEED_LIST_DRAG_HOST_TEST_TAG = "feed-list-drag-host"
  * @param modifier Modifier applied to the pane.
  * @param onAddFeedClick Called when the user requests to add a feed.
  * @param onTextInputFocusChange Called when this pane starts or stops holding text-entry focus —
- *   the search field or a row's inline name editor. Bare-key shortcuts (J/K, arrows, F2, Delete)
- *   must stand aside for both, so they report through one channel.
+ *   the search field or a row's inline name editor — with which one, or `null` when neither does.
+ *   Bare-key shortcuts (J/K, arrows, F2, Delete) must stand aside for both, and `HomeScreen` also
+ *   uses the distinction itself to decide what ↓/↑ do while a field is focused (see
+ *   `KeyboardNav.kt`'s [HomeTextInput]).
  * @param renameSelectedRequestId Bumped by the keyboard rename/edit shortcut (F2/Return); on change,
  *   starts inline name editing on whichever feed/folder/tag the current filter selects.
  * @param deleteSelectedRequestId Bumped by the keyboard delete shortcut (Delete/Backspace); on
@@ -171,7 +173,7 @@ internal fun FeedListPane(
     onActivated: () -> Unit,
     modifier: Modifier = Modifier,
     onAddFeedClick: () -> Unit = {},
-    onTextInputFocusChange: (Boolean) -> Unit = {},
+    onTextInputFocusChange: (HomeTextInput?) -> Unit = {},
     renameSelectedRequestId: Int = 0,
     deleteSelectedRequestId: Int = 0,
     onSelectionAdvance: (() -> Unit)? = null,
@@ -211,7 +213,7 @@ internal fun FeedListPane(
     // this in practice guards only the (currently theoretical) case of this composable leaving
     // composition outright — not the open/closed drawer transition, which never unmounts it.
     DisposableEffect(Unit) {
-        onDispose { onTextInputFocusChange(false) }
+        onDispose { onTextInputFocusChange(null) }
     }
     // Shared by every feed row's "copy feed URL"/"copy site URL" context-menu item, mirroring
     // ArticleListPane's rememberCopyUrlAction() for article rows.
@@ -232,7 +234,16 @@ internal fun FeedListPane(
     // Typed characters must reach an open editor rather than the root's bare-key shortcuts, and the
     // menu bar's own F2/Delete accelerators must stand down too (see MenuController).
     LaunchedEffect(searchFieldFocused, inlineEdit != null) {
-        onTextInputFocusChange(searchFieldFocused || inlineEdit != null)
+        // inlineEdit wins on the rare transition frame where both are momentarily true (starting
+        // an inline edit is a deliberate action that should read as RowNameEditor immediately, even
+        // before the previous field's own onFocusChanged(false) has landed).
+        onTextInputFocusChange(
+            when {
+                inlineEdit != null -> HomeTextInput.RowNameEditor
+                searchFieldFocused -> HomeTextInput.SearchField
+                else -> null
+            },
+        )
     }
 
     // Shared by every filter-selecting row below (quick filters, feeds, folders, tags): selecting a
@@ -391,6 +402,13 @@ internal fun FeedListPane(
 
     FeedListAutoScrollEffect(dragPointerYState, hostBoundsState, listState, dragController)
 
+    // Provided once here (not by HomeScreen) so every row composable below — all of them live
+    // only inside this Column — can read LocalFeedListInDrawer without a parameter of its own; see
+    // that CompositionLocal's own KDoc in ListRowChrome.kt for why onSelectionAdvance's nullness is
+    // the right signal (null only at PaneLayout.Triple, where this pane is the permanent sidebar
+    // rather than drawer content). FeedListDialogs below is deliberately outside this provider — it
+    // renders no list rows of its own.
+    CompositionLocalProvider(LocalFeedListInDrawer provides (onSelectionAdvance != null)) {
     Column(
         modifier
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
@@ -770,6 +788,7 @@ internal fun FeedListPane(
             }
         }
     }
+    }
 
     FeedListDialogs(
         vm = vm,
@@ -929,7 +948,12 @@ private fun SidebarRow(
     Row(
         Modifier.fillMaxWidth()
             .listRowClickable(rowInteraction, selected, onClick)
-            .listRowSurface(selectionBackground(selected, focused), ListRowKind.NavItem, rowInteraction)
+            .listRowSurface(
+                selectionBackground(selected, focused),
+                ListRowKind.NavItem,
+                rowInteraction,
+                decoration = listRowOutline(ListRowKind.NavItem, selected, focused),
+            )
             .heightIn(min = listRowMinHeight(isTouchPrimary))
             .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1018,7 +1042,12 @@ private fun TagRow(
                 dropTargetBackground(isDropTarget, selected, focused, MaterialTheme.colorScheme.tertiaryContainer),
                 ListRowKind.NavItem,
                 rowInteraction,
-                decoration = dropTargetBorderModifier(isDropTarget, MaterialTheme.colorScheme.tertiary),
+                decoration = listRowOutline(
+                    ListRowKind.NavItem,
+                    selected,
+                    focused,
+                    dropTargetColor = MaterialTheme.colorScheme.tertiary.takeIf { isDropTarget },
+                ),
             )
             .heightIn(min = listRowMinHeight(isTouchPrimary))
             .padding(start = 8.dp, end = 8.dp),
@@ -1190,9 +1219,14 @@ private fun TagFeedRow(
                 // right-click on it promotes it first, exactly as the old `!selected` check did.
                 onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
             )
-            .listRowSurface(selectionBackground(selectionTone, focused), ListRowKind.NavItem, rowInteraction)
+            .listRowSurface(
+                selectionBackground(selectionTone, focused),
+                ListRowKind.NavItem,
+                rowInteraction,
+                decoration = listRowOutline(ListRowKind.NavItem, selectionTone, focused),
+            )
             .heightIn(min = listRowMinHeight(isTouchPrimary))
-            .padding(start = FEED_ROW_INDENT, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            .padding(start = feedRowIndent(), end = 8.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FeedAvatar(feed.displayTitle(), feed.favicon_url)

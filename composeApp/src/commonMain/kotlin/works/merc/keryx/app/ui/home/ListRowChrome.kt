@@ -6,9 +6,12 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -17,8 +20,17 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
-/** The horizontal inset a list row's highlight keeps from the pane edge — see [listRowSurface]. */
-internal val LIST_ROW_HORIZONTAL_MARGIN = 8.dp
+/**
+ * The horizontal inset a list row's highlight keeps from the pane edge — see [listRowSurface].
+ * `8dp` everywhere except a touch-primary platform, which uses M3's own `NavigationDrawerItem`
+ * inset (`NavigationDrawerItemDefaults.ItemPadding`, `12dp`) instead — the same
+ * per-platform-density split [listRowMinHeight] already follows.
+ *
+ * @param isTouchPrimary Overridable for tests only (mirrors `feedListReorderDrag`'s own
+ *   `isTouchPrimary` parameter) — production call sites always use the platform default.
+ */
+internal fun listRowHorizontalMargin(isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary): Dp =
+    if (isTouchPrimary) 12.dp else 8.dp
 
 /** How long a pulse-triggered ripple holds its press state before releasing, so the indication has
  * time to visibly grow before it starts fading — an immediate press-then-release can render as
@@ -78,7 +90,7 @@ internal fun PulseRippleEffect(ripplePulse: Int, interactionSource: MutableInter
  *   `2 *` [LIST_ROW_VERTICAL_MARGIN] short of it. What this floors is the *highlight*, not the
  *   row's whole clickable band.
  *
- * Deliberately independent of [LIST_ROW_VERTICAL_MARGIN]/[LIST_ROW_HORIZONTAL_MARGIN]/
+ * Deliberately independent of [LIST_ROW_VERTICAL_MARGIN]/[listRowHorizontalMargin]/
  * [LIST_ROW_GUIDE_THICKNESS] — those govern the *gap* between two rows and the drag insertion
  * marker's geometry, which must stay put regardless of a row's own content height (see
  * [LIST_ROW_VERTICAL_MARGIN]'s own KDoc). It is a *minimum*, not a fixed height: a row whose
@@ -169,24 +181,40 @@ internal val LIST_ROW_VERTICAL_MARGIN = LIST_ROW_GUIDE_CLEARANCE + LIST_ROW_GUID
  * `NavigationDrawerItem` and `Tab` both report this same role for "pick one of a set, the pick
  * changes what's shown elsewhere" selection, which is exactly what every one of these rows does —
  * `ListRowChrome.android.kt`'s [ListRowKind.NavItem] style is itself modeled on `NavigationDrawerItem`.
+ *
+ * `Modifier.selectable` is focusable by default (it accepts Enter/Space as a click, the same as
+ * `clickable`), which this app does not want for a list row: this app's own arrow-key/J-K model —
+ * not Tab order — is how a row is reached from the keyboard, and a row that *could* still take real
+ * focus left Android's own M3 ripple showing its focus-state layer on whichever row last actually
+ * received it (a tap, or a stray Tab), even after keyboard/tap selection had since moved elsewhere
+ * — indistinguishable from a stuck selection highlight. `InlineRename.kt`'s cancel icon uses the
+ * same `focusProperties { canFocus = false }` technique for a different reason (keeping its click
+ * from running the adjacent field's blur-commit path first). `canFocus = false` here removes the
+ * row as a possible destination for *any* focus-moving mechanism (Tab order, click-to-focus,
+ * arrow-key focus search) while leaving [selected] and [Role.Tab] intact, so a screen reader still
+ * reports which row is selected exactly as before.
  */
 internal fun Modifier.listRowClickable(
     interactionSource: MutableInteractionSource,
     selected: Boolean,
     onClick: () -> Unit,
-): Modifier = selectable(
-    selected = selected,
-    interactionSource = interactionSource,
-    indication = null,
-    role = Role.Tab,
-    onClick = onClick,
-)
+): Modifier = this
+    .focusProperties { canFocus = false }
+    .selectable(
+        selected = selected,
+        interactionSource = interactionSource,
+        indication = null,
+        role = Role.Tab,
+        onClick = onClick,
+    )
 
 /**
  * Which native row idiom a list row should follow — see [listRowSurface]'s own KDoc and the
  * `ui-guidelines` skill's "Platform-native list rows" section for the full rationale. Desktop's
  * `actual` ignores this entirely (its one, macOS-leaning row style applies regardless), so this
- * distinction is Android-only in practice.
+ * distinction is Android-only in practice. On Android, [NavItem] additionally depends on
+ * [LocalFeedListInDrawer] for its *shape* specifically (see [listRowShape]) — "Android's
+ * equivalent of a navigation-drawer item" below is literally true only while it actually is one.
  */
 internal enum class ListRowKind {
     /** A feed/folder/tag row — Android's equivalent of a navigation-drawer item. */
@@ -198,7 +226,7 @@ internal enum class ListRowKind {
 
 /**
  * The selection surface a list row paints inside its (wider) clickable band — see
- * [listRowClickable]. Applies the row's standard [LIST_ROW_HORIZONTAL_MARGIN] /
+ * [listRowClickable]. Applies the row's standard [listRowHorizontalMargin] /
  * [LIST_ROW_VERTICAL_MARGIN] outer margin, paints [background], then [decoration] (e.g. a
  * drop-target border), then the platform's own press feedback via [interactionSource] — `null` for
  * a row that carries no selection state of its own (e.g. `NoFolderHeader`, which only ever shows a
@@ -229,3 +257,94 @@ internal expect fun Modifier.listRowSurface(
     decoration: Modifier = Modifier,
     extraBottomMargin: Dp = 0.dp,
 ): Modifier
+
+/**
+ * The shape a list row's selection surface is clipped to (and that a drop-target border /
+ * keyboard-focus outline traces via `listRowOutline` in `HomeCommon.kt`). Desktop's `actual`
+ * ignores [kind] entirely — its one macOS-leaning row style applies to every row. Kept out of
+ * [listRowSurface] as a value of its own so a decoration drawn *around* a row traces the very
+ * shape the row is clipped to, instead of repeating a shape constant that could drift from it.
+ *
+ * On Android, the shape depends on more than just [kind]: an [ListRowKind.NavItem] row clips to a
+ * full pill (M3's own `NavigationDrawerItem` shape) only while it's actually rendered as
+ * navigation-drawer content ([LocalFeedListInDrawer]); at `PaneLayout.Triple`, where the same feed
+ * list is a permanent pane sitting beside the article list rather than a drawer, it instead shares
+ * the article list's own large-rounded-rectangle shape — two simultaneously visible panes read as
+ * one design that way, which a drawer overlay (never on screen at the same time as the pane it
+ * replaces) has no such need to match. [ListRowKind.ListItem] (article rows, which never render
+ * inside the drawer) is unaffected by [LocalFeedListInDrawer] and always gets that same
+ * large-rounded-rectangle shape.
+ */
+@Composable
+internal expect fun listRowShape(kind: ListRowKind): Shape
+
+/**
+ * Whether the list row currently being laid out is rendered as feed-list navigation-drawer content
+ * (`ModalNavigationDrawer`) rather than `PaneLayout.Triple`'s permanent on-screen sidebar pane —
+ * see [listRowShape]'s own KDoc for what this changes. `FeedListPane` is the sole provider,
+ * derived from its own `onSelectionAdvance` parameter's nullness (the same "is this a drawer"
+ * signal its own KDoc and every other narrow-layout branch inside it already use — `null` means
+ * `PaneLayout.Triple`); Android's `listRowShape` `actual` is the sole consumer. The default
+ * `false` is correct for every row outside `FeedListPane`'s own subtree (in practice just
+ * `ArticleRow`, whose [ListRowKind.ListItem] never consults this local anyway) — unlike
+ * [listRowSurface]'s `kind` parameter, which deliberately has no default because it's set by many
+ * unrelated call sites across both `FeedListPane` and `ArticleListPane` and forgetting it there
+ * really could pick a silently wrong style, this local has exactly one provider and one consumer,
+ * the same low-risk shape as [LocalRowSelectionVisible]/[LocalKeyboardEngaged] (`HomeCommon.kt`).
+ */
+internal val LocalFeedListInDrawer = staticCompositionLocalOf { false }
+
+/** Width of a list row's outline decoration — both the drop-target border and the keyboard-focus
+ * ring `listRowOutline` (`HomeCommon.kt`) draws share this one value. */
+internal val ROW_OUTLINE_WIDTH = 2.dp
+
+/**
+ * How a platform shows *which pane holds keyboard focus* on a selected row — the two mechanisms are
+ * mutually exclusive by construction (a platform picks exactly one), which is why this is a sealed
+ * type rather than a set of nullable fields on [RowSelectionColors] a given platform leaves unused.
+ *
+ * @see RowSelectionColors
+ */
+internal sealed interface PaneFocusIndication {
+    /**
+     * Desktop: a selected row in the pane that does *not* hold keyboard focus dims to [alpha], so
+     * the user can see where their keyboard input will land. The full-strength color itself already
+     * carries pane focus, so desktop draws no separate outline.
+     */
+    data class Dim(val alpha: Float) : PaneFocusIndication
+
+    /**
+     * Android: the selection color itself never changes with pane focus (M3's `NavigationDrawerItem`
+     * keeps the same `secondaryContainer`/`onSecondaryContainer` pair whether or not the item holds
+     * focus) — a physical keyboard can be attached to an Android tablet, though, so pane focus still
+     * needs to be shown somewhere, and here it's a `secondary` outline (`listRowOutline` in
+     * `HomeCommon.kt`) around the selected row in whichever pane holds it — M3's own
+     * `FocusIndicatorColor` concept, which ships as a token but has no Compose implementation yet,
+     * so this platform's `actual` supplies its own [color].
+     */
+    data class Ring(val color: Color) : PaneFocusIndication
+}
+
+/**
+ * The palette a selectable list row paints its selection from — resolved per platform, applied by
+ * the shared `selectionBackground` / `selectionContentColorOrNull` / `rowOutlineColorOrNull` logic
+ * in `HomeCommon.kt` (which keeps the [LocalRowSelectionVisible] gate, the [RowSelectionTone]
+ * fan-out, and the derivation of a non-focused row's/an echo row's actual color from
+ * [selectedBackground]/[paneFocus] common to both platforms — see those functions' own KDoc).
+ *
+ * @property selectedBackground Background of a selected row in the pane that holds keyboard focus
+ *   — also the row's background regardless of focus on a platform whose [paneFocus] is [Ring].
+ * @property selectedContent Content color to pair with [selectedBackground]; `null` leaves each
+ *   element at its own default color.
+ * @property paneFocus How this platform shows pane focus on the selected row — see
+ *   [PaneFocusIndication].
+ */
+internal data class RowSelectionColors(
+    val selectedBackground: Color,
+    val selectedContent: Color?,
+    val paneFocus: PaneFocusIndication,
+)
+
+/** This platform's list-row selection palette — see [RowSelectionColors]. */
+@Composable
+internal expect fun rowSelectionColors(): RowSelectionColors

@@ -159,8 +159,13 @@ outside it) and — on Android — the OS back gesture/button (`platform/BackHan
 width (`PaneLayout.Dual`) both stay on screen together, permanently — `visiblePanes(Dual, depth)`
 returns the same `[ArticleList, ArticleDetail]` at every depth, unlike before the drawer existed.
 Nothing about either pane's own internal layout (tonal roles, dividers, row chrome) changes between
-layouts; only how many are mounted at once does — with one deliberate exception, an affordance that
-has nowhere else to live once the drawer replaces the sidebar: the search field (see below). That
+layouts; only how many are mounted at once does — with two deliberate exceptions. The first is an
+affordance that has nowhere else to live once the drawer replaces the sidebar: the search field
+(see below). The second is Android's own `NavItem` row shape (`ListRowChrome.android.kt`'s
+`listRowShape`), which clips to a full pill only while actually rendered as drawer content
+(`LocalFeedListInDrawer`) and to the article list's own large rounded rectangle at
+`PaneLayout.Triple`, where the two panes sit side by side and read as one shared design instead —
+see "Platform-native list rows" below for the full rationale. That
 unmounting is state-preserving: `ui/home/NarrowPaneRow.kt` hosts the panes so each one keeps (or
 gets restored to) its own scroll position across the stack's comings and goings, which is why **a
 pane added there must be emitted from its own fixed `if`, never a loop iteration** — every iteration
@@ -217,6 +222,17 @@ A `SharedFlow` with no subscriber yet would drop a request silently, which is ex
 used to make Android's search feel broken. The latch stays set until whichever field composes
 next consumes it (`consumeSearchFocusRequest()`), and `HomeViewModel.selectFilter` clears an
 unconsumed one when the user navigates elsewhere first.
+
+Arrow-key navigation over the feed list's own rows (`HomeScreen.moveFeedSelection` →
+`HomeViewModel.selectFeedListRow`) can land on this same "Search" row — `buildOrderedFeedListRows`
+includes it — and snapshots the filter/row to restore later exactly like a tap does
+(`captureSearchScopeEntry`, shared by both `enterSearchScope` and `selectFeedListRow`), but
+deliberately does **not** call `requestSearchFocus()`: focusing the field mid-navigation would
+swallow the next ↓ into the result list instead of the next sidebar row, making everything below
+Search unreachable by keyboard. Cmd/Ctrl+F remains the keyboard path that does focus the field.
+`orderedRows` excludes the row entirely at a narrow layout (`includeSearchRow`, `false` whenever
+`feedListIsDrawer(paneLayout)`) — `FeedListPane` renders no such row there either, so keyboard
+navigation must not be able to select one that isn't actually on screen.
 
 **Going back out of Search.** Search has no `HomePane` of its own — every entry point above just
 sets `ArticleFilter.Search` on `HomePane.ArticleList` (see "Search is layout-dependent" above)
@@ -320,7 +336,7 @@ their drawn/visible size.
 - **Between individual rows in a list** (e.g. article rows): no divider.
   Separate rows with the selection-highlight background (`selectionBackground`)
   instead. The highlight is a rounded rectangle inset by
-  `LIST_ROW_HORIZONTAL_MARGIN` / `LIST_ROW_VERTICAL_MARGIN`, while the
+  `listRowHorizontalMargin()` / `LIST_ROW_VERTICAL_MARGIN`, while the
   **clickable/drag band is the row's whole reported bounds** — full width,
   margin included, no outer-margin dead strip and no unclickable wedge under
   the rounded corners — so every list row is a **single composable with a single
@@ -340,7 +356,15 @@ their drawn/visible size.
     the click/drag hit area, applied with **nothing** before it in the chain
     (no padding, no clip) so it covers the row's entire reported bounds.
     Passes `indication = null` deliberately; press feedback is `listRowSurface`'s
-    job, confined to the inset highlight.
+    job, confined to the inset highlight. Also disables real Compose focus on
+    the row itself (`Modifier.focusProperties { canFocus = false }`, ahead of
+    the `selectable` it wraps) — a list row is reached by this app's own
+    arrow-key/J-K model, never by Tab order or click-to-focus, and leaving a
+    row focusable let Android's own M3 ripple keep showing its focus-state
+    layer on whichever row last actually took focus, independent of where
+    keyboard/tap selection had since moved on to. `selected`/`Role.Tab` still
+    reach accessibility services exactly as before; only real focusability is
+    removed.
   - `.nativeContextMenu(...)`, then — for a feed-list row that can be a drag
     insertion boundary — `.insertionMarkers(top, bottom)`
     (`ui/home/FeedListDragAndDrop.kt`), then
@@ -348,7 +372,7 @@ their drawn/visible size.
     is a `ListRowKind` (`NavItem` for feed/folder/tag rows, `ListItem` for
     article rows) that only matters on Android; see "Platform-native list
     rows" below for what each `expect`/`actual` does with it. On desktop this
-    is still the row's standard `LIST_ROW_HORIZONTAL_MARGIN`/
+    is still the row's standard `listRowHorizontalMargin()`/
     `LIST_ROW_VERTICAL_MARGIN` outer margin, `MaterialTheme.shapes.small`
     clip, `background`, an optional `decoration` (e.g. a drop-target border),
     then the shared `interactionSource`'s flat press feedback via
@@ -410,17 +434,36 @@ their drawn/visible size.
 
 `listRowSurface` (see above) is `expect`/`actual` and takes a `ListRowKind` — `NavItem` for
 feed/folder/tag rows, `ListItem` for article rows — because the two platforms don't just differ in
-color/shape here, they follow genuinely different native row idioms:
+color/shape here, they follow genuinely different native row idioms. The vertical inset
+(`LIST_ROW_VERTICAL_MARGIN`) is the same for both `kind`s on both platforms (see the Divider policy
+section above for why it must stay put). The horizontal inset (`listRowHorizontalMargin()`) is the
+same for both `kind`s on a given platform, but differs *between* platforms — `8dp` on desktop,
+`12dp` on Android (M3's own `NavigationDrawerItemDefaults.ItemPadding`) — while still keeping both
+`kind`s equal to each other: the two panes sit side by side at `PaneLayout.Triple`, so a row that
+used a different inset than its neighbor kind would read as two unrelated designs rather than two
+levels of one hierarchy. The corner treatment, via `listRowShape(kind)` (its own `expect`/`actual`,
+also used by `listRowOutline` so a drop-target border or keyboard-focus ring always traces the
+exact shape the row itself is clipped to — see below), differs by `kind` on Android and by more
+than `kind` alone:
 
 - **Desktop**: one look regardless of `kind` — the inset, rounded-rectangle highlight described
-  throughout the Divider policy section above. Desktop has no equivalent split between "nav item"
-  and "content list item" chrome, so the desktop `actual` ignores `kind` entirely.
-- **Android**: `NavItem` keeps the same inset (`LIST_ROW_HORIZONTAL_MARGIN`/`LIST_ROW_VERTICAL_MARGIN`
-  are unchanged — the drag insertion marker's geometry, per the Divider policy section above, depends
-  on the vertical one specifically) but clips to a full pill (`CircleShape`) instead of a lightly
-  rounded rectangle, matching M3's `NavigationDrawerItem`. `ListItem` is full-bleed — no horizontal
-  inset, no corner clip — matching M3's plain `ListItem`; article rows are never a drag target, so
-  nothing depends on the exact vertical spacing there the way `NavItem`'s does.
+  throughout the Divider policy section above (`MaterialTheme.shapes.small`). Desktop has no
+  equivalent split between "nav item" and "content list item" chrome, so the desktop `actual`
+  ignores `kind` entirely.
+- **Android**: `ListItem` (article rows) always clips to `MaterialTheme.shapes.large` — a card-like
+  rounded rectangle, rather than M3's plain (unclipped, full-bleed) `ListItem`. `NavItem`
+  (feed/folder/tag rows) shares that *same* `shapes.large` shape while rendered as
+  `PaneLayout.Triple`'s permanent sidebar pane (`LocalFeedListInDrawer` false there) — the feed
+  list and article list sit side by side then, so one shared shape reads as one design rather than
+  two unrelated ones, the same reasoning the shared horizontal inset above already follows. Only
+  while `NavItem` is actually rendered as feed-list navigation-drawer content
+  (`LocalFeedListInDrawer` true — `FeedListPane` provides it from its own `onSelectionAdvance`
+  nullness) does it clip to a full pill (`CircleShape`) instead, matching M3's own
+  `NavigationDrawerItem`: a drawer overlay is never on screen at the same time as the pane it
+  replaces, so it has no need to visually match a sibling pane the way `Triple`'s two simultaneous
+  panes do. Article rows are never a drag target, so nothing depends on the vertical spacing there
+  the way `NavItem`'s does, but the horizontal inset is shared with `NavItem` regardless (see
+  above).
 
 **When adding a new list row**, decide which `ListRowKind` it is by asking the same question M3
 asks: does this row represent a navigation/filter target (a feed, folder, tag — something you tap to
@@ -428,14 +471,53 @@ change what's showing), or a content item in a list (an article — something yo
 `kind` explicitly; it has no default (see `listRowSurface`'s own KDoc for why — a forgotten `kind`
 should be a compile error, not a silently wrong Android row style).
 
-`selectionBackground`/`selectionContentColorOrNull` (`ui/home/HomeCommon.kt`) — the color functions
-list rows pass into `listRowSurface`'s `background` parameter — additionally read
+`selectionBackground`/`selectionContentColorOrNull` (`ui/home/HomeCommon.kt`) resolve their actual
+colors from `rowSelectionColors()` (`ui/home/ListRowChrome.kt`'s `expect`/`actual`,
+`RowSelectionColors`) — the shared logic in `HomeCommon.kt` only handles the `LocalRowSelectionVisible`
+gate, the `RowSelectionTone` fan-out (a feed rendered once under its folder and again under every
+expanded tag; the non-primary instances get a faint tint of `RowSelectionColors.selectedBackground`
+at `SECONDARY_SELECTION_ALPHA`), and deriving a non-focused row's actual color from
+`RowSelectionColors.paneFocus`, a `PaneFocusIndication` (`Dim` or `Ring`) that names *how* this
+platform shows pane focus rather than each platform repeating its own copy of the derivation logic.
+The palette itself is per-platform:
+
+- **Desktop**: `primary`/`onPrimary` at `RowSelectionColors.selectedBackground`/`selectedContent`,
+  with `paneFocus = PaneFocusIndication.Dim(0.4f)` — a selected row in the pane that does *not*
+  hold keyboard focus dims to that alpha, with no content-color override (the dimmed background
+  still has enough contrast with each element's own default color). The focused/unfocused split
+  itself is "which pane will keyboard input land in", a concept a pointer-and-keyboard platform has
+  and a touch one doesn't.
+- **Android**: `secondaryContainer`/`onSecondaryContainer` at the same two properties, the same
+  regardless of pane focus — M3's own `NavigationDrawerItem` tokens don't recolor on focus either
+  (`ActiveFocusLabelTextColor` equals `ActiveLabelTextColor`). An Android tablet can have a physical
+  keyboard attached, though, so pane focus still exists there and still needs to be shown somewhere:
+  it's carried by `paneFocus = PaneFocusIndication.Ring(secondary)` instead — a `secondary` outline
+  drawn by `listRowOutline` (`ui/home/HomeCommon.kt`, shared logic; see below) around the selected
+  row in whichever pane holds keyboard focus, M3's own `FocusIndicatorColor` concept (a token that
+  ships with no Compose implementation, so Android's `actual` supplies its own).
+
+`PaneFocusIndication`'s two cases are mutually exclusive by construction — a platform picks exactly
+one — which is why it is a sealed type rather than a `RowSelectionColors` carrying both a nullable
+dim alpha and a nullable ring color, each platform leaving the other's field unused.
+
+`listRowOutline` (`ui/home/HomeCommon.kt`, two overloads mirroring `selectionBackground`'s
+boolean/`RowSelectionTone` split) draws a row's outline decoration: a drop-target border when the row
+is an active drop target, otherwise — gated on `LocalKeyboardEngaged` (below) — the keyboard-focus
+ring above, for whichever selected row is `focused`. A drop target always wins over the focus ring;
+only the one actual `RowSelectionTone.PRIMARY` instance of a selected feed is ever eligible for a
+focus ring, never a `SECONDARY` echo. `LocalKeyboardEngaged`, a `CompositionLocal` `HomeScreen`
+latches `true` on the first hardware `KeyDown` `homeKeyboardShortcuts` observes (`ui/home/
+KeyboardNav.kt`'s `onKeyboardEngaged` parameter) and never resets, gates the ring the same way the
+web's `:focus-visible` gates its own outline: a touch-only session (no keyboard ever attached, or
+one attached but never used) should never show a focus indicator meant for keyboard navigation.
+
 `LocalRowSelectionVisible`, a `CompositionLocal` `HomeScreen` sets to `false` at `PaneLayout.Single`
 (see "Adaptive pane layout & touch affordances" above): on a phone-width screen, tapping a row
 navigates *away* from it (drills into the article list or the article detail), so a lingering
 highlight there would mark a row the user can no longer see, unlike at `Dual`/`Triple` where the
-selected row's pane stays on screen alongside whichever pane it opened. This is desktop-and-Android
-shared logic (desktop is unaffected — it never resolves `Single`), not a per-platform `actual`.
+selected row's pane stays on screen alongside whichever pane it opened. This gate is
+desktop-and-Android shared logic (desktop is unaffected — it never resolves `Single`), not a
+per-platform `actual`.
 
 ## Sticky section headers in scrollable lists
 

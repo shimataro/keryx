@@ -61,7 +61,7 @@ class FeedListPaneTest {
         vm: HomeViewModel,
         height: Dp,
         onSelectionAdvance: (() -> Unit)? = null,
-        onTextInputFocusChange: (Boolean) -> Unit = {},
+        onTextInputFocusChange: (HomeTextInput?) -> Unit = {},
         // Defaults to the real desktop value (see DesktopOs.kt) so every existing test here keeps
         // exercising the "native app menu" branch (no app_name header, no settings footer)
         // unchanged; only the tests exercising the Android branch below override it.

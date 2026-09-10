@@ -58,9 +58,18 @@ composeApp/src/
     PlatformTheme（`platformShapes` は M3 既定の `Shapes()`、`ProvidePlatformInteraction` は
     no-op — `LocalIndication`/`LocalRippleConfiguration` を M3 既定のままにすることで、あらゆる
     `clickable` と M3 部品が本物のリップルを持つようになる。external-spec.ja.md の「UI 方針」参照）、
-    `ListRowChrome.android.kt` の `listRowSurface`（`ListRowKind.NavItem` 行は
-    `NavigationDrawerItem` 風のピル形ハイライト、`ListRowKind.ListItem` 行はフルブリード —
-    詳細は同ファイル自身の KDoc）、TooltipIconButton/ToolbarIconGroup/FlatTooltipContent
+    `ListRowChrome.android.kt` の `listRowSurface`（両 `ListRowKind` で同じ 12dp インセットを共有
+    — Android 独自の `listRowHorizontalMargin()`、M3 の `NavigationDrawerItemDefaults.ItemPadding`
+    — し、`listRowShape(kind)` でクリップ形状を決める: `ListItem` 行は常に角丸長方形、`NavItem`
+    行も `PaneLayout.Triple` の常設サイドバーペインとして描画されている間（記事一覧の隣に
+    並ぶので、2 つが 1 つのデザインに見える）は同じ形。実際にフィード一覧のナビゲーション
+    ドロワーの中身として描画されているときだけ（`LocalFeedListInDrawer`、`FeedListPane` 自身の
+    `onSelectionAdvance` の非 null 性から提供される）`NavigationDrawerItem` 風のピルになる。
+    選択色は `rowSelectionColors()` の
+    `secondaryContainer`/`onSecondaryContainer` で、どのペインがキーボードフォーカスを持つかに
+    関わらず同じ値を使う（ペインフォーカスは代わりに `RowSelectionColors.paneFocus` の
+    `PaneFocusIndication.Ring` による `secondary` の輪郭線で表し、`HomeCommon.kt` の
+    `listRowOutline` が描く — 詳細は同ファイル自身の KDoc）、TooltipIconButton/ToolbarIconGroup/FlatTooltipContent
     （それぞれ、独自のネイティブな長押しトリガーを持つ `TooltipBox` の中に置いた M3 自身の
     アイコンボタン群 — どれを使うかは `IconButtonKind` が決める: `IconButton`（`Standard`）、
     `FilledIconButton`（`Primary`）、`OutlinedIconButton`（`Secondary`）、`errorContainer` に
@@ -493,12 +502,46 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 ナビゲーションスタック自体は常に3段（`HomePane.FeedList` → `ArticleList` → `ArticleDetail`）だが、
 狭いレイアウトでは depth 1（フィード一覧）に到達できない——ドロワーは `focusedPane` が指す
 スタックの一部ではなく、開いても `focusedPane` は進まないし、`initialPaneFor`/`paneForFeedDetail`
-（後述）もそこには決して解決されない。`HomePane.ordinal + 1` がそのままスタックの現在の深さを
-兼ねるため、`HomeScreen` は別途深さの状態を持つ必要がない — 記事の選択で深さが進み
-（`ArticleListPane` の `onSelectionAdvance`。`Triple` では `null` — 全ペインが既に見えており、
-進む先がない）、`platform/BackHandler`（Android では実際の戻るジェスチャー/ボタンを横取りし、
-デスクトップでは no-op）が1段戻す — その有効/無効は `homeBackAction(layout, depth,
-searchScopeReturnPending)` で決まる。これは、ペインだけを見る純関数 `canNavigateBack(layout,
+（後述）もそこには決して解決されない。このため、狭いレイアウトでは「今キーボード操作の対象は
+フィード一覧か」という問いに `focusedPane` だけでは答えられない（Android タブレットには物理
+キーボードが接続されうる）——その答えを必要とするすべての呼び出し箇所（矢印キーのルーティング、
+F2/Delete のフィード一覧ショートカット、各ペイン自身の `focused` 引数——選択行のキーボード
+フォーカス枠/減光を駆動する）は代わりに `HomePaneLayout.kt` の
+**`keyboardPaneFor(focusedPane, feedDrawerOpen)`** を読む。これはただ一つの純関数であり、
+ドロワーが開いていれば常に `HomePane.FeedList` に解決し（`feedDrawerOpen =
+feedListIsDrawer(paneLayout) && drawerState.isOpen`——開いている間は `focusedPane` に関わらず
+常に画面の最前面にあるため）、それ以外では `focusedPane` そのものに解決する。`focusedPane` と
+`feedDrawerOpen` を呼び出し箇所ごとに個別に読んでいた頃は、同じドロワー優先の判定をその都度
+手で再導出する必要があった上、一度実際にそれが食い違うバグがあった:
+`HomeScreen` の `Triple`/ドロワーの `FeedListPane` と `ArticleListPane` はそれぞれ独自に
+`focused` フラグを計算しており、両方が同時に `true` になり得た（`PaneLayout.Dual` でドロワーが
+開いている場合）ため、2つのペインに同時にキーボードフォーカス枠が描かれてしまっていた——
+`keyboardPaneFor` はこれを構造的に不可能にする。すべての消費側が、この関数が解決する
+ただ一つの値だけを読むようになったからである。
+
+**`focusedPane` 自体が「進む」のは `PaneLayout.Single` のときだけである。**
+`HomePane.ordinal + 1` がそのままスタックの現在の深さを兼ねるため、`HomeScreen` は別途深さの
+状態を持つ必要がない——`platform/BackHandler`（Android では実際の戻るジェスチャー/ボタンを
+横取りし、デスクトップでは no-op）が `homeBackAction(layout, depth, searchScopeReturnPending)`
+（後述）の有効/無効に従って1段戻し、記事の選択も同じ軸で前に進める——ただし `visiblePanes` が
+depth によって実際に変化するレイアウトでのみ。`ArticleListPane` の `onSelectionAdvance`
+（ドロワーの `FeedListPane` 自身の同名の引数も同様——こちらは行選択時にドロワーを閉じるだけでなく
+`focusedPane` を必ず `HomePane.ArticleList` へ動かす）は `PaneLayout.Triple` と
+`PaneLayout.Dual` のどちらでも no-op である。`visiblePanes` が返すペインはどちらのレイアウトでも
+既に画面上に揃っており、それ以上 `focusedPane` を進めても、記事一覧ペインが次のフレームで
+`focused = false` を報告するだけで得るものが無いからだ——詳細は `ArticleListPane` 自身の
+この引数の KDoc を参照。**この `focusedPane` の状態とは独立に、実際の Compose キーボード
+フォーカスが画面全体で存在しうる場所はちょうど2つしかない: `homeKeyboardShortcuts` が付与された
+ルート `Box`、そして現在入力中のテキストフィールド（サイドバーの検索欄、狭いレイアウト自身の
+検索欄、あるいはフィード一覧の行のインライン改名欄のいずれか）である。** 一覧の行自体は決して
+実フォーカスを持たない（`ListRowChrome.kt` の `listRowClickable` が
+`Modifier.focusProperties { canFocus = false }` でこれを無効化している）——行への到達は完全に
+このアプリ独自の矢印キー/J・K モデルによるものであり、Tab 順やクリックによるフォーカス移動では
+ない。各ペイン自身の `onActivated` は `HomeScreen` の小さなヘルパーを経由し、`focusedPane` への
+作用に加えて実フォーカスをルート `Box` へ戻す——これが、どのテキストフィールドにフォーカスが
+あっても、行やボタンへのタップでそこからフォーカスを外せる理由である。
+
+`homeBackAction(layout, depth, searchScopeReturnPending)` は、ペインだけを見る純関数 `canNavigateBack(layout,
 depth)`（「1段戻っても実際には画面が変わらない」場合に常に `false` を返す — `Triple` では常に。
 `Dual` でも常に——`visiblePanes(Dual, *)` はどの深さでも同じ2ペインを返すため——`canNavigateBack`
 が無かった頃は、そこでの戻る操作が何も起こさず黙って消費されていた）に、「戻る操作が実際に何を
@@ -578,6 +621,23 @@ WebView をホストするペインを含む3ペインすべてがアプリの�
 `exitSearchScope()` がその両方を復元してそのペインを返す。これを上記 `homeBackAction` の
 `ExitSearch` が `PopPane` の代わりに使う。検索クエリ自体はこの一連の処理では一切触れられず、
 入力欄上にそのまま残る。
+
+サイドバー自身の「検索」クイックフィルター行（`FeedListPane`、`PaneLayout.Triple` のみ）には2つの
+到達手段があり、意図的にスナップショットは揃えつつフォーカスの扱いだけ変えている。タップは
+`enterSearchScope` を直接呼ぶ。フィード一覧の行に対する矢印キー移動
+（`HomeScreen.moveFeedSelection` → `HomeViewModel.selectFeedListRow`）でも同じ行に着地しうる
+——`buildOrderedFeedListRows` がこの行を含むため——その場合も同じ方法でスナップショットを取る
+（`captureSearchScopeEntry`。`enterSearchScope` と `selectFeedListRow` の両方が呼ぶ共有部分）ので、
+後の戻る操作でこの行が押し出したフィルター/選択行を正しく復元できる。ただし
+**`requestSearchFocus()` は呼ばない**——移動中に入力欄へフォーカスを移すと、次の ↓ がサイドバーの
+次の行ではなく結果一覧へ吸収されてしまう（1行入力欄にとってこのキーはキャレット移動の意味を
+持たない——`KeyboardNav.kt` 自身の KDoc 参照）ため、Search より下の行がキーボードで到達不能に
+なってしまう。タップは「検索したい」という明示的な意思表示だが、一覧を辿る途中で矢印キーが
+この行を通過するのは一時的な通過にすぎない——検索欄へフォーカスを移すキーボード操作は引き続き
+Cmd/Ctrl+F が担う。`orderedRows` は狭いレイアウトではこの行を完全に除外する
+（`buildOrderedFeedListRows` の `includeSearchRow`。`feedListIsDrawer(paneLayout)` のとき
+`false`）——`FeedListPane` 自身が `onSelectionAdvance` の有無でこの行を省略するのと同じ条件で、
+画面に存在しない行をキーボードで選択できてはならないため。
 
 `enterSearchScope` のスナップショットには、その瞬間の閲覧コンテキスト — 既読ピン留め・未読
 スターピン留めのマップ、選択中の記事、キーボード操作用カーソル（下記「楽観的な既読/スター

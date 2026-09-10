@@ -3,6 +3,8 @@ package works.merc.keryx.app.ui.home
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MIN_WIDTH
+import works.merc.keryx.app.core.ARTICLE_LIST_PANE_WIDTH_DEFAULT
+import works.merc.keryx.app.core.DETAIL_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.DUAL_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.FEED_LIST_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.TRIPLE_PANE_MIN_WIDTH
@@ -23,7 +25,9 @@ enum class HomePane { FeedList, ArticleList, ArticleDetail }
  * not an independent breakpoint, are this app's source of truth. [TRIPLE_PANE_MIN_WIDTH] is
  * summed from the two resizable panes' *default* widths (three panes squeezed onto their floors
  * are not worth showing as three — see its own KDoc); [DUAL_PANE_MIN_WIDTH] from the minimums,
- * since the two panes it governs are split evenly by `NarrowPaneRow` with no preference to honor.
+ * since the two panes it governs are not sized from a preference at all — `NarrowPaneRow` gives
+ * the article list a fixed width capped at its own default ([dualPaneArticleListWidth]) and hands
+ * the reader everything left over, so that threshold only has to guarantee both floors fit.
  */
 enum class PaneLayout { Single, Dual, Triple }
 
@@ -48,6 +52,25 @@ fun paneLayoutFor(availableWidth: Dp): PaneLayout = when {
  * presentation does not.
  */
 fun feedListIsDrawer(layout: PaneLayout): Boolean = layout != PaneLayout.Triple
+
+/**
+ * The single [HomePane] that keyboard input (arrow-key pane navigation, J/K, F2/Delete) actually
+ * targets right now, and therefore the single source of truth for which pane's selected row should
+ * show the keyboard-focus ring/dimming (see `ui-guidelines`'s per-platform selection palette).
+ *
+ * An open feed-list drawer always wins over [focusedPane]: it is the topmost thing on screen while
+ * open, regardless of which [HomePane] the navigation stack itself points at (the drawer isn't part
+ * of that stack at all — see [HomePane]'s own KDoc). Every other case falls straight through to
+ * [focusedPane]. This replaces the old `feedListActionAllowed(pane, drawerOpen)` +
+ * `feedDrawerOpen`-guarded-`when(focusedPane)` duplication that used to be repeated at every one of
+ * `HomeScreen`'s keyboard-routing and pane-focus call sites — each of those is exactly "is this the
+ * pane [keyboardPaneFor] resolves to right now", which used to require re-deriving the drawer
+ * precedence by hand at each call site (and was the source of a real bug: two call sites deriving
+ * it independently could disagree, painting a focus ring on two panes at once — see
+ * `docs/app-architecture.md`'s "focused pane" section).
+ */
+fun keyboardPaneFor(focusedPane: HomePane, feedDrawerOpen: Boolean): HomePane =
+    if (feedDrawerOpen) HomePane.FeedList else focusedPane
 
 /** The widths the feed list and article list panes are laid out at, per [triplePaneWidths]. */
 internal data class TriplePaneWidths(val feedWidth: Dp, val articleWidth: Dp)
@@ -81,6 +104,29 @@ internal fun triplePaneWidths(availableForPanes: Dp, feedPreference: Dp, article
     val extraScale = if (extraTotal > extraAvailable && extraTotal > 0.dp) extraAvailable / extraTotal else 1f
     return TriplePaneWidths(minFeed + feedExtra * extraScale, minArticle + articleExtra * extraScale)
 }
+
+/**
+ * The width the article list pane is laid out at within [availableWidth] at [PaneLayout.Dual], the
+ * article detail pane taking everything left over via `Modifier.weight(1f)` (see `NarrowPaneRow`).
+ *
+ * This is the [PaneLayout.Dual] analogue of [triplePaneWidths], and deliberately reuses the same
+ * article-list default and minimum ([ARTICLE_LIST_PANE_WIDTH_DEFAULT] /
+ * [ARTICLE_LIST_PANE_MIN_WIDTH]) that pane already gets at [PaneLayout.Triple] rather than
+ * introducing a width constant of its own: it is the same pane showing the same rows, and the
+ * asymmetry it produces — a list at a settled width, a reader that grows into whatever remains —
+ * is the shape both layouts want. There is no persisted preference to honor here (a narrow layout
+ * has no draggable divider to set one with), so the list's own default width *is* the preference.
+ *
+ * The reader can never be squeezed below its own floor by this: [paneLayoutFor] only resolves
+ * [PaneLayout.Dual] at or above [DUAL_PANE_MIN_WIDTH] ([ARTICLE_LIST_PANE_MIN_WIDTH] +
+ * [DETAIL_PANE_MIN_WIDTH] + one divider's width this layout doesn't spend — it draws none between
+ * the two panes), so `availableWidth - DETAIL_PANE_MIN_WIDTH` already clears
+ * [ARTICLE_LIST_PANE_MIN_WIDTH] before the clamp, and what the detail pane is left with
+ * (`availableWidth -` this result) stays at or above [DETAIL_PANE_MIN_WIDTH] throughout the range.
+ */
+internal fun dualPaneArticleListWidth(availableWidth: Dp): Dp =
+    (availableWidth - DETAIL_PANE_MIN_WIDTH.dp)
+        .coerceIn(ARTICLE_LIST_PANE_MIN_WIDTH.dp, ARTICLE_LIST_PANE_WIDTH_DEFAULT.dp)
 
 /**
  * The panes to render for [layout], given the navigation stack's current [depth] (1..3, see

@@ -182,14 +182,24 @@ class KeyboardNavTest {
     }
 
     @Test
-    fun shortcutsAreSuppressedWhileSearchFieldFocused() {
-        // With the sidebar search field focused, all shortcuts step aside so typed letters/arrows
-        // reach the field instead of being swallowed by this root handler.
+    fun mostShortcutsAreSuppressedWhileSearchFieldFocused() {
+        // With the sidebar search field focused, most shortcuts step aside so typed letters/arrows
+        // reach the field instead of being swallowed by this root handler. ↓/↑ are the one
+        // exception — see onUpAndOnDownStillFireWhileSearchFieldFocused below and this function's
+        // own KDoc.
         assertEquals(emptyList(), firedEvents(textInputFocused = true) { pressKey(Key.J) })
-        assertEquals(emptyList(), firedEvents(textInputFocused = true) { pressKey(Key.DirectionDown) })
         assertEquals(
             emptyList(),
             firedEvents(textInputFocused = true) { withKeyDown(Key.CtrlLeft) { pressKey(Key.F) } },
         )
+    }
+
+    @Test
+    fun onUpAndOnDownStillFireWhileSearchFieldFocused() {
+        // A single-line field has no caret use for ↓/↑, and leaving them unconsumed here would let
+        // Compose's own default focus-search step silently move real focus off the field — see this
+        // function's own KDoc for the full reasoning.
+        assertEquals(listOf("down"), firedEvents(textInputFocused = true) { pressKey(Key.DirectionDown) })
+        assertEquals(listOf("up"), firedEvents(textInputFocused = true) { pressKey(Key.DirectionUp) })
     }
 }

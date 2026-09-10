@@ -352,16 +352,18 @@ Every axis-2 candidate states **both sides of the trade**.
 
 **Mandatory gate for Yellow/Red candidates.** If the tiered list contains any Yellow
 or Red item, launch **`review-architecture`**, **`review-data-integrity`**,
-**`review-sync-merge`**, **`review-concurrency`**, and **`review-security`** in one
-message, in parallel, scoped to the files/areas those candidates touch — this must
-complete before Step 4. It is not optional, unlike a Green-only list: Green is
-integrity-irrelevant by this file's own tier definition (see "Risk tiers" above), so
-a candidate set with no Yellow/Red item skips this gate entirely. Do **not** call
-`review-performance` — you are the performance analysis; what you need from review is
-whether the ground you are about to touch is load-bearing. If any of the five fails to
-run, do not proceed to Step 4: stop, name which perspective is unchecked, and report
-that the run is blocked (never hide a gap — `.claude/etc/review/common.md` §"Never
-hide a gap").
+**`review-sync-merge`**, **`review-concurrency`**, **`review-security`**, and
+**`review-state-consistency`** in one message, in parallel, scoped to the files/areas
+those candidates touch — this must complete before Step 4. It is not optional, unlike
+a Green-only list: Green is integrity-irrelevant by this file's own tier definition
+(see "Risk tiers" above), so a candidate set with no Yellow/Red item skips this gate
+entirely. Do **not** call `review-performance` — you are the performance analysis;
+what you need from review is whether the ground you are about to touch is
+load-bearing. `review-state-consistency` is on the list because narrowing a query,
+memoizing a derived list, or changing a flow's sharing strategy can silently drop
+state the UI is still showing. If any of the six fails to run, do not proceed to
+Step 4: stop, name which perspective is unchecked, and report that the run is blocked
+(never hide a gap — `.claude/etc/review/common.md` §"Never hide a gap").
 
 ### Step 4 — Confirm scope (the single gate)
 
@@ -456,17 +458,19 @@ becomes a problem once several independently-fine items are combined. Optionally
 review the accumulated changes (`git diff "$BASE_SHA" HEAD`, using the `BASE_SHA`
 captured in Step 1) for invariants broken by the optimization. Launch
 **`review-architecture`**, **`review-data-integrity`**, **`review-sync-merge`**,
-**`review-concurrency`**, and **`review-security`** in parallel — `review-concurrency`
-matters here specifically because performance work reorders, parallelizes, and
-caches, and `review-architecture` catches a layering/constraint violation the
-per-item Step 3 gate could still miss once items are combined. Again not
-`review-performance`, and not the `reviewer` orchestrator.
+**`review-concurrency`**, **`review-security`**, and **`review-state-consistency`** in
+parallel — `review-concurrency` matters here specifically because performance work
+reorders, parallelizes, and caches, `review-state-consistency` because a cache or a
+narrowed re-query can stop the UI from following the state it displays, and
+`review-architecture` catches a layering/constraint violation the per-item Step 3
+gate could still miss once items are combined. Again not `review-performance`, and
+not the `reviewer` orchestrator.
 **Deduplicate** findings at the same `file:line` that make the same point. Keep one
 entry and list **every contributing perspective** in its label — `[Architecture / Concurrency / Security]`.
 Never drop one silently. Then **number** this step's findings continuously, 1..n,
-across all five perspectives — the same reason `reviewer.md` §4 numbers its report:
+across all six perspectives — the same reason `reviewer.md` §4 numbers its report:
 so a follow-up can name a finding by number.
-If any of the five specialists fails to run, say so in the closing summary as
+If any of the six specialists fails to run, say so in the closing summary as
 `unchecked`, the same way Step 3 reports a blocked gate — by this point every item
 has already committed itself independently in Step 5, so a plain `git diff` against
 a clean working tree would show nothing. There is no aggregate commit message to

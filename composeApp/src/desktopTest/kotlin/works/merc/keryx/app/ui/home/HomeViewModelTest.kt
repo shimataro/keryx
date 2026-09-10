@@ -1840,6 +1840,62 @@ class HomeViewModelTest {
         assertEquals(true, vm.pendingSearchFocus.value)
     }
 
+    /**
+     * The arrow-key counterpart of the sidebar's own "Search" row: landing on it via keyboard
+     * navigation (`HomeScreen.moveFeedSelection` -> `selectFeedListRow`) must still snapshot the
+     * filter/row to restore later, exactly like a tap through [enterSearchScope] — the gap this
+     * regression-guards was that a plain `selectFilter(ArticleFilter.Search)` (the old behavior)
+     * switched the filter with no snapshot at all, leaving a later back action with nothing to
+     * restore.
+     */
+    @Test
+    fun selectFeedListRowOnTheSearchRowSnapshotsTheEntryButDoesNotRequestFocus() = runTest {
+        db.insertFeed("f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+
+        vm.selectFeedListRow(FeedListRowSelection.Search, HomePane.FeedList)
+
+        assertEquals(ArticleFilter.Search, vm.filter.value)
+        // Deliberately does not request focus — see selectFeedListRow's own KDoc: focusing the
+        // field here would swallow the very next ↓ into the result list, making every row below
+        // Search unreachable by keyboard.
+        assertEquals(false, vm.pendingSearchFocus.value)
+        assertEquals(HomePane.FeedList, vm.exitSearchScope())
+        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
+    }
+
+    @Test
+    fun selectFeedListRowOnAnOrdinaryRowBehavesExactlyLikeSelectFilter() = runTest {
+        db.insertFeed("f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+
+        vm.selectFeedListRow(FeedListRowSelection.FeedInFolderGroup("f1"), HomePane.FeedList)
+
+        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
+        assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), vm.selectedRowInstance.value)
+        assertEquals(false, vm.pendingSearchFocus.value)
+        assertEquals(null, vm.exitSearchScope())
+    }
+
+    @Test
+    fun selectFeedListRowAwayFromSearchDropsAPreviouslyCapturedSnapshot() = runTest {
+        db.insertFeed("f1")
+        db.insertFeed("f2")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        vm.selectFeedListRow(FeedListRowSelection.Search, HomePane.FeedList)
+
+        // Same "leaving Search by any other means drops the snapshot" rule selectFilter already
+        // enforces for a tap-driven exit (see leavingSearchByAnyOtherMeansDropsTheSnapshot).
+        vm.selectFeedListRow(FeedListRowSelection.FeedInFolderGroup("f2"), HomePane.FeedList)
+
+        assertEquals(null, vm.exitSearchScope())
+    }
+
     @Test
     fun exitSearchScopeRestoresTheFilterAndRowInstanceAndReturnsTheEntryPane() = runTest {
         db.insertFeed("f1")

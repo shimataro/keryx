@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 
 /**
@@ -26,12 +27,40 @@ internal actual fun Modifier.listRowSurface(
     extraBottomMargin: Dp,
 ): Modifier = this
     .padding(
-        start = LIST_ROW_HORIZONTAL_MARGIN,
-        end = LIST_ROW_HORIZONTAL_MARGIN,
+        start = listRowHorizontalMargin(),
+        end = listRowHorizontalMargin(),
         top = LIST_ROW_VERTICAL_MARGIN,
         bottom = LIST_ROW_VERTICAL_MARGIN + extraBottomMargin,
     )
-    .clip(MaterialTheme.shapes.small)
+    .clip(listRowShape(kind))
     .background(background)
     .then(decoration)
     .let { if (interactionSource != null) it.indication(interactionSource, LocalIndication.current) else it }
+
+/**
+ * Desktop clips every list row the same way — see [ListRowKind]'s own KDoc for why [kind] carries
+ * no meaning here.
+ */
+@Composable
+internal actual fun listRowShape(kind: ListRowKind): Shape = MaterialTheme.shapes.small
+
+/**
+ * Desktop's selection palette: full-strength `primary` (with `onPrimary` content) in the focused
+ * pane, dimmed to [UNFOCUSED_SELECTION_ALPHA] elsewhere via [PaneFocusIndication.Dim] — dim enough
+ * that each element's own default text/icon color still reads against it, which is why
+ * `HomeCommon.kt`'s non-focused content resolution leaves no override for [PaneFocusIndication.Dim]
+ * (`selectedContent` stays `null` there). Desktop represents pane focus entirely through this
+ * dimming, not a separate outline (see [PaneFocusIndication.Dim]'s own KDoc).
+ */
+@Composable
+internal actual fun rowSelectionColors(): RowSelectionColors = RowSelectionColors(
+    selectedBackground = MaterialTheme.colorScheme.primary,
+    selectedContent = MaterialTheme.colorScheme.onPrimary,
+    paneFocus = PaneFocusIndication.Dim(UNFOCUSED_SELECTION_ALPHA),
+)
+
+/**
+ * Alpha of a selected row whose pane does not hold logical focus — desktop-only, since the
+ * focused/unfocused axis itself is (see [PaneFocusIndication.Dim]).
+ */
+private const val UNFOCUSED_SELECTION_ALPHA = 0.4f

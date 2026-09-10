@@ -220,7 +220,12 @@ internal fun ArticleRow(
                 },
                 onOpen = onClick,
             )
-            .listRowSurface(selectionBackground(selected, focused), ListRowKind.ListItem, interactionSource)
+            .listRowSurface(
+                selectionBackground(selected, focused),
+                ListRowKind.ListItem,
+                interactionSource,
+                decoration = listRowOutline(ListRowKind.ListItem, selected, focused),
+            )
             .heightIn(min = listRowMinHeight())
             .padding(horizontal = 8.dp, vertical = 10.dp)
             .heightIn(min = rowHeight),

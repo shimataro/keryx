@@ -96,4 +96,44 @@ class ExpandCollapseChevronTest {
 
         assertEquals("展開する", action?.label)
     }
+
+    // --- expandChevronSlotSize / feedRowIndent (pure functions, no composition needed) ---
+
+    @Test
+    fun expandChevronSlotSizeIs20dpWhenNotTouchPrimary() {
+        assertEquals(20.dp, expandChevronSlotSize(isTouchPrimary = false))
+    }
+
+    @Test
+    fun expandChevronSlotSizeIs48dpWhenTouchPrimary() {
+        assertEquals(48.dp, expandChevronSlotSize(isTouchPrimary = true))
+    }
+
+    /** Pinned for backward compatibility with the pre-existing fixed `FEED_ROW_INDENT` value. */
+    @Test
+    fun feedRowIndentIs36dpWhenNotTouchPrimary() {
+        assertEquals(36.dp, feedRowIndent(isTouchPrimary = false))
+    }
+
+    @Test
+    fun feedRowIndentIs64dpWhenTouchPrimary() {
+        assertEquals(64.dp, feedRowIndent(isTouchPrimary = true))
+    }
+
+    /**
+     * Asserts the relationship itself, not just the two pinned values above, so a change to
+     * [expandChevronSlotSize] can't silently desync from [feedRowIndent] without a test noticing —
+     * see `feedRowIndent`'s own KDoc for why the indent is derived from the chevron slot rather than
+     * kept as an independent constant.
+     */
+    @Test
+    fun feedRowIndentIsAlwaysTheChevronSlotSizePlus16dp() {
+        for (isTouchPrimary in listOf(false, true)) {
+            assertEquals(
+                expandChevronSlotSize(isTouchPrimary) + 16.dp,
+                feedRowIndent(isTouchPrimary),
+                "feedRowIndent(isTouchPrimary=$isTouchPrimary) must track expandChevronSlotSize",
+            )
+        }
+    }
 }

@@ -61,6 +61,21 @@ reviews:
         native-feel components, dialog/popup conventions) should follow the ui-guidelines skill
         at .claude/skills/ui-guidelines/SKILL.md.
 
+    - path: "composeApp/src/**/ui/home/**"
+      instructions: &state_consistency_note >
+        What is rendered, selected, and focused must stay derivable from the one place that owns
+        it. HomePaneLayout.kt's keyboardPaneFor / visiblePanes / feedListIsDrawer / homeBackAction
+        are the single source of truth for which pane the keyboard targets, which panes are on
+        screen, and what back does — flag a call site that re-derives any of them inline from
+        focusedPane + drawerState.isOpen, or that hardcodes focused = false. A row the keyboard can
+        select must be a row that is actually rendered (buildOrderedFeedListRows' includeSearchRow
+        vs what FeedListPane draws). Selection / filter / scroll state that must survive a narrow
+        layout's pane remount belongs in rememberSaveable, not remember. Flag an early return in a
+        selection setter that skips resetting the browsing context, and any value restored from
+        local_settings.json without validating that its target still exists.
+    - path: "composeApp/src/**/ui/**/*ViewModel.kt"
+      instructions: *state_consistency_note
+
     - path: "composeApp/src/**/*.kt"
       instructions: >
         Comments, KDoc, log/exception messages, and non-UI string literals must be written in

@@ -418,6 +418,48 @@ on a device or emulator:
 - Inside the drawer: drag-and-drop reordering (including auto-scroll), the long-press context menu,
   inline rename (IME), and the currently selected feed/folder/tag staying highlighted while the
   drawer is open.
+- At `PaneLayout.Triple` (tablet landscape), select a feed and then an article: the feed-list row's
+  selection highlight must stay the same `secondaryContainer` strength it started at, not dim the
+  instant the article list gains focus (`rowSelectionColors()`'s `ListRowChrome.android.kt` `actual`
+  deliberately drops the desktop pane-focus dimming — Android's selection color never changes with
+  focus). Confirm in both light and dark theme.
+- With a hardware keyboard attached (an emulator's Extended Controls, or a Bluetooth keyboard on a
+  real tablet): pressing an arrow key latches `LocalKeyboardEngaged` and shows a `secondary`
+  keyboard-focus ring (`listRowOutline`, `HomeCommon.kt`) around the selected row in whichever pane
+  holds keyboard focus — the *background* color stays the same either way (see the bullet above).
+  Confirm at `PaneLayout.Triple` (the ring moves between the feed-list and article-list panes as
+  arrow-key focus moves) and inside the drawer at a narrower layout (↑/↓ move the feed selection
+  without closing the drawer; → closes it). With no keyboard ever attached (touch only), no ring
+  should ever appear.
+- Rotate a narrow layout into `PaneLayout.Triple` while the drawer is open: the feed-list pane and
+  the article-list pane must not both show a keyboard-focus ring at once. At `PaneLayout.Dual`,
+  open the drawer via the hamburger button (not by rotation) and confirm the same thing — this is
+  the case `keyboardPaneFor` (`HomePaneLayout.kt`) exists to make structurally impossible: only the
+  drawer's `FeedListPane` should ever show the ring while it's open, never the article list beside
+  it too.
+- Dual: tap an article row, then press ↑/↓ with a hardware keyboard — the selection must keep
+  moving from the tapped article, not stop dead. (Regression check for a bug where selecting an
+  article at `PaneLayout.Dual` silently advanced `focusedPane` to `HomePane.ArticleDetail`, even
+  though the reader has no on-screen change to show for it there — see `ArticleListPane`'s own
+  `onSelectionAdvance` KDoc.)
+- Triple: focus the sidebar search field (tap it, or the "Search" row), then tap an article row or
+  a feed row. The field must lose focus (its border color reverts, the soft keyboard — if it was
+  showing — dismisses), and a following ↑/↓ must move the tapped pane's selection on the **first**
+  press, not the second. (Regression check for a bug where a tap left the field holding real
+  Compose focus, and the first arrow-key press was silently absorbed reassigning that focus rather
+  than moving any selection.)
+- Triple: tap "All Feeds", then press ↓ twice with a hardware keyboard — selection must land on
+  "Starred", and "All Feeds" must show no lingering gray background afterward. (Regression check
+  for the same bug above: the stray background was Android's own M3 ripple painting its
+  focus-state layer on a row that had picked up real Compose focus — `ListRowChrome.kt`'s
+  `listRowClickable` now disables that with `Modifier.focusProperties { canFocus = false }`, so no
+  row can take real focus at all any more.)
+- At `PaneLayout.Triple` (tablet landscape), select a feed and then an article: the feed-list
+  row's selection highlight and the article-list row's must be the **same large-rounded-rectangle
+  shape** (`listRowShape`'s `LocalFeedListInDrawer`-gated branch) — not the feed-list one a pill.
+  Confirm the drop-target border and keyboard-focus ring on a feed/folder row trace that same
+  rounded-rectangle shape too. Then rotate the device to a narrower width so the feed list becomes
+  the drawer: opening it must show the **same feed row back as a pill**.
 - The drawer's header shows "Keryx" and its footer shows a "Settings" row that opens Settings; with
   many feeds, the footer stays fixed and does not scroll away.
 - Edge-to-edge: the scrim reaches the status/navigation bars; no pane's top bar or list bottom is

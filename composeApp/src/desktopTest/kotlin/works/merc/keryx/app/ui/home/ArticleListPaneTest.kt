@@ -694,7 +694,7 @@ class ArticleListPaneTest {
             val vm = fixture.vm
             var depth by mutableStateOf(2)
             setContent {
-                NarrowPaneRow(visiblePanes(PaneLayout.Single, depth), Modifier.size(360.dp, 400.dp)) { pane, paneModifier ->
+                NarrowPaneRow(visiblePanes(PaneLayout.Single, depth), 360.dp, Modifier.size(360.dp, 400.dp)) { pane, paneModifier ->
                     when (pane) {
                         HomePane.ArticleList -> ArticleListPane(
                             vm = vm,

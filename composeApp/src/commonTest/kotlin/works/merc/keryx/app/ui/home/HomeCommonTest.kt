@@ -73,6 +73,30 @@ class HomeCommonTest {
     }
 
     @Test
+    fun buildOrderedFeedListRowsOmitsTheSearchRowWhenNotIncluded() {
+        // At a narrow PaneLayout, FeedListPane renders no "Search" row at all (it's a drawer, not
+        // a screen search results could live on) — the keyboard-navigable order must match that,
+        // or an arrow key could select a row that isn't actually on screen.
+        val tags = listOf(tag("t1"))
+        val feeds = listOf(feed("f1"))
+
+        val ordered = buildOrderedFeedListRows(
+            tags, emptyList(), feeds, emptySet(), emptySet(), emptyMap(),
+            includeSearchRow = false,
+        )
+
+        assertEquals(
+            listOf(
+                FeedListRowSelection.All,
+                FeedListRowSelection.Starred,
+                FeedListRowSelection.FeedInFolderGroup("f1"),
+                FeedListRowSelection.Tag("t1"),
+            ),
+            ordered,
+        )
+    }
+
+    @Test
     fun buildOrderedFeedListRowsPutsFolderGroupsBeforeUnassignedFeedsAndTags() {
         val tags = listOf(tag("t1"))
         val folders = listOf(folder("d1"))
@@ -355,23 +379,6 @@ class HomeCommonTest {
             FeedListRowSelection.Starred,
             nextFeedListRow(FeedListRowSelection.FeedInFolderGroup("gone"), ordered, 1),
         )
-    }
-
-    @Test
-    fun feedListActionAllowedIsTrueOnlyForFeedListPane() {
-        assertEquals(true, feedListActionAllowed(HomePane.FeedList))
-        assertEquals(false, feedListActionAllowed(HomePane.ArticleList))
-        assertEquals(false, feedListActionAllowed(HomePane.ArticleDetail))
-    }
-
-    @Test
-    fun feedListActionAllowedIsTrueWhenTheDrawerIsOpenRegardlessOfPane() {
-        // At a narrow layout, focusedPane is never HomePane.FeedList (the feed list is a drawer,
-        // not a pane there — see feedListIsDrawer), so drawerOpen is what stands in for "the feed
-        // list is what has the user's attention" instead.
-        assertEquals(true, feedListActionAllowed(HomePane.ArticleList, drawerOpen = true))
-        assertEquals(true, feedListActionAllowed(HomePane.ArticleDetail, drawerOpen = true))
-        assertEquals(false, feedListActionAllowed(HomePane.ArticleList, drawerOpen = false))
     }
 
     @Test

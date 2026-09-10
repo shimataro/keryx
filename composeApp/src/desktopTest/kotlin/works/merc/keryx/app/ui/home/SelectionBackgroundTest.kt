@@ -231,4 +231,339 @@ class SelectionBackgroundTest {
         }
         assertEquals(primary, actual)
     }
+
+    // --- explicit RowSelectionColors injection (platform-independent branch logic) ---
+
+    // Distinct from desktop's own real palette values so a test asserting against this fixture
+    // cannot pass by accident against the real desktop `actual`.
+    private val ANDROID_LIKE_BACKGROUND = Color(0xFF112233)
+    private val ANDROID_LIKE_CONTENT = Color(0xFF445566)
+    private val ANDROID_LIKE_FOCUS_RING = Color(0xFF778899)
+
+    /**
+     * An arbitrary [RowSelectionColors] shaped like Android's `actual` (see
+     * `ListRowChrome.android.kt`'s `rowSelectionColors()`): [PaneFocusIndication.Ring] means the
+     * background/content pair a row paints is the *same* regardless of pane focus (M3's
+     * `NavigationDrawerItem` itself doesn't recolor on focus) — pane focus is instead carried by
+     * the ring's own color.
+     */
+    private val androidLikeColors = RowSelectionColors(
+        selectedBackground = ANDROID_LIKE_BACKGROUND,
+        selectedContent = ANDROID_LIKE_CONTENT,
+        paneFocus = PaneFocusIndication.Ring(ANDROID_LIKE_FOCUS_RING),
+    )
+
+    private fun colorFor(selected: Boolean, focused: Boolean, colors: RowSelectionColors): Color {
+        var actual = Color.Unspecified
+        runDesktopComposeUiTest {
+            setContent { actual = selectionBackground(selected, focused, colors) }
+        }
+        return actual
+    }
+
+    private fun contentColorFor(selected: Boolean, focused: Boolean, colors: RowSelectionColors): Color? {
+        var actual: Color? = Color.Unspecified
+        runDesktopComposeUiTest {
+            setContent { actual = selectionContentColorOrNull(selected, focused, colors) }
+        }
+        return actual
+    }
+
+    private fun colorFor(tone: RowSelectionTone, focused: Boolean, colors: RowSelectionColors): Color {
+        var actual = Color.Unspecified
+        runDesktopComposeUiTest {
+            setContent { actual = selectionBackground(tone, focused, colors) }
+        }
+        return actual
+    }
+
+    private fun contentColorFor(tone: RowSelectionTone, focused: Boolean, colors: RowSelectionColors): Color? {
+        var actual: Color? = Color.Unspecified
+        runDesktopComposeUiTest {
+            setContent { actual = selectionContentColorOrNull(tone, focused, colors) }
+        }
+        return actual
+    }
+
+    @Test
+    fun explicitColorsBooleanOverloadPicksFocusedBackgroundWhenFocused() {
+        assertEquals(
+            ANDROID_LIKE_BACKGROUND,
+            colorFor(selected = true, focused = true, colors = androidLikeColors),
+        )
+    }
+
+    @Test
+    fun explicitColorsBooleanOverloadPicksUnfocusedBackgroundWhenSelectedButNotFocused() {
+        assertEquals(
+            ANDROID_LIKE_BACKGROUND,
+            colorFor(selected = true, focused = false, colors = androidLikeColors),
+        )
+    }
+
+    @Test
+    fun explicitColorsBooleanOverloadIsTransparentWhenNotSelectedRegardlessOfFocus() {
+        assertEquals(Color.Transparent, colorFor(selected = false, focused = true, colors = androidLikeColors))
+        assertEquals(Color.Transparent, colorFor(selected = false, focused = false, colors = androidLikeColors))
+    }
+
+    @Test
+    fun explicitColorsBooleanContentColorMatchesFocusedAndUnfocusedContentRespectively() {
+        assertEquals(
+            ANDROID_LIKE_CONTENT,
+            contentColorFor(selected = true, focused = true, colors = androidLikeColors),
+        )
+        assertEquals(
+            ANDROID_LIKE_CONTENT,
+            contentColorFor(selected = true, focused = false, colors = androidLikeColors),
+        )
+    }
+
+    @Test
+    fun explicitColorsBooleanContentColorIsNullWhenNotSelected() {
+        assertNull(contentColorFor(selected = false, focused = true, colors = androidLikeColors))
+    }
+
+    /**
+     * The behavior that makes Android's selection look "the same either way": a palette whose
+     * [RowSelectionColors.paneFocus] is [PaneFocusIndication.Ring] must produce identical
+     * background/content results with `focused` true or false — i.e. a platform that shows pane
+     * focus as an outline rather than a color change genuinely can't tell the two apart in the
+     * background/content it paints. Desktop's own palette ([PaneFocusIndication.Dim]) would fail
+     * this same assertion, which is exactly the point: this is Android's behavior, verified without
+     * depending on Android's `actual` ever running in this (desktop) test target.
+     */
+    @Test
+    fun aColorsInstanceWithEqualFocusedAndUnfocusedValuesLooksIdenticalRegardlessOfFocus() {
+        val focusedBg = colorFor(selected = true, focused = true, colors = androidLikeColors)
+        val unfocusedBg = colorFor(selected = true, focused = false, colors = androidLikeColors)
+        assertEquals(focusedBg, unfocusedBg)
+
+        val focusedContent = contentColorFor(selected = true, focused = true, colors = androidLikeColors)
+        val unfocusedContent = contentColorFor(selected = true, focused = false, colors = androidLikeColors)
+        assertEquals(focusedContent, unfocusedContent)
+    }
+
+    @Test
+    fun explicitColorsToneOverloadPicksEchoBackgroundForSecondaryTone() {
+        assertEquals(
+            ANDROID_LIKE_BACKGROUND.copy(alpha = SECONDARY_SELECTION_ALPHA),
+            colorFor(RowSelectionTone.SECONDARY, focused = true, colors = androidLikeColors),
+        )
+        assertEquals(
+            ANDROID_LIKE_BACKGROUND.copy(alpha = SECONDARY_SELECTION_ALPHA),
+            colorFor(RowSelectionTone.SECONDARY, focused = false, colors = androidLikeColors),
+        )
+    }
+
+    @Test
+    fun explicitColorsToneOverloadIsTransparentForNoneTone() {
+        assertEquals(Color.Transparent, colorFor(RowSelectionTone.NONE, focused = true, colors = androidLikeColors))
+        assertEquals(Color.Transparent, colorFor(RowSelectionTone.NONE, focused = false, colors = androidLikeColors))
+    }
+
+    @Test
+    fun explicitColorsToneOverloadPicksFocusedOrUnfocusedBackgroundForPrimaryTone() {
+        assertEquals(
+            ANDROID_LIKE_BACKGROUND,
+            colorFor(RowSelectionTone.PRIMARY, focused = true, colors = androidLikeColors),
+        )
+        assertEquals(
+            ANDROID_LIKE_BACKGROUND,
+            colorFor(RowSelectionTone.PRIMARY, focused = false, colors = androidLikeColors),
+        )
+    }
+
+    /**
+     * Regression guard for the tone-aware content color resolving a non-`null` value for an
+     * unfocused [RowSelectionTone.PRIMARY] row on a [PaneFocusIndication.Ring] platform — desktop's
+     * own [PaneFocusIndication.Dim] resolves `null` there instead (see `nonFocusedSelectionContent`
+     * in `HomeCommon.kt`), which kept this behavior invisible until a palette like Android's did.
+     */
+    @Test
+    fun explicitColorsTonePrimaryContentColorUsesUnfocusedContentWhenNotFocused() {
+        assertEquals(
+            ANDROID_LIKE_CONTENT,
+            contentColorFor(RowSelectionTone.PRIMARY, focused = false, colors = androidLikeColors),
+        )
+    }
+
+    @Test
+    fun explicitColorsToneContentColorIsNullForNonPrimaryTones() {
+        assertNull(contentColorFor(RowSelectionTone.SECONDARY, focused = true, colors = androidLikeColors))
+        assertNull(contentColorFor(RowSelectionTone.NONE, focused = true, colors = androidLikeColors))
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun explicitColorsBooleanBackgroundIsTransparentWhenSelectionVisibilityIsSuppressedRegardlessOfColors() {
+        var actual = Color.Unspecified
+        runDesktopComposeUiTest {
+            setContent {
+                CompositionLocalProvider(LocalRowSelectionVisible provides false) {
+                    actual = selectionBackground(selected = true, focused = true, colors = androidLikeColors)
+                }
+            }
+        }
+        assertEquals(Color.Transparent, actual)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun explicitColorsBooleanContentColorIsNullWhenSelectionVisibilityIsSuppressedRegardlessOfColors() {
+        var actual: Color? = Color.Unspecified
+        runDesktopComposeUiTest {
+            setContent {
+                CompositionLocalProvider(LocalRowSelectionVisible provides false) {
+                    actual = selectionContentColorOrNull(selected = true, focused = true, colors = androidLikeColors)
+                }
+            }
+        }
+        assertNull(actual)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun explicitColorsToneBackgroundIsTransparentWhenSelectionVisibilityIsSuppressedRegardlessOfColors() {
+        var actual = Color.Unspecified
+        runDesktopComposeUiTest {
+            setContent {
+                CompositionLocalProvider(LocalRowSelectionVisible provides false) {
+                    actual = selectionBackground(RowSelectionTone.PRIMARY, focused = true, colors = androidLikeColors)
+                }
+            }
+        }
+        assertEquals(Color.Transparent, actual)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun explicitColorsToneContentColorIsNullWhenSelectionVisibilityIsSuppressedRegardlessOfColors() {
+        var actual: Color? = Color.Unspecified
+        runDesktopComposeUiTest {
+            setContent {
+                CompositionLocalProvider(LocalRowSelectionVisible provides false) {
+                    actual = selectionContentColorOrNull(RowSelectionTone.PRIMARY, focused = true, colors = androidLikeColors)
+                }
+            }
+        }
+        assertNull(actual)
+    }
+
+    // --- rowOutlineColorOrNull (listRowOutline's judgment half) ---
+
+    private fun outlineColorFor(
+        selected: Boolean,
+        focused: Boolean,
+        dropTargetColor: Color? = null,
+        colors: RowSelectionColors = androidLikeColors,
+        keyboardEngaged: Boolean = true,
+        selectionVisible: Boolean = true,
+    ): Color? {
+        var actual: Color? = Color.Unspecified
+        runDesktopComposeUiTest {
+            setContent {
+                CompositionLocalProvider(
+                    LocalKeyboardEngaged provides keyboardEngaged,
+                    LocalRowSelectionVisible provides selectionVisible,
+                ) {
+                    actual = rowOutlineColorOrNull(selected, focused, dropTargetColor, colors)
+                }
+            }
+        }
+        return actual
+    }
+
+    private fun outlineColorFor(
+        tone: RowSelectionTone,
+        focused: Boolean,
+        dropTargetColor: Color? = null,
+        colors: RowSelectionColors = androidLikeColors,
+        keyboardEngaged: Boolean = true,
+        selectionVisible: Boolean = true,
+    ): Color? {
+        var actual: Color? = Color.Unspecified
+        runDesktopComposeUiTest {
+            setContent {
+                CompositionLocalProvider(
+                    LocalKeyboardEngaged provides keyboardEngaged,
+                    LocalRowSelectionVisible provides selectionVisible,
+                ) {
+                    actual = rowOutlineColorOrNull(tone, focused, dropTargetColor, colors)
+                }
+            }
+        }
+        return actual
+    }
+
+    @Test
+    fun outlineBooleanOverloadShowsFocusRingWhenSelectedFocusedAndKeyboardEngaged() {
+        assertEquals(ANDROID_LIKE_FOCUS_RING, outlineColorFor(selected = true, focused = true))
+    }
+
+    @Test
+    fun outlineBooleanOverloadIsNullWhenSelectedButNotFocused() {
+        assertNull(outlineColorFor(selected = true, focused = false))
+    }
+
+    @Test
+    fun outlineBooleanOverloadIsNullWhenFocusedButNotSelected() {
+        assertNull(outlineColorFor(selected = false, focused = true))
+    }
+
+    @Test
+    fun outlineBooleanOverloadIsNullWhenKeyboardNotEngagedEvenIfSelectedAndFocused() {
+        // A touch-only session (no hardware key ever pressed) must never show a focus ring meant
+        // for keyboard navigation — see LocalKeyboardEngaged's own KDoc.
+        assertNull(outlineColorFor(selected = true, focused = true, keyboardEngaged = false))
+    }
+
+    @Test
+    fun outlineBooleanOverloadIsNullWhenSelectionVisibilityIsSuppressedEvenIfSelectedFocusedAndEngaged() {
+        assertNull(outlineColorFor(selected = true, focused = true, selectionVisible = false))
+    }
+
+    @Test
+    fun outlineBooleanOverloadIsNullWhenPaneFocusIsDimNotRing() {
+        // Desktop's own indication (PaneFocusIndication.Dim) — represents pane focus through
+        // background dimming instead, never a separate outline.
+        assertNull(outlineColorFor(selected = true, focused = true, colors = androidLikeColors.copy(paneFocus = PaneFocusIndication.Dim(0.4f))))
+    }
+
+    @Test
+    fun outlineBooleanOverloadDropTargetColorWinsOverFocusRing() {
+        val dropColor = Color(0xFFAABBCC)
+        assertEquals(dropColor, outlineColorFor(selected = true, focused = true, dropTargetColor = dropColor))
+    }
+
+    @Test
+    fun outlineBooleanOverloadDropTargetColorAppliesEvenWhenNotSelected() {
+        // A row can be a drop target without being the selected row at all (e.g. NoFolderHeader,
+        // which is never selectable) — the drop-target outline is independent of selection.
+        val dropColor = Color(0xFFAABBCC)
+        assertEquals(dropColor, outlineColorFor(selected = false, focused = false, dropTargetColor = dropColor))
+    }
+
+    @Test
+    fun outlineToneOverloadShowsFocusRingOnlyForPrimaryToneWhenFocusedAndEngaged() {
+        assertEquals(ANDROID_LIKE_FOCUS_RING, outlineColorFor(RowSelectionTone.PRIMARY, focused = true))
+        assertNull(outlineColorFor(RowSelectionTone.SECONDARY, focused = true))
+        assertNull(outlineColorFor(RowSelectionTone.NONE, focused = true))
+    }
+
+    @Test
+    fun outlineToneOverloadIsNullWhenPrimaryButNotFocused() {
+        assertNull(outlineColorFor(RowSelectionTone.PRIMARY, focused = false))
+    }
+
+    @Test
+    fun outlineToneOverloadIsNullWhenKeyboardNotEngagedEvenIfPrimaryAndFocused() {
+        assertNull(outlineColorFor(RowSelectionTone.PRIMARY, focused = true, keyboardEngaged = false))
+    }
+
+    @Test
+    fun outlineToneOverloadDropTargetColorWinsOverFocusRing() {
+        val dropColor = Color(0xFFAABBCC)
+        assertEquals(dropColor, outlineColorFor(RowSelectionTone.PRIMARY, focused = true, dropTargetColor = dropColor))
+    }
 }

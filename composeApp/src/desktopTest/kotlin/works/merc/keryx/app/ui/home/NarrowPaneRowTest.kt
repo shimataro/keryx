@@ -61,7 +61,7 @@ class NarrowPaneRowTest {
         paneState: SaveableStateHolder = rememberSaveableStateHolder(),
         onArticleListState: (LazyListState) -> Unit,
     ) {
-        NarrowPaneRow(visiblePanes(layout, depth), Modifier.size(360.dp, 400.dp), paneState) { pane, paneModifier ->
+        NarrowPaneRow(visiblePanes(layout, depth), 360.dp, Modifier.size(360.dp, 400.dp), paneState) { pane, paneModifier ->
             when (pane) {
                 HomePane.ArticleList -> StubListPane(paneModifier, onArticleListState)
                 else -> Box(paneModifier.fillMaxSize().testTag("pane-${pane.name}"))

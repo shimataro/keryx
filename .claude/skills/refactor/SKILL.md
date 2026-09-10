@@ -309,17 +309,20 @@ of every doc.
 ### Step 7 — Constraint review + closing summary
 
 Optionally review the accumulated diff (`git diff`) for constraint violations
-before finishing. Launch these four specialist agents **in parallel, in one
+before finishing. Launch these five specialist agents **in parallel, in one
 message** — not the `reviewer` orchestrator, whose dispatch table would also pull
 in perspectives a behavior-preserving refactor cannot affect:
 **`review-architecture`**, **`review-data-integrity`**, **`review-sync-merge`**,
-**`review-verification`**. Their responsibilities are mutually exclusive (see
-`.claude/etc/review/common.md`), so sorting the combined findings by severity is
-enough — no deduplication needed. Number the combined findings continuously,
-1..n, across all four perspectives, the same reason `reviewer.md` §4 numbers its
-report — so a follow-up can name a finding by number. If one of the four fails to
-run, report it as `unchecked` in the closing summary rather than silently
-omitting its row. Each batch already
+**`review-verification`**, **`review-state-consistency`** — the last because
+splitting a composable moves `remember`/`rememberSaveable` across a new function
+boundary, and an extracted helper can quietly re-derive a value
+`ui/home/HomePaneLayout.kt` already resolves. Their responsibilities are mutually
+exclusive (see `.claude/etc/review/common.md`), so sorting the combined findings
+by severity is enough — no deduplication needed. Number the combined findings
+continuously, 1..n, across all five perspectives, the same reason `reviewer.md`
+§4 numbers its report — so a follow-up can name a finding by number. If one of
+the five fails to run, report it as `unchecked` in the closing summary rather
+than silently omitting its row. Each batch already
 committed itself independently in Step 4, so there is no aggregate commit
 message to produce here — finish by outputting the closing summary (see
 `## How to report`).

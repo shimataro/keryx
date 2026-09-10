@@ -65,10 +65,10 @@ class FeedListInlineRenameTest {
         val dragOverlay = remember { FeedDragOverlayState() }
         var renameSelectedRequestId by remember { mutableStateOf(0) }
         var deleteSelectedRequestId by remember { mutableStateOf(0) }
-        var textInputFocused by remember { mutableStateOf(false) }
+        var textInput by remember { mutableStateOf<HomeTextInput?>(null) }
         Box(
             Modifier.testTag(ROOT_TEST_TAG).size(320.dp, 700.dp).focusable().homeKeyboardShortcuts(
-                textInputFocused = textInputFocused,
+                textInputFocused = textInput != null,
                 onEscape = { false },
                 onUp = {},
                 onDown = {},
@@ -87,7 +87,7 @@ class FeedListInlineRenameTest {
                 focused = true,
                 dragOverlay = dragOverlay,
                 onActivated = {},
-                onTextInputFocusChange = { textInputFocused = it },
+                onTextInputFocusChange = { textInput = it },
                 renameSelectedRequestId = renameSelectedRequestId,
                 deleteSelectedRequestId = deleteSelectedRequestId,
             )

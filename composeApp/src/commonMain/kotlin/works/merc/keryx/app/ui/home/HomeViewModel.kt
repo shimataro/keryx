@@ -430,11 +430,12 @@ class HomeViewModel(
      * to [ArticleFilter.Search], the same as any other filter change, so it has to be carried
      * forward here to come back at all.
      *
-     * Captured only on the *first* [enterSearchScope] call after leaving Search (a re-entry while
-     * already in Search — e.g. re-tapping the sidebar's own "Search" row — must not overwrite it
-     * with Search-scope state). Cleared by [selectFilter] whenever the user leaves Search by any
-     * other means (e.g. tapping an unrelated feed at [PaneLayout.Dual], where both panes are on
-     * screen at once), so a stale snapshot can never resurface a filter the user already moved past.
+     * Captured only on the *first* [captureSearchScopeEntry] call after leaving Search (a re-entry
+     * while already in Search — e.g. re-tapping the sidebar's own "Search" row, or arrow-navigating
+     * back onto its row — must not overwrite it with Search-scope state). Cleared by [selectFilter]
+     * whenever the user leaves Search by any other means (e.g. tapping an unrelated feed at
+     * [PaneLayout.Dual], where both panes are on screen at once), so a stale snapshot can never
+     * resurface a filter the user already moved past.
      */
     internal data class SearchScopeEntry(
         val returnPane: HomePane,
@@ -450,13 +451,16 @@ class HomeViewModel(
     internal val searchScopeEntry: StateFlow<SearchScopeEntry?> = _searchScopeEntry.asStateFlow()
 
     /**
-     * Enters the Search scope, snapshotting the current filter/row/browsing-context/[returnPane] so
-     * [exitSearchScope] can restore them later. [returnPane] is the pane a narrow-layout back action
-     * should focus on exit — the caller's own pane, since entering Search never advances the
-     * navigation stack past it (the field itself lives on [HomePane.ArticleList], see
-     * `ArticleListPane`'s `SearchListPane`).
+     * Snapshots the current filter/row/browsing-context under [returnPane] so [exitSearchScope] can
+     * restore them later — the shared half of [enterSearchScope] and [selectFeedListRow]'s own
+     * handling of the sidebar "Search" row, both of which switch into [ArticleFilter.Search].
+     *
+     * Must run before the caller's own [selectFilter] call: [selectFilter] clears `_filter`,
+     * `_selectedRowInstance`, the read/unstarred pins, `_selectedArticle`, and the selection cursor
+     * the instant it switches to a new filter, so snapshotting after it would capture the emptied
+     * post-Search state instead of the state to return to.
      */
-    fun enterSearchScope(returnPane: HomePane) {
+    private fun captureSearchScopeEntry(returnPane: HomePane) {
         if (_filter.value != ArticleFilter.Search) {
             _searchScopeEntry.value = SearchScopeEntry(
                 returnPane, _filter.value, _selectedRowInstance.value,
@@ -464,8 +468,42 @@ class HomeViewModel(
                 _selectedArticle.value, selectionCursorId,
             )
         }
+    }
+
+    /**
+     * Enters the Search scope, snapshotting the current filter/row/browsing-context/[returnPane] so
+     * [exitSearchScope] can restore them later. [returnPane] is the pane a narrow-layout back action
+     * should focus on exit — the caller's own pane, since entering Search never advances the
+     * navigation stack past it (the field itself lives on [HomePane.ArticleList], see
+     * `ArticleListPane`'s `SearchListPane`).
+     */
+    fun enterSearchScope(returnPane: HomePane) {
+        captureSearchScopeEntry(returnPane)
         selectFilter(ArticleFilter.Search)
         requestSearchFocus()
+    }
+
+    /**
+     * Moves the feed list's keyboard-navigated selection to [row] — the arrow-key counterpart of a
+     * row tap (`FeedListPane`'s `selectFilterFromRow`). Landing on the sidebar's own "Search" row
+     * ([FeedListRowSelection.Search]) still needs [captureSearchScopeEntry] so a later back action
+     * can restore the filter/row/browsing context this displaces — the same reason a tap on that
+     * row goes through [enterSearchScope] rather than a bare [selectFilter] — but deliberately does
+     * *not* also call [requestSearchFocus]: unlike a tap (an explicit "I want to search" action),
+     * arrow-navigating onto this row while walking the list is transient, and focusing the field
+     * would swallow the very next ↓ into the result list (a single-line field has no caret use for
+     * it — see `KeyboardNav.kt`'s own KDoc on that), making the rows below Search unreachable by
+     * keyboard. Reaching the field this way still works via the existing Cmd/Ctrl+F shortcut.
+     *
+     * [searchReturnPane] should always be [HomePane.FeedList] in practice: this is a
+     * [PaneLayout.Triple]-only path — arrow-key navigation over the feed list's own rows requires
+     * `FeedListPane` to be on screen as a pane, and its "Search" row exists only there in the first
+     * place (`FeedListPane`'s own `if (onSelectionAdvance == null)` guard) — the same reason its tap
+     * handler passes [HomePane.FeedList] to [enterSearchScope] for this row too.
+     */
+    fun selectFeedListRow(row: FeedListRowSelection, searchReturnPane: HomePane) {
+        if (row == FeedListRowSelection.Search) captureSearchScopeEntry(searchReturnPane)
+        selectFilter(row.filter, row)
     }
 
     /**

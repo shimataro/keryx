@@ -1,12 +1,12 @@
 package works.merc.keryx.app.ui.home
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
@@ -20,6 +20,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.datetime.TimeZone
@@ -67,6 +68,16 @@ internal val deleteNativeShortcut = NativeMenuShortcut(Key.Delete)
 internal val LocalRowSelectionVisible = staticCompositionLocalOf { true }
 
 /**
+ * Whether a hardware key has been pressed at least once this session — `HomeScreen` latches this
+ * `true` on the first `KeyDown` `homeKeyboardShortcuts` observes (see `KeyboardNav.kt`'s
+ * `onKeyboardEngaged`) and never resets it. Gates [listRowOutline]'s keyboard-focus ring: a
+ * touch-only session (a phone, or a tablet with no keyboard ever attached) should never show a
+ * focus indicator meant for someone navigating by keyboard, matching the web's own
+ * `:focus-visible` convention of only drawing a focus ring once keyboard interaction is evidenced.
+ */
+internal val LocalKeyboardEngaged = staticCompositionLocalOf { false }
+
+/**
  * The [SnackbarHostState] backing the `SnackbarHost` `HomeScreen` renders — inside a `Popup`, not
  * `Scaffold`'s own slot, so it draws above the article reader's native WebView (see that call
  * site's own comment). `null` on desktop, which per the `ui-guidelines` skill has no in-app
@@ -86,9 +97,14 @@ internal val LocalSnackbarHostState = staticCompositionLocalOf<SnackbarHostState
  * click-to-focus for the panes inside this one window, so a plain click anywhere in a pane's
  * empty background is this app's only way to move keyboard focus onto it.
  *
- * Dropped entirely on a touch-primary platform ([isTouchPrimary]): touch has no keyboard focus to
- * move in the first place, so keeping this modifier there would only add an unlabeled, full-size
- * accessibility click node sitting behind every other control in the pane.
+ * Dropped entirely on a touch-primary platform ([isTouchPrimary]): every interactive control a
+ * touch pane actually contains (a row, a button) already calls its own `onActivated` when tapped
+ * (see each pane's own call sites), so a *dedicated* empty-background click handler moves focus
+ * nothing else already moves — this is unrelated to whether keyboard focus itself exists on
+ * Android (it does; a physical keyboard can be attached to a tablet and arrow keys still move it —
+ * see `ListRowChrome.kt`'s `PaneFocusIndication.Ring`). Keeping this modifier there anyway
+ * would only add an unlabeled, full-size accessibility click node sitting behind every other
+ * control in the pane.
  *
  * @param isTouchPrimary Overridable for tests only (mirrors `feedListReorderDrag`'s own
  *   `isTouchPrimary` parameter) — production call sites always use the platform default from
@@ -105,15 +121,31 @@ internal fun Modifier.paneActivation(
 }
 
 /**
+ * The square [ExpandCollapseChevron] occupies: M3's 48dp touch target on a touch-primary platform,
+ * the bare 20dp icon everywhere else.
+ *
+ * Exposed as a function rather than left inline because it is also the horizontal step a row nested
+ * *under* a chevron-bearing row is indented past — see `feedRowIndent` in `FeedListDragAndDrop.kt`.
+ * Deriving that indent from this is what keeps the hierarchy from inverting when the touch density
+ * changes: a 36dp indent that reads as nesting beside a 20dp chevron reads as *outdenting* beside a
+ * 48dp one.
+ *
+ * @param isTouchPrimary Overridable for tests only (mirrors `feedListReorderDrag`'s own
+ *   `isTouchPrimary` parameter) — production call sites always use the platform default.
+ */
+internal fun expandChevronSlotSize(isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary): Dp =
+    if (isTouchPrimary) 48.dp else 20.dp
+
+/**
  * The expand/collapse chevron used by [TagRow] and `FolderGroupHeader` — a two-asset toggle
  * (never a single flipped/rotated asset, per the `ui-guidelines` skill's icon-set section) with an
  * `onClickLabel` for accessibility, since the icon's own `contentDescription` is `null` (the label
  * would otherwise be announced twice, once for the icon and once for the click action).
  *
- * On a touch-primary platform the click target grows to a 48dp box around the (still 20dp) icon —
- * unlike the tag color dot's own 8dp-margin-absorbing trick, there's no spare margin here to
- * absorb, so this relies on the row's own [listRowMinHeight] density pass to keep the row from
- * being forced taller than its neighbors just by this one control.
+ * On a touch-primary platform the click target grows to a [expandChevronSlotSize] box around the
+ * (still 20dp) icon — unlike the tag color dot's own 8dp-margin-absorbing trick, there's no spare
+ * margin here to absorb, so this relies on the row's own [listRowMinHeight] density pass to keep the
+ * row from being forced taller than its neighbors just by this one control.
  *
  * @param isTouchPrimary Overridable for tests only (mirrors `feedListReorderDrag`'s own
  *   `isTouchPrimary` parameter) — production call sites always use the platform default.
@@ -128,7 +160,7 @@ internal fun ExpandCollapseChevron(
     val icon = if (expanded) KeryxIcons.ExpandMore else KeryxIcons.ChevronRight
     if (isTouchPrimary) {
         Box(
-            Modifier.size(48.dp).clickable(onClickLabel = label, onClick = onToggle),
+            Modifier.size(expandChevronSlotSize(isTouchPrimary)).clickable(onClickLabel = label, onClick = onToggle),
             contentAlignment = Alignment.Center,
         ) {
             KeryxIcon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
@@ -143,43 +175,6 @@ internal fun ExpandCollapseChevron(
 }
 
 /**
- * Background for a selectable row: full-strength when its pane is focused, dimmed when the
- * item is selected but its pane isn't the logically-focused one, transparent otherwise. Matches
- * the "on" color of [works.merc.keryx.app.ui.common.ToggleChip]/`SegmentedControl` so selection
- * highlighting reads consistently across the app.
- *
- * Returns [Color.Transparent] whenever [LocalRowSelectionVisible] reads `false` — set by `HomeScreen`
- * at [PaneLayout.Single], where "selected" doesn't mean "on screen" the way it does at [PaneLayout.Dual]/
- * [PaneLayout.Triple]: tapping a row navigates away from it, so a lingering highlight on a row the
- * user can no longer see would read as stale rather than as "your place."
- */
-@Composable
-fun selectionBackground(selected: Boolean, focused: Boolean): Color = when {
-    !LocalRowSelectionVisible.current -> Color.Transparent
-    selected && focused -> MaterialTheme.colorScheme.primary
-    selected -> MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-    else -> Color.Transparent
-}
-
-/**
- * Content color to pair with an opaque [selectionBackground] (`selected && focused` only) — null
- * otherwise, so callers fall back to each element's normal color (the 0.4-alpha background still
- * has enough contrast with the default text/icon colors). Also `null` whenever
- * [LocalRowSelectionVisible] reads `false`, matching [selectionBackground] never painting an opaque
- * background there either.
- */
-@Composable
-fun selectionContentColorOrNull(selected: Boolean, focused: Boolean): Color? =
-    if (LocalRowSelectionVisible.current && selected && focused) MaterialTheme.colorScheme.onPrimary else null
-
-/**
- * Alpha of the [RowSelectionTone.SECONDARY] tint — deliberately well below the 0.4 alpha of an
- * unfocused [RowSelectionTone.PRIMARY] row, so a duplicate row of the selected feed reads as
- * "same feed, not the row you're on" rather than as a second selection.
- */
-internal const val SECONDARY_SELECTION_ALPHA = 0.15f
-
-/**
  * How strongly a feed-list row paints its selection. A feed renders once under its folder group and
  * again under every expanded tag it carries, so "selected" is not a single row: exactly one rendered
  * instance is the one actually clicked/keyboard-navigated to ([PRIMARY]), and every other instance of
@@ -188,32 +183,188 @@ internal const val SECONDARY_SELECTION_ALPHA = 0.15f
 enum class RowSelectionTone { NONE, SECONDARY, PRIMARY }
 
 /**
- * Background for a row that can render as more than one instance (see [RowSelectionTone]). [PRIMARY]
- * matches the boolean [selectionBackground] exactly, so a feed with no duplicates looks unchanged.
- * Gated on [LocalRowSelectionVisible] the same way the boolean overload is — see that overload's
- * own KDoc.
+ * Alpha of a [RowSelectionTone.SECONDARY] row's tint, applied to [RowSelectionColors.selectedBackground]
+ * by the tone-aware [selectionBackground] below — deliberately far below a [RowSelectionTone.PRIMARY]
+ * background, so a duplicate row of the selected feed reads as "same feed, not the row you're on"
+ * rather than as a second selection. The same fraction of the same base color on every platform,
+ * which is what makes this a shared constant rather than a per-platform [RowSelectionColors] field.
+ */
+internal const val SECONDARY_SELECTION_ALPHA = 0.15f
+
+/**
+ * A selected row's background in the pane that does *not* hold keyboard focus — [colors.selectedBackground]
+ * unchanged on a platform whose [PaneFocusIndication] is [PaneFocusIndication.Ring] (Android: the
+ * color itself never moves with pane focus, see that type's own KDoc), or dimmed to
+ * [PaneFocusIndication.Dim.alpha] on a platform whose indication is [PaneFocusIndication.Dim]
+ * (desktop: this dimming *is* how pane focus is shown, so it needs to actually differ from the
+ * focused color).
+ */
+private fun nonFocusedSelectionBackground(colors: RowSelectionColors): Color = when (val focus = colors.paneFocus) {
+    is PaneFocusIndication.Dim -> colors.selectedBackground.copy(alpha = focus.alpha)
+    is PaneFocusIndication.Ring -> colors.selectedBackground
+}
+
+/**
+ * A selected row's content color in the pane that does *not* hold keyboard focus — mirrors
+ * [nonFocusedSelectionBackground]'s own per-[PaneFocusIndication] split. `null` on [PaneFocusIndication.Dim]
+ * (desktop's dimmed background still has enough contrast with each element's own default color, so
+ * it sets none — see [RowSelectionColors.selectedContent]'s own KDoc), [colors.selectedContent]
+ * unchanged on [PaneFocusIndication.Ring] (Android: content color never moves with pane focus
+ * either).
+ */
+private fun nonFocusedSelectionContent(colors: RowSelectionColors): Color? = when (colors.paneFocus) {
+    is PaneFocusIndication.Dim -> null
+    is PaneFocusIndication.Ring -> colors.selectedContent
+}
+
+/**
+ * Background for a selectable row, taken from this platform's [RowSelectionColors]. Delegates to
+ * the [RowSelectionTone] overload below ([selected] is exactly [RowSelectionTone.PRIMARY] vs.
+ * [RowSelectionTone.NONE] — the two are mathematically equivalent for a row that never renders more
+ * than one instance of itself, e.g. every article row).
+ *
+ * @param colors Overridable for tests only — production call sites always use the platform default.
  */
 @Composable
-fun selectionBackground(tone: RowSelectionTone, focused: Boolean): Color = when {
+internal fun selectionBackground(
+    selected: Boolean,
+    focused: Boolean,
+    colors: RowSelectionColors = rowSelectionColors(),
+): Color = selectionBackground(if (selected) RowSelectionTone.PRIMARY else RowSelectionTone.NONE, focused, colors)
+
+/**
+ * Content color to pair with [selectionBackground] — see the [RowSelectionTone] overload below,
+ * which this delegates to the same way [selectionBackground] does.
+ *
+ * @param colors Overridable for tests only — production call sites always use the platform default.
+ */
+@Composable
+internal fun selectionContentColorOrNull(
+    selected: Boolean,
+    focused: Boolean,
+    colors: RowSelectionColors = rowSelectionColors(),
+): Color? = selectionContentColorOrNull(if (selected) RowSelectionTone.PRIMARY else RowSelectionTone.NONE, focused, colors)
+
+/**
+ * Background for a row that can render as more than one instance (see [RowSelectionTone]):
+ * [colors.selectedBackground] in the focused pane, [nonFocusedSelectionBackground] otherwise, for
+ * [RowSelectionTone.PRIMARY]; a faint [SECONDARY_SELECTION_ALPHA] tint of [colors.selectedBackground]
+ * for [RowSelectionTone.SECONDARY] regardless of focus (an echo of the selection, not a second one).
+ * Transparent whenever [LocalRowSelectionVisible] reads `false` — set by `HomeScreen` at
+ * [PaneLayout.Single], where "selected" doesn't mean "on screen" the way it does at
+ * [PaneLayout.Dual]/[PaneLayout.Triple]: tapping a row navigates away from it, so a lingering
+ * highlight on a row the user can no longer see would read as stale rather than as "your place."
+ *
+ * @param colors Overridable for tests only — production call sites always use the platform default.
+ */
+@Composable
+internal fun selectionBackground(
+    tone: RowSelectionTone,
+    focused: Boolean,
+    colors: RowSelectionColors = rowSelectionColors(),
+): Color = when {
     !LocalRowSelectionVisible.current -> Color.Transparent
-    tone == RowSelectionTone.PRIMARY ->
-        if (focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-    tone == RowSelectionTone.SECONDARY -> MaterialTheme.colorScheme.primary.copy(alpha = SECONDARY_SELECTION_ALPHA)
+    tone == RowSelectionTone.PRIMARY -> if (focused) colors.selectedBackground else nonFocusedSelectionBackground(colors)
+    tone == RowSelectionTone.SECONDARY -> colors.selectedBackground.copy(alpha = SECONDARY_SELECTION_ALPHA)
     else -> Color.Transparent
 }
 
 /**
- * Content color to pair with the tone-aware [selectionBackground] — only the opaque
- * `PRIMARY && focused` background needs one, exactly as in the boolean overload. Also gated on
- * [LocalRowSelectionVisible].
+ * Content color to pair with the tone-aware [selectionBackground] — only a
+ * [RowSelectionTone.PRIMARY] row takes one, exactly as in the boolean overload (a
+ * [RowSelectionTone.SECONDARY] echo is a faint tint that every element's default color still reads
+ * against). Also gated on [LocalRowSelectionVisible].
+ *
+ * @param colors Overridable for tests only — production call sites always use the platform default.
  */
 @Composable
-fun selectionContentColorOrNull(tone: RowSelectionTone, focused: Boolean): Color? =
-    if (LocalRowSelectionVisible.current && tone == RowSelectionTone.PRIMARY && focused) {
-        MaterialTheme.colorScheme.onPrimary
-    } else {
-        null
-    }
+internal fun selectionContentColorOrNull(
+    tone: RowSelectionTone,
+    focused: Boolean,
+    colors: RowSelectionColors = rowSelectionColors(),
+): Color? = when {
+    !LocalRowSelectionVisible.current || tone != RowSelectionTone.PRIMARY -> null
+    focused -> colors.selectedContent
+    else -> nonFocusedSelectionContent(colors)
+}
+
+/**
+ * The color a list row's outline decoration should paint, or `null` for no outline at all — the
+ * judgment half of [listRowOutline], kept separate from the `Modifier`-returning half so it can be
+ * unit-tested the same way [selectionContentColorOrNull] already is (a `Modifier`'s contents can't
+ * be inspected by a test the way a `Color?` can). Delegates to the [RowSelectionTone] overload below
+ * the same way [selectionBackground] does.
+ *
+ * @param colors Overridable for tests only — production call sites always use the platform default.
+ */
+@Composable
+internal fun rowOutlineColorOrNull(
+    selected: Boolean,
+    focused: Boolean,
+    dropTargetColor: Color? = null,
+    colors: RowSelectionColors = rowSelectionColors(),
+): Color? = rowOutlineColorOrNull(
+    if (selected) RowSelectionTone.PRIMARY else RowSelectionTone.NONE,
+    focused,
+    dropTargetColor,
+    colors,
+)
+
+/**
+ * Tone-aware [rowOutlineColorOrNull] — see [rowOutlineColorOrNull]'s boolean overload for the
+ * general contract. A non-null [dropTargetColor] always wins over the keyboard-focus ring below — a
+ * drop target is a transient, high-urgency signal, and a row can only paint one outline at a time.
+ * Otherwise, the ring shows only when **all** of these hold: [LocalRowSelectionVisible] is showing
+ * highlights at all, [LocalKeyboardEngaged] has latched (see its own KDoc), this platform's
+ * [PaneFocusIndication] is actually [PaneFocusIndication.Ring] (desktop's is [PaneFocusIndication.Dim]
+ * — its dimming already carries pane focus, see that type's own KDoc), [focused] is true (this
+ * row's pane holds keyboard focus), and [tone] is [RowSelectionTone.PRIMARY] — a row that is merely
+ * a [RowSelectionTone.SECONDARY] echo of the selected feed never gets a focus ring, only the one
+ * *actual* selected instance does.
+ *
+ * @param colors Overridable for tests only — production call sites always use the platform default.
+ */
+@Composable
+internal fun rowOutlineColorOrNull(
+    tone: RowSelectionTone,
+    focused: Boolean,
+    dropTargetColor: Color? = null,
+    colors: RowSelectionColors = rowSelectionColors(),
+): Color? = when {
+    dropTargetColor != null -> dropTargetColor
+    LocalRowSelectionVisible.current && LocalKeyboardEngaged.current && tone == RowSelectionTone.PRIMARY && focused ->
+        (colors.paneFocus as? PaneFocusIndication.Ring)?.color
+    else -> null
+}
+
+/**
+ * A list row's outline decoration — a drop-target border, or (absent one) a keyboard-focus ring
+ * around the row currently selected in the pane that holds keyboard focus. Traces [kind]'s own
+ * [listRowShape] so the outline always matches the shape the row is clipped to, whichever it is.
+ * See [rowOutlineColorOrNull] for the color it resolves.
+ */
+@Composable
+internal fun listRowOutline(
+    kind: ListRowKind,
+    selected: Boolean,
+    focused: Boolean,
+    dropTargetColor: Color? = null,
+    colors: RowSelectionColors = rowSelectionColors(),
+): Modifier = rowOutlineColorOrNull(selected, focused, dropTargetColor, colors)?.let {
+    Modifier.border(ROW_OUTLINE_WIDTH, it, listRowShape(kind))
+} ?: Modifier
+
+/** Tone-aware overload of [listRowOutline] — see [rowOutlineColorOrNull]'s own tone overload. */
+@Composable
+internal fun listRowOutline(
+    kind: ListRowKind,
+    tone: RowSelectionTone,
+    focused: Boolean,
+    dropTargetColor: Color? = null,
+    colors: RowSelectionColors = rowSelectionColors(),
+): Modifier = rowOutlineColorOrNull(tone, focused, dropTargetColor, colors)?.let {
+    Modifier.border(ROW_OUTLINE_WIDTH, it, listRowShape(kind))
+} ?: Modifier
 
 /**
  * One specific *rendered row instance* of the feed list, as opposed to [ArticleFilter], which only
@@ -353,6 +504,12 @@ fun articleListTitle(
  * @param collapsedFolderIds The IDs of folders whose feed rows are hidden.
  * @param expandedTagIds The IDs of tags whose attached feed rows are rendered.
  * @param feedTagMap Mapping of feed IDs to their attached tag IDs.
+ * @param includeSearchRow Whether [FeedListRowSelection.Search] belongs in the order — `false` at a
+ *   narrow `PaneLayout`, where the feed list is a modal drawer and `FeedListPane` renders no
+ *   "Search" row at all (its own `onSelectionAdvance != null` guard), so keyboard navigation must
+ *   not be able to select a row that isn't actually on screen. Defaults to `true` (every other
+ *   caller — chiefly the existing tests — cares about the rest of the order, not this row's
+ *   presence) since the only production call site (`HomeScreen`) is the one that needs `false`.
  * @return The rows in visual top-to-bottom order.
  */
 fun buildOrderedFeedListRows(
@@ -362,8 +519,13 @@ fun buildOrderedFeedListRows(
     collapsedFolderIds: Set<String>,
     expandedTagIds: Set<String>,
     feedTagMap: Map<String, Set<String>>,
+    includeSearchRow: Boolean = true,
 ): List<FeedListRowSelection> =
-    listOf(FeedListRowSelection.All, FeedListRowSelection.Starred, FeedListRowSelection.Search) +
+    listOfNotNull(
+        FeedListRowSelection.All,
+        FeedListRowSelection.Starred,
+        FeedListRowSelection.Search.takeIf { includeSearchRow },
+    ) +
         groupFeedsByFolder(feeds, folders).flatMap { (folder, feedsInFolder) ->
             if (folder == null) {
                 feedsInFolder.map { FeedListRowSelection.FeedInFolderGroup(it.id) }
@@ -427,21 +589,6 @@ internal fun reorderTargetWithinScope(orderedIds: List<String>, index: Int, delt
     // goes after it — i.e. before that row's own successor, or at the very end when there is none.
     return if (delta < 0) ReorderTarget(orderedIds[landsAt]) else ReorderTarget(orderedIds.getOrNull(landsAt + 1))
 }
-
-/**
- * Whether a keyboard shortcut that acts on the selected feed-list item (rename/edit,
- * unsubscribe/delete) should fire, given the currently focused [pane] and whether the feed-list
- * drawer is open ([drawerOpen] — `false` at [PaneLayout.Triple], where the feed list is a pane, not
- * a drawer, and [pane] alone already answers this). These mirror the feed/folder/tag row
- * context-menu items, so they only make sense while the feed list itself has the user's attention —
- * either [PaneLayout.Triple]'s own focused pane, or a narrow layout's open drawer, which is always
- * the topmost thing on screen while open regardless of [pane]. (Toggle read/star, open in browser,
- * copy URL, and refresh-selected-feed have no bare-key equivalent scoped this way — they are
- * Ctrl+Shift+<letter> app-menu accelerators instead, gated by
- * `MenuUiState.articleActionsEnabled`/`urlActionsEnabled`/`feedActionsEnabled`.)
- */
-fun feedListActionAllowed(pane: HomePane, drawerOpen: Boolean = false): Boolean =
-    pane == HomePane.FeedList || drawerOpen
 
 /** Whether the refresh-all / sync actions (toolbar buttons and app-menu items alike) are
  * available — each is blocked while the other operation is in flight, since running both at

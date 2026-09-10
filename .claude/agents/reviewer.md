@@ -49,6 +49,7 @@ Paths follow `.coderabbit.yaml`'s `path_instructions` conventions.
 | `**/domain/MergeSql.kt`, `**/domain/SyncRepository.kt`, `**/platform/DatabaseMerger*.kt`, `**/platform/DatabaseSnapshot*.kt`, `composeApp/src/**/data/cloud/**`, `**/Fts*.kt`, `**/CloudFileTransfer*.kt`, `**/Gzip*.kt` | sync-merge |
 | `composeApp/src/**/sqldelight/**/*.sq`, `**/*.sqm`, `**/domain/MergeSchema.kt`, `**/DatabaseDriverFactory*.kt` | data-integrity, sync-merge, verification, docs |
 | `composeApp/src/**/ui/**`, `composeApp/src/**/tray/**`, `composeApp/src/**/appmenu/**`, `**/platform/NativeMenu*.kt`, `**/composeResources/values*/strings.xml` | ui, docs |
+| `composeApp/src/**/ui/**`, `composeApp/src/**/*ViewModel.kt`, `**/data/local/LocalSettings.kt` | state-consistency |
 | a diff that adds or changes **user-visible text** — judged by content, not path: a new `Res.string.`, `getString(`, `stringResource(`, or a literal reaching a display path. `**/domain/NotificationMessages.kt` is the one outside `ui/` that gets missed | ui |
 | `composeApp/src/commonMain/**` gaining a platform API (`java.io`, `java.awt`, `java.sql`, `javax.swing`, Ktor CIO) | architecture |
 | `composeApp/src/**/platform/**` | architecture, concurrency, docs |
@@ -59,6 +60,10 @@ Paths follow `.coderabbit.yaml`'s `path_instructions` conventions.
 
 `docs` runs on code changes, not only doc changes: the commonest drift is code moving while
 `app-architecture.md` / `db-schema.md` / `sync-architecture.md` keep describing the old shape.
+
+`state-consistency` covers the whole of `ui/**` on purpose: the divergences it looks for live
+between a ViewModel and the composable that reads it, and a diff touching only one of the two is
+the common case. On a styling- or string-only diff it returns `Not applicable` in one line.
 
 **No row matches.** If a changed path matches no row above — most notably `.claude/**`, which owns
 no row here on purpose — treat it as unchecked, not as a clean pass.
