@@ -104,10 +104,11 @@ fun SetupScreen(onComplete: () -> Unit) {
             )
             Spacer(Modifier.height(24.dp))
 
+            val enabled = vm.phase != SetupPhase.CONNECTING
             OptionCard(
                 title = stringResource(Res.string.setup_local_only),
                 description = stringResource(Res.string.setup_local_desc),
-                enabled = vm.phase != SetupPhase.CONNECTING,
+                enabled = enabled,
                 onClick = { vm.chooseLocalOnly(onComplete) },
             )
             vm.availableCloudTypes.forEach { type ->
@@ -116,7 +117,7 @@ fun SetupScreen(onComplete: () -> Unit) {
                 OptionCard(
                     title = stringResource(option.title),
                     description = stringResource(option.description),
-                    enabled = vm.phase != SetupPhase.CONNECTING,
+                    enabled = enabled,
                     icon = option.icon,
                     onClick = { vm.connect(type, onComplete) },
                 )
