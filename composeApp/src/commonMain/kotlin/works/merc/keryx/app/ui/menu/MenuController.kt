@@ -7,9 +7,11 @@ import kotlinx.coroutines.flow.asSharedFlow
 import works.merc.keryx.app.ui.navigation.Screen
 
 /**
- * One-shot commands issued by the desktop application menu bar (see `AppMenuBar`) for actions whose
- * state lives inside a specific screen's composition (dialogs, navigation, focus) rather than in a
- * shared ViewModel. Collected by [works.merc.keryx.app.App], `HomeScreen`, and `FeedListPane`.
+ * One-shot commands for actions whose state lives inside a specific screen's composition
+ * (dialogs, navigation, focus) rather than in a shared ViewModel. Issued by the desktop
+ * application menu bar (see `AppMenuBar`) and, on Android — which has no menu bar — by in-app
+ * controls that reach the same actions directly (`GeneralTab`'s About row, `FeedListPane`'s
+ * Settings row). Collected by [works.merc.keryx.app.App], `HomeScreen`, and `FeedListPane`.
  */
 enum class MenuCommand {
     AddFeed,
@@ -37,7 +39,7 @@ enum class MenuCommand {
  *   accelerator (unlike `KeyboardNav.kt`) has no way to defer to a focused text field.
  * - [commands] carries one-shot menu clicks to whichever composable owns the target state.
  *
- * App-scoped Koin singleton (single-window desktop app).
+ * App-scoped Koin singleton.
  */
 class MenuController {
     val currentScreen = MutableStateFlow<Screen>(Screen.Setup)
