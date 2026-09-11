@@ -8,8 +8,9 @@ import works.merc.keryx.app.ui.home.isHttpOrHttpsUrl
 /**
  * Absolute href of every `<a>` tag in [html], resolved against [baseUri] (the article's own URL)
  * via [UrlResolver.resolve]. Used to tell a genuine outbound link click apart from a SNS-embed
- * widget's own internal requests when both report as a main-frame navigation (see plan doc
- * html-webview-os-wobbly-hammock.md). An absolute href resolves the same regardless of [baseUri];
+ * widget's own internal requests when both report as a main-frame navigation (see
+ * "Article Reader (native WebView)" in app-architecture.md). An absolute href resolves the same
+ * regardless of [baseUri];
  * a relative href is dropped when it can't be resolved (no usable [baseUri]) rather than kept raw,
  * since an unresolved relative string can never match the WebView's own absolutely-resolved
  * navigation request.

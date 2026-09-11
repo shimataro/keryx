@@ -337,8 +337,9 @@ fun HomeScreen() {
                                 HomePane.FeedList -> moveFeedSelection(-1)
                                 HomePane.ArticleList -> vm.selectPrevious()
                                 // The article body scrolls inside the native WebView itself now
-                                // (see plan doc html-webview-os-wobbly-hammock.md), so there's no
-                                // Compose ScrollState left here to drive with the keyboard.
+                                // (see "Article Reader (native WebView)" in app-architecture.md),
+                                // so there's no Compose ScrollState left here to drive with the
+                                // keyboard.
                                 HomePane.ArticleDetail -> {}
                             }
                         }
