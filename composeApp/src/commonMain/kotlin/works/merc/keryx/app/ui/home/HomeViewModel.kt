@@ -804,15 +804,15 @@ class HomeViewModel(
         // no unread articles left to pin at all.
         val selected = _selectedArticle.value
         val visibleUnread = if (marksSelectedRead) currentArticles().filter { it.is_read == 0L } else emptyList()
-        // Dispatched before the optimistic state below, not after — see reconcilePinnedArticlesAndSelection's
-        // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
-        // pass can never observe (and revert) this optimistic pin/selection using DB flags from
-        // before this write has landed.
         if (active && idsToMark.isEmpty()) {
             // Nothing in the current search results needs marking read; skip both the DB write and
             // the dependent search refresh.
             return
         }
+        // Dispatched before the optimistic state below, not after — see reconcilePinnedArticlesAndSelection's
+        // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
+        // pass can never observe (and revert) this optimistic pin/selection using DB flags from
+        // before this write has landed.
         viewModelScope.launch(dbWriteDispatcher) {
             if (active) {
                 articleRepository.markArticlesAsRead(idsToMark)
