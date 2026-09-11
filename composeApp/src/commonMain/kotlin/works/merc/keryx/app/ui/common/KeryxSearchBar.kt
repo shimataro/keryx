@@ -5,12 +5,12 @@ import androidx.compose.ui.Modifier
 
 /**
  * The search screen's own header at a narrow `PaneLayout`: a back arrow, an editable query field,
- * and a clear action, all on one bar. Lives above `ui/home/ArticleListPane.kt`'s `SearchListPane`
- * results list instead of a `KeryxPaneTopBar`, because `KeryxPaneTopBar`'s Android `actual` is a
- * real M3 `TopAppBar` with a fixed 64dp container height, while an input field's own minimum
- * height (56dp) grows past that once the user's font-size setting (`LocalSettings.fontSizeScale`,
- * up to 1.4×) is applied — clipping the field. This composable's own pill shape has no fixed
- * height to clip against.
+ * and a clear action, all on one bar. Lives above `ui/home/ArticleListPane.kt`'s article list
+ * instead of a `KeryxPaneTopBar`, because `KeryxPaneTopBar`'s Android `actual` is a real M3
+ * `TopAppBar` with a fixed 64dp container height, while an input field's own minimum height (56dp)
+ * grows past that once the user's font-size setting (`LocalSettings.fontSizeScale`, up to 1.4×)
+ * is applied — clipping the field. This composable's own pill shape has no fixed height to clip
+ * against.
  *
  * @param query The current, editable query text — bound straight to `HomeViewModel.searchQuery`,
  *   which stays the single source of truth even though the field now lives in two possible places
@@ -18,10 +18,9 @@ import androidx.compose.ui.Modifier
  * @param onQueryChange Reports every edit upstream to `HomeViewModel.setSearchQuery`.
  * @param placeholder Shown when [query] is empty.
  * @param onNavigateUp Called by the leading back arrow — resolves to `HomeScreen`'s own
- *   `ArticleListPane`'s `onExitSearch`, itself `HomeViewModel.exitSearchScope` followed by
- *   restoring the filter active before Search opened — see `ui/home/HomePaneLayout.kt`'s
- *   `homeBackAction` for why exiting Search is a distinct action from popping the navigation
- *   stack.
+ *   `ArticleListPane`'s `onExitSearch`, itself `vm.setSearchBarVisible(false)` (see
+ *   `ui/home/HomePaneLayout.kt`'s `homeBackAction` for why closing the search bar is a distinct
+ *   action from popping the navigation stack).
  * @param navigateUpEnabled Whether the back arrow can act right now. Exiting Search always changes
  *   what's on screen, so every real caller passes `true` unconditionally.
  * @param navigateUpContentDescription Accessibility label for the back arrow.
