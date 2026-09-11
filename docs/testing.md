@@ -354,7 +354,8 @@ snapshot to restore when it ends; these checks focus on that.
   article — `initialPaneFor`'s clamp. A saved `HomePane.FeedList` (left over from before the feed
   list became a drawer) also comes back as the article list now, not a screen of its own.
 - Tapping the article list's own search icon opens the bar with the keyboard already up and the
-  field focused. The feed list/drawer has no search entry point of its own at all.
+  field focused. The feed list/drawer has no search entry point of its own at a narrow layout — at
+  `PaneLayout.Triple`, `FeedListPane` has its own permanent field instead.
 - Typing 2+ characters shows results on the same screen, below the field — no pane change needed.
   Typing exactly 1 character shows the "enter at least 2 characters" hint rather than the
   underlying list or an empty-results message.
