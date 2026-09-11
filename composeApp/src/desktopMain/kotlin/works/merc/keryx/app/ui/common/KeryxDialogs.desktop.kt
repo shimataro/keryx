@@ -414,12 +414,11 @@ private fun DesktopModalWindow(
                 // will never correct it. Reading DialogState.size here turns each of those into an
                 // event, at any point in the dialog's life.
                 //
-                // The previous bounded, break-on-first-match re-assert loop could not: it stopped
-                // watching after one matching frame and nothing re-armed it, because the
-                // requiredWidthIn/requiredHeightIn below deliberately make the measured content
-                // size a function of content only, so capturedContentPx never changes again. That
-                // is why a late clobber stayed for the dialog's whole lifetime — the "tabs missing
-                // / tall empty dialog" report, which reproduced on 7 of 10 opens.
+                // This guard must stay armed for the dialog's whole lifetime, not just until the
+                // first matching frame: requiredWidthIn/requiredHeightIn below deliberately make the
+                // measured content size a function of content only, so capturedContentPx never
+                // changes again on its own — a bounded, break-on-first-match version would leave a
+                // late clobber uncorrected for the rest of the dialog's life.
                 //
                 // DialogState.size must be part of the emitted value, not merely read: snapshotFlow
                 // only emits when the emitted value differs, so a size-only change would re-run the
@@ -497,11 +496,9 @@ private fun DesktopModalWindow(
                     // larger than what content actually measures — without this, that surplus area
                     // would show Skia's default (light) clear color instead of the theme.
                     //
-                    // It paints the card's OWN color, not a distinct tone: a different tone (this
-                    // used to be surfaceContainerLow against a `surface` card — #141218 vs #1D1B20
-                    // in the M3 dark scheme) reads as a visible band around the card for as long as
-                    // the size takes to settle, which is precisely the window in which the surplus
-                    // exists at all.
+                    // It paints the card's OWN color, not a distinct tone: a different tone reads as a
+                    // visible band around the card for as long as the size takes to settle, which is
+                    // precisely the window in which the surplus exists at all.
                     Box(Modifier.fillMaxSize().background(resolvedContainerColor)) {
                         // TopCenter (not Center): any excess between the window's actual size and
                         // the measured content must only ever show up as extra space at the
@@ -534,19 +531,14 @@ private fun DesktopModalWindow(
                                 // clamps to the incoming max (see placeholderSize's KDoc). Bounded by
                                 // the window, that max is whatever size the native window happens to
                                 // report at measure time; a DialogWindow that has not yet reached its
-                                // requested size measures narrower. This used to be able to become
-                                // permanent: fitSize (above) fed that narrower measurement straight
-                                // back into the next requested window width, which then measured
-                                // narrower still — a self-amplifying shrink that reproduced on Linux as
-                                // a modeless dialog's window collapsing to ~1dp wide over the following
-                                // second (see fitWindowSize's doc and "Dialogs occasionally opened at
-                                // an unexpected size" in docs/known-issues.md). fitSize no longer reads
-                                // contentPx.width at all — the requested width is always initialWidth —
-                                // so that feedback path is gone regardless of what the window
-                                // momentarily reports here. This modifier still matters for a plainer
-                                // reason: without it, a transiently narrow window would visibly clip
-                                // the tab bar (a plain non-wrapping Row, ~530dp for the Japanese
-                                // labels) for however long that transient narrowness lasts.
+                                // requested size measures narrower (see fitWindowSize's doc and
+                                // "Dialogs occasionally opened at an unexpected size" in
+                                // docs/known-issues.md for how a narrower measurement can otherwise
+                                // feed back into the next requested width). This modifier still
+                                // matters here for a plainer reason: without it, a transiently narrow
+                                // window would visibly clip the tab bar (a plain non-wrapping Row,
+                                // ~530dp for the Japanese labels) for however long that transient
+                                // narrowness lasts.
                                 .requiredWidthIn(max = initialWidth),
                         ) {
                             content()
