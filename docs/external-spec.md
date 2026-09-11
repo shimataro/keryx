@@ -156,10 +156,12 @@ place the field can live without duplicating an editable copy of the same query.
 the field to sit directly above the results it filters, in the same header a hamburger button
 normally occupies, and it stays put there when the device is rotated between phone and tablet width.
 At every width, search narrows whatever subscription-list item is currently selected rather than
-being a separate destination of its own: the sidebar's own selection stays visible and highlighted
-throughout, showing plainly what the query is being matched against, and clearing the query (or, at
-a narrower width, backing out of the expanded field) simply returns to that same selection's own
-unfiltered list.
+being a separate destination of its own. At the 3-pane width this selection stays visible and
+highlighted in the sidebar throughout, showing plainly what the query is being matched against; at
+a narrower width the feed list is a drawer that is normally already closed by the time search is
+reached (through the article list's own header), so the selection isn't on screen while searching
+there. Either way, clearing the query (or, at a narrower width, backing out of the expanded field)
+simply returns to that same selection's own unfiltered list.
 
 Where a mouse and a touchscreen need different affordances, both are supported without changing
 the underlying action: reordering a feed or folder is a plain click-and-drag with a mouse, and a
