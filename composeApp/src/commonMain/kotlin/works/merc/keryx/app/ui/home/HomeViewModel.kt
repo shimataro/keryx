@@ -399,8 +399,8 @@ class HomeViewModel(
             val raw = snapshot.results
             // Apply only the optimistic read-state from pinned (never the whole snapshot): other
             // fields — notably is_starred — must come from the fresh re-search, or starring an
-            // already-read result would be hidden by the stale pinned copy. Mirrors how
-            // searchUnreadCount reads `pinned[id]?.is_read` field-wise.
+            // already-read result would be hidden by the stale pinned copy. Field-wise merge of
+            // `is_read` from `pinned`, matching the merge in this same flow above.
             val merged = raw.map { result ->
                 pinned[result.article.id]?.let { p ->
                     result.copy(article = result.article.copy(is_read = p.is_read))
