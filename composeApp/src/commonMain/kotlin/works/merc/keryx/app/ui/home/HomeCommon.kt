@@ -84,7 +84,7 @@ internal val LocalKeyboardEngaged = staticCompositionLocalOf { false }
  * `Scaffold`'s own slot, so it draws above the article reader's native WebView (see that call
  * site's own comment). `null` on desktop, which per the `ui-guidelines` skill has no in-app
  * snackbar convention (its previous transient toasts were replaced by inline expressions — see
- * that skill's Notification Center section). `null` is also the value in any preview/test
+ * that skill's "Native-feel restyle" section). `null` is also the value in any preview/test
  * composition that never provides one. A composable that wants to show a snackbar (e.g.
  * `ArticleDetailPane`'s URL-copied feedback) should treat a `null` value here as "do nothing"
  * rather than crash.
