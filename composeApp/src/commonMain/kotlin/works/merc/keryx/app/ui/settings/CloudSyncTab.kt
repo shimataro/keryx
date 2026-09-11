@@ -320,7 +320,7 @@ internal fun CloudProviderRow(
     onSelect: () -> Unit,
     onCancel: () -> Unit,
     onDisconnect: () -> Unit,
-    onResetCloudData: () -> Unit = {},
+    onResetCloudData: () -> Unit,
 ) {
     // The connected row gets a step-up accent (same secondaryContainer/onSecondaryContainer
     // tokens desktop's settings-dialog tab bar, KeryxDialogTabBar, uses for its selected tab) so
