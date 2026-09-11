@@ -45,8 +45,7 @@ internal fun TextPromptDialog(
     var text by remember { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
     val trimmed = text.trim()
-    val error = if (trimmed.isBlank()) null else blockingError(trimmed)
-    val canConfirm = trimmed.isNotBlank() && error == null
+    val (error, canConfirm) = inlineRenameValidation(text, allowBlank = false, blockingError)
     val message = error
 
     fun submit() {
