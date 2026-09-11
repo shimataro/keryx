@@ -29,32 +29,35 @@ private const val GCM_IV_LENGTH_BYTES = 12
  * per-provider naming and the "never share an instance across providers" rule in
  * [TokenStorage]'s KDoc.
  *
+ * The save/load/clear outcome policy itself (when a write earns [TokenSaveOutcome.SECURE], when a
+ * stale fallback copy must be cleared, when [clear] counts as [TokenClearOutcome.CLEARED]) lives
+ * in [SecretStoreTokenStorage] — this class supplies only the three Keystore-backed primitives.
+ *
  * `setUserAuthenticationRequired(false)`: background sync (the periodic `WorkManager` refresh)
  * must be able to decrypt tokens with the device locked, so the key cannot require a recent
  * biometric/PIN unlock the way a per-transaction secret normally would.
  *
  * A decryption failure (key invalidated by a factory reset of the Keystore, a device/OS restore
  * that cannot carry hardware-backed keys, or any other Keystore inconsistency) is **not**
- * surfaced as an exception: [load] treats it identically to "no tokens saved" and deletes the
- * unreadable file, so the app falls back to prompting the user to reconnect rather than crashing
- * or looping on a permanently-undecryptable file.
+ * surfaced as an exception: [loadSecret] treats it identically to "no secret stored" and deletes
+ * the unreadable file, so the app falls back to prompting the user to reconnect rather than
+ * crashing or looping on a permanently-undecryptable file.
  */
 class KeystoreTokenStorage(
-    private val fallback: TokenStorage,
+    fallback: TokenStorage,
     account: String,
     dirOverride: String? = null,
-    private val json: Json = Json { ignoreUnknownKeys = true },
-) : TokenStorage {
+    json: Json = Json { ignoreUnknownKeys = true },
+) : SecretStoreTokenStorage(fallback, json) {
 
     private val keyAlias = "keryx_token_$account"
     private val file = File(dirOverride ?: AndroidAppContext.application.filesDir.absolutePath, ".${account}_tokens.enc")
 
-    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
+    override fun storeSecret(payload: String): Boolean {
         val result = runCatching {
             val key = getOrCreateKey()
             val cipher = Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key) }
-            val plaintext = json.encodeToString(tokens).encodeToByteArray()
-            val ciphertext = cipher.doFinal(plaintext)
+            val ciphertext = cipher.doFinal(payload.encodeToByteArray())
             val iv = cipher.iv
             check(iv.size == GCM_IV_LENGTH_BYTES) { "Unexpected GCM IV length: ${iv.size}" }
             atomicWrite(iv + ciphertext)
@@ -62,42 +65,25 @@ class KeystoreTokenStorage(
         if (result.isFailure) {
             Log.warn(TOKEN_STORAGE_LOG_TAG, "Keystore token save failed, falling back to file storage", result.exceptionOrNull())
             // A previously-successful encrypted save may have left `file` holding now-stale
-            // tokens that are still perfectly decryptable. load() always prefers `file` when it
-            // exists and decrypts, so leaving it in place would silently keep serving those old,
-            // since-rotated tokens forever — even though fallback.save() below just wrote the
-            // fresh ones. File.delete() is not guaranteed to succeed on every Android storage
-            // backend, so invalidate the content atomically instead: an empty file is at or under
-            // GCM_IV_LENGTH_BYTES, which load() already treats as "truncated, discard" and cleans
-            // up on its own next read.
+            // tokens that are still perfectly decryptable. loadSecret() always prefers `file` when
+            // it exists and decrypts, so leaving it in place would silently keep serving those
+            // old, since-rotated tokens forever — even though the caller's fallback write is about
+            // to write the fresh ones. File.delete() is not guaranteed to succeed on every Android
+            // storage backend, so invalidate the content atomically instead: an empty file is at
+            // or under GCM_IV_LENGTH_BYTES, which loadSecret() already treats as "truncated,
+            // discard" and cleans up on its own next read.
             if (file.exists()) {
                 runCatching { atomicWrite(ByteArray(0)) }
                     .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Failed to invalidate stale encrypted token file", e) }
             }
-            // Report the fallback's own outcome: its write can fail too, and that leaves the
-            // tokens nowhere at all instead of in a plaintext file.
-            return fallback.save(tokens)
-        } else {
-            // A previous run may have written the plaintext fallback before Keystore became
-            // available again; clear it so a stale plaintext copy doesn't linger once encrypted
-            // storage is working, and report a copy that survived — it still hands out a readable
-            // (stale, but possibly still valid) refresh token, which is exactly what the caller's
-            // plaintext warning exists for.
-            //
-            // The answer comes from clear() itself rather than from a follow-up fallback.load():
-            // FileTokenStorage.load() reports a file whose JSON no longer decodes as "nothing
-            // stored", so a failed delete of a corrupt-but-readable file would have looked like a
-            // successful cleanup and claimed SECURE with the tokens still on disk.
-            return if (fallback.clear() == TokenClearOutcome.CLEARED) {
-                TokenSaveOutcome.SECURE
-            } else {
-                TokenSaveOutcome.PLAINTEXT_FILE
-            }
+            return false
         }
+        return true
     }
 
     // Write to a sibling temp file, then atomically replace the target — the same idiom
     // FileTokenStorage.save() uses. file.writeBytes() straight into the token file would
-    // truncate it first, so a process death mid-write left a truncated file that load()
+    // truncate it first, so a process death mid-write left a truncated file that loadSecret()
     // discards, forcing the user to reconnect.
     private fun atomicWrite(bytes: ByteArray) {
         file.parentFile?.mkdirs()
@@ -111,26 +97,25 @@ class KeystoreTokenStorage(
         }
     }
 
-    override fun load(): OAuthTokens? {
+    override fun loadSecret(): String? {
         val bytes = file.takeIf { it.exists() }?.let {
             runCatching { it.readBytes() }
                 .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Encrypted token file could not be read", e) }
                 .getOrNull()
-        }
-        if (bytes == null) return fallback.load()
+        } ?: return null
         if (bytes.size <= GCM_IV_LENGTH_BYTES) {
             Log.warn(TOKEN_STORAGE_LOG_TAG, "Encrypted token file is truncated, discarding")
             file.delete()
-            return fallback.load()
+            return null
         }
-        val decrypted = runCatching {
+        return runCatching {
             val key = getExistingKey() ?: return@runCatching null
             val iv = bytes.copyOfRange(0, GCM_IV_LENGTH_BYTES)
             val ciphertext = bytes.copyOfRange(GCM_IV_LENGTH_BYTES, bytes.size)
             val cipher = Cipher.getInstance(TRANSFORMATION).apply {
                 init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv))
             }
-            json.decodeFromString<OAuthTokens>(cipher.doFinal(ciphertext).decodeToString())
+            cipher.doFinal(ciphertext).decodeToString()
         }.onFailure { e ->
             // Key invalidated (Keystore reset, restore to a different device, OS upgrade that
             // dropped hardware-backed keys) — treat exactly like "nothing saved" rather than
@@ -138,10 +123,9 @@ class KeystoreTokenStorage(
             Log.warn(TOKEN_STORAGE_LOG_TAG, "Token decryption failed, treating as unauthenticated", e)
             file.delete()
         }.getOrNull()
-        return decrypted ?: fallback.load()
     }
 
-    override fun clear(): TokenClearOutcome {
+    override fun clearSecret(): Boolean {
         val encryptedGone = runCatching {
             if (file.exists() && !file.delete()) {
                 Log.warn(TOKEN_STORAGE_LOG_TAG, "Encrypted token file delete returned false")
@@ -155,8 +139,7 @@ class KeystoreTokenStorage(
         // folding it in would risk reporting DATA_MAY_REMAIN for an already-empty store.)
         runCatching { keyStore().deleteEntry(keyAlias) }
             .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Keystore key delete failed", e) }
-        val fallbackCleared = fallback.clear() == TokenClearOutcome.CLEARED
-        return if (encryptedGone && fallbackCleared) TokenClearOutcome.CLEARED else TokenClearOutcome.DATA_MAY_REMAIN
+        return encryptedGone
     }
 
     private fun keyStore(): KeyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
