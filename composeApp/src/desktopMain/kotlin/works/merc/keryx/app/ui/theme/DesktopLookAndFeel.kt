@@ -49,7 +49,7 @@ internal fun shouldApplyLookAndFeel(
  * drives `MenuBar`/`PopupMenu` backgrounds (`@menuBackground`) and their derived border colors.
  *
  * Corner radii are deliberately not overridden: FlatLaf's own `Button.arc = 6` already matches
- * this app's `KeryxShapes.small`.
+ * this app's `platformShapes.small`.
  */
 internal fun keryxFlatLafDefaults(dark: Boolean): Map<String, String> = mapOf(
     "@accentColor" to keryxAccentColor(dark).toHexString(),
