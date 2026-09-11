@@ -1525,6 +1525,7 @@ class HomeViewModelTest {
         assertTrue(vm.unreadOnly.value)
 
         vm.setSearchBarVisible(true)
+        testScheduler.advanceUntilIdle()
         vm.setSearchQuery("Kotlin")
         advanceForSearchDebounce()
         assertTrue(vm.unreadOnly.value)
@@ -1540,6 +1541,7 @@ class HomeViewModelTest {
         assertTrue(vm.unreadOnly.value)
 
         vm.setSearchBarVisible(true)
+        testScheduler.advanceUntilIdle()
         vm.setSearchQuery("Kotlin")
         advanceForSearchDebounce()
         assertTrue(vm.unreadOnly.value)
