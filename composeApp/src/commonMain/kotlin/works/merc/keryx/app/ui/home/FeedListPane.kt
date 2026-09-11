@@ -859,7 +859,6 @@ private fun FeedListToolbarRow(
     WindowDragArea(Modifier.fillMaxWidth()) {
         KeryxPaneTopBar(
             modifier = Modifier.padding(top = WindowChrome.titleBarInsetDp.dp, start = 4.dp, end = 4.dp),
-            title = if (hasNativeAppMenu) null else null,
             titleContent = if (hasNativeAppMenu) null else {
                 {
                     Row(verticalAlignment = Alignment.CenterVertically) {
