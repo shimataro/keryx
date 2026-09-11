@@ -64,7 +64,7 @@ internal fun DataTabContent(vm: SettingsViewModel) {
             is OpmlResult.Imported -> opmlImportedText(r.added, r.failed)
             OpmlResult.ExportFailed -> getString(Res.string.settings_export_error)
             OpmlResult.ImportFailed -> getString(Res.string.settings_import_error)
-            OpmlResult.Cancelled, null -> opmlStatus
+            null -> opmlStatus
         }
         vm.clearOpmlResult()
     }

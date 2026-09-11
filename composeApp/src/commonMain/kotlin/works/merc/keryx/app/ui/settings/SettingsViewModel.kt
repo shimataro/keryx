@@ -52,7 +52,6 @@ import works.merc.keryx.app.ui.home.groupFeedsByFolder
 sealed interface OpmlResult {
     data class Imported(val added: Int, val failed: Int) : OpmlResult
     data object Exported : OpmlResult
-    data object Cancelled : OpmlResult
     data object ExportFailed : OpmlResult
     data object ImportFailed : OpmlResult
 }
@@ -317,7 +316,7 @@ class SettingsViewModel(
                 )
                 val target = fileSelector.pickSaveFile(request)
                 if (target == null) {
-                    opmlResult = OpmlResult.Cancelled
+                    opmlResult = null
                     return@launch
                 }
                 opmlResult = try {
@@ -376,7 +375,7 @@ class SettingsViewModel(
                 )
                 val source = fileSelector.pickOpenFile(request)
                 if (source == null) {
-                    opmlResult = OpmlResult.Cancelled
+                    opmlResult = null
                     return@launch
                 }
                 opmlResult = try {

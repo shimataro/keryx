@@ -809,12 +809,12 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun exportOpmlReportsCancelledWhenTheDialogIsDismissed() = runTest {
+    fun exportOpmlLeavesResultNullWhenTheDialogIsDismissed() = runTest {
         val vm = newViewModel(fileSelector = FakeFileSelector(savePath = null))
 
         vm.exportOpml()
 
-        assertEquals(OpmlResult.Cancelled, vm.opmlResult)
+        assertNull(vm.opmlResult)
     }
 
     @Test
@@ -890,12 +890,12 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun importOpmlReportsCancelledWhenTheDialogIsDismissed() = runTest {
+    fun importOpmlLeavesResultNullWhenTheDialogIsDismissed() = runTest {
         val vm = newViewModel(fileSelector = FakeFileSelector(openPath = null))
 
         vm.importOpml()
 
-        assertEquals(OpmlResult.Cancelled, vm.opmlResult)
+        assertNull(vm.opmlResult)
     }
 
     @Test
@@ -952,7 +952,7 @@ class SettingsViewModelTest {
         assertFalse(vm.exportingOpml)
 
         selector.openDeferred.complete(null)
-        assertEquals(OpmlResult.Cancelled, vm.opmlResult)
+        assertNull(vm.opmlResult)
         assertFalse(vm.importingOpml)
     }
 
