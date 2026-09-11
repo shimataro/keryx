@@ -58,13 +58,11 @@ fun feedListIsDrawer(layout: PaneLayout): Boolean = layout != PaneLayout.Triple
  * An open feed-list drawer always wins over [focusedPane]: it is the topmost thing on screen while
  * open, regardless of which [HomePane] the navigation stack itself points at (the drawer isn't part
  * of that stack at all — see [HomePane]'s own KDoc). Every other case falls straight through to
- * [focusedPane]. This replaces the old `feedListActionAllowed(pane, drawerOpen)` +
- * `feedDrawerOpen`-guarded-`when(focusedPane)` duplication that used to be repeated at every one of
- * `HomeScreen`'s keyboard-routing and pane-focus call sites — each of those is exactly "is this the
- * pane [keyboardPaneFor] resolves to right now", which used to require re-deriving the drawer
- * precedence by hand at each call site (and was the source of a real bug: two call sites deriving
- * it independently could disagree, painting a focus ring on two panes at once — see
- * "Home's adaptive pane layout" in `docs/app-architecture.md`).
+ * [focusedPane]. Every one of `HomeScreen`'s keyboard-routing and pane-focus call sites reads
+ * [keyboardPaneFor] rather than re-deriving this drawer precedence by hand — two call sites
+ * disagreeing about it independently was a real bug (a focus ring painted on two panes at once —
+ * see "Home's adaptive pane layout" in `docs/app-architecture.md`), which reading a single shared
+ * function makes structurally impossible.
  */
 fun keyboardPaneFor(focusedPane: HomePane, feedDrawerOpen: Boolean): HomePane =
     if (feedDrawerOpen) HomePane.FeedList else focusedPane
