@@ -33,6 +33,11 @@ import androidx.compose.ui.unit.Dp
  * node of its own, so each pane stays a direct `Row` child and the `Modifier.weight` handed to
  * [pane] still applies.
  *
+ * The body below is two fixed `if` blocks (one per pane that can actually appear in [visible]),
+ * not a loop over [HomePane.entries] — this assumes exactly the three current entries
+ * ([HomePane.FeedList]/[HomePane.ArticleList]/[HomePane.ArticleDetail]); adding a fourth needs a
+ * new fixed branch here, not just a bigger loop bound.
+ *
  * With both panes on screen ([PaneLayout.Dual]) they are not split evenly: the article list gets
  * a fixed [dualPaneArticleListWidth] and the reader takes everything left over, the same
  * settled-list/growing-reader asymmetry [PaneLayout.Triple] already lays out (see that function's
@@ -59,14 +64,6 @@ internal fun NarrowPaneRow(
     paneState: SaveableStateHolder = rememberSaveableStateHolder(),
     pane: @Composable (HomePane, Modifier) -> Unit,
 ) {
-    require(HomePane.entries.size == 3) {
-        "NarrowPaneRow's unrolled pane layout assumes exactly three HomePane entries; " +
-            "add a new fixed branch when expanding HomePane."
-    }
-    require(HomePane.FeedList !in visible) {
-        "The feed list is a modal navigation drawer at a narrow PaneLayout, not a NarrowPaneRow " +
-            "pane; see HomePaneLayout.kt's feedListIsDrawer."
-    }
     Row(modifier) {
         val bothVisible = visible.size > 1
         if (HomePane.ArticleList in visible) {
