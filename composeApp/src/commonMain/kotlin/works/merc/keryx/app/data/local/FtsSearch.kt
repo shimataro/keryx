@@ -214,10 +214,10 @@ class FtsSearch(private val driver: SqlDriver) {
 
     companion object {
         /** Sentinel wrapping the start of a matched span in [FtsHit] markup (ASCII STX, `char(2)`). */
-        const val MARK_START: Char = ''
+        const val MARK_START: Char = '\u0002'
 
         /** Sentinel wrapping the end of a matched span in [FtsHit] markup (ASCII ETX, `char(3)`). */
-        const val MARK_END: Char = ''
+        const val MARK_END: Char = '\u0003'
     }
 }
 
