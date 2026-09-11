@@ -21,8 +21,6 @@ import androidx.compose.ui.Modifier
  *   `ArticleListPane`'s `onExitSearch`, itself `vm.setSearchBarVisible(false)` (see
  *   `ui/home/HomePaneLayout.kt`'s `homeBackAction` for why closing the search bar is a distinct
  *   action from popping the navigation stack).
- * @param navigateUpEnabled Whether the back arrow can act right now. Exiting Search always changes
- *   what's on screen, so every real caller passes `true` unconditionally.
  * @param navigateUpContentDescription Accessibility label for the back arrow.
  * @param clearContentDescription Accessibility label for the clear ("×") action, shown only when
  *   [query] is non-empty.
@@ -38,7 +36,6 @@ expect fun KeryxExpandedSearchBar(
     onQueryChange: (String) -> Unit,
     placeholder: String,
     onNavigateUp: () -> Unit,
-    navigateUpEnabled: Boolean,
     navigateUpContentDescription: String,
     clearContentDescription: String,
     onSearchAction: () -> Unit,

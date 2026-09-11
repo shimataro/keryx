@@ -3,7 +3,6 @@ package works.merc.keryx.app.ui.common
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -32,7 +31,6 @@ class KeryxSearchBarTest {
                     onQueryChange = { reported = it },
                     placeholder = "Search articles…",
                     onNavigateUp = {},
-                    navigateUpEnabled = true,
                     navigateUpContentDescription = "Back",
                     clearContentDescription = "Clear",
                     onSearchAction = {},
@@ -56,7 +54,6 @@ class KeryxSearchBarTest {
                     onQueryChange = { reported = it },
                     placeholder = "Search articles…",
                     onNavigateUp = {},
-                    navigateUpEnabled = true,
                     navigateUpContentDescription = "Back",
                     clearContentDescription = "Clear",
                     onSearchAction = {},
@@ -79,7 +76,6 @@ class KeryxSearchBarTest {
                     onQueryChange = {},
                     placeholder = "Search articles…",
                     onNavigateUp = { backClicked = true },
-                    navigateUpEnabled = true,
                     navigateUpContentDescription = "Back",
                     clearContentDescription = "Clear",
                     onSearchAction = {},
@@ -90,25 +86,5 @@ class KeryxSearchBarTest {
         onNodeWithContentDescription("Back").performClick()
 
         assertEquals(true, backClicked)
-    }
-
-    @Test
-    fun expandedBarNavigateUpIsDisabledWhenNotEnabled() = runDesktopComposeUiTest {
-        setContent {
-            MaterialTheme {
-                KeryxExpandedSearchBar(
-                    query = "",
-                    onQueryChange = {},
-                    placeholder = "Search articles…",
-                    onNavigateUp = {},
-                    navigateUpEnabled = false,
-                    navigateUpContentDescription = "Back",
-                    clearContentDescription = "Clear",
-                    onSearchAction = {},
-                )
-            }
-        }
-
-        onNodeWithContentDescription("Back").assertIsNotEnabled()
     }
 }

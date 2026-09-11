@@ -58,7 +58,6 @@ actual fun KeryxExpandedSearchBar(
     onQueryChange: (String) -> Unit,
     placeholder: String,
     onNavigateUp: () -> Unit,
-    navigateUpEnabled: Boolean,
     navigateUpContentDescription: String,
     clearContentDescription: String,
     onSearchAction: () -> Unit,
@@ -76,7 +75,6 @@ actual fun KeryxExpandedSearchBar(
         TooltipIconButton(
             tooltip = navigateUpContentDescription,
             onClick = onNavigateUp,
-            enabled = navigateUpEnabled,
         ) {
             KeryxIcon(KeryxIcons.ArrowBack, contentDescription = navigateUpContentDescription)
         }

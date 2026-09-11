@@ -227,9 +227,6 @@ fun ArticleListPane(
                 onQueryChange = { vm.setSearchQuery(it) },
                 placeholder = stringResource(Res.string.home_search_placeholder),
                 onNavigateUp = exitSearch,
-                // Closing the bar always changes what's on screen (see homeBackAction's own KDoc on
-                // HomeBackAction.CloseSearchBar), so there is no "can't close right now" state to gate on.
-                navigateUpEnabled = true,
                 navigateUpContentDescription = stringResource(Res.string.common_back),
                 clearContentDescription = stringResource(Res.string.home_search_clear),
                 onSearchAction = { keyboardController?.hide() },
