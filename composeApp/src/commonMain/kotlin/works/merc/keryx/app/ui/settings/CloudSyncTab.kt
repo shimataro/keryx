@@ -87,7 +87,9 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
     // connect new). Holds the target (new) provider.
     var confirmingSwitchTo by remember { mutableStateOf<CloudStorageType?>(null) }
     // Confirms the destructive "reset cloud data" (delete the cloud DB, re-upload local fresh).
-    var confirmingResetCloudData by remember { mutableStateOf<CloudStorageType?>(null) }
+    // Unlike the other confirm-triggers, the dialog's title/body/action carry no provider name, so
+    // there's nothing to hold onto beyond "is it showing".
+    var confirmingResetCloudData by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         val connected = vm.connectedType
@@ -122,7 +124,7 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                     },
                     onCancel = { confirmingAbortConnect = type },
                     onDisconnect = { confirmingDisconnect = type },
-                    onResetCloudData = { confirmingResetCloudData = type },
+                    onResetCloudData = { confirmingResetCloudData = true },
                 )
             }
         }
@@ -150,14 +152,14 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
             dismissText = stringResource(Res.string.common_cancel),
         )
     }
-    confirmingResetCloudData?.let { _ ->
+    if (confirmingResetCloudData) {
         KeryxAlertDialog(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            onDismissRequest = { confirmingResetCloudData = null },
+            onDismissRequest = { confirmingResetCloudData = false },
             title = stringResource(Res.string.settings_cloud_reset_confirm_title),
             text = { Text(stringResource(Res.string.settings_cloud_reset_confirm_body)) },
             confirmText = stringResource(Res.string.settings_cloud_reset_confirm_action),
-            onConfirm = { vm.resetCloudData(); confirmingResetCloudData = null },
+            onConfirm = { vm.resetCloudData(); confirmingResetCloudData = false },
             dismissText = stringResource(Res.string.common_cancel),
         )
     }
