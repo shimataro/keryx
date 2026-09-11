@@ -15,7 +15,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 /**
- * Desktop `actual`: a plain `Row`, matching each former call site's exact layout — see the
+ * Desktop `actual`: a plain `Row` (`navigationIcon` → title → trailing-pinned actions) — see the
  * `expect`'s KDoc in `commonMain` for why [modifier] (not this composable) owns padding.
  */
 @Composable

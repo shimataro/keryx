@@ -3,12 +3,11 @@ package works.merc.keryx.app.ui.common
 import androidx.compose.runtime.Composable
 
 /**
- * A single-select control replacing Material3's `FilterChip` row (originally `ChipRow` in the
- * settings screen). `expect`/`actual` per platform: the desktop `actual` renders a native-looking
- * bordered, filled-background segmented row rather than a horizontally-scrolling row of pill chips
- * — segments size to their label content (`Modifier.weight(1f)` is deliberately not used) so labels
- * never wrap/truncate. The Android `actual` delegates to M3's own `SingleChoiceSegmentedButtonRow`
- * + `SegmentedButton` to match Android's native visual language.
+ * A single-select control. `expect`/`actual` per platform: the desktop `actual` renders a
+ * native-looking bordered, filled-background segmented row rather than a horizontally-scrolling
+ * row of pill chips — segments size to their label content (`Modifier.weight(1f)` is deliberately
+ * not used) so labels never wrap/truncate. The Android `actual` delegates to M3's own
+ * `SingleChoiceSegmentedButtonRow` + `SegmentedButton` to match Android's native visual language.
  */
 @Composable
 expect fun <T> SegmentedControl(options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit)

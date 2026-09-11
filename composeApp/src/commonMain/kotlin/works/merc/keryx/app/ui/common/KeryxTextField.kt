@@ -25,8 +25,8 @@ object KeryxTextFieldDefaults {
  *
  * The [modifier] is applied to the inner text field (not an outer frame), so a caller's
  * `focusRequester` / `onFocusChanged { it.isFocused }` behaves exactly as it did on `OutlinedTextField`.
- * The placeholder contrast, border colors, and supporting-text styling are internal — call sites no
- * longer pass a `colors = OutlinedTextFieldDefaults.colors(...)` override.
+ * The placeholder contrast, border colors, and supporting-text styling are internal — call sites
+ * need no `colors = OutlinedTextFieldDefaults.colors(...)` override.
  *
  * [minHeight] and [horizontalPadding] exist for the one call site that is *not* stand-alone: the
  * feed list's inline row editor (`ui/home/InlineRename.kt`), which must occupy exactly the height of
