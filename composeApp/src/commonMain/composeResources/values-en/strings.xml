@@ -10,8 +10,6 @@
     <string name="common_cancel">Cancel</string>
     <string name="common_save">Save</string>
     <string name="common_delete">Delete</string>
-    <string name="common_create">Create</string>
-    <string name="common_add">Add</string>
     <string name="common_ok">OK</string>
     <string name="common_back">Back</string>
     <string name="common_abort">Abort</string>
@@ -27,7 +25,6 @@
     <string name="setup_local_desc">Use this device only</string>
     <string name="setup_dropbox">Sync with Dropbox</string>
     <string name="setup_dropbox_desc">Share subscriptions and read state across devices</string>
-    <string name="setup_dropbox_wip">Dropbox integration is coming soon</string>
     <string name="setup_google_drive">Sync with Google Drive</string>
     <string name="setup_google_drive_desc">Share subscriptions and read state across devices</string>
     <string name="setup_onedrive">Sync with OneDrive</string>
@@ -37,9 +34,6 @@
     <string name="setup_abort_connect_confirm_body">Nothing has been saved yet.</string>
     <string name="oauth_loopback_success">Authentication complete. You can close this tab and return to the app.</string>
     <string name="setup_auth_failed">Authentication failed</string>
-    <string name="setup_cloud_has_data">Existing data was found in Dropbox. Import it?</string>
-    <string name="setup_import_and_start">Import and start</string>
-    <string name="setup_skip_import">Skip and start</string>
 
     <!-- home -->
     <string name="home_add_feed">Add feed</string>
@@ -55,7 +49,6 @@
     <string name="home_add_feed_select_all">Select all</string>
     <string name="home_add_feed_clear_all">Clear all</string>
     <string name="home_add_feed_selected_count">%1$d / %2$d selected</string>
-    <string name="home_add_feed_subscribed">Added %1$d feed(s)</string>
     <plurals name="home_add_feed_partial">
         <item quantity="one">%1$d feed added, %2$d failed</item>
         <item quantity="other">%1$d feeds added, %2$d failed</item>
@@ -68,12 +61,10 @@
     <string name="home_starred">Starred</string>
     <string name="home_tags">Tags</string>
     <string name="home_add_tag">Add tag</string>
-    <string name="home_edit_tags">Edit tags</string>
     <string name="home_new_tag_hint">Enter tag name</string>
     <string name="home_tag_name_duplicate">A tag with this name already exists</string>
     <string name="home_tag_color">Color</string>
     <string name="home_delete_tag_confirm">Delete the tag “%1$s”?</string>
-    <string name="home_tag_deleted">Tag deleted</string>
     <string name="home_edit_tag_menu">Edit</string>
     <string name="home_edit_tag">Edit tag</string>
     <string name="home_delete_tag_menu">Delete</string>
@@ -92,7 +83,6 @@
     <string name="home_move_up">Move up</string>
     <string name="home_move_down">Move down</string>
     <string name="home_no_folder">No Folder</string>
-    <string name="home_rename_feed_menu">Rename</string>
     <string name="home_rename_feed">Rename</string>
     <string name="home_unsubscribe_menu">Unsubscribe</string>
     <string name="home_copy_feed_url">Copy feed URL</string>
@@ -107,8 +97,6 @@
     <string name="home_refreshing">Checking for new articles…</string>
     <string name="home_feed_error">Feed error</string>
     <string name="home_feed_gone">Feed not found (it may have been removed)</string>
-    <string name="home_feed_error_count">Failed %1$d time(s) in a row</string>
-    <string name="home_feed_error_refresh_now">Refresh now</string>
     <string name="home_mark_all_read">Mark all as read</string>
     <string name="home_no_feeds">No feeds yet</string>
     <string name="home_no_articles">No articles</string>
@@ -128,7 +116,6 @@
     <string name="home_search_too_short">Enter at least 2 characters</string>
     <string name="home_search_no_results">No matching articles</string>
     <string name="home_search_try_all_feeds">To search every feed, select "All Feeds"</string>
-    <string name="home_search_hint">↑↓ to navigate · Enter to open</string>
     <string name="home_search_clear">Clear</string>
 
     <!-- article -->
@@ -178,7 +165,6 @@
         <item quantity="other">Failed to add %1$d feeds</item>
     </plurals>
     <string name="settings_export_success">Exported</string>
-    <string name="settings_import_cancelled">Cancelled</string>
     <string name="settings_export_error">Export failed</string>
     <string name="settings_import_error">Import failed</string>
     <string name="settings_refresh_interval">Feed refresh interval</string>
@@ -252,7 +238,6 @@
     <string name="tray_update_failed">Update failed</string>
 
     <!-- feed notifications -->
-    <string name="feed_gone_title">Feed removed</string>
     <string name="feed_gone_message">“%1$s” has been removed (HTTP 410 Gone). We recommend unsubscribing from it.</string>
     <plurals name="feed_new_articles">
         <item quantity="one">%1$d new article</item>

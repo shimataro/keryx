@@ -11,8 +11,6 @@
     <string name="common_cancel">キャンセル</string>
     <string name="common_save">保存</string>
     <string name="common_delete">削除</string>
-    <string name="common_create">作成</string>
-    <string name="common_add">追加</string>
     <string name="common_ok">OK</string>
     <string name="common_back">戻る</string>
     <string name="common_abort">中止</string>
@@ -28,7 +26,6 @@
     <string name="setup_local_desc">このデバイス単体で使用します</string>
     <string name="setup_dropbox">Dropbox で同期する</string>
     <string name="setup_dropbox_desc">複数デバイスで購読・既読を共有します</string>
-    <string name="setup_dropbox_wip">Dropbox 連携は準備中です</string>
     <string name="setup_google_drive">Google Drive で同期する</string>
     <string name="setup_google_drive_desc">複数デバイスで購読・既読を共有します</string>
     <string name="setup_onedrive">OneDrive で同期する</string>
@@ -38,9 +35,6 @@
     <string name="setup_abort_connect_confirm_body">まだ何も保存されていません。</string>
     <string name="oauth_loopback_success">認証が完了しました。このタブを閉じてアプリに戻ってください。</string>
     <string name="setup_auth_failed">認証に失敗しました</string>
-    <string name="setup_cloud_has_data">Dropbox に既存のデータが見つかりました。インポートしますか？</string>
-    <string name="setup_import_and_start">インポートして開始</string>
-    <string name="setup_skip_import">スキップして開始</string>
 
     <!-- home -->
     <string name="home_add_feed">フィードを追加</string>
@@ -55,7 +49,6 @@
     <string name="home_add_feed_select_all">すべて選択</string>
     <string name="home_add_feed_clear_all">すべて解除</string>
     <string name="home_add_feed_selected_count">%1$d / %2$d 件選択中</string>
-    <string name="home_add_feed_subscribed">%1$d 件のフィードを追加しました</string>
     <plurals name="home_add_feed_partial">
         <item quantity="other">%1$d 件追加、%2$d 件失敗しました</item>
     </plurals>
@@ -67,12 +60,10 @@
     <string name="home_starred">スター付き</string>
     <string name="home_tags">タグ</string>
     <string name="home_add_tag">タグを追加</string>
-    <string name="home_edit_tags">タグを編集</string>
     <string name="home_new_tag_hint">タグ名を入力</string>
     <string name="home_tag_name_duplicate">同じ名前のタグが既にあります</string>
     <string name="home_tag_color">色</string>
     <string name="home_delete_tag_confirm">タグ「%1$s」を削除しますか？</string>
-    <string name="home_tag_deleted">タグを削除しました</string>
     <string name="home_edit_tag_menu">編集</string>
     <string name="home_edit_tag">タグを編集</string>
     <string name="home_delete_tag_menu">削除</string>
@@ -91,7 +82,6 @@
     <string name="home_move_up">上に移動</string>
     <string name="home_move_down">下に移動</string>
     <string name="home_no_folder">フォルダーなし</string>
-    <string name="home_rename_feed_menu">タイトルを変更</string>
     <string name="home_rename_feed">タイトルを変更</string>
     <string name="home_unsubscribe_menu">購読を削除</string>
     <string name="home_copy_feed_url">フィード URL をコピー</string>
@@ -106,8 +96,6 @@
     <string name="home_refreshing">新着を確認中…</string>
     <string name="home_feed_error">フィードのエラー</string>
     <string name="home_feed_gone">フィードが見つかりません（削除された可能性があります）</string>
-    <string name="home_feed_error_count">%1$d 回連続でエラーが発生しています</string>
-    <string name="home_feed_error_refresh_now">今すぐ更新</string>
     <string name="home_mark_all_read">すべて既読にする</string>
     <string name="home_no_feeds">フィードが登録されていません</string>
     <string name="home_no_articles">記事がありません</string>
@@ -127,7 +115,6 @@
     <string name="home_search_too_short">2文字以上の語句を入力してください</string>
     <string name="home_search_no_results">該当する記事がありません</string>
     <string name="home_search_try_all_feeds">すべてのフィードから探すには「すべてのフィード」を選んでください</string>
-    <string name="home_search_hint">↑↓ で移動 · Enter で開く</string>
     <string name="home_search_clear">クリア</string>
 
     <!-- article -->
@@ -175,7 +162,6 @@
         <item quantity="other">%1$d 件の追加に失敗しました</item>
     </plurals>
     <string name="settings_export_success">エクスポートしました</string>
-    <string name="settings_import_cancelled">キャンセルしました</string>
     <string name="settings_export_error">エクスポートに失敗しました</string>
     <string name="settings_import_error">インポートに失敗しました</string>
     <string name="settings_refresh_interval">フィード更新間隔</string>
@@ -249,7 +235,6 @@
     <string name="tray_update_failed">アップデートに失敗しました</string>
 
     <!-- feed notifications -->
-    <string name="feed_gone_title">フィードが削除されました</string>
     <string name="feed_gone_message">「%1$s」は削除されたフィードです（HTTP 410 Gone）。購読を解除することをおすすめします。</string>
     <plurals name="feed_new_articles">
         <item quantity="other">新着記事が %1$d 件あります</item>
