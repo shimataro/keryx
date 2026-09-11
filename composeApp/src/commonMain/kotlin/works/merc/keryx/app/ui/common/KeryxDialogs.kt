@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.common
 
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,7 +35,7 @@ expect fun KeryxAlertDialog(
     title: String? = null,
     titleAction: (@Composable () -> Unit)? = null,
     text: (@Composable () -> Unit)? = null,
-    containerColor: Color = Color.Unspecified,
+    containerColor: Color = MaterialTheme.colorScheme.surfaceContainerLow,
     modal: Boolean = true,
 )
 

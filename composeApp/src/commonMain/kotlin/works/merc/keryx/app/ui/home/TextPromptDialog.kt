@@ -53,7 +53,6 @@ internal fun TextPromptDialog(
     }
 
     KeryxAlertDialog(
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         onDismissRequest = onDismiss,
         title = title,
         text = {

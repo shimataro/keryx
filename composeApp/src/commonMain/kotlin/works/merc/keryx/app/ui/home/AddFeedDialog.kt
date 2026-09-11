@@ -144,7 +144,6 @@ internal fun AddFeedDialog(
     val alreadySubscribed = addFeedAlreadySubscribed(url, feeds)
 
     KeryxAlertDialog(
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         onDismissRequest = onDismiss,
         title = stringResource(Res.string.home_add_feed),
         text = {

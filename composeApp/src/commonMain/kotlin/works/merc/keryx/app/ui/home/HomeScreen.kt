@@ -683,7 +683,6 @@ internal fun PendingNotificationActionHost(
             // Corrupt/incompatible cloud DB: confirm the destructive reset, then clear the
             // now-stale error notification.
             KeryxAlertDialog(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 onDismissRequest = { notifVm.clearPendingAction() },
                 title = stringResource(Res.string.settings_cloud_reset_confirm_title),
                 text = { Text(stringResource(Res.string.settings_cloud_reset_confirm_body)) },
@@ -706,7 +705,6 @@ internal fun PendingNotificationActionHost(
         // Explanation only (e.g. the macOS translocation warning) — no navigation, one button.
         is AppNotificationAction.ShowInfoDialog ->
             KeryxAlertDialog(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 onDismissRequest = { notifVm.clearPendingAction() },
                 title = stringResource(Res.string.notification_detail_title),
                 text = { Text(action.detail) },

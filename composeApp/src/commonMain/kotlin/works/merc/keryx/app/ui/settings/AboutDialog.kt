@@ -39,6 +39,11 @@ fun AboutDialog(onDismiss: () -> Unit) {
         onConfirm = onDismiss,
         title = stringResource(Res.string.app_name),
         text = { AboutDialogContent() },
+        // The one dialog that deliberately doesn't use the flat surfaceContainerLow every other
+        // KeryxAlertDialog call site shares — a plain surface reads better behind this dialog's
+        // own icon + version + link rows than the tonal container the confirm/destructive
+        // dialogs use.
+        containerColor = MaterialTheme.colorScheme.surface,
         modal = false,
     )
 }
