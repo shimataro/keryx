@@ -56,9 +56,11 @@ internal fun AppMenuNode.isEnabled(): Boolean = when (this) {
  * or `null` if none does. Pure and AWT-key-code based, so it is unit-testable with synthetic input.
  *
  * A shortcut matches only on an exact modifier combination: its own [AppMenuShortcut.ctrl] /
- * [AppMenuShortcut.meta] / [AppMenuShortcut.shift] must equal [ctrl] / [meta] / [shift] — this is
- * what keeps e.g. Ctrl+R (`RefreshAll`) and Ctrl+Shift+R (`FeedRefresh`) from being confused with
- * one another. Enabled state is **not** consulted here — the caller decides whether to invoke.
+ * [AppMenuShortcut.shift] must equal [ctrl] / [shift], and [meta] must be `false` — no menu
+ * shortcut is ever bound to a Meta-held combination, so a Meta-held keypress is rejected outright
+ * rather than matched against a per-shortcut property. This is what keeps e.g. Ctrl+R
+ * (`RefreshAll`) and Ctrl+Shift+R (`FeedRefresh`) from being confused with one another. Enabled
+ * state is **not** consulted here — the caller decides whether to invoke.
  */
 internal fun matchMenuShortcut(
     root: AppMenuRoot,
@@ -79,7 +81,6 @@ internal fun matchMenuShortcut(
             if (shortcut != null &&
                 shortcut.awtKeyCode() == keyCode &&
                 shortcut.ctrl == ctrl &&
-                shortcut.meta == meta &&
                 shortcut.shift == shift
             ) {
                 return node
@@ -90,6 +91,10 @@ internal fun matchMenuShortcut(
         }
         return null
     }
+
+    // No menu shortcut is ever bound to a Meta-held combination, so a Meta-held keypress can never
+    // match any of them — checked once here rather than per-shortcut.
+    if (meta) return null
 
     return search(root.menus)
 }

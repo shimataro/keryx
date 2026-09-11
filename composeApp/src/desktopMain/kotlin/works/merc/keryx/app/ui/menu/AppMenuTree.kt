@@ -23,7 +23,9 @@ import works.merc.keryx.app.ui.home.renameKey
  * The modifier + key of a menu accelerator. [ctrl] means "use the platform's primary modifier"
  * (Ctrl elsewhere, ⌘ on macOS) — the in-window renderer (`AppMenuBar.toKeyShortcut`) derives the
  * actual per-platform `ctrl`/`meta` `KeyShortcut` flags from it, and the Linux
- * [MenuShortcutDispatcher] matches [ctrl]/[meta] directly. It defaults to `true`, used by every
+ * [MenuShortcutDispatcher] matches [ctrl] directly (no shortcut here ever uses Meta, so a
+ * Meta-held keypress is rejected outright rather than matched against this property — see
+ * `appmenu/MenuBarVisibility.kt`'s `matchMenuShortcut`). [ctrl] defaults to `true`, used by every
  * "always available" shortcut as a plain Ctrl/⌘ combo. Selected-item shortcuts (enabled only with
  * the right selection/focus — the Article and Feed menus' `Ctrl+Shift+<letter>` entries)
  * additionally set [shift], keeping them in a chord space that can never collide with a plain-Ctrl
@@ -43,7 +45,6 @@ internal enum class AppMenuShortcut(
     val key: Key,
     val dbusmenuKeyName: String,
     val ctrl: Boolean = true,
-    val meta: Boolean = false,
     val shift: Boolean = false,
 ) {
     AddFeed(Key.N, "N"),

@@ -143,9 +143,10 @@ private fun propertiesFor(node: AppMenuNode): Map<String, Variant<*>> = when (no
  * KDE's Global Menu use to render the accelerator hint next to a label.
  */
 private fun AppMenuShortcut.toDbusmenuShortcut(): Variant<*> {
+    // No shortcut is ever bound to a Meta-held combination (see AppMenuTree.kt's own KDoc), so
+    // there is no "Super" case to add here.
     val combo = buildList {
         if (ctrl) add("Control")
-        if (meta) add("Super")
         if (shift) add("Shift")
         add(dbusmenuKeyName)
     }
