@@ -491,8 +491,15 @@ internal fun ripplePulseFor(articleId: String, selectedId: String?, returnRipple
  *
  * Used for both of [ArticleListPane]'s two modes — the current filter's own list, and its search
  * results — never both in the same composition. Which mode is which is entirely up to the caller's
- * choice of [articles]/[listState]/[titleMarkedById]/[emptyContent]/[sortEnabled]; this composable
- * itself has no notion of search.
+ * choice of parameters; this composable itself has no notion of search.
+ *
+ * The two callers differ exactly on these parameters:
+ * - **Search results** supply a separate [listState], set [sortEnabled] = `false`, pass
+ *   [titleMarkedById] (FTS highlight markup), and provide a non-null [emptyContent] for the
+ *   "no matching articles" / "query too short" hints.
+ * - **Current filter list** passes [returnRipplePulse] (for the back-from-article-detail flash),
+ *   sets [hasNoFeeds] (to swap the empty-state to the "Add feed" prompt), and leaves
+ *   [titleMarkedById], [emptyContent], and [sortEnabled] at their defaults.
  *
  * @param articles The article rows to display.
  * @param feedTitles Display titles keyed by feed identifier.
