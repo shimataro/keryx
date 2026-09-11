@@ -321,8 +321,8 @@ internal fun CloudProviderRow(
     onResetCloudData: () -> Unit,
 ) {
     // The connected row gets a step-up accent (same secondaryContainer/onSecondaryContainer
-    // tokens desktop's settings-dialog tab bar, KeryxDialogTabBar, uses for its selected tab) so
-    // it still stands out once nested inside the outer SettingsCard's surfaceContainerLow
+    // tokens desktop's settings-dialog tab bar, SecondaryScrollableTabRow, uses for its selected
+    // tab) so it still stands out once nested inside the outer SettingsCard's surfaceContainerLow
     // background; unconnected rows stay
     // transparent (no extra tint over the card).
     val contentColor = if (connected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface

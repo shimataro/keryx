@@ -94,9 +94,10 @@ actual fun KeryxAlertDialog(
  * update-check mechanism this build has), and `fontSizeScale` (see `SettingsViewModel`) can push
  * even a fixed set of labels past what a single screen width holds at "Large"/"Extra Large".
  * `Tab`'s own default M3 layout already stacks the icon above the label, and its
- * `indicator`/ripple/selection colors need no manual wiring, unlike the desktop actual's
- * hand-rolled tab bar (`KeryxDialogTabBar` in `KeryxDialogs.desktop.kt`, desktop-only since this
- * Android actual stopped sharing it). The desktop actual's macOS-System-Settings styling
+ * `indicator`/ripple/selection colors need no manual wiring — the desktop actual is likewise a
+ * real M3 tab row (`SecondaryScrollableTabRow`) sharing this same [KeryxDialogTabs] tab-content
+ * helper, differing only in the `Primary`/`Secondary` grouping each platform's layout calls for.
+ * The desktop actual's macOS-System-Settings styling
  * (traffic-light-adjacent title mirroring, fixed small window size, non-blocking modeless window)
  * has no Android equivalent; this only needs to host the same tab-switching behavior in a shape
  * that fits a phone or tablet screen. Revisit alongside the Settings screen's own adaptive-layout
