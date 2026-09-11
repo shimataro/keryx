@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
@@ -269,7 +270,9 @@ class HomeViewModel(
     // them in the flatMapLatest key made every article selection (which pins the article it marks
     // read) cancel and re-execute the whole unbounded list query.
     private val filteredArticles: Flow<List<ArticleListRow>> =
-        _filter.flatMapLatest { f -> articleRepository.watchArticles(f) }
+        combine(_filter, _searchActive) { f, searchActive ->
+            if (searchActive) flowOf(emptyList()) else articleRepository.watchArticles(f)
+        }.flatMapLatest { it }
 
     val articles: StateFlow<List<ArticleListRow>> =
         combine(
