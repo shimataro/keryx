@@ -364,7 +364,7 @@ snapshot to restore when it ends; these checks focus on that.
   (no keyboard auto-reopening).
 - From an article list already showing some other feed/tag/folder, tapping its own search icon,
   typing a query, then going back returns to **that same article list**, still showing that same
-  feed/tag/folder selected (nothing was ever displaced) — `homeBackAction`'s `ExitSearch`, since the
+  feed/tag/folder selected (nothing was ever displaced) — `homeBackAction`'s `CloseSearchBar`, since the
   search icon never advances the stack.
 - Searching while a single feed (or a folder, or a tag) is selected only matches articles in that
   scope — an article that would match in a different feed does not appear. Selecting "All Feeds"

@@ -598,7 +598,7 @@ narrow layouts: at `PaneLayout.Triple`, `FeedListPane`'s own query field is perm
 `HomeScreen`'s own `LaunchedEffect(layout)` keeps it `true` there the whole time; at a narrow
 layout it starts `false` and is toggled by `ArticleListTopBar`'s search icon
 (`onSearchClick` → `setSearchBarVisible(true)`) and the expanded bar's own back arrow
-(`onExitSearch` → `homeBackAction`'s `ExitSearch` case → `setSearchBarVisible(false)`). Its purpose
+(`onExitSearch` → `homeBackAction`'s `CloseSearchBar` case → `setSearchBarVisible(false)`). Its purpose
 is exactly the gap between "the query still has text" and "the bar is currently open": closing the
 bar at a narrow layout must show the filter's own list again without erasing the query, so a later
 tap on the search icon re-shows the same results — `searchActive` requiring both is what makes that

@@ -616,7 +616,7 @@ WebView をホストするペインを含む3ペインすべてがアプリの�
 存在する: `PaneLayout.Triple` では `FeedListPane` 自身のクエリ欄が常設なので、`HomeScreen` 自身の
 `LaunchedEffect(layout)` がそこでは常に `true` に保つ。狭いレイアウトでは `false` から始まり、
 `ArticleListTopBar` の検索アイコン（`onSearchClick` → `setSearchBarVisible(true)`）と、展開された
-バー自身の戻る矢印（`onExitSearch` → `homeBackAction` の `ExitSearch` ケース →
+バー自身の戻る矢印（`onExitSearch` → `homeBackAction` の `CloseSearchBar` ケース →
 `setSearchBarVisible(false)`）で切り替わる。その存在理由は「クエリにまだ文字が残っている」ことと
 「バーが今開いている」ことの間のまさにその隙間である: 狭いレイアウトでバーを閉じるときは、クエリを
 消さずにフィルタ自身の一覧を再び表示しなければならず、それにより後で検索アイコンを再度タップした
