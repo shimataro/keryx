@@ -72,7 +72,7 @@ Keryx はボランティアベースのベストエフォートで保守され�
 ## 本規約の変更について
 
 本規約はソースコードと同様にバージョン管理されています。変更履歴は
-<https://github.com/shimataro/keryx/commits/master/TERMS.ja.md> で公開されて
+<https://github.com/shimataro/keryx/commits/HEAD/TERMS.ja.md> で公開されて
 います。変更後もアプリの利用を継続した場合、変更後の規約に同意したものと
 みなされます。
 

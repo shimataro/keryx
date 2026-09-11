@@ -170,7 +170,7 @@ verification is performed or required.
 
 This file is version-controlled along with the rest of the source code. Its history
 of changes is publicly visible at
-<https://github.com/shimataro/keryx/commits/master/PRIVACY.md>.
+<https://github.com/shimataro/keryx/commits/HEAD/PRIVACY.md>.
 
 ## Verify it yourself
 

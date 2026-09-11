@@ -73,7 +73,7 @@ obligation to continue development, support, or distribution.
 
 These Terms are version-controlled along with the rest of the source code. Their
 history of changes is publicly visible at
-<https://github.com/shimataro/keryx/commits/master/TERMS.md>. Continuing to use the
+<https://github.com/shimataro/keryx/commits/HEAD/TERMS.md>. Continuing to use the
 app after a change means you accept the updated Terms.
 
 ## Governing law
