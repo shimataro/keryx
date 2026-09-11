@@ -296,7 +296,7 @@ fun ArticleListPane(
                 {}
             }
             results.isEmpty() -> {
-                { NoSearchResultsHint(scopedToAFeed = filter != ArticleFilter.All) }
+                { NoSearchResultsHint(scopedBelowAllFeeds = filter != ArticleFilter.All) }
             }
             else -> null
         }
@@ -334,12 +334,13 @@ fun ArticleListPane(
 }
 
 /**
- * The "no matches" hint shown when a search under [scopedToAFeed] came back empty — with a
+ * The "no matches" hint shown when a search under [scopedBelowAllFeeds] came back empty — with a
  * secondary line pointing at "All Feeds" only when the search was actually narrowed to something
- * less than that, since switching to All wouldn't change anything otherwise.
+ * less than that, since switching to All wouldn't change anything otherwise. The scope can be a
+ * single feed, a folder, a tag, or Starred — anything but All itself.
  */
 @Composable
-private fun NoSearchResultsHint(scopedToAFeed: Boolean) {
+private fun NoSearchResultsHint(scopedBelowAllFeeds: Boolean) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
@@ -347,7 +348,7 @@ private fun NoSearchResultsHint(scopedToAFeed: Boolean) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (scopedToAFeed) {
+            if (scopedBelowAllFeeds) {
                 Text(
                     stringResource(Res.string.home_search_try_all_feeds),
                     style = MaterialTheme.typography.bodySmall,
