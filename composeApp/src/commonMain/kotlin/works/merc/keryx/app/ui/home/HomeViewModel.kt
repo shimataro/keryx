@@ -493,26 +493,6 @@ class HomeViewModel(
         settingsRepository.mutateLocalSettings { it.copy(expandedTagIds = _expandedTagIds.value) }
     }
 
-    // --- Article scroll position memory ---
-
-    private val scrollPositionStore = ArticleScrollPositionStore(settingsRepository)
-
-    /**
-     * Gets the saved scroll position for an article.
-     *
-     * @param articleId The identifier of the article.
-     * @return The saved scroll offset, or the default position when none is stored.
-     */
-    fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPosition(articleId)
-
-    /**
-     * Saves the scroll offset for an article and retains only the most recent remembered positions.
-     *
-     * @param articleId The identifier of the article.
-     * @param offset The article's scroll offset.
-     */
-    fun saveScrollPosition(articleId: String, offset: Int) = scrollPositionStore.saveScrollPosition(articleId, offset)
-
     init {
         // Restore the last-selected article (not via selectArticle(), to avoid re-marking it as
         // read and clobbering another device's "mark as unread" sync via read_at last-write-wins).

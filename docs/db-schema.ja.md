@@ -206,7 +206,6 @@ SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundli
 | `expandedTagIds` | string[] | `[]`（タグは逆に既定が*折り畳み*。このリストが無かった頃と同じだけサイドバーが短いままになるようにするため） |
 | `lastFilter` | string\|null | null |
 | `lastArticleId` | string\|null | null |
-| `recentArticleScrollPositions` | `{articleId, scrollOffset}[]` | `[]` |
 | `lastFocusedPane` | string\|null | null |
 | `lastUnreadOnly` | boolean\|null | null |
 | `lastUnreadOnlyStarred` | boolean\|null | null（スター付きフィルタ専用。`lastUnreadOnly` とは独立） |
