@@ -246,17 +246,23 @@ class SettingsViewModel(
         authorizationJob?.cancel()
     }
 
+    /**
+     * Disconnects [type] and clears everything a subsequent connect must not inherit: the sync
+     * failure reason (so a fresh connect doesn't start out showing the old provider's error), the
+     * persisted provider setting, and the last-synced timestamp. Shared by [disconnect] and
+     * [switchTo], which differ only in what runs before/after this teardown.
+     */
+    private suspend fun tearDownConnection(type: CloudStorageType) {
+        withContext(dispatcher) { cloudSession.disconnect(type) }
+        syncRepository.clearSyncFailureState()
+        update { it.copy(cloudStorageType = null) }
+        connectedType = null
+        lastSyncedAtText = null
+    }
+
     fun disconnect() {
         val type = connectedType ?: return
-        viewModelScope.launch {
-            withContext(dispatcher) { cloudSession.disconnect(type) }
-            // Clear before exposing the disconnect, so a subsequent connect (to this or another
-            // provider) never inherits this provider's stale failure reason.
-            syncRepository.clearSyncFailureState()
-            update { it.copy(cloudStorageType = null) }
-            connectedType = null
-            lastSyncedAtText = null
-        }
+        viewModelScope.launch { tearDownConnection(type) }
     }
 
     /**
@@ -277,17 +283,17 @@ class SettingsViewModel(
         }
     }
 
+    /**
+     * Switches from the currently connected provider to [newType]. Only ever called from the UI
+     * once a provider is already connected (`CloudSyncTab`'s onSelect routes a no-provider-yet
+     * selection through [connect] directly instead) — the guard below is a no-op for every real
+     * caller, matching [resetCloudData]'s own style.
+     */
     fun switchTo(newType: CloudStorageType) {
-        val oldType = connectedType ?: return connect(newType)
+        val oldType = connectedType ?: return
         viewModelScope.launch {
             connectingType = newType
-            withContext(dispatcher) { cloudSession.disconnect(oldType) }
-            // Clear before connecting the new provider, so it never inherits the old provider's
-            // stale failure reason.
-            syncRepository.clearSyncFailureState()
-            update { it.copy(cloudStorageType = null) }
-            connectedType = null
-            lastSyncedAtText = null
+            tearDownConnection(oldType)
             connect(newType)
         }
     }
