@@ -2,25 +2,13 @@ package works.merc.keryx.app.di
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
-import kotlinx.coroutines.flow.MutableSharedFlow
 import org.koin.core.module.Module
 import org.koin.dsl.module
-import works.merc.keryx.app.BuildConfig
 import works.merc.keryx.app.core.CloudStorageType
-import works.merc.keryx.app.data.cloud.CloudAuthManager
-import works.merc.keryx.app.data.cloud.DropboxAuthManager
-import works.merc.keryx.app.data.cloud.DropboxStorage
 import works.merc.keryx.app.data.cloud.FileTokenStorage
 import works.merc.keryx.app.data.cloud.KeystoreTokenStorage
-import works.merc.keryx.app.data.cloud.OneDriveAuthManager
-import works.merc.keryx.app.data.cloud.OneDriveStorage
 import works.merc.keryx.app.data.cloud.TokenStorage
-import works.merc.keryx.app.domain.CloudSession
-import works.merc.keryx.app.domain.CustomUriRedirectTransport
-import works.merc.keryx.app.domain.OAuthCallbackParams
-import works.merc.keryx.app.domain.OAuthConnectFlow
 import works.merc.keryx.app.domain.OsNotificationSink
-import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.UpdateInstaller
 import works.merc.keryx.app.platform.AndroidAppContext
 import works.merc.keryx.app.platform.AndroidNotificationSink
@@ -39,9 +27,10 @@ private fun providerTokenStorage(type: CloudStorageType): TokenStorage =
 /**
  * Android `platformModule`. Dropbox and OneDrive are wired the same way as desktop (PKCE public
  * client, `CustomUriRedirectTransport` over the shared `keryx://oauth2/callback` scheme — see
- * `.claude/rules/cloud-oauth-transport.md`); the OS delivers the redirect to `MainActivity`
- * (`AndroidManifest.xml`'s `keryx://oauth2/callback` intent-filter), which forwards it into
- * [callbackFlow] via `dispatchOAuthCallbackIfPresent`.
+ * `.claude/rules/cloud-oauth-transport.md` and `di/CloudPlatformModule.kt`'s `cloudSessionSingles`);
+ * the OS delivers the redirect to `MainActivity` (`AndroidManifest.xml`'s
+ * `keryx://oauth2/callback` intent-filter), which forwards it into the shared
+ * `MutableSharedFlow<OAuthCallbackParams>` via `dispatchOAuthCallbackIfPresent`.
  *
  * Google Drive has no provider entry here — see `core/CloudStorageAvailability.android.kt`'s own
  * KDoc for why it is out of scope on this platform. `DatabaseMerger`/`DatabaseSnapshot` are fully
@@ -54,55 +43,10 @@ actual val platformModule: Module = module {
 
     single { keryxHttpClient(OkHttp) }
 
-    // Shared by MainActivity's OS URI routing (dispatchOAuthCallbackIfPresent) and the
-    // custom-URI (Dropbox/OneDrive) connect transport — the Android counterpart of desktop's
-    // PlatformModule.desktop.kt single of the same type.
-    single { MutableSharedFlow<OAuthCallbackParams>(replay = 0, extraBufferCapacity = 1) }
-
-    single {
-        val client = get<HttpClient>()
-        val callbackFlow = get<MutableSharedFlow<OAuthCallbackParams>>()
-
-        // Dropbox: custom URI scheme (keryx://) delivered by the OS.
-        val dropboxAuth: CloudAuthManager = DropboxAuthManager(client)
-        val dropboxProvider = CloudSession.Provider(
-            clientId = BuildConfig.DROPBOX_APP_KEY,
-            tokenStorage = providerTokenStorage(CloudStorageType.DROPBOX),
-            authManager = dropboxAuth,
-            connectFlow = OAuthConnectFlow(
-                authManager = dropboxAuth,
-                clientId = BuildConfig.DROPBOX_APP_KEY,
-                transport = CustomUriRedirectTransport(callbackFlow),
-            ),
-            createStorage = { tokenProvider -> DropboxStorage(client, tokenProvider) },
-        )
-
-        // OneDrive: custom URI scheme (keryx://), shared with Dropbox and disambiguated by `state`.
-        // Microsoft Identity platform is a PKCE public client, so no client secret is needed.
-        val oneDriveAuth: CloudAuthManager = OneDriveAuthManager(client)
-        val oneDriveProvider = CloudSession.Provider(
-            clientId = BuildConfig.ONEDRIVE_CLIENT_ID,
-            tokenStorage = providerTokenStorage(CloudStorageType.ONEDRIVE),
-            authManager = oneDriveAuth,
-            connectFlow = OAuthConnectFlow(
-                authManager = oneDriveAuth,
-                clientId = BuildConfig.ONEDRIVE_CLIENT_ID,
-                transport = CustomUriRedirectTransport(callbackFlow),
-            ),
-            createStorage = { tokenProvider -> OneDriveStorage(client, tokenProvider) },
-        )
-
-        CloudSession(
-            providers = mapOf(
-                CloudStorageType.DROPBOX to dropboxProvider,
-                CloudStorageType.ONEDRIVE to oneDriveProvider,
-            ),
-            selectedType = {
-                CloudStorageType.fromId(get<SettingsRepository>().getLocalSettings().cloudStorageType)
-            },
-            clock = get(),
-            notificationCenter = get(),
-            notificationMessages = get(),
-        )
-    }
+    cloudSessionSingles(
+        tokenStorage = ::providerTokenStorage,
+        // Google Drive has no provider entry on Android — see
+        // core/CloudStorageAvailability.android.kt's own KDoc for why it is out of scope here.
+        extraProviders = { emptyMap() },
+    )
 }
