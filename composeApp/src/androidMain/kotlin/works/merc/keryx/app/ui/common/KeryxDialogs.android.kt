@@ -100,10 +100,7 @@ actual fun KeryxAlertDialog(
  * The desktop actual's macOS-System-Settings styling
  * (traffic-light-adjacent title mirroring, fixed small window size, non-blocking modeless window)
  * has no Android equivalent; this only needs to host the same tab-switching behavior in a shape
- * that fits a phone or tablet screen. Revisit alongside the Settings screen's own adaptive-layout
- * work (Phase 2) — a full-screen Settings destination may replace this dialog wrapper entirely,
- * though this `TopAppBar` already gives the user the same back-arrow-and-title experience a route
- * would, so that swap would be an internal refactor rather than a user-visible change.
+ * that fits a phone or tablet screen.
  *
  * The back arrow's `onClick` is [onDismissRequest] itself — the same dismiss path the system back
  * gesture/button already goes through — because the `Dialog`'s own `Surface` fills the entire
