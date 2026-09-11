@@ -32,3 +32,20 @@ expect object CloudStorageAvailability {
     val oneDriveAvailable: Boolean
     val available: List<CloudStorageType>
 }
+
+/**
+ * The [CloudStorageType.entries] filter both platform actuals share: adding a new backend then
+ * has exactly one `when` to update, not one per platform. Declaration order of [CloudStorageType]
+ * drives the UI display order (see `SettingsViewModel.availableCloudTypes` / `SetupViewModel`).
+ */
+internal fun availableCloudStorageTypes(
+    dropbox: Boolean,
+    googleDrive: Boolean,
+    oneDrive: Boolean,
+): List<CloudStorageType> = CloudStorageType.entries.filter {
+    when (it) {
+        CloudStorageType.DROPBOX -> dropbox
+        CloudStorageType.GOOGLE_DRIVE -> googleDrive
+        CloudStorageType.ONEDRIVE -> oneDrive
+    }
+}
