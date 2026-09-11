@@ -26,6 +26,15 @@ class FtsSearchQueryHelpersTest {
     }
 
     @Test
+    fun articleScopeSqlClauseContent() {
+        assertTrue(articleScopeSql(ArticleFilter.All).clause.contains("f.deleted_at IS NULL"))
+        assertTrue(articleScopeSql(ArticleFilter.Starred).clause.contains("is_starred"))
+        assertTrue(articleScopeSql(ArticleFilter.Feed("f1")).clause.contains("feed_id"))
+        assertTrue(articleScopeSql(ArticleFilter.Tag("t1")).clause.contains("tag_id"))
+        assertTrue(articleScopeSql(ArticleFilter.Folder("d1")).clause.contains("folder_id"))
+    }
+
+    @Test
     fun escapeLikePatternEscapesWildcardsAndTheEscapeCharItself() {
         assertEquals("100\\%", escapeLikePattern("100%"))
         assertEquals("a\\_b", escapeLikePattern("a_b"))
