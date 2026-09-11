@@ -67,7 +67,7 @@ fun feedListIsDrawer(layout: PaneLayout): Boolean = layout != PaneLayout.Triple
  * pane [keyboardPaneFor] resolves to right now", which used to require re-deriving the drawer
  * precedence by hand at each call site (and was the source of a real bug: two call sites deriving
  * it independently could disagree, painting a focus ring on two panes at once — see
- * `docs/app-architecture.md`'s "focused pane" section).
+ * "Home's adaptive pane layout" in `docs/app-architecture.md`).
  */
 fun keyboardPaneFor(focusedPane: HomePane, feedDrawerOpen: Boolean): HomePane =
     if (feedDrawerOpen) HomePane.FeedList else focusedPane
