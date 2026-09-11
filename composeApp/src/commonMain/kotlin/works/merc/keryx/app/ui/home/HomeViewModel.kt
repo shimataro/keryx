@@ -230,23 +230,18 @@ class HomeViewModel(
         settingsRepository.getLocalSettings().lastUnreadOnlyStarred ?: false,
     )
 
-    // When search is active the same key as the underlying filter is used (general for
-    // All/Feed/Tag/Folder, starred for Starred).
+    /** [Starred] uses its own dedicated toggle ([_unreadOnlyStarred]); every other filter shares
+     * [_unreadOnly]. Search narrows whichever filter is already selected rather than displacing
+     * it (see "Search is orthogonal to ArticleFilter" in app-architecture.md), so it reads the
+     * same key as the filter underneath it — there is no separate search-specific toggle. */
+    private fun unreadOnlyFor(filter: ArticleFilter, general: Boolean, starred: Boolean): Boolean =
+        if (filter == ArticleFilter.Starred) starred else general
+
     val unreadOnly: StateFlow<Boolean> =
-        combine(_filter, searchActive, _unreadOnly, _unreadOnlyStarred) { f, active, general, starred ->
-            when {
-                active -> if (f == ArticleFilter.Starred) starred else general
-                f == ArticleFilter.Starred -> starred
-                else -> general
-            }
-        }.stateIn(
+        combine(_filter, _unreadOnly, _unreadOnlyStarred, ::unreadOnlyFor).stateIn(
             viewModelScope,
             started,
-            when {
-                searchActive.value -> if (_filter.value == ArticleFilter.Starred) _unreadOnlyStarred.value else _unreadOnly.value
-                _filter.value == ArticleFilter.Starred -> _unreadOnlyStarred.value
-                else -> _unreadOnly.value
-            },
+            unreadOnlyFor(_filter.value, _unreadOnly.value, _unreadOnlyStarred.value),
         )
 
     private val _newestFirst = MutableStateFlow(settingsRepository.getLocalSettings().lastNewestFirst ?: true)
