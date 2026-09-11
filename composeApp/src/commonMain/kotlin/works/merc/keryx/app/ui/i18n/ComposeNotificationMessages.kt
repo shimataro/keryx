@@ -29,13 +29,6 @@ import works.merc.keryx.app.resources.update_available_notification
 import works.merc.keryx.app.resources.update_ready_notification
 
 /** The "N imported" text, with a " / N failed" suffix appended when [failed] is non-zero. */
-/**
- * Builds the localized result message for an OPML import.
- *
- * @param added The number of successfully imported items.
- * @param failed The number of items that failed to import.
- * @return The localized import result message.
- */
 internal suspend fun opmlImportedText(added: Int, failed: Int): String {
     val addedText = getPluralString(Res.plurals.settings_import_success, added, added)
     return if (failed > 0) {
@@ -57,12 +50,12 @@ class ComposeNotificationMessages : NotificationMessages {
         getString(Res.string.feed_gone_message, feedTitle)
 
     /**
-         * Creates a localized message indicating that a feed URL has changed.
-         *
-         * @param feedTitle The title of the feed whose URL changed.
-         * @return The localized feed URL change message.
-         */
-        override suspend fun feedUrlChanged(feedTitle: String): String =
+     * Creates a localized message indicating that a feed URL has changed.
+     *
+     * @param feedTitle The title of the feed whose URL changed.
+     * @return The localized feed URL change message.
+     */
+    override suspend fun feedUrlChanged(feedTitle: String): String =
         getString(Res.string.feed_url_changed, feedTitle)
 
     override suspend fun newArticles(count: Int): String =
