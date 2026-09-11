@@ -279,6 +279,10 @@ internal fun UpdateResultSection(
  * card — the status/action block above it is deliberately unboxed (see this file's own KDoc). */
 internal const val UPDATE_RELEASE_NOTES_CARD_TEST_TAG = "update-release-notes-card"
 
+/** Exposed for `UpdatesTabTest` to compare this row's own height across states (Available,
+ * Downloading, Verifying, Installing), independent of the rest of the card. */
+internal const val UPDATE_HEADLINE_ROW_TEST_TAG = "update-headline-row"
+
 /**
  * The card's single hero line: what's currently true about the update, and — trailing, on the
  * same row — the one button that acts on it (download / install / retry), so the most useful
@@ -294,8 +298,6 @@ internal const val UPDATE_RELEASE_NOTES_CARD_TEST_TAG = "update-release-notes-ca
  * Cancel action; this button is disabled precisely because there is nothing to click here while
  * either is in flight.
  */
-internal const val UPDATE_HEADLINE_ROW_TEST_TAG = "update-headline-row"
-
 @Composable
 private fun UpdateHeadlineRow(
     state: UpdateState,
