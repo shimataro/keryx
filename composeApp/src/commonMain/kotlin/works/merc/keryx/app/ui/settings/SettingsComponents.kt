@@ -23,8 +23,8 @@ import works.merc.keryx.app.ui.common.KeryxSettingRow
  * — see `ui-guidelines`: `surfaceContainerLow` fill + hairline `outlineVariant` border, no tonal
  * elevation — also used by `NotificationCenterSheet`/`SetupScreen.OptionCard`/`FlatTooltipContent`).
  * Ties a row's label and its trailing control (e.g. a switch pinned to the far edge by
- * `weight(1f)`) together as one visible unit instead of floating disconnected across the dialog's
- * fixed 640dp width.
+ * `weight(1f)`) together as one visible unit instead of floating disconnected across the settings
+ * dialog's full width — a fixed 640dp on desktop, the whole screen width on Android.
  *
  * @param modifier Applied to the outer raised surface — e.g. a `testTag` for a call site a test
  *   needs to locate directly (most callers can leave this at its default).
