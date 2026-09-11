@@ -9,11 +9,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -733,10 +735,10 @@ class ArticleListPaneTest {
             vm.setSearchBarVisible(true)
             waitForIdle()
             vm.setSearchQuery("nonexistentquery12345")
-            waitForIdle()
+            waitForNoSearchResultsHint()
 
             onNodeWithText("該当する記事がありません").assertIsDisplayed()
-            onNodeWithText("すべてのフィードから探すには").assertDoesNotExist()
+            onNodeWithText("すべてのフィードから探すには", substring = true).assertDoesNotExist()
         }
     }
 
@@ -759,12 +761,26 @@ class ArticleListPaneTest {
             vm.setSearchBarVisible(true)
             waitForIdle()
             vm.setSearchQuery("nonexistentquery12345")
-            waitForIdle()
+            waitForNoSearchResultsHint()
 
             onNodeWithText("該当する記事がありません").assertIsDisplayed()
-            onNodeWithText("すべてのフィードから探すには").assertIsDisplayed()
+            onNodeWithText("すべてのフィードから探すには", substring = true).assertIsDisplayed()
         }
     }
+
+    /**
+     * Waits out the search pipeline's `SEARCH_DEBOUNCE_MS` (250ms). It runs on
+     * `Dispatchers.Unconfined` in these tests, so that delay is a real wall-clock wait
+     * [ComposeUiTest.waitForIdle] cannot pump, and until it elapses `HomeViewModel.searching`
+     * deliberately holds the pane blank rather than flashing "no results". Waits on the rendered
+     * node instead of `searching` itself, which isn't guaranteed to have flipped to `true` yet the
+     * instant `setSearchQuery` returns. The timeout sits well past the 250ms window so this doesn't
+     * flake on a loaded CI machine.
+     */
+    private fun ComposeUiTest.waitForNoSearchResultsHint() =
+        waitUntil(timeoutMillis = 2000) {
+            onAllNodesWithText("該当する記事がありません").fetchSemanticsNodes().isNotEmpty()
+        }
 }
 
 /** Inserts an article row for the DB-backed tests above (`article`/`articles` build UI rows). */
