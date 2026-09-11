@@ -38,8 +38,8 @@ import works.merc.keryx.app.resources.settings_updates
 fun SettingsDialog(onDismiss: () -> Unit, initialTabId: String = "general", tabRequestToken: Int = 0) {
     val vm = koinInject<SettingsViewModel>()
 
-    // The cloud-sync tab exists only when at least one cloud provider was configured at build time
-    // (mirrors the old section-level hiding). availableCloudTypes is stable across the dialog's life.
+    // The cloud-sync tab exists only when at least one cloud provider was configured at build time.
+    // availableCloudTypes is stable across the dialog's life.
     val tabs = buildList {
         add(KeryxDialogTab("general", stringResource(Res.string.settings_tab_general), KeryxIcons.Tune))
         add(KeryxDialogTab("notifications", stringResource(Res.string.settings_tab_notifications), KeryxIcons.Notifications))

@@ -67,9 +67,8 @@ import works.merc.keryx.app.resources.settings_update_verifying
  * place, so it (and its one actionable button — download, install, retry, whichever applies) reads
  * first; "check for update" is something to reach for only once that story is already known.
  *
- * Opening the tab starts a check if nothing has run yet, same as before this composable was
- * rewritten against the full [UpdateState] machine — equivalent to one press of "check now", so it
- * never perturbs the automatic check schedule.
+ * Opening the tab starts a check if nothing has run yet — equivalent to one press of "check now",
+ * so it never perturbs the automatic check schedule.
  *
  * [vm.updateState] is deliberately *not* collected here: a download in progress emits an
  * [UpdateState.Downloading] tick per percent, and collecting it in this outer function would

@@ -189,8 +189,7 @@ private fun CloudStorageType.brandIcon(): DrawableResource = when (this) {
 
 /**
  * Brand name for a cloud provider's connection row. Deliberately a hardcoded literal, not a
- * string resource — these are untranslated product names (matching the pre-existing "Dropbox"
- * literal this section already used).
+ * string resource — these are untranslated product names.
  */
 private fun CloudStorageType.brandLabel(): String = when (this) {
     CloudStorageType.DROPBOX -> "Dropbox"
@@ -223,8 +222,7 @@ private fun CloudStorageType.disconnectLabel(): StringResource = when (this) {
 /**
  * One trailing action on a provider row: a labelled button on desktop, an icon-only
  * [TooltipIconButton] on a touch-primary platform. Two labelled buttons plus the provider name
- * cannot fit a phone-width settings dialog in any locale (they need ~340-366dp of ~288dp), which
- * used to squeeze the name onto four lines.
+ * cannot fit a phone-width settings dialog in any locale — they need ~340-366dp of ~288dp.
  *
  * [kind] is the one emphasis axis, rendered by each platform's own means: the icon-only button
  * takes it as its container, while labelled it selects the button component (`Primary` -> the
@@ -245,8 +243,8 @@ private fun ProviderActionButton(
     busy: Boolean = false,
     iconOnly: Boolean = isTouchPrimary,
 ) {
-    // 18dp keeps desktop's labelled buttons exactly as they look today; 20dp matches the row's own
-    // brand mark inside the bare icon buttons.
+    // 18dp for desktop's labelled buttons; 20dp for icon-only buttons, to match the row's own
+    // brand mark.
     val glyphSize = if (iconOnly) 20.dp else 18.dp
     val glyph: @Composable () -> Unit = {
         if (busy) {

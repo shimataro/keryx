@@ -86,8 +86,8 @@ internal fun ActionLinkRow(label: String, onClick: () -> Unit) {
 
 /**
  * Displays a labeled switch row. Tapping the switch always toggles it; on Android, tapping
- * anywhere in the row does too (a real `ListItem`'s own tap target) — desktop keeps its previous
- * behavior of only the switch itself being interactive (see [KeryxSettingRow]'s desktop `actual`).
+ * anywhere in the row does too (a real `ListItem`'s own tap target) — on desktop, only the switch
+ * itself is interactive (see [KeryxSettingRow]'s desktop `actual`).
  *
  * @param label The text displayed beside the switch.
  * @param checked Whether the switch is selected.
