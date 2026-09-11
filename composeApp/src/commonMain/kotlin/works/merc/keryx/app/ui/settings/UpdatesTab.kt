@@ -213,8 +213,9 @@ internal fun UpdateResultSection(
                             Text(stringResource(Res.string.settings_update_retry))
                         }
                     }
-                    UpdateState.Idle, UpdateState.Checking -> Unit
-                    else -> Unit // unreachable: every other state carries an AvailableUpdate
+                    // Idle/Checking render nothing here; every other state carries an
+                    // AvailableUpdate, so update wouldn't be null in the first place.
+                    else -> Unit
                 }
             } else {
                 Spacer(Modifier.height(12.dp))
