@@ -1822,6 +1822,28 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun articlesDoesNotBrieflyGoEmptyWhenSearchEnds() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1")
+        db.insertArticle("a2", "f1")
+
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        assertEquals(setOf("a1", "a2"), vm.articles.value.map { it.id }.toSet())
+
+        vm.setSearchBarVisible(true)
+        vm.setSearchQuery("kotlin")
+        testScheduler.advanceUntilIdle()
+
+        // Exiting search must not cancel/restart the underlying watchArticles(f) query — `articles`
+        // should already hold the correct list the instant search ends, with no async gap.
+        // Deliberately no advanceUntilIdle() call before this assertion.
+        vm.setSearchQuery("")
+        assertEquals(setOf("a1", "a2"), vm.articles.value.map { it.id }.toSet())
+    }
+
+    @Test
     fun legacySearchFilterRestoresToAllOnRestart() = runTest {
         // Simulates a user who had the removed ArticleFilter.Search selected before upgrading (back
         // when it was still a filter of its own): the persisted "search" lastFilter must not
