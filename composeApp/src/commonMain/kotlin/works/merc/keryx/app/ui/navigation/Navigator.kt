@@ -1,8 +1,10 @@
 package works.merc.keryx.app.ui.navigation
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 
 /**
  * Top-level destinations. Article view is a pane within [Screen.Home], not a route; Settings is a
@@ -14,22 +16,13 @@ sealed interface Screen {
     data object Home : Screen
 }
 
-/** Minimal stack-based navigator for the desktop single-window app. */
+/** Tracks the single current top-level [Screen] for the app's whole lifetime. */
 class Navigator(start: Screen) {
-    private val stack = mutableStateListOf(start)
-
-    val current: Screen get() = stack.last()
-
-    fun navigate(screen: Screen) {
-        stack.add(screen)
-    }
+    var current: Screen by mutableStateOf(start)
+        private set
 
     fun replace(screen: Screen) {
-        stack[stack.lastIndex] = screen
-    }
-
-    fun back() {
-        if (stack.size > 1) stack.removeAt(stack.lastIndex)
+        current = screen
     }
 }
 
