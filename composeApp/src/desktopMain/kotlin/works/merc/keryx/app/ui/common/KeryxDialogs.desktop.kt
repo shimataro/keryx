@@ -70,7 +70,6 @@ import works.merc.keryx.app.platform.LocalNativeWindow
 import works.merc.keryx.app.ui.theme.KeryxTheme
 import java.awt.Dimension
 import java.awt.FlowLayout
-import java.awt.Point
 import java.awt.Window
 import javax.swing.JButton
 import javax.swing.JPanel
@@ -232,7 +231,7 @@ private data class DialogThemePrefs(val themeMode: String, val fontScale: Double
  * The window is created at a placeholder size (see [placeholderSize]) and then kept fitted to
  * [content] for its whole lifetime by the drift guard below, clamping the height to
  * [MAX_HEIGHT_FRACTION] of the current screen's height. It centers itself over the owner window
- * (see [resolvePosition]). [KeryxTheme] is re-applied because a `DialogWindow`'s content is an
+ * (see [centeredPosition]). [KeryxTheme] is re-applied because a `DialogWindow`'s content is an
  * independent composition root that does not inherit ambient theme values from the caller.
  *
  * @param title The native window title.
@@ -261,13 +260,12 @@ private fun DesktopModalWindow(
 ) {
     val owner = LocalDialogWindowOwner.current ?: LocalNativeWindow.current
 
-    val cursorPoint: Point? = null
-    val screenBounds = remember(cursorPoint, owner) { currentScreenBounds(cursorPoint, owner) }
+    val screenBounds = remember(owner) { currentScreenBounds(owner) }
     val placeholderSize = remember(initialWidth) { placeholderSize(initialWidth) }
 
     val dialogState = remember {
         DialogState(
-            position = resolvePosition(cursorPoint, owner, screenBounds, placeholderSize),
+            position = centeredPosition(owner, placeholderSize),
             size = placeholderSize,
         )
     }
@@ -458,7 +456,7 @@ private fun DesktopModalWindow(
                         // truthful and keeps the setPreferredSize + pack() path it uses while the
                         // peer does not exist yet.
                         val position = if (decision.applyPosition) {
-                            resolvePosition(cursorPoint, owner, screenBounds, target)
+                            centeredPosition(owner, target)
                         } else {
                             null
                         }
