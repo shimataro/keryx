@@ -398,18 +398,26 @@ class HomeViewModel(
     // a changed query text means a new search, so leaving a pinned article from the previous
     // query stuck in results that no longer match would be surprising.
     val searchResults: StateFlow<List<ArticleSearchResult>> =
-        combine(_rawSearchResults, unreadOnly, _pinnedReadArticles) { snapshot, unread, pinned ->
+        combine(_rawSearchResults, unreadOnly, _pinnedReadArticles, _pinnedUnstarredArticles) { snapshot, unread, pinnedRead, pinnedUnstarred ->
             val raw = snapshot.results
             // Apply only the optimistic read-state from pinned (never the whole snapshot): other
             // fields — notably is_starred — must come from the fresh re-search, or starring an
             // already-read result would be hidden by the stale pinned copy. Field-wise merge of
-            // `is_read` from `pinned`, matching the merge in this same flow above.
+            // `is_read` from `pinnedRead` and `is_starred` from `pinnedUnstarred`, matching the
+            // merge in the `articles` flow above.
             val merged = raw.map { result ->
-                pinned[result.article.id]?.let { p ->
-                    result.copy(article = result.article.copy(is_read = p.is_read))
-                } ?: result
+                val readPin = pinnedRead[result.article.id]
+                val unstarPin = pinnedUnstarred[result.article.id]
+                when {
+                    readPin != null && unstarPin != null -> result.copy(
+                        article = result.article.copy(is_read = readPin.is_read, is_starred = unstarPin.is_starred),
+                    )
+                    readPin != null -> result.copy(article = result.article.copy(is_read = readPin.is_read))
+                    unstarPin != null -> result.copy(article = result.article.copy(is_starred = unstarPin.is_starred))
+                    else -> result
+                }
             }
-            if (unread) merged.filter { it.article.is_read == 0L || it.article.id in pinned } else merged
+            if (unread) merged.filter { it.article.is_read == 0L || it.article.id in pinnedRead } else merged
         }.flowOn(dispatcher).stateIn(viewModelScope, started, emptyList())
 
     // Requests to move keyboard focus into whichever composable currently owns the search field —
