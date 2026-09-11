@@ -30,6 +30,7 @@ import works.merc.keryx.app.ui.common.KeryxIcons
 import kotlinx.coroutines.Dispatchers
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.ArticleListRow
+import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import kotlin.test.Test
@@ -713,6 +714,55 @@ class ArticleListPaneTest {
                 onNodeWithText("未読のみ").fetchSemanticsNode().boundsInRoot,
                 "the controls row must not move when the search field's clear button appears",
             )
+        }
+    }
+
+    @Test
+    fun searchNoResultsHintShowsOnlyOneLineForAllFeedsScope() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("f1")
+        db.insertArticleRow("a1", "f1", createdAt = 0L)
+        ftsManagerIndexed(driver)
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            setContent {
+                ArticleListPane(vm = vm, focused = true, onActivated = {}, onOpenDrawer = {}, onExitSearch = {})
+            }
+            waitForIdle()
+
+            vm.setSearchBarVisible(true)
+            waitForIdle()
+            vm.setSearchQuery("nonexistentquery12345")
+            waitForIdle()
+
+            onNodeWithText("該当する記事がありません").assertIsDisplayed()
+            onNodeWithText("すべてのフィードから探すには").assertDoesNotExist()
+        }
+    }
+
+    @Test
+    fun searchNoResultsHintShowsTwoLinesForScopedFeedSearch() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("f1")
+        db.insertFeed("f2")
+        db.insertArticleRow("a1", "f1", createdAt = 0L)
+        ftsManagerIndexed(driver)
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            setContent {
+                ArticleListPane(vm = vm, focused = true, onActivated = {}, onOpenDrawer = {}, onExitSearch = {})
+            }
+            waitForIdle()
+
+            vm.selectFilter(ArticleFilter.Feed("f2"))
+            waitForIdle()
+            vm.setSearchBarVisible(true)
+            waitForIdle()
+            vm.setSearchQuery("nonexistentquery12345")
+            waitForIdle()
+
+            onNodeWithText("該当する記事がありません").assertIsDisplayed()
+            onNodeWithText("すべてのフィードから探すには").assertIsDisplayed()
         }
     }
 }
