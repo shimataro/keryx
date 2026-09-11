@@ -139,4 +139,16 @@ class UpdateInstallPolicyTest {
         assertEquals(false, canInstallAndroidApkUpdate(UpdatePlan.OpenReleasePage, canRequestPackageInstalls = true))
         assertEquals(false, canInstallAndroidApkUpdate(UpdatePlan.NotOffered, canRequestPackageInstalls = true))
     }
+
+    @Test
+    fun selfReplaceInstallKindsMatchesExactlyWhatUpdatePlanSelfReplacesFor() {
+        // DesktopUpdateInstaller.canInstall independently re-checks an InstallKind against
+        // SELF_REPLACE_INSTALL_KINDS rather than trusting the plan it was handed — this pins that
+        // the shared set and updatePlan's own SelfReplace branches can never silently drift apart
+        // as InstallKind gains or loses self-replaceable forms.
+        for (kind in InstallKind.entries) {
+            val isSelfReplace = updatePlan(location(kind), SOME_ASSET) is UpdatePlan.SelfReplace
+            assertEquals(kind in SELF_REPLACE_INSTALL_KINDS, isSelfReplace, "mismatch for $kind")
+        }
+    }
 }

@@ -41,6 +41,15 @@ internal val UpdatePlan.isInstallable: Boolean
     get() = this is UpdatePlan.SelfReplace || this is UpdatePlan.RunInstaller
 
 /**
+ * The [InstallKind]s [updatePlan] can return [UpdatePlan.SelfReplace] for. Shared with
+ * `DesktopUpdateInstaller.canInstall`'s own independent verification of a received plan's
+ * [InstallLocation] (it doesn't trust [plan][UpdatePlan] to have come from the current location),
+ * so the two can't silently drift apart as [InstallKind] gains or loses self-replaceable forms.
+ */
+internal val SELF_REPLACE_INSTALL_KINDS: Set<InstallKind> =
+    setOf(InstallKind.MAC_APP_BUNDLE, InstallKind.WINDOWS_PORTABLE, InstallKind.LINUX_PORTABLE)
+
+/**
  * Whether `AndroidUpdateInstaller.canInstall` should accept [plan], given whether the OS currently
  * lets this app install packages ([canRequestPackageInstalls] — the exact value
  * `PackageManager.canRequestPackageInstalls()` returns, which already folds together both facts

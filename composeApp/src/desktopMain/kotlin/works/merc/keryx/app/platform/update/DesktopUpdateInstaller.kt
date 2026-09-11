@@ -6,6 +6,7 @@ import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.core.untrustedText
 import works.merc.keryx.app.domain.AvailableUpdate
 import works.merc.keryx.app.domain.InstallLaunchResult
+import works.merc.keryx.app.domain.SELF_REPLACE_INSTALL_KINDS
 import works.merc.keryx.app.domain.UpdateAssetKind
 import works.merc.keryx.app.domain.UpdateInstaller
 import works.merc.keryx.app.domain.UpdatePlan
@@ -18,10 +19,6 @@ import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.isWindows
 import java.io.File
 import java.io.IOException
-
-/** [InstallKind]s [UpdatePlan.SelfReplace] can actually target — matches [updatePlan]'s own mapping. */
-private val SELF_REPLACE_KINDS =
-    setOf(InstallKind.MAC_APP_BUNDLE, InstallKind.WINDOWS_PORTABLE, InstallKind.LINUX_PORTABLE)
 
 /** Uncompressed size an update ZIP is allowed to expand to, as a multiple of the compressed asset
  * size — generous headroom for a `.app`/app-image (mostly a JVM runtime, which compresses well)
@@ -85,7 +82,7 @@ class DesktopUpdateInstaller internal constructor(
 
     override fun canInstall(plan: UpdatePlan): Boolean = when (plan) {
         is UpdatePlan.SelfReplace ->
-            location.kind in SELF_REPLACE_KINDS && location.appRoot != null && location.launcherPath != null &&
+            location.kind in SELF_REPLACE_INSTALL_KINDS && location.appRoot != null && location.launcherPath != null &&
                 location.parentWritable && !location.translocated
         is UpdatePlan.RunInstaller ->
             plan.asset.kind == UpdateAssetKind.WINDOWS_MSI &&
@@ -365,7 +362,7 @@ class DesktopUpdateInstaller internal constructor(
  * it can only be a leftover from a past, abandoned attempt, never one this process itself needs.
  */
 internal fun cleanUpStaleSelfReplaceArtifacts(location: InstallLocation) {
-    if (location.kind !in SELF_REPLACE_KINDS) return
+    if (location.kind !in SELF_REPLACE_INSTALL_KINDS) return
     val appRootFile = File(location.appRoot ?: return)
     val parent = appRootFile.parentFile ?: return
     FileSystemExtras.deleteRecursively(File(parent, ".${appRootFile.name}.new").path)
