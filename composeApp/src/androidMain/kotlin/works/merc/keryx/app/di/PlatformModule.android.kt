@@ -2,14 +2,11 @@ package works.merc.keryx.app.di
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
-import io.ktor.client.plugins.HttpTimeout
 import kotlinx.coroutines.flow.MutableSharedFlow
 import org.koin.core.module.Module
 import org.koin.dsl.module
 import works.merc.keryx.app.BuildConfig
-import works.merc.keryx.app.core.CONNECTION_TIMEOUT_MS
 import works.merc.keryx.app.core.CloudStorageType
-import works.merc.keryx.app.core.REQUEST_TIMEOUT_MS
 import works.merc.keryx.app.data.cloud.CloudAuthManager
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.DropboxStorage
@@ -55,17 +52,7 @@ actual val platformModule: Module = module {
 
     single<UpdateInstaller> { AndroidUpdateInstaller() }
 
-    single {
-        HttpClient(OkHttp) {
-            // Statuses are handled explicitly everywhere (feed redirects, cloud errors).
-            followRedirects = false
-            expectSuccess = false
-            install(HttpTimeout) {
-                connectTimeoutMillis = CONNECTION_TIMEOUT_MS
-                requestTimeoutMillis = REQUEST_TIMEOUT_MS
-            }
-        }
-    }
+    single { keryxHttpClient(OkHttp) }
 
     // Shared by MainActivity's OS URI routing (dispatchOAuthCallbackIfPresent) and the
     // custom-URI (Dropbox/OneDrive) connect transport — the Android counterpart of desktop's

@@ -2,16 +2,13 @@ package works.merc.keryx.app.di
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
-import io.ktor.client.plugins.HttpTimeout
 import kotlinx.coroutines.flow.MutableSharedFlow
 import org.jetbrains.compose.resources.getString
 import org.koin.core.module.Module
 import org.koin.dsl.module
 import works.merc.keryx.app.BuildConfig
 import works.merc.keryx.app.DesktopBuildConfig
-import works.merc.keryx.app.core.CONNECTION_TIMEOUT_MS
 import works.merc.keryx.app.core.CloudStorageType
-import works.merc.keryx.app.core.REQUEST_TIMEOUT_MS
 import works.merc.keryx.app.data.cloud.CloudAuthManager
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.DropboxStorage
@@ -83,17 +80,7 @@ actual val platformModule: Module = module {
 
     single<UpdateInstaller> { DesktopUpdateInstaller(get()) }
 
-    single {
-        HttpClient(CIO) {
-            // Statuses are handled explicitly everywhere (feed redirects, cloud errors).
-            followRedirects = false
-            expectSuccess = false
-            install(HttpTimeout) {
-                connectTimeoutMillis = CONNECTION_TIMEOUT_MS
-                requestTimeoutMillis = REQUEST_TIMEOUT_MS
-            }
-        }
-    }
+    single { keryxHttpClient(CIO) }
 
     // Shared by main.kt's OS URI routing and the custom-URI (Dropbox) connect transport.
     single { MutableSharedFlow<OAuthCallbackParams>(replay = 0, extraBufferCapacity = 1) }
