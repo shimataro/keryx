@@ -128,7 +128,7 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  *   further to advance to.
  * @param onExitSearch The narrow layout's own back arrow inside the expanded search bar — closes
  *   the bar rather than opening the feed-list drawer (a distinct action from [onOpenDrawer] — see
- *   `HomePaneLayout.kt`'s `homeBackAction`/`HomeBackAction.ExitSearch`). `null` at
+ *   `HomePaneLayout.kt`'s `homeBackAction`/`HomeBackAction.CloseSearchBar`). `null` at
  *   [PaneLayout.Triple], same boundary as [onOpenDrawer] — the field there lives permanently in
  *   `FeedListPane`'s sidebar instead, with no bar of its own to close.
  * @param onAddFeedClick Invoked from the empty state's "Add feed" button, shown instead of the
@@ -228,7 +228,7 @@ fun ArticleListPane(
                 placeholder = stringResource(Res.string.home_search_placeholder),
                 onNavigateUp = exitSearch,
                 // Closing the bar always changes what's on screen (see homeBackAction's own KDoc on
-                // HomeBackAction.ExitSearch), so there is no "can't close right now" state to gate on.
+                // HomeBackAction.CloseSearchBar), so there is no "can't close right now" state to gate on.
                 navigateUpEnabled = true,
                 navigateUpContentDescription = stringResource(Res.string.common_back),
                 clearContentDescription = stringResource(Res.string.home_search_clear),

@@ -292,8 +292,8 @@ class HomePaneLayoutTest {
         // lives (see homeBackAction's own KDoc). This is the fix for both bugs a pending scope used
         // to trip over: Single unconditionally popped to the feed list instead of exiting Search,
         // and Dual's back arrow was disabled outright (canNavigateBack(Dual, 2) == false).
-        assertEquals(HomeBackAction.ExitSearch, homeBackAction(PaneLayout.Single, 2, searchBarOpen = true))
-        assertEquals(HomeBackAction.ExitSearch, homeBackAction(PaneLayout.Dual, 2, searchBarOpen = true))
+        assertEquals(HomeBackAction.CloseSearchBar, homeBackAction(PaneLayout.Single, 2, searchBarOpen = true))
+        assertEquals(HomeBackAction.CloseSearchBar, homeBackAction(PaneLayout.Dual, 2, searchBarOpen = true))
     }
 
     @Test
@@ -301,7 +301,7 @@ class HomePaneLayoutTest {
         // A result opened from the search screen into ArticleDetail (depth 3) still pops one pane
         // at a time at Single — landing back on the search screen with the scope intact, not
         // exiting it in one step. ArticleList isn't visible at this depth (visiblePanes(Single, 3)
-        // == [ArticleDetail]), which is what keeps ExitSearch from taking priority here.
+        // == [ArticleDetail]), which is what keeps CloseSearchBar from taking priority here.
         assertEquals(HomeBackAction.PopPane, homeBackAction(PaneLayout.Single, 3, searchBarOpen = true))
     }
 
@@ -310,7 +310,7 @@ class HomePaneLayoutTest {
         // Unlike Single, Dual keeps the article list on screen at every depth (visiblePanes(Dual,
         // 3) == [ArticleList, ArticleDetail]) — so exiting Search takes priority over popping the
         // pane at every depth there, not just depth 2.
-        assertEquals(HomeBackAction.ExitSearch, homeBackAction(PaneLayout.Dual, 3, searchBarOpen = true))
+        assertEquals(HomeBackAction.CloseSearchBar, homeBackAction(PaneLayout.Dual, 3, searchBarOpen = true))
     }
 
     @Test

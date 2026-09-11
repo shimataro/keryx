@@ -166,7 +166,7 @@ fun canNavigateBack(layout: PaneLayout, depth: Int): Boolean =
     depth > 1 && visiblePanes(layout, depth - 1) != visiblePanes(layout, depth)
 
 /** What a back action (system back, or a narrow pane's own back arrow) actually does. */
-enum class HomeBackAction { None, ExitSearch, PopPane }
+enum class HomeBackAction { None, CloseSearchBar, PopPane }
 
 /**
  * Resolves what a back action should do at [depth]/[layout], given whether the expanded search
@@ -191,7 +191,7 @@ enum class HomeBackAction { None, ExitSearch, PopPane }
 fun homeBackAction(layout: PaneLayout, depth: Int, searchBarOpen: Boolean): HomeBackAction = when {
     searchBarOpen &&
         feedListIsDrawer(layout) &&
-        HomePane.ArticleList in visiblePanes(layout, depth) -> HomeBackAction.ExitSearch
+        HomePane.ArticleList in visiblePanes(layout, depth) -> HomeBackAction.CloseSearchBar
     canNavigateBack(layout, depth) -> HomeBackAction.PopPane
     else -> HomeBackAction.None
 }

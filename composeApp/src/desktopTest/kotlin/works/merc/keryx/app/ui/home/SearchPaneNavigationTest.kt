@@ -60,7 +60,7 @@ class SearchPaneNavigationTest {
             val searchBarVisible by vm.searchBarVisible.collectAsStateSafe(false)
             fun goBack() {
                 when (homeBackAction(layout, depth, searchBarVisible)) {
-                    HomeBackAction.ExitSearch -> { vm.setSearchBarVisible(false); onDepthChange(HomePane.ArticleList.ordinal + 1) }
+                    HomeBackAction.CloseSearchBar -> { vm.setSearchBarVisible(false); onDepthChange(HomePane.ArticleList.ordinal + 1) }
                     HomeBackAction.PopPane -> onDepthChange(depth - 1)
                     HomeBackAction.None -> {}
                 }
@@ -115,7 +115,7 @@ class SearchPaneNavigationTest {
             }
             fun goBack() {
                 when (homeBackAction(layout, focusedPane.ordinal + 1, searchBarVisible)) {
-                    HomeBackAction.ExitSearch -> { vm.setSearchBarVisible(false); setFocusedPane(HomePane.ArticleList) }
+                    HomeBackAction.CloseSearchBar -> { vm.setSearchBarVisible(false); setFocusedPane(HomePane.ArticleList) }
                     HomeBackAction.PopPane -> {
                         val previous = focusedPane.ordinal - 1
                         if (previous >= 0) setFocusedPane(HomePane.entries[previous])
@@ -150,7 +150,7 @@ class SearchPaneNavigationTest {
     }
 
     @Test
-    fun theArticleListsOwnSearchIconAtDualLayoutFocusesItSoBackCanExitSearch() = runDesktopComposeUiTest {
+    fun theArticleListsOwnSearchIconAtDualLayoutFocusesItSoBackCanCloseSearchBar() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         useHomeViewModel(driver, db) { fixture ->
             val vm = fixture.vm
@@ -169,7 +169,7 @@ class SearchPaneNavigationTest {
 
             assertEquals(true, vm.searchBarVisible.value)
             // The fix: opening the bar from this icon also focuses the article list, so
-            // homeBackAction resolves to ExitSearch instead of None.
+            // homeBackAction resolves to CloseSearchBar instead of None.
             assertEquals(HomePane.ArticleList, focusedPane)
             onNodeWithContentDescription("戻る").assertIsEnabled()
 

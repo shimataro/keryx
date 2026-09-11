@@ -228,7 +228,7 @@ fun HomeScreen() {
     // resolved as a distinct action rather than always popping the pane stack.
     fun goBack() {
         when (homeBackAction(paneLayout, focusedPane.ordinal + 1, searchBarVisible)) {
-            HomeBackAction.ExitSearch -> vm.setSearchBarVisible(false)
+            HomeBackAction.CloseSearchBar -> vm.setSearchBarVisible(false)
             HomeBackAction.PopPane -> {
                 if (shouldFlashReturnedArticle(paneLayout, focusedPane)) articleReturnRipplePulse++
                 val previous = focusedPane.ordinal - 1
@@ -436,7 +436,7 @@ fun HomeScreen() {
                 // Alt+F4-equivalent) is left alone there. It is also None at PaneLayout.Dual depth
                 // 1->2 while the search bar is closed (visiblePanes' sliding window shows the same
                 // two panes at both depths), so a back press that would produce no visible change
-                // falls through instead of being swallowed — but ExitSearch still applies there
+                // falls through instead of being swallowed — but CloseSearchBar still applies there
                 // while the bar is open, since closing it always changes what's on screen.
                 val backAction = homeBackAction(layout, focusedPane.ordinal + 1, searchBarVisible)
                 // The drawer's own back handling lives in ModalDrawerSheet(drawerState = ...) ->
@@ -595,7 +595,7 @@ fun HomeScreen() {
                                     // handler — see ArticleListPaneContent), so without this,
                                     // focusedPane could still be ArticleDetail (both panes are on
                                     // screen at Dual) and homeBackAction would never resolve to
-                                    // ExitSearch.
+                                    // CloseSearchBar.
                                     onSearchClick = {
                                         setFocusedPane(HomePane.ArticleList)
                                         vm.setSearchBarVisible(true)
