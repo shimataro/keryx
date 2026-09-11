@@ -33,7 +33,6 @@ import works.merc.keryx.app.resources.ic_notifications_material
 import works.merc.keryx.app.resources.ic_public_filled_material
 import works.merc.keryx.app.resources.ic_public_outlined_material
 import works.merc.keryx.app.resources.ic_refresh_material
-import works.merc.keryx.app.resources.ic_restart_alt_material
 import works.merc.keryx.app.resources.ic_search_material
 import works.merc.keryx.app.resources.ic_smartphone_material
 import works.merc.keryx.app.resources.ic_sort_ascending_material
@@ -80,7 +79,6 @@ actual object KeryxIcons {
     actual val NewLabel: DrawableResource = Res.drawable.ic_new_label_material
     actual val Notifications: DrawableResource = Res.drawable.ic_notifications_material
     actual val Refresh: DrawableResource = Res.drawable.ic_refresh_material
-    actual val RestartAlt: DrawableResource = Res.drawable.ic_restart_alt_material
     actual val Search: DrawableResource = Res.drawable.ic_search_material
     // Material Symbols ships no directional sort glyph, so these are local composites of the
     // stock `sort` (bars only) plus `arrow_downward`/`arrow_upward`.

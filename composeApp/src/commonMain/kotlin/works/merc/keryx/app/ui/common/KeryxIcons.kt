@@ -54,7 +54,6 @@ expect object KeryxIcons {
     val NewLabel: DrawableResource
     val Notifications: DrawableResource
     val Refresh: DrawableResource
-    val RestartAlt: DrawableResource
     val Search: DrawableResource
     val SortAscending: DrawableResource
     val SortDescending: DrawableResource
