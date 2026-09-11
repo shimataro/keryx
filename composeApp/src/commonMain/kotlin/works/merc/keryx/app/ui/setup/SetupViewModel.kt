@@ -5,8 +5,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Result
@@ -21,6 +24,10 @@ class SetupViewModel(
     private val settingsRepository: SettingsRepository,
     private val cloudSession: CloudSession,
     private val syncRepository: SyncRepository,
+    // Token store / sync touch the OS Keychain (macOS shells out to `security`, which may
+    // block and show an authorization dialog), so keep them off the Main/EDT dispatcher —
+    // same rationale as SettingsViewModel's own dispatcher.
+    private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : ViewModel() {
 
     /** Cloud providers configured in this build, in display order. */
@@ -74,11 +81,11 @@ class SetupViewModel(
             }
             when (result) {
                 is Result.Ok -> {
-                    cloudSession.saveTokens(type, result.value)
+                    withContext(dispatcher) { cloudSession.saveTokens(type, result.value) }
                     settingsRepository.mutateLocalSettings { it.copy(cloudStorageType = type.id) }
-                    settingsRepository.flush()
+                    withContext(dispatcher) { settingsRepository.flush() }
                     // Merge whatever already exists in the cloud (imports on first sync).
-                    syncRepository.sync()
+                    withContext(dispatcher) { syncRepository.sync() }
                     phase = SetupPhase.IDLE
                     onDone()
                 }
