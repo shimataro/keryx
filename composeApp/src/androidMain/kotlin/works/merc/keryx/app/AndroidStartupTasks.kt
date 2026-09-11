@@ -2,15 +2,8 @@ package works.merc.keryx.app
 
 import kotlinx.coroutines.sync.Mutex
 import org.koin.core.Koin
-import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.SettingsRepository
-import works.merc.keryx.app.domain.SyncRepository
-import works.merc.keryx.app.domain.SyncTrigger
-import works.merc.keryx.app.domain.checkForUpdateAndNotify
-import works.merc.keryx.app.domain.cleanUpArticleCacheIfDue
-import works.merc.keryx.app.domain.maybeRebuildFtsIndex
-import works.merc.keryx.app.domain.refreshFeedsAndNotify
-import works.merc.keryx.app.domain.runMaintenanceStep
+import works.merc.keryx.app.domain.runStartupMaintenance
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -38,9 +31,10 @@ internal val startupMaintenanceMutex = Mutex()
 private val startupTasksRan = AtomicBoolean(false)
 
 /**
- * Runs the same maintenance sequence as desktop's `runStartupTasks` (cache cleanup, initial cloud
- * sync, feed refresh, update check, FTS repair) — everything except the macOS-specific
- * translocation warning, which has no Android equivalent.
+ * Runs the same maintenance sequence as desktop's `runStartupTasks` — `domain/
+ * StartupMaintenanceTasks.kt`'s shared [runStartupMaintenance] (cache cleanup, initial cloud sync,
+ * feed refresh, update check, FTS repair) — everything except the macOS-specific translocation
+ * warning, which has no Android equivalent.
  *
  * Called from `MainActivity.onCreate`, not `KeryxApplication.onCreate`: the latter also runs when
  * `WorkManager` wakes the process to run `FeedRefreshWorker`, and running the full startup
@@ -52,12 +46,10 @@ private val startupTasksRan = AtomicBoolean(false)
  */
 suspend fun runAndroidStartupTasks(koin: Koin) {
     if (startupTasksRan.get()) return
-    // Every step below eventually calls SettingsRepository.mutateLocalSettings (to record its own
-    // "last ran at" timestamp), which persists local_settings.json in the background — the same
-    // file whose mere *existence* is isSetupComplete()'s signal that setup finished
-    // (SetupViewModel calls flush() at that point deliberately). Running any of this before setup
-    // completes could race that check on a fresh install and make it skip the Setup screen
-    // entirely. None of it is useful pre-setup anyway (no feeds to refresh, no sync configured).
+    // Checked here too (runStartupMaintenance re-checks it, and owns the full reason why) rather
+    // than only inside runStartupMaintenance: this must happen *before* the tryLock below, so a
+    // pre-setup call never holds the lock at all — see startupMaintenanceMutex's own KDoc for why
+    // that would otherwise let it steal FeedRefreshWorker's periodic run for nothing.
     if (!koin.get<SettingsRepository>().isSetupComplete()) return
     // FeedRefreshWorker may already be running the same sequence (WorkManager woke the process
     // right as this Activity started) — skip rather than duplicate refresh/sync/update-check/FTS
@@ -68,25 +60,12 @@ suspend fun runAndroidStartupTasks(koin: Koin) {
     try {
         // Double execution is prevented by startupMaintenanceMutex.tryLock() above, not by this
         // flag — it is a plain `set`, not a `compareAndSet`, because only one caller can ever reach
-        // this point at a time. Each step runs through runMaintenanceStep so that one step's
-        // exception (e.g. maybeRebuildFtsIndex hitting FtsManager's busy_timeout) does not skip the
-        // rest of the sequence the way a single shared try/catch would. The flag is then set
-        // unconditionally once every step has been attempted — a step that failed is logged and
-        // left for FeedRefreshWorker's own periodic run to pick back up (refreshFeedsAndNotify /
-        // sync / checkForUpdateAndNotify / maybeRebuildFtsIndex), except cleanUpArticleCacheIfDue,
-        // which only runs here and simply waits for its own 24h gate on the next process start.
-        // sync()'s own Result (as opposed to a thrown exception) is deliberately not inspected here
-        // — Activity recreation is not meant to be a retry mechanism for the expected failure
-        // categories error-design.md documents as Result, only for genuinely unexpected exceptions.
-        runMaintenanceStep("cacheCleanup") { cleanUpArticleCacheIfDue(koin) }
-        runMaintenanceStep("sync") {
-            if (koin.get<CloudSession>().isConnected()) {
-                koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
-            }
-        }
-        runMaintenanceStep("feedRefresh") { refreshFeedsAndNotify(koin) }
-        runMaintenanceStep("updateCheck") { checkForUpdateAndNotify(koin) }
-        runMaintenanceStep("ftsRebuild") { maybeRebuildFtsIndex(koin) }
+        // this point at a time. Set unconditionally once every step has been attempted (matching
+        // runStartupMaintenance's own per-step isolation) — a step that failed is logged and left
+        // for FeedRefreshWorker's own periodic run to pick back up (refreshFeedsAndNotify / sync /
+        // checkForUpdateAndNotify / maybeRebuildFtsIndex), except cleanUpArticleCacheIfDue, which
+        // only runs here and simply waits for its own 24h gate on the next process start.
+        runStartupMaintenance(koin)
         startupTasksRan.set(true)
     } finally {
         startupMaintenanceMutex.unlock()

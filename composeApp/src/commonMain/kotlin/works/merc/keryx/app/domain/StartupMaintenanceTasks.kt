@@ -36,6 +36,36 @@ internal suspend fun runMaintenanceStep(name: String, step: suspend () -> Unit) 
 }
 
 /**
+ * The maintenance sequence desktop's `StartupTasks.kt` and Android's `AndroidStartupTasks.kt` both
+ * run at startup, sharing this one implementation rather than each hand-writing the same five
+ * [runMaintenanceStep] calls: cache cleanup, initial cloud sync, feed refresh, update check, FTS
+ * heal. Each caller wraps this with whatever else its own platform needs before/after it (desktop's
+ * macOS translocation warning and stale-self-replace-artifact cleanup run before this; Android's
+ * `startupMaintenanceMutex`/once-per-process guard wraps around the call instead).
+ *
+ * Every step below eventually calls [SettingsRepository.mutateLocalSettings] (to record its own
+ * "last ran at" timestamp), which persists `local_settings.json` in the background — the same file
+ * whose mere *existence* is `isSetupComplete()`'s signal that setup finished (`SetupViewModel`
+ * calls `flush()` at that point deliberately). Running any of this before setup completes could
+ * race that check and make a fresh install skip the Setup screen entirely. None of it is useful
+ * pre-setup anyway (no feeds to refresh, no sync configured) — hence the gate below, checked before
+ * anything else runs. It is deliberately not itself a [runMaintenanceStep]: it is control flow for
+ * the whole sequence, not a step that can independently fail.
+ */
+internal suspend fun runStartupMaintenance(koin: Koin) {
+    if (!koin.get<SettingsRepository>().isSetupComplete()) return
+    runMaintenanceStep("cacheCleanup") { cleanUpArticleCacheIfDue(koin) }
+    runMaintenanceStep("sync") {
+        if (koin.get<CloudSession>().isConnected()) {
+            koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
+        }
+    }
+    runMaintenanceStep("feedRefresh") { refreshFeedsAndNotify(koin) }
+    runMaintenanceStep("updateCheck") { checkForUpdateAndNotify(koin) }
+    runMaintenanceStep("ftsRebuild") { maybeRebuildFtsIndex(koin) }
+}
+
+/**
  * Soft-deletes expired cached articles once per day (gated on [works.merc.keryx.app.data.local.db.LocalSettings.lastCacheCleanupAt],
  * mirroring [maybeRebuildFtsIndex]'s own 24h gate).
  */

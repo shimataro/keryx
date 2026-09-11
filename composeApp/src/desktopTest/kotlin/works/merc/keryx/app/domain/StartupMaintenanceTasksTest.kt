@@ -142,6 +142,50 @@ class StartupMaintenanceTasksTest {
     }
 
     @Test
+    fun runStartupMaintenanceSkipsEverythingUntilSetupIsComplete() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            val now = 10 * ONE_DAY_MS
+            db.seedOneFeedWithOneExpirableArticle(now)
+            val koin = testKoin(db, driver, now)
+            // No local_settings.json written for this test's dir — isSetupComplete() is false, so
+            // the gate must return before the first step (cacheCleanup) ever runs.
+            koin.get<SettingsRepository>().setCacheRetentionDays(1)
+
+            runStartupMaintenance(koin)
+
+            assertNull(koin.get<SettingsRepository>().getLocalSettings().lastCacheCleanupAt)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun runStartupMaintenanceRunsTheSequenceOnceSetupIsComplete() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            val now = 10 * ONE_DAY_MS
+            db.seedOneFeedWithOneExpirableArticle(now)
+            val koin = testKoin(db, driver, now)
+            koin.get<SettingsRepository>().setCacheRetentionDays(1)
+            // Any mutateLocalSettings call persists local_settings.json, which is exactly what
+            // isSetupComplete() checks for — so this also marks setup as finished.
+            koin.get<SettingsRepository>().mutateLocalSettings { it }
+
+            // The later steps (sync/feedRefresh/updateCheck/ftsRebuild) all need dependencies this
+            // test's Koin never registers (CloudSession, FtsManager, SelfUpdateCheckSupport, ...),
+            // so each throws — but runMaintenanceStep swallows that per-step, and this test only
+            // asserts on the first step's own effect: reaching the end and observing it proves the
+            // gate passed and the sequence actually started running step by step.
+            runStartupMaintenance(koin)
+
+            assertEquals(now, koin.get<SettingsRepository>().getLocalSettings().lastCacheCleanupAt)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun checkForUpdateAndNotifySkipsWhenSelfUpdateCheckIsUnsupported() = runTest {
         val koin = koinApplication {
             modules(

@@ -49,12 +49,21 @@ import works.merc.keryx.app.ui.common.KeryxIcons
 fun <T> StateFlow<T>.collectAsStateSafe(@Suppress("UNUSED_PARAMETER") initial: T): State<T> = collectAsState()
 
 /**
+ * The bare key each OS's own file manager uses to start a rename (Finder: Return,
+ * Explorer/Nautilus/Dolphin: F2). Single source of truth for this convention — also used by
+ * `KeyboardNav.kt`'s rename shortcut and the native application menu's `FeedRename` accelerator.
+ * [isMacOs] is overridable for tests only; production call sites use the platform default.
+ */
+internal fun renameKey(isMacOs: Boolean = works.merc.keryx.app.platform.isMacOs): Key =
+    if (isMacOs) Key.Enter else Key.F2
+
+/**
  * The bare-key context-menu shortcut for rename/edit-type actions (feed/folder/tag), matching each
  * OS's own file-manager rename convention (Explorer/Nautilus/Dolphin use F2, Finder uses Return).
  * Renders as a real native accelerator on Linux; AWT's `MenuShortcut` can't represent a bare key at
  * all, so macOS/Windows show no hint for it — see `NativeMenuShortcut`'s doc comment.
  */
-internal val renameNativeShortcut = NativeMenuShortcut(if (isMacOs) Key.Enter else Key.F2)
+internal val renameNativeShortcut = NativeMenuShortcut(renameKey())
 
 /**
  * The bare-key context-menu shortcut for unsubscribe/delete-type actions (feed/folder/tag). Same

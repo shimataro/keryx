@@ -105,7 +105,7 @@ fun Modifier.homeKeyboardShortcuts(
         !event.isCtrlPressed && !event.isMetaPressed && event.key == Key.J -> { onNextArticle(); true }
         !event.isCtrlPressed && !event.isMetaPressed && event.key == Key.K -> { onPreviousArticle(); true }
         !event.isCtrlPressed && !event.isMetaPressed &&
-            (if (isMacOs) event.key == Key.Enter else event.key == Key.F2) -> { onFeedListRename(); true }
+            event.key == renameKey(isMacOs) -> { onFeedListRename(); true }
         !event.isCtrlPressed && !event.isMetaPressed &&
             (event.key == Key.Delete || event.key == Key.Backspace) -> { onFeedListDelete(); true }
         else -> false

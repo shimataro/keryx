@@ -200,6 +200,13 @@ ATTACH DATABASE マージは**専用の JDBC コネクション 1 本**で行う
 判定した DB ファイルを削除する — バンドル AAR の逆アセンブルで確認済み。`platform/AndroidSqliteSupport.kt`
 参照）。
 
+`DatabaseSnapshot` にも同じ「ロジックは commonMain、コネクションは actual」という分割が当てはまる:
+`domain/SnapshotSql`（`MergeSql` と同様、純粋なデータ）が、`VACUUM INTO` 後にスナップショットのコピー側へ
+実行するクリーンアップ文の共有リストであり、両 actual が同じテーブル/インデックスを同じ順序で DROP する
+ため、個別に再導出して乖離するリスクがない。異なるのはコピーを開くコネクション（JDBC か requery のバンドル
+SQLite か）だけで、Android 固有の `android_metadata` テーブルは共有リストにハードコードせず、追加の
+drop テーブルとして渡している。
+
 ### CloudSession / SyncRepository
 
 `CloudSession` が現在の `CloudStorage`（デスクトップは Dropbox / Google Drive / OneDrive、Android は

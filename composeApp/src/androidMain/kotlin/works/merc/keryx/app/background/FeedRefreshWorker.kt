@@ -35,9 +35,10 @@ class FeedRefreshWorker(context: Context, params: WorkerParameters) : CoroutineW
     override suspend fun doWork(): Result {
         val koin = KoinPlatform.getKoin()
         val settingsRepository = koin.get<SettingsRepository>()
-        // Guards against the same local_settings.json-existence race AndroidStartupTasks.kt's
-        // runAndroidStartupTasks documents — WorkManager's own 15-minute floor makes this
-        // exceedingly unlikely to actually fire pre-setup, but the guard costs nothing to keep.
+        // Guards against the same local_settings.json-existence race
+        // domain/StartupMaintenanceTasks.kt's runStartupMaintenance documents — WorkManager's own
+        // 15-minute floor makes this exceedingly unlikely to actually fire pre-setup, but the
+        // guard costs nothing to keep.
         if (!settingsRepository.isSetupComplete()) return Result.success()
         // runAndroidStartupTasks may already be running the same sequence (the Activity started
         // right as this periodic wakeup fired) — skip rather than duplicate the work; the next

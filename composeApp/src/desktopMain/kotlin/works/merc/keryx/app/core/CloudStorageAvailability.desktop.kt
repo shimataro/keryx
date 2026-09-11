@@ -12,12 +12,6 @@ actual object CloudStorageAvailability {
     // OneDrive is a PKCE public client — the client id alone gates availability (no secret).
     actual val oneDriveAvailable: Boolean = BuildConfig.ONEDRIVE_CLIENT_ID.isNotEmpty()
 
-    // Declaration order of CloudStorageType drives the UI display order.
-    actual val available: List<CloudStorageType> = CloudStorageType.entries.filter {
-        when (it) {
-            CloudStorageType.DROPBOX -> dropboxAvailable
-            CloudStorageType.GOOGLE_DRIVE -> googleDriveAvailable
-            CloudStorageType.ONEDRIVE -> oneDriveAvailable
-        }
-    }
+    actual val available: List<CloudStorageType> =
+        availableCloudStorageTypes(dropbox = dropboxAvailable, googleDrive = googleDriveAvailable, oneDrive = oneDriveAvailable)
 }

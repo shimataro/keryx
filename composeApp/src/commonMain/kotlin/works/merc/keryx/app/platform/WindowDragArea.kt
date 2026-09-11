@@ -14,7 +14,7 @@ import androidx.compose.ui.Modifier
  * default pass-through (no-op).
  *
  * The value is set once at startup and never changes, hence [staticCompositionLocalOf] (same
- * reason as [LocalNativeWindow]).
+ * reason desktop's `LocalNativeWindow` uses it too).
  */
 val LocalWindowDragArea:
     ProvidableCompositionLocal<@Composable (Modifier, @Composable () -> Unit) -> Unit> =

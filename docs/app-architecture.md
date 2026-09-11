@@ -187,6 +187,13 @@ connection, opened with `NoOpDatabaseErrorHandler` rather than the library's def
 a database file it judges corrupt — confirmed by disassembling the bundled AAR; see
 `platform/AndroidSqliteSupport.kt`).
 
+The same "policy in commonMain, connection in the actual" split applies to `DatabaseSnapshot`:
+`domain/SnapshotSql` (plain data, like `MergeSql`) is the shared list of cleanup statements run
+against the snapshot copy after `VACUUM INTO`, so both actuals drop the same tables/indexes in the
+same order without re-deriving (and risking drifting) the list independently. Only the connection
+each actual opens the copy through differs (JDBC vs. requery's bundled SQLite), and Android's own
+`android_metadata` table is passed in as an extra drop table rather than hardcoded into the shared list.
+
 ### CloudSession / SyncRepository
 
 `CloudSession` provides the current `CloudStorage` (Dropbox / Google Drive / OneDrive on desktop;

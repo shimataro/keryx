@@ -9,18 +9,17 @@ import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.MILLIS_PER_MINUTE
 import works.merc.keryx.app.core.SystemClock
-import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.IdGenerator
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncTrigger
 import works.merc.keryx.app.domain.checkForUpdateAndNotify
-import works.merc.keryx.app.domain.cleanUpArticleCacheIfDue
 import works.merc.keryx.app.domain.importOpmlAndNotify
 import works.merc.keryx.app.domain.maybeRebuildFtsIndex
 import works.merc.keryx.app.domain.refreshFeedsAndNotify
 import works.merc.keryx.app.domain.runMaintenanceStep
+import works.merc.keryx.app.domain.runStartupMaintenance
 import works.merc.keryx.app.domain.shouldCheckForUpdate
 import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.platform.InstallLocation
@@ -33,32 +32,14 @@ private const val LOG_TAG = "StartupTasks"
 
 /**
  * Executes startup maintenance, synchronization, feed refresh, update checks, and search-index
- * maintenance. Each step runs through [runMaintenanceStep] (the same isolation
- * `AndroidStartupTasks.kt`'s `runAndroidStartupTasks` uses, sharing its step names) so that one
- * step's failure — e.g. `cleanUpArticleCacheIfDue` hitting `FtsManager`'s `busy_timeout` — does not
- * skip the rest of the sequence the way a single shared `runCatching` used to.
+ * maintenance. The shared five-step sequence itself is `domain/StartupMaintenanceTasks.kt`'s
+ * [runStartupMaintenance] (also used by Android's `AndroidStartupTasks.kt`); this only adds the
+ * two desktop-specific steps that have no Android equivalent, run before it.
  */
 internal suspend fun runStartupTasks(koin: Koin) {
     runMaintenanceStep("translocationWarning") { warnIfAppTranslocated(koin) }
     runMaintenanceStep("staleSelfReplaceCleanup") { cleanUpStaleSelfReplaceArtifacts(koin.get<InstallLocation>()) }
-    // Every step below eventually calls SettingsRepository.mutateLocalSettings (to record its own
-    // "last ran at" timestamp), which persists local_settings.json in the background — the same
-    // file whose mere *existence* is isSetupComplete()'s signal that setup finished (SetupViewModel
-    // calls flush() at that point deliberately). Running any of this before setup completes could
-    // race that check and make a fresh install skip the Setup screen entirely. None of it is useful
-    // pre-setup anyway (no feeds to refresh, no sync configured). This gate is deliberately not
-    // itself a runMaintenanceStep — it's control flow for the whole sequence, not a step that can
-    // independently fail.
-    if (!koin.get<SettingsRepository>().isSetupComplete()) return
-    runMaintenanceStep("cacheCleanup") { cleanUpArticleCacheIfDue(koin) }
-    runMaintenanceStep("sync") {
-        if (koin.get<CloudSession>().isConnected()) {
-            koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
-        }
-    }
-    runMaintenanceStep("feedRefresh") { refreshFeedsAndNotify(koin) }
-    runMaintenanceStep("updateCheck") { checkForUpdateAndNotify(koin) }
-    runMaintenanceStep("ftsRebuild") { maybeRebuildFtsIndex(koin) }
+    runStartupMaintenance(koin)
 }
 
 /**

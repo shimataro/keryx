@@ -5,6 +5,7 @@ import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.tray.TrayUpdateEntry
+import works.merc.keryx.app.ui.home.renameKey
 
 /**
  * The desktop application menu, modelled as a single tree that is built once per composition and
@@ -60,7 +61,7 @@ internal enum class AppMenuShortcut(
     OpenInBrowser(Key.O, "O", shift = true),
     CopyUrl(Key.C, "C", shift = true),
     FeedRefresh(Key.R, "R", shift = true),
-    FeedRename(if (isMacOs) Key.Enter else Key.F2, if (isMacOs) "Return" else "F2", ctrl = false),
+    FeedRename(renameKey(isMacOs), if (isMacOs) "Return" else "F2", ctrl = false),
     FeedUnsubscribe(Key.Delete, "Delete", ctrl = false),
 }
 

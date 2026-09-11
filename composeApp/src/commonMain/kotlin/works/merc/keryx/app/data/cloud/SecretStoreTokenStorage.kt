@@ -4,15 +4,18 @@ import kotlinx.serialization.json.Json
 import works.merc.keryx.app.core.Log
 
 /**
- * Shared save/load/clear contract for the desktop secure-store backends that keep one secret per
- * account and degrade to [fallback] on any failure — currently [KeyringTokenStorage] (java-keyring)
- * and [LibSecretTokenStorage] (libsecret). A concrete subclass supplies only the three backend
- * primitives ([storeSecret]/[loadSecret]/[clearSecret]); the outcome composition itself — when a
- * backend write earns [TokenSaveOutcome.SECURE], when a stale fallback copy must be cleared and
- * what a failure to clear it downgrades to, when a [clear] only counts as
- * [TokenClearOutcome.CLEARED] — is the exact contract `CloudSession`'s notification-center
- * warnings depend on (see `error-design.md`), so it lives here once instead of being re-derived,
- * and risking drifting, per backend.
+ * Shared save/load/clear contract for the secure-store backends that keep one secret per account
+ * and degrade to [fallback] on any failure — currently desktop's `KeyringTokenStorage`
+ * (java-keyring) and `LibSecretTokenStorage` (libsecret), and Android's `KeystoreTokenStorage`
+ * (Android Keystore). A concrete subclass supplies only the three backend primitives
+ * ([storeSecret]/[loadSecret]/[clearSecret]); the outcome composition itself — when a backend
+ * write earns [TokenSaveOutcome.SECURE], when a stale fallback copy must be cleared and what a
+ * failure to clear it downgrades to, when a [clear] only counts as [TokenClearOutcome.CLEARED] —
+ * is the exact contract `CloudSession`'s notification-center warnings depend on (see
+ * `error-design.md`), so it lives here once instead of being re-derived, and risking drifting,
+ * per backend. In `commonMain` (rather than desktop-only) so this same policy is exercisable from
+ * `commonTest` — Android has no JVM-testable unit-test source set (see `docs/testing.md`), so this
+ * is the only way its own outcome logic gets covered by an automated test at all.
  */
 abstract class SecretStoreTokenStorage(
     private val fallback: TokenStorage,
