@@ -27,9 +27,10 @@ import works.merc.keryx.app.resources.website_url
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
 
 /**
- * Minimal macOS-style "About" dialog shown from the native application menu's
- * "About Keryx" item. Detailed open-source licenses live in the Settings screen's
- * About section, not here.
+ * Minimal "About" dialog: shown from the native application menu's "About Keryx" item on desktop,
+ * and from the General settings tab's own entry point on Android, which has no application menu
+ * (see `hasNativeAppMenu`). Open-source licenses are a link within [AboutDialogContent] itself,
+ * opened in the external browser — there is no separate "About section" elsewhere to hold them.
  */
 @Composable
 fun AboutDialog(onDismiss: () -> Unit) {
