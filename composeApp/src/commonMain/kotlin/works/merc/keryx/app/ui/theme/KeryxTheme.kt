@@ -127,7 +127,8 @@ private fun typographyWithFontFamily(family: FontFamily): Typography {
  * Applies the Keryx color scheme, shapes, typography, and interaction styling.
  *
  * @param themeMode Selects light, dark, or system-based appearance.
- * @param fontScale Scales text within the range from 0.8 to 1.6.
+ * @param fontScale Scales text, clamped to 0.8–1.6 as a defensive bound; the Settings UI's own
+ *   font-size options (`GeneralTab`) only ever offer 0.85–1.4.
  * @param content The composable content displayed within the theme.
  */
 @Composable
