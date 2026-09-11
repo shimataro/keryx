@@ -172,7 +172,7 @@ class SettingsViewModel(
     fun setUpdateCheckIntervalHours(hours: Int) = update { it.copy(updateCheckIntervalHours = hours) }
 
     /**
-     * Manual "check for update" (About section). Deliberately does not touch
+     * Manual "check for update" (Updates tab). Deliberately does not touch
      * [LocalSettings.lastUpdateCheckAt] — that timestamp belongs to the automatic
      * startup/background schedule (see main.kt's `checkForUpdateAndNotify`), so a manual check
      * never perturbs it. A no-op while [updateState] is already [UpdateState.Checking].
