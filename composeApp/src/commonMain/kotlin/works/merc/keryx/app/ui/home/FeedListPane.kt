@@ -36,6 +36,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -178,23 +179,23 @@ internal fun FeedListPane(
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     hasNativeAppMenu: Boolean = works.merc.keryx.app.platform.hasNativeAppMenu,
 ) {
-    val feeds by vm.feeds.collectAsStateSafe(emptyList())
-    val tags by vm.tags.collectAsStateSafe(emptyList())
-    val feedTagMap by vm.feedTagMap.collectAsStateSafe(emptyMap())
-    val folders by vm.folders.collectAsStateSafe(emptyList())
-    val unreadByFeed by vm.unreadByFeed.collectAsStateSafe(emptyMap())
-    val unreadByTag by vm.unreadByTag.collectAsStateSafe(emptyMap())
-    val unreadByFolder by vm.unreadByFolder.collectAsStateSafe(emptyMap())
-    val collapsedFolderIds by vm.collapsedFolderIds.collectAsStateSafe(emptySet())
-    val expandedTagIds by vm.expandedTagIds.collectAsStateSafe(emptySet())
-    val totalUnread by vm.totalUnread.collectAsStateSafe(0L)
-    val starredUnread by vm.starredUnreadCount.collectAsStateSafe(0L)
-    val filter by vm.filter.collectAsStateSafe(ArticleFilter.All)
-    val selectedRowInstance by vm.selectedRowInstance.collectAsStateSafe(FeedListRowSelection.All)
-    val searchQuery by vm.searchQuery.collectAsStateSafe("")
-    val cloudConnected by vm.cloudConnected.collectAsStateSafe(false)
+    val feeds by vm.feeds.collectAsState()
+    val tags by vm.tags.collectAsState()
+    val feedTagMap by vm.feedTagMap.collectAsState()
+    val folders by vm.folders.collectAsState()
+    val unreadByFeed by vm.unreadByFeed.collectAsState()
+    val unreadByTag by vm.unreadByTag.collectAsState()
+    val unreadByFolder by vm.unreadByFolder.collectAsState()
+    val collapsedFolderIds by vm.collapsedFolderIds.collectAsState()
+    val expandedTagIds by vm.expandedTagIds.collectAsState()
+    val totalUnread by vm.totalUnread.collectAsState()
+    val starredUnread by vm.starredUnreadCount.collectAsState()
+    val filter by vm.filter.collectAsState()
+    val selectedRowInstance by vm.selectedRowInstance.collectAsState()
+    val searchQuery by vm.searchQuery.collectAsState()
+    val cloudConnected by vm.cloudConnected.collectAsState()
     val searchFocusRequester = remember { FocusRequester() }
-    val pendingSearchFocus by vm.pendingSearchFocus.collectAsStateSafe(false)
+    val pendingSearchFocus by vm.pendingSearchFocus.collectAsState()
     // Only consumed at PaneLayout.Triple (onSelectionAdvance == null), where this pane's own field
     // stays editable — at a narrow layout the latch is meant for ArticleListPane's own expanded
     // search bar field instead (see HomeViewModel.requestSearchFocus's KDoc on why this is a latch,
@@ -854,8 +855,8 @@ private fun FeedListToolbarRow(
     onAddFeedClick: () -> Unit,
     hasNativeAppMenu: Boolean,
 ) {
-    val refreshing by vm.feedRefreshing.collectAsStateSafe(false)
-    val syncing by vm.syncing.collectAsStateSafe(false)
+    val refreshing by vm.feedRefreshing.collectAsState()
+    val syncing by vm.syncing.collectAsState()
     WindowDragArea(Modifier.fillMaxWidth()) {
         KeryxPaneTopBar(
             modifier = Modifier.padding(top = WindowChrome.titleBarInsetDp.dp, start = 4.dp, end = 4.dp),

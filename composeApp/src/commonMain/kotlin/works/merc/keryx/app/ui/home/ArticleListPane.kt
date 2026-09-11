@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -150,10 +151,10 @@ fun ArticleListPane(
     onSearchClick: (() -> Unit)? = null,
     returnRipplePulse: Int = 0,
 ) {
-    val filter by vm.filter.collectAsStateSafe(ArticleFilter.All)
-    val feeds by vm.feeds.collectAsStateSafe(emptyList())
-    val folders by vm.folders.collectAsStateSafe(emptyList())
-    val tags by vm.tags.collectAsStateSafe(emptyList())
+    val filter by vm.filter.collectAsState()
+    val feeds by vm.feeds.collectAsState()
+    val folders by vm.folders.collectAsState()
+    val tags by vm.tags.collectAsState()
     val title = onOpenDrawer?.let {
         articleListTitle(
             filter = filter,
@@ -167,12 +168,12 @@ fun ArticleListPane(
     val feedTitles = feeds.associate { it.id to it.displayTitle() }
     val feedFavicons = feeds.associate { it.id to it.favicon_url }
 
-    val query by vm.searchQuery.collectAsStateSafe("")
-    val searchBarVisible by vm.searchBarVisible.collectAsStateSafe(false)
-    val searchActive by vm.searchActive.collectAsStateSafe(false)
-    val selected by vm.selectedArticle.collectAsStateSafe(null)
-    val unreadOnly by vm.unreadOnly.collectAsStateSafe(false)
-    val newestFirst by vm.newestFirst.collectAsStateSafe(true)
+    val query by vm.searchQuery.collectAsState()
+    val searchBarVisible by vm.searchBarVisible.collectAsState()
+    val searchActive by vm.searchActive.collectAsState()
+    val selected by vm.selectedArticle.collectAsState()
+    val unreadOnly by vm.unreadOnly.collectAsState()
+    val newestFirst by vm.newestFirst.collectAsState()
 
     // Two independent LazyListStates, one per mode, both declared unconditionally so switching
     // between them (typing/clearing a query) never disposes either one's scroll position — see
@@ -202,7 +203,7 @@ fun ArticleListPane(
     // when requestFocus() is called (see HomeViewModel.requestSearchFocus's KDoc on why this is a
     // latch rather than a one-shot event in the first place).
     val searchFocusRequester = remember { FocusRequester() }
-    val pendingSearchFocus by vm.pendingSearchFocus.collectAsStateSafe(false)
+    val pendingSearchFocus by vm.pendingSearchFocus.collectAsState()
     LaunchedEffect(pendingSearchFocus, barShown) {
         if (!barShown || !pendingSearchFocus) return@LaunchedEffect
         searchFocusRequester.requestFocus()
@@ -254,7 +255,7 @@ fun ArticleListPane(
     val emptyContent: (@Composable () -> Unit)?
 
     if (!searchActive) {
-        val baseArticles by vm.articles.collectAsStateSafe(emptyList())
+        val baseArticles by vm.articles.collectAsState()
         articles = baseArticles
         listState = baseListState
         branchReturnRipplePulse = returnRipplePulse
@@ -264,8 +265,8 @@ fun ArticleListPane(
         titleMarkedById = null
         emptyContent = null
     } else {
-        val results by vm.searchResults.collectAsStateSafe(emptyList())
-        val searching by vm.searching.collectAsStateSafe(false)
+        val results by vm.searchResults.collectAsState()
+        val searching by vm.searching.collectAsState()
         // A query has usable terms once at least one word is 2+ characters (searched via the
         // trigram index at 3+, or a LIKE fallback at exactly 2 — see FtsSearch). A lone 1-character
         // word, or "a b" where every word is too short, count as no terms.

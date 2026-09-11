@@ -27,6 +27,7 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -85,17 +86,17 @@ fun HomeScreen() {
     // inside the keyboard-shortcut callbacks below, which read vm.selectedArticle.value live at
     // invocation (same pattern as openSelectedInBrowser/copySelectedUrl) — collecting it here would
     // recompose the whole HomeScreen on every arrow-key selection change for no rendering benefit.
-    val feeds by vm.feeds.collectAsStateSafe(emptyList())
+    val feeds by vm.feeds.collectAsState()
     // Whether the expanded search bar is open — see homeBackAction's own KDoc.
-    val searchBarVisible by vm.searchBarVisible.collectAsStateSafe(false)
-    val tags by vm.tags.collectAsStateSafe(emptyList())
-    val folders by vm.folders.collectAsStateSafe(emptyList())
-    val collapsedFolderIds by vm.collapsedFolderIds.collectAsStateSafe(emptySet())
-    val expandedTagIds by vm.expandedTagIds.collectAsStateSafe(emptySet())
-    val feedTagMap by vm.feedTagMap.collectAsStateSafe(emptyMap())
-    val selectedRowInstance by vm.selectedRowInstance.collectAsStateSafe(FeedListRowSelection.All)
-    val feedListPaneWidth by vm.feedListPaneWidth.collectAsStateSafe(FEED_LIST_PANE_WIDTH_DEFAULT.toDouble())
-    val articleListPaneWidth by vm.articleListPaneWidth.collectAsStateSafe(ARTICLE_LIST_PANE_WIDTH_DEFAULT.toDouble())
+    val searchBarVisible by vm.searchBarVisible.collectAsState()
+    val tags by vm.tags.collectAsState()
+    val folders by vm.folders.collectAsState()
+    val collapsedFolderIds by vm.collapsedFolderIds.collectAsState()
+    val expandedTagIds by vm.expandedTagIds.collectAsState()
+    val feedTagMap by vm.feedTagMap.collectAsState()
+    val selectedRowInstance by vm.selectedRowInstance.collectAsState()
+    val feedListPaneWidth by vm.feedListPaneWidth.collectAsState()
+    val articleListPaneWidth by vm.articleListPaneWidth.collectAsState()
 
     var showAddFeed by remember { mutableStateOf(false) }
     // The feed list's drag ghost is hosted here, not in FeedListPane: the chip has to be able to
