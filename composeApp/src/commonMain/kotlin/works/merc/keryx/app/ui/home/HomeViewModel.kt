@@ -270,7 +270,7 @@ class HomeViewModel(
     // them in the flatMapLatest key made every article selection (which pins the article it marks
     // read) cancel and re-execute the whole unbounded list query.
     private val filteredArticles: Flow<List<ArticleListRow>> =
-        combine(_filter, _searchActive) { f, searchActive ->
+        combine(_filter, searchActive) { f, searchActive ->
             if (searchActive) flowOf(emptyList()) else articleRepository.watchArticles(f)
         }.flatMapLatest { it }
 
