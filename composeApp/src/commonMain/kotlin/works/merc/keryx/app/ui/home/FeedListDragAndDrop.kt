@@ -286,8 +286,7 @@ internal fun FolderGroupHeader(
 ) {
     val editFolderLabel = stringResource(Res.string.home_edit_folder_menu)
     val deleteFolderLabel = stringResource(Res.string.home_delete_folder_menu)
-    val isEmpty = firstFeedId == null
-    val feedZoneBoundary = if (isEmpty) DropBoundary.AppendFeeds(folder.id) else firstFeedId.let(DropBoundary::BeforeFeed)
+    val feedZoneBoundary = firstFeedId?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(folder.id)
     val isFeedDragHighlight = when (val boundary = activeBoundaryState.value) {
         is DropBoundary.BeforeFeed -> boundary.feedId in feedIdsInFolder
         is DropBoundary.AppendFeeds -> boundary.folderId == folder.id
@@ -415,7 +414,7 @@ internal fun NoFolderHeader(
     activeBoundaryState: State<DropBoundary?>,
 ) {
     val isEmpty = firstFeedId == null
-    val feedZoneBoundary = if (isEmpty) DropBoundary.AppendFeeds(null) else firstFeedId.let(DropBoundary::BeforeFeed)
+    val feedZoneBoundary = firstFeedId?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(null)
     val isFeedDragHighlight = when (val boundary = activeBoundaryState.value) {
         is DropBoundary.BeforeFeed -> boundary.feedId in feedIdsInNoFolder
         is DropBoundary.AppendFeeds -> boundary.folderId == null
