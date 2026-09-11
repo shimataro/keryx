@@ -28,10 +28,7 @@ import works.merc.keryx.app.ui.common.KeryxTextField
  *
  * @param title The dialog title.
  * @param hint The placeholder text for the input field.
- * @param initial The initial input value.
- * @param allowBlank Whether blank input can be confirmed.
  * @param blockingError Produces a validation error message for the trimmed input, or `null` when valid.
- * @param infoHint Produces supporting text when the input has no validation error, or `null`.
  * @param extraContent Additional content displayed below the input field.
  * @param onConfirm Receives the trimmed input when confirmation succeeds.
  * @param onDismiss Called when the dialog is dismissed.
@@ -40,20 +37,17 @@ import works.merc.keryx.app.ui.common.KeryxTextField
 internal fun TextPromptDialog(
     title: String,
     hint: String,
-    initial: String,
-    allowBlank: Boolean = false,
     blockingError: (String) -> String? = { null },
-    infoHint: (String) -> String? = { null },
     extraContent: @Composable () -> Unit = {},
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var text by remember { mutableStateOf(initial) }
+    var text by remember { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
     val trimmed = text.trim()
-    val error = if (!allowBlank && trimmed.isBlank()) null else blockingError(trimmed)
-    val canConfirm = (allowBlank || trimmed.isNotBlank()) && error == null
-    val message = error ?: infoHint(trimmed)
+    val error = if (trimmed.isBlank()) null else blockingError(trimmed)
+    val canConfirm = trimmed.isNotBlank() && error == null
+    val message = error
 
     fun submit() {
         if (canConfirm) onConfirm(trimmed)

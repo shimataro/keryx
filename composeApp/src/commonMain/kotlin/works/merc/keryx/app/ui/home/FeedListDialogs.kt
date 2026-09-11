@@ -64,7 +64,6 @@ internal fun FeedListDialogs(
         TextPromptDialog(
             title = stringResource(Res.string.home_add_tag),
             hint = stringResource(Res.string.home_new_tag_hint),
-            initial = "",
             blockingError = { name -> if (tags.any { it.name == name }) duplicateError else null },
             extraContent = { TagColorPicker(selected = color, onSelect = { color = it }) },
             onConfirm = { vm.createTag(it, color); onShowAddTagChange(false) },
@@ -87,7 +86,6 @@ internal fun FeedListDialogs(
         TextPromptDialog(
             title = stringResource(Res.string.home_add_folder),
             hint = stringResource(Res.string.home_new_folder_hint),
-            initial = "",
             blockingError = { name -> if (folders.any { it.name == name }) duplicateError else null },
             onConfirm = { vm.createFolder(it); onShowAddFolderChange(false) },
             onDismiss = { onShowAddFolderChange(false) },
