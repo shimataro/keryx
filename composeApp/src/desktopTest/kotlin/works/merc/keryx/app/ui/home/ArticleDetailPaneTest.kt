@@ -41,7 +41,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = article,
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -60,7 +60,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = null,
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -76,7 +76,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = article,
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -95,7 +95,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = testArticle(url = ""),
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -110,7 +110,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = null,
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -127,7 +127,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = testArticle(content = "   ", summary = "fallback summary"),
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, body, _, _ -> capturedBody = body; Box(Modifier.fillMaxSize()) },
+                reader = { _, body, _ -> capturedBody = body; Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -136,24 +136,7 @@ class ArticleDetailPaneTest {
     }
 
     @Test
-    fun readerReceivesArticleUrlAsBaseUrl() = runDesktopComposeUiTest {
-        var capturedBaseUrl: String? = "unset"
-        val article = testArticle()
-
-        setContent {
-            ArticleDetailPaneContent(
-                article = article,
-                modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _, baseUrl, _ -> capturedBaseUrl = baseUrl; Box(Modifier.fillMaxSize()) },
-            )
-        }
-        waitForIdle()
-
-        assertEquals(article.url, capturedBaseUrl)
-    }
-
-    @Test
-    fun readerReceivesArticleUrlAsFourthArg() = runDesktopComposeUiTest {
+    fun readerReceivesTheArticleUrl() = runDesktopComposeUiTest {
         var capturedArticleUrl: String? = "unset"
         val article = testArticle()
 
@@ -161,7 +144,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = article,
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _, _, articleUrl -> capturedArticleUrl = articleUrl; Box(Modifier.fillMaxSize()) },
+                reader = { _, _, articleUrl -> capturedArticleUrl = articleUrl; Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -177,28 +160,12 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = null,
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _, _, articleUrl -> capturedArticleUrl = articleUrl; Box(Modifier.fillMaxSize()) },
+                reader = { _, _, articleUrl -> capturedArticleUrl = articleUrl; Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
 
         assertEquals(null, capturedArticleUrl)
-    }
-
-    @Test
-    fun readerReceivesNullBaseUrlWhenNoArticleSelected() = runDesktopComposeUiTest {
-        var capturedBaseUrl: String? = "unset"
-
-        setContent {
-            ArticleDetailPaneContent(
-                article = null,
-                modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _, baseUrl, _ -> capturedBaseUrl = baseUrl; Box(Modifier.fillMaxSize()) },
-            )
-        }
-        waitForIdle()
-
-        assertEquals(null, capturedBaseUrl)
     }
 
     @Test
@@ -209,7 +176,7 @@ class ArticleDetailPaneTest {
                 ArticleDetailPaneContent(
                     article = testArticle(),
                     modifier = Modifier.size(400.dp, 500.dp),
-                    reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+                    reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
                 )
             }
         }
@@ -228,7 +195,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = testArticle(),
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -258,7 +225,7 @@ class ArticleDetailPaneTest {
                 onNavigateUp = {},
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
                 isTouchPrimary = true,
-                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -275,7 +242,7 @@ class ArticleDetailPaneTest {
                 onNavigateUp = {},
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
                 isTouchPrimary = false,
-                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -296,7 +263,7 @@ class ArticleDetailPaneTest {
                 onNavigateUp = {},
                 swipeNavigation = null,
                 isTouchPrimary = true,
-                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -318,7 +285,7 @@ class ArticleDetailPaneTest {
                 onNavigateUp = null,
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
                 isTouchPrimary = true,
-                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -335,7 +302,7 @@ class ArticleDetailPaneTest {
                 onNavigateUp = {},
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { false }, { true }),
                 isTouchPrimary = true,
-                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -353,7 +320,7 @@ class ArticleDetailPaneTest {
                 onNavigateUp = {},
                 swipeNavigation = ArticleSwipeNavigation({ invoked = true }, {}, { true }, { true }),
                 isTouchPrimary = true,
-                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
