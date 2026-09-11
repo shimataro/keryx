@@ -182,17 +182,9 @@ internal fun feedRowIndent(isTouchPrimary: Boolean = works.merc.keryx.app.platfo
  *
  * Drawn **after** the content (`drawWithContent`, not `drawBehind`) so nothing the row paints can
  * hide it. The margin it paints into is outside the row's own highlight, so drawing on top covers
- * nothing meaningful.
- *
- * This used to be a real `Box` composed as a layout sibling above/below the row's content (inside
- * a wrapping `Column`), taking up fixed layout space regardless of visibility (so toggling one
- * on/off never shifted anything else — the usual "reserve the slot, vary only its content" rule).
- * But a *reserved slot* still costs layout space, and — critically — that space belonged entirely
- * to whichever row's `Column` contained it, so the gap between two rows could only ever split
- * unevenly, never at its true midpoint: a click just past one row's highlight, closer to it than
- * to its neighbor, could still resolve to the neighbor. Painting instead of laying out fixed that,
- * and also removed the `Column` wrapper `FeedRow`/`FolderGroupHeader` needed only to lay the old
- * `Box` out as a sibling — see `listRowClickable`'s KDoc.
+ * nothing meaningful. Painting rather than laying out a real sibling `Box` also means the gap
+ * between two rows can split exactly at its true midpoint rather than belonging entirely to
+ * whichever row's own layout reserved it — see `listRowClickable`'s KDoc.
  *
  * Must sit *before* [listRowSurface] in the modifier chain: the marker is drawn in the margin
  * [listRowSurface]'s leading `padding` reserves, so applying it afterwards would inset it away —
@@ -587,7 +579,7 @@ internal fun FeedRow(
                     )
                 },
                 // A secondary-toned (or unselected) row is not the one currently focused, so a
-                // right-click on it promotes it first, exactly as the old `!selected` check did.
+                // right-click on it promotes it first.
                 onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
             )
             .insertionMarkers(top = topMarker, bottom = bottomMarker)

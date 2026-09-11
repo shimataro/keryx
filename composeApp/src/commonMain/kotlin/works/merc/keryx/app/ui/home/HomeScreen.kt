@@ -368,13 +368,13 @@ fun HomeScreen() {
                     onRight = {
                         if (feedDrawerOpen) {
                             // Closing the drawer *is* "advance to the article list" at a narrow
-                            // layout — mirrors selectFilterFromRow's own onSelectionAdvance. Also
-                            // advances focusedPane itself now (unlike before keyboardPaneFor
-                            // existed): at PaneLayout.Dual, ArticleListPane's own hamburger
-                            // (onOpenDrawer) can open the drawer without touching focusedPane, which
-                            // can therefore still be ArticleDetail (both panes stay on screen
-                            // together at Dual) from an earlier visit — closing the drawer without
-                            // this would leave the article list unable to receive ↑/↓ afterwards.
+                            // layout — mirrors selectFilterFromRow's own onSelectionAdvance. This
+                            // must also advance focusedPane itself: at PaneLayout.Dual,
+                            // ArticleListPane's own hamburger (onOpenDrawer) can open the drawer
+                            // without touching focusedPane, which can therefore still be
+                            // ArticleDetail (both panes stay on screen together at Dual) from an
+                            // earlier visit — closing the drawer without this would leave the
+                            // article list unable to receive ↑/↓ afterwards.
                             setFocusedPane(HomePane.ArticleList)
                             scope.launch { drawerState.close() }
                         } else {

@@ -26,7 +26,7 @@ import works.merc.keryx.app.platform.CursorIcons
  * M3 has no touch-oriented pane-splitter idiom, and 8dp is well under any reasonable touch
  * target, so on a touch-primary platform ([isTouchPrimary]) this renders as a plain static
  * divider with no hover/drag affordances at all — pane widths stay at whatever
- * `local_settings` last recorded. Desktop's mouse-driven hover/drag behavior is unchanged.
+ * `local_settings` last recorded.
  *
  * The outer `width(8.dp)` is kept even on touch so callers (`HomeScreen`'s
  * `TRIPLE_PANE_MIN_WIDTH`/`triplePaneWidths` math) don't need a separate touch-width case.

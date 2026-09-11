@@ -98,8 +98,7 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  * results — decided purely by [HomeViewModel.searchActive]. There is no separate "Search pane";
  * both are rendered by the same [ArticleListPaneContent] call below, just fed different `articles`/
  * `listState`, which is what lets each keep its own independent scroll position across a query
- * being typed and cleared again — no snapshot/restore machinery needed, unlike when Search used to
- * be a filter of its own that displaced the one being browsed.
+ * being typed and cleared again — no snapshot/restore machinery needed.
  *
  * @param vm The view model providing article, feed, selection, and filter state.
  * @param focused Whether the pane currently has focus.

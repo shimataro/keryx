@@ -959,11 +959,10 @@ private fun SidebarRow(
  * may carry many tags) whereas dropping on a folder *moves* the feed, so this row tints itself and
  * its border `tertiary`/`tertiaryContainer` — not the `secondary`/`secondaryContainer` of
  * [FolderGroupHeader] — and additionally swaps its color dot for a filled "+" badge while hovered
- * (a folder gets no such badge, since a move has no equivalent "adding" semantics). Now that the
- * drag is Compose-drawn rather than OS-level, that "attach, not move" cue *could* live on the drag
- * ghost instead — it deliberately doesn't: an affordance drawn on the target it applies to reads
- * more clearly than one riding along with the pointer, and it keeps the ghost identical no matter
- * what is underneath it.
+ * (a folder gets no such badge, since a move has no equivalent "adding" semantics). This "attach,
+ * not move" cue is deliberately drawn on the target row rather than on the drag ghost itself: an
+ * affordance drawn on the target it applies to reads more clearly than one riding along with the
+ * pointer, and it keeps the ghost identical no matter what is underneath it.
  *
  * @param tag The tag represented by the row.
  * @param count The number of unread articles associated with the tag.
@@ -1199,7 +1198,7 @@ private fun TagFeedRow(
                     )
                 },
                 // A secondary-toned (or unselected) row is not the one currently focused, so a
-                // right-click on it promotes it first, exactly as the old `!selected` check did.
+                // right-click on it promotes it first.
                 onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
             )
             .listRowSurface(

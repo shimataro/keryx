@@ -16,9 +16,8 @@ import androidx.compose.ui.unit.Dp
  * comings and goings.
  *
  * [PaneLayout.Dual] always shows the same two panes (see [visiblePanes]'s own KDoc) regardless of
- * depth, so it never loses a pane's state at all — [visible] itself never changes there, and this
- * row's own emission order is what's left over from the era when it did (see below), rather than
- * something this layout still needs. [PaneLayout.Single] is the layout this row exists for:
+ * depth, so it never loses a pane's state at all — [visible] itself never changes there.
+ * [PaneLayout.Single] is the layout this row exists for:
  *
  * - **[PaneLayout.Single]** genuinely unmounts every pane but the one on screen, so nothing can be
  *   kept alive there. [rememberSaveableStateHolder] instead saves each pane's `rememberSaveable`
