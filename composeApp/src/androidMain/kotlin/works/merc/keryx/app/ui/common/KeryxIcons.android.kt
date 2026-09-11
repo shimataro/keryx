@@ -12,7 +12,6 @@ import works.merc.keryx.app.resources.ic_circle_material
 import works.merc.keryx.app.resources.ic_close_filled_material
 import works.merc.keryx.app.resources.ic_close_outlined_material
 import works.merc.keryx.app.resources.ic_cloud_material
-import works.merc.keryx.app.resources.ic_computer_material
 import works.merc.keryx.app.resources.ic_content_copy_material
 import works.merc.keryx.app.resources.ic_create_new_folder_material
 import works.merc.keryx.app.resources.ic_delete_material
@@ -36,6 +35,7 @@ import works.merc.keryx.app.resources.ic_public_outlined_material
 import works.merc.keryx.app.resources.ic_refresh_material
 import works.merc.keryx.app.resources.ic_restart_alt_material
 import works.merc.keryx.app.resources.ic_search_material
+import works.merc.keryx.app.resources.ic_smartphone_material
 import works.merc.keryx.app.resources.ic_sort_ascending_material
 import works.merc.keryx.app.resources.ic_sort_descending_material
 import works.merc.keryx.app.resources.ic_star_border_material
@@ -63,7 +63,6 @@ actual object KeryxIcons {
     actual val ArrowBack: DrawableResource = Res.drawable.ic_arrow_back_material
     actual val ChevronRight: DrawableResource = Res.drawable.ic_chevron_right_material
     actual val Cloud: DrawableResource = Res.drawable.ic_cloud_material
-    actual val Computer: DrawableResource = Res.drawable.ic_computer_material
     actual val ContentCopy: DrawableResource = Res.drawable.ic_content_copy_material
     actual val Circle: DrawableResource = Res.drawable.ic_circle_material
     actual val CreateNewFolder: DrawableResource = Res.drawable.ic_create_new_folder_material
@@ -88,6 +87,7 @@ actual object KeryxIcons {
     actual val SortAscending: DrawableResource = Res.drawable.ic_sort_ascending_material
     actual val SortDescending: DrawableResource = Res.drawable.ic_sort_descending_material
     actual val Storage: DrawableResource = Res.drawable.ic_storage_material
+    actual val ThisDevice: DrawableResource = Res.drawable.ic_smartphone_material
     actual val Tune: DrawableResource = Res.drawable.ic_tune_material
     actual val Update: DrawableResource = Res.drawable.ic_update_material
     actual val Warning: DrawableResource = Res.drawable.ic_warning_material

@@ -188,7 +188,7 @@ private fun OptionCard(
                         )
                     } else {
                         KeryxIcon(
-                            KeryxIcons.Computer,
+                            KeryxIcons.ThisDevice,
                             contentDescription = null,
                             modifier = Modifier.size(18.dp),
                         )
