@@ -159,40 +159,39 @@ fun visiblePanes(layout: PaneLayout, depth: Int): List<HomePane> = when (layout)
  * article list to the article detail).
  *
  * `HomeScreen`'s `BackHandler`/`navigateUpEnabled` no longer read this directly — they go through
- * [homeBackAction], which also accounts for exiting the Search scope. This stays the pane-only
+ * [homeBackAction], which also accounts for closing the expanded search bar. This stays the pane-only
  * half of that decision.
  */
 fun canNavigateBack(layout: PaneLayout, depth: Int): Boolean =
     depth > 1 && visiblePanes(layout, depth - 1) != visiblePanes(layout, depth)
 
 /** What a back action (system back, or a narrow pane's own back arrow) actually does. */
-enum class HomeBackAction { None, ExitSearch, PopPane }
+enum class HomeBackAction { None, CloseSearchBar, PopPane }
 
 /**
- * Resolves what a back action should do at [depth]/[layout], given whether a Search-scope
- * snapshot is waiting to be restored ([searchScopeReturnPending] — see
- * `HomeViewModel.searchScopeEntry`).
+ * Resolves what a back action should do at [depth]/[layout], given whether the expanded search
+ * bar is currently open ([searchBarOpen] — see `HomeViewModel.searchBarVisible`).
  *
- * Search has no [HomePane] of its own — it's `HomePane.ArticleList` with its content swapped out
- * (see `ArticleListPane`'s own KDoc) — so exiting it is a distinct action from popping the pane
- * stack, and takes priority over [canNavigateBack] whenever it applies. It only applies where
- * [HomePane.ArticleList] is actually among the panes on screen right now ([visiblePanes]): at
- * [PaneLayout.Single] that's depth 2 only (a search *result* opened into
+ * The search bar lives on `HomePane.ArticleList` with its content swapped out (see
+ * `ArticleListPane`'s own KDoc), not a [HomePane] of its own — so closing it is a distinct action
+ * from popping the pane stack, and takes priority over [canNavigateBack] whenever it applies. It
+ * only applies where [HomePane.ArticleList] is actually among the panes on screen right now
+ * ([visiblePanes]): at [PaneLayout.Single] that's depth 2 only (a search *result* opened into
  * [HomePane.ArticleDetail], depth 3, still pops one pane at a time, landing back on the search
- * screen with the scope intact); at [PaneLayout.Dual] it's every depth, since the article list is
- * always on screen there. [PaneLayout.Triple] is excluded entirely via [feedListIsDrawer] — the
- * field there stays in `FeedListPane`'s sidebar, and back navigation is disabled at every depth
- * regardless.
+ * screen with the bar still open); at [PaneLayout.Dual] it's every depth, since the article list
+ * is always on screen there. [PaneLayout.Triple] is excluded entirely via [feedListIsDrawer] — the
+ * field there stays in `FeedListPane`'s sidebar (always visible, never a bar to close), and back
+ * navigation is disabled at every depth regardless.
  *
  * Falling through to [canNavigateBack] and then [HomeBackAction.None] is what lets a back press on
- * the article list at a narrow layout (depth 2, no Search pending) go unhandled — `HomeScreen`'s
+ * the article list at a narrow layout (depth 2, no search bar open) go unhandled — `HomeScreen`'s
  * `BackHandler` disables itself for `None`, so the platform's own back gesture/button takes over
  * (exiting the app on Android) rather than this codebase swallowing it with nowhere to go.
  */
-fun homeBackAction(layout: PaneLayout, depth: Int, searchScopeReturnPending: Boolean): HomeBackAction = when {
-    searchScopeReturnPending &&
+fun homeBackAction(layout: PaneLayout, depth: Int, searchBarOpen: Boolean): HomeBackAction = when {
+    searchBarOpen &&
         feedListIsDrawer(layout) &&
-        HomePane.ArticleList in visiblePanes(layout, depth) -> HomeBackAction.ExitSearch
+        HomePane.ArticleList in visiblePanes(layout, depth) -> HomeBackAction.CloseSearchBar
     canNavigateBack(layout, depth) -> HomeBackAction.PopPane
     else -> HomeBackAction.None
 }

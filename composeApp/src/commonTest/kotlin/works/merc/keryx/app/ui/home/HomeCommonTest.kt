@@ -20,7 +20,6 @@ class HomeCommonTest {
         // tag-nested copy.
         assertEquals(FeedListRowSelection.All, FeedListRowSelection.canonicalFor(ArticleFilter.All))
         assertEquals(FeedListRowSelection.Starred, FeedListRowSelection.canonicalFor(ArticleFilter.Starred))
-        assertEquals(FeedListRowSelection.Search, FeedListRowSelection.canonicalFor(ArticleFilter.Search))
         assertEquals(
             FeedListRowSelection.FeedInFolderGroup("f1"),
             FeedListRowSelection.canonicalFor(ArticleFilter.Feed("f1")),
@@ -36,7 +35,6 @@ class HomeCommonTest {
     fun feedListRowSelectionCarriesTheFilterEachRowSelects() {
         assertEquals(ArticleFilter.All, FeedListRowSelection.All.filter)
         assertEquals(ArticleFilter.Starred, FeedListRowSelection.Starred.filter)
-        assertEquals(ArticleFilter.Search, FeedListRowSelection.Search.filter)
         assertEquals(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInFolderGroup("f1").filter)
         assertEquals(ArticleFilter.Folder("d1"), FeedListRowSelection.Folder("d1").filter)
         assertEquals(ArticleFilter.Tag("t1"), FeedListRowSelection.Tag("t1").filter)
@@ -62,35 +60,10 @@ class HomeCommonTest {
             listOf(
                 FeedListRowSelection.All,
                 FeedListRowSelection.Starred,
-                FeedListRowSelection.Search,
                 FeedListRowSelection.FeedInFolderGroup("f1"),
                 FeedListRowSelection.FeedInFolderGroup("f2"),
                 FeedListRowSelection.Tag("t1"),
                 FeedListRowSelection.Tag("t2"),
-            ),
-            ordered,
-        )
-    }
-
-    @Test
-    fun buildOrderedFeedListRowsOmitsTheSearchRowWhenNotIncluded() {
-        // At a narrow PaneLayout, FeedListPane renders no "Search" row at all (it's a drawer, not
-        // a screen search results could live on) — the keyboard-navigable order must match that,
-        // or an arrow key could select a row that isn't actually on screen.
-        val tags = listOf(tag("t1"))
-        val feeds = listOf(feed("f1"))
-
-        val ordered = buildOrderedFeedListRows(
-            tags, emptyList(), feeds, emptySet(), emptySet(), emptyMap(),
-            includeSearchRow = false,
-        )
-
-        assertEquals(
-            listOf(
-                FeedListRowSelection.All,
-                FeedListRowSelection.Starred,
-                FeedListRowSelection.FeedInFolderGroup("f1"),
-                FeedListRowSelection.Tag("t1"),
             ),
             ordered,
         )
@@ -108,7 +81,6 @@ class HomeCommonTest {
             listOf(
                 FeedListRowSelection.All,
                 FeedListRowSelection.Starred,
-                FeedListRowSelection.Search,
                 FeedListRowSelection.Folder("d1"),
                 FeedListRowSelection.FeedInFolderGroup("f1"),
                 FeedListRowSelection.FeedInFolderGroup("f2"),
@@ -129,7 +101,6 @@ class HomeCommonTest {
             listOf(
                 FeedListRowSelection.All,
                 FeedListRowSelection.Starred,
-                FeedListRowSelection.Search,
                 FeedListRowSelection.Folder("d1"),
             ),
             ordered,
@@ -141,7 +112,7 @@ class HomeCommonTest {
         val ordered = buildOrderedFeedListRows(emptyList(), emptyList(), emptyList(), emptySet(), emptySet(), emptyMap())
 
         assertEquals(
-            listOf(FeedListRowSelection.All, FeedListRowSelection.Starred, FeedListRowSelection.Search),
+            listOf(FeedListRowSelection.All, FeedListRowSelection.Starred),
             ordered,
         )
     }
@@ -158,7 +129,6 @@ class HomeCommonTest {
             listOf(
                 FeedListRowSelection.All,
                 FeedListRowSelection.Starred,
-                FeedListRowSelection.Search,
                 FeedListRowSelection.FeedInFolderGroup("f1"),
                 FeedListRowSelection.FeedInFolderGroup("f2"),
                 FeedListRowSelection.Tag("t1"),
@@ -183,7 +153,6 @@ class HomeCommonTest {
             listOf(
                 FeedListRowSelection.All,
                 FeedListRowSelection.Starred,
-                FeedListRowSelection.Search,
                 FeedListRowSelection.FeedInFolderGroup("f1"),
                 FeedListRowSelection.Tag("t1"),
             ),
@@ -285,27 +254,23 @@ class HomeCommonTest {
 
         assertEquals(
             "All",
-            articleListTitle(ArticleFilter.All, feeds, folders, tags, "All", "Starred", "Search"),
+            articleListTitle(ArticleFilter.All, feeds, folders, tags, "All", "Starred"),
         )
         assertEquals(
             "Starred",
-            articleListTitle(ArticleFilter.Starred, feeds, folders, tags, "All", "Starred", "Search"),
-        )
-        assertEquals(
-            "Search",
-            articleListTitle(ArticleFilter.Search, feeds, folders, tags, "All", "Starred", "Search"),
+            articleListTitle(ArticleFilter.Starred, feeds, folders, tags, "All", "Starred"),
         )
         assertEquals(
             "Feed f1",
-            articleListTitle(ArticleFilter.Feed("f1"), feeds, folders, tags, "All", "Starred", "Search"),
+            articleListTitle(ArticleFilter.Feed("f1"), feeds, folders, tags, "All", "Starred"),
         )
         assertEquals(
             "Folder d1",
-            articleListTitle(ArticleFilter.Folder("d1"), feeds, folders, tags, "All", "Starred", "Search"),
+            articleListTitle(ArticleFilter.Folder("d1"), feeds, folders, tags, "All", "Starred"),
         )
         assertEquals(
             "Tag t1",
-            articleListTitle(ArticleFilter.Tag("t1"), feeds, folders, tags, "All", "Starred", "Search"),
+            articleListTitle(ArticleFilter.Tag("t1"), feeds, folders, tags, "All", "Starred"),
         )
     }
 
@@ -313,15 +278,15 @@ class HomeCommonTest {
     fun articleListTitleFallsBackToAllLabelForAMissingFeedTagOrFolder() {
         assertEquals(
             "All",
-            articleListTitle(ArticleFilter.Feed("gone"), emptyList(), emptyList(), emptyList(), "All", "Starred", "Search"),
+            articleListTitle(ArticleFilter.Feed("gone"), emptyList(), emptyList(), emptyList(), "All", "Starred"),
         )
         assertEquals(
             "All",
-            articleListTitle(ArticleFilter.Folder("gone"), emptyList(), emptyList(), emptyList(), "All", "Starred", "Search"),
+            articleListTitle(ArticleFilter.Folder("gone"), emptyList(), emptyList(), emptyList(), "All", "Starred"),
         )
         assertEquals(
             "All",
-            articleListTitle(ArticleFilter.Tag("gone"), emptyList(), emptyList(), emptyList(), "All", "Starred", "Search"),
+            articleListTitle(ArticleFilter.Tag("gone"), emptyList(), emptyList(), emptyList(), "All", "Starred"),
         )
     }
 
@@ -472,15 +437,14 @@ class HomeCommonTest {
 
     @Test
     fun feedListRowIndexReturnsNullForSidebarRows() {
-        // All, Starred, and Search are rendered outside the LazyColumn entirely as fixed
-        // SidebarRows, so they never correspond to a LazyColumn item and must not trigger a scroll.
+        // All and Starred are rendered outside the LazyColumn entirely as fixed SidebarRows, so
+        // they never correspond to a LazyColumn item and must not trigger a scroll.
         val folders = listOf(folder("d1"))
         val feeds = listOf(feed("f1", folderId = "d1"))
         val tags = listOf(tag("t1"))
 
         assertNull(feedListRowIndex(FeedListRowSelection.Starred, feeds, folders, tags, emptySet()))
         assertNull(feedListRowIndex(FeedListRowSelection.All, feeds, folders, tags, emptySet()))
-        assertNull(feedListRowIndex(FeedListRowSelection.Search, feeds, folders, tags, emptySet()))
     }
 
     @Test
@@ -807,7 +771,6 @@ class HomeCommonTest {
 
         assertNull(resolveFeedListSelectionTarget(ArticleFilter.All, feeds, folders, tags))
         assertNull(resolveFeedListSelectionTarget(ArticleFilter.Starred, feeds, folders, tags))
-        assertNull(resolveFeedListSelectionTarget(ArticleFilter.Search, feeds, folders, tags))
     }
 
     // --- toInlineEditTarget ---

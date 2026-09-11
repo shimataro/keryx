@@ -1,6 +1,5 @@
 package works.merc.keryx.app.ui.menu
 
-import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.ui.navigation.Screen
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -16,7 +15,7 @@ class MenuUiStateTest {
         feedRefreshing: Boolean = false,
         syncing: Boolean = false,
         cloudConnected: Boolean = false,
-        filter: ArticleFilter = ArticleFilter.All,
+        searchActive: Boolean = false,
         unreadOnly: Boolean = false,
         hasSelectedFeed: Boolean = false,
         textInputFocused: Boolean = false,
@@ -29,7 +28,7 @@ class MenuUiStateTest {
         feedRefreshing = feedRefreshing,
         syncing = syncing,
         cloudConnected = cloudConnected,
-        filter = filter,
+        searchActive = searchActive,
         unreadOnly = unreadOnly,
         hasSelectedFeed = hasSelectedFeed,
         textInputFocused = textInputFocused,
@@ -113,26 +112,22 @@ class MenuUiStateTest {
     // --- Sort / search interaction ---
 
     @Test
-    fun toggle_sort_disabled_in_search_scope() {
-        assertFalse(state(filter = ArticleFilter.Search).toggleSortEnabled)
-        assertTrue(state(filter = ArticleFilter.All).toggleSortEnabled)
+    fun toggle_sort_disabled_while_searching() {
+        assertFalse(state(searchActive = true).toggleSortEnabled)
+        assertTrue(state(searchActive = false).toggleSortEnabled)
     }
 
-    // --- Unread-only is enabled uniformly across every filter, including Starred ---
+    // --- Unread-only is enabled uniformly regardless of filter/search state ---
 
     @Test
-    fun unread_only_enabled_for_every_filter() {
-        assertTrue(state(filter = ArticleFilter.All).unreadOnlyEnabled)
-        assertTrue(state(filter = ArticleFilter.Search).unreadOnlyEnabled)
-        assertTrue(state(filter = ArticleFilter.Feed("f1")).unreadOnlyEnabled)
-        assertTrue(state(filter = ArticleFilter.Tag("t1")).unreadOnlyEnabled)
-        assertTrue(state(filter = ArticleFilter.Folder("fo1")).unreadOnlyEnabled)
-        assertTrue(state(filter = ArticleFilter.Starred).unreadOnlyEnabled)
+    fun unread_only_enabled_regardless_of_search_state() {
+        assertTrue(state(searchActive = false).unreadOnlyEnabled)
+        assertTrue(state(searchActive = true).unreadOnlyEnabled)
     }
 
     @Test
     fun unread_only_disabled_away_from_home() {
-        assertFalse(state(screen = Screen.Setup, filter = ArticleFilter.All).unreadOnlyEnabled)
+        assertFalse(state(screen = Screen.Setup).unreadOnlyEnabled)
     }
 
     // --- Refresh / sync gating ---

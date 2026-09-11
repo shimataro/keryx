@@ -18,6 +18,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import works.merc.keryx.app.core.AppNotificationAction
+import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.FEED_ERROR_REASON_GONE
 import works.merc.keryx.app.core.FeedTimeoutException
@@ -446,7 +447,7 @@ class FeedRepositoryTest {
             // Regression test: before the fix, the FTS index was never rebuilt after
             // subscribeFeed(), so this search would return empty even though the article exists.
             val searchRepo = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L }, Dispatchers.Unconfined)
-            val results = searchRepo.search("Kotlin")
+            val results = searchRepo.search("Kotlin", ArticleFilter.All)
 
             assertEquals(listOf(article.id), results.map { it.article.id })
         } finally {
@@ -651,7 +652,7 @@ class FeedRepositoryTest {
             // Regression test: before the fix, refreshFeed() never rebuilt the FTS index, so this
             // search would return empty even though the new article exists.
             val searchRepo = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L }, Dispatchers.Unconfined)
-            val results = searchRepo.search("Serialization")
+            val results = searchRepo.search("Serialization", ArticleFilter.All)
 
             assertEquals(listOf(newArticle.id), results.map { it.article.id })
         } finally {
@@ -670,7 +671,7 @@ class FeedRepositoryTest {
             val article = db.articlesQueries.watchAll().executeAsList().single()
 
             val searchRepo = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L }, Dispatchers.Unconfined)
-            assertEquals(listOf(article.id), searchRepo.search("Kotlin").map { it.article.id }, "sanity check before the no-op refresh")
+            assertEquals(listOf(article.id), searchRepo.search("Kotlin", ArticleFilter.All).map { it.article.id }, "sanity check before the no-op refresh")
 
             // A 304-style response: no articles at all, so refreshFeedArticles.hadArticles is false
             // and the (already up-to-date) FTS index should not need — and must not be broken by —
@@ -681,7 +682,7 @@ class FeedRepositoryTest {
 
             assertIs<Result.Ok<Int>>(result)
             assertEquals(0, result.value)
-            assertEquals(listOf(article.id), searchRepo.search("Kotlin").map { it.article.id })
+            assertEquals(listOf(article.id), searchRepo.search("Kotlin", ArticleFilter.All).map { it.article.id })
         } finally {
             driver.close()
         }

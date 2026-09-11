@@ -72,6 +72,7 @@ import works.merc.keryx.app.resources.home_search_clear
 import works.merc.keryx.app.resources.home_search_no_results
 import works.merc.keryx.app.resources.home_search_placeholder
 import works.merc.keryx.app.resources.home_search_too_short
+import works.merc.keryx.app.resources.home_search_try_all_feeds
 import works.merc.keryx.app.resources.home_sort_disabled_search
 import works.merc.keryx.app.resources.home_search
 import works.merc.keryx.app.resources.home_sort_newest
@@ -88,7 +89,16 @@ import works.merc.keryx.app.ui.common.ToolbarIconGroup
 import works.merc.keryx.app.ui.common.TooltipIconButton
 
 /**
- * Displays the article list for the current filter and routes search filters to the search list.
+ * Displays the article list for the current filter, narrowed by search when active.
+ *
+ * Search is orthogonal to [ArticleFilter] (see `HomeViewModel`'s own "Search" section): the query
+ * narrows whichever filter is already selected rather than displacing it, so this pane's content
+ * is always exactly one of two things — the current filter's own list, or that filter's search
+ * results — decided purely by [HomeViewModel.searchActive]. There is no separate "Search pane";
+ * both are rendered by the same [ArticleListPaneContent] call below, just fed different `articles`/
+ * `listState`, which is what lets each keep its own independent scroll position across a query
+ * being typed and cleared again — no snapshot/restore machinery needed, unlike when Search used to
+ * be a filter of its own that displaced the one being browsed.
  *
  * @param vm The view model providing article, feed, selection, and filter state.
  * @param focused Whether the pane currently has focus.
@@ -107,19 +117,20 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  *   disabled, since a [PaneLayout.Triple] pane has no drawer to open at all — the row's presence
  *   therefore depends only on the layout, never on the navigation stack's current depth. Always
  *   enabled when non-null: unlike a "back" action, opening the drawer is never contextually unavailable.
- * @param onTextInputFocusChange Reports [HomeTextInput.SearchField] while this pane's own search
- *   field (the one hosted here when [filter] is [ArticleFilter.Search] at a narrow layout) holds
- *   focus, `null` otherwise — same contract as `FeedListPane`'s own parameter of that name, so
+ * @param onTextInputFocusChange Reports [HomeTextInput.SearchField] while this pane's own expanded
+ *   search field (present at a narrow layout — [onExitSearch] non-null — while the bar is open)
+ *   holds focus, `null` otherwise — same contract as `FeedListPane`'s own parameter of that name, so
  *   `HomeScreen` can suppress bare-key shortcuts while the user is typing regardless of which pane
  *   the field currently lives in.
- * @param onSearchClick Adds a search entry point to [ArticleListPaneContent]'s own top bar when
- *   non-null — the search icon `ui-guidelines`' "Pane structure & tonal roles" section places at
- *   the head of this pane's header row. Not forwarded to [SearchListPane]: once [filter] is already
- *   [ArticleFilter.Search] there is nowhere further to advance to.
- * @param onExitSearch Forwarded to [SearchListPane] alone: its own leading back arrow, which leaves
- *   the Search scope rather than opening the feed-list drawer (a distinct action from
- *   [onOpenDrawer] — see `HomePaneLayout.kt`'s `homeBackAction`/`HomeBackAction.ExitSearch`). `null`
- *   at [PaneLayout.Triple], same boundary as [onOpenDrawer].
+ * @param onSearchClick Adds a search entry point to this pane's own top bar when non-null — the
+ *   search icon `ui-guidelines`' "Pane structure & tonal roles" section places at the head of this
+ *   pane's header row. Omitted once the expanded search bar is already open: there is nowhere
+ *   further to advance to.
+ * @param onExitSearch The narrow layout's own back arrow inside the expanded search bar — closes
+ *   the bar rather than opening the feed-list drawer (a distinct action from [onOpenDrawer] — see
+ *   `HomePaneLayout.kt`'s `homeBackAction`/`HomeBackAction.CloseSearchBar`). `null` at
+ *   [PaneLayout.Triple], same boundary as [onOpenDrawer] — the field there lives permanently in
+ *   `FeedListPane`'s sidebar instead, with no bar of its own to close.
  * @param onAddFeedClick Invoked from the empty state's "Add feed" button, shown instead of the
  *   usual "no articles" message when there are no feeds at all — see [ArticleListPaneContent]'s own
  *   KDoc. `null` hides the button (leaving the message on its own); every real caller supplies it.
@@ -151,190 +162,73 @@ fun ArticleListPane(
             tags = tags,
             allLabel = stringResource(Res.string.home_all_feeds),
             starredLabel = stringResource(Res.string.home_starred),
-            searchLabel = stringResource(Res.string.home_search),
         )
     }
-    // Reset the list to the top when the user switches feed/tag/folder/scope, so a new list never
-    // opens scrolled to the previous one's offset. Only fires on an actual filter change (not the
-    // first composition), so a restored last-selected article's scroll-into-view isn't clobbered.
-    //
-    // rememberSaveable, so this survives the pane being unmounted and remounted at a narrow
-    // PaneLayout (see NarrowPaneRow) — the filter can change while this pane is off screen at
-    // PaneLayout.Single (a notification's ShowFeedDetail, or deleting the feed/tag/folder being
-    // viewed), and a plain remember would re-initialize to the *new* filter on remount, leaving
-    // the restored scroll position pointing into the previous filter's list with no reset. Held
-    // as ArticleFilter.encode()'s String (the same form local settings persist it as) because
-    // ArticleFilter itself isn't a saveable type.
-    //
-    // Declared above the Search early-return below (not next to the content that uses it) so this
-    // call site — and therefore listState/lastFilter themselves — stays unconditional and never
-    // leaves composition while Search is active. Search has no HomePane/SaveableStateHolder of its
-    // own to preserve state across a branch it isn't part of (unlike NarrowPaneRow's pane-level
-    // unmounts), so without this the list's scroll position would reset every time Search closes.
-    val listState = rememberLazyListState()
+    val feedTitles = feeds.associate { it.id to it.displayTitle() }
+    val feedFavicons = feeds.associate { it.id to it.favicon_url }
+
+    val query by vm.searchQuery.collectAsStateSafe("")
+    val searchBarVisible by vm.searchBarVisible.collectAsStateSafe(false)
+    val searchActive by vm.searchActive.collectAsStateSafe(false)
+    val selected by vm.selectedArticle.collectAsStateSafe(null)
+    val unreadOnly by vm.unreadOnly.collectAsStateSafe(false)
+    val newestFirst by vm.newestFirst.collectAsStateSafe(true)
+
+    // Two independent LazyListStates, one per mode, both declared unconditionally so switching
+    // between them (typing/clearing a query) never disposes either one's scroll position — see
+    // this file's own module KDoc. Reset to the top when the user switches feed/tag/folder/scope,
+    // so a new list never opens scrolled to the previous one's offset; only fires on an actual
+    // filter change (not the first composition), so a restored last-selected article's
+    // scroll-into-view isn't clobbered.
+    val baseListState = rememberLazyListState()
+    val searchListState = rememberLazyListState()
     var lastFilter by rememberSaveable { mutableStateOf(filter.encode()) }
-    // Whether the previous composition's filter was Search — read synchronously below to detect
-    // the one composition right after Search closes, so ArticleListPaneContent's own "keep the
-    // selection in view" scroll can sit out that single frame (see preserveScrollPositionOnMount's
-    // own parameter doc). Updated inside the same LaunchedEffect(filter) that already runs on every
-    // filter change, so by the time a *later* composition reads it (after Search has since closed),
-    // the write from entering Search has had a full cycle to land.
-    var wasSearch by rememberSaveable { mutableStateOf(false) }
-    val justReturnedFromSearch = wasSearch && filter !is ArticleFilter.Search
     LaunchedEffect(filter) {
-        if (filter is ArticleFilter.Search) {
-            wasSearch = true
-            return@LaunchedEffect
-        }
-        wasSearch = false
-        // While Search is active this pane renders SearchListPane instead (below), so there is no
-        // list to reset — and leaving lastFilter untouched is what lets the check below recognize
-        // "back to the same filter Search was entered from" and skip the reset-to-top on return.
         val encoded = filter.encode()
         if (encoded != lastFilter) {
-            listState.scrollToItem(0)
+            baseListState.scrollToItem(0)
+            searchListState.scrollToItem(0)
             lastFilter = encoded
         }
     }
 
-    if (filter is ArticleFilter.Search) {
-        SearchListPane(
-            vm = vm,
-            focused = focused,
-            onActivated = onActivated,
-            modifier = modifier,
-            notifVm = notifVm,
-            onExitSearch = onExitSearch,
-            onSelectionAdvance = onSelectionAdvance,
-            onTextInputFocusChange = onTextInputFocusChange,
-        )
-        return
-    }
+    // Whether the expanded search bar (a narrow-layout-only header replacing the hamburger/title
+    // row) is actually on screen right now — onExitSearch is non-null at a narrow layout
+    // regardless of whether the bar happens to be open.
+    val barShown = onExitSearch != null && searchBarVisible
 
-    val articles by vm.articles.collectAsStateSafe(emptyList())
-    val selected by vm.selectedArticle.collectAsStateSafe(null)
-    val unreadOnly by vm.unreadOnly.collectAsStateSafe(false)
-    val newestFirst by vm.newestFirst.collectAsStateSafe(true)
-    val feedTitles = feeds.associate { it.id to it.displayTitle() }
-    val feedFavicons = feeds.associate { it.id to it.favicon_url }
-
-    ArticleListPaneContent(
-        articles = articles,
-        feedTitles = feedTitles,
-        feedFavicons = feedFavicons,
-        selectedId = selected?.id,
-        unreadOnly = unreadOnly,
-        newestFirst = newestFirst,
-        focused = focused,
-        onToggleUnreadOnly = { vm.setUnreadOnly(!unreadOnly) },
-        onToggleSort = { vm.toggleSort() },
-        onMarkAllRead = { vm.markAllRead() },
-        onSelectArticle = { vm.selectArticle(it); onActivated(); onSelectionAdvance() },
-        onToggleRead = { vm.toggleRead(it) },
-        onToggleStar = { vm.toggleStar(it) },
-        modifier = modifier,
-        listState = listState,
-        preserveScrollPositionOnMount = justReturnedFromSearch,
-        returnRipplePulse = returnRipplePulse,
-        onActivated = onActivated,
-        notifVm = notifVm,
-        onOpenDrawer = onOpenDrawer,
-        title = title,
-        onSearchClick = onSearchClick,
-        hasNoFeeds = feeds.isEmpty(),
-        onAddFeedClick = onAddFeedClick,
-    )
-}
-
-/**
- * Displays the article search results pane with filtering, selection, and article actions.
- *
- * Search results are shown with matched terms highlighted. The pane displays appropriate hints for
- * short queries and empty results, keeps the selected result visible, and uses relevance ordering.
- *
- * At a narrow `PaneLayout` ([onExitSearch] non-null), this pane's own top bar is
- * [KeryxExpandedSearchBar] — an editable query field with its own back arrow — rather than
- * [ArticleListTopBar]'s usual hamburger-button-and-title row: the query field itself needs to live
- * wherever the results do (see this file's own module KDoc / the `ui-guidelines` skill's "Adaptive
- * pane layout" section for why), and the back arrow inside it replaces the title row entirely
- * rather than sitting above it, so [ArticleListTopBar] is still called but with `onOpenDrawer =
- * null` to suppress its own row. At [PaneLayout.Triple] ([onExitSearch] is `null`), this pane is
- * unchanged from before: no query field of its own, since `FeedListPane`'s field already covers it.
- *
- * @param focused Whether the pane currently has focus.
- * @param onActivated Called when the pane is activated.
- * @param onExitSearch Leaves the Search scope — see `ArticleListPane`'s own KDoc on the parameter
- *   of the same name, which this is forwarded straight from.
- * @param onTextInputFocusChange Reports [HomeTextInput.SearchField] while this pane's own query
- *   field holds focus, `null` otherwise — see `ArticleListPane`'s own parameter of the same name.
- */
-@Composable
-private fun SearchListPane(
-    vm: HomeViewModel,
-    focused: Boolean,
-    onActivated: () -> Unit,
-    modifier: Modifier = Modifier,
-    notifVm: NotificationCenterViewModel? = null,
-    onExitSearch: (() -> Unit)? = null,
-    onSelectionAdvance: () -> Unit = {},
-    onTextInputFocusChange: (HomeTextInput?) -> Unit = {},
-) {
-    val query by vm.searchQuery.collectAsStateSafe("")
-    val results by vm.searchResults.collectAsStateSafe(emptyList())
-    val searching by vm.searching.collectAsStateSafe(false)
-    val selected by vm.selectedArticle.collectAsStateSafe(null)
-    val unreadOnly by vm.unreadOnly.collectAsStateSafe(false)
-    val feeds by vm.feeds.collectAsStateSafe(emptyList())
-    val feedTitles = feeds.associate { it.id to it.displayTitle() }
-    val feedFavicons = feeds.associate { it.id to it.favicon_url }
-    // A query has usable terms once at least one word is 2+ characters (searched via the trigram
-    // index at 3+, or a LIKE fallback at exactly 2 — see FtsSearch). A lone 1-character word, or
-    // "a b" where every word is too short, count as no terms.
-    val hasValidTerms = searchTerms(query).isNotEmpty()
-
-    val listState = rememberLazyListState()
-    // Keep the keyboard-selected result in view (mirrors ArticleListPaneContent's scroll-to-selected).
-    LaunchedEffect(selected?.id, results) {
-        val index = results.indexOfFirst { it.article.id == selected?.id }
-        if (index !in results.indices) return@LaunchedEffect
-        listState.scrollToIndexIfNeeded(index)
-    }
-
-    // Consumes HomeViewModel's pendingSearchFocus latch — only while this pane's own field is
-    // actually on screen (onExitSearch != null), since at PaneLayout.Triple FeedListPane's own
-    // field is the one the latch is meant for instead (see HomeViewModel.requestSearchFocus's KDoc
-    // on why this is a latch rather than a one-shot event in the first place).
+    // Consumes HomeViewModel's pendingSearchFocus latch — only once the bar is actually rendered
+    // (barShown), so the FocusRequester below is guaranteed to be attached to something on screen
+    // when requestFocus() is called (see HomeViewModel.requestSearchFocus's KDoc on why this is a
+    // latch rather than a one-shot event in the first place).
     val searchFocusRequester = remember { FocusRequester() }
     val pendingSearchFocus by vm.pendingSearchFocus.collectAsStateSafe(false)
-    LaunchedEffect(pendingSearchFocus, onExitSearch) {
-        if (onExitSearch == null || !pendingSearchFocus) return@LaunchedEffect
+    LaunchedEffect(pendingSearchFocus, barShown) {
+        if (!barShown || !pendingSearchFocus) return@LaunchedEffect
         searchFocusRequester.requestFocus()
         vm.consumeSearchFocusRequest()
     }
-    // A field that unmounts (the user navigates away, or PaneLayout narrows down to Triple mid-
-    // session) must report its focus as gone — a LaunchedEffect merely being cancelled does not
-    // report false on its own, and a stuck `true` would permanently suppress bare-key shortcuts
-    // (see HomeScreen's own textInputFocused KDoc).
-    DisposableEffect(Unit) {
+    // The field reports its focus as gone whenever the bar hides (searchBarVisible flips false, so
+    // KeryxExpandedSearchBar itself leaves composition) or this whole pane unmounts — a
+    // LaunchedEffect merely being cancelled does not report false on its own, and a stuck `true`
+    // would permanently suppress bare-key shortcuts (see HomeScreen's own textInputFocused KDoc).
+    DisposableEffect(barShown) {
         onDispose { onTextInputFocusChange(null) }
     }
 
-    Column(
-        modifier
-            .background(MaterialTheme.colorScheme.surfaceContainer)
-            .fillMaxSize()
-            .paneActivation(onActivated)
-            .nativeContextMenu(items = { emptyList() }, onOpen = onActivated),
-    ) {
-        if (onExitSearch != null) {
+    val header: (@Composable () -> Unit)? = if (barShown) {
+        // barShown already established onExitSearch != null; captured here as a local val so the
+        // lambda below doesn't need a redundant safe call on it.
+        val exitSearch = onExitSearch
+        {
             val keyboardController = LocalSoftwareKeyboardController.current
             KeryxExpandedSearchBar(
                 query = query,
                 onQueryChange = { vm.setSearchQuery(it) },
                 placeholder = stringResource(Res.string.home_search_placeholder),
-                onNavigateUp = onExitSearch,
-                // Exiting Search always changes what's on screen (see homeBackAction's own KDoc on
-                // HomeBackAction.ExitSearch), so there is no "can't exit right now" state to gate on.
+                onNavigateUp = exitSearch,
+                // Closing the bar always changes what's on screen (see homeBackAction's own KDoc on
+                // HomeBackAction.CloseSearchBar), so there is no "can't close right now" state to gate on.
                 navigateUpEnabled = true,
                 navigateUpContentDescription = stringResource(Res.string.common_back),
                 clearContentDescription = stringResource(Res.string.home_search_clear),
@@ -345,65 +239,131 @@ private fun SearchListPane(
                     .onFocusChanged { onTextInputFocusChange(if (it.isFocused) HomeTextInput.SearchField else null) },
             )
         }
-        ArticleListTopBar(
-            unreadOnly = unreadOnly,
-            onToggleUnreadOnly = { vm.setUnreadOnly(!unreadOnly) },
-            newestFirst = true,
-            onToggleSort = {},
-            onMarkAllRead = { vm.markAllRead() },
-            sortEnabled = false,
-            notifVm = notifVm,
-        )
+    } else {
+        null
+    }
 
-        Box(Modifier.fillMaxSize().imePadding()) {
-            when {
-                !hasValidTerms -> CenteredHint(stringResource(Res.string.home_search_too_short))
-                // Hold (blank) while the debounced search for the current query is still in flight,
-                // instead of flashing "no results" between keystrokes before results arrive. Any
-                // previous non-empty results keep showing (the `else` branch) until the new ones land.
-                results.isEmpty() && searching -> Unit
-                results.isEmpty() -> CenteredHint(stringResource(Res.string.home_search_no_results))
-                else -> {
-                    val rowMetrics = rememberArticleRowMetrics()
-                    val rowStrings = rememberArticleRowStrings()
-                    val copyUrl = rememberCopyUrlAction()
-                    // contentPadding's bottom clears the navigation bar on Android's edge-to-edge
-                    // layout (see HomeScreen's Scaffold); zero on desktop (WindowInsets.safeDrawing).
-                    LazyColumn(
-                        Modifier.fillMaxSize(),
-                        state = listState,
-                        contentPadding = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues(),
-                    ) {
-                        items(results, key = { it.article.id }) { result ->
-                            val article = result.article
-                            ArticleRow(
-                                article = article,
-                                feedTitle = feedTitles[article.feed_id].orEmpty(),
-                                feedFavicon = feedFavicons[article.feed_id],
-                                selected = article.id == selected?.id,
-                                focused = focused,
-                                rowHeight = rowMetrics.rowHeight,
-                                faviconSize = rowMetrics.faviconSize,
-                                onClick = { vm.selectArticle(article); onActivated(); onSelectionAdvance() },
-                                onToggleRead = { vm.toggleRead(article) },
-                                onToggleStar = { vm.toggleStar(article) },
-                                onCopyUrl = { copyUrl(article.url) },
-                                onOpenInBrowser = { BrowserOpener.open(article.url) },
-                                titleOverride = markedToAnnotatedString(result.titleMarked.ifBlank { article.title }),
-                                strings = rowStrings,
-                            )
-                        }
-                    }
-                    VerticalScrollbarIfNeeded(listState)
-                }
+    if (!searchActive) {
+        val articles by vm.articles.collectAsStateSafe(emptyList())
+        ArticleListPaneContent(
+            articles = articles,
+            feedTitles = feedTitles,
+            feedFavicons = feedFavicons,
+            selectedId = selected?.id,
+            unreadOnly = unreadOnly,
+            newestFirst = newestFirst,
+            focused = focused,
+            onToggleUnreadOnly = { vm.setUnreadOnly(!unreadOnly) },
+            onToggleSort = { vm.toggleSort() },
+            onMarkAllRead = { vm.markAllRead() },
+            onSelectArticle = { vm.selectArticle(it); onActivated(); onSelectionAdvance() },
+            onToggleRead = { vm.toggleRead(it) },
+            onToggleStar = { vm.toggleStar(it) },
+            modifier = modifier,
+            listState = baseListState,
+            returnRipplePulse = returnRipplePulse,
+            onActivated = onActivated,
+            notifVm = notifVm,
+            onOpenDrawer = if (barShown) null else onOpenDrawer,
+            title = if (barShown) null else title,
+            onSearchClick = if (barShown) null else onSearchClick,
+            hasNoFeeds = feeds.isEmpty(),
+            onAddFeedClick = onAddFeedClick,
+            header = header,
+        )
+    } else {
+        val results by vm.searchResults.collectAsStateSafe(emptyList())
+        val searching by vm.searching.collectAsStateSafe(false)
+        // A query has usable terms once at least one word is 2+ characters (searched via the
+        // trigram index at 3+, or a LIKE fallback at exactly 2 — see FtsSearch). A lone 1-character
+        // word, or "a b" where every word is too short, count as no terms.
+        val hasValidTerms = searchTerms(query).isNotEmpty()
+
+        // Keep the keyboard-selected result in view (mirrors ArticleListPaneContent's own
+        // scroll-to-selection effect for the base list).
+        LaunchedEffect(selected?.id, results) {
+            val index = results.indexOfFirst { it.article.id == selected?.id }
+            if (index !in results.indices) return@LaunchedEffect
+            searchListState.scrollToIndexIfNeeded(index)
+        }
+
+        val emptyContent: (@Composable () -> Unit)? = when {
+            !hasValidTerms -> {
+                { CenteredHint(stringResource(Res.string.home_search_too_short)) }
+            }
+            // Hold (blank) while the debounced search for the current query/filter is still in
+            // flight, instead of flashing "no results" between keystrokes (or right after switching
+            // filters) before the real results land. Any previous non-empty results keep showing
+            // (the `else` branch below) until the new ones land.
+            results.isEmpty() && searching -> {
+                {}
+            }
+            results.isEmpty() -> {
+                { NoSearchResultsHint(scopedToAFeed = filter != ArticleFilter.All) }
+            }
+            else -> null
+        }
+
+        ArticleListPaneContent(
+            articles = results.map { it.article },
+            feedTitles = feedTitles,
+            feedFavicons = feedFavicons,
+            selectedId = selected?.id,
+            unreadOnly = unreadOnly,
+            // Deliberately the real sort direction, not a fixed value — sortDirectionIcon's own
+            // KDoc: the button still reflects the current direction while disabled, it just can't
+            // be toggled (search order is always FTS5 relevance rank).
+            newestFirst = newestFirst,
+            focused = focused,
+            onToggleUnreadOnly = { vm.setUnreadOnly(!unreadOnly) },
+            onToggleSort = { vm.toggleSort() },
+            onMarkAllRead = { vm.markAllRead() },
+            onSelectArticle = { vm.selectArticle(it); onActivated(); onSelectionAdvance() },
+            onToggleRead = { vm.toggleRead(it) },
+            onToggleStar = { vm.toggleStar(it) },
+            modifier = modifier,
+            listState = searchListState,
+            onActivated = onActivated,
+            notifVm = notifVm,
+            onOpenDrawer = if (barShown) null else onOpenDrawer,
+            title = if (barShown) null else title,
+            onSearchClick = if (barShown) null else onSearchClick,
+            sortEnabled = false,
+            titleMarkedById = remember(results) { results.associate { it.article.id to it.titleMarked } },
+            emptyContent = emptyContent,
+            header = header,
+        )
+    }
+}
+
+/**
+ * The "no matches" hint shown when a search under [scopedToAFeed] came back empty — with a
+ * secondary line pointing at "All Feeds" only when the search was actually narrowed to something
+ * less than that, since switching to All wouldn't change anything otherwise.
+ */
+@Composable
+private fun NoSearchResultsHint(scopedToAFeed: Boolean) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                stringResource(Res.string.home_search_no_results),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (scopedToAFeed) {
+                Text(
+                    stringResource(Res.string.home_search_try_all_feeds),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
 }
 
 /**
- * Remembers a "copy URL to clipboard" action, shared by [SearchListPane]'s and
- * [ArticleListPaneContent]'s article rows, and by [FeedListPane]'s feed rows.
+ * Remembers a "copy URL to clipboard" action, shared by [ArticleListPaneContent]'s article rows
+ * (both the current filter's own list and search results), and by [FeedListPane]'s feed rows.
  */
 @Composable
 internal fun rememberCopyUrlAction(): (String) -> Unit {
@@ -420,18 +380,18 @@ internal fun rememberCopyUrlAction(): (String) -> Unit {
  * which reads as a direction only on an icon set whose sort glyph carries an arrow — Material
  * Symbols' does not, so the flip was invisible on Android. See `KeryxIcons`' own KDoc.
  *
- * Always reflects the current sort direction, even in the search scope where the button is
- * disabled (results stay pinned to FTS5 relevance rank) — [ArticleListTopBar] conveys "disabled"
- * through `TooltipIconButton`'s own dimmed styling, not through swapping the glyph itself.
+ * Always reflects the current sort direction, even while disabled during a search (results stay
+ * pinned to FTS5 relevance rank) — [ArticleListTopBar] conveys "disabled" through
+ * `TooltipIconButton`'s own dimmed styling, not through swapping the glyph itself.
  */
 internal fun sortDirectionIcon(newestFirst: Boolean): DrawableResource =
     if (newestFirst) KeryxIcons.SortDescending else KeryxIcons.SortAscending
 
 /**
- * The top bar shared by the normal article list ([ArticleListPaneContent]) and the search scope
- * ([SearchListPane]): unread-only toggle, notifications bell, sort, mark-all-read. When
- * [sortEnabled] is false (search scope, where the result order is fixed — FTS5 relevance rank, or
- * recency when every term is too short to be ranked, see FtsSearch), the sort button is disabled
+ * The top bar shared by every mode [ArticleListPaneContent] renders (the current filter's own list,
+ * or its search results): unread-only toggle, notifications bell, sort, mark-all-read. When
+ * [sortEnabled] is false (search is active, where the result order is fixed — FTS5 relevance rank,
+ * or recency when every term is too short to be ranked, see FtsSearch), the sort button is disabled
  * and its tooltip explains why instead of showing the usual "sort by ...".
  *
  * When [onOpenDrawer] is non-null (this pane is shown at a narrow [PaneLayout], where the feed
@@ -449,8 +409,8 @@ internal fun sortDirectionIcon(newestFirst: Boolean): DrawableResource =
  *
  * @param onSearchClick The entry point into search at a narrow layout (before this, folded into
  *   [onOpenDrawer]'s own leading row rather than the controls row's [ToolbarIconGroup] below —
- *   see this composable's own KDoc above). [SearchListPane] never passes this: once already in the
- *   Search scope there is nowhere further to advance to.
+ *   see this composable's own KDoc above). `null` once the expanded search bar is already open:
+ *   there is nowhere further to advance to.
  */
 @Composable
 internal fun ArticleListTopBar(
@@ -529,6 +489,18 @@ internal fun ripplePulseFor(articleId: String, selectedId: String?, returnRipple
 /**
  * Renders the article list with sorting, unread filtering, selection, and article actions.
  *
+ * Used for both of [ArticleListPane]'s two modes — the current filter's own list, and its search
+ * results — never both in the same composition. Which mode is which is entirely up to the caller's
+ * choice of parameters; this composable itself has no notion of search.
+ *
+ * The two callers differ exactly on these parameters:
+ * - **Search results** supply a separate [listState], set [sortEnabled] = `false`, pass
+ *   [titleMarkedById] (FTS highlight markup), and provide a non-null [emptyContent] for the
+ *   "no matching articles" / "query too short" hints.
+ * - **Current filter list** passes [returnRipplePulse] (for the back-from-article-detail flash),
+ *   sets [hasNoFeeds] (to swap the empty-state to the "Add feed" prompt), and leaves
+ *   [titleMarkedById], [emptyContent], and [sortEnabled] at their defaults.
+ *
  * @param articles The article rows to display.
  * @param feedTitles Display titles keyed by feed identifier.
  * @param feedFavicons Favicon URLs keyed by feed identifier.
@@ -536,22 +508,26 @@ internal fun ripplePulseFor(articleId: String, selectedId: String?, returnRipple
  * @param unreadOnly Whether to show only unread articles.
  * @param newestFirst Whether to sort articles from newest to oldest.
  * @param focused Whether the list has focus.
- * @param preserveScrollPositionOnMount Suppresses this composable's own "keep the selection in
- *   view" scroll for the single [selectedId]/[articles] evaluation that runs right as it mounts.
- *   Set by [ArticleListPane] for the one composition right after the Search scope closes: the list
- *   there is scrolled to wherever it was left before Search opened (see `ArticleListPane`'s own
- *   `listState`/`lastFilter` handling), which may well not be where [selectedId] currently sits —
- *   without this, that restored position would be immediately overridden by a scroll back to the
- *   selection. `false` elsewhere, including the analogous `NarrowPaneRow` remount case: there the
- *   restored position is already guaranteed to already show the selection (see
- *   `doesNotScrollAwayFromARestoredPositionThatAlreadyShowsTheSelection`), so this isn't needed.
+ * @param sortEnabled Whether the sort button in [ArticleListTopBar] can be toggled — `false` while
+ *   search is active, where the result order is fixed to FTS5 relevance rank.
+ * @param titleMarkedById Search-highlight markup (see `FtsSearch`/`markedToAnnotatedString`) keyed
+ *   by article id, applied as each row's title override instead of its plain title. `null` (the
+ *   default) renders every row's own title unmodified — the current filter's own list has no
+ *   search markup to show.
+ * @param header Rendered above [ArticleListTopBar] inside this composable's own background/
+ *   pane-activation container — [ArticleListPane]'s expanded search bar at a narrow layout while
+ *   it's open, `null` everywhere else.
  * @param hasNoFeeds Swaps the empty-state message from `home_no_articles` ("no articles yet, but
  *   you're subscribed to something") to `home_no_feeds` plus an "Add feed" button ([onAddFeedClick])
  *   when there are no feeds at all — otherwise a narrow layout, where the "+" button lives inside
  *   the feed-list drawer, would leave a phone-width user with no visible way to add their first
- *   feed. Only [articles] being empty renders either message; a non-empty [articles] always wins.
+ *   feed. Only consulted when [emptyContent] is `null`; a non-empty [articles] always wins over both.
  * @param onAddFeedClick Invoked from the "Add feed" button shown when [hasNoFeeds]. `null` (the
  *   default) omits the button, leaving just the message.
+ * @param emptyContent Overrides the ordinary [hasNoFeeds]/`home_no_articles` empty-state message
+ *   when [articles] is empty — search's own "too short a query"/"no matching articles" hints, which
+ *   have nothing to do with whether the user has any feeds at all. `null` (the default) falls back
+ *   to that ordinary message.
  */
 @Composable
 internal fun ArticleListPaneContent(
@@ -575,22 +551,17 @@ internal fun ArticleListPaneContent(
     onOpenDrawer: (() -> Unit)? = null,
     title: String? = null,
     onSearchClick: (() -> Unit)? = null,
-    preserveScrollPositionOnMount: Boolean = false,
     returnRipplePulse: Int = 0,
     hasNoFeeds: Boolean = false,
     onAddFeedClick: (() -> Unit)? = null,
+    sortEnabled: Boolean = true,
+    titleMarkedById: Map<String, String>? = null,
+    header: (@Composable () -> Unit)? = null,
+    emptyContent: (@Composable () -> Unit)? = null,
 ) {
-    // Consumed on this composable's first LaunchedEffect run, whatever that run turns out to do —
-    // not just when it actually finds selectedId in articles — so a mount where the selection isn't
-    // in this list yet (still loading, or genuinely absent) doesn't leave the flag stuck `true` and
-    // suppress a later, real selection change within the same mount.
-    var skipInitialSelectionScroll by remember { mutableStateOf(preserveScrollPositionOnMount) }
-    LaunchedEffect(selectedId, articles.isNotEmpty()) {
-        val skip = skipInitialSelectionScroll
-        skipInitialSelectionScroll = false
+    LaunchedEffect(listState, selectedId, articles.isNotEmpty()) {
         val index = articles.indexOfFirst { it.id == selectedId }
         if (index !in articles.indices) return@LaunchedEffect
-        if (skip) return@LaunchedEffect
         // Before the list's first measure pass layoutInfo is still empty, which
         // scrollToIndexIfNeeded reads as "not rendered anywhere" and answers with an animated
         // scroll — clobbering the scroll position NarrowPaneRow just restored, and pulling the
@@ -610,40 +581,45 @@ internal fun ArticleListPaneContent(
             .paneActivation(onActivated)
             .nativeContextMenu(items = { emptyList() }, onOpen = onActivated),
     ) {
+        header?.invoke()
         ArticleListTopBar(
             unreadOnly = unreadOnly,
             onToggleUnreadOnly = onToggleUnreadOnly,
             newestFirst = newestFirst,
             onToggleSort = onToggleSort,
             onMarkAllRead = onMarkAllRead,
-            sortEnabled = true,
+            sortEnabled = sortEnabled,
             notifVm = notifVm,
             onOpenDrawer = onOpenDrawer,
             title = title,
             onSearchClick = onSearchClick,
         )
 
-        if (articles.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                if (hasNoFeeds) {
-                    // A narrow layout's "+" button lives inside the feed-list drawer (closed by
-                    // default), so this is the one reachable entry point to add a first feed —
-                    // without it a phone-width user with no feeds yet would have no visible way
-                    // forward. See ArticleListPaneContent's own KDoc.
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text(stringResource(Res.string.home_no_feeds), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (onAddFeedClick != null) {
-                            FlatButton(onClick = onAddFeedClick) { Text(stringResource(Res.string.home_add_feed)) }
+        Box(Modifier.fillMaxSize().imePadding()) {
+            if (articles.isEmpty()) {
+                if (emptyContent != null) {
+                    emptyContent()
+                } else {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        if (hasNoFeeds) {
+                            // A narrow layout's "+" button lives inside the feed-list drawer (closed by
+                            // default), so this is the one reachable entry point to add a first feed —
+                            // without it a phone-width user with no feeds yet would have no visible way
+                            // forward. See ArticleListPaneContent's own KDoc.
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text(stringResource(Res.string.home_no_feeds), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (onAddFeedClick != null) {
+                                    FlatButton(onClick = onAddFeedClick) { Text(stringResource(Res.string.home_add_feed)) }
+                                }
+                            }
+                        } else {
+                            Text(stringResource(Res.string.home_no_articles), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                } else {
-                    Text(stringResource(Res.string.home_no_articles), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-            }
-        } else {
-            val rowMetrics = rememberArticleRowMetrics()
-            val rowStrings = rememberArticleRowStrings()
-            Box(Modifier.fillMaxSize()) {
+            } else {
+                val rowMetrics = rememberArticleRowMetrics()
+                val rowStrings = rememberArticleRowStrings()
                 val copyUrl = rememberCopyUrlAction()
                 // contentPadding's bottom clears the navigation bar on Android's edge-to-edge
                 // layout (see HomeScreen's Scaffold); zero on desktop (WindowInsets.safeDrawing).
@@ -666,6 +642,9 @@ internal fun ArticleListPaneContent(
                             onToggleStar = { onToggleStar(article) },
                             onCopyUrl = { copyUrl(article.url) },
                             onOpenInBrowser = { BrowserOpener.open(article.url) },
+                            titleOverride = titleMarkedById?.get(article.id)?.let {
+                                markedToAnnotatedString(it.ifBlank { article.title })
+                            },
                             strings = rowStrings,
                             ripplePulse = ripplePulseFor(article.id, selectedId, returnRipplePulse),
                         )

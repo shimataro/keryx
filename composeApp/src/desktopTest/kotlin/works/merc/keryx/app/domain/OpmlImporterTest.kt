@@ -14,6 +14,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
@@ -245,8 +246,8 @@ class OpmlImporterTest {
             // (instead of once per feed) — this must still leave every imported feed's articles
             // searchable, not just the last one indexed.
             val searchRepo = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L }, Dispatchers.Unconfined)
-            assertEquals(listOf("Kotlin Multiplatform News"), searchRepo.search("Kotlin").map { it.article.title })
-            assertEquals(listOf("Compose Rendering Pipeline"), searchRepo.search("Compose").map { it.article.title })
+            assertEquals(listOf("Kotlin Multiplatform News"), searchRepo.search("Kotlin", ArticleFilter.All).map { it.article.title })
+            assertEquals(listOf("Compose Rendering Pipeline"), searchRepo.search("Compose", ArticleFilter.All).map { it.article.title })
         } finally {
             driver.close()
         }

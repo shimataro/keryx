@@ -257,7 +257,6 @@ class HomeViewModelTest {
         backgroundScope.launch { vm.starredUnreadCount.collect {} }
         backgroundScope.launch { vm.articles.collect {} }
         backgroundScope.launch { vm.searchResults.collect {} }
-        backgroundScope.launch { vm.searchUnreadCount.collect {} }
     }
 
     @Test
@@ -695,6 +694,7 @@ class HomeViewModelTest {
         val vm = newViewModel()
         subscribeAll(vm)
 
+        vm.setSearchBarVisible(true)
         vm.setSearchQuery("Kotlin")
         advanceForSearchDebounce()
         val results = vm.searchResults.value.map { it.article }
@@ -1512,88 +1512,90 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun unreadOnlyIsScopedIndependentlyForTheSearchFilter() = runTest {
+    fun searchInheritsUnderlyingFilterUnreadOnlyState() = runTest {
         db.insertFeed("f1")
-        // Most searches are for an article already read, so a global toggle inherited from the
-        // feed list would leave search results looking empty/incomplete.
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 1L)
         ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
 
+        // All filter with unread-only on: search inherits it.
         vm.setUnreadOnly(true)
         testScheduler.advanceUntilIdle()
         assertTrue(vm.unreadOnly.value)
 
-        // Switching to Search does not inherit the feed list's "unread only" state — it starts at
-        // its own (unset) default, so the already-read matching article still shows.
+        vm.setSearchBarVisible(true)
+        testScheduler.advanceUntilIdle()
         vm.setSearchQuery("Kotlin")
         advanceForSearchDebounce()
-        assertFalse(vm.unreadOnly.value)
-        assertEquals(listOf("a1"), vm.searchResults.value.map { it.article.id })
-
-        // Turning it on within Search filters correctly, and does not touch the feed list's toggle.
-        vm.setUnreadOnly(true)
-        testScheduler.advanceUntilIdle()
         assertTrue(vm.unreadOnly.value)
         assertEquals(emptyList(), vm.searchResults.value.map { it.article.id })
 
-        // Switching back to All restores the feed list's own (still-on) toggle state.
-        vm.selectFilter(ArticleFilter.All)
+        // Switch to Starred filter with its own unread-only on: search inherits Starred's toggle.
+        vm.setSearchBarVisible(false)
         testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.unreadOnly.value)
+
+        vm.setSearchBarVisible(true)
+        testScheduler.advanceUntilIdle()
+        vm.setSearchQuery("Kotlin")
+        advanceForSearchDebounce()
         assertTrue(vm.unreadOnly.value)
     }
 
     @Test
-    fun setUnreadOnlyOnTheSearchFilterPersistsSeparatelyFromTheSharedToggle() = runTest {
+    fun setUnreadOnlyWhileSearchingWritesToUnderlyingFilterKey() = runTest {
         val store = LocalSettingsStore(dirOverride = dir)
         val vm = newViewModel()
         subscribeAll(vm)
+
+        // Searching on All writes to lastUnreadOnly.
+        vm.setSearchBarVisible(true)
         vm.setSearchQuery("Kotlin")
         advanceForSearchDebounce()
-
         vm.setUnreadOnly(true)
 
-        assertEquals(true, store.load().lastUnreadOnlySearch)
-        assertNull(store.load().lastUnreadOnly)
+        assertEquals(true, store.load().lastUnreadOnly)
+        assertNull(store.load().lastUnreadOnlyStarred)
+
+        // Searching on Starred writes to lastUnreadOnlyStarred.
+        vm.setSearchBarVisible(false)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        vm.setSearchBarVisible(true)
+        vm.setSearchQuery("Kotlin")
+        advanceForSearchDebounce()
+        vm.setUnreadOnly(true)
+
+        assertEquals(true, store.load().lastUnreadOnlyStarred)
     }
 
     @Test
-    fun restartRestoresUnreadOnlySearchIndependentlyFromTheSharedToggle() = runTest {
+    fun restartRestoresUnderlyingFilterToggleUsedBySearch() = runTest {
         val vm1 = newViewModel()
         subscribeAll(vm1)
+        vm1.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        vm1.setSearchBarVisible(true)
         vm1.setSearchQuery("Kotlin")
         advanceForSearchDebounce()
-        vm1.setUnreadOnly(true)
+        assertTrue(vm1.unreadOnly.value)
 
         val vm2 = newViewModel()
         subscribeAll(vm2)
+        vm2.setSearchBarVisible(true)
         vm2.setSearchQuery("Kotlin")
         advanceForSearchDebounce()
         assertTrue(vm2.unreadOnly.value)
 
-        vm2.selectFilter(ArticleFilter.All)
+        vm2.setSearchBarVisible(false)
         testScheduler.advanceUntilIdle()
-        assertFalse(vm2.unreadOnly.value)
-    }
-
-    @Test
-    fun unreadOnlySearchIgnoresTheDeviceWideDefaultUnlikeEveryOtherFilter() = runTest {
-        // article_list_default_unread_only is the fallback for the *shared* toggle only — the
-        // Search-specific one always starts OFF regardless, so it never inherits the device-wide
-        // "start with unread only" preference.
-        val settingsRepository = SettingsRepository(
-            db, LocalSettingsStore(dirOverride = dir), SyncScheduler {}, Clock { 0L }, writeDispatcher = Dispatchers.Unconfined,
-        )
-        settingsRepository.setArticleListDefaultUnreadOnly(true)
-
-        val vm = newViewModel()
-        subscribeAll(vm)
-        assertTrue(vm.unreadOnly.value)
-
-        vm.setSearchQuery("Kotlin")
-        advanceForSearchDebounce()
-        assertFalse(vm.unreadOnly.value)
+        assertTrue(vm2.unreadOnly.value)
     }
 
     @Test
@@ -1716,9 +1718,12 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun searchFilterEncodeDecodeRoundTrips() {
-        assertEquals("search", ArticleFilter.Search.encode())
-        assertEquals(ArticleFilter.Search, decodeArticleFilter("search"))
+    fun legacySearchFilterDecodesToAll() {
+        // "search" was Search's own encoding from when it was still a filter that could displace
+        // the one being browsed. encode() no longer produces it (Search isn't an ArticleFilter any
+        // more), but decode-only compatibility keeps an older-app-version persisted value from
+        // resolving to null.
+        assertEquals(ArticleFilter.All, decodeArticleFilter("search"))
     }
 
     @Test
@@ -1745,60 +1750,57 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun selectingANonSearchFilterDropsAnUnconsumedSearchFocusRequest() = runTest {
+    fun collapsingTheSearchBarDropsAnUnconsumedFocusRequest() = runTest {
         val vm = newViewModel()
         subscribeAll(vm)
 
-        vm.selectFilter(ArticleFilter.Search)
+        vm.setSearchBarVisible(true)
         vm.requestSearchFocus()
         assertEquals(true, vm.pendingSearchFocus.value)
 
-        // Navigating away before any field consumed the request must drop it — otherwise it would
+        // Closing the bar before any field consumed the request must drop it — otherwise it would
         // steal focus at whatever unrelated field appears next.
-        vm.selectFilter(ArticleFilter.All)
+        vm.setSearchBarVisible(false)
         assertEquals(false, vm.pendingSearchFocus.value)
     }
 
     @Test
-    fun reselectingTheSearchFilterKeepsAPendingFocusRequest() = runTest {
+    fun selectFilterNeverTouchesAPendingSearchFocusRequest() = runTest {
         val vm = newViewModel()
         subscribeAll(vm)
 
-        vm.selectFilter(ArticleFilter.Search)
+        vm.setSearchBarVisible(true)
         vm.requestSearchFocus()
         assertEquals(true, vm.pendingSearchFocus.value)
 
-        // Re-selecting the filter that is already active takes selectFilter's early-return path,
-        // which must not clear a request still waiting to be consumed.
-        vm.selectFilter(ArticleFilter.Search)
+        // Search is orthogonal to the filter now, so switching feeds while the bar is open must not
+        // disturb a focus request still waiting to be consumed — only setSearchBarVisible(false)
+        // (closing the bar) does that.
+        vm.selectFilter(ArticleFilter.Feed("f1"))
         assertEquals(true, vm.pendingSearchFocus.value)
     }
 
     @Test
-    fun setSearchQuerySwitchesToSearchScopeAndRetainsQuery() = runTest {
+    fun setSearchQueryDoesNotChangeTheFilter() = runTest {
         val vm = newViewModel()
         subscribeAll(vm)
 
         assertEquals(ArticleFilter.All, vm.filter.value)
 
-        // Typing moves into the Search scope on the first keystroke — the switch happens on
-        // isNotEmpty, not on whether the query has any usable (2+ char) terms or a result set.
+        // Typing narrows whatever filter is already selected rather than switching to one of its
+        // own — the whole point of search being orthogonal to ArticleFilter.
         vm.setSearchQuery("ko")
-        assertEquals(ArticleFilter.Search, vm.filter.value)
-        assertEquals("ko", vm.searchQuery.value)
-
-        // Leaving Search keeps the query so returning re-shows the same results.
-        vm.selectFilter(ArticleFilter.All)
         assertEquals(ArticleFilter.All, vm.filter.value)
         assertEquals("ko", vm.searchQuery.value)
 
-        vm.selectFilter(ArticleFilter.Search)
-        assertEquals(ArticleFilter.Search, vm.filter.value)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
+        // The query survives the filter switch — it now narrows the new filter instead.
         assertEquals("ko", vm.searchQuery.value)
     }
 
     @Test
-    fun currentArticlesSwitchesSourceToSearchResultsInSearchScope() = runTest {
+    fun currentArticlesSwitchesSourceToSearchResultsWhileSearchActive() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1")
         db.insertArticle("a2", "f1")
@@ -1807,352 +1809,63 @@ class HomeViewModelTest {
         subscribeAll(vm)
         testScheduler.advanceUntilIdle()
 
-        // Normal scope: currentArticles (used by J/K/arrow navigation) mirrors the feed-backed list.
+        // Not searching: currentArticles (used by J/K/arrow navigation) mirrors the feed-backed list.
         assertEquals(setOf("a1", "a2"), vm.currentArticles().map { it.id }.toSet())
 
-        // Search scope draws from searchResults instead — empty here (no query), which proves the
-        // source switched away from the feed list. (Real FTS hit ranking is covered by FtsSearchTest.)
-        vm.selectFilter(ArticleFilter.Search)
+        // Once searchActive (bar open + non-empty query), it draws from searchResults instead —
+        // empty here (no FTS index set up), which proves the source switched away from the feed
+        // list. (Real FTS hit ranking is covered by FtsSearchTest.)
+        vm.setSearchBarVisible(true)
+        vm.setSearchQuery("kotlin")
+        testScheduler.advanceUntilIdle()
         assertEquals(emptyList(), vm.currentArticles())
     }
 
     @Test
-    fun restoredSearchFilterFallsBackToAll() = runTest {
-        val vm1 = newViewModel()
-        vm1.setSearchQuery("ko") // persists lastFilter = "search"
-        assertEquals(ArticleFilter.Search, vm1.filter.value)
-
-        // A fresh viewmodel (same settings dir) must not restore into an empty Search view,
-        // since the query text isn't persisted.
-        val vm2 = newViewModel()
-        assertEquals(ArticleFilter.All, vm2.filter.value)
-    }
-
-    @Test
-    fun enterSearchScopeSnapshotsTheCurrentFilterAndRequestsFocus() = runTest {
-        val vm = newViewModel()
-        subscribeAll(vm)
-        vm.selectFilter(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInTag("f1", "t1"))
-
-        vm.enterSearchScope(HomePane.FeedList)
-
-        assertEquals(ArticleFilter.Search, vm.filter.value)
-        assertEquals(true, vm.pendingSearchFocus.value)
-    }
-
-    /**
-     * The arrow-key counterpart of the sidebar's own "Search" row: landing on it via keyboard
-     * navigation (`HomeScreen.moveFeedSelection` -> `selectFeedListRow`) must still snapshot the
-     * filter/row to restore later, exactly like a tap through [enterSearchScope] — the gap this
-     * regression-guards was that a plain `selectFilter(ArticleFilter.Search)` (the old behavior)
-     * switched the filter with no snapshot at all, leaving a later back action with nothing to
-     * restore.
-     */
-    @Test
-    fun selectFeedListRowOnTheSearchRowSnapshotsTheEntryButDoesNotRequestFocus() = runTest {
+    fun articlesDoesNotBrieflyGoEmptyWhenSearchEnds() = runTest {
         db.insertFeed("f1")
-        val vm = newViewModel()
-        subscribeAll(vm)
-        vm.selectFilter(ArticleFilter.Feed("f1"))
+        db.insertArticle("a1", "f1")
+        db.insertArticle("a2", "f1")
 
-        vm.selectFeedListRow(FeedListRowSelection.Search, HomePane.FeedList)
-
-        assertEquals(ArticleFilter.Search, vm.filter.value)
-        // Deliberately does not request focus — see selectFeedListRow's own KDoc: focusing the
-        // field here would swallow the very next ↓ into the result list, making every row below
-        // Search unreachable by keyboard.
-        assertEquals(false, vm.pendingSearchFocus.value)
-        assertEquals(HomePane.FeedList, vm.exitSearchScope())
-        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
-    }
-
-    @Test
-    fun selectFeedListRowOnAnOrdinaryRowBehavesExactlyLikeSelectFilter() = runTest {
-        db.insertFeed("f1")
-        val vm = newViewModel()
-        subscribeAll(vm)
-
-        vm.selectFeedListRow(FeedListRowSelection.FeedInFolderGroup("f1"), HomePane.FeedList)
-
-        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
-        assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), vm.selectedRowInstance.value)
-        assertEquals(false, vm.pendingSearchFocus.value)
-        assertEquals(null, vm.exitSearchScope())
-    }
-
-    @Test
-    fun selectFeedListRowAwayFromSearchDropsAPreviouslyCapturedSnapshot() = runTest {
-        db.insertFeed("f1")
-        db.insertFeed("f2")
-        val vm = newViewModel()
-        subscribeAll(vm)
-        vm.selectFilter(ArticleFilter.Feed("f1"))
-        vm.selectFeedListRow(FeedListRowSelection.Search, HomePane.FeedList)
-
-        // Same "leaving Search by any other means drops the snapshot" rule selectFilter already
-        // enforces for a tap-driven exit (see leavingSearchByAnyOtherMeansDropsTheSnapshot).
-        vm.selectFeedListRow(FeedListRowSelection.FeedInFolderGroup("f2"), HomePane.FeedList)
-
-        assertEquals(null, vm.exitSearchScope())
-    }
-
-    @Test
-    fun exitSearchScopeRestoresTheFilterAndRowInstanceAndReturnsTheEntryPane() = runTest {
-        db.insertFeed("f1")
-        db.insertTag("t1", "Kotlin")
-        db.insertFeedTag("f1", "t1")
         val vm = newViewModel()
         subscribeAll(vm)
         testScheduler.advanceUntilIdle()
-        vm.toggleTagExpanded("t1")
-        vm.selectFilter(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInTag("f1", "t1"))
-        vm.enterSearchScope(HomePane.ArticleList)
+        assertEquals(setOf("a1", "a2"), vm.articles.value.map { it.id }.toSet())
 
-        val returnPane = vm.exitSearchScope()
-
-        assertEquals(HomePane.ArticleList, returnPane)
-        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
-        assertEquals(FeedListRowSelection.FeedInTag("f1", "t1"), vm.selectedRowInstance.value)
-    }
-
-    @Test
-    fun reenteringSearchScopeWhileAlreadyInItKeepsTheOriginalSnapshot() = runTest {
-        db.insertFeed("f1")
-        val vm = newViewModel()
-        subscribeAll(vm)
-        testScheduler.advanceUntilIdle()
-        vm.selectFilter(ArticleFilter.Feed("f1"))
-        vm.enterSearchScope(HomePane.FeedList)
-
-        // e.g. re-tapping the sidebar's own "Search" row while already on the search screen —
-        // must not overwrite the snapshot with Search-scope state.
-        vm.enterSearchScope(HomePane.ArticleList)
-
-        assertEquals(HomePane.FeedList, vm.exitSearchScope())
-        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
-    }
-
-    @Test
-    fun leavingSearchByAnyOtherMeansDropsTheSnapshot() = runTest {
-        val vm = newViewModel()
-        subscribeAll(vm)
-        vm.selectFilter(ArticleFilter.Feed("f1"))
-        vm.enterSearchScope(HomePane.FeedList)
-
-        // The user picked a different feed directly (e.g. at PaneLayout.Dual, where the feed list
-        // stays on screen beside the search results) instead of going back.
-        vm.selectFilter(ArticleFilter.Feed("f2"))
-
-        assertEquals(null, vm.exitSearchScope())
-    }
-
-    @Test
-    fun exitSearchScopeReturnsNullWithoutASnapshot() = runTest {
-        val vm = newViewModel()
-        subscribeAll(vm)
-
-        // Entered directly (e.g. a restored "search" filter, or a test calling selectFilter itself)
-        // rather than through enterSearchScope, so there is nothing to restore.
-        vm.selectFilter(ArticleFilter.Search)
-
-        assertEquals(null, vm.exitSearchScope())
-    }
-
-    @Test
-    fun theSearchQuerySurvivesEnteringAndExitingTheSearchScope() = runTest {
-        val vm = newViewModel()
-        subscribeAll(vm)
-        vm.selectFilter(ArticleFilter.Feed("f1"))
-        vm.enterSearchScope(HomePane.FeedList)
+        vm.setSearchBarVisible(true)
         vm.setSearchQuery("kotlin")
+        testScheduler.advanceUntilIdle()
 
-        vm.exitSearchScope()
-
-        assertEquals("kotlin", vm.searchQuery.value)
+        // Exiting search must not cancel/restart the underlying watchArticles(f) query — `articles`
+        // should already hold the correct list the instant search ends, with no async gap.
+        // Deliberately no advanceUntilIdle() call before this assertion.
+        vm.setSearchQuery("")
+        assertEquals(setOf("a1", "a2"), vm.articles.value.map { it.id }.toSet())
     }
 
-    /**
-     * The user-reported regression this whole group guards: [selectFilter] (which [enterSearchScope]
-     * calls) clears `_pinnedReadArticles`/`_selectedArticle`/the cursor the same way it clears the
-     * filter/row — [exitSearchScope] restores the filter/row already, and must restore this browsing
-     * context too, or a round trip through Search silently drops an article that was only staying
-     * visible under unread-only because it was pinned.
-     */
     @Test
-    fun exitSearchScopeRestoresAPinnedArticleUnderUnreadOnly() = runTest {
-        db.insertFeed("f1")
-        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
-        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+    fun legacySearchFilterRestoresToAllOnRestart() = runTest {
+        // Simulates a user who had the removed ArticleFilter.Search selected before upgrading (back
+        // when it was still a filter of its own): the persisted "search" lastFilter must not
+        // restore into an empty view, since the query text was never persisted.
+        val store = LocalSettingsStore(dirOverride = dir)
+        store.save(store.load().copy(lastFilter = "search"))
+
         val vm = newViewModel()
-        subscribeAll(vm)
-        vm.selectFilter(ArticleFilter.Feed("f1"))
-        vm.setUnreadOnly(true)
-        testScheduler.advanceUntilIdle()
-        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
-        testScheduler.advanceUntilIdle()
-        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
-
-        vm.enterSearchScope(HomePane.ArticleList)
-        testScheduler.advanceUntilIdle()
-        // Search clears the browsing context the same way any other filter switch would.
-        assertEquals(emptyList<String>(), vm.articles.value.map { it.id })
-
-        vm.exitSearchScope()
-        testScheduler.advanceUntilIdle()
-
-        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
-        // a1 is back, still showing read (the pin survived the round trip, resolved against the DB's
-        // current — unchanged — flags), so it stays visible under unread-only exactly as before.
-        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
-        assertEquals(1L, vm.articles.value.first { it.id == "a1" }.is_read)
-    }
-
-    /** Selection and the keyboard-navigation cursor are restored the same way the pin is. */
-    @Test
-    fun exitSearchScopeRestoresTheSelectedArticleAndCursor() = runTest {
-        db.insertFeed("f1")
-        db.insertArticle("a1", "f1", isRead = 0L)
-        val vm = newViewModel()
-        subscribeAll(vm)
-        vm.selectFilter(ArticleFilter.Feed("f1"))
-        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
-        testScheduler.advanceUntilIdle()
-        assertEquals("a1", vm.selectedArticle.value?.id)
-
-        vm.enterSearchScope(HomePane.ArticleList)
-        testScheduler.advanceUntilIdle()
-        assertEquals(null, vm.selectedArticle.value)
-
-        vm.exitSearchScope()
-        testScheduler.advanceUntilIdle()
-
-        assertEquals("a1", vm.selectedArticle.value?.id)
-        // The cursor is restored too, so the next arrow key steps from a1 rather than the top.
-        vm.selectNext()
-        testScheduler.advanceUntilIdle()
-        assertEquals("a1", vm.selectedArticle.value?.id)
-    }
-
-    /**
-     * A change made *from inside Search* — here, toggling a search result row's own read state
-     * back to unread — must not be undone by restoring the frozen pre-Search snapshot:
-     * [exitSearchScope] resolves the snapshot against the DB's current flags rather than replaying
-     * it verbatim, the same rule [HomeViewModel.reconcilePinnedArticles] applies reactively while
-     * Search is not involved. Uses [HomeViewModel.toggleRead] directly (not the selection) since
-     * entering Search already cleared the selection [enterSearchScope] snapshotted — the row action
-     * doesn't require anything to be selected, matching a tap on the row's own read/unread control.
-     */
-    @Test
-    fun exitSearchScopeReflectsAnUnreadMadeWhileInsideSearch() = runTest {
-        db.insertFeed("f1")
-        db.insertArticle("a1", "f1", isRead = 0L)
-        val vm = newViewModel()
-        subscribeAll(vm)
-        vm.selectFilter(ArticleFilter.Feed("f1"))
-        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
-        testScheduler.advanceUntilIdle()
-        assertEquals(1L, vm.articles.value.first { it.id == "a1" }.is_read)
-
-        vm.enterSearchScope(HomePane.ArticleList)
-        testScheduler.advanceUntilIdle()
-        vm.toggleRead(db.articlesQueries.getById("a1").executeAsOne().toListRow())
-        testScheduler.advanceUntilIdle()
-        assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_read)
-
-        vm.exitSearchScope()
-        testScheduler.advanceUntilIdle()
-
-        // The pin restored from before Search must not resurrect the stale "read" state on top of
-        // the unread the user just made from inside Search.
-        assertEquals(0L, vm.articles.value.first { it.id == "a1" }.is_read)
-    }
-
-    /**
-     * A sync merge that tombstones a pinned article while Search is active must not resurrect it —
-     * the same invariant [reconcilePinnedArticles] applies reactively, applied here to the one-shot
-     * restore instead.
-     */
-    @Test
-    fun exitSearchScopeDoesNotResurrectAnArticleTombstonedWhileInsideSearch() = runTest {
-        db.insertFeed("f1")
-        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
-        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
-        val vm = newViewModel()
-        subscribeAll(vm)
-        vm.selectFilter(ArticleFilter.Feed("f1"))
-        vm.setUnreadOnly(true)
-        testScheduler.advanceUntilIdle()
-        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
-        testScheduler.advanceUntilIdle()
-
-        vm.enterSearchScope(HomePane.ArticleList)
-        testScheduler.advanceUntilIdle()
-        driver.stampArticleDeleted("a1", deletedAt = 100L)
-
-        vm.exitSearchScope()
-        testScheduler.advanceUntilIdle()
-
-        assertEquals(listOf("a2"), vm.articles.value.map { it.id })
-    }
-
-    /**
-     * Mirrors [exitSearchScopeFallsBackToAllWhenFilterTargetWasDeletedMeanwhile]: when the filter
-     * itself falls back to a different one, the pinned-read/selection snapshot belongs to the
-     * *original* filter and must not be attached to the fallback.
-     */
-    @Test
-    fun exitSearchScopeDoesNotRestoreTheBrowsingContextWhenTheFilterFallsBack() = runTest {
-        db.insertFeed("f1")
-        db.insertArticle("a1", "f1", isRead = 0L)
-        val vm = newViewModel()
-        subscribeAll(vm)
-        vm.selectFilter(ArticleFilter.Feed("f1"))
-        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
-        testScheduler.advanceUntilIdle()
-
-        vm.enterSearchScope(HomePane.ArticleList)
-        testScheduler.advanceUntilIdle()
-        // Simulate the feed being soft-deleted independently (e.g. by another device's sync) while
-        // Search is active, so the snapshot inside _searchScopeEntry still points at "f1".
-        db.feedsQueries.softDelete(50L, 50L, 50L, "f1")
-
-        vm.exitSearchScope()
-        testScheduler.advanceUntilIdle()
 
         assertEquals(ArticleFilter.All, vm.filter.value)
-        assertEquals(null, vm.selectedArticle.value)
     }
 
-    /**
-     * A pin set *from inside Search* — reading a different feed's article there — is not part of
-     * [enterSearchScope]'s snapshot at all, and must not leak into the returned filter's list: the
-     * `articles` combine re-adds any pinned id missing from its query result, so restoring it here
-     * would surface an unrelated feed's article in this filter's list.
-     */
     @Test
-    fun exitSearchScopeDoesNotLeakAPinSetFromInsideSearchIntoTheReturnedFilter() = runTest {
-        db.insertFeed("f1")
-        db.insertFeed("f2")
-        db.insertArticle("a1", "f1", isRead = 0L)
-        db.insertArticle("b1", "f2", title = "Kotlin", content = "kotlin content", isRead = 0L)
-        ftsManagerIndexed(driver)
+    fun theSearchQuerySurvivesAFilterSwitch() = runTest {
         val vm = newViewModel()
         subscribeAll(vm)
         vm.selectFilter(ArticleFilter.Feed("f1"))
-        testScheduler.advanceUntilIdle()
+        vm.setSearchQuery("kotlin")
 
-        vm.enterSearchScope(HomePane.ArticleList)
-        vm.setSearchQuery("Kotlin")
-        advanceForSearchDebounce()
-        vm.selectArticle(db.articlesQueries.getById("b1").executeAsOne().toListRow())
-        testScheduler.advanceUntilIdle()
-        assertEquals(1L, db.articlesQueries.getById("b1").executeAsOne().is_read)
+        vm.selectFilter(ArticleFilter.Feed("f2"))
 
-        vm.exitSearchScope()
-        testScheduler.advanceUntilIdle()
-
-        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
-        assertEquals(listOf("a1"), vm.articles.value.map { it.id })
+        assertEquals("kotlin", vm.searchQuery.value)
     }
 
     /**
@@ -2217,33 +1930,6 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun searchUnreadCountCountsUnreadMatchesIgnoresUnreadOnlyAndDecrementsOnRead() = runTest {
-        db.insertFeed("f1")
-        db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
-        db.insertArticle("a2", "f1", title = "Kotlin Two", content = "kotlin content", isRead = 1L)
-        db.insertArticle("a3", "f1", title = "Kotlin Three", content = "kotlin content", isRead = 0L)
-        ftsManagerIndexed(driver)
-        val vm = newViewModel()
-        subscribeAll(vm)
-        vm.setSearchQuery("Kotlin")
-        advanceForSearchDebounce()
-
-        // Only the two unread matches (a1, a3) are counted; the read one (a2) is excluded.
-        assertEquals(2L, vm.searchUnreadCount.value)
-
-        // The unread-only display toggle must not change the count (it counts raw matches).
-        vm.setUnreadOnly(true)
-        testScheduler.advanceUntilIdle()
-        assertEquals(2L, vm.searchUnreadCount.value)
-
-        // Selecting a result marks it read immediately (pinned); the count drops by one.
-        val article1 = db.articlesQueries.getById("a1").executeAsOne()
-        vm.selectArticle(article1.toListRow())
-        testScheduler.advanceUntilIdle()
-        assertEquals(1L, vm.searchUnreadCount.value)
-    }
-
-    @Test
     fun selectingSearchResultKeepsItPinnedAndVisibleUnderUnreadOnlyAfterBeingMarkedRead() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
@@ -2265,8 +1951,16 @@ class HomeViewModelTest {
         assertEquals(setOf("a1", "a2"), vm.searchResults.value.map { it.article.id }.toSet())
     }
 
+    /**
+     * Unlike a filter switch, a query change does not start a fresh browsing context — it narrows
+     * the *same* one (see [HomeViewModel.setSearchQuery]'s own KDoc). A pin set under the previous
+     * query must therefore survive: `search_text` no longer matching the new query is exactly the
+     * "pinned but no longer in the raw results" case [searchResults] deliberately does *not* merge
+     * back in (unlike the base `articles` list), so an old query's pin cannot resurface a stale
+     * result under the new one.
+     */
     @Test
-    fun changingSearchQueryClearsPinnedReadArticles() = runTest {
+    fun changingSearchQueryKeepsPinnedReadArticles() = runTest {
         db.insertFeed("f1")
         // a1 matches both queries, a2 only "Kotlin", a3 only "Java".
         db.insertArticle("a1", "f1", title = "Kotlin and Java", content = "kotlin java", isRead = 0L)
@@ -2275,6 +1969,7 @@ class HomeViewModelTest {
         ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
+        vm.setSearchBarVisible(true)
         vm.setSearchQuery("Kotlin")
         vm.setUnreadOnly(true)
         advanceForSearchDebounce()
@@ -2287,31 +1982,29 @@ class HomeViewModelTest {
         // a1 is read but pinned, so it stays visible under unread-only.
         assertEquals(setOf("a1", "a2"), vm.searchResults.value.map { it.article.id }.toSet())
 
-        // Change query: pins are cleared immediately. After the new search, a1 is read and unpinned,
-        // so even though it also matches "Java" it must not appear under unread-only.
+        // Change query: the pin survives. "Java"'s own raw results (a1, a3) still contain a1, and
+        // the pin resolves its read state the same way it did under "Kotlin" — so a1 stays visible.
         vm.setSearchQuery("Java")
         advanceForSearchDebounce()
-        assertEquals(listOf("a3"), vm.searchResults.value.map { it.article.id })
+        assertEquals(setOf("a1", "a3"), vm.searchResults.value.map { it.article.id }.toSet())
     }
 
     /**
-     * The same clearing, but with the query changed while the selected article's body is still
-     * loading. The selection deliberately survives a query change, so the cursor stays non-null and
-     * cannot veto the stale pin — without the browsing epoch, a1 is pinned *after* the clear and
-     * stays visible under unread-only in results it should have left behind.
+     * The same survival, but with the query changed while the selected article's body is still
+     * loading — unlike a filter switch, [HomeViewModel.setSearchQuery] no longer bumps the
+     * browsing epoch, so the in-flight [HomeViewModel.selectArticle] completes and pins normally
+     * rather than being vetoed as belonging to a since-abandoned context.
      */
     @Test
-    fun changingSearchQueryClearsAPinWhoseBodyIsStillLoading() = runTest {
+    fun changingSearchQueryKeepsAPinWhoseBodyIsStillLoading() = runTest {
         db.insertFeed("f1")
-        // a1 matches both queries, a2 only "Kotlin", a3 only "Java".
         db.insertArticle("a1", "f1", title = "Kotlin and Java", content = "kotlin java", isRead = 0L)
         db.insertArticle("a2", "f1", title = "Kotlin Only", content = "kotlin", isRead = 0L)
-        db.insertArticle("a3", "f1", title = "Java Only", content = "java", isRead = 0L)
         ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
+        vm.setSearchBarVisible(true)
         vm.setSearchQuery("Kotlin")
-        vm.setUnreadOnly(true)
         advanceForSearchDebounce()
         assertEquals(setOf("a1", "a2"), vm.searchResults.value.map { it.article.id }.toSet())
 
@@ -2321,11 +2014,13 @@ class HomeViewModelTest {
         vm.setSearchQuery("Java")
         advanceForSearchDebounce()
 
-        assertEquals(listOf("a3"), vm.searchResults.value.map { it.article.id })
+        // a1 (the only "Java" match) landed its pin despite the query changing mid-load.
+        assertEquals(listOf("a1"), vm.searchResults.value.map { it.article.id })
+        assertEquals(1L, vm.searchResults.value.single().article.is_read)
     }
 
     @Test
-    fun markAllReadInSearchScopeMarksOnlyUnreadMatchesAndKeepsSelectedOnePinned() = runTest {
+    fun markAllReadWhileSearchingMarksOnlyUnreadMatchesAndKeepsSelectedOnePinned() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
         db.insertArticle("a2", "f1", title = "Kotlin Two", content = "kotlin content", isRead = 0L)
@@ -2333,6 +2028,7 @@ class HomeViewModelTest {
         ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
+        vm.setSearchBarVisible(true)
         vm.setSearchQuery("Kotlin")
         vm.setUnreadOnly(true)
         advanceForSearchDebounce()
@@ -2354,13 +2050,14 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun markAllReadInSearchScopeDoesNotAffectUnreadArticlesOutsideTheMatch() = runTest {
+    fun markAllReadWhileSearchingDoesNotAffectUnreadArticlesOutsideTheMatch() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
         db.insertArticle("other", "f1", title = "Something else", content = "unrelated content", isRead = 0L)
         ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
+        vm.setSearchBarVisible(true)
         vm.setSearchQuery("Kotlin")
         advanceForSearchDebounce()
         assertEquals(listOf("a1"), vm.searchResults.value.map { it.article.id })
@@ -2369,13 +2066,13 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
 
         assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
-        // "other" never matched the search, so a search-scoped mark-all-read must not touch it —
+        // "other" never matched the search, so marking read while searching must not touch it —
         // proving this isn't a blanket mark-everything-read fallback.
         assertEquals(0L, db.articlesQueries.getById("other").executeAsOne().is_read)
     }
 
     @Test
-    fun markAllReadAfterMarkSelectedUnreadInSearchMarksSelectedArticleRead() = runTest {
+    fun markAllReadAfterMarkSelectedUnreadWhileSearchingMarksSelectedArticleRead() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content")
         ftsManagerIndexed(driver)
@@ -2383,6 +2080,7 @@ class HomeViewModelTest {
         // markAllRead() has already inspected the stale search snapshot.
         val vm = newViewModel(dbWriteDispatcher = StandardTestDispatcher(testScheduler))
         subscribeAll(vm)
+        vm.setSearchBarVisible(true)
         vm.setSearchQuery("Kotlin")
         advanceForSearchDebounce()
 
@@ -2409,6 +2107,7 @@ class HomeViewModelTest {
         ftsManagerIndexed(driver)
         val vm = newViewModel()
         subscribeAll(vm)
+        vm.setSearchBarVisible(true)
         vm.setSearchQuery("Kotlin")
         advanceForSearchDebounce()
         val before = vm.searchResults.value.map { it.article.id }
@@ -2418,7 +2117,7 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
 
         assertFalse(vm.newestFirst.value)
-        // The relevance-rank order is unaffected by the (search-scope-irrelevant) sort toggle.
+        // The relevance-rank order is unaffected by the (search-irrelevant) sort toggle.
         assertEquals(before, vm.searchResults.value.map { it.article.id })
     }
 
@@ -2962,48 +2661,6 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
 
         assertEquals(ArticleFilter.All, vm2.filter.value)
-    }
-
-    @Test
-    fun exitSearchScopeFallsBackToAllWhenFilterTargetWasDeletedMeanwhile() = runTest {
-        db.insertTag("t1", "Kotlin")
-        val vm = newViewModel()
-        subscribeAll(vm)
-        vm.selectFilter(ArticleFilter.Tag("t1"))
-        testScheduler.advanceUntilIdle()
-        vm.enterSearchScope(HomePane.ArticleList)
-
-        // Simulate the tag being soft-deleted independently (e.g. by another device's sync)
-        // while Search is active, so the snapshot inside _searchScopeEntry still points at "t1".
-        db.tagsQueries.softDelete(1L, 1L, "t1")
-
-        vm.exitSearchScope()
-
-        assertEquals(ArticleFilter.All, vm.filter.value)
-    }
-
-    @Test
-    fun exitSearchScopeDemotesStaleTagNestedRowInstanceWhenTagCollapsedMeanwhile() = runTest {
-        db.insertFeed("f1")
-        db.insertTag("t1", "Kotlin")
-        db.insertFeedTag("f1", "t1")
-        val vm = newViewModel()
-        subscribeAll(vm)
-        testScheduler.advanceUntilIdle()
-        assertFalse("t1" in vm.expandedTagIds.value)
-        vm.toggleTagExpanded("t1")
-        assertTrue("t1" in vm.expandedTagIds.value)
-        vm.selectFilter(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInTag("f1", "t1"))
-        vm.enterSearchScope(HomePane.ArticleList)
-
-        // Collapsing the tag while still in Search only normalizes the live selection, not the
-        // frozen snapshot inside _searchScopeEntry — exitSearchScope must do that normalization itself.
-        vm.toggleTagExpanded("t1")
-
-        vm.exitSearchScope()
-
-        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
-        assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), vm.selectedRowInstance.value)
     }
 
     @Test

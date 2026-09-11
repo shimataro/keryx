@@ -141,6 +141,22 @@ unbounded. A query that mixes a 3+-character term with a 2-character one still r
 `articles_fts MATCH` (rank-ordered) with the short term ANDed in as an extra `LIKE` filter on the
 matched rows.
 
+**Search is scoped to an `ArticleFilter`, not run over every article.** `FtsSearch.search(rawQuery,
+scope)` (`data/local/FtsSearch.kt`) takes the currently selected `ArticleFilter` and, via
+`articleScopeSql`, appends a `WHERE`-clause fragment matching the exact row set the corresponding
+`articles.sq` query (`watchAll`/`watchStarred`/`watchByFeed`/`watchByTag`/`watchByFolder`) would
+show as a plain, non-search article list for that same filter — including that those five queries
+are not symmetric about joining `feeds`: `Starred` and `Feed` don't, so a starred article (or any
+article) belonging to an unsubscribed (soft-deleted) feed still matches under those two scopes,
+while `All`/`Tag`/`Folder` exclude it. The scope predicate is expressed as `EXISTS (...)` rather
+than `feed_id IN (...)`, so a folder/tag scope spanning many feeds still binds at most one
+parameter — relevant because it shares the same query's bound-parameter budget with the short-term
+`LIKE` clauses above. `SEARCH_FALLBACK_RESULT_LIMIT` applies *within* the scope (the `WHERE` already
+narrows the rows the `LIMIT` counts against), not before it, so a search scoped to one feed isn't
+starved by an unrelated feed's hits filling the cap first. See "Search is orthogonal to
+`ArticleFilter`" in [app-architecture.md](app-architecture.md) for how `HomeViewModel` decides which
+scope to pass.
+
 ## local_settings.json (outside keryx.db, non-sync)
 
 Location: directly under the app data directory (`AppDirs.appDataDir()`. macOS: `~/Library/Application Support/Keryx`).
@@ -169,7 +185,6 @@ Setup completion = file exists.
 | `lastFocusedPane` | string\|null | null |
 | `lastUnreadOnly` | boolean\|null | null |
 | `lastUnreadOnlyStarred` | boolean\|null | null (scoped to the Starred filter alone, independent of `lastUnreadOnly`) |
-| `lastUnreadOnlySearch` | boolean\|null | null (same, for the Search filter) |
 | `lastNewestFirst` | boolean\|null | null |
 | `appMenuBarVisible` | boolean\|null | null (Linux KDE Global Menu: null=auto (shown until `RegisterWindow` succeeds, then hidden); true/false=explicit override via Ctrl+M / the exported "Show Menu Bar" checkbox. No effect where no `com.canonical.AppMenu.Registrar` is present) |
 

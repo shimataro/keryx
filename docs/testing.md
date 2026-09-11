@@ -345,30 +345,46 @@ real app UI, so confirm manually on a device or emulator:
 
 (Android, narrow layout) Search — `KeryxSearchBarAndroidTest.kt` covers `KeryxExpandedSearchBar`'s
 semantics/text-input/font-scale behavior in isolation (see `androidApp/src/androidTest/` above);
-confirm the full navigation flow manually on a device or emulator:
+confirm the full navigation flow manually on a device or emulator. Search is orthogonal to the
+article filter (`core/ArticleFilter.kt` has no `Search` case) — it narrows whichever
+feed/folder/tag/Starred/All selection is already active rather than displacing it, so there is no
+snapshot to restore when it ends; these checks focus on that.
 
 - On launch, a saved `HomePane.ArticleDetail` comes back as the article list, not the last-read
   article — `initialPaneFor`'s clamp. A saved `HomePane.FeedList` (left over from before the feed
   list became a drawer) also comes back as the article list now, not a screen of its own.
-- Tapping the article list's own search icon opens the search screen with the keyboard already up
-  and the field focused. The feed list/drawer has no search entry point of its own at all.
+- Tapping the article list's own search icon opens the bar with the keyboard already up and the
+  field focused. The feed list/drawer has no search entry point of its own at a narrow layout — at
+  `PaneLayout.Triple`, `FeedListPane` has its own permanent field instead.
 - Typing 2+ characters shows results on the same screen, below the field — no pane change needed.
+  Typing exactly 1 character shows the "enter at least 2 characters" hint rather than the
+  underlying list or an empty-results message.
 - With the keyboard still open, the results list scrolls all the way to its last item without the
   keyboard covering it.
-- Opening a result, then going back, returns to the search screen with the query and results still
-  in place (no keyboard auto-reopening).
-- From an article list already showing some other feed/tag/folder, tapping its own search icon and
-  then going back returns to **that same article list**, with the original scope selected again
-  (`homeBackAction`'s `ExitSearch`, since the search icon never advances the stack).
+- Opening a result, then going back, returns to the bar with the query and results still in place
+  (no keyboard auto-reopening).
+- From an article list already showing some other feed/tag/folder, tapping its own search icon,
+  typing a query, then going back returns to **that same article list**, still showing that same
+  feed/tag/folder selected (nothing was ever displaced) — `homeBackAction`'s `CloseSearchBar`, since the
+  search icon never advances the stack.
+- Searching while a single feed (or a folder, or a tag) is selected only matches articles in that
+  scope — an article that would match in a different feed does not appear. Selecting "All Feeds"
+  before searching (or switching to it mid-search) searches everywhere.
+- A scoped search (anything other than "All Feeds") that comes back with zero matches shows a
+  second line inviting the user to select "All Feeds" to search everywhere; a search under "All
+  Feeds" itself never shows that line.
+- Clearing the query (with the "×" button, or by deleting it) shows the underlying filter's own
+  list again, unchanged and at the same scroll position, without needing to go back first.
 - Rotating to a tablet-width landscape (`PaneLayout.Dual`) mid-session does not eject the user from
   whatever they were reading, and a back press from the article list there (with nothing else
   pending) exits the app rather than doing nothing — `Dual` always shows the same two panes now, so
   there is no "no-op" depth transition left to guard against, only the article-list-itself case
-  (see "The feed-list navigation drawer" below for that). Entering search at `Dual` and pressing
-  back exits the search scope the same way it does at phone width, at every depth.
+  (see "The feed-list navigation drawer" below for that). Opening the search bar at `Dual` and
+  pressing back closes it the same way it does at phone width, at every depth.
 - At a tablet-width landscape wide enough to reach `PaneLayout.Triple`, the layout matches desktop
   exactly — the search field is back in the feed list sidebar, and the article list carries no
   search bar of its own. Back navigation stays disabled at every depth there, same as desktop.
+  Rotating back to a narrower width with the query still empty must not leave the bar open there.
 - Opening an article from partway down the article list and then going back returns to the list at
   the same scroll position, with **no visible scroll animation** — at phone width (where the pane is
   genuinely unmounted) and at tablet-width landscape alike (where the article list is never
@@ -376,16 +392,19 @@ confirm the full navigation flow manually on a device or emulator:
   results list.
 - With an article open, using a notification's "show feed" action to switch to a different feed and
   then going back opens that feed's list at the **top**, not at the previous feed's scroll position.
-- Scroll the article list down, open Search from its own icon, then close Search without picking
-  anything — the list returns to the same scroll position, not the top. Applies at every
-  `PaneLayout`, including desktop's `Triple` (this round trip stays inside `ArticleListPane`, not
-  `NarrowPaneRow`, so it isn't narrow-layout-specific).
-- With "unread only" on, select an unread article (it stays visible, shown read, while browsing) and
-  then open and close Search without picking anything — that article must still be there, still
-  shown read, not silently dropped from the list. The selection itself, and the article detail pane,
-  must also come back exactly as they were before Search opened.
-- With an article open in Search results (not the same one that was selected beforehand), mark it
-  unread from its own row and then close Search — it must show as unread, not snap back to read.
+- Scroll the article list down, open the search bar from its own icon, type a query, then close the
+  bar without picking anything — the underlying list returns at the same scroll position, not the
+  top. Applies at every `PaneLayout`, including desktop's `Triple` (`ArticleListPane` keeps the
+  filter's own list and its search results in two independent scroll states, so this isn't
+  narrow-layout-specific).
+- With "unread only" on, select an unread article (it stays visible, shown read, while browsing),
+  then search for it and close the bar without picking anything — that article must still be there
+  in the underlying list, still shown read, not silently dropped. The selection itself, and the
+  article detail pane, must also be unaffected — nothing about them was ever touched by opening or
+  closing the bar.
+- With an article open in search results (not the same one that was selected beforehand), mark it
+  unread from its own row and then close the bar — the underlying list, if it also matches that
+  article, must show it as unread too, not stuck read.
 - With an article selected (and therefore pinned read under "unread only"), have another device sync
   a "mark unread" for that same article — it must switch to showing unread reactively, without
   needing a filter switch or app restart. The same for a re-star synced in while browsing under
@@ -442,7 +461,7 @@ on a device or emulator:
   article at `PaneLayout.Dual` silently advanced `focusedPane` to `HomePane.ArticleDetail`, even
   though the reader has no on-screen change to show for it there — see `ArticleListPane`'s own
   `onSelectionAdvance` KDoc.)
-- Triple: focus the sidebar search field (tap it, or the "Search" row), then tap an article row or
+- Triple: focus the sidebar search field (tap it), then tap an article row or
   a feed row. The field must lose focus (its border color reverts, the soft keyboard — if it was
   showing — dismisses), and a following ↑/↓ must move the tapped pane's selection on the **first**
   press, not the second. (Regression check for a bug where a tap left the field holding real

@@ -1,6 +1,5 @@
 package works.merc.keryx.app.ui.menu
 
-import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.platform.isMacOs
@@ -63,14 +62,14 @@ class AppMenuTreeTest {
     private fun enabledUi() = computeMenuUiState(
         screen = Screen.Home, hasSelectedArticle = true, selectedArticleHasUrl = true,
         feedRefreshing = false, syncing = false, cloudConnected = true,
-        filter = ArticleFilter.All, unreadOnly = true,
+        searchActive = false, unreadOnly = true,
         hasSelectedFeed = true, hasRenamableSelection = true, selectedFeedHasSiteUrl = true,
     )
 
     private fun disabledUi() = computeMenuUiState(
         screen = Screen.Setup, hasSelectedArticle = false, selectedArticleHasUrl = false,
         feedRefreshing = true, syncing = true, cloudConnected = false,
-        filter = ArticleFilter.Search, unreadOnly = false,
+        searchActive = true, unreadOnly = false,
         hasSelectedFeed = false, hasRenamableSelection = false,
     )
 
@@ -78,14 +77,14 @@ class AppMenuTreeTest {
     private fun folderSelectedUi() = computeMenuUiState(
         screen = Screen.Home, hasSelectedArticle = false, selectedArticleHasUrl = false,
         feedRefreshing = false, syncing = false, cloudConnected = true,
-        filter = ArticleFilter.Folder("fo1"), unreadOnly = false,
+        searchActive = false, unreadOnly = false,
         hasSelectedFeed = false, hasRenamableSelection = true,
     )
 
     private fun starredFilterUi() = computeMenuUiState(
         screen = Screen.Home, hasSelectedArticle = true, selectedArticleHasUrl = true,
         feedRefreshing = false, syncing = false, cloudConnected = true,
-        filter = ArticleFilter.Starred, unreadOnly = true,
+        searchActive = false, unreadOnly = true,
         hasSelectedFeed = true, hasRenamableSelection = true,
     )
 

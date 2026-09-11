@@ -1,13 +1,38 @@
 package works.merc.keryx.app.data.local
 
+import works.merc.keryx.app.core.ArticleFilter
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
- * Pure-function tests for [escapeLikePattern] and [markTerms]. The driver-backed MATCH/LIKE
- * behavior itself is covered by [FtsSearchTest] (desktopTest, needs a real SQLite connection).
+ * Pure-function tests for [escapeLikePattern], [markTerms], and [articleScopeSql]. The
+ * driver-backed MATCH/LIKE behavior itself is covered by [FtsSearchTest] (desktopTest, needs a
+ * real SQLite connection).
  */
 class FtsSearchQueryHelpersTest {
+
+    @Test
+    fun articleScopeSqlProducesNoArgumentsForAllAndStarred() {
+        assertTrue(articleScopeSql(ArticleFilter.All).args.isEmpty())
+        assertTrue(articleScopeSql(ArticleFilter.Starred).args.isEmpty())
+    }
+
+    @Test
+    fun articleScopeSqlProducesExactlyOneArgumentForFeedTagAndFolder() {
+        assertEquals(listOf("f1"), articleScopeSql(ArticleFilter.Feed("f1")).args)
+        assertEquals(listOf("t1"), articleScopeSql(ArticleFilter.Tag("t1")).args)
+        assertEquals(listOf("d1"), articleScopeSql(ArticleFilter.Folder("d1")).args)
+    }
+
+    @Test
+    fun articleScopeSqlClauseContent() {
+        assertTrue(articleScopeSql(ArticleFilter.All).clause.contains("f.deleted_at IS NULL"))
+        assertTrue(articleScopeSql(ArticleFilter.Starred).clause.contains("is_starred"))
+        assertTrue(articleScopeSql(ArticleFilter.Feed("f1")).clause.contains("feed_id"))
+        assertTrue(articleScopeSql(ArticleFilter.Tag("t1")).clause.contains("tag_id"))
+        assertTrue(articleScopeSql(ArticleFilter.Folder("d1")).clause.contains("folder_id"))
+    }
 
     @Test
     fun escapeLikePatternEscapesWildcardsAndTheEscapeCharItself() {

@@ -86,12 +86,8 @@ fun HomeScreen() {
     // invocation (same pattern as openSelectedInBrowser/copySelectedUrl) — collecting it here would
     // recompose the whole HomeScreen on every arrow-key selection change for no rendering benefit.
     val feeds by vm.feeds.collectAsStateSafe(emptyList())
-    // Whether a Search-scope snapshot is waiting to be restored — see homeBackAction's own KDoc.
-    // Only its nullness is read here; _filter is written in exactly one place (selectFilter), which
-    // also clears this whenever the filter moves away from Search, so a non-null entry always means
-    // the filter is currently Search — no need to separately collect vm.filter (and recompose this
-    // whole screen on every filter change) just to re-derive what this already implies.
-    val searchScopeEntry by vm.searchScopeEntry.collectAsStateSafe(null)
+    // Whether the expanded search bar is open — see homeBackAction's own KDoc.
+    val searchBarVisible by vm.searchBarVisible.collectAsStateSafe(false)
     val tags by vm.tags.collectAsStateSafe(emptyList())
     val folders by vm.folders.collectAsStateSafe(emptyList())
     val collapsedFolderIds by vm.collapsedFolderIds.collectAsStateSafe(emptySet())
@@ -218,7 +214,8 @@ fun HomeScreen() {
     // HomeTextInput.SearchField. Descends into the results list rather than moving whatever
     // selection keyboardPane would otherwise resolve to: at PaneLayout.Triple the field lives in
     // FeedListPane's own sidebar, where keyboardPane still reads FeedList, but moving *that*
-    // selection would silently drop the Search filter itself (see HomeViewModel.selectFilter).
+    // selection would move the feed-list cursor instead of the article the user is actually
+    // searching through.
     fun moveArticleSelectionFromSearchField(delta: Int) {
         returnKeyboardFocusToRoot()
         setFocusedPane(HomePane.ArticleList)
@@ -227,11 +224,11 @@ fun HomeScreen() {
 
     // At a narrow PaneLayout, focusedPane doubles as the navigation stack's depth cursor (see
     // HomePane's KDoc) — one step back is just the previous ordinal, with no separate depth state
-    // to keep in sync. See homeBackAction's own KDoc for why exiting the Search scope is resolved
-    // as a distinct action rather than always popping the pane stack.
+    // to keep in sync. See homeBackAction's own KDoc for why closing the expanded search bar is
+    // resolved as a distinct action rather than always popping the pane stack.
     fun goBack() {
-        when (homeBackAction(paneLayout, focusedPane.ordinal + 1, searchScopeEntry != null)) {
-            HomeBackAction.ExitSearch -> vm.exitSearchScope()?.let { setFocusedPane(it) }
+        when (homeBackAction(paneLayout, focusedPane.ordinal + 1, searchBarVisible)) {
+            HomeBackAction.CloseSearchBar -> vm.setSearchBarVisible(false)
             HomeBackAction.PopPane -> {
                 if (shouldFlashReturnedArticle(paneLayout, focusedPane)) articleReturnRipplePulse++
                 val previous = focusedPane.ordinal - 1
@@ -247,19 +244,11 @@ fun HomeScreen() {
     // Feed menu's bare-key items (F2/Delete) while the user is actually typing.
     LaunchedEffect(textInputFocused) { menuController.textInputFocused.value = textInputFocused }
 
-    // The sidebar's own "Search" quick-filter row only renders at PaneLayout.Triple (FeedListPane's
-    // own `if (onSelectionAdvance == null)` guard) — the keyboard-navigable row order must match,
-    // or an arrow key could select a row that isn't actually on screen (behind the drawer, whose
-    // own FeedListPane content omits it entirely).
-    val searchRowRendered = !feedListIsDrawer(paneLayout)
-    val orderedRows = remember(tags, folders, feeds, collapsedFolderIds, expandedTagIds, feedTagMap, searchRowRendered) {
-        buildOrderedFeedListRows(tags, folders, feeds, collapsedFolderIds, expandedTagIds, feedTagMap, searchRowRendered)
+    val orderedRows = remember(tags, folders, feeds, collapsedFolderIds, expandedTagIds, feedTagMap) {
+        buildOrderedFeedListRows(tags, folders, feeds, collapsedFolderIds, expandedTagIds, feedTagMap)
     }
     fun moveFeedSelection(delta: Int) {
-        // HomePane.FeedList as the Search row's own return pane is only correct because
-        // searchRowRendered above keeps that row out of orderedRows whenever the feed list isn't a
-        // pane — see HomeViewModel.selectFeedListRow's own KDoc.
-        nextFeedListRow(selectedRowInstance, orderedRows, delta)?.let { vm.selectFeedListRow(it, HomePane.FeedList) }
+        nextFeedListRow(selectedRowInstance, orderedRows, delta)?.let { vm.selectFilter(it.filter, it) }
     }
 
     // Shared by the keyboard shortcuts and the menu bar (via MenuController). Read the current
@@ -276,16 +265,14 @@ fun HomeScreen() {
         }
     }
     fun focusSearch() {
-        // Read before setFocusedPane below overwrites it: at a narrow layout, coerced down to
-        // ArticleList so triggering this from the article detail pane doesn't later restore back
-        // into a detail view with no list around it (see enterSearchScope's own KDoc on
-        // returnPane) — matching initialPaneFor's own clamp for the same reason.
-        val returnPane = if (paneLayout == PaneLayout.Triple) focusedPane else minOf(focusedPane, HomePane.ArticleList)
-        vm.enterSearchScope(returnPane)
-        // At PaneLayout.Triple the field stays in FeedListPane; at a narrow layout it has moved
-        // into ArticleListPane's SearchListPane instead (see FeedListPane's own KDoc) — Triple is
-        // paneLayout's initial value, so desktop's behavior here is unchanged.
+        // Opens the bar at a narrow layout (a no-op at Triple, where HomeScreen's own
+        // LaunchedEffect(layout) below keeps it open already) and moves focusedPane onto whichever
+        // pane hosts the editable field, matching initialPaneFor's own narrow-layout clamp: at
+        // Triple the field stays in FeedListPane's sidebar; at a narrow layout it lives in
+        // ArticleListPane's own expanded search bar instead (see FeedListPane's own KDoc).
+        vm.setSearchBarVisible(true)
         setFocusedPane(if (paneLayout == PaneLayout.Triple) HomePane.FeedList else HomePane.ArticleList)
+        vm.requestSearchFocus()
     }
 
     // Same live-read-at-call-time pattern as openSelectedInBrowser/copySelectedUrl, resolving the
@@ -413,7 +400,14 @@ fun HomeScreen() {
             CompositionLocalProvider(LocalKeyboardEngaged provides keyboardEngaged) {
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 val layout = paneLayoutFor(maxWidth)
-                LaunchedEffect(layout) { paneLayout = layout }
+                LaunchedEffect(layout) {
+                    paneLayout = layout
+                    // At Triple, FeedListPane's own field is permanent, so the bar is always
+                    // "open" there. Dropping below Triple keeps it open only if there's a query to
+                    // keep showing — otherwise an idle bar would reappear at a narrower width for
+                    // no reason (see HomeViewModel.searchBarVisible's own KDoc).
+                    vm.setSearchBarVisible(layout == PaneLayout.Triple || vm.searchQuery.value.isNotEmpty())
+                }
                 // Clamps focusedPane for a narrow layout exactly once, on the first frame with a
                 // real (post-layout) width — a transient pre-layout frame reports maxWidth == 0.dp,
                 // which paneLayoutFor resolves to Single regardless of the eventual layout, and
@@ -440,17 +434,17 @@ fun HomeScreen() {
                 // there — desktop's WINDOW_MIN_WIDTH never resolves to anything else, see
                 // TRIPLE_PANE_MIN_WIDTH's KDoc), so the app's default (OS back gesture /
                 // Alt+F4-equivalent) is left alone there. It is also None at PaneLayout.Dual depth
-                // 1->2 outside the Search scope (visiblePanes' sliding window shows the same two
-                // panes at both depths), so a back press that would produce no visible change falls
-                // through instead of being swallowed — but ExitSearch still applies there while
-                // Search is active, since exiting it always changes what's on screen.
-                val backAction = homeBackAction(layout, focusedPane.ordinal + 1, searchScopeEntry != null)
+                // 1->2 while the search bar is closed (visiblePanes' sliding window shows the same
+                // two panes at both depths), so a back press that would produce no visible change
+                // falls through instead of being swallowed — but CloseSearchBar still applies there
+                // while the bar is open, since closing it always changes what's on screen.
+                val backAction = homeBackAction(layout, focusedPane.ordinal + 1, searchBarVisible)
                 // The drawer's own back handling lives in ModalDrawerSheet(drawerState = ...) ->
                 // PredictiveBackHandler(enabled = drawerState.isOpen) — this gate makes this
                 // BackHandler stand down while it's open, independent of registration order, so
                 // the drawer always wins a back press over whatever's behind it (the only case
-                // where the two could otherwise race is Dual + a pending Search scope + the
-                // drawer open).
+                // where the two could otherwise race is Dual + the search bar open + the drawer
+                // open).
                 BackHandler(enabled = backAction != HomeBackAction.None && !drawerState.isOpen) { goBack() }
 
                 if (layout == PaneLayout.Triple) {
@@ -592,19 +586,20 @@ fun HomeScreen() {
                                     onOpenDrawer = { scope.launch { drawerState.open() } },
                                     onExitSearch = ::goBack,
                                     onTextInputFocusChange = { articleListTextInput = it },
-                                    // Only outside the Search scope: once already there, there is
+                                    // Only while the bar is closed: once already open, there is
                                     // nowhere further to advance to (see ArticleListTopBar's own
                                     // KDoc on onSearchClick). Doesn't advance the navigation stack —
-                                    // the field lives on this same pane (see enterSearchScope's own
-                                    // KDoc on returnPane). setFocusedPane is still required at
-                                    // PaneLayout.Dual: the search icon's own onClick never reaches
-                                    // paneActivation (a separate, unchained click handler — see
-                                    // ArticleListPaneContent), so without this, focusedPane could
-                                    // still be ArticleDetail (both panes are on screen at Dual) and
-                                    // homeBackAction would never resolve to ExitSearch.
+                                    // the field lives on this same pane. setFocusedPane is still
+                                    // required at PaneLayout.Dual: the search icon's own onClick
+                                    // never reaches paneActivation (a separate, unchained click
+                                    // handler — see ArticleListPaneContent), so without this,
+                                    // focusedPane could still be ArticleDetail (both panes are on
+                                    // screen at Dual) and homeBackAction would never resolve to
+                                    // CloseSearchBar.
                                     onSearchClick = {
                                         setFocusedPane(HomePane.ArticleList)
-                                        vm.enterSearchScope(HomePane.ArticleList)
+                                        vm.setSearchBarVisible(true)
+                                        vm.requestSearchFocus()
                                     },
                                     returnRipplePulse = articleReturnRipplePulse,
                                     onAddFeedClick = { showAddFeed = true },

@@ -94,7 +94,6 @@ import works.merc.keryx.app.resources.home_refresh
 import works.merc.keryx.app.resources.home_refreshing
 import works.merc.keryx.app.resources.home_remove_feed_from_tag_menu
 import works.merc.keryx.app.resources.home_rename_feed
-import works.merc.keryx.app.resources.home_search
 import works.merc.keryx.app.resources.home_search_clear
 import works.merc.keryx.app.resources.home_search_placeholder
 import works.merc.keryx.app.resources.home_starred
@@ -153,12 +152,11 @@ internal const val FEED_LIST_DRAG_HOST_TEST_TAG = "feed-list-drag-host"
  *   tag row), in addition to [onActivated] — see `HomeScreen`'s pane-layout wiring. `null` means
  *   [PaneLayout.Triple], where every pane is already visible and there is nowhere to advance to —
  *   this is also what keeps this pane's search field editable (see the `KeryxTextField` branch
- *   below) and its "Search" quick-filter row visible (see the SidebarRow below it). At a narrow
- *   layout this pane is a modal navigation drawer instead (see `HomePaneLayout.kt`'s
- *   `feedListIsDrawer`), non-null here means "close the drawer", and search has no entry point of
- *   its own on this pane at all: the field the user actually types into lives in
- *   `ArticleListPane`'s `SearchListPane` alongside the results (see that composable's own KDoc),
- *   reachable through the article list's own search icon.
+ *   below). At a narrow layout this pane is a modal navigation drawer instead (see
+ *   `HomePaneLayout.kt`'s `feedListIsDrawer`), non-null here means "close the drawer", and search
+ *   has no entry point of its own on this pane at all: the field the user actually types into
+ *   lives in `ArticleListPane`'s own expanded search bar alongside the results (see that
+ *   composable's own KDoc), reachable through the article list's own search icon.
  * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
  * @param hasNativeAppMenu Overridable for tests only — see `platform/PlatformOs.kt`'s own KDoc.
  *   Gates this pane's header (an `app_name` title instead of none) and its settings footer row
@@ -191,7 +189,6 @@ internal fun FeedListPane(
     val expandedTagIds by vm.expandedTagIds.collectAsStateSafe(emptySet())
     val totalUnread by vm.totalUnread.collectAsStateSafe(0L)
     val starredUnread by vm.starredUnreadCount.collectAsStateSafe(0L)
-    val searchUnread by vm.searchUnreadCount.collectAsStateSafe(0L)
     val filter by vm.filter.collectAsStateSafe(ArticleFilter.All)
     val selectedRowInstance by vm.selectedRowInstance.collectAsStateSafe(FeedListRowSelection.All)
     val searchQuery by vm.searchQuery.collectAsStateSafe("")
@@ -199,8 +196,9 @@ internal fun FeedListPane(
     val searchFocusRequester = remember { FocusRequester() }
     val pendingSearchFocus by vm.pendingSearchFocus.collectAsStateSafe(false)
     // Only consumed at PaneLayout.Triple (onSelectionAdvance == null), where this pane's own field
-    // stays editable — at a narrow layout the latch is meant for SearchListPane's field instead
-    // (see HomeViewModel.requestSearchFocus's KDoc on why this is a latch, not a one-shot event).
+    // stays editable — at a narrow layout the latch is meant for ArticleListPane's own expanded
+    // search bar field instead (see HomeViewModel.requestSearchFocus's KDoc on why this is a latch,
+    // not a one-shot event).
     LaunchedEffect(pendingSearchFocus, onSelectionAdvance) {
         if (onSelectionAdvance != null || !pendingSearchFocus) return@LaunchedEffect
         searchFocusRequester.requestFocus()
@@ -426,7 +424,10 @@ internal fun FeedListPane(
         // Only at PaneLayout.Triple (onSelectionAdvance == null): a narrow layout's feed list is
         // a modal drawer, not a screen of its own, and the search results have nowhere to live
         // beside it — the entry point there is the article list's own search icon instead, which
-        // opens SearchListPane's real editable field directly (see ArticleListTopBar's own KDoc).
+        // opens ArticleListPane's own expanded search bar directly (see ArticleListTopBar's own
+        // KDoc). Typing here narrows whatever filter is already selected below (see
+        // HomeViewModel.setSearchQuery) rather than switching to a distinct "Search" filter — a
+        // click or a keyboard cursor landing on this field never changes anything on its own.
         if (onSelectionAdvance == null) {
             KeryxTextField(
                 value = searchQuery,
@@ -471,24 +472,6 @@ internal fun FeedListPane(
             onClick = { selectFilterFromRow(ArticleFilter.Starred) },
             isTouchPrimary = isTouchPrimary,
         )
-        // At a narrow layout the feed list is a drawer with no search entry point of its own at
-        // all (see ArticleListTopBar's own search icon, which opens SearchListPane's real field
-        // directly) — a Search row here would be redundant with that, and unreachable-feeling
-        // besides, since this drawer has nowhere to show results even if tapped. At
-        // PaneLayout.Triple the row is not an entry point but a filter scope alongside All/Starred
-        // — it carries the unread badge, and it is the only way back to the results after
-        // switching filters.
-        if (onSelectionAdvance == null) {
-            SidebarRow(
-                icon = { KeryxIcon(KeryxIcons.Search, null) },
-                label = stringResource(Res.string.home_search),
-                count = searchUnread,
-                selected = filter == ArticleFilter.Search,
-                focused = focused,
-                onClick = { vm.enterSearchScope(HomePane.FeedList); onActivated() },
-                isTouchPrimary = isTouchPrimary,
-            )
-        }
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
 
         Box(Modifier.weight(1f)) {

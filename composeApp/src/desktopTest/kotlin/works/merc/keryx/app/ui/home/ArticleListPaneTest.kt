@@ -9,11 +9,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -30,6 +32,7 @@ import works.merc.keryx.app.ui.common.KeryxIcons
 import kotlinx.coroutines.Dispatchers
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.ArticleListRow
+import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import kotlin.test.Test
@@ -105,85 +108,6 @@ class ArticleListPaneTest {
         onNodeWithTag("article-a22").assertIsDisplayed()
         assertEquals(20, state.firstVisibleItemIndex)
         assertEquals(0, state.firstVisibleItemScrollOffset)
-    }
-
-    /**
-     * The `ArticleListPane`-level counterpart of the test above: a round trip through Search
-     * restores `listState` to wherever it was left (see `ArticleListPane`'s own `listState`/
-     * `wasSearch` handling), but the selected article — cleared and possibly re-restored to
-     * something unrelated to where the list happens to be scrolled — is not guaranteed to land
-     * inside that viewport the way a `NarrowPaneRow` remount's selection always does.
-     * `preserveScrollPositionOnMount` exists for exactly this gap: it must suppress the "keep the
-     * selection in view" scroll for this composable's first evaluation, even when the selected
-     * article is nowhere near the restored viewport.
-     */
-    @Test
-    fun preserveScrollPositionOnMountSuppressesTheInitialSelectionScroll() = runDesktopComposeUiTest {
-        val items = articles(60)
-        lateinit var state: LazyListState
-
-        setContent {
-            state = rememberLazyListState(initialFirstVisibleItemIndex = 20)
-            ArticleListPaneContent(
-                articles = items,
-                feedTitles = emptyMap(),
-                // Far outside the restored viewport (rows ~20-25 at this size) — a plain mount would
-                // animate-scroll all the way down to it.
-                selectedId = items[55].id,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
-                onToggleSort = {},
-                onMarkAllRead = {},
-                onSelectArticle = {},
-                modifier = Modifier.size(360.dp, 400.dp),
-                listState = state,
-                preserveScrollPositionOnMount = true,
-            )
-        }
-        waitForIdle()
-
-        onNodeWithTag("article-a20").assertIsDisplayed()
-        assertEquals(20, state.firstVisibleItemIndex)
-        assertEquals(0, state.firstVisibleItemScrollOffset)
-    }
-
-    /**
-     * The suppression above must only ever cover the mount's own first evaluation — a genuine
-     * selection change afterward (keyboard navigation, picking a different article) still has to
-     * scroll normally, or a search round trip would leave the list stuck refusing to follow the
-     * selection for the rest of the pane's lifetime.
-     */
-    @Test
-    fun preserveScrollPositionOnMountDoesNotSuppressALaterGenuineSelectionChange() = runDesktopComposeUiTest {
-        val items = articles(60)
-        lateinit var state: LazyListState
-        var selected by mutableStateOf(items[55])
-
-        setContent {
-            state = rememberLazyListState(initialFirstVisibleItemIndex = 20)
-            ArticleListPaneContent(
-                articles = items,
-                feedTitles = emptyMap(),
-                selectedId = selected.id,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
-                onToggleSort = {},
-                onMarkAllRead = {},
-                onSelectArticle = {},
-                modifier = Modifier.size(360.dp, 400.dp),
-                listState = state,
-                preserveScrollPositionOnMount = true,
-            )
-        }
-        waitForIdle()
-        // The mount's own evaluation was suppressed, exactly as above.
-        assertEquals(20, state.firstVisibleItemIndex)
-
-        // A later, genuine selection change must scroll normally.
-        selected = items[59]
-        waitForIdle()
-
-        onNodeWithTag("article-a59").assertIsDisplayed()
     }
 
     @Test
@@ -542,12 +466,12 @@ class ArticleListPaneTest {
     }
 
     /**
-     * At a narrow layout, the query field itself moves into this pane's own top bar
-     * (`KeryxExpandedSearchBar`) once the Search scope is active — see `SearchListPane`'s KDoc for
+     * At a narrow layout, the query field itself lives in this pane's own top bar
+     * (`KeryxExpandedSearchBar`) once the bar is open — see `ArticleListPane`'s own module KDoc for
      * why it can't stay in `FeedListPane` there.
      */
     @Test
-    fun articleListPaneShowsAnEditableSearchFieldAtANarrowLayoutInSearchScope() = runDesktopComposeUiTest {
+    fun articleListPaneShowsAnEditableSearchFieldAtANarrowLayoutOnceTheBarIsOpen() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         useHomeViewModel(driver, db) { fixture ->
             val vm = fixture.vm
@@ -556,7 +480,7 @@ class ArticleListPaneTest {
             }
             waitForIdle()
 
-            vm.selectFilter(ArticleFilter.Search)
+            vm.setSearchBarVisible(true)
             waitForIdle()
 
             onNode(hasSetTextAction()).assertIsDisplayed()
@@ -566,11 +490,11 @@ class ArticleListPaneTest {
 
     /**
      * Desktop regression guard: at [PaneLayout.Triple] (no `onOpenDrawer`), `FeedListPane`'s own
-     * field already covers search input, so `SearchListPane` must not render its own editable
-     * field even while the Search scope is active.
+     * field already covers search input, so this pane must not render its own editable field even
+     * when [HomeViewModel.searchBarVisible] is true (`onExitSearch == null` is the real gate).
      */
     @Test
-    fun articleListPaneOmitsTheEditableSearchFieldAtTripleEvenInSearchScope() = runDesktopComposeUiTest {
+    fun articleListPaneOmitsTheEditableSearchFieldAtTripleEvenWithTheBarVisible() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         useHomeViewModel(driver, db) { fixture ->
             val vm = fixture.vm
@@ -579,7 +503,7 @@ class ArticleListPaneTest {
             }
             waitForIdle()
 
-            vm.selectFilter(ArticleFilter.Search)
+            vm.setSearchBarVisible(true)
             waitForIdle()
 
             onNode(hasSetTextAction()).assertDoesNotExist()
@@ -596,7 +520,7 @@ class ArticleListPaneTest {
             }
             waitForIdle()
 
-            vm.selectFilter(ArticleFilter.Search)
+            vm.setSearchBarVisible(true)
             waitForIdle()
 
             onNode(hasSetTextAction()).performTextInput("kotlin")
@@ -612,8 +536,8 @@ class ArticleListPaneTest {
     /**
      * The search icon this test targets is [ArticleListTopBar]'s own entry point into search at a
      * narrow layout ("Native-feel restyle"/"Pane structure" in the `ui-guidelines` skill) — distinct
-     * from the query field inside [SearchListPane]'s `KeryxExpandedSearchBar`, which is never
-     * present at the same time (the icon only shows outside the Search scope). It sits in the same
+     * from the query field inside the pane's own `KeryxExpandedSearchBar`, which is never present
+     * at the same time (the icon only shows while the bar is closed). It sits in the same
      * leading row [onOpenDrawer] draws (see that composable's own KDoc), so both must be supplied
      * together to reach it — exactly how every real caller wires it.
      */
@@ -729,10 +653,10 @@ class ArticleListPaneTest {
     }
 
     /**
-     * Search has no `HomePane`/`SaveableStateHolder` of its own the way `NarrowPaneRow` gives
-     * `PaneLayout.Single` — `ArticleListPane` renders `SearchListPane` from an early `return` inside
-     * the same composable instead, which used to leave `listState`/`lastFilter` out of composition
-     * (and therefore reset to a fresh, unscrolled state) for as long as Search was active.
+     * The current filter's own list and search results now share one [ArticleListPaneContent] call
+     * site but keep independent `LazyListState`s (see `ArticleListPane`'s own module KDoc) — so a
+     * round trip through search must leave the filter's own scroll position exactly where it was,
+     * with no snapshot/restore machinery needed to make that true.
      */
     @Test
     fun returningFromSearchPreservesTheArticleListsScrollPosition() = runDesktopComposeUiTest {
@@ -752,21 +676,23 @@ class ArticleListPaneTest {
             waitForIdle()
             onNodeWithTag("article-a39").assertDoesNotExist()
 
-            vm.enterSearchScope(HomePane.ArticleList)
+            vm.setSearchBarVisible(true)
+            vm.setSearchQuery("kotlin")
             waitForIdle()
-            vm.exitSearchScope()
+            vm.setSearchQuery("")
+            vm.setSearchBarVisible(false)
             waitForIdle()
 
-            // Still scrolled past the top row, not reset by the round trip through Search.
+            // Still scrolled past the top row, not reset by the round trip through search.
             onNodeWithTag("article-a39").assertDoesNotExist()
         }
     }
 
     /**
      * `KeryxExpandedSearchBar` and `ArticleListTopBar` are two separate composables stacked in the
-     * same `Column` (see `SearchListPane`) — the clear button appearing/disappearing inside the
-     * former must not shift the latter's controls row (see the `ui-guidelines` skill's "Layout
-     * stability under state changes").
+     * same `Column` (see `ArticleListPane`'s own `header` slot) — the clear button appearing/
+     * disappearing inside the former must not shift the latter's controls row (see the
+     * `ui-guidelines` skill's "Layout stability under state changes").
      */
     @Test
     fun theSearchFieldsClearButtonAppearingDoesNotMoveTheControlsRowBelowIt() = runDesktopComposeUiTest {
@@ -778,7 +704,7 @@ class ArticleListPaneTest {
             }
             waitForIdle()
 
-            vm.selectFilter(ArticleFilter.Search)
+            vm.setSearchBarVisible(true)
             waitForIdle()
             val boundsWhenEmpty = onNodeWithText("未読のみ").fetchSemanticsNode().boundsInRoot
 
@@ -792,6 +718,69 @@ class ArticleListPaneTest {
             )
         }
     }
+
+    @Test
+    fun searchNoResultsHintShowsOnlyOneLineForAllFeedsScope() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("f1")
+        db.insertArticleRow("a1", "f1", createdAt = 0L)
+        ftsManagerIndexed(driver)
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            setContent {
+                ArticleListPane(vm = vm, focused = true, onActivated = {}, onOpenDrawer = {}, onExitSearch = {})
+            }
+            waitForIdle()
+
+            vm.setSearchBarVisible(true)
+            waitForIdle()
+            vm.setSearchQuery("nonexistentquery12345")
+            waitForNoSearchResultsHint()
+
+            onNodeWithText("該当する記事がありません").assertIsDisplayed()
+            onNodeWithText("すべてのフィードから探すには", substring = true).assertDoesNotExist()
+        }
+    }
+
+    @Test
+    fun searchNoResultsHintShowsTwoLinesForScopedFeedSearch() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("f1")
+        db.insertFeed("f2")
+        db.insertArticleRow("a1", "f1", createdAt = 0L)
+        ftsManagerIndexed(driver)
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            setContent {
+                ArticleListPane(vm = vm, focused = true, onActivated = {}, onOpenDrawer = {}, onExitSearch = {})
+            }
+            waitForIdle()
+
+            vm.selectFilter(ArticleFilter.Feed("f2"))
+            waitForIdle()
+            vm.setSearchBarVisible(true)
+            waitForIdle()
+            vm.setSearchQuery("nonexistentquery12345")
+            waitForNoSearchResultsHint()
+
+            onNodeWithText("該当する記事がありません").assertIsDisplayed()
+            onNodeWithText("すべてのフィードから探すには", substring = true).assertIsDisplayed()
+        }
+    }
+
+    /**
+     * Waits out the search pipeline's `SEARCH_DEBOUNCE_MS` (250ms). It runs on
+     * `Dispatchers.Unconfined` in these tests, so that delay is a real wall-clock wait
+     * [ComposeUiTest.waitForIdle] cannot pump, and until it elapses `HomeViewModel.searching`
+     * deliberately holds the pane blank rather than flashing "no results". Waits on the rendered
+     * node instead of `searching` itself, which isn't guaranteed to have flipped to `true` yet the
+     * instant `setSearchQuery` returns. The timeout sits well past the 250ms window so this doesn't
+     * flake on a loaded CI machine.
+     */
+    private fun ComposeUiTest.waitForNoSearchResultsHint() =
+        waitUntil(timeoutMillis = 2000) {
+            onAllNodesWithText("該当する記事がありません").fetchSemanticsNodes().isNotEmpty()
+        }
 }
 
 /** Inserts an article row for the DB-backed tests above (`article`/`articles` build UI rows). */
