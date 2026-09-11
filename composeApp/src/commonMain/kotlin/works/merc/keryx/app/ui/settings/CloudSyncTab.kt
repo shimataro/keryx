@@ -108,7 +108,7 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                     connected = connected == type,
                     connecting = vm.connectingType == type,
                     canCancel = vm.canCancelConnect,
-                    idleEnabled = vm.connectingType == null && !vm.resetting,
+                    idleEnabled = vm.connectingType == null,
                     failed = vm.connectFailedType == type,
                     lastSyncedAtText = if (connected == type) vm.lastSyncedAtText else null,
                     // Only meaningful for the connected provider: it's why its background syncs
@@ -411,7 +411,9 @@ internal fun CloudProviderRow(
                     icon = KeryxIcons.Link,
                     onClick = onSelect,
                     kind = IconButtonKind.Primary,
-                    enabled = idleEnabled,
+                    // idleEnabled means "not busy connecting"; !resetting is combined here too so a
+                    // reset in progress on the connected provider also blocks switching providers.
+                    enabled = idleEnabled && !resetting,
                     busy = connecting,
                     iconOnly = iconOnly,
                 )
