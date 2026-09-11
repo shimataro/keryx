@@ -148,7 +148,6 @@ fun SetupScreen(onComplete: () -> Unit) {
     if (confirmingAbortConnect) {
         KeryxAlertDialog(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            tonalElevation = 0.dp,
             onDismissRequest = { confirmingAbortConnect = false },
             title = stringResource(Res.string.setup_abort_connect_confirm_title),
             text = { Text(stringResource(Res.string.setup_abort_connect_confirm_body)) },

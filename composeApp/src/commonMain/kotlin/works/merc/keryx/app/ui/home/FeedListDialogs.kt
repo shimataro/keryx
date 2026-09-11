@@ -74,7 +74,6 @@ internal fun FeedListDialogs(
     confirmingDeleteTag?.let { tag ->
         KeryxAlertDialog(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            tonalElevation = 0.dp,
             onDismissRequest = { onConfirmingDeleteTagChange(null) },
             title = stringResource(Res.string.home_delete_tag_menu),
             text = { Text(stringResource(Res.string.home_delete_tag_confirm, tag.name)) },
@@ -97,7 +96,6 @@ internal fun FeedListDialogs(
     confirmingDeleteFolder?.let { folder ->
         KeryxAlertDialog(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            tonalElevation = 0.dp,
             onDismissRequest = { onConfirmingDeleteFolderChange(null) },
             title = stringResource(Res.string.home_delete_folder_menu),
             text = { Text(stringResource(Res.string.home_delete_folder_confirm, folder.name)) },
@@ -110,7 +108,6 @@ internal fun FeedListDialogs(
         val displayName = feed.displayTitle()
         KeryxAlertDialog(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            tonalElevation = 0.dp,
             onDismissRequest = { onConfirmingUnsubscribeFeedChange(null) },
             title = stringResource(Res.string.home_unsubscribe_title, displayName),
             text = { Text(stringResource(Res.string.home_unsubscribe_body)) },

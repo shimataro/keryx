@@ -7,8 +7,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import org.jetbrains.compose.resources.DrawableResource
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 
 /**
  * Drop-in replacement for `androidx.compose.material3.AlertDialog` that renders in a real,
@@ -37,7 +35,6 @@ expect fun KeryxAlertDialog(
     titleAction: (@Composable () -> Unit)? = null,
     text: (@Composable () -> Unit)? = null,
     containerColor: Color = Color.Unspecified,
-    tonalElevation: Dp = 0.dp,
     modal: Boolean = true,
 )
 

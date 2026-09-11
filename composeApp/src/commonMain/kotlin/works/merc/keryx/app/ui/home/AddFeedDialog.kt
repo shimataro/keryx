@@ -145,7 +145,6 @@ internal fun AddFeedDialog(
 
     KeryxAlertDialog(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        tonalElevation = 0.dp,
         onDismissRequest = onDismiss,
         title = stringResource(Res.string.home_add_feed),
         text = {

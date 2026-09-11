@@ -684,7 +684,6 @@ internal fun PendingNotificationActionHost(
             // now-stale error notification.
             KeryxAlertDialog(
                 containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                tonalElevation = 0.dp,
                 onDismissRequest = { notifVm.clearPendingAction() },
                 title = stringResource(Res.string.settings_cloud_reset_confirm_title),
                 text = { Text(stringResource(Res.string.settings_cloud_reset_confirm_body)) },
@@ -708,7 +707,6 @@ internal fun PendingNotificationActionHost(
         is AppNotificationAction.ShowInfoDialog ->
             KeryxAlertDialog(
                 containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                tonalElevation = 0.dp,
                 onDismissRequest = { notifVm.clearPendingAction() },
                 title = stringResource(Res.string.notification_detail_title),
                 text = { Text(action.detail) },

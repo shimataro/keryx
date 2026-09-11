@@ -730,7 +730,6 @@ private class ButtonRowLayoutInputs {
  * @param titleAction Optional action displayed alongside the title.
  * @param text Optional composable dialog content.
  * @param containerColor Background color of the dialog.
- * @param tonalElevation Elevation applied to the dialog surface.
  * @param modal Whether the dialog blocks interaction with its owner window.
  */
 @Composable
@@ -744,7 +743,6 @@ actual fun KeryxAlertDialog(
     titleAction: (@Composable () -> Unit)?,
     text: (@Composable () -> Unit)?,
     containerColor: Color,
-    tonalElevation: Dp,
     modal: Boolean,
 ) {
     DesktopModalWindow(
@@ -761,7 +759,7 @@ actual fun KeryxAlertDialog(
         val dialogWindow = LocalDialogWindowOwner.current
         val resolvedContainerColor = containerColor.takeOrElse { MaterialTheme.colorScheme.surface }
 
-        Surface(color = resolvedContainerColor, tonalElevation = tonalElevation) {
+        Surface(color = resolvedContainerColor, tonalElevation = 0.dp) {
             // Fixed width (see KERYX_ALERT_DIALOG_WIDTH) so the button row can be right-aligned
             // within a stable width via Modifier.fillMaxWidth() below.
             Column(Modifier.width(KERYX_ALERT_DIALOG_WIDTH)) {

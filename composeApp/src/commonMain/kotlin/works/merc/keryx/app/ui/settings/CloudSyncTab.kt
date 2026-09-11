@@ -131,7 +131,6 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
     confirmingDisconnect?.let { type ->
         KeryxAlertDialog(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            tonalElevation = 0.dp,
             onDismissRequest = { confirmingDisconnect = null },
             title = stringResource(Res.string.settings_cloud_disconnect_confirm_title, type.brandLabel()),
             text = { Text(stringResource(Res.string.settings_cloud_disconnect_confirm_body)) },
@@ -143,7 +142,6 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
     confirmingAbortConnect?.let { type ->
         KeryxAlertDialog(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            tonalElevation = 0.dp,
             onDismissRequest = { confirmingAbortConnect = null },
             title = stringResource(Res.string.settings_cloud_abort_connect_confirm_title, type.brandLabel()),
             text = { Text(stringResource(Res.string.settings_cloud_abort_connect_confirm_body)) },
@@ -155,7 +153,6 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
     confirmingResetCloudData?.let { _ ->
         KeryxAlertDialog(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            tonalElevation = 0.dp,
             onDismissRequest = { confirmingResetCloudData = null },
             title = stringResource(Res.string.settings_cloud_reset_confirm_title),
             text = { Text(stringResource(Res.string.settings_cloud_reset_confirm_body)) },
@@ -167,7 +164,6 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
     confirmingSwitchTo?.let { type ->
         KeryxAlertDialog(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            tonalElevation = 0.dp,
             onDismissRequest = { confirmingSwitchTo = null },
             title = stringResource(Res.string.settings_cloud_switch_confirm_title, type.brandLabel()),
             // Read the current provider live — nothing else can mutate it while this modal is open.
