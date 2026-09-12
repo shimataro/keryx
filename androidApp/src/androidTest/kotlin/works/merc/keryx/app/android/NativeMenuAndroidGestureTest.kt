@@ -1,5 +1,6 @@
 package works.merc.keryx.app.android
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
@@ -17,6 +18,7 @@ import org.junit.Rule
 import org.junit.Test
 import works.merc.keryx.app.platform.NativeMenuItem
 import works.merc.keryx.app.platform.nativeContextMenu
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 
 /**
@@ -155,5 +157,116 @@ class NativeMenuAndroidGestureTest {
 
         composeTestRule.onNodeWithText("Test action").assertIsDisplayed()
         assertFalse(opened, "small wiggle inside slop must not invoke onOpen")
+    }
+
+    /**
+     * Regression guard for a real Keryx row shape: [nativeContextMenu] on the row, a plain
+     * `clickable` on a nested child (e.g. the tag color dot or the folder/tag expand chevron). A
+     * long press anywhere in the row — including on top of the child — must open only the row's
+     * menu; the child's own tap must not also fire once the finger lifts. Before the `Initial`-pass
+     * fix, the child (a descendant, resolved before the ancestor on the `Main` pass `clickable`
+     * uses) would see an unconsumed `up` and fire its `onClick` in addition to the menu opening.
+     */
+    @Test
+    fun longPressDoesNotFireANestedChildClickable() {
+        var childClicks = 0
+        composeTestRule.setContent {
+            Box(
+                Modifier
+                    .size(200.dp)
+                    .testTag("menu-host")
+                    .nativeContextMenu(
+                        items = { listOf(NativeMenuItem("Test action") {}) },
+                        onOpen = {},
+                    ),
+            ) {
+                Box(
+                    Modifier
+                        .size(48.dp)
+                        .testTag("child")
+                        .clickable { childClicks++ },
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("child").performTouchInput { longClick() }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithText("Test action").assertIsDisplayed()
+        assertEquals(0, childClicks, "a long press must not also fire the nested child's onClick")
+    }
+
+    /** The short-tap counterpart of [longPressDoesNotFireANestedChildClickable]: an ordinary tap on
+     * the nested child must still reach its own `onClick`, and must not open the row's menu. */
+    @Test
+    fun shortTapOnANestedChildStillFiresItsClickable() {
+        var childClicks = 0
+        composeTestRule.setContent {
+            Box(
+                Modifier
+                    .size(200.dp)
+                    .testTag("menu-host")
+                    .nativeContextMenu(
+                        items = { listOf(NativeMenuItem("Test action") {}) },
+                        onOpen = {},
+                    ),
+            ) {
+                Box(
+                    Modifier
+                        .size(48.dp)
+                        .testTag("child")
+                        .clickable { childClicks++ },
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("child").performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithText("Test action").assertDoesNotExist()
+        assertEquals(1, childClicks, "a short tap on the nested child must still fire its onClick")
+    }
+
+    /**
+     * Regression guard for a pane background carrying an empty-items [nativeContextMenu] (e.g.
+     * `FeedListPane`'s/`ArticleListPane`'s own background, used to move keyboard focus on
+     * desktop's right-click) around every row, each of which has its own [nativeContextMenu] with
+     * real items. A long press on a row must still open *that row's* menu — the empty-items
+     * ancestor's own claim must not win the race and swallow the press first.
+     */
+    @Test
+    fun longPressInsideAnEmptyMenuAncestorStillOpensTheInnerMenu() {
+        var childClicks = 0
+        composeTestRule.setContent {
+            Box(
+                Modifier
+                    .size(300.dp)
+                    .testTag("pane-background")
+                    .nativeContextMenu(items = { emptyList() }, onOpen = {}),
+            ) {
+                Box(
+                    Modifier
+                        .size(200.dp)
+                        .testTag("row")
+                        .nativeContextMenu(
+                            items = { listOf(NativeMenuItem("Inner action") {}) },
+                            onOpen = {},
+                        ),
+                ) {
+                    Box(
+                        Modifier
+                            .size(48.dp)
+                            .testTag("child")
+                            .clickable { childClicks++ },
+                    )
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithTag("child").performTouchInput { longClick() }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithText("Inner action").assertIsDisplayed()
+        assertEquals(0, childClicks, "the row's own menu must win over the empty-items ancestor")
     }
 }

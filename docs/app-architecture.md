@@ -370,11 +370,19 @@ counterpart.
 feed / folder / tag rows) with a long-press-triggered Material 3 `DropdownMenu` instead: a
 self-contained `awaitEachGesture` loop that never consumes the initial *down* — only once the
 press survives `viewConfiguration.longPressTimeoutMillis` with no up and no consumption elsewhere
-(e.g. a `LazyColumn` scroll claiming the gesture) does it treat this as a long press and start
-consuming the rest of the gesture, so `ui/home/ListRowChrome.kt`'s `listRowClickable` (chained
-right before it, and therefore the *more outer* node — Compose's pointer-input `Main` pass resumes
-nested nodes before their ancestors for the same event) never also fires `onClick` for the same
-press. `NativeSubMenu` drills into its own items in place (a leading "back" row swaps the top level
+(e.g. a `LazyColumn` scroll claiming the gesture) does it treat this as a long press. That
+detection loop reads `PointerEventPass.Main` (descendant to ancestor) deliberately, since it needs
+to observe whether a descendant has already claimed the gesture. Once confirmed, though, the
+*claim* loop that follows switches to `PointerEventPass.Initial` (ancestor to descendant): this
+node's own consumption then reaches every other node before it can observe the event as
+unconsumed — both `ui/home/ListRowChrome.kt`'s `listRowClickable` (chained right before it, the
+*more outer* node) and any plain `clickable` **nested inside** the row (a descendant — e.g. a tag
+row's color dot or a folder/tag row's expand chevron — which on `Main` alone would see the event
+*before* this node and fire its own tap on release). `PointerInputChange.isConsumed` is shared
+across every node for a given change, so a single `Initial`-pass consume is enough; there is no
+need to also consume on `Main`. This is what keeps a long press on an embedded control from both
+opening the row's menu *and* triggering that control's own tap action once the finger lifts.
+`NativeSubMenu` drills into its own items in place (a leading "back" row swaps the top level
 for the submenu's own items) rather than opening a nested popup. Two behaviours are Android-specific,
 unlike the desktop backends below: a confirmed long-press never invokes `onOpen` (desktop's
 right-click-selects-the-row hook — an Android long-press only opens the menu, never selects the
