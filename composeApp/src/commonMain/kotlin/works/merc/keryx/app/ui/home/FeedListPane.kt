@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -510,7 +511,7 @@ internal fun FeedListPane(
                         Row(
                             Modifier.fillMaxWidth()
                                 .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                                .padding(start = 16.dp, end = 8.dp),
+                                .padding(start = listRowHorizontalMargin() + FEED_LIST_ROW_START_PADDING, end = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
@@ -671,7 +672,7 @@ internal fun FeedListPane(
                         Row(
                             Modifier.fillMaxWidth()
                                 .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                                .padding(start = 16.dp, end = 8.dp),
+                                .padding(start = listRowHorizontalMargin() + FEED_LIST_ROW_START_PADDING, end = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
@@ -1032,12 +1033,12 @@ private fun TagRow(
                 ),
             )
             .heightIn(min = listRowMinHeight(isTouchPrimary))
-            .padding(start = 8.dp, end = 8.dp),
+            .padding(start = FEED_LIST_ROW_START_PADDING, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CompositionLocalProvider(LocalContentColor provides (contentColor ?: LocalContentColor.current)) {
             ExpandCollapseChevron(expanded = expanded, onToggle = onToggleExpanded, isTouchPrimary = isTouchPrimary)
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(CHEVRON_MARKER_GAP))
             Row(
                 Modifier.weight(1f).padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1045,29 +1046,32 @@ private fun TagRow(
                 // Anchors the color popover; sized by the click target inside it.
                 Box {
                     Box(
-                        // Desktop: the click target is deliberately larger than the dot it
-                        // contains, absorbing the 8dp gap that used to be a Spacer here plus 4dp
-                        // above and below, so the geometry of the row is unchanged while the hit
-                        // area is not a 10dp circle. Touch: a full Material 48dp touch target
-                        // instead — safe now that the row's own listRowMinHeight() floor keeps
-                        // this from stretching the row taller than its neighbors.
+                        // The click target's *layout* footprint (TAG_COLOR_DOT_FOOTPRINT, 26x26 —
+                        // the FEED_LIST_MARKER_SLOT marker plus the padding below) is the same on
+                        // both platforms, so the tag row's own hierarchy geometry never depends on
+                        // touch density (see `feedRowIndent` in `FeedListDragAndDrop.kt`). A
+                        // touch-primary platform additionally grows the *hit target* past that
+                        // footprint to a full Material 48dp square via `layoutAs`, safe now that
+                        // the row's own listRowMinHeight() floor keeps this from stretching the row
+                        // taller than its neighbors.
                         Modifier
                             .testTag(tagColorDotTestTag(tag.id))
                             .clickable(onClickLabel = colorLabel) { showColorPicker = true }
                             .then(
                                 if (isTouchPrimary) {
-                                    Modifier.size(TAG_COLOR_DOT_TOUCH_TARGET_DP.dp)
+                                    Modifier.layoutAs(TAG_COLOR_DOT_FOOTPRINT, TAG_COLOR_DOT_FOOTPRINT).requiredSize(TOUCH_TARGET_MIN_SIZE)
                                 } else {
-                                    Modifier.padding(top = 4.dp, bottom = 4.dp, end = 8.dp)
+                                    Modifier
                                 },
-                            ),
+                            )
+                            .padding(top = 4.dp, bottom = 4.dp, end = 8.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         // Fixed-size slot so swapping the dot for the "+" badge never shifts the tag name.
-                        Box(Modifier.size(TAG_MARKER_SIZE_DP.dp), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(FEED_LIST_MARKER_SLOT), contentAlignment = Alignment.Center) {
                             if (isDropTarget) {
                                 Box(
-                                    Modifier.size(TAG_MARKER_SIZE_DP.dp).background(MaterialTheme.colorScheme.tertiary, CircleShape),
+                                    Modifier.size(FEED_LIST_MARKER_SLOT).background(MaterialTheme.colorScheme.tertiary, CircleShape),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     KeryxIcon(
@@ -1087,11 +1091,7 @@ private fun TagRow(
                             selected = tag.color,
                             onSelect = { showColorPicker = false; onSelectColor(it) },
                             onDismissRequest = { showColorPicker = false },
-                            anchorOffsetY = if (isTouchPrimary) {
-                                TAG_COLOR_DOT_TOUCH_TARGET_DP.dp
-                            } else {
-                                (TAG_MARKER_SIZE_DP + TAG_COLOR_DOT_HIT_PADDING_DP * 2).dp
-                            },
+                            anchorOffsetY = TAG_COLOR_DOT_FOOTPRINT,
                         )
                     }
                 }
@@ -1116,20 +1116,19 @@ private fun TagRow(
     }
 }
 
-/** Size of a [TagRow]'s leading marker slot, holding either the tag color dot or the drop "+" glyph. */
-private const val TAG_MARKER_SIZE_DP = 16
-
-/** Diameter of the visible tag color dot inside the [TAG_MARKER_SIZE_DP] marker slot. */
+/** Diameter of the visible tag color dot inside the [FEED_LIST_MARKER_SLOT] marker slot. */
 private const val TAG_COLOR_DOT_SIZE_DP = 10
 
-/** Vertical slack added around the marker slot to widen the color dot's click target without
- * changing the row's height (the row's own text is taller than the resulting box). Desktop only —
- * see [TAG_COLOR_DOT_TOUCH_TARGET_DP] for touch. */
-private const val TAG_COLOR_DOT_HIT_PADDING_DP = 4
-
-/** The color dot's click target on a touch-primary platform — a full Material touch target,
- * safe now that [listRowMinHeight] keeps the row itself at least this tall. */
-private const val TAG_COLOR_DOT_TOUCH_TARGET_DP = 48
+/**
+ * The color dot's click target *layout* footprint — [FEED_LIST_MARKER_SLOT] plus the same
+ * `padding(top = 4.dp, bottom = 4.dp, end = 8.dp)` every [TagRow] applies around it, absorbing
+ * what used to be a plain `Spacer` there so the dot's own hit area is not just a bare 10dp circle.
+ * The same on every platform — a touch-primary platform's larger Material hit target is layered on
+ * top of this footprint via `Modifier.layoutAs` rather than replacing it, so [TagRow]'s own
+ * hierarchy geometry never depends on touch density (see `feedRowIndent` in
+ * `FeedListDragAndDrop.kt`).
+ */
+private val TAG_COLOR_DOT_FOOTPRINT = FEED_LIST_MARKER_SLOT + 8.dp
 
 /** Test tag on a tag row's color dot, which opens its color popover. */
 internal fun tagColorDotTestTag(tagId: String): String = "tag-color-dot-$tagId"
