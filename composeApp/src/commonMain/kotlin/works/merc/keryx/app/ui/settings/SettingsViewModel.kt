@@ -305,7 +305,8 @@ class SettingsViewModel(
     /**
      * Exports subscribed feeds, folders, and tags to a user-selected OPML file.
      *
-     * Updates the OPML result to indicate whether the export succeeded, was canceled, or failed.
+     * Updates [opmlResult] to [OpmlResult.Exported] on success, [OpmlResult.ExportFailed] on failure,
+     * or `null` if the user cancels the file picker.
      */
     fun exportOpml() {
         if (exportingOpml || importingOpml) return
