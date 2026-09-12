@@ -17,6 +17,7 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -111,6 +112,71 @@ internal fun PulseRippleEffect(ripplePulse: Int, interactionSource: MutableInter
  */
 internal fun listRowMinHeight(isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary): Dp =
     if (isTouchPrimary) 56.dp else 0.dp
+
+/**
+ * Leading padding shared by every feed-list row kind (folder header, tag header, an un-indented
+ * feed row directly under "No Folder" or a tag) inside its own [listRowSurface] margin — the first
+ * column of the shared layout `[start][chevron][gap][marker][gap][label]` every such row follows.
+ * Not `isTouchPrimary`-dependent: a row's *outer* margin ([listRowHorizontalMargin]) already
+ * absorbs the touch-density difference, so this inner column stays a plain constant, the same as
+ * [EXPAND_CHEVRON_SLOT] / [CHEVRON_MARKER_GAP] / [FEED_LIST_MARKER_SLOT] below.
+ */
+internal val FEED_LIST_ROW_START_PADDING = 8.dp
+
+/**
+ * Layout width of the feed-list expand/collapse chevron's own column — always the chevron icon's
+ * drawn size, `20.dp`. This used to be `expandChevronSlotSize()`, a function that grew to `48.dp`
+ * (M3's touch-target minimum) on a touch-primary platform and fed directly into `feedRowIndent()`
+ * in `FeedListDragAndDrop.kt`, which is what let a tap target dictate how deep the feed list's own
+ * hierarchy reads. A touch-primary platform's larger hit area is still honored — see
+ * [layoutAs] below — but purely as a hit-test overlay with no layout footprint, so this column's
+ * width (and therefore [feedRowIndent] in `FeedListDragAndDrop.kt`) no longer depends on touch
+ * density at all.
+ */
+internal val EXPAND_CHEVRON_SLOT = 20.dp
+
+/** Gap between the chevron column and the marker column (folder icon / tag color dot / favicon)
+ * that follows it — the feed-list row layout's second column. */
+internal val CHEVRON_MARKER_GAP = 4.dp
+
+/**
+ * Width of the marker column every feed-list row kind centers its leading glyph in — a folder's
+ * [works.merc.keryx.app.ui.common.KeryxIcons.Folder] icon, a tag's color-dot marker, or a feed
+ * row's own favicon (`FeedAvatar`/`LetterAvatar` in `FeedListRowParts.kt`). Sharing one value
+ * across all three is what keeps a folder row's icon, a tag row's dot, and every feed row's
+ * favicon starting at the same horizontal position regardless of which kind of row it is.
+ */
+internal val FEED_LIST_MARKER_SLOT = 18.dp
+
+/**
+ * The minimum size a touch-only hit target may grow to without adding any layout footprint of its
+ * own — M3's own touch-target floor. Paired with [layoutAs] below.
+ */
+internal val TOUCH_TARGET_MIN_SIZE = 48.dp
+
+/**
+ * Reserves exactly [width] x [height] of layout space for content that may measure larger,
+ * centering the overflow around that reserved box instead of letting it grow the parent. This is
+ * what lets a touch-primary platform's `48.dp` M3 touch target (the expand/collapse chevron, the
+ * tag color dot) sit on top of a feed-list row without widening the row's own indentation columns
+ * to match it — the failure mode this replaces: before this existed, the touch target's own `size`
+ * modifier *was* the column's layout width, so the feed list's hierarchy indent (`feedRowIndent()`
+ * in `FeedListDragAndDrop.kt`) had to track the touch target size or a nested feed row's content
+ * would sit to the left of its own parent's.
+ *
+ * The overflow is centered, so content wider/taller than [width]/[height] extends equally past
+ * both edges of the reserved box. Anything a caller draws or hit-tests outside the row's own
+ * [listRowSurface] clip — in practice, only the side that extends past the row's leading edge,
+ * since [listRowSurface] clips to the row's painted bounds — loses both painting and hit-testing
+ * there; callers placing a touch target near a row's leading edge should confirm the resulting
+ * overlap with the row's own outer margin ([listRowHorizontalMargin]) still leaves a usable target.
+ */
+internal fun Modifier.layoutAs(width: Dp, height: Dp): Modifier = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
+    val w = width.roundToPx()
+    val h = height.roundToPx()
+    layout(w, h) { placeable.place((w - placeable.width) / 2, (h - placeable.height) / 2) }
+}
 
 /**
  * Total thickness of the horizontal guide line drawn at a boundary between two list rows —

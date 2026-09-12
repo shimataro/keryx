@@ -123,31 +123,22 @@ internal fun Modifier.paneActivation(
 }
 
 /**
- * The square [ExpandCollapseChevron] occupies: M3's 48dp touch target on a touch-primary platform,
- * the bare 20dp icon everywhere else.
- *
- * Exposed as a function rather than left inline because it is also the horizontal step a row nested
- * *under* a chevron-bearing row is indented past — see `feedRowIndent` in `FeedListDragAndDrop.kt`.
- * Deriving that indent from this is what keeps the hierarchy from inverting when the touch density
- * changes: a 36dp indent that reads as nesting beside a 20dp chevron reads as *outdenting* beside a
- * 48dp one.
- *
- * @param isTouchPrimary Overridable for tests only (mirrors `feedListReorderDrag`'s own
- *   `isTouchPrimary` parameter) — production call sites always use the platform default.
- */
-internal fun expandChevronSlotSize(isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary): Dp =
-    if (isTouchPrimary) 48.dp else 20.dp
-
-/**
  * The expand/collapse chevron used by [TagRow] and `FolderGroupHeader` — a two-asset toggle
  * (never a single flipped/rotated asset, per the `ui-guidelines` skill's icon-set section) with an
  * `onClickLabel` for accessibility, since the icon's own `contentDescription` is `null` (the label
  * would otherwise be announced twice, once for the icon and once for the click action).
  *
- * On a touch-primary platform the click target grows to a [expandChevronSlotSize] box around the
- * (still 20dp) icon — unlike the tag color dot's own 8dp-margin-absorbing trick, there's no spare
- * margin here to absorb, so this relies on the row's own [listRowMinHeight] density pass to keep the
- * row from being forced taller than its neighbors just by this one control.
+ * The icon always measures [EXPAND_CHEVRON_SLOT] (`20.dp`) — its own drawn size — regardless of
+ * touch density; this is also the horizontal step a row nested *under* a chevron-bearing row is
+ * indented past (see `feedRowIndent` in `FeedListDragAndDrop.kt`), so keeping it a plain constant
+ * is what keeps the feed list's hierarchy from depending on touch density at all. A touch-primary
+ * platform still grows the *hit target* to M3's [TOUCH_TARGET_MIN_SIZE] (`48.dp`), via
+ * [Modifier.layoutAs] — which reserves only the icon's own [EXPAND_CHEVRON_SLOT] of layout space
+ * and centers the larger clickable box around it, so the row's own indentation columns never
+ * widen just because this one control's hit area did. Unlike the tag color dot's own
+ * margin-absorbing trick, there's no spare margin here to absorb, so this relies on the row's own
+ * [listRowMinHeight] density pass to keep the row from being forced taller than its neighbors just
+ * by this one control.
  *
  * @param isTouchPrimary Overridable for tests only (mirrors `feedListReorderDrag`'s own
  *   `isTouchPrimary` parameter) — production call sites always use the platform default.
@@ -162,16 +153,18 @@ internal fun ExpandCollapseChevron(
     val icon = if (expanded) KeryxIcons.ExpandMore else KeryxIcons.ChevronRight
     if (isTouchPrimary) {
         Box(
-            Modifier.size(expandChevronSlotSize(isTouchPrimary)).clickable(onClickLabel = label, onClick = onToggle),
+            Modifier.layoutAs(EXPAND_CHEVRON_SLOT, EXPAND_CHEVRON_SLOT)
+                .size(TOUCH_TARGET_MIN_SIZE)
+                .clickable(onClickLabel = label, onClick = onToggle),
             contentAlignment = Alignment.Center,
         ) {
-            KeryxIcon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
+            KeryxIcon(icon, contentDescription = null, modifier = Modifier.size(EXPAND_CHEVRON_SLOT))
         }
     } else {
         KeryxIcon(
             icon,
             contentDescription = null,
-            modifier = Modifier.size(20.dp).clickable(onClickLabel = label, onClick = onToggle),
+            modifier = Modifier.size(EXPAND_CHEVRON_SLOT).clickable(onClickLabel = label, onClick = onToggle),
         )
     }
 }

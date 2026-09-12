@@ -45,7 +45,7 @@ internal fun FeedAvatar(title: String, faviconUrl: String?) {
             contentDescription = null,
             contentScale = ContentScale.Crop,
             error = painterResource(KeryxIcons.PublicFilled),
-            modifier = Modifier.size(18.dp).clip(RoundedCornerShape(4.dp)),
+            modifier = Modifier.size(FEED_LIST_MARKER_SLOT).clip(RoundedCornerShape(4.dp)),
         )
     }
 }
@@ -59,7 +59,7 @@ internal fun FeedAvatar(title: String, faviconUrl: String?) {
 private fun LetterAvatar(title: String) {
     val letter = title.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
     Box(
-        Modifier.size(18.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+        Modifier.size(FEED_LIST_MARKER_SLOT).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
         Text(letter, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
