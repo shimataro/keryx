@@ -11,7 +11,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -50,7 +49,6 @@ class KeryxSearchBarAndroidTest {
                     onQueryChange = { reported = it },
                     placeholder = "Search articles…",
                     onNavigateUp = { backClicked = true },
-                    navigateUpEnabled = true,
                     navigateUpContentDescription = "Back",
                     clearContentDescription = "Clear",
                     onSearchAction = {},
@@ -84,8 +82,7 @@ class KeryxSearchBarAndroidTest {
                             onQueryChange = {},
                             placeholder = "Search articles…",
                             onNavigateUp = {},
-                            navigateUpEnabled = true,
-                            navigateUpContentDescription = "Back",
+                                    navigateUpContentDescription = "Back",
                             clearContentDescription = "Clear",
                             onSearchAction = {},
                             modifier = Modifier.testTag("expanded-bar"),
@@ -105,23 +102,4 @@ class KeryxSearchBarAndroidTest {
         )
     }
 
-    @Test
-    fun expandedBarNavigateUpIsDisabledWhenNotEnabled() {
-        composeTestRule.setContent {
-            MaterialTheme {
-                KeryxExpandedSearchBar(
-                    query = "",
-                    onQueryChange = {},
-                    placeholder = "Search articles…",
-                    onNavigateUp = {},
-                    navigateUpEnabled = false,
-                    navigateUpContentDescription = "Back",
-                    clearContentDescription = "Clear",
-                    onSearchAction = {},
-                )
-            }
-        }
-
-        composeTestRule.onNodeWithContentDescription("Back").assertIsNotEnabled()
-    }
 }
