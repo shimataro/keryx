@@ -1,23 +1,25 @@
 [versions]
-agp = "9.3.2"
-kotlin = "2.4.10"
+agp = "9.4.0"
+kotlin = "2.4.20"
 compose-multiplatform = "1.11.1"
 sqldelight = "2.3.2"
-sqlite-jdbc = "3.53.2.0"
-ktor = "3.5.1"
+sqlite-jdbc = "3.53.4.0"
+ktor = "3.5.2"
 koin = "4.2.2"
 coroutines = "1.11.0"
 serialization = "1.11.0"
 datetime = "0.8.0"
-kotlinx-io = "0.9.0"
-xmlutil = "1.0.1"
+kotlinx-io = "0.9.1"
+# 1.0.2.1 is newer than 1.0.2 (published 2026-08-25 vs 2026-08-08); Maven metadata lists
+# 1.0.2 last, which is publication order, not version order.
+xmlutil = "1.0.2.1"
 coil = "3.5.0"
 lifecycle = "2.11.0"
 ksoup = "0.2.6"
 javakeyring = "1.0.4"
 jna = "5.19.1"
 composewebview = "1.0.0-beta-02"
-slf4j = "2.0.18"
+slf4j = "2.0.19"
 flatlaf = "3.7.2"
 
 # Pinned to the version java-keyring already brings in transitively

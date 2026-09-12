@@ -8,7 +8,7 @@
   コンパイル用ツールチェーン（JDK 25）は Gradle の foojay-resolver が自動取得する。
   ただし `:composeApp:run` などの JavaExec タスクは Gradle を起動した JVM で実行されるため、
   それが 25 未満だと実行時に `UnsupportedClassVersionError` になる。
-- Gradle は同梱の wrapper（`./gradlew`, Gradle 9.6.1）を使う。
+- Gradle は同梱の wrapper（`./gradlew`, Gradle 9.7.1）を使う。
 - **Android SDK**（`local.properties` の `sdk.dir`、または環境変数 `ANDROID_HOME`） —
   `:composeApp` 自体が Android library ターゲットを構成しているため、デスクトップ側だけの変更
   であってもルートの `./gradlew build` には SDK の解決が必要。インストールと AVD の作成は

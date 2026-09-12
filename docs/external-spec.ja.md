@@ -235,7 +235,7 @@ Linux は Look & Feel が解決したフォント、次にデスクトップの�
 | クラウド同期 | Ktor + Dropbox / Google Drive / OneDrive（Microsoft Graph）REST API（OAuth PKCE + リフレッシュトークン） |
 | i18n | Compose Resources |
 | テスト | kotlin-test + kotlinx-coroutines-test + Ktor MockEngine |
-| ビルド | Gradle 9.6（Kotlin 2.4 / Compose 1.11 / JDK 25 toolchain） |
+| ビルド | Gradle 9.7（Kotlin 2.4 / Compose 1.11 / JDK 25 toolchain） |
 | 画像ロード | Coil3（favicon 表示。SVG デコード対応、既存 HttpClient 共有、ディスクキャッシュあり） |
 
 フィード一覧・記事一覧の両方で、favicon（`feeds.favicon_url`）を Coil3 の `AsyncImage` で表示する。
