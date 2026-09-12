@@ -140,10 +140,11 @@ internal sealed interface DropBoundary {
 internal data class InsertionMarker(val indented: Boolean, val unpaired: Boolean = false)
 
 /**
- * How far an indented feed row's content is set in *past the chevron slot* of the folder/tag row it
- * nests under — the hierarchy step itself, as opposed to the chevron's own width.
+ * How far an indented feed row's content is set in *past the marker column* (folder icon / tag
+ * color dot) of the folder/tag row it nests under — the hierarchy step itself, as opposed to the
+ * chevron's or marker's own width.
  */
-private val FEED_ROW_HIERARCHY_STEP = 16.dp
+private val FEED_ROW_HIERARCHY_STEP = 12.dp
 
 /**
  * Where an indented feed row's own content starts, inside the row's [listRowSurface] margin — the
@@ -152,15 +153,18 @@ private val FEED_ROW_HIERARCHY_STEP = 16.dp
  * [InsertionMarker.indented] set takes its left edge *from here* rather than carrying its own
  * number, so the marker and the row title it lines up with can only ever move together.
  *
- * Derived from [expandChevronSlotSize] rather than fixed, so the nesting survives a touch platform
- * widening the chevron's own slot: a constant 36dp indent sits *inside* a 48dp chevron slot, which
- * would put a nested feed's title to the left of its own folder's title.
- *
- * @param isTouchPrimary Overridable for tests only (mirrors `feedListReorderDrag`'s own
- *   `isTouchPrimary` parameter) — production call sites always use the platform default.
+ * A plain constant — [FEED_LIST_ROW_START_PADDING] + [EXPAND_CHEVRON_SLOT] + [CHEVRON_MARKER_GAP] +
+ * [FEED_ROW_HIERARCHY_STEP], all of them touch-density-independent — rather than a function of
+ * `isTouchPrimary`. It used to be derived from the chevron slot's own (touch-dependent) width, so
+ * that a fixed indent would not read as *outdenting* once a touch platform widened that slot to
+ * M3's 48dp touch target; now that [EXPAND_CHEVRON_SLOT] itself no longer grows on a touch-primary
+ * platform (the touch target grows via [Modifier.layoutAs] instead, with no layout footprint), the
+ * indent has nothing left to track and is simply fixed.
  */
-internal fun feedRowIndent(isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary): Dp =
-    expandChevronSlotSize(isTouchPrimary) + FEED_ROW_HIERARCHY_STEP
+internal val FEED_ROW_INDENT: Dp = FEED_LIST_ROW_START_PADDING + EXPAND_CHEVRON_SLOT + CHEVRON_MARKER_GAP + FEED_ROW_HIERARCHY_STEP
+
+/** @see FEED_ROW_INDENT */
+internal fun feedRowIndent(): Dp = FEED_ROW_INDENT
 
 /**
  * Draws drag insertion markers at this row's top and/or bottom edge, `null` for an edge that is
@@ -345,7 +349,7 @@ internal fun FolderGroupHeader(
                 ),
             )
             .heightIn(min = listRowMinHeight(isTouchPrimary))
-            .padding(end = 8.dp),
+            .padding(start = FEED_LIST_ROW_START_PADDING, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CompositionLocalProvider(
@@ -355,7 +359,7 @@ internal fun FolderGroupHeader(
                 ),
         ) {
             ExpandCollapseChevron(expanded = !collapsed, onToggle = onToggleCollapse)
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(CHEVRON_MARKER_GAP))
             Row(
                 Modifier.weight(1f).padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -365,7 +369,7 @@ internal fun FolderGroupHeader(
                     contentDescription = null,
                     tint = dropTargetContentColorOrNull(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.onSecondaryContainer, isDragSource)
                         ?: MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier.size(FEED_LIST_MARKER_SLOT),
                 )
                 Spacer(Modifier.width(8.dp))
                 // Same weighted slot either way, so the chevron/folder icon on the left and the
@@ -447,7 +451,7 @@ internal fun NoFolderHeader(
                 ),
                 extraBottomMargin = (LIST_ROW_GUIDE_THICKNESS / 2f).takeIf { isEmpty } ?: 0.dp,
             )
-            .padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
+            .padding(start = FEED_LIST_ROW_START_PADDING, top = 4.dp, bottom = 4.dp),
     )
 }
 
@@ -590,7 +594,7 @@ internal fun FeedRow(
                 decoration = listRowOutline(ListRowKind.NavItem, selectionTone, focused),
             )
             .heightIn(min = listRowMinHeight(isTouchPrimary))
-            .padding(start = if (indented) feedRowIndent() else 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            .padding(start = if (indented) feedRowIndent() else FEED_LIST_ROW_START_PADDING, end = 8.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FeedAvatar(feed.displayTitle(), feed.favicon_url)
