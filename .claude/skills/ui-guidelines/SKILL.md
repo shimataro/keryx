@@ -317,7 +317,17 @@ see the Divider policy section above), and never applied outside `listRowSurface
 floor would swallow that margin instead of the highlight it's meant for — see
 `listRowMinHeight`'s own KDoc. A row's individual touch-only elements (the tag color dot, the
 folder/tag expand chevron) grow their own click target to a full 48dp the same way, independent of
-their drawn/visible size.
+their drawn/visible size — but, critically, **not independent of the row's own layout footprint**:
+`ui/home/ListRowChrome.kt`'s `Modifier.layoutAs(width, height)` reserves only the marker's own
+column width in the row's layout (the same width on every platform) and centers the larger 48dp hit
+target on top of it, so growing the hit target on a touch-primary platform never widens the feed
+list's own indentation columns. This replaced an earlier version where the touch target's own
+`Modifier.size(48.dp)` *was* the column's layout width, which forced `feedRowIndent()` in
+`FeedListDragAndDrop.kt` to grow in lockstep with it — and, for the tag color dot specifically,
+which the indent calculation never accounted for at all, silently inverted a tag-nested feed row's
+indent past its own tag's name on a touch-primary platform. `feedRowIndent()` is now a plain
+constant (44dp on every platform) precisely because none of the columns it's built from depend on
+touch density any more.
 
 ## Divider policy
 
