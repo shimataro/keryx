@@ -235,7 +235,7 @@ Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
 | Cloud sync | Ktor + Dropbox / Google Drive / OneDrive (Microsoft Graph) REST API (OAuth PKCE + refresh token) |
 | i18n | Compose Resources |
 | Testing | kotlin-test + kotlinx-coroutines-test + Ktor MockEngine |
-| Build | Gradle 9.6 (Kotlin 2.4 / Compose 1.11 / JDK 25 toolchain) |
+| Build | Gradle 9.7 (Kotlin 2.4 / Compose 1.11 / JDK 25 toolchain) |
 | Image loading | Coil3 (favicon display. SVG decode support, shared existing HttpClient, disk cache) |
 
 Both the feed list and article list display favicons (`feeds.favicon_url`) using Coil3 `AsyncImage`. If not yet fetched or loading fails, fall back to a letter (initial) avatar or generic icon.

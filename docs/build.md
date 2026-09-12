@@ -7,7 +7,7 @@
 - **JDK 25 or later** (`JAVA_HOME`, the JVM that launches `./gradlew`).
   The JDK 25 compilation toolchain is auto-provisioned by Gradle's foojay-resolver.
   However, JavaExec tasks such as `:composeApp:run` are executed with the JVM that launched Gradle, so if it is older than 25 you will hit `UnsupportedClassVersionError` at runtime.
-- Use the bundled wrapper (`./gradlew`, Gradle 9.6.1).
+- Use the bundled wrapper (`./gradlew`, Gradle 9.7.1).
 - **Android SDK** (`local.properties`' `sdk.dir` or the `ANDROID_HOME` environment variable) —
   `:composeApp` itself configures an Android library target, so the root `./gradlew build` needs
   the SDK resolvable even for a desktop-only change. See [setup.md](setup.md) for install/AVD

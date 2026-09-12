@@ -45,7 +45,7 @@
 | --- | --- | --- |
 | **JDK 25 以上**（`JAVA_HOME`） | `./gradlew` を起動する JVM | macOS: `brew install temurin@25`。Windows: `winget install EclipseAdoptium.Temurin.25.JDK` または[公式インストーラー](https://adoptium.net/installation/)。Linux: ディストリのパッケージ（例: Adoptium の apt リポジトリ経由で `sudo apt install temurin-25-jdk`）や[SDKMAN!](https://sdkman.io/)（`sdk install java 25-tem`）など |
 | **Git** | リポジトリの取得 | 各 OS 標準の方法（[git-scm.com](https://git-scm.com/downloads)、macOS の Xcode Command Line Tools、ディストリのパッケージ等） |
-| Gradle | ビルド実行 | 同梱の Wrapper（`./gradlew`、Gradle 9.6.1）を使うため**別途インストール不要** |
+| Gradle | ビルド実行 | 同梱の Wrapper（`./gradlew`、Gradle 9.7.1）を使うため**別途インストール不要** |
 
 #### Android ターゲット向け
 

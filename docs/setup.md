@@ -47,7 +47,7 @@ Split into what every target needs in common, and what's specific to the Android
 | --- | --- | --- |
 | **JDK 25 or later** (`JAVA_HOME`) | The JVM that launches `./gradlew` | macOS: `brew install temurin@25`. Windows: `winget install EclipseAdoptium.Temurin.25.JDK`, or the [official installer](https://adoptium.net/installation/). Linux: your distro's package (e.g. `sudo apt install temurin-25-jdk` via Adoptium's apt repository) or [SDKMAN!](https://sdkman.io/) (`sdk install java 25-tem`), etc. |
 | **Git** | Cloning the repository | Whatever your OS provides ([git-scm.com](https://git-scm.com/downloads), Xcode Command Line Tools on macOS, your distro's package, etc.) |
-| Gradle | Running the build | Uses the bundled Wrapper (`./gradlew`, Gradle 9.6.1) — **no separate install needed** |
+| Gradle | Running the build | Uses the bundled Wrapper (`./gradlew`, Gradle 9.7.1) — **no separate install needed** |
 
 #### For the Android Target
 

@@ -225,10 +225,10 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
 
 ## Environment
 
-- Kotlin 2.4.10 / Compose Multiplatform 1.11.1 / Gradle 9.6.1
+- Kotlin 2.4.10 / Compose Multiplatform 1.11.1 / Gradle 9.7.1
 - **Requires JDK 25 or later** as the JVM that launches `./gradlew` (i.e.
   `JAVA_HOME`). Compilation uses a JDK 25 toolchain auto-provisioned by the
   foojay-resolver plugin, but `:composeApp:run` executes with whatever JVM
   launched Gradle — if that's older than 25, you'll hit `UnsupportedClassVersionError`.
-- SQLDelight 2.3.2, sqlite-jdbc 3.53.2.0, Ktor 3.5.1, Koin 4.2.2, coroutines 1.11.0
+- SQLDelight 2.3.2, sqlite-jdbc 3.53.4.0, Ktor 3.5.2, Koin 4.2.2, coroutines 1.11.0
 - Config cache is disabled (the `generateBuildConfig` task isn't cache-safe yet).
