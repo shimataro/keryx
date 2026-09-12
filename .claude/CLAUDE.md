@@ -225,7 +225,7 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
 
 ## Environment
 
-- Kotlin 2.4.20 / Compose Multiplatform 1.11.1 / Gradle 9.7.1
+- Kotlin 2.4.10 / Compose Multiplatform 1.11.1 / Gradle 9.7.1
 - **Requires JDK 25 or later** as the JVM that launches `./gradlew` (i.e.
   `JAVA_HOME`). Compilation uses a JDK 25 toolchain auto-provisioned by the
   foojay-resolver plugin, but `:composeApp:run` executes with whatever JVM
