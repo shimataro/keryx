@@ -195,8 +195,6 @@ const val WINDOW_STATE_PERSIST_DEBOUNCE_MS = 500L
 // activation rather than a deliberate hide - see tray/TrayActionPolicy.kt.
 const val TRAY_ACTION_NOTIFICATION_RECENCY_MS = 5_000L
 
-// --- Article scroll memory ---
-const val MAX_REMEMBERED_SCROLL_POSITIONS = 5
 
 // --- Dropbox OAuth endpoints ---
 const val DROPBOX_AUTHORIZE_ENDPOINT = "https://www.dropbox.com/oauth2/authorize"

@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -57,7 +58,7 @@ class SearchPaneNavigationTest {
         KoinApplication(configuration = koinConfiguration { modules(module { single { testMenuController } }) }) {
             val layout = PaneLayout.Single
             val visible = visiblePanes(layout, depth)
-            val searchBarVisible by vm.searchBarVisible.collectAsStateSafe(false)
+            val searchBarVisible by vm.searchBarVisible.collectAsState()
             fun goBack() {
                 when (homeBackAction(layout, depth, searchBarVisible)) {
                     HomeBackAction.CloseSearchBar -> { vm.setSearchBarVisible(false); onDepthChange(HomePane.ArticleList.ordinal + 1) }
@@ -109,7 +110,7 @@ class SearchPaneNavigationTest {
         KoinApplication(configuration = koinConfiguration { modules(module { single { testMenuController } }) }) {
             val layout = PaneLayout.Dual
             val visible = visiblePanes(layout, focusedPane.ordinal + 1)
-            val searchBarVisible by vm.searchBarVisible.collectAsStateSafe(false)
+            val searchBarVisible by vm.searchBarVisible.collectAsState()
             fun setFocusedPane(pane: HomePane) {
                 if (pane != focusedPane) onFocusedPaneChange(pane)
             }

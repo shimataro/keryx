@@ -181,7 +181,6 @@ Setup completion = file exists.
 | `expandedTagIds` | string[] | `[]` (tags are the opposite — they default to *collapsed*, so the sidebar stays as short as it was before this list existed) |
 | `lastFilter` | string\|null | null |
 | `lastArticleId` | string\|null | null |
-| `recentArticleScrollPositions` | `{articleId, scrollOffset}[]` | `[]` |
 | `lastFocusedPane` | string\|null | null |
 | `lastUnreadOnly` | boolean\|null | null |
 | `lastUnreadOnlyStarred` | boolean\|null | null (scoped to the Starred filter alone, independent of `lastUnreadOnly`) |

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -68,7 +69,7 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  */
 @Composable
 fun NotificationCenterSheet(vm: NotificationCenterViewModel, onNavigated: () -> Unit = {}) {
-    val items by vm.items.collectAsStateSafe(emptyList())
+    val items by vm.items.collectAsState()
     val shape = MaterialTheme.shapes.medium
     val isTouchPrimary = works.merc.keryx.app.platform.isTouchPrimary
 

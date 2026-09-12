@@ -87,7 +87,9 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
     // connect new). Holds the target (new) provider.
     var confirmingSwitchTo by remember { mutableStateOf<CloudStorageType?>(null) }
     // Confirms the destructive "reset cloud data" (delete the cloud DB, re-upload local fresh).
-    var confirmingResetCloudData by remember { mutableStateOf<CloudStorageType?>(null) }
+    // Unlike the other confirm-triggers, the dialog's title/body/action carry no provider name, so
+    // there's nothing to hold onto beyond "is it showing".
+    var confirmingResetCloudData by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         val connected = vm.connectedType
@@ -108,7 +110,7 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                     connected = connected == type,
                     connecting = vm.connectingType == type,
                     canCancel = vm.canCancelConnect,
-                    idleEnabled = vm.connectingType == null && !vm.resetting,
+                    idleEnabled = vm.connectingType == null,
                     failed = vm.connectFailedType == type,
                     lastSyncedAtText = if (connected == type) vm.lastSyncedAtText else null,
                     // Only meaningful for the connected provider: it's why its background syncs
@@ -122,7 +124,7 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                     },
                     onCancel = { confirmingAbortConnect = type },
                     onDisconnect = { confirmingDisconnect = type },
-                    onResetCloudData = { confirmingResetCloudData = type },
+                    onResetCloudData = { confirmingResetCloudData = true },
                 )
             }
         }
@@ -130,8 +132,6 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
 
     confirmingDisconnect?.let { type ->
         KeryxAlertDialog(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            tonalElevation = 0.dp,
             onDismissRequest = { confirmingDisconnect = null },
             title = stringResource(Res.string.settings_cloud_disconnect_confirm_title, type.brandLabel()),
             text = { Text(stringResource(Res.string.settings_cloud_disconnect_confirm_body)) },
@@ -142,8 +142,6 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
     }
     confirmingAbortConnect?.let { type ->
         KeryxAlertDialog(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            tonalElevation = 0.dp,
             onDismissRequest = { confirmingAbortConnect = null },
             title = stringResource(Res.string.settings_cloud_abort_connect_confirm_title, type.brandLabel()),
             text = { Text(stringResource(Res.string.settings_cloud_abort_connect_confirm_body)) },
@@ -152,22 +150,18 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
             dismissText = stringResource(Res.string.common_cancel),
         )
     }
-    confirmingResetCloudData?.let { _ ->
+    if (confirmingResetCloudData) {
         KeryxAlertDialog(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            tonalElevation = 0.dp,
-            onDismissRequest = { confirmingResetCloudData = null },
+            onDismissRequest = { confirmingResetCloudData = false },
             title = stringResource(Res.string.settings_cloud_reset_confirm_title),
             text = { Text(stringResource(Res.string.settings_cloud_reset_confirm_body)) },
             confirmText = stringResource(Res.string.settings_cloud_reset_confirm_action),
-            onConfirm = { vm.resetCloudData(); confirmingResetCloudData = null },
+            onConfirm = { vm.resetCloudData(); confirmingResetCloudData = false },
             dismissText = stringResource(Res.string.common_cancel),
         )
     }
     confirmingSwitchTo?.let { type ->
         KeryxAlertDialog(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            tonalElevation = 0.dp,
             onDismissRequest = { confirmingSwitchTo = null },
             title = stringResource(Res.string.settings_cloud_switch_confirm_title, type.brandLabel()),
             // Read the current provider live — nothing else can mutate it while this modal is open.
@@ -195,8 +189,7 @@ private fun CloudStorageType.brandIcon(): DrawableResource = when (this) {
 
 /**
  * Brand name for a cloud provider's connection row. Deliberately a hardcoded literal, not a
- * string resource — these are untranslated product names (matching the pre-existing "Dropbox"
- * literal this section already used).
+ * string resource — these are untranslated product names.
  */
 private fun CloudStorageType.brandLabel(): String = when (this) {
     CloudStorageType.DROPBOX -> "Dropbox"
@@ -229,8 +222,7 @@ private fun CloudStorageType.disconnectLabel(): StringResource = when (this) {
 /**
  * One trailing action on a provider row: a labelled button on desktop, an icon-only
  * [TooltipIconButton] on a touch-primary platform. Two labelled buttons plus the provider name
- * cannot fit a phone-width settings dialog in any locale (they need ~340-366dp of ~288dp), which
- * used to squeeze the name onto four lines.
+ * cannot fit a phone-width settings dialog in any locale — they need ~340-366dp of ~288dp.
  *
  * [kind] is the one emphasis axis, rendered by each platform's own means: the icon-only button
  * takes it as its container, while labelled it selects the button component (`Primary` -> the
@@ -251,8 +243,8 @@ private fun ProviderActionButton(
     busy: Boolean = false,
     iconOnly: Boolean = isTouchPrimary,
 ) {
-    // 18dp keeps desktop's labelled buttons exactly as they look today; 20dp matches the row's own
-    // brand mark inside the bare icon buttons.
+    // 18dp for desktop's labelled buttons; 20dp for icon-only buttons, to match the row's own
+    // brand mark.
     val glyphSize = if (iconOnly) 20.dp else 18.dp
     val glyph: @Composable () -> Unit = {
         if (busy) {
@@ -324,11 +316,11 @@ internal fun CloudProviderRow(
     onSelect: () -> Unit,
     onCancel: () -> Unit,
     onDisconnect: () -> Unit,
-    onResetCloudData: () -> Unit = {},
+    onResetCloudData: () -> Unit,
 ) {
     // The connected row gets a step-up accent (same secondaryContainer/onSecondaryContainer
-    // tokens desktop's settings-dialog tab bar, KeryxDialogTabBar, uses for its selected tab) so
-    // it still stands out once nested inside the outer SettingsCard's surfaceContainerLow
+    // tokens desktop's settings-dialog tab bar, SecondaryScrollableTabRow, uses for its selected
+    // tab) so it still stands out once nested inside the outer SettingsCard's surfaceContainerLow
     // background; unconnected rows stay
     // transparent (no extra tint over the card).
     val contentColor = if (connected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
@@ -415,7 +407,9 @@ internal fun CloudProviderRow(
                     icon = KeryxIcons.Link,
                     onClick = onSelect,
                     kind = IconButtonKind.Primary,
-                    enabled = idleEnabled,
+                    // idleEnabled means "not busy connecting"; !resetting is combined here too so a
+                    // reset in progress on the connected provider also blocks switching providers.
+                    enabled = idleEnabled && !resetting,
                     busy = connecting,
                     iconOnly = iconOnly,
                 )

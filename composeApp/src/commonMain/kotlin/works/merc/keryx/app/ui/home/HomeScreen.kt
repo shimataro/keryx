@@ -27,6 +27,7 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -85,17 +86,17 @@ fun HomeScreen() {
     // inside the keyboard-shortcut callbacks below, which read vm.selectedArticle.value live at
     // invocation (same pattern as openSelectedInBrowser/copySelectedUrl) — collecting it here would
     // recompose the whole HomeScreen on every arrow-key selection change for no rendering benefit.
-    val feeds by vm.feeds.collectAsStateSafe(emptyList())
+    val feeds by vm.feeds.collectAsState()
     // Whether the expanded search bar is open — see homeBackAction's own KDoc.
-    val searchBarVisible by vm.searchBarVisible.collectAsStateSafe(false)
-    val tags by vm.tags.collectAsStateSafe(emptyList())
-    val folders by vm.folders.collectAsStateSafe(emptyList())
-    val collapsedFolderIds by vm.collapsedFolderIds.collectAsStateSafe(emptySet())
-    val expandedTagIds by vm.expandedTagIds.collectAsStateSafe(emptySet())
-    val feedTagMap by vm.feedTagMap.collectAsStateSafe(emptyMap())
-    val selectedRowInstance by vm.selectedRowInstance.collectAsStateSafe(FeedListRowSelection.All)
-    val feedListPaneWidth by vm.feedListPaneWidth.collectAsStateSafe(FEED_LIST_PANE_WIDTH_DEFAULT.toDouble())
-    val articleListPaneWidth by vm.articleListPaneWidth.collectAsStateSafe(ARTICLE_LIST_PANE_WIDTH_DEFAULT.toDouble())
+    val searchBarVisible by vm.searchBarVisible.collectAsState()
+    val tags by vm.tags.collectAsState()
+    val folders by vm.folders.collectAsState()
+    val collapsedFolderIds by vm.collapsedFolderIds.collectAsState()
+    val expandedTagIds by vm.expandedTagIds.collectAsState()
+    val feedTagMap by vm.feedTagMap.collectAsState()
+    val selectedRowInstance by vm.selectedRowInstance.collectAsState()
+    val feedListPaneWidth by vm.feedListPaneWidth.collectAsState()
+    val articleListPaneWidth by vm.articleListPaneWidth.collectAsState()
 
     var showAddFeed by remember { mutableStateOf(false) }
     // The feed list's drag ghost is hosted here, not in FeedListPane: the chip has to be able to
@@ -336,8 +337,9 @@ fun HomeScreen() {
                                 HomePane.FeedList -> moveFeedSelection(-1)
                                 HomePane.ArticleList -> vm.selectPrevious()
                                 // The article body scrolls inside the native WebView itself now
-                                // (see plan doc html-webview-os-wobbly-hammock.md), so there's no
-                                // Compose ScrollState left here to drive with the keyboard.
+                                // (see "Article Reader (native WebView)" in app-architecture.md),
+                                // so there's no Compose ScrollState left here to drive with the
+                                // keyboard.
                                 HomePane.ArticleDetail -> {}
                             }
                         }
@@ -366,13 +368,13 @@ fun HomeScreen() {
                     onRight = {
                         if (feedDrawerOpen) {
                             // Closing the drawer *is* "advance to the article list" at a narrow
-                            // layout — mirrors selectFilterFromRow's own onSelectionAdvance. Also
-                            // advances focusedPane itself now (unlike before keyboardPaneFor
-                            // existed): at PaneLayout.Dual, ArticleListPane's own hamburger
-                            // (onOpenDrawer) can open the drawer without touching focusedPane, which
-                            // can therefore still be ArticleDetail (both panes stay on screen
-                            // together at Dual) from an earlier visit — closing the drawer without
-                            // this would leave the article list unable to receive ↑/↓ afterwards.
+                            // layout — mirrors selectFilterFromRow's own onSelectionAdvance. This
+                            // must also advance focusedPane itself: at PaneLayout.Dual,
+                            // ArticleListPane's own hamburger (onOpenDrawer) can open the drawer
+                            // without touching focusedPane, which can therefore still be
+                            // ArticleDetail (both panes stay on screen together at Dual) from an
+                            // earlier visit — closing the drawer without this would leave the
+                            // article list unable to receive ↑/↓ afterwards.
                             setFocusedPane(HomePane.ArticleList)
                             scope.launch { drawerState.close() }
                         } else {
@@ -683,8 +685,6 @@ internal fun PendingNotificationActionHost(
             // Corrupt/incompatible cloud DB: confirm the destructive reset, then clear the
             // now-stale error notification.
             KeryxAlertDialog(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                tonalElevation = 0.dp,
                 onDismissRequest = { notifVm.clearPendingAction() },
                 title = stringResource(Res.string.settings_cloud_reset_confirm_title),
                 text = { Text(stringResource(Res.string.settings_cloud_reset_confirm_body)) },
@@ -707,8 +707,6 @@ internal fun PendingNotificationActionHost(
         // Explanation only (e.g. the macOS translocation warning) — no navigation, one button.
         is AppNotificationAction.ShowInfoDialog ->
             KeryxAlertDialog(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                tonalElevation = 0.dp,
                 onDismissRequest = { notifVm.clearPendingAction() },
                 title = stringResource(Res.string.notification_detail_title),
                 text = { Text(action.detail) },

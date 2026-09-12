@@ -7,14 +7,13 @@ import androidx.compose.ui.unit.dp
 
 /**
  * A lightweight, dismissable panel opened from a control (the notification bell, a tag's color
- * dot) — the replacement for a raw `androidx.compose.ui.window.Popup` at a `commonMain` call site
- * (see `ui/home/ArticleRowComponents.kt`'s `NotificationsBell` and
- * `ui/home/TagColorPicker.kt`'s `TagColorPickerPopup`, both now thin wrappers around this).
+ * dot) — see `ui/home/ArticleRowComponents.kt`'s `NotificationsBell` and
+ * `ui/home/TagColorPicker.kt`'s `TagColorPickerPopup`.
  *
- * Desktop's `actual` is exactly the former raw `Popup` (anchored, focusable,
- * dismiss-on-click-outside) — see the `ui-guidelines` skill's "Popup vs. Dialog" section for why
- * this stays a `Popup` rather than a `Dialog` there: non-modal, no scrim, dismissed by clicking
- * outside, and picking something inside applies immediately with nothing to confirm. Android's
+ * Desktop's `actual` is an anchored, focusable, dismiss-on-click-outside `Popup` — see the
+ * `ui-guidelines` skill's "Popup vs. Dialog" section for why this stays a `Popup` rather than a
+ * `Dialog` there: non-modal, no scrim, dismissed by clicking outside, and picking something inside
+ * applies immediately with nothing to confirm. Android's
  * `actual` is a real M3 `ModalBottomSheet`, matching that platform's own convention for this kind
  * of lightweight overlay — [content] should render its own text/controls only, with **no**
  * `KeryxRaisedSurface`/shadow/width wrapping of its own, since both `actual`s already provide a

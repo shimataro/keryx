@@ -26,10 +26,10 @@ import androidx.compose.ui.unit.dp
 
 /**
  * Desktop `actual`: the app's flat convention — see the `expect`'s KDoc in `commonMain`. With
- * [trailing], this is exactly the former `SwitchRow`'s layout (plain-colored label + trailing
- * slot, [onClick] not wired to the row itself — only [trailing] was ever interactive there);
- * without it, this is exactly the former `LinkRow`/`ActionLinkRow` (primary-colored label,
- * underline + hand cursor on hover, [supporting] as a hover tooltip via [FlatTooltipContent]).
+ * [trailing], this renders a plain-colored label plus the trailing slot, with [onClick] not wired
+ * to the row itself — only [trailing] is ever interactive there; without it, this renders a
+ * primary-colored label with underline + hand cursor on hover, [supporting] as a hover tooltip via
+ * [FlatTooltipContent].
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -39,7 +39,7 @@ actual fun KeryxSettingRow(
     supporting: String?,
     onClick: (() -> Unit)?,
     trailing: (@Composable () -> Unit)?,
-    @Suppress("UNUSED_PARAMETER") toggled: Boolean?,
+    toggled: Boolean?,
 ) {
     if (trailing != null) {
         Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

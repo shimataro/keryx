@@ -37,7 +37,6 @@ expect object KeryxIcons {
     val ArrowBack: DrawableResource
     val ChevronRight: DrawableResource
     val Cloud: DrawableResource
-    val Computer: DrawableResource
     val ContentCopy: DrawableResource
     val Circle: DrawableResource
     val CreateNewFolder: DrawableResource
@@ -55,11 +54,11 @@ expect object KeryxIcons {
     val NewLabel: DrawableResource
     val Notifications: DrawableResource
     val Refresh: DrawableResource
-    val RestartAlt: DrawableResource
     val Search: DrawableResource
     val SortAscending: DrawableResource
     val SortDescending: DrawableResource
     val Storage: DrawableResource
+    val ThisDevice: DrawableResource
     val Tune: DrawableResource
     val Update: DrawableResource
     val Warning: DrawableResource

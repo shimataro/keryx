@@ -50,8 +50,8 @@ private val InlineRenameCancelIconSize = 16.dp
  *
  * A blank value is deliberately **not** an error: it produces no message and no red frame, it simply
  * cannot be committed — unless `allowBlank` says a blank value is itself meaningful, in which case
- * it is validated like any other. This is [TextPromptDialog]'s exact model, reused rather than
- * reinvented, so the inline editor and the remaining dialogs agree on what "invalid" means.
+ * it is validated like any other. Shared by [InlineRenameField] and [TextPromptDialog], the app's
+ * two single-line-text-entry surfaces, so both agree on what "invalid" means.
  */
 internal data class InlineRenameValidation(val error: String?, val canCommit: Boolean)
 

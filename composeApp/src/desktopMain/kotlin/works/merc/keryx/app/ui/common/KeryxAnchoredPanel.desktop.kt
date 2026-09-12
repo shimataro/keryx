@@ -9,8 +9,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 
 /**
- * Desktop `actual`: the former raw `Popup` call, unchanged — see the `expect`'s KDoc in
- * `commonMain`.
+ * Desktop `actual`: an anchored `Popup` — see the `expect`'s KDoc in `commonMain`.
  */
 @Composable
 actual fun KeryxAnchoredPanel(

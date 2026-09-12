@@ -36,6 +36,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -178,23 +179,23 @@ internal fun FeedListPane(
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     hasNativeAppMenu: Boolean = works.merc.keryx.app.platform.hasNativeAppMenu,
 ) {
-    val feeds by vm.feeds.collectAsStateSafe(emptyList())
-    val tags by vm.tags.collectAsStateSafe(emptyList())
-    val feedTagMap by vm.feedTagMap.collectAsStateSafe(emptyMap())
-    val folders by vm.folders.collectAsStateSafe(emptyList())
-    val unreadByFeed by vm.unreadByFeed.collectAsStateSafe(emptyMap())
-    val unreadByTag by vm.unreadByTag.collectAsStateSafe(emptyMap())
-    val unreadByFolder by vm.unreadByFolder.collectAsStateSafe(emptyMap())
-    val collapsedFolderIds by vm.collapsedFolderIds.collectAsStateSafe(emptySet())
-    val expandedTagIds by vm.expandedTagIds.collectAsStateSafe(emptySet())
-    val totalUnread by vm.totalUnread.collectAsStateSafe(0L)
-    val starredUnread by vm.starredUnreadCount.collectAsStateSafe(0L)
-    val filter by vm.filter.collectAsStateSafe(ArticleFilter.All)
-    val selectedRowInstance by vm.selectedRowInstance.collectAsStateSafe(FeedListRowSelection.All)
-    val searchQuery by vm.searchQuery.collectAsStateSafe("")
-    val cloudConnected by vm.cloudConnected.collectAsStateSafe(false)
+    val feeds by vm.feeds.collectAsState()
+    val tags by vm.tags.collectAsState()
+    val feedTagMap by vm.feedTagMap.collectAsState()
+    val folders by vm.folders.collectAsState()
+    val unreadByFeed by vm.unreadByFeed.collectAsState()
+    val unreadByTag by vm.unreadByTag.collectAsState()
+    val unreadByFolder by vm.unreadByFolder.collectAsState()
+    val collapsedFolderIds by vm.collapsedFolderIds.collectAsState()
+    val expandedTagIds by vm.expandedTagIds.collectAsState()
+    val totalUnread by vm.totalUnread.collectAsState()
+    val starredUnread by vm.starredUnreadCount.collectAsState()
+    val filter by vm.filter.collectAsState()
+    val selectedRowInstance by vm.selectedRowInstance.collectAsState()
+    val searchQuery by vm.searchQuery.collectAsState()
+    val cloudConnected by vm.cloudConnected.collectAsState()
     val searchFocusRequester = remember { FocusRequester() }
-    val pendingSearchFocus by vm.pendingSearchFocus.collectAsStateSafe(false)
+    val pendingSearchFocus by vm.pendingSearchFocus.collectAsState()
     // Only consumed at PaneLayout.Triple (onSelectionAdvance == null), where this pane's own field
     // stays editable — at a narrow layout the latch is meant for ArticleListPane's own expanded
     // search bar field instead (see HomeViewModel.requestSearchFocus's KDoc on why this is a latch,
@@ -854,8 +855,8 @@ private fun FeedListToolbarRow(
     onAddFeedClick: () -> Unit,
     hasNativeAppMenu: Boolean,
 ) {
-    val refreshing by vm.feedRefreshing.collectAsStateSafe(false)
-    val syncing by vm.syncing.collectAsStateSafe(false)
+    val refreshing by vm.feedRefreshing.collectAsState()
+    val syncing by vm.syncing.collectAsState()
     WindowDragArea(Modifier.fillMaxWidth()) {
         KeryxPaneTopBar(
             modifier = Modifier.padding(top = WindowChrome.titleBarInsetDp.dp, start = 4.dp, end = 4.dp),
@@ -958,11 +959,10 @@ private fun SidebarRow(
  * may carry many tags) whereas dropping on a folder *moves* the feed, so this row tints itself and
  * its border `tertiary`/`tertiaryContainer` — not the `secondary`/`secondaryContainer` of
  * [FolderGroupHeader] — and additionally swaps its color dot for a filled "+" badge while hovered
- * (a folder gets no such badge, since a move has no equivalent "adding" semantics). Now that the
- * drag is Compose-drawn rather than OS-level, that "attach, not move" cue *could* live on the drag
- * ghost instead — it deliberately doesn't: an affordance drawn on the target it applies to reads
- * more clearly than one riding along with the pointer, and it keeps the ghost identical no matter
- * what is underneath it.
+ * (a folder gets no such badge, since a move has no equivalent "adding" semantics). This "attach,
+ * not move" cue is deliberately drawn on the target row rather than on the drag ghost itself: an
+ * affordance drawn on the target it applies to reads more clearly than one riding along with the
+ * pointer, and it keeps the ghost identical no matter what is underneath it.
  *
  * @param tag The tag represented by the row.
  * @param count The number of unread articles associated with the tag.
@@ -1198,7 +1198,7 @@ private fun TagFeedRow(
                     )
                 },
                 // A secondary-toned (or unselected) row is not the one currently focused, so a
-                // right-click on it promotes it first, exactly as the old `!selected` check did.
+                // right-click on it promotes it first.
                 onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
             )
             .listRowSurface(

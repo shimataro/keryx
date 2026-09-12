@@ -9,8 +9,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.State
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
@@ -22,7 +20,6 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.number
 import kotlinx.datetime.toLocalDateTime
@@ -43,10 +40,6 @@ import works.merc.keryx.app.resources.home_collapse
 import works.merc.keryx.app.resources.home_expand
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
-
-/** [collectAsState] for a [StateFlow] — the `initial` documents the value type. */
-@Composable
-fun <T> StateFlow<T>.collectAsStateSafe(@Suppress("UNUSED_PARAMETER") initial: T): State<T> = collectAsState()
 
 /**
  * The bare key each OS's own file manager uses to start a rename (Finder: Return,
@@ -91,7 +84,7 @@ internal val LocalKeyboardEngaged = staticCompositionLocalOf { false }
  * `Scaffold`'s own slot, so it draws above the article reader's native WebView (see that call
  * site's own comment). `null` on desktop, which per the `ui-guidelines` skill has no in-app
  * snackbar convention (its previous transient toasts were replaced by inline expressions — see
- * that skill's Notification Center section). `null` is also the value in any preview/test
+ * that skill's "Native-feel restyle" section). `null` is also the value in any preview/test
  * composition that never provides one. A composable that wants to show a snackbar (e.g.
  * `ArticleDetailPane`'s URL-copied feedback) should treat a `null` value here as "do nothing"
  * rather than crash.

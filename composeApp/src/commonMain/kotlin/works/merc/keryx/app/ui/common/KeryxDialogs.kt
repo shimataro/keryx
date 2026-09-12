@@ -1,30 +1,29 @@
 package works.merc.keryx.app.ui.common
 
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import org.jetbrains.compose.resources.DrawableResource
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 
 /**
- * Drop-in replacement for `androidx.compose.material3.AlertDialog` that renders in a real,
- * separate OS window (`DialogWindow`) instead of a Compose `Popup`. This avoids the Compose
+ * Drop-in replacement for `androidx.compose.material3.AlertDialog`. Desktop's `actual` renders in
+ * a real, separate OS window (`DialogWindow`) instead of a Compose `Popup` — avoiding the Compose
  * Desktop heavyweight/lightweight interop bug where a native AWT panel (the article reader's
- * WebView) always paints on top of Popup-based dialogs in the same window.
+ * WebView) always paints on top of Popup-based dialogs in the same window — with `title` handed to
+ * the native title bar (`DialogWindow(title = ...)`) as a plain string and, on macOS, redrawn in
+ * the merged title-bar area, and `confirmText`/`onConfirm`/`confirmEnabled`/`dismissText` rendered
+ * as real native Swing buttons. Android's `actual` is a plain M3 `AlertDialog` — none of the above
+ * applies, since there is no heavyweight AWT panel that could paint over a Compose `Popup` there.
+ * See each platform's own `KeryxDialogs.*.kt` for the details.
  *
- * Deliberately has no `modifier` parameter — the content lives in its own window, not in the
- * caller's composition tree.
- *
- * `title` is a plain string (rather than a composable slot) so it can be handed to the native
- * title bar (`DialogWindow(title = ...)`) as well as, on macOS, redrawn in the merged title-bar
- * area. Any trailing icon action next to the title (e.g. "add folder"/"add tag") is a separate
- * [titleAction] slot. `confirmText`/`onConfirm`/`confirmEnabled`/`dismissText` replace the old
- * `confirmButton`/`dismissButton` composable slots so the buttons can be rendered as real native
- * Swing buttons; when [dismissText] is non-null, clicking it always just calls [onDismissRequest].
+ * Deliberately has no `modifier` parameter on either platform — the content lives in its own
+ * dialog surface, not the caller's composition tree. Any trailing icon action next to the title
+ * (e.g. "add folder"/"add tag") is a separate [titleAction] slot; when [dismissText] is non-null,
+ * clicking it always just calls [onDismissRequest].
  */
 @Composable
 expect fun KeryxAlertDialog(
@@ -36,8 +35,7 @@ expect fun KeryxAlertDialog(
     title: String? = null,
     titleAction: (@Composable () -> Unit)? = null,
     text: (@Composable () -> Unit)? = null,
-    containerColor: Color = Color.Unspecified,
-    tonalElevation: Dp = 0.dp,
+    containerColor: Color = MaterialTheme.colorScheme.surfaceContainerLow,
     modal: Boolean = true,
 )
 

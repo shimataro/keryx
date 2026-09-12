@@ -16,9 +16,8 @@ import androidx.compose.ui.unit.Dp
  * comings and goings.
  *
  * [PaneLayout.Dual] always shows the same two panes (see [visiblePanes]'s own KDoc) regardless of
- * depth, so it never loses a pane's state at all — [visible] itself never changes there, and this
- * row's own emission order is what's left over from the era when it did (see below), rather than
- * something this layout still needs. [PaneLayout.Single] is the layout this row exists for:
+ * depth, so it never loses a pane's state at all — [visible] itself never changes there.
+ * [PaneLayout.Single] is the layout this row exists for:
  *
  * - **[PaneLayout.Single]** genuinely unmounts every pane but the one on screen, so nothing can be
  *   kept alive there. [rememberSaveableStateHolder] instead saves each pane's `rememberSaveable`
@@ -32,6 +31,11 @@ import androidx.compose.ui.unit.Dp
  * (it throws when the same key is provided twice at once). `SaveableStateProvider` emits no layout
  * node of its own, so each pane stays a direct `Row` child and the `Modifier.weight` handed to
  * [pane] still applies.
+ *
+ * The body below is two fixed `if` blocks (one per pane that can actually appear in [visible]),
+ * not a loop over [HomePane.entries] — this assumes exactly the three current entries
+ * ([HomePane.FeedList]/[HomePane.ArticleList]/[HomePane.ArticleDetail]); adding a fourth needs a
+ * new fixed branch here, not just a bigger loop bound.
  *
  * With both panes on screen ([PaneLayout.Dual]) they are not split evenly: the article list gets
  * a fixed [dualPaneArticleListWidth] and the reader takes everything left over, the same
@@ -59,14 +63,6 @@ internal fun NarrowPaneRow(
     paneState: SaveableStateHolder = rememberSaveableStateHolder(),
     pane: @Composable (HomePane, Modifier) -> Unit,
 ) {
-    require(HomePane.entries.size == 3) {
-        "NarrowPaneRow's unrolled pane layout assumes exactly three HomePane entries; " +
-            "add a new fixed branch when expanding HomePane."
-    }
-    require(HomePane.FeedList !in visible) {
-        "The feed list is a modal navigation drawer at a narrow PaneLayout, not a NarrowPaneRow " +
-            "pane; see HomePaneLayout.kt's feedListIsDrawer."
-    }
     Row(modifier) {
         val bothVisible = visible.size > 1
         if (HomePane.ArticleList in visible) {

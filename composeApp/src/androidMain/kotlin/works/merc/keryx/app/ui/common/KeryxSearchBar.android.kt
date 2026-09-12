@@ -41,9 +41,9 @@ import kotlinx.coroutines.flow.drop
  * same "external value places the caret at the end" contract [KeryxTextField] already guarantees
  * for the same reason.
  *
- * [onExpandedChange] is a no-op: this bar is always rendered already expanded (it *is* the search
- * screen's header, not a collapsible overlay above it), so there is no separate expanded/collapsed
- * state to toggle here.
+ * `SearchBarDefaults.InputField`'s own `onExpandedChange` is a no-op here: this bar is always
+ * rendered already expanded (it *is* the search screen's header, not a collapsible overlay above
+ * it), so there is no separate expanded/collapsed state to toggle.
  *
  * This is the pane's topmost element at a narrow layout (`SearchListPane`'s own header), and
  * `HomeScreen`'s `Scaffold` draws content edge-to-edge (`contentWindowInsets = WindowInsets(0)`),
@@ -58,7 +58,6 @@ actual fun KeryxExpandedSearchBar(
     onQueryChange: (String) -> Unit,
     placeholder: String,
     onNavigateUp: () -> Unit,
-    navigateUpEnabled: Boolean,
     navigateUpContentDescription: String,
     clearContentDescription: String,
     onSearchAction: () -> Unit,
@@ -76,7 +75,6 @@ actual fun KeryxExpandedSearchBar(
         TooltipIconButton(
             tooltip = navigateUpContentDescription,
             onClick = onNavigateUp,
-            enabled = navigateUpEnabled,
         ) {
             KeryxIcon(KeryxIcons.ArrowBack, contentDescription = navigateUpContentDescription)
         }
@@ -109,10 +107,10 @@ actual fun KeryxExpandedSearchBar(
  * (a plain `StateFlow<String>`, which stays the single source of truth) — a one-way, UI-to-VM
  * bridge, not a round trip: `HomeViewModel.setSearchQuery`'s only production callers are this field
  * itself and its own clear action (confirmed by grep), so nothing external ever writes a divergent
- * value back into [query] while this composable is mounted, and [textFieldState] is `remember`ed
- * exactly once per mount — [query]'s value at that moment seeds [TextFieldState]'s own initial
- * text/selection (caret at the end, its constructor's own default) and every later change to
- * [query] is simply not read again.
+ * value back into [query] while this composable is mounted, and the returned `TextFieldState` is
+ * `remember`ed exactly once per mount — [query]'s value at that moment seeds [TextFieldState]'s
+ * own initial text/selection (caret at the end, its constructor's own default) and every later
+ * change to [query] is simply not read again.
  */
 @Composable
 private fun rememberQueryFieldState(query: String, onQueryChange: (String) -> Unit): TextFieldState {

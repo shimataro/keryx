@@ -6,6 +6,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpStatusCode
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -40,6 +41,7 @@ import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.singleProviderCloudSession
+import kotlin.coroutines.CoroutineContext
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -48,6 +50,22 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+
+/**
+ * Counts [dispatch] calls, so a test can assert that `withContext(dispatcher)` actually ran — then
+ * runs the block immediately rather than delegating to [Dispatchers.Unconfined], whose real
+ * synchronous-execution trick lives behind `isDispatchNeeded() == false` and isn't reached when
+ * `dispatch()` is invoked directly.
+ */
+private class CountingDispatcher : CoroutineDispatcher() {
+    var dispatchCount = 0
+        private set
+
+    override fun dispatch(context: CoroutineContext, block: Runnable) {
+        dispatchCount++
+        block.run()
+    }
+}
 
 /** Minimal [NotificationMessages] fake (SyncRepository requires one; Setup tests never assert on it). */
 private object SetupViewModelTestNotificationMessages : NotificationMessages {
@@ -99,6 +117,7 @@ class SetupViewModelTest {
         tokenStorage: TokenStorage = FakeTokenStorage(),
         clock: Clock = Clock { 0L },
         connectFlow: CloudConnectFlow? = null,
+        dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
     ): SetupViewModel {
         val syncScheduler = SyncScheduler {}
         // Unconfined write dispatcher so SettingsRepository.flush() (called on setup completion)
@@ -127,7 +146,7 @@ class SetupViewModelTest {
             clock = clock,
             connectFlow = connectFlow ?: FakeCloudConnectFlow(connectResult),
         )
-        return SetupViewModel(settingsRepository, cloudSession, syncRepository)
+        return SetupViewModel(settingsRepository, cloudSession, syncRepository, dispatcher)
             .also { createdViewModels += it }
     }
 
@@ -210,5 +229,21 @@ class SetupViewModelTest {
         assertFalse(onDoneCalled)
         assertNull(tokenStorage.load())
         assertNull(store.load().cloudStorageType)
+    }
+
+    @Test
+    fun connectSuccessRunsTokenSaveFlushAndSyncOnTheInjectedDispatcher() = runTest {
+        val counting = CountingDispatcher()
+        val vm = newViewModel(
+            connectResult = Result.Ok(OAuthTokens("AT", "RT")),
+            dispatcher = counting,
+        )
+
+        vm.connect(CloudStorageType.DROPBOX) {}
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(SetupPhase.IDLE, vm.phase)
+        // Three withContext(dispatcher) hops: saveTokens, settingsRepository.flush(), sync().
+        assertTrue(counting.dispatchCount >= 3)
     }
 }

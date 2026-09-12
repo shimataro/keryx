@@ -20,14 +20,13 @@ object KeryxTextFieldDefaults {
  * Drop-in replacement for a single-line `androidx.compose.material3.OutlinedTextField`. The desktop
  * `actual` renders a flat, thin-bordered native-feel field (hairline `outlineVariant` border, small
  * corner radius, accent-colored border on focus) instead of M3's tall outlined box with its floating
- * label — matching the app's Native-feel restyle conventions (see `.claude/skills/ui-guidelines/SKILL.md`). When an
- * Android target is added, its `actual` can go back to M3's `OutlinedTextField`/`TextField`, which is
- * the desirable look on Android.
+ * label — matching the app's Native-feel restyle conventions (see `.claude/skills/ui-guidelines/SKILL.md`).
+ * The Android `actual` is M3's own `OutlinedTextField`, which is the desirable look there.
  *
  * The [modifier] is applied to the inner text field (not an outer frame), so a caller's
  * `focusRequester` / `onFocusChanged { it.isFocused }` behaves exactly as it did on `OutlinedTextField`.
- * The placeholder contrast, border colors, and supporting-text styling are internal — call sites no
- * longer pass a `colors = OutlinedTextFieldDefaults.colors(...)` override.
+ * The placeholder contrast, border colors, and supporting-text styling are internal — call sites
+ * need no `colors = OutlinedTextFieldDefaults.colors(...)` override.
  *
  * [minHeight] and [horizontalPadding] exist for the one call site that is *not* stand-alone: the
  * feed list's inline row editor (`ui/home/InlineRename.kt`), which must occupy exactly the height of

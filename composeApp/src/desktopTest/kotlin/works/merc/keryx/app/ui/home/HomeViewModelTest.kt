@@ -26,7 +26,6 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.DiscoveredFeedLink
 import works.merc.keryx.app.core.FeedNotFoundException
-import works.merc.keryx.app.core.MAX_REMEMBERED_SCROLL_POSITIONS
 import works.merc.keryx.app.core.decodeArticleFilter
 import works.merc.keryx.app.core.encode
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
@@ -2527,62 +2526,6 @@ class HomeViewModelTest {
         assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), vm.selectedRowInstance.value)
     }
 
-    // --- Article scroll position memory ---
-
-    @Test
-    fun saveScrollPositionCapsAtMaxAndEvictsLeastRecentlyUsed() = runTest {
-        val vm = newViewModel()
-        subscribeAll(vm)
-
-        for (i in 1..MAX_REMEMBERED_SCROLL_POSITIONS) {
-            vm.saveScrollPosition("a$i", i * 100)
-        }
-        for (i in 1..MAX_REMEMBERED_SCROLL_POSITIONS) {
-            assertEquals(i * 100, vm.getScrollPosition("a$i"))
-        }
-
-        // One more entry evicts the least-recently-used one (a1, saved first and never touched again).
-        vm.saveScrollPosition("aNew", 999)
-
-        assertEquals(0, vm.getScrollPosition("a1")) // evicted -> falls back to default 0
-        assertEquals(999, vm.getScrollPosition("aNew"))
-        for (i in 2..MAX_REMEMBERED_SCROLL_POSITIONS) {
-            assertEquals(i * 100, vm.getScrollPosition("a$i"))
-        }
-    }
-
-    @Test
-    fun saveScrollPositionOnExistingArticleMovesItToMruFrontAndUpdatesValue() = runTest {
-        val vm = newViewModel()
-        subscribeAll(vm)
-        for (i in 1..MAX_REMEMBERED_SCROLL_POSITIONS) {
-            vm.saveScrollPosition("a$i", i * 100)
-        }
-
-        // Re-save the oldest entry (a1): it should move to the MRU front, so a2 (now the
-        // least-recently-used) is the one evicted by the next new entry, not a1.
-        vm.saveScrollPosition("a1", 12345)
-        vm.saveScrollPosition("aNew", 1)
-
-        assertEquals(12345, vm.getScrollPosition("a1"))
-        assertEquals(0, vm.getScrollPosition("a2")) // evicted
-        assertEquals(1, vm.getScrollPosition("aNew"))
-    }
-
-    @Test
-    fun saveScrollPositionPersistsToLocalSettings() = runTest {
-        val store = LocalSettingsStore(dirOverride = dir)
-        val vm = newViewModel()
-        subscribeAll(vm)
-
-        vm.saveScrollPosition("a1", 42)
-
-        val persisted = store.load().recentArticleScrollPositions
-        assertEquals(1, persisted.size)
-        assertEquals("a1", persisted[0].articleId)
-        assertEquals(42, persisted[0].scrollOffset)
-    }
-
     // --- Restart persistence / restoration ---
 
     @Test
@@ -2622,7 +2565,7 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun restartRestoresFilterArticleAndScrollPosition() = runTest {
+    fun restartRestoresFilterAndArticle() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L)
         val vm1 = newViewModel()
@@ -2631,7 +2574,6 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
         val article1 = db.articlesQueries.getById("a1").executeAsOne()
         vm1.selectArticle(article1.toListRow())
-        vm1.saveScrollPosition("a1", 321)
         testScheduler.advanceUntilIdle()
 
         // Simulate an app restart: a fresh HomeViewModel over the same db/dir.
@@ -2641,7 +2583,6 @@ class HomeViewModelTest {
 
         assertEquals(ArticleFilter.Feed("f1"), vm2.filter.value)
         assertEquals("a1", vm2.selectedArticle.value?.id)
-        assertEquals(321, vm2.getScrollPosition("a1"))
     }
 
     @Test

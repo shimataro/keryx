@@ -723,7 +723,7 @@ menu-item selection, checkmarks, focus rings, the default button, menu bar and
 popup backgrounds and their borders. **Don't add per-widget color overrides**;
 adjust the two source colors in `KeryxTheme.kt` instead. Corner radii are
 deliberately not overridden either — FlatLaf's `Button.arc = 6` already matches
-`KeryxShapes.small`.
+`platformShapes.small`.
 
 Light/dark follows the in-app theme at runtime (an effect in `main.kt` calls
 `updateLookAndFeel`, which re-runs setup and `FlatLaf.updateUI()`), so a theme

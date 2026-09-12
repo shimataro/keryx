@@ -23,8 +23,8 @@ import works.merc.keryx.app.ui.common.KeryxSettingRow
  * — see `ui-guidelines`: `surfaceContainerLow` fill + hairline `outlineVariant` border, no tonal
  * elevation — also used by `NotificationCenterSheet`/`SetupScreen.OptionCard`/`FlatTooltipContent`).
  * Ties a row's label and its trailing control (e.g. a switch pinned to the far edge by
- * `weight(1f)`) together as one visible unit instead of floating disconnected across the dialog's
- * fixed 640dp width.
+ * `weight(1f)`) together as one visible unit instead of floating disconnected across the settings
+ * dialog's full width — a fixed 640dp on desktop, the whole screen width on Android.
  *
  * @param modifier Applied to the outer raised surface — e.g. a `testTag` for a call site a test
  *   needs to locate directly (most callers can leave this at its default).
@@ -86,8 +86,8 @@ internal fun ActionLinkRow(label: String, onClick: () -> Unit) {
 
 /**
  * Displays a labeled switch row. Tapping the switch always toggles it; on Android, tapping
- * anywhere in the row does too (a real `ListItem`'s own tap target) — desktop keeps its previous
- * behavior of only the switch itself being interactive (see [KeryxSettingRow]'s desktop `actual`).
+ * anywhere in the row does too (a real `ListItem`'s own tap target) — on desktop, only the switch
+ * itself is interactive (see [KeryxSettingRow]'s desktop `actual`).
  *
  * @param label The text displayed beside the switch.
  * @param checked Whether the switch is selected.

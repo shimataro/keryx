@@ -34,7 +34,6 @@ import works.merc.keryx.app.resources.ic_notifications_outlined
 import works.merc.keryx.app.resources.ic_public_filled
 import works.merc.keryx.app.resources.ic_public_outlined
 import works.merc.keryx.app.resources.ic_refresh_outlined
-import works.merc.keryx.app.resources.ic_restart_alt_outlined
 import works.merc.keryx.app.resources.ic_search_outlined
 import works.merc.keryx.app.resources.ic_sort_ascending_outlined
 import works.merc.keryx.app.resources.ic_sort_descending_outlined
@@ -52,7 +51,6 @@ actual object KeryxIcons {
     actual val ArrowBack: DrawableResource = Res.drawable.ic_arrow_back_outlined
     actual val ChevronRight: DrawableResource = Res.drawable.ic_chevron_right_outlined
     actual val Cloud: DrawableResource = Res.drawable.ic_cloud_outlined
-    actual val Computer: DrawableResource = Res.drawable.ic_computer_outlined
     actual val ContentCopy: DrawableResource = Res.drawable.ic_content_copy_outlined
     actual val Circle: DrawableResource = Res.drawable.ic_circle_outlined
     actual val CreateNewFolder: DrawableResource = Res.drawable.ic_create_new_folder_outlined
@@ -70,11 +68,11 @@ actual object KeryxIcons {
     actual val NewLabel: DrawableResource = Res.drawable.ic_new_label_outlined
     actual val Notifications: DrawableResource = Res.drawable.ic_notifications_outlined
     actual val Refresh: DrawableResource = Res.drawable.ic_refresh_outlined
-    actual val RestartAlt: DrawableResource = Res.drawable.ic_restart_alt_outlined
     actual val Search: DrawableResource = Res.drawable.ic_search_outlined
     actual val SortAscending: DrawableResource = Res.drawable.ic_sort_ascending_outlined
     actual val SortDescending: DrawableResource = Res.drawable.ic_sort_descending_outlined
     actual val Storage: DrawableResource = Res.drawable.ic_storage_outlined
+    actual val ThisDevice: DrawableResource = Res.drawable.ic_computer_outlined
     actual val Tune: DrawableResource = Res.drawable.ic_tune_outlined
     actual val Update: DrawableResource = Res.drawable.ic_update_outlined
     actual val Warning: DrawableResource = Res.drawable.ic_warning_outlined

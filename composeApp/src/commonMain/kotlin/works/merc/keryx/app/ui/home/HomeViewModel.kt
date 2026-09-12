@@ -230,23 +230,18 @@ class HomeViewModel(
         settingsRepository.getLocalSettings().lastUnreadOnlyStarred ?: false,
     )
 
-    // When search is active the same key as the underlying filter is used (general for
-    // All/Feed/Tag/Folder, starred for Starred).
+    /** [Starred] uses its own dedicated toggle ([_unreadOnlyStarred]); every other filter shares
+     * [_unreadOnly]. Search narrows whichever filter is already selected rather than displacing
+     * it (see "Search is orthogonal to ArticleFilter" in app-architecture.md), so it reads the
+     * same key as the filter underneath it — there is no separate search-specific toggle. */
+    private fun unreadOnlyFor(filter: ArticleFilter, general: Boolean, starred: Boolean): Boolean =
+        if (filter == ArticleFilter.Starred) starred else general
+
     val unreadOnly: StateFlow<Boolean> =
-        combine(_filter, searchActive, _unreadOnly, _unreadOnlyStarred) { f, active, general, starred ->
-            when {
-                active -> if (f == ArticleFilter.Starred) starred else general
-                f == ArticleFilter.Starred -> starred
-                else -> general
-            }
-        }.stateIn(
+        combine(_filter, _unreadOnly, _unreadOnlyStarred, ::unreadOnlyFor).stateIn(
             viewModelScope,
             started,
-            when {
-                searchActive.value -> if (_filter.value == ArticleFilter.Starred) _unreadOnlyStarred.value else _unreadOnly.value
-                _filter.value == ArticleFilter.Starred -> _unreadOnlyStarred.value
-                else -> _unreadOnly.value
-            },
+            unreadOnlyFor(_filter.value, _unreadOnly.value, _unreadOnlyStarred.value),
         )
 
     private val _newestFirst = MutableStateFlow(settingsRepository.getLocalSettings().lastNewestFirst ?: true)
@@ -492,26 +487,6 @@ class HomeViewModel(
         }
         settingsRepository.mutateLocalSettings { it.copy(expandedTagIds = _expandedTagIds.value) }
     }
-
-    // --- Article scroll position memory ---
-
-    private val scrollPositionStore = ArticleScrollPositionStore(settingsRepository)
-
-    /**
-     * Gets the saved scroll position for an article.
-     *
-     * @param articleId The identifier of the article.
-     * @return The saved scroll offset, or the default position when none is stored.
-     */
-    fun getScrollPosition(articleId: String): Int = scrollPositionStore.getScrollPosition(articleId)
-
-    /**
-     * Saves the scroll offset for an article and retains only the most recent remembered positions.
-     *
-     * @param articleId The identifier of the article.
-     * @param offset The article's scroll offset.
-     */
-    fun saveScrollPosition(articleId: String, offset: Int) = scrollPositionStore.saveScrollPosition(articleId, offset)
 
     init {
         // Restore the last-selected article (not via selectArticle(), to avoid re-marking it as
@@ -829,15 +804,15 @@ class HomeViewModel(
         // no unread articles left to pin at all.
         val selected = _selectedArticle.value
         val visibleUnread = if (marksSelectedRead) currentArticles().filter { it.is_read == 0L } else emptyList()
-        // Dispatched before the optimistic state below, not after — see reconcilePinnedArticlesAndSelection's
-        // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
-        // pass can never observe (and revert) this optimistic pin/selection using DB flags from
-        // before this write has landed.
         if (active && idsToMark.isEmpty()) {
             // Nothing in the current search results needs marking read; skip both the DB write and
             // the dependent search refresh.
             return
         }
+        // Dispatched before the optimistic state below, not after — see reconcilePinnedArticlesAndSelection's
+        // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
+        // pass can never observe (and revert) this optimistic pin/selection using DB flags from
+        // before this write has landed.
         viewModelScope.launch(dbWriteDispatcher) {
             if (active) {
                 articleRepository.markArticlesAsRead(idsToMark)

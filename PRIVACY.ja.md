@@ -167,7 +167,7 @@ Keryx は誰からも（子供を含め）個人データを収集しません�
 ## このポリシーの変更について
 
 このファイルはソースコードと同様にバージョン管理されています。変更履歴は
-<https://github.com/shimataro/keryx/commits/master/PRIVACY.ja.md> で公開されています。
+<https://github.com/shimataro/keryx/commits/HEAD/PRIVACY.ja.md> で公開されています。
 
 ## 自分で検証する
 

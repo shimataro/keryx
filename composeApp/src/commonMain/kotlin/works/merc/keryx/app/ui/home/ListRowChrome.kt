@@ -1,13 +1,18 @@
 package works.merc.keryx.app.ui.home
 
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.background
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -24,7 +29,10 @@ import kotlinx.coroutines.withContext
  * The horizontal inset a list row's highlight keeps from the pane edge — see [listRowSurface].
  * `8dp` everywhere except a touch-primary platform, which uses M3's own `NavigationDrawerItem`
  * inset (`NavigationDrawerItemDefaults.ItemPadding`, `12dp`) instead — the same
- * per-platform-density split [listRowMinHeight] already follows.
+ * per-platform-density split [listRowMinHeight] already follows. The same inset applies to both
+ * [ListRowKind]s: on a touch-primary platform the feed list and the article list sit side by side
+ * at `PaneLayout.Triple`, so a row that bled to the pane edge in one and floated inside an inset in
+ * the other would read as two unrelated designs rather than as two levels of one hierarchy.
  *
  * @param isTouchPrimary Overridable for tests only (mirrors `feedListReorderDrag`'s own
  *   `isTouchPrimary` parameter) — production call sites always use the platform default.
@@ -250,13 +258,23 @@ internal enum class ListRowKind {
  *   `NavItem` rows are ever drag targets, so this only has an effect there.
  */
 @Composable
-internal expect fun Modifier.listRowSurface(
+internal fun Modifier.listRowSurface(
     background: Color,
     kind: ListRowKind,
     interactionSource: MutableInteractionSource? = null,
     decoration: Modifier = Modifier,
     extraBottomMargin: Dp = 0.dp,
-): Modifier
+): Modifier = this
+    .padding(
+        start = listRowHorizontalMargin(),
+        end = listRowHorizontalMargin(),
+        top = LIST_ROW_VERTICAL_MARGIN,
+        bottom = LIST_ROW_VERTICAL_MARGIN + extraBottomMargin,
+    )
+    .clip(listRowShape(kind))
+    .background(background)
+    .then(decoration)
+    .let { if (interactionSource != null) it.indication(interactionSource, LocalIndication.current) else it }
 
 /**
  * The shape a list row's selection surface is clipped to (and that a drop-target border /

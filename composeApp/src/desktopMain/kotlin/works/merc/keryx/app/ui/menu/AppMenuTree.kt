@@ -11,8 +11,7 @@ import works.merc.keryx.app.ui.home.renameKey
  * The desktop application menu, modelled as a single tree that is built once per composition and
  * consumed by **both** the in-window Compose `MenuBar` renderer (`AppMenuBar`) and — on Linux with a
  * KDE Global Menu registrar — the `com.canonical.dbusmenu` D-Bus layout builder (`AppMenuLayoutBuilder`).
- * Building both surfaces from one model means they can never drift out of sync (see the plan's
- * Decision 3).
+ * Building both surfaces from one model means they can never drift out of sync.
  *
  * The model carries pre-resolved [String] labels and plain action lambdas: `stringResource` only
  * resolves inside `@Composable` scope, so `AppMenuBar` resolves the labels once and passes them down,
@@ -23,7 +22,9 @@ import works.merc.keryx.app.ui.home.renameKey
  * The modifier + key of a menu accelerator. [ctrl] means "use the platform's primary modifier"
  * (Ctrl elsewhere, ⌘ on macOS) — the in-window renderer (`AppMenuBar.toKeyShortcut`) derives the
  * actual per-platform `ctrl`/`meta` `KeyShortcut` flags from it, and the Linux
- * [MenuShortcutDispatcher] matches [ctrl]/[meta] directly. It defaults to `true`, used by every
+ * [MenuShortcutDispatcher] matches [ctrl] directly (no shortcut here ever uses Meta, so a
+ * Meta-held keypress is rejected outright rather than matched against this property — see
+ * `appmenu/MenuBarVisibility.kt`'s `matchMenuShortcut`). [ctrl] defaults to `true`, used by every
  * "always available" shortcut as a plain Ctrl/⌘ combo. Selected-item shortcuts (enabled only with
  * the right selection/focus — the Article and Feed menus' `Ctrl+Shift+<letter>` entries)
  * additionally set [shift], keeping them in a chord space that can never collide with a plain-Ctrl
@@ -43,7 +44,6 @@ internal enum class AppMenuShortcut(
     val key: Key,
     val dbusmenuKeyName: String,
     val ctrl: Boolean = true,
-    val meta: Boolean = false,
     val shift: Boolean = false,
 ) {
     AddFeed(Key.N, "N"),

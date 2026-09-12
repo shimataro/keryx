@@ -2,20 +2,17 @@ package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
@@ -43,28 +40,13 @@ internal fun FeedAvatar(title: String, faviconUrl: String?) {
     if (faviconUrl.isNullOrBlank()) {
         LetterAvatar(title)
     } else {
-        // The favicon must NOT sit in its own graphics layer: the feed row's
-        // `Modifier.dragAndDropSource` records the row into a Picture and draws that snapshot,
-        // and a nested layer's async update (the favicon finishing loading) doesn't invalidate
-        // that recorder — so the favicon would stay invisible until a hover-driven redraw.
-        // Hence rounded corners are clipped at the canvas level (drawWithCache + clipPath, which
-        // creates no layer) instead of `Modifier.clip`, and Coil's own `clipToBounds` is disabled.
-        Box(
-            Modifier.size(18.dp).drawWithCache {
-                val r = 4.dp.toPx()
-                val path = Path().apply { addRoundRect(RoundRect(0f, 0f, size.width, size.height, r, r)) }
-                onDrawWithContent { clipPath(path) { this@onDrawWithContent.drawContent() } }
-            },
-        ) {
-            AsyncImage(
-                model = faviconUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                error = painterResource(KeryxIcons.PublicFilled),
-                clipToBounds = false,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
+        AsyncImage(
+            model = faviconUrl,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            error = painterResource(KeryxIcons.PublicFilled),
+            modifier = Modifier.size(18.dp).clip(RoundedCornerShape(4.dp)),
+        )
     }
 }
 

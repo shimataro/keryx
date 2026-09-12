@@ -21,12 +21,11 @@ import works.merc.keryx.app.resources.settings_title
 import works.merc.keryx.app.resources.settings_updates
 
 /**
- * The settings screen, presented as a modeless, macOS-System-Settings-style tabbed dialog window
- * (see [KeryxTabDialog]) rather than a full-screen navigation route. Each tab reorganizes what used
- * to be a single vertical list of sections; all the underlying settings logic (via
- * [SettingsViewModel]) is unchanged and applies immediately. Each tab's content lives in its own
- * file (`GeneralTab` / `NotificationsTab` / `CloudSyncTab` / `DataTab` / `UpdatesTab`), with shared
- * building blocks in `SettingsComponents`.
+ * The settings screen (see [KeryxTabDialog]): a modeless, macOS-System-Settings-style tabbed
+ * dialog window on desktop; a near-fullscreen, modal tabbed `Dialog` with its own back arrow on
+ * Android, since a near-fullscreen surface otherwise leaves no other way out. Each tab's content
+ * lives in its own file (`GeneralTab` / `NotificationsTab` / `CloudSyncTab` / `DataTab` /
+ * `UpdatesTab`), with shared building blocks in `SettingsComponents`.
  *
  * @param onDismiss Called when the dialog should be dismissed.
  * @param initialTabId The tab shown when the dialog opens. Defaults to the first tab; a notification's
@@ -39,8 +38,8 @@ import works.merc.keryx.app.resources.settings_updates
 fun SettingsDialog(onDismiss: () -> Unit, initialTabId: String = "general", tabRequestToken: Int = 0) {
     val vm = koinInject<SettingsViewModel>()
 
-    // The cloud-sync tab exists only when at least one cloud provider was configured at build time
-    // (mirrors the old section-level hiding). availableCloudTypes is stable across the dialog's life.
+    // The cloud-sync tab exists only when at least one cloud provider was configured at build time.
+    // availableCloudTypes is stable across the dialog's life.
     val tabs = buildList {
         add(KeryxDialogTab("general", stringResource(Res.string.settings_tab_general), KeryxIcons.Tune))
         add(KeryxDialogTab("notifications", stringResource(Res.string.settings_tab_notifications), KeryxIcons.Notifications))

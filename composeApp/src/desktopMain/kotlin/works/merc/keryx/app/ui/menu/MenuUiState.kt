@@ -75,7 +75,7 @@ fun computeMenuUiState(
     val onHome = screen == Screen.Home
     return MenuUiState(
         addItemsEnabled = onHome,
-        opmlEnabled = screen != Screen.Setup,
+        opmlEnabled = onHome,
         searchEnabled = onHome,
         unreadOnlyEnabled = onHome,
         unreadOnlyChecked = unreadOnly,

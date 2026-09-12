@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -97,8 +98,7 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  * results — decided purely by [HomeViewModel.searchActive]. There is no separate "Search pane";
  * both are rendered by the same [ArticleListPaneContent] call below, just fed different `articles`/
  * `listState`, which is what lets each keep its own independent scroll position across a query
- * being typed and cleared again — no snapshot/restore machinery needed, unlike when Search used to
- * be a filter of its own that displaced the one being browsed.
+ * being typed and cleared again — no snapshot/restore machinery needed.
  *
  * @param vm The view model providing article, feed, selection, and filter state.
  * @param focused Whether the pane currently has focus.
@@ -150,10 +150,10 @@ fun ArticleListPane(
     onSearchClick: (() -> Unit)? = null,
     returnRipplePulse: Int = 0,
 ) {
-    val filter by vm.filter.collectAsStateSafe(ArticleFilter.All)
-    val feeds by vm.feeds.collectAsStateSafe(emptyList())
-    val folders by vm.folders.collectAsStateSafe(emptyList())
-    val tags by vm.tags.collectAsStateSafe(emptyList())
+    val filter by vm.filter.collectAsState()
+    val feeds by vm.feeds.collectAsState()
+    val folders by vm.folders.collectAsState()
+    val tags by vm.tags.collectAsState()
     val title = onOpenDrawer?.let {
         articleListTitle(
             filter = filter,
@@ -167,12 +167,12 @@ fun ArticleListPane(
     val feedTitles = feeds.associate { it.id to it.displayTitle() }
     val feedFavicons = feeds.associate { it.id to it.favicon_url }
 
-    val query by vm.searchQuery.collectAsStateSafe("")
-    val searchBarVisible by vm.searchBarVisible.collectAsStateSafe(false)
-    val searchActive by vm.searchActive.collectAsStateSafe(false)
-    val selected by vm.selectedArticle.collectAsStateSafe(null)
-    val unreadOnly by vm.unreadOnly.collectAsStateSafe(false)
-    val newestFirst by vm.newestFirst.collectAsStateSafe(true)
+    val query by vm.searchQuery.collectAsState()
+    val searchBarVisible by vm.searchBarVisible.collectAsState()
+    val searchActive by vm.searchActive.collectAsState()
+    val selected by vm.selectedArticle.collectAsState()
+    val unreadOnly by vm.unreadOnly.collectAsState()
+    val newestFirst by vm.newestFirst.collectAsState()
 
     // Two independent LazyListStates, one per mode, both declared unconditionally so switching
     // between them (typing/clearing a query) never disposes either one's scroll position — see
@@ -202,7 +202,7 @@ fun ArticleListPane(
     // when requestFocus() is called (see HomeViewModel.requestSearchFocus's KDoc on why this is a
     // latch rather than a one-shot event in the first place).
     val searchFocusRequester = remember { FocusRequester() }
-    val pendingSearchFocus by vm.pendingSearchFocus.collectAsStateSafe(false)
+    val pendingSearchFocus by vm.pendingSearchFocus.collectAsState()
     LaunchedEffect(pendingSearchFocus, barShown) {
         if (!barShown || !pendingSearchFocus) return@LaunchedEffect
         searchFocusRequester.requestFocus()
@@ -227,9 +227,6 @@ fun ArticleListPane(
                 onQueryChange = { vm.setSearchQuery(it) },
                 placeholder = stringResource(Res.string.home_search_placeholder),
                 onNavigateUp = exitSearch,
-                // Closing the bar always changes what's on screen (see homeBackAction's own KDoc on
-                // HomeBackAction.CloseSearchBar), so there is no "can't close right now" state to gate on.
-                navigateUpEnabled = true,
                 navigateUpContentDescription = stringResource(Res.string.common_back),
                 clearContentDescription = stringResource(Res.string.home_search_clear),
                 onSearchAction = { keyboardController?.hide() },
@@ -243,37 +240,32 @@ fun ArticleListPane(
         null
     }
 
+    // The two branches below differ only in these values — see ArticleListPaneContent's own
+    // KDoc for exactly which. Collecting each mode's own state only inside its branch (rather
+    // than both unconditionally) is deliberate: it avoids subscribing to search results/the
+    // debounce state while search isn't even active, and vice versa.
+    val articles: List<ArticleListRow>
+    val listState: LazyListState
+    val branchReturnRipplePulse: Int
+    val branchOnAddFeedClick: (() -> Unit)?
+    val hasNoFeeds: Boolean
+    val sortEnabled: Boolean
+    val titleMarkedById: Map<String, String>?
+    val emptyContent: (@Composable () -> Unit)?
+
     if (!searchActive) {
-        val articles by vm.articles.collectAsStateSafe(emptyList())
-        ArticleListPaneContent(
-            articles = articles,
-            feedTitles = feedTitles,
-            feedFavicons = feedFavicons,
-            selectedId = selected?.id,
-            unreadOnly = unreadOnly,
-            newestFirst = newestFirst,
-            focused = focused,
-            onToggleUnreadOnly = { vm.setUnreadOnly(!unreadOnly) },
-            onToggleSort = { vm.toggleSort() },
-            onMarkAllRead = { vm.markAllRead() },
-            onSelectArticle = { vm.selectArticle(it); onActivated(); onSelectionAdvance() },
-            onToggleRead = { vm.toggleRead(it) },
-            onToggleStar = { vm.toggleStar(it) },
-            modifier = modifier,
-            listState = baseListState,
-            returnRipplePulse = returnRipplePulse,
-            onActivated = onActivated,
-            notifVm = notifVm,
-            onOpenDrawer = if (barShown) null else onOpenDrawer,
-            title = if (barShown) null else title,
-            onSearchClick = if (barShown) null else onSearchClick,
-            hasNoFeeds = feeds.isEmpty(),
-            onAddFeedClick = onAddFeedClick,
-            header = header,
-        )
+        val baseArticles by vm.articles.collectAsState()
+        articles = baseArticles
+        listState = baseListState
+        branchReturnRipplePulse = returnRipplePulse
+        branchOnAddFeedClick = onAddFeedClick
+        hasNoFeeds = feeds.isEmpty()
+        sortEnabled = true
+        titleMarkedById = null
+        emptyContent = null
     } else {
-        val results by vm.searchResults.collectAsStateSafe(emptyList())
-        val searching by vm.searching.collectAsStateSafe(false)
+        val results by vm.searchResults.collectAsState()
+        val searching by vm.searching.collectAsState()
         // A query has usable terms once at least one word is 2+ characters (searched via the
         // trigram index at 3+, or a LIKE fallback at exactly 2 — see FtsSearch). A lone 1-character
         // word, or "a b" where every word is too short, count as no terms.
@@ -287,7 +279,14 @@ fun ArticleListPane(
             searchListState.scrollToIndexIfNeeded(index)
         }
 
-        val emptyContent: (@Composable () -> Unit)? = when {
+        articles = results.map { it.article }
+        listState = searchListState
+        branchReturnRipplePulse = 0
+        branchOnAddFeedClick = null
+        hasNoFeeds = false
+        sortEnabled = false
+        titleMarkedById = remember(results) { results.associate { it.article.id to it.titleMarked } }
+        emptyContent = when {
             !hasValidTerms -> {
                 { CenteredHint(stringResource(Res.string.home_search_too_short)) }
             }
@@ -299,50 +298,54 @@ fun ArticleListPane(
                 {}
             }
             results.isEmpty() -> {
-                { NoSearchResultsHint(scopedToAFeed = filter != ArticleFilter.All) }
+                { NoSearchResultsHint(scopedBelowAllFeeds = filter != ArticleFilter.All) }
             }
             else -> null
         }
-
-        ArticleListPaneContent(
-            articles = results.map { it.article },
-            feedTitles = feedTitles,
-            feedFavicons = feedFavicons,
-            selectedId = selected?.id,
-            unreadOnly = unreadOnly,
-            // Deliberately the real sort direction, not a fixed value — sortDirectionIcon's own
-            // KDoc: the button still reflects the current direction while disabled, it just can't
-            // be toggled (search order is always FTS5 relevance rank).
-            newestFirst = newestFirst,
-            focused = focused,
-            onToggleUnreadOnly = { vm.setUnreadOnly(!unreadOnly) },
-            onToggleSort = { vm.toggleSort() },
-            onMarkAllRead = { vm.markAllRead() },
-            onSelectArticle = { vm.selectArticle(it); onActivated(); onSelectionAdvance() },
-            onToggleRead = { vm.toggleRead(it) },
-            onToggleStar = { vm.toggleStar(it) },
-            modifier = modifier,
-            listState = searchListState,
-            onActivated = onActivated,
-            notifVm = notifVm,
-            onOpenDrawer = if (barShown) null else onOpenDrawer,
-            title = if (barShown) null else title,
-            onSearchClick = if (barShown) null else onSearchClick,
-            sortEnabled = false,
-            titleMarkedById = remember(results) { results.associate { it.article.id to it.titleMarked } },
-            emptyContent = emptyContent,
-            header = header,
-        )
     }
+
+    ArticleListPaneContent(
+        articles = articles,
+        feedTitles = feedTitles,
+        feedFavicons = feedFavicons,
+        selectedId = selected?.id,
+        unreadOnly = unreadOnly,
+        // Deliberately the real sort direction even while search disables the button — search
+        // order is always FTS5 relevance rank, but sortDirectionIcon's own KDoc says the button
+        // still reflects the current direction while disabled, it just can't be toggled.
+        newestFirst = newestFirst,
+        focused = focused,
+        onToggleUnreadOnly = { vm.setUnreadOnly(!unreadOnly) },
+        onToggleSort = { vm.toggleSort() },
+        onMarkAllRead = { vm.markAllRead() },
+        onSelectArticle = { vm.selectArticle(it); onActivated(); onSelectionAdvance() },
+        onToggleRead = { vm.toggleRead(it) },
+        onToggleStar = { vm.toggleStar(it) },
+        modifier = modifier,
+        listState = listState,
+        returnRipplePulse = branchReturnRipplePulse,
+        onActivated = onActivated,
+        notifVm = notifVm,
+        onOpenDrawer = if (barShown) null else onOpenDrawer,
+        title = if (barShown) null else title,
+        onSearchClick = if (barShown) null else onSearchClick,
+        hasNoFeeds = hasNoFeeds,
+        onAddFeedClick = branchOnAddFeedClick,
+        sortEnabled = sortEnabled,
+        titleMarkedById = titleMarkedById,
+        emptyContent = emptyContent,
+        header = header,
+    )
 }
 
 /**
- * The "no matches" hint shown when a search under [scopedToAFeed] came back empty — with a
+ * The "no matches" hint shown when a search under [scopedBelowAllFeeds] came back empty — with a
  * secondary line pointing at "All Feeds" only when the search was actually narrowed to something
- * less than that, since switching to All wouldn't change anything otherwise.
+ * less than that, since switching to All wouldn't change anything otherwise. The scope can be a
+ * single feed, a folder, a tag, or Starred — anything but All itself.
  */
 @Composable
-private fun NoSearchResultsHint(scopedToAFeed: Boolean) {
+private fun NoSearchResultsHint(scopedBelowAllFeeds: Boolean) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
@@ -350,7 +353,7 @@ private fun NoSearchResultsHint(scopedToAFeed: Boolean) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (scopedToAFeed) {
+            if (scopedBelowAllFeeds) {
                 Text(
                     stringResource(Res.string.home_search_try_all_feeds),
                     style = MaterialTheme.typography.bodySmall,

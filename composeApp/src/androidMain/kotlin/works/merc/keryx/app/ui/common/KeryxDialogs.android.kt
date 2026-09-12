@@ -21,7 +21,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import org.jetbrains.compose.resources.stringResource
@@ -37,10 +36,10 @@ import works.merc.keryx.app.resources.common_back
  * always modal at the window-manager level — there is no non-blocking dialog concept to opt out
  * into, and a modal About screen is the ordinary, expected pattern on this platform.
  *
- * [containerColor] and [tonalElevation] are also unused: they exist so desktop callers can opt into
- * the app's own flat surface pattern (`surfaceContainerLow` + no elevation — see the `ui-guidelines`
- * skill), but on Android a dialog surface is exactly where M3's own tonal elevation reads as native.
- * Not passing either to [AlertDialog] lets `AlertDialogDefaults`' own values apply.
+ * [containerColor] is also unused: it exists so desktop callers can opt into the app's own flat
+ * surface pattern (`surfaceContainerLow` + no elevation — see the `ui-guidelines` skill), but on
+ * Android a dialog surface is exactly where M3's own tonal elevation reads as native. Not passing
+ * it to [AlertDialog] lets `AlertDialogDefaults`' own values apply.
  */
 @Composable
 actual fun KeryxAlertDialog(
@@ -53,7 +52,6 @@ actual fun KeryxAlertDialog(
     titleAction: (@Composable () -> Unit)?,
     text: (@Composable () -> Unit)?,
     containerColor: Color,
-    tonalElevation: Dp,
     modal: Boolean,
 ) {
     AlertDialog(
@@ -83,7 +81,7 @@ actual fun KeryxAlertDialog(
             }
         },
         text = text,
-        // containerColor/tonalElevation deliberately NOT forwarded — see this function's own KDoc.
+        // containerColor deliberately NOT forwarded — see this function's own KDoc.
     )
 }
 
@@ -96,15 +94,13 @@ actual fun KeryxAlertDialog(
  * update-check mechanism this build has), and `fontSizeScale` (see `SettingsViewModel`) can push
  * even a fixed set of labels past what a single screen width holds at "Large"/"Extra Large".
  * `Tab`'s own default M3 layout already stacks the icon above the label, and its
- * `indicator`/ripple/selection colors need no manual wiring, unlike the desktop actual's
- * hand-rolled tab bar (`KeryxDialogTabBar` in `KeryxDialogs.desktop.kt`, desktop-only since this
- * Android actual stopped sharing it). The desktop actual's macOS-System-Settings styling
+ * `indicator`/ripple/selection colors need no manual wiring — the desktop actual is likewise a
+ * real M3 tab row (`SecondaryScrollableTabRow`) sharing this same [KeryxDialogTabs] tab-content
+ * helper, differing only in the `Primary`/`Secondary` grouping each platform's layout calls for.
+ * The desktop actual's macOS-System-Settings styling
  * (traffic-light-adjacent title mirroring, fixed small window size, non-blocking modeless window)
  * has no Android equivalent; this only needs to host the same tab-switching behavior in a shape
- * that fits a phone or tablet screen. Revisit alongside the Settings screen's own adaptive-layout
- * work (Phase 2) — a full-screen Settings destination may replace this dialog wrapper entirely,
- * though this `TopAppBar` already gives the user the same back-arrow-and-title experience a route
- * would, so that swap would be an internal refactor rather than a user-visible change.
+ * that fits a phone or tablet screen.
  *
  * The back arrow's `onClick` is [onDismissRequest] itself — the same dismiss path the system back
  * gesture/button already goes through — because the `Dialog`'s own `Surface` fills the entire
@@ -120,8 +116,8 @@ actual fun KeryxAlertDialog(
  * Android-specific. Both the `TopAppBar` and `PrimaryScrollableTabRow`'s default colors (and the
  * latter's bottom `HorizontalDivider()`) are left as-is rather than overridden to match the
  * surrounding `surfaceContainerLow` — same reasoning as [KeryxAlertDialog]'s Android `actual`
- * ignoring `containerColor`/`tonalElevation`: M3's own defaults are what reads as native chrome
- * here, not desktop's flat surface pattern.
+ * ignoring `containerColor`: M3's own defaults are what reads as native chrome here, not desktop's
+ * flat surface pattern.
  *
  * The `Dialog` window draws behind the system bars edge-to-edge like the rest of the app (see
  * `MainActivity`'s `enableEdgeToEdge()`), so its content applies its own `safeDrawingPadding()`

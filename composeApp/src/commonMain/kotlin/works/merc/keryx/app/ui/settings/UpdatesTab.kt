@@ -67,9 +67,8 @@ import works.merc.keryx.app.resources.settings_update_verifying
  * place, so it (and its one actionable button — download, install, retry, whichever applies) reads
  * first; "check for update" is something to reach for only once that story is already known.
  *
- * Opening the tab starts a check if nothing has run yet, same as before this composable was
- * rewritten against the full [UpdateState] machine — equivalent to one press of "check now", so it
- * never perturbs the automatic check schedule.
+ * Opening the tab starts a check if nothing has run yet — equivalent to one press of "check now",
+ * so it never perturbs the automatic check schedule.
  *
  * [vm.updateState] is deliberately *not* collected here: a download in progress emits an
  * [UpdateState.Downloading] tick per percent, and collecting it in this outer function would
@@ -213,8 +212,9 @@ internal fun UpdateResultSection(
                             Text(stringResource(Res.string.settings_update_retry))
                         }
                     }
-                    UpdateState.Idle, UpdateState.Checking -> Unit
-                    else -> Unit // unreachable: every other state carries an AvailableUpdate
+                    // Idle/Checking render nothing here; every other state carries an
+                    // AvailableUpdate, so update wouldn't be null in the first place.
+                    else -> Unit
                 }
             } else {
                 Spacer(Modifier.height(12.dp))
@@ -258,11 +258,13 @@ internal fun UpdateResultSection(
                 text,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                // Measured (a 20-line synthetic body, KERYX_TAB_DIALOG_WIDTH's 640dp) at ~397dp
-                // total tab height with 6, comfortably inside KERYX_TAB_DIALOG_CONTENT_HEIGHT's
+                // Measured on desktop (a 20-line synthetic body, KERYX_TAB_DIALOG_WIDTH's 640dp) at
+                // ~397dp total tab height with 6, comfortably inside KERYX_TAB_DIALOG_CONTENT_HEIGHT's
                 // 416dp — 12 measured ~493dp, well past it, forcing every "update available" tab
                 // open into KeryxTabDialog's scroll fallback that other tabs never need. See that
-                // constant's own KDoc.
+                // constant's own KDoc. Android's own tab content already scrolls
+                // (KeryxDialogs.android.kt's Column.verticalScroll), so this cap isn't load-bearing
+                // there — it's kept anyway for a consistent card height across platforms.
                 maxLines = 6,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -276,6 +278,10 @@ internal fun UpdateResultSection(
 /** Exposed for `UpdatesTabTest` to confirm the release notes are the *only* thing inside this
  * card — the status/action block above it is deliberately unboxed (see this file's own KDoc). */
 internal const val UPDATE_RELEASE_NOTES_CARD_TEST_TAG = "update-release-notes-card"
+
+/** Exposed for `UpdatesTabTest` to compare this row's own height across states (Available,
+ * Downloading, Verifying, Installing), independent of the rest of the card. */
+internal const val UPDATE_HEADLINE_ROW_TEST_TAG = "update-headline-row"
 
 /**
  * The card's single hero line: what's currently true about the update, and — trailing, on the
@@ -292,8 +298,6 @@ internal const val UPDATE_RELEASE_NOTES_CARD_TEST_TAG = "update-release-notes-ca
  * Cancel action; this button is disabled precisely because there is nothing to click here while
  * either is in flight.
  */
-internal const val UPDATE_HEADLINE_ROW_TEST_TAG = "update-headline-row"
-
 @Composable
 private fun UpdateHeadlineRow(
     state: UpdateState,

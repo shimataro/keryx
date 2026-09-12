@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -99,7 +100,7 @@ fun ArticleDetailPane(
     onNavigateUp: (() -> Unit)? = null,
     swipeNavigation: ArticleSwipeNavigation? = null,
 ) {
-    val article by vm.selectedArticle.collectAsStateSafe(null)
+    val article by vm.selectedArticle.collectAsState()
 
     ArticleDetailPaneContent(
         article = article,
@@ -143,8 +144,8 @@ internal fun ArticleDetailPaneContent(
     onNavigateUp: (() -> Unit)? = null,
     swipeNavigation: ArticleSwipeNavigation? = null,
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
-    reader: @Composable (html: String, body: String, baseUrl: String?, articleUrl: String?) -> Unit =
-        { html, body, baseUrl, articleUrl -> ArticleWebView(html, body, baseUrl, articleUrl) },
+    reader: @Composable (html: String, body: String, articleUrl: String?) -> Unit =
+        { html, body, articleUrl -> ArticleWebView(html, body, articleUrl) },
 ) {
     // Inline "copied" feedback for the toolbar copy button. Kept above any conditional so this
     // composable never leaves/re-enters composition — otherwise LaunchedEffect(copyPulse) would
@@ -270,7 +271,7 @@ internal fun ArticleDetailPaneContent(
                         onPrevious = swipeNavigation?.onSelectPrevious ?: {},
                     ),
             ) {
-                reader(html, body.orEmpty(), article?.url, article?.url)
+                reader(html, body.orEmpty(), article?.url)
             }
         }
     }
@@ -377,20 +378,22 @@ internal fun articleMetaText(author: String?, publishedAt: Long?): String =
  * [works.merc.keryx.app.ui.article.wrapArticleHtml] or one of its sibling builders); this
  * composable only owns the native WebView lifecycle. [body] is the raw article body HTML (not
  * the wrapped document) used to decide which link clicks should escape to the system browser.
- * [baseUrl] is the article's own URL (same value [html]'s `<base href>` was built from, if any)
- * used to resolve [body]'s relative `<a href>` values to the same absolute form the WebView
- * itself will navigate to.
+ * [articleUrl] is the article's own URL — the same value [html]'s `<base href>` was built from,
+ * if any — and does double duty: resolving [body]'s relative `<a href>` values to the same
+ * absolute form the WebView itself will navigate to, and (since the rendered title is itself a
+ * link to this same URL) being added to the known-outbound-link set alongside those resolved
+ * body links.
  */
 @Composable
-private fun ArticleWebView(html: String, body: String, baseUrl: String?, titleUrl: String?) {
+private fun ArticleWebView(html: String, body: String, articleUrl: String?) {
     // Only genuine outbound links from the article's own HTML are forwarded to the system
     // browser. A plain "any http(s) main-frame request" check would also catch SNS-embed
     // widgets' own internal requests (confirmed during the spike for the X/Twitter widget),
     // breaking the embed instead of letting it render in place.
     val knownLinks = remember { mutableStateOf(emptySet<String>()) }
-    LaunchedEffect(body, baseUrl, titleUrl) {
-        val links = extractLinks(body, baseUrl.orEmpty())
-        knownLinks.value = titleUrl?.takeIf { isHttpOrHttpsUrl(it) }?.let { links + it } ?: links
+    LaunchedEffect(body, articleUrl) {
+        val links = extractLinks(body, articleUrl.orEmpty())
+        knownLinks.value = articleUrl?.takeIf { isHttpOrHttpsUrl(it) }?.let { links + it } ?: links
     }
     val scope = rememberCoroutineScope()
     val interceptor = remember {

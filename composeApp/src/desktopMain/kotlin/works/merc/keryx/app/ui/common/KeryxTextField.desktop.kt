@@ -75,7 +75,7 @@ actual fun KeryxTextField(
         else -> MaterialTheme.colorScheme.outlineVariant
     }
 
-    Column(modifier = Modifier) {
+    Column {
         BasicTextField(
             value = displayed,
             onValueChange = { updated ->

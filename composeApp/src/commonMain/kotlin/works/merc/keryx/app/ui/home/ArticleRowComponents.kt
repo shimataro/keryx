@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,7 +66,7 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  */
 @Composable
 internal fun NotificationsBell(notifVm: NotificationCenterViewModel) {
-    val notifications by notifVm.items.collectAsStateSafe(emptyList())
+    val notifications by notifVm.items.collectAsState()
     var showNotifications by remember { mutableStateOf(false) }
     Box {
         val notificationsTooltip = stringResource(Res.string.home_notifications)

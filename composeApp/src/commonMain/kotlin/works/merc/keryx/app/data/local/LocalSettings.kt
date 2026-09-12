@@ -9,9 +9,6 @@ import works.merc.keryx.app.core.FEED_LIST_PANE_WIDTH_DEFAULT
  * the cloud.
  */
 @Serializable
-data class ArticleScrollPosition(val articleId: String, val scrollOffset: Int)
-
-@Serializable
 data class LocalSettings(
     val themeMode: String = "system", // "light" | "dark" | "system"
     val fontSizeScale: Double = 1.0,
@@ -41,7 +38,6 @@ data class LocalSettings(
     val expandedTagIds: Set<String> = emptySet(),
     val lastFilter: String? = null,
     val lastArticleId: String? = null,
-    val recentArticleScrollPositions: List<ArticleScrollPosition> = emptyList(),
     val lastFocusedPane: String? = null,
     val lastUnreadOnly: Boolean? = null,
     /** "Unread only" state scoped to the Starred filter alone, independent of [lastUnreadOnly]. */

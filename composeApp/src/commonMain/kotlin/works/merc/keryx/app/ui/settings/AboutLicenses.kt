@@ -10,4 +10,4 @@ const val PROJECT_URL: String = "https://github.com/shimataro/keryx"
  * constant. The actual list of bundled dependencies lives in `THIRD-PARTY-LICENSES.md`
  * at the repository root (kept in sync with `gradle/libs.versions.toml`).
  */
-const val LICENSES_URL: String = "$PROJECT_URL/blob/master/THIRD-PARTY-LICENSES.md"
+const val LICENSES_URL: String = "$PROJECT_URL/blob/HEAD/THIRD-PARTY-LICENSES.md"
