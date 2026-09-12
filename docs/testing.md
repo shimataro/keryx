@@ -11,7 +11,9 @@
 - `androidApp/src/androidTest/` — Instrumented Compose UI tests that need a real Android
   application module to host `androidx.compose.ui.test.junit4.v2.createComposeRule` (e.g.
   `NativeMenuAndroidGestureTest.kt`, covering the long-press gesture policy of `nativeContextMenu`'s
-  Android `actual`; `KeryxSearchBarAndroidTest.kt`, covering `ui/common/KeryxSearchBar.kt`'s Android
+  Android `actual` — including the regression where a plain `clickable` nested inside a row (e.g. a
+  tag row's color dot) would fire its own tap once a confirmed long press released, before the
+  claim loop moved to `PointerEventPass.Initial`; `KeryxSearchBarAndroidTest.kt`, covering `ui/common/KeryxSearchBar.kt`'s Android
   `actual`s — this is where the M3-specific risk `desktopTest` cannot exercise at all lives: the
   editable field's `SearchBarDefaults.InputField` must not clip once the font-size setting scales
   text past its 56dp minimum height, confirmed here at the largest (1.4×) setting). `composeApp`
@@ -324,6 +326,9 @@ peer creation still works from inside the click's own call stack:
   item — and stay in place across a resync (e.g. toggling a tag) without the menu rebuilding.
 - Right-clicking an article row with no usable URL still shows "Copy URL" and "Open in Browser"
   grayed out (disabled) rather than omitting them; an article with a URL shows both enabled.
+- Right-clicking a tag row shows "Edit", "Change color", and "Delete"; choosing "Change color"
+  opens the same anchored popover the color dot itself opens (positioned at the dot, not at the
+  click), and picking a swatch there applies immediately.
 - Opening any of these menus while the article reader's WebView is visible renders the menu above
   the WebView, not behind it.
 - (Linux) After switching the in-app theme (light ↔ dark) with no restart: the menu bar and an
@@ -342,6 +347,12 @@ real app UI, so confirm manually on a device or emulator:
   list as a normal drag; the menu does not open and the row is not activated.
 - Long-pressing a feed row, a folder header, and a tag row shows the menu with the correct actions,
   and the row's selection does not change as a side effect of the long-press itself.
+- Long-pressing a tag row's color dot, a folder/tag row's expand chevron, or an inline-rename
+  field's "×" cancel icon opens only that row's context menu — releasing the finger does not also
+  open the color picker, toggle the expanded state, or discard the in-progress edit. A short tap on
+  any of these still performs its own action (open the picker / toggle expand / cancel the edit)
+  without opening the menu. Choosing "Change color" from a tag row's menu opens the same color
+  picker the dot itself opens, and picking a swatch applies it immediately.
 
 (Android, narrow layout) Search — `KeryxSearchBarAndroidTest.kt` covers `KeryxExpandedSearchBar`'s
 semantics/text-input/font-scale behavior in isolation (see `androidApp/src/androidTest/` above);

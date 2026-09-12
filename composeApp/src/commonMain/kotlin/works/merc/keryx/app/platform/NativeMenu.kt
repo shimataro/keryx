@@ -75,6 +75,10 @@ data object NativeMenuSeparator : NativeMenuEntry {
  * opens the menu on that row. On Android, a gesture that is consumed as a
  * long-press but resolves to an empty [items] still consumes the rest of that
  * gesture (see the Android `actual`'s own KDoc) — the menu just never appears.
+ * That claim also reaches any plain `clickable` **nested inside** the element this modifier is
+ * attached to (e.g. a tag row's color dot, or a folder/tag row's expand chevron): once a long
+ * press is confirmed, releasing the finger over such a child does not also fire the child's own
+ * tap action, even though it sits deeper in the tree than this modifier's own node.
  *
  * [onOpen] is invoked right before the menu is shown on desktop
  * (secondary-mouse-button click). Callers typically use it to select the

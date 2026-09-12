@@ -703,6 +703,19 @@ Modifier.nativeContextMenu(
   synced on every change without a rebuild.
 - Do not reach for `androidx.compose.material3.DropdownMenu` for this kind of
   menu going forward.
+- **A `clickable` nested inside a row that also carries `nativeContextMenu`
+  (a tag row's color dot, a folder/tag row's expand chevron) never fires from
+  a long press on Android** — once the long press is confirmed, the Android
+  `actual` claims the rest of the gesture on `PointerEventPass.Initial`
+  (ancestor to descendant), which reaches the nested `clickable` before its
+  own `Main`-pass tap recognition does, so releasing the finger over it does
+  not also fire its `onClick`. Long-pressing anywhere on the row — including
+  on top of an embedded control — is meant to open only that row's menu. If a
+  control reachable only through such an embedded element needs a long-press
+  equivalent, expose it as a menu item instead (`TagRow`'s "Change color",
+  which reaches the same color popover the dot itself opens, is the reference
+  implementation) — don't try to give the embedded control its own long-press
+  handling.
 
 ### Backends
 
@@ -1226,7 +1239,10 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   (`ui/home/TagColorPicker.kt`), anchored to the tag row's own color dot, which
   is clickable at all times and independent of whether that row is being
   renamed — picking a swatch applies immediately, so there is nothing to
-  confirm and nothing to block the window for. Note the container and the
+  confirm and nothing to block the window for. The same popover is also
+  reachable from the tag row's own context menu ("Change color"), for a
+  long-press user who cannot reliably land a tap on the small dot itself —
+  both paths open the identical popover anchored at the dot. Note the container and the
   swatches are deliberately separate composables, so both share the same
   swatches with no changes needed there. Both render as a real M3
   `ModalBottomSheet` on Android (`KeryxAnchoredPanel`'s Android `actual`) —

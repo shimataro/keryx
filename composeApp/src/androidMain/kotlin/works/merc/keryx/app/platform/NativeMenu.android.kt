@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -38,15 +39,23 @@ import works.merc.keryx.app.ui.i18n.uncheckedStateDescription
  * `detectTapGestures(onLongPress = ...)`, because that helper consumes the initial *down*
  * unconditionally — which would break `ListRowChrome.kt`'s `listRowClickable` (a plain
  * `Modifier.clickable`, chained right before this one) on every ordinary tap, not just long
- * presses. This function's node sits later in the modifier chain than `listRowClickable`'s, which
- * makes it the more deeply nested one — Compose's pointer-input `Main` pass resumes nested nodes
- * before their ancestors for the same event, so this gesture observes every event first. It never
- * consumes the *down* itself; only once the press survives
+ * presses. It never consumes the *down* itself; only once the press survives
  * `viewConfiguration.longPressTimeoutMillis` with no up and no consumption elsewhere (e.g. a
- * `LazyColumn` scroll claiming the gesture) does it treat this as a long press, and only then does
- * it start consuming — the remaining events through to pointer-up — so `listRowClickable`'s own
- * tap recognition, observing the same stream one step later, sees it as already claimed and never
- * fires `onClick` for the same press.
+ * `LazyColumn` scroll claiming the gesture) does it treat this as a long press. That detection
+ * loop reads [PointerEventPass.Main] (descendant to ancestor) deliberately, since it needs to see
+ * whether a descendant — a nested scrollable, or a plain `Modifier.clickable` on an embedded
+ * control like a tag row's color dot or an expand chevron — has already claimed the gesture.
+ *
+ * Once confirmed, though, the *claim* loop that follows switches to [PointerEventPass.Initial]
+ * (ancestor to descendant): this node's own consumption then reaches every other node — both
+ * `listRowClickable` chained right before it in the modifier chain (the more outer node, whose
+ * `Main`-pass tap recognition is naturally *after* this node's Initial-pass consume in the same
+ * event) and any `clickable` **nested inside** this row (a descendant, which on `Main` alone would
+ * see the same event *before* this node and fire its own `onClick` on release) — before either can
+ * observe the event as unconsumed. `PointerInputChange.isConsumed` is shared across every node for
+ * a given change (backed by one `consumedDelegate`), so a single `Initial`-pass consume is enough;
+ * there is no need to also consume on `Main`. This is what keeps a long press on, say, a tag row's
+ * color dot from opening the row's menu *and* also opening the color picker once the finger lifts.
  *
  * [items] is evaluated once the long press is confirmed (matching the `expect`'s contract that it
  * is "only evaluated once the triggering gesture actually completes"), and the resulting menu is
@@ -95,10 +104,11 @@ actual fun Modifier.nativeContextMenu(
                     menuItems = resolvedItems
                     expanded = true
                 }
-                // Claim the rest of this gesture — see this function's own KDoc for why this alone
-                // is enough to keep listRowClickable's tap from also firing.
+                // Claim the rest of this gesture on the Initial pass — see this function's own
+                // KDoc for why that alone is enough to keep both the outer listRowClickable and
+                // any nested clickable (e.g. a tag row's color dot) from also firing.
                 while (true) {
-                    val event = awaitPointerEvent()
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
                     val change = event.changes.firstOrNull { it.id == down.id } ?: break
                     change.consume()
                     if (change.changedToUpIgnoreConsumed()) break

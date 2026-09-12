@@ -85,6 +85,7 @@ import works.merc.keryx.app.resources.home_add_feed
 import works.merc.keryx.app.resources.home_add_folder
 import works.merc.keryx.app.resources.home_add_tag
 import works.merc.keryx.app.resources.home_all_feeds
+import works.merc.keryx.app.resources.home_change_tag_color_menu
 import works.merc.keryx.app.resources.home_copy_feed_url
 import works.merc.keryx.app.resources.home_copy_site_url
 import works.merc.keryx.app.resources.home_delete_tag_menu
@@ -979,8 +980,10 @@ private fun SidebarRow(
  * @param onRenameCommit Applies an edited tag name.
  * @param onRenameCancel Abandons an in-progress name edit.
  * @param nameError Produces a validation message for an edited name, or `null` when valid.
- * @param onSelectColor Applies a color picked from the color dot's popover. Independent of name
- *   editing: the dot is clickable whether or not the row is currently being renamed.
+ * @param onSelectColor Applies a color picked from the color dot's popover, reachable either by
+ *   tapping the dot directly or via the row's own context menu's "change color" entry (both open
+ *   the same popover, anchored to the dot). Independent of name editing: the dot is clickable
+ *   whether or not the row is currently being renamed.
  * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
  */
 @Composable
@@ -1003,6 +1006,7 @@ private fun TagRow(
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
     val editLabel = stringResource(Res.string.home_edit_tag_menu)
+    val changeColorLabel = stringResource(Res.string.home_change_tag_color_menu)
     val deleteLabel = stringResource(Res.string.home_delete_tag_menu)
     val colorLabel = stringResource(Res.string.home_tag_color)
     var showColorPicker by remember { mutableStateOf(false) }
@@ -1016,6 +1020,7 @@ private fun TagRow(
                 items = {
                     listOf(
                         NativeMenuItem(editLabel, renameNativeShortcut) { onEdit() },
+                        NativeMenuItem(changeColorLabel) { showColorPicker = true },
                         NativeMenuItem(deleteLabel, deleteNativeShortcut) { onDelete() },
                     )
                 },
