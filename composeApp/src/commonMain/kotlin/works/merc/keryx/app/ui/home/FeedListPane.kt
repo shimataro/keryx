@@ -1053,10 +1053,13 @@ private fun TagRow(
                         // touch-primary platform additionally grows the *hit target* past that
                         // footprint to a full Material 48dp square via `layoutAs`, safe now that
                         // the row's own listRowMinHeight() floor keeps this from stretching the row
-                        // taller than its neighbors.
+                        // taller than its neighbors. `clickable` must come after `layoutAs`/
+                        // `requiredSize` (like `ExpandCollapseChevron`'s own touch-primary branch)
+                        // — `layoutAs` always reports its own fixed size regardless of what a child
+                        // measures, so a `clickable` placed *before* it would only ever see the
+                        // 26dp footprint, not the enlarged 48dp target.
                         Modifier
                             .testTag(tagColorDotTestTag(tag.id))
-                            .clickable(onClickLabel = colorLabel) { showColorPicker = true }
                             .then(
                                 if (isTouchPrimary) {
                                     Modifier.layoutAs(TAG_COLOR_DOT_FOOTPRINT, TAG_COLOR_DOT_FOOTPRINT).requiredSize(TOUCH_TARGET_MIN_SIZE)
@@ -1064,6 +1067,7 @@ private fun TagRow(
                                     Modifier
                                 },
                             )
+                            .clickable(onClickLabel = colorLabel) { showColorPicker = true }
                             .padding(top = 4.dp, bottom = 4.dp, end = 8.dp),
                         contentAlignment = Alignment.Center,
                     ) {

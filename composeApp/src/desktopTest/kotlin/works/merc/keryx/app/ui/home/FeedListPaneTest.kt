@@ -8,16 +8,19 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -66,6 +69,9 @@ class FeedListPaneTest {
         // exercising the "native app menu" branch (no app_name header, no settings footer)
         // unchanged; only the tests exercising the Android branch below override it.
         hasNativeAppMenu: Boolean = true,
+        // Defaults to the real platform value so every existing test keeps exercising its own
+        // platform's branch unchanged; only the touch-target tests below override it.
+        isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     ) {
         KoinApplication(configuration = koinConfiguration { modules(module { single { testMenuController } }) }) {
             Box(Modifier.testTag(ROOT_TEST_TAG).size(320.dp, height)) {
@@ -77,6 +83,7 @@ class FeedListPaneTest {
                     onSelectionAdvance = onSelectionAdvance,
                     onTextInputFocusChange = onTextInputFocusChange,
                     hasNativeAppMenu = hasNativeAppMenu,
+                    isTouchPrimary = isTouchPrimary,
                 )
             }
         }
@@ -320,6 +327,50 @@ class FeedListPaneTest {
             // onNodeWithText matches exactly by default, so the quick-filter label is never
             // confused with the sidebar search field's own placeholder.
             onNodeWithText("記事を検索").assertDoesNotExist()
+        }
+    }
+
+    /**
+     * Regression test for the tag color dot's touch target: `layoutAs` (`ListRowChrome.kt:174`)
+     * always reports its own fixed size regardless of what a child measures, so `clickable` must
+     * sit *after* `layoutAs`/`requiredSize` in the modifier chain (like `ExpandCollapseChevron`'s
+     * own touch-primary branch) for the enlarged 48dp target to actually be clickable — mirrors
+     * `ExpandCollapseChevronTest.touchClickReachesPastTheReportedBoundsOnTouchPrimary`.
+     */
+    @Test
+    fun tagColorDotTouchTargetReachesPastItsReportedFootprintOnTouchPrimary() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertTag("t1", "Tag One")
+        useHomeViewModel(driver, db) { fixture ->
+            setContent { FeedListPaneTestHost(fixture.vm, TEST_PANE_HEIGHT, isTouchPrimary = true) }
+            waitForIdle()
+
+            onNodeWithTag(tagColorDotTestTag("t1"), useUnmergedTree = true).performMouseInput {
+                click(center + Offset(20.dp.toPx(), 0f))
+            }
+            waitForIdle()
+
+            onNodeWithTag(tagColorSwatchTestTag(null)).assertIsDisplayed()
+        }
+    }
+
+    /** The same offset click must miss on a non-touch-primary platform, where the dot's click
+     * target never grows past its own 26dp reported footprint — mirrors
+     * `ExpandCollapseChevronTest.theSameOffsetClickMissesOnNonTouchPrimary`. */
+    @Test
+    fun theSameOffsetClickMissesTheTagColorDotOnNonTouchPrimary() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertTag("t1", "Tag One")
+        useHomeViewModel(driver, db) { fixture ->
+            setContent { FeedListPaneTestHost(fixture.vm, TEST_PANE_HEIGHT, isTouchPrimary = false) }
+            waitForIdle()
+
+            onNodeWithTag(tagColorDotTestTag("t1"), useUnmergedTree = true).performMouseInput {
+                click(center + Offset(20.dp.toPx(), 0f))
+            }
+            waitForIdle()
+
+            onNodeWithTag(tagColorSwatchTestTag(null)).assertDoesNotExist()
         }
     }
 
