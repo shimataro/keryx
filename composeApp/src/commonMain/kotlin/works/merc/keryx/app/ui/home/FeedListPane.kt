@@ -225,6 +225,8 @@ internal fun FeedListPane(
     var showAddFolder by remember { mutableStateOf(false) }
     var confirmingDeleteFolder by remember { mutableStateOf<Folders?>(null) }
     var confirmingUnsubscribeFeed by remember { mutableStateOf<Feeds?>(null) }
+    var creatingFolderForFeedId by remember { mutableStateOf<String?>(null) }
+    var creatingTagForFeedId by remember { mutableStateOf<String?>(null) }
     // The single row (if any) whose name is currently being edited in place. Renaming a feed,
     // folder, or tag happens in the row itself rather than in a dialog — see InlineRename.kt.
     var inlineEdit by remember { mutableStateOf<InlineEditTarget?>(null) }
@@ -578,6 +580,8 @@ internal fun FeedListPane(
                                 onCopySiteUrl = { feed.site_url?.let(copyUrl) },
                                 onOpenSite = { feed.site_url?.let(BrowserOpener::open) },
                                 isTouchPrimary = isTouchPrimary,
+                                onCreateNewFolderForFeed = { creatingFolderForFeedId = feed.id },
+                                onCreateNewTagForFeed = { creatingTagForFeedId = feed.id },
                                 // Same mutation the drop of a real drag applies (see
                                 // FeedListDragController.end), just with the landing position
                                 // resolved from the group's own order instead of a pointer.
@@ -790,6 +794,10 @@ internal fun FeedListPane(
         onConfirmingDeleteFolderChange = { confirmingDeleteFolder = it },
         confirmingUnsubscribeFeed = confirmingUnsubscribeFeed,
         onConfirmingUnsubscribeFeedChange = { confirmingUnsubscribeFeed = it },
+        creatingFolderForFeedId = creatingFolderForFeedId,
+        onCreatingFolderForFeedIdChange = { creatingFolderForFeedId = it },
+        creatingTagForFeedId = creatingTagForFeedId,
+        onCreatingTagForFeedIdChange = { creatingTagForFeedId = it },
     )
 }
 

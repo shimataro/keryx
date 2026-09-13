@@ -55,6 +55,8 @@ import works.merc.keryx.app.resources.home_edit_folder_menu
 import works.merc.keryx.app.resources.home_feed_error
 import works.merc.keryx.app.resources.home_feed_gone
 import works.merc.keryx.app.resources.home_move_to_folder
+import works.merc.keryx.app.resources.home_new_folder
+import works.merc.keryx.app.resources.home_new_tag
 import works.merc.keryx.app.resources.home_no_folder
 import works.merc.keryx.app.resources.home_open_site
 import works.merc.keryx.app.resources.home_refresh
@@ -515,11 +517,15 @@ internal fun FeedRow(
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     onMoveUp: (() -> Unit)? = null,
     onMoveDown: (() -> Unit)? = null,
+    onCreateNewFolderForFeed: () -> Unit = {},
+    onCreateNewTagForFeed: () -> Unit = {},
 ) {
     val refreshLabel = stringResource(Res.string.home_refresh)
     val assignTagsLabel = stringResource(Res.string.home_assign_tags)
     val renameFeedLabel = stringResource(Res.string.home_rename_feed)
     val moveToFolderLabel = stringResource(Res.string.home_move_to_folder)
+    val newFolderLabel = stringResource(Res.string.home_new_folder)
+    val newTagLabel = stringResource(Res.string.home_new_tag)
     val noFolderLabel = stringResource(Res.string.home_no_folder)
     val unsubscribeLabel = stringResource(Res.string.home_unsubscribe_menu)
     val copyFeedUrlLabel = stringResource(Res.string.home_copy_feed_url)
@@ -553,7 +559,9 @@ internal fun FeedRow(
                                 NativeCheckMenuItem(tag.name, checked = tag.id in attachedTagIds) {
                                     onToggleFeedTag(tag.id, tag.id !in attachedTagIds)
                                 }
-                            },
+                            } + listOf(
+                                NativeMenuItem(newTagLabel) { onCreateNewTagForFeed() },
+                            ),
                         ),
                         NativeSubMenu(
                             label = moveToFolderLabel,
@@ -570,6 +578,7 @@ internal fun FeedRow(
                                         },
                                     )
                                 }
+                                add(NativeMenuItem(newFolderLabel) { onCreateNewFolderForFeed() })
                             },
                         ),
                         NativeMenuSeparator,
