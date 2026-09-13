@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -47,7 +48,7 @@ private val AttachLight = Color(0xFF64B5F6)
 private val TertiaryContainerLight = Attach.copy(alpha = 0.26f).compositeOver(Color(0xFFF1F1F1))
 private val TertiaryContainerDark = Attach.copy(alpha = 0.32f).compositeOver(Color(0xFF303030))
 
-private val LightColors = lightColorScheme(
+internal val LightColors = lightColorScheme(
     primary = Teal,
     secondary = Teal,
     secondaryContainer = SecondaryContainerLight,
@@ -58,7 +59,7 @@ private val LightColors = lightColorScheme(
     onTertiaryContainer = OnSecondaryContainerLight,
 )
 
-private val DarkColors = darkColorScheme(
+internal val DarkColors = darkColorScheme(
     primary = TealLight,
     secondary = TealLight,
     secondaryContainer = SecondaryContainerDark,
@@ -126,6 +127,10 @@ private fun typographyWithFontFamily(family: FontFamily): Typography {
 /**
  * Applies the Keryx color scheme, shapes, typography, and interaction styling.
  *
+ * On Android 12+ (API 31), the color scheme is derived dynamically from the system
+ * wallpaper via Material You. On older Android versions and on desktop, the app's
+ * brand color scheme (teal) is used instead.
+ *
  * @param themeMode Selects light, dark, or system-based appearance.
  * @param fontScale Scales text, clamped to 0.8–1.6 as a defensive bound; the Settings UI's own
  *   font-size options (`GeneralTab`) only ever offer 0.85–1.4.
@@ -143,20 +148,21 @@ fun KeryxTheme(
     val typography = remember(nativeFontFamily) {
         nativeFontFamily?.let { typographyWithFontFamily(it) }
     }
+    val colorScheme = platformColorScheme(dark)
     CompositionLocalProvider(
         LocalDensity provides Density(density.density, fontScale.coerceIn(0.8f, 1.6f)),
     ) {
         ProvidePlatformInteraction(dark) {
             if (typography != null) {
                 MaterialTheme(
-                    colorScheme = if (dark) DarkColors else LightColors,
+                    colorScheme = colorScheme,
                     shapes = platformShapes,
                     typography = typography,
                     content = content,
                 )
             } else {
                 MaterialTheme(
-                    colorScheme = if (dark) DarkColors else LightColors,
+                    colorScheme = colorScheme,
                     shapes = platformShapes,
                     content = content,
                 )

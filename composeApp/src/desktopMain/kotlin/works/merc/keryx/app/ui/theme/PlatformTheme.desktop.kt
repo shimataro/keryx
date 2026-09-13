@@ -10,6 +10,7 @@ import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.ripple.RippleAlpha
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.RippleConfiguration
 import androidx.compose.material3.Shapes
@@ -125,4 +126,13 @@ actual @Composable fun ProvidePlatformInteraction(dark: Boolean, content: @Compo
         LocalRippleConfiguration provides NoRippleConfiguration,
         content = content,
     )
+}
+
+/**
+ * Always returns the app's brand color scheme on desktop, since dynamic color is an
+ * Android-only feature.
+ */
+@Composable
+actual fun platformColorScheme(dark: Boolean): ColorScheme {
+    return if (dark) DarkColors else LightColors
 }

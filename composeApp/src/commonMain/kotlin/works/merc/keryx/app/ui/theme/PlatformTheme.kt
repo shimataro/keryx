@@ -1,5 +1,6 @@
 package works.merc.keryx.app.ui.theme
 
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.Shapes
 import androidx.compose.runtime.Composable
 
@@ -21,3 +22,11 @@ expect val platformShapes: Shapes
  */
 @Composable
 expect fun ProvidePlatformInteraction(dark: Boolean, content: @Composable () -> Unit)
+
+/**
+ * Resolves the platform-specific [ColorScheme]. On Android 12+ (API 31), this returns
+ * a dynamic color scheme derived from the system wallpaper via Material You. On older
+ * Android versions and on desktop, it falls back to the app's brand color scheme.
+ */
+@Composable
+expect fun platformColorScheme(dark: Boolean): ColorScheme
