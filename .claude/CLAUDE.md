@@ -85,6 +85,9 @@ message in English for the resulting diff (`git diff`). Do not commit unless
 asked. Follow the repo's Conventional Commits style (`fix(scope): ...`,
 `docs(scope): ...`, etc.).
 
+When changes are not committed, generate a commit comment from the diff and
+present it to the user so they can review or use it manually.
+
 ## Bug fixes
 
 When fixing a bug, prefer the **root-cause fix over the smallest diff**. A change
