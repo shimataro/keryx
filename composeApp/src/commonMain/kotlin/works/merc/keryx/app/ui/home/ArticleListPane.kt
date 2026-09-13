@@ -281,7 +281,7 @@ fun ArticleListPane(
 
         articles = results.map { it.article }
         listState = searchListState
-        branchReturnRipplePulse = 0
+        branchReturnRipplePulse = returnRipplePulse
         branchOnAddFeedClick = null
         hasNoFeeds = false
         sortEnabled = false
