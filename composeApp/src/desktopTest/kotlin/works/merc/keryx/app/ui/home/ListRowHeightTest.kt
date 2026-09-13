@@ -29,25 +29,25 @@ import kotlin.test.Test
 import kotlin.test.assertTrue
 
 /**
- * A touch-primary list row's painted highlight must floor at [listRowMinHeight] (56dp, M3's own
- * `NavigationDrawerItem` minimum) — as an *outer* height, so every row kind lands on the same band
- * height ([LIST_ROW_VERTICAL_MARGIN] on each side) regardless of how much inner content padding it
- * happens to carry. Before the fix this test guards, `heightIn(min = listRowMinHeight())` sat
- * *inside* each row's own content padding, so the floor applied to the content alone and the
- * padding stacked on top of it — `SidebarRow` (8dp top/bottom padding) rendered at 76dp,
- * `FeedRow`/`TagFeedRow` (4dp top/bottom) at 68dp, and only `FolderGroupHeader`/`TagRow` (no
- * vertical padding of their own) landed on the intended 60dp. See `listRowMinHeight`'s own KDoc.
+ * A touch-primary list row's painted highlight must floor at [listRowMinHeight] (52dp) — as an
+ * *outer* height, so every row kind lands on the same band height ([LIST_ROW_VERTICAL_MARGIN] on
+ * each side) regardless of how much inner content padding it happens to carry. Before the fix this
+ * test guards, `heightIn(min = listRowMinHeight())` sat *inside* each row's own content padding,
+ * so the floor applied to the content alone and the padding stacked on top of it — `SidebarRow`
+ * (8dp top/bottom padding) rendered at 72dp, `FeedRow`/`TagFeedRow` (4dp top/bottom) at 64dp,
+ * and only `FolderGroupHeader`/`TagRow` (no vertical padding of their own) landed on the intended
+ * 56dp. See `listRowMinHeight`'s own KDoc.
  *
  * The Compose test here runs at desktop density with `isTouchPrimary` forced to `true` by
  * parameter — `ExpandCollapseChevron`'s own content height therefore differs from a real Android
- * device (20dp here vs. 48dp there), but the 56dp floor dominates either way, so the asserted band
- * height (60dp) holds in both environments.
+ * device (20dp here vs. 48dp there), but the 52dp floor dominates either way, so the asserted band
+ * height (56dp) holds in both environments.
  */
 @OptIn(ExperimentalTestApi::class)
 class ListRowHeightTest {
 
-    /** The band height every touch-primary row must share: the 56dp floor plus its own margin. */
-    private val expectedTouchBandHeight: Dp = 56.dp + LIST_ROW_VERTICAL_MARGIN * 2
+    /** The band height every touch-primary row must share: the 52dp floor plus its own margin. */
+    private val expectedTouchBandHeight: Dp = 52.dp + LIST_ROW_VERTICAL_MARGIN * 2
 
     /** One folder, one folder feed, one tag with an unfoldered feed attached — one of each row kind. */
     private fun KeryxDatabase.seedOneOfEachRowKind() {
