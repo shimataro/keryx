@@ -6,7 +6,25 @@
 
 - `commonTest/` — Pure logic and Ktor `MockEngine` tests (parsers, fetchers, URL resolvers, OPML, Dropbox storage/auth, local settings). Runs on the desktop target, so `expect` declarations resolve to desktop `actual`s (`FileIO` / `AppDirs` available with temp directories).
 - `desktopTest/` — Tests requiring the actual SQLDelight driver (`JdbcSqliteDriver`) (schema, article upsert, ATTACH merge). Helpers are in `DbTestSupport.kt` (`inMemoryDb()`, `fileDb()`, `insertFeed()`). This directory also contains Compose UI tests that render actual Composables (`androidx.compose.ui.test.runDesktopComposeUiTest`, no JUnit4 rule needed) (e.g. `ArticleListPaneTest.kt`). Requires the actual Skia/AWT renderer, so placed in `desktopTest` rather than `commonTest`.
-- `androidDeviceTest/` — Instrumented tests for `DatabaseMerger`/`DatabaseSnapshot`'s Android actuals, which open the bundled `requery` SQLite (a native library) directly and therefore cannot run as a plain JVM unit test the way `desktopTest` does — see `.claude/rules/android-sqlite-bundling.md`. Needs a connected device or running emulator; there is no `androidUnitTest`/`androidHostTest` source set in this module, since none of `composeApp`'s Android-specific logic is JVM-testable without either a device or Robolectric (not currently a dependency). Helpers are in `AndroidDbTestSupport.kt` (`createSchemaDbFile()`, mirroring `DbTestSupport.kt`'s `fileDb()` but driven through a real `AndroidSqliteDriver` so the schema is installed the same way production creates it). Scoped narrowly to what is genuinely Android-specific — the schema-version guard, the migration path, exception-*class*-based failure classification (Android's `SQLiteException` carries no numeric result code, unlike the JDBC driver desktop's `DatabaseMerger` reads `resultCode` from), and the `NoOpDatabaseErrorHandler` regression (the bundled SQLite's default error handler deletes a database file it judges corrupt, confirmed by disassembling the AAR) — not a full port of `desktopTest`'s merge/snapshot suites, since the merge SQL itself (`MergeSql`) is pure and already covered there.
+- `androidDeviceTest/` — Instrumented tests that need Android's real, bundled SQLite or platform APIs and
+  therefore cannot run as a plain JVM unit test — see `.claude/rules/android-sqlite-bundling.md`. Needs a
+  connected device or running emulator; there is no `androidUnitTest`/`androidHostTest` source set in this
+  module, since none of `composeApp`'s Android-specific logic is JVM-testable without either a device or
+  Robolectric (not currently a dependency). Helpers are in `AndroidDbTestSupport.kt` (`createSchemaDbFile()`,
+  mirroring `DbTestSupport.kt`'s `fileDb()` but driven through a real `AndroidSqliteDriver` so the schema is
+  installed the same way production creates it). Five files, each scoped narrowly to what is genuinely
+  Android-specific:
+  - `DatabaseMergerDeviceTest.kt` / `DatabaseSnapshotDeviceTest.kt` — the schema-version guard, the migration
+    path, and merge/snapshot behavior against the bundled `requery` SQLite (a native library); not a full port
+    of `desktopTest`'s suites, since the merge SQL itself (`MergeSql`) is pure and already covered there.
+  - `MergeFailureClassificationDeviceTest.kt` — exception-*class*-based failure classification (Android's
+    `SQLiteException` carries no numeric result code, unlike the JDBC driver desktop's `DatabaseMerger` reads
+    `resultCode` from), and the `NoOpDatabaseErrorHandler` regression (the bundled SQLite's default error
+    handler deletes a database file it judges corrupt, confirmed by disassembling the AAR).
+  - `KeystoreTokenStorageDeviceTest.kt` — `KeystoreTokenStorage.save()`'s fallback path against the real
+    Android Keystore.
+  - `FilePickerDeviceTest.kt` — the Storage Access Framework file picker's write-failure path
+    (`ContentUriPickedFile.writeText` when no provider can open the stream).
 
 - `androidApp/src/androidTest/` — Instrumented Compose UI tests that need a real Android
   application module to host `androidx.compose.ui.test.junit4.v2.createComposeRule` (e.g.
@@ -16,7 +34,9 @@
   claim loop moved to `PointerEventPass.Initial`; `KeryxSearchBarAndroidTest.kt`, covering `ui/common/KeryxSearchBar.kt`'s Android
   `actual`s — this is where the M3-specific risk `desktopTest` cannot exercise at all lives: the
   editable field's `SearchBarDefaults.InputField` must not clip once the font-size setting scales
-  text past its 56dp minimum height, confirmed here at the largest (1.4×) setting). `composeApp`
+  text past its 56dp minimum height, confirmed here at the largest (1.4×) setting); `KeryxSettingRowAndroidGestureTest.kt`,
+  covering `ui/common/KeryxSettingRow.kt`'s Android `actual`'s toggle semantics — a `Role.Switch`/checked-state
+  regression a plain visual check would not catch). `composeApp`
   itself is an Android *library* module (`com.android.kotlin.multiplatform.library`), not an
   application — its own instrumented tests (`androidDeviceTest` above) are scoped to native-driver
   concerns that don't need a Compose UI tree, so a Compose-rendering test lives here instead, in

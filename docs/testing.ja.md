@@ -13,20 +13,26 @@
   （`androidx.compose.ui.test.runDesktopComposeUiTest`、JUnit4 ルール不要）も置く
   （例: `ArticleListPaneTest.kt`）。実 Skia/AWT レンダラが必要なため `commonTest` ではなく
   `desktopTest` に置く。
-- `androidDeviceTest/` — `DatabaseMerger`/`DatabaseSnapshot` の Android 実装向け計装テスト。
-  バンドルされた `requery` SQLite（ネイティブライブラリ）を直接開くため、`desktopTest` のような
-  プレーンな JVM ユニットテストとしては実行できない（`.claude/rules/android-sqlite-bundling.md`
-  参照）。実機または起動中のエミュレータが必要。`composeApp` には `androidUnitTest`/`androidHostTest`
+- `androidDeviceTest/` — Android 実機の SQLite やプラットフォーム API を必要とし、プレーンな JVM
+  ユニットテストとしては実行できない計装テスト（`.claude/rules/android-sqlite-bundling.md` 参照）。
+  実機または起動中のエミュレータが必要。`composeApp` には `androidUnitTest`/`androidHostTest`
   ソースセットは存在しない — デバイスか Robolectric（現状未導入の依存）のどちらか無しには JVM 上で
   テストできない Android 固有ロジックが無いため。ヘルパーは `AndroidDbTestSupport.kt`
   （`createSchemaDbFile()`。`DbTestSupport.kt` の `fileDb()` に相当するが、本番と同じスキーマ導入経路
-  である実際の `AndroidSqliteDriver` 経由で作成する）。範囲は Android 固有の差異が出うる箇所に絞る
-  — スキーマバージョンガード、マイグレーション経路、例外**クラス**ベースの失敗分類（Android の
-  `SQLiteException` は数値エラーコードを持たない。デスクトップの `DatabaseMerger` は JDBC ドライバの
-  `resultCode` を読む点と対照的）、および `NoOpDatabaseErrorHandler` の回帰確認（バンドル SQLite の
-  既定エラーハンドラは破損と判定した DB ファイルを削除する。AAR の逆アセンブルで確認済み）——
-  `desktopTest` のマージ/スナップショット系スイート全体を移植するものではない。マージ SQL 自体
-  （`MergeSql`）は純粋ロジックであり、既に `desktopTest` 側でカバーされているため。
+  である実際の `AndroidSqliteDriver` 経由で作成する）。5ファイルあり、それぞれ Android 固有の差異が
+  出うる箇所に絞る:
+  - `DatabaseMergerDeviceTest.kt` / `DatabaseSnapshotDeviceTest.kt` — スキーマバージョンガード、
+    マイグレーション経路、バンドルされた `requery` SQLite（ネイティブライブラリ）に対するマージ/
+    スナップショット動作。`desktopTest` のスイート全体を移植するものではない——マージ SQL 自体
+    （`MergeSql`）は純粋ロジックであり、既に `desktopTest` 側でカバーされているため。
+  - `MergeFailureClassificationDeviceTest.kt` — 例外**クラス**ベースの失敗分類（Android の
+    `SQLiteException` は数値エラーコードを持たない。デスクトップの `DatabaseMerger` は JDBC ドライバの
+    `resultCode` を読む点と対照的）、および `NoOpDatabaseErrorHandler` の回帰確認（バンドル SQLite の
+    既定エラーハンドラは破損と判定した DB ファイルを削除する。AAR の逆アセンブルで確認済み）。
+  - `KeystoreTokenStorageDeviceTest.kt` — `KeystoreTokenStorage.save()` のフォールバック経路を実際の
+    Android Keystore に対して検証。
+  - `FilePickerDeviceTest.kt` — Storage Access Framework のファイルピッカーの書き込み失敗経路
+    （どのプロバイダーもストリームを開けない場合の `ContentUriPickedFile.writeText`）。
 
 - `androidApp/src/androidTest/` — `androidx.compose.ui.test.junit4.v2.createComposeRule` を
   ホストできる、実際の Android アプリケーションモジュールを必要とする計装 Compose UI テスト
@@ -36,7 +42,9 @@
   際に自分のタップを重ねて発火していた回帰も含む。`ui/common/KeryxSearchBar.kt` の Android `actual` を検証する
   `KeryxSearchBarAndroidTest.kt` ——ここには `desktopTest` では一切検証できない M3 固有のリスクがある:
   編集可能な入力欄の `SearchBarDefaults.InputField` は、文字サイズ設定でテキストが最小高 56dp を
-  超えて拡大されてもクリップしてはならず、これを最大（1.4倍）設定で確認している）。`composeApp` 自体は
+  超えて拡大されてもクリップしてはならず、これを最大（1.4倍）設定で確認している。`ui/common/KeryxSettingRow.kt`
+  の Android `actual` のトグル意味論を検証する `KeryxSettingRowAndroidGestureTest.kt` ——プレーンな見た目の
+  確認では捕まえられない `Role.Switch`／チェック状態の回帰）。`composeApp` 自体は
   Android **ライブラリ**モジュール
   （`com.android.kotlin.multiplatform.library`）でありアプリケーションではない——その計装テスト
   （上記の `androidDeviceTest`）は Compose UI ツリーを必要としないネイティブドライバ寄りの範囲に
