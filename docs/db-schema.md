@@ -51,7 +51,7 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
 `id`(PK), `feed_id`(FK→feeds), `guid`, `url`, `title`, `summary`, `content`, `author`,
 `published_at`, `thumbnail_url`, `is_read`, `read_at`, `is_starred`, `starred_at`, `cached_at`,
 `search_text`, `updated_at`, `created_at`, `deleted_at`, `deleted_updated_at`. `UNIQUE(feed_id, guid)`.
-Indexes: `feed_id` / `is_read` / `is_starred` / `published_at DESC`.
+Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC, created_at DESC, id DESC)` for list ordering.
 
 - `id` is deterministically generated from `(feed_id, guid)` as **UUIDv5** (`IdGenerator.articleId`). The same article gets the same ID on all devices, so sync merge (articles matched by `id`) can propagate read/star states via last-write-wins. Existing rows keep their id via `upsert`'s `ON CONFLICT(feed_id, guid)` — deterministic generation only applies to new rows.
 - Read/star conflict resolution is last-write-wins via `read_at` / `starred_at`.

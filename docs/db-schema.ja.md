@@ -65,7 +65,8 @@
 `id`(PK), `feed_id`(FK→feeds), `guid`, `url`, `title`, `summary`, `content`, `author`,
 `published_at`, `thumbnail_url`, `is_read`, `read_at`, `is_starred`, `starred_at`, `cached_at`,
 `search_text`, `updated_at`, `created_at`, `deleted_at`, `deleted_updated_at`。`UNIQUE(feed_id, guid)`。
-インデックス: `feed_id` / `is_read` / `is_starred` / `published_at DESC`。
+インデックス: `feed_id`、`is_read`、`is_starred`、および一覧の並び順用の複合インデックス
+`(published_at DESC, created_at DESC, id DESC)`。
 
 - `id` は `(feed_id, guid)` から **UUIDv5** で決定的に生成する（`IdGenerator.articleId`）。同じ記事は
   全デバイスで同一 ID になるため、同期マージ（記事を `id` で照合する）が既読・スターを後勝ちで
