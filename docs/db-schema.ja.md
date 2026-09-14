@@ -151,7 +151,10 @@ DROP して行う。[sync-architecture.ja.md](sync-architecture.ja.md) の「FTS
 同期マージの後は `FtsManager.indexMissing()` で**未索引の新記事だけを増分投入**する（全 `'rebuild'` は毎回だと
 重くスケールしないため使わない）。全再構築は日次アイドル pass（`local_settings.lastFtsRebuiltAt`
 の 24h ゲート）でのみ行い、増分投入以降に本文が更新されて古くなった既存行の作り直しを担う。
-**起動時に `FtsManager.ensureIndexed()` を呼び、テーブルが無ければ作成し、索引に未登録の記事があれば増分投入する**。
+**起動時に `FtsManager.ensureIndexed()` を呼び、テーブルが無ければ作成し、索引に未登録の記事があれば増分投入する。**
+Android はこれより軽い `ensureIndexedIfTableAbsent()` をプロセス起動のたびに呼ぶ（`WorkManager` の
+ウェイクアップ含め1日最大約96回）— テーブルが既に存在すれば毎回 `indexMissing()` の `O(記事数)` スキャンを
+再実行せず、即座に no-op で返る。
 
 `tokenize='trigram'` は SQLite ≥3.34 を必要とするが、AOSP 自身の SQLite ビルドはこれを提供しない
 （どの API レベルでも FTS5 自体を含んでいない）— Android の `DatabaseDriverFactory` actual はバンドル
