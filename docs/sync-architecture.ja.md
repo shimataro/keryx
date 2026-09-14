@@ -188,9 +188,8 @@
 データを直しているかもしれない」を確認できる無料の再試行であり、ゲートの本来の目的
 ——同じ壊れたファイルを1プロセス内で何度も再ダウンロード・再マージせず、同じ通知を何度も出さないこと
 ——にはそれ以上の永続性は不要である。成功した同期（手動・自動どちらでも）、`resetCloudData()` の成功、
-そして `clearSyncFailureState()`（旧 `clearLastSyncError()` から改名 — ミラーされている失敗理由の
-テキストと合わせてゲートもクリアするようになった。接続の解除・切り替え時（
-`SettingsViewModel.disconnect()`/`switchTo()`）に呼ばれる）でクリアされる。
+そして `clearSyncFailureState()`（ミラーされている失敗理由のテキストも合わせてクリアする。接続の
+解除・切り替え時（`SettingsViewModel.disconnect()`/`switchTo()`）に呼ばれる）でクリアされる。
 
 リセット／通知の UI 側はゲートの影響を一切受けない: 通知センターの `ResetCloudData` ボタンも設定画面の
 リセットボタンも無条件（ゲートされない）で、スキップされた `AUTOMATIC` 呼び出しは `lastSyncError` に
