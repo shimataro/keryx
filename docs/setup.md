@@ -93,8 +93,8 @@ Split into what every target needs in common, and what's specific to the Android
   "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n keryx -k "system-images;android-<N>;google_apis_playstore;<ABI>"
   ```
 
-  `<N>` should match (or be close to) `minSdk = 26` / `compileSdk`/`targetSdk = 37` above; the
-  CI instrumented-test job runs against API 29. `<ABI>` should match your host CPU's own
+  For `<N>`, use API 29 to match what the CI instrumented-test job runs against, or any value in the
+  `minSdk = 26`..`compileSdk`/`targetSdk = 37` range above. `<ABI>` should match your host CPU's own
   architecture for hardware-accelerated emulation — `x86_64` on an x86_64 host, `arm64-v8a` on an
   ARM64 host (e.g. an Apple Silicon Mac, or ARM64 Windows/Linux) — see the
   [emulator acceleration guide](https://developer.android.com/studio/run/emulator-acceleration).

@@ -90,8 +90,8 @@
   "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n keryx -k "system-images;android-<N>;google_apis_playstore;<ABI>"
   ```
 
-  `<N>` は上記の `minSdk = 26` / `compileSdk`・`targetSdk = 37` に近い値を選ぶ。CI の計装テスト
-  ジョブは API 29 で実行している。`<ABI>` はホスト CPU のアーキテクチャに合わせる必要がある
+  `<N>` は、CI の計装テストジョブと同じ API 29 を使うか、上記の `minSdk = 26`〜`compileSdk`・
+  `targetSdk = 37` の範囲内で任意の値を選ぶ。`<ABI>` はホスト CPU のアーキテクチャに合わせる必要がある
   ——ハードウェアアクセラレーションを効かせるには、x86_64 ホストなら `x86_64`、ARM64 ホスト
   （Apple Silicon Mac や ARM64 版 Windows/Linux など）なら `arm64-v8a` を選ぶ。詳細は
   [エミュレータのアクセラレーションガイド](https://developer.android.com/studio/run/emulator-acceleration)
