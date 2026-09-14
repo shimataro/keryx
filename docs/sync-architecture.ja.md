@@ -478,10 +478,10 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
   初回接続時もバックグラウンドのトークンリフレッシュ時も同様。フォールバック自体は引き続き許容する
   （`SECURITY.md` に記載のとおり、意図的な graceful degradation）が、黙って行われてはならず、また何も
   保存できなかった場合を「平文ファイルに保存した」と報告してはならない、という位置づけ。
-  セキュアな書き込みが成功した際、デスクトップのセキュアストア実装はいずれも
-  （`KeyringTokenStorage`/`SecurityCliTokenStorage`/`LibSecretTokenStorage` — この合成ロジック自体は
-  共通の `SecretStoreTokenStorage` に集約されている）以前の劣化した保存で残った古いフォールバック
-  ファイルを削除する — Android の `KeystoreTokenStorage`（後述）と同じ clear-on-success の挙動で、
+  セキュアな書き込みが成功した際、デスクトップのセキュアストア実装はいずれも以前の劣化した保存で
+  残った古いフォールバックファイルを削除する——`KeyringTokenStorage`/`LibSecretTokenStorage` はこの合成
+  ロジックを共通の `SecretStoreTokenStorage` から継承するが、`SecurityCliTokenStorage` は継承せず同じ
+  合成ロジックを自前で実装している — Android の `KeystoreTokenStorage`（後述）と同じ clear-on-success の挙動で、
   セキュアストレージが再び使えるようになった後も平文コピーがディスクに残り続けないようにする。
   フォールバックの削除が成功を確認できなかった場合は、誤って `SECURE` と
   報告せず `PLAINTEXT_FILE` に降格する。
