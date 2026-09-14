@@ -36,9 +36,12 @@ composeApp/src/
     not SVG — Compose Multiplatform's SVG decoder is desktop/iOS-only and crashes on Android at
     runtime; VectorDrawable XML is the one image format `painterResource` renders on every target)
   jvmCommonMain/kotlin/…/  actuals shared by desktop and Android, needing no platform API either
-    target lacks: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage, AppInfo,
-    CloudStorageAvailability (the last two just read the shared generated BuildConfig),
-    FileSystemExtras, ZipExtractor (in-app update — see "In-App Update" below)
+    target lacks: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage,
+    AppInfo (just reads the shared generated BuildConfig), FileSystemExtras, ZipExtractor (in-app
+    update — see "In-App Update" below), di/CloudPlatformModule.kt (the shared cloud-provider DI
+    wiring both platformModules call — cloudSessionSingles, dropboxProvider, oneDriveProvider),
+    domain/OAuthUriParser.kt (parseOAuthUri, shared by desktop's and Android's `keryx://` redirect
+    handling)
   desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of each expect not covered by jvmCommonMain (DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule, InstallLocation) + LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage/LibSecretTokenStorage, sharing outcome-composition logic via SecretStoreTokenStorage), DesktopOs (isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux, plus text-antialiasing hint normalization — missing hint, VALUE_TEXT_ANTIALIAS_DEFAULT, and VALUE_TEXT_ANTIALIAS_OFF are resolved to greyscale antialiasing so Swing surfaces do not look jagged next to the Compose-rendered UI)
     tray/      KeryxTray (platform branch), MacTray, LinuxTray + the StatusNotifierItem/dbusmenu D-Bus objects
     platform/update/  DesktopUpdateInstaller, UpdateScriptWriter (pure self-replace/msiexec script templates), ProcessLauncher/RealProcessLauncher (the detached-launch seam a test fakes), ArchiveExtractor (DittoArchiveExtractor on macOS, where the signed bundle seals its own symlinks; InProcessArchiveExtractor in process elsewhere), CodeSigningVerifier/RealCodeSigningVerifier (the `codesign --verify` seam)
