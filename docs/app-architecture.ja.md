@@ -703,8 +703,9 @@ WebView をホストするペインを含む3ペインすべてがアプリの�
   iOS/iPadOS は compact 幅で `NavigationSplitView` のサイドバーを押し込まれたナビゲーション
   スタックに畳む（Mail.app、NetNewsWire、Reeder）——これはドロワーが存在する以前にこのアプリが
   していたことであり、`git log` にも今なお残っている: `Single` の depth 1 で `visiblePanes` が
-  `[FeedList]` を返していたこと、`FeedListPane` 自身の通知ベル、`onEnterArticleList`、戻り
-  リップル、これらはすべてドロワーと引き換えに削除された。`paneLayoutFor` と `visiblePanes` の
+  `[FeedList]` を返していたこと、`FeedListPane` 自身の通知ベル、`onEnterArticleList`——これらは
+  ドロワーと引き換えに削除された（戻りリップル自体はこれとは無関係で、現在も
+  `HomePaneLayout.kt` の `shouldFlashReturnedArticle` として存在する）。`paneLayoutFor` と `visiblePanes` の
   `Triple`/`Dual` の場合分けは iPadOS にそのまま持ち越せる（`NavigationSplitView` の3カラム・
   2カラムモードにそのまま対応し、`Dual` の常設の閲覧ペインは iPad 自身のスプリットビューとも
   一致する）——持ち越せないのは `Single` の見せ方だけである。

@@ -683,7 +683,8 @@ model does not carry over unchanged:
   `NavigationSplitView`'s sidebar into a pushed navigation stack at a compact width (Mail.app,
   NetNewsWire, Reeder) instead — which is what this app did before the drawer, and what `git log`
   still holds: `visiblePanes` returning `[FeedList]` at `Single` depth 1, `FeedListPane`'s own
-  notification bell, `onEnterArticleList`, and the return ripple, all removed alongside it.
+  notification bell, and `onEnterArticleList`, removed alongside it (the return ripple itself is unrelated and
+still exists today, at `HomePaneLayout.kt`'s `shouldFlashReturnedArticle`).
   `paneLayoutFor` and `visiblePanes`' `Triple`/`Dual` cases carry over to iPadOS unchanged (they map
   onto `NavigationSplitView`'s three- and two-column modes, and `Dual`'s permanent reading pane
   matches iPad's own split view); only `Single`'s presentation does not.
