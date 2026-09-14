@@ -180,7 +180,27 @@ Current `user_version` is 2 (`1.sqm` adds `articles.deleted_at` / `deleted_updat
 > statements referencing newer columns from failing with `no such column` against an old cloud DB. A cloud
 > `user_version` of `0` (pre-dating any `.sqm` migration) is **not** covered by this uplift.
 
-`DatabaseMerger.validateSchema(dbPath, schemaVersion)` returns a **nullable** `Boolean` — `true`/`false` for a registered schema version's tables/columns, `null` when `schemaVersion` has no entry in `domain/MergeSchema.EXPECTED_SCHEMAS` (`commonMain` — the expectation table is plain data shared by every platform; only the `PRAGMA table_info` reflection that checks a file against it lives in each `actual`), or `null` when opening the database or inspecting its tables fails (e.g. a corrupt or unreadable file) — a failed inspection says nothing about whether the schema itself is valid, so it must not be conflated with a completed inspection that finds it invalid (`false`). This is deliberately fail-safe in the direction that matters: a version bump (`KeryxDatabase.Schema.version`) whose expected-schema entry was forgotten degrades `validateSchema` from `true` to `null` rather than `false`, and every caller treats `null` the same as `true` — an undetermined verdict must never be used to offer a destructive cloud-data reset for what is really just a missing registration. `SyncMergerTest.validateSchemaReturnsTrueForValidKeryxDb` pins the current schema version to `true`, so a forgotten registration fails that test immediately rather than silently degrading behavior in the field; `schemaVersion` is a plain `Long`, so this cannot be enforced by the compiler (no sealed/enum exhaustiveness check applies), making that test the actual guard.
+`DatabaseMerger.validateSchema(dbPath, schemaVersion)` returns a **nullable** `Boolean`:
+
+- `true`/`false` for a registered schema version's tables/columns.
+- `null` when `schemaVersion` has no entry in `domain/MergeSchema.EXPECTED_SCHEMAS` (`commonMain` —
+  the expectation table is plain data shared by every platform; only the `PRAGMA table_info`
+  reflection that checks a file against it lives in each `actual`), or `null` when opening the
+  database or inspecting its tables fails (e.g. a corrupt or unreadable file) — a failed inspection
+  says nothing about whether the schema itself is valid, so it must not be conflated with a
+  completed inspection that finds it invalid (`false`).
+
+**Why `null` is treated as `true`.** This is deliberately fail-safe in the direction that matters: a
+version bump (`KeryxDatabase.Schema.version`) whose expected-schema entry was forgotten degrades
+`validateSchema` from `true` to `null` rather than `false`, and every caller treats `null` the same
+as `true` — an undetermined verdict must never be used to offer a destructive cloud-data reset for
+what is really just a missing registration.
+
+**The test that actually guards this.** `SyncMergerTest.validateSchemaReturnsTrueForValidKeryxDb`
+pins the current schema version to `true`, so a forgotten registration fails that test immediately
+rather than silently degrading behavior in the field; `schemaVersion` is a plain `Long`, so this
+cannot be enforced by the compiler (no sealed/enum exhaustiveness check applies), making that test
+the actual guard.
 
 ## FTS5 Handling
 

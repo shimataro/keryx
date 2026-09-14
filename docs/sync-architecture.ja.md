@@ -314,18 +314,26 @@ main（ローカル）側に既に存在する不整合が、マージの `UPDAT
 > 失敗しない。クラウドの `user_version` が `0`（どの `.sqm` マイグレーションよりも前）の場合はこの
 > 引き上げの対象**外**。
 
-`DatabaseMerger.validateSchema(dbPath, schemaVersion)` は **nullable な** `Boolean` を返す —
-登録済みのスキーマバージョンに対するテーブル・カラムの有無なら `true`/`false`、`schemaVersion` が
-`commonMain` の `domain/MergeSchema.EXPECTED_SCHEMAS` に未登録なら `null`（期待スキーマの表は全
-プラットフォーム共通の純粋なデータで、それをファイルと突き合わせる `PRAGMA table_info` の実処理だけが
-各 `actual` にある）。これは意図的に安全側へ倒す
-方向のフェイルセーフである — バージョンを上げた（`KeryxDatabase.Schema.version`）際に対応する
-期待スキーマの登録を忘れると、`validateSchema` は `false` ではなく `true` から `null` へ*劣化*し、
-呼び出し側はすべて `null` を `true` と同様に扱う — 判定不能な結果を使って破壊的なクラウドデータリセットを
-提示してはならない。`SyncMergerTest.validateSchemaReturnsTrueForValidKeryxDb` が現行スキーマバージョンで
-`true` になることを固定しているため、登録を忘れるとこのテストが即座に失敗する（本番での挙動劣化として
-静かに埋もれることはない）。`schemaVersion` はただの `Long` なのでこれをコンパイラで強制する手段は無く
-（sealed / enum の網羅性チェックは効かない）、このテストが実質的な歯止めになっている。
+`DatabaseMerger.validateSchema(dbPath, schemaVersion)` は **nullable な** `Boolean` を返す:
+
+- 登録済みのスキーマバージョンに対するテーブル・カラムの有無なら `true`/`false`。
+- `schemaVersion` が `commonMain` の `domain/MergeSchema.EXPECTED_SCHEMAS` に未登録なら `null`
+  （期待スキーマの表は全プラットフォーム共通の純粋なデータで、それをファイルと突き合わせる
+  `PRAGMA table_info` の実処理だけが各 `actual` にある）。あるいは、データベースを開く・テーブルを
+  検査する処理自体が失敗した場合（破損ファイル・読み取り不能なファイルなど）も `null` — 検査が
+  失敗したこと自体はスキーマ自体の妥当性について何も語らないため、検査が完了したうえで無効と
+  判定した場合（`false`）と混同してはならない。
+
+**`null` を `true` と同様に扱う理由。** これは意図的に安全側へ倒す方向のフェイルセーフである —
+バージョンを上げた（`KeryxDatabase.Schema.version`）際に対応する期待スキーマの登録を忘れると、
+`validateSchema` は `false` ではなく `true` から `null` へ*劣化*し、呼び出し側はすべて `null` を
+`true` と同様に扱う — 判定不能な結果を使って破壊的なクラウドデータリセットを提示してはならない。
+
+**実質的な歯止めになっているテスト。** `SyncMergerTest.validateSchemaReturnsTrueForValidKeryxDb` が
+現行スキーマバージョンで `true` になることを固定しているため、登録を忘れるとこのテストが即座に
+失敗する（本番での挙動劣化として静かに埋もれることはない）。`schemaVersion` はただの `Long` なので
+これをコンパイラで強制する手段は無く（sealed / enum の網羅性チェックは効かない）、このテストが
+実質的な歯止めになっている。
 
 ## FTS5 の扱い
 
