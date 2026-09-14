@@ -74,7 +74,8 @@
 - 既読・スターの競合解決は `read_at` / `starred_at` で後勝ち。
 - `content` は `summary` より優先して表示。両方 NULL の場合、その場にローカライズされた「本文なし」の
   プレースホルダーを表示する（外部ブラウザーで開くリンク／ボタン付き）。自動で何かが開くことはない。
-- `search_text = COALESCE(content, summary, '')`。挿入・更新時に計算する。
+- `search_text` ＝ `content`（無ければ `summary`）の HTML タグを除去した平文。両方 NULL なら `""`。
+  挿入・更新時に計算する（`ArticleRepository`、`HtmlText.toPlainText`）。
 - `deleted_at`（NULL = 生存）で論理削除する。`deleted_at` を書き込むのは**キャッシュ削除のみ**
   （`softDeleteExpired`）で、スター付き記事は削除しない。`deleted_updated_at` は削除/復活イベントの
   フィールド別後勝ちタイムスタンプ（`read_at` / `starred_at`、および `feeds.deleted_updated_at` と同様）で、
