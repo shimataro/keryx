@@ -219,8 +219,9 @@ Each of these was tested against the deterministic repro and made no difference:
 - `stringResource` lookups in the row.
 - Compose version skew: `runtime` / `foundation` / `ui` all resolve to a single version, and the
   `org.jetbrains.compose.*` and `androidx.compose.*` desktop artifacts on the classpath are empty
-  alias jars, so there is no duplicate-class conflict. The `compose-material3` pin is also not a
-  factor — that version *is* the newest stable (1.10 and 1.11 only ever shipped alphas).
+  alias jars, so there is no duplicate-class conflict. The `compose-material3` pin (currently `1.9.0`,
+  `gradle/libs.versions.toml`) is also not a factor — re-check the latest stable release before
+  ruling this out again on a future bump, per "Re-checking after a library update" below.
 
 ### Workarounds that did not work
 
@@ -231,8 +232,9 @@ Listed so they are not tried again:
 - Waiting for `isScrollInProgress` to clear before scrolling into view.
 - Both of the above combined.
 - `requestScrollToItem`, which defers the scroll to the next measure pass.
-- Upgrading to Compose Multiplatform **1.12.0-beta03** (confirmed to actually resolve in the
-  dependency graph; still reproduces 5 / 5).
+- Upgrading to a newer Compose Multiplatform pre-release (confirmed to actually resolve in the
+  dependency graph; still reproduces 5 / 5 as of the version tested — re-check per "Re-checking
+  after a library update" below rather than trusting this version number indefinitely).
 
 The only thing that prevents it is removing the scroll-into-view behaviour entirely, which would
 mean the selected article can sit off-screen during keyboard navigation. That is a worse trade than
@@ -380,7 +382,7 @@ only a SHARED lock at the read and has to **upgrade** to RESERVED at the write.
 SQLite's own lock-upgrade rule (documented behavior of `sqlite3_busy_handler`) is: if granting the
 upgrade could deadlock against another connection that is itself waiting to upgrade, SQLite returns
 `SQLITE_BUSY` **immediately, without invoking the busy handler**. `busy_timeout` (this app's
-`SQLITE_BUSY_TIMEOUT_MS`, applied via `sqlite_connection_properties()`) only governs waiting to
+`SQLITE_BUSY_TIMEOUT_MS`, applied via `sqliteConnectionProperties()`) only governs waiting to
 *acquire* a lock that has no conflicting upgrade in progress — it does not apply here.
 
 The two overlapping writers in the failing test: the first `subscribeFeedWrite` call holds RESERVED

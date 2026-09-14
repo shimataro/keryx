@@ -215,8 +215,9 @@ Compose 自身のレイジーリスト項目再利用における内部不変条
 - 行内の `stringResource` 呼び出し。
 - Compose のバージョン不整合。`runtime` / `foundation` / `ui` は単一バージョンに解決されており、
   クラスパス上の `org.jetbrains.compose.*` と `androidx.compose.*` の desktop 成果物は
-  **クラスを含まないエイリアス jar** なので重複クラス衝突は起きない。`compose-material3` のピンも
-  要因ではない（そのバージョンが最新安定版で、1.10 / 1.11 は alpha しか出ていない）。
+  **クラスを含まないエイリアス jar** なので重複クラス衝突は起きない。`compose-material3` のピン
+  （現在 `1.9.0`、`gradle/libs.versions.toml`）も要因ではない——将来バンプする際は、この判断を
+  再確認せずに信用せず、下記「ライブラリ更新後の再確認」に従って最新安定版を確認し直すこと。
 
 ### 効果が無かった回避策
 
@@ -227,8 +228,9 @@ Compose 自身のレイジーリスト項目再利用における内部不変条
 - scroll-into-view の前に `isScrollInProgress` が false になるまで待つ。
 - 上記 2 つの併用。
 - 次の measure パスまでスクロールを遅延させる `requestScrollToItem`。
-- Compose Multiplatform **1.12.0-beta03** への更新（依存グラフに実際に解決されたことを確認済み。
-  それでも 5 / 5 で再現）。
+- より新しい Compose Multiplatform のプレリリース版への更新（依存グラフに実際に解決されたことを
+  確認済み。検証時点のバージョンでもそれでも 5 / 5 で再現——このバージョン番号を永続的に信用せず、
+  下記「ライブラリ更新後の再確認」に従って再確認すること）。
 
 唯一有効だったのは scroll-into-view 自体を取り除くことだが、それではキーボード操作時に選択記事が
 画面外に留まってしまう。発生頻度の低さに対して割に合わないため採用しなかった。
@@ -374,7 +376,7 @@ RESERVED へ**昇格**する必要がある。
 SQLite 自身のロック昇格ルール（`sqlite3_busy_handler` の公式ドキュメントに記載された挙動）は次のとおり:
 その昇格を許可すると、別の接続が自分自身の昇格待ちでデッドロックし得る場合、SQLite は
 **busy handler を呼び出すことなく即座に** `SQLITE_BUSY` を返す。`busy_timeout`（このアプリの
-`SQLITE_BUSY_TIMEOUT_MS`。`sqlite_connection_properties()` 経由で適用）は、他の昇格と衝突していない
+`SQLITE_BUSY_TIMEOUT_MS`。`sqliteConnectionProperties()` 経由で適用）は、他の昇格と衝突していない
 ロックの**取得**を待つ場合にのみ効き、この経路には効かない。
 
 失敗したテストにおける並行書き込み元は次の 2 つ: 1 本目の `subscribeFeedWrite` は
