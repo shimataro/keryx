@@ -18,11 +18,12 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
 - All tables are managed by SQLDelight (`.sq`). `articles_fts` is created/maintained separately via raw SQL (`FtsManager`).
 - Logical deletion uses `deleted_at` (NULL = alive). Sync timestamp is `updated_at`.
 - Booleans and timestamps are **INTEGER (`Long`)**. Booleans are 0/1; times are Unix milliseconds.
-- Schema version is managed by `PRAGMA user_version` (currently 2). `DatabaseDriverFactory` drives create/migrate.
-  Version 2 adds `articles.deleted_at` / `deleted_updated_at` via `1.sqm` (SQLDelight derives the version from the
-  highest migration file + 1). When the schema changes, add a `.sqm` file (`<from-version>.sqm`) and the version bumps
-  automatically; `domain/MergeSchema.EXPECTED_SCHEMAS` (which `DatabaseMerger.validateSchema` checks against) must be
-  updated to the new version in lockstep.
+- Schema version is managed by `PRAGMA user_version` (currently 2). On desktop, `DatabaseDriverFactory`
+  drives create/migrate manually off this pragma; on Android, `AndroidSqliteDriver` drives it internally via its own
+  `onCreate`/`onUpgrade` callbacks. Version 2 adds `articles.deleted_at` / `deleted_updated_at` via `1.sqm`
+  (SQLDelight derives the version from the highest migration file + 1). When the schema changes, add a `.sqm` file
+  (`<from-version>.sqm`) and the version bumps automatically; `domain/MergeSchema.EXPECTED_SCHEMAS` (which
+  `DatabaseMerger.validateSchema` checks against) must be updated to the new version in lockstep.
 
 ## Table List
 

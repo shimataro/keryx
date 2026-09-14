@@ -18,9 +18,10 @@
 - 全テーブルは SQLDelight（`.sq`）で管理。`articles_fts` のみ生 SQL（`FtsManager`）で別途作成する。
 - 論理削除は `deleted_at`（NULL = 生存）。同期タイムスタンプは `updated_at`。
 - 真偽値・タイムスタンプは **INTEGER（`Long`）**。真偽値は 0/1、時刻は Unix ミリ秒。
-- スキーマバージョンは `PRAGMA user_version`（現在 2）。`DatabaseDriverFactory` が create/migrate を駆動。
-  バージョン 2 は `1.sqm` で `articles.deleted_at` / `deleted_updated_at` を追加する（SQLDelight は最大の
-  マイグレーションファイル + 1 でバージョンを導出）。スキーマを変える場合は `.sqm` ファイル
+- スキーマバージョンは `PRAGMA user_version`（現在 2）。desktop では `DatabaseDriverFactory` がこのプラグマを見て
+  create/migrate を自前で駆動するが、Android では `AndroidSqliteDriver` が自身の `onCreate`/`onUpgrade` コールバック内で
+  内部的に駆動する。バージョン 2 は `1.sqm` で `articles.deleted_at` / `deleted_updated_at` を追加する（SQLDelight は
+  最大のマイグレーションファイル + 1 でバージョンを導出）。スキーマを変える場合は `.sqm` ファイル
   （`<移行元バージョン>.sqm`）を追加すればバージョンは自動で上がる。あわせて
   `domain/MergeSchema.EXPECTED_SCHEMAS`（`DatabaseMerger.validateSchema` が参照する期待スキーマ）を
   新バージョンに追随させること。
