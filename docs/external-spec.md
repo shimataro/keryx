@@ -137,34 +137,39 @@ article detail) + keyboard navigation, adapting down to fewer simultaneous panes
 
 ### Adaptive layout (width) and touch input (Android)
 
-The 3-pane layout is desktop's steady state — the window can never narrow below the width all three
+**3-pane width (desktop's steady state).** The window can never narrow below the width all three
 panes need, so it always shows all three, with the feed list as a permanent sidebar pane. "The width
 all three panes need" is measured at the panes' intended sizes rather than their bare minimums: a
 screen just wide enough to cram all three onto their floors at once — an Android tablet held in
 portrait, say — counts as narrower and shows two, while a large Android tablet in landscape is
-genuinely wide enough and does get all three. At any narrower width, the feed list instead becomes a
-Gmail-style navigation drawer — reached via a hamburger button, and opened automatically the very
-first time the app has no feeds and no cloud account yet, so a new user sees it (and the "+" button
-to add a first feed) without having to find it themselves. A phone-width screen shows one of the two
-remaining panes (article list, article detail) at a time as a hierarchical stack with its own back
-control; a tablet-width screen shows both together, permanently — there is no narrower state where
-the reader loses its own back control without the article list gaining a permanent one beside it
-(see the note on the swipe gesture below). Nothing about either pane's own content changes between
-these — only how many are on screen together — with one exception: search. At the 3-pane width the
-search field stays where it has always been, in the feed list's sidebar, with results appearing
-reactively in the article list beside it. At a narrower width the drawer has no search field of its
-own at all — a phone- or tablet-width screen both reach search through the article list's own
-header, which is the one pane every narrower width always keeps on screen and therefore the one
-place the field can live without duplicating an editable copy of the same query. Tapping it moves
-the field to sit directly above the results it filters, in the same header a hamburger button
-normally occupies, and it stays put there when the device is rotated between phone and tablet width.
-At every width, search narrows whatever subscription-list item is currently selected rather than
-being a separate destination of its own. At the 3-pane width this selection stays visible and
-highlighted in the sidebar throughout, showing plainly what the query is being matched against; at
-a narrower width the feed list is a drawer that is normally already closed by the time search is
-reached (through the article list's own header), so the selection isn't on screen while searching
-there. Either way, clearing the query (or, at a narrower width, backing out of the expanded field)
-simply returns to that same selection's own unfiltered list.
+genuinely wide enough and does get all three.
+
+**Narrower widths.** The feed list instead becomes a Gmail-style navigation drawer — reached via a
+hamburger button, and opened automatically the very first time the app has no feeds and no cloud
+account yet, so a new user sees it (and the "+" button to add a first feed) without having to find
+it themselves. A phone-width screen shows one of the two remaining panes (article list, article
+detail) at a time as a hierarchical stack with its own back control; a tablet-width screen shows
+both together, permanently — there is no narrower state where the reader loses its own back control
+without the article list gaining a permanent one beside it (see the note on the swipe gesture
+below). Nothing about either pane's own content changes between these — only how many are on screen
+together — with one exception: search.
+
+**Search field placement.** At the 3-pane width the search field stays where it has always been, in
+the feed list's sidebar, with results appearing reactively in the article list beside it. At a
+narrower width the drawer has no search field of its own at all — a phone- or tablet-width screen
+both reach search through the article list's own header, which is the one pane every narrower width
+always keeps on screen and therefore the one place the field can live without duplicating an
+editable copy of the same query. Tapping it moves the field to sit directly above the results it
+filters, in the same header a hamburger button normally occupies, and it stays put there when the
+device is rotated between phone and tablet width.
+
+**What search narrows.** At every width, search narrows whatever subscription-list item is
+currently selected rather than being a separate destination of its own. At the 3-pane width this
+selection stays visible and highlighted in the sidebar throughout, showing plainly what the query is
+being matched against; at a narrower width the feed list is a drawer that is normally already closed
+by the time search is reached (through the article list's own header), so the selection isn't on
+screen while searching there. Either way, clearing the query (or, at a narrower width, backing out
+of the expanded field) simply returns to that same selection's own unfiltered list.
 
 Where a mouse and a touchscreen need different affordances, both are supported without changing
 the underlying action: reordering a feed or folder is a plain click-and-drag with a mouse, and a
