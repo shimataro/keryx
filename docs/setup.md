@@ -191,8 +191,8 @@ additionally needs the Android SDK, per above. The native packaging tasks
     preinstalled, so both `ci.yml` and `release.yml` build it with no separate install
     step — see [build.md](build.md).
 
-`fakeroot`/`rpm` are not installed by default on `ubuntu-latest`; the release workflow installs
-them via `apt-get` right before packaging (`.github/workflows/release.yml`). Xcode Command Line
+`fakeroot`/`rpm` are not installed by default on `ubuntu-latest`; both `ci.yml` and `release.yml`
+install them via `apt-get` right before packaging. Xcode Command Line
 Tools and WiX Toolset already come preinstalled on the `macos-latest` and `windows-latest` runner
 images respectively — a local dev machine still needs whichever of these three it's missing set up
 manually.

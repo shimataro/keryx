@@ -186,9 +186,9 @@
     WiX Toolset v3.14.1 がプリインストール済みのため、`ci.yml` と `release.yml` のどちらも
     追加のインストール手順なしでビルドできる。詳細は `build.md` 参照
 
-`fakeroot`/`rpm` は `ubuntu-latest` に既定で入っていない。リリース
-ワークフローはパッケージング直前に `apt-get` で `fakeroot rpm` をインストールしている
-（`.github/workflows/release.yml`）。Xcode Command Line Tools と WiX Toolset は
+`fakeroot`/`rpm` は `ubuntu-latest` に既定で入っていない。`ci.yml`・`release.yml` の
+どちらもパッケージング直前に `apt-get` で `fakeroot rpm` をインストールしている。
+Xcode Command Line Tools と WiX Toolset は
 `macos-latest` / `windows-latest` の各ランナーイメージにそれぞれプリインストール済み —
 ローカルの開発機ではこの3つのうち足りないものを手動でセットアップする必要がある。
 
