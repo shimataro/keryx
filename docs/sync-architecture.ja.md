@@ -339,8 +339,9 @@ main（ローカル）側に既に存在する不整合が、マージの `UPDAT
   実行中の検索を弾き得るため hot path では使わない。本文が更新された既存記事の索引は次の rebuild まで古いまま
   （許容。記事はなお旧トークンでヒットするので検索が 0 件に退行しない）。
 - **healing 用の全再構築（`rebuildIndex()` = `'rebuild'`）**:
-  `StartupTasks.kt` の日次アイドル pass（`maybeRebuildFtsIndex`、`local_settings.lastFtsRebuiltAt` の 24h ゲート +
-  `ActivityCenter` アイドル）でのみ実行。増分投入以降に本文が更新されて古くなった既存行を作り直す。
+  `domain/StartupMaintenanceTasks.kt` の `maybeRebuildFtsIndex`（desktop と Android で共有）による日次アイドル
+  pass（`local_settings.lastFtsRebuiltAt` の 24h ゲート + `ActivityCenter` アイドル）でのみ実行。増分投入以降に
+  本文が更新されて古くなった既存行を作り直す。
   `'rebuild'` は単一文で原子的（読み手は再構築前後どちらかを見るだけ）＋ `busy_timeout` で待つため、
   実行中の検索も 0 件にならない。
 
@@ -351,15 +352,17 @@ mutex で直列化する（このため両者は `suspend`）。日次 pass の�
 どの呼び出し元も catch しない生の `SQLiteException` になる。検索は**意図的に直列化しない**: 従来どおり
 `'rebuild'` が単一のアトミックな文であることと `busy_timeout` の待機に依存する。
 
-起動時に `FtsManager.ensureIndexed()`（初回作成 + 未索引行の増分投入）を呼ぶのは従来どおりだが、`main.kt` の
-`runBlocking` から呼ぶ（索引不在のままウィンドウを開かせないため）。ライタ mutex はコルーチンベースで、この
-時点では直前にディスパッチされた `.opml` インポートが短時間だけ保持し得るのみなので、メインスレッドで待って
-もデッドロックしない。
+desktop の起動時は `main.kt` の `runBlocking` から `FtsManager.ensureIndexed()`（初回作成 + 未索引行の増分
+投入）を呼ぶ（索引不在のままウィンドウを開かせないため）。ライタ mutex はコルーチンベースで、この時点では
+直前にディスパッチされた `.opml` インポートが短時間だけ保持し得るのみなので、メインスレッドで待っても
+デッドロックしない。Android は代わりに、より軽い `ensureIndexedIfTableAbsent()` をプロセス起動のたびに
+呼ぶ（理由は [db-schema.ja.md](db-schema.ja.md) の `articles_fts` 節「起動時」を参照）。
 
 ## クラウド認証（OAuth PKCE + オフラインアクセス）
 
 OAuth 2.0 authorization-code-with-PKCE のオーケストレーション（PKCE 生成・認可 URL 構築・ブラウザー起動・
-state 検証・コード交換）はプロバイダー共通の `OAuthConnectFlow`（desktop）に集約する。プロバイダー差は
+state 検証・コード交換）はプロバイダー共通の `OAuthConnectFlow`（`commonMain`、desktop と Android で共有）
+に集約する。プロバイダー差は
 **リダイレクトの受け取り方（`OAuthRedirectTransport`）とエンドポイント/スコープ（`CloudAuthManager` 実装）**
 だけで、`DropboxAuthManager` / `GoogleDriveAuthManager` / `OneDriveAuthManager` が `CloudAuthManager` を実装する。いずれも
 オフラインアクセス（Dropbox: `token_access_type=offline`、Google: `access_type=offline` + `prompt=consent`、OneDrive: `offline_access` スコープ）を

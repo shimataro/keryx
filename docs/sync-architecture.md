@@ -189,7 +189,10 @@ Index maintenance is two-tier:
 
 - **Hot path (after feed refresh / sync merge)**: `FtsManager.indexMissing()` incrementally indexes only unindexed new articles (O(new rows), does not wipe index). Full rebuild (`'rebuild'`) is O(total indexed text) and heavy, and could reject running searches, so it is not used on hot paths. Indexes of existing articles with updated body text remain stale until the next rebuild (acceptable; they still match old tokens so searches do not regress to zero results).
 - **Healing full rebuild (`rebuildIndex()` = `'rebuild'`)**:
-  Executed only in the daily idle pass in `StartupTasks.kt` (`maybeRebuildFtsIndex`, gated by `local_settings.lastFtsRebuiltAt` 24h gate + `ActivityCenter` idle). Rebuilds stale existing rows (body text updated since incremental indexing). `'rebuild'` is a single atomic statement (readers see only before or after) + `busy_timeout` wait, so running searches do not regress to zero results either.
+  Executed only in the daily idle pass (`domain/StartupMaintenanceTasks.kt`'s `maybeRebuildFtsIndex`, shared by
+  desktop and Android, gated by `local_settings.lastFtsRebuiltAt` 24h gate + `ActivityCenter` idle). Rebuilds stale
+  existing rows (body text updated since incremental indexing). `'rebuild'` is a single atomic statement (readers
+  see only before or after) + `busy_timeout` wait, so running searches do not regress to zero results either.
 
 The two index writers are **mutually exclusive**: `FtsManager` serializes `indexMissing()` and
 `rebuildIndex()` behind an internal mutex (both are therefore `suspend`). The daily pass's idle gate is a
@@ -198,14 +201,15 @@ rebuild — always wasted work (a rebuild subsumes an incremental insert), and o
 outlasts `busy_timeout`, a raw `SQLiteException` no caller catches. Searches are deliberately **not**
 serialized: they still rely on `'rebuild'` being a single atomic statement plus the `busy_timeout` wait.
 
-On startup, `FtsManager.ensureIndexed()` (initial creation + unindexed row incremental insert) is called as
-before, from a `runBlocking` in `main.kt` — the window must not open on an absent index. The writer mutex
-is coroutine-based and, that early, can only be held briefly by an `.opml` import dispatched moments
-before, so blocking the main thread on it cannot deadlock.
+On desktop startup, `FtsManager.ensureIndexed()` (initial creation + unindexed row incremental insert) is called
+from a `runBlocking` in `main.kt` — the window must not open on an absent index. The writer mutex is
+coroutine-based and, that early, can only be held briefly by an `.opml` import dispatched moments before, so
+blocking the main thread on it cannot deadlock. Android instead calls the cheaper `ensureIndexedIfTableAbsent()`
+on every process start (see "On startup" in [db-schema.md](db-schema.md)'s `articles_fts` section for why).
 
 ## Cloud Authentication (OAuth PKCE + Offline Access)
 
-OAuth 2.0 authorization-code-with-PKCE orchestration (PKCE generation, authorization URL building, browser launch, state verification, code exchange) is consolidated in `OAuthConnectFlow` (desktop). Provider differences are only in **redirect reception method (`OAuthRedirectTransport`) and endpoints/scopes (`CloudAuthManager` implementation)**, so `DropboxAuthManager` / `GoogleDriveAuthManager` / `OneDriveAuthManager` implement `CloudAuthManager`. All request offline access (Dropbox: `token_access_type=offline`, Google: `access_type=offline` + `prompt=consent`, OneDrive: `offline_access` scope) to **obtain and save refresh tokens**.
+OAuth 2.0 authorization-code-with-PKCE orchestration (PKCE generation, authorization URL building, browser launch, state verification, code exchange) is consolidated in `OAuthConnectFlow` (`commonMain`, shared by desktop and Android). Provider differences are only in **redirect reception method (`OAuthRedirectTransport`) and endpoints/scopes (`CloudAuthManager` implementation)**, so `DropboxAuthManager` / `GoogleDriveAuthManager` / `OneDriveAuthManager` implement `CloudAuthManager`. All request offline access (Dropbox: `token_access_type=offline`, Google: `access_type=offline` + `prompt=consent`, OneDrive: `offline_access` scope) to **obtain and save refresh tokens**.
 
 Redirect reception method is chosen per provider (see the `.claude/rules/cloud-oauth-transport.md` design rule — prefer the custom URI scheme when both work):
 
