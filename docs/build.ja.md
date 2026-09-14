@@ -698,7 +698,34 @@ package_update,package_release` の ACL を指定）で生成したものを使�
 `LibSecretTokenStorage`／Secret portal 経路（申請が一切不要）は上記「Linux Snap パッケージ」
 参照。
 
-Android のリリース署名には、`ANDROID_RELEASE_KEYSTORE_BASE64`、`ANDROID_RELEASE_KEYSTORE_PASSWORD`、`ANDROID_RELEASE_KEY_ALIAS`、`ANDROID_RELEASE_KEY_PASSWORD` をリポジトリの Secrets に設定する。keystore は Base64 エンコードした PKCS12/JKS ファイルであり、ワークフローがビルド時に復元する。GitHub Releases と Google Play で同じ署名キーを使いたい場合は、ローカルで生成した keystore を、アプリ作成時に Google Play Console で**既存のアプリ署名キー**として登録する: Play Console は生の JKS/PKCS12 ファイルをそのままでは受け付けず、まず Google の PEPK（Play Encrypt Private Key）ツールで暗号化する必要がある（`java -jar pepk.jar --keystore=<path> --alias=<alias> --output=<encrypted-file> --encryptionkey=<key-from-play-console>`。Play App Signing の登録ページからダウンロードできる）。生成された暗号化ファイルをアップロードすると、その keystore が**アプリ署名キー**として登録される — これは Google が保持し、ユーザーに届く前にアプリを再署名するために使う鍵であり、以降 Play Console にアップロードする各 `.aab` に署名する**アップロードキー**とは区別される。同じ keystore を両方の役割に使うこともでき（Google はアプリ署名キーをそのままアップロードキーとして再利用することを明示的に許可している）、これにより GitHub Releases（APK/AAB に直接その keystore で署名する）と Google Play の双方で単一の keystore のみで済む。専用のアップロードキーを別に用意するのは Google が推奨する追加の防御策であり、必須ではない。`release.yml` は `:androidApp:assembleGithubRelease`/`:androidApp:bundlePlayRelease` に `-PandroidReleaseSigningRequired=true` を渡しており、これは Secrets が未設定（または一部だけ設定）の場合に**即座のビルド失敗**へつなげるためのフラグ — このワークフローは成果物を公開するので、未署名のまま成功させてはならない。そのため release ワークフローの成功には4つすべての Secrets が必須。両方の flavor は同じ keystore で署名される（`signingConfigs` は flavor スコープではない）——これはまさに上記のアプリ署名キー登録が要求する構成そのもの: サイドロードされる `github` の APK と、Play が再署名する `play` の AAB は同一の署名 ID に遡れる必要があり、そうでなければ一方が既にインストールされている端末が他方をその場でのアップデートとして受け取れなくなる（`INSTALL_FAILED_UPDATE_INCOMPATIBLE`）。
+Android のリリース署名には、`ANDROID_RELEASE_KEYSTORE_BASE64`、`ANDROID_RELEASE_KEYSTORE_PASSWORD`、
+`ANDROID_RELEASE_KEY_ALIAS`、`ANDROID_RELEASE_KEY_PASSWORD` をリポジトリの Secrets に設定する。keystore は
+Base64 エンコードした PKCS12/JKS ファイルであり、ワークフローがビルド時に復元する。
+
+**keystore を Google Play に登録する（一度きり。両チャネルで同じ署名キーを使うため）。** GitHub Releases と
+Google Play で同じ署名キーを使いたい場合は、ローカルで生成した keystore を、アプリ作成時に Google Play
+Console で**既存のアプリ署名キー**として登録する: Play Console は生の JKS/PKCS12 ファイルをそのままでは
+受け付けず、まず Google の PEPK（Play Encrypt Private Key）ツールで暗号化する必要がある
+（`java -jar pepk.jar --keystore=<path> --alias=<alias> --output=<encrypted-file> --encryptionkey=<key-from-play-console>`。
+Play App Signing の登録ページからダウンロードできる）。生成された暗号化ファイルをアップロードする。
+
+**アプリ署名キーとアップロードキーの違い。** これにより、その keystore が**アプリ署名キー**として登録される
+— これは Google が保持し、ユーザーに届く前にアプリを再署名するために使う鍵であり、以降 Play Console に
+アップロードする各 `.aab` に署名する**アップロードキー**とは区別される。同じ keystore を両方の役割に使う
+こともでき（Google はアプリ署名キーをそのままアップロードキーとして再利用することを明示的に許可している）、
+これにより GitHub Releases（APK/AAB に直接その keystore で署名する）と Google Play の双方で単一の keystore
+のみで済む。専用のアップロードキーを別に用意するのは Google が推奨する追加の防御策であり、必須ではない。
+
+**4つの Secrets はすべて必須で、任意ではない。** `release.yml` は
+`:androidApp:assembleGithubRelease`/`:androidApp:bundlePlayRelease` に
+`-PandroidReleaseSigningRequired=true` を渡しており、これは Secrets が未設定（または一部だけ設定）の場合に
+**即座のビルド失敗**へつなげるためのフラグ — このワークフローは成果物を公開するので、未署名のまま成功させて
+はならない。
+
+**両方の flavor は1つの keystore を共有する。** `signingConfigs` は flavor スコープではなく、これはまさに
+上記のアプリ署名キー登録が要求する構成そのもの: サイドロードされる `github` の APK と、Play が再署名する
+`play` の AAB は同一の署名 ID に遡れる必要があり、そうでなければ一方が既にインストールされている端末が
+他方をその場でのアップデートとして受け取れなくなる（`INSTALL_FAILED_UPDATE_INCOMPATIBLE`）。
 
 `ci.yml` の通常のビルドジョブは、push のたびに実行され何も公開しない都合上、意図的にこれらの
 Secrets を受け取らない。AGP は成果物が実際に使われるかどうかに関わらず `assembleRelease` を

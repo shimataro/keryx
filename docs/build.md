@@ -666,7 +666,33 @@ No `password-manager-service` auto-connect request is filed after publishing —
 package" above for why (Snapcraft reviewers decline this interface's auto-connect on principle)
 and for the `LibSecretTokenStorage`/Secret-portal path used instead, which needs no such request.
 
-For Android release signing, set `ANDROID_RELEASE_KEYSTORE_BASE64`, `ANDROID_RELEASE_KEYSTORE_PASSWORD`, `ANDROID_RELEASE_KEY_ALIAS`, and `ANDROID_RELEASE_KEY_PASSWORD` as repository secrets. The keystore is a Base64-encoded PKCS12/JKS file; the workflow decodes it at build time. To keep the same signing key on GitHub Releases and Google Play, generate the keystore locally and, when creating the app in Google Play Console, enroll it as the **existing app signing key**: Play Console never accepts the raw JKS/PKCS12 file directly — first encrypt it with Google's PEPK (Play Encrypt Private Key) tool (`java -jar pepk.jar --keystore=<path> --alias=<alias> --output=<encrypted-file> --encryptionkey=<key-from-play-console>`, downloaded from the Play App Signing enrollment page), then upload the resulting encrypted file. This registers the keystore as the **app signing key** — the key Google holds and uses to re-sign the app before it reaches users, distinct from the **upload key** used to sign each `.aab` submitted through Play Console afterward. The same keystore can serve both roles (Google explicitly allows reusing the app signing key as its own upload key), which is what keeps a single keystore sufficient for both GitHub Releases (where the APK/AAB is signed with it directly) and Google Play; a separate, dedicated upload key is Google's recommended hardening, not a requirement. `release.yml` passes `-PandroidReleaseSigningRequired=true` to `:androidApp:assembleGithubRelease`/`:androidApp:bundlePlayRelease`, which turns a missing (or half-configured) secret into an immediate build failure — since this workflow publishes its output, it must never succeed with an unsigned artifact — so all four secrets are required for the release workflow to succeed. Both flavors are signed with the same keystore (the `signingConfigs` block isn't flavor-scoped), which is exactly what the app-signing-key enrollment above requires: the sideloaded `github` APK and the Play-resigned `play` AAB need to trace back to the same signing identity, or a device that already has one installed can never receive the other as an in-place update (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`).
+For Android release signing, set `ANDROID_RELEASE_KEYSTORE_BASE64`, `ANDROID_RELEASE_KEYSTORE_PASSWORD`,
+`ANDROID_RELEASE_KEY_ALIAS`, and `ANDROID_RELEASE_KEY_PASSWORD` as repository secrets. The keystore is a
+Base64-encoded PKCS12/JKS file; the workflow decodes it at build time.
+
+**Enrolling the keystore with Google Play (one-time, for the same signing key on both channels).** To keep
+the same signing key on GitHub Releases and Google Play, generate the keystore locally and, when creating
+the app in Google Play Console, enroll it as the **existing app signing key**: Play Console never accepts
+the raw JKS/PKCS12 file directly — first encrypt it with Google's PEPK (Play Encrypt Private Key) tool
+(`java -jar pepk.jar --keystore=<path> --alias=<alias> --output=<encrypted-file> --encryptionkey=<key-from-play-console>`,
+downloaded from the Play App Signing enrollment page), then upload the resulting encrypted file.
+
+**App signing key vs. upload key.** This registers the keystore as the **app signing key** — the key Google
+holds and uses to re-sign the app before it reaches users, distinct from the **upload key** used to sign each
+`.aab` submitted through Play Console afterward. The same keystore can serve both roles (Google explicitly
+allows reusing the app signing key as its own upload key), which is what keeps a single keystore sufficient
+for both GitHub Releases (where the APK/AAB is signed with it directly) and Google Play; a separate,
+dedicated upload key is Google's recommended hardening, not a requirement.
+
+**All four secrets are required, not optional.** `release.yml` passes `-PandroidReleaseSigningRequired=true`
+to `:androidApp:assembleGithubRelease`/`:androidApp:bundlePlayRelease`, which turns a missing (or
+half-configured) secret into an immediate build failure — since this workflow publishes its output, it must
+never succeed with an unsigned artifact.
+
+**Both flavors share one keystore.** The `signingConfigs` block isn't flavor-scoped, which is exactly what
+the app-signing-key enrollment above requires: the sideloaded `github` APK and the Play-resigned `play` AAB
+need to trace back to the same signing identity, or a device that already has one installed can never
+receive the other as an in-place update (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`).
 
 `ci.yml`'s ordinary build job never receives these secrets — deliberately, since it runs on every
 push and never publishes anything. AGP wires `assembleRelease` into `:androidApp`'s default
