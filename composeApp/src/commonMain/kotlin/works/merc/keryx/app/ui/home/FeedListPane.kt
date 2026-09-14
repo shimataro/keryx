@@ -735,7 +735,7 @@ internal fun FeedListPane(
                                     nextFeedId = null,
                                     folderId = null,
                                     isFirstInList = false,
-                                    activeBoundaryState = activeBoundaryState,
+                                    activeBoundaryState = remember { mutableStateOf<DropBoundary?>(null) },
                                     onClick = { selectFilterFromRow(ArticleFilter.Feed(feed.id), instance) },
                                     onRename = { inlineEdit = InlineEditTarget.Feed(feed.id, tag.id) },
                                     editingName = inlineEdit == InlineEditTarget.Feed(feed.id, tag.id),
