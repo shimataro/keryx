@@ -178,114 +178,34 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 `assembleDebugAndroidTest` は実行しない。ただし `.github/workflows/ci.yml` の
 `android-instrumented-test` ジョブがプッシュごとにこのスイートを実行している。
 
-プロジェクト全体で見ると、上記の Android の2スイートに加えて、`commonTest`/`desktopTest`
-（上記の `./gradlew :composeApp:desktopTest` で実行）がパーサ、フェッチャのリダイレクト/304/404/410/タイムアウト/ディスカバリ、
-OPML、Dropbox ストレージ/認証、PKCE、OAuth ループバックサーバ、マージ（後勝ち・OR マージ・衝突ガード・
-FK ガード）、スキーマ、ローカル設定、記事 upsert、URL リゾルバ、日時パーサ、Result、Repository 層
-（Article/Feed/Tag/Settings）、CloudSession、NotificationCenter、IdGenerator、SyncRepository、
-ViewModel 層（Home/Settings/Setup/NotificationCenter。`SettingsViewModel` の OPML インポート/エクスポート
-経路——構築したドキュメント/読み込んだファイルがピックしたパスと往復すること、ローカライズ済みの
-リクエスト内容が `FakeFileSelector` に渡ること、キャンセル、そしてドキュメントの構築/書き込み/取り込み
-処理が EDT ではなく注入したディスパッチャ上で実行されることを含む）、Linux/macOS/Windows の
-ファイルダイアログのバックエンド分岐（`FilePickerTest`：`defaultFilePickerBackend` の OS 判定、
-`FileNameExtensionFilter` と一致する拡張子述語——ディレクトリを accept することを含む——、
-上書き確認の解決、ダイアログの親ウインドウ選択）、フィード一覧のドラッグ&ドロップの書き直し
-（`HomeCommonTest.kt` の `parseFeedListDragSourceKey` で純粋なキー解析ロジックを、`FeedListDragTest.kt`
-で実際にレンダリングしたコンポーザブルに対して `performMouseInput`/`performKeyInput` を使う実際の
-エンドツーエンドのジェスチャーをカバー——フィードを別のフィードの上にドラッグして永続化された順序を
-検証、しきい値未満の移動でも選択は効くケース、フォルダーヘッダー/タグ行へのドロップ、ドラッグ中に
-右クリックが来てもコンテキストメニューが開かずドラッグも中断されないこと、ゴーストオーバーレイの
-表示/非表示のライフサイクル、Escape によるキャンセル、フォルダー同士の並べ替え、
-ペインの水平方向の範囲を越えて押し出されたドラッグが行の高さと一致していても有効なドロップ先と
-判定されずドロップも適用されないこと）、フィード一覧の行内リネーム編集
-（`commonTest` の `InlineRenameValidationTest` で「空欄はエラーではないが確定もできない」という
-共有バリデーション規則を、`HomeCommonTest.kt` で `toInlineEditTarget` を、`FeedListInlineRenameTest.kt`
-で実際にレンダリングしたコンポーザブルに対するエンドツーエンドの挙動をカバー——F2 で編集を開始し
-Enter で確定、Escape と「×」アイコンでのキャンセル、blur による確定、フォルダー名の重複が Enter を
-ブロックし blur では静かに元へ戻ること、フォルダー名の空欄が単に確定不可であること、フィード名を
-空欄で確定すると `custom_title` がリセットされフィード自身のタイトルが `placeholder` に出ること、
-タグのリネームが色に触れないこと、タグの色ドットのポップオーバーがリネーム中かどうかに関わらず
-即座に色を反映すること、Feed メニューの `RenameFeed` コマンドが現在の選択に対して編集を開始すること）、
-名前とタイムスタンプを並べるメタ行（`ArticleRowMetadataTest`：フィードタイトルが長くても省略されるのはタイトル側だけで、記事カードのタイムスタンプは幅を奪われず行の右端に揃ったまま表示される。`ArticleMetaTextTest`：`articleMetaText` が著者とタイムスタンプを結合すること、および null または空白のみの著者名を除去し先頭に区切りが残らないこと）、記事リーダーのネイティブ WebView（`ArticleWebViewHtmlTest`：`extractLinks`、および 3 つの文書ビルダー `wrapArticleHtml`／`articleNoContentHtml`／`articlePlaceholderHtml`——すべての文書が同じ `<style>` ブロックを共有し、テーマの色・フォントスケールで塗られるためどれもデフォルトの白いページを一瞬出せないこと、を含む。`ArticleDetailLoadGuardTest`：`shouldLoadArticleHtml` のリロード判定——プレースホルダー／本文なし状態が実記事と WebView を共有するため、記事 ID ではなく描画された文書の文字列をキーにしていること。`ArticleDetailPaneTest`：リーダーが常にコンポーズされたままであること、選択状態が変わってもその計測済みバウンズが動かないこと——`known-issues.md` に記載されたウインドウ全体のフリッカーの回帰ガード——、および未選択時、または選択中の記事に URL が無い場合にツールバーが非表示ではなく無効化されること）、AppFont（Linux の UI フォント用 Pango フォント記述のパース）、カスタム URI スキーム登録（`UriSchemeRegistration` の OS 別ディスパッチとパッケージ版ランチャー判定、`LinuxUriSchemeRegistrar` の `.desktop` 生成——`%u` フィールドコードを含む——、`mimeapps.list` の非破壊マージ、冪等性）、FTS（FtsManager/FtsSearch、
-`indexMissing` の増分投入・非破壊、`rebuildIndex` がテーブル存在を前提とすること、同期アップロードが
-`VACUUM INTO` スナップショットで `articles_fts` を除外し `user_version` を保全することを含む）、
-Linux の SNI トレイ（`TrayPixmapTest`＝ビッグエンディアン ARGB32 / RGBA エンコーダーとアルファ保全、
-`TrayMenuModelTest`＝dbusmenu レイアウト、`TrayMenuRevisionTest`＝revision / `AboutToShow` /
-イベントディスパッチ、`DBusSignatureTest`＝export した D-Bus シグネチャ）、
-Windows のトレイメニュー（`WindowsTrayMenuTest`＝構築される Swing ウィジェット・ラベル・コールバック・
-heavyweight ポップアップの強制。置き換え対象の AWT ウィジェットは HiDPI の Windows デスクトップで
-自身のラベルを重ねて描画してしまう）、
-クラウドデータの破損／非互換からの復旧（`SyncRepositoryTest.kt`／`SyncMergerTest.kt`：制約違反する
-クラウドデータ——`feeds` の行集合が UNIQUE な `url` を重複させている、または NOT NULL 違反の NULL を
-クラウド DB 自身の（より緩い）スキーマだけが許していた——を、破損ファイルや外部スキーマと同様に
-`CloudDataIncompatibleException` として分類すること、`SyncMergerTest.mergeDoesNotClassifyABrokenLocalSchemaAsCloudDataIncompatible`
-がその逆（ローカル側の破損は誤分類しない）を担保すること、`SyncRepositoryTest.postMergeIndexFailureIsNotClassifiedAsCloudDataIncompatible`
-がマージ commit 後の `FtsManager.indexMissing()` の失敗——壊れたクラウドスキーマと同じ曖昧な SQLite
-エラーコードを共有する——を誤って分類しないことを担保すること。`core/SqliteFileTest.kt`＝アップロード
-側と対称なダウンロードバイト列の SQLite ヘッダ検証）、削除ではなく退避するようになったクラウドデータの
-リセット（`core/CloudBackupPathTest.kt`＝決定的で UTC 整形された退避パス、`CloudStorage.rename` は
-`DropboxStorageTest.kt`／`GoogleDriveStorageTest.kt`／`OneDriveStorageTest.kt` でプロバイダごとに
-（退避先の衝突・退避元の不在ケースを含めて）検証、`SyncRepositoryTest.kt` の `resetCloudData*` 系が
-リネームしてから作り直すフローとその削除フォールバックを検証）、クラウド転送のファイルストリーミング
-（`CloudFileTransferTest.kt`：レスポンスボディが複数チャンクにまたがっても宛先ファイルへそのまま
-書かれること、短いペイロードが既存の宛先ファイルに追記されず置き換わること、`FileUploadContent` が
-ファイルをストリームし——Drive の `multipart/related` 封筒を可能にする prefix/suffix で包む場合も
-含めて——正しい `contentLength` を報告すること。`ContentDigestTest.kt`：アップロードのスキップ判定に
-使うチャンク単位 SHA-256——最終チャンクの変更も検出されること、ファイルが無い場合は誤一致ではなく
-ダイジェスト無しを返すことを含む。`SqliteFileTest.kt`：パス版のヘッダ検証が、どのバッファよりも
-大きなファイルでも先頭16バイトだけで判定すること）、変更がないときの転送スキップ
-（`SyncRepositoryTest.kt`：双方とも変更が無い2回目の同期がペイロードを1バイトも転送せずメタデータ取得
-1回だけで済むこと、そのスキップの後にローカルを変更したら確実にアップロードされること、リモートの変更は
-従来どおりダウンロードしてマージすること、アップロード自身のレスポンスからリビジョンを記録するので自分の
-書き込みを再ダウンロードしないこと、`sync_state` がアップロード用スナップショットから除外されており
-ダイジェストが独りでに変化しないこと、`clearSyncFailureState()` が実行中の同期に取り消されないこと
-——共有ミューテックスの保証を2本のテストで半分ずつ検証する。リビジョン／ダイジェストのマーカーを
-書き戻すのは**成功した**同期であり、`lastSyncError` を書き戻すのは**失敗した**同期なので、1本では
-両方を検証できないため、および圧縮アップロード／レガシーフォールバックの分岐——レガシーのみの
-クラウドがマージされてから `.gz` へ移行すること（リビジョンガード付きの更新ではなく create-only で）、
-レガシーファイル自体がバイト単位でそのまま生き残ること、一度移行したデバイスは（レガシーファイルが
-その後壊れていても）二度とレガシーを読まないこと、移行中の壊れたレガシーファイルと不正な（gzip
-ではない）`.gz` ペイロードのどちらも `CloudDataIncompatibleException` に分類されること、リセットが
-`.gz` のみをリネーム・再作成しレガシーファイルには一切触れないこと）、自動同期の抑制ゲート
-（`SyncRepositoryTest.kt`：`AUTOMATIC` トリガーの同期が `autoSyncSuspended` 中はスキップされること、
-`MANUAL` は決してゲートされないこと、`scheduleSync()` も同様に抑制されること、成功した同期／リセット／
-`clearSyncFailureState()` でゲートがクリアされること——`SchemaVersionException` は意図的にゲートを
-一切起動しない）、アプリ内アップデートのパイプライン（`UpdateCheckerTest.kt`：`assets[]`/`body` を
-`asset`/`releaseNotes` へパースすること、`sha256` 以外や不正な `digest` はアセットなし扱いになる
-こと、`state` が `"uploaded"` でないアセットは除外されること；`UpdateAssetSelectorTest.kt`：
-`InstallKind` ごとのアセットのサフィックス一致、リリースに何が含まれていても `.aab` は絶対に
-選ばれないこと；`UpdateInstallPolicyTest.kt`：`InstallLocation` × アセット → `UpdatePlan`、および
-`canInstallAndroidApkUpdate` のプラン種別／OS 同意状態によるゲーティング——`AndroidUpdateInstaller`
-の判断のうちここだけ純粋関数として切り出してあるのは、`androidMain` 自体には JVM でテストできる
-ユニットテストのソースセットが存在しないため（下記「既知の未カバー範囲」参照）；
-`UpdateDownloaderTest.kt`：ホストの allowlist（先頭ドット必須の
-サフィックス一致、生 IP や紛らわしいホスト名を拒否）、`MAX_REDIRECTS` で頭打ちになる手動リダイレクト
-追従、digest やサイズの不一致時に `.part` ファイルも本体ファイルも残らないこと、進捗通知が単調に
-増加して `bytesTotal` に到達すること；`UpdateStateMachineTest.kt`：`Ready` が `UpToDate`／同一
-バージョンの再チェックでは潰れないが、より新しいバージョンでは潰れること、`Downloading`/
-`Verifying`/`Installing` には一切割り込まれないこと；`UpdateRepositoryTest.kt`：`startDownload()`
-を2回呼んでもダウンロードは1本だけ開始されること、`cancelDownload()` が `.part` ファイルを削除し
-`Failed` ではなく `Available` に戻すこと、sweep が進行中の `.part` と現在の `Ready` ファイルを保護
-しつつそれ以外を削除すること、より新しいバージョンのチェックが旧 `Ready` バージョンのディレクトリを
-削除すること；`ReleaseNotesTextTest.kt`）、デスクトップの自己置換／インストーラースクリプト
-（`UpdateScriptWriterTest.kt`：生成されたスクリプト本文そのものをテンプレートごとに検証——退避して
-から削除する順序、配置に失敗した際のロールバック分岐、旧コピーの削除を許可する前のヘルスチェック；
-`DesktopUpdateInstallerTest.kt`：`canInstall` の `InstallKind`／アセット種別ごとのゲーティング、
-macOS/Windows/Linux の自己置換と Windows MSI 経路それぞれで実際に起動されるコマンドライン一式を、
-実際には何も起動しないフェイクの `ProcessLauncher` 経由で検証すること、バージョン不一致や実行権限の
-無い展開済みバンドルはランチャーが呼ばれる前に失敗すること、書庫を拒否する `ArchiveExtractor` も
-同様にランチャーより手前で失敗し、その理由が呼び出し側まで伝わること、展開開始前に古い
-`extracted/` ツリーが消されること；`ZipExtractorTest.kt`：zip slip の拒否、
-`maxBytes` の上限、指定したエントリだけ実行ビットが復元されること、および同じ 2 つのガードを
-`validate` 経由でも検証すること（`validate` はさらに、解決先としてしか使わない展開先ディレクトリを
-作らないこと）（エントリ数上限自体——`ZipExtractor.kt` の `MAX_ZIP_ENTRIES`、10 万——は
-どちらの関数についても未検証: 実際に 10 万件超のエントリを持つ ZIP を
-ユニットテストで生成・展開することになるため、実用的なフィクスチャが作れない）；
-`FileSystemExtrasTest.kt`/`InstallLocationDesktopTest.kt` を `setExecutable`/`isDirectoryWritable`/
-`move`、`copyTree` が symlink（ファイル・ディレクトリとも）をたどらずリンクのまま複製すること、
-OS ごとの `InstallLocation` 判定向けに拡張したもの）などを網羅する。
-`SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` の失敗は DB スキーマ・
-マージ SQL・同期オーケストレーションの退行を意味するので特に注意する。
+プロジェクト全体で見ると——
+
+- 上記の Android の2スイートに加えて、`commonTest`/`desktopTest`（上記の `./gradlew :composeApp:desktopTest` で実行）がパーサ、フェッチャのリダイレクト/304/404/410/タイムアウト/ディスカバリ、OPML、Dropbox ストレージ/認証、PKCE、OAuth ループバックサーバ、マージ（後勝ち・OR マージ・衝突ガード・FK ガード）、スキーマ、ローカル設定、記事 upsert、URL リゾルバ、日時パーサ、Result、Repository 層（Article/Feed/Tag/Settings）、CloudSession、NotificationCenter、IdGenerator、SyncRepository、ViewModel 層（Home/Settings/Setup/NotificationCenter。`SettingsViewModel` の OPML インポート/エクスポート経路——構築したドキュメント/読み込んだファイルがピックしたパスと往復すること、ローカライズ済みのリクエスト内容が `FakeFileSelector` に渡ること、キャンセル、そしてドキュメントの構築/書き込み/取り込み処理が EDT ではなく注入したディスパッチャ上で実行されることを含む）
+- Linux/macOS/Windows のファイルダイアログのバックエンド分岐（`FilePickerTest`：`defaultFilePickerBackend` の OS 判定、`FileNameExtensionFilter` と一致する拡張子述語——ディレクトリを accept することを含む——、上書き確認の解決、ダイアログの親ウインドウ選択）
+- フィード一覧のドラッグ&ドロップの書き直し（`HomeCommonTest.kt` の `parseFeedListDragSourceKey` で純粋なキー解析ロジックを、`FeedListDragTest.kt` で実際にレンダリングしたコンポーザブルに対して `performMouseInput`/`performKeyInput` を使う実際のエンドツーエンドのジェスチャーをカバー——フィードを別のフィードの上にドラッグして永続化された順序を検証、しきい値未満の移動でも選択は効くケース、フォルダーヘッダー/タグ行へのドロップ、ドラッグ中に右クリックが来てもコンテキストメニューが開かずドラッグも中断されないこと、ゴーストオーバーレイの表示/非表示のライフサイクル、Escape によるキャンセル、フォルダー同士の並べ替え、ペインの水平方向の範囲を越えて押し出されたドラッグが行の高さと一致していても有効なドロップ先と判定されずドロップも適用されないこと）
+- フィード一覧の行内リネーム編集（`commonTest` の `InlineRenameValidationTest` で「空欄はエラーではないが確定もできない」という共有バリデーション規則を、`HomeCommonTest.kt` で `toInlineEditTarget` を、`FeedListInlineRenameTest.kt` で実際にレンダリングしたコンポーザブルに対するエンドツーエンドの挙動をカバー——F2 で編集を開始し Enter で確定、Escape と「×」アイコンでのキャンセル、blur による確定、フォルダー名の重複が Enter をブロックし blur では静かに元へ戻ること、フォルダー名の空欄が単に確定不可であること、フィード名を空欄で確定すると `custom_title` がリセットされフィード自身のタイトルが `placeholder` に出ること、タグのリネームが色に触れないこと、タグの色ドットのポップオーバーがリネーム中かどうかに関わらず即座に色を反映すること、Feed メニューの `RenameFeed` コマンドが現在の選択に対して編集を開始すること）
+- 名前とタイムスタンプを並べるメタ行（`ArticleRowMetadataTest`：フィードタイトルが長くても省略されるのはタイトル側だけで、記事カードのタイムスタンプは幅を奪われず行の右端に揃ったまま表示される。`ArticleMetaTextTest`：`articleMetaText` が著者とタイムスタンプを結合すること、および null または空白のみの著者名を除去し先頭に区切りが残らないこと）
+- 記事リーダーのネイティブ WebView（`ArticleWebViewHtmlTest`：`extractLinks`、および 3 つの文書ビルダー `wrapArticleHtml`／`articleNoContentHtml`／`articlePlaceholderHtml`——すべての文書が同じ `<style>` ブロックを共有し、テーマの色・フォントスケールで塗られるためどれもデフォルトの白いページを一瞬出せないこと、を含む。`ArticleDetailLoadGuardTest`：`shouldLoadArticleHtml` のリロード判定——プレースホルダー／本文なし状態が実記事と WebView を共有するため、記事 ID ではなく描画された文書の文字列をキーにしていること。`ArticleDetailPaneTest`：リーダーが常にコンポーズされたままであること、選択状態が変わってもその計測済みバウンズが動かないこと——`known-issues.md` に記載されたウインドウ全体のフリッカーの回帰ガード——、および未選択時、または選択中の記事に URL が無い場合にツールバーが非表示ではなく無効化されること）
+- AppFont（Linux の UI フォント用 Pango フォント記述のパース）
+- カスタム URI スキーム登録（`UriSchemeRegistration` の OS 別ディスパッチとパッケージ版ランチャー判定、`LinuxUriSchemeRegistrar` の `.desktop` 生成——`%u` フィールドコードを含む——、`mimeapps.list` の非破壊マージ、冪等性）
+- `.opml` ファイル関連付け（`LaunchArg` による OAuth URI と `.opml` パスの分類、`registerWindowsOpmlAssociation` の ProgID レジストリ書き込み、`LinuxOpmlAssociationRegistrar` の `.desktop` 生成——`%f` フィールドコードを含む——、その shared-mime-info パッケージ XML、冪等性、および `OpmlImporter` の追加/失敗件数カウントとフォルダー/タグの照合）
+- FTS（FtsManager/FtsSearch、`indexMissing` の増分投入・非破壊、`rebuildIndex` がテーブル存在を前提とすること、同期アップロードが`VACUUM INTO` スナップショットで `articles_fts` を除外し `user_version` を保全することを含む）
+- Linux の SNI トレイ（`TrayPixmapTest`＝ビッグエンディアン ARGB32 / RGBA エンコーダーとアルファ保全、`TrayMenuModelTest`＝dbusmenu レイアウト、`TrayMenuRevisionTest`＝revision / `AboutToShow` / イベントディスパッチ、`DBusSignatureTest`＝export した D-Bus シグネチャ）
+- Windows のトレイメニュー（`WindowsTrayMenuTest`＝構築される Swing ウィジェット・ラベル・コールバック・heavyweight ポップアップの強制。置き換え対象の AWT ウィジェットは HiDPI の Windows デスクトップで自身のラベルを重ねて描画してしまう）
+- KDE Global Menu / AppMenu（`AppMenuTreeTest`＝共有メニューツリーモデルの形状／`isMacOs` による省略／有効・チェック状態のミラーリング／任意の「メニューバーを表示」項目、`AppMenuLayoutBuilderTest`＝再帰的な `com.canonical.dbusmenu` レイアウト／プロパティフィルタリング／チェックボックスマッピング／行きがけ順 id の安定性、`AppMenuRevisionTest`＝revision の増分／`AboutToShow`／クリックディスパッチ／重複排除なし、`AppMenuSignatureTest`＝`com.canonical.AppMenu.Registrar` のワイヤーシグネチャ、`MenuBarVisibilityTest`＝AWT キーコードマップ／ショートカット→ノードのマッチャ／表示状態の永続化）
+- `SqliteConnectionPropertiesTest`（本番の接続プロパティが実際に全接続へ届くこと——外部キー有効化、`busy_timeout` 適用——は単発の `PRAGMA` では担保できない。JVM ドライバは文ごとに新しい接続を開くため）
+- `FormatTimestampTest`（`formatTimestamp` の正確な出力を固定する。他のタイムスタンプ検証は期待値をその関数自体から導出するため、この検証はできない）
+- `LazyNativePopupTest`（最初の右クリックまでネイティブなものは何も構築されない。`LocalNativeWindow` が null になる Compose UI テストでは観測できない）
+- `WindowGeometryTest`（ダイアログウインドウのジオメトリ: オーナー中心配置と画面境界クランプ、自動フィットの計算 `fitWindowSize`/`sizeMatches`、`nextDialogFit` のドリフト補正ステートマシン——フィットが確定した**後**に Compose の関知しないところでサイズが適用される回帰ケースも依然として補正されること、拒否するウインドウマネージャがガードを無限に回さないための試行回数上限、フィットが着地するまでダイアログを不可視に保つ `presentable` フラグ——その上限を使い切った時点での解放を含め、ジオメトリを拒否するウインドウマネージャがダイアログを不可視のままにし続けることは決してない）
+- クラウドデータの破損／非互換からの復旧（`SyncRepositoryTest.kt`／`SyncMergerTest.kt`：制約違反するクラウドデータ——`feeds` の行集合が UNIQUE な `url` を重複させている、または NOT NULL 違反の NULL をクラウド DB 自身の（より緩い）スキーマだけが許していた——を、破損ファイルや外部スキーマと同様に `CloudDataIncompatibleException` として分類すること、`SyncMergerTest.mergeDoesNotClassifyABrokenLocalSchemaAsCloudDataIncompatible` がその逆（ローカル側の破損は誤分類しない）を担保すること、`SyncRepositoryTest.postMergeIndexFailureIsNotClassifiedAsCloudDataIncompatible` がマージ commit 後の `FtsManager.indexMissing()` の失敗——壊れたクラウドスキーマと同じ曖昧な SQLite エラーコードを共有する——を誤って分類しないことを担保すること。`core/SqliteFileTest.kt`＝アップロード側と対称なダウンロードバイト列の SQLite ヘッダ検証）
+- 削除ではなく退避するようになったクラウドデータのリセット（`core/CloudBackupPathTest.kt`＝決定的で UTC 整形された退避パス、`CloudStorage.rename` は `DropboxStorageTest.kt`／`GoogleDriveStorageTest.kt`／`OneDriveStorageTest.kt` でプロバイダごとに（退避先の衝突・退避元の不在ケースを含めて）検証、`SyncRepositoryTest.kt` の `resetCloudData*` 系がリネームしてから作り直すフローとその削除フォールバックを検証）
+- クラウド転送のファイルストリーミング（`CloudFileTransferTest.kt`：レスポンスボディが複数チャンクにまたがっても宛先ファイルへそのまま書かれること、短いペイロードが既存の宛先ファイルに追記されず置き換わること、`FileUploadContent` がファイルをストリームし——Drive の `multipart/related` 封筒を可能にする prefix/suffix で包む場合も含めて——正しい `contentLength` を報告すること。`ContentDigestTest.kt`：アップロードのスキップ判定に使うチャンク単位 SHA-256——最終チャンクの変更も検出されること、ファイルが無い場合は誤一致ではなくダイジェスト無しを返すことを含む。`SqliteFileTest.kt`：パス版のヘッダ検証が、どのバッファよりも大きなファイルでも先頭16バイトだけで判定すること）
+- 変更がないときの転送スキップ（`SyncRepositoryTest.kt`：双方とも変更が無い2回目の同期がペイロードを1バイトも転送せずメタデータ取得1回だけで済むこと、そのスキップの後にローカルを変更したら確実にアップロードされること、リモートの変更は従来どおりダウンロードしてマージすること、アップロード自身のレスポンスからリビジョンを記録するので自分の書き込みを再ダウンロードしないこと、`sync_state` がアップロード用スナップショットから除外されておりダイジェストが独りでに変化しないこと、`clearSyncFailureState()` が実行中の同期に取り消されないこと——共有ミューテックスの保証を2本のテストで半分ずつ検証する。リビジョン／ダイジェストのマーカーを書き戻すのは**成功した**同期であり、`lastSyncError` を書き戻すのは**失敗した**同期なので、1本では両方を検証できないため、および圧縮アップロード／レガシーフォールバックの分岐——レガシーのみのクラウドがマージされてから `.gz` へ移行すること（リビジョンガード付きの更新ではなく create-only で）、レガシーファイル自体がバイト単位でそのまま生き残ること、一度移行したデバイスは（レガシーファイルがその後壊れていても）二度とレガシーを読まないこと、移行中の壊れたレガシーファイルと不正な（gzip ではない）`.gz` ペイロードのどちらも `CloudDataIncompatibleException` に分類されること、リセットが `.gz` のみをリネーム・再作成しレガシーファイルには一切触れないこと）
+- 自動同期の抑制ゲート（`SyncRepositoryTest.kt`：`AUTOMATIC` トリガーの同期が `autoSyncSuspended` 中はスキップされること、`MANUAL` は決してゲートされないこと、`scheduleSync()` も同様に抑制されること、成功した同期／リセット／`clearSyncFailureState()` でゲートがクリアされること——`SchemaVersionException` は意図的にゲートを一切起動しない）
+- アプリ内アップデートのパイプライン（`UpdateCheckerTest.kt`：`assets[]`/`body` を `asset`/`releaseNotes` へパースすること、`sha256` 以外や不正な `digest` はアセットなし扱いになること、`state` が `"uploaded"` でないアセットは除外されること；`UpdateAssetSelectorTest.kt`：`InstallKind` ごとのアセットのサフィックス一致、リリースに何が含まれていても `.aab` は絶対に選ばれないこと；`UpdateInstallPolicyTest.kt`：`InstallLocation` × アセット → `UpdatePlan`、および `canInstallAndroidApkUpdate` のプラン種別／OS 同意状態によるゲーティング——`AndroidUpdateInstaller`の判断のうちここだけ純粋関数として切り出してあるのは、`androidMain` 自体には JVM でテストできるユニットテストのソースセットが存在しないため（下記「既知の未カバー範囲」参照）；`UpdateDownloaderTest.kt`：ホストの allowlist（先頭ドット必須のサフィックス一致、生 IP や紛らわしいホスト名を拒否）、`MAX_REDIRECTS` で頭打ちになる手動リダイレクト追従、digest やサイズの不一致時に `.part` ファイルも本体ファイルも残らないこと、進捗通知が単調に増加して `bytesTotal` に到達すること；`UpdateStateMachineTest.kt`：`Ready` が `UpToDate`／同一バージョンの再チェックでは潰れないが、より新しいバージョンでは潰れること、`Downloading`/`Verifying`/`Installing` には一切割り込まれないこと；`UpdateRepositoryTest.kt`：`startDownload()` を2回呼んでもダウンロードは1本だけ開始されること、`cancelDownload()` が `.part` ファイルを削除し `Failed` ではなく `Available` に戻すこと、sweep が進行中の `.part` と現在の `Ready` ファイルを保護しつつそれ以外を削除すること、より新しいバージョンのチェックが旧 `Ready` バージョンのディレクトリを削除すること；`ReleaseNotesTextTest.kt`）
+- デスクトップの自己置換／インストーラースクリプト（`UpdateScriptWriterTest.kt`：生成されたスクリプト本文そのものをテンプレートごとに検証——退避してから削除する順序、配置に失敗した際のロールバック分岐、旧コピーの削除を許可する前のヘルスチェック；`DesktopUpdateInstallerTest.kt`：`canInstall` の `InstallKind`／アセット種別ごとのゲーティング、macOS/Windows/Linux の自己置換と Windows MSI 経路それぞれで実際に起動されるコマンドライン一式を、実際には何も起動しないフェイクの `ProcessLauncher` 経由で検証すること、バージョン不一致や実行権限の無い展開済みバンドルはランチャーが呼ばれる前に失敗すること、書庫を拒否する `ArchiveExtractor` も同様にランチャーより手前で失敗し、その理由が呼び出し側まで伝わること、展開開始前に古い `extracted/` ツリーが消されること；`ZipExtractorTest.kt`：zip slip の拒否、`maxBytes` の上限、指定したエントリだけ実行ビットが復元されること、および同じ 2 つのガードを `validate` 経由でも検証すること（`validate` はさらに、解決先としてしか使わない展開先ディレクトリを作らないこと）（エントリ数上限自体——`ZipExtractor.kt` の `MAX_ZIP_ENTRIES`、10 万——はどちらの関数についても未検証: 実際に 10 万件超のエントリを持つ ZIP をユニットテストで生成・展開することになるため、実用的なフィクスチャが作れない）；`FileSystemExtrasTest.kt`/`InstallLocationDesktopTest.kt` を `setExecutable`/`isDirectoryWritable`/`move`、`copyTree` が symlink（ファイル・ディレクトリとも）をたどらずリンクのまま複製すること、OS ごとの `InstallLocation` 判定向けに拡張したもの）
+
+この一覧を超えて、`SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` の失敗は DB スキーマ・マージ SQL・同期オーケストレーションの退行を意味するので特に注意する。
 
 既知の未カバー範囲: `SettingsViewModel.exportOpml`/`importOpml` は今やテスト用シーム（`FileSelector`、
 テストでは `FakeFileSelector` でフェイク化）を持ちカバー済み——未カバーのまま残るのは、ネイティブ
