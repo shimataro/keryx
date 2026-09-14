@@ -25,7 +25,10 @@ composeApp/src/
     domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, StartupMaintenanceTasks (refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
     di/           AppModule (+ expect platformModule)
     platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor (all expect)
-    ui/           theme/, navigation/, setup/, home/ (3-pane + search + notification center), article/, settings/, i18n/
+    ui/           theme/, navigation/, setup/, home/ (adaptive 1/2/3-pane layout + search + notification
+                  center), article/, settings/, i18n/, common/ (KeryxTextField/KeryxDialogs/KeryxIcons/
+                  FlatButtons/FlatToggles/SegmentedControl/KeryxSearchBar/… — expect/actual-split, plain-M3-
+                  feel components shared by every pane), menu/ (MenuController)
     LaunchArg.kt  Classifies a raw launch argument (`keryx://` URI vs `.opml` path) — platform-independent, package root
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq (7 tables)
   commonMain/composeResources/  values/strings.xml, drawable/ (icons are Android Vector Drawable XML,
