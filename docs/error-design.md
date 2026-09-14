@@ -87,8 +87,10 @@ When emitting notifications from the Repository, text is localized via `Notifica
 | `FeedNotFoundException(isGone=true)` | ❌ | ✅ |
 | `UpdateException` (check/download/verify/install failure) | ❌ (retried only via the user clicking Retry — the Updates settings tab or the tray's own item) | ❌ (surfaced there instead — see "In-App Update" in [background-update.md](background-update.md); only the informational "update available"/"ready to install" notices reach the bell, via `ShowSettingsTab`/`OpenUrl` above) |
 
-## Constants (`core/Constants.kt`)
+## Constants (`core/Constants.kt`, excerpt)
 
 `SYNC_MAX_RETRY=3`, `FEED_TIMEOUT_RETRY_COUNT=1`, `SYNC_DEBOUNCE_MS=5000`,
 `CONNECTION_TIMEOUT_MS=10000`, `READ_TIMEOUT_SECONDS_DEFAULT=30`, `MAX_REDIRECTS=5`,
-`UPDATE_DOWNLOAD_SOCKET_TIMEOUT_MS=60000`.
+`UPDATE_DOWNLOAD_SOCKET_TIMEOUT_MS=60000`. The file has more (e.g. `SQLITE_BUSY_TIMEOUT_MS`,
+`REQUEST_TIMEOUT_MS`, `MAX_SYNC_DB_SIZE_BYTES`, `TOKEN_EXPIRY_SKEW_MS`, `OAUTH_CONNECT_TIMEOUT_MS`) — this lists the
+ones most relevant to error handling and retries.

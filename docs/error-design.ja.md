@@ -124,8 +124,10 @@ Repository から通知を出す際、文言は `NotificationMessages`（`getStr
 | `FeedNotFoundException(isGone=true)` | ❌ | ✅ |
 | `UpdateException`（チェック/ダウンロード/検証/インストールの失敗） | ❌（ユーザーが Updates 設定タブまたはトレイの項目で「再試行」を押した時のみ再試行） | ❌（代わりに Updates タブとトレイの項目で提示する——[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照。ベルに届くのは「更新があります」/「インストール準備完了」という情報通知のみで、上記の `ShowSettingsTab`/`OpenUrl` 経由） |
 
-## 定数（`core/Constants.kt`）
+## 定数（`core/Constants.kt`、抜粋）
 
 `SYNC_MAX_RETRY=3`, `FEED_TIMEOUT_RETRY_COUNT=1`, `SYNC_DEBOUNCE_MS=5000`,
 `CONNECTION_TIMEOUT_MS=10000`, `READ_TIMEOUT_SECONDS_DEFAULT=30`, `MAX_REDIRECTS=5`,
-`UPDATE_DOWNLOAD_SOCKET_TIMEOUT_MS=60000`。
+`UPDATE_DOWNLOAD_SOCKET_TIMEOUT_MS=60000`。このファイルには他にも定数がある（例:
+`SQLITE_BUSY_TIMEOUT_MS`, `REQUEST_TIMEOUT_MS`, `MAX_SYNC_DB_SIZE_BYTES`, `TOKEN_EXPIRY_SKEW_MS`,
+`OAUTH_CONNECT_TIMEOUT_MS`）— ここに挙げるのはエラー処理・リトライに最も関係するものに限る。
