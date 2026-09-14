@@ -392,14 +392,12 @@ a host where no GL stack is reachable from the sandbox:
   `java.awt.FileDialog` / AWT popups (see "UI Direction" in `external-spec.md`), never a portal,
   so this is not the app's own call failing.
 
-The one line that *did* need a fix — `TransportBuilder - Using transport
-dbus-java-transport-native-unixsocket` — was dbus-java's own `slf4j` logging bypassing the app's
-log file and printing in a different format (its own timestamp, no `[tag]` prefix) because it went
-straight through `slf4j-simple` to stderr. Switching the desktop runtime's `slf4j` provider from
-`slf4j-simple` to `slf4j-jdk14` (`composeApp/build.gradle.kts`, `gradle/libs.versions.toml`) routes
-it — and any other third-party `slf4j` caller — through `java.util.logging`, where
-`Log.desktop.kt` now installs its own formatter/handlers on the JUL root logger, so third-party log
-lines land in `keryx.<n>.log` with the same format as the app's own.
+The desktop runtime's `slf4j` provider is `slf4j-jdk14` (`composeApp/build.gradle.kts`,
+`gradle/libs.versions.toml`), routing dbus-java's own logging — and any other third-party `slf4j`
+caller — through `java.util.logging`, where `Log.desktop.kt` installs its own formatter/handlers on
+the JUL root logger. This is why third-party log lines (e.g. dbus-java's own
+`TransportBuilder - Using transport dbus-java-transport-native-unixsocket`) land in `keryx.<n>.log`
+with the same format as the app's own, rather than going to stderr in a different format.
 
 ### Android (APK / AAB)
 

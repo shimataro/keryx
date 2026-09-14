@@ -394,15 +394,12 @@ WebView のレンダラーサンドボックスのみを無効化するもので
   の「UI Direction」参照）、portal は一切使っていないため、これはアプリ自身の呼び出しが
   失敗しているわけではない。
 
-一方、実際に修正が必要だった行が `TransportBuilder - Using transport
-dbus-java-transport-native-unixsocket` である。これは dbus-java 自身の `slf4j` ログが、
-`slf4j-simple` 経由で直接 stderr に出力されており、アプリのログファイルを経由せず、
-（独自のタイムスタンプ・`[tag]` 無しという）別フォーマットで出ていたことが原因。デスクトップ
-ランタイムの `slf4j` プロバイダを `slf4j-simple` から `slf4j-jdk14`
-（`composeApp/build.gradle.kts` / `gradle/libs.versions.toml`）に切り替えることで、この行を
-含め他のあらゆる第三者 `slf4j` 呼び出しが `java.util.logging` 経由になり、`Log.desktop.kt` が
-JUL のルートロガーに仕込んだ formatter/handler を通るようになった。これにより、第三者ライブラリの
-ログ行もアプリ本体と同じフォーマットで `keryx.<n>.log` に残るようになっている。
+デスクトップランタイムの `slf4j` プロバイダは `slf4j-jdk14`
+（`composeApp/build.gradle.kts` / `gradle/libs.versions.toml`）であり、dbus-java 自身のログを含む
+あらゆる第三者 `slf4j` 呼び出しを `java.util.logging` 経由にルーティングする。`Log.desktop.kt` は
+JUL のルートロガーに自前の formatter/handler を仕込んでいる。そのため第三者ライブラリのログ行
+（例: dbus-java 自身の `TransportBuilder - Using transport dbus-java-transport-native-unixsocket`）も、
+別フォーマットで stderr に出るのではなく、アプリ本体と同じフォーマットで `keryx.<n>.log` に残る。
 
 ### Android（APK / AAB）
 
