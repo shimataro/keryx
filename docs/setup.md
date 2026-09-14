@@ -33,9 +33,10 @@
   [external-spec.md](external-spec.md) §2, "Planned"). Android-specific tooling (deploying to a
   device/emulator, layout preview, etc.) is weaker than in Android Studio, so prefer Android
   Studio when the work is mainly on the Android side.
-- **[Visual Studio Code](https://code.visualstudio.com/)**: JetBrains released an official "Kotlin by JetBrains" extension in Alpha in 2026,
-  but it explicitly does not yet support Kotlin Multiplatform projects. Not recommended for this
-  project's development at this time.
+- **[Visual Studio Code](https://code.visualstudio.com/)**: JetBrains' official "Kotlin by JetBrains"
+  extension has explicitly not supported Kotlin Multiplatform projects at any point checked so far —
+  verify its current KMP support status before relying on it, since this can change. Not recommended
+  for this project's development unless that has changed.
 
 ### Software Required to Build
 

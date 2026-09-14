@@ -31,9 +31,10 @@
   のため現時点では必須ではない。Android 実機/エミュレータへのデプロイやレイアウトプレビュー
   など Android 特化のツールは Android Studio に比べて弱いので、Android 側の作業が中心なら
   Android Studio を使う方がよい。
-- **[Visual Studio Code](https://code.visualstudio.com/)**: JetBrains 公式の "Kotlin by JetBrains" 拡張は2026年に Alpha 公開されたが、
-  Kotlin Multiplatform プロジェクトは現時点で非対応と明言されている。本プロジェクトの開発
-  には現状推奨できない。
+- **[Visual Studio Code](https://code.visualstudio.com/)**: JetBrains 公式の "Kotlin by JetBrains" 拡張は、
+  これまで確認した限り常に Kotlin Multiplatform プロジェクトを非対応と明言している——この状況は
+  変わりうるため、頼る前に現在の KMP 対応状況を確認すること。状況が変わっていない限り本プロジェクトの
+  開発には推奨できない。
 
 ### ビルドに必要なソフトウェア
 
