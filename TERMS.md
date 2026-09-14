@@ -49,6 +49,11 @@ party to those services, does not operate them, and has no control over their
 availability or behavior. See the [Privacy Policy](PRIVACY.md)'s cloud sync section
 for what data is involved.
 
+The Dropbox, Google Drive, and OneDrive names and logos are trademarks of their
+respective owners (Dropbox, Inc.; Google LLC; Microsoft Corporation). They are used
+here solely to identify the corresponding service you may choose to connect, and
+their use does not imply endorsement, sponsorship, or affiliation.
+
 ## No warranty
 
 Keryx is provided "AS IS", without warranty of any kind, express or implied,
