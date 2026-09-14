@@ -72,7 +72,8 @@
   伝播できる。既存行は `upsert` の `ON CONFLICT(feed_id, guid)` が既存 ID を保持する
   （決定的生成は新規行のみに効く）。
 - 既読・スターの競合解決は `read_at` / `starred_at` で後勝ち。
-- `content` は `summary` より優先して表示。両方 NULL なら外部ブラウザーで開く。
+- `content` は `summary` より優先して表示。両方 NULL の場合、その場にローカライズされた「本文なし」の
+  プレースホルダーを表示する（外部ブラウザーで開くリンク／ボタン付き）。自動で何かが開くことはない。
 - `search_text = COALESCE(content, summary, '')`。挿入・更新時に計算する。
 - `deleted_at`（NULL = 生存）で論理削除する。`deleted_at` を書き込むのは**キャッシュ削除のみ**
   （`softDeleteExpired`）で、スター付き記事は削除しない。`deleted_updated_at` は削除/復活イベントの

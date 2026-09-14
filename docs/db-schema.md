@@ -55,7 +55,7 @@ Indexes: `feed_id` / `is_read` / `is_starred` / `published_at DESC`.
 
 - `id` is deterministically generated from `(feed_id, guid)` as **UUIDv5** (`IdGenerator.articleId`). The same article gets the same ID on all devices, so sync merge (articles matched by `id`) can propagate read/star states via last-write-wins. Existing rows keep their id via `upsert`'s `ON CONFLICT(feed_id, guid)` — deterministic generation only applies to new rows.
 - Read/star conflict resolution is last-write-wins via `read_at` / `starred_at`.
-- `content` is displayed in preference to `summary`. If both are NULL, open in external browser.
+- `content` is displayed in preference to `summary`. If both are NULL, the reader shows a localized "no content" placeholder in place (with a link/button to open the article in the external browser); nothing opens automatically.
 - `search_text = COALESCE(content, summary, '')`. Computed at insert/update time.
 - Logical deletion via `deleted_at` (NULL = alive). Cache cleanup is the **only** writer of `deleted_at`
   (`softDeleteExpired`); starred articles are never deleted. `deleted_updated_at` is a field-specific last-wins
