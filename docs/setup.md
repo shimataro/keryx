@@ -59,7 +59,7 @@ Split into what every target needs in common, and what's specific to the Android
   `sdkmanager platforms;android-37` fails with "Failed to find package". Run `sdkmanager --list |
   grep android-37` to find the current id, or just let AGP's own SDK auto-download resolve it on
   the first build. `build-tools;36.0.0` is unaffected and installs directly
-  (`sdkmanager "build-tools;36.0.0"` — the version AGP 9.3.2 selects by default when none is
+  (`sdkmanager "build-tools;36.0.0"` — the version AGP 9.4.0 selects by default when none is
   specified).
 - Setup: point `local.properties`' `sdk.dir` at the SDK location (AGP reads this key itself; it
   doesn't go through this project's own `-P`/env-var/`local.properties` resolution chain used for

@@ -57,7 +57,7 @@
   ID はもう存在せず、`sdkmanager platforms;android-37` は "Failed to find package" で失敗する。
   `sdkmanager --list | grep android-37` で現在の ID を確認するか、初回ビルド時に AGP 自身の
   SDK 自動ダウンロードに解決させればよい。`build-tools;36.0.0` はこの影響を受けず、そのまま
-  導入できる（`sdkmanager "build-tools;36.0.0"` — 36.0.0 は AGP 9.3.2 が既定で選択するバージョン）。
+  導入できる（`sdkmanager "build-tools;36.0.0"` — 36.0.0 は AGP 9.4.0 が既定で選択するバージョン）。
 - 初期設定: `local.properties` の `sdk.dir` に SDK の場所を指定する（AGP がこのキー自体を
   直接読み取るため、下記 OAuth キーで使う `-P`/環境変数/`local.properties` の解決チェーンとは
   別系統）か、環境変数 `ANDROID_HOME` を設定してもよい——以下のコマンドは、どちらかが
