@@ -185,7 +185,7 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 - フィード一覧のドラッグ&ドロップの書き直し（`HomeCommonTest.kt` の `parseFeedListDragSourceKey` で純粋なキー解析ロジックを、`FeedListDragTest.kt` で実際にレンダリングしたコンポーザブルに対して `performMouseInput`/`performKeyInput` を使う実際のエンドツーエンドのジェスチャーをカバー——フィードを別のフィードの上にドラッグして永続化された順序を検証、しきい値未満の移動でも選択は効くケース、フォルダーヘッダー/タグ行へのドロップ、ドラッグ中に右クリックが来てもコンテキストメニューが開かずドラッグも中断されないこと、ゴーストオーバーレイの表示/非表示のライフサイクル、Escape によるキャンセル、フォルダー同士の並べ替え、ペインの水平方向の範囲を越えて押し出されたドラッグが行の高さと一致していても有効なドロップ先と判定されずドロップも適用されないこと）
 - フィード一覧の行内リネーム編集（`commonTest` の `InlineRenameValidationTest` で「空欄はエラーではないが確定もできない」という共有バリデーション規則を、`HomeCommonTest.kt` で `toInlineEditTarget` を、`FeedListInlineRenameTest.kt` で実際にレンダリングしたコンポーザブルに対するエンドツーエンドの挙動をカバー——F2 で編集を開始し Enter で確定、Escape と「×」アイコンでのキャンセル、blur による確定、フォルダー名の重複が Enter をブロックし blur では静かに元へ戻ること、フォルダー名の空欄が単に確定不可であること、フィード名を空欄で確定すると `custom_title` がリセットされフィード自身のタイトルが `placeholder` に出ること、タグのリネームが色に触れないこと、タグの色ドットのポップオーバーがリネーム中かどうかに関わらず即座に色を反映すること、Feed メニューの `RenameFeed` コマンドが現在の選択に対して編集を開始すること）
 - 名前とタイムスタンプを並べるメタ行（`ArticleRowMetadataTest`：フィードタイトルが長くても省略されるのはタイトル側だけで、記事カードのタイムスタンプは幅を奪われず行の右端に揃ったまま表示される。`ArticleMetaTextTest`：`articleMetaText` が著者とタイムスタンプを結合すること、および null または空白のみの著者名を除去し先頭に区切りが残らないこと）
-- 記事リーダーのネイティブ WebView（`ArticleWebViewHtmlTest`：`extractLinks`、および 3 つの文書ビルダー `wrapArticleHtml`／`articleNoContentHtml`／`articlePlaceholderHtml`——すべての文書が同じ `<style>` ブロックを共有し、テーマの色・フォントスケールで塗られるためどれもデフォルトの白いページを一瞬出せないこと、を含む。`ArticleDetailLoadGuardTest`：`shouldLoadArticleHtml` のリロード判定——プレースホルダー／本文なし状態が実記事と WebView を共有するため、記事 ID ではなく描画された文書の文字列をキーにしていること。`ArticleDetailPaneTest`：リーダーが常にコンポーズされたままであること、選択状態が変わってもその計測済みバウンズが動かないこと——`known-issues.md` に記載されたウインドウ全体のフリッカーの回帰ガード——、および未選択時、または選択中の記事に URL が無い場合にツールバーが非表示ではなく無効化されること）
+- 記事リーダーのネイティブ WebView（`ArticleWebViewHtmlTest`：`extractLinks`、および 3 つの文書ビルダー `wrapArticleHtml`／`articleNoContentHtml`／`articlePlaceholderHtml`——すべての文書が同じ `<style>` ブロックを共有し、テーマの色・フォントスケールで塗られるためどれもデフォルトの白いページを一瞬出せないこと、を含む。`ArticleDetailLoadGuardTest`：`shouldLoadArticleHtml` のリロード判定——プレースホルダー／本文なし状態が実記事と WebView を共有するため、記事 ID ではなく描画された文書の文字列をキーにしていること。`ArticleDetailPaneTest`：リーダーが常にコンポーズされたままであること、選択状態が変わってもその計測済みバウンズが動かないこと、および未選択時、または選択中の記事に URL が無い場合にツールバーが非表示ではなく無効化されること）
 - AppFont（Linux の UI フォント用 Pango フォント記述のパース）
 - カスタム URI スキーム登録（`UriSchemeRegistration` の OS 別ディスパッチとパッケージ版ランチャー判定、`LinuxUriSchemeRegistrar` の `.desktop` 生成——`%u` フィールドコードを含む——、`mimeapps.list` の非破壊マージ、冪等性）
 - `.opml` ファイル関連付け（`LaunchArg` による OAuth URI と `.opml` パスの分類、`registerWindowsOpmlAssociation` の ProgID レジストリ書き込み、`LinuxOpmlAssociationRegistrar` の `.desktop` 生成——`%f` フィールドコードを含む——、その shared-mime-info パッケージ XML、冪等性、および `OpmlImporter` の追加/失敗件数カウントとフォルダー/タグの照合）
@@ -400,9 +400,7 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 
 記事リーダーのネイティブ WebView（`ui/home/ArticleDetailPane.kt`）はヘビーウェイトな AWT
 サーフェスであり Compose UI テストでは一切ホストできないため、`ArticleDetailPaneTest` がカバーする
-バウンズ／無効化状態のチェックを超えた実際の画面上の挙動は目視で確認する必要がある。リーダーが
-常時マウントされている理由は `known-issues.ja.md` の「記事が未選択の状態から選択するとウインドウ
-全体がフリッカーする」を参照:
+バウンズ／無効化状態のチェックを超えた実際の画面上の挙動は目視で確認する必要がある:
 
 - 未選択状態から記事をクリックし、また未選択（あるいは記事の無いフィード）に戻す操作を、本文の
   ある記事・無い記事を交ぜながら繰り返す — ウインドウのどの部分（フィード一覧・記事一覧・ウインドウ
