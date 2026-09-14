@@ -57,8 +57,9 @@ Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC
 - Read/star conflict resolution is last-write-wins via `read_at` / `starred_at`.
 - `content` is displayed in preference to `summary`. If both are NULL, the reader shows a localized "no content" placeholder in place (with a link/button to open the article in the external browser); nothing opens automatically.
 - `search_text` = the HTML-stripped plain text of `content` (falling back to `summary`), or `""` if both are NULL. Computed at insert/update time (`ArticleRepository`, `HtmlText.toPlainText`).
-- Logical deletion via `deleted_at` (NULL = alive). Cache cleanup is the **only** writer of `deleted_at`
-  (`softDeleteExpired`); starred articles are never deleted. `deleted_updated_at` is a field-specific last-wins
+- Logical deletion via `deleted_at` (NULL = alive). Cache cleanup (`softDeleteExpired`) is the only **local**
+  originator of a deletion; starred articles are never deleted. (Sync merge also writes `deleted_at`, propagating a
+  deletion made on another device — see below.) `deleted_updated_at` is a field-specific last-wins
   timestamp for the delete/undelete event (like `read_at` / `starred_at`, and like `feeds.deleted_updated_at`), kept
   separate from `updated_at` so a content refresh / read / star change can't clobber a deletion during the sync merge.
   In the merge, deletion propagates by last-write-wins on `deleted_updated_at`, but a star newer than the deletion
