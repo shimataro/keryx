@@ -186,8 +186,9 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
    e.g. `AppDirs`, `FileIO`, `BrowserOpener`, `FilePicker`, `DatabaseDriverFactory`,
    `DatabaseMerger`, `DatabaseSnapshot`, `Gzip`, `Pkce`, `CloudStorageAvailability`,
    `platformModule`. That list is illustrative, not exhaustive: the real set is
-   whatever `commonMain` declares `expect` (mostly under `platform/`, currently ~28
-   declarations) — `grep -rn "expect " composeApp/src/commonMain` for the current one.
+   whatever `commonMain` declares `expect` (mostly under `platform/`, but also spanning
+   `core/`, `data/cloud/`, and `di/`) — `grep -rn "expect " composeApp/src/commonMain` for
+   the current one, rather than trusting a count here that will drift.
    Desktop implementations live in `desktopMain`. This keeps the door open for
    Android/iOS targets later.
 5. **Follow the design docs.** Do not change the sync algorithm, merge SQL
