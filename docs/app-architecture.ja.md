@@ -138,7 +138,8 @@ composeApp/src/
 
 ルート直下の別モジュール `androidApp`（`com.android.application`。上記の Kotlin Multiplatform
 ソースセット構成には含まれない）は `AndroidManifest.xml`、`KeryxApplication`（プロセス全体の初期化:
-`AndroidAppContext.init`、`startKoin`、`configureImageLoader`、FTS バックフィルの `ensureIndexed()`、
+`AndroidAppContext.init`、`startKoin`、`configureImageLoader`、FTS バックフィルの
+`ensureIndexedIfTableAbsent()`（プロセス起動のたびに呼ばれる軽量版——db-schema.md の `articles_fts` 節参照）、
 `startBackgroundRefresh`）、`MainActivity`（`setContent { App() }`、続けて
 `runAndroidStartupTasks`）のみを持つ。これが別モジュールになっているのは、AGP 9 の
 `com.android.application` プラグインが Kotlin Multiplatform プラグインと同一モジュールで併用できない

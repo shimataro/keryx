@@ -139,7 +139,8 @@ The package root is `works.merc.keryx.app` (reverse DNS of `keryx.merc.works`).
 A separate root-level module, `androidApp` (`com.android.application`, not part of the Kotlin
 Multiplatform source-set layout above), holds only `AndroidManifest.xml`, `KeryxApplication`
 (process-wide setup: `AndroidAppContext.init`, `startKoin`, `configureImageLoader`, an
-`ensureIndexed()` FTS backfill, `startBackgroundRefresh`), and `MainActivity`
+an `ensureIndexedIfTableAbsent()` FTS backfill (the cheaper, every-process-start variant — see
+db-schema.md's `articles_fts` section), `startBackgroundRefresh`), and `MainActivity`
 (`setContent { App() }`, then `runAndroidStartupTasks`). It exists because AGP
 9's `com.android.application` plugin cannot be applied to the same module as the Kotlin Multiplatform
 plugin — `composeApp` is instead an Android library via `com.android.kotlin.multiplatform.library`,
