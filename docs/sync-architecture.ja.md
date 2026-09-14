@@ -417,19 +417,23 @@ Desktop Entry 仕様上 URI がプロセスに渡らず、ブラウザーはス�
 エラーを出す。いずれも OS が URL をコマンドライン引数としてアプリを起動し、`main.kt` が
 single-instance 経由で実行中インスタンスへ転送する。
 
-**Android** は同じ `keryx://oauth2/callback` スキームを宣言的に登録する — `AndroidManifest.xml` の
-`MainActivity` に `intent-filter`（`VIEW`/`DEFAULT`/`BROWSABLE`、`scheme="keryx"` `host="oauth2"`）を
-持たせるだけで、Windows/Linux のような起動時登録処理は不要。`MainActivity.onCreate`/`onNewIntent` が
-リダイレクトのデータ URI を `dispatchOAuthCallbackIfPresent` に渡し、これがデスクトップの `main.kt` と
-同じ `classifyLaunchArg`（commonMain）/ `parseOAuthUri`（jvmCommonMain）で分類したうえで、同じ形の
-`MutableSharedFlow<OAuthCallbackParams>`（Android 自身の `platformModule` に登録された別インスタンス）
-へ流し込む。`launchMode="singleTask"` により、既に起動中のインスタンスは新規 `onCreate` ではなく
-`onNewIntent` でリダイレクトを受け取る。ディスパッチ成功後は intent のデータをクリアしておく —
-そうしないと、後で回転などによる構成変更で `onCreate` が同じ `Intent` を再度受け取ったときに
-同じリダイレクトを二重処理してしまう。デスクトップと異なり、Android のカスタム URI スキームの
-`intent-filter` はアプリが排他的に専有できるものではない（別アプリが同じスキームを宣言しうる）ため、
-コード交換自体を実際に守っているのは（全プロバイダーで既に必須の）PKCE である——横取りされても
-一致する `code_verifier` が無ければ意味を成さない。
+**Android** は同じ `keryx://oauth2/callback` スキームを宣言的に登録する:
+
+- **登録。** `AndroidManifest.xml` の `MainActivity` に `intent-filter`（`VIEW`/`DEFAULT`/`BROWSABLE`、
+  `scheme="keryx"` `host="oauth2"`）を持たせるだけで、Windows/Linux のような起動時登録処理は不要。
+- **ディスパッチ。** `MainActivity.onCreate`/`onNewIntent` がリダイレクトのデータ URI を
+  `dispatchOAuthCallbackIfPresent` に渡し、これがデスクトップの `main.kt` と同じ
+  `classifyLaunchArg`（commonMain）/ `parseOAuthUri`（jvmCommonMain）で分類したうえで、同じ形の
+  `MutableSharedFlow<OAuthCallbackParams>`（Android 自身の `platformModule` に登録された別インスタンス）
+  へ流し込む。
+- **構成変更。** `launchMode="singleTask"` により、既に起動中のインスタンスは新規 `onCreate` ではなく
+  `onNewIntent` でリダイレクトを受け取る。ディスパッチ成功後は intent のデータをクリアしておく —
+  そうしないと、後で回転などによる構成変更で `onCreate` が同じ `Intent` を再度受け取ったときに
+  同じリダイレクトを二重処理してしまう。
+- **スキームを排他専有できなくても安全な理由。** デスクトップと異なり、Android のカスタム URI
+  スキームの `intent-filter` はアプリが排他的に専有できるものではない（別アプリが同じスキームを
+  宣言しうる）ため、コード交換自体を実際に守っているのは（全プロバイダーで既に必須の）PKCE である
+  ——横取りされても一致する `code_verifier` が無ければ意味を成さない。
 
 > [!NOTE]
 > **カスタム URI プロバイダーは全デスクトップ OS 共通**: `./gradlew :composeApp:run` では
