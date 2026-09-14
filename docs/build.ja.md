@@ -581,13 +581,13 @@ AppStream の `<launchable>` のために追加した — 上記「Linux パッ�
 2. `release: published` で起動し、先頭の `v` を除去して `-PappVersion` に渡す。
 3. 5つの独立したジョブが並行して実行される:
 
-   - macOS ランナーで `:composeApp:packageDmg` を実行し、`Keryx-<version>-macos-arm64.dmg` に加えて **`Keryx-<version>-macos-arm64.zip`** としても添付する。**プレリリースタグの場合は `packageDmg` をスキップし、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。
+   - macOS ランナーで `:composeApp:createDistributable :composeApp:packageDmg` を実行し（下の `.zip` の元になるアプリバンドルを確実に作るため `createDistributable` を `packageDmg` と並べて明示的に要求している）、`Keryx-<version>-macos-arm64.dmg` に加えて **`Keryx-<version>-macos-arm64.zip`** としても添付する。**プレリリースタグの場合は `packageDmg` をスキップし `createDistributable` のみ実行するため、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。
    - Linux ランナーで（jpackage 用に `fakeroot`/`rpm` をインストールした上で）`:composeApp:packageDeb :composeApp:packageRpm` を実行し、`Keryx-<version>-linux-x86_64.deb` と `Keryx-<version>-linux-x86_64.rpm` に加えて **`Keryx-<version>-linux-x86_64.zip`** としても添付する。**プレリリースタグの場合は `packageDeb`/`packageRpm` をスキップし、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。
    - `package-snap` は独立したジョブで、`snapcraft` の失敗が上記 deb/rpm/zip ジョブの成果物を
      道連れにしないようにしてある（`ubuntu-latest` ではなく `ubuntu-24.04` 固定ランナーが必要な
      理由は上記「Linux Snap パッケージ」参照）。（`sudo snap install snapcraft --classic` の後）
-     `snap/snapcraft.yaml` に対して `snapcraft pack --destructive-mode` を実行し、
-     `Keryx-<version>-linux-x86_64.snap` を添付する — `.deb`/`.rpm` と異なり、snapcraftの
+     `snap/snapcraft.yaml` に対して `sudo snapcraft pack --destructive-mode --output "Keryx-$VERSION-linux-x86_64.snap"` を実行し、
+     生成された `Keryx-<version>-linux-x86_64.snap` を添付する — `.deb`/`.rpm` と異なり、snapcraftの
      `version:`フィールドはjpackageのパッケージメタデータのような `MAJOR.MINOR.PATCH` 限定ではないため、
      **プレリリースタグでもスキップせず添付する**。GitHub Release への添付の後、同じジョブは
      **Snap Storeへのスナップ公開**も行う（`snapcraft upload --release=<channel>`。後述の
