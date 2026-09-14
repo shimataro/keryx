@@ -16,7 +16,8 @@ Target: cloud sync (Dropbox / Google Drive / OneDrive). Implementation is in `do
 ## Cloud File Structure
 
 ```bash
-/keryx.db.gz                           ← Sync SQLite, gzip-compressed (without articles_fts / sync_state) — primary
+/keryx.db.gz                           ← Sync SQLite, gzip-compressed (without articles_fts / sync_state / the
+                                          idx_articles_* indexes) — primary
 /keryx.db                              ← Legacy, uncompressed — read-only fallback, never written; see below
 /keryx-YYYYMMDD-HHMMSS.db.gz.bak       ← archive left behind by a cloud-data reset (never pruned)
 ```

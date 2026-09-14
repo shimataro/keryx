@@ -27,7 +27,8 @@
 ## クラウド上のファイル構成
 
 ```bash
-/keryx.db.gz                           ← 同期用 SQLite、gzip 圧縮（articles_fts / sync_state なし）— 正本
+/keryx.db.gz                           ← 同期用 SQLite、gzip 圧縮（articles_fts / sync_state / idx_articles_*
+                                          インデックスなし）— 正本
 /keryx.db                              ← レガシー・非圧縮。読み取り専用フォールバック。後述
 /keryx-YYYYMMDD-HHMMSS.db.gz.bak       ← クラウドデータのリセットで退避される旧ファイル（自動削除されない）
 ```
