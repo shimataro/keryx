@@ -11,7 +11,7 @@ A local-first, cross-platform RSS reader
 ## Features
 
 - **Multi-device sync**: via cloud storage (Dropbox / Google Drive / OneDrive — Android currently supports
-  Dropbox and OneDrive; Google Drive there is planned)
+  Dropbox and OneDrive; Google Drive support there is a future consideration)
 - **Local-first**: no central server; works fully offline without sync
 - **Fast local full-text search**: instantly search article titles and content by keyword
 - **Organize feeds with tags and folders**: tags for cross-cutting labels, folders for hierarchical grouping
