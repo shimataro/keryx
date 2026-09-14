@@ -112,9 +112,6 @@ data exists in the cloud it is automatically merged (imported) during the initia
 | 410 Gone | Warning in notification center (not auto-deleted) |
 | Timeout | Error notification after a fixed number of retries |
 
-> [!NOTE]
-> Fixed the bug where only 301 was supported with no redirect loop guard, and now all redirect codes are supported + a maximum 5-time loop guard is implemented.
-
 ## 8. Accessibility & Internationalization
 
 - All UI strings are managed via Compose Resources (`values/strings.xml`). Selected according to system locale, falling back to default (Japanese) if the language is not supported. Currently only Japanese is bundled.
