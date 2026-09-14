@@ -200,7 +200,21 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 - クラウドデータの破損／非互換からの復旧（`SyncRepositoryTest.kt`／`SyncMergerTest.kt`：制約違反するクラウドデータ——`feeds` の行集合が UNIQUE な `url` を重複させている、または NOT NULL 違反の NULL をクラウド DB 自身の（より緩い）スキーマだけが許していた——を、破損ファイルや外部スキーマと同様に `CloudDataIncompatibleException` として分類すること、`SyncMergerTest.mergeDoesNotClassifyABrokenLocalSchemaAsCloudDataIncompatible` がその逆（ローカル側の破損は誤分類しない）を担保すること、`SyncRepositoryTest.postMergeIndexFailureIsNotClassifiedAsCloudDataIncompatible` がマージ commit 後の `FtsManager.indexMissing()` の失敗——壊れたクラウドスキーマと同じ曖昧な SQLite エラーコードを共有する——を誤って分類しないことを担保すること。`core/SqliteFileTest.kt`＝アップロード側と対称なダウンロードバイト列の SQLite ヘッダ検証）
 - 削除ではなく退避するようになったクラウドデータのリセット（`core/CloudBackupPathTest.kt`＝決定的で UTC 整形された退避パス、`CloudStorage.rename` は `DropboxStorageTest.kt`／`GoogleDriveStorageTest.kt`／`OneDriveStorageTest.kt` でプロバイダごとに（退避先の衝突・退避元の不在ケースを含めて）検証、`SyncRepositoryTest.kt` の `resetCloudData*` 系がリネームしてから作り直すフローとその削除フォールバックを検証）
 - クラウド転送のファイルストリーミング（`CloudFileTransferTest.kt`：レスポンスボディが複数チャンクにまたがっても宛先ファイルへそのまま書かれること、短いペイロードが既存の宛先ファイルに追記されず置き換わること、`FileUploadContent` がファイルをストリームし——Drive の `multipart/related` 封筒を可能にする prefix/suffix で包む場合も含めて——正しい `contentLength` を報告すること。`ContentDigestTest.kt`：アップロードのスキップ判定に使うチャンク単位 SHA-256——最終チャンクの変更も検出されること、ファイルが無い場合は誤一致ではなくダイジェスト無しを返すことを含む。`SqliteFileTest.kt`：パス版のヘッダ検証が、どのバッファよりも大きなファイルでも先頭16バイトだけで判定すること）
-- 変更がないときの転送スキップ（`SyncRepositoryTest.kt`：双方とも変更が無い2回目の同期がペイロードを1バイトも転送せずメタデータ取得1回だけで済むこと、そのスキップの後にローカルを変更したら確実にアップロードされること、リモートの変更は従来どおりダウンロードしてマージすること、アップロード自身のレスポンスからリビジョンを記録するので自分の書き込みを再ダウンロードしないこと、`sync_state` がアップロード用スナップショットから除外されておりダイジェストが独りでに変化しないこと、`clearSyncFailureState()` が実行中の同期に取り消されないこと——共有ミューテックスの保証を2本のテストで半分ずつ検証する。リビジョン／ダイジェストのマーカーを書き戻すのは**成功した**同期であり、`lastSyncError` を書き戻すのは**失敗した**同期なので、1本では両方を検証できないため、および圧縮アップロード／レガシーフォールバックの分岐——レガシーのみのクラウドがマージされてから `.gz` へ移行すること（リビジョンガード付きの更新ではなく create-only で）、レガシーファイル自体がバイト単位でそのまま生き残ること、一度移行したデバイスは（レガシーファイルがその後壊れていても）二度とレガシーを読まないこと、移行中の壊れたレガシーファイルと不正な（gzip ではない）`.gz` ペイロードのどちらも `CloudDataIncompatibleException` に分類されること、リセットが `.gz` のみをリネーム・再作成しレガシーファイルには一切触れないこと）
+- 変更がないときの転送スキップ（`SyncRepositoryTest.kt`）:
+  - 双方とも変更が無い2回目の同期がペイロードを1バイトも転送せずメタデータ取得1回だけで済むこと、
+    そのスキップの後にローカルを変更したら確実にアップロードされること、リモートの変更は従来どおり
+    ダウンロードしてマージすること、アップロード自身のレスポンスからリビジョンを記録するので自分の
+    書き込みを再ダウンロードしないこと、`sync_state` がアップロード用スナップショットから除外されて
+    おりダイジェストが独りでに変化しないこと、`clearSyncFailureState()` が実行中の同期に取り消され
+    ないこと——共有ミューテックスの保証を2本のテストで半分ずつ検証する。リビジョン／ダイジェストの
+    マーカーを書き戻すのは**成功した**同期であり、`lastSyncError` を書き戻すのは**失敗した**同期
+    なので、1本では両方を検証できないため。
+  - 圧縮アップロード／レガシーフォールバックの分岐: レガシーのみのクラウドがマージされてから `.gz`
+    へ移行すること（リビジョンガード付きの更新ではなく create-only で）、レガシーファイル自体が
+    バイト単位でそのまま生き残ること、一度移行したデバイスは（レガシーファイルがその後壊れていても）
+    二度とレガシーを読まないこと、移行中の壊れたレガシーファイルと不正な（gzip ではない）`.gz`
+    ペイロードのどちらも `CloudDataIncompatibleException` に分類されること、リセットが `.gz` のみを
+    リネーム・再作成しレガシーファイルには一切触れないこと。
 - 自動同期の抑制ゲート（`SyncRepositoryTest.kt`：`AUTOMATIC` トリガーの同期が `autoSyncSuspended` 中はスキップされること、`MANUAL` は決してゲートされないこと、`scheduleSync()` も同様に抑制されること、成功した同期／リセット／`clearSyncFailureState()` でゲートがクリアされること——`SchemaVersionException` は意図的にゲートを一切起動しない）
 - アプリ内アップデートのパイプライン:
   - `UpdateCheckerTest.kt`：`assets[]`/`body` を `asset`/`releaseNotes` へパースすること、`sha256`
