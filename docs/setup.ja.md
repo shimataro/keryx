@@ -97,16 +97,17 @@
   [エミュレータのアクセラレーションガイド](https://developer.android.com/studio/run/emulator-acceleration)
   を参照。このプロジェクト固有の制約を超えた詳細は
   [公式の AVD ガイド](https://developer.android.com/studio/run/managing-avds) を参照。
-- **Android リリース署名キーストア（任意）**: Gradle の既定 `build` ライフサイクルは
-  `:androidApp` の `assembleRelease` を含んでおり（App Bundle は含まれない —
-  `:androidApp:bundlePlayRelease` は `release.yml` のように明示的に叩く必要がある）、
-  `androidApp/build.gradle.kts` は署名情報が無いときに debug 署名へフォールバックしない設計に
-  なっている（debug 署名の release 成果物はインストール可能で本物に見えてしまうため、これこそ
-  危険なケース）。その代わり、**キーストアを用意していなくてもルートの `./gradlew build` は成功する**
-  が、`:androidApp` の release APK は**未署名**になる（ビルド警告が出る） — その APK は実機に
-  インストールも Google Play へのアップロードもできない。実機で動かす/配布するつもりがある
-  場合にのみ用意すればよく、ローカル検証には JDK 同梱の `keytool` でその場限りのキーストアを
-  作れば十分:
+- **Android リリース署名キーストア（任意）**: **キーストアを用意していなくてもルートの
+  `./gradlew build` は成功する**が、`:androidApp` の release APK は**未署名**になる（ビルド警告が
+  出る） — その APK は実機にインストールも Google Play へのアップロードもできない。実機で動かす/
+  配布するつもりがある場合にのみ用意すればよく、ローカル検証には JDK 同梱の `keytool` でその場限りの
+  キーストアを作れば十分。
+
+  Gradle の既定 `build` ライフサイクルは `:androidApp` の `assembleRelease` を含んでおり（App Bundle は
+  含まれない — `:androidApp:bundlePlayRelease` は `release.yml` のように明示的に叩く必要がある）、
+  `androidApp/build.gradle.kts` は署名情報が無いときに debug 署名へフォールバックしない設計になって
+  いる。debug 署名の release 成果物はインストール可能で本物に見えてしまうため——サイレントな
+  フォールバックが生む、まさに危険なケースである。
 
   ```bash
   keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \

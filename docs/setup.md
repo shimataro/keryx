@@ -100,16 +100,17 @@ Split into what every target needs in common, and what's specific to the Android
   [emulator acceleration guide](https://developer.android.com/studio/run/emulator-acceleration).
   See the [official AVD guide](https://developer.android.com/studio/run/managing-avds) for details
   beyond this project's own constraints.
-- **Android release signing keystore (optional)**: Gradle's default `build` lifecycle includes
-  `:androidApp`'s `assembleRelease` (the App Bundle is not part of it — `:androidApp:bundlePlayRelease`
-  has to be invoked explicitly, as `release.yml` does), and `androidApp/build.gradle.kts` is
-  deliberately built to **not** fall back to debug signing when signing credentials are missing —
-  a debug-signed release artifact is installable and looks legitimate, which is the dangerous
-  case. Instead, **without a keystore the root `./gradlew build` still succeeds**, but
-  `:androidApp`'s release APK comes out **unsigned** (with a build warning) — it cannot be
-  installed on a device or uploaded to Google Play. Set this up only if you actually want to
-  install or distribute a release build; a throwaway keystore made with the JDK's own `keytool` is
-  enough for local testing:
+- **Android release signing keystore (optional)**: **Without a keystore, the root `./gradlew build`
+  still succeeds**, but `:androidApp`'s release APK comes out **unsigned** (with a build warning) —
+  it cannot be installed on a device or uploaded to Google Play. Set this up only if you actually
+  want to install or distribute a release build; a throwaway keystore made with the JDK's own
+  `keytool` is enough for local testing.
+
+  Gradle's default `build` lifecycle includes `:androidApp`'s `assembleRelease` (the App Bundle is
+  not part of it — `:androidApp:bundlePlayRelease` has to be invoked explicitly, as `release.yml`
+  does). `androidApp/build.gradle.kts` is deliberately built to **not** fall back to debug signing
+  when signing credentials are missing, since a debug-signed release artifact is installable and
+  looks legitimate — the dangerous case a silent fallback would create.
 
   ```bash
   keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
