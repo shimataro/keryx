@@ -68,8 +68,9 @@ composeApp/src/
     PlatformTheme（`platformShapes` は M3 既定の `Shapes()`、`ProvidePlatformInteraction` は
     no-op — `LocalIndication`/`LocalRippleConfiguration` を M3 既定のままにすることで、あらゆる
     `clickable` と M3 部品が本物のリップルを持つようになる。external-spec.ja.md の「UI 方針」参照）、
-    `ListRowChrome.android.kt` の `listRowSurface`（両 `ListRowKind` で同じ 12dp インセットを共有
-    — Android 独自の `listRowHorizontalMargin()`、M3 の `NavigationDrawerItemDefaults.ItemPadding`
+    `ui/home/ListRowChrome.kt` の `listRowSurface`（`expect`/`actual` ではなく単一の commonMain 関数——
+    両 `ListRowKind` で同じ 12dp インセットを `listRowHorizontalMargin()` で共有（`isTouchPrimary` で
+    分岐: タッチ 12dp / マウス 8dp。タッチ側は M3 の `NavigationDrawerItemDefaults.ItemPadding` と一致）
     — し、`listRowShape(kind)` でクリップ形状を決める: `ListItem` 行は常に角丸長方形、`NavItem`
     行も `PaneLayout.Triple` の常設サイドバーペインとして描画されている間（記事一覧の隣に
     並ぶので、2 つが 1 つのデザインに見える）は同じ形。実際にフィード一覧のナビゲーション
