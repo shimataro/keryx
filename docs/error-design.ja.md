@@ -28,9 +28,11 @@ sealed interface Result<out T> {
 sealed class KeryxException(message: String) : Exception(message)
 ```
 
-主なサブクラス: `FeedFetchException(statusCode)`, `FeedParseException`, `FeedDiscoveryException(candidates)`,
-`FeedTimeoutException`, `FeedNotFoundException(isGone)`, `CloudAuthException`, `CloudStorageException`,
-`SyncConflictException`, `SchemaVersionException(localVersion, cloudVersion)`, `CloudDataIncompatibleException`, `InvalidFeedUrlException`, `UpdateException(stage)`。
+主なサブクラス（いずれも先頭に `message: String` を取るが、以下では省略）: `FeedFetchException(statusCode)`,
+`FeedParseException`, `FeedDiscoveryException(candidates)`, `FeedTimeoutException`, `FeedNotFoundException(isGone)`,
+`CloudAuthException`, `CloudStorageException`, `SyncConflictException`,
+`SchemaVersionException(localVersion, cloudVersion)`, `CloudDataIncompatibleException`, `InvalidFeedUrlException`,
+`UpdateException(stage)`。
 
 補助拡張: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `onOk` / `onErr` / `map`。
 
