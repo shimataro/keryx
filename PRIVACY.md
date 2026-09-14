@@ -90,13 +90,14 @@ OneDrive (one provider active at a time), here is exactly what happens:
   using your operating system's secure credential storage (Keychain on macOS,
   Credential Manager on Windows, Secret Service on Linux — inside the Snap
   package, an encrypted local store keyed by a per-app master secret from your
-  desktop's Secret portal), falling back to a permission-restricted local file
-  only if the OS store is unavailable. On
-  Android, tokens are encrypted with a key held in the Android Keystore before
-  being written to a file in the app's private storage; this file is explicitly
-  excluded from Android's automatic backup and device transfer. Tokens are never
-  sent anywhere except directly to Dropbox's, Google's, or Microsoft's own API,
-  as required to perform the sync you requested.
+  desktop's Secret portal). If the OS store is unavailable, tokens fall back to
+  a permission-restricted (`0600`, readable only by your own account) local
+  file instead. On Android, tokens are encrypted with a key held in the
+  Android Keystore before being written to a file in the app's private
+  storage; this file is explicitly excluded from Android's automatic backup
+  and device transfer. Tokens are never sent anywhere except directly to
+  Dropbox's, Google's, or Microsoft's own API, as required to perform the
+  sync you requested.
 - Once your data is in your Dropbox, Google Drive, or OneDrive account, it is
   subject to that provider's own privacy policy and terms — Keryx has no further
   access to or control over it beyond the sync file it wrote.
