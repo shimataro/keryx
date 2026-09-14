@@ -69,7 +69,8 @@ sealed class KeryxException(message: String) : Exception(message)
   エラー・警告に加え、`INFO` は新バージョンの通知のみ。**新着記事は通知センターには記録しない**
   （`NewArticleNotifier` は OS 通知（トレイ）にのみ流す）——記事一覧と未読バッジという永続的な手段で
   既に把握できるため。手動更新も同様に、一覧・未読バッジの更新で示す。
-- ベルアイコンにバッジ（件数）。ベルは `ArticleListPane` のヘッダ行にある（正確な規則は `ui-guidelines` スキルを参照）。`ArticleDetailPane` には意図的に置かない。
+- ベルアイコンにバッジ（件数）。ベルは幅を問わず（デスクトップの3ペイン定常状態を含む）
+  `ArticleListPane` のヘッダ行にある（正確な規則は `ui-guidelines` スキルを参照）。`ArticleDetailPane` には意図的に置かない。
 - バックグラウンド更新中の警告は UI コンテキストが無いため通知センターにのみ記録し、
   **OS 通知には出さない**（OS 通知は新着記事専用。上記参照）。そのため Android では
   `ForegroundAlertSnackbar`（`ui/home/HomeScreen.kt`）が、`WARNING`/`ERROR` の発生時点で
