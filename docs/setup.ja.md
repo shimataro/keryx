@@ -247,10 +247,9 @@ keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
 
 ### `SDK location not found`（Gradle の設定段階）
 
-`composeApp` 自体が Android ライブラリターゲット（`com.android.kotlin.multiplatform.library`）
-を構成するようになったため、その `build` ライフサイクルに触れるタスク——ルートの
-`./gradlew build`、あるいは `:composeApp:build` 単体でも——は `:androidApp` だけでなく
-Android SDK を必要とする。
+`composeApp` 自体が Android ライブラリターゲット（`com.android.kotlin.multiplatform.library`）を
+構成しているため、その `build` ライフサイクルに触れるタスク——ルートの `./gradlew build`、あるいは
+`:androidApp` 配下だけでなく `:composeApp:build` 単体でも——は Android SDK を必要とする。
 
 `local.properties` の `sdk.dir`（前提を参照）か環境変数 `ANDROID_HOME` を設定する。デスクトップ
 だけの作業なら `:composeApp:compileKotlinDesktop` や `:composeApp:desktopTest` のような特定

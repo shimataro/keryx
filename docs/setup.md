@@ -252,10 +252,9 @@ To reset data during development, delete `keryx.db` and `local_settings.json` in
 
 ### `SDK location not found` (at Gradle configuration time)
 
-`composeApp` itself now configures an Android library target
-(`com.android.kotlin.multiplatform.library`), so any task that touches its `build` lifecycle —
-the root `./gradlew build`, or even `:composeApp:build` alone — needs the Android SDK, not just
-`:androidApp`.
+`composeApp` itself configures an Android library target (`com.android.kotlin.multiplatform.library`),
+so any task that touches its `build` lifecycle — the root `./gradlew build`, or even
+`:composeApp:build` alone, not only a task under `:androidApp` — needs the Android SDK.
 
 Set `sdk.dir` in `local.properties` (see Prerequisites above) or the `ANDROID_HOME` environment
 variable. Desktop-only work can avoid this by scoping to a specific desktop task instead, e.g.
