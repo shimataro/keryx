@@ -207,7 +207,7 @@ SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundli
 | `windowPlacement` | string | "floating"（"floating" \| "maximized" \| "fullscreen"。未知の値は floating として復元） |
 | `feedListPaneWidth` / `articleListPaneWidth` | number | 260 / 360 |
 | `collapsedFolderIds` | string[] | `[]`（フォルダの既定は*展開*なので、畳まれている方だけを記録する） |
-| `expandedTagIds` | string[] | `[]`（タグは逆に既定が*折り畳み*。このリストが無かった頃と同じだけサイドバーが短いままになるようにするため） |
+| `expandedTagIds` | string[] | `[]`（タグは逆に既定が*折り畳み*で、サイドバーを短く保つ） |
 | `lastFilter` | string\|null | null |
 | `lastArticleId` | string\|null | null |
 | `lastFocusedPane` | string\|null | null |

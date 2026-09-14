@@ -179,7 +179,7 @@ Setup completion = file exists.
 | `windowPlacement` | string | "floating" ("floating" \| "maximized" \| "fullscreen"; an unrecognized value restores as floating) |
 | `feedListPaneWidth` / `articleListPaneWidth` | number | 260 / 360 |
 | `collapsedFolderIds` | string[] | `[]` (folders default to *expanded*, so only the collapsed ones are tracked) |
-| `expandedTagIds` | string[] | `[]` (tags are the opposite — they default to *collapsed*, so the sidebar stays as short as it was before this list existed) |
+| `expandedTagIds` | string[] | `[]` (tags are the opposite — they default to *collapsed*, keeping the sidebar short) |
 | `lastFilter` | string\|null | null |
 | `lastArticleId` | string\|null | null |
 | `lastFocusedPane` | string\|null | null |
