@@ -504,10 +504,9 @@ AppStream の `<launchable>` のために追加した — 上記「Linux パッ�
   追加されるだけでなく）Keryx が直接起動するようにしている。macOS には OPML 用の組み込み
   システム UTI が存在せず、サードパーティ製フィードリーダーのエコシステムでも統一されていない —
   NetNewsWire は `org.opml.opml`（OPML 自体が Apple の UTI システムより古いため、事実上の標準に
-  最も近い）、Reeder は `com.reederapp.opml`、Overcast は `unofficial.opml` を使う。以前のバージョンの
-  本アプリは独自の UTI（`works.merc.keryx.opml`）をエクスポートしていたが、これだと他のアプリが
-  既に `.opml` 拡張子をこれらいずれかの識別子に紐付け済みの Mac では、Finder の「このアプリケーションで
-  開く」メニューに Keryx が現れなくなってしまう — ファイルはその拡張子に既に紐付いている UTI の
+  最も近い）、Reeder は `com.reederapp.opml`、Overcast は `unofficial.opml` を使う。これらの代わりに Keryx 独自の UTI（`works.merc.keryx.opml`）を `.opml` 用にエクスポートすると、他の
+  アプリが既に `.opml` 拡張子をこれらいずれかの識別子に紐付け済みの Mac では、Finder の「このアプリケー
+  ションで開く」メニューに Keryx が現れなくなってしまう — ファイルはその拡張子に既に紐付いている UTI の
   ほうに解決され、後から競合するエクスポート宣言をしてもその紐付けには勝てない。そのため
   `LSItemContentTypes` には既知の3識別子すべてを列挙し、（Keryx はこれらの識別子の所有者ではなく
   利用者であるため）`UTExportedTypeDeclarations` ではなく `UTImportedTypeDeclarations` で宣言する —

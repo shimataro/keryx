@@ -496,9 +496,9 @@ per platform:
   "Open With" submenu. macOS has no single built-in system UTI for OPML, and the third-party feed
   reader ecosystem never converged on one either — NetNewsWire uses `org.opml.opml` (the closest
   thing to a de facto standard, since OPML itself predates Apple's UTI system), Reeder uses
-  `com.reederapp.opml`, and Overcast uses `unofficial.opml`. An earlier version of this app instead
-  exported its own UTI (`works.merc.keryx.opml`), but that made Keryx invisible in Finder's "Open
-  With" menu on any Mac where another app had already claimed the `.opml` extension for one of these
+  `com.reederapp.opml`, and Overcast uses `unofficial.opml`. Exporting a Keryx-owned UTI for `.opml`
+  (`works.merc.keryx.opml`) instead of these would make Keryx invisible in Finder's "Open With" menu
+  on any Mac where another app has already claimed the `.opml` extension for one of these
   other identifiers — the file resolves to whichever UTI is already bound to that extension, and a
   competing export doesn't win that binding. `LSItemContentTypes` therefore lists all three known
   identifiers, declared via `UTImportedTypeDeclarations` (Keryx is a consumer of these identifiers,
