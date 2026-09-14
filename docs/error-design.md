@@ -50,8 +50,14 @@ Helper extensions: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `
 
 ## Notification Center (`domain/NotificationCenter`)
 
-- The notification center (history, manually dismissed) is the primary channel. Previous transient toasts have been replaced with more macOS-native inline expressions (copy shows a ✓ near the action source, OPML shows result text near the button, subscription shows the list appearance + in-dialog display), so desktop has no in-app snackbar. Android is the one platform-specific exception: it shows an M3 `Snackbar` for the URL-copy confirmation, but only below API 33 — from API 33 onward the OS already shows its own clipboard-copy confirmation, and a Snackbar there would just duplicate it (see `platform/PlatformOs.kt`'s `platformShowsOwnCopyConfirmation` and `ui/home/HomeCommon.kt`'s `LocalSnackbarHostState`). Android's second Snackbar use is
-  `ui/home/HomeScreen.kt`'s `ForegroundAlertSnackbar`, described below.
+- The notification center (history, manually dismissed) is the primary channel. Desktop has **no in-app snackbar** —
+  confirmations use inline expressions instead (copy shows a ✓ near the action source, OPML shows result text near
+  the button, subscription shows the list appearance + in-dialog display). Android is the one platform-specific
+  exception: it shows an M3 `Snackbar` for the URL-copy confirmation, but only below API 33 — from API 33 onward the
+  OS already shows its own clipboard-copy confirmation, and a Snackbar there would just duplicate it (see
+  `platform/PlatformOs.kt`'s `platformShowsOwnCopyConfirmation` and `ui/home/HomeCommon.kt`'s
+  `LocalSnackbarHostState`). Android's second Snackbar use is `ui/home/HomeScreen.kt`'s `ForegroundAlertSnackbar`,
+  described below.
 - History is kept only for the session (not persisted to DB). Only things worth looking back at are recorded: errors and warnings, plus `INFO` for a new app version. **New articles are NOT recorded in the notification center** — `NewArticleNotifier` only feeds the OS notification (tray), because their arrival is already durably visible in the article list and the unread badges. This OS notification fires for both the background/startup refresh and a manual "Refresh All", via the shared `NewArticleNotifier.notifyIfEnabled` gate (new-article count > 0 and the `notificationEnabled` setting).
 - Bell icon with badge (count). The bell lives in `ArticleListPane`'s header row at every layout width, including the desktop 3-pane steady state (see the `ui-guidelines` skill for the exact rule). `ArticleDetailPane` deliberately has none.
 - Background-update warnings are recorded only in the notification center (because there is no UI context), and produce **no OS notification** — the OS notification channel is reserved for new articles (see above). On Android, `ForegroundAlertSnackbar` (`ui/home/HomeScreen.kt`) therefore also announces every `WARNING`/`ERROR` in a Snackbar the moment it is raised: a badge alone only reaches a user already looking at the pane hosting the bell, and these alerts are raised asynchronously by `runAndroidStartupTasks` and `FeedRefreshWorker`. `INFO` is excluded (a new-version notice is not an alert). Details:
