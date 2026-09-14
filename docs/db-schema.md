@@ -120,7 +120,17 @@ CREATE VIRTUAL TABLE articles_fts USING fts5(
 INSERT INTO articles_fts(articles_fts) VALUES('rebuild');
 ```
 
-External content mode keeps only the index, referencing `articles.search_text` for body text. **Never DROP `articles_fts` on the live DB** (exclusion from upload is done by dropping it on the `VACUUM INTO` snapshot copy side. See "FTS5 handling" in [sync-architecture.md](sync-architecture.md)). After feed refresh / sync merge, `FtsManager.indexMissing()` **incrementally indexes only unindexed new articles** (do not use full `'rebuild'` on every hot path because it is O(total indexed text) and heavy). Full rebuild (`rebuildIndex()` = `'rebuild'`) is only done in the daily idle pass (`local_settings.lastFtsRebuiltAt` 24h gate + `ActivityCenter` idle), rebuilding stale existing rows (body text updated since incremental indexing). `'rebuild'` is atomic + `busy_timeout` wait, so running searches do not regress to zero results.
+External content mode keeps only the index, referencing `articles.search_text` for body text.
+
+- **Never DROP `articles_fts` on the live DB.** Exclusion from upload is done by dropping it on the `VACUUM INTO`
+  snapshot copy side instead — see "FTS5 handling" in [sync-architecture.md](sync-architecture.md).
+- After feed refresh or sync merge, `FtsManager.indexMissing()` **incrementally indexes only unindexed new
+  articles**. Never use a full `'rebuild'` on a hot path — it is `O(total indexed text)` and too heavy to run there.
+- Full rebuild (`rebuildIndex()` = `'rebuild'`) runs only in the daily idle pass (`local_settings.lastFtsRebuiltAt`
+  24h gate + `ActivityCenter` idle), to rebuild stale existing rows whose body text changed since incremental
+  indexing.
+- `'rebuild'` is atomic and waits on `busy_timeout`, so a search running concurrently never regresses to zero
+  results.
 **On startup, call `FtsManager.ensureIndexed()` to create the table on first run and backfill any missing rows.**
 Android instead calls the cheaper `ensureIndexedIfTableAbsent()` on every process start (including a `WorkManager`
 wakeup, up to ~96 times/day) — it skips straight to a no-op once the table already exists, instead of re-running

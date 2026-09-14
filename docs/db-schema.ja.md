@@ -145,12 +145,16 @@ CREATE VIRTUAL TABLE articles_fts USING fts5(
 INSERT INTO articles_fts(articles_fts) VALUES('rebuild');
 ```
 
-外部コンテンツ方式でインデックスのみ保持し、本文は `articles.search_text` を参照する。**ライブ DB の
-`articles_fts` は決して DROP しない**（アップロードからの除外は `VACUUM INTO` スナップショットのコピー側で
-DROP して行う。[sync-architecture.ja.md](sync-architecture.ja.md) の「FTS5 の扱い」）。フィード更新・
-同期マージの後は `FtsManager.indexMissing()` で**未索引の新記事だけを増分投入**する（全 `'rebuild'` は毎回だと
-重くスケールしないため使わない）。全再構築は日次アイドル pass（`local_settings.lastFtsRebuiltAt`
-の 24h ゲート）でのみ行い、増分投入以降に本文が更新されて古くなった既存行の作り直しを担う。
+外部コンテンツ方式でインデックスのみ保持し、本文は `articles.search_text` を参照する。
+
+- **ライブ DB の `articles_fts` は決して DROP しない。** アップロードからの除外は `VACUUM INTO` スナップショット
+  のコピー側で DROP して行う — [sync-architecture.ja.md](sync-architecture.ja.md) の「FTS5 の扱い」参照。
+- フィード更新・同期マージの後は `FtsManager.indexMissing()` で**未索引の新記事だけを増分投入**する。
+  全 `'rebuild'` はホットパスでは決して使わない — `O(索引済みテキスト全体)` で重すぎるため。
+- 全再構築（`rebuildIndex()` ＝ `'rebuild'`）は日次アイドル pass（`local_settings.lastFtsRebuiltAt` の
+  24h ゲート ＋ `ActivityCenter` のアイドル）でのみ行い、増分投入以降に本文が更新されて古くなった既存行を
+  作り直す。
+- `'rebuild'` はアトミックかつ `busy_timeout` 待ちなので、実行中の検索が 0 件に後退することはない。
 **起動時に `FtsManager.ensureIndexed()` を呼び、テーブルが無ければ作成し、索引に未登録の記事があれば増分投入する。**
 Android はこれより軽い `ensureIndexedIfTableAbsent()` をプロセス起動のたびに呼ぶ（`WorkManager` の
 ウェイクアップ含め1日最大約96回）— テーブルが既に存在すれば毎回 `indexMissing()` の `O(記事数)` スキャンを
