@@ -158,9 +158,7 @@ Android はこれより軽い `ensureIndexedIfTableAbsent()` をプロセス起�
 
 `tokenize='trigram'` は SQLite ≥3.34 を必要とするが、AOSP 自身の SQLite ビルドはこれを提供しない
 （どの API レベルでも FTS5 自体を含んでいない）— Android の `DatabaseDriverFactory` actual はバンドル
-SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundling.md` を参照。これは Android の
-実機で実際に `articles_fts` テーブルを作成・投入し、`MATCH` クエリを実行した DB ファイルを取り出して
-検証済み。
+SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundling.md` を参照。
 
 **trigram トークナイザは 3 文字未満のクエリ文字列からトークンを一つも生成しない** — 1〜2 文字での
 `MATCH` はエラーにならず無音で 0 件を返す。検索の最小文字数（`core/Constants.kt` の

@@ -128,9 +128,7 @@ wakeup, up to ~96 times/day) — it skips straight to a no-op once the table alr
 
 `tokenize='trigram'` needs SQLite ≥3.34, which AOSP's own SQLite build never provides (it omits
 FTS5 entirely, at any API level) — Android's `DatabaseDriverFactory` actual uses a bundled SQLite
-instead. See `.claude/rules/android-sqlite-bundling.md` for the rationale and exit criteria. This
-was verified against a real `articles_fts` table (created, populated, and queried with `MATCH`)
-pulled from a device during Android bring-up.
+instead. See `.claude/rules/android-sqlite-bundling.md` for the rationale and exit criteria.
 
 **The trigram tokenizer produces no tokens at all for a query string under 3 characters** — a
 `MATCH` against a 1- or 2-character string silently returns zero rows rather than erroring. Search's
