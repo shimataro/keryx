@@ -736,7 +736,7 @@ WebView をホストするペインを含む3ペインすべてがアプリの�
 再検証なしでは、外部からの変更（他端末の同期による「未読にする」・再スター、または論理削除の
 tombstone）を、書き込みが in-flight の短い間だけでなく**永久に**隠し続けてしまいかねない。
 
-`HomeViewModel.reconcilePinnedArticles` はこの隙間を埋める: `articleChangeSignal` コレクタ経由で
+`HomeViewModel.reconcilePinnedArticlesAndSelection` はこの隙間を埋める: `articleChangeSignal` コレクタ経由で
 `articles` への書き込みのたびに走り、ピン留め済みの全 ID — および現在の選択のキャッシュされた
 フラグ — を `ArticleRepository.aliveArticleFlags` に対する1クエリでまとめて再検証し、記事が
 既に存在しないか、フラグがピンの値と一致しなくなったものを外す（選択については更新する）。

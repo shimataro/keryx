@@ -715,7 +715,7 @@ without revalidation a pin could hide an external change (another device's sync 
 unread"/restar, or a soft-delete tombstone) forever, not just for the brief window the write is in
 flight for.
 
-`HomeViewModel.reconcilePinnedArticles` closes that gap: it runs on every write to `articles` (via
+`HomeViewModel.reconcilePinnedArticlesAndSelection` closes that gap: it runs on every write to `articles` (via
 an `articleChangeSignal` collector), revalidating every pinned id — and the current selection's own
 cached flags — against `ArticleRepository.aliveArticleFlags` in one query, dropping (or, for the
 selection, refreshing) anything whose article is gone or whose flags no longer match what was
