@@ -87,7 +87,13 @@ The digest is stored in `sync_state`, which is itself excluded from the upload �
 
 Both markers describe **one provider's file**, so `clearSyncFailureState()` clears them alongside the failure state when a connection is disconnected or switched (`SettingsViewModel.disconnect()`/`switchTo()`). Each provider's revision is an opaque string in its own format, so a stale one would in practice never match the next provider's — but a match would skip a download that was never merged, and that is not a risk worth leaving to chance. Reconnecting to the same provider re-establishes both on the first sync.
 
-The clear runs **under the same mutex `sync()` holds**, which is also why `updateAutoSyncGate()` / `emitErrorNotification()` are called inside that lock rather than after it: all four fields the clear touches (the revision, the digest, `lastSyncError`, `autoSyncSuspended`) are written by a sync too, so a sync already in flight would otherwise finish *after* the disconnect and restore the markers describing the provider that was just torn down — reintroducing exactly the skipped-download-never-merged case the clear exists to prevent. The cost is that disconnecting waits out an in-flight sync (bounded by the HTTP timeouts, and visible as the usual sync spinner), which is the correct ordering anyway.
+The clear runs **under the same mutex `sync()` holds**. This is why `updateAutoSyncGate()` / `emitErrorNotification()`
+are also called inside that lock rather than after it: all four fields the clear touches (the revision, the digest,
+`lastSyncError`, `autoSyncSuspended`) are written by a sync too. Without the shared lock, a sync already in flight
+could finish *after* the disconnect and restore the markers describing the provider that was just torn down —
+reintroducing exactly the skipped-download-never-merged case the clear exists to prevent. The cost is that
+disconnecting waits out an in-flight sync (bounded by the HTTP timeouts, and visible as the usual sync spinner),
+which is the correct ordering anyway.
 
 ### Automatic-Sync Suspension
 
