@@ -74,16 +74,26 @@ Android の `CloudSession` は現状 Dropbox/OneDrive のみプロバイダー�
 
 `MainActivity.onCreate` から `runAndroidStartupTasks`（`AndroidStartupTasks.kt`）を呼ぶ —
 デスクトップの `runStartupTasks` に相当するが、macOS 固有の translocation 警告（Android には該当
-概念がない）を除く。`cleanUpArticleCacheIfDue`（後述）を実行し、続けてデスクトップの
-`runStartupTasks` と同じ位置・同じゲートで初回クラウド同期を行ってから、`FeedRefreshWorker` と
-同じ3関数を実行する。これは意図的に `Application.onCreate` ではなく **Activity** 側に置いている:
+概念がない）を除く。5つのステップをそれぞれ独立して実行する（`runMaintenanceStep`）ため、1ステップが
+例外を投げても（例: `maybeRebuildFtsIndex` が `FtsManager` の `busy_timeout` に達する場合）残りの
+ステップをスキップさせない:
+
+1. `cleanUpArticleCacheIfDue`（後述）。
+2. 初回クラウド同期——デスクトップの `runStartupTasks` と同じ位置・同じゲート。
+3. `refreshFeedsAndNotify`
+4. `checkForUpdateAndNotify`
+5. `maybeRebuildFtsIndex`
+
+（ステップ3〜5は `FeedRefreshWorker` が実行するのと同じ3関数——後述——から、ステップ2で既にカバー済みの
+同期処理を除いたもの。）
+
+これは意図的に `Application.onCreate` ではなく **Activity** 側に置いている:
 後者は `WorkManager` が `FeedRefreshWorker` を実行するためにプロセスを起こしたときにも走るため、
 バックグラウンド起床のたびに起動時処理一式を実行すると、Worker 自身が直前に行った更新/同期/更新確認/
 FTS 処理と重複してしまう。プロセス内ガード（`startupTasksRan`）により、画面回転など Activity だけが
-再生成される設定変更で `onCreate` が再度走ってもプロセス内で1回に保たれる。5つのステップはそれぞれ
-独立して実行される（`runMaintenanceStep`）ため、1ステップが例外を投げても
-（例: `maybeRebuildFtsIndex` が `FtsManager` の `busy_timeout` に達する場合）残りのステップをスキップ
-させない。ガードはすべてのステップを一通り試行し終えた後にのみセットされ、その前ではない:
+再生成される設定変更で `onCreate` が再度走ってもプロセス内で1回に保たれる。
+
+**ガードはすべてのステップを一通り試行し終えた後にのみセットされ、その前ではない。**
 セットアップが未完了、または `FeedRefreshWorker` がメンテナンスロックを保持中という理由で早期に
 return した呼び出しは、`FeedRefreshWorker` 自身が実行しない `cleanUpArticleCacheIfDue` を
 このプロセスで実行する唯一の機会を消費しない。

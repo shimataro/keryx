@@ -75,20 +75,29 @@ permanent failures it marks non-retryable (`CloudAuthException`/`SchemaVersionEx
 
 `MainActivity.onCreate` calls `runAndroidStartupTasks` (`AndroidStartupTasks.kt`) — the Android
 counterpart to desktop's `runStartupTasks`, minus the macOS-specific translocation warning (which
-has no Android equivalent). It runs `cleanUpArticleCacheIfDue` (see below), then — same gate and
-position as desktop's `runStartupTasks` — the initial cloud sync, then the same three maintenance
-functions `FeedRefreshWorker` runs. This deliberately lives in the *Activity*, not
-`Application.onCreate`: the latter also runs when `WorkManager` wakes the process to run
-`FeedRefreshWorker`, and running the full startup sequence on every background wakeup would
-duplicate the refresh/sync/update-check/FTS work the worker itself just did. A process-local guard
-(`startupTasksRan`) keeps it to once per process even though `onCreate` re-runs on configuration
-changes (e.g. rotation) that recreate the Activity without restarting the process. Each of the five
-steps runs in isolation (`runMaintenanceStep`), so one step throwing — e.g. `maybeRebuildFtsIndex`
-hitting `FtsManager`'s `busy_timeout` — does not skip the rest of the sequence. The guard is set
-only once every step has been attempted, not before: a call that returns early because setup isn't
-finished yet, or because `FeedRefreshWorker` currently holds the maintenance lock, does not consume
-this process's only chance to run `cleanUpArticleCacheIfDue`, which `FeedRefreshWorker` never runs
-itself.
+has no Android equivalent). It runs five steps, each in isolation (`runMaintenanceStep`) so one
+throwing — e.g. `maybeRebuildFtsIndex` hitting `FtsManager`'s `busy_timeout` — does not skip the rest:
+
+1. `cleanUpArticleCacheIfDue` (see below).
+2. The initial cloud sync — same gate and position as desktop's `runStartupTasks`.
+3. `refreshFeedsAndNotify`
+4. `checkForUpdateAndNotify`
+5. `maybeRebuildFtsIndex`
+
+(Steps 3-5 are the same three maintenance functions `FeedRefreshWorker` runs — see below — minus the
+sync step already covered by step 2.)
+
+This deliberately lives in the *Activity*, not `Application.onCreate`: the latter also runs when
+`WorkManager` wakes the process to run `FeedRefreshWorker`, and running the full startup sequence on
+every background wakeup would duplicate the refresh/sync/update-check/FTS work the worker itself just
+did. A process-local guard (`startupTasksRan`) keeps it to once per process even though `onCreate`
+re-runs on configuration changes (e.g. rotation) that recreate the Activity without restarting the
+process.
+
+**The guard is set only once every step has been attempted, not before.** A call that returns early
+because setup isn't finished yet, or because `FeedRefreshWorker` currently holds the maintenance
+lock, does not consume this process's only chance to run `cleanUpArticleCacheIfDue`, which
+`FeedRefreshWorker` never runs itself.
 
 New-article notifications reach the OS through `domain/OsNotificationSink.kt`, a `fun interface`
 (`post(message: String, count: Int)`) Android binds (in `platformModule`) to
