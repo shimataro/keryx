@@ -221,7 +221,12 @@ Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
 ## 10. Privacy & Security
 
 - No data sent to external servers, no account registration required, HTTPS only.
-- Dropbox token is stored in the OS secure storage — Keychain on macOS (via the `security` CLI), Credential Manager / Secret Service on Windows/Linux via java-keyring, or, inside the Snap package specifically, a local store encrypted with a per-app key from the desktop's Secret portal (via libsecret, not java-keyring) — see `docs/sync-architecture.md`'s "Token Storage". Falls back to a file in the data directory when unavailable.
+- Each cloud provider's token (Dropbox, Google Drive, OneDrive) is stored separately in platform secure storage.
+  On desktop: Keychain on macOS (via the `security` CLI), Credential Manager / Secret Service on Windows/Linux via
+  java-keyring, or, inside the Snap package specifically, a local store encrypted with a per-app key from the
+  desktop's Secret portal (via libsecret, not java-keyring) — falling back to a file in the data directory when
+  unavailable. On Android: an AES-256/GCM key held in the Android Keystore, per provider. See
+  `docs/sync-architecture.md`'s "Token Storage" for both.
 
 ## 11. Technology Choices
 

@@ -215,11 +215,12 @@ Linux は Look & Feel が解決したフォント、次にデスクトップの�
 ## 10. プライバシー・セキュリティ
 
 - サーバーへのデータ送信なし、アカウント登録不要、通信は HTTPS のみ。
-- Dropbox トークンは OS のセキュアストレージに保存——macOS は Keychain（`security` CLI 経由）、
-  Windows/Linux は Credential Manager / Secret Service（java-keyring 経由）、Snap 版だけは
-  デスクトップの Secret portal から得たアプリ専用の鍵で暗号化されたローカルストア（libsecret 経由。
-  java-keyring は使わない）。詳細は `docs/sync-architecture.ja.md`「Token Storage」参照。
-  利用不可時はデータディレクトリのファイルにフォールバック。
+- 各クラウドプロバイダー（Dropbox・Google Drive・OneDrive）のトークンはそれぞれ独立してプラットフォームの
+  セキュアストレージに保存する。desktop: macOS は Keychain（`security` CLI 経由）、Windows/Linux は
+  Credential Manager / Secret Service（java-keyring 経由）、Snap 版だけはデスクトップの Secret portal から
+  得たアプリ専用の鍵で暗号化されたローカルストア（libsecret 経由。java-keyring は使わない）——利用不可時は
+  データディレクトリのファイルにフォールバック。Android: プロバイダーごとに Android Keystore が保持する
+  AES-256/GCM 鍵。両方の詳細は `docs/sync-architecture.ja.md`「Token Storage」参照。
 
 ## 11. 技術選定
 
