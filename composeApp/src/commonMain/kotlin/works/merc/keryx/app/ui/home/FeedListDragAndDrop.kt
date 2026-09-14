@@ -554,16 +554,6 @@ internal fun FeedRow(
                     listOf(
                         NativeMenuItem(refreshLabel, NativeMenuShortcut(Key.R, ctrl = true, shift = true)) { onRefresh() },
                         NativeSubMenu(
-                            label = assignTagsLabel,
-                            items = tags.map { tag ->
-                                NativeCheckMenuItem(tag.name, checked = tag.id in attachedTagIds) {
-                                    onToggleFeedTag(tag.id, tag.id !in attachedTagIds)
-                                }
-                            } + listOf(
-                                NativeMenuItem(newTagLabel) { onCreateNewTagForFeed() },
-                            ),
-                        ),
-                        NativeSubMenu(
                             label = moveToFolderLabel,
                             items = buildList {
                                 add(
@@ -580,6 +570,16 @@ internal fun FeedRow(
                                 }
                                 add(NativeMenuItem(newFolderLabel) { onCreateNewFolderForFeed() })
                             },
+                        ),
+                        NativeSubMenu(
+                            label = assignTagsLabel,
+                            items = tags.map { tag ->
+                                NativeCheckMenuItem(tag.name, checked = tag.id in attachedTagIds) {
+                                    onToggleFeedTag(tag.id, tag.id !in attachedTagIds)
+                                }
+                            } + listOf(
+                                NativeMenuItem(newTagLabel) { onCreateNewTagForFeed() },
+                            ),
                         ),
                         NativeMenuSeparator,
                         NativeMenuItem(copyFeedUrlLabel) { onCopyFeedUrl() },
