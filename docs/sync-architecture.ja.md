@@ -500,53 +500,58 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
   使い道もない——`KeyringTokenStorage` はスナップ内からは意図的に到達不能）。詳しい理由は
   `docs/build.ja.md` の「Linux Snap パッケージ」参照。スナップ外では適用しないため、既存の
   deb/rpm 利用者の Secret Service アイテムには影響しない。
-- 上記いずれも失敗時はデータディレクトリの `.{CloudStorageType.id}_tokens.json`（0600。Dropbox は `.dropbox_tokens.json`）へ
-  フォールバック。DI が `isMacOs`／`isSnap` で3つを切り替える（`PlatformModule.desktop.kt` の
-  `providerTokenStorage`）。`TokenStorage.save()` はトークンが実際にどこに残ったかを
-  返す（`TokenSaveOutcome.SECURE` = セキュアストア / Android の Keystore 暗号化ファイル、`PLAINTEXT_FILE` =
-  平文フォールバックファイルから読める（セキュアストアに到達できなかった場合と、セキュアな書き込みは
-  成功したが古いフォールバックのコピーを削除できなかった場合の両方を含む）、`NOT_PERSISTED` = どちらにも書けず、アプリ終了までしか残らないため
-  再起動後に再接続が必要）。劣化した 2 つの結果については、`CloudSession` がそれぞれ別のメッセージで、
-  集約（coalescing）した `WARNING` 通知（原因と対処法を示す `ShowInfoDialog` アクション付き）を発行する。
-  初回接続時もバックグラウンドのトークンリフレッシュ時も同様。フォールバック自体は引き続き許容する
-  （`SECURITY.md` に記載のとおり、意図的な graceful degradation）が、黙って行われてはならず、また何も
-  保存できなかった場合を「平文ファイルに保存した」と報告してはならない、という位置づけ。
-  セキュアな書き込みが成功した際、デスクトップのセキュアストア実装はいずれも以前の劣化した保存で
-  残った古いフォールバックファイルを削除し、セキュアストレージが再び使えるようになった後も平文コピーが
-  ディスクに残り続けないようにする — Android の `KeystoreTokenStorage`（後述）と同じ clear-on-success の
-  挙動である。`KeyringTokenStorage`/`LibSecretTokenStorage` はこの合成ロジックを共通の
-  `SecretStoreTokenStorage` から継承するが、`SecurityCliTokenStorage` は継承せず同じ合成ロジックを
-  自前で実装している。削除の確認が取れなかったフォールバッククリアは、`SECURE` と偽って報告するのではなく
-  `PLAINTEXT_FILE` へと結果を降格する。
-  フォールバックの削除が成功を確認できなかった場合は、誤って `SECURE` と
-  報告せず `PLAINTEXT_FILE` に降格する。
+- **フォールバックファイルと結果報告**:
+  - 上記いずれも失敗時はデータディレクトリの `.{CloudStorageType.id}_tokens.json`（0600。Dropbox は
+    `.dropbox_tokens.json`）へフォールバック。DI が `isMacOs`／`isSnap` で3つを切り替える
+    （`PlatformModule.desktop.kt` の `providerTokenStorage`）。
+  - `TokenStorage.save()` はトークンが実際にどこに残ったかを返す（`TokenSaveOutcome.SECURE` =
+    セキュアストア / Android の Keystore 暗号化ファイル、`PLAINTEXT_FILE` = 平文フォールバック
+    ファイルから読める（セキュアストアに到達できなかった場合と、セキュアな書き込みは成功したが
+    古いフォールバックのコピーを削除できなかった場合の両方を含む）、`NOT_PERSISTED` = どちらにも
+    書けず、アプリ終了までしか残らないため再起動後に再接続が必要）。
+  - 劣化した2つの結果については、`CloudSession` がそれぞれ別のメッセージで、集約（coalescing）した
+    `WARNING` 通知（原因と対処法を示す `ShowInfoDialog` アクション付き）を発行する。初回接続時も
+    バックグラウンドのトークンリフレッシュ時も同様。フォールバック自体は引き続き許容する
+    （`SECURITY.md` に記載のとおり、意図的な graceful degradation）が、黙って行われてはならず、
+    また何も保存できなかった場合を「平文ファイルに保存した」と報告してはならない、という位置づけ。
+  - **clear-on-success。** セキュアな書き込みが成功した際、デスクトップのセキュアストア実装はいずれも
+    以前の劣化した保存で残った古いフォールバックファイルを削除し、セキュアストレージが再び使える
+    ようになった後も平文コピーがディスクに残り続けないようにする — Android の `KeystoreTokenStorage`
+    （後述）と同じ clear-on-success の挙動である。`KeyringTokenStorage`/`LibSecretTokenStorage` は
+    この合成ロジックを共通の `SecretStoreTokenStorage` から継承するが、`SecurityCliTokenStorage` は
+    継承せず同じ合成ロジックを自前で実装している。削除の確認が取れなかったフォールバッククリアは、
+    `SECURE` と偽って報告するのではなく `PLAINTEXT_FILE` へと結果を降格する。
 - macOS は書き込み後に **read-back 検証**（login keychain を明示指定して読み戻し）を行い、永続化を確認できない
   場合は file フォールバックへ回す。**書き込みの永続性は起動セッション依存**: パッケージ版（GUI ログイン
   セッション）では login keychain に永続化されるが、`gradlew run`（launchd 直下の Gradle daemon 配下の
   切り離しセッション）では `security add` が成功を返しても永続化しないため file に保存される。**読み取りは
   どちらのセッションからでも可能**（一度パッケージ版で連携すれば以降 `gradlew run` でも接続を引き継げる）。
-- **Android**: `KeystoreTokenStorage` が Android Keystore 保持の AES-256/GCM 鍵（プロバイダーごとに
-  `CloudStorageType.id` 由来の別エイリアス。鍵の実体は端末が対応していれば Keystore/TEE から一切
-  出ない）でトークン JSON を暗号化し、`IV || 暗号文` を `Context.filesDir` 配下の
-  `.{CloudStorageType.id}_tokens.enc` に書く。鍵は `setUserAuthenticationRequired(false)` で生成する —
-  定期実行される `WorkManager` のバックグラウンド同期は端末ロック中でもトークンを復号できる必要があり、
-  通常のトランザクションごとの秘密情報とは異なる要件のため。復号失敗（Keystore のリセット、
-  ハードウェア鍵を引き継げない端末/OS 移行など）はクラッシュとしてではなく「トークン未保存」と全く
-  同様に扱い、復号不能なファイルは残さず削除する。Keystore 自体が使えない端末は、デスクトップが
-  最終手段として使うのと同じ平文の `FileTokenStorage` にフォールバックする。暗号化保存が成功した場合は
-  このフォールバックファイルを `clear()` し、`SECURE` / `PLAINTEXT_FILE` の判断はその `clear()` 自身の
-  報告から決める——`TokenStorage.clear()` は `TokenClearOutcome.CLEARED` / `DATA_MAY_REMAIN` を返し、
-  `FileTokenStorage` は削除試行後にファイルがまだディスク上にあるか（`File.delete()` が false を
-  返した場合は残る）で判定する。消し切れずに残った平文のコピーは `SECURE` ではなく `PLAINTEXT_FILE`
-  として報告し、気付かれないままディスク上に読める状態で残るのではなく警告の対象にする。
-  **判定は必ずファイルの存在で行い、後続の `fallback.load()` では行わない**——
-  `FileTokenStorage.load()` は JSON がデコードできなくなったファイルを「未保存」として報告する一方、
-  その中の refresh token はそのまま読める状態で残るため、`load()` から消去を推測すると、
-  まさに最も警告が必要なケースで `SECURE` を返してしまっていた。`.enc` ファイルと平文
-  フォールバックの `.json` ファイルはどちらも Android の自動バックアップ/デバイス間転送から除外している
-  （`AndroidManifest.xml` の `dataExtractionRules`/`fullBackupContent`）——長寿命の OAuth リフレッシュ
-  トークンをバックアップに乗せるべきではなく、また Keystore 暗号化されたファイルはそもそも別端末に
-  復元しても役に立たないため。
+- **Android**:
+  - **暗号化。** `KeystoreTokenStorage` が Android Keystore 保持の AES-256/GCM 鍵（プロバイダーごとに
+    `CloudStorageType.id` 由来の別エイリアス。鍵の実体は端末が対応していれば Keystore/TEE から一切
+    出ない）でトークン JSON を暗号化し、`IV || 暗号文` を `Context.filesDir` 配下の
+    `.{CloudStorageType.id}_tokens.enc` に書く。鍵は `setUserAuthenticationRequired(false)` で
+    生成する — 定期実行される `WorkManager` のバックグラウンド同期は端末ロック中でもトークンを
+    復号できる必要があり、通常のトランザクションごとの秘密情報とは異なる要件のため。
+  - **復号失敗とフォールバック。** 復号失敗（Keystore のリセット、ハードウェア鍵を引き継げない
+    端末/OS 移行など）はクラッシュとしてではなく「トークン未保存」と全く同様に扱い、復号不能な
+    ファイルは残さず削除する。Keystore 自体が使えない端末は、デスクトップが最終手段として使うのと
+    同じ平文の `FileTokenStorage` にフォールバックする。
+  - **clear-on-success。** 暗号化保存が成功した場合はこのフォールバックファイルを `clear()` し、
+    `SECURE` / `PLAINTEXT_FILE` の判断はその `clear()` 自身の報告から決める——`TokenStorage.clear()`
+    は `TokenClearOutcome.CLEARED` / `DATA_MAY_REMAIN` を返し、`FileTokenStorage` は削除試行後に
+    ファイルがまだディスク上にあるか（`File.delete()` が false を返した場合は残る）で判定する。
+    消し切れずに残った平文のコピーは `SECURE` ではなく `PLAINTEXT_FILE` として報告し、気付かれない
+    ままディスク上に読める状態で残るのではなく警告の対象にする。
+  - **判定がファイルの存在であって `fallback.load()` ではない理由。**
+    `FileTokenStorage.load()` は JSON がデコードできなくなったファイルを「未保存」として報告する
+    一方、その中の refresh token はそのまま読める状態で残るため、`load()` から消去を推測すると、
+    まさに最も警告が必要なケースで `SECURE` を返してしまっていた。
+  - **バックアップからの除外。** `.enc` ファイルと平文フォールバックの `.json` ファイルはどちらも
+    Android の自動バックアップ/デバイス間転送から除外している（`AndroidManifest.xml` の
+    `dataExtractionRules`/`fullBackupContent`）——長寿命の OAuth リフレッシュトークンをバックアップに
+    乗せるべきではなく、また Keystore 暗号化されたファイルはそもそも別端末に復元しても役に立たない
+    ため。
 
 ### 今後の課題（未対応）
 
