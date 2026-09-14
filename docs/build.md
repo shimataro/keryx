@@ -131,7 +131,8 @@ the recommended way to get one — see [setup.md](setup.md).
 
 ## Packaging
 
-Created under [`composeApp/build/compose/binaries/main`](./composeApp/build/compose/binaries/main).
+Created under `composeApp/build/compose/binaries/main` (relative to the repo root, not this file's own
+directory — this is a build-output path, not a doc to link to).
 
 Only the platform matching the execution platform can be built (cross-compilation is not supported).
 

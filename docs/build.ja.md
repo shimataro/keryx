@@ -131,7 +131,8 @@ Google Play イメージ（Chrome 入り）— [setup.ja.md](setup.ja.md) を参
 
 ## パッケージング
 
-[`composeApp/build/compose/binaries/main`](./composeApp/build/compose/binaries/main)以下に作成される
+`composeApp/build/compose/binaries/main`（リポジトリルートからの相対パス。このファイル自身の
+ディレクトリからではない——ビルド成果物のパスであり、リンクを張る対象のドキュメントではない）以下に作成される
 
 実行するプラットフォームで動くもののみ作成可（クロスコンパイル不可）
 
