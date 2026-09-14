@@ -326,12 +326,14 @@ Linux の SNI トレイでは `SniConnection`（接続・バス名取得・expor
 再登録経路、ホスト起点の `Activate`/`Event` が dbus-java のワーカースレッド経由で届くこと、
 `LinuxNotifier.notify` の実デーモンへの配送、`LinuxTray` コンポーザブルの結線もテスト不可。
 パネル上で実際に透過して見えるかは本質的に目視確認になる。Android 側では、「実行」節にある
-2 つの計装スイート以外はすべて同様に未カバーである: `WorkManager` の実際の定期ジョブスケジューリング
+計装スイートが届かない範囲の大半はまだ未カバーである: `WorkManager` の実際の定期ジョブスケジューリング
 と実行（純粋なスケジュール算出ロジック `BackgroundRefreshSchedule.kt` のみテスト済み）、
-`NotificationManagerCompat` 経由の実通知投稿、Storage Access Framework のファイルピッカー、
-Keystore を使ったトークン保存、そして `AndroidUpdateInstaller` の `PackageInstaller` セッション／
-`BroadcastReceiver`／`canRequestPackageInstalls()` の扱い（委譲先の純粋なプラン／同意判断である
-`canInstallAndroidApkUpdate` のみテスト済み——上記「アプリ内アップデートのパイプライン」参照）。
+`NotificationManagerCompat` 経由の実通知投稿、そして `AndroidUpdateInstaller` の `PackageInstaller`
+セッション／`BroadcastReceiver`／`canRequestPackageInstalls()` の扱い（委譲先の純粋なプラン／同意判断
+である `canInstallAndroidApkUpdate` のみテスト済み——上記「アプリ内アップデートのパイプライン」参照）。
+Storage Access Framework のファイルピッカーの書き込み失敗経路と、Keystore を使ったトークン保存の
+フォールバック経路は**カバーされている**——それぞれ `FilePickerDeviceTest.kt` と
+`KeystoreTokenStorageDeviceTest.kt`（上記「構成」の `androidDeviceTest/` 参照）。
 同様にデスクトップ側でも、自己置換／`msiexec` スクリプト（`UpdateScriptWriter` の出力）を実際に
 実行する部分は手動確認のみ——生成されたスクリプト本文そのものは直接検証しており、
 `DesktopUpdateInstaller` はテスト内で実際にスクリプトを起動することがない（上記のフェイク
