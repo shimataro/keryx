@@ -42,7 +42,7 @@ To help us triage and fix the issue quickly, please include as much of the
 following as you can:
 
 - A clear description of the vulnerability and its potential impact.
-- The affected version, platform (Windows / macOS / Linux), and configuration
+- The affected version, platform (Windows / macOS / Linux / Android), and configuration
   (e.g. whether cloud sync was enabled and with which provider).
 - Step-by-step reproduction instructions, and a proof of concept if possible.
 - Any relevant logs, stack traces, or screenshots.
@@ -77,8 +77,8 @@ The following are **out of scope**:
 - Vulnerabilities in third-party dependencies — please report those upstream to
   the respective project (see [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md)).
   You may still let us know so we can bump the dependency.
-- Vulnerabilities in Dropbox, Google Drive, or the operating system's own
-  credential storage — report those to the respective vendor.
+- Vulnerabilities in Dropbox, Google Drive, OneDrive, or the operating system's own
+  credential storage (including the Android Keystore) — report those to the respective vendor.
 - Issues that require a device already compromised by an attacker with local
   access or elevated privileges.
 - Missing hardening that has no demonstrable security impact.
@@ -88,14 +88,14 @@ The following are **out of scope**:
 Keryx is designed to minimize its attack surface:
 
 - **No accounts and no developer-operated server.** There is no backend the
-  developer controls; the app talks only to the feeds you subscribe to and, if you
-  opt in, directly to Dropbox or Google Drive.
-- **Cloud credentials** (OAuth access / refresh tokens) are stored in the
-  operating system's secure credential storage (Keychain on macOS, Credential
-  Manager on Windows, Secret Service on Linux — inside the Snap package, an
-  encrypted local store keyed by a per-app master secret from your desktop's
-  Secret portal), falling back to a permission-restricted (`0600`) local file
-  only when the OS store is unavailable.
+  developer controls; the app talks only to the feeds you subscribe to, an allowlisted GitHub host for
+  update checks/downloads (see below), and, if you opt in, directly to Dropbox, Google Drive, or OneDrive.
+- **Cloud credentials** (OAuth access / refresh tokens, one per connected provider) are stored in the
+  platform's secure credential storage: on desktop, Keychain on macOS, Credential Manager on Windows,
+  Secret Service on Linux (inside the Snap package, an encrypted local store keyed by a per-app master
+  secret from your desktop's Secret portal), falling back to a permission-restricted (`0600`) local file
+  only when the OS store is unavailable; on Android, an AES-256/GCM key held in the Android Keystore, per
+  provider.
 - **OAuth** uses the authorization-code flow with PKCE, performed directly between
   your device and the provider — no credentials pass through any developer server.
 - **Local data** (subscriptions, cached articles, settings) stays on your device
