@@ -598,7 +598,16 @@ AppStream の `<launchable>` のために追加した — 上記「Linux パッ�
      プレリリースフラグも見る——チャンネルを誤って `stable` にすると snapd 自身の自動リフレッシュで
      全 Store ユーザーに配信されてしまい、取り消せないため）。
    - Windows ランナーで `:composeApp:createDistributable :composeApp:packageMsi` を実行し（`windows-latest` には WiX Toolset v3.14.1 がプリインストール済みのため、別途 WiX のセットアップ手順は不要）、`Keryx-<version>-windows-x86_64.msi` に加えて **`Keryx-<version>-windows-x86_64.zip`** としても添付する。**プレリリースタグの場合は `packageMsi` をスキップし、`.zip` のみを添付する** — MSI の `ProductVersion`（後述）は数値のみでなければならず、同一の対象バージョンに属するプレリリースはすべて同じ `ProductVersion` に潰れてしまうため、固定の `upgradeUuid` の下では WiX が後続のプレリリースや最終的な正式版を「アップグレード」として認識できない。
-   - Ubuntu ランナーで `:androidApp:assembleGithubRelease` と `:androidApp:bundlePlayRelease` を実行し、`Keryx-<version>-android-universal.apk` と `Keryx-<version>-android-universal.aab` として添付する。APK は `github` flavor（`REQUEST_INSTALL_PACKAGES` を持つ——アプリ内アップデートがこの上に上書きインストールするため。上記「Android（APK / AAB）」参照）から、AAB は `play`（Play Console 提出用の成果物で、この権限を持ってはならない）から生成する。Android 版はデスクトップのインストーラーとは異なり、プレリリースタグでもビルド・添付する — Android には該当するバージョンメタデータ制約が無く、テスターが署名済み APK を必要とするため。**ワークフローが出力するプレリリースの APK/AAB は、GitHub 用のテストアーティファクトに過ぎない。** `androidApp/build.gradle.kts` は `versionCode` を `appVersion.substringBefore('-')` から導出しているため、`v1.2.0-beta.1` のようなプレリリースタグと最終的な `v1.2.0` は同じ `versionCode`（例: `10200`）になる。Google Play に提出する際は、`androidApp/build.gradle.kts`（またはそれを駆動するリリースタグ）を調整し、厳密に増加した `versionCode` で再ビルドすること — この値はビルド時に署名済みアーティファクトへ焼き込まれるため、ビルド後に書き換えることはできない。
+   - Ubuntu ランナーで `:androidApp:assembleGithubRelease` と `:androidApp:bundlePlayRelease` を実行し、`Keryx-<version>-android-universal.apk` と `Keryx-<version>-android-universal.aab` として添付する。APK は `github` flavor（`REQUEST_INSTALL_PACKAGES` を持つ——アプリ内アップデートがこの上に上書きインストールするため。上記「Android（APK / AAB）」参照）から、AAB は `play`（Play Console 提出用の成果物で、この権限を持ってはならない）から生成する。Android 版はデスクトップのインストーラーとは異なり、プレリリースタグでもビルド・添付する — Android には該当するバージョンメタデータ制約が無く、テスターが署名済み APK を必要とするため。
+
+     > [!WARNING]
+     > **ワークフローが出力するプレリリースの APK/AAB は、GitHub 用のテストアーティファクトに過ぎない
+     > — そのまま Google Play に提出しないこと。** `androidApp/build.gradle.kts` は `versionCode` を
+     > `appVersion.substringBefore('-')` から導出しているため、`v1.2.0-beta.1` のようなプレリリース
+     > タグと最終的な `v1.2.0` は同じ `versionCode`（例: `10200`）になる。Google Play に提出する際は、
+     > `androidApp/build.gradle.kts`（またはそれを駆動するリリースタグ）を調整し、厳密に増加した
+     > `versionCode` で再ビルドすること — この値はビルド時に署名済みアーティファクトへ焼き込まれる
+     > ため、ビルド後に書き換えることはできない。
 
    `deploy-pages`（ダウンロードページ更新用の Cloudflare Pages デプロイフックをトリガーする）は
    `package-macos` / `package-linux` / `package-windows` / `package-android` の完了を待つが、
