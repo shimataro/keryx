@@ -113,8 +113,8 @@ composeApp/src/
     the adaptive-layout phase — see its
     KDoc for the tap-vs-long-press disambiguation), BackHandler (delegates to
     `androidx.activity.compose.BackHandler`), PlatformOs (isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android has no menu bar or system tray,
-    so `FeedListToolbarRow`/`GeneralTab` grow their own Settings/
-    About entry points instead), SelfUpdateCheck (installer-package-based, see "Background Update"),
+    so `FeedListPane`'s own settings footer row (below the scrolling folder/tag/feed list) is Android's
+    Settings entry point, and `GeneralTab` carries About instead), SelfUpdateCheck (installer-package-based, see "Background Update"),
     NotificationPermission (wraps `rememberLauncherForActivityResult` for `POST_NOTIFICATIONS`) +
     AndroidStartupTasks.kt (`runAndroidStartupTasks`, called from `:androidApp`'s `MainActivity`) +
     background/ (`FeedRefreshWorker` + `BackgroundRefresh.kt`'s `startBackgroundRefresh`,

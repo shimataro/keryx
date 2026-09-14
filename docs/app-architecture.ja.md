@@ -113,7 +113,8 @@ composeApp/src/
     nativeContextMenu（適応レイアウトのフェーズで実装した実際の
     長押し DropdownMenu — タップと長押しの判別は KDoc 参照）, BackHandler（`androidx.activity.compose.BackHandler`
     へ委譲）, PlatformOs（isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android にはメニューバーやシステムトレイが
-    無いため、FeedListToolbarRow/GeneralTab が独自の設定/バージョン情報導線を持つ）,
+    無いため、`FeedListPane` 自身の設定用フッター行（スクロールするフォルダー/タグ/フィード一覧の下）が
+    Android の設定への導線となり、`GeneralTab` がバージョン情報を持つ）,
     SelfUpdateCheck（インストール元パッケージ名に基づく判定、下記「バックグラウンド更新」参照）,
     NotificationPermission（`POST_NOTIFICATIONS` 用に `rememberLauncherForActivityResult` をラップ）+
     AndroidStartupTasks.kt（`runAndroidStartupTasks`。`:androidApp` の `MainActivity` から呼ばれる）+
