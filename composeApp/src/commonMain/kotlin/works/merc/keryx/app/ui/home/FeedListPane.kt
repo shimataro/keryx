@@ -95,7 +95,6 @@ import works.merc.keryx.app.resources.home_folders
 import works.merc.keryx.app.resources.home_open_site
 import works.merc.keryx.app.resources.home_refresh
 import works.merc.keryx.app.resources.home_refreshing
-import works.merc.keryx.app.resources.home_remove_feed_from_tag_menu
 import works.merc.keryx.app.resources.home_rename_feed
 import works.merc.keryx.app.resources.home_search_clear
 import works.merc.keryx.app.resources.home_search_placeholder
@@ -225,6 +224,8 @@ internal fun FeedListPane(
     var showAddFolder by remember { mutableStateOf(false) }
     var confirmingDeleteFolder by remember { mutableStateOf<Folders?>(null) }
     var confirmingUnsubscribeFeed by remember { mutableStateOf<Feeds?>(null) }
+    var creatingFolderForFeedId by remember { mutableStateOf<String?>(null) }
+    var creatingTagForFeedId by remember { mutableStateOf<String?>(null) }
     // The single row (if any) whose name is currently being edited in place. Renaming a feed,
     // folder, or tag happens in the row itself rather than in a dialog — see InlineRename.kt.
     var inlineEdit by remember { mutableStateOf<InlineEditTarget?>(null) }
@@ -578,6 +579,8 @@ internal fun FeedListPane(
                                 onCopySiteUrl = { feed.site_url?.let(copyUrl) },
                                 onOpenSite = { feed.site_url?.let(BrowserOpener::open) },
                                 isTouchPrimary = isTouchPrimary,
+                                onCreateNewFolderForFeed = { creatingFolderForFeedId = feed.id },
+                                onCreateNewTagForFeed = { creatingTagForFeedId = feed.id },
                                 // Same mutation the drop of a real drag applies (see
                                 // FeedListDragController.end), just with the landing position
                                 // resolved from the group's own order instead of a pointer.
@@ -723,21 +726,36 @@ internal fun FeedListPane(
                                 contentType = { "tag-feed" },
                             ) { feed ->
                                 val instance = FeedListRowSelection.FeedInTag(feed.id, tag.id)
-                                TagFeedRow(
+                                FeedRow(
                                     feed = feed,
                                     count = unreadByFeed[feed.id] ?: 0L,
                                     selectionTone = toneFor(instance),
                                     focused = focused,
+                                    indented = true,
+                                    nextFeedId = null,
+                                    folderId = null,
+                                    isFirstInList = false,
+                                    activeBoundaryState = remember { mutableStateOf<DropBoundary?>(null) },
                                     onClick = { selectFilterFromRow(ArticleFilter.Feed(feed.id), instance) },
                                     onRename = { inlineEdit = InlineEditTarget.Feed(feed.id, tag.id) },
                                     editingName = inlineEdit == InlineEditTarget.Feed(feed.id, tag.id),
                                     onRenameCommit = { vm.renameFeed(feed.id, it); inlineEdit = null },
                                     onRenameCancel = { inlineEdit = null },
-                                    onRemoveFromTag = { vm.setFeedTag(feed.id, tag.id, false) },
+                                    onRefresh = { vm.refreshFeed(feed) },
+                                    tags = tags,
+                                    attachedTagIds = feedTagMap[feed.id] ?: emptySet(),
+                                    onToggleFeedTag = { tagId, attached -> vm.setFeedTag(feed.id, tagId, attached) },
+                                    folders = folders,
+                                    onMoveFeedToFolder = { moveFolderId -> vm.moveFeed(feed.id, moveFolderId) },
+                                    onUnsubscribe = { confirmingUnsubscribeFeed = feed },
                                     onCopyFeedUrl = { copyUrl(feed.url) },
                                     onCopySiteUrl = { feed.site_url?.let(copyUrl) },
                                     onOpenSite = { feed.site_url?.let(BrowserOpener::open) },
                                     isTouchPrimary = isTouchPrimary,
+                                    onMoveUp = null,
+                                    onMoveDown = null,
+                                    onCreateNewFolderForFeed = { creatingFolderForFeedId = feed.id },
+                                    onCreateNewTagForFeed = { creatingTagForFeedId = feed.id },
                                 )
                             }
                         }
@@ -790,6 +808,10 @@ internal fun FeedListPane(
         onConfirmingDeleteFolderChange = { confirmingDeleteFolder = it },
         confirmingUnsubscribeFeed = confirmingUnsubscribeFeed,
         onConfirmingUnsubscribeFeedChange = { confirmingUnsubscribeFeed = it },
+        creatingFolderForFeedId = creatingFolderForFeedId,
+        onCreatingFolderForFeedIdChange = { creatingFolderForFeedId = it },
+        creatingTagForFeedId = creatingTagForFeedId,
+        onCreatingTagForFeedIdChange = { creatingTagForFeedId = it },
     )
 }
 
@@ -1145,100 +1167,3 @@ internal fun tagColorDotTestTag(tagId: String): String = "tag-color-dot-$tagId"
 /** Test tag on a [TagRow] itself, distinguishing its clickable band from its color dot. */
 internal fun tagRowTestTag(tagId: String): String = "tag-row-$tagId"
 
-/**
- * Renders a feed attached to an expanded tag.
- *
- * @param feed The attached feed.
- * @param count The number of unread articles in the feed.
- * @param selectionTone How this rendered instance paints its selection — the same feed also renders
- *   under its folder group, and only the instance actually selected paints
- *   [RowSelectionTone.PRIMARY] (see [FeedListRowSelection]).
- * @param focused Whether the sidebar has focus.
- * @param onClick Handles feed selection.
- * @param onRename Starts inline editing of the feed's display title, on this tag-nested row.
- * @param editingName Whether the title is currently open for inline editing on this row (see
- *   [InlineRenameField]) — this feed's folder-group row edits independently of this one.
- * @param onRenameCommit Applies an edited title; a blank value resets it to the feed's own title.
- * @param onRenameCancel Abandons an in-progress title edit.
- * @param onRemoveFromTag Detaches the feed from the tag.
- * @param onCopyFeedUrl Copies the feed's own (RSS/Atom) URL to the clipboard.
- * @param onCopySiteUrl Copies the feed's website URL to the clipboard.
- * @param onOpenSite Opens the feed's website in the external browser.
- * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
- */
-@Composable
-private fun TagFeedRow(
-    feed: Feeds,
-    count: Long,
-    selectionTone: RowSelectionTone,
-    focused: Boolean,
-    onClick: () -> Unit,
-    onRename: () -> Unit,
-    editingName: Boolean,
-    onRenameCommit: (String) -> Unit,
-    onRenameCancel: () -> Unit,
-    onRemoveFromTag: () -> Unit,
-    onCopyFeedUrl: () -> Unit,
-    onCopySiteUrl: () -> Unit,
-    onOpenSite: () -> Unit,
-    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
-) {
-    val renameLabel = stringResource(Res.string.home_rename_feed)
-    val removeLabel = stringResource(Res.string.home_remove_feed_from_tag_menu)
-    val copyFeedUrlLabel = stringResource(Res.string.home_copy_feed_url)
-    val copySiteUrlLabel = stringResource(Res.string.home_copy_site_url)
-    val openSiteLabel = stringResource(Res.string.home_open_site)
-    val siteUrlUsable = hasUsableUrl(feed.site_url)
-    val rowInteraction = remember { MutableInteractionSource() }
-    Row(
-        Modifier.fillMaxWidth()
-            .listRowClickable(rowInteraction, selectionTone == RowSelectionTone.PRIMARY, onClick)
-            .nativeContextMenu(
-                items = {
-                    listOf(
-                        NativeMenuItem(copyFeedUrlLabel) { onCopyFeedUrl() },
-                        NativeMenuItem(copySiteUrlLabel, enabled = siteUrlUsable) { onCopySiteUrl() },
-                        NativeMenuItem(openSiteLabel, enabled = siteUrlUsable) { onOpenSite() },
-                        NativeMenuSeparator,
-                        NativeMenuItem(renameLabel, renameNativeShortcut) { onRename() },
-                        NativeMenuSeparator,
-                        NativeMenuItem(removeLabel) { onRemoveFromTag() },
-                    )
-                },
-                // A secondary-toned (or unselected) row is not the one currently focused, so a
-                // right-click on it promotes it first.
-                onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
-            )
-            .listRowSurface(
-                selectionBackground(selectionTone, focused),
-                ListRowKind.NavItem,
-                rowInteraction,
-                decoration = listRowOutline(ListRowKind.NavItem, selectionTone, focused),
-            )
-            .heightIn(min = listRowMinHeight(isTouchPrimary))
-            .padding(start = feedRowIndent(), end = 8.dp, top = 4.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        FeedAvatar(feed.displayTitle(), feed.favicon_url)
-        Spacer(Modifier.width(12.dp))
-        // Same weighted slot either way, so the favicon on the left and the count badge on the right
-        // never move when editing starts or ends (mirrors FeedRow's folder-group editor).
-        if (editingName) {
-            Box(Modifier.weight(1f)) {
-                InlineRenameField(
-                    value = feed.custom_title ?: feed.title,
-                    onCommit = onRenameCommit,
-                    onCancel = onRenameCancel,
-                    placeholder = feed.title,
-                    allowBlank = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        } else {
-            CompositionLocalProvider(LocalContentColor provides (selectionContentColorOrNull(selectionTone, focused) ?: LocalContentColor.current)) {
-                Text(feed.displayTitle(), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
-        if (count > 0) CountBadge(count, selectionTone == RowSelectionTone.PRIMARY, focused)
-    }
-}

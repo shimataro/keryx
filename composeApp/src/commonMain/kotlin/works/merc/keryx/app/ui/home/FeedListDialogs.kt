@@ -57,6 +57,10 @@ internal fun FeedListDialogs(
     onConfirmingDeleteFolderChange: (Folders?) -> Unit,
     confirmingUnsubscribeFeed: Feeds?,
     onConfirmingUnsubscribeFeedChange: (Feeds?) -> Unit,
+    creatingFolderForFeedId: String?,
+    onCreatingFolderForFeedIdChange: (String?) -> Unit,
+    creatingTagForFeedId: String?,
+    onCreatingTagForFeedIdChange: (String?) -> Unit,
 ) {
     if (showAddTag) {
         val duplicateError = stringResource(Res.string.home_tag_name_duplicate)
@@ -68,6 +72,21 @@ internal fun FeedListDialogs(
             extraContent = { TagColorPicker(selected = color, onSelect = { color = it }) },
             onConfirm = { vm.createTag(it, color); onShowAddTagChange(false) },
             onDismiss = { onShowAddTagChange(false) },
+        )
+    }
+    creatingTagForFeedId?.let { feedId ->
+        val duplicateError = stringResource(Res.string.home_tag_name_duplicate)
+        var color by remember { mutableStateOf<String?>(null) }
+        TextPromptDialog(
+            title = stringResource(Res.string.home_add_tag),
+            hint = stringResource(Res.string.home_new_tag_hint),
+            blockingError = { name -> if (tags.any { it.name == name }) duplicateError else null },
+            extraContent = { TagColorPicker(selected = color, onSelect = { color = it }) },
+            onConfirm = { name ->
+                vm.createTag(name, color)?.let { vm.setFeedTag(feedId, it, true) }
+                onCreatingTagForFeedIdChange(null)
+            },
+            onDismiss = { onCreatingTagForFeedIdChange(null) },
         )
     }
     confirmingDeleteTag?.let { tag ->
@@ -88,6 +107,19 @@ internal fun FeedListDialogs(
             blockingError = { name -> if (folders.any { it.name == name }) duplicateError else null },
             onConfirm = { vm.createFolder(it); onShowAddFolderChange(false) },
             onDismiss = { onShowAddFolderChange(false) },
+        )
+    }
+    creatingFolderForFeedId?.let { feedId ->
+        val duplicateError = stringResource(Res.string.home_folder_name_duplicate)
+        TextPromptDialog(
+            title = stringResource(Res.string.home_add_folder),
+            hint = stringResource(Res.string.home_new_folder_hint),
+            blockingError = { name -> if (folders.any { it.name == name }) duplicateError else null },
+            onConfirm = { name ->
+                vm.createFolder(name)?.let { vm.moveFeed(feedId, it) }
+                onCreatingFolderForFeedIdChange(null)
+            },
+            onDismiss = { onCreatingFolderForFeedIdChange(null) },
         )
     }
     confirmingDeleteFolder?.let { folder ->
