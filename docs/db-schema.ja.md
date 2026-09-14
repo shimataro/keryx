@@ -69,10 +69,8 @@
 
 - `id` は `(feed_id, guid)` から **UUIDv5** で決定的に生成する（`IdGenerator.articleId`）。同じ記事は
   全デバイスで同一 ID になるため、同期マージ（記事を `id` で照合する）が既読・スターを後勝ちで
-  伝播できる。**理由**: 以前は記事 ID がフェッチ時のランダム UUIDv4 で、両デバイスが同じ記事を独立に
-  取得すると別 ID になり、マージの guid 衝突ガードにスキップされて既読が伝播しない不具合があった。
-  v5 のバージョンニブルにより旧 v4 ID とは決して衝突しない。ID 生成方式の変更は新規行のみに効き、
-  既存行は `upsert` の `ON CONFLICT(feed_id, guid)` が旧 ID を保持する（＝既存はそのまま）。
+  伝播できる。既存行は `upsert` の `ON CONFLICT(feed_id, guid)` が既存 ID を保持する
+  （決定的生成は新規行のみに効く）。
 - 既読・スターの競合解決は `read_at` / `starred_at` で後勝ち。
 - `content` は `summary` より優先して表示。両方 NULL なら外部ブラウザーで開く。
 - `search_text = COALESCE(content, summary, '')`。挿入・更新時に計算する。

@@ -53,7 +53,7 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
 `search_text`, `updated_at`, `created_at`, `deleted_at`, `deleted_updated_at`. `UNIQUE(feed_id, guid)`.
 Indexes: `feed_id` / `is_read` / `is_starred` / `published_at DESC`.
 
-- `id` is deterministically generated from `(feed_id, guid)` as **UUIDv5** (`IdGenerator.articleId`). The same article gets the same ID on all devices, so sync merge (articles matched by `id`) can propagate read/star states via last-write-wins. **Reason**: Previously, article IDs were random UUIDv4 generated at fetch time, so when two devices independently fetched the same article they got different IDs, and the guid collision guard in merge skipped them, preventing read-state propagation. The version nibble of v5 guarantees no collision with legacy v4 IDs. The ID generation change only affects new rows; existing rows keep their old ID via `upsert`'s `ON CONFLICT(feed_id, guid)`.
+- `id` is deterministically generated from `(feed_id, guid)` as **UUIDv5** (`IdGenerator.articleId`). The same article gets the same ID on all devices, so sync merge (articles matched by `id`) can propagate read/star states via last-write-wins. Existing rows keep their id via `upsert`'s `ON CONFLICT(feed_id, guid)` — deterministic generation only applies to new rows.
 - Read/star conflict resolution is last-write-wins via `read_at` / `starred_at`.
 - `content` is displayed in preference to `summary`. If both are NULL, open in external browser.
 - `search_text = COALESCE(content, summary, '')`. Computed at insert/update time.
