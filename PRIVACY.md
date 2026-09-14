@@ -115,11 +115,11 @@ developer:
   on manual refresh) to check for new articles, using conditional requests so
   unchanged feeds transfer no content.
 - **Each feed's own site/favicon** — to display a small site icon next to the feed.
-- **GitHub** (`api.github.com`) — an unauthenticated, anonymous check for the
-  latest release, so the app can tell you when an update is available. No account
-  information, telemetry, or identifiers are sent. On Android, this check is
-  skipped entirely when Keryx was installed through Google Play (self-update
-  checks only make sense for the GitHub-distributed build).
+- **GitHub** (`api.github.com` for an unauthenticated, anonymous release check; `github.com` and
+  `*.githubusercontent.com` when you actually download an update) — so the app can tell you when an
+  update is available, and fetch it if you choose to install it. No account information, telemetry, or
+  identifiers are sent. On Android, this is skipped entirely when Keryx was installed through Google Play
+  (self-update only makes sense for the GitHub-distributed build).
 - **Dropbox, Google Drive, or OneDrive** — only if you've connected cloud sync,
   as described above.
 - **Content an article itself references** — when you open an article, any external
@@ -130,9 +130,9 @@ developer:
   chooses to fetch.
 
 Aside from what an opened article's own content may additionally reference (above),
-that's the complete list of servers Keryx itself decides to contact. Nothing else is
-contacted, and no analytics or tracking payloads are ever sent with any of these
-requests.
+that's the complete list of *kinds* of servers Keryx itself decides to contact — no analytics or
+tracking payloads are ever sent with any of these requests, and no server outside this list is ever
+contacted.
 
 ## Data retention & deletion
 
