@@ -298,10 +298,11 @@ app-wide freeze on click).
 
 **Android's reader (`ui/home/ArticleDetailPane.kt`, shared `commonMain` composable) also grows
 swipe-to-navigate at a narrow layout** (`ui/home/ArticleSwipeNav.kt`) — a horizontal drag on the
-reader moves to the next/previous article, gated on `isTouchPrimary && onNavigateUp != null &&
-article != null` (the same nullable-callback narrow-layout signal `HomePaneLayout.kt` already uses
-elsewhere, see "Home's adaptive pane layout" below), so it is inert at `PaneLayout.Triple` and on
-desktop. Android's `WebView` (embedded via `AndroidView`) is an ordinary in-tree view, but it still
+reader moves to the next/previous article, gated on `isTouchPrimary && swipeNavigation != null &&
+article != null`. The signal is `swipeNavigation`, not `onNavigateUp` — at `PaneLayout.Dual` the reader has no
+back control (`onNavigateUp` is `null`) but swipe must still work, so `swipeNavigation` is a separate,
+still-non-null signal there (see "Home's adaptive pane layout" below); it is inert only at `PaneLayout.Triple`
+and on desktop, where no caller passes it at all. Android's `WebView` (embedded via `AndroidView`) is an ordinary in-tree view, but it still
 consumes touch input on its own terms, so the gesture is arbitrated the same way
 `platform/NativeMenu.android.kt`'s long-press and `ui/home/FeedListDragGestures.kt`'s reorder drag
 already are: a `pointerInput` loop watches `PointerEventPass.Initial` (which reaches this ancestor

@@ -317,10 +317,11 @@ WebView **内部**の HTML として描画する（`ui/article/ArticleWebViewHtm
 
 **Android のリーダー（`ui/home/ArticleDetailPane.kt`。commonMain 共有のコンポーザブル）は、
 狭いレイアウトではスワイプによる前後移動も持つ**（`ui/home/ArticleSwipeNav.kt`） — リーダー上の
-水平ドラッグで次/前の記事へ移動する。有効化条件は `isTouchPrimary && onNavigateUp != null &&
-article != null`（`HomePaneLayout.kt` が他所でも使っている、狭いレイアウトを示す既定の
-nullable-callback シグナルと同じ — 下記「Home's adaptive pane layout」参照）で、
-`PaneLayout.Triple` およびデスクトップでは無効になる。Android の `WebView`（`AndroidView` 経由で
+水平ドラッグで次/前の記事へ移動する。有効化条件は `isTouchPrimary && swipeNavigation != null &&
+article != null`。シグナルは `onNavigateUp` ではなく `swipeNavigation` である——`PaneLayout.Dual` では
+リーダーに戻るボタンが無い（`onNavigateUp` が `null`）が、スワイプは有効なままである必要があるため、
+`swipeNavigation` はそこでも非 null の別シグナルとして存在する（下記「Home's adaptive pane layout」参照）。
+無効になるのは `PaneLayout.Triple` とデスクトップのみで、そこではどの呼び出し元もこのシグナルを渡さない。Android の `WebView`（`AndroidView` 経由で
 埋め込まれる）は通常の in-tree ビューだが、タッチ入力は自分自身で消費してしまうため、このジェスチャーは
 `platform/NativeMenu.android.kt` の長押しや `ui/home/FeedListDragGestures.kt` の並べ替えドラッグと
 同じ方式で調停する: `pointerInput` ループが `PointerEventPass.Initial`（この祖先ノードに WebView 側の
