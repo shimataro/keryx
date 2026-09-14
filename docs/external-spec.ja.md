@@ -16,9 +16,10 @@
 
 | プラットフォーム | 対応 |
 | --- | --- |
-| Windows / macOS / Linux | ✅（Compose Multiplatform、現行） |
+| Windows / macOS / Linux | ✅ Compose Multiplatform（現行） |
 | Android | ✅（Compose Multiplatform、現行。クラウド同期は Dropbox / OneDrive に対応 — Google Drive の Android 対応は将来の検討事項。§4 および [sync-architecture.ja.md](sync-architecture.ja.md) 参照） |
-| iOS / iPadOS / macOS | 予定（最初は Compose、その後 SwiftUI ネイティブ UI） |
+| iOS / iPadOS | 予定（最初は Compose、その後 SwiftUI ネイティブ UI） |
+| macOS（ネイティブ） | 予定 — 上記の Compose 版とは別に、ネイティブ SwiftUI 版 macOS アプリを提供予定 |
 
 ## 3. 対応フォーマット
 
