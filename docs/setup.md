@@ -100,7 +100,7 @@ Split into what every target needs in common, and what's specific to the Android
   See the [official AVD guide](https://developer.android.com/studio/run/managing-avds) for details
   beyond this project's own constraints.
 - **Android release signing keystore (optional)**: Gradle's default `build` lifecycle includes
-  `:androidApp`'s `assembleRelease` (the App Bundle is not part of it — `:androidApp:bundleRelease`
+  `:androidApp`'s `assembleRelease` (the App Bundle is not part of it — `:androidApp:bundlePlayRelease`
   has to be invoked explicitly, as `release.yml` does), and `androidApp/build.gradle.kts` is
   deliberately built to **not** fall back to debug signing when signing credentials are missing —
   a debug-signed release artifact is installable and looks legitimate, which is the dangerous
@@ -265,7 +265,7 @@ Android SDK.
 ### The Android release build comes out unsigned
 
 Gradle's default `build` lifecycle includes `:androidApp`'s `assembleRelease`, so it produces the
-release APK (the App Bundle does not come out of it — `:androidApp:bundleRelease` has to be invoked
+release APK (the App Bundle does not come out of it — `:androidApp:bundlePlayRelease` has to be invoked
 explicitly). Without an Android release signing keystore configured,
 `androidApp/build.gradle.kts` prints a build warning and produces an **unsigned** release APK per
 flavor (`androidApp/build/outputs/apk/github/release/androidApp-github-release-unsigned.apk` and

@@ -669,8 +669,8 @@ For Android release signing, set `ANDROID_RELEASE_KEYSTORE_BASE64`, `ANDROID_REL
 
 `ci.yml`'s ordinary build job never receives these secrets — deliberately, since it runs on every
 push and never publishes anything. AGP wires `assembleRelease` into `:androidApp`'s default
-`build` task regardless of whether the artifact is ever consumed (`bundleRelease` is a separate
-lifecycle task, which is why `release.yml` above invokes it explicitly), but
+`build` task regardless of whether the artifact is ever consumed (`bundlePlayRelease` is not part of any
+aggregate lifecycle task, which is why `release.yml` above invokes it explicitly), but
 `androidApp/build.gradle.kts`'s `signingConfigs` block treats a completely unconfigured signing
 identity as the unsigned-release case (a build warning, not a failure — see "Android release
 signing keystore" in [setup.md](setup.md)) rather than requiring `androidReleaseSigningRequired`.

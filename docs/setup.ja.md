@@ -98,7 +98,7 @@
   [公式の AVD ガイド](https://developer.android.com/studio/run/managing-avds) を参照。
 - **Android リリース署名キーストア（任意）**: Gradle の既定 `build` ライフサイクルは
   `:androidApp` の `assembleRelease` を含んでおり（App Bundle は含まれない —
-  `:androidApp:bundleRelease` は `release.yml` のように明示的に叩く必要がある）、
+  `:androidApp:bundlePlayRelease` は `release.yml` のように明示的に叩く必要がある）、
   `androidApp/build.gradle.kts` は署名情報が無いときに debug 署名へフォールバックしない設計に
   なっている（debug 署名の release 成果物はインストール可能で本物に見えてしまうため、これこそ
   危険なケース）。その代わり、**キーストアを用意していなくてもルートの `./gradlew build` は成功する**
@@ -259,7 +259,7 @@ Android SDK を必要とする。
 ### Android のリリースビルドが未署名になる
 
 Gradle の既定 `build` ライフサイクルは `:androidApp` の `assembleRelease` を含んでおり、
-release APK が生成される（App Bundle は生成されない — `:androidApp:bundleRelease` を明示的に
+release APK が生成される（App Bundle は生成されない — `:androidApp:bundlePlayRelease` を明示的に
 叩く必要がある）。Android リリース署名キーストアを設定していない場合、
 `androidApp/build.gradle.kts` はビルド警告を出したうえでフレーバーごとに**未署名**の release APK
 （`androidApp/build/outputs/apk/github/release/androidApp-github-release-unsigned.apk` と
