@@ -634,11 +634,10 @@ Linux all three steps are no-ops, since no `.app` exists there. This is not cosm
 that exact check against every downloaded bundle before swapping it in (see
 [background-update.md](background-update.md)), so an app image that cannot pass it leaves the release ZIP
 un-installable **by the in-app updater** — a manual install of the very same ZIP keeps working, since the kernel
-never re-hashes `Info.plist` at launch. That asymmetry is why every 0.x release shipped this way unnoticed until
-the in-app updater first exercised the check, and why the build-time verify is the only thing that catches it:
-ordinary manual smoke-testing cannot. The DMG never exposed it either, because jpackage re-signs its own copy of
-the app image while building it — only the ZIP asset, made straight from `binaries/main/app`, carried the broken
-seal.
+never re-hashes `Info.plist` at launch — so ordinary manual smoke-testing of a downloaded ZIP cannot catch a
+broken seal; the build-time verify is the only thing that does. The DMG is unaffected either way, because
+jpackage re-signs its own copy of the app image while building it — only the ZIP asset, made straight from
+`binaries/main/app`, can carry a broken seal.
 
 The net effect for `0.1.1`: the tag, `BuildConfig.VERSION` (About screen), the update checker, and the version
 Finder shows are all `0.1.1`. Only `CFBundleVersion` keeps the `1.0.0` placeholder, which is an internal build
