@@ -115,8 +115,9 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
 
 ## 8. アクセシビリティ・国際化
 
-- UI 文言はすべて Compose Resources（`values/strings.xml`）で管理。システムロケールに応じて選択し、
-  対応言語がなければデフォルト（日本語）へフォールバック。現状は日本語のみ同梱。
+- UI 文言はすべて Compose Resources（日本語の `values/strings.xml` ——既定かつフォールバック——に加え、
+  同じキー集合の英語 `values-en/strings.xml`）で管理。システムロケールに応じて選択し、いずれの言語にも
+  該当しなければ日本語へフォールバック。
 - 文字サイズ設定（`LocalDensity` の fontScale に反映）。
 
 ## 9. UI 方針

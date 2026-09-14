@@ -114,7 +114,9 @@ data exists in the cloud it is automatically merged (imported) during the initia
 
 ## 8. Accessibility & Internationalization
 
-- All UI strings are managed via Compose Resources (`values/strings.xml`). Selected according to system locale, falling back to default (Japanese) if the language is not supported. Currently only Japanese is bundled.
+- All UI strings are managed via Compose Resources (`values/strings.xml` for Japanese — the default and
+  fallback — plus `values-en/strings.xml` for English, same key set). Selected according to system locale,
+  falling back to Japanese if the system locale isn't one of the two.
 - Font size setting (reflected in `LocalDensity` fontScale).
 
 ## 9. UI Direction
