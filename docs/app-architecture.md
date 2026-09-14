@@ -266,7 +266,11 @@ presentation) and `SECURITY.md` for the integrity-verification trust model.
 
 ### Provider / DI (Koin)
 
-`appModule` (`commonMain`) registers repositories, services, and ViewModels. `platformModule` (`desktop`) registers HttpClient, TokenStorage, CloudSession, and CloudConnectFlow. ViewModels are registered as app-scope `single` for a single-window desktop app and obtained via `koinInject()`.
+`appModule` (`commonMain`) registers repositories, services, and ViewModels — used by both desktop and Android.
+Each platform has its own `platformModule`: desktop's registers HttpClient, TokenStorage, CloudSession,
+CloudConnectFlow, `OsNotificationSink`, and `UpdateInstaller`; Android's registers the Android-specific
+equivalents (OkHttp-backed HttpClient, `KeystoreTokenStorage`, a Dropbox/OneDrive-only `CloudSession`, etc. — see
+"Android" sections above). ViewModels are registered as app-scope `single` and obtained via `koinInject()`.
 
 ### Article Reader (native WebView)
 
