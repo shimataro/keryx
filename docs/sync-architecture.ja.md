@@ -306,11 +306,12 @@ main（ローカル）側に既に存在する不整合が、マージの `UPDAT
 
 > [!NOTE]
 > **クラウドが古い場合のローカル方向マイグレーション**: `DatabaseMerger.merge` は
-> マージ本体の前にダウンロードしたクラウド DB の `user_version` を確認し、ローカルより古ければ一時ファイルに
-> 対して `KeryxDatabase.Schema.migrate` でローカルのスキーマまで引き上げてからマージする。これにより、
-> 新しい列を参照するマージ文が古いクラウドに対して `no such column` で失敗しない。バージョン 2 では、
-> この引き上げ分岐（`migrateCloudIfOlder`）がバージョン 1 のクラウド DB に対して発火し、ダウンロードした
-> コピーへ `1.sqm` を適用してから記事マージが `deleted_at` を参照できるようにする。
+> マージ本体の前にダウンロードしたクラウド DB の `user_version` を確認し、`1 until localSchemaVersion` の
+> 範囲にあれば一時ファイルに対して `KeryxDatabase.Schema.migrate` でローカルのスキーマまで引き上げてから
+> マージする（例: バージョン 1 のクラウド DB には `1.sqm` を適用し、記事マージが `deleted_at` を参照
+> できるようにする）。これにより、新しい列を参照するマージ文が古いクラウドに対して `no such column` で
+> 失敗しない。クラウドの `user_version` が `0`（どの `.sqm` マイグレーションよりも前）の場合はこの
+> 引き上げの対象**外**。
 
 `DatabaseMerger.validateSchema(dbPath, schemaVersion)` は **nullable な** `Boolean` を返す —
 登録済みのスキーマバージョンに対するテーブル・カラムの有無なら `true`/`false`、`schemaVersion` が
