@@ -250,7 +250,7 @@ Until Google offers a backend-server-free OAuth flow for native Android apps (e.
 
 ### Future Work (not yet supported)
 
-- **file → Keychain migration heal**: If `.dropbox_tokens.json` exists but Keychain is empty, `SecurityCliTokenStorage.load()` writes the file value back to Keychain and **deletes the file only if read-back verification succeeds** (on failure, keeps the file to prevent data loss). Phase 2.5 verification logic can be reused.
+- **file → Keychain migration heal**: If `.dropbox_tokens.json` exists but Keychain is empty, `SecurityCliTokenStorage.load()` would write the file value back to Keychain and **delete the file only if read-back verification succeeds** (on failure, keep the file to prevent data loss). Not yet implemented — `load()` currently only falls back to the file, without writing back.
 
 ## Sync Target Article Range
 

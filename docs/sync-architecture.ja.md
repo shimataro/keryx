@@ -517,7 +517,8 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
 
 - **file → Keychain 移行 heal**: `.dropbox_tokens.json` にトークンがあり Keychain が空の場合、
   `SecurityCliTokenStorage.load()` で file の値を Keychain へ書き戻し、**read-back 検証に成功した時のみ**
-  file を削除する（検証失敗時は file を保持しデータ損失を防ぐ）。Phase 2.5 の検証ロジックを再利用できる。
+  file を削除する予定（検証失敗時は file を保持しデータ損失を防ぐ）。未実装 — 現在の `load()` は file への
+  フォールバックのみで、Keychain への書き戻しは行わない。
 
 ## 同期対象の記事範囲
 
