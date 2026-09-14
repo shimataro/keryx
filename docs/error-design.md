@@ -25,7 +25,9 @@ sealed interface Result<out T> {
     data class Err(val exception: KeryxException) : Result<Nothing>
 }
 
-sealed class KeryxException(message: String) : Exception(message)
+sealed class KeryxException(message: String) : Exception(message) {
+    val messageText: String get() = message ?: this::class.simpleName.orEmpty() // Throwable.message is nullable
+}
 ```
 
 Main subclasses (each also takes a leading `message: String`, omitted below): `FeedFetchException(statusCode)`,
