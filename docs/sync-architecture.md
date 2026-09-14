@@ -30,7 +30,11 @@ Conflict prevention is done via a revision check on upload — Dropbox: `rev`, a
    it costs no extra round trip, since every provider's metadata response already carries the revision (Dropbox's
    `get_metadata` `rev`, Drive's name-lookup `version`, Graph's item `eTag`).
    - **1a. Compressed file absent** — `CloudStorage.metadata(CLOUD_DB_PATH)` checks the legacy fallback.
-     - **Both absent (true first sync ever)**: the local DB is exported, compressed, and uploaded via create-only (`createFresh`), and the sync ends. See "Compressed Upload / Legacy Fallback" below.
+     - **Both absent (true first sync ever)**: the local DB is exported, compressed, and uploaded via create-only
+       (`createFresh`), and the sync ends. If `createFresh` finds the file already exists after all (a concurrent
+       creator, a stale "absent" reading), it returns `SyncConflictException` and the outer retry loop re-runs the
+       whole sync, which now takes the gz-present branch above instead of clobbering the other device's upload. See
+       "Compressed Upload / Legacy Fallback" below.
      - **Legacy present, compressed absent (one-time migration)**: the legacy file is downloaded and merged (step 3 below, uncompressed), then the local DB is exported, compressed, and *created* (not rev-guarded — there is no compressed revision yet) at `CLOUD_DB_GZ_PATH`, and the sync ends. The legacy file itself is left untouched.
 2. Stream `keryx.db.gz` from the cloud into a temp file, then decompress it (capped at `MAX_SYNC_DB_SIZE_BYTES`,
    1 GiB) — **skipped when the revision equals `sync_state.cloud_file_rev`**, i.e. this device has already merged
