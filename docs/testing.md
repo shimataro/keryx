@@ -176,8 +176,46 @@ Project-wide, this is on top of the two Android suites above:
 - the file-streamed cloud transfers (`CloudFileTransferTest.kt`: a response body written to its destination verbatim across several read chunks, a shorter payload replacing rather than appending to an existing destination file, and `FileUploadContent` streaming a file — optionally wrapped in the prefix/suffix that make Drive's `multipart/related` envelope possible — while reporting the right `contentLength`; `ContentDigestTest.kt` for the chunked SHA-256 the upload skip is keyed on, including a change in the final chunk still registering and a missing file yielding no digest rather than a false match; `SqliteFileTest.kt` for the path-based header check deciding from the first 16 bytes of a file far larger than any buffer)
 - the unchanged-transfer skip (`SyncRepositoryTest.kt`: a second sync with nothing changed on either side transferring zero payload bytes and issuing only its one metadata request, a local edit made after such a skip still being uploaded, a remote change still being downloaded and merged, the revision recorded from the upload's own response so a device never re-downloads its own write, `sync_state` being absent from the uploaded snapshot so its digest cannot drift on its own, `clearSyncFailureState()` not being undone by a sync that was already in flight — one test per half of the shared-mutex guarantee, since a *successful* gated sync is what rewrites the revision/digest markers while only a *failing* one rewrites `lastSyncError` — and the compressed upload / legacy-fallback split (a legacy-only cloud being merged then migrated to `.gz` via create-only rather than a rev-guarded update, the legacy file surviving migration byte-for-byte, a migrated device never reading the legacy file again even when it is left corrupted, a corrupt legacy file during migration and an invalid (non-gzip) `.gz` payload both classified as `CloudDataIncompatibleException`, and a reset renaming/recreating only `.gz` while leaving the legacy file untouched))
 - the automatic-sync suspension gate (`SyncRepositoryTest.kt`: an `AUTOMATIC`-triggered sync skipped while `autoSyncSuspended`, a `MANUAL` one never gated, `scheduleSync()` likewise suppressed, and the gate clearing on a successful sync/reset/`clearSyncFailureState()` — `SchemaVersionException` deliberately never triggers the gate)
-- the in-app update pipeline (`UpdateCheckerTest.kt`: `assets[]`/`body` parsing into `asset`/`releaseNotes`, a non-`sha256` or malformed `digest` yielding no asset, an asset whose `state` isn't `"uploaded"` excluded; `UpdateAssetSelectorTest.kt`: per-`InstallKind` asset-suffix matching, `.aab` never selected regardless of what a release ships; `UpdateInstallPolicyTest.kt`: `InstallLocation` × asset → `UpdatePlan`, and `canInstallAndroidApkUpdate`'s plan-kind/OS-consent gating — the one piece of `AndroidUpdateInstaller`'s decision pulled out as a pure function specifically so it's exercisable here, since `androidMain` itself has no JVM-testable unit-test source set (see "Known uncovered areas" below); `UpdateDownloaderTest.kt`: the host allowlist (leading-dot-anchored suffix match, rejecting a bare-IP or lookalike host), manual redirect-following capped at `MAX_REDIRECTS`, a digest or size mismatch leaving neither the `.part` file nor the final one behind, and progress emission monotonically reaching `bytesTotal`; `UpdateStateMachineTest.kt`: `Ready` surviving a `UpToDate`/same-version re-check but not a newer one, and never being interrupted by `Downloading`/`Verifying`/`Installing`; `UpdateRepositoryTest.kt`: `startDownload()` called twice starting exactly one download, `cancelDownload()` removing the `.part` file and reverting to `Available` rather than `Failed`, the sweep protecting an in-progress `.part` and the current `Ready` file while removing everything else, and a newer version's check deleting a superseded `Ready` version's directory; `ReleaseNotesTextTest.kt`)
-- the desktop self-replace/installer scripts (`UpdateScriptWriterTest.kt`: the generated script text itself, per template — the retreat-before-delete ordering, the rollback branch on a failed placement, and the health check gating the old copy's removal; `DesktopUpdateInstallerTest.kt`: `canInstall`'s per-`InstallKind`/asset-kind gating, the exact command line launched for each of macOS/Windows/Linux self-replace and the Windows MSI path via a fake `ProcessLauncher` that never actually runs one, a version-mismatched or executable-less extracted bundle failing before the launcher is ever called, an `ArchiveExtractor` that rejects the archive failing before it too (with its own reason carried through to the caller), and a stale partial `extracted/` tree being cleared before extraction starts; `ZipExtractorTest.kt`: zip-slip rejection, the `maxBytes` limit, restoring only the listed entries' executable bit, and the same two guards again through `validate`, which must additionally not create the destination directory it only resolves against (the entry-count limit itself — `MAX_ZIP_ENTRIES` in `ZipExtractor.kt`, 100,000 — is unverified for either function: no practical fixture exists for it, since exercising it means actually building and extracting a hundred-thousand-plus-entry ZIP in a unit test); `FileSystemExtrasTest.kt`/`InstallLocationDesktopTest.kt` extended for `setExecutable`/`isDirectoryWritable`/`move`, `copyTree` reproducing a symlink (file or directory) as a link rather than dereferencing it, and the per-OS `InstallLocation` detection)
+- the in-app update pipeline:
+  - `UpdateCheckerTest.kt`: `assets[]`/`body` parsing into `asset`/`releaseNotes`, a non-`sha256` or
+    malformed `digest` yielding no asset, an asset whose `state` isn't `"uploaded"` excluded.
+  - `UpdateAssetSelectorTest.kt`: per-`InstallKind` asset-suffix matching, `.aab` never selected
+    regardless of what a release ships.
+  - `UpdateInstallPolicyTest.kt`: `InstallLocation` × asset → `UpdatePlan`, and
+    `canInstallAndroidApkUpdate`'s plan-kind/OS-consent gating — the one piece of
+    `AndroidUpdateInstaller`'s decision pulled out as a pure function specifically so it's
+    exercisable here, since `androidMain` itself has no JVM-testable unit-test source set (see
+    "Known uncovered areas" below).
+  - `UpdateDownloaderTest.kt`: the host allowlist (leading-dot-anchored suffix match, rejecting a
+    bare-IP or lookalike host), manual redirect-following capped at `MAX_REDIRECTS`, a digest or
+    size mismatch leaving neither the `.part` file nor the final one behind, and progress emission
+    monotonically reaching `bytesTotal`.
+  - `UpdateStateMachineTest.kt`: `Ready` surviving a `UpToDate`/same-version re-check but not a
+    newer one, and never being interrupted by `Downloading`/`Verifying`/`Installing`.
+  - `UpdateRepositoryTest.kt`: `startDownload()` called twice starting exactly one download,
+    `cancelDownload()` removing the `.part` file and reverting to `Available` rather than `Failed`,
+    the sweep protecting an in-progress `.part` and the current `Ready` file while removing
+    everything else, and a newer version's check deleting a superseded `Ready` version's directory.
+  - `ReleaseNotesTextTest.kt`.
+- the desktop self-replace/installer scripts:
+  - `UpdateScriptWriterTest.kt`: the generated script text itself, per template — the
+    retreat-before-delete ordering, the rollback branch on a failed placement, and the health check
+    gating the old copy's removal.
+  - `DesktopUpdateInstallerTest.kt`: `canInstall`'s per-`InstallKind`/asset-kind gating, the exact
+    command line launched for each of macOS/Windows/Linux self-replace and the Windows MSI path via
+    a fake `ProcessLauncher` that never actually runs one, a version-mismatched or executable-less
+    extracted bundle failing before the launcher is ever called, an `ArchiveExtractor` that rejects
+    the archive failing before it too (with its own reason carried through to the caller), and a
+    stale partial `extracted/` tree being cleared before extraction starts.
+  - `ZipExtractorTest.kt`: zip-slip rejection, the `maxBytes` limit, restoring only the listed
+    entries' executable bit, and the same two guards again through `validate`, which must
+    additionally not create the destination directory it only resolves against (the entry-count
+    limit itself — `MAX_ZIP_ENTRIES` in `ZipExtractor.kt`, 100,000 — is unverified for either
+    function: no practical fixture exists for it, since exercising it means actually building and
+    extracting a hundred-thousand-plus-entry ZIP in a unit test).
+  - `FileSystemExtrasTest.kt`/`InstallLocationDesktopTest.kt` extended for
+    `setExecutable`/`isDirectoryWritable`/`move`, `copyTree` reproducing a symlink (file or
+    directory) as a link rather than dereferencing it, and the per-OS `InstallLocation` detection.
 
 Beyond this list, `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` failures specifically indicate a regression in DB schema / merge SQL / sync orchestration and warrant extra attention.
 

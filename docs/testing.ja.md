@@ -202,8 +202,47 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 - クラウド転送のファイルストリーミング（`CloudFileTransferTest.kt`：レスポンスボディが複数チャンクにまたがっても宛先ファイルへそのまま書かれること、短いペイロードが既存の宛先ファイルに追記されず置き換わること、`FileUploadContent` がファイルをストリームし——Drive の `multipart/related` 封筒を可能にする prefix/suffix で包む場合も含めて——正しい `contentLength` を報告すること。`ContentDigestTest.kt`：アップロードのスキップ判定に使うチャンク単位 SHA-256——最終チャンクの変更も検出されること、ファイルが無い場合は誤一致ではなくダイジェスト無しを返すことを含む。`SqliteFileTest.kt`：パス版のヘッダ検証が、どのバッファよりも大きなファイルでも先頭16バイトだけで判定すること）
 - 変更がないときの転送スキップ（`SyncRepositoryTest.kt`：双方とも変更が無い2回目の同期がペイロードを1バイトも転送せずメタデータ取得1回だけで済むこと、そのスキップの後にローカルを変更したら確実にアップロードされること、リモートの変更は従来どおりダウンロードしてマージすること、アップロード自身のレスポンスからリビジョンを記録するので自分の書き込みを再ダウンロードしないこと、`sync_state` がアップロード用スナップショットから除外されておりダイジェストが独りでに変化しないこと、`clearSyncFailureState()` が実行中の同期に取り消されないこと——共有ミューテックスの保証を2本のテストで半分ずつ検証する。リビジョン／ダイジェストのマーカーを書き戻すのは**成功した**同期であり、`lastSyncError` を書き戻すのは**失敗した**同期なので、1本では両方を検証できないため、および圧縮アップロード／レガシーフォールバックの分岐——レガシーのみのクラウドがマージされてから `.gz` へ移行すること（リビジョンガード付きの更新ではなく create-only で）、レガシーファイル自体がバイト単位でそのまま生き残ること、一度移行したデバイスは（レガシーファイルがその後壊れていても）二度とレガシーを読まないこと、移行中の壊れたレガシーファイルと不正な（gzip ではない）`.gz` ペイロードのどちらも `CloudDataIncompatibleException` に分類されること、リセットが `.gz` のみをリネーム・再作成しレガシーファイルには一切触れないこと）
 - 自動同期の抑制ゲート（`SyncRepositoryTest.kt`：`AUTOMATIC` トリガーの同期が `autoSyncSuspended` 中はスキップされること、`MANUAL` は決してゲートされないこと、`scheduleSync()` も同様に抑制されること、成功した同期／リセット／`clearSyncFailureState()` でゲートがクリアされること——`SchemaVersionException` は意図的にゲートを一切起動しない）
-- アプリ内アップデートのパイプライン（`UpdateCheckerTest.kt`：`assets[]`/`body` を `asset`/`releaseNotes` へパースすること、`sha256` 以外や不正な `digest` はアセットなし扱いになること、`state` が `"uploaded"` でないアセットは除外されること；`UpdateAssetSelectorTest.kt`：`InstallKind` ごとのアセットのサフィックス一致、リリースに何が含まれていても `.aab` は絶対に選ばれないこと；`UpdateInstallPolicyTest.kt`：`InstallLocation` × アセット → `UpdatePlan`、および `canInstallAndroidApkUpdate` のプラン種別／OS 同意状態によるゲーティング——`AndroidUpdateInstaller`の判断のうちここだけ純粋関数として切り出してあるのは、`androidMain` 自体には JVM でテストできるユニットテストのソースセットが存在しないため（下記「既知の未カバー範囲」参照）；`UpdateDownloaderTest.kt`：ホストの allowlist（先頭ドット必須のサフィックス一致、生 IP や紛らわしいホスト名を拒否）、`MAX_REDIRECTS` で頭打ちになる手動リダイレクト追従、digest やサイズの不一致時に `.part` ファイルも本体ファイルも残らないこと、進捗通知が単調に増加して `bytesTotal` に到達すること；`UpdateStateMachineTest.kt`：`Ready` が `UpToDate`／同一バージョンの再チェックでは潰れないが、より新しいバージョンでは潰れること、`Downloading`/`Verifying`/`Installing` には一切割り込まれないこと；`UpdateRepositoryTest.kt`：`startDownload()` を2回呼んでもダウンロードは1本だけ開始されること、`cancelDownload()` が `.part` ファイルを削除し `Failed` ではなく `Available` に戻すこと、sweep が進行中の `.part` と現在の `Ready` ファイルを保護しつつそれ以外を削除すること、より新しいバージョンのチェックが旧 `Ready` バージョンのディレクトリを削除すること；`ReleaseNotesTextTest.kt`）
-- デスクトップの自己置換／インストーラースクリプト（`UpdateScriptWriterTest.kt`：生成されたスクリプト本文そのものをテンプレートごとに検証——退避してから削除する順序、配置に失敗した際のロールバック分岐、旧コピーの削除を許可する前のヘルスチェック；`DesktopUpdateInstallerTest.kt`：`canInstall` の `InstallKind`／アセット種別ごとのゲーティング、macOS/Windows/Linux の自己置換と Windows MSI 経路それぞれで実際に起動されるコマンドライン一式を、実際には何も起動しないフェイクの `ProcessLauncher` 経由で検証すること、バージョン不一致や実行権限の無い展開済みバンドルはランチャーが呼ばれる前に失敗すること、書庫を拒否する `ArchiveExtractor` も同様にランチャーより手前で失敗し、その理由が呼び出し側まで伝わること、展開開始前に古い `extracted/` ツリーが消されること；`ZipExtractorTest.kt`：zip slip の拒否、`maxBytes` の上限、指定したエントリだけ実行ビットが復元されること、および同じ 2 つのガードを `validate` 経由でも検証すること（`validate` はさらに、解決先としてしか使わない展開先ディレクトリを作らないこと）（エントリ数上限自体——`ZipExtractor.kt` の `MAX_ZIP_ENTRIES`、10 万——はどちらの関数についても未検証: 実際に 10 万件超のエントリを持つ ZIP をユニットテストで生成・展開することになるため、実用的なフィクスチャが作れない）；`FileSystemExtrasTest.kt`/`InstallLocationDesktopTest.kt` を `setExecutable`/`isDirectoryWritable`/`move`、`copyTree` が symlink（ファイル・ディレクトリとも）をたどらずリンクのまま複製すること、OS ごとの `InstallLocation` 判定向けに拡張したもの）
+- アプリ内アップデートのパイプライン:
+  - `UpdateCheckerTest.kt`：`assets[]`/`body` を `asset`/`releaseNotes` へパースすること、`sha256`
+    以外や不正な `digest` はアセットなし扱いになること、`state` が `"uploaded"` でないアセットは
+    除外されること。
+  - `UpdateAssetSelectorTest.kt`：`InstallKind` ごとのアセットのサフィックス一致、リリースに何が
+    含まれていても `.aab` は絶対に選ばれないこと。
+  - `UpdateInstallPolicyTest.kt`：`InstallLocation` × アセット → `UpdatePlan`、および
+    `canInstallAndroidApkUpdate` のプラン種別／OS 同意状態によるゲーティング——`AndroidUpdateInstaller`
+    の判断のうちここだけ純粋関数として切り出してあるのは、`androidMain` 自体には JVM でテスト
+    できるユニットテストのソースセットが存在しないため（下記「既知の未カバー範囲」参照）。
+  - `UpdateDownloaderTest.kt`：ホストの allowlist（先頭ドット必須のサフィックス一致、生 IP や
+    紛らわしいホスト名を拒否）、`MAX_REDIRECTS` で頭打ちになる手動リダイレクト追従、digest や
+    サイズの不一致時に `.part` ファイルも本体ファイルも残らないこと、進捗通知が単調に増加して
+    `bytesTotal` に到達すること。
+  - `UpdateStateMachineTest.kt`：`Ready` が `UpToDate`／同一バージョンの再チェックでは潰れないが、
+    より新しいバージョンでは潰れること、`Downloading`/`Verifying`/`Installing` には一切割り込まれ
+    ないこと。
+  - `UpdateRepositoryTest.kt`：`startDownload()` を2回呼んでもダウンロードは1本だけ開始されること、
+    `cancelDownload()` が `.part` ファイルを削除し `Failed` ではなく `Available` に戻すこと、sweep
+    が進行中の `.part` と現在の `Ready` ファイルを保護しつつそれ以外を削除すること、より新しい
+    バージョンのチェックが旧 `Ready` バージョンのディレクトリを削除すること。
+  - `ReleaseNotesTextTest.kt`。
+- デスクトップの自己置換／インストーラースクリプト:
+  - `UpdateScriptWriterTest.kt`：生成されたスクリプト本文そのものをテンプレートごとに検証——退避
+    してから削除する順序、配置に失敗した際のロールバック分岐、旧コピーの削除を許可する前の
+    ヘルスチェック。
+  - `DesktopUpdateInstallerTest.kt`：`canInstall` の `InstallKind`／アセット種別ごとのゲーティング、
+    macOS/Windows/Linux の自己置換と Windows MSI 経路それぞれで実際に起動されるコマンドライン一式を、
+    実際には何も起動しないフェイクの `ProcessLauncher` 経由で検証すること、バージョン不一致や実行
+    権限の無い展開済みバンドルはランチャーが呼ばれる前に失敗すること、書庫を拒否する
+    `ArchiveExtractor` も同様にランチャーより手前で失敗し、その理由が呼び出し側まで伝わること、
+    展開開始前に古い `extracted/` ツリーが消されること。
+  - `ZipExtractorTest.kt`：zip slip の拒否、`maxBytes` の上限、指定したエントリだけ実行ビットが
+    復元されること、および同じ2つのガードを `validate` 経由でも検証すること（`validate` はさらに、
+    解決先としてしか使わない展開先ディレクトリを作らないこと）（エントリ数上限自体——
+    `ZipExtractor.kt` の `MAX_ZIP_ENTRIES`、10万——はどちらの関数についても未検証: 実際に10万件超の
+    エントリを持つ ZIP をユニットテストで生成・展開することになるため、実用的なフィクスチャが
+    作れない）。
+  - `FileSystemExtrasTest.kt`/`InstallLocationDesktopTest.kt` を `setExecutable`/
+    `isDirectoryWritable`/`move`、`copyTree` が symlink（ファイル・ディレクトリとも）をたどらず
+    リンクのまま複製すること、OS ごとの `InstallLocation` 判定向けに拡張したもの。
 
 この一覧を超えて、`SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` の失敗は DB スキーマ・マージ SQL・同期オーケストレーションの退行を意味するので特に注意する。
 
