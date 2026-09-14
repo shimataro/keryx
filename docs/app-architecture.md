@@ -491,7 +491,9 @@ bound to the SELECT column order (guarded by
 
 ## Navigation
 
-A simple stack navigator in `ui/navigation/Navigator.kt` switches between Setup / Home / Settings. Article view is a pane inside Home (not a root route).
+`ui/navigation/Navigator.kt` holds a single current `Screen` (`Setup` or `Home` — not a stack, and there is no
+third `Settings` value) and switches it via `replace()`. Settings is a dialog shown over Home, and article view is
+a pane inside Home — neither is a route of its own.
 
 ### Home's adaptive pane layout
 

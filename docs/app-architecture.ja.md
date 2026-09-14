@@ -508,8 +508,9 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 
 ## ナビゲーション
 
-`ui/navigation/Navigator.kt` の単純なスタック型ナビゲータで Setup / Home / Settings を切り替える。
-記事ビューは Home 内のペイン（ルートではない）。
+`ui/navigation/Navigator.kt` は現在の `Screen`（`Setup` または `Home` の一値——スタックではなく、
+3番目の `Settings` という値も存在しない）を保持し、`replace()` で切り替える。設定は Home の上に表示される
+ダイアログであり、記事ビューは Home 内のペインであって、どちらも独自のルートではない。
 
 ### Home の適応的ペインレイアウト
 
