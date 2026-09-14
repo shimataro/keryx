@@ -58,7 +58,21 @@ Real-DB measurement (a 3,671-article, 21.4 MB snapshot, gzip level default via `
 
 The upload-skip digest (step 5) is deliberately computed on the **uncompressed** snapshot, never the compressed bytes. `GZIPOutputStream` embeds a timestamp in its header, so compressing byte-identical input twice does not produce byte-identical output — hashing the compressed file would make the skip check fail to fire even when nothing changed. Hashing the content that is actually invariant (the plain snapshot) is what makes the skip check work (see "Skipping Unchanged Transfers" below); compression sits downstream of that decision, not inside it.
 
-**This fallback is deliberately temporary**, scoped to the 0.x pre-release period. It is planned for removal once the app reaches its v1.0.0 release: at that point every device still running an older, `.gz`-unaware build is expected to have upgraded, and from v1.0.0 onward the cloud format is compressed-only — `CLOUD_DB_PATH`, the legacy-fallback branch in `syncLocked()`, and the corresponding tests are all deleted in that release, not deprecated in place. Until then, the fallback carries one accepted, narrow risk: a **one-way silent divergence** between a `.gz`-aware device and one still running a pre-compression build against the *same* cloud connection — the old build keeps reading and writing only `CLOUD_DB_PATH`, so once a `.gz`-aware device migrates a shared cloud, the old build's subsequent writes to the now-frozen legacy file are never seen by any `.gz`-aware device, and neither side's sync ever fails or reports it (both report success). This is accepted because it only matters for a user who is deliberately running two different app vintages against the same connected account simultaneously — an unusual, transitional-only scenario — and is documented rather than engineered around, since the whole mechanism it would need is retired at v1.0.0 anyway. It is not a risk between two devices both past this release, and not a risk for a single-device user at any point.
+**This fallback is deliberately temporary**, scoped to the 0.x pre-release period, and planned for removal at
+v1.0.0 — `CLOUD_DB_PATH`, the legacy-fallback branch in `syncLocked()`, and the corresponding tests are all deleted
+in that release, not deprecated in place, once every device is expected to have upgraded past a `.gz`-unaware build.
+
+Until then, it carries one accepted, narrow risk:
+
+- **A one-way silent divergence** can occur between a `.gz`-aware device and one still running a pre-compression
+  build against the *same* cloud connection. The old build keeps reading and writing only `CLOUD_DB_PATH`; once a
+  `.gz`-aware device migrates a shared cloud, the old build's subsequent writes to the now-frozen legacy file are
+  never seen by any `.gz`-aware device — and neither side's sync ever fails or reports it (both report success).
+- **This is accepted, not engineered around**, because it only matters for a user deliberately running two different
+  app vintages against the same connected account at once — an unusual, transitional-only scenario — and the whole
+  fallback mechanism it depends on is retired at v1.0.0 anyway.
+- It is **not** a risk between two devices both past this release, and **not** a risk for a single-device user at
+  any point.
 
 ### Skipping Unchanged Transfers
 
