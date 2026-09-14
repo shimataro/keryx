@@ -97,7 +97,15 @@ which is the correct ordering anyway.
 
 ### Automatic-Sync Suspension
 
-`SyncRepository.sync(trigger: SyncTrigger = MANUAL)` takes who is asking. `SyncTrigger.AUTOMATIC` — the debounced-write consumer, `runStartupTasks`, and `backgroundUpdateLoop` — is subject to a gate: while `autoSyncSuspended` (a `StateFlow<Boolean>`) is true, an `AUTOMATIC` call skips the download/merge/upload cycle entirely and returns `Result.Ok(Unit)` without spinning the sync spinner or touching the notification center, so a known-unusable cloud DB is not re-downloaded and re-merged on every debounced write. `SyncTrigger.MANUAL` (the default, used by every UI-triggered sync — the toolbar/menu "sync now", "Refresh All", the initial connect-time sync, `SettingsViewModel.connect()`) **always runs for real**, so a person who explicitly asked for a sync always gets a real attempt and the failure that explains why, never a silent no-op.
+`SyncRepository.sync(trigger: SyncTrigger = MANUAL)` takes who is asking. `SyncTrigger.AUTOMATIC` — the
+debounced-write consumer, `runStartupMaintenance` (shared by desktop's `StartupTasks.kt` and Android's startup
+path), and Android's `FeedRefreshWorker` — is subject to a gate: while `autoSyncSuspended` (a `StateFlow<Boolean>`)
+is true, an `AUTOMATIC` call skips the download/merge/upload cycle entirely and returns `Result.Ok(Unit)` without
+spinning the sync spinner or touching the notification center, so a known-unusable cloud DB is not re-downloaded
+and re-merged on every debounced write. `SyncTrigger.MANUAL` (the default, used by every UI-triggered sync — the
+toolbar/menu "sync now", "Refresh All", the initial connect-time sync in both `SettingsViewModel.connect()` and
+`SetupViewModel`) **always runs for real**, so a person who explicitly asked for a sync always gets a real attempt
+and the failure that explains why, never a silent no-op.
 
 The gate is set by `updateAutoSyncGate` (called from both `sync()` and `resetCloudData()`, right before `emitErrorNotification`): a result carrying `CloudDataIncompatibleException` sets it, any `Result.Ok` clears it. `SchemaVersionException` is deliberately excluded — it is equally permanent, but its fix is "update the app", and gating background syncing on it would hide the moment a newly-installed version starts working again. `scheduleSync()` also checks the gate before enqueueing a debounce signal, so a write burst does not even spin up the debounce wait while the cloud is known-unusable.
 
