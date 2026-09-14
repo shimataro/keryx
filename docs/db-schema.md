@@ -109,9 +109,6 @@ receiving device ever reads — it appears in neither `MergeSql` nor `DatabaseMe
 dropping it is also what keeps the snapshot a pure function of the synced data, since `last_synced_at` would
 otherwise change its bytes on every successful sync and defeat the digest comparison above.
 
-> [!NOTE]
-> The issue that read/write to this table was unimplemented has been fixed; the current implementation actually records these values.
-
 ### articles_fts (FTS5 virtual table, outside SQLDelight management)
 
 ```sql
