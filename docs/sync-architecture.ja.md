@@ -451,19 +451,23 @@ single-instance 経由で実行中インスタンスへ転送する。
 
 デスクトップの Google Drive 構成——ループバックリダイレクト + 毎回のトークン交換/リフレッシュで
 `client_secret` を送る「デスクトップアプリ」OAuth クライアント——は Android には流用できない。
-Google の現行ドキュメントが明確にしているのは、これが**Google 自身の OAuth クライアント種別に関する
-ポリシー上の判断**であって、Android 一般の制約ではないという点である（Dropbox と OneDrive はどちらも
-Android でカスタム URI スキームのリダイレクト + PKCE を使っており、Dropbox はこれを公式に推奨してさえ
-いる）: カスタム URI スキームのリダイレクトは Google の Android/Chrome アプリ向けクライアント種別では
-サポート対象外（理由はアプリなりすましのリスク）、ループバックリダイレクトも同じクライアント種別では別途廃止と
-されている。Android から Google ユーザーデータへアクセスする Google 自身の推奨経路である Play services
-の `AuthorizationClient` に切り替えても、Play services へのランタイム依存が増える（この
-アプリの「アカウント不要・ローカルファースト」という方針と相性が悪い）うえ、リフレッシュトークンを
-得るにはやはりサーバー側での `client_secret` 交換が必要になる（`AuthorizationResult.getServerAuthCode()`
-が返す認可コードはバックエンドでの引き換えを前提としており、APK に埋め込む想定ではない）。どちらの
-トレードオフも小さな追加では済まないため、Android の Google Drive 対応は Dropbox/OneDrive を追加した
-フェーズには含めず、独立した将来の調査課題として先送りする。`core/CloudStorageAvailability.android.kt`
-は `googleDriveAvailable = false` を固定しており、その KDoc からここへリンクしている。
+
+- **これは Google 自身のポリシー上の判断であり、Android 一般の制約ではない。** Google の現行
+  ドキュメントがこれを明確にしている（Dropbox と OneDrive はどちらも Android でカスタム URI
+  スキームのリダイレクト + PKCE を使っており、Dropbox はこれを公式に推奨してさえいる）:
+  カスタム URI スキームのリダイレクトは Google の Android/Chrome アプリ向けクライアント種別では
+  サポート対象外（理由はアプリなりすましのリスク）、ループバックリダイレクトも同じクライアント
+  種別では別途廃止とされている。
+- **プラットフォーム自身の推奨代替策も合わない。** Android から Google ユーザーデータへアクセスする
+  Google 自身の推奨経路である Play services の `AuthorizationClient` に切り替えても、Play services
+  へのランタイム依存が増える（このアプリの「アカウント不要・ローカルファースト」という方針と
+  相性が悪い）うえ、リフレッシュトークンを得るにはやはりサーバー側での `client_secret` 交換が
+  必要になる（`AuthorizationResult.getServerAuthCode()` が返す認可コードはバックエンドでの
+  引き換えを前提としており、APK に埋め込む想定ではない）。
+- **現状。** どちらのトレードオフも小さな追加では済まないため、Android の Google Drive 対応は
+  Dropbox/OneDrive を追加したフェーズには含めず、独立した将来の調査課題として先送りする。
+  `core/CloudStorageAvailability.android.kt` は `googleDriveAvailable = false` を固定しており、
+  その KDoc からここへリンクしている。
 
 #### 将来の検討事項（Android での Google Drive）
 
