@@ -2,7 +2,9 @@
 
 [日本語](sync-architecture.ja.md)
 
-Target: cloud sync (Dropbox / Google Drive / OneDrive). Implementation is in `domain/SyncRepository.kt`, `domain/MergeSql.kt`, `platform/DatabaseMerger`, `platform/DatabaseSnapshot`.
+Target: cloud sync (Dropbox / Google Drive / OneDrive). Implementation is in `domain/SyncRepository.kt`,
+`domain/MergeSql.kt`, `domain/MergeFailureClassifier.kt`, `domain/MergeSchema.kt`, `domain/SnapshotSql.kt`,
+`platform/DatabaseMerger`, `platform/DatabaseSnapshot`.
 
 ## Design Philosophy
 

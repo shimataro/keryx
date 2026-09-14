@@ -2,7 +2,9 @@
 
 [English](sync-architecture.md)
 
-対象: クラウドストレージ同期（Dropbox / Google Drive / OneDrive）。実装は `domain/SyncRepository.kt`, `domain/MergeSql.kt`, `platform/DatabaseMerger`, `platform/DatabaseSnapshot`。
+対象: クラウドストレージ同期（Dropbox / Google Drive / OneDrive）。実装は `domain/SyncRepository.kt`,
+`domain/MergeSql.kt`, `domain/MergeFailureClassifier.kt`, `domain/MergeSchema.kt`, `domain/SnapshotSql.kt`,
+`platform/DatabaseMerger`, `platform/DatabaseSnapshot`。
 
 ## 設計方針
 
