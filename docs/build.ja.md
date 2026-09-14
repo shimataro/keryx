@@ -585,18 +585,20 @@ AppStream の `<launchable>` のために追加した — 上記「Linux パッ�
    - Linux ランナーで（jpackage 用に `fakeroot`/`rpm` をインストールした上で）`:composeApp:packageDeb :composeApp:packageRpm` を実行し、`Keryx-<version>-linux-x86_64.deb` と `Keryx-<version>-linux-x86_64.rpm` に加えて **`Keryx-<version>-linux-x86_64.zip`** としても添付する。**プレリリースタグの場合は `packageDeb`/`packageRpm` をスキップし、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。
    - `package-snap` は独立したジョブで、`snapcraft` の失敗が上記 deb/rpm/zip ジョブの成果物を
      道連れにしないようにしてある（`ubuntu-latest` ではなく `ubuntu-24.04` 固定ランナーが必要な
-     理由は上記「Linux Snap パッケージ」参照）。（`sudo snap install snapcraft --classic` の後）
-     `snap/snapcraft.yaml` に対して `sudo snapcraft pack --destructive-mode --output "Keryx-$VERSION-linux-x86_64.snap"` を実行し、
-     生成された `Keryx-<version>-linux-x86_64.snap` を添付する — `.deb`/`.rpm` と異なり、snapcraftの
-     `version:`フィールドはjpackageのパッケージメタデータのような `MAJOR.MINOR.PATCH` 限定ではないため、
-     **プレリリースタグでもスキップせず添付する**。GitHub Release への添付の後、同じジョブは
-     **Snap Storeへのスナップ公開**も行う（`snapcraft upload --release=<channel>`。後述の
-     `SNAPCRAFT_STORE_CREDENTIALS` シークレットが設定されている場合のみ実行）——チャンネルは、
-     タグにプレリリース接尾辞が付いている **か** GitHub Release 自体がプレリリースとして
-     マークされている場合に `edge`、それ以外は `stable` になる（上記の deb/rpm/msi の
-     スキップ判定はタグ接尾辞のみで決まるが、Snap Store のチャンネル判定だけは Release 側の
-     プレリリースフラグも見る——チャンネルを誤って `stable` にすると snapd 自身の自動リフレッシュで
-     全 Store ユーザーに配信されてしまい、取り消せないため）。
+     理由は上記「Linux Snap パッケージ」参照）。
+     - **ビルドと添付。**（`sudo snap install snapcraft --classic` の後）`snap/snapcraft.yaml` に
+       対して `sudo snapcraft pack --destructive-mode --output "Keryx-$VERSION-linux-x86_64.snap"`
+       を実行し、生成された `Keryx-<version>-linux-x86_64.snap` を添付する — `.deb`/`.rpm` と異なり、
+       snapcraft の `version:` フィールドは jpackage のパッケージメタデータのような
+       `MAJOR.MINOR.PATCH` 限定ではないため、**プレリリースタグでもスキップせず添付する**。
+     - **Snap Store への公開。** GitHub Release への添付の後、同じジョブは**Snap Store へのスナップ
+       公開**も行う（`snapcraft upload --release=<channel>`。後述の `SNAPCRAFT_STORE_CREDENTIALS`
+       シークレットが設定されている場合のみ実行）。
+     - **チャンネルの選択。** タグにプレリリース接尾辞が付いている**か** GitHub Release 自体が
+       プレリリースとしてマークされている場合に `edge`、それ以外は `stable` になる（上記の
+       deb/rpm/msi のスキップ判定はタグ接尾辞のみで決まるが、Snap Store のチャンネル判定だけは
+       Release 側のプレリリースフラグも見る——チャンネルを誤って `stable` にすると snapd 自身の
+       自動リフレッシュで全 Store ユーザーに配信されてしまい、取り消せないため）。
    - Windows ランナーで `:composeApp:createDistributable :composeApp:packageMsi` を実行し（`windows-latest` には WiX Toolset v3.14.1 がプリインストール済みのため、別途 WiX のセットアップ手順は不要）、`Keryx-<version>-windows-x86_64.msi` に加えて **`Keryx-<version>-windows-x86_64.zip`** としても添付する。**プレリリースタグの場合は `packageMsi` をスキップし、`.zip` のみを添付する** — MSI の `ProductVersion`（後述）は数値のみでなければならず、同一の対象バージョンに属するプレリリースはすべて同じ `ProductVersion` に潰れてしまうため、固定の `upgradeUuid` の下では WiX が後続のプレリリースや最終的な正式版を「アップグレード」として認識できない。
    - Ubuntu ランナーで `:androidApp:assembleGithubRelease` と `:androidApp:bundlePlayRelease` を実行し、`Keryx-<version>-android-universal.apk` と `Keryx-<version>-android-universal.aab` として添付する。APK は `github` flavor（`REQUEST_INSTALL_PACKAGES` を持つ——アプリ内アップデートがこの上に上書きインストールするため。上記「Android（APK / AAB）」参照）から、AAB は `play`（Play Console 提出用の成果物で、この権限を持ってはならない）から生成する。Android 版はデスクトップのインストーラーとは異なり、プレリリースタグでもビルド・添付する — Android には該当するバージョンメタデータ制約が無く、テスターが署名済み APK を必要とするため。
 
