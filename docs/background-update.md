@@ -188,7 +188,8 @@ each a separate, explicit click (Updates tab button, or that menu item).
   no-op in Ktor 3.5; the streaming form is the only way out). Progress is throttled to once per
   whole-percent change (`shouldEmitProgress` — gated on the percentage itself, not a fixed byte
   delta, since that's the finest resolution any consumer can show and scales correctly regardless
-  of asset size), and cancelling reverts to `Available` rather than `Failed` — a
+  of asset size — a separate, coarser 5% rounding happens downstream in the tray menu label, see
+  "Presentation" below), and cancelling reverts to `Available` rather than `Failed` — a
   user-requested stop is not a failure. There is no resume-from-partial: the redirect target is a
   signed URL that expires in about an hour, so a failed/cancelled download is simply restarted, not
   resumed. `check()` also sweeps `<cacheDir>/updates/` of every version except whichever one the
@@ -297,8 +298,9 @@ each a separate, explicit click (Updates tab button, or that menu item).
 - **Presentation.** Surfaced from the moment `check()` finds something, not only once it's ready:
   the single update menu item — shown identically in the desktop tray and in the application menu
   bar's Help menu, both built by `tray/UpdateMenuEntry.kt`'s `updateMenuEntry` — cycles through
-  "Download update %1$s", "Downloading… N%" (rounded to 5% to avoid flooding the Linux SNI D-Bus
-  menu with layout-change signals), "Verifying…", "Restart to update to %1$s", and "Update failed"
+  "Download update %1$s", "Downloading… N%" (a separate, coarser 5% rounding of the same underlying
+  progress described in "Downloading" above — needed here specifically to avoid flooding the Linux SNI
+  D-Bus menu with layout-change signals), "Verifying…", "Restart to update to %1$s", and "Update failed"
   as `state` moves (`%1$s` is the target version — see `tray_update_download`/`tray_update_restart`
   in `strings.xml`). That item is **always present**, whatever the state: `Idle`/`UpToDate` show
   "Check for updates"/"Up to date" and are the user's way to ask for a check on demand (clicking
