@@ -215,15 +215,23 @@
   ON CONFLICT が扱うのは内容フィールド（url/title/description/etag 等 + `updated_at`）のみ。
   feeds を **`id` で照合**するため、feed id は購読時に `url` から **UUIDv5** で決定的に生成し
   （`IdGenerator.feedId`）、同じフィードが全デバイスで同一 id になることが前提。ランダム id だと両
-  デバイスが独立購読した同一フィードが別 id になり、URL 衝突ガードにスキップされて収束しない（feed が
-  収束しないと記事 id も `feed_id` 由来で食い違い記事も収束しない）。詳細は
+  デバイスが独立購読した同一フィードが別 id になっていると URL 衝突ガードにスキップされて収束しない
+  （feed が収束しないと記事 id も `feed_id` 由来で食い違い記事も収束しない）。詳細は
   [db-schema.ja.md](db-schema.ja.md) の `feeds` 節。
-- articles: 既読（`read_at`）・スター（`starred_at`）は後勝ち、本文は OR マージ、`search_text` を再計算。削除は `deleted_at` / `deleted_updated_at` の後勝ち（既読・スターと同じフィールド別）で、キャッシュ削除の論理削除がクラウドから復活せず伝播する。削除より新しいスターがあれば記事を復活（`deleted_at` → NULL）させる。`upsert`（フィード更新）は `deleted_at` に書き込まないため、更新が削除済み記事を復活させることはない。
+- articles: 既読（`read_at`）・スター（`starred_at`）は後勝ち、本文は OR マージ。`search_text` は
+  再計算せず、勝った側の `content`/`summary` に対応するほうの、既に格納されている `search_text` を選ぶ
+  （どちらの `content` が非 NULL かによる `CASE`）。削除は `deleted_at` / `deleted_updated_at` の後勝ち
+  （既読・スターと同じフィールド別）で、キャッシュ削除の論理削除がクラウドから復活せず伝播する。削除より
+  新しいスターがあれば記事を復活（`deleted_at` → NULL）させる。`upsert`（フィード更新）は `deleted_at` に
+  書き込まないため、更新が削除済み記事を復活させることはない。
   記事を **`id` で照合**するため、記事 ID は `(feed_id, guid)` から **UUIDv5** で決定的に生成し
-  （`IdGenerator.articleId`）、同じ記事が全デバイスで同一 ID になることが前提。ランダム ID だと両
-  デバイスが独立取得した同一記事が別 ID になり、下記の guid 衝突ガードにスキップされて既読が伝播しない
-  （その不具合の修正）。詳細は [db-schema.ja.md](db-schema.ja.md) の `articles` 節。
-- feed_tags: 後勝ち。参照先 feed / tag が main に存在する場合のみ取り込む（FK 保護）。
+  （`IdGenerator.articleId`）、同じ記事が全デバイスで同一 ID になることが前提。そうでなければ両デバイスが
+  独立取得した同一記事が別 ID になっていると下記の guid 衝突ガードにスキップされ、既読が伝播しない。
+  詳細は [db-schema.ja.md](db-schema.ja.md) の `articles` 節。
+- feed_tags: 後勝ち。参照先 feed が main に存在する場合のみ取り込む（FK 保護）。タグは feed より
+  緩やかに解決する: クラウド側の `tag_id` が main にも存在すればそのまま使い、無ければ `cloud.tags` を
+  経由した join で **名前で** `main.tags` を検索する（同じ名前のタグを両デバイスが独立に別 id で
+  作った場合でも、1つのタグに収束させるため）。
 - **feeds のユーザー編集フィールドは専用文でフィールド専用タイムスタンプを使い独立に後勝ちマージする**
   （記事の `read_at` / `starred_at` と同じ設計。行全体の `updated_at`＝内容リフレッシュで更新、とは切り離す）:
   `mergeFeedFolderId`（`folder_id` / `folder_updated_at`）、`mergeFeedSortOrder`（`sort_order` /
