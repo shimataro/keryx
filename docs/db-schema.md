@@ -102,11 +102,12 @@ The last two exist so a sync that has nothing to do transfers nothing: an unchan
 skips the download, and an unchanged snapshot digest skips the upload (see "Skipping Unchanged
 Transfers" in [sync-architecture.md](sync-architecture.md)).
 
-This table is **excluded from the uploaded snapshot** (`DatabaseSnapshot.exportForUpload` drops it
-alongside `articles_fts`). It is device-local bookkeeping that no receiving device ever read — it appears
-in neither `MergeSql` nor `DatabaseMerger`'s expected schema — and dropping it is also what keeps the
-snapshot a pure function of the synced data, since `last_synced_at` would otherwise change its bytes on
-every successful sync and defeat the digest comparison above.
+This table is **excluded from the uploaded snapshot**, alongside `articles_fts` and the four `idx_articles_*`
+indexes — `DatabaseSnapshot.exportForUpload` drops all of them on the `VACUUM INTO` copy (never on the live DB),
+then runs a trailing `VACUUM` (`domain/SnapshotSql.kt`). `sync_state` itself is device-local bookkeeping that no
+receiving device ever reads — it appears in neither `MergeSql` nor `DatabaseMerger`'s expected schema — and
+dropping it is also what keeps the snapshot a pure function of the synced data, since `last_synced_at` would
+otherwise change its bytes on every successful sync and defeat the digest comparison above.
 
 > [!NOTE]
 > The issue that read/write to this table was unimplemented has been fixed; the current implementation actually records these values.

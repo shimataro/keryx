@@ -126,9 +126,11 @@ SHA-256 を hex 化したもの）。
 ダウンロードを、スナップショットのダイジェストが変わっていなければアップロードをスキップする
 （[sync-architecture.ja.md](sync-architecture.ja.md) の「変更がないときの転送スキップ」参照）。
 
-このテーブルは**アップロード用スナップショットから除外される**（`DatabaseSnapshot.exportForUpload` が
-`articles_fts` と一緒に DROP する）。デバイスローカルな管理情報であり受信側が読むことは元々なく
-（`MergeSql` にも `DatabaseMerger` の期待スキーマにも登場しない）、除外することでスナップショットが
+このテーブルは、`articles_fts` および `idx_articles_*` の4本のインデックスとともに
+**アップロード用スナップショットから除外される** — `DatabaseSnapshot.exportForUpload` がこれらすべてを
+`VACUUM INTO` コピー側（ライブ DB 側ではない）で DROP し、最後に `VACUUM` を実行する
+（`domain/SnapshotSql.kt`）。`sync_state` 自体はデバイスローカルな管理情報であり受信側が読むことは
+元々なく（`MergeSql` にも `DatabaseMerger` の期待スキーマにも登場しない）、除外することでスナップショットが
 同期対象データのみの関数になる — さもないと `last_synced_at` が同期成功のたびにバイト列を変え、
 上記のダイジェスト比較が成立しなくなる。
 
