@@ -126,10 +126,12 @@ a flat, SF-leaning look; Android gets Material 3's own components, shapes, and r
 will eventually get native SwiftUI. **Windows and Linux are the deliberate exception**: Java/Swing's
 own platform integration is too limited to give either OS a comparably native treatment (see the
 Look & Feel, context-menu, and file-dialog specifics below, and `docs/known-issues.md`), so both
-share macOS's flat look instead of getting one of their own. Material 3 with the app's own teal
-color scheme is Android's concrete instantiation of this principle, not a universal baseline the
-other platforms deviate from — where this document says "Material 3", read it as Android-specific
-unless stated otherwise. Light / dark / system support. 3-pane layout (feed list / article list /
+share macOS's flat look instead of getting one of their own. Material 3 is Android's concrete
+instantiation of this principle — where this document says "Material 3", read it as Android-specific
+unless stated otherwise. Android's own color scheme is not always the app's fixed teal palette:
+on Android 12+ (API 31+) the app uses Material You dynamic color, derived from the system wallpaper
+(`dynamicLightColorScheme`/`dynamicDarkColorScheme`), falling back to the fixed teal scheme on older
+versions. Light / dark / system support. 3-pane layout (feed list / article list /
 article detail) + keyboard navigation, adapting down to fewer simultaneous panes on narrower widths
 (see below).
 
