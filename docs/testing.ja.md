@@ -207,78 +207,20 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 
 この一覧を超えて、`SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` の失敗は DB スキーマ・マージ SQL・同期オーケストレーションの退行を意味するので特に注意する。
 
-既知の未カバー範囲: `SettingsViewModel.exportOpml`/`importOpml` は今やテスト用シーム（`FileSelector`、
-テストでは `FakeFileSelector` でフェイク化）を持ちカバー済み——未カバーのまま残るのは、ネイティブ
-ダイアログが実際に表示される部分（本物の `JFileChooser`/`FileDialog` にはディスプレイと人手が要る
-ため、下記の手動確認に留まる）と、`FilePicker.desktop.kt` の `resolveDialogOwner()` を実ウインドウに
-対して動かす部分（委譲先の純粋な `chooseDialogOwner` の選択ロジックのみテスト済み）である。
-`OAuthConnectFlow.connect()` のブラウザー起動〜コールバック待受〜
-コード交換部分（`BrowserOpener`/`LoopbackRedirectTransport` の実I/Oに依存し、シームなしにはモック不可。
-App Key 空チェックで即エラーになる分岐のみ `OAuthConnectFlowTest` でカバー済み）、
-`DatabaseDriverFactory.create()` そのもの（`AppDirs.appDataDir()` を直接参照しておりテスト用の
-ディレクトリ差し替えができない）。ただし本質的な部分である接続設定は `sqliteConnectionProperties()`
-として切り出され、`SqliteConnectionPropertiesTest` が実ファイル DB に対して検証している
-（`inMemoryDb()`/`fileDb()` もこれを使ってドライバを組み立てる）。フィード/フォルダーの並び替えジェスチャー（`ui/home/FeedListDragController.kt`/
-`FeedListDragGestures.kt`）は、OS レベルの DnD ではなく自前実装の Compose ネイティブなドラッグになった
-ことで、まさにこの部分をテスト可能にするために書き直された経緯があり、`FeedListDragTest.kt` が
-`performMouseInput`/`performKeyInput` を使って実際にエンドツーエンドで検証する（ドラッグによる並べ替え、
-しきい値判定、フォルダー/タグへのドロップ、ドラッグ中の右クリック、ゴーストのライフサイクル、
-Escape によるキャンセル）。並び替えの計算ロジック自体（`ReorderUtil.kt` のトップレベル関数 `reorderIds`）と、それを使う
-`FeedRepository.moveFeed`/`FolderRepository.reorderFolders` の DB 反映は通常どおりテストする。
-新規に追加されたものとして、`SqliteConnectionPropertiesTest`（本番の接続プロパティが実際にすべての
-接続へ届くこと — 外部キーが効き `busy_timeout` が適用されること。JVM ドライバは文ごとに接続を開くため
-一度きりの `PRAGMA` では届かない）、`FormatTimestampTest`（`formatTimestamp` の出力そのものを固定する。
-他のタイムスタンプ検証は期待値を同関数から導出しているため書式変更を検出できない）、
-`LazyNativePopupTest`（初回の右クリックまでネイティブなものを一切構築しないこと。`LocalNativeWindow`
-が null になる Compose UI テストからは観測できない）、
-`WindowGeometryTest`（ダイアログウィンドウのジオメトリ: オーナー中央寄せと画面境界クランプ、
-自動フィットの算術 `fitWindowSize`/`sizeMatches`、`nextDialogFit` のドリフト補正状態機械 —
-フィットが収まった*後*に Compose の裏側から適用されたサイズも補正されるという回帰ケースと、
-ジオメトリを拒否するウィンドウマネージャーとの無限往復を防ぐ target ごとの補正上限、およびフィットが
-確定するまでダイアログを不可視に保つ `presentable` フラグ —— 補正上限を使い切った場合には解放される
-（ジオメトリを拒否するウィンドウマネージャー環境でダイアログが永久に出ないことがない）ことを含む）がある。
-なおダイアログの自動サイズ調整は「どのサイズを要求し、再適用すべきか」という判断は
-`WindowGeometryTest` で全てカバーされるが、その*適用*（実 `DialogWindow` への反映）はネイティブ peer を
-持つ OS ウィンドウが必要なため後述の目視確認に委ねている。
-Linux の SNI トレイでは `SniConnection`（接続・バス名取得・export・登録・再登録・close）が
-実セッションバスと稼働中の `org.kde.StatusNotifierWatcher` を必要とするため CI では不可。同様に
-`NewIcon`/`NewToolTip`/`LayoutUpdated` の実配送（*発火の判断* はカバー済み）、`NameOwnerChanged` からの
-再登録経路、ホスト起点の `Activate`/`Event` が dbus-java のワーカースレッド経由で届くこと、
-`LinuxNotifier.notify` の実デーモンへの配送、`LinuxTray` コンポーザブルの結線もテスト不可。
-パネル上で実際に透過して見えるかは本質的に目視確認になる。Android 側では、「実行」節にある
-計装スイートが届かない範囲の大半はまだ未カバーである: `WorkManager` の実際の定期ジョブスケジューリング
-と実行（純粋なスケジュール算出ロジック `BackgroundRefreshSchedule.kt` のみテスト済み）、
-`NotificationManagerCompat` 経由の実通知投稿、そして `AndroidUpdateInstaller` の `PackageInstaller`
-セッション／`BroadcastReceiver`／`canRequestPackageInstalls()` の扱い（委譲先の純粋なプラン／同意判断
-である `canInstallAndroidApkUpdate` のみテスト済み——上記「アプリ内アップデートのパイプライン」参照）。
-Storage Access Framework のファイルピッカーの書き込み失敗経路と、Keystore を使ったトークン保存の
-フォールバック経路は**カバーされている**——それぞれ `FilePickerDeviceTest.kt` と
-`KeystoreTokenStorageDeviceTest.kt`（上記「構成」の `androidDeviceTest/` 参照）。
-同様にデスクトップ側でも、自己置換／`msiexec` スクリプト（`UpdateScriptWriter` の出力）を実際に
-実行する部分は手動確認のみ——生成されたスクリプト本文そのものは直接検証しており、
-`DesktopUpdateInstaller` はテスト内で実際にスクリプトを起動することがない（上記のフェイク
-`ProcessLauncher` を参照）。詳細は下記「アプリ内アップデート」を参照。この経路にはさらに、
-*ユニット*テストでは到達できない箇所が 2 つあり、それぞれ別の形でカバーしている。
-`DittoArchiveExtractor` が実際に `ditto` を実行する部分は `ArchiveExtractorTest.kt` の
-`isMacOs` ゲート付きテストがカバーしている（CI マトリクスに `macos-latest` があるので実際に走る。
-Linux / Windows のランナーには `ditto` が無く、インストーラー自身のテストは既定で
-`InProcessArchiveExtractor` を注入する）。実署名済みの `.app` が
-`zip -ry` → `ditto` → `codesign --verify --strict --deep` の往復を通ること自体は macOS **かつ**
-jpackage バンドルを要し、どのテストソースセットにも用意できない——そこで `ci.yml` の
-「Verify packaging (macOS)」ステップがビルドしたてのアプリイメージに対してまさにその往復を実行し、
-symlink の数が変わらないことと展開後のバンドルが検証を通ることをアサートする。対になるのが
-`createDistributable` 自身の `verifyMacOsBundleSeal`／署名特性のガードで、zip より*前*の段階で
-バンドルが既に壊れていればビルドを失敗させる（[build.ja.md](build.ja.md) 参照）。両者により、
-当初の欠陥のどちらの半分も気付かれずリリースへ届くことはない。`FileSystemExtras.move` のボリューム跨ぎフォールバックも同様に
-テストから到達できない（2 つ目のファイルシステムを用意できない）ため、その委譲先である
-リンク保持コピーを `copyTree` として切り出し、直接テストしている。デスクトップでは、
-`LibSecretTokenStorage` の実際の libsecret バインディング——`libsecret-1.so.0` の `Native.load`、
-`SecretSchema`／`GError` の JNA 構造体、`org.freedesktop.portal.Secret` への実際の D-Bus
-ラウンドトリップ——は実機の Linux デスクトップセッションが必要で、意味のある形で動くのは
-Snap パッケージ内だけである。その背後にある `LibSecretAccess` seam（store/lookup/clear の
-成功・失敗）だけが `LibSecretTokenStorageTest` でテストされており、`KeyringAccess`／
-`KeyringTokenStorageTest` や `CommandRunner`／`SecurityCliTokenStorage` と同じ切り分け方である。
-手動で確認すべき内容は `docs/build.ja.md`「Linux Snap パッケージ」の手動検証手順を参照。
+既知の未カバー範囲:
+
+- `SettingsViewModel.exportOpml`/`importOpml` は今やテスト用シーム（`FileSelector`、テストでは `FakeFileSelector` でフェイク化）を持ちカバー済み——未カバーのまま残るのは、ネイティブダイアログが実際に表示される部分（本物の `JFileChooser`/`FileDialog` にはディスプレイと人手が要るため、下記の手動確認に留まる）と、`FilePicker.desktop.kt` の `resolveDialogOwner()` を実ウインドウに対して動かす部分（委譲先の純粋な `chooseDialogOwner` の選択ロジックのみテスト済み）である。
+- `OAuthConnectFlow.connect()` のブラウザー起動〜コールバック待受〜コード交換部分（`BrowserOpener`/`LoopbackRedirectTransport` の実I/Oに依存し、シームなしにはモック不可。App Key 空チェックで即エラーになる分岐のみ `OAuthConnectFlowTest` でカバー済み）、`DatabaseDriverFactory.create()` そのもの（`AppDirs.appDataDir()` を直接参照しておりテスト用のディレクトリ差し替えができない）——ただし本質的な部分である接続設定は `sqliteConnectionProperties()` として切り出され、`SqliteConnectionPropertiesTest` が実ファイル DB に対して検証しており （`inMemoryDb()`/`fileDb()` もこれを使ってドライバを組み立てる）、こちらはカバー済み。
+- ダイアログの自動サイズ調整は「どのサイズを要求し、再適用すべきか」という判断は`WindowGeometryTest` で全てカバーされるが、その*適用*（実 `DialogWindow` への反映）はネイティブ peer を持つ OS ウインドウが必要なため、下記の目視確認に委ねている。
+- **実際には未カバーではない——対比として記載:** フィード/フォルダーの並び替えジェスチャー（`ui/home/FeedListDragController.kt`/`FeedListDragGestures.kt`）は、OS レベルの DnD ではなく自前実装の Compose ネイティブなドラッグであり、まさにこの部分を直接テスト可能にするためにそうなっている: `FeedListDragTest.kt` が `performMouseInput`/`performKeyInput` を使って実際にエンドツーエンドで検証する（ドラッグによる並べ替え、しきい値判定、フォルダー/タグへのドロップ、ドラッグ中の右クリック、ゴーストのライフサイクル、Escape によるキャンセル）。並び替えの計算ロジック自体（`ReorderUtil.kt` のトップレベル関数 `reorderIds`）と、それを使う`FeedRepository.moveFeed`/`FolderRepository.reorderFolders` は通常どおりテストする。
+- Linux の SNI トレイでは `SniConnection`（接続・バス名取得・export・登録・再登録・close）が実セッションバスと稼働中の `org.kde.StatusNotifierWatcher` を必要とするため CI では不可。同様に`NewIcon`/`NewToolTip`/`LayoutUpdated` の実配送（*発火の判断*はカバー済み）、`NameOwnerChanged` からの再登録経路、ホスト起点の `Activate`/`Event` が dbus-java のワーカースレッド経由で届くこと、`LinuxNotifier.notify` の実デーモンへの配送、`LinuxTray` コンポーザブルの結線もテスト不可。パネル上で実際に透過して見えるかは本質的に目視確認になる。
+- KDE Global Menu も同様: `X11WindowId.findOwnWindowId()`（実 X サーバーと `_NET_WM_PID` を持つマップ済みウインドウが必要）、実際の `AppMenuConnection` の connect/detect/`RegisterWindow`/reregister/`close` の往復、KWin/Plasma が実際に `_KDE_NET_WM_APPMENU_*` を書き込みパネルウィジェット／タイトルバーボタンがメニューを描画すること、`startMinimized` の XID タイミング/リトライ経路、Compose 自身の `MenuBar` ショートカット処理が本当にフレームアタッチに依存するか（手動で検証済み）、実際の `MenuShortcutDispatcher` の Ctrl+M/N/W/,/Q/R 捕捉が `KeyboardFocusManager` 経由で動くこと——いずれも未カバー（委譲先の純粋なマッチャーのみテスト済み）。
+- Android 側では、「実行」節にある計装スイートが届かない範囲の大半はまだ未カバーである: `WorkManager` の実際の定期ジョブスケジューリングと実行（純粋なスケジュール算出ロジック `BackgroundRefreshSchedule.kt` のみテスト済み）、`NotificationManagerCompat` 経由の実通知投稿、そして `AndroidUpdateInstaller` の `PackageInstaller` セッション／`BroadcastReceiver`／`canRequestPackageInstalls()` の扱い（委譲先の純粋なプラン／同意判断である `canInstallAndroidApkUpdate` のみテスト済み——上記「アプリ内アップデートのパイプライン」参照）。
+- **実際には未カバーではない——対比として記載:** Storage Access Framework のファイルピッカーの書き込み失敗経路と、Keystore を使ったトークン保存のフォールバック経路は**カバーされている**——それぞれ `FilePickerDeviceTest.kt` と `KeystoreTokenStorageDeviceTest.kt`（上記「構成」の `androidDeviceTest/` 参照）。
+- 同様にデスクトップ側でも、自己置換／`msiexec` スクリプト（`UpdateScriptWriter` の出力）を実際に実行する部分は手動確認のみ——生成されたスクリプト本文そのものは直接検証しており、`DesktopUpdateInstaller` はテスト内で実際にスクリプトを起動することがない（上記のフェイク`ProcessLauncher` を参照）。詳細は下記「アプリ内アップデート」を参照。この経路にはさらに*ユニット*テストでは到達できない箇所が2つあり、それぞれ別の形でカバーしている。
+- `DittoArchiveExtractor` が実際に `ditto` を実行する部分は `ArchiveExtractorTest.kt` の`isMacOs` ゲート付きテストがカバーしている（CI マトリクスに `macos-latest` があるので実際に走る。Linux / Windows のランナーには `ditto` が無く、インストーラー自身のテストは既定で`InProcessArchiveExtractor` を注入する）。実署名済みの `.app` が`zip -ry` → `ditto` → `codesign --verify --strict --deep` の往復を通ること自体は macOS **かつ**jpackage バンドルを要し、どのテストソースセットにも用意できない——そこで `ci.yml` の「Verify packaging (macOS)」ステップがビルドしたてのアプリイメージに対してまさにその往復を実行し、symlink の数が変わらないことと展開後のバンドルが検証を通ることをアサートする。対になるのが`createDistributable` 自身の `verifyMacOsBundleSeal`／署名特性のガードで、zip より*前*の段階でバンドルが既に壊れていればビルドを失敗させる（[build.ja.md](build.ja.md) 参照）。両者により、当初の欠陥のどちらの半分も気付かれずリリースへ届くことはない。
+- `FileSystemExtras.move` のボリューム跨ぎフォールバックも同様にテストから到達できない（2つ目のファイルシステムを用意できない）ため、その委譲先であるリンク保持コピーを `copyTree` として切り出し、直接テストしている。
+- デスクトップでは、`LibSecretTokenStorage` の実際の libsecret バインディング——`libsecret-1.so.0` の `Native.load`、`SecretSchema`／`GError` の JNA 構造体、`org.freedesktop.portal.Secret` への実際の D-Bus ラウンドトリップ——は実機の Linux デスクトップセッションが必要で、意味のある形で動くのは Snap パッケージ内だけである。その背後にある `LibSecretAccess` seam（store/lookup/clear の成功・失敗）だけが `LibSecretTokenStorageTest` でテストされており、`KeyringAccess`／`KeyringTokenStorageTest` や `CommandRunner`／`SecurityCliTokenStorage` と同じ切り分け方である。手動で確認すべき内容は `docs/build.ja.md`「Linux Snap パッケージ」の手動検証手順を参照。
 
 ## 手動確認（UI）
 
