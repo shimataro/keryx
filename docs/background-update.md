@@ -205,82 +205,87 @@ each a separate, explicit click (Updates tab button, or that menu item).
   current state is still using (protecting an in-progress `.part` as well as a `Ready` file), so an
   update this repository stops referencing doesn't accumulate on disk forever.
 - **Installing.** The two platform `UpdateInstaller` actuals do not share an approach:
-  - **Desktop** (`platform/update/DesktopUpdateInstaller.kt`) extracts a self-replace ZIP into a
-    staging directory through `platform/update/ArchiveExtractor.kt` (zip-slip rejection,
-    entry-count and byte-size limits — see below for why this is a seam), health-checks it
-    (the executable exists; on macOS, its `Info.plist` version and its own code signature also
-    match — `codesign --verify --strict --deep`), moves the extraction
-    onto the same volume as the current install (so the swap is a plain rename), and hands off to a
-    detached helper script (`platform/update/UpdateScriptWriter.kt`) via `ProcessLauncher`. Only
-    once that hand-off has actually happened — the installer returning `Launched`, which makes
-    `UpdateRepository` emit its `installLaunched` signal — does `main.kt` exit the app. The app
-    deliberately does **not** exit on `UpdateState.Installing`: that state is set the moment an
-    install starts, while the extraction is still running, so exiting on it killed the process
-    before the script had even been written. Every script follows the same shape regardless of OS:
-    wait for this process's
-    PID to exit, **retreat** the running install aside (`mv`, never delete first), **place** the new
-    one, **verify** it, and **roll back** to the retreated copy on any failure along the way — so a
-    crash mid-swap never leaves the install directory empty. Because that retreat is always a plain
-    `mv` rather than delete-then-move, `DesktopUpdateInstaller` clears both the `.new` staging
-    directory and the `.old` retreat directory immediately before staging a fresh attempt (a stale
-    one from a past attempt that failed before the script could run would otherwise make the `mv`
-    nest into it instead of overwriting it). The `extracted/` staging directory is cleared first for
-    a different reason: an attempt killed *mid-extraction* leaves a partial tree, and both extractors
-    merge into an existing destination rather than replacing it, so without the clear a retried
-    install would blend two versions into one bundle. `cleanUpStaleSelfReplaceArtifacts` sweeps the
-    other two on every startup — safe unconditionally, since reaching that line at all means the current
-    `appRoot` is the live install this process is running from, which a script mid-swap never
-    leaves behind. A Windows MSI-installed build instead
-    launches a script that waits out the PID and then runs `msiexec /i ... /passive /norestart`
-    (WiX's fixed `upgradeUuid` makes this a MajorUpgrade, not a fresh install), relaunching whatever
-    ends up at the exe path either way — a declined UAC prompt or a failed upgrade relaunches the
-    previous, still-working install rather than leaving nothing running. A Linux deb/rpm install is
-    never self-replaced at all (`updatePlan` above already routes it to `OpenReleasePage`) — running
-    `pkexec`/`sudo` from a GUI with no recovery path if it fails was judged not worth the risk. A
-    Linux Snap install is routed the same way, for the more basic reason that its `/snap/keryx/…`
-    mount is a read-only squashfs image — there is nothing an in-app update could write to even if
-    it wanted to. `release.yml`'s `package-snap` job publishes to the Snap Store once
-    `SNAPCRAFT_STORE_CREDENTIALS` is configured (see `build.md`); a Store-installed snap gets
-    snapd's own background auto-refresh there, independent of this app's own update path.
-    `OpenReleasePage` stays the routing for every `LINUX_SNAP` install regardless of Store status,
-    because a `.snap` sideloaded `--dangerous` from a GitHub Release attachment — the same asset —
-    is never auto-refreshed, and `InstallLocation` has no way to tell the two apart at runtime.
-
-    Extraction sits behind a seam because a **signed** macOS bundle cannot be unpacked in process at
-    all: its `CodeResources` seals the 43 symbolic links in the bundled JDK's legal-notices directory
-    *as links*, and `java.util.zip` exposes no way to tell a stored link from a regular file — it
-    writes each one out as a file holding the link target, which fails the `codesign` check above
-    every single time. macOS therefore extracts with `ditto -x -k` (`DittoArchiveExtractor`),
-    preceded by `ZipExtractor.validate` so the zip-slip, entry-count and uncompressed-size guards
-    still apply to an extraction `ditto` performs with no limits of its own — and are the only limits
-    in play, since `ditto` itself is bounded only by a 300-second ceiling, past which the child is
-    force-destroyed and the install fails (rather than hanging) with the exit status in its reason.
-    `validate` establishes the size bound by inflating every entry and discarding it, so a macOS
-    install decompresses the archive twice (order of +1-2 s for a ~190MB bundle, on a path the user
-    triggered by hand). That is deliberate: a local header's declared size can be absent, so reading
-    it from the central directory instead would mean trusting the archive's own metadata for a bound
-    whose whole purpose is to survive a crafted one, and overlapping the pass with `ditto` would give
-    up the property that a rejected archive leaves nothing on disk at all.
-    What `validate` cannot check is a stored link's *target* (same `java.util.zip` blind spot), so
-    `DittoArchiveExtractor.verifyExtractedTree` walks the extracted tree afterwards and rejects any
-    symlink that, resolved **through the filesystem**, lands outside the destination — textual
-    resolution is not enough, since a `..` following another symlink collapses against the link
-    rather than its target. `ditto` is not that guard (it declines to *traverse* links, not to
-    *create* an escaping one, and exits 0 having done so); what it does contribute is normalizing a
-    `..` entry *name* into the destination, which is the only defense against something written
-    *outside* the destination, where a walk that starts there cannot look. The `codesign` check is
-    deliberately not counted as a defense against an *escape* at all — it inspects the bundle
-    directory only, so an entry written beside the bundle is never looked at (see
-    [SECURITY.md](../SECURITY.md)). All of this sits on top of the SHA-256 digest the archive
-    already had to match.
-    Windows and Linux, whose app images carry no signature for a flattened link to invalidate, stay
-    on the in-process path (`InProcessArchiveExtractor` → `platform/ZipExtractor.kt`, which
-    restores the executable bit only on the entries the caller names). Their `legal/` links do come
-    out of an in-app update flattened into files holding a relative path, which is accepted rather
-    than overlooked: they are license text, never a path the app executes. The staging move has the same requirement and the same
-    trap: `FileSystemExtras`'s cross-volume fallback copies with `NOFOLLOW_LINKS`, since both
-    `Files.copy` and `Files.isDirectory` follow links by default and would otherwise flatten them
-    right back on any install whose cache and install directory sit on different volumes.
+  - **Desktop** (`platform/update/DesktopUpdateInstaller.kt`):
+    - **Extract, verify, stage, hand off.** Extracts a self-replace ZIP into a staging directory
+      through `platform/update/ArchiveExtractor.kt` (zip-slip rejection, entry-count and byte-size
+      limits — see "Why extraction sits behind a seam" below for why this is a seam at all),
+      health-checks it (the executable exists; on macOS, its `Info.plist` version and its own code
+      signature also match — `codesign --verify --strict --deep`), moves the extraction onto the
+      same volume as the current install (so the swap is a plain rename), and hands off to a
+      detached helper script (`platform/update/UpdateScriptWriter.kt`) via `ProcessLauncher`. Only
+      once that hand-off has actually happened — the installer returning `Launched`, which makes
+      `UpdateRepository` emit its `installLaunched` signal — does `main.kt` exit the app.
+    - **Why the app doesn't exit on `Installing`.** That state is set the moment an install starts,
+      while the extraction is still running, so exiting on it would kill the process before the
+      script had even been written.
+    - **Script shape.** Every script follows the same shape regardless of OS: wait for this
+      process's PID to exit, **retreat** the running install aside (`mv`, never delete first),
+      **place** the new one, **verify** it, and **roll back** to the retreated copy on any failure
+      along the way — so a crash mid-swap never leaves the install directory empty.
+    - **Cleanup.** Because that retreat is always a plain `mv` rather than delete-then-move,
+      `DesktopUpdateInstaller` clears both the `.new` staging directory and the `.old` retreat
+      directory immediately before staging a fresh attempt (a stale one from a past attempt that
+      failed before the script could run would otherwise make the `mv` nest into it instead of
+      overwriting it). The `extracted/` staging directory is cleared first for a different reason:
+      an attempt killed *mid-extraction* leaves a partial tree, and both extractors merge into an
+      existing destination rather than replacing it, so without the clear a retried install would
+      blend two versions into one bundle. `cleanUpStaleSelfReplaceArtifacts` sweeps the other two
+      on every startup — safe unconditionally, since reaching that line at all means the current
+      `appRoot` is the live install this process is running from, which a script mid-swap never
+      leaves behind.
+    - **Platform routing.** A Windows MSI-installed build instead launches a script that waits out
+      the PID and then runs `msiexec /i ... /passive /norestart` (WiX's fixed `upgradeUuid` makes
+      this a MajorUpgrade, not a fresh install), relaunching whatever ends up at the exe path
+      either way — a declined UAC prompt or a failed upgrade relaunches the previous, still-working
+      install rather than leaving nothing running. A Linux deb/rpm install is never self-replaced
+      at all (`updatePlan` above already routes it to `OpenReleasePage`) — running `pkexec`/`sudo`
+      from a GUI with no recovery path if it fails was judged not worth the risk. A Linux Snap
+      install is routed the same way, for the more basic reason that its `/snap/keryx/…` mount is
+      a read-only squashfs image — there is nothing an in-app update could write to even if it
+      wanted to. `release.yml`'s `package-snap` job publishes to the Snap Store once
+      `SNAPCRAFT_STORE_CREDENTIALS` is configured (see `build.md`); a Store-installed snap gets
+      snapd's own background auto-refresh there, independent of this app's own update path.
+      `OpenReleasePage` stays the routing for every `LINUX_SNAP` install regardless of Store
+      status, because a `.snap` sideloaded `--dangerous` from a GitHub Release attachment — the
+      same asset — is never auto-refreshed, and `InstallLocation` has no way to tell the two apart
+      at runtime.
+    - **Why extraction sits behind a seam.** A **signed** macOS bundle cannot be unpacked in
+      process at all: its `CodeResources` seals the 43 symbolic links in the bundled JDK's
+      legal-notices directory *as links*, and `java.util.zip` exposes no way to tell a stored link
+      from a regular file — it writes each one out as a file holding the link target, which fails
+      the `codesign` check above every single time. macOS therefore extracts with `ditto -x -k`
+      (`DittoArchiveExtractor`), preceded by `ZipExtractor.validate` so the zip-slip, entry-count
+      and uncompressed-size guards still apply to an extraction `ditto` performs with no limits of
+      its own — and are the only limits in play, since `ditto` itself is bounded only by a
+      300-second ceiling, past which the child is force-destroyed and the install fails (rather
+      than hanging) with the exit status in its reason. `validate` establishes the size bound by
+      inflating every entry and discarding it, so a macOS install decompresses the archive twice
+      (order of +1-2 s for a ~190MB bundle, on a path the user triggered by hand). That is
+      deliberate: a local header's declared size can be absent, so reading it from the central
+      directory instead would mean trusting the archive's own metadata for a bound whose whole
+      purpose is to survive a crafted one, and overlapping the pass with `ditto` would give up the
+      property that a rejected archive leaves nothing on disk at all.
+    - **What still needs to be checked after `ditto` runs.** `validate` cannot check a stored
+      link's *target* (same `java.util.zip` blind spot), so `DittoArchiveExtractor.verifyExtractedTree`
+      walks the extracted tree afterwards and rejects any symlink that, resolved **through the
+      filesystem**, lands outside the destination — textual resolution is not enough, since a `..`
+      following another symlink collapses against the link rather than its target. `ditto` is not
+      that guard (it declines to *traverse* links, not to *create* an escaping one, and exits 0
+      having done so); what it does contribute is normalizing a `..` entry *name* into the
+      destination, which is the only defense against something written *outside* the destination,
+      where a walk that starts there cannot look. The `codesign` check is deliberately not counted
+      as a defense against an *escape* at all — it inspects the bundle directory only, so an entry
+      written beside the bundle is never looked at (see [SECURITY.md](../SECURITY.md)). All of this
+      sits on top of the SHA-256 digest the archive already had to match.
+    - **Windows and Linux.** Their app images carry no signature for a flattened link to
+      invalidate, so they stay on the in-process path (`InProcessArchiveExtractor` →
+      `platform/ZipExtractor.kt`, which restores the executable bit only on the entries the caller
+      names). Their `legal/` links do come out of an in-app update flattened into files holding a
+      relative path, which is accepted rather than overlooked: they are license text, never a path
+      the app executes. The staging move has the same requirement and the same trap:
+      `FileSystemExtras`'s cross-volume fallback copies with `NOFOLLOW_LINKS`, since both
+      `Files.copy` and `Files.isDirectory` follow links by default and would otherwise flatten them
+      right back on any install whose cache and install directory sit on different volumes.
   - **Android** (`platform/update/AndroidUpdateInstaller.kt`) streams the downloaded APK into a
     `PackageInstaller` session and commits it; the OS takes over from there (showing its own install
     confirmation, and — on success — killing this process itself, so nothing here has to). If
