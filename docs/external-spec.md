@@ -29,7 +29,8 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
 
 - No account registration in Keryx. The user's own cloud storage (Dropbox / Google Drive / OneDrive) is used as the sync bus. Only one active connection is allowed at a time; the user selects and switches providers (no simultaneous connections).
 - The sync file is a gzip-compressed `VACUUM INTO` snapshot of `keryx.db` (excluding the local-only
-  `articles_fts` search index and `sync_state` table) — see [sync-architecture.md](sync-architecture.md).
+  `articles_fts` search index, the four `idx_articles_*` indexes, and the `sync_state` table) — see
+  [sync-architecture.md](sync-architecture.md).
 - Sync targets: subscription list, read state, stars, tag structure, global settings.
 - Non-sync targets: device-local settings, cloud authentication info.
 - Import / export is OPML.

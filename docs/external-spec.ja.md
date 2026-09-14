@@ -30,7 +30,8 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
 - Keryx へのアカウント登録なし。ユーザー自身のクラウドストレージ（Dropbox / Google Drive / OneDrive）を同期バスとして
   利用する。有効な接続は常に 1 つで、どのプロバイダーを使うかはユーザーが選択・切替する（同時接続はしない）。
 - 同期ファイルは `keryx.db` の `VACUUM INTO` スナップショットを gzip 圧縮したもの（ローカル専用の
-  `articles_fts` 検索索引と `sync_state` テーブルを除く）——[sync-architecture.ja.md](sync-architecture.ja.md) 参照。
+  `articles_fts` 検索索引・4 つの `idx_articles_*` インデックス・`sync_state` テーブルを除く）——
+  [sync-architecture.ja.md](sync-architecture.ja.md) 参照。
 - 同期対象: 購読リスト・既読状態・スター・タグ構造・グローバル設定。
 - 非同期対象: デバイスローカル設定・クラウド認証情報。
 - インポート / エクスポートは OPML。
