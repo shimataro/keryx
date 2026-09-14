@@ -106,7 +106,8 @@
 
 ### global_settings（KVS, 同期対象）
 
-`key`(PK), `value`(JSON 文字列), `updated_at`。既知キー:
+`key`(PK), `value`（プレーンな文字列 — int/boolean は `toString()` でエンコードし、JSON ではない）,
+`updated_at`。既知キー:
 
 | キー | 型 | デフォルト |
 | --- | --- | --- |

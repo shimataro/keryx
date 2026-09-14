@@ -83,7 +83,7 @@ Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC
 
 ### global_settings (KVS, sync target)
 
-`key`(PK), `value`(JSON string), `updated_at`. Known keys:
+`key`(PK), `value`(plain string — an int/boolean encoded as its `toString()`, not JSON), `updated_at`. Known keys:
 
 | Key | Type | Default |
 | --- | --- | --- |
