@@ -179,11 +179,21 @@ Android の `actual` は `AndroidSqliteDriver` を生成する。こちらは `o
 ### FtsManager / FtsSearch
 
 `articles_fts`（FTS5 trigram, `content='articles'`）を生 SQL で管理する。SQLDelight のスキーマには含めない。
-**ライブ DB では決して DROP しない**（アップロードからの除外はスナップショットのコピー側で行う。`DatabaseSnapshot`）。
-`ensureIndexed()`（desktop の起動時、初回作成 + 未索引行の増分投入。Android は軽量版
-`ensureIndexedIfTableAbsent()` をプロセス起動のたびに呼ぶ——理由は db-schema.md の `articles_fts` 節参照）、
-`indexMissing()`（hot path＝フィード更新・同期マージ後の増分投入）、`rebuildIndex()`（日次アイドルの全再構築
-heal のみ。desktop・Android 共有の `maybeRebuildFtsIndex` から呼ぶ）を持つ。`FtsSearch.search()` は語の長さで
+- **ライブ DB の `articles_fts` は決して DROP しない** — アップロードからの除外はスナップショットの
+  コピー側（`DatabaseSnapshot`）で `VACUUM INTO` により行うため、実行中の検索が `no such table` に
+  当たることはない。
+- **Hot path**（フィード更新・同期マージ後）は `FtsManager.indexMissing()` で新規行のみを増分投入する
+  — 全体を索引し直す `'rebuild'` は `O(索引済みテキスト全体)` で重く、実行中の検索をブロック/0件化
+  しうるため決して使わない。
+- **Heal。** インデックス全体の再構築は稀な heal パスでのみ行う: 日次アイドルパス
+  （`domain/StartupMaintenanceTasks.kt` の `maybeRebuildFtsIndex`。`lastFtsRebuiltAt` + `ActivityCenter`
+  のアイドル状態がゲート。desktop の `StartupTasks.kt` と Android の起動処理の両方から呼ばれる）が、
+  増分投入では古いままの内容を再索引する。
+- **起動時。** desktop の起動時は `FtsManager.ensureIndexed()` がテーブルを初回作成し未索引行を
+  バックフィルする。Android は軽量版 `ensureIndexedIfTableAbsent()` をプロセス起動のたびに呼ぶ
+  （理由は db-schema.md の `articles_fts` 節参照）。
+- **並行性。** `DatabaseDriverFactory` で設定する `busy_timeout` により、検索は増分投入や rebuild の
+  短い書き込みロックをエラーにせず待ち抜ける。`FtsSearch.search()` は語の長さで
 分岐する — 3 文字以上の語は `articles_fts MATCH`（ランク順）を実行するが、trigram トークナイザはそれより
 短い語を索引化できないため、2 文字の語は `LIKE` フィルタとして扱う（長い語が1つでもあればマッチ済みの行への
 追加 AND、全語が2文字ならマッチ ID なしの単独 `LIKE` 走査を `published_at DESC` 順・
