@@ -37,10 +37,9 @@
 ## 同期フロー（`SyncRepository.sync()`）
 
 1. `CloudStorage.metadata(CLOUD_DB_GZ_PATH)` で圧縮ファイルのリビジョンを取得する。クラウドにまだ存在
-   しなければ `null` が返り、その場合は手順1aへ進む。これは従来の存在チェックを置き換えるもので、
-   **追加のネットワーク往復は発生しない** — 3 プロバイダとも同じリクエストでリビジョンを既に受け取り
-   ながら捨てていた（Dropbox `get_metadata` の `rev` / Drive の名前検索が返す `version` / Graph のアイテムの
-   `eTag`）。
+   しなければ `null` が返り、その場合は手順1aへ進む。同期が行う存在・リビジョンチェックはこれだけであり、
+   **追加のネットワーク往復は発生しない** — 3 プロバイダともメタデータ応答に元々リビジョンが含まれている
+   （Dropbox `get_metadata` の `rev` / Drive の名前検索が返す `version` / Graph のアイテムの `eTag`）。
    - **1a. 圧縮ファイルが無い場合** — `CloudStorage.metadata(CLOUD_DB_PATH)` でレガシーフォールバックを確認する。
      - **両方とも無い（真の初回同期）**: ローカル DB をエクスポート・圧縮し、create-only で
        アップロードして（`createFresh`）終了する。詳細は後述の「圧縮アップロード / レガシーフォールバック」。

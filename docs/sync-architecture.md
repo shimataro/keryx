@@ -25,7 +25,10 @@ Conflict prevention is done via a revision check on upload — Dropbox: `rev`, a
 
 ## Sync Flow (`SyncRepository.sync()`)
 
-1. `CloudStorage.metadata(CLOUD_DB_GZ_PATH)` fetches the compressed file's revision — or `null` when it does not exist yet remotely, in which case step 1a below runs. This single request replaces the old existence check; every provider already returned the revision in it (Dropbox's `get_metadata` `rev`, Drive's name-lookup `version`, Graph's item `eTag`) and simply discarded it, so learning the revision costs no extra round trip.
+1. `CloudStorage.metadata(CLOUD_DB_GZ_PATH)` fetches the compressed file's revision — or `null` when it does not
+   exist yet remotely, in which case step 1a below runs. This is the only existence/revision check the sync makes;
+   it costs no extra round trip, since every provider's metadata response already carries the revision (Dropbox's
+   `get_metadata` `rev`, Drive's name-lookup `version`, Graph's item `eTag`).
    - **1a. Compressed file absent** — `CloudStorage.metadata(CLOUD_DB_PATH)` checks the legacy fallback.
      - **Both absent (true first sync ever)**: the local DB is exported, compressed, and uploaded via create-only (`createFresh`), and the sync ends. See "Compressed Upload / Legacy Fallback" below.
      - **Legacy present, compressed absent (one-time migration)**: the legacy file is downloaded and merged (step 3 below, uncompressed), then the local DB is exported, compressed, and *created* (not rev-guarded — there is no compressed revision yet) at `CLOUD_DB_GZ_PATH`, and the sync ends. The legacy file itself is left untouched.
