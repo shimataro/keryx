@@ -75,20 +75,29 @@ permanent failures it marks non-retryable (`CloudAuthException`/`SchemaVersionEx
 
 `MainActivity.onCreate` calls `runAndroidStartupTasks` (`AndroidStartupTasks.kt`) — the Android
 counterpart to desktop's `runStartupTasks`, minus the macOS-specific translocation warning (which
-has no Android equivalent). It runs `cleanUpArticleCacheIfDue` (see below), then — same gate and
-position as desktop's `runStartupTasks` — the initial cloud sync, then the same three maintenance
-functions `FeedRefreshWorker` runs. This deliberately lives in the *Activity*, not
-`Application.onCreate`: the latter also runs when `WorkManager` wakes the process to run
-`FeedRefreshWorker`, and running the full startup sequence on every background wakeup would
-duplicate the refresh/sync/update-check/FTS work the worker itself just did. A process-local guard
-(`startupTasksRan`) keeps it to once per process even though `onCreate` re-runs on configuration
-changes (e.g. rotation) that recreate the Activity without restarting the process. Each of the five
-steps runs in isolation (`runMaintenanceStep`), so one step throwing — e.g. `maybeRebuildFtsIndex`
-hitting `FtsManager`'s `busy_timeout` — does not skip the rest of the sequence. The guard is set
-only once every step has been attempted, not before: a call that returns early because setup isn't
-finished yet, or because `FeedRefreshWorker` currently holds the maintenance lock, does not consume
-this process's only chance to run `cleanUpArticleCacheIfDue`, which `FeedRefreshWorker` never runs
-itself.
+has no Android equivalent). It runs five steps, each in isolation (`runMaintenanceStep`) so one
+throwing — e.g. `maybeRebuildFtsIndex` hitting `FtsManager`'s `busy_timeout` — does not skip the rest:
+
+1. `cleanUpArticleCacheIfDue` (see below).
+2. The initial cloud sync — same gate and position as desktop's `runStartupTasks`.
+3. `refreshFeedsAndNotify`
+4. `checkForUpdateAndNotify`
+5. `maybeRebuildFtsIndex`
+
+(Steps 3-5 are the same three maintenance functions `FeedRefreshWorker` runs — see below — minus the
+sync step already covered by step 2.)
+
+This deliberately lives in the *Activity*, not `Application.onCreate`: the latter also runs when
+`WorkManager` wakes the process to run `FeedRefreshWorker`, and running the full startup sequence on
+every background wakeup would duplicate the refresh/sync/update-check/FTS work the worker itself just
+did. A process-local guard (`startupTasksRan`) keeps it to once per process even though `onCreate`
+re-runs on configuration changes (e.g. rotation) that recreate the Activity without restarting the
+process.
+
+**The guard is set only once every step has been attempted, not before.** A call that returns early
+because setup isn't finished yet, or because `FeedRefreshWorker` currently holds the maintenance
+lock, does not consume this process's only chance to run `cleanUpArticleCacheIfDue`, which
+`FeedRefreshWorker` never runs itself.
 
 New-article notifications reach the OS through `domain/OsNotificationSink.kt`, a `fun interface`
 (`post(message: String, count: Int)`) Android binds (in `platformModule`) to
@@ -188,90 +197,95 @@ each a separate, explicit click (Updates tab button, or that menu item).
   no-op in Ktor 3.5; the streaming form is the only way out). Progress is throttled to once per
   whole-percent change (`shouldEmitProgress` — gated on the percentage itself, not a fixed byte
   delta, since that's the finest resolution any consumer can show and scales correctly regardless
-  of asset size), and cancelling reverts to `Available` rather than `Failed` — a
+  of asset size — a separate, coarser 5% rounding happens downstream in the tray menu label, see
+  "Presentation" below), and cancelling reverts to `Available` rather than `Failed` — a
   user-requested stop is not a failure. There is no resume-from-partial: the redirect target is a
   signed URL that expires in about an hour, so a failed/cancelled download is simply restarted, not
   resumed. `check()` also sweeps `<cacheDir>/updates/` of every version except whichever one the
   current state is still using (protecting an in-progress `.part` as well as a `Ready` file), so an
   update this repository stops referencing doesn't accumulate on disk forever.
 - **Installing.** The two platform `UpdateInstaller` actuals do not share an approach:
-  - **Desktop** (`platform/update/DesktopUpdateInstaller.kt`) extracts a self-replace ZIP into a
-    staging directory through `platform/update/ArchiveExtractor.kt` (zip-slip rejection,
-    entry-count and byte-size limits — see below for why this is a seam), health-checks it
-    (the executable exists; on macOS, its `Info.plist` version and its own code signature also
-    match — `codesign --verify --strict --deep`), moves the extraction
-    onto the same volume as the current install (so the swap is a plain rename), and hands off to a
-    detached helper script (`platform/update/UpdateScriptWriter.kt`) via `ProcessLauncher`. Only
-    once that hand-off has actually happened — the installer returning `Launched`, which makes
-    `UpdateRepository` emit its `installLaunched` signal — does `main.kt` exit the app. The app
-    deliberately does **not** exit on `UpdateState.Installing`: that state is set the moment an
-    install starts, while the extraction is still running, so exiting on it killed the process
-    before the script had even been written. Every script follows the same shape regardless of OS:
-    wait for this process's
-    PID to exit, **retreat** the running install aside (`mv`, never delete first), **place** the new
-    one, **verify** it, and **roll back** to the retreated copy on any failure along the way — so a
-    crash mid-swap never leaves the install directory empty. Because that retreat is always a plain
-    `mv` rather than delete-then-move, `DesktopUpdateInstaller` clears both the `.new` staging
-    directory and the `.old` retreat directory immediately before staging a fresh attempt (a stale
-    one from a past attempt that failed before the script could run would otherwise make the `mv`
-    nest into it instead of overwriting it). The `extracted/` staging directory is cleared first for
-    a different reason: an attempt killed *mid-extraction* leaves a partial tree, and both extractors
-    merge into an existing destination rather than replacing it, so without the clear a retried
-    install would blend two versions into one bundle. `cleanUpStaleSelfReplaceArtifacts` sweeps the
-    other two on every startup — safe unconditionally, since reaching that line at all means the current
-    `appRoot` is the live install this process is running from, which a script mid-swap never
-    leaves behind. A Windows MSI-installed build instead
-    launches a script that waits out the PID and then runs `msiexec /i ... /passive /norestart`
-    (WiX's fixed `upgradeUuid` makes this a MajorUpgrade, not a fresh install), relaunching whatever
-    ends up at the exe path either way — a declined UAC prompt or a failed upgrade relaunches the
-    previous, still-working install rather than leaving nothing running. A Linux deb/rpm install is
-    never self-replaced at all (`updatePlan` above already routes it to `OpenReleasePage`) — running
-    `pkexec`/`sudo` from a GUI with no recovery path if it fails was judged not worth the risk. A
-    Linux Snap install is routed the same way, for the more basic reason that its `/snap/keryx/…`
-    mount is a read-only squashfs image — there is nothing an in-app update could write to even if
-    it wanted to. `release.yml`'s `package-snap` job publishes to the Snap Store once
-    `SNAPCRAFT_STORE_CREDENTIALS` is configured (see `build.md`) — the `keryx` listing isn't live yet,
-    so no installed snap benefits from it today, but once it is, a Store-installed snap will get
-    snapd's own background auto-refresh; `OpenReleasePage`
-    stays the routing for every `LINUX_SNAP` install regardless, because a `.snap` sideloaded
-    `--dangerous` from a GitHub Release attachment — the same asset — is never auto-refreshed, and
-    `InstallLocation` has no way to tell the two apart at runtime.
-
-    Extraction sits behind a seam because a **signed** macOS bundle cannot be unpacked in process at
-    all: its `CodeResources` seals the 43 symbolic links in the bundled JDK's legal-notices directory
-    *as links*, and `java.util.zip` exposes no way to tell a stored link from a regular file — it
-    writes each one out as a file holding the link target, which fails the `codesign` check above
-    every single time. macOS therefore extracts with `ditto -x -k` (`DittoArchiveExtractor`),
-    preceded by `ZipExtractor.validate` so the zip-slip, entry-count and uncompressed-size guards
-    still apply to an extraction `ditto` performs with no limits of its own — and are the only limits
-    in play, since `ditto` itself is bounded only by a 300-second ceiling, past which the child is
-    force-destroyed and the install fails (rather than hanging) with the exit status in its reason.
-    `validate` establishes the size bound by inflating every entry and discarding it, so a macOS
-    install decompresses the archive twice (order of +1-2 s for a ~190MB bundle, on a path the user
-    triggered by hand). That is deliberate: a local header's declared size can be absent, so reading
-    it from the central directory instead would mean trusting the archive's own metadata for a bound
-    whose whole purpose is to survive a crafted one, and overlapping the pass with `ditto` would give
-    up the property that a rejected archive leaves nothing on disk at all.
-    What `validate` cannot check is a stored link's *target* (same `java.util.zip` blind spot), so
-    `DittoArchiveExtractor.verifyExtractedTree` walks the extracted tree afterwards and rejects any
-    symlink that, resolved **through the filesystem**, lands outside the destination — textual
-    resolution is not enough, since a `..` following another symlink collapses against the link
-    rather than its target. `ditto` is not that guard (it declines to *traverse* links, not to
-    *create* an escaping one, and exits 0 having done so); what it does contribute is normalizing a
-    `..` entry *name* into the destination, which is the only defense against something written
-    *outside* the destination, where a walk that starts there cannot look. The `codesign` check is
-    deliberately not counted as a defense against an *escape* at all — it inspects the bundle
-    directory only, so an entry written beside the bundle is never looked at (see
-    [SECURITY.md](../SECURITY.md)). All of this sits on top of the SHA-256 digest the archive
-    already had to match.
-    Windows and Linux, whose app images carry no signature for a flattened link to invalidate, stay
-    on the in-process path (`InProcessArchiveExtractor` → `platform/ZipExtractor.kt`, which
-    restores the executable bit only on the entries the caller names). Their `legal/` links do come
-    out of an in-app update flattened into files holding a relative path, which is accepted rather
-    than overlooked: they are license text, never a path the app executes. The staging move has the same requirement and the same
-    trap: `FileSystemExtras`'s cross-volume fallback copies with `NOFOLLOW_LINKS`, since both
-    `Files.copy` and `Files.isDirectory` follow links by default and would otherwise flatten them
-    right back on any install whose cache and install directory sit on different volumes.
+  - **Desktop** (`platform/update/DesktopUpdateInstaller.kt`):
+    - **Extract, verify, stage, hand off.** Extracts a self-replace ZIP into a staging directory
+      through `platform/update/ArchiveExtractor.kt` (zip-slip rejection, entry-count and byte-size
+      limits — see "Why extraction sits behind a seam" below for why this is a seam at all),
+      health-checks it (the executable exists; on macOS, its `Info.plist` version and its own code
+      signature also match — `codesign --verify --strict --deep`), moves the extraction onto the
+      same volume as the current install (so the swap is a plain rename), and hands off to a
+      detached helper script (`platform/update/UpdateScriptWriter.kt`) via `ProcessLauncher`. Only
+      once that hand-off has actually happened — the installer returning `Launched`, which makes
+      `UpdateRepository` emit its `installLaunched` signal — does `main.kt` exit the app.
+    - **Why the app doesn't exit on `Installing`.** That state is set the moment an install starts,
+      while the extraction is still running, so exiting on it would kill the process before the
+      script had even been written.
+    - **Script shape.** Every script follows the same shape regardless of OS: wait for this
+      process's PID to exit, **retreat** the running install aside (`mv`, never delete first),
+      **place** the new one, **verify** it, and **roll back** to the retreated copy on any failure
+      along the way — so a crash mid-swap never leaves the install directory empty.
+    - **Cleanup.** Because that retreat is always a plain `mv` rather than delete-then-move,
+      `DesktopUpdateInstaller` clears both the `.new` staging directory and the `.old` retreat
+      directory immediately before staging a fresh attempt (a stale one from a past attempt that
+      failed before the script could run would otherwise make the `mv` nest into it instead of
+      overwriting it). The `extracted/` staging directory is cleared first for a different reason:
+      an attempt killed *mid-extraction* leaves a partial tree, and both extractors merge into an
+      existing destination rather than replacing it, so without the clear a retried install would
+      blend two versions into one bundle. `cleanUpStaleSelfReplaceArtifacts` sweeps the other two
+      on every startup — safe unconditionally, since reaching that line at all means the current
+      `appRoot` is the live install this process is running from, which a script mid-swap never
+      leaves behind.
+    - **Platform routing.** A Windows MSI-installed build instead launches a script that waits out
+      the PID and then runs `msiexec /i ... /passive /norestart` (WiX's fixed `upgradeUuid` makes
+      this a MajorUpgrade, not a fresh install), relaunching whatever ends up at the exe path
+      either way — a declined UAC prompt or a failed upgrade relaunches the previous, still-working
+      install rather than leaving nothing running. A Linux deb/rpm install is never self-replaced
+      at all (`updatePlan` above already routes it to `OpenReleasePage`) — running `pkexec`/`sudo`
+      from a GUI with no recovery path if it fails was judged not worth the risk. A Linux Snap
+      install is routed the same way, for the more basic reason that its `/snap/keryx/…` mount is
+      a read-only squashfs image — there is nothing an in-app update could write to even if it
+      wanted to. `release.yml`'s `package-snap` job publishes to the Snap Store once
+      `SNAPCRAFT_STORE_CREDENTIALS` is configured (see `build.md`); a Store-installed snap gets
+      snapd's own background auto-refresh there, independent of this app's own update path.
+      `OpenReleasePage` stays the routing for every `LINUX_SNAP` install regardless of Store
+      status, because a `.snap` sideloaded `--dangerous` from a GitHub Release attachment — the
+      same asset — is never auto-refreshed, and `InstallLocation` has no way to tell the two apart
+      at runtime.
+    - **Why extraction sits behind a seam.** A **signed** macOS bundle cannot be unpacked in
+      process at all: its `CodeResources` seals the 43 symbolic links in the bundled JDK's
+      legal-notices directory *as links*, and `java.util.zip` exposes no way to tell a stored link
+      from a regular file — it writes each one out as a file holding the link target, which fails
+      the `codesign` check above every single time. macOS therefore extracts with `ditto -x -k`
+      (`DittoArchiveExtractor`), preceded by `ZipExtractor.validate` so the zip-slip, entry-count
+      and uncompressed-size guards still apply to an extraction `ditto` performs with no limits of
+      its own — and are the only limits in play, since `ditto` itself is bounded only by a
+      300-second ceiling, past which the child is force-destroyed and the install fails (rather
+      than hanging) with the exit status in its reason. `validate` establishes the size bound by
+      inflating every entry and discarding it, so a macOS install decompresses the archive twice
+      (order of +1-2 s for a ~190MB bundle, on a path the user triggered by hand). That is
+      deliberate: a local header's declared size can be absent, so reading it from the central
+      directory instead would mean trusting the archive's own metadata for a bound whose whole
+      purpose is to survive a crafted one, and overlapping the pass with `ditto` would give up the
+      property that a rejected archive leaves nothing on disk at all.
+    - **What still needs to be checked after `ditto` runs.** `validate` cannot check a stored
+      link's *target* (same `java.util.zip` blind spot), so `DittoArchiveExtractor.verifyExtractedTree`
+      walks the extracted tree afterwards and rejects any symlink that, resolved **through the
+      filesystem**, lands outside the destination — textual resolution is not enough, since a `..`
+      following another symlink collapses against the link rather than its target. `ditto` is not
+      that guard (it declines to *traverse* links, not to *create* an escaping one, and exits 0
+      having done so); what it does contribute is normalizing a `..` entry *name* into the
+      destination, which is the only defense against something written *outside* the destination,
+      where a walk that starts there cannot look. The `codesign` check is deliberately not counted
+      as a defense against an *escape* at all — it inspects the bundle directory only, so an entry
+      written beside the bundle is never looked at (see [SECURITY.md](../SECURITY.md)). All of this
+      sits on top of the SHA-256 digest the archive already had to match.
+    - **Windows and Linux.** Their app images carry no signature for a flattened link to
+      invalidate, so they stay on the in-process path (`InProcessArchiveExtractor` →
+      `platform/ZipExtractor.kt`, which restores the executable bit only on the entries the caller
+      names). Their `legal/` links do come out of an in-app update flattened into files holding a
+      relative path, which is accepted rather than overlooked: they are license text, never a path
+      the app executes. The staging move has the same requirement and the same trap:
+      `FileSystemExtras`'s cross-volume fallback copies with `NOFOLLOW_LINKS`, since both
+      `Files.copy` and `Files.isDirectory` follow links by default and would otherwise flatten them
+      right back on any install whose cache and install directory sit on different volumes.
   - **Android** (`platform/update/AndroidUpdateInstaller.kt`) streams the downloaded APK into a
     `PackageInstaller` session and commits it; the OS takes over from there (showing its own install
     confirmation, and — on success — killing this process itself, so nothing here has to). If
@@ -297,8 +311,9 @@ each a separate, explicit click (Updates tab button, or that menu item).
 - **Presentation.** Surfaced from the moment `check()` finds something, not only once it's ready:
   the single update menu item — shown identically in the desktop tray and in the application menu
   bar's Help menu, both built by `tray/UpdateMenuEntry.kt`'s `updateMenuEntry` — cycles through
-  "Download update %1$s", "Downloading… N%" (rounded to 5% to avoid flooding the Linux SNI D-Bus
-  menu with layout-change signals), "Verifying…", "Restart to update to %1$s", and "Update failed"
+  "Download update %1$s", "Downloading… N%" (a separate, coarser 5% rounding of the same underlying
+  progress described in "Downloading" above — needed here specifically to avoid flooding the Linux SNI
+  D-Bus menu with layout-change signals), "Verifying…", "Restart to update to %1$s", and "Update failed"
   as `state` moves (`%1$s` is the target version — see `tray_update_download`/`tray_update_restart`
   in `strings.xml`). That item is **always present**, whatever the state: `Idle`/`UpToDate` show
   "Check for updates"/"Up to date" and are the user's way to ask for a check on demand (clicking
@@ -375,7 +390,21 @@ step 2 itself too, the same way desktop does — both call `SyncRepository.sync(
 2. If a cloud provider is connected, initial sync (`SyncRepository.sync(SyncTrigger.AUTOMATIC)`) —
    Dropbox / Google Drive / OneDrive on desktop, Dropbox / OneDrive on Android.
 3. FTS full rebuild (`maybeRebuildFtsIndex`, only if 24+ hours since last run **and** idle; see below).
-4. FTS initial creation + unindexed row incremental insertion is done by `FtsManager.ensureIndexed()` on desktop, blocked on with `runBlocking` before `application {}` (acceptable there, since it only delays showing the first window, and `main.kt` runs exactly once per process). `KeryxApplication.onCreate` instead launches `FtsManager.ensureIndexedIfTableAbsent()` fire-and-forget on the shared app-scope `CoroutineScope` — blocking `Application.onCreate` would delay every Android cold start instead of just the first window, and a search performed in the brief window before it completes just returns fewer/no hits rather than failing. It calls the cheaper `ensureIndexedIfTableAbsent()`, not `ensureIndexed()`, because `Application.onCreate` also runs on every `WorkManager` wakeup that starts the process to run `FeedRefreshWorker` (up to ~96 times/day at the platform's 15-minute minimum interval, see "Android Implementation" below) — `ensureIndexed()`'s `indexMissing()` call is an `O(articles)` scan, which `ensureIndexedIfTableAbsent()` skips entirely (a single `sqlite_master` lookup) once the table has already been created and backfilled once. New articles keep getting indexed as normal through the hot-path `indexMissing()` calls in `refreshFeedsAndNotify`/sync and the daily rebuild heal below.
+4. FTS initial creation + unindexed row incremental insertion:
+   - **Desktop.** `FtsManager.ensureIndexed()`, blocked on with `runBlocking` before `application {}`
+     (acceptable there, since it only delays showing the first window, and `main.kt` runs exactly
+     once per process).
+   - **Android.** `KeryxApplication.onCreate` instead launches `FtsManager.ensureIndexedIfTableAbsent()`
+     fire-and-forget on the shared app-scope `CoroutineScope` — blocking `Application.onCreate` would
+     delay every Android cold start instead of just the first window, and a search performed in the
+     brief window before it completes just returns fewer/no hits rather than failing.
+   - **Why the cheaper variant.** `Application.onCreate` also runs on every `WorkManager` wakeup that
+     starts the process to run `FeedRefreshWorker` (up to ~96 times/day at the platform's 15-minute
+     minimum interval, see "Android Implementation" above) — `ensureIndexed()`'s `indexMissing()`
+     call is an `O(articles)` scan, which `ensureIndexedIfTableAbsent()` skips entirely (a single
+     `sqlite_master` lookup) once the table has already been created and backfilled once.
+   - New articles keep getting indexed as normal through the hot-path `indexMissing()` calls in
+     `refreshFeedsAndNotify`/sync and the daily rebuild heal below.
 
 ## Daily FTS Rebuild Heal (`maybeRebuildFtsIndex`)
 

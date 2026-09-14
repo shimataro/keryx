@@ -131,7 +131,8 @@ the recommended way to get one — see [setup.md](setup.md).
 
 ## Packaging
 
-Created under [`composeApp/build/compose/binaries/main`](./composeApp/build/compose/binaries/main).
+Created under `composeApp/build/compose/binaries/main` (relative to the repo root, not this file's own
+directory — this is a build-output path, not a doc to link to).
 
 Only the platform matching the execution platform can be built (cross-compilation is not supported).
 
@@ -391,14 +392,12 @@ a host where no GL stack is reachable from the sandbox:
   `java.awt.FileDialog` / AWT popups (see "UI Direction" in `external-spec.md`), never a portal,
   so this is not the app's own call failing.
 
-The one line that *did* need a fix — `TransportBuilder - Using transport
-dbus-java-transport-native-unixsocket` — was dbus-java's own `slf4j` logging bypassing the app's
-log file and printing in a different format (its own timestamp, no `[tag]` prefix) because it went
-straight through `slf4j-simple` to stderr. Switching the desktop runtime's `slf4j` provider from
-`slf4j-simple` to `slf4j-jdk14` (`composeApp/build.gradle.kts`, `gradle/libs.versions.toml`) routes
-it — and any other third-party `slf4j` caller — through `java.util.logging`, where
-`Log.desktop.kt` now installs its own formatter/handlers on the JUL root logger, so third-party log
-lines land in `keryx.<n>.log` with the same format as the app's own.
+The desktop runtime's `slf4j` provider is `slf4j-jdk14` (`composeApp/build.gradle.kts`,
+`gradle/libs.versions.toml`), routing dbus-java's own logging — and any other third-party `slf4j`
+caller — through `java.util.logging`, where `Log.desktop.kt` installs its own formatter/handlers on
+the JUL root logger. This is why third-party log lines (e.g. dbus-java's own
+`TransportBuilder - Using transport dbus-java-transport-native-unixsocket`) land in `keryx.<n>.log`
+with the same format as the app's own, rather than going to stderr in a different format.
 
 ### Android (APK / AAB)
 
@@ -497,9 +496,9 @@ per platform:
   "Open With" submenu. macOS has no single built-in system UTI for OPML, and the third-party feed
   reader ecosystem never converged on one either — NetNewsWire uses `org.opml.opml` (the closest
   thing to a de facto standard, since OPML itself predates Apple's UTI system), Reeder uses
-  `com.reederapp.opml`, and Overcast uses `unofficial.opml`. An earlier version of this app instead
-  exported its own UTI (`works.merc.keryx.opml`), but that made Keryx invisible in Finder's "Open
-  With" menu on any Mac where another app had already claimed the `.opml` extension for one of these
+  `com.reederapp.opml`, and Overcast uses `unofficial.opml`. Exporting a Keryx-owned UTI for `.opml`
+  (`works.merc.keryx.opml`) instead of these would make Keryx invisible in Finder's "Open With" menu
+  on any Mac where another app has already claimed the `.opml` extension for one of these
   other identifiers — the file resolves to whichever UTI is already bound to that extension, and a
   competing export doesn't win that binding. `LSItemContentTypes` therefore lists all three known
   identifiers, declared via `UTImportedTypeDeclarations` (Keryx is a consumer of these identifiers,
@@ -570,11 +569,36 @@ Flow:
 2. The workflow triggers on `release: published`, strips the leading `v`, and passes the result as `-PappVersion`.
 3. Five independent jobs run in parallel:
 
-   - `:composeApp:packageDmg` (macOS runner), attached as `Keryx-<version>-macos-arm64.dmg` **and `Keryx-<version>-macos-arm64.zip`**. **For a pre-release tag, `packageDmg` is skipped and only the `.zip` is attached** (same reasoning as the Windows MSI case below).
+   - `:composeApp:createDistributable :composeApp:packageDmg` (macOS runner — `createDistributable` is requested explicitly, alongside `packageDmg`, to still produce the app bundle the `.zip` below is made from), attached as `Keryx-<version>-macos-arm64.dmg` **and `Keryx-<version>-macos-arm64.zip`**. **For a pre-release tag, `packageDmg` is skipped and only `createDistributable` runs, so only the `.zip` is attached** (same reasoning as the Windows MSI case below).
    - `:composeApp:packageDeb :composeApp:packageRpm` (Linux runner, after installing `fakeroot`/`rpm` for jpackage), attached as `Keryx-<version>-linux-x86_64.deb`, `Keryx-<version>-linux-x86_64.rpm` **and `Keryx-<version>-linux-x86_64.zip`**. **For a pre-release tag, `packageDeb`/`packageRpm` are skipped and only the `.zip` is attached** (same reasoning as the Windows MSI case below).
-   - `package-snap`, a separate job so a `snapcraft` failure can never block the deb/rpm/zip job above from reaching the release (see "Linux Snap package" above for why it also needs its own `ubuntu-24.04`-pinned runner rather than `ubuntu-latest`). It runs `snapcraft pack --destructive-mode` against `snap/snapcraft.yaml` (after `sudo snap install snapcraft --classic`) and attaches `Keryx-<version>-linux-x86_64.snap` — unlike `.deb`/`.rpm`, this **is** attached for pre-release tags too, since snapcraft's `version:` field isn't restricted to `MAJOR.MINOR.PATCH` the way jpackage's packaging metadata is. After the GitHub Release attachment, the same job also **publishes the snap to the Snap Store** (`snapcraft upload --release=<channel>`, gated on the `SNAPCRAFT_STORE_CREDENTIALS` secret below being set at all) — the channel is `edge` when the tag carries a pre-release suffix **or** the GitHub Release itself is marked as a pre-release, and `stable` otherwise (the deb/rpm/msi skip checks above key on the tag suffix alone; only the Snap Store channel also honours the Release's own pre-release flag, since a snap mis-channelled to `stable` is pushed to every Store user by snapd's own auto-refresh with no way to recall it).
+   - `package-snap`, a separate job so a `snapcraft` failure can never block the deb/rpm/zip job above
+     from reaching the release (see "Linux Snap package" above for why it also needs its own
+     `ubuntu-24.04`-pinned runner rather than `ubuntu-latest`).
+     - **Build and attach.** It runs
+       `sudo snapcraft pack --destructive-mode --output "Keryx-$VERSION-linux-x86_64.snap"` against
+       `snap/snapcraft.yaml` (after `sudo snap install snapcraft --classic`) and attaches the
+       resulting `Keryx-<version>-linux-x86_64.snap` — unlike `.deb`/`.rpm`, this **is** attached for
+       pre-release tags too, since snapcraft's `version:` field isn't restricted to
+       `MAJOR.MINOR.PATCH` the way jpackage's packaging metadata is.
+     - **Snap Store publish.** After the GitHub Release attachment, the same job also **publishes
+       the snap to the Snap Store** (`snapcraft upload --release=<channel>`, gated on the
+       `SNAPCRAFT_STORE_CREDENTIALS` secret below being set at all).
+     - **Channel selection.** The channel is `edge` when the tag carries a pre-release suffix **or**
+       the GitHub Release itself is marked as a pre-release, and `stable` otherwise (the deb/rpm/msi
+       skip checks above key on the tag suffix alone; only the Snap Store channel also honours the
+       Release's own pre-release flag, since a snap mis-channelled to `stable` is pushed to every
+       Store user by snapd's own auto-refresh with no way to recall it).
    - `:composeApp:createDistributable :composeApp:packageMsi` (Windows runner — `windows-latest` ships WiX Toolset v3.14.1 preinstalled, so no separate WiX setup step is needed), attached as `Keryx-<version>-windows-x86_64.msi` **and `Keryx-<version>-windows-x86_64.zip`**. **For a pre-release tag, `packageMsi` is skipped and only the `.zip` is attached** — MSI's `ProductVersion` must be purely numeric (see below), so every pre-release of a given target version would collapse to the same `ProductVersion` under the fixed `upgradeUuid`, and WiX would not recognize a later pre-release or the eventual final release as an upgrade of an earlier one.
-   - `:androidApp:assembleGithubRelease` and `:androidApp:bundlePlayRelease` (Ubuntu runner), attached as `Keryx-<version>-android-universal.apk` and `Keryx-<version>-android-universal.aab`. The APK comes from the `github` flavor (carries `REQUEST_INSTALL_PACKAGES`, since it's the one an in-app update installs over — see the "Android (APK / AAB)" section above) and the AAB from `play` (the Play Console submission artifact, which must not carry that permission). Unlike the desktop installers, Android packages are built and attached for pre-release tags too, because Android has no equivalent version-metadata restriction and testers need a signed APK. **Pre-release APK/AAB files produced by the workflow are GitHub test artifacts only.** `androidApp/build.gradle.kts` derives `versionCode` from `appVersion.substringBefore('-')`, so a pre-release tag such as `v1.2.0-beta.1` and the final `v1.2.0` produce the same `versionCode` (e.g. `10200`). Before submitting to Google Play, assign a strictly increasing `versionCode` by adjusting `androidApp/build.gradle.kts` (or the release tag that drives it) and rebuilding the APK/AAB — the value is baked into the signed artifact at build time and cannot be edited afterward.
+   - `:androidApp:assembleGithubRelease` and `:androidApp:bundlePlayRelease` (Ubuntu runner), attached as `Keryx-<version>-android-universal.apk` and `Keryx-<version>-android-universal.aab`. The APK comes from the `github` flavor (carries `REQUEST_INSTALL_PACKAGES`, since it's the one an in-app update installs over — see the "Android (APK / AAB)" section above) and the AAB from `play` (the Play Console submission artifact, which must not carry that permission). Unlike the desktop installers, Android packages are built and attached for pre-release tags too, because Android has no equivalent version-metadata restriction and testers need a signed APK.
+
+     > [!WARNING]
+     > **Pre-release APK/AAB files produced by the workflow are GitHub test artifacts only — never submit
+     > one to Google Play as-is.** `androidApp/build.gradle.kts` derives `versionCode` from
+     > `appVersion.substringBefore('-')`, so a pre-release tag such as `v1.2.0-beta.1` and the final
+     > `v1.2.0` produce the same `versionCode` (e.g. `10200`). Before submitting to Google Play, assign a
+     > strictly increasing `versionCode` by adjusting `androidApp/build.gradle.kts` (or the release tag
+     > that drives it) and rebuilding the APK/AAB — the value is baked into the signed artifact at build
+     > time and cannot be edited afterward.
 
    `deploy-pages` (triggers the Cloudflare Pages deploy hook for the download page) waits on
    `package-macos` / `package-linux` / `package-windows` / `package-android`, but deliberately
@@ -635,11 +659,10 @@ Linux all three steps are no-ops, since no `.app` exists there. This is not cosm
 that exact check against every downloaded bundle before swapping it in (see
 [background-update.md](background-update.md)), so an app image that cannot pass it leaves the release ZIP
 un-installable **by the in-app updater** — a manual install of the very same ZIP keeps working, since the kernel
-never re-hashes `Info.plist` at launch. That asymmetry is why every 0.x release shipped this way unnoticed until
-the in-app updater first exercised the check, and why the build-time verify is the only thing that catches it:
-ordinary manual smoke-testing cannot. The DMG never exposed it either, because jpackage re-signs its own copy of
-the app image while building it — only the ZIP asset, made straight from `binaries/main/app`, carried the broken
-seal.
+never re-hashes `Info.plist` at launch — so ordinary manual smoke-testing of a downloaded ZIP cannot catch a
+broken seal; the build-time verify is the only thing that does. The DMG is unaffected either way, because
+jpackage re-signs its own copy of the app image while building it — only the ZIP asset, made straight from
+`binaries/main/app`, can carry a broken seal.
 
 The net effect for `0.1.1`: the tag, `BuildConfig.VERSION` (About screen), the update checker, and the version
 Finder shows are all `0.1.1`. Only `CFBundleVersion` keeps the `1.0.0` placeholder, which is an internal build
@@ -665,12 +688,38 @@ No `password-manager-service` auto-connect request is filed after publishing —
 package" above for why (Snapcraft reviewers decline this interface's auto-connect on principle)
 and for the `LibSecretTokenStorage`/Secret-portal path used instead, which needs no such request.
 
-For Android release signing, set `ANDROID_RELEASE_KEYSTORE_BASE64`, `ANDROID_RELEASE_KEYSTORE_PASSWORD`, `ANDROID_RELEASE_KEY_ALIAS`, and `ANDROID_RELEASE_KEY_PASSWORD` as repository secrets. The keystore is a Base64-encoded PKCS12/JKS file; the workflow decodes it at build time. To keep the same signing key on GitHub Releases and Google Play, generate the keystore locally and, when creating the app in Google Play Console, enroll it as the **existing app signing key**: Play Console never accepts the raw JKS/PKCS12 file directly — first encrypt it with Google's PEPK (Play Encrypt Private Key) tool (`java -jar pepk.jar --keystore=<path> --alias=<alias> --output=<encrypted-file> --encryptionkey=<key-from-play-console>`, downloaded from the Play App Signing enrollment page), then upload the resulting encrypted file. This registers the keystore as the **app signing key** — the key Google holds and uses to re-sign the app before it reaches users, distinct from the **upload key** used to sign each `.aab` submitted through Play Console afterward. The same keystore can serve both roles (Google explicitly allows reusing the app signing key as its own upload key), which is what keeps a single keystore sufficient for both GitHub Releases (where the APK/AAB is signed with it directly) and Google Play; a separate, dedicated upload key is Google's recommended hardening, not a requirement. `release.yml` passes `-PandroidReleaseSigningRequired=true` to `:androidApp:assembleGithubRelease`/`:androidApp:bundlePlayRelease`, which turns a missing (or half-configured) secret into an immediate build failure — since this workflow publishes its output, it must never succeed with an unsigned artifact — so all four secrets are required for the release workflow to succeed. Both flavors are signed with the same keystore (the `signingConfigs` block isn't flavor-scoped), which is exactly what the app-signing-key enrollment above requires: the sideloaded `github` APK and the Play-resigned `play` AAB need to trace back to the same signing identity, or a device that already has one installed can never receive the other as an in-place update (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`).
+For Android release signing, set `ANDROID_RELEASE_KEYSTORE_BASE64`, `ANDROID_RELEASE_KEYSTORE_PASSWORD`,
+`ANDROID_RELEASE_KEY_ALIAS`, and `ANDROID_RELEASE_KEY_PASSWORD` as repository secrets. The keystore is a
+Base64-encoded PKCS12/JKS file; the workflow decodes it at build time.
+
+**Enrolling the keystore with Google Play (one-time, for the same signing key on both channels).** To keep
+the same signing key on GitHub Releases and Google Play, generate the keystore locally and, when creating
+the app in Google Play Console, enroll it as the **existing app signing key**: Play Console never accepts
+the raw JKS/PKCS12 file directly — first encrypt it with Google's PEPK (Play Encrypt Private Key) tool
+(`java -jar pepk.jar --keystore=<path> --alias=<alias> --output=<encrypted-file> --encryptionkey=<key-from-play-console>`,
+downloaded from the Play App Signing enrollment page), then upload the resulting encrypted file.
+
+**App signing key vs. upload key.** This registers the keystore as the **app signing key** — the key Google
+holds and uses to re-sign the app before it reaches users, distinct from the **upload key** used to sign each
+`.aab` submitted through Play Console afterward. The same keystore can serve both roles (Google explicitly
+allows reusing the app signing key as its own upload key), which is what keeps a single keystore sufficient
+for both GitHub Releases (where the APK/AAB is signed with it directly) and Google Play; a separate,
+dedicated upload key is Google's recommended hardening, not a requirement.
+
+**All four secrets are required, not optional.** `release.yml` passes `-PandroidReleaseSigningRequired=true`
+to `:androidApp:assembleGithubRelease`/`:androidApp:bundlePlayRelease`, which turns a missing (or
+half-configured) secret into an immediate build failure — since this workflow publishes its output, it must
+never succeed with an unsigned artifact.
+
+**Both flavors share one keystore.** The `signingConfigs` block isn't flavor-scoped, which is exactly what
+the app-signing-key enrollment above requires: the sideloaded `github` APK and the Play-resigned `play` AAB
+need to trace back to the same signing identity, or a device that already has one installed can never
+receive the other as an in-place update (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`).
 
 `ci.yml`'s ordinary build job never receives these secrets — deliberately, since it runs on every
 push and never publishes anything. AGP wires `assembleRelease` into `:androidApp`'s default
-`build` task regardless of whether the artifact is ever consumed (`bundleRelease` is a separate
-lifecycle task, which is why `release.yml` above invokes it explicitly), but
+`build` task regardless of whether the artifact is ever consumed (`bundlePlayRelease` is not part of any
+aggregate lifecycle task, which is why `release.yml` above invokes it explicitly), but
 `androidApp/build.gradle.kts`'s `signingConfigs` block treats a completely unconfigured signing
 identity as the unsigned-release case (a build warning, not a failure — see "Android release
 signing keystore" in [setup.md](setup.md)) rather than requiring `androidReleaseSigningRequired`.

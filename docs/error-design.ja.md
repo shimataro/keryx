@@ -25,12 +25,16 @@ sealed interface Result<out T> {
     data class Err(val exception: KeryxException) : Result<Nothing>
 }
 
-sealed class KeryxException(message: String) : Exception(message)
+sealed class KeryxException(message: String) : Exception(message) {
+    val messageText: String get() = message ?: this::class.simpleName.orEmpty() // Throwable.message は nullable
+}
 ```
 
-主なサブクラス: `FeedFetchException(statusCode)`, `FeedParseException`, `FeedDiscoveryException(candidates)`,
-`FeedTimeoutException`, `FeedNotFoundException(isGone)`, `CloudAuthException`, `CloudStorageException`,
-`SyncConflictException`, `SchemaVersionException(localVersion, cloudVersion)`, `CloudDataIncompatibleException`, `InvalidFeedUrlException`, `UpdateException(stage)`。
+主なサブクラス（いずれも先頭に `message: String` を取るが、以下では省略）: `FeedFetchException(statusCode)`,
+`FeedParseException`, `FeedDiscoveryException(candidates)`, `FeedTimeoutException`, `FeedNotFoundException(isGone)`,
+`CloudAuthException`, `CloudStorageException`, `SyncConflictException`,
+`SchemaVersionException(localVersion, cloudVersion)`, `CloudDataIncompatibleException`, `InvalidFeedUrlException`,
+`UpdateException(stage)`。
 
 補助拡張: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `onOk` / `onErr` / `map`。
 
@@ -42,12 +46,14 @@ sealed class KeryxException(message: String) : Exception(message)
     `FeedDiscoveryException` を返す。最大 5 回のリダイレクトループガードあり。
   - `DropboxStorage`: 401/403 → `CloudAuthException`、409（upload）→ `SyncConflictException`、
     409 `path/not_found`（get_metadata）→ 存在しない、を判別。
-  - `DatabaseMerger.merge`: マージ失敗を SQLite の**エラーコード**（`SQLiteException.resultCode`。
-    メッセージ文字列ではない）から分類し、`CloudDataIncompatibleException`（破損ファイル、クラウド
-    DB 自身の（より緩い）スキーマが許していた制約違反、または — `validateSchema` がダウンロードした
-    ファイルとアプリのスキーマの不一致を確認できた場合に限り — 外部・レガシースキーマ）にするか、
-    そのまま変更しない（一時的／アプリのバグ、または `validateSchema` が確定できなかったスキーマ
-    エラー）。詳細は [sync-architecture.ja.md](sync-architecture.ja.md) の「マージ失敗の分類」を参照。
+  - `DatabaseMerger.merge` はマージ失敗を SQLite の**エラーコード**（`SQLiteException.resultCode`。
+    メッセージ文字列ではない）から分類する:
+    - → `CloudDataIncompatibleException`：破損ファイル、クラウド DB 自身の（より緩い）スキーマが
+      許していた制約違反、または — `validateSchema` がダウンロードしたファイルとアプリのスキーマの
+      不一致を確認できた場合に限り — 外部・レガシースキーマ。
+    - → そのまま変更せず再送出：一時的な失敗、アプリのバグ、または `validateSchema` が確定できなかった
+      スキーマエラー。
+    - 詳細な判定表は [sync-architecture.ja.md](sync-architecture.ja.md) の「マージ失敗の分類」を参照。
 - **Repository 層**: `Result` を受けてビジネスロジック（リトライ等）を適用。
 - **ViewModel 層**: `Result` を UI 状態へ変換。
 - **UI 層**: `ui/i18n/ErrorMessages.kt` の `userMessage(KeryxException)` は `KeryxException` を
@@ -57,19 +63,19 @@ sealed class KeryxException(message: String) : Exception(message)
 
 ## 通知センター（`domain/NotificationCenter`）
 
-- 通知センター（履歴・手動で消す）を主とする。かつての一時トーストは macOS ネイティブ寄りの
-  インライン表現（コピーは操作元の✓、OPML はボタン近くの結果テキスト、購読は一覧出現＋ダイアログ内表示）へ
-  置き換えたため、デスクトップにはアプリ内スナックバーが無い。Android だけはプラットフォーム固有の例外で、
-  URL コピーの確認を M3 の `Snackbar` で表示するが、これは API 33 未満に限られる — API 33 以降は OS 側が
-  既にクリップボードコピーの確認を表示するため、Snackbar を出すとそれと重複してしまう
-  （`platform/PlatformOs.kt` の `platformShowsOwnCopyConfirmation` と `ui/home/HomeCommon.kt` の
-  `LocalSnackbarHostState` を参照）。Android における Snackbar のもう一つの用途は
-  `ui/home/HomeScreen.kt` の `ForegroundAlertSnackbar`（後述）。
+- 通知センター（履歴・手動で消す）を主とする。デスクトップには**アプリ内スナックバーが無い**——
+  確認はインライン表現で行う（コピーは操作元の✓、OPML はボタン近くの結果テキスト、購読は一覧出現＋
+  ダイアログ内表示）。Android だけはプラットフォーム固有の例外で、URL コピーの確認を M3 の `Snackbar` で
+  表示するが、これは API 33 未満に限られる — API 33 以降は OS 側が既にクリップボードコピーの確認を
+  表示するため、Snackbar を出すとそれと重複してしまう（`platform/PlatformOs.kt` の
+  `platformShowsOwnCopyConfirmation` と `ui/home/HomeCommon.kt` の `LocalSnackbarHostState` を参照）。
+  Android における Snackbar のもう一つの用途は `ui/home/HomeScreen.kt` の `ForegroundAlertSnackbar`（後述）。
 - 履歴はセッション中のみ保持（DB 保存なし）。記録するのは「後から見返す価値がある内容」に限る:
   エラー・警告に加え、`INFO` は新バージョンの通知のみ。**新着記事は通知センターには記録しない**
   （`NewArticleNotifier` は OS 通知（トレイ）にのみ流す）——記事一覧と未読バッジという永続的な手段で
   既に把握できるため。手動更新も同様に、一覧・未読バッジの更新で示す。
-- ベルアイコンにバッジ（件数）。ベルは `ArticleListPane` のヘッダ行にある（正確な規則は `ui-guidelines` スキルを参照）。`ArticleDetailPane` には意図的に置かない。
+- ベルアイコンにバッジ（件数）。ベルは幅を問わず（デスクトップの3ペイン定常状態を含む）
+  `ArticleListPane` のヘッダ行にある（正確な規則は `ui-guidelines` スキルを参照）。`ArticleDetailPane` には意図的に置かない。
 - バックグラウンド更新中の警告は UI コンテキストが無いため通知センターにのみ記録し、
   **OS 通知には出さない**（OS 通知は新着記事専用。上記参照）。そのため Android では
   `ForegroundAlertSnackbar`（`ui/home/HomeScreen.kt`）が、`WARNING`/`ERROR` の発生時点で
@@ -110,17 +116,25 @@ Repository から通知を出す際、文言は `NotificationMessages`（`getStr
 
 | エラー | 自動リトライ | 通知センター |
 | --- | --- | --- |
-| `FeedTimeoutException` / `FeedFetchException` | ✅ | ✅ |
+| `FeedTimeoutException` / `FeedFetchException` | ✅\* | ✅ |
 | `FeedParseException` | ❌ | ✅ |
-| `CloudStorageException` | ✅ | ✅ |
+| `CloudStorageException` | ✅\*\* | ✅ |
 | `SyncConflictException` | ✅（内部） | ❌ |
 | `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ |
 | `CloudDataIncompatibleException`（破損/非互換なクラウドDB／制約違反データ） | ❌（リセットまたは手動同期の成功まで**自動**同期そのものが抑制される — `SyncTrigger.AUTOMATIC` ゲート。[sync-architecture.ja.md](sync-architecture.ja.md)「自動同期の抑制」参照） | ✅ |
 | `FeedNotFoundException(isGone=true)` | ❌ | ✅ |
+
+\* `FeedFetcher` が自動リトライするのは実際のタイムアウト時のみで、`FEED_TIMEOUT_RETRY_COUNT` 回まで追加試行する。
+タイムアウト以外の `FeedFetchException`（5xx ステータス等）は同一フェッチ内では再試行しない。
+\*\* `sync()` 1回の中で `repeat(SYNC_MAX_RETRY)` が再ループするのは `SyncConflictException` のみで、それ以外の
+エラー（`CloudStorageException` を含む）は即座に return する。ここでの「自動リトライ」はループ内の再試行では
+なく、次回のスケジュール済み同期試行を指す。
 | `UpdateException`（チェック/ダウンロード/検証/インストールの失敗） | ❌（ユーザーが Updates 設定タブまたはトレイの項目で「再試行」を押した時のみ再試行） | ❌（代わりに Updates タブとトレイの項目で提示する——[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照。ベルに届くのは「更新があります」/「インストール準備完了」という情報通知のみで、上記の `ShowSettingsTab`/`OpenUrl` 経由） |
 
-## 定数（`core/Constants.kt`）
+## 定数（`core/Constants.kt`、抜粋）
 
 `SYNC_MAX_RETRY=3`, `FEED_TIMEOUT_RETRY_COUNT=1`, `SYNC_DEBOUNCE_MS=5000`,
 `CONNECTION_TIMEOUT_MS=10000`, `READ_TIMEOUT_SECONDS_DEFAULT=30`, `MAX_REDIRECTS=5`,
-`UPDATE_DOWNLOAD_SOCKET_TIMEOUT_MS=60000`。
+`UPDATE_DOWNLOAD_SOCKET_TIMEOUT_MS=60000`。このファイルには他にも定数がある（例:
+`SQLITE_BUSY_TIMEOUT_MS`, `REQUEST_TIMEOUT_MS`, `MAX_SYNC_DB_SIZE_BYTES`, `TOKEN_EXPIRY_SKEW_MS`,
+`OAUTH_CONNECT_TIMEOUT_MS`）— ここに挙げるのはエラー処理・リトライに最も関係するものに限る。

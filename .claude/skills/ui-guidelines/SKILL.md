@@ -903,6 +903,13 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   `ProvideTextStyle(MaterialTheme.typography.labelLarge)`** — the same style M3's own `Button`
   gives its label, so the Android `actual`s already have it — and that is load-bearing, not a
   redundant wrapper to tidy away later: a bare `Text` would fall back to `TextStyle.Default`,
+- **Color scheme — `PlatformTheme.kt`'s `platformColorScheme`** (`expect`/`actual`): on Android
+  12+ (API 31+), this returns Material You dynamic color derived from the system wallpaper
+  (`dynamicLightColorScheme`/`dynamicDarkColorScheme`), falling back to the app's fixed teal
+  `LightColors`/`DarkColors` on older Android versions. Desktop's `actual` always returns the fixed
+  teal scheme — there is no desktop equivalent of wallpaper-derived color. Don't assume Android's
+  colors are always the app's own teal palette when reasoning about contrast or a hardcoded color
+  value; on a 12+ device they come from the user's wallpaper instead.
   whose `lineHeight` is unspecified, making the label's height (and with it the button's) come
   from whichever font the *host* resolves for the label's own glyphs. Two buttons whose labels are
   worded differently then measure differently on one machine and identically on another — which is

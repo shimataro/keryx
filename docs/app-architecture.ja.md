@@ -24,18 +24,28 @@ composeApp/src/
     domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler（importOpmlAndNotify。デスクトップと Android の「`.opml` ファイル関連付け」で共有）, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, OAuthCallbackParams, StartupMaintenanceTasks（refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
     di/           AppModule（+ expect platformModule）
     platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor（すべて expect）
-    ui/           theme/, navigation/, setup/, home/（3ペイン + 検索 + 通知センター）, article/, settings/, i18n/
+    ui/           theme/, navigation/, setup/, home/（アダプティブな1/2/3ペインレイアウト + 検索 +
+                  通知センター）, article/, settings/, i18n/, common/（KeryxTextField/KeryxDialogs/
+                  KeryxIcons/FlatButtons/FlatToggles/SegmentedControl/KeryxSearchBar/… — expect/actual
+                  分割された、全ペイン共通のプレーンな M3 見た目のコンポーネント）, menu/（MenuController）
     LaunchArg.kt  起動時の引数（`keryx://` URI か `.opml` パスか）を分類する — プラットフォーム非依存、パッケージ直下
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq（7 テーブル）
-  commonMain/composeResources/  values/strings.xml, drawable/（アイコンは SVG ではなく Android
+  commonMain/composeResources/  values/strings.xml（日本語、デフォルト/フォールバック）,
+    values-en/strings.xml（英語、同じキー集合）, drawable/（アイコンは SVG ではなく Android
     Vector Drawable XML — Compose Multiplatform の SVG デコーダはデスクトップ/iOS 専用で Android では
     実行時にクラッシュするため。VectorDrawable XML は `painterResource` が全ターゲットで描画できる唯一の画像形式）
   jvmCommonMain/kotlin/…/  デスクトップと Android の両方が共有する actual（どちらのプラットフォーム
-    API にも依存しない）: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage, AppInfo,
-    CloudStorageAvailability（後者2つは共有生成 BuildConfig を読むだけ）, FileSystemExtras,
-    ZipExtractor（アプリ内アップデート——下記「アプリ内アップデート」参照）
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ jvmCommonMain がカバーしない expect の actual（DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule, InstallLocation）+ LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（Keyring/File/SecurityCliTokenStorage/LibSecretTokenStorage。outcome 合成ロジックは共通の SecretStoreTokenStorage に集約）, DesktopOs（isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）
-    tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray + StatusNotifierItem/dbusmenu の D-Bus オブジェクト
+    API にも依存しない）: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage,
+    AppInfo（共有生成 BuildConfig を読むだけ）, FileSystemExtras,
+    ZipExtractor（アプリ内アップデート——下記「アプリ内アップデート」参照）,
+    di/CloudPlatformModule.kt（両プラットフォームの platformModule が呼ぶ共有クラウドプロバイダー DI 配線
+    ——cloudSessionSingles, dropboxProvider, oneDriveProvider）,
+    domain/OAuthUriParser.kt（parseOAuthUri。デスクトップと Android の `keryx://` リダイレクト処理が共有）
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ jvmCommonMain がカバーしない expect の actual（DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule, InstallLocation）+ LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage——1番目と3番目は commonMain の SecretStoreTokenStorage から outcome 合成ロジックを継承するが、SecurityCliTokenStorage は同じロジックを自前で実装している）, DesktopOs（isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）
+    tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray, WindowsTray +
+               StatusNotifierItem/dbusmenu の D-Bus オブジェクト
+    appmenu/   KDE Global Menu / D-Bus アプリケーションメニュー連携（AppMenuBarHost, AppMenuConnection,
+               AppMenuDBusMenu, AppMenuRegistrar）— external-spec.ja.md §9 参照
     platform/update/  DesktopUpdateInstaller, UpdateScriptWriter（純粋な自己置換／msiexec スクリプトのテンプレート）, ProcessLauncher/RealProcessLauncher（テストがフェイクに差し替える detached 起動のシーム）, ArchiveExtractor（macOS は DittoArchiveExtractor——署名済みバンドルが自身の symlink を封印しているため。それ以外はインプロセスの InProcessArchiveExtractor）, CodeSigningVerifier/RealCodeSigningVerifier（`codesign --verify` のシーム）
   androidMain/kotlin/…/  jvmCommonMain がカバーしない expect の actual: DatabaseDriverFactory（バンドル
     SQLite、後述）, DatabaseFile（`databaseFilePath()` — `Context.getDatabasePath` で、
@@ -58,8 +68,9 @@ composeApp/src/
     PlatformTheme（`platformShapes` は M3 既定の `Shapes()`、`ProvidePlatformInteraction` は
     no-op — `LocalIndication`/`LocalRippleConfiguration` を M3 既定のままにすることで、あらゆる
     `clickable` と M3 部品が本物のリップルを持つようになる。external-spec.ja.md の「UI 方針」参照）、
-    `ListRowChrome.android.kt` の `listRowSurface`（両 `ListRowKind` で同じ 12dp インセットを共有
-    — Android 独自の `listRowHorizontalMargin()`、M3 の `NavigationDrawerItemDefaults.ItemPadding`
+    `ui/home/ListRowChrome.kt` の `listRowSurface`（`expect`/`actual` ではなく単一の commonMain 関数——
+    両 `ListRowKind` で同じ 12dp インセットを `listRowHorizontalMargin()` で共有（`isTouchPrimary` で
+    分岐: タッチ 12dp / マウス 8dp。タッチ側は M3 の `NavigationDrawerItemDefaults.ItemPadding` と一致）
     — し、`listRowShape(kind)` でクリップ形状を決める: `ListItem` 行は常に角丸長方形、`NavItem`
     行も `PaneLayout.Triple` の常設サイドバーペインとして描画されている間（記事一覧の隣に
     並ぶので、2 つが 1 つのデザインに見える）は同じ形。実際にフィード一覧のナビゲーション
@@ -103,7 +114,8 @@ composeApp/src/
     nativeContextMenu（適応レイアウトのフェーズで実装した実際の
     長押し DropdownMenu — タップと長押しの判別は KDoc 参照）, BackHandler（`androidx.activity.compose.BackHandler`
     へ委譲）, PlatformOs（isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android にはメニューバーやシステムトレイが
-    無いため、FeedListToolbarRow/GeneralTab が独自の設定/バージョン情報導線を持つ）,
+    無いため、`FeedListPane` 自身の設定用フッター行（スクロールするフォルダー/タグ/フィード一覧の下）が
+    Android の設定への導線となり、`GeneralTab` がバージョン情報を持つ）,
     SelfUpdateCheck（インストール元パッケージ名に基づく判定、下記「バックグラウンド更新」参照）,
     NotificationPermission（`POST_NOTIFICATIONS` 用に `rememberLauncherForActivityResult` をラップ）+
     AndroidStartupTasks.kt（`runAndroidStartupTasks`。`:androidApp` の `MainActivity` から呼ばれる）+
@@ -128,7 +140,8 @@ composeApp/src/
 
 ルート直下の別モジュール `androidApp`（`com.android.application`。上記の Kotlin Multiplatform
 ソースセット構成には含まれない）は `AndroidManifest.xml`、`KeryxApplication`（プロセス全体の初期化:
-`AndroidAppContext.init`、`startKoin`、`configureImageLoader`、FTS バックフィルの `ensureIndexed()`、
+`AndroidAppContext.init`、`startKoin`、`configureImageLoader`、FTS バックフィルの
+`ensureIndexedIfTableAbsent()`（プロセス起動のたびに呼ばれる軽量版——db-schema.md の `articles_fts` 節参照）、
 `startBackgroundRefresh`）、`MainActivity`（`setContent { App() }`、続けて
 `runAndroidStartupTasks`）のみを持つ。これが別モジュールになっているのは、AGP 9 の
 `com.android.application` プラグインが Kotlin Multiplatform プラグインと同一モジュールで併用できない
@@ -166,9 +179,21 @@ Android の `actual` は `AndroidSqliteDriver` を生成する。こちらは `o
 ### FtsManager / FtsSearch
 
 `articles_fts`（FTS5 trigram, `content='articles'`）を生 SQL で管理する。SQLDelight のスキーマには含めない。
-**ライブ DB では決して DROP しない**（アップロードからの除外はスナップショットのコピー側で行う。`DatabaseSnapshot`）。
-`ensureIndexed()`（起動時、初回作成 + 未索引行の増分投入）、`indexMissing()`（hot path＝フィード更新・同期マージ後の
-増分投入）、`rebuildIndex()`（日次アイドルの全再構築 heal のみ）を持つ。`FtsSearch.search()` は語の長さで
+- **ライブ DB の `articles_fts` は決して DROP しない** — アップロードからの除外はスナップショットの
+  コピー側（`DatabaseSnapshot`）で `VACUUM INTO` により行うため、実行中の検索が `no such table` に
+  当たることはない。
+- **Hot path**（フィード更新・同期マージ後）は `FtsManager.indexMissing()` で新規行のみを増分投入する
+  — 全体を索引し直す `'rebuild'` は `O(索引済みテキスト全体)` で重く、実行中の検索をブロック/0件化
+  しうるため決して使わない。
+- **Heal。** インデックス全体の再構築は稀な heal パスでのみ行う: 日次アイドルパス
+  （`domain/StartupMaintenanceTasks.kt` の `maybeRebuildFtsIndex`。`lastFtsRebuiltAt` + `ActivityCenter`
+  のアイドル状態がゲート。desktop の `StartupTasks.kt` と Android の起動処理の両方から呼ばれる）が、
+  増分投入では古いままの内容を再索引する。
+- **起動時。** desktop の起動時は `FtsManager.ensureIndexed()` がテーブルを初回作成し未索引行を
+  バックフィルする。Android は軽量版 `ensureIndexedIfTableAbsent()` をプロセス起動のたびに呼ぶ
+  （理由は db-schema.md の `articles_fts` 節参照）。
+- **並行性。** `DatabaseDriverFactory` で設定する `busy_timeout` により、検索は増分投入や rebuild の
+  短い書き込みロックをエラーにせず待ち抜ける。`FtsSearch.search()` は語の長さで
 分岐する — 3 文字以上の語は `articles_fts MATCH`（ランク順）を実行するが、trigram トークナイザはそれより
 短い語を索引化できないため、2 文字の語は `LIKE` フィルタとして扱う（長い語が1つでもあればマッチ済みの行への
 追加 AND、全語が2文字ならマッチ ID なしの単独 `LIKE` 走査を `published_at DESC` 順・
@@ -271,9 +296,12 @@ JVM でテスト可能なユニットテストのソースセットが無いに�
 
 ### Provider / DI（Koin）
 
-`appModule`（commonMain）にリポジトリ・サービス・ViewModel を登録。`platformModule`（desktop）に
-HttpClient・TokenStorage・CloudSession・CloudConnectFlow を登録。ViewModel は単一ウィンドウの
-デスクトップアプリのためアプリスコープの `single` として登録し、`koinInject()` で取得する。
+`appModule`（commonMain）にリポジトリ・サービス・ViewModel を登録——desktop と Android 共通。
+`platformModule` は各プラットフォームが個別に持つ: desktop 版は HttpClient・TokenStorage・CloudSession・
+CloudConnectFlow・`OsNotificationSink`・`UpdateInstaller` を登録し、Android 版は Android 固有の実装
+（OkHttp ベースの HttpClient、`KeystoreTokenStorage`、Dropbox/OneDrive のみの `CloudSession` 等——上記
+「Android」各節参照）を登録する。ViewModel はアプリスコープの `single` として登録し、`koinInject()` で
+取得する。
 
 ### 記事リーダー（ネイティブ WebView）
 
@@ -300,10 +328,11 @@ WebView **内部**の HTML として描画する（`ui/article/ArticleWebViewHtm
 
 **Android のリーダー（`ui/home/ArticleDetailPane.kt`。commonMain 共有のコンポーザブル）は、
 狭いレイアウトではスワイプによる前後移動も持つ**（`ui/home/ArticleSwipeNav.kt`） — リーダー上の
-水平ドラッグで次/前の記事へ移動する。有効化条件は `isTouchPrimary && onNavigateUp != null &&
-article != null`（`HomePaneLayout.kt` が他所でも使っている、狭いレイアウトを示す既定の
-nullable-callback シグナルと同じ — 下記「Home's adaptive pane layout」参照）で、
-`PaneLayout.Triple` およびデスクトップでは無効になる。Android の `WebView`（`AndroidView` 経由で
+水平ドラッグで次/前の記事へ移動する。有効化条件は `isTouchPrimary && swipeNavigation != null &&
+article != null`。シグナルは `onNavigateUp` ではなく `swipeNavigation` である——`PaneLayout.Dual` では
+リーダーに戻るボタンが無い（`onNavigateUp` が `null`）が、スワイプは有効なままである必要があるため、
+`swipeNavigation` はそこでも非 null の別シグナルとして存在する（下記「Home's adaptive pane layout」参照）。
+無効になるのは `PaneLayout.Triple` とデスクトップのみで、そこではどの呼び出し元もこのシグナルを渡さない。Android の `WebView`（`AndroidView` 経由で
 埋め込まれる）は通常の in-tree ビューだが、タッチ入力は自分自身で消費してしまうため、このジェスチャーは
 `platform/NativeMenu.android.kt` の長押しや `ui/home/FeedListDragGestures.kt` の並べ替えドラッグと
 同じ方式で調停する: `pointerInput` ループが `PointerEventPass.Initial`（この祖先ノードに WebView 側の
@@ -490,8 +519,9 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 
 ## ナビゲーション
 
-`ui/navigation/Navigator.kt` の単純なスタック型ナビゲータで Setup / Home / Settings を切り替える。
-記事ビューは Home 内のペイン（ルートではない）。
+`ui/navigation/Navigator.kt` は現在の `Screen`（`Setup` または `Home` の一値——スタックではなく、
+3番目の `Settings` という値も存在しない）を保持し、`replace()` で切り替える。設定は Home の上に表示される
+ダイアログであり、記事ビューは Home 内のペインであって、どちらも独自のルートではない。
 
 ### Home の適応的ペインレイアウト
 
@@ -684,8 +714,9 @@ WebView をホストするペインを含む3ペインすべてがアプリの�
   iOS/iPadOS は compact 幅で `NavigationSplitView` のサイドバーを押し込まれたナビゲーション
   スタックに畳む（Mail.app、NetNewsWire、Reeder）——これはドロワーが存在する以前にこのアプリが
   していたことであり、`git log` にも今なお残っている: `Single` の depth 1 で `visiblePanes` が
-  `[FeedList]` を返していたこと、`FeedListPane` 自身の通知ベル、`onEnterArticleList`、戻り
-  リップル、これらはすべてドロワーと引き換えに削除された。`paneLayoutFor` と `visiblePanes` の
+  `[FeedList]` を返していたこと、`FeedListPane` 自身の通知ベル、`onEnterArticleList`——これらは
+  ドロワーと引き換えに削除された（戻りリップル自体はこれとは無関係で、現在も
+  `HomePaneLayout.kt` の `shouldFlashReturnedArticle` として存在する）。`paneLayoutFor` と `visiblePanes` の
   `Triple`/`Dual` の場合分けは iPadOS にそのまま持ち越せる（`NavigationSplitView` の3カラム・
   2カラムモードにそのまま対応し、`Dual` の常設の閲覧ペインは iPad 自身のスプリットビューとも
   一致する）——持ち越せないのは `Single` の見せ方だけである。
@@ -716,7 +747,7 @@ WebView をホストするペインを含む3ペインすべてがアプリの�
 再検証なしでは、外部からの変更（他端末の同期による「未読にする」・再スター、または論理削除の
 tombstone）を、書き込みが in-flight の短い間だけでなく**永久に**隠し続けてしまいかねない。
 
-`HomeViewModel.reconcilePinnedArticles` はこの隙間を埋める: `articleChangeSignal` コレクタ経由で
+`HomeViewModel.reconcilePinnedArticlesAndSelection` はこの隙間を埋める: `articleChangeSignal` コレクタ経由で
 `articles` への書き込みのたびに走り、ピン留め済みの全 ID — および現在の選択のキャッシュされた
 フラグ — を `ArticleRepository.aliveArticleFlags` に対する1クエリでまとめて再検証し、記事が
 既に存在しないか、フラグがピンの値と一致しなくなったものを外す（選択については更新する）。

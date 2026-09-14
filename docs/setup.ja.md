@@ -31,9 +31,10 @@
   のため現時点では必須ではない。Android 実機/エミュレータへのデプロイやレイアウトプレビュー
   など Android 特化のツールは Android Studio に比べて弱いので、Android 側の作業が中心なら
   Android Studio を使う方がよい。
-- **[Visual Studio Code](https://code.visualstudio.com/)**: JetBrains 公式の "Kotlin by JetBrains" 拡張は2026年に Alpha 公開されたが、
-  Kotlin Multiplatform プロジェクトは現時点で非対応と明言されている。本プロジェクトの開発
-  には現状推奨できない。
+- **[Visual Studio Code](https://code.visualstudio.com/)**: JetBrains 公式の "Kotlin by JetBrains" 拡張は、
+  これまで確認した限り常に Kotlin Multiplatform プロジェクトを非対応と明言している——この状況は
+  変わりうるため、頼る前に現在の KMP 対応状況を確認すること。状況が変わっていない限り本プロジェクトの
+  開発には推奨できない。
 
 ### ビルドに必要なソフトウェア
 
@@ -57,7 +58,7 @@
   ID はもう存在せず、`sdkmanager platforms;android-37` は "Failed to find package" で失敗する。
   `sdkmanager --list | grep android-37` で現在の ID を確認するか、初回ビルド時に AGP 自身の
   SDK 自動ダウンロードに解決させればよい。`build-tools;36.0.0` はこの影響を受けず、そのまま
-  導入できる（`sdkmanager "build-tools;36.0.0"` — 36.0.0 は AGP 9.3.2 が既定で選択するバージョン）。
+  導入できる（`sdkmanager "build-tools;36.0.0"` — 36.0.0 は AGP 9.4.0 が既定で選択するバージョン）。
 - 初期設定: `local.properties` の `sdk.dir` に SDK の場所を指定する（AGP がこのキー自体を
   直接読み取るため、下記 OAuth キーで使う `-P`/環境変数/`local.properties` の解決チェーンとは
   別系統）か、環境変数 `ANDROID_HOME` を設定してもよい——以下のコマンドは、どちらかが
@@ -89,23 +90,24 @@
   "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n keryx -k "system-images;android-<N>;google_apis_playstore;<ABI>"
   ```
 
-  `<N>` は上記の `minSdk = 26` / `compileSdk`・`targetSdk = 37` に近い値を選ぶ。CI の計装テスト
-  ジョブは API 29 で実行している。`<ABI>` はホスト CPU のアーキテクチャに合わせる必要がある
+  `<N>` は、CI の計装テストジョブと同じ API 29 を使うか、上記の `minSdk = 26`〜`compileSdk`・
+  `targetSdk = 37` の範囲内で任意の値を選ぶ。`<ABI>` はホスト CPU のアーキテクチャに合わせる必要がある
   ——ハードウェアアクセラレーションを効かせるには、x86_64 ホストなら `x86_64`、ARM64 ホスト
   （Apple Silicon Mac や ARM64 版 Windows/Linux など）なら `arm64-v8a` を選ぶ。詳細は
   [エミュレータのアクセラレーションガイド](https://developer.android.com/studio/run/emulator-acceleration)
   を参照。このプロジェクト固有の制約を超えた詳細は
   [公式の AVD ガイド](https://developer.android.com/studio/run/managing-avds) を参照。
-- **Android リリース署名キーストア（任意）**: Gradle の既定 `build` ライフサイクルは
-  `:androidApp` の `assembleRelease` を含んでおり（App Bundle は含まれない —
-  `:androidApp:bundleRelease` は `release.yml` のように明示的に叩く必要がある）、
-  `androidApp/build.gradle.kts` は署名情報が無いときに debug 署名へフォールバックしない設計に
-  なっている（debug 署名の release 成果物はインストール可能で本物に見えてしまうため、これこそ
-  危険なケース）。その代わり、**キーストアを用意していなくてもルートの `./gradlew build` は成功する**
-  が、`:androidApp` の release APK は**未署名**になる（ビルド警告が出る） — その APK は実機に
-  インストールも Google Play へのアップロードもできない。実機で動かす/配布するつもりがある
-  場合にのみ用意すればよく、ローカル検証には JDK 同梱の `keytool` でその場限りのキーストアを
-  作れば十分:
+- **Android リリース署名キーストア（任意）**: **キーストアを用意していなくてもルートの
+  `./gradlew build` は成功する**が、`:androidApp` の release APK は**未署名**になる（ビルド警告が
+  出る） — その APK は実機にインストールも Google Play へのアップロードもできない。実機で動かす/
+  配布するつもりがある場合にのみ用意すればよく、ローカル検証には JDK 同梱の `keytool` でその場限りの
+  キーストアを作れば十分。
+
+  Gradle の既定 `build` ライフサイクルは `:androidApp` の `assembleRelease` を含んでおり（App Bundle は
+  含まれない — `:androidApp:bundlePlayRelease` は `release.yml` のように明示的に叩く必要がある）、
+  `androidApp/build.gradle.kts` は署名情報が無いときに debug 署名へフォールバックしない設計になって
+  いる。debug 署名の release 成果物はインストール可能で本物に見えてしまうため——サイレントな
+  フォールバックが生む、まさに危険なケースである。
 
   ```bash
   keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
@@ -185,9 +187,9 @@
     WiX Toolset v3.14.1 がプリインストール済みのため、`ci.yml` と `release.yml` のどちらも
     追加のインストール手順なしでビルドできる。詳細は `build.md` 参照
 
-`fakeroot`/`rpm` は `ubuntu-latest` に既定で入っていない。リリース
-ワークフローはパッケージング直前に `apt-get` で `fakeroot rpm` をインストールしている
-（`.github/workflows/release.yml`）。Xcode Command Line Tools と WiX Toolset は
+`fakeroot`/`rpm` は `ubuntu-latest` に既定で入っていない。`ci.yml`・`release.yml` の
+どちらもパッケージング直前に `apt-get` で `fakeroot rpm` をインストールしている。
+Xcode Command Line Tools と WiX Toolset は
 `macos-latest` / `windows-latest` の各ランナーイメージにそれぞれプリインストール済み —
 ローカルの開発機ではこの3つのうち足りないものを手動でセットアップする必要がある。
 
@@ -247,10 +249,9 @@ keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
 
 ### `SDK location not found`（Gradle の設定段階）
 
-`composeApp` 自体が Android ライブラリターゲット（`com.android.kotlin.multiplatform.library`）
-を構成するようになったため、その `build` ライフサイクルに触れるタスク——ルートの
-`./gradlew build`、あるいは `:composeApp:build` 単体でも——は `:androidApp` だけでなく
-Android SDK を必要とする。
+`composeApp` 自体が Android ライブラリターゲット（`com.android.kotlin.multiplatform.library`）を
+構成しているため、その `build` ライフサイクルに触れるタスク——ルートの `./gradlew build`、あるいは
+`:androidApp` 配下だけでなく `:composeApp:build` 単体でも——は Android SDK を必要とする。
 
 `local.properties` の `sdk.dir`（前提を参照）か環境変数 `ANDROID_HOME` を設定する。デスクトップ
 だけの作業なら `:composeApp:compileKotlinDesktop` や `:composeApp:desktopTest` のような特定
@@ -259,7 +260,7 @@ Android SDK を必要とする。
 ### Android のリリースビルドが未署名になる
 
 Gradle の既定 `build` ライフサイクルは `:androidApp` の `assembleRelease` を含んでおり、
-release APK が生成される（App Bundle は生成されない — `:androidApp:bundleRelease` を明示的に
+release APK が生成される（App Bundle は生成されない — `:androidApp:bundlePlayRelease` を明示的に
 叩く必要がある）。Android リリース署名キーストアを設定していない場合、
 `androidApp/build.gradle.kts` はビルド警告を出したうえでフレーバーごとに**未署名**の release APK
 （`androidApp/build/outputs/apk/github/release/androidApp-github-release-unsigned.apk` と
@@ -295,11 +296,10 @@ release ビルドと debug ビルドを同時に使いたい場合は、端末�
 `applicationIdSuffix` を付ける方式は意図的に採っていない — `keryx://oauth2/callback` と `.opml` の
 ハンドラーが 2 つになり、OAuth リダイレクトとファイル関連付けが曖昧になるため。
 
-`INSTALL_FAILED_VERSION_DOWNGRADE` は以前これより先に当たっていたもので、原因は別。ローカル
-ビルドは `-PappVersion` を渡さないため `versionCode` が 1 になり、実バージョン付きの APK には
-上書きインストールできなかった。現在は debug バリアントが固定の `versionCode` を使うので
-（[build.ja.md](build.ja.md) の「Android（APK / AAB）」参照）debug には当てはまらない —
-いま出るとすれば debug 以外の APK をインストールしている。
+`INSTALL_FAILED_VERSION_DOWNGRADE` は、押し込もうとしている `versionCode` より高い `versionCode` の
+ものが端末に既にインストールされていることを意味する。debug バリアントは固定の `versionCode` を使う
+ので（[build.ja.md](build.ja.md) の「Android（APK / AAB）」参照）、debug インストールでこのエラーが
+出た場合は、それより高い `versionCode` でビルドされた debug 以外の APK がいま端末に入っている。
 
 ### `UnsupportedClassVersionError`（実行時エラー）
 

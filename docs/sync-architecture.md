@@ -2,7 +2,9 @@
 
 [日本語](sync-architecture.ja.md)
 
-Target: cloud sync (Dropbox / Google Drive / OneDrive). Implementation is in `domain/SyncRepository.kt`, `domain/MergeSql.kt`, `platform/DatabaseMerger`, `platform/DatabaseSnapshot`.
+Target: cloud sync (Dropbox / Google Drive / OneDrive). Implementation is in `domain/SyncRepository.kt`,
+`domain/MergeSql.kt`, `domain/MergeFailureClassifier.kt`, `domain/MergeSchema.kt`, `domain/SnapshotSql.kt`,
+`platform/DatabaseMerger`, `platform/DatabaseSnapshot`.
 
 ## Design Philosophy
 
@@ -14,7 +16,8 @@ Target: cloud sync (Dropbox / Google Drive / OneDrive). Implementation is in `do
 ## Cloud File Structure
 
 ```bash
-/keryx.db.gz                           ← Sync SQLite, gzip-compressed (without articles_fts / sync_state) — primary
+/keryx.db.gz                           ← Sync SQLite, gzip-compressed (without articles_fts / sync_state / the
+                                          idx_articles_* indexes) — primary
 /keryx.db                              ← Legacy, uncompressed — read-only fallback, never written; see below
 /keryx-YYYYMMDD-HHMMSS.db.gz.bak       ← archive left behind by a cloud-data reset (never pruned)
 ```
@@ -23,16 +26,27 @@ Conflict prevention is done via a revision check on upload — Dropbox: `rev`, a
 
 ## Sync Flow (`SyncRepository.sync()`)
 
-1. `CloudStorage.metadata(CLOUD_DB_GZ_PATH)` fetches the compressed file's revision — or `null` when it does not exist yet remotely, in which case step 1a below runs. This single request replaces the old existence check; every provider already returned the revision in it (Dropbox's `get_metadata` `rev`, Drive's name-lookup `version`, Graph's item `eTag`) and simply discarded it, so learning the revision costs no extra round trip.
+1. `CloudStorage.metadata(CLOUD_DB_GZ_PATH)` fetches the compressed file's revision — or `null` when it does not
+   exist yet remotely, in which case step 1a below runs. This is the only existence/revision check the sync makes;
+   it costs no extra round trip, since every provider's metadata response already carries the revision (Dropbox's
+   `get_metadata` `rev`, Drive's name-lookup `version`, Graph's item `eTag`).
    - **1a. Compressed file absent** — `CloudStorage.metadata(CLOUD_DB_PATH)` checks the legacy fallback.
-     - **Both absent (true first sync ever)**: the local DB is exported, compressed, and uploaded via create-only (`createFresh`), and the sync ends. See "Compressed Upload / Legacy Fallback" below.
+     - **Both absent (true first sync ever)**: the local DB is exported, compressed, and uploaded via create-only
+       (`createFresh`), and the sync ends. If `createFresh` finds the file already exists after all (a concurrent
+       creator, a stale "absent" reading), it returns `SyncConflictException` and the outer retry loop re-runs the
+       whole sync, which now takes the gz-present branch above instead of clobbering the other device's upload. See
+       "Compressed Upload / Legacy Fallback" below.
      - **Legacy present, compressed absent (one-time migration)**: the legacy file is downloaded and merged (step 3 below, uncompressed), then the local DB is exported, compressed, and *created* (not rev-guarded — there is no compressed revision yet) at `CLOUD_DB_GZ_PATH`, and the sync ends. The legacy file itself is left untouched.
-2. Stream `keryx.db.gz` from the cloud into a temp file, then decompress it — **skipped when the revision equals `sync_state.cloud_file_rev`**, i.e. this device has already merged exactly this file. Re-downloading it would only re-merge bytes that are by definition already in the local DB. (Step 1a's legacy download is not gzip-compressed and skips decompression.)
+2. Stream `keryx.db.gz` from the cloud into a temp file, then decompress it (capped at `MAX_SYNC_DB_SIZE_BYTES`,
+   1 GiB) — **skipped when the revision equals `sync_state.cloud_file_rev`**, i.e. this device has already merged
+   exactly this file. Re-downloading it would only re-merge bytes that are by definition already in the local DB.
+   (Step 1a's legacy download is not gzip-compressed and skips decompression.)
    - The decompressed file is checked against SQLite's 16-byte file header (`core/SqliteFile.kt`'s path-based `looksLikeSqliteFile`, which reads only those bytes) before the merger opens it — symmetric with the same check on the upload side (step 5). A payload that fails it (truncated download, an HTML error page, a 0-byte or otherwise non-SQLite file) is rejected immediately as `CloudDataIncompatibleException`, rather than reaching `DatabaseMerger` and failing deep inside the merge statements with an ambiguous `no such table: cloud.folders`. A `.gz` payload that isn't valid gzip at all (decompression itself throws) is rejected the same way, before ever reaching this check.
 3. **`DatabaseMerger.merge()` to merge** (see below). Immediately after, `ftsManager.indexMissing()` incrementally indexes new articles from merge (without wiping the live index), then `driver.notifyListeners(...)` (all tables touched by merge) is called. Because merge writes via `DatabaseMerger`'s dedicated raw JDBC connection without firing SQLDelight query notifications, `watchAll` flows (and re-search with updated index) must be re-triggered to reflect sync content in the UI without restart.
 4. Record `sync_state.cloud_file_rev`.
-5. `DatabaseSnapshot.exportForUpload()` creates a `VACUUM INTO` snapshot, **drops `articles_fts` and `sync_state` on the copy side** (live DB is unchanged), then gzip-compresses it (`platform/Gzip`). Stream the compressed file to `CLOUD_DB_GZ_PATH` specifying `rev` — **skipped when the snapshot's SHA-256 equals `sync_state.last_uploaded_snapshot_digest` and step 2 merged nothing**, i.e. the cloud already holds exactly these bytes. The digest is always computed on the *uncompressed* snapshot (see "Compressed Upload / Legacy Fallback" below for why).
-   - If `rev` mismatch (409 → `SyncConflictException`), retry from re-download (max 3 retries).
+5. `DatabaseSnapshot.exportForUpload()` creates a `VACUUM INTO` snapshot, **drops `articles_fts` and `sync_state` on the copy side** (live DB is unchanged), then gzip-compresses it (`platform/Gzip`). Stream the compressed file to `CLOUD_DB_GZ_PATH` specifying `rev` — **skipped when the snapshot's SHA-256 equals `sync_state.last_uploaded_snapshot_digest` and step 2 merged nothing**, i.e. the cloud already holds exactly these bytes (this skip still records `last_synced_at`, same as an actual upload). The digest is always computed on the *uncompressed* snapshot (see "Compressed Upload / Legacy Fallback" below for why).
+   - If `rev` mismatch (409 → `SyncConflictException`), retry from re-download. `SYNC_MAX_RETRY = 3` bounds the
+     total number of attempts (2 retries after the first).
 6. On success, record `last_synced_at`, the uploaded snapshot's (uncompressed) digest, and **the revision the upload itself produced** (`CloudStorage.upload`/`create` return it). It must come from the write's own response, never a follow-up `metadata()` call: a second request could observe another device's newer write, and storing that revision would make the next sync skip a download whose contents were never merged.
 
 Debouncing: After changes such as read/star, `SyncScheduler.scheduleSync()` batches sync after a fixed delay from the last operation.
@@ -43,9 +57,23 @@ Debouncing: After changes such as read/star, `SyncScheduler.scheduleSync()` batc
 
 Real-DB measurement (a 3,671-article, 21.4 MB snapshot, gzip level default via `java.util.zip.GZIPOutputStream`): **3.47 MB uploaded, an 84% reduction**, compressed in ~0.3s. `platform/Gzip` streams both directions file-to-file (matching the discipline in the "database is never held in memory" bullet above), so this does not reintroduce a whole-payload allocation.
 
-The upload-skip digest (step 5) is deliberately computed on the **uncompressed** snapshot, never the compressed bytes. `GZIPOutputStream` embeds a timestamp in its header, so compressing byte-identical input twice does not produce byte-identical output — hashing the compressed file would make the skip check fail to fire even when nothing changed. Hashing the content that is actually invariant (the plain snapshot) is what the skip check has always done (see "Skipping Unchanged Transfers" below); compression sits downstream of that decision, not inside it.
+The upload-skip digest (step 5) is deliberately computed on the **uncompressed** snapshot, never the compressed bytes. `GZIPOutputStream` embeds a timestamp in its header, so compressing byte-identical input twice does not produce byte-identical output — hashing the compressed file would make the skip check fail to fire even when nothing changed. Hashing the content that is actually invariant (the plain snapshot) is what makes the skip check work (see "Skipping Unchanged Transfers" below); compression sits downstream of that decision, not inside it.
 
-**This fallback is deliberately temporary**, scoped to the 0.x pre-release period. It is planned for removal once the app reaches its v1.0.0 release: at that point every device still running an older, `.gz`-unaware build is expected to have upgraded, and from v1.0.0 onward the cloud format is compressed-only — `CLOUD_DB_PATH`, the legacy-fallback branch in `syncLocked()`, and the corresponding tests are all deleted in that release, not deprecated in place. Until then, the fallback carries one accepted, narrow risk: a **one-way silent divergence** between a `.gz`-aware device and one still running a pre-compression build against the *same* cloud connection — the old build keeps reading and writing only `CLOUD_DB_PATH`, so once a `.gz`-aware device migrates a shared cloud, the old build's subsequent writes to the now-frozen legacy file are never seen by any `.gz`-aware device, and neither side's sync ever fails or reports it (both report success). This is accepted because it only matters for a user who is deliberately running two different app vintages against the same connected account simultaneously — an unusual, transitional-only scenario — and is documented rather than engineered around, since the whole mechanism it would need is retired at v1.0.0 anyway. It is not a risk between two devices both past this release, and not a risk for a single-device user at any point.
+**This fallback is deliberately temporary**, scoped to the 0.x pre-release period, and planned for removal at
+v1.0.0 — `CLOUD_DB_PATH`, the legacy-fallback branch in `syncLocked()`, and the corresponding tests are all deleted
+in that release, not deprecated in place, once every device is expected to have upgraded past a `.gz`-unaware build.
+
+Until then, it carries one accepted, narrow risk:
+
+- **A one-way silent divergence** can occur between a `.gz`-aware device and one still running a pre-compression
+  build against the *same* cloud connection. The old build keeps reading and writing only `CLOUD_DB_PATH`; once a
+  `.gz`-aware device migrates a shared cloud, the old build's subsequent writes to the now-frozen legacy file are
+  never seen by any `.gz`-aware device — and neither side's sync ever fails or reports it (both report success).
+- **This is accepted, not engineered around**, because it only matters for a user deliberately running two different
+  app vintages against the same connected account at once — an unusual, transitional-only scenario — and the whole
+  fallback mechanism it depends on is retired at v1.0.0 anyway.
+- It is **not** a risk between two devices both past this release, and **not** a risk for a single-device user at
+  any point.
 
 ### Skipping Unchanged Transfers
 
@@ -54,21 +82,35 @@ The background loop syncs on a timer, so the overwhelmingly common case is that 
 - **Download** is skipped on an unchanged revision (step 2). Because step 6 records the revision the upload produced, a device that is the only writer recognises its own uploads and never downloads them back.
 - **Upload** is skipped when the freshly built snapshot hashes to the same digest as the last uploaded one *and* no merge happened this cycle (step 5). A merge is always followed by an upload even if nothing else changed locally, because last-write-wins can leave the local DB holding rows the cloud lacks.
 
-Comparing the snapshot's own content is what makes skipping safe: a local edit cannot hash to the previous digest, so no change is ever silently dropped. The opposite misjudgement — treating identical data as changed — merely uploads, exactly as before. Dropping `sync_state` from the snapshot (step 5) is what makes the digest stable: `last_synced_at` is rewritten on every successful sync, so leaving it in would change the bytes every cycle and the check could never fire. That table is device-local by design (see [db-schema.md](db-schema.md)) and appears in neither `MergeSql` nor `DatabaseMerger`'s expected schema, so no receiving device ever read it out of the uploaded file.
+Comparing the snapshot's own content is what makes skipping safe: a local edit cannot hash to the previous digest, so no change is ever silently dropped. The opposite misjudgement — treating identical data as changed — merely uploads, exactly as before. Dropping `sync_state` from the snapshot (step 5) is what makes the digest stable: `last_synced_at` is rewritten on every successful sync, so leaving it in would change the bytes every cycle and the check could never fire. That table is device-local by design (see [db-schema.md](db-schema.md)) and appears in neither `MergeSql` nor `DatabaseMerger`'s expected schema, so no receiving device ever reads it out of the uploaded file.
 
 The digest is stored in `sync_state`, which is itself excluded from the upload — so it is per-device state, and a device that has never uploaded simply finds no digest and uploads.
 
 Both markers describe **one provider's file**, so `clearSyncFailureState()` clears them alongside the failure state when a connection is disconnected or switched (`SettingsViewModel.disconnect()`/`switchTo()`). Each provider's revision is an opaque string in its own format, so a stale one would in practice never match the next provider's — but a match would skip a download that was never merged, and that is not a risk worth leaving to chance. Reconnecting to the same provider re-establishes both on the first sync.
 
-The clear runs **under the same mutex `sync()` holds**, which is also why `updateAutoSyncGate()` / `emitErrorNotification()` are called inside that lock rather than after it: all four fields the clear touches (the revision, the digest, `lastSyncError`, `autoSyncSuspended`) are written by a sync too, so a sync already in flight would otherwise finish *after* the disconnect and restore the markers describing the provider that was just torn down — reintroducing exactly the skipped-download-never-merged case the clear exists to prevent. The cost is that disconnecting waits out an in-flight sync (bounded by the HTTP timeouts, and visible as the usual sync spinner), which is the correct ordering anyway.
+The clear runs **under the same mutex `sync()` holds**. This is why `updateAutoSyncGate()` / `emitErrorNotification()`
+are also called inside that lock rather than after it: all four fields the clear touches (the revision, the digest,
+`lastSyncError`, `autoSyncSuspended`) are written by a sync too. Without the shared lock, a sync already in flight
+could finish *after* the disconnect and restore the markers describing the provider that was just torn down —
+reintroducing exactly the skipped-download-never-merged case the clear exists to prevent. The cost is that
+disconnecting waits out an in-flight sync (bounded by the HTTP timeouts, and visible as the usual sync spinner),
+which is the correct ordering anyway.
 
 ### Automatic-Sync Suspension
 
-`SyncRepository.sync(trigger: SyncTrigger = MANUAL)` takes who is asking. `SyncTrigger.AUTOMATIC` — the debounced-write consumer, `runStartupTasks`, and `backgroundUpdateLoop` — is subject to a gate: while `autoSyncSuspended` (a `StateFlow<Boolean>`) is true, an `AUTOMATIC` call skips the download/merge/upload cycle entirely and returns `Result.Ok(Unit)` without spinning the sync spinner or touching the notification center, so a known-unusable cloud DB is not re-downloaded and re-merged on every debounced write. `SyncTrigger.MANUAL` (the default, used by every UI-triggered sync — the toolbar/menu "sync now", "Refresh All", the initial connect-time sync, `SettingsViewModel.connect()`) **always runs for real**, so a person who explicitly asked for a sync always gets a real attempt and the failure that explains why, never a silent no-op.
+`SyncRepository.sync(trigger: SyncTrigger = MANUAL)` takes who is asking. `SyncTrigger.AUTOMATIC` — the
+debounced-write consumer, `runStartupMaintenance` (shared by desktop's `StartupTasks.kt` and Android's startup
+path), and Android's `FeedRefreshWorker` — is subject to a gate: while `autoSyncSuspended` (a `StateFlow<Boolean>`)
+is true, an `AUTOMATIC` call skips the download/merge/upload cycle entirely and returns `Result.Ok(Unit)` without
+spinning the sync spinner or touching the notification center, so a known-unusable cloud DB is not re-downloaded
+and re-merged on every debounced write. `SyncTrigger.MANUAL` (the default, used by every UI-triggered sync — the
+toolbar/menu "sync now", "Refresh All", the initial connect-time sync in both `SettingsViewModel.connect()` and
+`SetupViewModel`) **always runs for real**, so a person who explicitly asked for a sync always gets a real attempt
+and the failure that explains why, never a silent no-op.
 
 The gate is set by `updateAutoSyncGate` (called from both `sync()` and `resetCloudData()`, right before `emitErrorNotification`): a result carrying `CloudDataIncompatibleException` sets it, any `Result.Ok` clears it. `SchemaVersionException` is deliberately excluded — it is equally permanent, but its fix is "update the app", and gating background syncing on it would hide the moment a newly-installed version starts working again. `scheduleSync()` also checks the gate before enqueueing a debounce signal, so a write burst does not even spin up the debounce wait while the cloud is known-unusable.
 
-`autoSyncSuspended` is deliberately **in-memory, not persisted**: a process restart is a free, honest retry (another device may have fixed the cloud data in the meantime), and the gate's entire purpose — not re-downloading/re-merging the same unusable file, and not re-raising the same notification, within one running process — needs nothing more durable than that. It clears on any successful sync (manual or automatic), on a successful `resetCloudData()`, and via `clearSyncFailureState()` (renamed from `clearLastSyncError()` — it now also clears the gate, alongside the mirrored failure-reason text), called when the connection that produced it is disconnected or switched (`SettingsViewModel.disconnect()`/`switchTo()`).
+`autoSyncSuspended` is deliberately **in-memory, not persisted**: a process restart is a free, honest retry (another device may have fixed the cloud data in the meantime), and the gate's entire purpose — not re-downloading/re-merging the same unusable file, and not re-raising the same notification, within one running process — needs nothing more durable than that. It clears on any successful sync (manual or automatic), on a successful `resetCloudData()`, and via `clearSyncFailureState()` — which also clears the mirrored failure-reason text — called when the connection that produced it is disconnected or switched (`SettingsViewModel.disconnect()`/`switchTo()`).
 
 Nothing about the reset/notification UI is affected by the gate: the notification-center `ResetCloudData` button and the settings screen's reset button are unconditional (not gated), and `lastSyncError` is left untouched by a skipped `AUTOMATIC` call, so the cloud-sync tab keeps showing why sync is currently broken.
 
@@ -84,10 +126,21 @@ Merge SQL (`MergeSql`) key points:
 - **Explicitly specify columns** (avoid `SELECT *` which can cause column count mismatch on schema differences).
 - feeds / tags / folders / global_settings: last-write-wins (including logical deletion). However, the `ON CONFLICT` in the feeds statement **does not handle user-edited fields (`folder_id` / `sort_order` / `custom_title` / `deleted_at`) at all** (delegated to dedicated statements below). This prevents these fields from being overwritten just because the content is newer.
   The `ON CONFLICT` only handles content fields (url/title/description/etag etc. + `updated_at`).
-  feeds are matched **`id`** so feed ids must be deterministically generated from `url` as **UUIDv5** at subscription time (`IdGenerator.feedId`), ensuring the same feed has the same id on all devices. With random ids, two devices independently subscribing to the same URL would get different ids and the URL collision guard would skip them, preventing convergence (and article ids derived from `feed_id` would also diverge). See `feeds` section in [db-schema.md](db-schema.md) for details.
-- articles: Read (`read_at`) / star (`starred_at`) are last-write-wins, body is OR merge, `search_text` is recalculated. Deletion is last-write-wins on `deleted_at` / `deleted_updated_at` (field-specific, like read/star), so a cache-cleanup soft-delete propagates instead of being resurrected from the cloud; a star newer than the deletion revives the article (`deleted_at` → NULL). `upsert` (feed refresh) never writes `deleted_at`, so a refresh cannot revive a deleted article.
-  Articles are matched **`id`** so article IDs must be deterministically generated from `(feed_id, guid)` as **UUIDv5** (`IdGenerator.articleId`), ensuring the same article has the same ID on all devices. With random IDs, two devices independently fetching the same article would get different IDs and the guid collision guard below would skip them, preventing read-state propagation (this was a fixed bug). See `articles` section in [db-schema.md](db-schema.md) for details.
-- feed_tags: last-write-wins. Only imported if the referenced feed / tag exists in main (FK protection).
+  feeds are matched **`id`** so feed ids must be deterministically generated from `url` as **UUIDv5** at subscription time (`IdGenerator.feedId`), ensuring the same feed has the same id on all devices — otherwise the URL collision guard below would skip independently-subscribed duplicates and they'd never converge (and article ids derived from `feed_id` would also diverge). See `feeds` section in [db-schema.md](db-schema.md) for details.
+- articles: Read (`read_at`) / star (`starred_at`) are last-write-wins, body is OR merge; `search_text` is not
+  recomputed — the merge selects whichever side's already-stored `search_text` matches the winning `content`/`summary`
+  (a `CASE` on which side's `content` is non-NULL). Deletion is last-write-wins on `deleted_at` / `deleted_updated_at`
+  (field-specific, like read/star), so a cache-cleanup soft-delete propagates instead of being resurrected from the
+  cloud; a star newer than the deletion revives the article (`deleted_at` → NULL). `upsert` (feed refresh) never
+  writes `deleted_at`, so a refresh cannot revive a deleted article.
+  Articles are matched **`id`** so article IDs must be deterministically generated from `(feed_id, guid)` as
+  **UUIDv5** (`IdGenerator.articleId`), ensuring the same article has the same ID on all devices — otherwise the
+  guid collision guard below would skip independently-fetched duplicates and read-state would never propagate. See
+  `articles` section in [db-schema.md](db-schema.md) for details.
+- feed_tags: last-write-wins. Only imported if the referenced feed exists in main (FK protection). The tag is
+  resolved more leniently than the feed: if the cloud's `tag_id` also exists in main, it's used as-is; otherwise the
+  tag is looked up **by name** against `main.tags` via a join through `cloud.tags` (so two devices that created the
+  same tag name independently, with different ids, still converge on one tag).
 - **feeds user-edited fields are merged independently via dedicated statements using field-specific timestamps** (same design as `read_at` / `starred_at` for articles, separated from row-level `updated_at` = content refresh update):
   `mergeFeedFolderId` (`folder_id` / `folder_updated_at`), `mergeFeedSortOrder` (`sort_order` / `sort_order_updated_at`), `mergeFeedCustomTitle` (`custom_title` / `custom_title_updated_at`), `mergeFeedDeletedAt` (`deleted_at` / `deleted_updated_at`). All use NULL-aware comparison (`c.<ts> IS NOT NULL AND (main is NULL or cloud is strictly newer)`), satisfying: propagation not blocked by refresh, no useless writes after convergence, local preserved if newer. `folder_id` is resolved by the dedicated statement (keep if folder exists in main, fall back to same-name resolution, else NULL) and is not included in feeds INSERT. `sort_order` / `custom_title` / `deleted_at` remain in feeds INSERT for initial value propagation (only excluded from `ON CONFLICT`).
 - `NOT EXISTS` / `EXISTS` guards skip colliding rows (same URL, different ID, etc.) so UNIQUE / FK violations do not fail the entire transaction.
@@ -108,11 +161,11 @@ The split between the two layers is: the desktop `actual` only reduces `resultCo
 | `SQLITE_ERROR` (`no such table`, `no such column`) | **Ambiguous** — this is what a foreign/legacy cloud schema looks like, but also what a broken *local* schema (an unrelated app bug) looks like. Resolved by calling `validateSchema` against the downloaded cloud file: `false` → `CloudDataIncompatibleException`; `true` or `null` (undetermined) → rethrown unchanged, since neither confidently pins the failure on the cloud. |
 | Anything else (`SQLITE_CANTOPEN`, `SQLITE_IOERR`, `SQLITE_FULL`, `SQLITE_BUSY`, `SQLITE_LOCKED`, `SQLITE_READONLY`, no `SQLiteException` found, …) | **Transient / app-side** — rethrown unchanged. |
 
-Because classification lives entirely inside `DatabaseMerger.merge` (which only wraps `mergeUnclassified`, not anything the caller does afterward), it structurally cannot see `SyncRepository.mergeCloud`'s post-commit steps — `ftsManager.indexMissing()` and `driver.notifyListeners(...)`, both of which run *after* the merge has already committed. A failure there (e.g. a dropped local `articles_fts` table, itself `SQLITE_ERROR`) reaches `SyncRepository`'s own catch-all unclassified and is reported as `CloudStorageException`, never `CloudDataIncompatibleException` — the merge already succeeded, so offering a destructive cloud-data reset for it would be wrong. (This was a real risk under the previous message-text-matching design in `SyncRepository`, whose `try` covered these same post-commit calls.)
+Because classification lives entirely inside `DatabaseMerger.merge` (which only wraps `mergeUnclassified`, not anything the caller does afterward), it structurally cannot see `SyncRepository.mergeCloud`'s post-commit steps — `ftsManager.indexMissing()` and `driver.notifyListeners(...)`, both of which run *after* the merge has already committed. A failure there (e.g. a dropped local `articles_fts` table, itself `SQLITE_ERROR`) reaches `SyncRepository`'s own catch-all unclassified and is reported as `CloudStorageException`, never `CloudDataIncompatibleException` — the merge already succeeded, so offering a destructive cloud-data reset for it would be wrong.
 
 A residual, accepted risk: with `PRAGMA foreign_keys=ON` active during the merge transaction, a pre-existing inconsistency on the *main* (local) side could in principle only be exposed once a merge `UPDATE` statement touches it, surfacing as `SQLITE_CONSTRAINT_FOREIGNKEY` and being misclassified as cloud-caused. In practice this is unlikely — e.g. `mergeFeedFolderId` always resolves `folder_id` to either an existing `main.folders` row or `NULL` — and even if misclassified, no data is lost: the reset path (below) archives rather than deletes. The extended SQLite error code is logged for post-hoc diagnosis.
 
-**Future work**: `PRAGMA quick_check`/`integrity_check` on the downloaded cloud DB is deliberately *not* run on every sync — it is O(DB size), and SQLite already surfaces a corrupt page as a distinct error code the moment the merge touches it (see "Merge failure classification" below), so a whole-file scan on every sync would buy nothing for the pages the merge doesn't visit. It also cannot detect the failure mode this feature targets (a cloud DB with duplicate/NULL data that violates *this app's* constraints but not the cloud DB's own, since `quick_check` only verifies a DB's internal consistency against its own schema). If ever added, it belongs as a second-stage check inside the merge-failure classification path (only once the ambiguous `SQLITE_ERROR` case has already ruled out a schema mismatch), not on the hot sync path.
+**Future work**: `PRAGMA quick_check`/`integrity_check` on the downloaded cloud DB is deliberately *not* run on every sync — it is O(DB size), and SQLite already surfaces a corrupt page as a distinct error code the moment the merge touches it (see "Merge Failure Classification" above), so a whole-file scan on every sync would buy nothing for the pages the merge doesn't visit. It also cannot detect the failure mode this feature targets (a cloud DB with duplicate/NULL data that violates *this app's* constraints but not the cloud DB's own, since `quick_check` only verifies a DB's internal consistency against its own schema). If ever added, it belongs as a second-stage check inside the merge-failure classification path (only once the ambiguous `SQLITE_ERROR` case has already ruled out a schema mismatch), not on the hot sync path.
 
 ## Schema Version
 
@@ -120,9 +173,34 @@ Managed via `PRAGMA user_version`. At merge time, `cloud.user_version` is checke
 Current `user_version` is 2 (`1.sqm` adds `articles.deleted_at` / `deleted_updated_at`).
 
 > [!NOTE]
-> **Local-direction migration for older cloud schema**: `DatabaseMerger.merge` checks the downloaded cloud DB's `user_version` before merging, and if older than local, runs `KeryxDatabase.Schema.migrate` on the temp file to bring it up to the local schema before merging. This prevents merge statements referencing newer columns from failing with `no such column` against an old cloud DB. With version 2, this uplift branch (`migrateCloudIfOlder`) now fires for a version-1 cloud DB, applying `1.sqm` to the downloaded copy so the article merge can reference `deleted_at`.
+> **Local-direction migration for older cloud schema**: `DatabaseMerger.merge` checks the downloaded cloud DB's
+> `user_version` before merging, and for a cloud version in `1 until localSchemaVersion`, runs
+> `KeryxDatabase.Schema.migrate` on the temp file to bring it up to the local schema before merging (e.g. a
+> version-1 cloud DB gets `1.sqm` applied so the article merge can reference `deleted_at`). This prevents merge
+> statements referencing newer columns from failing with `no such column` against an old cloud DB. A cloud
+> `user_version` of `0` (pre-dating any `.sqm` migration) is **not** covered by this uplift.
 
-`DatabaseMerger.validateSchema(dbPath, schemaVersion)` returns a **nullable** `Boolean` — `true`/`false` for a registered schema version's tables/columns, `null` when `schemaVersion` has no entry in `domain/MergeSchema.EXPECTED_SCHEMAS` (`commonMain` — the expectation table is plain data shared by every platform; only the `PRAGMA table_info` reflection that checks a file against it lives in each `actual`), or `null` when opening the database or inspecting its tables fails (e.g. a corrupt or unreadable file) — a failed inspection says nothing about whether the schema itself is valid, so it must not be conflated with a completed inspection that finds it invalid (`false`). This is deliberately fail-safe in the direction that matters: a version bump (`KeryxDatabase.Schema.version`) whose expected-schema entry was forgotten degrades `validateSchema` from `true` to `null` rather than `false`, and every caller treats `null` the same as `true` — an undetermined verdict must never be used to offer a destructive cloud-data reset for what is really just a missing registration. `SyncMergerTest.validateSchemaReturnsTrueForValidKeryxDb` pins the current schema version to `true`, so a forgotten registration fails that test immediately rather than silently degrading behavior in the field; `schemaVersion` is a plain `Long`, so this cannot be enforced by the compiler (no sealed/enum exhaustiveness check applies), making that test the actual guard.
+`DatabaseMerger.validateSchema(dbPath, schemaVersion)` returns a **nullable** `Boolean`:
+
+- `true`/`false` for a registered schema version's tables/columns.
+- `null` when `schemaVersion` has no entry in `domain/MergeSchema.EXPECTED_SCHEMAS` (`commonMain` —
+  the expectation table is plain data shared by every platform; only the `PRAGMA table_info`
+  reflection that checks a file against it lives in each `actual`), or `null` when opening the
+  database or inspecting its tables fails (e.g. a corrupt or unreadable file) — a failed inspection
+  says nothing about whether the schema itself is valid, so it must not be conflated with a
+  completed inspection that finds it invalid (`false`).
+
+**Why `null` is treated as `true`.** This is deliberately fail-safe in the direction that matters: a
+version bump (`KeryxDatabase.Schema.version`) whose expected-schema entry was forgotten degrades
+`validateSchema` from `true` to `null` rather than `false`, and every caller treats `null` the same
+as `true` — an undetermined verdict must never be used to offer a destructive cloud-data reset for
+what is really just a missing registration.
+
+**The test that actually guards this.** `SyncMergerTest.validateSchemaReturnsTrueForValidKeryxDb`
+pins the current schema version to `true`, so a forgotten registration fails that test immediately
+rather than silently degrading behavior in the field; `schemaVersion` is a plain `Long`, so this
+cannot be enforced by the compiler (no sealed/enum exhaustiveness check applies), making that test
+the actual guard.
 
 ## FTS5 Handling
 
@@ -132,7 +210,10 @@ Index maintenance is two-tier:
 
 - **Hot path (after feed refresh / sync merge)**: `FtsManager.indexMissing()` incrementally indexes only unindexed new articles (O(new rows), does not wipe index). Full rebuild (`'rebuild'`) is O(total indexed text) and heavy, and could reject running searches, so it is not used on hot paths. Indexes of existing articles with updated body text remain stale until the next rebuild (acceptable; they still match old tokens so searches do not regress to zero results).
 - **Healing full rebuild (`rebuildIndex()` = `'rebuild'`)**:
-  Executed only in the daily idle pass in `StartupTasks.kt` (`maybeRebuildFtsIndex`, gated by `local_settings.lastFtsRebuiltAt` 24h gate + `ActivityCenter` idle). Rebuilds stale existing rows (body text updated since incremental indexing). `'rebuild'` is a single atomic statement (readers see only before or after) + `busy_timeout` wait, so running searches do not regress to zero results either.
+  Executed only in the daily idle pass (`domain/StartupMaintenanceTasks.kt`'s `maybeRebuildFtsIndex`, shared by
+  desktop and Android, gated by `local_settings.lastFtsRebuiltAt` 24h gate + `ActivityCenter` idle). Rebuilds stale
+  existing rows (body text updated since incremental indexing). `'rebuild'` is a single atomic statement (readers
+  see only before or after) + `busy_timeout` wait, so running searches do not regress to zero results either.
 
 The two index writers are **mutually exclusive**: `FtsManager` serializes `indexMissing()` and
 `rebuildIndex()` behind an internal mutex (both are therefore `suspend`). The daily pass's idle gate is a
@@ -141,30 +222,87 @@ rebuild — always wasted work (a rebuild subsumes an incremental insert), and o
 outlasts `busy_timeout`, a raw `SQLiteException` no caller catches. Searches are deliberately **not**
 serialized: they still rely on `'rebuild'` being a single atomic statement plus the `busy_timeout` wait.
 
-On startup, `FtsManager.ensureIndexed()` (initial creation + unindexed row incremental insert) is called as
-before, from a `runBlocking` in `main.kt` — the window must not open on an absent index. The writer mutex
-is coroutine-based and, that early, can only be held briefly by an `.opml` import dispatched moments
-before, so blocking the main thread on it cannot deadlock.
+On desktop startup, `FtsManager.ensureIndexed()` (initial creation + unindexed row incremental insert) is called
+from a `runBlocking` in `main.kt` — the window must not open on an absent index. The writer mutex is
+coroutine-based and, that early, can only be held briefly by an `.opml` import dispatched moments before, so
+blocking the main thread on it cannot deadlock. Android instead calls the cheaper `ensureIndexedIfTableAbsent()`
+on every process start (see "On startup" in [db-schema.md](db-schema.md)'s `articles_fts` section for why).
 
 ## Cloud Authentication (OAuth PKCE + Offline Access)
 
-OAuth 2.0 authorization-code-with-PKCE orchestration (PKCE generation, authorization URL building, browser launch, state verification, code exchange) is consolidated in `OAuthConnectFlow` (desktop). Provider differences are only in **redirect reception method (`OAuthRedirectTransport`) and endpoints/scopes (`CloudAuthManager` implementation)**, so `DropboxAuthManager` / `GoogleDriveAuthManager` / `OneDriveAuthManager` implement `CloudAuthManager`. All request offline access (Dropbox: `token_access_type=offline`, Google: `access_type=offline` + `prompt=consent`, OneDrive: `offline_access` scope) to **obtain and save refresh tokens**.
+OAuth 2.0 authorization-code-with-PKCE orchestration (PKCE generation, authorization URL building, browser launch, state verification, code exchange) is consolidated in `OAuthConnectFlow` (`commonMain`, shared by desktop and Android). Provider differences are only in **redirect reception method (`OAuthRedirectTransport`) and endpoints/scopes (`CloudAuthManager` implementation)**, so `DropboxAuthManager` / `GoogleDriveAuthManager` / `OneDriveAuthManager` implement `CloudAuthManager`. All request offline access (Dropbox: `token_access_type=offline`, Google: `access_type=offline` + `prompt=consent`, OneDrive: `offline_access` scope) to **obtain and save refresh tokens**.
 
 Redirect reception method is chosen per provider (see the `.claude/rules/cloud-oauth-transport.md` design rule — prefer the custom URI scheme when both work):
 
-- **Dropbox / OneDrive — Custom URI scheme** (`CustomUriRedirectTransport`): Redirect URI is `keryx://oauth2/callback`, shared by both providers and disambiguated by `state`. The authorization URL is opened in the default browser, and the OS delivers the URL to the running instance (`main.kt` parses via `parseOAuthUri` and feeds a shared `MutableSharedFlow<OAuthCallbackParams>`). OneDrive uses the Microsoft Identity platform (`consumers` tenant) and Microsoft Graph; it is a **PKCE public client with no client secret** (unlike Google), and stores the sync DB in the hidden app folder (`/me/drive/special/approot`, scope `Files.ReadWrite.AppFolder`). **OneDrive sync supports personal Microsoft accounts only**, and the tenant segment must stay `consumers` rather than `common`: the app registration is a "Personal Microsoft accounts only" one (signInAudience = Consumer), which Microsoft rejects on `/common` ("the application must not be configured with 'Consumer' as the user audience") — and only *after* the user submits their address, so it surfaces as a generic authentication failure. Widening the registration to work/school accounts is not an option either, because `Files.ReadWrite.AppFolder` is a personal-account-only Graph permission: an organizational account would force a far broader scope such as `Files.ReadWrite(.All)` over the user's entire drive, against the privacy stance in `external-spec.md`. Microsoft has no standard token-revocation endpoint, so `OneDriveAuthManager.revoke` is a no-op and disconnect just clears the stored tokens. Optimistic concurrency uses the DriveItem `eTag` as the `rev`, sent back via `If-Match` (412 → conflict); `create` uses `@microsoft.graph.conflictBehavior=fail` (409 → conflict).
+- **Dropbox / OneDrive — Custom URI scheme** (`CustomUriRedirectTransport`):
+  - **Mechanism.** Redirect URI is `keryx://oauth2/callback`, shared by both providers and
+    disambiguated by `state`. The authorization URL is opened in the default browser, and the OS
+    delivers the URL to the running instance (`main.kt` parses via `parseOAuthUri` and feeds a
+    shared `MutableSharedFlow<OAuthCallbackParams>`).
+  - **OneDrive specifics.** Uses the Microsoft Identity platform (`consumers` tenant) and Microsoft
+    Graph; it is a **PKCE public client with no client secret** (unlike Google), and stores the sync
+    DB in the hidden app folder (`/me/drive/special/approot`, scope `Files.ReadWrite.AppFolder`).
+  - **Why OneDrive is personal-accounts-only.** The tenant segment must stay `consumers` rather than
+    `common`: the app registration is a "Personal Microsoft accounts only" one (signInAudience =
+    Consumer), which Microsoft rejects on `/common` ("the application must not be configured with
+    'Consumer' as the user audience") — and only *after* the user submits their address, so it
+    surfaces as a generic authentication failure. Widening the registration to work/school accounts
+    is not an option either, because `Files.ReadWrite.AppFolder` is a personal-account-only Graph
+    permission: an organizational account would force a far broader scope such as
+    `Files.ReadWrite(.All)` over the user's entire drive, against the privacy stance in
+    `external-spec.md`.
+  - **Revocation and concurrency.** Microsoft has no standard token-revocation endpoint, so
+    `OneDriveAuthManager.revoke` is a no-op and disconnect just clears the stored tokens. Optimistic
+    concurrency uses the DriveItem `eTag` as the `rev`, sent back via `If-Match` (412 → conflict);
+    `create` uses `@microsoft.graph.conflictBehavior=fail` (409 → conflict).
 - **Google Drive — Loopback** (`LoopbackRedirectTransport`): Google's "Desktop app" client does not allow arbitrary custom schemes; only `http://127.0.0.1:<port>` loopback is accepted. A temporary HTTP server (`com.sun.net.httpserver`; `jdk.httpserver` module is bundled) is started to receive the redirect and stopped after reception. No OS scheme registration is required (`keryx://` registration remains for Dropbox / OneDrive). **Unlike Dropbox, the client secret (`GOOGLE_DRIVE_CLIENT_SECRET`) is also sent for both token exchange and refresh** — despite using PKCE, Google's "Desktop app" OAuth client is not treated as a full public client like iOS/Android, and Google's token endpoint rejects token exchange / refresh without `client_secret` with `invalid_request: client_secret is missing` (regardless of PKCE). Scope is `drive.appdata` only (app-specific hidden folder in the user's Drive). During development, set the OAuth consent screen to "Testing" and register test users.
 
 How the scheme is registered with the OS differs per platform. macOS declares it in Info.plist (`CFBundleURLTypes`) at packaging time. Windows and Linux register it at startup, from `registerFileAssociations()`: the Windows path writes `HKEY_CURRENT_USER\Software\Classes\keryx` (the per-user hive, so no admin elevation is needed), the Linux path writes a user-level `.desktop` entry (`$XDG_DATA_HOME/applications/keryx-url-handler.desktop`, default `~/.local/share/applications/keryx-url-handler.desktop`) and a `$XDG_CONFIG_HOME/mimeapps.list` (default `~/.config/mimeapps.list`) association via `LinuxUriSchemeRegistrar`. The Linux entry's `Exec` line must end in `%u` — without it the desktop-entry spec does not hand the URI to the process, and the browser cannot resolve the scheme at all (an "unknown protocol" error). On both platforms the OS then launches the app with the URL as a command-line argument, which `main.kt` forwards to the running instance via single-instance.
 
-**Android** registers the same `keryx://oauth2/callback` scheme declaratively, via an `intent-filter` (`VIEW`/`DEFAULT`/`BROWSABLE`, `scheme="keryx"` `host="oauth2"`) on `MainActivity` in `AndroidManifest.xml` — no runtime registration step, unlike Windows/Linux. `MainActivity.onCreate`/`onNewIntent` forward the redirect's data URI to `dispatchOAuthCallbackIfPresent`, which classifies it via the same `classifyLaunchArg` (commonMain) / `parseOAuthUri` (jvmCommonMain) code desktop's `main.kt` uses, then emits into the same-shaped `MutableSharedFlow<OAuthCallbackParams>` (a separate instance registered in Android's own `platformModule`). `launchMode="singleTask"` means an already-running instance receives the redirect through `onNewIntent` rather than a fresh `onCreate`; the Activity clears the intent's data after a successful dispatch so a later configuration-change recreation (which replays the same `Intent` into `onCreate`) doesn't resubmit it. Unlike desktop, a custom URI scheme's `intent-filter` is not something Android lets an app claim exclusively — another app could in principle declare the same scheme — so PKCE (already required for every provider here) is what actually protects the code exchange: a redirect intercepted by a different app is useless without the matching `code_verifier`.
+**Android** registers the same `keryx://oauth2/callback` scheme declaratively:
+
+- **Registration.** Via an `intent-filter` (`VIEW`/`DEFAULT`/`BROWSABLE`, `scheme="keryx"`
+  `host="oauth2"`) on `MainActivity` in `AndroidManifest.xml` — no runtime registration step,
+  unlike Windows/Linux.
+- **Dispatch.** `MainActivity.onCreate`/`onNewIntent` forward the redirect's data URI to
+  `dispatchOAuthCallbackIfPresent`, which classifies it via the same `classifyLaunchArg`
+  (commonMain) / `parseOAuthUri` (jvmCommonMain) code desktop's `main.kt` uses, then emits into the
+  same-shaped `MutableSharedFlow<OAuthCallbackParams>` (a separate instance registered in Android's
+  own `platformModule`).
+- **Configuration changes.** `launchMode="singleTask"` means an already-running instance receives
+  the redirect through `onNewIntent` rather than a fresh `onCreate`; the Activity clears the
+  intent's data after a successful dispatch so a later configuration-change recreation (which
+  replays the same `Intent` into `onCreate`) doesn't resubmit it.
+- **Why this is still secure without exclusive scheme ownership.** Unlike desktop, a custom URI
+  scheme's `intent-filter` is not something Android lets an app claim exclusively — another app
+  could in principle declare the same scheme — so PKCE (already required for every provider here)
+  is what actually protects the code exchange: a redirect intercepted by a different app is useless
+  without the matching `code_verifier`.
 
 > [!NOTE]
 > **Custom-URI providers on every desktop OS**: `./gradlew :composeApp:run` cannot complete Dropbox / OneDrive linking. On macOS, LaunchServices routes `keryx://` to the packaged `Keryx.app`, so the `gradlew run` instance never receives the redirect. On Windows and Linux, the startup registration deliberately no-ops unless the process is a packaged launcher (`packagedLauncherPath()`), because registering the JDK's own `java` binary as the `keryx://` handler would outlive the Gradle run. To test/perform linking, build the app with `./gradlew :composeApp:createDistributable` and launch it (see [setup.md](setup.md) for details). Google Drive uses loopback reception, so this restriction does not apply and `gradlew run` can complete linking. Android has no such restriction either way — the manifest-declared `intent-filter` works the same whether the APK was built via `installGithubDebug` or a release pipeline.
 
 ### Google Drive on Android (not supported)
 
-Desktop's Google Drive configuration — a "Desktop app" OAuth client using loopback redirect plus a `client_secret` sent on every token exchange/refresh — cannot be reused on Android. Google's current documentation is explicit that this is a **Google policy decision for its own OAuth client types**, not a general Android restriction (Dropbox and OneDrive both use — and, for Dropbox, officially recommend — a plain custom-URI-scheme redirect on Android with PKCE): a custom-URI-scheme redirect is not supported for Google's Android/Chrome-app client type (cited reason: app-impersonation risk), and the loopback redirect is separately deprecated for that same client type. The platform's own recommended replacement for accessing Google user data from Android — Play services' `AuthorizationClient` — would both add a Play-services runtime dependency (in tension with this app's local-first, no-account positioning) and still require a server-side `client_secret` exchange to obtain a refresh token (`AuthorizationResult.getServerAuthCode()`'s code is meant to be redeemed by a backend, not embedded in an APK). Neither tradeoff is a small addition, so Google Drive support on Android is deferred to its own future investigation rather than folded into the phase that added Dropbox/OneDrive; `core/CloudStorageAvailability.android.kt` fixes `googleDriveAvailable = false` and its own KDoc links back here.
+Desktop's Google Drive configuration — a "Desktop app" OAuth client using loopback redirect plus a
+`client_secret` sent on every token exchange/refresh — cannot be reused on Android.
+
+- **This is a Google policy decision, not a general Android restriction.** Google's current
+  documentation is explicit about this (Dropbox and OneDrive both use — and, for Dropbox,
+  officially recommend — a plain custom-URI-scheme redirect on Android with PKCE): a
+  custom-URI-scheme redirect is not supported for Google's Android/Chrome-app client type (cited
+  reason: app-impersonation risk), and the loopback redirect is separately deprecated for that same
+  client type.
+- **The platform's own recommended replacement doesn't fit either.** Play services'
+  `AuthorizationClient` — Google's own recommended path for accessing Google user data from Android
+  — would both add a Play-services runtime dependency (in tension with this app's local-first,
+  no-account positioning) and still require a server-side `client_secret` exchange to obtain a
+  refresh token (`AuthorizationResult.getServerAuthCode()`'s code is meant to be redeemed by a
+  backend, not embedded in an APK).
+- **Current state.** Neither tradeoff is a small addition, so Google Drive support on Android is
+  deferred to its own future investigation rather than folded into the phase that added
+  Dropbox/OneDrive; `core/CloudStorageAvailability.android.kt` fixes `googleDriveAvailable = false`
+  and its own KDoc links back here.
 
 #### Future Consideration (Google Drive on Android)
 
@@ -178,18 +316,68 @@ Until Google offers a backend-server-free OAuth flow for native Android apps (e.
 
 ### Token Storage
 
-**Per-provider separate `TokenStorage` instances** are constructed in DI (`platformModule`) (do not share a single instance across providers; `SecurityCliTokenStorage`/`KeystoreTokenStorage` cache results per instance, so sharing would break). Keychain account name and fallback file name are derived from `CloudStorageType.id` (Dropbox is `"dropbox"`, matching the legacy hardcoded value so no existing token migration needed. Google Drive is `"google_drive"`, OneDrive is `"onedrive"`). `KEYCHAIN_SERVICE` is shared.
+**Per-provider separate `TokenStorage` instances** are constructed in DI (`platformModule`) (do not share a single instance across providers; `SecurityCliTokenStorage`/`KeystoreTokenStorage` cache results per instance, so sharing would break). Keychain account name and fallback file name are derived from `CloudStorageType.id` (`"dropbox"`, `"google_drive"`, `"onedrive"`). `KEYCHAIN_SERVICE` is shared.
 
 - Windows/Linux: OS secure storage (java-keyring — Credential Manager / Secret Service, `KeyringTokenStorage`).
 - macOS: Delegated to Apple-signed `/usr/bin/security` CLI (`SecurityCliTokenStorage`). java-keyring fails to write to Keychain from a shared JVM, so macOS uses `security` instead.
 - Linux, inside the Snap package specifically: `LibSecretTokenStorage` instead of `KeyringTokenStorage`, gated on `platform.isSnap`. It calls libsecret directly via JNA, which detects the sandbox and routes through the Secret portal (`org.freedesktop.portal.Secret`) instead of raw Secret Service, encrypting the token JSON in a local file with a per-app master secret obtained from that portal — the snap declares no `password-manager-service` plug at all (Snapcraft reviewers decline auto-connect for that interface on principle, and nothing here would use a manually-connected one anyway, since `KeyringTokenStorage` is unreachable from inside the snap by design). See `docs/build.md`'s "Linux Snap package" for the full reasoning; not applied outside the snap, so existing deb/rpm users' Secret Service items are unaffected.
-- On failure for any of the above, fallback to a file in the data directory `.{CloudStorageType.id}_tokens.json` (0600. Dropbox is `.dropbox_tokens.json`). DI selects between the three using `isMacOs`/`isSnap` (`providerTokenStorage` in `PlatformModule.desktop.kt`). `TokenStorage.save()` reports where the tokens actually ended up — `TokenSaveOutcome.SECURE` (the secure store, or Android's Keystore-encrypted file), `PLAINTEXT_FILE` (readable in the fallback file — either because the secure store could not be reached, or because a secure write succeeded but a stale fallback copy could not be deleted afterwards), or `NOT_PERSISTED` (neither accepted the write, so the tokens live only until the app exits and the account has to be connected again afterwards). `CloudSession` raises a coalesced `WARNING` notification (with a `ShowInfoDialog` cause-and-fix action) for each of the two degraded outcomes, with its own message for each, on the initial connect and on a background token refresh alike. The fallback is still allowed (it is the documented degrade-gracefully path, see `SECURITY.md`); it just must not be silent — and a save that persisted nothing must not be reported as one that landed in a file. On a successful secure write, every desktop secure-store backend (`KeyringTokenStorage`/`SecurityCliTokenStorage`/`LibSecretTokenStorage` — the shared composition logic lives in `SecretStoreTokenStorage`) also clears a stale fallback file left over from an earlier degraded save — the same clear-on-success behavior `KeystoreTokenStorage` uses on Android (see below), so a plaintext copy doesn't keep sitting on disk once secure storage starts working again; a fallback clear that does not confirm removal downgrades the outcome to `PLAINTEXT_FILE` rather than falsely reporting `SECURE`.
+- **Fallback file and outcome reporting**:
+  - On failure for any of the above, fallback to a file in the data directory
+    `.{CloudStorageType.id}_tokens.json` (0600. Dropbox is `.dropbox_tokens.json`). DI selects
+    between the three using `isMacOs`/`isSnap` (`providerTokenStorage` in
+    `PlatformModule.desktop.kt`).
+  - `TokenStorage.save()` reports where the tokens actually ended up — `TokenSaveOutcome.SECURE`
+    (the secure store, or Android's Keystore-encrypted file), `PLAINTEXT_FILE` (readable in the
+    fallback file — either because the secure store could not be reached, or because a secure
+    write succeeded but a stale fallback copy could not be deleted afterwards), or `NOT_PERSISTED`
+    (neither accepted the write, so the tokens live only until the app exits and the account has to
+    be connected again afterwards).
+  - `CloudSession` raises a coalesced `WARNING` notification (with a `ShowInfoDialog` cause-and-fix
+    action) for each of the two degraded outcomes, with its own message for each, on the initial
+    connect and on a background token refresh alike. The fallback is still allowed (it is the
+    documented degrade-gracefully path, see `SECURITY.md`); it just must not be silent — and a save
+    that persisted nothing must not be reported as one that landed in a file.
+  - **Clear-on-success.** On a successful secure write, every desktop secure-store backend also
+    clears a stale fallback file left over from an earlier degraded save, so a plaintext copy
+    doesn't keep sitting on disk once secure storage starts working again — the same clear-on-success
+    behavior `KeystoreTokenStorage` uses on Android (see below). `KeyringTokenStorage`/`LibSecretTokenStorage`
+    share this composition logic via `SecretStoreTokenStorage`; `SecurityCliTokenStorage`
+    re-implements the same outcome composition inline instead of inheriting it. A fallback clear
+    that does not confirm removal downgrades the outcome to `PLAINTEXT_FILE` rather than falsely
+    reporting `SECURE`.
 - macOS performs a **read-back verification** after writing (explicitly specifying login keychain), and falls back to file if persistence cannot be confirmed. **Write persistence is session-dependent**: packaged version (GUI login session) persists to login keychain, but `gradlew run` (detached session under Gradle daemon via launchd) may not persist even if `security add` returns success, so file is used. **Read is possible from either session** (once linked via packaged version, `gradlew run` can also reuse the connection).
-- **Android**: `KeystoreTokenStorage` encrypts the token JSON with an AES-256/GCM key held in the Android Keystore (one key alias per provider, derived from `CloudStorageType.id`; the key material itself never leaves the Keystore/TEE where the device supports it) and writes `IV || ciphertext` to `.{CloudStorageType.id}_tokens.enc` under `Context.filesDir`. The key is created with `setUserAuthenticationRequired(false)` — the periodic `WorkManager` background sync must be able to decrypt tokens with the device locked, unlike a typical per-transaction secret. A decryption failure (Keystore reset, a device/OS restore that cannot carry hardware-backed keys) is treated exactly like "nothing saved" rather than surfaced as a crash, and the unreadable file is deleted so it doesn't linger; a device with no usable Keystore at all falls back to the same plaintext `FileTokenStorage` desktop uses as its last resort. A successful encrypted save also clears that fallback file, and takes its `SECURE`/`PLAINTEXT_FILE` answer from what the clear itself reports: `TokenStorage.clear()` returns `TokenClearOutcome.CLEARED` or `DATA_MAY_REMAIN`, and `FileTokenStorage` decides that from whether the file is still on disk after the delete attempt (a `File.delete()` that returned false leaves it there). So a plaintext copy that survives is reported as `PLAINTEXT_FILE` rather than `SECURE`, and gets warned about instead of sitting readable on disk unnoticed. **The check has to be file existence, not a follow-up `fallback.load()`**: `FileTokenStorage.load()` reports a file whose JSON no longer decodes as "nothing stored", while the refresh token inside it stays perfectly readable — so inferring the cleanup from `load()` claimed `SECURE` for exactly the case that most needed the warning. Both the `.enc` and the plaintext-fallback `.json` files are excluded from Android's auto backup/device-transfer (`AndroidManifest.xml`'s `dataExtractionRules`/`fullBackupContent`) — a long-lived OAuth refresh token should never ride along in a backup, and the Keystore-encrypted file couldn't be usefully restored to a different device anyway.
+- **Android**:
+  - **Encryption.** `KeystoreTokenStorage` encrypts the token JSON with an AES-256/GCM key held in
+    the Android Keystore (one key alias per provider, derived from `CloudStorageType.id`; the key
+    material itself never leaves the Keystore/TEE where the device supports it) and writes
+    `IV || ciphertext` to `.{CloudStorageType.id}_tokens.enc` under `Context.filesDir`. The key is
+    created with `setUserAuthenticationRequired(false)` — the periodic `WorkManager` background
+    sync must be able to decrypt tokens with the device locked, unlike a typical per-transaction
+    secret.
+  - **Decryption failure and fallback.** Treated exactly like "nothing saved" rather than surfaced
+    as a crash (Keystore reset, a device/OS restore that cannot carry hardware-backed keys), and
+    the unreadable file is deleted so it doesn't linger; a device with no usable Keystore at all
+    falls back to the same plaintext `FileTokenStorage` desktop uses as its last resort.
+  - **Clear-on-success.** A successful encrypted save also clears that fallback file, and takes its
+    `SECURE`/`PLAINTEXT_FILE` answer from what the clear itself reports: `TokenStorage.clear()`
+    returns `TokenClearOutcome.CLEARED` or `DATA_MAY_REMAIN`, and `FileTokenStorage` decides that
+    from whether the file is still on disk after the delete attempt (a `File.delete()` that
+    returned false leaves it there). So a plaintext copy that survives is reported as
+    `PLAINTEXT_FILE` rather than `SECURE`, and gets warned about instead of sitting readable on
+    disk unnoticed.
+  - **Why the check is file existence, not `fallback.load()`.** `FileTokenStorage.load()` reports a
+    file whose JSON no longer decodes as "nothing stored", while the refresh token inside it stays
+    perfectly readable — so inferring the cleanup from `load()` claimed `SECURE` for exactly the
+    case that most needed the warning.
+  - **Backup exclusion.** Both the `.enc` and the plaintext-fallback `.json` files are excluded
+    from Android's auto backup/device-transfer (`AndroidManifest.xml`'s
+    `dataExtractionRules`/`fullBackupContent`) — a long-lived OAuth refresh token should never ride
+    along in a backup, and the Keystore-encrypted file couldn't be usefully restored to a different
+    device anyway.
 
 ### Future Work (not yet supported)
 
-- **file → Keychain migration heal**: If `.dropbox_tokens.json` exists but Keychain is empty, `SecurityCliTokenStorage.load()` writes the file value back to Keychain and **deletes the file only if read-back verification succeeds** (on failure, keeps the file to prevent data loss). Phase 2.5 verification logic can be reused.
+- **file → Keychain migration heal**: If `.dropbox_tokens.json` exists but Keychain is empty, `SecurityCliTokenStorage.load()` would write the file value back to Keychain and **delete the file only if read-back verification succeeds** (on failure, keep the file to prevent data loss). Not yet implemented — `load()` currently only falls back to the file, without writing back.
 
 ## Sync Target Article Range
 

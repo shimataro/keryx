@@ -25,18 +25,28 @@ composeApp/src/
     domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, StartupMaintenanceTasks (refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
     di/           AppModule (+ expect platformModule)
     platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor (all expect)
-    ui/           theme/, navigation/, setup/, home/ (3-pane + search + notification center), article/, settings/, i18n/
+    ui/           theme/, navigation/, setup/, home/ (adaptive 1/2/3-pane layout + search + notification
+                  center), article/, settings/, i18n/, common/ (KeryxTextField/KeryxDialogs/KeryxIcons/
+                  FlatButtons/FlatToggles/SegmentedControl/KeryxSearchBar/… — expect/actual-split, plain-M3-
+                  feel components shared by every pane), menu/ (MenuController)
     LaunchArg.kt  Classifies a raw launch argument (`keryx://` URI vs `.opml` path) — platform-independent, package root
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq (7 tables)
-  commonMain/composeResources/  values/strings.xml, drawable/ (icons are Android Vector Drawable XML,
+  commonMain/composeResources/  values/strings.xml (Japanese, default/fallback), values-en/strings.xml
+    (English, same key set), drawable/ (icons are Android Vector Drawable XML,
     not SVG — Compose Multiplatform's SVG decoder is desktop/iOS-only and crashes on Android at
     runtime; VectorDrawable XML is the one image format `painterResource` renders on every target)
   jvmCommonMain/kotlin/…/  actuals shared by desktop and Android, needing no platform API either
-    target lacks: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage, AppInfo,
-    CloudStorageAvailability (the last two just read the shared generated BuildConfig),
-    FileSystemExtras, ZipExtractor (in-app update — see "In-App Update" below)
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of each expect not covered by jvmCommonMain (DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule, InstallLocation) + LoopbackRedirectTransport, OAuthUriParser, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (Keyring/File/SecurityCliTokenStorage/LibSecretTokenStorage, sharing outcome-composition logic via SecretStoreTokenStorage), DesktopOs (isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux, plus text-antialiasing hint normalization — missing hint, VALUE_TEXT_ANTIALIAS_DEFAULT, and VALUE_TEXT_ANTIALIAS_OFF are resolved to greyscale antialiasing so Swing surfaces do not look jagged next to the Compose-rendered UI)
-    tray/      KeryxTray (platform branch), MacTray, LinuxTray + the StatusNotifierItem/dbusmenu D-Bus objects
+    target lacks: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage,
+    AppInfo (just reads the shared generated BuildConfig), FileSystemExtras, ZipExtractor (in-app
+    update — see "In-App Update" below), di/CloudPlatformModule.kt (the shared cloud-provider DI
+    wiring both platformModules call — cloudSessionSingles, dropboxProvider, oneDriveProvider),
+    domain/OAuthUriParser.kt (parseOAuthUri, shared by desktop's and Android's `keryx://` redirect
+    handling)
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of each expect not covered by jvmCommonMain (DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule, InstallLocation) + LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage — the first and third inherit shared outcome-composition logic from commonMain's SecretStoreTokenStorage; SecurityCliTokenStorage re-implements it inline), DesktopOs (isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux, plus text-antialiasing hint normalization — missing hint, VALUE_TEXT_ANTIALIAS_DEFAULT, and VALUE_TEXT_ANTIALIAS_OFF are resolved to greyscale antialiasing so Swing surfaces do not look jagged next to the Compose-rendered UI)
+    tray/      KeryxTray (platform branch), MacTray, LinuxTray, WindowsTray + the
+               StatusNotifierItem/dbusmenu D-Bus objects
+    appmenu/   KDE Global Menu / D-Bus application-menu integration (AppMenuBarHost, AppMenuConnection,
+               AppMenuDBusMenu, AppMenuRegistrar) — see external-spec.md §9
     platform/update/  DesktopUpdateInstaller, UpdateScriptWriter (pure self-replace/msiexec script templates), ProcessLauncher/RealProcessLauncher (the detached-launch seam a test fakes), ArchiveExtractor (DittoArchiveExtractor on macOS, where the signed bundle seals its own symlinks; InProcessArchiveExtractor in process elsewhere), CodeSigningVerifier/RealCodeSigningVerifier (the `codesign --verify` seam)
   androidMain/kotlin/…/  actual implementations not covered by jvmCommonMain: DatabaseDriverFactory
     (bundled SQLite, see below), DatabaseFile (`databaseFilePath()` — `Context.getDatabasePath`,
@@ -59,9 +69,10 @@ composeApp/src/
     (`platformShapes` = M3's own default `Shapes()`,
     `ProvidePlatformInteraction` a no-op — leaving `LocalIndication`/`LocalRippleConfiguration` at
     their M3 defaults is what gives every `clickable` and M3 component a real ripple; see "UI
-    Direction" in external-spec.md), `ListRowChrome.android.kt`'s `listRowSurface` (a 12dp inset
-    for both `ListRowKind`s — Android's own `listRowHorizontalMargin()`, M3's
-    `NavigationDrawerItemDefaults.ItemPadding` — clipped to `listRowShape(kind)`: `ListItem` rows
+    Direction" in external-spec.md), `ui/home/ListRowChrome.kt`'s `listRowSurface` (a single commonMain
+    function, not an `expect`/`actual` — a 12dp inset for both `ListRowKind`s via
+    `listRowHorizontalMargin()` (`isTouchPrimary`-gated: 12dp touch / 8dp mouse, matching M3's own
+    `NavigationDrawerItemDefaults.ItemPadding` on the touch side) — clipped to `listRowShape(kind)`: `ListItem` rows
     always a large rounded rectangle, `NavItem` rows the same shape too while rendered as
     `PaneLayout.Triple`'s permanent sidebar pane (beside the article list, so the two read as one
     design) or a `NavigationDrawerItem`-style pill while actually rendered as feed-list
@@ -103,8 +114,8 @@ composeApp/src/
     the adaptive-layout phase — see its
     KDoc for the tap-vs-long-press disambiguation), BackHandler (delegates to
     `androidx.activity.compose.BackHandler`), PlatformOs (isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android has no menu bar or system tray,
-    so `FeedListToolbarRow`/`GeneralTab` grow their own Settings/
-    About entry points instead), SelfUpdateCheck (installer-package-based, see "Background Update"),
+    so `FeedListPane`'s own settings footer row (below the scrolling folder/tag/feed list) is Android's
+    Settings entry point, and `GeneralTab` carries About instead), SelfUpdateCheck (installer-package-based, see "Background Update"),
     NotificationPermission (wraps `rememberLauncherForActivityResult` for `POST_NOTIFICATIONS`) +
     AndroidStartupTasks.kt (`runAndroidStartupTasks`, called from `:androidApp`'s `MainActivity`) +
     background/ (`FeedRefreshWorker` + `BackgroundRefresh.kt`'s `startBackgroundRefresh`,
@@ -129,7 +140,8 @@ The package root is `works.merc.keryx.app` (reverse DNS of `keryx.merc.works`).
 A separate root-level module, `androidApp` (`com.android.application`, not part of the Kotlin
 Multiplatform source-set layout above), holds only `AndroidManifest.xml`, `KeryxApplication`
 (process-wide setup: `AndroidAppContext.init`, `startKoin`, `configureImageLoader`, an
-`ensureIndexed()` FTS backfill, `startBackgroundRefresh`), and `MainActivity`
+an `ensureIndexedIfTableAbsent()` FTS backfill (the cheaper, every-process-start variant — see
+db-schema.md's `articles_fts` section), `startBackgroundRefresh`), and `MainActivity`
 (`setContent { App() }`, then `runAndroidStartupTasks`). It exists because AGP
 9's `com.android.application` plugin cannot be applied to the same module as the Kotlin Multiplatform
 plugin — `composeApp` is instead an Android library via `com.android.kotlin.multiplatform.library`,
@@ -164,7 +176,21 @@ than the device's own SQLite: AOSP's SQLite build omits FTS5 entirely, so `artic
 ### FtsManager / FtsSearch
 
 Manages `articles_fts` (FTS5 trigram, `content='articles'`) via raw SQL. Not included in the SQLDelight schema. `FtsSearch.search()` splits terms by length: 3+-character terms run through `articles_fts MATCH` (rank-ordered), while the trigram tokenizer can't index anything shorter, so a 2-character term is applied as a `LIKE` filter instead — an extra AND clause on the MATCH-narrowed rows when at least one long term is present, or (when every term is that short) a standalone `LIKE` scan over `articles` ordered by `published_at DESC` and capped at `SEARCH_FALLBACK_RESULT_LIMIT` (no FTS rank exists to sort by). Highlight markup for both paths is produced in Kotlin (`markTerms`), not via FTS5's `highlight()`, so short LIKE-matched terms get marked consistently with FTS-matched ones. See the `articles_fts` section in [db-schema.md](db-schema.md) for the exact term-length thresholds.
-**Never DROP the live DB's `articles_fts`** (excluded from upload via `VACUUM INTO` snapshot copy (`DatabaseSnapshot`), dropping it on the copy side, so concurrent searches never hit `no such table`). Hot paths (feed refresh, sync merge) incrementally index new rows via `FtsManager.indexMissing()` — never a full `'rebuild'`, which is O(all indexed text) and would block/zero-out concurrent searches. The whole index is only rebuilt in the rare healing pass: a once-per-24h idle pass (`maybeRebuildFtsIndex` in commonMain's `domain/StartupMaintenanceTasks.kt`, gated on `lastFtsRebuiltAt` + `ActivityCenter` idle, called from desktop's `StartupTasks.kt`), which re-indexes content that incremental indexing left stale. On startup, `FtsManager.ensureIndexed()` creates the table on first run and backfills any missing rows. `busy_timeout` (set in `DatabaseDriverFactory`) lets a search wait out, rather than error on, the brief write lock of an incremental insert or a rebuild.
+- **Never DROP the live DB's `articles_fts`** — excluded from upload via `VACUUM INTO` snapshot copy
+  (`DatabaseSnapshot`), dropping it on the copy side, so concurrent searches never hit
+  `no such table`.
+- **Hot paths** (feed refresh, sync merge) incrementally index new rows via
+  `FtsManager.indexMissing()` — never a full `'rebuild'`, which is O(all indexed text) and would
+  block/zero-out concurrent searches.
+- **Healing.** The whole index is only rebuilt in the rare healing pass: a once-per-24h idle pass
+  (`maybeRebuildFtsIndex` in commonMain's `domain/StartupMaintenanceTasks.kt`, gated on
+  `lastFtsRebuiltAt` + `ActivityCenter` idle, called from both desktop's `StartupTasks.kt` and
+  Android's startup path), which re-indexes content that incremental indexing left stale.
+- **Startup.** On desktop startup, `FtsManager.ensureIndexed()` creates the table on first run and
+  backfills any missing rows; Android calls the cheaper `ensureIndexedIfTableAbsent()` instead on
+  every process start (see db-schema.md's `articles_fts` section for why).
+- **Concurrency.** `busy_timeout` (set in `DatabaseDriverFactory`) lets a search wait out, rather
+  than error on, the brief write lock of an incremental insert or a rebuild.
 
 ### DatabaseMerger (expect / actual) — Key to Sync Merge
 
@@ -255,7 +281,11 @@ presentation) and `SECURITY.md` for the integrity-verification trust model.
 
 ### Provider / DI (Koin)
 
-`appModule` (`commonMain`) registers repositories, services, and ViewModels. `platformModule` (`desktop`) registers HttpClient, TokenStorage, CloudSession, and CloudConnectFlow. ViewModels are registered as app-scope `single` for a single-window desktop app and obtained via `koinInject()`.
+`appModule` (`commonMain`) registers repositories, services, and ViewModels — used by both desktop and Android.
+Each platform has its own `platformModule`: desktop's registers HttpClient, TokenStorage, CloudSession,
+CloudConnectFlow, `OsNotificationSink`, and `UpdateInstaller`; Android's registers the Android-specific
+equivalents (OkHttp-backed HttpClient, `KeystoreTokenStorage`, a Dropbox/OneDrive-only `CloudSession`, etc. — see
+"Android" sections above). ViewModels are registered as app-scope `single` and obtained via `koinInject()`.
 
 ### Article Reader (native WebView)
 
@@ -283,10 +313,11 @@ app-wide freeze on click).
 
 **Android's reader (`ui/home/ArticleDetailPane.kt`, shared `commonMain` composable) also grows
 swipe-to-navigate at a narrow layout** (`ui/home/ArticleSwipeNav.kt`) — a horizontal drag on the
-reader moves to the next/previous article, gated on `isTouchPrimary && onNavigateUp != null &&
-article != null` (the same nullable-callback narrow-layout signal `HomePaneLayout.kt` already uses
-elsewhere, see "Home's adaptive pane layout" below), so it is inert at `PaneLayout.Triple` and on
-desktop. Android's `WebView` (embedded via `AndroidView`) is an ordinary in-tree view, but it still
+reader moves to the next/previous article, gated on `isTouchPrimary && swipeNavigation != null &&
+article != null`. The signal is `swipeNavigation`, not `onNavigateUp` — at `PaneLayout.Dual` the reader has no
+back control (`onNavigateUp` is `null`) but swipe must still work, so `swipeNavigation` is a separate,
+still-non-null signal there (see "Home's adaptive pane layout" below); it is inert only at `PaneLayout.Triple`
+and on desktop, where no caller passes it at all. Android's `WebView` (embedded via `AndroidView`) is an ordinary in-tree view, but it still
 consumes touch input on its own terms, so the gesture is arbitrated the same way
 `platform/NativeMenu.android.kt`'s long-press and `ui/home/FeedListDragGestures.kt`'s reorder drag
 already are: a `pointerInput` loop watches `PointerEventPass.Initial` (which reaches this ancestor
@@ -475,7 +506,9 @@ bound to the SELECT column order (guarded by
 
 ## Navigation
 
-A simple stack navigator in `ui/navigation/Navigator.kt` switches between Setup / Home / Settings. Article view is a pane inside Home (not a root route).
+`ui/navigation/Navigator.kt` holds a single current `Screen` (`Setup` or `Home` — not a stack, and there is no
+third `Settings` value) and switches it via `replace()`. Settings is a dialog shown over Home, and article view is
+a pane inside Home — neither is a route of its own.
 
 ### Home's adaptive pane layout
 
@@ -665,7 +698,8 @@ model does not carry over unchanged:
   `NavigationSplitView`'s sidebar into a pushed navigation stack at a compact width (Mail.app,
   NetNewsWire, Reeder) instead — which is what this app did before the drawer, and what `git log`
   still holds: `visiblePanes` returning `[FeedList]` at `Single` depth 1, `FeedListPane`'s own
-  notification bell, `onEnterArticleList`, and the return ripple, all removed alongside it.
+  notification bell, and `onEnterArticleList`, removed alongside it (the return ripple itself is unrelated and
+still exists today, at `HomePaneLayout.kt`'s `shouldFlashReturnedArticle`).
   `paneLayoutFor` and `visiblePanes`' `Triple`/`Dual` cases carry over to iPadOS unchanged (they map
   onto `NavigationSplitView`'s three- and two-column modes, and `Dual`'s permanent reading pane
   matches iPad's own split view); only `Single`'s presentation does not.
@@ -696,7 +730,7 @@ without revalidation a pin could hide an external change (another device's sync 
 unread"/restar, or a soft-delete tombstone) forever, not just for the brief window the write is in
 flight for.
 
-`HomeViewModel.reconcilePinnedArticles` closes that gap: it runs on every write to `articles` (via
+`HomeViewModel.reconcilePinnedArticlesAndSelection` closes that gap: it runs on every write to `articles` (via
 an `articleChangeSignal` collector), revalidating every pinned id — and the current selection's own
 cached flags — against `ArticleRepository.aliveArticleFlags` in one query, dropping (or, for the
 selection, refreshing) anything whose article is gone or whose flags no longer match what was

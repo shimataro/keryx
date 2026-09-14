@@ -18,11 +18,12 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
 - All tables are managed by SQLDelight (`.sq`). `articles_fts` is created/maintained separately via raw SQL (`FtsManager`).
 - Logical deletion uses `deleted_at` (NULL = alive). Sync timestamp is `updated_at`.
 - Booleans and timestamps are **INTEGER (`Long`)**. Booleans are 0/1; times are Unix milliseconds.
-- Schema version is managed by `PRAGMA user_version` (currently 2). `DatabaseDriverFactory` drives create/migrate.
-  Version 2 adds `articles.deleted_at` / `deleted_updated_at` via `1.sqm` (SQLDelight derives the version from the
-  highest migration file + 1). When the schema changes, add a `.sqm` file (`<from-version>.sqm`) and the version bumps
-  automatically; `domain/MergeSchema.EXPECTED_SCHEMAS` (which `DatabaseMerger.validateSchema` checks against) must be
-  updated to the new version in lockstep.
+- Schema version is managed by `PRAGMA user_version` (currently 2). On desktop, `DatabaseDriverFactory`
+  drives create/migrate manually off this pragma; on Android, `AndroidSqliteDriver` drives it internally via its own
+  `onCreate`/`onUpgrade` callbacks. Version 2 adds `articles.deleted_at` / `deleted_updated_at` via `1.sqm`
+  (SQLDelight derives the version from the highest migration file + 1). When the schema changes, add a `.sqm` file
+  (`<from-version>.sqm`) and the version bumps automatically; `domain/MergeSchema.EXPECTED_SCHEMAS` (which
+  `DatabaseMerger.validateSchema` checks against) must be updated to the new version in lockstep.
 
 ## Table List
 
@@ -36,9 +37,9 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
 `sort_order_updated_at`(nullable), `custom_title_updated_at`(nullable), `deleted_updated_at`(nullable).
 
 - `url` is the unique key for a subscription but not the primary key (so the same feed can be treated as the same entity even if the URL changes).
-- `id` is deterministically generated from (redirect-resolved) `url` as **UUIDv5** at subscription time (`IdGenerator.feedId`). The same feed gets the same id on all devices, so sync merge (`feeds` matched by `id`) can converge independently subscribed feeds, and article ids (derived from `feed_id`) also match. Previously, random UUIDv4 at subscription time caused divergent ids when two devices independently subscribed to the same URL, preventing convergence. The version nibble of v5 guarantees no collision with legacy v4 ids. Re-subscribing to an existing URL reuses the existing id, so the existing row is left in place (deterministic generation only applies to new rows).
+- `id` is deterministically generated from (redirect-resolved) `url` as **UUIDv5** at subscription time (`IdGenerator.feedId`). The same feed gets the same id on all devices, so sync merge (`feeds` matched by `id`) can converge independently subscribed feeds, and article ids (derived from `feed_id`) also match. Re-subscribing to an existing URL reuses the existing id, so the existing row is left in place (deterministic generation only applies to new rows).
 - Logical deletion via `deleted_at`. Re-subscribing resets it to NULL.
-- `error_count` reaching the constant `FEED_TIMEOUT_RETRY_COUNT` is treated as an error.
+- The feed list flags a feed as erroring whenever `error_count > 0` (or the feed is gone, see below). `FEED_TIMEOUT_RETRY_COUNT` is a separate, unrelated constant — the fetch-attempt retry budget `FeedFetcher` spends before giving up on a single fetch (`core/Constants.kt`).
 - `last_error` has two uses: the raw error text of the last failed fetch, and — for a 410 Gone feed — the fixed internal marker `FEED_ERROR_REASON_GONE` (`"gone"`, written by `feeds.markGone`). A 410 deliberately does not bump `error_count` (it is permanent, not a retry candidate), so this marker is the only signal the feed is gone, and it is what makes the feed list flag it (with its own localized tooltip — the column value itself is never shown to the user). Cleared by `resetErrorCount` on the next successful fetch.
 - `folder_id` is the folder a feed belongs to (1 feed = max 1 folder). This is an independent classification axis from tags (`feed_tags`, many-to-many). `feeds.upsert` (for subscription/refresh) does not touch this column at all; folder assignment changes are only made via `feeds.updateFolder` / `updateFolderAndSortOrder` (so they are not overwritten by subscription/refresh).
 - `folder_updated_at` / `sort_order_updated_at` / `custom_title_updated_at` / `deleted_updated_at` are
@@ -50,14 +51,15 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
 `id`(PK), `feed_id`(FK→feeds), `guid`, `url`, `title`, `summary`, `content`, `author`,
 `published_at`, `thumbnail_url`, `is_read`, `read_at`, `is_starred`, `starred_at`, `cached_at`,
 `search_text`, `updated_at`, `created_at`, `deleted_at`, `deleted_updated_at`. `UNIQUE(feed_id, guid)`.
-Indexes: `feed_id` / `is_read` / `is_starred` / `published_at DESC`.
+Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC, created_at DESC, id DESC)` for list ordering.
 
-- `id` is deterministically generated from `(feed_id, guid)` as **UUIDv5** (`IdGenerator.articleId`). The same article gets the same ID on all devices, so sync merge (articles matched by `id`) can propagate read/star states via last-write-wins. **Reason**: Previously, article IDs were random UUIDv4 generated at fetch time, so when two devices independently fetched the same article they got different IDs, and the guid collision guard in merge skipped them, preventing read-state propagation. The version nibble of v5 guarantees no collision with legacy v4 IDs. The ID generation change only affects new rows; existing rows keep their old ID via `upsert`'s `ON CONFLICT(feed_id, guid)`.
+- `id` is deterministically generated from `(feed_id, guid)` as **UUIDv5** (`IdGenerator.articleId`). The same article gets the same ID on all devices, so sync merge (articles matched by `id`) can propagate read/star states via last-write-wins. Existing rows keep their id via `upsert`'s `ON CONFLICT(feed_id, guid)` — deterministic generation only applies to new rows.
 - Read/star conflict resolution is last-write-wins via `read_at` / `starred_at`.
-- `content` is displayed in preference to `summary`. If both are NULL, open in external browser.
-- `search_text = COALESCE(content, summary, '')`. Computed at insert/update time.
-- Logical deletion via `deleted_at` (NULL = alive). Cache cleanup is the **only** writer of `deleted_at`
-  (`softDeleteExpired`); starred articles are never deleted. `deleted_updated_at` is a field-specific last-wins
+- `content` is displayed in preference to `summary`. If both are NULL, the reader shows a localized "no content" placeholder in place (with a link/button to open the article in the external browser); nothing opens automatically.
+- `search_text` = the HTML-stripped plain text of `content` (falling back to `summary`), or `""` if both are NULL. Computed at insert/update time (`ArticleRepository`, `HtmlText.toPlainText`).
+- Logical deletion via `deleted_at` (NULL = alive). Cache cleanup (`softDeleteExpired`) is the only **local**
+  originator of a deletion; starred articles are never deleted. (Sync merge also writes `deleted_at`, propagating a
+  deletion made on another device — see below.) `deleted_updated_at` is a field-specific last-wins
   timestamp for the delete/undelete event (like `read_at` / `starred_at`, and like `feeds.deleted_updated_at`), kept
   separate from `updated_at` so a content refresh / read / star change can't clobber a deletion during the sync merge.
   In the merge, deletion propagates by last-write-wins on `deleted_updated_at`, but a star newer than the deletion
@@ -81,7 +83,7 @@ Indexes: `feed_id` / `is_read` / `is_starred` / `published_at DESC`.
 
 ### global_settings (KVS, sync target)
 
-`key`(PK), `value`(JSON string), `updated_at`. Known keys:
+`key`(PK), `value`(plain string — an int/boolean encoded as its `toString()`, not JSON), `updated_at`. Known keys:
 
 | Key | Type | Default |
 | --- | --- | --- |
@@ -100,14 +102,12 @@ The last two exist so a sync that has nothing to do transfers nothing: an unchan
 skips the download, and an unchanged snapshot digest skips the upload (see "Skipping Unchanged
 Transfers" in [sync-architecture.md](sync-architecture.md)).
 
-This table is **excluded from the uploaded snapshot** (`DatabaseSnapshot.exportForUpload` drops it
-alongside `articles_fts`). It is device-local bookkeeping that no receiving device ever read — it appears
-in neither `MergeSql` nor `DatabaseMerger`'s expected schema — and dropping it is also what keeps the
-snapshot a pure function of the synced data, since `last_synced_at` would otherwise change its bytes on
-every successful sync and defeat the digest comparison above.
-
-> [!NOTE]
-> The issue that read/write to this table was unimplemented has been fixed; the current implementation actually records these values.
+This table is **excluded from the uploaded snapshot**, alongside `articles_fts` and the four `idx_articles_*`
+indexes — `DatabaseSnapshot.exportForUpload` drops all of them on the `VACUUM INTO` copy (never on the live DB),
+then runs a trailing `VACUUM` (`domain/SnapshotSql.kt`). `sync_state` itself is device-local bookkeeping that no
+receiving device ever reads — it appears in neither `MergeSql` nor `DatabaseMerger`'s expected schema — and
+dropping it is also what keeps the snapshot a pure function of the synced data, since `last_synced_at` would
+otherwise change its bytes on every successful sync and defeat the digest comparison above.
 
 ### articles_fts (FTS5 virtual table, outside SQLDelight management)
 
@@ -120,14 +120,25 @@ CREATE VIRTUAL TABLE articles_fts USING fts5(
 INSERT INTO articles_fts(articles_fts) VALUES('rebuild');
 ```
 
-External content mode keeps only the index, referencing `articles.search_text` for body text. **Never DROP `articles_fts` on the live DB** (exclusion from upload is done by dropping it on the `VACUUM INTO` snapshot copy side. See "FTS5 handling" in [sync-architecture.md](sync-architecture.md)). After feed refresh / sync merge, `FtsManager.indexMissing()` **incrementally indexes only unindexed new articles** (do not use full `'rebuild'` on every hot path because it is O(total indexed text) and heavy). Full rebuild (`rebuildIndex()` = `'rebuild'`) is only done in the daily idle pass (`local_settings.lastFtsRebuiltAt` 24h gate + `ActivityCenter` idle), rebuilding stale existing rows (body text updated since incremental indexing). `'rebuild'` is atomic + `busy_timeout` wait, so running searches do not regress to zero results.
-**On startup, call `FtsManager.ensureIndexed()` to create the table on first run and backfill any missing rows**.
+External content mode keeps only the index, referencing `articles.search_text` for body text.
+
+- **Never DROP `articles_fts` on the live DB.** Exclusion from upload is done by dropping it on the `VACUUM INTO`
+  snapshot copy side instead — see "FTS5 handling" in [sync-architecture.md](sync-architecture.md).
+- After feed refresh or sync merge, `FtsManager.indexMissing()` **incrementally indexes only unindexed new
+  articles**. Never use a full `'rebuild'` on a hot path — it is `O(total indexed text)` and too heavy to run there.
+- Full rebuild (`rebuildIndex()` = `'rebuild'`) runs only in the daily idle pass (`local_settings.lastFtsRebuiltAt`
+  24h gate + `ActivityCenter` idle), to rebuild stale existing rows whose body text changed since incremental
+  indexing.
+- `'rebuild'` is atomic and waits on `busy_timeout`, so a search running concurrently never regresses to zero
+  results.
+**On startup, call `FtsManager.ensureIndexed()` to create the table on first run and backfill any missing rows.**
+Android instead calls the cheaper `ensureIndexedIfTableAbsent()` on every process start (including a `WorkManager`
+wakeup, up to ~96 times/day) — it skips straight to a no-op once the table already exists, instead of re-running
+`indexMissing()`'s `O(articles)` scan on every wakeup.
 
 `tokenize='trigram'` needs SQLite ≥3.34, which AOSP's own SQLite build never provides (it omits
 FTS5 entirely, at any API level) — Android's `DatabaseDriverFactory` actual uses a bundled SQLite
-instead. See `.claude/rules/android-sqlite-bundling.md` for the rationale and exit criteria. This
-was verified against a real `articles_fts` table (created, populated, and queried with `MATCH`)
-pulled from a device during Android bring-up.
+instead. See `.claude/rules/android-sqlite-bundling.md` for the rationale and exit criteria.
 
 **The trigram tokenizer produces no tokens at all for a query string under 3 characters** — a
 `MATCH` against a 1- or 2-character string silently returns zero rows rather than erroring. Search's
@@ -178,7 +189,7 @@ Setup completion = file exists.
 | `windowPlacement` | string | "floating" ("floating" \| "maximized" \| "fullscreen"; an unrecognized value restores as floating) |
 | `feedListPaneWidth` / `articleListPaneWidth` | number | 260 / 360 |
 | `collapsedFolderIds` | string[] | `[]` (folders default to *expanded*, so only the collapsed ones are tracked) |
-| `expandedTagIds` | string[] | `[]` (tags are the opposite — they default to *collapsed*, so the sidebar stays as short as it was before this list existed) |
+| `expandedTagIds` | string[] | `[]` (tags are the opposite — they default to *collapsed*, keeping the sidebar short) |
 | `lastFilter` | string\|null | null |
 | `lastArticleId` | string\|null | null |
 | `lastFocusedPane` | string\|null | null |

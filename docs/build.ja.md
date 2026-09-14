@@ -131,7 +131,8 @@ Google Play イメージ（Chrome 入り）— [setup.ja.md](setup.ja.md) を参
 
 ## パッケージング
 
-[`composeApp/build/compose/binaries/main`](./composeApp/build/compose/binaries/main)以下に作成される
+`composeApp/build/compose/binaries/main`（リポジトリルートからの相対パス。このファイル自身の
+ディレクトリからではない——ビルド成果物のパスであり、リンクを張る対象のドキュメントではない）以下に作成される
 
 実行するプラットフォームで動くもののみ作成可（クロスコンパイル不可）
 
@@ -393,15 +394,12 @@ WebView のレンダラーサンドボックスのみを無効化するもので
   の「UI Direction」参照）、portal は一切使っていないため、これはアプリ自身の呼び出しが
   失敗しているわけではない。
 
-一方、実際に修正が必要だった行が `TransportBuilder - Using transport
-dbus-java-transport-native-unixsocket` である。これは dbus-java 自身の `slf4j` ログが、
-`slf4j-simple` 経由で直接 stderr に出力されており、アプリのログファイルを経由せず、
-（独自のタイムスタンプ・`[tag]` 無しという）別フォーマットで出ていたことが原因。デスクトップ
-ランタイムの `slf4j` プロバイダを `slf4j-simple` から `slf4j-jdk14`
-（`composeApp/build.gradle.kts` / `gradle/libs.versions.toml`）に切り替えることで、この行を
-含め他のあらゆる第三者 `slf4j` 呼び出しが `java.util.logging` 経由になり、`Log.desktop.kt` が
-JUL のルートロガーに仕込んだ formatter/handler を通るようになった。これにより、第三者ライブラリの
-ログ行もアプリ本体と同じフォーマットで `keryx.<n>.log` に残るようになっている。
+デスクトップランタイムの `slf4j` プロバイダは `slf4j-jdk14`
+（`composeApp/build.gradle.kts` / `gradle/libs.versions.toml`）であり、dbus-java 自身のログを含む
+あらゆる第三者 `slf4j` 呼び出しを `java.util.logging` 経由にルーティングする。`Log.desktop.kt` は
+JUL のルートロガーに自前の formatter/handler を仕込んでいる。そのため第三者ライブラリのログ行
+（例: dbus-java 自身の `TransportBuilder - Using transport dbus-java-transport-native-unixsocket`）も、
+別フォーマットで stderr に出るのではなく、アプリ本体と同じフォーマットで `keryx.<n>.log` に残る。
 
 ### Android（APK / AAB）
 
@@ -506,10 +504,9 @@ AppStream の `<launchable>` のために追加した — 上記「Linux パッ�
   追加されるだけでなく）Keryx が直接起動するようにしている。macOS には OPML 用の組み込み
   システム UTI が存在せず、サードパーティ製フィードリーダーのエコシステムでも統一されていない —
   NetNewsWire は `org.opml.opml`（OPML 自体が Apple の UTI システムより古いため、事実上の標準に
-  最も近い）、Reeder は `com.reederapp.opml`、Overcast は `unofficial.opml` を使う。以前のバージョンの
-  本アプリは独自の UTI（`works.merc.keryx.opml`）をエクスポートしていたが、これだと他のアプリが
-  既に `.opml` 拡張子をこれらいずれかの識別子に紐付け済みの Mac では、Finder の「このアプリケーションで
-  開く」メニューに Keryx が現れなくなってしまう — ファイルはその拡張子に既に紐付いている UTI の
+  最も近い）、Reeder は `com.reederapp.opml`、Overcast は `unofficial.opml` を使う。これらの代わりに Keryx 独自の UTI（`works.merc.keryx.opml`）を `.opml` 用にエクスポートすると、他の
+  アプリが既に `.opml` 拡張子をこれらいずれかの識別子に紐付け済みの Mac では、Finder の「このアプリケー
+  ションで開く」メニューに Keryx が現れなくなってしまう — ファイルはその拡張子に既に紐付いている UTI の
   ほうに解決され、後から競合するエクスポート宣言をしてもその紐付けには勝てない。そのため
   `LSItemContentTypes` には既知の3識別子すべてを列挙し、（Keryx はこれらの識別子の所有者ではなく
   利用者であるため）`UTExportedTypeDeclarations` ではなく `UTImportedTypeDeclarations` で宣言する —
@@ -584,24 +581,35 @@ AppStream の `<launchable>` のために追加した — 上記「Linux パッ�
 2. `release: published` で起動し、先頭の `v` を除去して `-PappVersion` に渡す。
 3. 5つの独立したジョブが並行して実行される:
 
-   - macOS ランナーで `:composeApp:packageDmg` を実行し、`Keryx-<version>-macos-arm64.dmg` に加えて **`Keryx-<version>-macos-arm64.zip`** としても添付する。**プレリリースタグの場合は `packageDmg` をスキップし、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。
+   - macOS ランナーで `:composeApp:createDistributable :composeApp:packageDmg` を実行し（下の `.zip` の元になるアプリバンドルを確実に作るため `createDistributable` を `packageDmg` と並べて明示的に要求している）、`Keryx-<version>-macos-arm64.dmg` に加えて **`Keryx-<version>-macos-arm64.zip`** としても添付する。**プレリリースタグの場合は `packageDmg` をスキップし `createDistributable` のみ実行するため、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。
    - Linux ランナーで（jpackage 用に `fakeroot`/`rpm` をインストールした上で）`:composeApp:packageDeb :composeApp:packageRpm` を実行し、`Keryx-<version>-linux-x86_64.deb` と `Keryx-<version>-linux-x86_64.rpm` に加えて **`Keryx-<version>-linux-x86_64.zip`** としても添付する。**プレリリースタグの場合は `packageDeb`/`packageRpm` をスキップし、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。
    - `package-snap` は独立したジョブで、`snapcraft` の失敗が上記 deb/rpm/zip ジョブの成果物を
      道連れにしないようにしてある（`ubuntu-latest` ではなく `ubuntu-24.04` 固定ランナーが必要な
-     理由は上記「Linux Snap パッケージ」参照）。（`sudo snap install snapcraft --classic` の後）
-     `snap/snapcraft.yaml` に対して `snapcraft pack --destructive-mode` を実行し、
-     `Keryx-<version>-linux-x86_64.snap` を添付する — `.deb`/`.rpm` と異なり、snapcraftの
-     `version:`フィールドはjpackageのパッケージメタデータのような `MAJOR.MINOR.PATCH` 限定ではないため、
-     **プレリリースタグでもスキップせず添付する**。GitHub Release への添付の後、同じジョブは
-     **Snap Storeへのスナップ公開**も行う（`snapcraft upload --release=<channel>`。後述の
-     `SNAPCRAFT_STORE_CREDENTIALS` シークレットが設定されている場合のみ実行）——チャンネルは、
-     タグにプレリリース接尾辞が付いている **か** GitHub Release 自体がプレリリースとして
-     マークされている場合に `edge`、それ以外は `stable` になる（上記の deb/rpm/msi の
-     スキップ判定はタグ接尾辞のみで決まるが、Snap Store のチャンネル判定だけは Release 側の
-     プレリリースフラグも見る——チャンネルを誤って `stable` にすると snapd 自身の自動リフレッシュで
-     全 Store ユーザーに配信されてしまい、取り消せないため）。
+     理由は上記「Linux Snap パッケージ」参照）。
+     - **ビルドと添付。**（`sudo snap install snapcraft --classic` の後）`snap/snapcraft.yaml` に
+       対して `sudo snapcraft pack --destructive-mode --output "Keryx-$VERSION-linux-x86_64.snap"`
+       を実行し、生成された `Keryx-<version>-linux-x86_64.snap` を添付する — `.deb`/`.rpm` と異なり、
+       snapcraft の `version:` フィールドは jpackage のパッケージメタデータのような
+       `MAJOR.MINOR.PATCH` 限定ではないため、**プレリリースタグでもスキップせず添付する**。
+     - **Snap Store への公開。** GitHub Release への添付の後、同じジョブは**Snap Store へのスナップ
+       公開**も行う（`snapcraft upload --release=<channel>`。後述の `SNAPCRAFT_STORE_CREDENTIALS`
+       シークレットが設定されている場合のみ実行）。
+     - **チャンネルの選択。** タグにプレリリース接尾辞が付いている**か** GitHub Release 自体が
+       プレリリースとしてマークされている場合に `edge`、それ以外は `stable` になる（上記の
+       deb/rpm/msi のスキップ判定はタグ接尾辞のみで決まるが、Snap Store のチャンネル判定だけは
+       Release 側のプレリリースフラグも見る——チャンネルを誤って `stable` にすると snapd 自身の
+       自動リフレッシュで全 Store ユーザーに配信されてしまい、取り消せないため）。
    - Windows ランナーで `:composeApp:createDistributable :composeApp:packageMsi` を実行し（`windows-latest` には WiX Toolset v3.14.1 がプリインストール済みのため、別途 WiX のセットアップ手順は不要）、`Keryx-<version>-windows-x86_64.msi` に加えて **`Keryx-<version>-windows-x86_64.zip`** としても添付する。**プレリリースタグの場合は `packageMsi` をスキップし、`.zip` のみを添付する** — MSI の `ProductVersion`（後述）は数値のみでなければならず、同一の対象バージョンに属するプレリリースはすべて同じ `ProductVersion` に潰れてしまうため、固定の `upgradeUuid` の下では WiX が後続のプレリリースや最終的な正式版を「アップグレード」として認識できない。
-   - Ubuntu ランナーで `:androidApp:assembleGithubRelease` と `:androidApp:bundlePlayRelease` を実行し、`Keryx-<version>-android-universal.apk` と `Keryx-<version>-android-universal.aab` として添付する。APK は `github` flavor（`REQUEST_INSTALL_PACKAGES` を持つ——アプリ内アップデートがこの上に上書きインストールするため。上記「Android（APK / AAB）」参照）から、AAB は `play`（Play Console 提出用の成果物で、この権限を持ってはならない）から生成する。Android 版はデスクトップのインストーラーとは異なり、プレリリースタグでもビルド・添付する — Android には該当するバージョンメタデータ制約が無く、テスターが署名済み APK を必要とするため。**ワークフローが出力するプレリリースの APK/AAB は、GitHub 用のテストアーティファクトに過ぎない。** `androidApp/build.gradle.kts` は `versionCode` を `appVersion.substringBefore('-')` から導出しているため、`v1.2.0-beta.1` のようなプレリリースタグと最終的な `v1.2.0` は同じ `versionCode`（例: `10200`）になる。Google Play に提出する際は、`androidApp/build.gradle.kts`（またはそれを駆動するリリースタグ）を調整し、厳密に増加した `versionCode` で再ビルドすること — この値はビルド時に署名済みアーティファクトへ焼き込まれるため、ビルド後に書き換えることはできない。
+   - Ubuntu ランナーで `:androidApp:assembleGithubRelease` と `:androidApp:bundlePlayRelease` を実行し、`Keryx-<version>-android-universal.apk` と `Keryx-<version>-android-universal.aab` として添付する。APK は `github` flavor（`REQUEST_INSTALL_PACKAGES` を持つ——アプリ内アップデートがこの上に上書きインストールするため。上記「Android（APK / AAB）」参照）から、AAB は `play`（Play Console 提出用の成果物で、この権限を持ってはならない）から生成する。Android 版はデスクトップのインストーラーとは異なり、プレリリースタグでもビルド・添付する — Android には該当するバージョンメタデータ制約が無く、テスターが署名済み APK を必要とするため。
+
+     > [!WARNING]
+     > **ワークフローが出力するプレリリースの APK/AAB は、GitHub 用のテストアーティファクトに過ぎない
+     > — そのまま Google Play に提出しないこと。** `androidApp/build.gradle.kts` は `versionCode` を
+     > `appVersion.substringBefore('-')` から導出しているため、`v1.2.0-beta.1` のようなプレリリース
+     > タグと最終的な `v1.2.0` は同じ `versionCode`（例: `10200`）になる。Google Play に提出する際は、
+     > `androidApp/build.gradle.kts`（またはそれを駆動するリリースタグ）を調整し、厳密に増加した
+     > `versionCode` で再ビルドすること — この値はビルド時に署名済みアーティファクトへ焼き込まれる
+     > ため、ビルド後に書き換えることはできない。
 
    `deploy-pages`（ダウンロードページ更新用の Cloudflare Pages デプロイフックをトリガーする）は
    `package-macos` / `package-linux` / `package-windows` / `package-android` の完了を待つが、
@@ -665,11 +673,10 @@ no-op。これは見た目の問題ではない: アプリ内アップデート�
 まさにこの検証を実行する（[background-update.ja.md](background-update.ja.md) 参照）ため、これを
 通れないアプリイメージはリリース ZIP を**アプリ内アップデータからは**インストール不能にする —
 まったく同じ ZIP を手動でインストールする分には動き続ける。カーネルは起動時に `Info.plist` を
-再ハッシュしないためである。この非対称性ゆえに 0.x のリリースはすべてこの状態のまま気づかれず出荷され、
-アプリ内アップデータが初めてこの検証を行使したときに表面化した。そしてこれを捕まえられるのが
-ビルド時の検証だけである理由でもある: 通常の手動スモークテストでは捕まらない。DMG でも表に出なかったのは、
-jpackage が DMG 作成時にアプリイメージのコピーを再署名するから — `binaries/main/app` から直接作る
-ZIP 資産だけが壊れたシールを抱えていた。
+再ハッシュしないためである。そのため、ダウンロードした ZIP を手動でスモークテストしても壊れたシールは
+捕まらない——捕まえられるのはビルド時の検証だけである。DMG はどちらにしても影響を受けない。
+jpackage が DMG 作成時にアプリイメージのコピーを再署名するため、`binaries/main/app` から直接作る
+ZIP 資産だけが壊れたシールを抱えうる。
 
 `0.1.1` での結果: タグ・`BuildConfig.VERSION`（About 画面）・更新チェック・Finder の表示が
 すべて `0.1.1` で揃う。プレースホルダ `1.0.0` が残るのは `CFBundleVersion` だけで、これは
@@ -697,12 +704,39 @@ package_update,package_release` の ACL を指定）で生成したものを使�
 `LibSecretTokenStorage`／Secret portal 経路（申請が一切不要）は上記「Linux Snap パッケージ」
 参照。
 
-Android のリリース署名には、`ANDROID_RELEASE_KEYSTORE_BASE64`、`ANDROID_RELEASE_KEYSTORE_PASSWORD`、`ANDROID_RELEASE_KEY_ALIAS`、`ANDROID_RELEASE_KEY_PASSWORD` をリポジトリの Secrets に設定する。keystore は Base64 エンコードした PKCS12/JKS ファイルであり、ワークフローがビルド時に復元する。GitHub Releases と Google Play で同じ署名キーを使いたい場合は、ローカルで生成した keystore を、アプリ作成時に Google Play Console で**既存のアプリ署名キー**として登録する: Play Console は生の JKS/PKCS12 ファイルをそのままでは受け付けず、まず Google の PEPK（Play Encrypt Private Key）ツールで暗号化する必要がある（`java -jar pepk.jar --keystore=<path> --alias=<alias> --output=<encrypted-file> --encryptionkey=<key-from-play-console>`。Play App Signing の登録ページからダウンロードできる）。生成された暗号化ファイルをアップロードすると、その keystore が**アプリ署名キー**として登録される — これは Google が保持し、ユーザーに届く前にアプリを再署名するために使う鍵であり、以降 Play Console にアップロードする各 `.aab` に署名する**アップロードキー**とは区別される。同じ keystore を両方の役割に使うこともでき（Google はアプリ署名キーをそのままアップロードキーとして再利用することを明示的に許可している）、これにより GitHub Releases（APK/AAB に直接その keystore で署名する）と Google Play の双方で単一の keystore のみで済む。専用のアップロードキーを別に用意するのは Google が推奨する追加の防御策であり、必須ではない。`release.yml` は `:androidApp:assembleGithubRelease`/`:androidApp:bundlePlayRelease` に `-PandroidReleaseSigningRequired=true` を渡しており、これは Secrets が未設定（または一部だけ設定）の場合に**即座のビルド失敗**へつなげるためのフラグ — このワークフローは成果物を公開するので、未署名のまま成功させてはならない。そのため release ワークフローの成功には4つすべての Secrets が必須。両方の flavor は同じ keystore で署名される（`signingConfigs` は flavor スコープではない）——これはまさに上記のアプリ署名キー登録が要求する構成そのもの: サイドロードされる `github` の APK と、Play が再署名する `play` の AAB は同一の署名 ID に遡れる必要があり、そうでなければ一方が既にインストールされている端末が他方をその場でのアップデートとして受け取れなくなる（`INSTALL_FAILED_UPDATE_INCOMPATIBLE`）。
+Android のリリース署名には、`ANDROID_RELEASE_KEYSTORE_BASE64`、`ANDROID_RELEASE_KEYSTORE_PASSWORD`、
+`ANDROID_RELEASE_KEY_ALIAS`、`ANDROID_RELEASE_KEY_PASSWORD` をリポジトリの Secrets に設定する。keystore は
+Base64 エンコードした PKCS12/JKS ファイルであり、ワークフローがビルド時に復元する。
+
+**keystore を Google Play に登録する（一度きり。両チャネルで同じ署名キーを使うため）。** GitHub Releases と
+Google Play で同じ署名キーを使いたい場合は、ローカルで生成した keystore を、アプリ作成時に Google Play
+Console で**既存のアプリ署名キー**として登録する: Play Console は生の JKS/PKCS12 ファイルをそのままでは
+受け付けず、まず Google の PEPK（Play Encrypt Private Key）ツールで暗号化する必要がある
+（`java -jar pepk.jar --keystore=<path> --alias=<alias> --output=<encrypted-file> --encryptionkey=<key-from-play-console>`。
+Play App Signing の登録ページからダウンロードできる）。生成された暗号化ファイルをアップロードする。
+
+**アプリ署名キーとアップロードキーの違い。** これにより、その keystore が**アプリ署名キー**として登録される
+— これは Google が保持し、ユーザーに届く前にアプリを再署名するために使う鍵であり、以降 Play Console に
+アップロードする各 `.aab` に署名する**アップロードキー**とは区別される。同じ keystore を両方の役割に使う
+こともでき（Google はアプリ署名キーをそのままアップロードキーとして再利用することを明示的に許可している）、
+これにより GitHub Releases（APK/AAB に直接その keystore で署名する）と Google Play の双方で単一の keystore
+のみで済む。専用のアップロードキーを別に用意するのは Google が推奨する追加の防御策であり、必須ではない。
+
+**4つの Secrets はすべて必須で、任意ではない。** `release.yml` は
+`:androidApp:assembleGithubRelease`/`:androidApp:bundlePlayRelease` に
+`-PandroidReleaseSigningRequired=true` を渡しており、これは Secrets が未設定（または一部だけ設定）の場合に
+**即座のビルド失敗**へつなげるためのフラグ — このワークフローは成果物を公開するので、未署名のまま成功させて
+はならない。
+
+**両方の flavor は1つの keystore を共有する。** `signingConfigs` は flavor スコープではなく、これはまさに
+上記のアプリ署名キー登録が要求する構成そのもの: サイドロードされる `github` の APK と、Play が再署名する
+`play` の AAB は同一の署名 ID に遡れる必要があり、そうでなければ一方が既にインストールされている端末が
+他方をその場でのアップデートとして受け取れなくなる（`INSTALL_FAILED_UPDATE_INCOMPATIBLE`）。
 
 `ci.yml` の通常のビルドジョブは、push のたびに実行され何も公開しない都合上、意図的にこれらの
 Secrets を受け取らない。AGP は成果物が実際に使われるかどうかに関わらず `assembleRelease` を
-`:androidApp` のデフォルトの `build` タスクに組み込むが（`bundleRelease` は別系統の
-ライフサイクルタスクであり、だからこそ上記の `release.yml` は明示的に実行している）、
+`:androidApp` のデフォルトの `build` タスクに組み込むが（`bundlePlayRelease` はどの集約
+ライフサイクルタスクにも含まれておらず、だからこそ上記の `release.yml` は明示的に実行している）、
 `androidApp/build.gradle.kts` の `signingConfigs` ブロックは、署名情報が一切設定されていない
 状態を「未署名リリース」として扱う（ビルド失敗ではなく警告 — [setup.ja.md](setup.ja.md) の
 「Android release signing keystore」参照）。`androidReleaseSigningRequired` を明示的に要求

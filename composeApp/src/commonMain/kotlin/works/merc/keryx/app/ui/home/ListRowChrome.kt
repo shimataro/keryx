@@ -48,7 +48,7 @@ private const val RETURN_RIPPLE_PRESS_HOLD_MS = 220L
 
 /**
  * Plays a one-shot press+release into [this], mimicking a real tap so whichever indication is
- * bound to it (Android's M3 ripple via `listRowSurface`'s Android `actual`; desktop's
+ * bound to it (Android's M3 ripple, applied via [LocalIndication] left at its default; desktop's
  * `FlatIndication`) shows its normal press feedback with no actual pointer input. Used to flash
  * the article row a user just navigated away from when they back out to it at `PaneLayout.Single`,
  * where the persistent selection highlight is suppressed by `LocalRowSelectionVisible` — see

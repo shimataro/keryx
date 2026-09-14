@@ -18,9 +18,10 @@
 - 全テーブルは SQLDelight（`.sq`）で管理。`articles_fts` のみ生 SQL（`FtsManager`）で別途作成する。
 - 論理削除は `deleted_at`（NULL = 生存）。同期タイムスタンプは `updated_at`。
 - 真偽値・タイムスタンプは **INTEGER（`Long`）**。真偽値は 0/1、時刻は Unix ミリ秒。
-- スキーマバージョンは `PRAGMA user_version`（現在 2）。`DatabaseDriverFactory` が create/migrate を駆動。
-  バージョン 2 は `1.sqm` で `articles.deleted_at` / `deleted_updated_at` を追加する（SQLDelight は最大の
-  マイグレーションファイル + 1 でバージョンを導出）。スキーマを変える場合は `.sqm` ファイル
+- スキーマバージョンは `PRAGMA user_version`（現在 2）。desktop では `DatabaseDriverFactory` がこのプラグマを見て
+  create/migrate を自前で駆動するが、Android では `AndroidSqliteDriver` が自身の `onCreate`/`onUpgrade` コールバック内で
+  内部的に駆動する。バージョン 2 は `1.sqm` で `articles.deleted_at` / `deleted_updated_at` を追加する（SQLDelight は
+  最大のマイグレーションファイル + 1 でバージョンを導出）。スキーマを変える場合は `.sqm` ファイル
   （`<移行元バージョン>.sqm`）を追加すればバージョンは自動で上がる。あわせて
   `domain/MergeSchema.EXPECTED_SCHEMAS`（`DatabaseMerger.validateSchema` が参照する期待スキーマ）を
   新バージョンに追随させること。
@@ -39,12 +40,12 @@
 - `url` は購読の一意キーだが主キーではない（URL が変わっても同一フィードとして扱うため）。
 - `id` は新規購読時に（リダイレクト解決済みの）`url` から **UUIDv5** で決定的に生成する
   （`IdGenerator.feedId`）。同じフィードは全デバイスで同一 id になるため、同期マージ（feeds を `id` で
-  照合）が独立購読されたフィードを収束でき、記事 id（`feed_id` から導出）も一致する。以前は購読時の
-  ランダム UUIDv4 で、両デバイスが同じ URL を独立購読すると id が食い違い収束しなかった。v5 の
-  バージョンニブルにより旧 v4 id とは決して衝突しない。既存 url の再購読は既存 id を再利用するため
-  既存行は据え置き（新規のみ決定的）。
+  照合）が独立購読されたフィードを収束でき、記事 id（`feed_id` から導出）も一致する。既存 url の再購読は
+  既存 id を再利用するため既存行は据え置き（新規のみ決定的）。
 - `deleted_at` で論理削除。再購読時に NULL へ戻す。
-- `error_count` が定数 `FEED_TIMEOUT_RETRY_COUNT` に達したらエラー扱い。
+- フィード一覧は `error_count > 0`（またはフィードが gone、後述）でエラー扱いとしてフラグを立てる。
+  `FEED_TIMEOUT_RETRY_COUNT` は無関係な別の定数で、`FeedFetcher` が1回のフェッチを諦めるまでの
+  リトライ予算（`core/Constants.kt`）。
 - `last_error` の用途は 2 つ: 直前の取得失敗の生のエラーテキストと、410 Gone のフィードに対する固定の内部マーカー `FEED_ERROR_REASON_GONE`（`"gone"`、`feeds.markGone` が書き込む）。410 は恒久的でリトライ対象ではないため意図的に `error_count` を増やさないので、このマーカーがフィード消失の唯一の目印であり、フィード一覧の目印（専用のローカライズ済みツールチップ付き。カラムの値そのものはユーザーに表示しない）の判定に使われる。次回の取得成功時に `resetErrorCount` がクリアする。
 - `folder_id` はフィードが属するフォルダー（1フィード = 最大1フォルダー）。タグ（`feed_tags`、多対多）とは
   独立した分類軸。`feeds.upsert`（購読・リフレッシュ用）はこの列に一切触れない設計にしており、
@@ -64,19 +65,21 @@
 `id`(PK), `feed_id`(FK→feeds), `guid`, `url`, `title`, `summary`, `content`, `author`,
 `published_at`, `thumbnail_url`, `is_read`, `read_at`, `is_starred`, `starred_at`, `cached_at`,
 `search_text`, `updated_at`, `created_at`, `deleted_at`, `deleted_updated_at`。`UNIQUE(feed_id, guid)`。
-インデックス: `feed_id` / `is_read` / `is_starred` / `published_at DESC`。
+インデックス: `feed_id`、`is_read`、`is_starred`、および一覧の並び順用の複合インデックス
+`(published_at DESC, created_at DESC, id DESC)`。
 
 - `id` は `(feed_id, guid)` から **UUIDv5** で決定的に生成する（`IdGenerator.articleId`）。同じ記事は
   全デバイスで同一 ID になるため、同期マージ（記事を `id` で照合する）が既読・スターを後勝ちで
-  伝播できる。**理由**: 以前は記事 ID がフェッチ時のランダム UUIDv4 で、両デバイスが同じ記事を独立に
-  取得すると別 ID になり、マージの guid 衝突ガードにスキップされて既読が伝播しない不具合があった。
-  v5 のバージョンニブルにより旧 v4 ID とは決して衝突しない。ID 生成方式の変更は新規行のみに効き、
-  既存行は `upsert` の `ON CONFLICT(feed_id, guid)` が旧 ID を保持する（＝既存はそのまま）。
+  伝播できる。既存行は `upsert` の `ON CONFLICT(feed_id, guid)` が既存 ID を保持する
+  （決定的生成は新規行のみに効く）。
 - 既読・スターの競合解決は `read_at` / `starred_at` で後勝ち。
-- `content` は `summary` より優先して表示。両方 NULL なら外部ブラウザーで開く。
-- `search_text = COALESCE(content, summary, '')`。挿入・更新時に計算する。
-- `deleted_at`（NULL = 生存）で論理削除する。`deleted_at` を書き込むのは**キャッシュ削除のみ**
-  （`softDeleteExpired`）で、スター付き記事は削除しない。`deleted_updated_at` は削除/復活イベントの
+- `content` は `summary` より優先して表示。両方 NULL の場合、その場にローカライズされた「本文なし」の
+  プレースホルダーを表示する（外部ブラウザーで開くリンク／ボタン付き）。自動で何かが開くことはない。
+- `search_text` ＝ `content`（無ければ `summary`）の HTML タグを除去した平文。両方 NULL なら `""`。
+  挿入・更新時に計算する（`ArticleRepository`、`HtmlText.toPlainText`）。
+- `deleted_at`（NULL = 生存）で論理削除する。削除を**ローカルで発生させる**のはキャッシュ削除
+  （`softDeleteExpired`）のみで、スター付き記事は削除しない（同期マージも `deleted_at` を書き込み、
+  他デバイスでの削除を伝播する。後述）。`deleted_updated_at` は削除/復活イベントの
   フィールド別後勝ちタイムスタンプ（`read_at` / `starred_at`、および `feeds.deleted_updated_at` と同様）で、
   コンテンツ更新・既読・スター変更が同期マージで削除を上書きしないよう `updated_at` とは分離する。
   マージでは `deleted_updated_at` の後勝ちで削除が伝播するが、削除より新しいスターがあれば記事を
@@ -103,7 +106,8 @@
 
 ### global_settings（KVS, 同期対象）
 
-`key`(PK), `value`(JSON 文字列), `updated_at`。既知キー:
+`key`(PK), `value`（プレーンな文字列 — int/boolean は `toString()` でエンコードし、JSON ではない）,
+`updated_at`。既知キー:
 
 | キー | 型 | デフォルト |
 | --- | --- | --- |
@@ -122,14 +126,13 @@ SHA-256 を hex 化したもの）。
 ダウンロードを、スナップショットのダイジェストが変わっていなければアップロードをスキップする
 （[sync-architecture.ja.md](sync-architecture.ja.md) の「変更がないときの転送スキップ」参照）。
 
-このテーブルは**アップロード用スナップショットから除外される**（`DatabaseSnapshot.exportForUpload` が
-`articles_fts` と一緒に DROP する）。デバイスローカルな管理情報であり受信側が読むことは元々なく
-（`MergeSql` にも `DatabaseMerger` の期待スキーマにも登場しない）、除外することでスナップショットが
+このテーブルは、`articles_fts` および `idx_articles_*` の4本のインデックスとともに
+**アップロード用スナップショットから除外される** — `DatabaseSnapshot.exportForUpload` がこれらすべてを
+`VACUUM INTO` コピー側（ライブ DB 側ではない）で DROP し、最後に `VACUUM` を実行する
+（`domain/SnapshotSql.kt`）。`sync_state` 自体はデバイスローカルな管理情報であり受信側が読むことは
+元々なく（`MergeSql` にも `DatabaseMerger` の期待スキーマにも登場しない）、除外することでスナップショットが
 同期対象データのみの関数になる — さもないと `last_synced_at` が同期成功のたびにバイト列を変え、
 上記のダイジェスト比較が成立しなくなる。
-
-> [!NOTE]
-> このテーブルへの読み書きが未実装だった問題を修正し、現在の実装では実際に記録する。
 
 ### articles_fts（FTS5 仮想テーブル、SQLDelight 管理外）
 
@@ -142,19 +145,24 @@ CREATE VIRTUAL TABLE articles_fts USING fts5(
 INSERT INTO articles_fts(articles_fts) VALUES('rebuild');
 ```
 
-外部コンテンツ方式でインデックスのみ保持し、本文は `articles.search_text` を参照する。**ライブ DB の
-`articles_fts` は決して DROP しない**（アップロードからの除外は `VACUUM INTO` スナップショットのコピー側で
-DROP して行う。[sync-architecture.ja.md](sync-architecture.ja.md) の「FTS5 の扱い」）。フィード更新・
-同期マージの後は `FtsManager.indexMissing()` で**未索引の新記事だけを増分投入**する（全 `'rebuild'` は毎回だと
-重くスケールしないため使わない）。全再構築は日次アイドル pass（`local_settings.lastFtsRebuiltAt`
-の 24h ゲート）でのみ行い、増分投入以降に本文が更新されて古くなった既存行の作り直しを担う。
-**起動時に `FtsManager.ensureIndexed()` を呼び、テーブルが無ければ作成し、索引に未登録の記事があれば増分投入する**。
+外部コンテンツ方式でインデックスのみ保持し、本文は `articles.search_text` を参照する。
+
+- **ライブ DB の `articles_fts` は決して DROP しない。** アップロードからの除外は `VACUUM INTO` スナップショット
+  のコピー側で DROP して行う — [sync-architecture.ja.md](sync-architecture.ja.md) の「FTS5 の扱い」参照。
+- フィード更新・同期マージの後は `FtsManager.indexMissing()` で**未索引の新記事だけを増分投入**する。
+  全 `'rebuild'` はホットパスでは決して使わない — `O(索引済みテキスト全体)` で重すぎるため。
+- 全再構築（`rebuildIndex()` ＝ `'rebuild'`）は日次アイドル pass（`local_settings.lastFtsRebuiltAt` の
+  24h ゲート ＋ `ActivityCenter` のアイドル）でのみ行い、増分投入以降に本文が更新されて古くなった既存行を
+  作り直す。
+- `'rebuild'` はアトミックかつ `busy_timeout` 待ちなので、実行中の検索が 0 件に後退することはない。
+**起動時に `FtsManager.ensureIndexed()` を呼び、テーブルが無ければ作成し、索引に未登録の記事があれば増分投入する。**
+Android はこれより軽い `ensureIndexedIfTableAbsent()` をプロセス起動のたびに呼ぶ（`WorkManager` の
+ウェイクアップ含め1日最大約96回）— テーブルが既に存在すれば毎回 `indexMissing()` の `O(記事数)` スキャンを
+再実行せず、即座に no-op で返る。
 
 `tokenize='trigram'` は SQLite ≥3.34 を必要とするが、AOSP 自身の SQLite ビルドはこれを提供しない
 （どの API レベルでも FTS5 自体を含んでいない）— Android の `DatabaseDriverFactory` actual はバンドル
-SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundling.md` を参照。これは Android の
-実機で実際に `articles_fts` テーブルを作成・投入し、`MATCH` クエリを実行した DB ファイルを取り出して
-検証済み。
+SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundling.md` を参照。
 
 **trigram トークナイザは 3 文字未満のクエリ文字列からトークンを一つも生成しない** — 1〜2 文字での
 `MATCH` はエラーにならず無音で 0 件を返す。検索の最小文字数（`core/Constants.kt` の
@@ -203,7 +211,7 @@ SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundli
 | `windowPlacement` | string | "floating"（"floating" \| "maximized" \| "fullscreen"。未知の値は floating として復元） |
 | `feedListPaneWidth` / `articleListPaneWidth` | number | 260 / 360 |
 | `collapsedFolderIds` | string[] | `[]`（フォルダの既定は*展開*なので、畳まれている方だけを記録する） |
-| `expandedTagIds` | string[] | `[]`（タグは逆に既定が*折り畳み*。このリストが無かった頃と同じだけサイドバーが短いままになるようにするため） |
+| `expandedTagIds` | string[] | `[]`（タグは逆に既定が*折り畳み*で、サイドバーを短く保つ） |
 | `lastFilter` | string\|null | null |
 | `lastArticleId` | string\|null | null |
 | `lastFocusedPane` | string\|null | null |

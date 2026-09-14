@@ -90,13 +90,14 @@ OneDrive (one provider active at a time), here is exactly what happens:
   using your operating system's secure credential storage (Keychain on macOS,
   Credential Manager on Windows, Secret Service on Linux — inside the Snap
   package, an encrypted local store keyed by a per-app master secret from your
-  desktop's Secret portal), falling back to a permission-restricted local file
-  only if the OS store is unavailable. On
-  Android, tokens are encrypted with a key held in the Android Keystore before
-  being written to a file in the app's private storage; this file is explicitly
-  excluded from Android's automatic backup and device transfer. Tokens are never
-  sent anywhere except directly to Dropbox's, Google's, or Microsoft's own API,
-  as required to perform the sync you requested.
+  desktop's Secret portal). If the OS store is unavailable, tokens fall back to
+  a permission-restricted (`0600`, readable only by your own account) local
+  file instead. On Android, tokens are encrypted with a key held in the
+  Android Keystore before being written to a file in the app's private
+  storage; this file is explicitly excluded from Android's automatic backup
+  and device transfer. Tokens are never sent anywhere except directly to
+  Dropbox's, Google's, or Microsoft's own API, as required to perform the
+  sync you requested.
 - Once your data is in your Dropbox, Google Drive, or OneDrive account, it is
   subject to that provider's own privacy policy and terms — Keryx has no further
   access to or control over it beyond the sync file it wrote.
@@ -115,11 +116,11 @@ developer:
   on manual refresh) to check for new articles, using conditional requests so
   unchanged feeds transfer no content.
 - **Each feed's own site/favicon** — to display a small site icon next to the feed.
-- **GitHub** (`api.github.com`) — an unauthenticated, anonymous check for the
-  latest release, so the app can tell you when an update is available. No account
-  information, telemetry, or identifiers are sent. On Android, this check is
-  skipped entirely when Keryx was installed through Google Play (self-update
-  checks only make sense for the GitHub-distributed build).
+- **GitHub** (`api.github.com` for an unauthenticated, anonymous release check; `github.com` and
+  `*.githubusercontent.com` when you actually download an update) — so the app can tell you when an
+  update is available, and fetch it if you choose to install it. No account information, telemetry, or
+  identifiers are sent. On Android, this is skipped entirely when Keryx was installed through Google Play
+  (self-update only makes sense for the GitHub-distributed build).
 - **Dropbox, Google Drive, or OneDrive** — only if you've connected cloud sync,
   as described above.
 - **Content an article itself references** — when you open an article, any external
@@ -130,9 +131,9 @@ developer:
   chooses to fetch.
 
 Aside from what an opened article's own content may additionally reference (above),
-that's the complete list of servers Keryx itself decides to contact. Nothing else is
-contacted, and no analytics or tracking payloads are ever sent with any of these
-requests.
+that's the complete list of *kinds* of servers Keryx itself decides to contact — no analytics or
+tracking payloads are ever sent with any of these requests, and no server outside this list is ever
+contacted.
 
 ## Data retention & deletion
 

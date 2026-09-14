@@ -2,7 +2,9 @@
 
 [English](sync-architecture.md)
 
-対象: クラウドストレージ同期（Dropbox / Google Drive / OneDrive）。実装は `domain/SyncRepository.kt`, `domain/MergeSql.kt`, `platform/DatabaseMerger`, `platform/DatabaseSnapshot`。
+対象: クラウドストレージ同期（Dropbox / Google Drive / OneDrive）。実装は `domain/SyncRepository.kt`,
+`domain/MergeSql.kt`, `domain/MergeFailureClassifier.kt`, `domain/MergeSchema.kt`, `domain/SnapshotSql.kt`,
+`platform/DatabaseMerger`, `platform/DatabaseSnapshot`。
 
 ## 設計方針
 
@@ -25,31 +27,35 @@
 ## クラウド上のファイル構成
 
 ```bash
-/keryx.db.gz                           ← 同期用 SQLite、gzip 圧縮（articles_fts / sync_state なし）— 正本
+/keryx.db.gz                           ← 同期用 SQLite、gzip 圧縮（articles_fts / sync_state / idx_articles_*
+                                          インデックスなし）— 正本
 /keryx.db                              ← レガシー・非圧縮。読み取り専用フォールバック。後述
 /keryx-YYYYMMDD-HHMMSS.db.gz.bak       ← クラウドデータのリセットで退避される旧ファイル（自動削除されない）
 ```
 
-競合防止はアップロード時のリビジョンチェックで行う — Dropbox: `rev`、サーバー側の compare-and-set（不一致時 409）。Google Drive: ファイルの `version`、クライアント側で比較後に書き込み（同期のリトライで担保）。lock ファイルは使わない。
+競合防止はアップロード時のリビジョンチェックで行う — Dropbox: `rev`、サーバー側の compare-and-set（不一致時 409）。Google Drive: ファイルの `version`、クライアント側で比較後に書き込み（同期のリトライで担保）。OneDrive: DriveItem の `eTag` を `If-Match` で送信（不一致時 412）。lock ファイルは使わない。
 
 ## 同期フロー（`SyncRepository.sync()`）
 
 1. `CloudStorage.metadata(CLOUD_DB_GZ_PATH)` で圧縮ファイルのリビジョンを取得する。クラウドにまだ存在
-   しなければ `null` が返り、その場合は手順1aへ進む。これは従来の存在チェックを置き換えるもので、
-   **追加のネットワーク往復は発生しない** — 3 プロバイダとも同じリクエストでリビジョンを既に受け取り
-   ながら捨てていた（Dropbox `get_metadata` の `rev` / Drive の名前検索が返す `version` / Graph のアイテムの
-   `eTag`）。
+   しなければ `null` が返り、その場合は手順1aへ進む。同期が行う存在・リビジョンチェックはこれだけであり、
+   **追加のネットワーク往復は発生しない** — 3 プロバイダともメタデータ応答に元々リビジョンが含まれている
+   （Dropbox `get_metadata` の `rev` / Drive の名前検索が返す `version` / Graph のアイテムの `eTag`）。
    - **1a. 圧縮ファイルが無い場合** — `CloudStorage.metadata(CLOUD_DB_PATH)` でレガシーフォールバックを確認する。
      - **両方とも無い（真の初回同期）**: ローカル DB をエクスポート・圧縮し、create-only で
-       アップロードして（`createFresh`）終了する。詳細は後述の「圧縮アップロード / レガシーフォールバック」。
+       アップロードして（`createFresh`）終了する。もし `createFresh` の時点で実はファイルが既に存在
+       していれば（他デバイスとの競合、または「無い」判定が古かった場合）`SyncConflictException` を返し、
+       外側のリトライループが同期全体を再実行する — 再実行時は gz が存在する分岐に入るため、他デバイスの
+       アップロードを上書きすることはない。詳細は後述の「圧縮アップロード / レガシーフォールバック」。
      - **レガシーはあるが圧縮ファイルが無い（一度きりの移行）**: レガシーファイルをダウンロードして
        マージし（後述の手順3、非圧縮のまま）、その後ローカル DB をエクスポート・圧縮して
        `CLOUD_DB_GZ_PATH` に *create*（リビジョンガード無し — 圧縮ファイルのリビジョンがまだ存在しない
        ため）して終了する。レガシーファイル自体には一切手を触れない。
-2. クラウドの `keryx.db.gz` を一時ファイルへストリームしてから展開する。ただし**リビジョンが
-   `sync_state.cloud_file_rev` と一致する場合はスキップ**する（このデバイスが既にマージ済みのファイルその
-   もので、再ダウンロードしても定義上ローカルに入っているバイト列を再マージするだけのため）。
-   （手順1aのレガシーダウンロードは gzip 圧縮されていないため展開をスキップする。）
+2. クラウドの `keryx.db.gz` を一時ファイルへストリームしてから展開する（`MAX_SYNC_DB_SIZE_BYTES`、
+   1 GiB を上限とする）。ただし**リビジョンが `sync_state.cloud_file_rev` と一致する場合はスキップ**する
+   （このデバイスが既にマージ済みのファイルそのもので、再ダウンロードしても定義上ローカルに入っている
+   バイト列を再マージするだけのため）。（手順1aのレガシーダウンロードは gzip 圧縮されていないため
+   展開をスキップする。）
    - 展開後のファイルは、マージャが開く前に SQLite の 16 バイトファイルヘッダと照合される
      （`core/SqliteFile.kt` のパス版 `looksLikeSqliteFile`。先頭 16 バイトしか読まない。アップロード側
      （手順5）と対称なチェック）。これに
@@ -66,10 +72,11 @@
    `articles_fts` と `sync_state` を DROP**（ライブ DB は不変）してから gzip 圧縮する（`platform/Gzip`）。
    その圧縮ファイルを `rev` を指定して `CLOUD_DB_GZ_PATH` へストリームアップロード。ただし
    **スナップショットの SHA-256 が `sync_state.last_uploaded_snapshot_digest` と一致し、
-   かつ手順2でマージが走らなかった場合はスキップ**する（クラウドに既に同じバイト列があるため）。
-   ダイジェストは常に**非圧縮**のスナップショットに対して計算する（理由は後述の「圧縮アップロード /
-   レガシーフォールバック」参照）。
-   - `rev` 不一致（409 → `SyncConflictException`）なら再ダウンロードからリトライ（最大 3 回）。
+   かつ手順2でマージが走らなかった場合はスキップ**する（クラウドに既に同じバイト列があるため。この
+   スキップでも実アップロードと同様に `last_synced_at` は記録される）。ダイジェストは常に**非圧縮**の
+   スナップショットに対して計算する（理由は後述の「圧縮アップロード / レガシーフォールバック」参照）。
+   - `rev` 不一致（409 → `SyncConflictException`）なら再ダウンロードからリトライする。
+     `SYNC_MAX_RETRY = 3` は**総試行回数**の上限（初回に加えてリトライ 2 回）。
 6. 成功したら `last_synced_at`、アップロードしたスナップショット（非圧縮）のダイジェスト、および
    **そのアップロードが生成したリビジョン**を記録する（`CloudStorage.upload` / `create` が返す）。これは
    書き込み自身のレスポンスから取らなければならず、後追いの `metadata()` で取り直してはいけない —
@@ -98,24 +105,26 @@
 圧縮後のバイト列に対しては計算しない。`GZIPOutputStream` はヘッダにタイムスタンプを埋め込むため、
 同一の入力を2回圧縮しても出力バイト列は一致しない — 圧縮後のファイルをハッシュすると、何も
 変わっていないときでもスキップ判定が一度も成立しなくなってしまう。実際に不変であるコンテンツ
-（非圧縮のスナップショット）をハッシュするのは、スキップ判定が元々（後述の「変更がないときの転送
-スキップ」参照）行っていたことそのままであり、圧縮はその判定より下流の処理に過ぎない。
+（非圧縮のスナップショット）をハッシュすることが、スキップ判定を成立させている（後述の「変更がないときの
+転送スキップ」参照）。圧縮はその判定より下流の処理に過ぎない。
 
-**このフォールバックは意図的に一時的なもの**で、0.x のプレリリース期間限定のスコープである。アプリが
-v1.0.0 リリースに到達した時点で削除する計画である — その時点までに、`.gz` を認識しない旧ビルドを
-まだ動かしているデバイスはすべてアップグレード済みであることを前提とし、v1.0.0 以降クラウド形式は
-圧縮版のみとなる。`CLOUD_DB_PATH`、`syncLocked()` のレガシーフォールバック分岐、および対応するテストは
-そのリリースで（段階的に非推奨化するのではなく）すべて削除する。それまでの間、このフォールバックは
-1つの限定的なリスクを受容している: **`.gz` 対応デバイスと、同じクラウド接続に対してまだ圧縮前の
-旧ビルドを動かしているデバイスとの間の、一方向のサイレントな分岐**である — 旧ビルドは
-`CLOUD_DB_PATH` のみを読み書きし続けるため、`.gz` 対応デバイスが共有クラウドを一度移行してしまうと、
-旧ビルドのその後の書き込みは（凍結された）レガシーファイルにしか届かず、どの `.gz` 対応デバイスにも
-決して見えなくなる。しかもどちら側の同期も失敗せず、何も報告しない（両方とも成功と表示される）。
-これを受容する理由は、同じアカウントに対して意図的に2つの異なるバージョンのアプリを同時に動かして
-いるユーザーにのみ関係する、異常かつ一時的限定のシナリオだからである — この仕組み全体が v1.0.0 で
-撤去される以上、それに対して作り込みで対処するのではなく、ここに文書化するにとどめる。本リリースを
-超えた2台のデバイス間のリスクではなく、単一デバイスのユーザーにとってはいかなる時点でもリスクでは
-ない。
+**このフォールバックは意図的に一時的なもの**で、0.x のプレリリース期間限定のスコープ。v1.0.0 で削除する
+計画である — `CLOUD_DB_PATH`、`syncLocked()` のレガシーフォールバック分岐、対応するテストは、すべての
+デバイスが `.gz` 非対応の旧ビルドからアップグレード済みになったと見なせる v1.0.0 リリースで（段階的に
+非推奨化するのではなく）まとめて削除する。
+
+それまでの間、1つの限定的なリスクを受容している:
+
+- **一方向のサイレントな分岐**が起こりうる: `.gz` 対応デバイスと、同じクラウド接続に対してまだ圧縮前の
+  旧ビルドを動かしているデバイスとの間で発生する。旧ビルドは `CLOUD_DB_PATH` のみを読み書きし続けるため、
+  `.gz` 対応デバイスが共有クラウドを一度移行してしまうと、旧ビルドのその後の書き込みは（凍結された）
+  レガシーファイルにしか届かず、どの `.gz` 対応デバイスにも決して見えなくなる — しかもどちら側の同期も
+  失敗せず、何も報告しない（両方とも成功と表示される）。
+- **これは受容するものであり、作り込みで対処するものではない**: 同じアカウントに対して意図的に2つの
+  異なるバージョンのアプリを同時に動かしているユーザーにのみ関係する、異常かつ一時的限定のシナリオ
+  であり、この仕組み全体が v1.0.0 で撤去される以上、対処のための仕組みを新たに作る意味がないため。
+- 本リリースを超えた2台のデバイス間のリスクでは**ない**し、単一デバイスのユーザーにとって
+  いかなる時点でもリスクでは**ない**。
 
 ### 変更がないときの転送スキップ
 
@@ -136,7 +145,7 @@ v1.0.0 リリースに到達した時点で削除する計画である — そ�
 `sync_state` の除外である — `last_synced_at` は同期成功のたびに書き換わるため、これを含めたままだと毎回
 バイト列が変化してこの判定が一度も成立しない。`sync_state` は設計上デバイスローカルであり
 （[db-schema.ja.md](db-schema.ja.md) 参照）、`MergeSql` にも `DatabaseMerger` の期待スキーマにも登場しない
-ので、受信側がアップロードファイルからこれを読むことは元々なかった。
+ので、受信側はアップロードファイルからこれを読むことがない。
 
 ダイジェストは `sync_state` に保存する。これ自体がアップロードから除外されているのでデバイスごとの状態と
 なり、まだ一度もアップロードしていないデバイスはダイジェストが見つからず単にアップロードする。
@@ -149,12 +158,12 @@ v1.0.0 リリースに到達した時点で削除する計画である — そ�
 再確立される。
 
 このクリア処理は **`sync()` が保持しているのと同じミューテックス配下**で実行する。`updateAutoSyncGate()` /
-`emitErrorNotification()` をロックの外ではなく内側で呼んでいるのも同じ理由である — クリアが触れる4つの値
-（リビジョン、ダイジェスト、`lastSyncError`、`autoSyncSuspended`）はいずれも同期側も書き込むため、実行中の
-同期があると切断処理の**後**に完了して、いま破棄したばかりのプロバイダのマーカーを復活させてしまう。これは
-まさにクリアが防ごうとしている「未マージの内容のダウンロードをスキップする」状態そのものである。代償として
-切断は実行中の同期の完了を待つことになるが（待ち時間は HTTP タイムアウトで上限が決まり、通常の同期
-スピナーとして見える）、順序としてはこちらが正しい。
+`emitErrorNotification()` をロックの外ではなく内側で呼んでいるのも同じ理由である。クリアが触れる4つの値
+（リビジョン、ダイジェスト、`lastSyncError`、`autoSyncSuspended`）はいずれも同期側も書き込む。共有ロックが
+なければ、実行中の同期が切断処理の**後**に完了して、いま破棄したばかりのプロバイダのマーカーを復活させて
+しまいうる — まさにクリアが防ごうとしている「未マージの内容のダウンロードをスキップする」状態そのもの
+である。代償として切断は実行中の同期の完了を待つことになるが（待ち時間は HTTP タイムアウトで上限が決まり、
+通常の同期スピナーとして見える）、順序としてはこちらが正しい。
 
 ### 自動同期の抑制
 
@@ -164,8 +173,8 @@ v1.0.0 リリースに到達した時点で削除する計画である — そ�
 ダウンロード／マージ／アップロードのサイクルを一切実行せず `Result.Ok(Unit)` を返す。同期スピナーも
 動かさず、通知センターにも触れないので、既に利用不能と分かっているクラウド DB が書き込みのたびに
 再ダウンロード・再マージされることはない。`SyncTrigger.MANUAL`（デフォルト。UI から呼ばれる同期
-——ツールバー／メニューの「今すぐ同期」、「すべて更新」、初回接続時の同期、`SettingsViewModel.connect()`
-——はすべてこちら）は**常に実際に実行される**。ユーザーが明示的に同期を求めた場合、必ず本当の試行と
+——ツールバー／メニューの「今すぐ同期」、「すべて更新」、初回接続時の同期は `SettingsViewModel.connect()`
+と `SetupViewModel` のどちらも——はすべてこちら）は**常に実際に実行される**。ユーザーが明示的に同期を求めた場合、必ず本当の試行と
 その失敗理由を受け取れる — 黙って何もしない、ということは起きない。
 
 ゲートは `updateAutoSyncGate`（`sync()` と `resetCloudData()` の両方から、`emitErrorNotification` の
@@ -180,9 +189,8 @@ v1.0.0 リリースに到達した時点で削除する計画である — そ�
 データを直しているかもしれない」を確認できる無料の再試行であり、ゲートの本来の目的
 ——同じ壊れたファイルを1プロセス内で何度も再ダウンロード・再マージせず、同じ通知を何度も出さないこと
 ——にはそれ以上の永続性は不要である。成功した同期（手動・自動どちらでも）、`resetCloudData()` の成功、
-そして `clearSyncFailureState()`（旧 `clearLastSyncError()` から改名 — ミラーされている失敗理由の
-テキストと合わせてゲートもクリアするようになった。接続の解除・切り替え時（
-`SettingsViewModel.disconnect()`/`switchTo()`）に呼ばれる）でクリアされる。
+そして `clearSyncFailureState()`（ミラーされている失敗理由のテキストも合わせてクリアする。接続の
+解除・切り替え時（`SettingsViewModel.disconnect()`/`switchTo()`）に呼ばれる）でクリアされる。
 
 リセット／通知の UI 側はゲートの影響を一切受けない: 通知センターの `ResetCloudData` ボタンも設定画面の
 リセットボタンも無条件（ゲートされない）で、スキップされた `AUTOMATIC` 呼び出しは `lastSyncError` に
@@ -208,15 +216,23 @@ v1.0.0 リリースに到達した時点で削除する計画である — そ�
   ON CONFLICT が扱うのは内容フィールド（url/title/description/etag 等 + `updated_at`）のみ。
   feeds を **`id` で照合**するため、feed id は購読時に `url` から **UUIDv5** で決定的に生成し
   （`IdGenerator.feedId`）、同じフィードが全デバイスで同一 id になることが前提。ランダム id だと両
-  デバイスが独立購読した同一フィードが別 id になり、URL 衝突ガードにスキップされて収束しない（feed が
-  収束しないと記事 id も `feed_id` 由来で食い違い記事も収束しない）。詳細は
+  デバイスが独立購読した同一フィードが別 id になっていると URL 衝突ガードにスキップされて収束しない
+  （feed が収束しないと記事 id も `feed_id` 由来で食い違い記事も収束しない）。詳細は
   [db-schema.ja.md](db-schema.ja.md) の `feeds` 節。
-- articles: 既読（`read_at`）・スター（`starred_at`）は後勝ち、本文は OR マージ、`search_text` を再計算。削除は `deleted_at` / `deleted_updated_at` の後勝ち（既読・スターと同じフィールド別）で、キャッシュ削除の論理削除がクラウドから復活せず伝播する。削除より新しいスターがあれば記事を復活（`deleted_at` → NULL）させる。`upsert`（フィード更新）は `deleted_at` に書き込まないため、更新が削除済み記事を復活させることはない。
+- articles: 既読（`read_at`）・スター（`starred_at`）は後勝ち、本文は OR マージ。`search_text` は
+  再計算せず、勝った側の `content`/`summary` に対応するほうの、既に格納されている `search_text` を選ぶ
+  （どちらの `content` が非 NULL かによる `CASE`）。削除は `deleted_at` / `deleted_updated_at` の後勝ち
+  （既読・スターと同じフィールド別）で、キャッシュ削除の論理削除がクラウドから復活せず伝播する。削除より
+  新しいスターがあれば記事を復活（`deleted_at` → NULL）させる。`upsert`（フィード更新）は `deleted_at` に
+  書き込まないため、更新が削除済み記事を復活させることはない。
   記事を **`id` で照合**するため、記事 ID は `(feed_id, guid)` から **UUIDv5** で決定的に生成し
-  （`IdGenerator.articleId`）、同じ記事が全デバイスで同一 ID になることが前提。ランダム ID だと両
-  デバイスが独立取得した同一記事が別 ID になり、下記の guid 衝突ガードにスキップされて既読が伝播しない
-  （その不具合の修正）。詳細は [db-schema.ja.md](db-schema.ja.md) の `articles` 節。
-- feed_tags: 後勝ち。参照先 feed / tag が main に存在する場合のみ取り込む（FK 保護）。
+  （`IdGenerator.articleId`）、同じ記事が全デバイスで同一 ID になることが前提。そうでなければ両デバイスが
+  独立取得した同一記事が別 ID になっていると下記の guid 衝突ガードにスキップされ、既読が伝播しない。
+  詳細は [db-schema.ja.md](db-schema.ja.md) の `articles` 節。
+- feed_tags: 後勝ち。参照先 feed が main に存在する場合のみ取り込む（FK 保護）。タグは feed より
+  緩やかに解決する: クラウド側の `tag_id` が main にも存在すればそのまま使い、無ければ `cloud.tags` を
+  経由した join で **名前で** `main.tags` を検索する（同じ名前のタグを両デバイスが独立に別 id で
+  作った場合でも、1つのタグに収束させるため）。
 - **feeds のユーザー編集フィールドは専用文でフィールド専用タイムスタンプを使い独立に後勝ちマージする**
   （記事の `read_at` / `starred_at` と同じ設計。行全体の `updated_at`＝内容リフレッシュで更新、とは切り離す）:
   `mergeFeedFolderId`（`folder_id` / `folder_updated_at`）、`mergeFeedSortOrder`（`sort_order` /
@@ -266,9 +282,7 @@ cause の循環に備えて深さ上限あり）。`SchemaVersionException` は�
 走る——は構造的に見えない。ここでの失敗（例: ローカルの `articles_fts` テーブルが DROP されている、これも
 `SQLITE_ERROR`）は `SyncRepository` 自身の catch-all で未分類のまま `CloudStorageException` として報告され、
 `CloudDataIncompatibleException` には決してならない — マージ自体は既に成功しているので、そのために
-破壊的なクラウドデータリセットを提示するのは誤りである。（これは `SyncRepository` 側の旧メッセージ文字列
-マッチ方式では実際に起こりうるリスクだった。旧方式の `try` はこの post-commit の呼び出しも同じブロックに
-含んでいたため。）
+破壊的なクラウドデータリセットを提示するのは誤りである。
 
 許容している残存リスクが一つある：マージのトランザクション中は `PRAGMA foreign_keys=ON` が有効なので、
 main（ローカル）側に既に存在する不整合が、マージの `UPDATE` 文がそれに触れて初めて表面化し、
@@ -279,7 +293,7 @@ main（ローカル）側に既に存在する不整合が、マージの `UPDAT
 
 **将来対応**: ダウンロードしたクラウド DB に対する `PRAGMA quick_check`/`integrity_check` は、毎回の同期では
 あえて実行しない — DB サイズに比例したコストがかかるうえ、SQLite はマージが触れた瞬間に破損ページを別個の
-エラーコードとして返す（後述「マージ失敗の分類」参照）ので、マージが触れないページまで毎回全走査しても
+エラーコードとして返す（前述「マージ失敗の分類」参照）ので、マージが触れないページまで毎回全走査しても
 得られるものが無い。またこの機能が本来検出したい失敗モード（クラウド DB 自身のスキーマとしては整合していても、
 このアプリの制約には違反するデータ）も検出できない（`quick_check` は DB が自分自身のスキーマと整合しているかしか
 見ない）。将来追加するとすれば、マージ失敗分類パスの第2段階（曖昧な `SQLITE_ERROR` でスキーマ不一致を除外した後）
@@ -293,24 +307,33 @@ main（ローカル）側に既に存在する不整合が、マージの `UPDAT
 
 > [!NOTE]
 > **クラウドが古い場合のローカル方向マイグレーション**: `DatabaseMerger.merge` は
-> マージ本体の前にダウンロードしたクラウド DB の `user_version` を確認し、ローカルより古ければ一時ファイルに
-> 対して `KeryxDatabase.Schema.migrate` でローカルのスキーマまで引き上げてからマージする。これにより、
-> 新しい列を参照するマージ文が古いクラウドに対して `no such column` で失敗しない。バージョン 2 では、
-> この引き上げ分岐（`migrateCloudIfOlder`）がバージョン 1 のクラウド DB に対して発火し、ダウンロードした
-> コピーへ `1.sqm` を適用してから記事マージが `deleted_at` を参照できるようにする。
+> マージ本体の前にダウンロードしたクラウド DB の `user_version` を確認し、`1 until localSchemaVersion` の
+> 範囲にあれば一時ファイルに対して `KeryxDatabase.Schema.migrate` でローカルのスキーマまで引き上げてから
+> マージする（例: バージョン 1 のクラウド DB には `1.sqm` を適用し、記事マージが `deleted_at` を参照
+> できるようにする）。これにより、新しい列を参照するマージ文が古いクラウドに対して `no such column` で
+> 失敗しない。クラウドの `user_version` が `0`（どの `.sqm` マイグレーションよりも前）の場合はこの
+> 引き上げの対象**外**。
 
-`DatabaseMerger.validateSchema(dbPath, schemaVersion)` は **nullable な** `Boolean` を返す —
-登録済みのスキーマバージョンに対するテーブル・カラムの有無なら `true`/`false`、`schemaVersion` が
-`commonMain` の `domain/MergeSchema.EXPECTED_SCHEMAS` に未登録なら `null`（期待スキーマの表は全
-プラットフォーム共通の純粋なデータで、それをファイルと突き合わせる `PRAGMA table_info` の実処理だけが
-各 `actual` にある）。これは意図的に安全側へ倒す
-方向のフェイルセーフである — バージョンを上げた（`KeryxDatabase.Schema.version`）際に対応する
-期待スキーマの登録を忘れると、`validateSchema` は `false` ではなく `true` から `null` へ*劣化*し、
-呼び出し側はすべて `null` を `true` と同様に扱う — 判定不能な結果を使って破壊的なクラウドデータリセットを
-提示してはならない。`SyncMergerTest.validateSchemaReturnsTrueForValidKeryxDb` が現行スキーマバージョンで
-`true` になることを固定しているため、登録を忘れるとこのテストが即座に失敗する（本番での挙動劣化として
-静かに埋もれることはない）。`schemaVersion` はただの `Long` なのでこれをコンパイラで強制する手段は無く
-（sealed / enum の網羅性チェックは効かない）、このテストが実質的な歯止めになっている。
+`DatabaseMerger.validateSchema(dbPath, schemaVersion)` は **nullable な** `Boolean` を返す:
+
+- 登録済みのスキーマバージョンに対するテーブル・カラムの有無なら `true`/`false`。
+- `schemaVersion` が `commonMain` の `domain/MergeSchema.EXPECTED_SCHEMAS` に未登録なら `null`
+  （期待スキーマの表は全プラットフォーム共通の純粋なデータで、それをファイルと突き合わせる
+  `PRAGMA table_info` の実処理だけが各 `actual` にある）。あるいは、データベースを開く・テーブルを
+  検査する処理自体が失敗した場合（破損ファイル・読み取り不能なファイルなど）も `null` — 検査が
+  失敗したこと自体はスキーマ自体の妥当性について何も語らないため、検査が完了したうえで無効と
+  判定した場合（`false`）と混同してはならない。
+
+**`null` を `true` と同様に扱う理由。** これは意図的に安全側へ倒す方向のフェイルセーフである —
+バージョンを上げた（`KeryxDatabase.Schema.version`）際に対応する期待スキーマの登録を忘れると、
+`validateSchema` は `false` ではなく `true` から `null` へ*劣化*し、呼び出し側はすべて `null` を
+`true` と同様に扱う — 判定不能な結果を使って破壊的なクラウドデータリセットを提示してはならない。
+
+**実質的な歯止めになっているテスト。** `SyncMergerTest.validateSchemaReturnsTrueForValidKeryxDb` が
+現行スキーマバージョンで `true` になることを固定しているため、登録を忘れるとこのテストが即座に
+失敗する（本番での挙動劣化として静かに埋もれることはない）。`schemaVersion` はただの `Long` なので
+これをコンパイラで強制する手段は無く（sealed / enum の網羅性チェックは効かない）、このテストが
+実質的な歯止めになっている。
 
 ## FTS5 の扱い
 
@@ -325,8 +348,9 @@ main（ローカル）側に既に存在する不整合が、マージの `UPDAT
   実行中の検索を弾き得るため hot path では使わない。本文が更新された既存記事の索引は次の rebuild まで古いまま
   （許容。記事はなお旧トークンでヒットするので検索が 0 件に退行しない）。
 - **healing 用の全再構築（`rebuildIndex()` = `'rebuild'`）**:
-  `StartupTasks.kt` の日次アイドル pass（`maybeRebuildFtsIndex`、`local_settings.lastFtsRebuiltAt` の 24h ゲート +
-  `ActivityCenter` アイドル）でのみ実行。増分投入以降に本文が更新されて古くなった既存行を作り直す。
+  `domain/StartupMaintenanceTasks.kt` の `maybeRebuildFtsIndex`（desktop と Android で共有）による日次アイドル
+  pass（`local_settings.lastFtsRebuiltAt` の 24h ゲート + `ActivityCenter` アイドル）でのみ実行。増分投入以降に
+  本文が更新されて古くなった既存行を作り直す。
   `'rebuild'` は単一文で原子的（読み手は再構築前後どちらかを見るだけ）＋ `busy_timeout` で待つため、
   実行中の検索も 0 件にならない。
 
@@ -337,15 +361,17 @@ mutex で直列化する（このため両者は `suspend`）。日次 pass の�
 どの呼び出し元も catch しない生の `SQLiteException` になる。検索は**意図的に直列化しない**: 従来どおり
 `'rebuild'` が単一のアトミックな文であることと `busy_timeout` の待機に依存する。
 
-起動時に `FtsManager.ensureIndexed()`（初回作成 + 未索引行の増分投入）を呼ぶのは従来どおりだが、`main.kt` の
-`runBlocking` から呼ぶ（索引不在のままウィンドウを開かせないため）。ライタ mutex はコルーチンベースで、この
-時点では直前にディスパッチされた `.opml` インポートが短時間だけ保持し得るのみなので、メインスレッドで待って
-もデッドロックしない。
+desktop の起動時は `main.kt` の `runBlocking` から `FtsManager.ensureIndexed()`（初回作成 + 未索引行の増分
+投入）を呼ぶ（索引不在のままウィンドウを開かせないため）。ライタ mutex はコルーチンベースで、この時点では
+直前にディスパッチされた `.opml` インポートが短時間だけ保持し得るのみなので、メインスレッドで待っても
+デッドロックしない。Android は代わりに、より軽い `ensureIndexedIfTableAbsent()` をプロセス起動のたびに
+呼ぶ（理由は [db-schema.ja.md](db-schema.ja.md) の `articles_fts` 節「起動時」を参照）。
 
 ## クラウド認証（OAuth PKCE + オフラインアクセス）
 
 OAuth 2.0 authorization-code-with-PKCE のオーケストレーション（PKCE 生成・認可 URL 構築・ブラウザー起動・
-state 検証・コード交換）はプロバイダー共通の `OAuthConnectFlow`（desktop）に集約する。プロバイダー差は
+state 検証・コード交換）はプロバイダー共通の `OAuthConnectFlow`（`commonMain`、desktop と Android で共有）
+に集約する。プロバイダー差は
 **リダイレクトの受け取り方（`OAuthRedirectTransport`）とエンドポイント/スコープ（`CloudAuthManager` 実装）**
 だけで、`DropboxAuthManager` / `GoogleDriveAuthManager` / `OneDriveAuthManager` が `CloudAuthManager` を実装する。いずれも
 オフラインアクセス（Dropbox: `token_access_type=offline`、Google: `access_type=offline` + `prompt=consent`、OneDrive: `offline_access` スコープ）を
@@ -353,9 +379,25 @@ state 検証・コード交換）はプロバイダー共通の `OAuthConnectFlo
 
 リダイレクト受信方式はプロバイダーごとに選ぶ（設計方針 `.claude/rules/cloud-oauth-transport.md` 参照——両方使える場合はカスタム URI スキームを優先）:
 
-- **Dropbox / OneDrive — カスタム URI スキーム**（`CustomUriRedirectTransport`）: リダイレクト URI は
-  `keryx://oauth2/callback`。両プロバイダーで共有し `state` で識別する。認可 URL は既定ブラウザーで開き、OS が URL を実行中インスタンスへ配送する
-  （`main.kt` が `parseOAuthUri` して共有 `MutableSharedFlow<OAuthCallbackParams>` に流す）。OneDrive は Microsoft Identity platform（`consumers` テナント）と Microsoft Graph を使い、Google と違い**クライアントシークレット不要の PKCE パブリッククライアント**。同期 DB はアプリ専用フォルダー（`/me/drive/special/approot`、スコープ `Files.ReadWrite.AppFolder`）に保存する。**OneDrive 同期が対応するのは個人用 Microsoft アカウントのみ**で、テナントセグメントは `common` ではなく `consumers` でなければならない。アプリ登録が「個人用 Microsoft アカウントのみ」（signInAudience = Consumer）であり、Microsoft はこの audience での `/common` を拒否する（"the application must not be configured with 'Consumer' as the user audience"）。しかもこの拒否はユーザーがメールアドレスを送信した*後*に返るため、汎用の認証失敗として現れる。登録を職場・学校アカウント対応に広げる選択も採れない。`Files.ReadWrite.AppFolder` は個人用アカウント限定の Graph 権限であり、組織アカウントに対応するにはユーザーのドライブ全体を対象とする `Files.ReadWrite(.All)` のような広いスコープが必要になって、`external-spec.md` のプライバシー方針に反するため。Microsoft には標準のトークン失効エンドポイントが無いため `OneDriveAuthManager.revoke` は no-op で、連携解除はローカルトークンの破棄のみ。楽観的排他は DriveItem の `eTag` を `rev` として使い `If-Match` で送る（412→衝突）。`create` は `@microsoft.graph.conflictBehavior=fail`（409→衝突）。
+- **Dropbox / OneDrive — カスタム URI スキーム**（`CustomUriRedirectTransport`）:
+  - **仕組み。** リダイレクト URI は `keryx://oauth2/callback`。両プロバイダーで共有し `state` で識別
+    する。認可 URL は既定ブラウザーで開き、OS が URL を実行中インスタンスへ配送する（`main.kt` が
+    `parseOAuthUri` して共有 `MutableSharedFlow<OAuthCallbackParams>` に流す）。
+  - **OneDrive 固有の事情。** Microsoft Identity platform（`consumers` テナント）と Microsoft Graph を
+    使い、Google と違い**クライアントシークレット不要の PKCE パブリッククライアント**。同期 DB は
+    アプリ専用フォルダー（`/me/drive/special/approot`、スコープ `Files.ReadWrite.AppFolder`）に保存する。
+  - **OneDrive が個人アカウント限定である理由。** テナントセグメントは `common` ではなく `consumers`
+    でなければならない。アプリ登録が「個人用 Microsoft アカウントのみ」（signInAudience = Consumer）
+    であり、Microsoft はこの audience での `/common` を拒否する（"the application must not be
+    configured with 'Consumer' as the user audience"）。しかもこの拒否はユーザーがメールアドレスを
+    送信した*後*に返るため、汎用の認証失敗として現れる。登録を職場・学校アカウント対応に広げる選択
+    も採れない。`Files.ReadWrite.AppFolder` は個人用アカウント限定の Graph 権限であり、組織アカウント
+    に対応するにはユーザーのドライブ全体を対象とする `Files.ReadWrite(.All)` のような広いスコープが
+    必要になって、`external-spec.md` のプライバシー方針に反するため。
+  - **失効と排他制御。** Microsoft には標準のトークン失効エンドポイントが無いため
+    `OneDriveAuthManager.revoke` は no-op で、連携解除はローカルトークンの破棄のみ。楽観的排他は
+    DriveItem の `eTag` を `rev` として使い `If-Match` で送る（412→衝突）。`create` は
+    `@microsoft.graph.conflictBehavior=fail`（409→衝突）。
 - **Google Drive — ループバック**（`LoopbackRedirectTransport`）: Google の「デスクトップアプリ」クライアントは
   任意のカスタムスキームを許可せず、`http://127.0.0.1:<ポート>` のループバックのみを受け付ける。一時 HTTP
   サーバー（`com.sun.net.httpserver`。`jdk.httpserver` モジュール同梱済み）を立ててリダイレクトを受け、
@@ -375,19 +417,23 @@ Desktop Entry 仕様上 URI がプロセスに渡らず、ブラウザーはス�
 エラーを出す。いずれも OS が URL をコマンドライン引数としてアプリを起動し、`main.kt` が
 single-instance 経由で実行中インスタンスへ転送する。
 
-**Android** は同じ `keryx://oauth2/callback` スキームを宣言的に登録する — `AndroidManifest.xml` の
-`MainActivity` に `intent-filter`（`VIEW`/`DEFAULT`/`BROWSABLE`、`scheme="keryx"` `host="oauth2"`）を
-持たせるだけで、Windows/Linux のような起動時登録処理は不要。`MainActivity.onCreate`/`onNewIntent` が
-リダイレクトのデータ URI を `dispatchOAuthCallbackIfPresent` に渡し、これがデスクトップの `main.kt` と
-同じ `classifyLaunchArg`（commonMain）/ `parseOAuthUri`（jvmCommonMain）で分類したうえで、同じ形の
-`MutableSharedFlow<OAuthCallbackParams>`（Android 自身の `platformModule` に登録された別インスタンス）
-へ流し込む。`launchMode="singleTask"` により、既に起動中のインスタンスは新規 `onCreate` ではなく
-`onNewIntent` でリダイレクトを受け取る。ディスパッチ成功後は intent のデータをクリアしておく —
-そうしないと、後で回転などによる構成変更で `onCreate` が同じ `Intent` を再度受け取ったときに
-同じリダイレクトを二重処理してしまう。デスクトップと異なり、Android のカスタム URI スキームの
-`intent-filter` はアプリが排他的に専有できるものではない（別アプリが同じスキームを宣言しうる）ため、
-コード交換自体を実際に守っているのは（全プロバイダーで既に必須の）PKCE である——横取りされても
-一致する `code_verifier` が無ければ意味を成さない。
+**Android** は同じ `keryx://oauth2/callback` スキームを宣言的に登録する:
+
+- **登録。** `AndroidManifest.xml` の `MainActivity` に `intent-filter`（`VIEW`/`DEFAULT`/`BROWSABLE`、
+  `scheme="keryx"` `host="oauth2"`）を持たせるだけで、Windows/Linux のような起動時登録処理は不要。
+- **ディスパッチ。** `MainActivity.onCreate`/`onNewIntent` がリダイレクトのデータ URI を
+  `dispatchOAuthCallbackIfPresent` に渡し、これがデスクトップの `main.kt` と同じ
+  `classifyLaunchArg`（commonMain）/ `parseOAuthUri`（jvmCommonMain）で分類したうえで、同じ形の
+  `MutableSharedFlow<OAuthCallbackParams>`（Android 自身の `platformModule` に登録された別インスタンス）
+  へ流し込む。
+- **構成変更。** `launchMode="singleTask"` により、既に起動中のインスタンスは新規 `onCreate` ではなく
+  `onNewIntent` でリダイレクトを受け取る。ディスパッチ成功後は intent のデータをクリアしておく —
+  そうしないと、後で回転などによる構成変更で `onCreate` が同じ `Intent` を再度受け取ったときに
+  同じリダイレクトを二重処理してしまう。
+- **スキームを排他専有できなくても安全な理由。** デスクトップと異なり、Android のカスタム URI
+  スキームの `intent-filter` はアプリが排他的に専有できるものではない（別アプリが同じスキームを
+  宣言しうる）ため、コード交換自体を実際に守っているのは（全プロバイダーで既に必須の）PKCE である
+  ——横取りされても一致する `code_verifier` が無ければ意味を成さない。
 
 > [!NOTE]
 > **カスタム URI プロバイダーは全デスクトップ OS 共通**: `./gradlew :composeApp:run` では
@@ -405,19 +451,23 @@ single-instance 経由で実行中インスタンスへ転送する。
 
 デスクトップの Google Drive 構成——ループバックリダイレクト + 毎回のトークン交換/リフレッシュで
 `client_secret` を送る「デスクトップアプリ」OAuth クライアント——は Android には流用できない。
-Google の現行ドキュメントが明確にしているのは、これが**Google 自身の OAuth クライアント種別に関する
-ポリシー上の判断**であって、Android 一般の制約ではないという点である（Dropbox と OneDrive はどちらも
-Android でカスタム URI スキームのリダイレクト + PKCE を使っており、Dropbox はこれを公式に推奨してさえ
-いる）: カスタム URI スキームのリダイレクトは Google の Android/Chrome アプリ向けクライアント種別では
-サポート対象外（理由はアプリなりすましのリスク）、ループバックリダイレクトも同じクライアント種別では別途廃止と
-されている。Android から Google ユーザーデータへアクセスする Google 自身の推奨経路である Play services
-の `AuthorizationClient` に切り替えても、Play services へのランタイム依存が増える（この
-アプリの「アカウント不要・ローカルファースト」という方針と相性が悪い）うえ、リフレッシュトークンを
-得るにはやはりサーバー側での `client_secret` 交換が必要になる（`AuthorizationResult.getServerAuthCode()`
-が返す認可コードはバックエンドでの引き換えを前提としており、APK に埋め込む想定ではない）。どちらの
-トレードオフも小さな追加では済まないため、Android の Google Drive 対応は Dropbox/OneDrive を追加した
-フェーズには含めず、独立した将来の調査課題として先送りする。`core/CloudStorageAvailability.android.kt`
-は `googleDriveAvailable = false` を固定しており、その KDoc からここへリンクしている。
+
+- **これは Google 自身のポリシー上の判断であり、Android 一般の制約ではない。** Google の現行
+  ドキュメントがこれを明確にしている（Dropbox と OneDrive はどちらも Android でカスタム URI
+  スキームのリダイレクト + PKCE を使っており、Dropbox はこれを公式に推奨してさえいる）:
+  カスタム URI スキームのリダイレクトは Google の Android/Chrome アプリ向けクライアント種別では
+  サポート対象外（理由はアプリなりすましのリスク）、ループバックリダイレクトも同じクライアント
+  種別では別途廃止とされている。
+- **プラットフォーム自身の推奨代替策も合わない。** Android から Google ユーザーデータへアクセスする
+  Google 自身の推奨経路である Play services の `AuthorizationClient` に切り替えても、Play services
+  へのランタイム依存が増える（このアプリの「アカウント不要・ローカルファースト」という方針と
+  相性が悪い）うえ、リフレッシュトークンを得るにはやはりサーバー側での `client_secret` 交換が
+  必要になる（`AuthorizationResult.getServerAuthCode()` が返す認可コードはバックエンドでの
+  引き換えを前提としており、APK に埋め込む想定ではない）。
+- **現状。** どちらのトレードオフも小さな追加では済まないため、Android の Google Drive 対応は
+  Dropbox/OneDrive を追加したフェーズには含めず、独立した将来の調査課題として先送りする。
+  `core/CloudStorageAvailability.android.kt` は `googleDriveAvailable = false` を固定しており、
+  その KDoc からここへリンクしている。
 
 #### 将来の検討事項（Android での Google Drive）
 
@@ -450,57 +500,65 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
   使い道もない——`KeyringTokenStorage` はスナップ内からは意図的に到達不能）。詳しい理由は
   `docs/build.ja.md` の「Linux Snap パッケージ」参照。スナップ外では適用しないため、既存の
   deb/rpm 利用者の Secret Service アイテムには影響しない。
-- 上記いずれも失敗時はデータディレクトリの `.{CloudStorageType.id}_tokens.json`（0600。Dropbox は `.dropbox_tokens.json`）へ
-  フォールバック。DI が `isMacOs`／`isSnap` で3つを切り替える（`PlatformModule.desktop.kt` の
-  `providerTokenStorage`）。`TokenStorage.save()` はトークンが実際にどこに残ったかを
-  返す（`TokenSaveOutcome.SECURE` = セキュアストア / Android の Keystore 暗号化ファイル、`PLAINTEXT_FILE` =
-  平文フォールバックファイルから読める（セキュアストアに到達できなかった場合と、セキュアな書き込みは
-  成功したが古いフォールバックのコピーを削除できなかった場合の両方を含む）、`NOT_PERSISTED` = どちらにも書けず、アプリ終了までしか残らないため
-  再起動後に再接続が必要）。劣化した 2 つの結果については、`CloudSession` がそれぞれ別のメッセージで、
-  集約（coalescing）した `WARNING` 通知（原因と対処法を示す `ShowInfoDialog` アクション付き）を発行する。
-  初回接続時もバックグラウンドのトークンリフレッシュ時も同様。フォールバック自体は引き続き許容する
-  （`SECURITY.md` に記載のとおり、意図的な graceful degradation）が、黙って行われてはならず、また何も
-  保存できなかった場合を「平文ファイルに保存した」と報告してはならない、という位置づけ。
-  セキュアな書き込みが成功した際、デスクトップのセキュアストア実装はいずれも
-  （`KeyringTokenStorage`/`SecurityCliTokenStorage`/`LibSecretTokenStorage` — この合成ロジック自体は
-  共通の `SecretStoreTokenStorage` に集約されている）以前の劣化した保存で残った古いフォールバック
-  ファイルを削除する — Android の `KeystoreTokenStorage`（後述）と同じ clear-on-success の挙動で、
-  セキュアストレージが再び使えるようになった後も平文コピーがディスクに残り続けないようにする。
-  フォールバックの削除が成功を確認できなかった場合は、誤って `SECURE` と
-  報告せず `PLAINTEXT_FILE` に降格する。
+- **フォールバックファイルと結果報告**:
+  - 上記いずれも失敗時はデータディレクトリの `.{CloudStorageType.id}_tokens.json`（0600。Dropbox は
+    `.dropbox_tokens.json`）へフォールバック。DI が `isMacOs`／`isSnap` で3つを切り替える
+    （`PlatformModule.desktop.kt` の `providerTokenStorage`）。
+  - `TokenStorage.save()` はトークンが実際にどこに残ったかを返す（`TokenSaveOutcome.SECURE` =
+    セキュアストア / Android の Keystore 暗号化ファイル、`PLAINTEXT_FILE` = 平文フォールバック
+    ファイルから読める（セキュアストアに到達できなかった場合と、セキュアな書き込みは成功したが
+    古いフォールバックのコピーを削除できなかった場合の両方を含む）、`NOT_PERSISTED` = どちらにも
+    書けず、アプリ終了までしか残らないため再起動後に再接続が必要）。
+  - 劣化した2つの結果については、`CloudSession` がそれぞれ別のメッセージで、集約（coalescing）した
+    `WARNING` 通知（原因と対処法を示す `ShowInfoDialog` アクション付き）を発行する。初回接続時も
+    バックグラウンドのトークンリフレッシュ時も同様。フォールバック自体は引き続き許容する
+    （`SECURITY.md` に記載のとおり、意図的な graceful degradation）が、黙って行われてはならず、
+    また何も保存できなかった場合を「平文ファイルに保存した」と報告してはならない、という位置づけ。
+  - **clear-on-success。** セキュアな書き込みが成功した際、デスクトップのセキュアストア実装はいずれも
+    以前の劣化した保存で残った古いフォールバックファイルを削除し、セキュアストレージが再び使える
+    ようになった後も平文コピーがディスクに残り続けないようにする — Android の `KeystoreTokenStorage`
+    （後述）と同じ clear-on-success の挙動である。`KeyringTokenStorage`/`LibSecretTokenStorage` は
+    この合成ロジックを共通の `SecretStoreTokenStorage` から継承するが、`SecurityCliTokenStorage` は
+    継承せず同じ合成ロジックを自前で実装している。削除の確認が取れなかったフォールバッククリアは、
+    `SECURE` と偽って報告するのではなく `PLAINTEXT_FILE` へと結果を降格する。
 - macOS は書き込み後に **read-back 検証**（login keychain を明示指定して読み戻し）を行い、永続化を確認できない
   場合は file フォールバックへ回す。**書き込みの永続性は起動セッション依存**: パッケージ版（GUI ログイン
   セッション）では login keychain に永続化されるが、`gradlew run`（launchd 直下の Gradle daemon 配下の
   切り離しセッション）では `security add` が成功を返しても永続化しないため file に保存される。**読み取りは
   どちらのセッションからでも可能**（一度パッケージ版で連携すれば以降 `gradlew run` でも接続を引き継げる）。
-- **Android**: `KeystoreTokenStorage` が Android Keystore 保持の AES-256/GCM 鍵（プロバイダーごとに
-  `CloudStorageType.id` 由来の別エイリアス。鍵の実体は端末が対応していれば Keystore/TEE から一切
-  出ない）でトークン JSON を暗号化し、`IV || 暗号文` を `Context.filesDir` 配下の
-  `.{CloudStorageType.id}_tokens.enc` に書く。鍵は `setUserAuthenticationRequired(false)` で生成する —
-  定期実行される `WorkManager` のバックグラウンド同期は端末ロック中でもトークンを復号できる必要があり、
-  通常のトランザクションごとの秘密情報とは異なる要件のため。復号失敗（Keystore のリセット、
-  ハードウェア鍵を引き継げない端末/OS 移行など）はクラッシュとしてではなく「トークン未保存」と全く
-  同様に扱い、復号不能なファイルは残さず削除する。Keystore 自体が使えない端末は、デスクトップが
-  最終手段として使うのと同じ平文の `FileTokenStorage` にフォールバックする。暗号化保存が成功した場合は
-  このフォールバックファイルを `clear()` し、`SECURE` / `PLAINTEXT_FILE` の判断はその `clear()` 自身の
-  報告から決める——`TokenStorage.clear()` は `TokenClearOutcome.CLEARED` / `DATA_MAY_REMAIN` を返し、
-  `FileTokenStorage` は削除試行後にファイルがまだディスク上にあるか（`File.delete()` が false を
-  返した場合は残る）で判定する。消し切れずに残った平文のコピーは `SECURE` ではなく `PLAINTEXT_FILE`
-  として報告し、気付かれないままディスク上に読める状態で残るのではなく警告の対象にする。
-  **判定は必ずファイルの存在で行い、後続の `fallback.load()` では行わない**——
-  `FileTokenStorage.load()` は JSON がデコードできなくなったファイルを「未保存」として報告する一方、
-  その中の refresh token はそのまま読める状態で残るため、`load()` から消去を推測すると、
-  まさに最も警告が必要なケースで `SECURE` を返してしまっていた。`.enc` ファイルと平文
-  フォールバックの `.json` ファイルはどちらも Android の自動バックアップ/デバイス間転送から除外している
-  （`AndroidManifest.xml` の `dataExtractionRules`/`fullBackupContent`）——長寿命の OAuth リフレッシュ
-  トークンをバックアップに乗せるべきではなく、また Keystore 暗号化されたファイルはそもそも別端末に
-  復元しても役に立たないため。
+- **Android**:
+  - **暗号化。** `KeystoreTokenStorage` が Android Keystore 保持の AES-256/GCM 鍵（プロバイダーごとに
+    `CloudStorageType.id` 由来の別エイリアス。鍵の実体は端末が対応していれば Keystore/TEE から一切
+    出ない）でトークン JSON を暗号化し、`IV || 暗号文` を `Context.filesDir` 配下の
+    `.{CloudStorageType.id}_tokens.enc` に書く。鍵は `setUserAuthenticationRequired(false)` で
+    生成する — 定期実行される `WorkManager` のバックグラウンド同期は端末ロック中でもトークンを
+    復号できる必要があり、通常のトランザクションごとの秘密情報とは異なる要件のため。
+  - **復号失敗とフォールバック。** 復号失敗（Keystore のリセット、ハードウェア鍵を引き継げない
+    端末/OS 移行など）はクラッシュとしてではなく「トークン未保存」と全く同様に扱い、復号不能な
+    ファイルは残さず削除する。Keystore 自体が使えない端末は、デスクトップが最終手段として使うのと
+    同じ平文の `FileTokenStorage` にフォールバックする。
+  - **clear-on-success。** 暗号化保存が成功した場合はこのフォールバックファイルを `clear()` し、
+    `SECURE` / `PLAINTEXT_FILE` の判断はその `clear()` 自身の報告から決める——`TokenStorage.clear()`
+    は `TokenClearOutcome.CLEARED` / `DATA_MAY_REMAIN` を返し、`FileTokenStorage` は削除試行後に
+    ファイルがまだディスク上にあるか（`File.delete()` が false を返した場合は残る）で判定する。
+    消し切れずに残った平文のコピーは `SECURE` ではなく `PLAINTEXT_FILE` として報告し、気付かれない
+    ままディスク上に読める状態で残るのではなく警告の対象にする。
+  - **判定がファイルの存在であって `fallback.load()` ではない理由。**
+    `FileTokenStorage.load()` は JSON がデコードできなくなったファイルを「未保存」として報告する
+    一方、その中の refresh token はそのまま読める状態で残るため、`load()` から消去を推測すると、
+    まさに最も警告が必要なケースで `SECURE` を返してしまっていた。
+  - **バックアップからの除外。** `.enc` ファイルと平文フォールバックの `.json` ファイルはどちらも
+    Android の自動バックアップ/デバイス間転送から除外している（`AndroidManifest.xml` の
+    `dataExtractionRules`/`fullBackupContent`）——長寿命の OAuth リフレッシュトークンをバックアップに
+    乗せるべきではなく、また Keystore 暗号化されたファイルはそもそも別端末に復元しても役に立たない
+    ため。
 
 ### 今後の課題（未対応）
 
 - **file → Keychain 移行 heal**: `.dropbox_tokens.json` にトークンがあり Keychain が空の場合、
   `SecurityCliTokenStorage.load()` で file の値を Keychain へ書き戻し、**read-back 検証に成功した時のみ**
-  file を削除する（検証失敗時は file を保持しデータ損失を防ぐ）。Phase 2.5 の検証ロジックを再利用できる。
+  file を削除する予定（検証失敗時は file を保持しデータ損失を防ぐ）。未実装 — 現在の `load()` は file への
+  フォールバックのみで、Keychain への書き戻しは行わない。
 
 ## 同期対象の記事範囲
 

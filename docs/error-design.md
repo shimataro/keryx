@@ -25,12 +25,16 @@ sealed interface Result<out T> {
     data class Err(val exception: KeryxException) : Result<Nothing>
 }
 
-sealed class KeryxException(message: String) : Exception(message)
+sealed class KeryxException(message: String) : Exception(message) {
+    val messageText: String get() = message ?: this::class.simpleName.orEmpty() // Throwable.message is nullable
+}
 ```
 
-Main subclasses: `FeedFetchException(statusCode)`, `FeedParseException`, `FeedDiscoveryException(candidates)`,
-`FeedTimeoutException`, `FeedNotFoundException(isGone)`, `CloudAuthException`, `CloudStorageException`,
-`SyncConflictException`, `SchemaVersionException(localVersion, cloudVersion)`, `CloudDataIncompatibleException`, `InvalidFeedUrlException`, `UpdateException(stage)`.
+Main subclasses (each also takes a leading `message: String`, omitted below): `FeedFetchException(statusCode)`,
+`FeedParseException`, `FeedDiscoveryException(candidates)`, `FeedTimeoutException`, `FeedNotFoundException(isGone)`,
+`CloudAuthException`, `CloudStorageException`, `SyncConflictException`,
+`SchemaVersionException(localVersion, cloudVersion)`, `CloudDataIncompatibleException`, `InvalidFeedUrlException`,
+`UpdateException(stage)`.
 
 Helper extensions: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `onOk` / `onErr` / `map`.
 
@@ -39,17 +43,30 @@ Helper extensions: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `
 - **DataSource layer**: Converts Ktor / SQLite exceptions into `KeryxException` subclasses. Never leaks raw exceptions upward.
   - `FeedFetcher`: Distinguishes 304 / 301·308 (permanent redirect, URL update) / 302·303·307 (temporary) / 410 / 404 / 4xx / timeout (retried a fixed number of times). If the response is an HTML page, `FeedDiscovery` looks for candidates and returns `FeedDiscoveryException`. Maximum 5 redirect loop guard.
   - `DropboxStorage`: 401/403 → `CloudAuthException`, 409 (upload) → `SyncConflictException`, 409 `path/not_found` (get_metadata) → does not exist.
-  - `DatabaseMerger.merge`: classifies a merge failure from SQLite's **error code** (`SQLiteException.resultCode`, not message text) into `CloudDataIncompatibleException` (corrupt file, a constraint violation the cloud DB's own — laxer — schema allowed, or — only once `validateSchema` confirms the downloaded file doesn't match the app's schema — a foreign/legacy schema) or otherwise leaves it unchanged (transient / an app bug, or a schema error `validateSchema` couldn't confirm). See "Merge Failure Classification" in [sync-architecture.md](sync-architecture.md).
+  - `DatabaseMerger.merge` classifies a merge failure from SQLite's **error code** (`SQLiteException.resultCode`,
+    not message text), never from unchanged behavior alone:
+    - → `CloudDataIncompatibleException` for a corrupt file, a constraint violation only the cloud DB's own laxer
+      schema allowed, or — only once `validateSchema` confirms the downloaded file doesn't match the app's schema —
+      a foreign/legacy schema.
+    - → left unchanged (rethrown as-is) for a transient failure, an app bug, or a schema error `validateSchema`
+      couldn't confirm.
+    - See "Merge Failure Classification" in [sync-architecture.md](sync-architecture.md) for the full decision table.
 - **Repository layer**: Receives `Result` and applies business logic (retries, etc.).
 - **ViewModel layer**: Converts `Result` into UI state.
 - **UI layer**: `ui/i18n/ErrorMessages.kt`'s `userMessage(KeryxException)` only localizes a `KeryxException` into a message `String` for inline display (e.g. the add-feed error text); it does not dispatch to the notification center. Notification-center entries are populated separately, from the Repository layer via `NotificationMessages` (see below).
 
 ## Notification Center (`domain/NotificationCenter`)
 
-- The notification center (history, manually dismissed) is the primary channel. Previous transient toasts have been replaced with more macOS-native inline expressions (copy shows a ✓ near the action source, OPML shows result text near the button, subscription shows the list appearance + in-dialog display), so desktop has no in-app snackbar. Android is the one platform-specific exception: it shows an M3 `Snackbar` for the URL-copy confirmation, but only below API 33 — from API 33 onward the OS already shows its own clipboard-copy confirmation, and a Snackbar there would just duplicate it (see `platform/PlatformOs.kt`'s `platformShowsOwnCopyConfirmation` and `ui/home/HomeCommon.kt`'s `LocalSnackbarHostState`). Android's second Snackbar use is
-  `ui/home/HomeScreen.kt`'s `ForegroundAlertSnackbar`, described below.
+- The notification center (history, manually dismissed) is the primary channel. Desktop has **no in-app snackbar** —
+  confirmations use inline expressions instead (copy shows a ✓ near the action source, OPML shows result text near
+  the button, subscription shows the list appearance + in-dialog display). Android is the one platform-specific
+  exception: it shows an M3 `Snackbar` for the URL-copy confirmation, but only below API 33 — from API 33 onward the
+  OS already shows its own clipboard-copy confirmation, and a Snackbar there would just duplicate it (see
+  `platform/PlatformOs.kt`'s `platformShowsOwnCopyConfirmation` and `ui/home/HomeCommon.kt`'s
+  `LocalSnackbarHostState`). Android's second Snackbar use is `ui/home/HomeScreen.kt`'s `ForegroundAlertSnackbar`,
+  described below.
 - History is kept only for the session (not persisted to DB). Only things worth looking back at are recorded: errors and warnings, plus `INFO` for a new app version. **New articles are NOT recorded in the notification center** — `NewArticleNotifier` only feeds the OS notification (tray), because their arrival is already durably visible in the article list and the unread badges. This OS notification fires for both the background/startup refresh and a manual "Refresh All", via the shared `NewArticleNotifier.notifyIfEnabled` gate (new-article count > 0 and the `notificationEnabled` setting).
-- Bell icon with badge (count). The bell lives in `ArticleListPane`'s header row at every narrow-layout width (see the `ui-guidelines` skill for the exact rule). `ArticleDetailPane` deliberately has none.
+- Bell icon with badge (count). The bell lives in `ArticleListPane`'s header row at every layout width, including the desktop 3-pane steady state (see the `ui-guidelines` skill for the exact rule). `ArticleDetailPane` deliberately has none.
 - Background-update warnings are recorded only in the notification center (because there is no UI context), and produce **no OS notification** — the OS notification channel is reserved for new articles (see above). On Android, `ForegroundAlertSnackbar` (`ui/home/HomeScreen.kt`) therefore also announces every `WARNING`/`ERROR` in a Snackbar the moment it is raised: a badge alone only reaches a user already looking at the pane hosting the bell, and these alerts are raised asynchronously by `runAndroidStartupTasks` and `FeedRefreshWorker`. `INFO` is excluded (a new-version notice is not an alert). Details:
   - Already-announced bookkeeping keys on `core/AppNotification.kt`'s `AlertKey` (level + message + action), not the notification id, which `NotificationCenter.addCoalescing` mints afresh on every recurrence — so a permanently failing sync announces itself once, not once per background attempt. Both go through the same helper so they cannot drift.
   - The collector is gated on the window actually having OS focus (`LocalWindowInfo`). While the app is backgrounded, the notification shade is down, or the settings dialog (a window of its own) is open, the alert simply waits — announcing it into a window nobody is looking at would time the Snackbar out unseen and consume it for good. It is surfaced once focus returns.
@@ -74,17 +91,25 @@ When emitting notifications from the Repository, text is localized via `Notifica
 
 | Error | Auto-retry | Notification Center |
 | --- | --- | --- |
-| `FeedTimeoutException` / `FeedFetchException` | ✅ | ✅ |
+| `FeedTimeoutException` / `FeedFetchException` | ✅\* | ✅ |
 | `FeedParseException` | ❌ | ✅ |
-| `CloudStorageException` | ✅ | ✅ |
+| `CloudStorageException` | ✅\*\* | ✅ |
 | `SyncConflictException` | ✅ (internal) | ❌ |
 | `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ |
 | `CloudDataIncompatibleException` (corrupt / incompatible cloud DB / constraint-violating data) | ❌ (further **automatic** syncs are suspended entirely — `SyncTrigger.AUTOMATIC` gate, see "Automatic-Sync Suspension" in [sync-architecture.md](sync-architecture.md) — until a reset or a successful manual sync) | ✅ |
 | `FeedNotFoundException(isGone=true)` | ❌ | ✅ |
+
+\* `FeedFetcher` retries only on an actual timeout, for `FEED_TIMEOUT_RETRY_COUNT` extra attempts — a non-timeout
+`FeedFetchException` (e.g. a 5xx status) is not retried within the same fetch.
+\*\* Within one `sync()` call, `repeat(SYNC_MAX_RETRY)` re-loops only on `SyncConflictException`; any other error
+(including `CloudStorageException`) returns immediately. "Auto-retry" here means the next scheduled sync attempt,
+not an in-loop retry.
 | `UpdateException` (check/download/verify/install failure) | ❌ (retried only via the user clicking Retry — the Updates settings tab or the tray's own item) | ❌ (surfaced there instead — see "In-App Update" in [background-update.md](background-update.md); only the informational "update available"/"ready to install" notices reach the bell, via `ShowSettingsTab`/`OpenUrl` above) |
 
-## Constants (`core/Constants.kt`)
+## Constants (`core/Constants.kt`, excerpt)
 
 `SYNC_MAX_RETRY=3`, `FEED_TIMEOUT_RETRY_COUNT=1`, `SYNC_DEBOUNCE_MS=5000`,
 `CONNECTION_TIMEOUT_MS=10000`, `READ_TIMEOUT_SECONDS_DEFAULT=30`, `MAX_REDIRECTS=5`,
-`UPDATE_DOWNLOAD_SOCKET_TIMEOUT_MS=60000`.
+`UPDATE_DOWNLOAD_SOCKET_TIMEOUT_MS=60000`. The file has more (e.g. `SQLITE_BUSY_TIMEOUT_MS`,
+`REQUEST_TIMEOUT_MS`, `MAX_SYNC_DB_SIZE_BYTES`, `TOKEN_EXPIRY_SKEW_MS`, `OAUTH_CONNECT_TIMEOUT_MS`) — this lists the
+ones most relevant to error handling and retries.

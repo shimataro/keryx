@@ -42,7 +42,7 @@ To help us triage and fix the issue quickly, please include as much of the
 following as you can:
 
 - A clear description of the vulnerability and its potential impact.
-- The affected version, platform (Windows / macOS / Linux), and configuration
+- The affected version, platform (Windows / macOS / Linux / Android), and configuration
   (e.g. whether cloud sync was enabled and with which provider).
 - Step-by-step reproduction instructions, and a proof of concept if possible.
 - Any relevant logs, stack traces, or screenshots.
@@ -77,8 +77,8 @@ The following are **out of scope**:
 - Vulnerabilities in third-party dependencies — please report those upstream to
   the respective project (see [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md)).
   You may still let us know so we can bump the dependency.
-- Vulnerabilities in Dropbox, Google Drive, or the operating system's own
-  credential storage — report those to the respective vendor.
+- Vulnerabilities in Dropbox, Google Drive, OneDrive, or the operating system's own
+  credential storage (including the Android Keystore) — report those to the respective vendor.
 - Issues that require a device already compromised by an attacker with local
   access or elevated privileges.
 - Missing hardening that has no demonstrable security impact.
@@ -88,14 +88,14 @@ The following are **out of scope**:
 Keryx is designed to minimize its attack surface:
 
 - **No accounts and no developer-operated server.** There is no backend the
-  developer controls; the app talks only to the feeds you subscribe to and, if you
-  opt in, directly to Dropbox or Google Drive.
-- **Cloud credentials** (OAuth access / refresh tokens) are stored in the
-  operating system's secure credential storage (Keychain on macOS, Credential
-  Manager on Windows, Secret Service on Linux — inside the Snap package, an
-  encrypted local store keyed by a per-app master secret from your desktop's
-  Secret portal), falling back to a permission-restricted (`0600`) local file
-  only when the OS store is unavailable.
+  developer controls; the app talks only to the feeds you subscribe to, an allowlisted GitHub host for
+  update checks/downloads (see below), and, if you opt in, directly to Dropbox, Google Drive, or OneDrive.
+- **Cloud credentials** (OAuth access / refresh tokens, one per connected provider) are stored in the
+  platform's secure credential storage: on desktop, Keychain on macOS, Credential Manager on Windows,
+  Secret Service on Linux (inside the Snap package, an encrypted local store keyed by a per-app master
+  secret from your desktop's Secret portal), falling back to a permission-restricted (`0600`) local file
+  only when the OS store is unavailable; on Android, an AES-256/GCM key held in the Android Keystore, per
+  provider.
 - **OAuth** uses the authorization-code flow with PKCE, performed directly between
   your device and the provider — no credentials pass through any developer server.
 - **Local data** (subscriptions, cached articles, settings) stays on your device
@@ -137,23 +137,24 @@ Keryx is designed to minimize its attack surface:
   extraction flattens them and the check above rejects the result. Extraction
   therefore hands off to `ditto -x -k`, with `ZipExtractor.validate` run first so the
   zip-slip, entry-count and uncompressed-size limits still apply to an extraction
-  `ditto` performs with no limits of its own. A stored link's *target* cannot be
-  pre-checked (the same blind spot), so the extracted tree is walked afterwards
-  (`verifyExtractedTree`): every symlink is resolved **through the filesystem** and
-  rejected unless it stays inside the destination, and entry count and byte total are
-  re-checked against what actually landed. Resolving through the filesystem rather
-  than textually is what makes it sound — a `..` that follows another symlink
-  collapses against the link, not against what the link points at, so two entries
-  would otherwise be enough to look contained while pointing outside. `ditto` itself
-  is *not* that guard: it declines to *traverse* links, which is a different property
-  from declining to *create* one that points outside — it creates such a link and
-  exits 0. What `ditto` does contribute is normalizing a `..` entry **name** into the
-  destination, which is the only defense against something written *outside* the
-  destination, since a walk that starts there cannot see it. The code-signature check
-  is **not** a line of defense against an escape at all: it inspects the bundle
-  directory only, so an entry written *beside* the bundle is never looked at, and it
-  is a self-consistency check, so an attacker able to produce the whole archive could
-  ad-hoc sign their own bundle. It detects modification *inside* the bundle, which is
-  what it is there for.
+  `ditto` performs with no limits of its own.
+  - **What `ditto` alone does *not* guard against**: a stored link's *target* cannot be pre-checked
+    (the same blind spot `ZipExtractor.validate` has) — `ditto` declines to *traverse* links, which
+    is a different property from declining to *create* one that points outside; it creates such a
+    link and exits 0.
+  - **What actually closes that gap**: the extracted tree is walked afterwards
+    (`verifyExtractedTree`): every symlink is resolved **through the filesystem** and rejected
+    unless it stays inside the destination, and entry count and byte total are re-checked against
+    what actually landed. Resolving through the filesystem rather than textually is what makes it
+    sound — a `..` that follows another symlink collapses against the link, not against what the
+    link points at, so two entries would otherwise be enough to look contained while pointing
+    outside.
+  - **What `ditto` does still contribute**: normalizing a `..` entry **name** into the destination,
+    which is the only defense against something written *outside* the destination, since a walk
+    that starts there cannot see it.
+  - **The code-signature check is *not* a line of defense against an escape at all**: it inspects
+    the bundle directory only, so an entry written *beside* the bundle is never looked at, and it
+    is a self-consistency check, so an attacker able to produce the whole archive could ad-hoc sign
+    their own bundle. It detects modification *inside* the bundle, which is what it is there for.
 
 For the complete data-handling description, see [PRIVACY.md](PRIVACY.md).

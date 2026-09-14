@@ -33,9 +33,10 @@
   [external-spec.md](external-spec.md) §2, "Planned"). Android-specific tooling (deploying to a
   device/emulator, layout preview, etc.) is weaker than in Android Studio, so prefer Android
   Studio when the work is mainly on the Android side.
-- **[Visual Studio Code](https://code.visualstudio.com/)**: JetBrains released an official "Kotlin by JetBrains" extension in Alpha in 2026,
-  but it explicitly does not yet support Kotlin Multiplatform projects. Not recommended for this
-  project's development at this time.
+- **[Visual Studio Code](https://code.visualstudio.com/)**: JetBrains' official "Kotlin by JetBrains"
+  extension has explicitly not supported Kotlin Multiplatform projects at any point checked so far —
+  verify its current KMP support status before relying on it, since this can change. Not recommended
+  for this project's development unless that has changed.
 
 ### Software Required to Build
 
@@ -59,7 +60,7 @@ Split into what every target needs in common, and what's specific to the Android
   `sdkmanager platforms;android-37` fails with "Failed to find package". Run `sdkmanager --list |
   grep android-37` to find the current id, or just let AGP's own SDK auto-download resolve it on
   the first build. `build-tools;36.0.0` is unaffected and installs directly
-  (`sdkmanager "build-tools;36.0.0"` — the version AGP 9.3.2 selects by default when none is
+  (`sdkmanager "build-tools;36.0.0"` — the version AGP 9.4.0 selects by default when none is
   specified).
 - Setup: point `local.properties`' `sdk.dir` at the SDK location (AGP reads this key itself; it
   doesn't go through this project's own `-P`/env-var/`local.properties` resolution chain used for
@@ -92,23 +93,24 @@ Split into what every target needs in common, and what's specific to the Android
   "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n keryx -k "system-images;android-<N>;google_apis_playstore;<ABI>"
   ```
 
-  `<N>` should match (or be close to) `minSdk = 26` / `compileSdk`/`targetSdk = 37` above; the
-  CI instrumented-test job runs against API 29. `<ABI>` should match your host CPU's own
+  For `<N>`, use API 29 to match what the CI instrumented-test job runs against, or any value in the
+  `minSdk = 26`..`compileSdk`/`targetSdk = 37` range above. `<ABI>` should match your host CPU's own
   architecture for hardware-accelerated emulation — `x86_64` on an x86_64 host, `arm64-v8a` on an
   ARM64 host (e.g. an Apple Silicon Mac, or ARM64 Windows/Linux) — see the
   [emulator acceleration guide](https://developer.android.com/studio/run/emulator-acceleration).
   See the [official AVD guide](https://developer.android.com/studio/run/managing-avds) for details
   beyond this project's own constraints.
-- **Android release signing keystore (optional)**: Gradle's default `build` lifecycle includes
-  `:androidApp`'s `assembleRelease` (the App Bundle is not part of it — `:androidApp:bundleRelease`
-  has to be invoked explicitly, as `release.yml` does), and `androidApp/build.gradle.kts` is
-  deliberately built to **not** fall back to debug signing when signing credentials are missing —
-  a debug-signed release artifact is installable and looks legitimate, which is the dangerous
-  case. Instead, **without a keystore the root `./gradlew build` still succeeds**, but
-  `:androidApp`'s release APK comes out **unsigned** (with a build warning) — it cannot be
-  installed on a device or uploaded to Google Play. Set this up only if you actually want to
-  install or distribute a release build; a throwaway keystore made with the JDK's own `keytool` is
-  enough for local testing:
+- **Android release signing keystore (optional)**: **Without a keystore, the root `./gradlew build`
+  still succeeds**, but `:androidApp`'s release APK comes out **unsigned** (with a build warning) —
+  it cannot be installed on a device or uploaded to Google Play. Set this up only if you actually
+  want to install or distribute a release build; a throwaway keystore made with the JDK's own
+  `keytool` is enough for local testing.
+
+  Gradle's default `build` lifecycle includes `:androidApp`'s `assembleRelease` (the App Bundle is
+  not part of it — `:androidApp:bundlePlayRelease` has to be invoked explicitly, as `release.yml`
+  does). `androidApp/build.gradle.kts` is deliberately built to **not** fall back to debug signing
+  when signing credentials are missing, since a debug-signed release artifact is installable and
+  looks legitimate — the dangerous case a silent fallback would create.
 
   ```bash
   keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
@@ -190,8 +192,8 @@ additionally needs the Android SDK, per above. The native packaging tasks
     preinstalled, so both `ci.yml` and `release.yml` build it with no separate install
     step — see [build.md](build.md).
 
-`fakeroot`/`rpm` are not installed by default on `ubuntu-latest`; the release workflow installs
-them via `apt-get` right before packaging (`.github/workflows/release.yml`). Xcode Command Line
+`fakeroot`/`rpm` are not installed by default on `ubuntu-latest`; both `ci.yml` and `release.yml`
+install them via `apt-get` right before packaging. Xcode Command Line
 Tools and WiX Toolset already come preinstalled on the `macos-latest` and `windows-latest` runner
 images respectively — a local dev machine still needs whichever of these three it's missing set up
 manually.
@@ -252,10 +254,9 @@ To reset data during development, delete `keryx.db` and `local_settings.json` in
 
 ### `SDK location not found` (at Gradle configuration time)
 
-`composeApp` itself now configures an Android library target
-(`com.android.kotlin.multiplatform.library`), so any task that touches its `build` lifecycle —
-the root `./gradlew build`, or even `:composeApp:build` alone — needs the Android SDK, not just
-`:androidApp`.
+`composeApp` itself configures an Android library target (`com.android.kotlin.multiplatform.library`),
+so any task that touches its `build` lifecycle — the root `./gradlew build`, or even
+`:composeApp:build` alone, not only a task under `:androidApp` — needs the Android SDK.
 
 Set `sdk.dir` in `local.properties` (see Prerequisites above) or the `ANDROID_HOME` environment
 variable. Desktop-only work can avoid this by scoping to a specific desktop task instead, e.g.
@@ -265,7 +266,7 @@ Android SDK.
 ### The Android release build comes out unsigned
 
 Gradle's default `build` lifecycle includes `:androidApp`'s `assembleRelease`, so it produces the
-release APK (the App Bundle does not come out of it — `:androidApp:bundleRelease` has to be invoked
+release APK (the App Bundle does not come out of it — `:androidApp:bundlePlayRelease` has to be invoked
 explicitly). Without an Android release signing keystore configured,
 `androidApp/build.gradle.kts` prints a build warning and produces an **unsigned** release APK per
 flavor (`androidApp/build/outputs/apk/github/release/androidApp-github-release-unsigned.apk` and
@@ -302,10 +303,10 @@ time; a debug-only `applicationIdSuffix` is deliberately not used, since a secon
 `keryx://oauth2/callback` and `.opml` handler would make the OAuth redirect and the file
 association ambiguous.
 
-`INSTALL_FAILED_VERSION_DOWNGRADE` used to be hit first, for an unrelated reason: a local build
-passes no `-PappVersion`, so it was `versionCode` 1 and could not install over any real-version APK.
-Debug variants now pin a fixed `versionCode` (see [build.md](build.md)'s "Android (APK / AAB)"), so
-this no longer applies to them — seeing it now means a non-debug APK is being installed.
+`INSTALL_FAILED_VERSION_DOWNGRADE` means the device already has a higher `versionCode` installed than
+the one being pushed. Debug variants pin a fixed `versionCode` (see [build.md](build.md)'s
+"Android (APK / AAB)"), so this error on a debug install means a non-debug APK — built with a higher
+`versionCode` — is the one currently on the device.
 
 ### `UnsupportedClassVersionError` (at runtime)
 

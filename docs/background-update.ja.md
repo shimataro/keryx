@@ -74,16 +74,26 @@ Android の `CloudSession` は現状 Dropbox/OneDrive のみプロバイダー�
 
 `MainActivity.onCreate` から `runAndroidStartupTasks`（`AndroidStartupTasks.kt`）を呼ぶ —
 デスクトップの `runStartupTasks` に相当するが、macOS 固有の translocation 警告（Android には該当
-概念がない）を除く。`cleanUpArticleCacheIfDue`（後述）を実行し、続けてデスクトップの
-`runStartupTasks` と同じ位置・同じゲートで初回クラウド同期を行ってから、`FeedRefreshWorker` と
-同じ3関数を実行する。これは意図的に `Application.onCreate` ではなく **Activity** 側に置いている:
+概念がない）を除く。5つのステップをそれぞれ独立して実行する（`runMaintenanceStep`）ため、1ステップが
+例外を投げても（例: `maybeRebuildFtsIndex` が `FtsManager` の `busy_timeout` に達する場合）残りの
+ステップをスキップさせない:
+
+1. `cleanUpArticleCacheIfDue`（後述）。
+2. 初回クラウド同期——デスクトップの `runStartupTasks` と同じ位置・同じゲート。
+3. `refreshFeedsAndNotify`
+4. `checkForUpdateAndNotify`
+5. `maybeRebuildFtsIndex`
+
+（ステップ3〜5は `FeedRefreshWorker` が実行するのと同じ3関数——後述——から、ステップ2で既にカバー済みの
+同期処理を除いたもの。）
+
+これは意図的に `Application.onCreate` ではなく **Activity** 側に置いている:
 後者は `WorkManager` が `FeedRefreshWorker` を実行するためにプロセスを起こしたときにも走るため、
 バックグラウンド起床のたびに起動時処理一式を実行すると、Worker 自身が直前に行った更新/同期/更新確認/
 FTS 処理と重複してしまう。プロセス内ガード（`startupTasksRan`）により、画面回転など Activity だけが
-再生成される設定変更で `onCreate` が再度走ってもプロセス内で1回に保たれる。5つのステップはそれぞれ
-独立して実行される（`runMaintenanceStep`）ため、1ステップが例外を投げても
-（例: `maybeRebuildFtsIndex` が `FtsManager` の `busy_timeout` に達する場合）残りのステップをスキップ
-させない。ガードはすべてのステップを一通り試行し終えた後にのみセットされ、その前ではない:
+再生成される設定変更で `onCreate` が再度走ってもプロセス内で1回に保たれる。
+
+**ガードはすべてのステップを一通り試行し終えた後にのみセットされ、その前ではない。**
 セットアップが未完了、または `FeedRefreshWorker` がメンテナンスロックを保持中という理由で早期に
 return した呼び出しは、`FeedRefreshWorker` 自身が実行しない `cleanUpArticleCacheIfDue` を
 このプロセスで実行する唯一の機会を消費しない。
@@ -189,90 +199,92 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
   deprecated な no-op なので、streaming 構文以外に回避手段は無い。進捗は整数パーセントが
   変わるたびにのみ発火するよう間引かれる（`shouldEmitProgress`——固定バイト幅ではなくパーセント
   自体をゲートにしているのは、どの消費側もそれより細かい解像度は表示できず、かつアセットサイズに
-  よらず正しくスケールするため）、キャンセルは `Failed` ではなく `Available` に戻す——ユーザー起因の
+  よらず正しくスケールするため——これとは別に、より粗い 5% 刻みへの丸めがトレイメニューのラベル側で
+  下流に発生する。下記「表示」参照）、キャンセルは `Failed` ではなく `Available` に戻す——ユーザー起因の
   中断は失敗ではない。中断からの再開は無い: リダイレクト先は約 1 時間で失効する署名付き URL の
   ため、失敗／キャンセルしたダウンロードは再開せず単にやり直す。`check()` は
   `<cacheDir>/updates/` も掃除し、現在の状態が参照しているバージョン以外（進行中の `.part` と
   `Ready` ファイルは保護する）をすべて削除するので、このリポジトリが参照しなくなったバージョンが
   ディスク上に無限に溜まることはない。
 - **インストール。** 2 つのプラットフォーム別 `UpdateInstaller` は手法を共有していない:
-  - **デスクトップ**（`platform/update/DesktopUpdateInstaller.kt`）は
-    `platform/update/ArchiveExtractor.kt` 経由で自己置換用の ZIP をステージングディレクトリへ
-    展開し（zip slip の拒否、エントリ数とバイト数の上限。シームになっている理由は後述）、
-    ヘルスチェックをかけ（実行ファイルが存在すること、macOS では `Info.plist` のバージョンと
-    バンドル自身のコード署名も一致すること——`codesign --verify --strict --deep`）、展開結果を
-    現在のインストール先と同じボリュームへ移動し（スワップが単なる rename になるように）、
-    detached ヘルパースクリプト（`platform/update/UpdateScriptWriter.kt`）を
-    `ProcessLauncher` 経由で起動する。アプリが終了するのは、この引き渡しが実際に完了してから
-    ——インストーラーが `Launched` を返し、それを受けて `UpdateRepository` が `installLaunched`
-    シグナルを流し、`main.kt` がそれを受け取った時点のみ。`UpdateState.Installing` になった
-    ことを理由に終了しては**いけない**: この state はインストール開始の瞬間、まだ展開の最中に
-    立つので、これで終了するとスクリプトが書き出される前にプロセスが死ぬ。
-    OS を問わずスクリプトの形は同じ: このプロセスの PID が
-    終了するのを待ち、実行中のインストールを**退避**させ（`mv`。決して先に削除しない）、新しい方を
-    **配置**し、それを**検証**し、途中で失敗すれば退避したコピーへ**ロールバック**する——これにより
-    スワップ途中のクラッシュがインストール先を空にしてしまうことは無い。この退避が常に素の `mv`
-    であって削除してから移動するのではない以上、`DesktopUpdateInstaller` は新しい試行をステージング
-    する直前に `.new` ステージング先と `.old` 退避先の両方をあらかじめ消す（前回の試行がスクリプト
-    実行前に失敗して残した `.old` が残っていると、この `mv` は上書きではなく入れ子になってしまう）。
-    `extracted/` ステージングディレクトリを最初に消すのは別の理由による: *展開中に* kill された試行は
-    部分ツリーを残し、どちらの展開器も既存の展開先を置き換えずマージするので、これを消さないと
-    再試行したインストールが 2 つのバージョンを 1 つのバンドルに混ぜてしまう。
-    さらに `cleanUpStaleSelfReplaceArtifacts` が残る 2 つを毎回の起動時に掃除する——これは無条件に
-    安全: この行に到達している時点で、現在の `appRoot` はこのプロセス自身が動いている生きたインストール
-    であり、スワップ途中のスクリプトがそのような状態を残すことは無いため。Windows の MSI
-    インストール済みビルドの場合は、代わりに PID の終了を待ってから
-    `msiexec /i ... /passive /norestart` を実行するスクリプトを起動する（WiX の固定 `upgradeUuid`
-    により、これは新規インストールではなく MajorUpgrade になる）。どちらの結果になっても exe パス
-    に最終的に存在する方を再起動する——UAC を拒否した場合やアップグレードが失敗した場合でも、
-    何も動いていない状態にはせず、元の動作していたインストールを再起動する。Linux の deb/rpm
-    インストールは自己置換の対象に一切ならない（上記の `updatePlan` が既に `OpenReleasePage` へ
-    振り分けている）——GUI から `pkexec`/`sudo` を呼び、失敗時の回復手段も無いという構成はリスクに
-    見合わないと判断した。Linux の Snap インストールも同じ扱いになるが、理由はより単純で、
-    `/snap/keryx/…` マウントが読み取り専用の squashfs イメージだからである——アプリ内アップデートが
-    書き込みたくても書き込む先が無い。`release.yml` の `package-snap` ジョブは
-    `SNAPCRAFT_STORE_CREDENTIALS` が設定されていれば Snap Store への公開を行う（`build.md` 参照）が、
-    `keryx` のストア掲載はまだ存在しないため、現時点でこの恩恵を受けている snap インストールは無い——
-    公開されれば、Store からインストールされた snap は snapd 自身のバックグラウンド自動リフレッシュの
-    恩恵を受けることになる。それでも `LINUX_SNAP`
-    インストールはすべて変わらず `OpenReleasePage` に振り分けられる——GitHub Release の添付ファイル
-    （Store 公開物と同一の `.snap`）を `--dangerous` でサイドロードした場合は自動リフレッシュされず、
-    `InstallLocation` は実行時にこの二つを区別する手段を持たないためである。
-
-    展開がシームになっているのは、**署名済みの** macOS バンドルはそもそもインプロセスで展開できない
-    から: `CodeResources` は同梱 JDK の legal ディレクトリにある 43 個のシンボリックリンクを
-    *リンクとして*封印しており、`java.util.zip` には格納されたリンクと通常ファイルを見分ける手段が
-    無い——リンク先を中身に持つ通常ファイルとして書き出してしまい、上記の `codesign` チェックが
-    毎回必ず落ちる。そのため macOS は `ditto -x -k`（`DittoArchiveExtractor`）で展開し、その前に
-    `ZipExtractor.validate` を通す。`ditto` 自身は上限を持たないので、zip slip・エントリ数・
-    展開後サイズのガードをこれで維持する。そしてこれが働く唯一の上限である: `ditto` に対する制約は
-    300 秒の上限だけで、それを超えると子プロセスを強制終了し、インストールはハングせず終了ステータスを
-    理由に含めて失敗する。`validate` はサイズ上限を全エントリの解凍・破棄によって確定するので、
-    macOS のインストールは書庫を 2 回解凍する（190MB 級のバンドルで +1〜2 秒程度、しかもユーザーが
-    自分で開始した経路）。これは意図的である: ローカルヘッダの申告サイズは欠落し得るため、
-    セントラルディレクトリから読むのは、細工された書庫に耐えることが目的の上限について書庫自身の
-    メタデータを信用することになる。また `ditto` と並走させると、拒否された書庫がディスクに何も
-    残さないという性質を手放すことになる。
-
-    `validate` で確認できないのは格納されたリンクの*リンク先*（同じ `java.util.zip` の限界）なので、
-    展開後に `DittoArchiveExtractor.verifyExtractedTree` がツリーを走査し、**ファイルシステム経由で**
-    解決して展開先の外に出る symlink を拒否する。字句的な解決では不十分で、別の symlink に続く `..` は
-    リンク先ではなくリンク自身に対して畳まれてしまう。`ditto` はこのガードではない（リンクを
-    *たどらない*だけで、外を指すリンクを*作らない*わけではなく、作ったうえで exit 0 になる）。
-    `ditto` が担うのは `..` を含むエントリ*名*を展開先へ正規化することで、これは展開先の*外*に
-    書かれたものに対する唯一の防御である（展開先から始まる走査では見えないため）。`codesign` チェックは
-    *脱出*に対する防御線としてはまったく数えていない — バンドルディレクトリのみを検査するので、
-    バンドルの隣に書かれたエントリは一度も見られない（[SECURITY.ja.md](../SECURITY.ja.md) 参照）。
-    これらはすべて、書庫が既に通過している SHA-256 digest 照合の上に積み重なる。
-    Windows / Linux はアプリイメージに
-    署名が無く、リンクが潰れても無効化されるものが無いため、インプロセスの経路
-    （`InProcessArchiveExtractor` → `platform/ZipExtractor.kt`。呼び出し側が指定したエントリだけ
-    実行ビットを復元する）のままにしている。それらの `legal/` のリンクはアプリ内アップデート後に
-    相対パスを中身に持つファイルへ潰れるが、これは見落としではなく受容している: license テキストで
-    あり、アプリが実行するパスには決してないためである。ステージングの移動にも同じ要件と同じ罠がある:
-    `FileSystemExtras` のボリューム跨ぎフォールバックは `NOFOLLOW_LINKS` 付きでコピーする。
-    `Files.copy` も `Files.isDirectory` も既定でリンクをたどるため、そうしないとキャッシュと
-    インストール先が別ボリュームにあるインストールでリンクがそのまま潰れてしまう。
+  - **デスクトップ**（`platform/update/DesktopUpdateInstaller.kt`）:
+    - **展開・検証・ステージング・引き渡し。** `platform/update/ArchiveExtractor.kt` 経由で自己置換用の
+      ZIP をステージングディレクトリへ展開し（zip slip の拒否、エントリ数とバイト数の上限。シームに
+      なっている理由は下記「展開がシームになっている理由」参照）、ヘルスチェックをかけ（実行ファイルが
+      存在すること、macOS では `Info.plist` のバージョンとバンドル自身のコード署名も一致すること
+      ——`codesign --verify --strict --deep`）、展開結果を現在のインストール先と同じボリュームへ
+      移動し（スワップが単なる rename になるように）、detached ヘルパースクリプト
+      （`platform/update/UpdateScriptWriter.kt`）を `ProcessLauncher` 経由で起動する。アプリが
+      終了するのは、この引き渡しが実際に完了してから——インストーラーが `Launched` を返し、それを
+      受けて `UpdateRepository` が `installLaunched` シグナルを流し、`main.kt` がそれを受け取った
+      時点のみ。
+    - **`Installing` を理由に終了しない理由。** この state はインストール開始の瞬間、まだ展開の最中に
+      立つので、これで終了するとスクリプトが書き出される前にプロセスが死ぬ。
+    - **スクリプトの形。** OS を問わずスクリプトの形は同じ: このプロセスの PID が終了するのを待ち、
+      実行中のインストールを**退避**させ（`mv`。決して先に削除しない）、新しい方を**配置**し、
+      それを**検証**し、途中で失敗すれば退避したコピーへ**ロールバック**する——これによりスワップ
+      途中のクラッシュがインストール先を空にしてしまうことは無い。
+    - **後始末。** この退避が常に素の `mv` であって削除してから移動するのではない以上、
+      `DesktopUpdateInstaller` は新しい試行をステージングする直前に `.new` ステージング先と `.old`
+      退避先の両方をあらかじめ消す（前回の試行がスクリプト実行前に失敗して残した `.old` が残っている
+      と、この `mv` は上書きではなく入れ子になってしまう）。`extracted/` ステージングディレクトリを
+      最初に消すのは別の理由による: *展開中に* kill された試行は部分ツリーを残し、どちらの展開器も
+      既存の展開先を置き換えずマージするので、これを消さないと再試行したインストールが2つの
+      バージョンを1つのバンドルに混ぜてしまう。さらに `cleanUpStaleSelfReplaceArtifacts` が残る
+      2つを毎回の起動時に掃除する——これは無条件に安全: この行に到達している時点で、現在の
+      `appRoot` はこのプロセス自身が動いている生きたインストールであり、スワップ途中のスクリプトが
+      そのような状態を残すことは無いため。
+    - **プラットフォーム別の振り分け。** Windows の MSI インストール済みビルドの場合は、代わりに
+      PID の終了を待ってから `msiexec /i ... /passive /norestart` を実行するスクリプトを起動する
+      （WiX の固定 `upgradeUuid` により、これは新規インストールではなく MajorUpgrade になる）。
+      どちらの結果になっても exe パスに最終的に存在する方を再起動する——UAC を拒否した場合や
+      アップグレードが失敗した場合でも、何も動いていない状態にはせず、元の動作していたインストール
+      を再起動する。Linux の deb/rpm インストールは自己置換の対象に一切ならない（上記の
+      `updatePlan` が既に `OpenReleasePage` へ振り分けている）——GUI から `pkexec`/`sudo` を呼び、
+      失敗時の回復手段も無いという構成はリスクに見合わないと判断した。Linux の Snap インストールも
+      同じ扱いになるが、理由はより単純で、`/snap/keryx/…` マウントが読み取り専用の squashfs
+      イメージだからである——アプリ内アップデートが書き込みたくても書き込む先が無い。`release.yml`
+      の `package-snap` ジョブは `SNAPCRAFT_STORE_CREDENTIALS` が設定されていれば Snap Store への
+      公開を行う（`build.md` 参照）。Store からインストールされた snap は、このアプリ自身の
+      アップデート経路とは無関係に、snapd 自身のバックグラウンド自動リフレッシュの恩恵を受ける。
+      それでも `LINUX_SNAP` インストールはストアでの公開状況に関わらずすべて変わらず
+      `OpenReleasePage` に振り分けられる——GitHub Release の添付ファイル（Store 公開物と同一の
+      `.snap`）を `--dangerous` でサイドロードした場合は自動リフレッシュされず、`InstallLocation`
+      は実行時にこの二つを区別する手段を持たないためである。
+    - **展開がシームになっている理由。** **署名済みの** macOS バンドルはそもそもインプロセスで展開
+      できないから: `CodeResources` は同梱 JDK の legal ディレクトリにある43個のシンボリックリンク
+      を*リンクとして*封印しており、`java.util.zip` には格納されたリンクと通常ファイルを見分ける
+      手段が無い——リンク先を中身に持つ通常ファイルとして書き出してしまい、上記の `codesign` チェック
+      が毎回必ず落ちる。そのため macOS は `ditto -x -k`（`DittoArchiveExtractor`）で展開し、その前に
+      `ZipExtractor.validate` を通す。`ditto` 自身は上限を持たないので、zip slip・エントリ数・
+      展開後サイズのガードをこれで維持する。そしてこれが働く唯一の上限である: `ditto` に対する制約
+      は300秒の上限だけで、それを超えると子プロセスを強制終了し、インストールはハングせず終了
+      ステータスを理由に含めて失敗する。`validate` はサイズ上限を全エントリの解凍・破棄によって
+      確定するので、macOS のインストールは書庫を2回解凍する（190MB級のバンドルで+1〜2秒程度、
+      しかもユーザーが自分で開始した経路）。これは意図的である: ローカルヘッダの申告サイズは欠落
+      し得るため、セントラルディレクトリから読むのは、細工された書庫に耐えることが目的の上限に
+      ついて書庫自身のメタデータを信用することになる。また `ditto` と並走させると、拒否された書庫
+      がディスクに何も残さないという性質を手放すことになる。
+    - **`ditto` 実行後もまだ確認が必要なもの。** `validate` で確認できないのは格納されたリンクの
+      *リンク先*（同じ `java.util.zip` の限界）なので、展開後に `DittoArchiveExtractor.verifyExtractedTree`
+      がツリーを走査し、**ファイルシステム経由で**解決して展開先の外に出る symlink を拒否する。
+      字句的な解決では不十分で、別の symlink に続く `..` はリンク先ではなくリンク自身に対して
+      畳まれてしまう。`ditto` はこのガードではない（リンクを*たどらない*だけで、外を指すリンクを
+      *作らない*わけではなく、作ったうえで exit 0 になる）。`ditto` が担うのは `..` を含むエントリ
+      *名*を展開先へ正規化することで、これは展開先の*外*に書かれたものに対する唯一の防御である
+      （展開先から始まる走査では見えないため）。`codesign` チェックは*脱出*に対する防御線としては
+      まったく数えていない — バンドルディレクトリのみを検査するので、バンドルの隣に書かれた
+      エントリは一度も見られない（[SECURITY.ja.md](../SECURITY.ja.md) 参照）。これらはすべて、
+      書庫が既に通過している SHA-256 digest 照合の上に積み重なる。
+    - **Windows / Linux。** アプリイメージに署名が無く、リンクが潰れても無効化されるものが無いため、
+      インプロセスの経路（`InProcessArchiveExtractor` → `platform/ZipExtractor.kt`。呼び出し側が
+      指定したエントリだけ実行ビットを復元する）のままにしている。それらの `legal/` のリンクは
+      アプリ内アップデート後に相対パスを中身に持つファイルへ潰れるが、これは見落としではなく
+      受容している: license テキストであり、アプリが実行するパスには決してないためである。
+      ステージングの移動にも同じ要件と同じ罠がある: `FileSystemExtras` のボリューム跨ぎフォール
+      バックは `NOFOLLOW_LINKS` 付きでコピーする。`Files.copy` も `Files.isDirectory` も既定で
+      リンクをたどるため、そうしないとキャッシュとインストール先が別ボリュームにあるインストールで
+      リンクがそのまま潰れてしまう。
   - **Android**（`platform/update/AndroidUpdateInstaller.kt`）はダウンロードした APK を
     `PackageInstaller` セッションへストリーム書き込みしてコミットする。以降は OS が引き継ぐ（自前の
     インストール確認を表示し、成功時にはこのプロセス自身を kill してくれるので、こちら側で何かする
@@ -299,8 +311,9 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
   唯一のアップデートメニュー項目——デスクトップトレイとアプリメニューバーの Help メニューに
   同一のものが出る。どちらも `tray/UpdateMenuEntry.kt` の `updateMenuEntry` が組み立てる——は、
   `state` が動くのに合わせて
-  「アップデート %1$s をダウンロード」「ダウンロード中… N%」（5% 刻みに丸めており、Linux SNI の
-  D-Bus メニューをレイアウト変更シグナルで溢れさせないため）、「検証中…」、
+  「アップデート %1$s をダウンロード」「ダウンロード中… N%」（上記「ダウンロード」で述べた同じ進捗を、
+  ここではさらに粗く 5% 刻みへ丸めたもの——Linux SNI の D-Bus メニューをレイアウト変更シグナルで
+  溢れさせないために必要）、「検証中…」、
   「再起動して %1$s にアップデート」、「アップデートに失敗しました」と切り替わる（`%1$s` は対象
   バージョン——`strings.xml` の `tray_update_download`／`tray_update_restart` 参照）。
   この項目は状態によらず**常に存在する**: `Idle`／`UpToDate` では「更新をチェック」／
@@ -383,20 +396,22 @@ macOS の translocated インストールの警告（デスクトップ固有の
 2. クラウドプロバイダーに接続済みなら初回同期（`SyncRepository.sync(SyncTrigger.AUTOMATIC)`）——
    デスクトップは Dropbox / Google Drive / OneDrive、Android は Dropbox / OneDrive。
 3. FTS 全再構築（`maybeRebuildFtsIndex`、前回から 24 時間以上 かつ アイドル時のみ。下記）。
-4. FTS の初回作成・未索引行の増分投入は、デスクトップでは `FtsManager.ensureIndexed()` が担う:
-   `application {}` の前に `runBlocking` でブロックして待つ（最初のウィンドウ表示が遅れるだけで
-   済み、かつ `main.kt` はプロセスにつき一度しか走らないので許容できる）。`KeryxApplication.onCreate`
-   はこれを共有のアプリスコープ `CoroutineScope` 上で fire-and-forget で起動する —
-   `Application.onCreate` をブロックすると Android の全コールドスタートが遅延してしまうため。
-   完了前の短い間に検索が実行された場合は、失敗するのではなくヒット件数が少なめ（0件を含む）に
-   なるだけである。ただしここで呼ぶのは `ensureIndexed()` ではなく、より軽量な
-   `FtsManager.ensureIndexedIfTableAbsent()` である: `Application.onCreate` は `FeedRefreshWorker` を
-   走らせるための `WorkManager` の起床でも実行される（プラットフォームの最短間隔 15 分なら
-   1 日最大 ~96 回。「Android での実装」節を参照）ため、`ensureIndexed()` が呼ぶ `indexMissing()` の
-   `O(記事数)` スキャンをそのたびに払うわけにはいかない。`ensureIndexedIfTableAbsent()` はテーブルが
-   一度作成・バックフィルされた後は `sqlite_master` を 1 回引くだけの no-op になる。新着記事の
-   索引付けは、`refreshFeedsAndNotify` / 同期でのホットパス `indexMissing()` 呼び出しと、
-   下記の日次再構築 heal で通常どおり継続される。
+4. FTS の初回作成・未索引行の増分投入:
+   - **デスクトップ。** `FtsManager.ensureIndexed()` が担う: `application {}` の前に `runBlocking`
+     でブロックして待つ（最初のウィンドウ表示が遅れるだけで済み、かつ `main.kt` はプロセスにつき
+     一度しか走らないので許容できる）。
+   - **Android。** `KeryxApplication.onCreate` はこれを共有のアプリスコープ `CoroutineScope` 上で
+     fire-and-forget で起動する — `Application.onCreate` をブロックすると Android の全コールド
+     スタートが遅延してしまうため。完了前の短い間に検索が実行された場合は、失敗するのではなく
+     ヒット件数が少なめ（0件を含む）になるだけである。
+   - **より軽量な版を呼ぶ理由。** ここで呼ぶのは `ensureIndexed()` ではなく、より軽量な
+     `FtsManager.ensureIndexedIfTableAbsent()` である: `Application.onCreate` は `FeedRefreshWorker`
+     を走らせるための `WorkManager` の起床でも実行される（プラットフォームの最短間隔 15 分なら
+     1日最大 ~96 回。「Android での実装」節を参照）ため、`ensureIndexed()` が呼ぶ `indexMissing()`
+     の `O(記事数)` スキャンをそのたびに払うわけにはいかない。`ensureIndexedIfTableAbsent()` は
+     テーブルが一度作成・バックフィルされた後は `sqlite_master` を1回引くだけの no-op になる。
+   - 新着記事の索引付けは、`refreshFeedsAndNotify` / 同期でのホットパス `indexMissing()` 呼び出しと、
+     下記の日次再構築 heal で通常どおり継続される。
 
 ## FTS 全再構築の日次 heal（`maybeRebuildFtsIndex`）
 

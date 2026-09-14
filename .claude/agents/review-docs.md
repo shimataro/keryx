@@ -29,7 +29,10 @@ the one nobody notices — code moved, docs did not.
 
 ## Checklist — docs match the code
 
-`docs/` is the design record. A structural change invalidates it silently.
+`docs/` is the design record. A structural change invalidates it silently. An **exhaustive
+file/class listing** (a directory map, a "here is everything under X" enumeration) is the doc most
+likely to silently rot, since nothing forces it to track additions — spot-check a sample against
+`find`/`grep` rather than trusting it.
 
 | Change | Doc that likely needs updating |
 | --- | --- |
@@ -41,7 +44,7 @@ the one nobody notices — code moved, docs did not.
 | The background loop, startup tasks, the FTS rebuild gate | `docs/background-update.md` |
 | A test convention or a new kind of test | `docs/testing.md` |
 | A build/packaging prerequisite, an API key, the release flow | `docs/build.md`, `docs/setup.md` |
-| A defect deliberately left unfixed, or one now resolved | `docs/known-issues.md` |
+| A defect deliberately left unfixed, or one now resolved | `docs/known-issues.md` — see "Checklist — stale and historical content" below for what "now resolved" requires |
 
 Report a specific stale sentence with its location, not "the docs may need updating".
 
@@ -74,3 +77,47 @@ strings in `values/strings.xml` (Japanese) and `values-en/strings.xml` (English)
   Japanese and the English say the same thing at the same register?
 
 Prose findings are `Low` unless the text is actively wrong about behavior, which makes them `Medium`.
+
+## Checklist — stale and historical content
+
+A design doc records the current spec; it is not a changelog. Content whose only job is to describe
+a past state, or a fix that already landed, does not belong even when it is well-written and
+technically accurate — this is a *scope* problem, not a prose-quality one, so check it independently
+of the "prose quality" checklist above.
+
+- **Resolved-bug notes.** A `> [!NOTE]` (or any passage) whose only content is "this bug was fixed" /
+  "X has been fixed; the current implementation does Y" adds nothing once the surrounding prose
+  already states the current behavior — which it almost always does, since the note exists beside
+  it. Flag the note for deletion.
+- **"Previously / used to / no longer" narrative that is not the rationale for an active decision.**
+  Keep the *why* behind a design choice that still holds; drop the story of how the code arrived
+  there. "Windows uses `JPopupMenu` because AWT's own popup ignores display scaling" stays — it
+  explains a current fact. "A bug caused overlapping labels, so this was switched from
+  `java.awt.PopupMenu`" is changelog narrative once the switch is the only implementation that has
+  ever shipped since this doc's reader could observe it; only the first sentence needs to remain.
+- **`docs/known-issues.md` scope.** Its own opening line restricts it to defects deliberately left
+  unfixed. An entry whose `**Status**` reads `Resolved` no longer belongs there **regardless of how
+  well the entry is written** — flag it as a finding. If the entry's "why the current code looks
+  this way" reasoning is not already recorded elsewhere, the suggested fix is to fold that reasoning
+  into the design doc it explains (e.g. `app-architecture.md`) in one to three lines, then delete the
+  entry outright — not to leave it in `known-issues.md` re-labeled as resolved. `docs/README.md`'s
+  index description for this file is a *description* of the intended scope, not a place to reconcile
+  drift; if it disagrees with what the file actually contains, the file is what is wrong.
+- **Point-in-time claims about something outside this project's control, asserted without a way to
+  re-check.** This is not about versions this project pins — `gradle/libs.versions.toml` entries and
+  the `external-spec.md` tech-choices table are deliberately kept current by the `update-dependencies`
+  skill, and citing them is expected. It is about a claim this repository cannot keep in sync: "this
+  is the newest stable release" of a third-party tool, a bare year ("as of 2026"), or a specific
+  external pre-release build cited as a repro case. These read as permanent facts but go stale
+  without triggering any review. Prefer phrasing that points at how to re-check (a command, a
+  section to read) over asserting a value someone has to remember to revisit.
+
+## Checklist — mechanical correctness
+
+Cheap to check, easy to miss in a large diff:
+
+- **Relative Markdown links resolve.** A link is relative to the file that contains it, not the repo
+  root; a moved or renamed doc breaks every link pointing at its old path, silently — nothing in the
+  build catches a broken doc link.
+- **"See X above / below" points the right way.** A section moved during editing without moving its
+  own back-references along with it.

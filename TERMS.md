@@ -17,8 +17,8 @@ agree, please don't use the app.
 
 Keryx is free software: no account, no subscription fee, and no server operated by
 the developer. It runs locally on your device and optionally syncs your data through
-a cloud storage account you control (Dropbox, Google Drive, or OneDrive) — see the
-[Privacy Policy](PRIVACY.md) for details on what that involves.
+a cloud storage account you control (Dropbox, Google Drive, or OneDrive — Google Drive is not
+currently offered on Android) — see the [Privacy Policy](PRIVACY.md) for details on what that involves.
 
 ## Source code license (MIT) — unaffected by these Terms
 

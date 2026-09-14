@@ -16,9 +16,10 @@ A lightweight, simple RSS reader that provides the same feed subscription experi
 
 | Platform | Support |
 | --- | --- |
-| Windows / macOS / Linux | ✅ (Compose Multiplatform, current) |
-| Android | ✅ (Compose Multiplatform, current; cloud sync supports Dropbox / OneDrive — Google Drive on Android is a future consideration, see §4 and [sync-architecture.md](sync-architecture.md)) |
-| iOS / iPadOS / macOS | Planned (initially Compose, then native SwiftUI) |
+| Windows / macOS / Linux | ✅ Compose Multiplatform (current) |
+| Android | ✅ Compose Multiplatform (current; cloud sync supports Dropbox / OneDrive — Google Drive on Android is a future consideration, see §4 and [sync-architecture.md](sync-architecture.md)) |
+| iOS / iPadOS | Planned (initially Compose, then native SwiftUI) |
+| macOS (native) | Planned — a separate native SwiftUI macOS app alongside the existing Compose one above |
 
 ## 3. Supported Formats
 
@@ -27,7 +28,9 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
 ## 4. Sync Method
 
 - No account registration in Keryx. The user's own cloud storage (Dropbox / Google Drive / OneDrive) is used as the sync bus. Only one active connection is allowed at a time; the user selects and switches providers (no simultaneous connections).
-- The sync file is a raw SQLite upload of `keryx.db`.
+- The sync file is a gzip-compressed `VACUUM INTO` snapshot of `keryx.db` (excluding the local-only
+  `articles_fts` search index, the four `idx_articles_*` indexes, and the `sync_state` table) — see
+  [sync-architecture.md](sync-architecture.md).
 - Sync targets: subscription list, read state, stars, tag structure, global settings.
 - Non-sync targets: device-local settings, cloud authentication info.
 - Import / export is OPML.
@@ -110,12 +113,11 @@ data exists in the cloud it is automatically merged (imported) during the initia
 | 410 Gone | Warning in notification center (not auto-deleted) |
 | Timeout | Error notification after a fixed number of retries |
 
-> [!NOTE]
-> Fixed the bug where only 301 was supported with no redirect loop guard, and now all redirect codes are supported + a maximum 5-time loop guard is implemented.
-
 ## 8. Accessibility & Internationalization
 
-- All UI strings are managed via Compose Resources (`values/strings.xml`). Selected according to system locale, falling back to default (Japanese) if the language is not supported. Currently only Japanese is bundled.
+- All UI strings are managed via Compose Resources (`values/strings.xml` for Japanese — the default and
+  fallback — plus `values-en/strings.xml` for English, same key set). Selected according to system locale,
+  falling back to Japanese if the system locale isn't one of the two.
 - Font size setting (reflected in `LocalDensity` fontScale).
 
 ## 9. UI Direction
@@ -125,43 +127,50 @@ a flat, SF-leaning look; Android gets Material 3's own components, shapes, and r
 will eventually get native SwiftUI. **Windows and Linux are the deliberate exception**: Java/Swing's
 own platform integration is too limited to give either OS a comparably native treatment (see the
 Look & Feel, context-menu, and file-dialog specifics below, and `docs/known-issues.md`), so both
-share macOS's flat look instead of getting one of their own. Material 3 with the app's own teal
-color scheme is Android's concrete instantiation of this principle, not a universal baseline the
-other platforms deviate from — where this document says "Material 3", read it as Android-specific
-unless stated otherwise. Light / dark / system support. 3-pane layout (feed list / article list /
+share macOS's flat look instead of getting one of their own. Material 3 is Android's concrete
+instantiation of this principle — where this document says "Material 3", read it as Android-specific
+unless stated otherwise. Android's own color scheme is not always the app's fixed teal palette:
+on Android 12+ (API 31+) the app uses Material You dynamic color, derived from the system wallpaper
+(`dynamicLightColorScheme`/`dynamicDarkColorScheme`), falling back to the fixed teal scheme on older
+versions. Light / dark / system support. 3-pane layout (feed list / article list /
 article detail) + keyboard navigation, adapting down to fewer simultaneous panes on narrower widths
 (see below).
 
 ### Adaptive layout (width) and touch input (Android)
 
-The 3-pane layout is desktop's steady state — the window can never narrow below the width all three
+**3-pane width (desktop's steady state).** The window can never narrow below the width all three
 panes need, so it always shows all three, with the feed list as a permanent sidebar pane. "The width
 all three panes need" is measured at the panes' intended sizes rather than their bare minimums: a
 screen just wide enough to cram all three onto their floors at once — an Android tablet held in
 portrait, say — counts as narrower and shows two, while a large Android tablet in landscape is
-genuinely wide enough and does get all three. At any narrower width, the feed list instead becomes a
-Gmail-style navigation drawer — reached via a hamburger button, and opened automatically the very
-first time the app has no feeds and no cloud account yet, so a new user sees it (and the "+" button
-to add a first feed) without having to find it themselves. A phone-width screen shows one of the two
-remaining panes (article list, article detail) at a time as a hierarchical stack with its own back
-control; a tablet-width screen shows both together, permanently — there is no narrower state where
-the reader loses its own back control without the article list gaining a permanent one beside it
-(see the note on the swipe gesture below). Nothing about either pane's own content changes between
-these — only how many are on screen together — with one exception: search. At the 3-pane width the
-search field stays where it has always been, in the feed list's sidebar, with results appearing
-reactively in the article list beside it. At a narrower width the drawer has no search field of its
-own at all — a phone- or tablet-width screen both reach search through the article list's own
-header, which is the one pane every narrower width always keeps on screen and therefore the one
-place the field can live without duplicating an editable copy of the same query. Tapping it moves
-the field to sit directly above the results it filters, in the same header a hamburger button
-normally occupies, and it stays put there when the device is rotated between phone and tablet width.
-At every width, search narrows whatever subscription-list item is currently selected rather than
-being a separate destination of its own. At the 3-pane width this selection stays visible and
-highlighted in the sidebar throughout, showing plainly what the query is being matched against; at
-a narrower width the feed list is a drawer that is normally already closed by the time search is
-reached (through the article list's own header), so the selection isn't on screen while searching
-there. Either way, clearing the query (or, at a narrower width, backing out of the expanded field)
-simply returns to that same selection's own unfiltered list.
+genuinely wide enough and does get all three.
+
+**Narrower widths.** The feed list instead becomes a Gmail-style navigation drawer — reached via a
+hamburger button, and opened automatically the very first time the app has no feeds and no cloud
+account yet, so a new user sees it (and the "+" button to add a first feed) without having to find
+it themselves. A phone-width screen shows one of the two remaining panes (article list, article
+detail) at a time as a hierarchical stack with its own back control; a tablet-width screen shows
+both together, permanently — there is no narrower state where the reader loses its own back control
+without the article list gaining a permanent one beside it (see the note on the swipe gesture
+below). Nothing about either pane's own content changes between these — only how many are on screen
+together — with one exception: search.
+
+**Search field placement.** At the 3-pane width the search field stays where it has always been, in
+the feed list's sidebar, with results appearing reactively in the article list beside it. At a
+narrower width the drawer has no search field of its own at all — a phone- or tablet-width screen
+both reach search through the article list's own header, which is the one pane every narrower width
+always keeps on screen and therefore the one place the field can live without duplicating an
+editable copy of the same query. Tapping it moves the field to sit directly above the results it
+filters, in the same header a hamburger button normally occupies, and it stays put there when the
+device is rotated between phone and tablet width.
+
+**What search narrows.** At every width, search narrows whatever subscription-list item is
+currently selected rather than being a separate destination of its own. At the 3-pane width this
+selection stays visible and highlighted in the sidebar throughout, showing plainly what the query is
+being matched against; at a narrower width the feed list is a drawer that is normally already closed
+by the time search is reached (through the article list's own header), so the selection isn't on
+screen while searching there. Either way, clearing the query (or, at a narrower width, backing out
+of the expanded field) simply returns to that same selection's own unfiltered list.
 
 Where a mouse and a touchscreen need different affordances, both are supported without changing
 the underlying action: reordering a feed or folder is a plain click-and-drag with a mouse, and a
@@ -220,7 +229,12 @@ Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
 ## 10. Privacy & Security
 
 - No data sent to external servers, no account registration required, HTTPS only.
-- Dropbox token is stored in the OS secure storage — Keychain on macOS (via the `security` CLI), Credential Manager / Secret Service on Windows/Linux via java-keyring, or, inside the Snap package specifically, a local store encrypted with a per-app key from the desktop's Secret portal (via libsecret, not java-keyring) — see `docs/sync-architecture.md`'s "Token Storage". Falls back to a file in the data directory when unavailable.
+- Each cloud provider's token (Dropbox, Google Drive, OneDrive) is stored separately in platform secure storage.
+  On desktop: Keychain on macOS (via the `security` CLI), Credential Manager / Secret Service on Windows/Linux via
+  java-keyring, or, inside the Snap package specifically, a local store encrypted with a per-app key from the
+  desktop's Secret portal (via libsecret, not java-keyring) — falling back to a file in the data directory when
+  unavailable. On Android: an AES-256/GCM key held in the Android Keystore, per provider. See
+  `docs/sync-architecture.md`'s "Token Storage" for both.
 
 ## 11. Technology Choices
 
@@ -229,13 +243,13 @@ Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
 | UI | Compose Multiplatform (Material 3 on Android; platform-specific UI elsewhere — see §9) |
 | State management | androidx.lifecycle ViewModel + Koin |
 | DB | SQLDelight (SQLite) + FTS5 (raw SQL) |
-| HTTP | Ktor client (CIO) |
+| HTTP | Ktor client (CIO on desktop, OkHttp on Android) |
 | RSS/HTML/XML parsing | ksoup |
 | Serialization / datetime | kotlinx-serialization / kotlinx-datetime |
 | Cloud sync | Ktor + Dropbox / Google Drive / OneDrive (Microsoft Graph) REST API (OAuth PKCE + refresh token) |
 | i18n | Compose Resources |
 | Testing | kotlin-test + kotlinx-coroutines-test + Ktor MockEngine |
-| Build | Gradle 9.7 (Kotlin 2.4 / Compose 1.11 / JDK 25 toolchain) |
+| Build | Gradle 9.7.1 (Kotlin 2.4.10 / Compose Multiplatform 1.11.1 / JDK 25 toolchain) |
 | Image loading | Coil3 (favicon display. SVG decode support, shared existing HttpClient, disk cache) |
 
 Both the feed list and article list display favicons (`feeds.favicon_url`) using Coil3 `AsyncImage`. If not yet fetched or loading fails, fall back to a letter (initial) avatar or generic icon.
