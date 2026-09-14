@@ -228,13 +228,13 @@ Linux は Look & Feel が解決したフォント、次にデスクトップの�
 | UI | Compose Multiplatform（Android は Material 3、他プラットフォームはプラットフォーム固有 UI — §9 参照） |
 | 状態管理 | androidx.lifecycle ViewModel + Koin |
 | DB | SQLDelight（SQLite）+ FTS5（生 SQL） |
-| HTTP | Ktor client（CIO） |
+| HTTP | Ktor client（desktop は CIO、Android は OkHttp） |
 | RSS/HTML/XML パース | ksoup |
 | シリアライズ / 日時 | kotlinx-serialization / kotlinx-datetime |
 | クラウド同期 | Ktor + Dropbox / Google Drive / OneDrive（Microsoft Graph）REST API（OAuth PKCE + リフレッシュトークン） |
 | i18n | Compose Resources |
 | テスト | kotlin-test + kotlinx-coroutines-test + Ktor MockEngine |
-| ビルド | Gradle 9.7（Kotlin 2.4 / Compose 1.11 / JDK 25 toolchain） |
+| ビルド | Gradle 9.7.1（Kotlin 2.4.10 / Compose Multiplatform 1.11.1 / JDK 25 toolchain） |
 | 画像ロード | Coil3（favicon 表示。SVG デコード対応、既存 HttpClient 共有、ディスクキャッシュあり） |
 
 フィード一覧・記事一覧の両方で、favicon（`feeds.favicon_url`）を Coil3 の `AsyncImage` で表示する。
