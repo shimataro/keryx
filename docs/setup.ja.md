@@ -295,11 +295,10 @@ release ビルドと debug ビルドを同時に使いたい場合は、端末�
 `applicationIdSuffix` を付ける方式は意図的に採っていない — `keryx://oauth2/callback` と `.opml` の
 ハンドラーが 2 つになり、OAuth リダイレクトとファイル関連付けが曖昧になるため。
 
-`INSTALL_FAILED_VERSION_DOWNGRADE` は以前これより先に当たっていたもので、原因は別。ローカル
-ビルドは `-PappVersion` を渡さないため `versionCode` が 1 になり、実バージョン付きの APK には
-上書きインストールできなかった。現在は debug バリアントが固定の `versionCode` を使うので
-（[build.ja.md](build.ja.md) の「Android（APK / AAB）」参照）debug には当てはまらない —
-いま出るとすれば debug 以外の APK をインストールしている。
+`INSTALL_FAILED_VERSION_DOWNGRADE` は、押し込もうとしている `versionCode` より高い `versionCode` の
+ものが端末に既にインストールされていることを意味する。debug バリアントは固定の `versionCode` を使う
+ので（[build.ja.md](build.ja.md) の「Android（APK / AAB）」参照）、debug インストールでこのエラーが
+出た場合は、それより高い `versionCode` でビルドされた debug 以外の APK がいま端末に入っている。
 
 ### `UnsupportedClassVersionError`（実行時エラー）
 

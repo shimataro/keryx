@@ -302,10 +302,10 @@ time; a debug-only `applicationIdSuffix` is deliberately not used, since a secon
 `keryx://oauth2/callback` and `.opml` handler would make the OAuth redirect and the file
 association ambiguous.
 
-`INSTALL_FAILED_VERSION_DOWNGRADE` used to be hit first, for an unrelated reason: a local build
-passes no `-PappVersion`, so it was `versionCode` 1 and could not install over any real-version APK.
-Debug variants now pin a fixed `versionCode` (see [build.md](build.md)'s "Android (APK / AAB)"), so
-this no longer applies to them — seeing it now means a non-debug APK is being installed.
+`INSTALL_FAILED_VERSION_DOWNGRADE` means the device already has a higher `versionCode` installed than
+the one being pushed. Debug variants pin a fixed `versionCode` (see [build.md](build.md)'s
+"Android (APK / AAB)"), so this error on a debug install means a non-debug APK — built with a higher
+`versionCode` — is the one currently on the device.
 
 ### `UnsupportedClassVersionError` (at runtime)
 
