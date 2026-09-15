@@ -472,6 +472,8 @@ jobs:
       # is strictly optional. Kept for resilience against future runner-image changes.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools"
 
       - name: Decode release keystore
         id: keystore
