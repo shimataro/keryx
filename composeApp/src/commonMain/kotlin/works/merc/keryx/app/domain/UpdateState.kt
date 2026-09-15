@@ -48,10 +48,19 @@ internal fun updateVersionInUse(state: UpdateState): String? = when (state) {
  * - [UpdateState.Ready] survives a check that reports the *same* version again (including
  *   [UpdateStatus.UpToDate], which is what the just-downloaded version now looks like from the
  *   checker's point of view) — only a genuinely *newer* version replaces it, handing the user a
- *   fresh [UpdateState.Available] for that one instead.
+ *   fresh [UpdateState.Available] for that one instead. "Genuinely newer" now also requires the
+ *   asset's digest to match: a release rebuilt under the same tag (the release deleted and
+ *   recreated after a failed upload, say) changes what [status.asset] hashes to without changing
+ *   [status.version], and treating that as "the same download" would hand a stale, already-verified
+ *   file to the installer instead of fetching the rebuilt one.
  * - [UpdateStatus.Failed] (the check itself failing, e.g. no network) never overwrites
  *   [UpdateState.Ready] either — a transient check failure is not a reason to forget an update
  *   that's already sitting on disk, verified and ready to install.
+ * - [awaitsReleaseAsset] folds a release that exists but has no asset for this install form yet
+ *   into the same branch as [UpdateStatus.UpToDate] — see its own KDoc for why: the release
+ *   workflow publishes the GitHub release before attaching the built packages, so a check landing
+ *   in that gap must not treat it as a durable "no in-app update, use the release page" verdict.
+ *   [UpdateRepository] is what turns this into a short-lived watch instead of silence.
  */
 internal fun nextStateAfterCheck(
     current: UpdateState,
@@ -70,7 +79,15 @@ internal fun nextStateAfterCheck(
         is UpdateStatus.Failed -> current as? UpdateState.Ready
             ?: UpdateState.Failed(current.update, status.exception)
         is UpdateStatus.Available -> {
-            if (current is UpdateState.Ready && current.update.version == status.version) {
+            if (awaitsReleaseAsset(location, status.asset)) {
+                // The release exists but carries no asset for this install form yet — from here
+                // that is indistinguishable from "not released yet", not "get it from the release
+                // page". See awaitsReleaseAsset's own KDoc.
+                current as? UpdateState.Ready ?: UpdateState.UpToDate
+            } else if (current is UpdateState.Ready &&
+                current.update.version == status.version &&
+                current.update.asset?.sha256 == status.asset?.sha256
+            ) {
                 current
             } else {
                 val plan = updatePlan(location, status.asset)

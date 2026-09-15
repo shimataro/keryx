@@ -79,9 +79,10 @@ internal class ReleaseFeedSource(
     // actually matters (skipping a re-fetch/re-parse on each periodic background re-check) without
     // the added complexity and surface area of persisting release payloads across restarts for the
     // comparatively rare case of two checks happening to straddle one. `cacheMutex` guards both
-    // slots against the (narrow, but real) case of two check() calls overlapping — see
-    // UpdateRepository.check()'s own KDoc for why the network call itself isn't otherwise
-    // serialized.
+    // slots against two overlapping check() calls racing to read-then-write the same cache slot —
+    // UpdateRepository's own checkMutex already serializes the checks it drives one at a time, but
+    // this class has no such guarantee about its own callers (UpdateChecker is constructible and
+    // usable directly, e.g. in tests), so it keeps this narrower guard for itself regardless.
     private val cacheMutex = Mutex()
     private var cachedReleaseList: ETagCache? = null
     private var cachedLatestRelease: ETagCache? = null

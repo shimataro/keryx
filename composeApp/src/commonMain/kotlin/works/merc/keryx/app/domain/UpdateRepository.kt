@@ -7,6 +7,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -27,6 +29,8 @@ import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SystemClock
+import works.merc.keryx.app.core.UPDATE_RELEASE_WATCH_INTERVAL_MS
+import works.merc.keryx.app.core.UPDATE_RELEASE_WATCH_MAX_ATTEMPTS
 import works.merc.keryx.app.core.UpdateException
 import works.merc.keryx.app.core.UpdateStage
 import works.merc.keryx.app.core.untrustedText
@@ -38,6 +42,23 @@ import works.merc.keryx.app.platform.InstallLocation
 import works.merc.keryx.app.platform.detectInstallLocation
 
 private const val TAG = "UpdateRepository"
+
+/** What [UpdateRepository.check] concluded, beyond the [UpdateState] it already published. */
+enum class UpdateCheckOutcome {
+    /** The check resolved to a durable answer — up to date, a genuinely installable update, a
+     * release page fallback, or a failure — and nothing further is pending. */
+    CONCLUSIVE,
+
+    /**
+     * The release GitHub returned is newer, but carries no asset for this install form yet
+     * ([awaitsReleaseAsset]) — the release workflow publishes the GitHub release before attaching
+     * the built packages, so this is expected to resolve itself within minutes. [UpdateRepository]
+     * has started (or continued) polling every [UPDATE_RELEASE_WATCH_INTERVAL_MS] on its own; no
+     * caller action is required, and none of this is shown to the user (see [UpdateState] — this
+     * check leaves it at [UpdateState.UpToDate], not a new [UpdateState.Available]).
+     */
+    AWAITING_RELEASE,
+}
 
 /** How much of a failure reason to keep. Long enough for any message this pipeline composes,
  * short enough that a crafted archive cannot consume a meaningful share of the rotating log. */
@@ -96,6 +117,11 @@ class UpdateRepository(
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     // Lets a test point at a temp directory, the same way LocalSettingsStore's dirOverride does.
     private val cacheDirOverride: String? = null,
+    // Lets UpdateRepositoryTest run the release watch (see startReleaseWatch) on a short interval
+    // instead of the real UPDATE_RELEASE_WATCH_INTERVAL_MS — that test polls on the real wall clock
+    // rather than runTest's virtual scheduler (see its own KDoc for why), so this needs a genuine
+    // seam rather than a fake clock.
+    private val releaseWatchIntervalMs: Long = UPDATE_RELEASE_WATCH_INTERVAL_MS,
 ) {
     private val cacheDir: String get() = cacheDirOverride ?: AppDirs.cacheDir()
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
@@ -122,6 +148,20 @@ class UpdateRepository(
     // inspect/replace downloadJob while a check() is mid-flight. See this class's own methods below.
     private val mutex = Mutex()
 
+    // Serializes one whole runCheck transaction — the "start" snapshot, checker.check() itself, and
+    // the "apply"/"watch bookkeeping" steps after it — against every other runCheck. [mutex] cannot
+    // do this: it is deliberately released across checker.check(), so two checks could fetch
+    // concurrently and the one that started *first* could apply *last*, overwriting a freshly found
+    // Available with its own older UpToDate and re-arming a watch the newer check had just ended.
+    // Holding a lock across the network call is safe here in a way holding [mutex] there was not —
+    // this one blocks only other checks, never startDownload/install/cancelDownload — and it also
+    // means a check beginning while another is in flight issues its own request only once that one
+    // is done, so a later start always sees later data. It equally serializes two *public* checks,
+    // whose overlap would otherwise hand the second one a `before` of UpdateState.Checking, which
+    // updateVersionInUse() reports as "no version in use" — letting sweepStaleUpdateDownloads delete
+    // the very directory the first check's Ready state is still pointing at.
+    private val checkMutex = Mutex()
+
     // Written only under mutex (startDownloadOf), but read from cancelDownload() — a plain,
     // non-suspend call from a UI click handler that cannot take a suspend lock — without it. @Volatile
     // is what makes that read see the write at all: a plain var gives the JVM/other backends no
@@ -129,6 +169,12 @@ class UpdateRepository(
     // another, so cancelDownload() could otherwise observe a stale null/previous Job forever.
     @Volatile
     private var downloadJob: Job? = null
+
+    // Both read and written only under mutex, inside runCheck/recordWatchOutcome/startReleaseWatch —
+    // unlike downloadJob above, nothing outside a suspend context ever touches these, so neither
+    // needs @Volatile. 0 means "not currently watching for a release"; see recordWatchOutcome.
+    private var releaseWatchAttempts: Int = 0
+    private var releaseWatchJob: Job? = null
 
     // Read-modified-written by postNotification(), called from both check() (after its own mutex is
     // released — see check()'s own KDoc for why that lock is scoped narrowly) and runDownload() (never
@@ -151,38 +197,85 @@ class UpdateRepository(
      * this repository stops referencing (a completed install, or a newer version superseding a
      * [UpdateState.Ready] one) doesn't accumulate on disk forever.
      *
-     * [mutex] is only held for the two brief, non-suspending-on-network steps — "start" (recording
-     * [state] as it was and, where appropriate, marking it [UpdateState.Checking]) and "apply" (folding
-     * [checker]'s result back in) — never across [checker.check] itself, which can take up to
-     * [works.merc.keryx.app.core.REQUEST_TIMEOUT_MS]. Holding it for the whole call once blocked [startDownload]/
-     * [install] from even beginning their own decision for as long as a slow check was in flight.
-     * The "apply" step reads [state] fresh via [MutableStateFlow.update] rather than reusing the
-     * "start" step's snapshot, so a download that ran to completion *while* this check's network
-     * call was in flight is folded in correctly instead of being clobbered by a stale pre-check
-     * value — seeing a state [nextStateAfterCheck] never interrupts (Downloading/Verifying/
-     * Installing) turns "apply" into a no-op, exactly as if this check had run instantaneously.
-     *
      * Suspends until the check completes — unlike [startDownload]/[cancelDownload]/[install], which
      * self-launch and return immediately — so a caller (e.g. [checkForUpdateAndNotify], stamping
      * the automatic-check timestamp afterward) can rely on [state] already reflecting this check's
      * result the moment this returns.
+     *
+     * The returned [UpdateCheckOutcome] is [UpdateCheckOutcome.AWAITING_RELEASE] exactly when this
+     * check has started (or continued) [startReleaseWatch] instead of concluding anything visible —
+     * see that function and [UpdateCheckOutcome]'s own KDoc. Every existing caller of this method
+     * predates that outcome and calls it as a statement, so this is source-compatible.
      */
-    suspend fun check() {
+    suspend fun check(): UpdateCheckOutcome = runCheck(quiet = false)
+
+    /**
+     * [check]'s real body, and also what [startReleaseWatch]'s own polling loop calls directly
+     * (with [quiet] set) rather than going through the public [check] again.
+     *
+     * [mutex] is only held for the brief, non-suspending-on-network steps — "start" (recording
+     * [state] as it was and, where appropriate, marking it [UpdateState.Checking]), "apply" (folding
+     * [checker]'s result back in), and "watch bookkeeping" (deciding [UpdateCheckOutcome] and
+     * updating [releaseWatchAttempts]) — never across [checker.check] itself, which can take up to
+     * [works.merc.keryx.app.core.REQUEST_TIMEOUT_MS]. Holding it for the whole call once blocked
+     * [startDownload]/[install] from even beginning their own decision for as long as a slow check
+     * was in flight. The "apply" step reads [state] fresh via [MutableStateFlow.update] rather than
+     * reusing the "start" step's snapshot, so a download that ran to completion *while* this check's
+     * network call was in flight is folded in correctly instead of being clobbered by a stale
+     * pre-check value — seeing a state [nextStateAfterCheck] never interrupts (Downloading/
+     * Verifying/Installing) turns "apply" into a no-op, exactly as if this check had run
+     * instantaneously.
+     *
+     * What keeps that narrow [mutex] scope from being a race between two *checks* is [checkMutex],
+     * which every call here is entered under: a quiet [startReleaseWatch] poll and a user-triggered
+     * [check] can never have their network calls in flight at the same time, so neither can apply a
+     * result the other has already superseded. The cost is that a check beginning while another is
+     * in flight waits it out before showing anything (at worst one
+     * [works.merc.keryx.app.core.REQUEST_TIMEOUT_MS], and only while a release watch is running);
+     * marking [UpdateState.Checking] *before* that wait instead would make the "start" snapshot
+     * itself [UpdateState.Checking], which is exactly the value [updateVersionInUse] reads as
+     * "nothing in use" and [sweepStaleUpdateDownloads] then deletes a live download over.
+     *
+     * [quiet] is what keeps [startReleaseWatch]'s repeated polling from being visible: it skips the
+     * momentary [UpdateState.Checking] flash a user-requested [check] shows (the tray/Updates tab
+     * would otherwise flicker "Checking…" every [releaseWatchIntervalMs]), and a network failure
+     * during a quiet poll is treated as "still waiting", not surfaced as [UpdateState.Failed] — a
+     * background retry's own transient hiccup should not overwrite whatever the user is currently
+     * looking at (still [UpdateState.UpToDate] from this repository's point of view — see
+     * [awaitsReleaseAsset]/[nextStateAfterCheck]) with an error the user never asked about.
+     */
+    private suspend fun runCheck(quiet: Boolean): UpdateCheckOutcome = checkMutex.withLock { runCheckLocked(quiet) }
+
+    /** [runCheck]'s body, always entered under [checkMutex] — see that field for what it guards. */
+    private suspend fun runCheckLocked(quiet: Boolean): UpdateCheckOutcome {
         val before = mutex.withLock {
             _state.value.also { current ->
-                _state.value = when (current) {
-                    UpdateState.Idle, UpdateState.UpToDate,
-                    is UpdateState.Available, is UpdateState.Failed,
-                    -> UpdateState.Checking
-                    // Downloading/Verifying/Ready/Installing/Checking: a check must never visibly
-                    // interrupt these, even momentarily.
-                    else -> current
+                if (!quiet) {
+                    _state.value = when (current) {
+                        UpdateState.Idle, UpdateState.UpToDate,
+                        is UpdateState.Available, is UpdateState.Failed,
+                        -> UpdateState.Checking
+                        // Downloading/Verifying/Ready/Installing/Checking: a check must never
+                        // visibly interrupt these, even momentarily.
+                        else -> current
+                    }
                 }
             }
         }
         withContext(dispatcher) { sweepStaleUpdateDownloads(before) }
 
         val status = checker.check()
+
+        if (quiet && status is UpdateStatus.Failed) {
+            Log.info(TAG, "Quiet release-watch poll failed transiently, still watching: ${untrustedText(status.exception.messageText, MAX_FAILURE_REASON_LENGTH)}")
+            // `releaseWatchAttempts > 0` rather than a flat `true`: a public check that concluded
+            // while this poll was queued behind it has already ended the watch (reset the counter),
+            // and a transient failure in the poll that follows must not resurrect one — see
+            // recordWatchOutcome's own KDoc ("Not watching already ... is *not* reason to start").
+            val outcome = mutex.withLock { recordWatchOutcome(stillWatching = releaseWatchAttempts > 0) }
+            if (outcome == UpdateCheckOutcome.AWAITING_RELEASE) startReleaseWatch()
+            return outcome
+        }
 
         val after = mutex.withLock {
             _state.update { current -> nextStateAfterCheck(current, status, location, canInstall = ::canInstall) }
@@ -213,6 +306,86 @@ class UpdateRepository(
                 AppNotificationAction.OpenUrl(status.url)
             }
             postNotification(message, action)
+        }
+
+        Log.info(
+            TAG,
+            "Update check resolved: version=${(status as? UpdateStatus.Available)?.version ?: "none"}, " +
+                "asset=${(status as? UpdateStatus.Available)?.asset?.name ?: "none"}, " +
+                "plan=${(after as? UpdateState.Available)?.update?.plan ?: "n/a"}, " +
+                "installable=${(after as? UpdateState.Available)?.update?.installable ?: false}",
+        )
+
+        val outcome = mutex.withLock {
+            // Available-with-no-asset-here is what starts/continues a watch; Available-with-asset
+            // (a real, actionable find) always ends one, even one already in progress — see
+            // recordWatchOutcome's own KDoc for why UpToDate/Failed while already watching also
+            // continue it, and why a plain "nothing to see" check does not start one.
+            val watchTriggering = status is UpdateStatus.Available && awaitsReleaseAsset(location, status.asset)
+            val stillWatching = watchTriggering || (releaseWatchAttempts > 0 && status !is UpdateStatus.Available)
+            recordWatchOutcome(stillWatching)
+        }
+        if (outcome == UpdateCheckOutcome.AWAITING_RELEASE) startReleaseWatch()
+        return outcome
+    }
+
+    /**
+     * Must be called under [mutex]. Updates [releaseWatchAttempts] and returns the [UpdateCheckOutcome]
+     * that follows from it.
+     *
+     * [stillWatching] folds together every reason a caller might want to keep polling short-interval:
+     * a release found with no asset for this install form yet, or — while already watching — a
+     * check that came back [UpdateStatus.UpToDate] (the release was withdrawn/deleted, expected
+     * during a hand-driven rebuild: unpublish, delete the tag, recreate it) or [UpdateStatus.Failed]
+     * (a transient network hiccup). Not watching already and seeing one of those two is *not* reason
+     * to start — an ordinary "nothing new" check must not begin polling every [releaseWatchIntervalMs].
+     *
+     * Resets [releaseWatchAttempts] to 0 whenever a watch ends, for whatever reason — including
+     * running out of budget — so a *later*, unrelated [UpdateStatus.UpToDate] under the normal
+     * schedule is never mistaken for "still watching".
+     */
+    private fun recordWatchOutcome(stillWatching: Boolean): UpdateCheckOutcome {
+        if (!stillWatching) {
+            releaseWatchAttempts = 0
+            return UpdateCheckOutcome.CONCLUSIVE
+        }
+        releaseWatchAttempts += 1
+        if (releaseWatchAttempts >= UPDATE_RELEASE_WATCH_MAX_ATTEMPTS) {
+            // Budget exhausted: this environment gets no asset for a release that plainly wants
+            // one (e.g. an MSI install offered a pre-release tag, which release.yml never attaches
+            // an .msi to at all) — fall back to the ordinary updateCheckIntervalHours schedule
+            // rather than polling forever. No notification either way: from this environment's
+            // point of view there is still nothing installable to announce.
+            releaseWatchAttempts = 0
+            return UpdateCheckOutcome.CONCLUSIVE
+        }
+        return UpdateCheckOutcome.AWAITING_RELEASE
+    }
+
+    /**
+     * Starts polling [runCheck] every [releaseWatchIntervalMs] (quietly — see its own KDoc) until it
+     * stops returning [UpdateCheckOutcome.AWAITING_RELEASE]. A no-op while a watch is already running
+     * ([releaseWatchJob]'s own `isActive`, checked under [mutex] the same way [downloadJob]'s
+     * equivalent guard in [startDownloadOf] is) — including when [runCheck] calls this again from
+     * inside that very loop, which is harmless but redundant rather than a bug: the guard sees its
+     * own job still active and returns immediately.
+     *
+     * Launched on [scope] (the app-lifetime scope — see this class's own KDoc), so the watch
+     * survives a closed settings dialog the same way an in-progress download does. It stops itself
+     * once [runCheck] concludes: an asset finally appearing, the budget in [recordWatchOutcome]
+     * running out (the "gone forever" case — [runCheck] on its own can never distinguish that from
+     * "gone for now"), or a download/install starting on this version (which keeps [state] at
+     * [UpdateState.Downloading]/[UpdateState.Verifying]/[UpdateState.Installing] rather than
+     * [UpdateState.Available], so [runCheck] naturally stops returning
+     * [UpdateCheckOutcome.AWAITING_RELEASE]).
+     */
+    private suspend fun startReleaseWatch(): Unit = mutex.withLock {
+        if (releaseWatchJob?.isActive == true) return@withLock
+        releaseWatchJob = scope.launch {
+            while (isActive) {
+                delay(releaseWatchIntervalMs)
+                if (runCheck(quiet = true) != UpdateCheckOutcome.AWAITING_RELEASE) return@launch
+            }
         }
     }
 

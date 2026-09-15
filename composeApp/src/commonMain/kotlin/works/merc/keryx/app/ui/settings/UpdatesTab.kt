@@ -60,6 +60,23 @@ import works.merc.keryx.app.resources.settings_update_retry
 import works.merc.keryx.app.resources.settings_update_verifying
 
 /**
+ * Whether opening the Updates tab should itself trigger a check — equivalent to one press of
+ * "check now", so it never perturbs the automatic check schedule.
+ *
+ * [UpdateState.Idle] is the ordinary case: nothing has run yet this session. `Available` with
+ * [AvailableUpdate.installable] false is the other one — that combination can outlive the check
+ * that produced it (the release-watch budget in `UpdateRepository.recordWatchOutcome` ran out, or
+ * this process's own [works.merc.keryx.app.platform.InstallLocation] was frozen at startup with,
+ * say, `parentWritable` momentarily false — see `UpdateRepository`'s own KDoc for why `location` is
+ * resolved once per process) with no other way back to a fresh check short of restarting the app.
+ * Opening this tab is that way back. Every other state already has its own check in flight, or has
+ * nothing left to check for right now ([UpdateState.UpToDate]/[UpdateState.Ready]/
+ * [UpdateState.Failed] — `Failed`'s own retry button is `startDownload`, not a check).
+ */
+internal fun shouldAutoCheckOnOpen(state: UpdateState): Boolean =
+    state is UpdateState.Idle || (state is UpdateState.Available && !state.update.installable)
+
+/**
  * Updates tab: the update status/action — once one is known — leads, driven by
  * [SettingsViewModel.updateState]; the update-check interval and the manual "check for update"
  * trigger sit below a divider, deprioritized as ordinary configuration rather than the thing most
@@ -67,8 +84,7 @@ import works.merc.keryx.app.resources.settings_update_verifying
  * place, so it (and its one actionable button — download, install, retry, whichever applies) reads
  * first; "check for update" is something to reach for only once that story is already known.
  *
- * Opening the tab starts a check if nothing has run yet — equivalent to one press of "check now",
- * so it never perturbs the automatic check schedule.
+ * Opening the tab starts a check per [shouldAutoCheckOnOpen].
  *
  * [vm.updateState] is deliberately *not* collected here: a download in progress emits an
  * [UpdateState.Downloading] tick per percent, and collecting it in this outer function would
@@ -84,7 +100,7 @@ internal fun UpdatesTabContent(vm: SettingsViewModel) {
     val settings by vm.localSettings.collectAsState()
 
     LaunchedEffect(Unit) {
-        if (vm.updateState.value is UpdateState.Idle) vm.checkForUpdate()
+        if (shouldAutoCheckOnOpen(vm.updateState.value)) vm.checkForUpdate()
     }
 
     Column(Modifier.fillMaxWidth().padding(16.dp)) {

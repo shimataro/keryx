@@ -17,6 +17,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.KeryxException
+import works.merc.keryx.app.core.UPDATE_RELEASE_WATCH_MAX_ATTEMPTS
 import works.merc.keryx.app.core.UpdateStage
 import works.merc.keryx.app.data.remote.UpdateDownloader
 import works.merc.keryx.app.platform.InstallKind
@@ -24,6 +25,7 @@ import works.merc.keryx.app.platform.InstallLocation
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.io.path.createTempDirectory
 import kotlin.random.Random
 import kotlin.test.AfterTest
@@ -45,6 +47,15 @@ private fun releaseJson(version: String, assetName: String, assetUrl: String, si
     {"tag_name":"v$version","html_url":"https://ex.com/$version","prerelease":false,"draft":false,"assets":[
         {"name":"$assetName","browser_download_url":"$assetUrl","size":$sizeBytes,"digest":"sha256:$sha256","state":"uploaded"}
     ]}
+""".trimIndent()
+
+/**
+ * Same shape as [releaseJson], but with an empty `assets[]` — the state the release workflow
+ * leaves a GitHub release in for the few minutes between publishing it and finishing the upload of
+ * every platform's package. See `UpdateInstallPolicy.kt`'s `awaitsReleaseAsset` KDoc.
+ */
+private fun releaseJsonNoAssets(version: String) = """
+    {"tag_name":"v$version","html_url":"https://ex.com/$version","prerelease":false,"draft":false,"assets":[]}
 """.trimIndent()
 
 /**
@@ -1060,6 +1071,484 @@ class UpdateRepositoryTest {
 
         downloadGate.complete(Unit)
         awaitState(repo) { it is UpdateState.Ready }
+    }
+
+    // --- Release watch: a release found with no asset for this install form yet ---
+    //
+    // The release workflow publishes the GitHub release before attaching the built packages, so a
+    // check landing in that gap must not offer OpenReleasePage as a durable verdict, nor post a
+    // notification for it — see UpdateInstallPolicy.kt's awaitsReleaseAsset KDoc and
+    // UpdateRepository's own runCheck/recordWatchOutcome/startReleaseWatch KDoc.
+
+    @Test
+    fun newVersionWithNoAssetYetPostsNoNotificationAndEntersTheReleaseWatch() {
+        val notificationCenter = NotificationCenter()
+        val repo = UpdateRepository(
+            checker = checkerFor { releaseJsonNoAssets("2.0.0") },
+            downloader = UpdateDownloader(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }) { expectSuccess = false }),
+            installer = noOpInstaller(),
+            notificationCenter = notificationCenter,
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+        )
+
+        val outcome = runBlocking { repo.check() }
+
+        assertEquals(UpdateCheckOutcome.AWAITING_RELEASE, outcome)
+        assertEquals(UpdateState.UpToDate, repo.state.value)
+        assertTrue(notificationCenter.items.value.isEmpty())
+    }
+
+    @Test
+    fun whenTheAssetLaterAppearsTheWatchNoticesAndNotifiesExactlyOnce() {
+        val payload = Random(41).nextBytes(1024)
+        val sha256 = sha256Hex(payload)
+        val assetReady = AtomicInteger(0) // 0 while absent; set to 1 once the test flips it
+        val notificationCenter = NotificationCenter()
+        val seenStates = CopyOnWriteArrayList<UpdateState>()
+        val repo = UpdateRepository(
+            checker = checkerFor {
+                if (assetReady.get() == 0) {
+                    releaseJsonNoAssets("2.0.0")
+                } else {
+                    releaseJson("2.0.0", "Keryx-2.0.0-macos-arm64.zip", "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256)
+                }
+            },
+            downloader = UpdateDownloader(HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }),
+            installer = noOpInstaller(),
+            notificationCenter = notificationCenter,
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+            releaseWatchIntervalMs = 20L,
+        )
+        val collectorScope = trackedScope()
+        val subscribed = CompletableDeferred<Unit>()
+        collectorScope.launch {
+            repo.state.onSubscription { subscribed.complete(Unit) }.collect { seenStates.add(it) }
+        }
+        runBlocking { withTimeout(5_000) { subscribed.await() } }
+
+        val outcome = runBlocking { repo.check() }
+        assertEquals(UpdateCheckOutcome.AWAITING_RELEASE, outcome)
+        assertEquals(UpdateState.UpToDate, repo.state.value)
+
+        // The initial check above is user-triggered (quiet = false) and legitimately flashes
+        // Checking on its way from Idle to UpToDate — only what happens *after* it, i.e. purely the
+        // watch's own quiet retries, must never show it.
+        seenStates.clear()
+
+        assetReady.set(1)
+        awaitState(repo) { it is UpdateState.Available && it.update.installable }
+        await(describe = { "notification never arrived after the asset appeared" }) {
+            notificationCenter.items.value.isNotEmpty()
+        }
+
+        val items = notificationCenter.items.value
+        assertEquals(1, items.size, "exactly one row, not one per poll")
+        assertEquals("updateAvailable:2.0.0", items.single().message)
+        assertEquals(AppNotificationAction.ShowSettingsTab("updates"), items.single().action)
+
+        // The quiet retries that found nothing must never have flashed UpdateState.Checking — that
+        // flicker is reserved for a check the user actually asked for (see runCheck's own KDoc on
+        // `quiet`).
+        assertFalse(seenStates.contains(UpdateState.Checking), "observed: $seenStates")
+    }
+
+    @Test
+    fun releaseWithdrawnDuringTheWatchDoesNotEndItAndReappearingWithAnAssetStillNotifies() {
+        // Simulates a hand-driven rebuild: the release is briefly unpublished/recreated (phase 1,
+        // reported as UpToDate — this checker's currentVersion "1.0.0" makes a v1.0.0 release look
+        // like nothing newer at all) before it comes back with the asset attached (phase 2).
+        val payload = Random(42).nextBytes(1024)
+        val sha256 = sha256Hex(payload)
+        val phase = AtomicInteger(0)
+        val requestsByPhase = CopyOnWriteArrayList<Int>()
+        val notificationCenter = NotificationCenter()
+        val repo = UpdateRepository(
+            checker = checkerFor {
+                val p = phase.get()
+                requestsByPhase.add(p)
+                when (p) {
+                    0 -> releaseJsonNoAssets("2.0.0")
+                    1 -> releaseJson("1.0.0", "Keryx-1.0.0-macos-arm64.zip", "https://x/1.0.0.zip", 1, "a".repeat(64))
+                    else -> releaseJson("2.0.0", "Keryx-2.0.0-macos-arm64.zip", "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256)
+                }
+            },
+            downloader = UpdateDownloader(HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }),
+            installer = noOpInstaller(),
+            notificationCenter = notificationCenter,
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+            releaseWatchIntervalMs = 20L,
+        )
+
+        val outcome = runBlocking { repo.check() }
+        assertEquals(UpdateCheckOutcome.AWAITING_RELEASE, outcome)
+
+        phase.set(1)
+        await(describe = { "watch never re-polled the withdrawn release; seen phases: $requestsByPhase" }) {
+            requestsByPhase.contains(1)
+        }
+        assertEquals(UpdateState.UpToDate, repo.state.value, "still watching; nothing to show yet")
+        assertTrue(notificationCenter.items.value.isEmpty())
+
+        phase.set(2)
+        awaitState(repo) { it is UpdateState.Available && it.update.installable }
+        await(describe = { "notification never arrived after the asset reappeared" }) {
+            notificationCenter.items.value.isNotEmpty()
+        }
+        assertEquals(1, notificationCenter.items.value.size)
+        assertEquals(AppNotificationAction.ShowSettingsTab("updates"), notificationCenter.items.value.single().action)
+    }
+
+    @Test
+    fun releaseWithdrawnDuringTheWatchDoesNotStopItEvenOnANetworkFailure() {
+        val phase = AtomicInteger(0) // 0 = no asset; 1 = transient check failure
+        val phase1RequestCount = AtomicInteger(0)
+        val notificationCenter = NotificationCenter()
+        val downloaderClient = HttpClient(MockEngine { respondError(HttpStatusCode.InternalServerError) }) { expectSuccess = false }
+        val checkerClient = HttpClient(
+            MockEngine {
+                if (phase.get() == 0) {
+                    respond(releaseJsonNoAssets("2.0.0"), HttpStatusCode.OK)
+                } else {
+                    phase1RequestCount.incrementAndGet()
+                    respondError(HttpStatusCode.InternalServerError)
+                }
+            },
+        ) { expectSuccess = false }
+        val repo = UpdateRepository(
+            checker = UpdateChecker(checkerClient, currentVersion = "1.0.0", repoSlug = "owner/repo", location = WRITABLE_MAC_LOCATION),
+            downloader = UpdateDownloader(downloaderClient),
+            installer = noOpInstaller(),
+            notificationCenter = notificationCenter,
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+            releaseWatchIntervalMs = 20L,
+        )
+
+        val outcome = runBlocking { repo.check() }
+        assertEquals(UpdateCheckOutcome.AWAITING_RELEASE, outcome)
+
+        phase.set(1)
+        // A transient failure during a quiet poll must not surface as UpdateState.Failed (see
+        // runCheck's own KDoc) nor end the watch — both would be visible regressions a user could
+        // stumble on. Wait for at least one such failing poll to have actually happened before
+        // asserting on its (lack of) effect.
+        await(describe = { "watch never re-polled after the endpoint started failing" }) {
+            phase1RequestCount.get() > 0
+        }
+        Thread.sleep(100) // let that poll's own state-handling (a no-op) finish settling
+
+        assertEquals(UpdateState.UpToDate, repo.state.value, "a quiet poll's own failure must not surface as Failed")
+        assertTrue(notificationCenter.items.value.isEmpty())
+    }
+
+    @Test
+    fun watchGivesUpAfterItsAttemptBudgetWithoutEverNotifying() {
+        val requestCount = AtomicInteger(0)
+        val notificationCenter = NotificationCenter()
+        val repo = UpdateRepository(
+            checker = checkerFor { requestCount.incrementAndGet(); releaseJsonNoAssets("2.0.0") },
+            downloader = UpdateDownloader(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }) { expectSuccess = false }),
+            installer = noOpInstaller(),
+            notificationCenter = notificationCenter,
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+            releaseWatchIntervalMs = 0L,
+        )
+
+        val outcome = runBlocking { repo.check() }
+        assertEquals(UpdateCheckOutcome.AWAITING_RELEASE, outcome)
+
+        // The very first check (this call) already consumes attempt #1 of the budget, so the
+        // total request count when the watch gives up is exactly the budget itself, not budget + 1.
+        val expectedTotal = UPDATE_RELEASE_WATCH_MAX_ATTEMPTS
+        await(timeoutMs = 30_000, describe = { "release watch never gave up; requestCount=$requestCount" }) {
+            requestCount.get() >= expectedTotal
+        }
+        // Let the request that pushed the budget over finish its own bookkeeping and the watch
+        // loop actually exit, then confirm no further request follows.
+        Thread.sleep(200)
+        val countAfterSettling = requestCount.get()
+        assertEquals(expectedTotal, countAfterSettling, "the watch kept polling past its own budget")
+        assertTrue(notificationCenter.items.value.isEmpty())
+        assertEquals(UpdateState.UpToDate, repo.state.value)
+    }
+
+    /**
+     * Regression guard for a reset bug that would otherwise be invisible from outside this class:
+     * if [UpdateRepository]'s internal watch-attempt counter were left non-zero after the budget
+     * above ran out, a later, entirely unrelated [UpdateStatus.UpToDate] (the ordinary
+     * `updateCheckIntervalHours` schedule finding nothing new, long after this environment gave up
+     * on the earlier release) would be mistaken for "still watching" and silently resume polling
+     * every `releaseWatchIntervalMs` forever.
+     */
+    @Test
+    fun afterTheWatchBudgetIsExhaustedAPlainUpToDateCheckIsNotMistakenForStillWatching() {
+        val phase = AtomicInteger(0) // 0 = no asset (drives the watch to exhaustion); 1 = plain up to date
+        val requestCount = AtomicInteger(0)
+        val repo = UpdateRepository(
+            checker = checkerFor {
+                requestCount.incrementAndGet()
+                if (phase.get() == 0) releaseJsonNoAssets("2.0.0") else releaseJson("1.0.0", "x", "https://x/1.0.0.zip", 1, "a".repeat(64))
+            },
+            downloader = UpdateDownloader(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }) { expectSuccess = false }),
+            installer = noOpInstaller(),
+            notificationCenter = NotificationCenter(),
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+            releaseWatchIntervalMs = 0L,
+        )
+
+        val firstOutcome = runBlocking { repo.check() }
+        assertEquals(UpdateCheckOutcome.AWAITING_RELEASE, firstOutcome)
+
+        // The very first check (this call) already consumes attempt #1 of the budget, so the
+        // total request count when the watch gives up is exactly the budget itself, not budget + 1.
+        val expectedTotal = UPDATE_RELEASE_WATCH_MAX_ATTEMPTS
+        await(timeoutMs = 30_000, describe = { "release watch never gave up; requestCount=$requestCount" }) {
+            requestCount.get() >= expectedTotal
+        }
+        Thread.sleep(200) // let the watch loop's own last iteration finish and truly exit
+
+        phase.set(1)
+        val laterOutcome = runBlocking { repo.check() }
+        assertEquals(
+            UpdateCheckOutcome.CONCLUSIVE,
+            laterOutcome,
+            "a plain UpToDate after the watch already gave up must not be reinterpreted as still watching",
+        )
+        assertEquals(UpdateState.UpToDate, repo.state.value)
+    }
+
+    // --- Regression: a public check and a quiet release-watch poll must never race to apply a
+    // stale result over each other's — see UpdateRepository's own checkMutex KDoc.
+
+    /**
+     * Regression guard: before checkMutex, runCheck() only held [mutex] for the brief "start"/
+     * "apply"/"watch bookkeeping" steps, never across checker.check() itself. A quiet release-watch
+     * poll that started first (and so saw no asset) could still finish *after* a later, user-
+     * triggered check that found one, clobbering the fresh Available with its own stale UpToDate.
+     */
+    @Test
+    fun aQuietWatchPollInFlightNeverOverwritesAPublicCheckThatFoundTheAsset() {
+        val payload = Random(50).nextBytes(1024)
+        val sha256 = sha256Hex(payload)
+        val requestCount = AtomicInteger(0)
+        val assetReady = AtomicInteger(0) // 0 while absent; set to 1 once the test flips it
+        val quietPollParked = CompletableDeferred<Unit>()
+        val quietGate = CompletableDeferred<Unit>()
+        val notificationCenter = NotificationCenter()
+        val checkerClient = HttpClient(
+            MockEngine { _ ->
+                val n = requestCount.incrementAndGet()
+                // Snapshot the body *before* parking, from assetReady as it stood when this request
+                // was actually issued — if this read happened after quietGate.await() instead, the
+                // parked poll would pick up the asset that only appears later, defeating the very
+                // race this test means to reproduce (a stale, already-in-flight result applied late).
+                val body = if (assetReady.get() == 0) {
+                    releaseJsonNoAssets("2.0.0")
+                } else {
+                    releaseJson("2.0.0", "Keryx-2.0.0-macos-arm64.zip", "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256)
+                }
+                if (n == 2) {
+                    quietPollParked.complete(Unit)
+                    quietGate.await()
+                }
+                respond(body, HttpStatusCode.OK)
+            },
+        ) { expectSuccess = false }
+        val repo = UpdateRepository(
+            checker = UpdateChecker(checkerClient, currentVersion = "1.0.0", repoSlug = "owner/repo", location = WRITABLE_MAC_LOCATION),
+            downloader = UpdateDownloader(HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }),
+            installer = noOpInstaller(),
+            notificationCenter = notificationCenter,
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+            releaseWatchIntervalMs = 1_500L,
+        )
+
+        // Starts the release watch: request #1 (the public check itself) finds no asset yet.
+        val firstOutcome = runBlocking { repo.check() }
+        assertEquals(UpdateCheckOutcome.AWAITING_RELEASE, firstOutcome)
+
+        // The watch's own first quiet poll (request #2) is now parked mid-network-call, body already
+        // snapshotted as "no asset".
+        runBlocking { withTimeout(5_000) { quietPollParked.await() } }
+        assetReady.set(1)
+
+        // A second, user-triggered check would — without checkMutex — be free to race the parked
+        // poll's own network call and apply its Available result first. With checkMutex it instead
+        // waits for the poll to fully finish (including its own "apply" step) before even issuing
+        // its own request.
+        val secondCheck = trackedScope().launch { repo.check() }
+        runBlocking { delay(200) } // give a wrongly-concurrent request every chance to have fired
+
+        quietGate.complete(Unit)
+        runBlocking { withTimeout(5_000) { secondCheck.join() } }
+
+        val state = repo.state.value
+        assertIs<UpdateState.Available>(state, "the parked quiet poll's stale UpToDate must not win over the later check's Available")
+        assertTrue(state.update.installable)
+        assertEquals(1, notificationCenter.items.value.size)
+    }
+
+    /**
+     * Regression guard: the quiet-failure branch of runCheck() used to call
+     * `recordWatchOutcome(stillWatching = true)` unconditionally, so a poll that had already been
+     * queued behind a public check — one that found the asset and ended the watch — would resurrect
+     * that watch on its own subsequent transient failure, even though nothing is being waited for
+     * any more.
+     */
+    @Test
+    fun aQuietPollFailingAfterAPublicCheckEndedTheWatchDoesNotRestartIt() {
+        val phase = AtomicInteger(0) // 0 = no asset; 1 = asset present; 2 = transient failure
+        val requestCount = AtomicInteger(0)
+        val payload = Random(51).nextBytes(1024)
+        val sha256 = sha256Hex(payload)
+        val notificationCenter = NotificationCenter()
+        val checkerClient = HttpClient(
+            MockEngine {
+                requestCount.incrementAndGet()
+                when (phase.get()) {
+                    0 -> respond(releaseJsonNoAssets("2.0.0"), HttpStatusCode.OK)
+                    1 -> respond(
+                        releaseJson("2.0.0", "Keryx-2.0.0-macos-arm64.zip", "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256),
+                        HttpStatusCode.OK,
+                    )
+                    else -> respondError(HttpStatusCode.InternalServerError)
+                }
+            },
+        ) { expectSuccess = false }
+        val repo = UpdateRepository(
+            checker = UpdateChecker(checkerClient, currentVersion = "1.0.0", repoSlug = "owner/repo", location = WRITABLE_MAC_LOCATION),
+            downloader = UpdateDownloader(HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }),
+            installer = noOpInstaller(),
+            notificationCenter = notificationCenter,
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+            releaseWatchIntervalMs = 1_000L,
+        )
+
+        // Starts the watch.
+        val firstOutcome = runBlocking { repo.check() }
+        assertEquals(UpdateCheckOutcome.AWAITING_RELEASE, firstOutcome)
+
+        // A public check immediately finds the asset and ends the watch (attempt counter reset).
+        phase.set(1)
+        val secondOutcome = runBlocking { repo.check() }
+        assertEquals(UpdateCheckOutcome.CONCLUSIVE, secondOutcome)
+        assertIs<UpdateState.Available>(repo.state.value)
+
+        // The watch's loop is still alive as a coroutine (its own `while (isActive)` has not yet
+        // rechecked the outcome), asleep in its next `delay(releaseWatchIntervalMs)` — so exactly
+        // one more quiet poll is still going to fire, and now hits a transient failure.
+        phase.set(2)
+        val requestsBeforeFailure = requestCount.get()
+        await(timeoutMs = 5_000, describe = { "the already-scheduled quiet poll never fired; requestCount=$requestCount" }) {
+            requestCount.get() > requestsBeforeFailure
+        }
+
+        // The regression: with `stillWatching` hardcoded to `true`, that one failure would resurrect
+        // the watch and it would keep polling every releaseWatchIntervalMs forever. Fixed, this
+        // single already-in-flight poll finds `releaseWatchAttempts == 0` (the public check reset
+        // it) and stops the loop instead of continuing it — so waiting several more intervals must
+        // show no further growth.
+        Thread.sleep(2_500)
+        assertEquals(
+            requestsBeforeFailure + 1,
+            requestCount.get(),
+            "a quiet poll's own transient failure must not resurrect a watch the public check already ended",
+        )
+        assertIs<UpdateState.Available>(repo.state.value)
+    }
+
+    // --- Regression: install forms that must notify immediately and never enter the release watch ---
+    //
+    // awaitsReleaseAsset requires asset == null, so any of these — even with a release that
+    // genuinely carries no asset for this install form — must still resolve to an immediate OpenUrl
+    // notification and UpdateCheckOutcome.CONCLUSIVE, never UpdateCheckOutcome.AWAITING_RELEASE.
+
+    @Test
+    fun macOsTranslocatedNotifiesImmediatelyAndNeverWatches() {
+        assertImmediateOpenUrlNoWatch(WRITABLE_MAC_LOCATION.copy(translocated = true), installerCanInstall = true)
+    }
+
+    @Test
+    fun macOsUnwritableParentNotifiesImmediatelyAndNeverWatches() {
+        assertImmediateOpenUrlNoWatch(WRITABLE_MAC_LOCATION.copy(parentWritable = false), installerCanInstall = true)
+    }
+
+    @Test
+    fun linuxPackageInstallNotifiesImmediatelyAndNeverWatchesRegardlessOfAsset() {
+        val linuxDeb = InstallLocation(InstallKind.LINUX_PACKAGE, appRoot = null, launcherPath = null, parentWritable = false, translocated = false)
+        assertImmediateOpenUrlNoWatch(linuxDeb, installerCanInstall = true)
+    }
+
+    @Test
+    fun assetPresentButInstallerRefusingNotifiesImmediatelyAndNeverWatches() {
+        // The Android install-unknown-apps-consent shape: the release has everything this install
+        // form needs, but the platform actual currently refuses it — a real, immediate answer, not
+        // "still being uploaded".
+        assertImmediateOpenUrlNoWatch(WRITABLE_MAC_LOCATION, installerCanInstall = false)
+    }
+
+    /** Unlike [noOpInstaller] (a constant answer regardless of [UpdatePlan]), this mirrors what a
+     * real [UpdateInstaller] does — [DesktopUpdateInstaller.canInstall] unconditionally refuses
+     * [UpdatePlan.OpenReleasePage]/[UpdatePlan.NotOffered] regardless of anything else — so
+     * [consent] (standing in for a platform-level gate like Android's install-unknown-apps consent)
+     * only ever matters for a plan that would otherwise be installable. Needed here specifically:
+     * [noOpInstaller]'s constant `true` would make a translocated/unwritable/deb location's
+     * [UpdatePlan.OpenReleasePage] look installable, which a real [UpdateInstaller] never would. */
+    private fun consentGatedInstaller(consent: Boolean) = object : UpdateInstaller {
+        override fun canInstall(plan: UpdatePlan) = plan.isInstallable && consent
+        override suspend fun install(filePath: String, update: AvailableUpdate) = InstallLaunchResult.Failed("not used")
+    }
+
+    /** Shared body for the four regression tests above: a release with a real, present asset for
+     * [location]'s own install form (an unrelated asset when [location]'s kind never matches one at
+     * all, e.g. Linux deb — irrelevant to it either way, since it always opens the release page). */
+    private fun assertImmediateOpenUrlNoWatch(location: InstallLocation, installerCanInstall: Boolean) {
+        val payload = Random(43).nextBytes(16)
+        val sha256 = sha256Hex(payload)
+        val notificationCenter = NotificationCenter()
+        val repo = UpdateRepository(
+            checker = checkerFor { releaseJson("2.0.0", "Keryx-2.0.0-macos-arm64.zip", "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256) },
+            downloader = UpdateDownloader(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }) { expectSuccess = false }),
+            installer = consentGatedInstaller(installerCanInstall),
+            notificationCenter = notificationCenter,
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = location,
+            cacheDirOverride = newTempDir(),
+        )
+
+        val outcome = runBlocking { repo.check() }
+
+        assertEquals(UpdateCheckOutcome.CONCLUSIVE, outcome)
+        val notification = notificationCenter.items.value.singleOrNull()
+        assertIs<AppNotificationAction.OpenUrl>(notification?.action)
+        assertEquals("https://ex.com/2.0.0", (notification?.action as AppNotificationAction.OpenUrl).url)
+        val state = repo.state.value
+        assertIs<UpdateState.Available>(state)
+        assertFalse(state.update.installable)
     }
 }
 

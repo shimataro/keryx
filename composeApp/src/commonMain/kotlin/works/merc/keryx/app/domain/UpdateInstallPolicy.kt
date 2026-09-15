@@ -64,6 +64,35 @@ internal fun canInstallAndroidApkUpdate(plan: UpdatePlan, canRequestPackageInsta
     plan is UpdatePlan.RunInstaller && plan.asset.kind == UpdateAssetKind.ANDROID_APK && canRequestPackageInstalls
 
 /**
+ * Whether the only thing standing between [location] and an in-app update is the release asset
+ * itself — i.e. [updatePlan] returns [UpdatePlan.OpenReleasePage] here *solely* because
+ * [selectUpdateAsset] found nothing to install yet.
+ *
+ * The release workflow publishes the GitHub release before the built packages are attached to it
+ * (the jobs are triggered by that very publish), so for a few minutes a genuinely newer release
+ * carries no asset for this install form at all. [UpdateRepository] treats that as "not released
+ * here yet" rather than as a permanent "get it from the release page" verdict — see its own
+ * release-watch handling.
+ *
+ * `asset == null` is a required condition, so an update whose asset *is* present but which the
+ * platform currently refuses (Android's install-unknown-apps consent, most notably) is never
+ * mistaken for one still being uploaded: that one is a real answer and is surfaced immediately.
+ *
+ * Mirrors [updatePlan]'s own `when (location.kind)` rather than deriving from it, so a new
+ * [InstallKind] has to answer both questions instead of silently inheriting one.
+ */
+internal fun awaitsReleaseAsset(location: InstallLocation, asset: UpdateAsset?): Boolean =
+    asset == null && when (location.kind) {
+        InstallKind.DEVELOPMENT, InstallKind.ANDROID_STORE, InstallKind.UNKNOWN,
+        InstallKind.LINUX_PACKAGE, InstallKind.LINUX_SNAP,
+        -> false
+
+        InstallKind.MAC_APP_BUNDLE -> !location.translocated && location.parentWritable
+        InstallKind.WINDOWS_PORTABLE, InstallKind.LINUX_PORTABLE -> location.parentWritable
+        InstallKind.WINDOWS_INSTALLED, InstallKind.ANDROID_SIDELOADED -> true
+    }
+
+/**
  * Decides [UpdatePlan] for [location] given the asset (if any) [UpdateChecker] already selected for
  * it. [asset] is `null` exactly when [selectUpdateAsset] found nothing installable — that alone
  * forces [UpdatePlan.OpenReleasePage] for every [InstallKind] that would otherwise self-replace or

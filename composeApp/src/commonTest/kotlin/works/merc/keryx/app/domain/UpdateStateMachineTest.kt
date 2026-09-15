@@ -165,4 +165,56 @@ class UpdateStateMachineTest {
         assertIs<UpdateState.Available>(whenPlatformAllows)
         assertEquals(true, whenPlatformAllows.update.installable)
     }
+
+    // --- awaitsReleaseAsset folded into UpToDate ---
+    //
+    // The release workflow publishes the GitHub release before attaching the built packages, so a
+    // release genuinely newer than this build can carry no asset for this install form yet. These
+    // pin that nextStateAfterCheck treats that exactly like UpdateStatus.UpToDate (see
+    // awaitsReleaseAsset's own KDoc) rather than a durable UpdatePlan.OpenReleasePage — the release
+    // page is not shown, and no Available(installable = false) is ever produced for it.
+
+    @Test
+    fun availableWithNoAssetYetIsFoldedIntoUpToDateOnASelfReplaceableInstallForm() {
+        val status = UpdateStatus.Available("2.0.0", "https://ex.com/2.0.0", null, asset = null)
+        val next = nextStateAfterCheck(UpdateState.Idle, status, WRITABLE_MAC_LOCATION)
+        assertEquals(UpdateState.UpToDate, next)
+    }
+
+    @Test
+    fun readySurvivesAnAvailableStatusWithNoAssetYetTheSameWayItSurvivesUpToDate() {
+        val ready = UpdateState.Ready(availableUpdate("2.0.0"), filePath = "/tmp/Keryx-2.0.0.zip")
+        val status = UpdateStatus.Available("3.0.0", "https://ex.com/3.0.0", null, asset = null)
+        val next = nextStateAfterCheck(ready, status, WRITABLE_MAC_LOCATION)
+        assertSame(ready, next)
+    }
+
+    @Test
+    fun availableWithNoAssetOnAnInstallFormThatWouldNeverSelfReplaceStaysAnOrdinaryAvailable() {
+        // LINUX_PACKAGE never awaits a release asset (see awaitsReleaseAsset), so a missing asset
+        // there is the durable OpenReleasePage answer it always was — not folded into UpToDate.
+        val linuxPackage = InstallLocation(
+            InstallKind.LINUX_PACKAGE, appRoot = null, launcherPath = null, parentWritable = false, translocated = false,
+        )
+        val status = UpdateStatus.Available("2.0.0", "https://ex.com/2.0.0", null, asset = null)
+        val next = nextStateAfterCheck(UpdateState.Idle, status, linuxPackage)
+        assertIs<UpdateState.Available>(next)
+        assertEquals(UpdatePlan.OpenReleasePage, next.update.plan)
+    }
+
+    @Test
+    fun readyIsReplacedWhenTheSameVersionsAssetDigestChanges() {
+        // A release rebuilt under the same tag (deleted and recreated after a failed upload, say)
+        // changes what the asset hashes to without changing the version string. Treating that as
+        // "the same download" would hand a stale, already-verified file to the installer instead of
+        // fetching the rebuilt one.
+        val ready = UpdateState.Ready(availableUpdate("2.0.0", asset = MAC_ASSET), filePath = "/tmp/Keryx-2.0.0.zip")
+        val rebuiltAsset = MAC_ASSET.copy(sha256 = "b".repeat(64))
+        val next = nextStateAfterCheck(
+            ready, UpdateStatus.Available("2.0.0", "https://ex.com/2.0.0", null, rebuiltAsset), WRITABLE_MAC_LOCATION,
+        )
+        assertIs<UpdateState.Available>(next)
+        assertEquals("2.0.0", next.update.version)
+        assertEquals(rebuiltAsset, next.update.asset)
+    }
 }
