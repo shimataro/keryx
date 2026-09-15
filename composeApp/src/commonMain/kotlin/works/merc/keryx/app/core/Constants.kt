@@ -80,6 +80,30 @@ const val REQUEST_TIMEOUT_MS = 60_000L
  */
 const val UPDATE_DOWNLOAD_SOCKET_TIMEOUT_MS = 60_000L
 
+/**
+ * How often [works.merc.keryx.app.domain.UpdateRepository] re-checks GitHub while it is watching for
+ * a release it cannot act on yet — see [UPDATE_RELEASE_WATCH_MAX_ATTEMPTS]. Short because the gap
+ * being waited out is itself short: the release workflow publishes the GitHub release first and
+ * attaches the built packages a few minutes later, so a check landing in that gap sees a release
+ * with no asset for this install form at all.
+ *
+ * Cheap to poll this often: `ReleaseFeedSource` sends `If-None-Match`, so an unchanged release list
+ * costs a bodyless 304, which GitHub does not count against the unauthenticated rate limit. Only
+ * the handful of responses that actually carry newly attached assets are full 200s.
+ */
+const val UPDATE_RELEASE_WATCH_INTERVAL_MS = 30_000L
+
+/**
+ * How many [UPDATE_RELEASE_WATCH_INTERVAL_MS] polls that watch lasts before giving up and falling
+ * back to the ordinary `updateCheckIntervalHours` schedule — roughly three hours, which covers a CI
+ * re-run and a hand-driven release rebuild (unpublish, delete the tag, recreate it).
+ *
+ * A budget is needed at all because some combinations never get their asset: the release workflow
+ * skips `packageMsi` for a pre-release tag, so an MSI install offered a pre-release would otherwise
+ * watch forever.
+ */
+const val UPDATE_RELEASE_WATCH_MAX_ATTEMPTS = 360
+
 /** Clock-skew tolerance for [works.merc.keryx.app.data.cloud.OAuthTokens.isExpired]'s default. */
 const val TOKEN_EXPIRY_SKEW_MS = 60_000L
 

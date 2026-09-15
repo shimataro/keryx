@@ -173,7 +173,16 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
   ——`/snap/keryx/<revision>/` マウントは読み取り専用のため、配布経路によらず自己置換は不可能）、
   macOS App Translocation、書き込めないインストール先、このリリースに合致するアセットが無い、
   など）、`NotOffered`（開発実行、または Google Play 経由でインストールされた Android ビルド）。
-  `UpdateInstaller.canInstall(plan)` はこれとは別の、より狭い問いにプラットフォームの `actual` が
+  `di/AppModule.kt` は `InstallLocation` をちょうど 1 回だけ、`UpdateChecker`/`UpdateRepository`/
+  デスクトップの `UpdateInstaller` が共有する Koin `single` として解決する——それぞれが自前の
+  コンストラクタ既定値 `detectInstallLocation()` を呼ぶに任せない。`parentWritable` は実際に
+  ファイルシステムを探る（一時ファイルを作って消す）ため、3 つの独立したライブプローブが互いに
+  食い違いうるし、起動経路で 3 回繰り返すこと自体も無駄になる。この帰結として——プロセス起動時に
+  このプローブが読んだ値（とりわけ `translocated`/`parentWritable`）は、そのプロセスの寿命いっぱい
+  凍結される。変わるのは再起動をまたいだときだけで、セッション中に変わることはない。この決定の中で
+  実行中のプロセス内で正当に変わりうるのは `check()` が見るアセットだけであり、これはまさに
+  下記のリリース監視の仕組みが前提にしていることでもある。`UpdateInstaller.canInstall(plan)` は
+  これとは別の、より狭い問いにプラットフォームの `actual` が
   実行時に答えるもの——「何をすべきか」ではなく「この実行環境に今それが許されているか」
   （典型的には Android の「提供元不明のアプリ」同意）——であり、ダウンロードを始めるかどうかを
   ゲートする。`check()` は更新が見つかるたびにこれを一度解決し、`AvailableUpdate.installable` に
@@ -181,6 +190,45 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
   `plan` は `SelfReplace`/`RunInstaller` を指していてもプラットフォームが拒否している場合があり、
   両サーフェスとも「ダウンロード」を押して実際に何か起きるかについて `startDownload()` 自身の
   ゲートと食い違ってはならないため。
+- **まだアセットが無いリリースは `OpenReleasePage` ではなく「ここではまだリリースされていない」
+  として扱う。** リリースワークフロー（`.github/workflows/release.yml`）は `release: published`
+  で起動し、各プラットフォームのパッケージはそのあとで添付される: GitHub のリリースは
+  `assets[]` が空のまま一瞬公開され（本リポジトリでの実測では数分間）、その後すべてのパッケージが
+  揃う。`UpdateChecker` 自身はこれを特別扱いしない——`selectUpdateAsset` が見つけた結果
+  （その窓の間は `null`）をそのまま報告するだけ——なので、`domain/UpdateInstallPolicy.kt` の
+  `awaitsReleaseAsset(location, asset)` が「ここでこのインストール形態が `OpenReleasePage` に
+  落ちる理由が、アセットが無いことだけなのか」を問う唯一の場所になる（`updatePlan` 自身の
+  `when (location.kind)` を鏡写しにしているので、`InstallKind` が増えたときは両方が答えを
+  持たねばならない）。自己置換／インストーラー駆動の形態で、他に問題が何もない場合
+  （translocated でない、書き込み可能、……）にのみ真になる。恒久的な理由でアセットが無い場合
+  （Linux の deb/rpm、Linux の Snap、アセットはあるがプラットフォームが拒否している——Android の
+  「提供元不明のアプリ」同意など）は偽のままで、この機能が入る前と変わらず即座に通知する。
+
+  `domain/UpdateState.kt` の `nextStateAfterCheck` は、真と判定された場合を `UpdateStatus.UpToDate`
+  と同じ分岐に畳み込む——`Available(installable = false)` は一切作られないので、`check()` 自身の
+  通知ブロック（`after is UpdateState.Available` でゲートされている）は発火せず、トレイと Updates
+  タブは「手動更新が必要」ではなく「最新」として読む。続いて `UpdateRepository` は
+  **リリース監視**を開始（または継続）する: `runCheck(quiet = true)` が
+  `UPDATE_RELEASE_WATCH_INTERVAL_MS`（30 秒——実測の空白は数分なので、アセットが揃ってすぐ
+  これで捕まえられる）ごとに、`UPDATE_RELEASE_WATCH_MAX_ATTEMPTS`（360 回、約 3 時間）まで
+  再チェックする。カウンタはバージョンごとではなく単一の値で追跡する——監視の途中でリリースが
+  手動で取り消されて作り直される（タグを消して push し直す）こともあるため、`UpdateStatus.UpToDate`
+  （取り下げ）と `UpdateStatus.Failed`（一時的なネットワーク障害）はどちらも進行中の監視を
+  **継続**させ、終わらせない。監視が終わるのはアセットが実際に現れたとき、または予算を使い切った
+  ときだけ（`recordWatchOutcome`——終わるときは理由を問わずカウンタを必ずリセットするので、通常
+  スケジュールに戻った後の無関係な `UpToDate` を「まだ監視中」と誤読することはない）。`quiet` が
+  これを見えないものにしている要——30 秒ごとに `UpdateState.Checking` が点滅することはなく、
+  quiet な再チェック自身の一時的な失敗が `UpdateState.Failed` として表面化することもない。どちらも
+  ユーザーが実際に依頼したチェックのためのものである。予算を設けているのは、一部の組み合わせでは
+  絶対に解決しないため——例えばプレリリースタグに対する MSI インストール版は、`release.yml` が
+  プレリリースでは `packageMsi` を丸ごとスキップするので該当する。その環境は通常の
+  `updateCheckIntervalHours` スケジュールへフォールバックする（その環境の視点からは知らせるべき
+  インストール可能なものが何も無いままなので、通知はどちらにせよ出ない）。
+
+  `nextStateAfterCheck` はまた、`Ready` なダウンロードを「すでに手元にある同じもの」として
+  扱い続ける条件に、バージョンだけでなくアセットの digest 一致も要求するようになった——さもないと、
+  同じタグの下でリリースが作り直された場合（手作業でのアップロードやり直しなど）、古い、
+  検証済みのファイルをインストーラーに渡してしまい、作り直された方を取りに行かなくなる。
 - **ダウンロード。** `data/remote/UpdateDownloader` は手動でリダイレクトを追う（共有 HTTP
   クライアントにはリダイレクトプラグイン自体が入っていない）。小さなホスト allowlist——
   完全一致の `github.com` と `api.github.com`（Releases API 自身が応答するホスト）、および

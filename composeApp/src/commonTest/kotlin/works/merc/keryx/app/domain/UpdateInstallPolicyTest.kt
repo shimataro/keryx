@@ -151,4 +151,79 @@ class UpdateInstallPolicyTest {
             assertEquals(kind in SELF_REPLACE_INSTALL_KINDS, isSelfReplace, "mismatch for $kind")
         }
     }
+
+    // --- awaitsReleaseAsset ---
+    //
+    // Every one of these is also a regression guard for the notification bug this was written to
+    // fix: a case that must always notify immediately (OpenUrl or otherwise) must never be
+    // classified as "awaiting a release asset" and sent into UpdateRepository's release-watch
+    // instead — see UpdateRepositoryTest for the end-to-end version of the same guarantee.
+
+    @Test
+    fun neverAwaitsAnAssetWhenOneIsAlreadyPresent() {
+        // Not just for install forms that would use it (MAC_APP_BUNDLE): an asset present but
+        // refused by the platform (Android's install-unknown-apps consent, most notably) is a real,
+        // immediate answer — never mistaken for "still being uploaded".
+        for (kind in InstallKind.entries) {
+            assertEquals(false, awaitsReleaseAsset(location(kind), SOME_ASSET), "mismatch for $kind")
+        }
+    }
+
+    @Test
+    fun developmentAndroidStoreAndUnknownNeverAwaitAnAsset() {
+        assertEquals(false, awaitsReleaseAsset(location(InstallKind.DEVELOPMENT), null))
+        assertEquals(false, awaitsReleaseAsset(location(InstallKind.ANDROID_STORE), null))
+        assertEquals(false, awaitsReleaseAsset(location(InstallKind.UNKNOWN), null))
+    }
+
+    @Test
+    fun linuxPackageAndSnapNeverAwaitAnAssetRegardlessOfWritability() {
+        assertEquals(false, awaitsReleaseAsset(location(InstallKind.LINUX_PACKAGE), null))
+        assertEquals(false, awaitsReleaseAsset(location(InstallKind.LINUX_SNAP), null))
+    }
+
+    @Test
+    fun macAppBundleAwaitsAnAssetOnlyWhenWritableAndNotTranslocated() {
+        assertEquals(true, awaitsReleaseAsset(location(InstallKind.MAC_APP_BUNDLE), null))
+        assertEquals(
+            false,
+            awaitsReleaseAsset(location(InstallKind.MAC_APP_BUNDLE, translocated = true), null),
+        )
+        assertEquals(
+            false,
+            awaitsReleaseAsset(location(InstallKind.MAC_APP_BUNDLE, parentWritable = false), null),
+        )
+    }
+
+    @Test
+    fun windowsAndLinuxPortableAwaitAnAssetOnlyWhenWritable() {
+        assertEquals(true, awaitsReleaseAsset(location(InstallKind.WINDOWS_PORTABLE), null))
+        assertEquals(true, awaitsReleaseAsset(location(InstallKind.LINUX_PORTABLE), null))
+        assertEquals(
+            false,
+            awaitsReleaseAsset(location(InstallKind.WINDOWS_PORTABLE, parentWritable = false), null),
+        )
+    }
+
+    @Test
+    fun windowsInstalledAndAndroidSideloadedAlwaysAwaitAnAssetWhenNoneIsPresent() {
+        assertEquals(true, awaitsReleaseAsset(location(InstallKind.WINDOWS_INSTALLED), null))
+        assertEquals(true, awaitsReleaseAsset(location(InstallKind.ANDROID_SIDELOADED), null))
+    }
+
+    @Test
+    fun awaitsReleaseAssetAgreesWithUpdatePlanIsInstallableOnWhetherAnAssetWouldHaveMattered() {
+        // For every InstallKind, an asset being present is what flips updatePlan between
+        // OpenReleasePage and something installable *whenever* awaitsReleaseAsset says the asset is
+        // the only thing standing in the way here — i.e. asset == null never awaits one on a kind
+        // that also never installs no matter what asset shows up (LINUX_PACKAGE, LINUX_SNAP,
+        // DEVELOPMENT, ANDROID_STORE, UNKNOWN), and awaitsReleaseAsset never mirrors a kind where
+        // updatePlan(location, SOME_ASSET) still isn't installable (translocated/unwritable).
+        for (kind in InstallKind.entries) {
+            val loc = location(kind)
+            val awaits = awaitsReleaseAsset(loc, null)
+            val installableWithAsset = updatePlan(loc, SOME_ASSET).isInstallable
+            assertEquals(installableWithAsset, awaits, "mismatch for $kind")
+        }
+    }
 }

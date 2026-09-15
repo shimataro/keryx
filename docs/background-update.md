@@ -171,7 +171,16 @@ each a separate, explicit click (Updates tab button, or that menu item).
   environment variable snapd sets — its `/snap/keryx/<revision>/` mount is read-only, so self-replace
   is impossible there regardless of the distribution channel), macOS App Translocation, an unwritable
   install directory, no matching asset in this release), or `NotOffered` (a development run, or an
-  Android build installed through Google Play). `UpdateInstaller.canInstall(plan)` is a separate, narrower question the platform
+  Android build installed through Google Play). `di/AppModule.kt` resolves `InstallLocation` exactly
+  once, as a Koin `single` shared by `UpdateChecker`/`UpdateRepository`/the desktop `UpdateInstaller`
+  alike, rather than letting each call its own constructor-default `detectInstallLocation()` —
+  `parentWritable` actually probes the filesystem (creates and deletes a temp file), so three
+  independent live probes could in principle disagree with each other, and three repeats on the
+  startup path would be wasted anyway. One consequence: whatever this probe read at process start
+  (`translocated`/`parentWritable` in particular) is frozen for the rest of that process's life — it
+  can only change across a restart, never mid-session; the asset each `check()` sees is the only
+  thing in this decision that *can* legitimately change within one running process, which is exactly
+  what the release-watch handling below relies on. `UpdateInstaller.canInstall(plan)` is a separate, narrower question the platform
   `actual` answers at runtime — not just "what should happen" but "is this instance currently
   allowed to" (Android's install-unknown-apps consent, most notably) — and gates whether a download
   even starts. `check()` resolves this once per found update and folds it into
@@ -179,6 +188,44 @@ each a separate, explicit click (Updates tab button, or that menu item).
   `isInstallable` — a plan can call for `SelfReplace`/`RunInstaller` while the platform still
   refuses it, and both surfaces need to agree with `startDownload()`'s own gate about whether
   "Download" does anything.
+- **A release with no asset yet is treated as not released here, not as `OpenReleasePage`.** The
+  release workflow (`.github/workflows/release.yml`) triggers on `release: published` and attaches
+  each platform's package only after that: a GitHub release is briefly visible with an empty
+  `assets[]` (observed: a few minutes on this repo) before every package lands. `UpdateChecker`
+  itself doesn't special-case this — it just reports whatever `selectUpdateAsset` found (`null` in
+  that window) — so `domain/UpdateInstallPolicy.kt`'s `awaitsReleaseAsset(location, asset)` is the
+  one place that asks "is a missing asset here *the only reason* this install form would fall back
+  to `OpenReleasePage`?" (mirroring `updatePlan`'s own `when (location.kind)`, so a new `InstallKind`
+  has to answer both). Only true for a self-replaceable/installer-driven form with nothing else
+  wrong (not translocated, parent writable, …); an asset that's genuinely absent for a *durable*
+  reason (Linux deb/rpm, Linux Snap, an asset present but the platform refusing it — Android's
+  install-unknown-apps consent) is `false` and notifies immediately, unchanged from before this
+  existed.
+
+  `domain/UpdateState.kt`'s `nextStateAfterCheck` folds a `true` verdict into the same branch as
+  `UpdateStatus.UpToDate` — no `Available(installable = false)` is produced for it, so `check()`'s
+  own notification block (gated on `after is UpdateState.Available`) never fires and the tray/Updates
+  tab read it as "up to date" rather than "manual update available". `UpdateRepository` then starts
+  (or continues) a **release watch**: `runCheck(quiet = true)` polls every `UPDATE_RELEASE_WATCH_INTERVAL_MS`
+  (30 s — the observed gap is a few minutes, so this catches the asset shortly after it lands) for up
+  to `UPDATE_RELEASE_WATCH_MAX_ATTEMPTS` (360, ≈3 h) attempts, tracked as a single in-memory counter
+  rather than per-version — a release can also be unpublished and recreated by hand (delete the tag,
+  push it again) mid-watch, so both `UpdateStatus.UpToDate` (withdrawn) and `UpdateStatus.Failed` (a
+  transient network hiccup) *continue* an already-running watch instead of ending it; only an asset
+  actually appearing, or the budget running out, ends one (`recordWatchOutcome`, always resetting the
+  counter when it does, so a later, unrelated `UpToDate` under the normal schedule is never mistaken
+  for "still watching"). `quiet` is what keeps this invisible: no `UpdateState.Checking` flash every
+  30 s, and a quiet poll's own transient failure never surfaces as `UpdateState.Failed` — both are
+  reserved for a check the user actually asked for. A budget exists because some combinations never
+  resolve: an MSI install offered a pre-release tag, say, since `release.yml` skips `packageMsi` for
+  one entirely — that environment falls back to the ordinary `updateCheckIntervalHours` schedule
+  rather than polling forever, with no notification either way (there is still nothing installable
+  to announce from that environment's point of view).
+
+  `nextStateAfterCheck` also requires a `Ready` download's asset digest, not just its version, to
+  still match before treating a fresh `Available` status as "the same download already in hand" —
+  otherwise a release rebuilt under the same tag (a failed upload redone by hand) could hand a
+  stale, already-verified file to the installer instead of fetching the rebuilt one.
 - **Downloading.** `data/remote/UpdateDownloader` manually follows redirects (the shared HTTP client
   has no redirect plugin at all) against a small host allowlist — exact-match `github.com` and
   `api.github.com` (where the Releases API itself answers), plus a leading-dot-required suffix

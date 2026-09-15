@@ -428,4 +428,21 @@ class UpdatesTabTest {
         assertEquals(idleHeight, upToDateHeight)
         assertEquals(idleHeight, failedHeight)
     }
+
+    // --- shouldAutoCheckOnOpen ---
+    //
+    // A plain function of UpdateState, not a Compose test — no runDesktopComposeUiTest needed.
+
+    @Test
+    fun autoChecksOnOpenFromIdleOrFromANonInstallableAvailableOnly() {
+        assertEquals(true, shouldAutoCheckOnOpen(UpdateState.Idle))
+        assertEquals(true, shouldAutoCheckOnOpen(UpdateState.Available(platformRefusedUpdate())))
+        assertEquals(true, shouldAutoCheckOnOpen(UpdateState.Available(manualOnlyUpdate())))
+
+        assertEquals(false, shouldAutoCheckOnOpen(UpdateState.Available(installableUpdate())))
+        assertEquals(false, shouldAutoCheckOnOpen(UpdateState.UpToDate))
+        assertEquals(false, shouldAutoCheckOnOpen(UpdateState.Checking))
+        assertEquals(false, shouldAutoCheckOnOpen(UpdateState.Ready(installableUpdate(), filePath = "/tmp/x.zip")))
+        assertEquals(false, shouldAutoCheckOnOpen(UpdateState.Failed(null, UpdateException(UpdateStage.CHECK, "boom"))))
+    }
 }
