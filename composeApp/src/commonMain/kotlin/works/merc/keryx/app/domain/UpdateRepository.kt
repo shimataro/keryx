@@ -148,6 +148,20 @@ class UpdateRepository(
     // inspect/replace downloadJob while a check() is mid-flight. See this class's own methods below.
     private val mutex = Mutex()
 
+    // Serializes one whole runCheck transaction — the "start" snapshot, checker.check() itself, and
+    // the "apply"/"watch bookkeeping" steps after it — against every other runCheck. [mutex] cannot
+    // do this: it is deliberately released across checker.check(), so two checks could fetch
+    // concurrently and the one that started *first* could apply *last*, overwriting a freshly found
+    // Available with its own older UpToDate and re-arming a watch the newer check had just ended.
+    // Holding a lock across the network call is safe here in a way holding [mutex] there was not —
+    // this one blocks only other checks, never startDownload/install/cancelDownload — and it also
+    // means a check beginning while another is in flight issues its own request only once that one
+    // is done, so a later start always sees later data. It equally serializes two *public* checks,
+    // whose overlap would otherwise hand the second one a `before` of UpdateState.Checking, which
+    // updateVersionInUse() reports as "no version in use" — letting sweepStaleUpdateDownloads delete
+    // the very directory the first check's Ready state is still pointing at.
+    private val checkMutex = Mutex()
+
     // Written only under mutex (startDownloadOf), but read from cancelDownload() — a plain,
     // non-suspend call from a UI click handler that cannot take a suspend lock — without it. @Volatile
     // is what makes that read see the write at all: a plain var gives the JVM/other backends no
@@ -212,6 +226,16 @@ class UpdateRepository(
      * Verifying/Installing) turns "apply" into a no-op, exactly as if this check had run
      * instantaneously.
      *
+     * What keeps that narrow [mutex] scope from being a race between two *checks* is [checkMutex],
+     * which every call here is entered under: a quiet [startReleaseWatch] poll and a user-triggered
+     * [check] can never have their network calls in flight at the same time, so neither can apply a
+     * result the other has already superseded. The cost is that a check beginning while another is
+     * in flight waits it out before showing anything (at worst one
+     * [works.merc.keryx.app.core.REQUEST_TIMEOUT_MS], and only while a release watch is running);
+     * marking [UpdateState.Checking] *before* that wait instead would make the "start" snapshot
+     * itself [UpdateState.Checking], which is exactly the value [updateVersionInUse] reads as
+     * "nothing in use" and [sweepStaleUpdateDownloads] then deletes a live download over.
+     *
      * [quiet] is what keeps [startReleaseWatch]'s repeated polling from being visible: it skips the
      * momentary [UpdateState.Checking] flash a user-requested [check] shows (the tray/Updates tab
      * would otherwise flicker "Checking…" every [releaseWatchIntervalMs]), and a network failure
@@ -220,7 +244,10 @@ class UpdateRepository(
      * looking at (still [UpdateState.UpToDate] from this repository's point of view — see
      * [awaitsReleaseAsset]/[nextStateAfterCheck]) with an error the user never asked about.
      */
-    private suspend fun runCheck(quiet: Boolean): UpdateCheckOutcome {
+    private suspend fun runCheck(quiet: Boolean): UpdateCheckOutcome = checkMutex.withLock { runCheckLocked(quiet) }
+
+    /** [runCheck]'s body, always entered under [checkMutex] — see that field for what it guards. */
+    private suspend fun runCheckLocked(quiet: Boolean): UpdateCheckOutcome {
         val before = mutex.withLock {
             _state.value.also { current ->
                 if (!quiet) {
@@ -241,7 +268,11 @@ class UpdateRepository(
 
         if (quiet && status is UpdateStatus.Failed) {
             Log.info(TAG, "Quiet release-watch poll failed transiently, still watching: ${untrustedText(status.exception.messageText, MAX_FAILURE_REASON_LENGTH)}")
-            val outcome = mutex.withLock { recordWatchOutcome(stillWatching = true) }
+            // `releaseWatchAttempts > 0` rather than a flat `true`: a public check that concluded
+            // while this poll was queued behind it has already ended the watch (reset the counter),
+            // and a transient failure in the poll that follows must not resurrect one — see
+            // recordWatchOutcome's own KDoc ("Not watching already ... is *not* reason to start").
+            val outcome = mutex.withLock { recordWatchOutcome(stillWatching = releaseWatchAttempts > 0) }
             if (outcome == UpdateCheckOutcome.AWAITING_RELEASE) startReleaseWatch()
             return outcome
         }

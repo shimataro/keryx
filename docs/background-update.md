@@ -222,6 +222,10 @@ each a separate, explicit click (Updates tab button, or that menu item).
   rather than polling forever, with no notification either way (there is still nothing installable
   to announce from that environment's point of view).
 
+  `UpdateRepository`'s own `checkMutex` serializes every call to `runCheck` — a quiet poll and a
+  user-triggered `check()` never have their network calls in flight at the same time, so a check
+  that started earlier can never apply its (by then stale) result after a later one already did.
+
   `nextStateAfterCheck` also requires a `Ready` download's asset digest, not just its version, to
   still match before treating a fresh `Available` status as "the same download already in hand" —
   otherwise a release rebuilt under the same tag (a failed upload redone by hand) could hand a

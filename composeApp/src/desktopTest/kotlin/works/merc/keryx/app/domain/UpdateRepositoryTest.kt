@@ -1334,6 +1334,152 @@ class UpdateRepositoryTest {
         assertEquals(UpdateState.UpToDate, repo.state.value)
     }
 
+    // --- Regression: a public check and a quiet release-watch poll must never race to apply a
+    // stale result over each other's — see UpdateRepository's own checkMutex KDoc.
+
+    /**
+     * Regression guard: before checkMutex, runCheck() only held [mutex] for the brief "start"/
+     * "apply"/"watch bookkeeping" steps, never across checker.check() itself. A quiet release-watch
+     * poll that started first (and so saw no asset) could still finish *after* a later, user-
+     * triggered check that found one, clobbering the fresh Available with its own stale UpToDate.
+     */
+    @Test
+    fun aQuietWatchPollInFlightNeverOverwritesAPublicCheckThatFoundTheAsset() {
+        val payload = Random(50).nextBytes(1024)
+        val sha256 = sha256Hex(payload)
+        val requestCount = AtomicInteger(0)
+        val assetReady = AtomicInteger(0) // 0 while absent; set to 1 once the test flips it
+        val quietPollParked = CompletableDeferred<Unit>()
+        val quietGate = CompletableDeferred<Unit>()
+        val notificationCenter = NotificationCenter()
+        val checkerClient = HttpClient(
+            MockEngine { _ ->
+                val n = requestCount.incrementAndGet()
+                // Snapshot the body *before* parking, from assetReady as it stood when this request
+                // was actually issued — if this read happened after quietGate.await() instead, the
+                // parked poll would pick up the asset that only appears later, defeating the very
+                // race this test means to reproduce (a stale, already-in-flight result applied late).
+                val body = if (assetReady.get() == 0) {
+                    releaseJsonNoAssets("2.0.0")
+                } else {
+                    releaseJson("2.0.0", "Keryx-2.0.0-macos-arm64.zip", "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256)
+                }
+                if (n == 2) {
+                    quietPollParked.complete(Unit)
+                    quietGate.await()
+                }
+                respond(body, HttpStatusCode.OK)
+            },
+        ) { expectSuccess = false }
+        val repo = UpdateRepository(
+            checker = UpdateChecker(checkerClient, currentVersion = "1.0.0", repoSlug = "owner/repo", location = WRITABLE_MAC_LOCATION),
+            downloader = UpdateDownloader(HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }),
+            installer = noOpInstaller(),
+            notificationCenter = notificationCenter,
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+            releaseWatchIntervalMs = 1_500L,
+        )
+
+        // Starts the release watch: request #1 (the public check itself) finds no asset yet.
+        val firstOutcome = runBlocking { repo.check() }
+        assertEquals(UpdateCheckOutcome.AWAITING_RELEASE, firstOutcome)
+
+        // The watch's own first quiet poll (request #2) is now parked mid-network-call, body already
+        // snapshotted as "no asset".
+        runBlocking { withTimeout(5_000) { quietPollParked.await() } }
+        assetReady.set(1)
+
+        // A second, user-triggered check would — without checkMutex — be free to race the parked
+        // poll's own network call and apply its Available result first. With checkMutex it instead
+        // waits for the poll to fully finish (including its own "apply" step) before even issuing
+        // its own request.
+        val secondCheck = trackedScope().launch { repo.check() }
+        runBlocking { delay(200) } // give a wrongly-concurrent request every chance to have fired
+
+        quietGate.complete(Unit)
+        runBlocking { withTimeout(5_000) { secondCheck.join() } }
+
+        val state = repo.state.value
+        assertIs<UpdateState.Available>(state, "the parked quiet poll's stale UpToDate must not win over the later check's Available")
+        assertTrue(state.update.installable)
+        assertEquals(1, notificationCenter.items.value.size)
+    }
+
+    /**
+     * Regression guard: the quiet-failure branch of runCheck() used to call
+     * `recordWatchOutcome(stillWatching = true)` unconditionally, so a poll that had already been
+     * queued behind a public check — one that found the asset and ended the watch — would resurrect
+     * that watch on its own subsequent transient failure, even though nothing is being waited for
+     * any more.
+     */
+    @Test
+    fun aQuietPollFailingAfterAPublicCheckEndedTheWatchDoesNotRestartIt() {
+        val phase = AtomicInteger(0) // 0 = no asset; 1 = asset present; 2 = transient failure
+        val requestCount = AtomicInteger(0)
+        val payload = Random(51).nextBytes(1024)
+        val sha256 = sha256Hex(payload)
+        val notificationCenter = NotificationCenter()
+        val checkerClient = HttpClient(
+            MockEngine {
+                requestCount.incrementAndGet()
+                when (phase.get()) {
+                    0 -> respond(releaseJsonNoAssets("2.0.0"), HttpStatusCode.OK)
+                    1 -> respond(
+                        releaseJson("2.0.0", "Keryx-2.0.0-macos-arm64.zip", "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256),
+                        HttpStatusCode.OK,
+                    )
+                    else -> respondError(HttpStatusCode.InternalServerError)
+                }
+            },
+        ) { expectSuccess = false }
+        val repo = UpdateRepository(
+            checker = UpdateChecker(checkerClient, currentVersion = "1.0.0", repoSlug = "owner/repo", location = WRITABLE_MAC_LOCATION),
+            downloader = UpdateDownloader(HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }),
+            installer = noOpInstaller(),
+            notificationCenter = notificationCenter,
+            notificationMessages = RecordingNotificationMessages(),
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+            releaseWatchIntervalMs = 1_000L,
+        )
+
+        // Starts the watch.
+        val firstOutcome = runBlocking { repo.check() }
+        assertEquals(UpdateCheckOutcome.AWAITING_RELEASE, firstOutcome)
+
+        // A public check immediately finds the asset and ends the watch (attempt counter reset).
+        phase.set(1)
+        val secondOutcome = runBlocking { repo.check() }
+        assertEquals(UpdateCheckOutcome.CONCLUSIVE, secondOutcome)
+        assertIs<UpdateState.Available>(repo.state.value)
+
+        // The watch's loop is still alive as a coroutine (its own `while (isActive)` has not yet
+        // rechecked the outcome), asleep in its next `delay(releaseWatchIntervalMs)` — so exactly
+        // one more quiet poll is still going to fire, and now hits a transient failure.
+        phase.set(2)
+        val requestsBeforeFailure = requestCount.get()
+        await(timeoutMs = 5_000, describe = { "the already-scheduled quiet poll never fired; requestCount=$requestCount" }) {
+            requestCount.get() > requestsBeforeFailure
+        }
+
+        // The regression: with `stillWatching` hardcoded to `true`, that one failure would resurrect
+        // the watch and it would keep polling every releaseWatchIntervalMs forever. Fixed, this
+        // single already-in-flight poll finds `releaseWatchAttempts == 0` (the public check reset
+        // it) and stops the loop instead of continuing it — so waiting several more intervals must
+        // show no further growth.
+        Thread.sleep(2_500)
+        assertEquals(
+            requestsBeforeFailure + 1,
+            requestCount.get(),
+            "a quiet poll's own transient failure must not resurrect a watch the public check already ended",
+        )
+        assertIs<UpdateState.Available>(repo.state.value)
+    }
+
     // --- Regression: install forms that must notify immediately and never enter the release watch ---
     //
     // awaitsReleaseAsset requires asset == null, so any of these — even with a release that
