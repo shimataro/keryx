@@ -332,7 +332,7 @@ kotlin {
         // java.util.zip, java.security.MessageDigest, java.util.Base64) that work verbatim on
         // both. Anything needing an Android Context (AppDirs) or an Android-idiomatic API (Log)
         // stays in each target's own source set instead.
-        val jvmCommonMain by creating {
+        val jvmCommonMain = create("jvmCommonMain") {
             dependsOn(commonMain.get())
             kotlin.srcDir(generatedBuildConfigDir)
         }
