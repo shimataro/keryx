@@ -40,6 +40,9 @@ private const val TAG = "PlayServicesGDriveAuth"
  * The Android OAuth client is never named in code: Play services identifies the app by its package
  * name and signing certificate, so an unregistered signing key surfaces as an authorization
  * failure here rather than as a missing configuration value at build time.
+ *
+ * A result is only accepted once it actually carries the requested scope — Play services can
+ * answer a partially-granted consent with a token that is useless for Drive. See [tokenFrom].
  */
 class PlayServicesAuthorization(
     private val context: Context = AndroidAppContext.application,
@@ -91,11 +94,28 @@ class PlayServicesAuthorization(
         }
     }
 
-    private fun tokenOf(result: AuthorizationResult): Result<String> {
-        val token = result.accessToken
-            ?: return Result.Err(CloudAuthException("Google Drive authorization returned no access token"))
-        return Result.Ok(token)
+    private fun tokenOf(result: AuthorizationResult): Result<String> =
+        tokenFrom(result.accessToken, result.grantedScopes)
+}
+
+/**
+ * The accept/reject decision for an [AuthorizationResult], kept as a top-level function rather than
+ * a member so it is testable without building a Play services result object (whose only constructor
+ * is the `SafeParcelable` one).
+ *
+ * The scope check is not belt-and-braces. Google's granular-permissions guidance is explicit that an
+ * app must check which scopes the user actually granted instead of assuming the requested set was
+ * approved wholesale — the consent screen lets a scope be declined on its own, and the result still
+ * carries an access token when that happens. Accepting such a token would let the connect report
+ * success and persist `cloudStorageType`, leaving the failure to surface much later as a 403 on
+ * every Drive request.
+ */
+internal fun tokenFrom(accessToken: String?, grantedScopes: List<String>): Result<String> {
+    if (GOOGLE_DRIVE_APPDATA_SCOPE !in grantedScopes) {
+        return Result.Err(CloudAuthException("Google Drive app-data access was not granted"))
     }
+    return accessToken?.let { Result.Ok(it) }
+        ?: Result.Err(CloudAuthException("Google Drive authorization returned no access token"))
 }
 
 /**
