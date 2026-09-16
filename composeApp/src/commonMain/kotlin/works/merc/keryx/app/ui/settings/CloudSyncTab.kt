@@ -322,6 +322,9 @@ private fun ProviderActionButton(
     }
 }
 
+/** Fixed size for the provider brand icon and action glyphs in icon-only mode. */
+private val CLOUD_ROW_ICON_SIZE = 20.dp
+
 /** Minimum height for the connected row's status slot (spinner+phase, "disconnecting…", or the
  * last-synced subtitle) — see that slot's own comment inside [CloudProviderRow] for why it is
  * reserved unconditionally rather than only while it has content. */
@@ -563,11 +566,3 @@ internal fun CloudProviderRow(
         }
     }
 }
-
-/** Fixed size for the provider brand icon and action glyphs in icon-only mode. */
-private val CLOUD_ROW_ICON_SIZE = 20.dp
-
-/** Minimum height for the connected row's status slot (spinner+phase, "disconnecting…", or the
- * last-synced subtitle) — see that slot's own comment inside [CloudProviderRow] for why it is
- * reserved unconditionally rather than only while it has content. */
-private val CLOUD_STATUS_SLOT_MIN_HEIGHT = 20.dp
