@@ -11,7 +11,6 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.getString
@@ -176,11 +175,14 @@ class SettingsViewModel(
             syncRepository.syncPhase.collect { syncPhase = it }
         }
         viewModelScope.launch {
-            // Skip the initial replay (current state at VM creation) — already handled by the
-            // property initializer above. Only react to genuine sync completions afterward,
-            // covering sync paths this ViewModel has no other visibility into (manual "sync now" on
-            // Home, debounced syncs, the background loop).
-            activityCenter.syncing.drop(1).collect { isSyncing ->
+            // Collects the subscription-time replay too, not just later changes: the property
+            // initializer above reads activityCenter.syncing.value synchronously at construction,
+            // but this launch only starts collecting once viewModelScope actually dispatches it,
+            // so the StateFlow's value can have moved on in between. Dropping that replay (as a
+            // once-tried `drop(1)` did) would silently swallow a real transition happening in that
+            // window; collecting it is safe since it just repeats work this ViewModel already does
+            // at startup (refreshLastSyncedAt() is a pure, idempotent read).
+            activityCenter.syncing.collect { isSyncing ->
                 syncing = isSyncing
                 // Guarded: a transient read failure must not kill this long-lived collector (which
                 // would silently stop all future last-synced refreshes) or leak as an uncaught

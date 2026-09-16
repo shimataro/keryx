@@ -606,6 +606,31 @@ class SettingsViewModelTest {
         runBlocking { job.join() }
     }
 
+    // Note: same reason as syncingMirrorsActivityCenter above — ActivityCenter.syncing is derived
+    // via a map{}.stateIn(...) pipeline outside any virtual scheduler, so this polls with real
+    // wall-clock waits. Regression test for a `drop(1)`-based bug: the syncing collector used to
+    // skip the subscription-time replay of ActivityCenter.syncing on the assumption it always
+    // matched the value the property initializer had already captured. That assumption can fail
+    // when a sync is already running before the ViewModel is even constructed (e.g. the background
+    // loop already syncing when Settings is opened) — the transition back to false can then race
+    // past the subscription point and get silently dropped, leaving `syncing` stuck true forever.
+    @Test
+    fun syncingReflectsActivityCenterAcrossAFullCycleEvenWhenAlreadyRunningAtConstruction() {
+        val activityCenter = trackedActivityCenter()
+        val gate = CompletableDeferred<Unit>()
+        val job = CoroutineScope(Dispatchers.Default).launch {
+            activityCenter.trackSync { gate.await() }
+        }
+        awaitTrue { activityCenter.syncing.value }
+
+        val vm = newViewModel(activityCenter = activityCenter)
+        assertTrue(vm.syncing)
+
+        gate.complete(Unit)
+        awaitTrue { !vm.syncing }
+        runBlocking { job.join() }
+    }
+
     // Note: same reason as disconnectClearsConnectedTypeAndCloudStorageType below — disconnect
     // performs a real (mocked) HTTP revoke call whose completion is dispatched on a real thread
     // outside the TestCoroutineScheduler, so we poll with real wall-clock waits instead.
