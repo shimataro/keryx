@@ -51,6 +51,28 @@ Conflict prevention is done via a revision check on upload — Dropbox: `rev`, a
 
 Debouncing: After changes such as read/star, `SyncScheduler.scheduleSync()` batches sync after a fixed delay from the last operation.
 
+### Sync Progress Feedback
+
+`SyncRepository` exposes `syncPhase: StateFlow<SyncPhase>` (`IDLE`, `CHECKING`, `DOWNLOADING`, `MERGING`,
+`INDEXING`, `PREPARING`, `UPLOADING`, `ARCHIVING`), so the cloud-sync settings tab can show *what* a sync is
+currently doing rather than only *whether* one is running (`ActivityCenter.syncing`, a plain boolean). Every
+transition happens inside the same `mutex` `sync()`/`resetCloudData()` already hold, so a sync queued behind
+another never observes a stale phase left by the one ahead of it, and the `finally` inside that lock always
+resets to `IDLE` on the way out — success, a classified `Result.Err`, or an uncaught exception alike.
+
+The phases map onto the steps above: `CHECKING` for each retry loop's `metadata()` round trip (step 1),
+`DOWNLOADING` for the `download()` call in step 2, `MERGING` for the decompress-and-`DatabaseMerger.merge()`
+portion of step 3, `INDEXING` for `ftsManager.indexMissing()` (also step 3), `PREPARING` for building the
+upload snapshot (step 5's `VACUUM INTO` + digest + gzip), and `UPLOADING` for the `create`/`upload` call itself
+(also step 5). `resetCloudData()` adds one phase of its own, `ARCHIVING`, for `archiveCloudDb()`'s rename (or
+delete-fallback), before it too reaches `PREPARING`/`UPLOADING` via `createFresh()`.
+
+An `AUTOMATIC` sync skipped by `autoSyncSuspended` never enters `trackSync` at all (see "Automatic-Sync
+Suspension" below), so `syncPhase` stays `IDLE` for its entire (instant) duration — consistent with that skip
+not spinning the sync spinner either. There is no byte-level progress (no phase reports a fraction downloaded
+or uploaded) — `CloudStorage`'s `download`/`upload`/`create` take no progress callback, so a phase is the
+finest granularity available without changing that interface across all three providers.
+
 ### Compressed Upload / Legacy Fallback
 
 `CLOUD_DB_GZ_PATH` (`/keryx.db.gz`) is the only path this app ever writes to. `CLOUD_DB_PATH` (`/keryx.db`, the format every version before this feature wrote) is **read-only** and consulted only when the compressed file does not exist remotely yet (step 1a above) — a cloud this device has not synced to since compression was added, or one no device has written to since. Once `CLOUD_DB_GZ_PATH` exists, the legacy file is never read again, and it is never deleted, renamed, or overwritten by this app — see "Resetting (Archiving) Cloud Data" below for why a reset does not touch it either.
@@ -93,8 +115,9 @@ are also called inside that lock rather than after it: all four fields the clear
 `lastSyncError`, `autoSyncSuspended`) are written by a sync too. Without the shared lock, a sync already in flight
 could finish *after* the disconnect and restore the markers describing the provider that was just torn down —
 reintroducing exactly the skipped-download-never-merged case the clear exists to prevent. The cost is that
-disconnecting waits out an in-flight sync (bounded by the HTTP timeouts, and visible as the usual sync spinner),
-which is the correct ordering anyway.
+disconnecting waits out an in-flight sync (bounded by the HTTP timeouts, and visible as the usual sync spinner) —
+`SettingsViewModel.disconnecting` covers this whole wait, so the cloud-sync tab shows "disconnecting…" for it
+rather than looking stuck — which is the correct ordering anyway.
 
 ### Automatic-Sync Suspension
 

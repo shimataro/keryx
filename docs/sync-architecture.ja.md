@@ -86,6 +86,29 @@
 デバウンス: 既読・スター等の変更後は `SyncScheduler.scheduleSync()` が最後の操作から一定秒後に
 まとめて同期する。
 
+### 同期の進捗表示
+
+`SyncRepository` は `syncPhase: StateFlow<SyncPhase>`（`IDLE` / `CHECKING` / `DOWNLOADING` / `MERGING` /
+`INDEXING` / `PREPARING` / `UPLOADING` / `ARCHIVING`）を公開しており、クラウド同期設定タブは「同期中かどうか」
+（`ActivityCenter.syncing`、単なる真偽値）だけでなく「今どの段階か」を表示できる。すべての遷移は
+`sync()`/`resetCloudData()` が保持しているのと同じ `mutex` の内側で行われるため、後から並んだ同期が前の同期の
+古いフェーズを見てしまうことはなく、そのロック内側の `finally` が常に `IDLE` に戻す — 成功・分類済みの
+`Result.Err`・捕捉されない例外のいずれの経路でも。
+
+各フェーズは上記の各ステップに対応する：`CHECKING` はリトライループ内の各 `metadata()` 往復（ステップ1）、
+`DOWNLOADING` はステップ2の `download()` 呼び出し、`MERGING` はステップ3のうち展開＋`DatabaseMerger.merge()`
+の部分、`INDEXING` は同じくステップ3の `ftsManager.indexMissing()`、`PREPARING` はステップ5のアップロード用
+スナップショット作成（`VACUUM INTO` ＋ダイジェスト計算＋gzip圧縮）、`UPLOADING` は同じくステップ5の
+`create`/`upload` 呼び出し自体。`resetCloudData()` はこれに加えて独自のフェーズ `ARCHIVING` を持ち、
+`archiveCloudDb()` のリネーム（またはその失敗時の削除フォールバック）に対応したうえで、`createFresh()` 経由で
+同じく `PREPARING`/`UPLOADING` に至る。
+
+`autoSyncSuspended` によってスキップされる `AUTOMATIC` 同期は `trackSync` に一切入らないため（後述の「自動同期の
+抑制」参照）、その（一瞬の）実行中ずっと `syncPhase` は `IDLE` のまま — このスキップが同期スピナーを回さないのと
+整合している。バイト単位の進捗（ダウンロード／アップロード済みバイト数の割合）はどのフェーズにも存在しない —
+`CloudStorage` の `download`/`upload`/`create` は進捗コールバックを受け取らないため、3プロバイダすべてに渡って
+このインターフェースを変更しない限り、フェーズ単位が得られる最も細かい粒度になる。
+
 ### 圧縮アップロード / レガシーフォールバック
 
 `CLOUD_DB_GZ_PATH`（`/keryx.db.gz`）はこのアプリが書き込む唯一のパスである。`CLOUD_DB_PATH`
@@ -163,7 +186,8 @@
 なければ、実行中の同期が切断処理の**後**に完了して、いま破棄したばかりのプロバイダのマーカーを復活させて
 しまいうる — まさにクリアが防ごうとしている「未マージの内容のダウンロードをスキップする」状態そのもの
 である。代償として切断は実行中の同期の完了を待つことになるが（待ち時間は HTTP タイムアウトで上限が決まり、
-通常の同期スピナーとして見える）、順序としてはこちらが正しい。
+通常の同期スピナーとして見える） — この待ち時間全体は `SettingsViewModel.disconnecting` でカバーされるため、
+クラウド同期タブは固まったように見えるのではなく「切断しています…」と表示する — 順序としてはこちらが正しい。
 
 ### 自動同期の抑制
 

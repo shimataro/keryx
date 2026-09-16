@@ -53,6 +53,15 @@ import works.merc.keryx.app.platform.databaseFilePath
 enum class SyncTrigger { MANUAL, AUTOMATIC }
 
 /**
+ * The step [SyncRepository] is currently on, for live progress feedback in the cloud-sync settings
+ * tab. [IDLE] outside any [SyncRepository.sync]/[SyncRepository.resetCloudData] call — including
+ * the entire duration of an [SyncTrigger.AUTOMATIC] call skipped by [SyncRepository.autoSyncSuspended],
+ * which never enters [ActivityCenter.trackSync] at all. Updated only from inside the single mutex
+ * both of those methods hold, so a queued sync never sees a stale phase left by the one ahead of it.
+ */
+enum class SyncPhase { IDLE, CHECKING, DOWNLOADING, MERGING, INDEXING, PREPARING, UPLOADING, ARCHIVING }
+
+/**
  * Cloud sync via the "upload the whole SQLite file" strategy. Downloads the
  * cloud DB, merges it into the local DB with [MergeSql] (ATTACH DATABASE), then
  * re-uploads with a rev guard. The FTS5 index is excluded from the uploaded file
@@ -90,6 +99,7 @@ class SyncRepository(
      */
     private val _lastSyncAuthFailed = MutableStateFlow(false)
     private val _autoSyncSuspended = MutableStateFlow(false)
+    private val _syncPhase = MutableStateFlow(SyncPhase.IDLE)
 
     /**
      * Debounce signals, coalesced. [scheduleSync] is called from the UI thread (tag / folder / feed
@@ -146,6 +156,14 @@ class SyncRepository(
     val autoSyncSuspended: StateFlow<Boolean> = _autoSyncSuspended
 
     /**
+     * The step the currently-running (or most recently finished) sync is on. Mirrors [_syncPhase],
+     * which every phase transition writes under [mutex] — see [SyncPhase] for why that ordering
+     * matters. The cloud-sync settings tab pairs this with [ActivityCenter.syncing] (via
+     * `SettingsViewModel`) to show live progress text on the connected provider's row.
+     */
+    val syncPhase: StateFlow<SyncPhase> = _syncPhase
+
+    /**
      * Clears everything tied to the current cloud connection — the mirrored failure reason, the
      * automatic-sync pause, and the "what we last saw / last uploaded" markers — e.g. when the
      * connection that produced them is being torn down so a subsequently-connected provider does
@@ -200,10 +218,14 @@ class SyncRepository(
         // disconnect can never be undone by a sync that was already in flight.
         return activityCenter.trackSync {
             mutex.withLock {
-                val result = syncLocked()
-                updateAutoSyncGate(result)
-                emitErrorNotification(result)
-                result
+                try {
+                    val result = syncLocked()
+                    updateAutoSyncGate(result)
+                    emitErrorNotification(result)
+                    result
+                } finally {
+                    _syncPhase.value = SyncPhase.IDLE
+                }
             }
         }
     }
@@ -238,14 +260,19 @@ class SyncRepository(
         // Gate and failure text written inside the lock, same reason as in sync().
         return activityCenter.trackSync {
             mutex.withLock {
-                val result = when (val archived = archiveCloudDb(cloud)) {
-                    is Result.Err -> archived
-                    // The old file is out of the way (archived or deleted), so re-create it.
-                    is Result.Ok -> createFresh(cloud)
+                try {
+                    _syncPhase.value = SyncPhase.ARCHIVING
+                    val result = when (val archived = archiveCloudDb(cloud)) {
+                        is Result.Err -> archived
+                        // The old file is out of the way (archived or deleted), so re-create it.
+                        is Result.Ok -> createFresh(cloud)
+                    }
+                    updateAutoSyncGate(result)
+                    emitErrorNotification(result)
+                    result
+                } finally {
+                    _syncPhase.value = SyncPhase.IDLE
                 }
-                updateAutoSyncGate(result)
-                emitErrorNotification(result)
-                result
             }
         }
     }
@@ -350,6 +377,7 @@ class SyncRepository(
             // before compression — every provider already returns the revision from this same
             // request. The legacy CLOUD_DB_PATH is consulted only when this comes back absent; see
             // "Compressed Upload / Legacy Fallback" in sync-architecture.md.
+            _syncPhase.value = SyncPhase.CHECKING
             val gzMeta = when (val meta = cloud.metadata(CLOUD_DB_GZ_PATH)) {
                 is Result.Err -> {
                     Log.error(TAG, "Sync: metadata() failed: ${meta.exception.message}")
@@ -414,6 +442,7 @@ class SyncRepository(
             // Both temp files stay files for their whole life: hashed and compressed from disk,
             // streamed to the cloud from disk, deleted afterwards. The snapshot is the largest
             // thing this app handles, and nothing here needs it as a contiguous array.
+            _syncPhase.value = SyncPhase.PREPARING
             val digest = when (val prepared = prepareCompressedUpload()) {
                 is Result.Err -> return prepared
                 is Result.Ok -> prepared.value
@@ -433,6 +462,7 @@ class SyncRepository(
                     return Result.Ok(Unit)
                 }
 
+                _syncPhase.value = SyncPhase.UPLOADING
                 val upload = if (expectedRev == null) {
                     cloud.create(CLOUD_DB_GZ_PATH, snapshotGzPath)
                 } else {
@@ -474,11 +504,13 @@ class SyncRepository(
      * including a conflict if the cloud file already exists.
      */
     private suspend fun createFresh(cloud: CloudStorage): Result<Unit> {
+        _syncPhase.value = SyncPhase.PREPARING
         val digest = when (val prepared = prepareCompressedUpload()) {
             is Result.Err -> return prepared
             is Result.Ok -> prepared.value
         }
         return try {
+            _syncPhase.value = SyncPhase.UPLOADING
             when (val r = cloud.create(CLOUD_DB_GZ_PATH, snapshotGzPath)) {
                 is Result.Ok -> {
                     // Same bookkeeping as a successful upload: the file we just created is, by
@@ -510,6 +542,7 @@ class SyncRepository(
     private suspend fun downloadAndMerge(cloud: CloudStorage, path: String, compressed: Boolean): Result<CloudFileMeta> {
         val downloadPath = if (compressed) cloudTempGzPath else cloudTempPath
         try {
+            _syncPhase.value = SyncPhase.DOWNLOADING
             val meta = when (val d = cloud.download(path, downloadPath)) {
                 is Result.Ok -> d.value
                 is Result.Err -> {
@@ -517,6 +550,7 @@ class SyncRepository(
                     return d
                 }
             }
+            _syncPhase.value = SyncPhase.MERGING
             val mergeTarget = if (compressed) {
                 try {
                     Gzip.decompressFile(downloadPath, cloudTempPath, MAX_SYNC_DB_SIZE_BYTES)
@@ -570,6 +604,7 @@ class SyncRepository(
                 localSchemaVersion = KeryxDatabase.Schema.version,
                 mergeStatements = MergeSql.all,
             )
+            _syncPhase.value = SyncPhase.INDEXING
             // Index the articles the merge brought in (incremental — the live index is never wiped),
             // before notifying listeners so the reactive search re-run sees the new rows.
             ftsManager.indexMissing()

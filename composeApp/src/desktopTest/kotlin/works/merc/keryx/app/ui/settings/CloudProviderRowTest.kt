@@ -49,7 +49,10 @@ class CloudProviderRowTest {
         iconOnly: Boolean,
         resetting: Boolean = false,
         idleEnabled: Boolean = true,
+        leaveEnabled: Boolean = idleEnabled,
         authFailed: Boolean = false,
+        statusText: String? = null,
+        lastSyncedAtText: String? = null,
     ) {
         CloudProviderRow(
             type = CloudStorageType.ONEDRIVE,
@@ -57,9 +60,12 @@ class CloudProviderRowTest {
             connecting = false,
             canCancel = false,
             idleEnabled = idleEnabled,
+            leaveEnabled = leaveEnabled,
             failed = false,
             authFailed = authFailed,
             resetting = resetting,
+            statusText = statusText,
+            lastSyncedAtText = lastSyncedAtText,
             iconOnly = iconOnly,
             onSelect = {},
             onCancel = {},
@@ -185,5 +191,99 @@ class CloudProviderRowTest {
         val idleHeight = onNodeWithTag("idle").getBoundsInRoot().height
         val resettingHeight = onNodeWithTag("resetting").getBoundsInRoot().height
         assertEquals(idleHeight, resettingHeight)
+    }
+
+    /**
+     * The regression this feature exists to fix: while a fresh connect's initial sync is running
+     * (`idleEnabled = false`, but `leaveEnabled` stays true — see `SettingsViewModel.connect`'s
+     * KDoc), the row must not look entirely frozen. "Reset"/"switch provider" stay blocked (they'd
+     * race the sync still writing to this row), but "disconnect" — always a safe exit — stays
+     * available.
+     */
+    @Test
+    fun initialSyncLeavesDisconnectEnabledButBlocksReset() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                ConnectedOneDriveRow(iconOnly = false, idleEnabled = false, leaveEnabled = true)
+            }
+        }
+        waitForIdle()
+
+        onNodeWithText(disconnectLabel).assertIsEnabled()
+        onNodeWithText(resetLabel).assertIsNotEnabled()
+    }
+
+    /** A disconnect already in flight (or a provider switch's teardown) blocks a second one. */
+    @Test
+    fun leaveDisabledDisablesDisconnectAction() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                ConnectedOneDriveRow(iconOnly = false, idleEnabled = false, leaveEnabled = false)
+            }
+        }
+        waitForIdle()
+
+        onNodeWithText(disconnectLabel).assertIsNotEnabled()
+    }
+
+    /**
+     * Live progress takes priority over the last-synced subtitle in the same slot — they never
+     * show at once, since `statusText` is only ever non-null while a sync (or a disconnect) is
+     * actually running, at which point the previous last-synced time is stale anyway.
+     */
+    @Test
+    fun statusTextTakesPriorityOverLastSyncedSubtitle() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                ConnectedOneDriveRow(
+                    iconOnly = false,
+                    statusText = "データを統合しています…",
+                    lastSyncedAtText = "2026/09/16 12:34",
+                )
+            }
+        }
+        waitForIdle()
+
+        onNodeWithText("データを統合しています…").assertIsDisplayed()
+        onAllNodesWithText("2026/09/16 12:34").assertCountEquals(0)
+    }
+
+    @Test
+    fun lastSyncedSubtitleShowsOnceStatusTextClears() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                ConnectedOneDriveRow(iconOnly = false, statusText = null, lastSyncedAtText = "2026/09/16 12:34")
+            }
+        }
+        waitForIdle()
+
+        onNodeWithText("最終同期: 2026/09/16 12:34").assertIsDisplayed()
+    }
+
+    /**
+     * The status slot is reserved unconditionally (the ui-guidelines skill's layout-stability
+     * rule), so a sync starting or finishing must not change the row's height — same discipline as
+     * [resettingDisablesResetActionWithoutChangingRowHeight] above, for the new slot instead of the
+     * action buttons.
+     */
+    @Test
+    fun statusSlotReservesHeightWhetherOrNotItHasContent() = runDesktopComposeUiTest {
+        setContent {
+            Column {
+                Box(Modifier.testTag("empty").width(640.dp)) {
+                    ConnectedOneDriveRow(iconOnly = false, statusText = null, lastSyncedAtText = null)
+                }
+                Box(Modifier.testTag("busy").width(640.dp)) {
+                    ConnectedOneDriveRow(iconOnly = false, statusText = "アップロードしています…")
+                }
+            }
+        }
+        waitForIdle()
+
+        // Same discipline as resettingDisablesResetActionWithoutChangingRowHeight above: compare
+        // the whole row's height, which includes the fixed-height status slot.
+        val emptyHeight = onNodeWithTag("empty").getBoundsInRoot().height
+        val busyHeight = onNodeWithTag("busy").getBoundsInRoot().height
+        assertEquals(emptyHeight, busyHeight)
     }
 }
