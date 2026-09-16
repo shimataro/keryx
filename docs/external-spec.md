@@ -35,8 +35,7 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
 - Non-sync targets: device-local settings, cloud authentication info.
 - Import / export is OPML.
 - While a sync is running, the connected provider's row in the Cloud Sync settings tab shows its current
-  progress (checking the cloud, downloading, merging, updating the search index, preparing or uploading the
-  snapshot) instead of just a plain spinner, so a long first-ever sync doesn't look stalled — see
+  progress (checking the cloud, downloading, merging, updating the search index, preparing the snapshot, uploading, or archiving) instead of just a plain spinner, so a long first-ever sync doesn't look stalled — see
   [sync-architecture.md](sync-architecture.md).
 - **OneDrive supports personal Microsoft accounts only** — a work/school (Microsoft 365 / Entra ID)
   account cannot be connected. Keryx keeps its sync file in OneDrive's hidden per-app folder, and the
