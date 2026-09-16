@@ -5,7 +5,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
@@ -21,12 +23,14 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.domain.SyncPhase
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * Regression coverage for the two Android bugs `ProviderActionButton`/`CloudProviderRow.iconOnly`
@@ -287,6 +291,39 @@ class CloudProviderRowTest {
         val emptyHeight = onNodeWithTag("empty").getBoundsInRoot().height
         val busyHeight = onNodeWithTag("busy").getBoundsInRoot().height
         assertEquals(emptyHeight, busyHeight)
+    }
+
+    /**
+     * The status slot's height is derived from the scaled `labelSmall` line height (not a
+     * hardcoded dp constant), so at KeryxTheme's largest supported fontScale (1.6, see
+     * `KeryxTheme`'s clamp) the slot grows tall enough to keep the status text on one line instead
+     * of clipping it against the fixed 20.dp box the old constant reserved.
+     */
+    @Test
+    fun statusSlotGrowsWithFontScaleInsteadOfClippingAtLargeScale() = runDesktopComposeUiTest {
+        setContent {
+            val baseDensity = LocalDensity.current
+            Column {
+                Box(Modifier.testTag("normal").width(640.dp)) {
+                    CompositionLocalProvider(LocalDensity provides Density(baseDensity.density, fontScale = 1f)) {
+                        ConnectedOneDriveRow(iconOnly = false, statusText = "アップロードしています…")
+                    }
+                }
+                Box(Modifier.testTag("scaled").width(640.dp)) {
+                    CompositionLocalProvider(LocalDensity provides Density(baseDensity.density, fontScale = 1.6f)) {
+                        ConnectedOneDriveRow(iconOnly = false, statusText = "アップロードしています…")
+                    }
+                }
+            }
+        }
+        waitForIdle()
+
+        val normalHeight = onNodeWithTag("normal").getBoundsInRoot().height
+        val scaledHeight = onNodeWithTag("scaled").getBoundsInRoot().height
+        assertTrue(scaledHeight > normalHeight)
+
+        // The status text itself must still be found — a single, undamaged line — at the larger scale.
+        onNode(hasText("アップロードしています…") and hasAnyAncestor(hasTestTag("scaled"))).assertIsDisplayed()
     }
 
     /**

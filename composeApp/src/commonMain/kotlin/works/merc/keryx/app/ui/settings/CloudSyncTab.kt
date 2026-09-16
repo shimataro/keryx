@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -325,10 +326,10 @@ private fun ProviderActionButton(
 /** Fixed size for the provider brand icon and action glyphs in icon-only mode. */
 private val CLOUD_ROW_ICON_SIZE = 20.dp
 
-/** Minimum height for the connected row's status slot (spinner+phase, "disconnecting…", or the
- * last-synced subtitle) — see that slot's own comment inside [CloudProviderRow] for why it is
- * reserved unconditionally rather than only while it has content. */
-private val CLOUD_STATUS_SLOT_MIN_HEIGHT = 20.dp
+/** Top padding above the connected row's status slot content (spinner+phase, "disconnecting…",
+ * or the last-synced subtitle) — shared with the slot's own reserved-height calculation inside
+ * [CloudProviderRow] so the box is always tall enough for its own content. */
+private val CLOUD_STATUS_SLOT_TOP_PADDING = 2.dp
 
 /** Localized progress text for a running sync's current phase, for the connected row's status slot. */
 @Composable
@@ -410,6 +411,14 @@ internal fun CloudProviderRow(
     // background; unconnected rows stay
     // transparent (no extra tint over the card).
     val contentColor = if (connected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
+    // Derived from scaled typography (not a hardcoded dp constant) so the box stays tall enough
+    // for its content at the theme's largest supported fontScale (KeryxTheme clamps to 1.6) — see
+    // rememberArticleRowMetrics() in ArticleRowComponents.kt for the same pattern.
+    val density = LocalDensity.current
+    val statusLabelLineHeight = MaterialTheme.typography.labelSmall.lineHeight
+    val statusSlotHeight = remember(density, statusLabelLineHeight) {
+        with(density) { statusLabelLineHeight.toDp() } + CLOUD_STATUS_SLOT_TOP_PADDING
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -530,10 +539,10 @@ internal fun CloudProviderRow(
         // live progress (statusText — a sync phase or "disconnecting…"), then the last-synced
         // subtitle, then nothing. Its own full-width line so it never wraps against the trailing
         // action buttons.
-        Box(Modifier.height(CLOUD_STATUS_SLOT_MIN_HEIGHT)) {
+        Box(Modifier.height(statusSlotHeight)) {
             when {
                 statusText != null -> Row(
-                    modifier = Modifier.padding(start = 28.dp, top = 2.dp),
+                    modifier = Modifier.padding(start = 28.dp, top = CLOUD_STATUS_SLOT_TOP_PADDING),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     SmallSpinner(size = 12.dp, color = contentColor)
@@ -542,13 +551,15 @@ internal fun CloudProviderRow(
                         statusText,
                         style = MaterialTheme.typography.labelSmall,
                         color = contentColor.copy(alpha = 0.8f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 lastSyncedAtText != null -> Text(
                     stringResource(Res.string.settings_last_synced, lastSyncedAtText),
                     style = MaterialTheme.typography.labelSmall,
                     color = contentColor.copy(alpha = 0.8f),
-                    modifier = Modifier.padding(start = 28.dp, top = 2.dp),
+                    modifier = Modifier.padding(start = 28.dp, top = CLOUD_STATUS_SLOT_TOP_PADDING),
                 )
             }
         }
