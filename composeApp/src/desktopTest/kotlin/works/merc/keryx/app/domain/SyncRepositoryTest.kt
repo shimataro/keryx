@@ -1604,4 +1604,16 @@ class SyncRepositoryTest {
 
         assertEquals(SyncPhase.IDLE, repo.syncPhase.value)
     }
+
+    @Test
+    fun resetCloudDataReturnsToIdleWhenCreateFreshFailsAfterSuccessfulArchive() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_GZ_PATH, gzipOf(cloudDbBytes()), "r1")
+        cloud.queueCreate(Result.Err(CloudStorageException("quota exceeded")))
+        val repo = newRepo(cloud)
+
+        assertIs<Result.Err>(repo.resetCloudData())
+
+        assertEquals(SyncPhase.IDLE, repo.syncPhase.value)
+    }
 }
