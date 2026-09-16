@@ -275,9 +275,9 @@ private fun ProviderActionButton(
     busy: Boolean = false,
     iconOnly: Boolean = isTouchPrimary,
 ) {
-    // 18dp for desktop's labelled buttons; 20dp for icon-only buttons, to match the row's own
-    // brand mark.
-    val glyphSize = if (iconOnly) 20.dp else 18.dp
+    // 18dp for desktop's labelled buttons; CLOUD_ROW_ICON_SIZE for icon-only buttons, to match
+    // the row's own brand mark.
+    val glyphSize = if (iconOnly) CLOUD_ROW_ICON_SIZE else 18.dp
     val glyph: @Composable () -> Unit = {
         if (busy) {
             // Follow the container's content color: a primary-filled container would otherwise
@@ -321,10 +321,10 @@ private fun ProviderActionButton(
     }
 }
 
-/** Fixed height for the connected row's status slot (spinner+phase, "disconnecting…", or the
+/** Minimum height for the connected row's status slot (spinner+phase, "disconnecting…", or the
  * last-synced subtitle) — see that slot's own comment inside [CloudProviderRow] for why it is
  * reserved unconditionally rather than only while it has content. */
-private val CLOUD_STATUS_SLOT_HEIGHT = 20.dp
+private val CLOUD_STATUS_SLOT_MIN_HEIGHT = 20.dp
 
 /** Localized progress text for a running sync's current phase, for the connected row's status slot. */
 @Composable
@@ -411,7 +411,7 @@ internal fun CloudProviderRow(
                 Image(
                     painter = painterResource(type.brandIcon()),
                     contentDescription = null,
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(CLOUD_ROW_ICON_SIZE),
                 )
                 Text(
                     type.brandLabel(),
@@ -477,7 +477,7 @@ internal fun CloudProviderRow(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (iconOnly) {
                         SmallSpinner(
-                            size = 20.dp, // matches the icon-only glyph size beside it
+                            size = CLOUD_ROW_ICON_SIZE, // matches the icon-only glyph size beside it
                             color = LocalContentColor.current,
                         )
                     }
@@ -511,7 +511,7 @@ internal fun CloudProviderRow(
         // live progress (statusText — a sync phase or "disconnecting…"), then the last-synced
         // subtitle, then nothing. Its own full-width line so it never wraps against the trailing
         // action buttons.
-        Box(Modifier.height(CLOUD_STATUS_SLOT_HEIGHT)) {
+        Box(Modifier.height(CLOUD_STATUS_SLOT_MIN_HEIGHT)) {
             when {
                 statusText != null -> Row(
                     modifier = Modifier.padding(start = 28.dp, top = 2.dp),
