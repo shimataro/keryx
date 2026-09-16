@@ -54,10 +54,11 @@ composeApp/src/
     InstallLocation (always ANDROID_SIDELOADED or ANDROID_STORE — see "In-App Update" below),
     AppDirs/BrowserOpener/ClipboardEntries (via AndroidAppContext, a
     static Context holder set once from KeryxApplication.onCreate), PlatformModule (Ktor OkHttp
-    engine, CloudSession with Dropbox/OneDrive providers — see Provider/DI below — plus
-    AndroidNotificationSink, see "Background Update" below), CloudStorageAvailability (Dropbox/
-    OneDrive real, Google Drive fixed `false` — see sync-architecture.md's "Google Drive on
-    Android" for why), KeryxTextField/KeryxAlertDialog/
+    engine, CloudSession with Dropbox/OneDrive providers plus Google Drive where Play services
+    exists — see Provider/DI below — plus AndroidNotificationSink, see "Background Update" below),
+    CloudStorageAvailability (Dropbox/OneDrive read their BuildConfig keys; Google Drive is instead
+    a once-per-process `GoogleApiAvailability` check, since it goes through Play services rather
+    than a build-time client id — see sync-architecture.md's "Google Drive on Android"), KeryxTextField/KeryxAlertDialog/
     KeryxIcons/FlatButtons/FlatToggles/SegmentedControl (plain M3 — the last four are
     `expect`/`actual` split the same way, with Material Symbols (icons) or M3's own
     `Button`/`FilledTonalButton`/`TextButton`/`Switch`/`Checkbox`/
@@ -223,8 +224,11 @@ each actual opens the copy through differs (JDBC vs. requery's bundled SQLite), 
 ### CloudSession / SyncRepository
 
 `CloudSession` provides the current `CloudStorage` (Dropbox / Google Drive / OneDrive on desktop;
-Dropbox / OneDrive on Android — see sync-architecture.md's "Google Drive on Android") and handles
-automatic access-token refresh. `SyncRepository` implements the download → merge (`DatabaseMerger`)
+the same three on Android, with Google Drive present only where Play services is) and handles
+automatic access-token refresh — except for Android's Google Drive, whose tokens belong to Play
+services rather than to this app, so its provider supplies them itself via
+`CloudSession.Provider.accessTokenProvider` and nothing is ever refreshed. See
+sync-architecture.md's "Google Drive on Android". `SyncRepository` implements the download → merge (`DatabaseMerger`)
 → incremental index of new articles (`indexMissing`) → `VACUUM INTO` snapshot generation
 (`DatabaseSnapshot`, excludes `articles_fts` on the copy side) → upload (rev check) flow, along
 with debouncing (`SyncScheduler`). The live DB's FTS is untouched. `SyncRepository`'s `localDbPath`
