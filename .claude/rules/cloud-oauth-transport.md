@@ -45,12 +45,14 @@ constraint already documented for Dropbox and is accepted.
 - OneDrive — custom URI (`CustomUriRedirectTransport`) on both desktop and Android; Microsoft
   Identity platform supports custom schemes.
 - Google Drive — loopback (`LoopbackRedirectTransport`) on desktop only; Google's Desktop-app
-  client requires it. **Not available on Android at all** — Google's own OAuth policy deprecates
-  both the custom-URI-scheme and loopback redirects for its Android/Chrome-app client type (this is
-  a Google-specific policy decision, not a general Android restriction: Dropbox/OneDrive's custom-
-  URI redirects work identically on Android). See `docs/sync-architecture.md`'s "Google Drive on
-  Android" for the full investigation and why the platform's suggested replacement
-  (Play services `AuthorizationClient`) is deferred rather than adopted.
+  client requires it. **On Android it uses no `OAuthRedirectTransport` at all**: Google's own OAuth
+  policy deprecates both the custom-URI-scheme and loopback redirects for its Android/Chrome-app
+  client type (a Google-specific policy decision, not a general Android restriction —
+  Dropbox/OneDrive's custom-URI redirects work identically on Android), so there is no redirect to
+  capture. Android bypasses `OAuthConnectFlow` entirely and uses Play services'
+  `AuthorizationClient` (`data/cloud/PlayServicesGoogleDriveAuth.kt`), which hands the app an access
+  token directly. **This rule does not apply to it** — there is no transport choice to make. See
+  `docs/sync-architecture.md`'s "Google Drive on Android".
 - Android registers the shared `keryx://oauth2/callback` scheme declaratively via an
   `AndroidManifest.xml` `intent-filter` on `MainActivity` (no runtime registration step, unlike
   Windows/Linux), and forwards the redirect through `dispatchOAuthCallbackIfPresent` into the same

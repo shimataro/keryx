@@ -113,13 +113,34 @@ OneDrive reuses the same custom URI scheme as Dropbox (`keryx://oauth2/callback`
 
 ### Android
 
-Android supports **Dropbox and OneDrive only** — set the same `local.properties` keys as above
-(`dropbox.app.key` / `onedrive.client.id`, or their `DROPBOX_APP_KEY`/`ONEDRIVE_CLIENT_ID`
-environment-variable equivalents); the Google Drive keys have no effect on the Android build.
-**Google Drive is not
-offered on Android** because its desktop OAuth configuration (a "Desktop app" client using loopback
-redirect + `client_secret`) cannot be reused there — see `external-spec.md` §4 and
-`sync-architecture.md`'s "Google Drive on Android" for the underlying investigation.
+Dropbox and OneDrive use the same `local.properties` keys as above (`dropbox.app.key` /
+`onedrive.client.id`, or their `DROPBOX_APP_KEY`/`ONEDRIVE_CLIENT_ID` environment-variable
+equivalents).
+
+**Google Drive takes a different route on Android** — Play services' `AuthorizationClient`, because
+Google deprecates both the custom-URI and loopback redirects for its Android OAuth client type (see
+`sync-architecture.md`'s "Google Drive on Android"). It needs **no client secret and no backend**,
+and the `googledrive.client.*` keys above have no effect on the Android build. What it needs instead
+is an OAuth client registered against this app's identity:
+
+1. In the **same Cloud project** as the desktop client (this matters: `appDataFolder` is scoped per
+   project, so sharing the project is what lets a phone and a desktop see the same sync file), go to
+   "Google Auth Platform" → "Clients" → "Create client" and choose application type **"Android"**.
+2. Package name: `works.merc.keryx`.
+3. SHA-1 of the signing certificate. Register **one client per signing key you actually run**:
+   - the release key (`docs/build.md`'s Android signing section — the same key backs both the GitHub
+     APK and the Play upload, so one entry covers both channels);
+   - your local **debug** keystore, or `installGithubDebug` builds cannot authorize at all
+     (`keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android`).
+4. No client ID or secret is copied into the project — Play services matches the app by package name
+   + signing certificate at runtime. An unregistered key surfaces as an authorization failure on the
+   device, not as a build error.
+
+Google Drive is offered only where `GoogleApiAvailability.isGooglePlayServicesAvailable` reports
+`ConnectionResult.SUCCESS` — Play services installed, enabled, and up to date. Anything short of
+that (a de-Googled ROM, but equally a device where Play services is disabled or needs an update)
+sees just Dropbox / OneDrive / local-only, since an authorization request could not be served there
+anyway. See `CloudStorageAvailability.android.kt`.
 
 Unlike desktop, where `keryx://` needs an OS-level registration step (see each provider's note
 above), Android receives the `keryx://oauth2/callback` redirect through a plain manifest

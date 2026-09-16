@@ -19,7 +19,7 @@
   ソースセットは存在しない — デバイスか Robolectric（現状未導入の依存）のどちらか無しには JVM 上で
   テストできない Android 固有ロジックが無いため。ヘルパーは `AndroidDbTestSupport.kt`
   （`createSchemaDbFile()`。`DbTestSupport.kt` の `fileDb()` に相当するが、本番と同じスキーマ導入経路
-  である実際の `AndroidSqliteDriver` 経由で作成する）。5ファイルあり、それぞれ Android 固有の差異が
+  である実際の `AndroidSqliteDriver` 経由で作成する）。7ファイルあり、それぞれ Android 固有の差異が
   出うる箇所に絞る:
   - `DatabaseMergerDeviceTest.kt` / `DatabaseSnapshotDeviceTest.kt` — スキーマバージョンガード、
     マイグレーション経路、バンドルされた `requery` SQLite（ネイティブライブラリ）に対するマージ/
@@ -33,6 +33,10 @@
     Android Keystore に対して検証。
   - `FilePickerDeviceTest.kt` — Storage Access Framework のファイルピッカーの書き込み失敗経路
     （どのプロバイダーもストリームを開けない場合の `ContentUriPickedFile.writeText`）。
+  - `PlayServicesGoogleDriveAuthDeviceTest.kt` — Play 開発者サービスによる Google Drive の認可結果。
+    要求したスコープの一部しか許諾されなかったケースを含む。
+  - `AndroidAuthorizationHostDeviceTest.kt` — `AndroidAuthorizationHost` が Activity へ渡す
+    同意画面リクエストのスロットの寿命。
 
 - `androidApp/src/androidTest/` — `androidx.compose.ui.test.junit4.v2.createComposeRule` を
   ホストできる、実際の Android アプリケーションモジュールを必要とする計装 Compose UI テスト
@@ -129,7 +133,7 @@ Android には計装テストスイートが 2 つある。CI に組み込まれ
 
 | スイート | タスク | 対象 | CI |
 | --- | --- | --- | --- |
-| `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | 実際のバンドル SQLite に対する `DatabaseMerger`/`DatabaseSnapshot` | ✗ ローカルのみ |
+| `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | 実際のバンドル SQLite に対する `DatabaseMerger`/`DatabaseSnapshot`、および他に置き場のない `androidMain` 専用ロジック（SAF の書き込み、Keystore のトークン保存、Play 開発者サービスの認可） | ✗ ローカルのみ |
 | `androidApp/src/androidTest/` | `:androidApp:connectedGithubDebugAndroidTest` | Compose UI（長押しジェスチャ、検索バー） | ✓ 毎プッシュ |
 
 どちらも実機または起動中のエミュレータが必要 — AVD（`<name>`）の作り方は
@@ -269,7 +273,7 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 - Linux の SNI トレイでは `SniConnection`（接続・バス名取得・export・登録・再登録・close）が実セッションバスと稼働中の `org.kde.StatusNotifierWatcher` を必要とするため CI では不可。同様に`NewIcon`/`NewToolTip`/`LayoutUpdated` の実配送（*発火の判断*はカバー済み）、`NameOwnerChanged` からの再登録経路、ホスト起点の `Activate`/`Event` が dbus-java のワーカースレッド経由で届くこと、`LinuxNotifier.notify` の実デーモンへの配送、`LinuxTray` コンポーザブルの結線もテスト不可。パネル上で実際に透過して見えるかは本質的に目視確認になる。
 - KDE Global Menu も同様: `X11WindowId.findOwnWindowId()`（実 X サーバーと `_NET_WM_PID` を持つマップ済みウインドウが必要）、実際の `AppMenuConnection` の connect/detect/`RegisterWindow`/reregister/`close` の往復、KWin/Plasma が実際に `_KDE_NET_WM_APPMENU_*` を書き込みパネルウィジェット／タイトルバーボタンがメニューを描画すること、`startMinimized` の XID タイミング/リトライ経路、Compose 自身の `MenuBar` ショートカット処理が本当にフレームアタッチに依存するか（手動で検証済み）、実際の `MenuShortcutDispatcher` の Ctrl+M/N/W/,/Q/R 捕捉が `KeyboardFocusManager` 経由で動くこと——いずれも未カバー（委譲先の純粋なマッチャーのみテスト済み）。
 - Android 側では、「実行」節にある計装スイートが届かない範囲の大半はまだ未カバーである: `WorkManager` の実際の定期ジョブスケジューリングと実行（純粋なスケジュール算出ロジック `BackgroundRefreshSchedule.kt` のみテスト済み）、`NotificationManagerCompat` 経由の実通知投稿、そして `AndroidUpdateInstaller` の `PackageInstaller` セッション／`BroadcastReceiver`／`canRequestPackageInstalls()` の扱い（委譲先の純粋なプラン／同意判断である `canInstallAndroidApkUpdate` のみテスト済み——上記「アプリ内アップデートのパイプライン」参照）。
-- **実際には未カバーではない——対比として記載:** Storage Access Framework のファイルピッカーの書き込み失敗経路と、Keystore を使ったトークン保存のフォールバック経路は**カバーされている**——それぞれ `FilePickerDeviceTest.kt` と `KeystoreTokenStorageDeviceTest.kt`（上記「構成」の `androidDeviceTest/` 参照）。
+- **実際には未カバーではない——対比として記載:** Storage Access Framework のファイルピッカーの書き込み失敗経路、Keystore を使ったトークン保存のフォールバック経路、Play 開発者サービスで一部のスコープしか許諾されなかった Google Drive の同意結果は**カバーされている**——それぞれ `FilePickerDeviceTest.kt`、`KeystoreTokenStorageDeviceTest.kt`、`PlayServicesGoogleDriveAuthDeviceTest.kt`。同意画面リクエストのスロットの寿命も `AndroidAuthorizationHostDeviceTest.kt` でカバーされている（上記「構成」の `androidDeviceTest/` 参照）。
 - 同様にデスクトップ側でも、自己置換／`msiexec` スクリプト（`UpdateScriptWriter` の出力）を実際に実行する部分は手動確認のみ——生成されたスクリプト本文そのものは直接検証しており、`DesktopUpdateInstaller` はテスト内で実際にスクリプトを起動することがない（上記のフェイク`ProcessLauncher` を参照）。詳細は下記「アプリ内アップデート」を参照。この経路にはさらに*ユニット*テストでは到達できない箇所が2つあり、それぞれ別の形でカバーしている。
 - `DittoArchiveExtractor` が実際に `ditto` を実行する部分は `ArchiveExtractorTest.kt` の`isMacOs` ゲート付きテストがカバーしている（CI マトリクスに `macos-latest` があるので実際に走る。Linux / Windows のランナーには `ditto` が無く、インストーラー自身のテストは既定で`InProcessArchiveExtractor` を注入する）。実署名済みの `.app` が`zip -ry` → `ditto` → `codesign --verify --strict --deep` の往復を通ること自体は macOS **かつ**jpackage バンドルを要し、どのテストソースセットにも用意できない——そこで `ci.yml` の「Verify packaging (macOS)」ステップがビルドしたてのアプリイメージに対してまさにその往復を実行し、symlink の数が変わらないことと展開後のバンドルが検証を通ることをアサートする。対になるのが`createDistributable` 自身の `verifyMacOsBundleSeal`／署名特性のガードで、zip より*前*の段階でバンドルが既に壊れていればビルドを失敗させる（[build.ja.md](build.ja.md) 参照）。両者により、当初の欠陥のどちらの半分も気付かれずリリースへ届くことはない。
 - `FileSystemExtras.move` のボリューム跨ぎフォールバックも同様にテストから到達できない（2つ目のファイルシステムを用意できない）ため、その委譲先であるリンク保持コピーを `copyTree` として切り出し、直接テストしている。

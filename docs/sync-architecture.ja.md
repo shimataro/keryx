@@ -377,6 +377,12 @@ state 検証・コード交換）はプロバイダー共通の `OAuthConnectFlo
 オフラインアクセス（Dropbox: `token_access_type=offline`、Google: `access_type=offline` + `prompt=consent`、OneDrive: `offline_access` スコープ）を
 指定し**リフレッシュトークンを取得・保存**する。
 
+**唯一の例外が Android の Google Drive で、このフローをまったく通らない** —— `OAuthConnectFlow` も
+`OAuthRedirectTransport` も使わず、リフレッシュトークンも持たない。Play 開発者サービスの
+`AuthorizationClient` が同意のやり取りを丸ごと担い、短命なアクセストークンを直接発行して、必要に
+なるたび再発行する。したがって本節の「トークン保存」までの記述は、デスクトップの 3 プロバイダーと
+Android の Dropbox / OneDrive を指す。残る 1 件は後述の「Android での Google Drive」を参照。
+
 リダイレクト受信方式はプロバイダーごとに選ぶ（設計方針 `.claude/rules/cloud-oauth-transport.md` 参照——両方使える場合はカスタム URI スキームを優先）:
 
 - **Dropbox / OneDrive — カスタム URI スキーム**（`CustomUriRedirectTransport`）:
@@ -398,7 +404,7 @@ state 検証・コード交換）はプロバイダー共通の `OAuthConnectFlo
     `OneDriveAuthManager.revoke` は no-op で、連携解除はローカルトークンの破棄のみ。楽観的排他は
     DriveItem の `eTag` を `rev` として使い `If-Match` で送る（412→衝突）。`create` は
     `@microsoft.graph.conflictBehavior=fail`（409→衝突）。
-- **Google Drive — ループバック**（`LoopbackRedirectTransport`）: Google の「デスクトップアプリ」クライアントは
+- **Google Drive（デスクトップのみ）— ループバック**（`LoopbackRedirectTransport`）: Android はこのフローを一切使わない — 後述の「Android での Google Drive」を参照。Google の「デスクトップアプリ」クライアントは
   任意のカスタムスキームを許可せず、`http://127.0.0.1:<ポート>` のループバックのみを受け付ける。一時 HTTP
   サーバー（`com.sun.net.httpserver`。`jdk.httpserver` モジュール同梱済み）を立ててリダイレクトを受け、
   受信後に停止する。OS 側のスキーム登録は不要（`keryx://` の登録は Dropbox / OneDrive 用のまま）。**Dropbox とは異なり
@@ -447,37 +453,92 @@ single-instance 経由で実行中インスタンスへ転送する。
 > Android にはどちらの制約もない——`installGithubDebug` でもリリースパイプライン経由でも、マニフェスト宣言の
 > `intent-filter` は同じように機能する。
 
-### Android で Google Drive が未対応な理由
+### Android での Google Drive（Play 開発者サービスの `AuthorizationClient`）
 
-デスクトップの Google Drive 構成——ループバックリダイレクト + 毎回のトークン交換/リフレッシュで
-`client_secret` を送る「デスクトップアプリ」OAuth クライアント——は Android には流用できない。
+Android の Google Drive は、本ドキュメントの他のどのプロバイダ・プラットフォームの組み合わせとも
+異なる仕組みを使う — ブラウザリダイレクトではなく、Play 開発者サービスの `AuthorizationClient` である。
+実装はすべて `data/cloud/PlayServicesGoogleDriveAuth.kt` にある。
 
-- **これは Google 自身のポリシー上の判断であり、Android 一般の制約ではない。** Google の現行
-  ドキュメントがこれを明確にしている（Dropbox と OneDrive はどちらも Android でカスタム URI
-  スキームのリダイレクト + PKCE を使っており、Dropbox はこれを公式に推奨してさえいる）:
-  カスタム URI スキームのリダイレクトは Google の Android/Chrome アプリ向けクライアント種別では
-  サポート対象外（理由はアプリなりすましのリスク）、ループバックリダイレクトも同じクライアント
-  種別では別途廃止とされている。
-- **プラットフォーム自身の推奨代替策も合わない。** Android から Google ユーザーデータへアクセスする
-  Google 自身の推奨経路である Play services の `AuthorizationClient` に切り替えても、Play services
-  へのランタイム依存が増える（このアプリの「アカウント不要・ローカルファースト」という方針と
-  相性が悪い）うえ、リフレッシュトークンを得るにはやはりサーバー側での `client_secret` 交換が
-  必要になる（`AuthorizationResult.getServerAuthCode()` が返す認可コードはバックエンドでの
-  引き換えを前提としており、APK に埋め込む想定ではない）。
-- **現状。** どちらのトレードオフも小さな追加では済まないため、Android の Google Drive 対応は
-  Dropbox/OneDrive を追加したフェーズには含めず、独立した将来の調査課題として先送りする。
-  `core/CloudStorageAvailability.android.kt` は `googleDriveAvailable = false` を固定しており、
-  その KDoc からここへリンクしている。
+- **デスクトップ向け構成を流用できない理由。** Google の OAuth ポリシーは Android クライアント種別に
+  対して、カスタム URI スキーム（理由はアプリなりすましのリスク）とループバックリダイレクトの
+  **両方**を廃止している。リダイレクトを使うフローが残っていないため、デスクトップの
+  「デスクトップアプリ」クライアント（ループバック + `client_secret`）に Android での等価物は無い。
+  これは Google 固有のポリシー判断であって Android 一般の制約ではない — Dropbox と OneDrive の
+  カスタム URI リダイレクトは Android でも同じように動作する。
+- **`AuthorizationClient` が代わりに提供するもの。** `drive.appdata` スコープでの `authorize()` は、
+  短命（1 時間）のアクセストークンを端末上で直接返す。初回のみ `PendingIntent` 経由で同意画面が出て、
+  以降は付与が有効なかぎり**ユーザー操作なしで**応答する。付与を所有するのは Play 開発者サービスなので、
+  **リフレッシュトークンも `client_secret` もバックエンドサーバも不要**。バックエンドが要るのは
+  オフライン版（`AuthorizationResult.getServerAuthCode()`）だけで、こちらは意図的に使っていない。
+- **ビルドにクライアント ID を持たない。** Android OAuth クライアントはパッケージ名 + 署名証明書の
+  SHA-1 で照合される（Cloud Console への登録手順は [build.ja.md](build.ja.md) 参照）ため、
+  `BuildConfig` から読む値は無い。したがって未登録の署名鍵でビルドした場合、ビルド時ではなく
+  `authorize()` の失敗として現れる。`CloudSession.Provider.clientId` は「このビルドでこのバックエンドが
+  設定済みか」の判定も兼ねるため非空である必要があり、`PlatformModule.android.kt` は
+  プレースホルダ `"play-services"` を渡す（OAuth クライアント ID ではない）。
+- **配信チャネルではなく端末で判定する。** `CloudStorageAvailability.googleDriveAvailable` は
+  `GoogleApiAvailability.isGooglePlayServicesAvailable(...) == SUCCESS` をプロセスごとに一度だけ評価し、
+  `platformModule` はそれが真のときだけプロバイダを登録する。脱 Google の ROM（GrapheneOS、
+  GApps なしの LineageOS）では Google Drive が選択肢に出ないだけで、Dropbox・OneDrive・ローカルのみは
+  影響を受けない。`github`/`play` のプロダクトフレーバーでは**意図的に**分岐しない — play フレーバーの
+  APK もサイドロードされうるし、github フレーバーの APK も Play 開発者サービスのある端末で問題なく動く。
+  `AndroidUpdateInstaller` が `REQUEST_INSTALL_PACKAGES` に適用しているのと同じ考え方。
+- **`CloudSession` 内でのトークンのライフサイクル。** リフレッシュトークンが無いため、通常の
+  保存トークン経路では `validAccessToken` の「期限切れでリフレッシュトークンが無い」分岐に落ち、
+  すでに失効したトークンを返してしまう。`CloudSession.Provider.accessTokenProvider` はまさにこの
+  ケースのためにトークン供給を上書きする: クラウドリクエストのたびに Play 開発者サービスへ問い合わせる
+  （`allowUserInteraction = false`。リクエスト、まして `WorkManager` のバックグラウンド同期が
+  独断で同意画面を開いてはならないため）。接続時のトークンは従来どおり `KeystoreTokenStorage` に
+  書くが、これは再起動後も `connectedType()` が「接続済み」と報告できるようにするためだけであり、
+  `expiresAtMillis` は `null` — Play 開発者サービスは有効期限を返さず、推測値を入れるのは
+  「不明」と認めるより悪いからである。
+- **再同意。** ユーザーが Google アカウント側で付与を取り消すと、同期は `CloudAuthException` で
+  失敗するようになり、既存の同期エラー経路が `ShowSettingsTab("cloud_sync")` 付きで通知センターに
+  記録する — Dropbox のリフレッシュトークンが失効したときとまったく同じ扱いである。
+  ここからの回復は「連携」を押し直すだけでは済まない。付与が取り消されても保存済みトークンは
+  そのまま残るため `connectedType()` は接続済みと報告し続け、そもそも行に「連携」ボタンが出ないからである。
+  直すのは切断 — Play 開発者サービスのキャッシュを落とすのはこちらの処理（前述の **切断** を参照）—
+  とそれに続く接続である。`CloudSyncTab` はこれを 1 つの操作として提供する:
+  `SyncRepository.lastSyncAuthFailed` が立っている間、接続済み行の 1 番目のアクションが
+  *同期データをリセット* に代わって **連携し直す**（`SettingsViewModel.reconnect`。解除してから
+  同じプロバイダへ接続し直す）になる。並べるのではなく差し替えるのは、ボタンを 1 つ増やすと
+  状態によって行の子要素数が変わり、デスクトップのラベル付きボタンがプロバイダ名と分け合う幅も
+  超えてしまうためであり、そもそもこの 2 つは排他的でもある: リセットには自前の有効な認可が必要で、
+  認可こそが壊れている状況で提示すべき回復手段ではない。*連携を解除* はどちらの場合も隣に残るので、
+  やめるために先に直す必要は無い。実機で一連の流れを確認済み。
 
-#### 将来の検討事項（Android での Google Drive）
+  `PlayServicesConnectFlow` が認可要求の前にキャッシュを落とすのも同じ理由による。こちらが
+  カバーするのは、**接続済みではないのに** Play 開発者サービスのキャッシュだけが付与より長生き
+  している場合 — 以前の切断で `clearToken` が失敗していた、再インストールした、
+  アプリのデータを消したがキャッシュは残っていた、といったケースである。これが無いと、
+  その状態での接続が死んだトークンで黙って成功してしまう。コストは明示的なユーザー操作 1 回につき
+  Play 開発者サービスへの往復が 1 回増えるだけで、付与が健全なら新しいトークンが黙って発行され、
+  同意画面は出ない（こちらも実機で確認済み）。
+- **切断。** `PlayServicesGoogleDriveAuthManager.revoke` は保存済みのアクセストークンを無視し
+  （その時点では 1 時間以上経っており、Google の revoke エンドポイントに拒否される）、
+  ユーザー操作なしで新しいものを取得して、デスクトップと同じ `GOOGLE_REVOKE_ENDPOINT` へ POST する。
+  それも取得できない場合は、切断の途中で同意画面を開くのではなく成功として報告する。いずれにせよ
+  `CloudSession.disconnect` はローカルのトークンを削除する。
+  **その後、同じトークンに対して `AuthorizationClient.clearToken` を呼ぶ。これは後片付けではなく必須の手順である。**
+  上記の取り消しは Play 開発者サービスの外側の素の HTTPS 通信なので、Play 開発者サービスは自分が
+  キャッシュしている認可が死んだことを知らない。そのまま `authorize()` にキャッシュから成功を返し続け、
+  `hasResolution()` も立てない。結果、再接続は同意画面なしで完了し、以後すべての Drive リクエストが
+  401 で失敗して、アプリ側に回復手段が無くなる。`clearToken` が無かった時点で実機で再現済み。
+  なお `AuthorizationClient.revokeAccess` は HTTPS の取り消しを丸ごと置き換えられそうに見えるが、
+  このフローが別途持っていない `Account` を必須とし、指定しないと Play 開発者サービス内部で
+  `NullPointerException: ... Account.name on a null object reference` になる。
+- **同意画面には Activity が必要。** `AuthorizationClient` が返す `PendingIntent` は Activity からしか
+  結果付きで起動できないため、`platform/AndroidAuthorizationHost.kt` が `MainActivity` の
+  `StartIntentSenderForResult` ランチャーを接続フローへ橋渡しする — `AndroidFilePickerHost` と
+  同じ形で、同じ理由による。Activity が接続されていない場合は `null` に解決され、これが
+  バックグラウンドでの正しい結果となる。
 
-Android での Google Drive 対応は、Android 一般の制約ではなく Google 自身の OAuth クライアント種別のポリシーによってブロックされている。検討した経路とその障壁は以下の通り:
+`appDataFolder` は **OAuth クライアント単位ではなく Cloud プロジェクト単位**でスコープされるため、
+既存のデスクトップ用クライアントに Android クライアントを追加しても、両方の端末が同じ隠しフォルダを
+読み書きする — 同一プロジェクト内の 2 つ目の OAuth クライアントから `appDataFolder` を一覧し、
+デスクトップ版が作成したファイルが見えることで確認済み。この性質が無ければ、デスクトップと Android は
+別々のファイルへ黙って同期してしまう。
 
-- **Play services `AuthorizationClient`** — Android から Google ユーザーデータへアクセスする Google の推奨経路。`AuthorizationResult.getServerAuthCode()` が返す認可コードは、バックエンドサーバーでの `client_secret` 交換を前提としており、APK に直接埋め込む想定ではない（埋め込めば抽出可能）。また Play services へのランタイム依存が増え、Keryx の「ローカルファースト・アカウント不要」という方針と相性が悪い。さらに `WorkManager` のバックグラウンド同期には `Activity` がないため、既存の認可がない場合に `AuthorizationClient.authorize()` が要求する対話的な `PendingIntent` の解決を起動できない。ただし、すでに付与されている認可であれば `Context` から引き続き使用できる。
-- **「Web application」OAuth クライアント種別** — 通常は `https://` のリダイレクト URI に限定されるが、`http://localhost` やループバックアドレスは文書化された例外として許可されている。それでもカスタム URI スキーム（`keryx://`）は使えず、Google のループバックポリシーが Android/Chrome アプリ向けクライアント種別でこのフローを禁止しているため、ネイティブ Android アプリの OAuth フローとして機能しない。
-- **「Desktop app」OAuth クライアント種別（デスクトップで使用中）** — ループバックリダイレクトは Android/Chrome アプリ向けクライアントでは廃止とされており、`client_secret` を埋め込みクライアントから送信することは推奨されていない上、モバイル APK ではセキュリティリスクとなる。
-
-Google がバックエンドサーバー不要のネイティブ Android アプリ向け OAuth フロー（例: カスタム URI スキームをサポートした Google Drive 向けの真の PKCE パブリッククライアント）を提供するか、あるいは Keryx がバックエンドでのトークン交換サービスを含むアーキテクチャを採用するまで、Android での Google Drive 対応は**将来の検討事項**として保留される。近い将来に計画される機能ではない。
 
 ### トークン保存先
 
@@ -527,6 +588,12 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
   切り離しセッション）では `security add` が成功を返しても永続化しないため file に保存される。**読み取りは
   どちらのセッションからでも可能**（一度パッケージ版で連携すれば以降 `gradlew run` でも接続を引き継げる）。
 - **Android**:
+  - **Google Drive は本節のすべての例外。** そのトークンを所有するのは本アプリではなく Play 開発者
+    サービスである（前述の「Android での Google Drive」参照）。リフレッシュトークンは一切保存されず、
+    ここに書かれるアクセストークンも、再起動後に「接続済み」と報告するためだけに存在する —
+    実際のリクエストに使うトークンは都度 Play 開発者サービスから取得する。仕組み（同じ
+    `KeystoreTokenStorage`、同じフォールバックと結果報告）は以下と同一だが、守っている秘密は
+    はるかに軽い — 長命なリフレッシュトークンではなく 1 時間のアクセストークンである。
   - **暗号化。** `KeystoreTokenStorage` が Android Keystore 保持の AES-256/GCM 鍵（プロバイダーごとに
     `CloudStorageType.id` 由来の別エイリアス。鍵の実体は端末が対応していれば Keystore/TEE から一切
     出ない）でトークン JSON を暗号化し、`IV || 暗号文` を `Context.filesDir` 配下の

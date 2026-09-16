@@ -22,7 +22,9 @@ import works.merc.keryx.app.data.cloud.TokenStorage
  *
  * [providers] is a small registry keyed by [CloudStorageType]; each entry bundles
  * that provider's client id, token storage, auth manager, interactive connect
- * flow, and a factory that builds its [CloudStorage].
+ * flow, and a factory that builds its [CloudStorage]. A provider whose tokens are
+ * owned by the platform rather than by this app overrides the token supply itself
+ * (see [Provider.accessTokenProvider]).
  *
  * Every token write goes through [saveTokensReportingFallback], which raises a
  * notification-center warning whenever a [TokenStorage] could not reach the OS secure store —
@@ -45,6 +47,17 @@ class CloudSession(
         val connectFlow: CloudConnectFlow,
         /** Builds the provider's [CloudStorage], given a valid-access-token supplier. */
         val createStorage: (accessTokenProvider: suspend () -> String?) -> CloudStorage,
+        /**
+         * Supplies the access token itself, replacing the stored-token + refresh-token path
+         * ([validAccessToken]) for a provider that does not own its own tokens.
+         *
+         * Android's Google Drive is the one user: Play services owns the authorization grant and
+         * mints a fresh one-hour access token on demand, so there is no refresh token to store and
+         * [validAccessToken]'s "expired with no refresh token" branch — which falls back to the
+         * stale token — would hand out a token that is already dead. Null for every provider that
+         * does hold its own OAuth tokens (Dropbox, OneDrive, desktop's Google Drive).
+         */
+        val accessTokenProvider: (suspend () -> String?)? = null,
     )
 
     /** True when a provider is selected, configured in this build, and has stored tokens. */
@@ -65,7 +78,7 @@ class CloudSession(
     fun current(): CloudStorage? {
         val type = connectedType() ?: return null
         val provider = providers[type] ?: return null
-        return provider.createStorage { validAccessToken(provider) }
+        return provider.createStorage(provider.accessTokenProvider ?: { validAccessToken(provider) })
     }
 
     /** Persists freshly-obtained tokens for [type] (called right after a successful connect). */

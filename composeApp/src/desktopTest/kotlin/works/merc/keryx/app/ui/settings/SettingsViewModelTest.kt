@@ -640,6 +640,54 @@ class SettingsViewModelTest {
         assertNull(vm.lastSyncedAtText)
     }
 
+    /**
+     * The cloud-sync tab swaps its reset action for a reconnect one off this flag, so it has to
+     * reach the ViewModel at all — it travels on its own collector, separate from the one carrying
+     * [SettingsViewModel.lastSyncErrorText].
+     *
+     * Note: avoids `runTest`'s virtual scheduler for the same reason as
+     * disconnectClearsConnectedTypeAndCloudStorageType above.
+     */
+    @Test
+    fun lastSyncAuthFailedMirrorsSyncRepositoryFlag() {
+        val tokenStorage = FakeTokenStorage()
+        tokenStorage.save(OAuthTokens("AT"))
+        val cloud = AlwaysFailingCloudStorage()
+        val vm = newViewModel(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
+
+        runBlocking { createdSyncRepository.sync() }
+
+        awaitTrue { vm.lastSyncAuthFailed }
+        assertTrue(vm.lastSyncAuthFailed)
+    }
+
+    /**
+     * `reconnect()` must not stop at the teardown half. On Android's Google Drive the disconnect is
+     * the only thing that clears Play services' cached token, but a disconnect that never connects
+     * back would leave the user staring at an unconfigured provider after pressing a button labelled
+     * "reconnect".
+     *
+     * Note: avoids `runTest`'s virtual scheduler for the same reason as
+     * disconnectClearsConnectedTypeAndCloudStorageType above.
+     */
+    @Test
+    fun reconnectTearsDownAndConnectsBackToTheSameProvider() {
+        val tokenStorage = FakeTokenStorage()
+        tokenStorage.save(OAuthTokens("AT"))
+        val cloud = AlwaysFailingCloudStorage()
+        val vm = newViewModel(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
+        runBlocking { createdSyncRepository.sync() }
+        awaitTrue { vm.lastSyncAuthFailed }
+
+        vm.reconnect()
+
+        // Back on the same provider, with the selection persisted again — the teardown cleared both.
+        awaitTrue { vm.connectedType == CloudStorageType.DROPBOX }
+        assertEquals(CloudStorageType.DROPBOX, vm.connectedType)
+        awaitTrue { vm.localSettings.value.cloudStorageType == CloudStorageType.DROPBOX.id }
+        assertEquals(CloudStorageType.DROPBOX.id, vm.localSettings.value.cloudStorageType)
+    }
+
     // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
     // disconnectClearsConnectedTypeAndCloudStorageType above.
     @Test

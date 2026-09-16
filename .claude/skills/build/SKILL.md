@@ -42,7 +42,10 @@ Run Keryx KMP's standard build flow in sequence.
   `-P<prop>` > env var > `local.properties` (git-ignored) > empty:
   Dropbox (`dropboxAppKey` / `DROPBOX_APP_KEY` / `dropbox.app.key`), Google Drive
   (client id **and** secret), OneDrive (`onedrive.client.id`). An empty key hides
-  that provider from the UI entirely — it is a feature, not a build failure. See
+  that provider from the UI entirely — it is a feature, not a build failure.
+  The Google Drive keys are **desktop-only**: Android goes through Play services'
+  `AuthorizationClient`, so its availability there is a runtime check for Play
+  services on the device, not a build-time key. See
   `docs/build.md` for how to obtain each one; `local.properties.example` lists the
   exact property names.
 

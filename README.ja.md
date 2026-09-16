@@ -10,8 +10,8 @@
 
 ## 特徴
 
-- **マルチデバイス同期**: クラウドストレージ経由（Dropbox / Google Drive / OneDrive — Android では
-  現在 Dropbox と OneDrive に対応。Google Drive の Android 対応は将来の検討事項）
+- **マルチデバイス同期**: クラウドストレージ経由（Dropbox / Google Drive / OneDrive — Android の
+  Google Drive は Google Play 開発者サービスが必要なため、それが無い端末では Dropbox と OneDrive に対応）
 - **ローカルファースト**: 中央サーバーなし、同期機能を使わなければローカルで完全に動作
 - **高速なローカル全文検索**: 記事本文・タイトルを対象に、キーワードで瞬時に検索
 - **タグ・フォルダーによるフィード整理**: タグは横断的に複数付与、フォルダーは階層的に分類

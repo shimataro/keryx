@@ -61,6 +61,13 @@ You review Keryx (a cross-platform RSS reader, Kotlin Multiplatform / Compose Mu
 ## Do NOT flag these — they are deliberate
 
 - Google Drive's OAuth requires `client_secret` even with PKCE (Desktop-app client).
+  This is the **desktop** path only — Android reaches Drive through Play services'
+  `AuthorizationClient`, so the APK carries no Google OAuth client id and no client
+  secret at all: Play services identifies the app by package name + signing certificate
+  and mints the access token itself. The literal `"play-services"` in
+  `PlatformModule.android.kt` is not a credential — it is a non-secret placeholder for
+  `CloudSession.Provider.clientId`, which `CloudSession` reads only as "is this backend
+  configured in this build at all" (a non-empty check).
 - The OAuth loopback deliberately uses http on `127.0.0.1`.
 
 ## Investigation

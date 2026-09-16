@@ -38,12 +38,14 @@ class CloudSessionTest {
         clock: Clock = Clock { 0L },
         selectedType: () -> CloudStorageType? = { CloudStorageType.DROPBOX },
         notificationCenter: NotificationCenter = NotificationCenter(),
+        accessTokenProvider: (suspend () -> String?)? = null,
     ) = singleProviderCloudSession(
         client = client(authHandler),
         tokenStorage = tokenStorage,
         authManager = authManager(authHandler),
         clientId = clientId,
         clock = clock,
+        accessTokenProvider = accessTokenProvider,
         selectedType = selectedType,
         notificationCenter = notificationCenter,
     )
@@ -309,6 +311,66 @@ class CloudSessionTest {
         cloudStorage.authenticate()
 
         assertEquals("Bearer STALE", authHeaderSeen)
+    }
+
+    /**
+     * A provider that supplies its own access token (Android's Google Drive, where Play services
+     * owns the grant) must bypass the stored-token + refresh path entirely — otherwise the branch
+     * exercised by [accessTokenExpiredWithNoRefreshTokenFallsBackToStaleToken] would hand out a
+     * token that expired an hour ago.
+     */
+    @Test
+    fun accessTokenProviderOverridesTheStoredTokenAndRefreshPath() = runBlocking {
+        var authHeaderSeen: String? = null
+        var refreshCalls = 0
+        val storage = FakeTokenStorage(
+            OAuthTokens("STALE", "RT", expiresAtMillis = 1_000L),
+        )
+        val s = session(
+            storage,
+            clientId = "APPKEY",
+            authHandler = { request ->
+                if (request.url.encodedPath.contains("oauth2/token")) {
+                    refreshCalls++
+                    respond("""{"access_token":"REFRESHED"}""", HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
+                } else {
+                    authHeaderSeen = request.headers["Authorization"]
+                    respond("{}", HttpStatusCode.OK)
+                }
+            },
+            clock = Clock { 2_000_000L }, // well past the stored token's expiry
+            accessTokenProvider = { "FRESH" },
+        )
+
+        val cloudStorage = s.current()
+        assertNotNull(cloudStorage)
+        cloudStorage.authenticate()
+
+        assertEquals("Bearer FRESH", authHeaderSeen)
+        assertEquals(0, refreshCalls)
+        // Nothing was re-persisted: the override's token lives only for the call it was fetched for.
+        assertEquals("STALE", storage.stored?.accessToken)
+    }
+
+    /**
+     * The override's "the user has to consent again" answer. It has to reach the caller as an
+     * ordinary auth failure — that is what turns a background sync with a withdrawn grant into a
+     * notification-center entry rather than a silent no-op.
+     */
+    @Test
+    fun accessTokenProviderReturningNullSurfacesAsAuthError(): Unit = runBlocking {
+        val storage = FakeTokenStorage(OAuthTokens("AT", "RT", expiresAtMillis = 1_000_000L))
+        val s = session(
+            storage,
+            clientId = "APPKEY",
+            clock = Clock { 0L }, // the stored token is still valid, so only the override can fail this
+            accessTokenProvider = { null },
+        )
+
+        val cloudStorage = s.current()
+        assertNotNull(cloudStorage)
+
+        assertIs<Result.Err>(cloudStorage.authenticate())
     }
 
     @Test

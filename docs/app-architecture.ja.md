@@ -54,9 +54,11 @@ composeApp/src/
     参照）,
     AppDirs/BrowserOpener/ClipboardEntries（AndroidAppContext 経由 — KeryxApplication.onCreate
     で一度だけ設定される静的 Context ホルダ）, PlatformModule（Ktor OkHttp エンジン、Dropbox/OneDrive
-    プロバイダを登録した CloudSession — 下記 Provider/DI 参照。加えて AndroidNotificationSink、下記
-    「バックグラウンド更新」参照）, CloudStorageAvailability（Dropbox/OneDrive は実判定、Google Drive は
-    `false` 固定 — 理由は sync-architecture.ja.md の「Android で Google Drive が未対応な理由」参照）,
+    プロバイダに加え Play 開発者サービスがある端末では Google Drive も登録した CloudSession — 下記
+    Provider/DI 参照。加えて AndroidNotificationSink、下記「バックグラウンド更新」参照）,
+    CloudStorageAvailability（Dropbox/OneDrive は BuildConfig のキーを見るが、Google Drive は
+    ビルド時のクライアント ID ではなく Play 開発者サービス経由のため、プロセスごとに一度だけ
+    `GoogleApiAvailability` で判定する — sync-architecture.ja.md の「Android での Google Drive」参照）,
     KeryxTextField/KeryxAlertDialog/KeryxIcons/FlatButtons/FlatToggles/
     SegmentedControl（素の M3。後の4つも同様に `expect`/`actual` 分割されており、Android 側は
     Material Symbols（アイコン）や M3 の `Button`/`FilledTonalButton`/`TextButton`/`Switch`/
@@ -234,9 +236,11 @@ drop テーブルとして渡している。
 
 ### CloudSession / SyncRepository
 
-`CloudSession` が現在の `CloudStorage`（デスクトップは Dropbox / Google Drive / OneDrive、Android は
-Dropbox / OneDrive — sync-architecture.ja.md の「Android で Google Drive が未対応な理由」参照）を
-提供し、アクセストークンの自動リフレッシュを担う。
+`CloudSession` が現在の `CloudStorage`（デスクトップは Dropbox / Google Drive / OneDrive、Android も
+同じ 3 つだが Google Drive は Play 開発者サービスのある端末のみ）を提供し、アクセストークンの自動
+リフレッシュを担う。ただし Android の Google Drive だけは例外で、トークンを所有するのは本アプリでは
+なく Play 開発者サービスであるため、プロバイダ自身が `CloudSession.Provider.accessTokenProvider` で
+供給し、リフレッシュは一切行わない — sync-architecture.ja.md の「Android での Google Drive」参照。
 `SyncRepository` はダウンロード → マージ（`DatabaseMerger`）→ 新記事の増分索引（`indexMissing`）→
 `VACUUM INTO` スナップショット生成（`DatabaseSnapshot`、コピー側で `articles_fts` を除外）→ アップロード
 （rev チェック）、のフローとデバウンス（`SyncScheduler`）を実装する。ライブ DB の FTS は触らない。
@@ -299,9 +303,9 @@ JVM でテスト可能なユニットテストのソースセットが無いに�
 `appModule`（commonMain）にリポジトリ・サービス・ViewModel を登録——desktop と Android 共通。
 `platformModule` は各プラットフォームが個別に持つ: desktop 版は HttpClient・TokenStorage・CloudSession・
 CloudConnectFlow・`OsNotificationSink`・`UpdateInstaller` を登録し、Android 版は Android 固有の実装
-（OkHttp ベースの HttpClient、`KeystoreTokenStorage`、Dropbox/OneDrive のみの `CloudSession` 等——上記
-「Android」各節参照）を登録する。ViewModel はアプリスコープの `single` として登録し、`koinInject()` で
-取得する。
+（OkHttp ベースの HttpClient、`KeystoreTokenStorage`、Dropbox と OneDrive に加え、Play 開発者サービスが
+利用できる環境でのみ Google Drive も持つ `CloudSession` 等——上記「Android」各節参照）を登録する。
+ViewModel はアプリスコープの `single` として登録し、`koinInject()` で取得する。
 
 ### 記事リーダー（ネイティブ WebView）
 

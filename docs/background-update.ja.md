@@ -60,10 +60,10 @@ while (true) {
 `KoinPlatform.getKoin()` から解決する）は、デスクトップの `backgroundUpdateLoop` が毎周回実行する
 のとまったく同じ手順を実行する: `refreshFeedsAndNotify` → （`CloudSession.isConnected()` が真なら）
 `SyncRepository.sync(SyncTrigger.AUTOMATIC)` → `shouldCheckForUpdate` が true の場合のみ `checkForUpdateAndNotify` → `maybeRebuildFtsIndex`。
-Android の `CloudSession` は現状 Dropbox/OneDrive のみプロバイダーを持つ（Google Drive 非対応の理由は
-[sync-architecture.ja.md](sync-architecture.ja.md) の「Android で Google Drive が未対応な理由」参照）
-ため、ユーザーがそのどちらとも連携していない場合、あるいは連携済みでも `autoSyncSuspended` が
-真の間（直前の `CloudDataIncompatibleException` により、リセットまたは手動同期成功まで
+Android の `CloudSession` は Dropbox と OneDrive に加え、Play 開発者サービスが利用できる環境でのみ
+Google Drive も持つ（[sync-architecture.ja.md](sync-architecture.ja.md) の
+「Android での Google Drive」参照）ため、ユーザーがそのいずれとも連携していない場合、あるいは
+連携済みでも `autoSyncSuspended` が真の間（直前の `CloudDataIncompatibleException` により、リセットまたは手動同期成功まで
 `SyncTrigger.AUTOMATIC` の試行がゲートされる状態。`SyncRepository.sync` 自身の KDoc 参照）は
 `sync()` が本当の no-op になる。捕捉した例外（`sync()` 自身の `Result` 型ではなく予期しない失敗）は
 `Result.retry()` を返し、リトライは `WorkManager` 自身のバックオフ方針に委ねる。`sync()` が
@@ -447,7 +447,8 @@ macOS の translocated インストールの警告（デスクトップ固有の
 
 1. キャッシュ削除（`cleanUpArticleCacheIfDue`。前回から 24 時間以上経過時）。
 2. クラウドプロバイダーに接続済みなら初回同期（`SyncRepository.sync(SyncTrigger.AUTOMATIC)`）——
-   デスクトップは Dropbox / Google Drive / OneDrive、Android は Dropbox / OneDrive。
+   デスクトップは Dropbox / Google Drive / OneDrive、Android も同じ 3 種（ただし Google Drive は
+   Play 開発者サービスが利用できる環境のみ）。
 3. FTS 全再構築（`maybeRebuildFtsIndex`、前回から 24 時間以上 かつ アイドル時のみ。下記）。
 4. FTS の初回作成・未索引行の増分投入:
    - **デスクトップ。** `FtsManager.ensureIndexed()` が担う: `application {}` の前に `runBlocking`

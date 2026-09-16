@@ -77,6 +77,18 @@ class SyncRepository(
 
     private val mutex = Mutex()
     private val _lastSyncError = MutableStateFlow<String?>(null)
+
+    /**
+     * Whether [lastSyncError] is an authentication failure specifically, rather than any other
+     * reason sync can break. Kept beside the message rather than derived from it: the message is
+     * already localized prose by the time it reaches [_lastSyncError], and matching on that text
+     * would be both fragile and locale-dependent.
+     *
+     * The cloud-sync settings tab uses this to offer reconnecting instead of resetting cloud data —
+     * a reset needs a working authorization of its own, so it is precisely the wrong recovery to
+     * offer while authorization is what failed.
+     */
+    private val _lastSyncAuthFailed = MutableStateFlow(false)
     private val _autoSyncSuspended = MutableStateFlow(false)
 
     /**
@@ -120,6 +132,9 @@ class SyncRepository(
      */
     val lastSyncError: StateFlow<String?> = _lastSyncError
 
+    /** See [_lastSyncAuthFailed]. Always false while [lastSyncError] is null. */
+    val lastSyncAuthFailed: StateFlow<Boolean> = _lastSyncAuthFailed
+
     /**
      * True while the cloud DB is known-unusable and automatic syncing is therefore paused (see
      * [sync]). Deliberately in-memory, not persisted: a process restart is a free, honest retry
@@ -150,6 +165,7 @@ class SyncRepository(
     suspend fun clearSyncFailureState() {
         mutex.withLock {
             _lastSyncError.value = null
+            _lastSyncAuthFailed.value = false
             _autoSyncSuspended.value = false
             setSyncState(SYNC_STATE_CLOUD_FILE_REV, "")
             setSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST, "")
@@ -283,6 +299,7 @@ class SyncRepository(
         if (result is Result.Err && result.exception !is SyncConflictException) {
             val message = notificationMessages.syncFailed(result.exception)
             _lastSyncError.value = message
+            _lastSyncAuthFailed.value = result.exception is CloudAuthException
             notificationCenter.addCoalescing(
                 AppNotification(
                     id = IdGenerator.newId(),
@@ -296,6 +313,7 @@ class SyncRepository(
             // Sync works again — drop the stale reason (a SyncConflictException, handled internally,
             // deliberately falls through both branches and changes nothing).
             _lastSyncError.value = null
+            _lastSyncAuthFailed.value = false
         }
     }
 

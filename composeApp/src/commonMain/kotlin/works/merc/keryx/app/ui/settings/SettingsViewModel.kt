@@ -133,10 +133,21 @@ class SettingsViewModel(
     var lastSyncErrorText by mutableStateOf<String?>(null)
         private set
 
+    /**
+     * Whether [lastSyncErrorText] is an authentication failure specifically. Mirrors
+     * [SyncRepository.lastSyncAuthFailed]; see that property for why it travels separately from the
+     * message rather than being matched out of it.
+     */
+    var lastSyncAuthFailed by mutableStateOf(false)
+        private set
+
     init {
         refreshLastSyncedAt()
         viewModelScope.launch {
             syncRepository.lastSyncError.collect { lastSyncErrorText = it }
+        }
+        viewModelScope.launch {
+            syncRepository.lastSyncAuthFailed.collect { lastSyncAuthFailed = it }
         }
         viewModelScope.launch {
             // Skip the initial replay (current state at VM creation) — already handled by the
@@ -263,6 +274,27 @@ class SettingsViewModel(
     fun disconnect() {
         val type = connectedType ?: return
         viewModelScope.launch { tearDownConnection(type) }
+    }
+
+    /**
+     * Re-authorizes the connected provider: the same teardown [disconnect] performs, immediately
+     * followed by a fresh [connect] to the same provider. Offered in place of a cloud-data reset
+     * while [lastSyncAuthFailed] holds (see `CloudSyncTab`).
+     *
+     * Disconnecting first is what makes this work rather than being a cosmetic wrapper around
+     * [connect]: on Android's Google Drive the disconnect is what clears Play services' cached
+     * access token, without which the connect would be answered from that cache and quietly
+     * succeed with a token the provider has already rejected (see
+     * `data/cloud/PlayServicesGoogleDriveAuth.kt`). The same shape as [switchTo], differing only in
+     * connecting back to the provider it just tore down.
+     */
+    fun reconnect() {
+        val type = connectedType ?: return
+        viewModelScope.launch {
+            connectingType = type
+            tearDownConnection(type)
+            connect(type)
+        }
     }
 
     /**
