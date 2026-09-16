@@ -232,6 +232,8 @@ on every process start (see "On startup" in [db-schema.md](db-schema.md)'s `arti
 
 OAuth 2.0 authorization-code-with-PKCE orchestration (PKCE generation, authorization URL building, browser launch, state verification, code exchange) is consolidated in `OAuthConnectFlow` (`commonMain`, shared by desktop and Android). Provider differences are only in **redirect reception method (`OAuthRedirectTransport`) and endpoints/scopes (`CloudAuthManager` implementation)**, so `DropboxAuthManager` / `GoogleDriveAuthManager` / `OneDriveAuthManager` implement `CloudAuthManager`. All request offline access (Dropbox: `token_access_type=offline`, Google: `access_type=offline` + `prompt=consent`, OneDrive: `offline_access` scope) to **obtain and save refresh tokens**.
 
+**The one exception is Google Drive on Android, which does not go through this flow at all** — no `OAuthConnectFlow`, no `OAuthRedirectTransport`, and no refresh token. Play services' `AuthorizationClient` runs the whole consent interaction and hands the app a short-lived access token directly, re-issuing one on demand instead. Everything in this section up to "Token Storage" therefore describes desktop's three providers plus Android's Dropbox and OneDrive; see "Google Drive on Android" below for the remaining case.
+
 Redirect reception method is chosen per provider (see the `.claude/rules/cloud-oauth-transport.md` design rule — prefer the custom URI scheme when both work):
 
 - **Dropbox / OneDrive — Custom URI scheme** (`CustomUriRedirectTransport`):

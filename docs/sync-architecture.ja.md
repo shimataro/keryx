@@ -377,6 +377,12 @@ state 検証・コード交換）はプロバイダー共通の `OAuthConnectFlo
 オフラインアクセス（Dropbox: `token_access_type=offline`、Google: `access_type=offline` + `prompt=consent`、OneDrive: `offline_access` スコープ）を
 指定し**リフレッシュトークンを取得・保存**する。
 
+**唯一の例外が Android の Google Drive で、このフローをまったく通らない** —— `OAuthConnectFlow` も
+`OAuthRedirectTransport` も使わず、リフレッシュトークンも持たない。Play 開発者サービスの
+`AuthorizationClient` が同意のやり取りを丸ごと担い、短命なアクセストークンを直接発行して、必要に
+なるたび再発行する。したがって本節の「トークン保存」までの記述は、デスクトップの 3 プロバイダーと
+Android の Dropbox / OneDrive を指す。残る 1 件は後述の「Android での Google Drive」を参照。
+
 リダイレクト受信方式はプロバイダーごとに選ぶ（設計方針 `.claude/rules/cloud-oauth-transport.md` 参照——両方使える場合はカスタム URI スキームを優先）:
 
 - **Dropbox / OneDrive — カスタム URI スキーム**（`CustomUriRedirectTransport`）:
