@@ -645,7 +645,7 @@ class SettingsViewModelTest {
         vm.disconnect()
         assertTrue(vm.disconnecting)
 
-        awaitTrue { vm.connectedType == null }
+        awaitTrue { vm.connectedType == null && !vm.disconnecting }
         assertFalse(vm.disconnecting)
     }
 
