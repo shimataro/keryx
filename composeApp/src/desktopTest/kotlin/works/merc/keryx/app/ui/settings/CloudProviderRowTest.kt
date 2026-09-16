@@ -1,5 +1,6 @@
 package works.merc.keryx.app.ui.settings
 
+import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
@@ -23,6 +24,7 @@ import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
 import works.merc.keryx.app.core.CloudStorageType
+import works.merc.keryx.app.domain.SyncPhase
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -285,5 +287,83 @@ class CloudProviderRowTest {
         val emptyHeight = onNodeWithTag("empty").getBoundsInRoot().height
         val busyHeight = onNodeWithTag("busy").getBoundsInRoot().height
         assertEquals(emptyHeight, busyHeight)
+    }
+
+    /**
+     * The mapping from ViewModel state to the status text shown on the connected row is extracted
+     * as a pure decision function so it can be tested independently of a full SettingsViewModel
+     * fixture. These tests cover the priority order (disconnecting > syncing > idle) and the
+     * per-row filtering (only the connected provider's row ever gets text).
+     */
+    @Test
+    fun statusTextForUnconnectedProviderIsNull() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                val text = cloudProviderRowStatusText(
+                    type = CloudStorageType.DROPBOX,
+                    connectedType = null,
+                    disconnecting = false,
+                    syncing = false,
+                    syncPhase = SyncPhase.IDLE,
+                )
+                Text(text ?: "null")
+            }
+        }
+        waitForIdle()
+        onNodeWithText("null").assertIsDisplayed()
+    }
+
+    @Test
+    fun statusTextShowsDisconnectingWhenProviderIsConnectedAndDisconnecting() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                val text = cloudProviderRowStatusText(
+                    type = CloudStorageType.DROPBOX,
+                    connectedType = CloudStorageType.DROPBOX,
+                    disconnecting = true,
+                    syncing = false,
+                    syncPhase = SyncPhase.IDLE,
+                )
+                Text(text ?: "null")
+            }
+        }
+        waitForIdle()
+        onNodeWithText("切断しています…").assertIsDisplayed()
+    }
+
+    @Test
+    fun statusTextShowsSyncPhaseWhenProviderIsConnectedAndSyncing() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                val text = cloudProviderRowStatusText(
+                    type = CloudStorageType.DROPBOX,
+                    connectedType = CloudStorageType.DROPBOX,
+                    disconnecting = false,
+                    syncing = true,
+                    syncPhase = SyncPhase.MERGING,
+                )
+                Text(text ?: "null")
+            }
+        }
+        waitForIdle()
+        onNodeWithText("データを統合しています…").assertIsDisplayed()
+    }
+
+    @Test
+    fun statusTextIsNullWhenProviderIsConnectedButIdle() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                val text = cloudProviderRowStatusText(
+                    type = CloudStorageType.DROPBOX,
+                    connectedType = CloudStorageType.DROPBOX,
+                    disconnecting = false,
+                    syncing = false,
+                    syncPhase = SyncPhase.IDLE,
+                )
+                Text(text ?: "null")
+            }
+        }
+        waitForIdle()
+        onNodeWithText("null").assertIsDisplayed()
     }
 }

@@ -142,12 +142,13 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                     // SettingsViewModel.disconnect's KDoc), then a running sync's current phase.
                     // Neither applies to any other row, nor once both have settled (falls back to
                     // lastSyncedAtText inside CloudProviderRow).
-                    statusText = when {
-                        connected != type -> null
-                        vm.disconnecting -> stringResource(Res.string.settings_cloud_disconnecting)
-                        vm.syncing -> vm.syncPhase.statusText()
-                        else -> null
-                    },
+                    statusText = cloudProviderRowStatusText(
+                        type = type,
+                        connectedType = connected,
+                        disconnecting = vm.disconnecting,
+                        syncing = vm.syncing,
+                        syncPhase = vm.syncPhase,
+                    ),
                     // No provider connected yet: a fresh connect is low-risk, so do it directly. A
                     // different provider connected: confirm the switch first.
                     onSelect = {
@@ -341,6 +342,21 @@ private fun SyncPhase.statusText(): String = when (this) {
     SyncPhase.PREPARING -> stringResource(Res.string.settings_cloud_phase_preparing)
     SyncPhase.UPLOADING -> stringResource(Res.string.settings_cloud_phase_uploading)
     SyncPhase.ARCHIVING -> stringResource(Res.string.settings_cloud_phase_archiving)
+}
+
+/** Resolves the live status text for a single cloud-provider row from ViewModel state. */
+@Composable
+internal fun cloudProviderRowStatusText(
+    type: CloudStorageType,
+    connectedType: CloudStorageType?,
+    disconnecting: Boolean,
+    syncing: Boolean,
+    syncPhase: SyncPhase,
+): String? = when {
+    connectedType != type -> null
+    disconnecting -> stringResource(Res.string.settings_cloud_disconnecting)
+    syncing -> syncPhase.statusText()
+    else -> null
 }
 
 /**
