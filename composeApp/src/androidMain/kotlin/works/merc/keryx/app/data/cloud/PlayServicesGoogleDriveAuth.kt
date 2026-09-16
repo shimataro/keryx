@@ -3,6 +3,7 @@ package works.merc.keryx.app.data.cloud
 import android.content.Context
 import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.AuthorizationResult
+import com.google.android.gms.auth.api.identity.ClearTokenRequest
 import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.common.api.Scope
 import com.google.android.gms.tasks.Task
@@ -94,6 +95,41 @@ class PlayServicesAuthorization(
         }
     }
 
+    /**
+     * Drops [token] from Play services' own token cache.
+     *
+     * **This is what keeps a disconnect from breaking the next connect.** Revoking the grant at
+     * Google (see [PlayServicesGoogleDriveAuthManager.revoke]) happens over plain HTTPS, outside
+     * Play services, so Play services never learns that the authorization it is holding has died.
+     * Without this call it keeps answering [accessToken] from that cache — successfully, with
+     * `hasResolution()` clear — so the next connect completes with no consent screen and every
+     * Drive request afterwards fails with 401, out of the app's reach to fix. Confirmed on-device:
+     * clearing the token here is what brings the consent screen back.
+     *
+     * `AuthorizationClient.revokeAccess` looks like it should replace the HTTPS revoke and make
+     * this unnecessary, but it requires an `Account` that nothing else in this flow tracks — called
+     * without one it fails inside Play services with
+     * `NullPointerException: ... Account.name on a null object reference`.
+     */
+    suspend fun clearToken(token: String): Result<Unit> = bestEffort("clear the cached Google Drive token") {
+        client.clearToken(ClearTokenRequest.builder().setToken(token).build()).awaitCompletion()
+    }
+
+    /**
+     * Runs a Play services call whose failure must not abort the caller — it is a step of a
+     * disconnect, which has to finish clearing local state either way. Logs and reports the failure
+     * rather than throwing.
+     */
+    private suspend fun bestEffort(what: String, block: suspend () -> Unit): Result<Unit> = try {
+        block()
+        Result.Ok(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        Log.warn(TAG, "Play services failed to $what", e)
+        Result.Err(CloudAuthException(e.message ?: "Failed to $what"))
+    }
+
     private fun tokenOf(result: AuthorizationResult): Result<String> =
         tokenFrom(result.accessToken, result.grantedScopes)
 }
@@ -172,13 +208,19 @@ class PlayServicesGoogleDriveAuthManager(
      * even that is unavailable (the user already withdrew the grant in their Google account) this
      * reports success rather than opening a consent screen mid-disconnect. `CloudSession.disconnect`
      * clears the local tokens regardless of what this returns.
+     *
+     * [PlayServicesAuthorization.clearToken] afterwards is not optional bookkeeping — without it
+     * Play services keeps serving this now-dead token and the next connect silently succeeds with
+     * it. See that method's KDoc for the failure it prevents.
      */
     override suspend fun revoke(accessToken: String): Result<Unit> {
         val fresh = authorization.accessToken(allowUserInteraction = false).valueOrNull
             ?: return Result.Ok(Unit)
-        return revokeOAuthToken {
+        val revoked = revokeOAuthToken {
             httpClient.submitForm(GOOGLE_REVOKE_ENDPOINT, parameters { append("token", fresh) })
         }
+        authorization.clearToken(fresh)
+        return revoked
     }
 
     private companion object {
@@ -190,6 +232,16 @@ class PlayServicesGoogleDriveAuthManager(
 /** Bridges a Play services [Task] to a coroutine without depending on kotlinx-coroutines-play-services. */
 private suspend fun <T> Task<T>.await(): T = suspendCancellableCoroutine { continuation ->
     addOnSuccessListener { continuation.resume(it) }
+    addOnFailureListener { continuation.resumeWithException(it) }
+    addOnCanceledListener { continuation.cancel() }
+}
+
+/**
+ * [await] for a `Task<Void>`. Its success value is always null, which [await]'s non-null `T` cannot
+ * carry, so completion is reported as [Unit] instead.
+ */
+private suspend fun Task<Void>.awaitCompletion(): Unit = suspendCancellableCoroutine { continuation ->
+    addOnSuccessListener { continuation.resume(Unit) }
     addOnFailureListener { continuation.resumeWithException(it) }
     addOnCanceledListener { continuation.cancel() }
 }

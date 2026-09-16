@@ -498,9 +498,17 @@ Android の Google Drive は、本ドキュメントの他のどのプロバイ�
   失効したときとまったく同じ扱いである。
 - **切断。** `PlayServicesGoogleDriveAuthManager.revoke` は保存済みのアクセストークンを無視し
   （その時点では 1 時間以上経っており、Google の revoke エンドポイントに拒否される）、
-  ユーザー操作なしで新しいものを取得して `GOOGLE_REVOKE_ENDPOINT` へ POST する。それも取得できない
-  場合は、切断の途中で同意画面を開くのではなく成功として報告する。いずれにせよ
+  ユーザー操作なしで新しいものを取得して、デスクトップと同じ `GOOGLE_REVOKE_ENDPOINT` へ POST する。
+  それも取得できない場合は、切断の途中で同意画面を開くのではなく成功として報告する。いずれにせよ
   `CloudSession.disconnect` はローカルのトークンを削除する。
+  **その後、同じトークンに対して `AuthorizationClient.clearToken` を呼ぶ。これは後片付けではなく必須の手順である。**
+  上記の取り消しは Play 開発者サービスの外側の素の HTTPS 通信なので、Play 開発者サービスは自分が
+  キャッシュしている認可が死んだことを知らない。そのまま `authorize()` にキャッシュから成功を返し続け、
+  `hasResolution()` も立てない。結果、再接続は同意画面なしで完了し、以後すべての Drive リクエストが
+  401 で失敗して、アプリ側に回復手段が無くなる。`clearToken` が無かった時点で実機で再現済み。
+  なお `AuthorizationClient.revokeAccess` は HTTPS の取り消しを丸ごと置き換えられそうに見えるが、
+  このフローが別途持っていない `Account` を必須とし、指定しないと Play 開発者サービス内部で
+  `NullPointerException: ... Account.name on a null object reference` になる。
 - **同意画面には Activity が必要。** `AuthorizationClient` が返す `PendingIntent` は Activity からしか
   結果付きで起動できないため、`platform/AndroidAuthorizationHost.kt` が `MainActivity` の
   `StartIntentSenderForResult` ランチャーを接続フローへ橋渡しする — `AndroidFilePickerHost` と

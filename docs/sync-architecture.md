@@ -330,9 +330,18 @@ holds the whole of it.
   the same treatment an expired Dropbox refresh token gets.
 - **Disconnect.** `PlayServicesGoogleDriveAuthManager.revoke` ignores the stored access token (an
   hour old by then, so Google's revoke endpoint would reject it), fetches a fresh one without user
-  interaction, and POSTs it to `GOOGLE_REVOKE_ENDPOINT`. If even that is unavailable it reports
-  success rather than opening a consent screen in the middle of a disconnect; `CloudSession.disconnect`
-  clears the local tokens either way.
+  interaction, and POSTs it to `GOOGLE_REVOKE_ENDPOINT` — the same endpoint desktop uses. If even
+  that is unavailable it reports success rather than opening a consent screen in the middle of a
+  disconnect; `CloudSession.disconnect` clears the local tokens either way.
+  **It then calls `AuthorizationClient.clearToken` on that same token, and this step is required
+  rather than tidy-up.** The revoke above travels over plain HTTPS, outside Play services, so Play
+  services never learns the authorization it caches has died; it keeps answering `authorize()` from
+  that cache, successfully and with `hasResolution()` clear. Reconnecting then completes with no
+  consent screen and every Drive request afterwards fails with 401, with no in-app way back. This
+  was reproduced on-device before the `clearToken` call existed. `AuthorizationClient.revokeAccess`
+  looks like it should replace the HTTPS revoke outright, but it requires an `Account` this flow
+  does not otherwise track and fails inside Play services without one
+  (`NullPointerException: ... Account.name on a null object reference`).
 - **The consent screen needs an Activity.** `AuthorizationClient` answers with a `PendingIntent`
   that only an Activity can start for a result, so `platform/AndroidAuthorizationHost.kt` bridges
   `MainActivity`'s `StartIntentSenderForResult` launcher to the connect flow — the same shape, and
