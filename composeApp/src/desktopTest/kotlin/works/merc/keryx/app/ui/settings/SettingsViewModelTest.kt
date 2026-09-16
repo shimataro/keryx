@@ -21,6 +21,7 @@ import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -560,6 +561,28 @@ class SettingsViewModelTest {
 
         gate.complete(Unit)
         testScheduler.advanceUntilIdle()
+
+        assertEquals(SyncPhase.IDLE, vm.syncPhase)
+    }
+
+    /**
+     * A manual "sync now" from Home (or anywhere else) also travels through [SyncRepository.syncPhase],
+     * so the ViewModel's collector must mirror it even when this ViewModel didn't start the sync.
+     */
+    @Test
+    fun syncPhaseMirrorsSyncRepositoryDuringManualSync() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val vm = newViewModel(syncCloudProvider = { GatedCloudStorage(gate) })
+        assertEquals(SyncPhase.IDLE, vm.syncPhase)
+
+        // Drive the sync through the repository directly, not through vm.connect().
+        val syncJob = launch { createdSyncRepository.sync() }
+        advanceUntilIdle()
+
+        assertEquals(SyncPhase.CHECKING, vm.syncPhase)
+
+        gate.complete(Unit)
+        syncJob.join()
 
         assertEquals(SyncPhase.IDLE, vm.syncPhase)
     }
