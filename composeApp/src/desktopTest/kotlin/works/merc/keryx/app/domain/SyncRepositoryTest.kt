@@ -509,6 +509,65 @@ class SyncRepositoryTest {
         assertEquals(uploadsBefore + 1, cloud.uploadCount, "cleared digest must force an upload")
     }
 
+    /**
+     * `lastSyncAuthFailed` exists so the cloud-sync settings tab can offer reconnecting instead of
+     * resetting cloud data — a reset needs a working authorization of its own, so it is the wrong
+     * recovery to offer while authorization is what broke. Getting the *distinction* right is the
+     * whole point: the flag is derived from the exception type, never from the already-localized
+     * message in `lastSyncError`, which would be both fragile and locale-dependent.
+     */
+    @Test
+    fun aFailureToAuthenticateIsFlaggedAsOne() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.queueExists(Result.Err(CloudAuthException("no token")))
+        val repo = newRepo(cloud)
+
+        assertIs<Result.Err>(repo.sync())
+
+        assertNotNull(repo.lastSyncError.value)
+        assertTrue(repo.lastSyncAuthFailed.value)
+    }
+
+    @Test
+    fun aFailureForAnyOtherReasonIsNotFlaggedAsAuthentication() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.queueExists(Result.Err(CloudStorageException("boom")))
+        val repo = newRepo(cloud)
+
+        assertIs<Result.Err>(repo.sync())
+
+        // The reason is still shown — only the "offer a reconnect" signal is withheld.
+        assertNotNull(repo.lastSyncError.value)
+        assertFalse(repo.lastSyncAuthFailed.value)
+    }
+
+    @Test
+    fun aSucceedingSyncClearsTheAuthenticationFlagAlongWithTheReason() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.queueExists(Result.Err(CloudAuthException("no token")))
+        val repo = newRepo(cloud)
+        assertIs<Result.Err>(repo.sync())
+        assertTrue(repo.lastSyncAuthFailed.value)
+
+        assertIs<Result.Ok<Unit>>(repo.sync())
+
+        assertNull(repo.lastSyncError.value)
+        assertFalse(repo.lastSyncAuthFailed.value)
+    }
+
+    @Test
+    fun clearSyncFailureStateClearsTheAuthenticationFlag() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.queueExists(Result.Err(CloudAuthException("no token")))
+        val repo = newRepo(cloud)
+        assertIs<Result.Err>(repo.sync())
+        assertTrue(repo.lastSyncAuthFailed.value)
+
+        repo.clearSyncFailureState()
+
+        assertFalse(repo.lastSyncAuthFailed.value)
+    }
+
     @Test
     fun clearSyncFailureStateIsNotUndoneByAFailingInFlightSync() = runTest {
         // The same race for the two StateFlows: emitErrorNotification() writes lastSyncError, so it
@@ -530,6 +589,7 @@ class SyncRepositoryTest {
         clearing.join()
 
         assertNull(repo.lastSyncError.value, "a sync failing after the clear must not restore the reason")
+        assertFalse(repo.lastSyncAuthFailed.value, "nor the authentication flag that travels with it")
     }
 
     @Test

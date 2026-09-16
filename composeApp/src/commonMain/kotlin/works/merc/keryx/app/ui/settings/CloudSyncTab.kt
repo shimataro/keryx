@@ -323,7 +323,8 @@ internal fun CloudProviderRow(
     onCancel: () -> Unit,
     onDisconnect: () -> Unit,
     onResetCloudData: () -> Unit,
-    onReconnect: () -> Unit = {},
+    /** No default: a call site that forgets this would render a button that silently does nothing. */
+    onReconnect: () -> Unit,
 ) {
     // The connected row gets a step-up accent (same secondaryContainer/onSecondaryContainer
     // tokens desktop's settings-dialog tab bar, SecondaryScrollableTabRow, uses for its selected

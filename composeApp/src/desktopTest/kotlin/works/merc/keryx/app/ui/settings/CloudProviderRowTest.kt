@@ -40,6 +40,7 @@ import kotlin.test.assertEquals
 class CloudProviderRowTest {
 
     private val resetLabel = "同期データをリセット"
+    private val reconnectLabel = "連携し直す"
     private val disconnectLabel = "連携を解除"
 
     /** A connected OneDrive row — the screenshot that motivated this change used OneDrive. */
@@ -48,6 +49,7 @@ class CloudProviderRowTest {
         iconOnly: Boolean,
         resetting: Boolean = false,
         idleEnabled: Boolean = true,
+        authFailed: Boolean = false,
     ) {
         CloudProviderRow(
             type = CloudStorageType.ONEDRIVE,
@@ -56,12 +58,14 @@ class CloudProviderRowTest {
             canCancel = false,
             idleEnabled = idleEnabled,
             failed = false,
+            authFailed = authFailed,
             resetting = resetting,
             iconOnly = iconOnly,
             onSelect = {},
             onCancel = {},
             onDisconnect = {},
             onResetCloudData = {},
+            onReconnect = {},
         )
     }
 
@@ -104,6 +108,58 @@ class CloudProviderRowTest {
 
         onNodeWithText(resetLabel).assertIsDisplayed()
         onNodeWithText(disconnectLabel).assertIsDisplayed()
+    }
+
+    /**
+     * While sync is failing to authenticate, the row's recovery slot must offer reconnecting
+     * instead of resetting the cloud data. The two swap rather than sitting side by side — a third
+     * button would change the row's child count with state and overrun the width the labelled
+     * buttons share with the provider name — and they are mutually exclusive anyway: a reset needs
+     * a working authorization of its own, so it is the wrong recovery to offer while authorization
+     * is exactly what broke.
+     */
+    @Test
+    fun authFailureSwapsTheResetActionForReconnect() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) { ConnectedOneDriveRow(iconOnly = false, authFailed = true) }
+        }
+        waitForIdle()
+
+        onNodeWithText(reconnectLabel).assertIsDisplayed()
+        onAllNodesWithText(resetLabel).assertCountEquals(0)
+    }
+
+    @Test
+    fun healthyRowKeepsTheResetActionAndOffersNoReconnect() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) { ConnectedOneDriveRow(iconOnly = false, authFailed = false) }
+        }
+        waitForIdle()
+
+        onNodeWithText(resetLabel).assertIsDisplayed()
+        onAllNodesWithText(reconnectLabel).assertCountEquals(0)
+    }
+
+    /**
+     * Disconnect survives the swap above. Repairing and leaving are separate decisions, and a user
+     * who wants to stop syncing must never have to authorize again first just to reach the exit.
+     */
+    @Test
+    fun disconnectStaysAvailableWhetherOrNotAuthenticationFailed() = runDesktopComposeUiTest {
+        setContent {
+            Column {
+                Box(Modifier.testTag("healthy").width(640.dp)) {
+                    ConnectedOneDriveRow(iconOnly = false, authFailed = false)
+                }
+                Box(Modifier.testTag("failed").width(640.dp)) {
+                    ConnectedOneDriveRow(iconOnly = false, authFailed = true)
+                }
+            }
+        }
+        waitForIdle()
+
+        onNode(hasText(disconnectLabel) and hasAnyAncestor(hasTestTag("healthy"))).assertIsDisplayed()
+        onNode(hasText(disconnectLabel) and hasAnyAncestor(hasTestTag("failed"))).assertIsDisplayed()
     }
 
     @Test
