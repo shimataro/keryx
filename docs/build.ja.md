@@ -136,8 +136,11 @@ Android OAuth クライアント種別に対してカスタム URI とループ�
    パッケージ名 + 署名証明書でアプリを照合する。未登録の鍵は、ビルドエラーではなく端末上での
    認可失敗として現れる。
 
-Google Drive が提供されるのは Google Play 開発者サービスのある端末のみで、脱 Google の ROM では
-Dropbox / OneDrive / ローカルのみが表示される。
+Google Drive が提供されるのは `GoogleApiAvailability.isGooglePlayServicesAvailable` が
+`ConnectionResult.SUCCESS` を返す端末——Play 開発者サービスがインストール済みかつ有効かつ最新——に
+限られる。それ未満（脱 Google の ROM はもちろん、無効化されている端末や更新が必要な端末も同様）では
+どのみち認可リクエストを処理できないため、Dropbox / OneDrive / ローカルのみが表示される。
+`CloudStorageAvailability.android.kt` を参照。
 
 デスクトップでは `keryx://` の受け口に OS レベルの登録手順が必要だった（上記の各サービスの
 説明を参照）のに対し、Android は `androidApp/src/main/AndroidManifest.xml` 内のマニフェスト

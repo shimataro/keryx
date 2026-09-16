@@ -17,7 +17,7 @@ A lightweight, simple RSS reader that provides the same feed subscription experi
 | Platform | Support |
 | --- | --- |
 | Windows / macOS / Linux | ✅ Compose Multiplatform (current) |
-| Android | ✅ Compose Multiplatform (current; cloud sync supports Dropbox / OneDrive, plus Google Drive on any device that has Google Play services — see §4 and [sync-architecture.md](sync-architecture.md)) |
+| Android | ✅ Compose Multiplatform (current; cloud sync supports Dropbox / OneDrive, plus Google Drive on any device with working Google Play services — installed, enabled and up to date — see §4 and [sync-architecture.md](sync-architecture.md)) |
 | iOS / iPadOS | Planned (initially Compose, then native SwiftUI) |
 | macOS (native) | Planned — a separate native SwiftUI macOS app alongside the existing Compose one above |
 
@@ -39,14 +39,15 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
   Graph permission that grants access to only that folder is offered for personal accounts alone;
   supporting an organizational account would mean requesting access to the user's entire drive
   instead. See "Cloud Authentication" in [sync-architecture.md](sync-architecture.md).
-- **Android reaches Google Drive differently, and only where Google Play services is present.**
+- **Android reaches Google Drive differently, and only where Google Play services is installed, enabled and up to date.**
   Dropbox and OneDrive are PKCE public clients using the same `keryx://oauth2/callback` custom-URI
   redirect as desktop, but Google's OAuth policy deprecates both redirect styles for its Android
   client type, so the desktop configuration (a "Desktop app" client using loopback redirect +
   `client_secret`) cannot be reused there. Android uses Google's own recommended replacement
   instead — Play services' `AuthorizationClient`, which needs neither a client secret nor a backend
-  server. A device without Play services (a de-Googled ROM) is therefore not offered Google Drive at
-  all, while Dropbox, OneDrive and local-only work as usual. The same account and the same sync file
+  server. A device whose Play services is missing (a de-Googled ROM), disabled, or too old to serve
+  an authorization request is therefore not offered Google Drive at all, while Dropbox, OneDrive and
+  local-only work as usual. The same account and the same sync file
   are shared with the desktop app. See "Google Drive on Android" in
   [sync-architecture.md](sync-architecture.md).
 
@@ -65,7 +66,7 @@ Details are in [sync-architecture.md](sync-architecture.md).
 ## 6. Setup Flow
 
 On first launch, choose local-only / cloud sync (Dropbox / Google Drive / OneDrive — on Android,
-Google Drive appears only where Google Play services is present, see §4). When cloud is selected, after OAuth authentication, if existing
+Google Drive appears only where Google Play services is installed, enabled and up to date, see §4). When cloud is selected, after OAuth authentication, if existing
 data exists in the cloud it is automatically merged (imported) during the initial sync.
 
 ## 7. Basic Features

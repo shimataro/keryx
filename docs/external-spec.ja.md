@@ -17,7 +17,7 @@
 | プラットフォーム | 対応 |
 | --- | --- |
 | Windows / macOS / Linux | ✅ Compose Multiplatform（現行） |
-| Android | ✅（Compose Multiplatform、現行。クラウド同期は Dropbox / OneDrive に対応。Google Play 開発者サービスがある端末では Google Drive も利用可能。§4 および [sync-architecture.ja.md](sync-architecture.ja.md) 参照） |
+| Android | ✅（Compose Multiplatform、現行。クラウド同期は Dropbox / OneDrive に対応。Google Play 開発者サービスがインストール済みかつ有効かつ最新の端末では Google Drive も利用可能。§4 および [sync-architecture.ja.md](sync-architecture.ja.md) 参照） |
 | iOS / iPadOS | 予定（最初は Compose、その後 SwiftUI ネイティブ UI） |
 | macOS（ネイティブ） | 予定 — 上記の Compose 版とは別に、ネイティブ SwiftUI 版 macOS アプリを提供予定 |
 
@@ -40,14 +40,15 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
   そのフォルダーだけにアクセスを限定する Graph 権限は個人用アカウントにしか提供されておらず、
   組織アカウントに対応するにはユーザーのドライブ全体へのアクセスを要求することになるため。
   [sync-architecture.ja.md](sync-architecture.ja.md) の「クラウド認証」を参照。
-- **Android の Google Drive は別経路で、Google Play 開発者サービスがある端末でのみ利用できる。**
+- **Android の Google Drive は別経路で、Google Play 開発者サービスがインストール済みかつ有効かつ最新の端末でのみ利用できる。**
   Dropbox と OneDrive はデスクトップと同じ `keryx://oauth2/callback` カスタム URI リダイレクトを使う
   PKCE パブリッククライアントだが、Google の OAuth ポリシーは Android クライアント種別に対して
   カスタム URI スキームとループバックの両方を廃止しているため、デスクトップ向け構成
   （ループバックリダイレクト + `client_secret` を使う「デスクトップアプリ」クライアント）は
   Android には流用できない。代わりに Google 自身が推奨する Play 開発者サービスの
   `AuthorizationClient` を使う — クライアントシークレットもバックエンドサーバも不要。
-  Play 開発者サービスのない端末（脱 Google の ROM）では Google Drive を選択肢として出さないが、
+  Play 開発者サービスが無い（脱 Google の ROM）・無効化されている・認可リクエストを処理するには
+  古すぎる端末では Google Drive を選択肢として出さないが、
   Dropbox・OneDrive・ローカルのみは従来どおり利用できる。アカウントも同期ファイルもデスクトップ版と
   共通。詳細は [sync-architecture.ja.md](sync-architecture.ja.md) の「Android での Google Drive」を参照。
 
@@ -66,7 +67,7 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
 ## 6. セットアップフロー
 
 初回起動でローカルのみ / クラウド同期（Dropbox・Google Drive・OneDrive。Android では Google Drive は
-Google Play 開発者サービスがある端末でのみ表示される、§4 参照）を選択する。クラウド選択時は OAuth 認証後、クラウドに既存データがあれば初回同期で自動的に
+Google Play 開発者サービスがインストール済みかつ有効かつ最新の端末でのみ表示される、§4 参照）を選択する。クラウド選択時は OAuth 認証後、クラウドに既存データがあれば初回同期で自動的に
 マージ（インポート）される。
 
 ## 7. 基本機能

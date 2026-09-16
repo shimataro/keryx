@@ -136,8 +136,11 @@ is an OAuth client registered against this app's identity:
    + signing certificate at runtime. An unregistered key surfaces as an authorization failure on the
    device, not as a build error.
 
-Google Drive is offered only on devices that have Google Play services; a de-Googled ROM sees just
-Dropbox / OneDrive / local-only.
+Google Drive is offered only where `GoogleApiAvailability.isGooglePlayServicesAvailable` reports
+`ConnectionResult.SUCCESS` — Play services installed, enabled, and up to date. Anything short of
+that (a de-Googled ROM, but equally a device where Play services is disabled or needs an update)
+sees just Dropbox / OneDrive / local-only, since an authorization request could not be served there
+anyway. See `CloudStorageAvailability.android.kt`.
 
 Unlike desktop, where `keryx://` needs an OS-level registration step (see each provider's note
 above), Android receives the `keryx://oauth2/callback` redirect through a plain manifest
