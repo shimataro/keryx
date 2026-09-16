@@ -61,9 +61,9 @@ matters for a hand-edited or migrated `local_settings.json`.
 `doWork()` rather than constructor-injected) runs exactly the same sequence desktop's
 `backgroundUpdateLoop` runs each cycle: `refreshFeedsAndNotify`, then (if `CloudSession.isConnected()`)
 `SyncRepository.sync(SyncTrigger.AUTOMATIC)`, then `checkForUpdateAndNotify` if `shouldCheckForUpdate` says it is due, then `maybeRebuildFtsIndex`.
-On Android, `CloudSession` currently has Dropbox/OneDrive providers only (no Google Drive — see
-[sync-architecture.md](sync-architecture.md)'s "Google Drive on Android"), so `sync()` is a genuine
-no-op when the user hasn't connected either of those, or — even when connected — while
+On Android, `CloudSession` carries Dropbox and OneDrive plus — only where Play services is available —
+Google Drive (see [sync-architecture.md](sync-architecture.md)'s "Google Drive on Android"), so `sync()`
+is a genuine no-op when the user hasn't connected any of them, or — even when connected — while
 `autoSyncSuspended` is true (a prior `CloudDataIncompatibleException` gates further
 `SyncTrigger.AUTOMATIC` attempts until a reset or a successful manual sync; see
 `SyncRepository.sync`'s own KDoc). A caught exception (an unexpected failure, not `sync()`'s own
@@ -439,7 +439,8 @@ step 2 itself too, the same way desktop does — both call `SyncRepository.sync(
 
 1. Cache cleanup (`cleanUpArticleCacheIfDue`, if 24+ hours since last run).
 2. If a cloud provider is connected, initial sync (`SyncRepository.sync(SyncTrigger.AUTOMATIC)`) —
-   Dropbox / Google Drive / OneDrive on desktop, Dropbox / OneDrive on Android.
+   Dropbox / Google Drive / OneDrive on desktop; on Android the same three, with Google Drive
+   only where Play services is available.
 3. FTS full rebuild (`maybeRebuildFtsIndex`, only if 24+ hours since last run **and** idle; see below).
 4. FTS initial creation + unindexed row incremental insertion:
    - **Desktop.** `FtsManager.ensureIndexed()`, blocked on with `runBlocking` before `application {}`

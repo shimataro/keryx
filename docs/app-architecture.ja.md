@@ -303,9 +303,9 @@ JVM でテスト可能なユニットテストのソースセットが無いに�
 `appModule`（commonMain）にリポジトリ・サービス・ViewModel を登録——desktop と Android 共通。
 `platformModule` は各プラットフォームが個別に持つ: desktop 版は HttpClient・TokenStorage・CloudSession・
 CloudConnectFlow・`OsNotificationSink`・`UpdateInstaller` を登録し、Android 版は Android 固有の実装
-（OkHttp ベースの HttpClient、`KeystoreTokenStorage`、Dropbox/OneDrive のみの `CloudSession` 等——上記
-「Android」各節参照）を登録する。ViewModel はアプリスコープの `single` として登録し、`koinInject()` で
-取得する。
+（OkHttp ベースの HttpClient、`KeystoreTokenStorage`、Dropbox と OneDrive に加え、Play 開発者サービスが
+利用できる環境でのみ Google Drive も持つ `CloudSession` 等——上記「Android」各節参照）を登録する。
+ViewModel はアプリスコープの `single` として登録し、`koinInject()` で取得する。
 
 ### 記事リーダー（ネイティブ WebView）
 
