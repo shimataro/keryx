@@ -12,7 +12,7 @@
   module, since none of `composeApp`'s Android-specific logic is JVM-testable without either a device or
   Robolectric (not currently a dependency). Helpers are in `AndroidDbTestSupport.kt` (`createSchemaDbFile()`,
   mirroring `DbTestSupport.kt`'s `fileDb()` but driven through a real `AndroidSqliteDriver` so the schema is
-  installed the same way production creates it). Five files, each scoped narrowly to what is genuinely
+  installed the same way production creates it). Seven files, each scoped narrowly to what is genuinely
   Android-specific:
   - `DatabaseMergerDeviceTest.kt` / `DatabaseSnapshotDeviceTest.kt` — the schema-version guard, the migration
     path, and merge/snapshot behavior against the bundled `requery` SQLite (a native library); not a full port
@@ -25,6 +25,10 @@
     Android Keystore.
   - `FilePickerDeviceTest.kt` — the Storage Access Framework file picker's write-failure path
     (`ContentUriPickedFile.writeText` when no provider can open the stream).
+  - `PlayServicesGoogleDriveAuthDeviceTest.kt` — Play services' Google Drive authorization result,
+    including the partially-granted consent where only some of the requested scopes come back.
+  - `AndroidAuthorizationHostDeviceTest.kt` — the lifetime of the consent-screen request slot
+    `AndroidAuthorizationHost` hands to the Activity.
 
 - `androidApp/src/androidTest/` — Instrumented Compose UI tests that need a real Android
   application module to host `androidx.compose.ui.test.junit4.v2.createComposeRule` (e.g.

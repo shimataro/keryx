@@ -19,7 +19,7 @@
   ソースセットは存在しない — デバイスか Robolectric（現状未導入の依存）のどちらか無しには JVM 上で
   テストできない Android 固有ロジックが無いため。ヘルパーは `AndroidDbTestSupport.kt`
   （`createSchemaDbFile()`。`DbTestSupport.kt` の `fileDb()` に相当するが、本番と同じスキーマ導入経路
-  である実際の `AndroidSqliteDriver` 経由で作成する）。5ファイルあり、それぞれ Android 固有の差異が
+  である実際の `AndroidSqliteDriver` 経由で作成する）。7ファイルあり、それぞれ Android 固有の差異が
   出うる箇所に絞る:
   - `DatabaseMergerDeviceTest.kt` / `DatabaseSnapshotDeviceTest.kt` — スキーマバージョンガード、
     マイグレーション経路、バンドルされた `requery` SQLite（ネイティブライブラリ）に対するマージ/
@@ -33,6 +33,10 @@
     Android Keystore に対して検証。
   - `FilePickerDeviceTest.kt` — Storage Access Framework のファイルピッカーの書き込み失敗経路
     （どのプロバイダーもストリームを開けない場合の `ContentUriPickedFile.writeText`）。
+  - `PlayServicesGoogleDriveAuthDeviceTest.kt` — Play 開発者サービスによる Google Drive の認可結果。
+    要求したスコープの一部しか許諾されなかったケースを含む。
+  - `AndroidAuthorizationHostDeviceTest.kt` — `AndroidAuthorizationHost` が Activity へ渡す
+    同意画面リクエストのスロットの寿命。
 
 - `androidApp/src/androidTest/` — `androidx.compose.ui.test.junit4.v2.createComposeRule` を
   ホストできる、実際の Android アプリケーションモジュールを必要とする計装 Compose UI テスト
