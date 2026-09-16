@@ -7,7 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
@@ -288,17 +288,19 @@ class SettingsViewModel(
      * and always after this function returns — see [connect]'s KDoc for why sync is deliberately
      * kept out of [connectingType].
      */
-    private suspend fun CoroutineScope.runConnectFlow(type: CloudStorageType): Boolean {
+    private suspend fun runConnectFlow(type: CloudStorageType): Boolean {
         val flow = cloudSession.connectFlow(type)
         if (flow == null) {
             connectFailedType = type
             return false
         }
-        val result = awaitCancellableConnect(
-            flow,
-            onJobChange = { authorizationJob = it },
-            onCanCancelChange = { canCancelConnect = it },
-        ) ?: return false
+        val result = coroutineScope {
+            awaitCancellableConnect(
+                flow,
+                onJobChange = { authorizationJob = it },
+                onCanCancelChange = { canCancelConnect = it },
+            )
+        } ?: return false
         return when (result) {
             is Result.Ok -> {
                 withContext(dispatcher) { cloudSession.saveTokens(type, result.value) }
