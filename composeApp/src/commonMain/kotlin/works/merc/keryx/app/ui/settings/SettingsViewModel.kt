@@ -94,15 +94,7 @@ class SettingsViewModel(
     var connectingType by mutableStateOf<CloudStorageType?>(null)
         private set
 
-    /**
-     * The provider whose connect-time initial sync is currently running, or null. Distinct from
-     * [connectingType], which covers only the OAuth-and-token-save half of [connect]: once that
-     * half finishes, [connectingType] drops to null and this becomes the connected provider until
-     * the sync itself finishes. The cloud-sync tab uses this split to keep the connected row's
-     * "disconnect" action available throughout the (potentially long) first sync — it is a safe
-     * exit at any point — while still blocking "reset"/"switch provider" until it settles, since
-     * either would race the sync that is still writing to the same row.
-     */
+    /** The provider whose connect-time initial sync is running, or null (see [connect]). */
     var initialSyncingType by mutableStateOf<CloudStorageType?>(null)
         private set
 
