@@ -198,6 +198,15 @@
     <string name="settings_cloud_reset_confirm_body">The cloud sync data will be renamed for safekeeping (keryx-&lt;date-time&gt;.db.bak) and rebuilt from this device’s data. If it can’t be renamed, it will be deleted instead. Safekept data is not removed automatically. Any unsynced changes on other devices may be lost.</string>
     <string name="settings_cloud_reset_confirm_action">Reset</string>
     <string name="settings_last_synced">Last synced: %1$s</string>
+    <string name="settings_cloud_syncing">Syncing…</string>
+    <string name="settings_cloud_phase_checking">Checking the cloud…</string>
+    <string name="settings_cloud_phase_downloading">Downloading…</string>
+    <string name="settings_cloud_phase_merging">Merging data…</string>
+    <string name="settings_cloud_phase_indexing">Updating the search index…</string>
+    <string name="settings_cloud_phase_preparing">Preparing the upload…</string>
+    <string name="settings_cloud_phase_uploading">Uploading…</string>
+    <string name="settings_cloud_phase_archiving">Archiving the cloud data…</string>
+    <string name="settings_cloud_disconnecting">Disconnecting…</string>
     <string name="settings_font_size">Font size</string>
     <string name="settings_font_small">Small</string>
     <string name="settings_font_medium">Medium</string>

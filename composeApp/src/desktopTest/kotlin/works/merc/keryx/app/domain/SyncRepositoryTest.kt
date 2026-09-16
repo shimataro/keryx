@@ -75,6 +75,11 @@ private class FakeCloudStorage : CloudStorage {
     /** When set, [download] suspends on this gate before returning, so a test can observe an in-flight sync. */
     var downloadGate: CompletableDeferred<Unit>? = null
 
+    /** When set, [rename] suspends on this gate before returning, so a test can observe an
+     * in-flight [SyncRepository.resetCloudData] (its archive step) the same way [downloadGate]
+     * does for a regular sync's download step. */
+    var renameGate: CompletableDeferred<Unit>? = null
+
     private val existsQueue = ArrayDeque<Result<CloudFileMeta?>>()
     private val downloadQueue = ArrayDeque<Result<CloudFileMeta>>()
     private val uploadQueue = ArrayDeque<Result<CloudFileMeta>>()
@@ -164,6 +169,7 @@ private class FakeCloudStorage : CloudStorage {
     override suspend fun rename(from: String, to: String): Result<Unit> {
         renameCount++
         lastRenameTo = to
+        renameGate?.await()
         renameQueue.removeFirstOrNull()?.let { return it }
         val f = files.remove(from) ?: return Result.Ok(Unit) // idempotent: absent source is a no-op
         if (files.containsKey(to)) {
@@ -1511,5 +1517,103 @@ class SyncRepositoryTest {
 
         localDb.sync_stateQueries.upsert(SYNC_STATE_LAST_SYNCED_AT, "not-a-number")
         assertNull(repo.lastSyncedAt())
+    }
+
+    // --- SyncPhase: live progress for the cloud-sync settings tab ---
+    //
+    // A bare `sync()` call runs its whole body inside the calling coroutine with no natural
+    // suspension point in these fakes (Mutex.withLock never contends here, and FakeCloudStorage's
+    // methods only suspend when a test explicitly gates one). So the only way to observe an
+    // intermediate SyncPhase is at an actual gate — the same downloadGate/renameGate + launch +
+    // runCurrent() technique the mutex-ordering tests above already use — rather than collecting a
+    // full transition sequence, which nothing here would ever interleave with.
+
+    @Test
+    fun syncPhaseIsIdleBeforeAnySyncRuns() = runTest {
+        val repo = newRepo(FakeCloudStorage())
+        assertEquals(SyncPhase.IDLE, repo.syncPhase.value)
+    }
+
+    @Test
+    fun syncPhaseIsDownloadingWhileTheDownloadIsInFlight() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_GZ_PATH, gzipOf(cloudDbBytes()), "r1")
+        val gate = CompletableDeferred<Unit>()
+        cloud.downloadGate = gate
+        val repo = newRepo(cloud)
+
+        val syncing = launch { repo.sync() }
+        runCurrent() // advances past CHECKING's metadata() call to the gated download
+        assertEquals(SyncPhase.DOWNLOADING, repo.syncPhase.value)
+
+        gate.complete(Unit)
+        syncing.join()
+        assertEquals(SyncPhase.IDLE, repo.syncPhase.value)
+    }
+
+    @Test
+    fun syncPhaseReturnsToIdleAfterAFailedSync() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.queueExists(Result.Err(CloudStorageException("boom")))
+        val repo = newRepo(cloud)
+
+        assertIs<Result.Err>(repo.sync())
+
+        assertEquals(SyncPhase.IDLE, repo.syncPhase.value)
+    }
+
+    @Test
+    fun automaticSyncSkippedByTheSuspensionGateNeverTouchesSyncPhase() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_GZ_PATH, gzipOf(byteArrayOf(1, 2, 3, 4)), "r1") // not a SQLite file
+        val repo = newRepo(cloud)
+        repo.sync(SyncTrigger.AUTOMATIC) // trips CloudDataIncompatibleException, suspends AUTOMATIC
+        assertTrue(repo.autoSyncSuspended.value)
+        assertEquals(SyncPhase.IDLE, repo.syncPhase.value)
+
+        assertIs<Result.Ok<Unit>>(repo.sync(SyncTrigger.AUTOMATIC)) // skipped by the gate
+
+        assertEquals(SyncPhase.IDLE, repo.syncPhase.value)
+    }
+
+    @Test
+    fun resetCloudDataReachesArchivingPhaseDuringRename() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_GZ_PATH, gzipOf(cloudDbBytes()), "r1")
+        val gate = CompletableDeferred<Unit>()
+        cloud.renameGate = gate
+        val repo = newRepo(cloud)
+
+        val resetting = launch { repo.resetCloudData() }
+        runCurrent() // advances into the gated rename (archiveCloudDb)
+        assertEquals(SyncPhase.ARCHIVING, repo.syncPhase.value)
+
+        gate.complete(Unit)
+        resetting.join()
+        assertEquals(SyncPhase.IDLE, repo.syncPhase.value)
+    }
+
+    @Test
+    fun resetCloudDataReturnsToIdleOnFailure() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_GZ_PATH, gzipOf(cloudDbBytes()), "r1")
+        cloud.queueRename(Result.Err(CloudAuthException("no token")))
+        val repo = newRepo(cloud)
+
+        assertIs<Result.Err>(repo.resetCloudData())
+
+        assertEquals(SyncPhase.IDLE, repo.syncPhase.value)
+    }
+
+    @Test
+    fun resetCloudDataReturnsToIdleWhenCreateFreshFailsAfterSuccessfulArchive() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_GZ_PATH, gzipOf(cloudDbBytes()), "r1")
+        cloud.queueCreate(Result.Err(CloudStorageException("quota exceeded")))
+        val repo = newRepo(cloud)
+
+        assertIs<Result.Err>(repo.resetCloudData())
+
+        assertEquals(SyncPhase.IDLE, repo.syncPhase.value)
     }
 }

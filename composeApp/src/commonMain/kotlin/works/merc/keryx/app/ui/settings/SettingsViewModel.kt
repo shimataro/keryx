@@ -7,10 +7,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.getString
@@ -28,6 +28,7 @@ import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.OpmlImporter
 import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.domain.SyncPhase
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.domain.UpdateRepository
@@ -92,6 +93,10 @@ class SettingsViewModel(
     var connectingType by mutableStateOf<CloudStorageType?>(null)
         private set
 
+    /** The provider whose connect-time initial sync is running, or null (see [connect]). */
+    var initialSyncingType by mutableStateOf<CloudStorageType?>(null)
+        private set
+
     /** The provider whose last connect attempt failed, or null. */
     var connectFailedType by mutableStateOf<CloudStorageType?>(null)
         private set
@@ -141,6 +146,23 @@ class SettingsViewModel(
     var lastSyncAuthFailed by mutableStateOf(false)
         private set
 
+    /**
+     * Mirrors [ActivityCenter.syncing] — true for every sync in progress (manual "sync now" on
+     * Home, a debounced sync, the background loop, and the connect-time initial sync this
+     * ViewModel itself starts), not only the ones this ViewModel initiates. The cloud-sync tab
+     * pairs this with [syncPhase] to show live progress on the connected provider's row.
+     */
+    var syncing by mutableStateOf(activityCenter.syncing.value)
+        private set
+
+    /** Mirrors [SyncRepository.syncPhase] — the step the current (or most recent) sync is on. */
+    var syncPhase by mutableStateOf(syncRepository.syncPhase.value)
+        private set
+
+    /** True while [disconnect] is tearing down the connected provider — see that function's KDoc. */
+    var disconnecting by mutableStateOf(false)
+        private set
+
     init {
         refreshLastSyncedAt()
         viewModelScope.launch {
@@ -150,15 +172,22 @@ class SettingsViewModel(
             syncRepository.lastSyncAuthFailed.collect { lastSyncAuthFailed = it }
         }
         viewModelScope.launch {
-            // Skip the initial replay (current state at VM creation) — already handled by the
-            // explicit call above. Only react to genuine sync completions afterward, covering
-            // sync paths this ViewModel has no other visibility into (manual "sync now" on Home,
-            // debounced syncs, the background loop).
-            activityCenter.syncing.drop(1).collect { syncing ->
+            syncRepository.syncPhase.collect { syncPhase = it }
+        }
+        viewModelScope.launch {
+            // Collects the subscription-time replay too, not just later changes: the property
+            // initializer above reads activityCenter.syncing.value synchronously at construction,
+            // but this launch only starts collecting once viewModelScope actually dispatches it,
+            // so the StateFlow's value can have moved on in between. Dropping that replay (as a
+            // once-tried `drop(1)` did) would silently swallow a real transition happening in that
+            // window; collecting it is safe since it just repeats work this ViewModel already does
+            // at startup (refreshLastSyncedAt() is a pure, idempotent read).
+            activityCenter.syncing.collect { isSyncing ->
+                syncing = isSyncing
                 // Guarded: a transient read failure must not kill this long-lived collector (which
                 // would silently stop all future last-synced refreshes) or leak as an uncaught
                 // exception. Best-effort UI state — log and carry on.
-                if (!syncing) {
+                if (!isSyncing) {
                     runCatching { refreshLastSyncedAt() }
                         .onFailure { Log.warn(TAG, "Failed to refresh last-synced time", it) }
                 }
@@ -214,42 +243,73 @@ class SettingsViewModel(
     }
 
     /**
-     * Connects to the selected cloud storage provider and starts synchronization after successful authorization.
+     * Connects to the selected cloud storage provider and starts synchronization after successful
+     * authorization.
+     *
+     * Split into two distinct phases against [connectingType] / [initialSyncingType]: OAuth and
+     * token save are comparatively quick and cannot yet be exited from mid-flight ([cancelConnect]
+     * is the only way out), so every other cloud-storage action on this provider's row stays
+     * blocked for that phase. The initial sync that follows is often the longest sync this app ever
+     * runs (a first-ever connection merges the *entire* existing cloud database), so it gets its
+     * own, looser phase: [initialSyncingType] still blocks "reset"/"switch provider" (both would
+     * race the sync still writing to this row), but leaves "disconnect" available throughout, since
+     * disconnecting is always a safe exit regardless of what a sync is doing.
      *
      * @param type The cloud storage provider to connect to.
      */
     fun connect(type: CloudStorageType) {
         viewModelScope.launch {
-            connectingType = type
-            connectFailedType = null
-            val flow = cloudSession.connectFlow(type)
-            if (flow == null) {
-                connectFailedType = type
+            val connected = try {
+                connectingType = type
+                connectFailedType = null
+                runConnectFlow(type)
+            } finally {
                 connectingType = null
-                return@launch
             }
-            val result = awaitCancellableConnect(
+            if (!connected) return@launch
+            initialSyncingType = type
+            try {
+                withContext(dispatcher) { syncRepository.sync() }
+            } finally {
+                initialSyncingType = null
+            }
+        }
+    }
+
+    /**
+     * Runs the OAuth authorization for [type] and, on success, saves its tokens and marks it
+     * connected. Returns whether it succeeded; [connect] runs the initial sync only when it did,
+     * and always after this function returns — see [connect]'s KDoc for why sync is deliberately
+     * kept out of [connectingType].
+     */
+    private suspend fun runConnectFlow(type: CloudStorageType): Boolean {
+        val flow = cloudSession.connectFlow(type)
+        if (flow == null) {
+            connectFailedType = type
+            return false
+        }
+        val result = coroutineScope {
+            awaitCancellableConnect(
                 flow,
                 onJobChange = { authorizationJob = it },
                 onCanCancelChange = { canCancelConnect = it },
-            ) ?: run {
-                connectingType = null
-                return@launch
+            )
+        } ?: return false
+        return when (result) {
+            is Result.Ok -> {
+                withContext(dispatcher) { cloudSession.saveTokens(type, result.value) }
+                update { it.copy(cloudStorageType = type.id) }
+                // Persist the provider selection to disk before the initial sync. Tokens are
+                // saved durably to the keychain above, so without this flush a crash could leave
+                // tokens present but cloudStorageType null → every later sync a silent no-op.
+                withContext(dispatcher) { settingsRepository.flush() }
+                connectedType = type
+                true
             }
-            when (result) {
-                is Result.Ok -> {
-                    withContext(dispatcher) { cloudSession.saveTokens(type, result.value) }
-                    update { it.copy(cloudStorageType = type.id) }
-                    // Persist the provider selection to disk before the initial sync. Tokens are
-                    // saved durably to the keychain above, so without this flush a crash could leave
-                    // tokens present but cloudStorageType null → every later sync a silent no-op.
-                    withContext(dispatcher) { settingsRepository.flush() }
-                    connectedType = type
-                    withContext(dispatcher) { syncRepository.sync() }
-                }
-                is Result.Err -> connectFailedType = type
+            is Result.Err -> {
+                connectFailedType = type
+                false
             }
-            connectingType = null
         }
     }
 
@@ -271,9 +331,23 @@ class SettingsViewModel(
         lastSyncedAtText = null
     }
 
+    /**
+     * Disconnects the connected provider. [disconnecting] covers this whole call, because
+     * [tearDownConnection] calls [SyncRepository.clearSyncFailureState], which takes the same
+     * mutex a running sync holds (see "Skipping Unchanged Transfers" in sync-architecture.md) — so
+     * disconnecting while a sync is in flight waits it out. Without a state to show for that wait,
+     * the row would look exactly as stuck as the bug this whole feature exists to fix.
+     */
     fun disconnect() {
         val type = connectedType ?: return
-        viewModelScope.launch { tearDownConnection(type) }
+        viewModelScope.launch {
+            disconnecting = true
+            try {
+                tearDownConnection(type)
+            } finally {
+                disconnecting = false
+            }
+        }
     }
 
     /**

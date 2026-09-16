@@ -1,10 +1,13 @@
 package works.merc.keryx.app.ui.settings
 
+import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
@@ -20,11 +23,14 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
 import works.merc.keryx.app.core.CloudStorageType
+import works.merc.keryx.app.domain.SyncPhase
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * Regression coverage for the two Android bugs `ProviderActionButton`/`CloudProviderRow.iconOnly`
@@ -49,7 +55,10 @@ class CloudProviderRowTest {
         iconOnly: Boolean,
         resetting: Boolean = false,
         idleEnabled: Boolean = true,
+        leaveEnabled: Boolean = idleEnabled,
         authFailed: Boolean = false,
+        statusText: String? = null,
+        lastSyncedAtText: String? = null,
     ) {
         CloudProviderRow(
             type = CloudStorageType.ONEDRIVE,
@@ -57,9 +66,12 @@ class CloudProviderRowTest {
             connecting = false,
             canCancel = false,
             idleEnabled = idleEnabled,
+            leaveEnabled = leaveEnabled,
             failed = false,
             authFailed = authFailed,
             resetting = resetting,
+            statusText = statusText,
+            lastSyncedAtText = lastSyncedAtText,
             iconOnly = iconOnly,
             onSelect = {},
             onCancel = {},
@@ -185,5 +197,210 @@ class CloudProviderRowTest {
         val idleHeight = onNodeWithTag("idle").getBoundsInRoot().height
         val resettingHeight = onNodeWithTag("resetting").getBoundsInRoot().height
         assertEquals(idleHeight, resettingHeight)
+    }
+
+    /**
+     * The regression this feature exists to fix: while a fresh connect's initial sync is running
+     * (`idleEnabled = false`, but `leaveEnabled` stays true — see `SettingsViewModel.connect`'s
+     * KDoc), the row must not look entirely frozen. "Reset"/"switch provider" stay blocked (they'd
+     * race the sync still writing to this row), but "disconnect" — always a safe exit — stays
+     * available.
+     */
+    @Test
+    fun initialSyncLeavesDisconnectEnabledButBlocksReset() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                ConnectedOneDriveRow(iconOnly = false, idleEnabled = false, leaveEnabled = true)
+            }
+        }
+        waitForIdle()
+
+        onNodeWithText(disconnectLabel).assertIsEnabled()
+        onNodeWithText(resetLabel).assertIsNotEnabled()
+    }
+
+    /** A disconnect already in flight (or a provider switch's teardown) blocks a second one. */
+    @Test
+    fun leaveDisabledDisablesDisconnectAction() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                ConnectedOneDriveRow(iconOnly = false, idleEnabled = false, leaveEnabled = false)
+            }
+        }
+        waitForIdle()
+
+        onNodeWithText(disconnectLabel).assertIsNotEnabled()
+    }
+
+    /**
+     * Live progress takes priority over the last-synced subtitle in the same slot — they never
+     * show at once, since `statusText` is only ever non-null while a sync (or a disconnect) is
+     * actually running, at which point the previous last-synced time is stale anyway.
+     */
+    @Test
+    fun statusTextTakesPriorityOverLastSyncedSubtitle() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                ConnectedOneDriveRow(
+                    iconOnly = false,
+                    statusText = "データを統合しています…",
+                    lastSyncedAtText = "2026/09/16 12:34",
+                )
+            }
+        }
+        waitForIdle()
+
+        onNodeWithText("データを統合しています…").assertIsDisplayed()
+        onAllNodesWithText("2026/09/16 12:34").assertCountEquals(0)
+    }
+
+    @Test
+    fun lastSyncedSubtitleShowsOnceStatusTextClears() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                ConnectedOneDriveRow(iconOnly = false, statusText = null, lastSyncedAtText = "2026/09/16 12:34")
+            }
+        }
+        waitForIdle()
+
+        onNodeWithText("最終同期: 2026/09/16 12:34").assertIsDisplayed()
+    }
+
+    /**
+     * The status slot is reserved unconditionally (the ui-guidelines skill's layout-stability
+     * rule), so a sync starting or finishing must not change the row's height — same discipline as
+     * [resettingDisablesResetActionWithoutChangingRowHeight] above, for the new slot instead of the
+     * action buttons.
+     */
+    @Test
+    fun statusSlotReservesHeightWhetherOrNotItHasContent() = runDesktopComposeUiTest {
+        setContent {
+            Column {
+                Box(Modifier.testTag("empty").width(640.dp)) {
+                    ConnectedOneDriveRow(iconOnly = false, statusText = null, lastSyncedAtText = null)
+                }
+                Box(Modifier.testTag("busy").width(640.dp)) {
+                    ConnectedOneDriveRow(iconOnly = false, statusText = "アップロードしています…")
+                }
+            }
+        }
+        waitForIdle()
+
+        // Same discipline as resettingDisablesResetActionWithoutChangingRowHeight above: compare
+        // the whole row's height, which includes the fixed-height status slot.
+        val emptyHeight = onNodeWithTag("empty").getBoundsInRoot().height
+        val busyHeight = onNodeWithTag("busy").getBoundsInRoot().height
+        assertEquals(emptyHeight, busyHeight)
+    }
+
+    /**
+     * The status slot's height is derived from the scaled `labelSmall` line height (not a
+     * hardcoded dp constant), so at KeryxTheme's largest supported fontScale (1.6, see
+     * `KeryxTheme`'s clamp) the slot grows tall enough to keep the status text on one line instead
+     * of clipping it against the fixed 20.dp box the old constant reserved.
+     */
+    @Test
+    fun statusSlotGrowsWithFontScaleInsteadOfClippingAtLargeScale() = runDesktopComposeUiTest {
+        setContent {
+            val baseDensity = LocalDensity.current
+            Column {
+                Box(Modifier.testTag("normal").width(640.dp)) {
+                    CompositionLocalProvider(LocalDensity provides Density(baseDensity.density, fontScale = 1f)) {
+                        ConnectedOneDriveRow(iconOnly = false, statusText = "アップロードしています…")
+                    }
+                }
+                Box(Modifier.testTag("scaled").width(640.dp)) {
+                    CompositionLocalProvider(LocalDensity provides Density(baseDensity.density, fontScale = 1.6f)) {
+                        ConnectedOneDriveRow(iconOnly = false, statusText = "アップロードしています…")
+                    }
+                }
+            }
+        }
+        waitForIdle()
+
+        val normalHeight = onNodeWithTag("normal").getBoundsInRoot().height
+        val scaledHeight = onNodeWithTag("scaled").getBoundsInRoot().height
+        assertTrue(scaledHeight > normalHeight)
+
+        // The status text itself must still be found — a single, undamaged line — at the larger scale.
+        onNode(hasText("アップロードしています…") and hasAnyAncestor(hasTestTag("scaled"))).assertIsDisplayed()
+    }
+
+    /**
+     * The mapping from ViewModel state to the status text shown on the connected row is extracted
+     * as a pure decision function so it can be tested independently of a full SettingsViewModel
+     * fixture. These tests cover the priority order (disconnecting > syncing > idle) and the
+     * per-row filtering (only the connected provider's row ever gets text).
+     */
+    @Test
+    fun statusTextForUnconnectedProviderIsNull() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                val text = cloudProviderRowStatusText(
+                    type = CloudStorageType.DROPBOX,
+                    connectedType = null,
+                    disconnecting = false,
+                    syncing = false,
+                    syncPhase = SyncPhase.IDLE,
+                )
+                Text(text ?: "null")
+            }
+        }
+        waitForIdle()
+        onNodeWithText("null").assertIsDisplayed()
+    }
+
+    @Test
+    fun statusTextShowsDisconnectingWhenProviderIsConnectedAndDisconnecting() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                val text = cloudProviderRowStatusText(
+                    type = CloudStorageType.DROPBOX,
+                    connectedType = CloudStorageType.DROPBOX,
+                    disconnecting = true,
+                    syncing = false,
+                    syncPhase = SyncPhase.IDLE,
+                )
+                Text(text ?: "null")
+            }
+        }
+        waitForIdle()
+        onNodeWithText("切断しています…").assertIsDisplayed()
+    }
+
+    @Test
+    fun statusTextShowsSyncPhaseWhenProviderIsConnectedAndSyncing() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                val text = cloudProviderRowStatusText(
+                    type = CloudStorageType.DROPBOX,
+                    connectedType = CloudStorageType.DROPBOX,
+                    disconnecting = false,
+                    syncing = true,
+                    syncPhase = SyncPhase.MERGING,
+                )
+                Text(text ?: "null")
+            }
+        }
+        waitForIdle()
+        onNodeWithText("データを統合しています…").assertIsDisplayed()
+    }
+
+    @Test
+    fun statusTextIsNullWhenProviderIsConnectedButIdle() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                val text = cloudProviderRowStatusText(
+                    type = CloudStorageType.DROPBOX,
+                    connectedType = CloudStorageType.DROPBOX,
+                    disconnecting = false,
+                    syncing = false,
+                    syncPhase = SyncPhase.IDLE,
+                )
+                Text(text ?: "null")
+            }
+        }
+        waitForIdle()
+        onNodeWithText("null").assertIsDisplayed()
     }
 }

@@ -195,6 +195,15 @@
     <string name="settings_cloud_reset_confirm_body">クラウド上の同期データを退避用の名前（keryx-日時.db.bak）に変更したうえで、この端末のデータで作り直します。退避できなかった場合は削除されます。退避したデータは自動では消えません。他の端末で未同期の変更がある場合は失われることがあります。</string>
     <string name="settings_cloud_reset_confirm_action">リセット</string>
     <string name="settings_last_synced">最終同期: %1$s</string>
+    <string name="settings_cloud_syncing">同期中…</string>
+    <string name="settings_cloud_phase_checking">クラウドを確認しています…</string>
+    <string name="settings_cloud_phase_downloading">ダウンロードしています…</string>
+    <string name="settings_cloud_phase_merging">データを統合しています…</string>
+    <string name="settings_cloud_phase_indexing">検索インデックスを更新しています…</string>
+    <string name="settings_cloud_phase_preparing">アップロードを準備しています…</string>
+    <string name="settings_cloud_phase_uploading">アップロードしています…</string>
+    <string name="settings_cloud_phase_archiving">クラウドデータを退避しています…</string>
+    <string name="settings_cloud_disconnecting">切断しています…</string>
     <string name="settings_font_size">文字サイズ</string>
     <string name="settings_font_small">小</string>
     <string name="settings_font_medium">標準</string>

@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -35,6 +36,7 @@ import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.CloudStorageType
+import works.merc.keryx.app.domain.SyncPhase
 import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.ui.common.FlatButton
 import works.merc.keryx.app.ui.common.FlatTonalButton
@@ -54,6 +56,15 @@ import works.merc.keryx.app.resources.settings_cloud_abort_connect_confirm_body
 import works.merc.keryx.app.resources.settings_cloud_abort_connect_confirm_title
 import works.merc.keryx.app.resources.settings_cloud_disconnect_confirm_body
 import works.merc.keryx.app.resources.settings_cloud_disconnect_confirm_title
+import works.merc.keryx.app.resources.settings_cloud_disconnecting
+import works.merc.keryx.app.resources.settings_cloud_phase_archiving
+import works.merc.keryx.app.resources.settings_cloud_phase_checking
+import works.merc.keryx.app.resources.settings_cloud_phase_downloading
+import works.merc.keryx.app.resources.settings_cloud_phase_indexing
+import works.merc.keryx.app.resources.settings_cloud_phase_merging
+import works.merc.keryx.app.resources.settings_cloud_phase_preparing
+import works.merc.keryx.app.resources.settings_cloud_phase_uploading
+import works.merc.keryx.app.resources.settings_cloud_syncing
 import works.merc.keryx.app.resources.settings_cloud_reconnect
 import works.merc.keryx.app.resources.settings_cloud_reset
 import works.merc.keryx.app.resources.settings_cloud_reset_confirm_action
@@ -111,7 +122,13 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                     connected = connected == type,
                     connecting = vm.connectingType == type,
                     canCancel = vm.canCancelConnect,
-                    idleEnabled = vm.connectingType == null,
+                    // "Reset"/"switch provider" stay blocked through the OAuth wait, the initial
+                    // sync that follows a fresh connect, and a disconnect tearing this row down —
+                    // each would race state the other is still writing. "Disconnect" is looser
+                    // (leaveEnabled below): it stays available through the initial sync, since
+                    // leaving is always a safe exit regardless of what a sync is doing.
+                    idleEnabled = vm.connectingType == null && vm.initialSyncingType == null && !vm.disconnecting,
+                    leaveEnabled = vm.connectingType == null && !vm.disconnecting,
                     failed = vm.connectFailedType == type,
                     lastSyncedAtText = if (connected == type) vm.lastSyncedAtText else null,
                     // Only meaningful for the connected provider: it's why its background syncs
@@ -121,6 +138,18 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                     // CloudProviderRow's own comment for why the two are mutually exclusive.
                     authFailed = connected == type && vm.lastSyncAuthFailed,
                     resetting = vm.resetting,
+                    // Live progress for the connected row, in priority order: an in-flight
+                    // disconnect (waiting out a sync it must let finish first — see
+                    // SettingsViewModel.disconnect's KDoc), then a running sync's current phase.
+                    // Neither applies to any other row, nor once both have settled (falls back to
+                    // lastSyncedAtText inside CloudProviderRow).
+                    statusText = cloudProviderRowStatusText(
+                        type = type,
+                        connectedType = connected,
+                        disconnecting = vm.disconnecting,
+                        syncing = vm.syncing,
+                        syncPhase = vm.syncPhase,
+                    ),
                     // No provider connected yet: a fresh connect is low-risk, so do it directly. A
                     // different provider connected: confirm the switch first.
                     onSelect = {
@@ -248,9 +277,9 @@ private fun ProviderActionButton(
     busy: Boolean = false,
     iconOnly: Boolean = isTouchPrimary,
 ) {
-    // 18dp for desktop's labelled buttons; 20dp for icon-only buttons, to match the row's own
-    // brand mark.
-    val glyphSize = if (iconOnly) 20.dp else 18.dp
+    // 18dp for desktop's labelled buttons; CLOUD_ROW_ICON_SIZE for icon-only buttons, to match
+    // the row's own brand mark.
+    val glyphSize = if (iconOnly) CLOUD_ROW_ICON_SIZE else 18.dp
     val glyph: @Composable () -> Unit = {
         if (busy) {
             // Follow the container's content color: a primary-filled container would otherwise
@@ -294,11 +323,59 @@ private fun ProviderActionButton(
     }
 }
 
+/** Fixed size for the provider brand icon and action glyphs in icon-only mode. */
+private val CLOUD_ROW_ICON_SIZE = 20.dp
+
+/** Top padding above the connected row's status slot content (spinner+phase, "disconnecting…",
+ * or the last-synced subtitle) — shared with the slot's own reserved-height calculation inside
+ * [CloudProviderRow] so the box is always tall enough for its own content. */
+private val CLOUD_STATUS_SLOT_TOP_PADDING = 2.dp
+
+/** Localized progress text for a running sync's current phase, for the connected row's status slot. */
+@Composable
+private fun SyncPhase.statusText(): String = when (this) {
+    // IDLE is reached between phase transitions inside a single sync (never observable as its own
+    // steady state while `syncing` is true, but the read and the write are two different threads'
+    // worth of StateFlow updates, so a caller can still catch it mid-transition) — falls back to
+    // the generic "syncing" text rather than showing nothing for that instant.
+    SyncPhase.IDLE -> stringResource(Res.string.settings_cloud_syncing)
+    SyncPhase.CHECKING -> stringResource(Res.string.settings_cloud_phase_checking)
+    SyncPhase.DOWNLOADING -> stringResource(Res.string.settings_cloud_phase_downloading)
+    SyncPhase.MERGING -> stringResource(Res.string.settings_cloud_phase_merging)
+    SyncPhase.INDEXING -> stringResource(Res.string.settings_cloud_phase_indexing)
+    SyncPhase.PREPARING -> stringResource(Res.string.settings_cloud_phase_preparing)
+    SyncPhase.UPLOADING -> stringResource(Res.string.settings_cloud_phase_uploading)
+    SyncPhase.ARCHIVING -> stringResource(Res.string.settings_cloud_phase_archiving)
+}
+
+/** Resolves the live status text for a single cloud-provider row from ViewModel state. */
+@Composable
+internal fun cloudProviderRowStatusText(
+    type: CloudStorageType,
+    connectedType: CloudStorageType?,
+    disconnecting: Boolean,
+    syncing: Boolean,
+    syncPhase: SyncPhase,
+): String? = when {
+    connectedType != type -> null
+    disconnecting -> stringResource(Res.string.settings_cloud_disconnecting)
+    syncing -> syncPhase.statusText()
+    else -> null
+}
+
 /**
  * Displays a cloud provider's connection state, available actions, and synchronization details.
  *
+ * @param leaveEnabled Enables the disconnect action. Looser than [idleEnabled] — a running initial
+ *   sync (see `SettingsViewModel.connect`'s KDoc) leaves this true so leaving stays available, while
+ *   [idleEnabled] (gating "reset"/"switch provider", both of which would race that same sync) stays
+ *   false. Defaults to [idleEnabled] so every other call site (including existing tests) keeps its
+ *   original single-condition behavior.
  * @param lastSyncedAtText Formatted time of the provider's most recent synchronization, or null.
  * @param lastSyncErrorText Localized explanation of the provider's current synchronization failure, or null.
+ * @param statusText Live progress text (a sync phase, or "disconnecting…") shown in the same slot
+ *   [lastSyncedAtText] otherwise occupies, taking priority over it — see the status slot below.
+ *   Only ever non-null for the connected row.
  * @param iconOnly Whether the trailing actions drop their labels — see [ProviderActionButton]. Only
  *   overridden by tests; production always takes the platform's own answer.
  * @param onSelect Invoked to select or connect the provider.
@@ -314,8 +391,10 @@ internal fun CloudProviderRow(
     canCancel: Boolean,
     idleEnabled: Boolean,
     failed: Boolean,
+    leaveEnabled: Boolean = idleEnabled,
     lastSyncedAtText: String? = null,
     lastSyncErrorText: String? = null,
+    statusText: String? = null,
     authFailed: Boolean = false,
     resetting: Boolean = false,
     iconOnly: Boolean = isTouchPrimary,
@@ -332,6 +411,14 @@ internal fun CloudProviderRow(
     // background; unconnected rows stay
     // transparent (no extra tint over the card).
     val contentColor = if (connected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
+    // Derived from scaled typography (not a hardcoded dp constant) so the box stays tall enough
+    // for its content at the theme's largest supported fontScale (KeryxTheme clamps to 1.6) — see
+    // rememberArticleRowMetrics() in ArticleRowComponents.kt for the same pattern.
+    val density = LocalDensity.current
+    val statusLabelLineHeight = MaterialTheme.typography.labelSmall.lineHeight
+    val statusSlotHeight = remember(density, statusLabelLineHeight) {
+        with(density) { statusLabelLineHeight.toDp() } + CLOUD_STATUS_SLOT_TOP_PADDING
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -352,7 +439,7 @@ internal fun CloudProviderRow(
                 Image(
                     painter = painterResource(type.brandIcon()),
                     contentDescription = null,
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(CLOUD_ROW_ICON_SIZE),
                 )
                 Text(
                     type.brandLabel(),
@@ -369,6 +456,11 @@ internal fun CloudProviderRow(
                 // Disabled during a switch (old provider's revoke in flight, connectingType != null)
                 // or a reset in progress, so neither destructive action can be re-triggered mid-op.
                 val enabled = idleEnabled && !resetting
+                // Looser than `enabled`: stays true through the initial sync a fresh connect starts
+                // (see SettingsViewModel.connect's KDoc) and through a switch's teardown, since
+                // leaving is always a safe exit — only a reset actually in flight blocks it (the
+                // disconnect that would follow must not race that reset's own writes).
+                val leaveOk = leaveEnabled && !resetting
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     // One recovery slot, never two: a third button would both change this row's
                     // child count with state (see the ui-guidelines skill's layout-stability rule)
@@ -402,7 +494,7 @@ internal fun CloudProviderRow(
                         icon = KeryxIcons.LinkOff,
                         onClick = onDisconnect,
                         kind = IconButtonKind.Secondary,
-                        enabled = enabled,
+                        enabled = leaveOk,
                         iconOnly = iconOnly,
                     )
                 }
@@ -413,7 +505,7 @@ internal fun CloudProviderRow(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (iconOnly) {
                         SmallSpinner(
-                            size = 20.dp, // matches the icon-only glyph size beside it
+                            size = CLOUD_ROW_ICON_SIZE, // matches the icon-only glyph size beside it
                             color = LocalContentColor.current,
                         )
                     }
@@ -441,15 +533,35 @@ internal fun CloudProviderRow(
                 )
             }
         }
-        // Last-synced shown as a subtitle under the provider name (only non-null for the connected
-        // row) — its own full-width line so it never wraps against the trailing action buttons.
-        lastSyncedAtText?.let { syncedAt ->
-            Text(
-                stringResource(Res.string.settings_last_synced, syncedAt),
-                style = MaterialTheme.typography.labelSmall,
-                color = contentColor.copy(alpha = 0.8f),
-                modifier = Modifier.padding(start = 28.dp, top = 2.dp),
-            )
+        // Fixed-height status slot under the provider name (only the connected row ever has
+        // content here) — reserved unconditionally so a sync starting or finishing never changes
+        // this row's height (the ui-guidelines skill's layout-stability rule). In priority order:
+        // live progress (statusText — a sync phase or "disconnecting…"), then the last-synced
+        // subtitle, then nothing. Its own full-width line so it never wraps against the trailing
+        // action buttons.
+        Box(Modifier.height(statusSlotHeight)) {
+            when {
+                statusText != null -> Row(
+                    modifier = Modifier.padding(start = 28.dp, top = CLOUD_STATUS_SLOT_TOP_PADDING),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SmallSpinner(size = 12.dp, color = contentColor)
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        statusText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = contentColor.copy(alpha = 0.8f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                lastSyncedAtText != null -> Text(
+                    stringResource(Res.string.settings_last_synced, lastSyncedAtText),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = contentColor.copy(alpha = 0.8f),
+                    modifier = Modifier.padding(start = 28.dp, top = CLOUD_STATUS_SLOT_TOP_PADDING),
+                )
+            }
         }
         // An in-progress sync failure (already localized per exception type) takes precedence: it
         // describes the live state of a working connection, whereas `failed` only reports that the

@@ -18,8 +18,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -54,6 +56,7 @@ import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.OpmlImporter
 import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.domain.SyncPhase
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.domain.TagRepository
@@ -106,6 +109,26 @@ private class AlwaysFailingCloudStorage : CloudStorage {
     override suspend fun delete(path: String): Result<Unit> = fail()
     override suspend fun rename(from: String, to: String): Result<Unit> = fail()
     override suspend fun metadata(path: String): Result<CloudFileMeta?> = fail()
+}
+
+/**
+ * A [CloudStorage] whose [metadata] suspends until [gate] resolves — for exercising the in-flight
+ * state of a still-running sync, the same way [SuspendingFileSelector] does for an OPML import.
+ * Every other method fails cleanly (never called in the "first sync ever" path this drives: two
+ * gated [metadata] calls — compressed then legacy, both absent — land on [create]).
+ */
+private class GatedCloudStorage(private val gate: CompletableDeferred<Unit>) : CloudStorage {
+    private fun <T> fail(): Result<T> = Result.Err(CloudAuthException("not used by this test"))
+    override suspend fun authenticate(): Result<Unit> = Result.Ok(Unit)
+    override suspend fun metadata(path: String): Result<CloudFileMeta?> {
+        gate.await()
+        return Result.Ok(null)
+    }
+    override suspend fun download(path: String, destPath: String): Result<CloudFileMeta> = fail()
+    override suspend fun upload(path: String, sourcePath: String, expectedRev: String?): Result<CloudFileMeta> = fail()
+    override suspend fun create(path: String, sourcePath: String): Result<CloudFileMeta> = fail()
+    override suspend fun delete(path: String): Result<Unit> = Result.Ok(Unit)
+    override suspend fun rename(from: String, to: String): Result<Unit> = Result.Ok(Unit)
 }
 
 /**
@@ -497,6 +520,133 @@ class SettingsViewModelTest {
         assertNull(vm.connectFailedType)
         assertNull(vm.localSettings.value.cloudStorageType)
         assertNull(tokenStorage.load())
+    }
+
+    /**
+     * The split this whole feature exists to fix: once OAuth and token save finish, connectingType
+     * must drop to null immediately — before the (potentially long) initial sync starts — while
+     * initialSyncingType picks up covering that sync. Without this split, the cloud-sync tab's
+     * "reset"/"switch provider" buttons stay correctly blocked, but so did "disconnect" (the bug),
+     * which must not be gated on the same flag.
+     */
+    @Test
+    fun initialSyncKeepsConnectingTypeClearWhileSettingInitialSyncingType() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val vm = newViewModel(syncCloudProvider = { GatedCloudStorage(gate) })
+        assertNull(vm.initialSyncingType)
+
+        vm.connect(CloudStorageType.DROPBOX)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(CloudStorageType.DROPBOX, vm.connectedType)
+        assertNull(vm.connectingType)
+        assertEquals(CloudStorageType.DROPBOX, vm.initialSyncingType)
+
+        gate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+
+        assertNull(vm.initialSyncingType)
+    }
+
+    @Test
+    fun syncPhaseMirrorsSyncRepositoryDuringTheInitialSync() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val vm = newViewModel(syncCloudProvider = { GatedCloudStorage(gate) })
+        assertEquals(SyncPhase.IDLE, vm.syncPhase)
+
+        vm.connect(CloudStorageType.DROPBOX)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(SyncPhase.CHECKING, vm.syncPhase)
+
+        gate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(SyncPhase.IDLE, vm.syncPhase)
+    }
+
+    /**
+     * A manual "sync now" from Home (or anywhere else) also travels through [SyncRepository.syncPhase],
+     * so the ViewModel's collector must mirror it even when this ViewModel didn't start the sync.
+     */
+    @Test
+    fun syncPhaseMirrorsSyncRepositoryDuringManualSync() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val vm = newViewModel(syncCloudProvider = { GatedCloudStorage(gate) })
+        assertEquals(SyncPhase.IDLE, vm.syncPhase)
+
+        // Drive the sync through the repository directly, not through vm.connect().
+        val syncJob = launch { createdSyncRepository.sync() }
+        advanceUntilIdle()
+
+        assertEquals(SyncPhase.CHECKING, vm.syncPhase)
+
+        gate.complete(Unit)
+        syncJob.join()
+
+        assertEquals(SyncPhase.IDLE, vm.syncPhase)
+    }
+
+    // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
+    // lastSyncedAtTextRefreshesWhenActivityCenterReportsSyncCompletion above — ActivityCenter.syncing
+    // is derived via a map{}.stateIn(...) pipeline that runs independently of any virtual scheduler,
+    // so both the true and the false side of the transition are polled with real wall-clock waits.
+    @Test
+    fun syncingMirrorsActivityCenter() {
+        val activityCenter = trackedActivityCenter()
+        val vm = newViewModel(activityCenter = activityCenter)
+        assertFalse(vm.syncing)
+
+        val job = CoroutineScope(Dispatchers.Default).launch {
+            activityCenter.trackSync { delay(200) }
+        }
+
+        awaitTrue { vm.syncing }
+        awaitTrue { !vm.syncing }
+        runBlocking { job.join() }
+    }
+
+    // Note: same reason as syncingMirrorsActivityCenter above — ActivityCenter.syncing is derived
+    // via a map{}.stateIn(...) pipeline outside any virtual scheduler, so this polls with real
+    // wall-clock waits. Regression test for a `drop(1)`-based bug: the syncing collector used to
+    // skip the subscription-time replay of ActivityCenter.syncing on the assumption it always
+    // matched the value the property initializer had already captured. That assumption can fail
+    // when a sync is already running before the ViewModel is even constructed (e.g. the background
+    // loop already syncing when Settings is opened) — the transition back to false can then race
+    // past the subscription point and get silently dropped, leaving `syncing` stuck true forever.
+    @Test
+    fun syncingReflectsActivityCenterAcrossAFullCycleEvenWhenAlreadyRunningAtConstruction() {
+        val activityCenter = trackedActivityCenter()
+        val gate = CompletableDeferred<Unit>()
+        val job = CoroutineScope(Dispatchers.Default).launch {
+            activityCenter.trackSync { gate.await() }
+        }
+        awaitTrue { activityCenter.syncing.value }
+
+        val vm = newViewModel(activityCenter = activityCenter)
+        assertTrue(vm.syncing)
+
+        gate.complete(Unit)
+        awaitTrue { !vm.syncing }
+        runBlocking { job.join() }
+    }
+
+    // Note: same reason as disconnectClearsConnectedTypeAndCloudStorageType below — disconnect
+    // performs a real (mocked) HTTP revoke call whose completion is dispatched on a real thread
+    // outside the TestCoroutineScheduler, so we poll with real wall-clock waits instead.
+    @Test
+    fun disconnectSetsDisconnectingUntilTeardownCompletes() {
+        val tokenStorage = FakeTokenStorage()
+        tokenStorage.save(OAuthTokens("AT"))
+        val vm = newViewModel(tokenStorage = tokenStorage)
+        assertEquals(CloudStorageType.DROPBOX, vm.connectedType)
+        assertFalse(vm.disconnecting)
+
+        vm.disconnect()
+        assertTrue(vm.disconnecting)
+
+        awaitTrue { vm.connectedType == null && !vm.disconnecting }
+        assertFalse(vm.disconnecting)
     }
 
     @Test
