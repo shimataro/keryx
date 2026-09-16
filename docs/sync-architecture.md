@@ -115,7 +115,7 @@ are also called inside that lock rather than after it: all four fields the clear
 `lastSyncError`, `autoSyncSuspended`) are written by a sync too. Without the shared lock, a sync already in flight
 could finish *after* the disconnect and restore the markers describing the provider that was just torn down —
 reintroducing exactly the skipped-download-never-merged case the clear exists to prevent. The cost is that
-disconnecting waits out an in-flight sync (bounded by the HTTP timeouts, and visible as the usual sync spinner) —
+disconnecting waits out an in-flight sync (bounded by the HTTP timeouts) —
 `SettingsViewModel.disconnecting` covers this whole wait, so the cloud-sync tab shows "disconnecting…" for it
 rather than looking stuck — which is the correct ordering anyway.
 
