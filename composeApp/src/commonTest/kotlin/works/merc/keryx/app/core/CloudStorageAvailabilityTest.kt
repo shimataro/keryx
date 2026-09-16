@@ -8,7 +8,9 @@ class CloudStorageAvailabilityTest {
 
     @Test
     fun filtersOutUnavailableBackends() {
-        // Android's actual combination: Dropbox and OneDrive configured, Google Drive never.
+        // Android on a device without Play services (a de-Googled ROM): Dropbox and OneDrive are
+        // configured, but Google Drive has no authorization path there at all — see
+        // CloudStorageAvailability.android.kt.
         assertEquals(
             listOf(CloudStorageType.DROPBOX, CloudStorageType.ONEDRIVE),
             availableCloudStorageTypes(dropbox = true, googleDrive = false, oneDrive = true),

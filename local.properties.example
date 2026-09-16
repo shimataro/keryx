@@ -22,6 +22,9 @@ dropbox.app.key=
 #   Default: (empty)
 # Leave empty (or omit) to disable Google Drive sync — the Google Drive
 # option is then hidden from the Setup / Settings screens.
+# Desktop only: Android reaches Google Drive through Play services instead, so its
+# availability there depends on the device having Google Play services, not on this
+# key. See docs/build.md's "Android" section.
 # See docs/build.md for how to obtain a Client ID.
 googledrive.client.id=
 

@@ -113,13 +113,31 @@ OneDrive は Dropbox と同じカスタム URI スキーム（`keryx://oauth2/ca
 
 ### Android
 
-Android が対応するのは **Dropbox と OneDrive のみ** — 設定方法は上記と同じく、`local.properties`
-の `dropbox.app.key` / `onedrive.client.id`（またはそれぞれの環境変数 `DROPBOX_APP_KEY` /
-`ONEDRIVE_CLIENT_ID`）を設定する。Google Drive のキーは Android ビルドには
-影響しない。**Google Drive が Android で提供されないのは**、そのデスクトップ用 OAuth 構成
-（loopback リダイレクト + `client_secret`）を Android では再利用できないため —
-背景となる調査は `external-spec.md` §4 と `sync-architecture.md` の "Google Drive on Android"
-を参照。
+Dropbox と OneDrive は上記と同じ `local.properties` のキー（`dropbox.app.key` /
+`onedrive.client.id`、またはそれぞれの環境変数 `DROPBOX_APP_KEY` / `ONEDRIVE_CLIENT_ID`）を使う。
+
+**Android の Google Drive は別経路** — Play 開発者サービスの `AuthorizationClient` を使う。Google が
+Android OAuth クライアント種別に対してカスタム URI とループバックの両リダイレクトを廃止しているため
+（`sync-architecture.ja.md` の「Android での Google Drive」参照）。**クライアントシークレットも
+バックエンドも不要**で、上記の `googledrive.client.*` キーは Android ビルドには影響しない。
+代わりに必要なのは、このアプリの同一性に対して登録された OAuth クライアントである:
+
+1. デスクトップ用クライアントと **同じ Cloud プロジェクト** で（これは重要: `appDataFolder` は
+   プロジェクト単位でスコープされるため、プロジェクトを共有していることがスマートフォンと
+   デスクトップで同じ同期ファイルを見られる根拠になる）、「Google Auth Platform」→「クライアント」→
+   「クライアントを作成」からアプリケーションの種類 **「Android」** を選ぶ。
+2. パッケージ名: `works.merc.keryx`。
+3. 署名証明書の SHA-1。**実際に動かす署名鍵ごとにクライアントを 1 つずつ**登録する:
+   - リリース鍵（本ドキュメントの Android 署名の節を参照 — GitHub 配布の APK と Play へのアップロードは
+     同じ鍵なので、1 エントリで両チャネルをカバーする）
+   - ローカルの **debug** キーストア。登録しないと `installGithubDebug` ビルドでは認可がまったく通らない
+     （`keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android`）
+4. クライアント ID もシークレットもプロジェクトには取り込まない — Play 開発者サービスが実行時に
+   パッケージ名 + 署名証明書でアプリを照合する。未登録の鍵は、ビルドエラーではなく端末上での
+   認可失敗として現れる。
+
+Google Drive が提供されるのは Google Play 開発者サービスのある端末のみで、脱 Google の ROM では
+Dropbox / OneDrive / ローカルのみが表示される。
 
 デスクトップでは `keryx://` の受け口に OS レベルの登録手順が必要だった（上記の各サービスの
 説明を参照）のに対し、Android は `androidApp/src/main/AndroidManifest.xml` 内のマニフェスト

@@ -255,7 +255,7 @@ Redirect reception method is chosen per provider (see the `.claude/rules/cloud-o
     `OneDriveAuthManager.revoke` is a no-op and disconnect just clears the stored tokens. Optimistic
     concurrency uses the DriveItem `eTag` as the `rev`, sent back via `If-Match` (412 → conflict);
     `create` uses `@microsoft.graph.conflictBehavior=fail` (409 → conflict).
-- **Google Drive — Loopback** (`LoopbackRedirectTransport`): Google's "Desktop app" client does not allow arbitrary custom schemes; only `http://127.0.0.1:<port>` loopback is accepted. A temporary HTTP server (`com.sun.net.httpserver`; `jdk.httpserver` module is bundled) is started to receive the redirect and stopped after reception. No OS scheme registration is required (`keryx://` registration remains for Dropbox / OneDrive). **Unlike Dropbox, the client secret (`GOOGLE_DRIVE_CLIENT_SECRET`) is also sent for both token exchange and refresh** — despite using PKCE, Google's "Desktop app" OAuth client is not treated as a full public client like iOS/Android, and Google's token endpoint rejects token exchange / refresh without `client_secret` with `invalid_request: client_secret is missing` (regardless of PKCE). Scope is `drive.appdata` only (app-specific hidden folder in the user's Drive). During development, set the OAuth consent screen to "Testing" and register test users.
+- **Google Drive (desktop only) — Loopback** (`LoopbackRedirectTransport`): Android does not use this flow at all — see "Google Drive on Android" below. Google's "Desktop app" client does not allow arbitrary custom schemes; only `http://127.0.0.1:<port>` loopback is accepted. A temporary HTTP server (`com.sun.net.httpserver`; `jdk.httpserver` module is bundled) is started to receive the redirect and stopped after reception. No OS scheme registration is required (`keryx://` registration remains for Dropbox / OneDrive). **Unlike Dropbox, the client secret (`GOOGLE_DRIVE_CLIENT_SECRET`) is also sent for both token exchange and refresh** — despite using PKCE, Google's "Desktop app" OAuth client is not treated as a full public client like iOS/Android, and Google's token endpoint rejects token exchange / refresh without `client_secret` with `invalid_request: client_secret is missing` (regardless of PKCE). Scope is `drive.appdata` only (app-specific hidden folder in the user's Drive). During development, set the OAuth consent screen to "Testing" and register test users.
 
 How the scheme is registered with the OS differs per platform. macOS declares it in Info.plist (`CFBundleURLTypes`) at packaging time. Windows and Linux register it at startup, from `registerFileAssociations()`: the Windows path writes `HKEY_CURRENT_USER\Software\Classes\keryx` (the per-user hive, so no admin elevation is needed), the Linux path writes a user-level `.desktop` entry (`$XDG_DATA_HOME/applications/keryx-url-handler.desktop`, default `~/.local/share/applications/keryx-url-handler.desktop`) and a `$XDG_CONFIG_HOME/mimeapps.list` (default `~/.config/mimeapps.list`) association via `LinuxUriSchemeRegistrar`. The Linux entry's `Exec` line must end in `%u` — without it the desktop-entry spec does not hand the URI to the process, and the browser cannot resolve the scheme at all (an "unknown protocol" error). On both platforms the OS then launches the app with the URL as a command-line argument, which `main.kt` forwards to the running instance via single-instance.
 
@@ -282,37 +282,67 @@ How the scheme is registered with the OS differs per platform. macOS declares it
 > [!NOTE]
 > **Custom-URI providers on every desktop OS**: `./gradlew :composeApp:run` cannot complete Dropbox / OneDrive linking. On macOS, LaunchServices routes `keryx://` to the packaged `Keryx.app`, so the `gradlew run` instance never receives the redirect. On Windows and Linux, the startup registration deliberately no-ops unless the process is a packaged launcher (`packagedLauncherPath()`), because registering the JDK's own `java` binary as the `keryx://` handler would outlive the Gradle run. To test/perform linking, build the app with `./gradlew :composeApp:createDistributable` and launch it (see [setup.md](setup.md) for details). Google Drive uses loopback reception, so this restriction does not apply and `gradlew run` can complete linking. Android has no such restriction either way — the manifest-declared `intent-filter` works the same whether the APK was built via `installGithubDebug` or a release pipeline.
 
-### Google Drive on Android (not supported)
+### Google Drive on Android (Play services `AuthorizationClient`)
 
-Desktop's Google Drive configuration — a "Desktop app" OAuth client using loopback redirect plus a
-`client_secret` sent on every token exchange/refresh — cannot be reused on Android.
+Android reaches Google Drive through a different mechanism than every other provider-platform pair
+here: Play services' `AuthorizationClient`, not a browser redirect. `data/cloud/PlayServicesGoogleDriveAuth.kt`
+holds the whole of it.
 
-- **This is a Google policy decision, not a general Android restriction.** Google's current
-  documentation is explicit about this (Dropbox and OneDrive both use — and, for Dropbox,
-  officially recommend — a plain custom-URI-scheme redirect on Android with PKCE): a
-  custom-URI-scheme redirect is not supported for Google's Android/Chrome-app client type (cited
-  reason: app-impersonation risk), and the loopback redirect is separately deprecated for that same
-  client type.
-- **The platform's own recommended replacement doesn't fit either.** Play services'
-  `AuthorizationClient` — Google's own recommended path for accessing Google user data from Android
-  — would both add a Play-services runtime dependency (in tension with this app's local-first,
-  no-account positioning) and still require a server-side `client_secret` exchange to obtain a
-  refresh token (`AuthorizationResult.getServerAuthCode()`'s code is meant to be redeemed by a
-  backend, not embedded in an APK).
-- **Current state.** Neither tradeoff is a small addition, so Google Drive support on Android is
-  deferred to its own future investigation rather than folded into the phase that added
-  Dropbox/OneDrive; `core/CloudStorageAvailability.android.kt` fixes `googleDriveAvailable = false`
-  and its own KDoc links back here.
+- **Why the desktop configuration cannot be reused.** Google's OAuth policy deprecates *both*
+  redirect styles for its Android client type — the custom URI scheme (cited reason: app
+  impersonation risk) and, separately, the loopback redirect. That leaves no redirect-based flow to
+  run, so desktop's "Desktop app" client (loopback + `client_secret`) has no Android equivalent.
+  This is a Google-specific policy decision, not a general Android restriction: Dropbox's and
+  OneDrive's custom-URI redirects work identically on Android.
+- **What `AuthorizationClient` gives instead.** `authorize()` with the `drive.appdata` scope returns
+  a short-lived (one hour) access token directly on the device. The first call shows the consent
+  screen via a `PendingIntent`; every later call answers **without user interaction** for as long as
+  the grant stands. Play services owns the grant, so there is **no refresh token, no `client_secret`
+  and no backend server** — a backend is only required for the *offline* variant
+  (`AuthorizationResult.getServerAuthCode()`), which is deliberately not used here.
+- **No client id in the build.** The Android OAuth client is matched by package name + signing
+  certificate SHA-1, registered in the Cloud Console (see [build.md](build.md)); nothing is read
+  from `BuildConfig`. A build signed with an unregistered key therefore fails at `authorize()` time
+  rather than at build time. `CloudSession.Provider.clientId` still has to be non-empty (it doubles
+  as "is this backend configured in this build"), so `PlatformModule.android.kt` passes the
+  placeholder `"play-services"` — not an OAuth client id.
+- **Gated on the device, not on the distribution channel.** `CloudStorageAvailability.googleDriveAvailable`
+  is `GoogleApiAvailability.isGooglePlayServicesAvailable(...) == SUCCESS`, evaluated once per
+  process, and `platformModule` registers the provider only when that holds. A de-Googled ROM
+  (GrapheneOS, LineageOS without GApps) simply never sees Google Drive offered; Dropbox, OneDrive
+  and local-only are unaffected. Deliberately **not** keyed on the `github`/`play` product flavor —
+  a play-flavored APK can be sideloaded and a github-flavored one runs fine where Play services
+  exists, the same reasoning `AndroidUpdateInstaller` applies to `REQUEST_INSTALL_PACKAGES`.
+- **Token lifecycle inside `CloudSession`.** Because there is no refresh token, the ordinary
+  stored-token path would fall through to `validAccessToken`'s "expired with no refresh token"
+  branch and hand out a token that is already dead. `CloudSession.Provider.accessTokenProvider`
+  overrides the token supply for exactly this case: each cloud request asks Play services again
+  (with `allowUserInteraction = false`, since a request — least of all the `WorkManager` background
+  sync — must never open a consent screen on its own). The connect's token is still written to
+  `KeystoreTokenStorage`, but only so `connectedType()` reports the account as connected after a
+  restart; its `expiresAtMillis` is `null` because Play services does not report an expiry and
+  guessing one would be worse than admitting it is unknown.
+- **Re-consent.** When the user withdraws the grant in their Google account, the token supply
+  answers `null`, `withCloudToken` turns that into `CloudAuthException`, and the existing sync
+  error path records it in the notification center with a `ShowSettingsTab("cloud_sync")` action —
+  the same treatment an expired Dropbox refresh token gets.
+- **Disconnect.** `PlayServicesGoogleDriveAuthManager.revoke` ignores the stored access token (an
+  hour old by then, so Google's revoke endpoint would reject it), fetches a fresh one without user
+  interaction, and POSTs it to `GOOGLE_REVOKE_ENDPOINT`. If even that is unavailable it reports
+  success rather than opening a consent screen in the middle of a disconnect; `CloudSession.disconnect`
+  clears the local tokens either way.
+- **The consent screen needs an Activity.** `AuthorizationClient` answers with a `PendingIntent`
+  that only an Activity can start for a result, so `platform/AndroidAuthorizationHost.kt` bridges
+  `MainActivity`'s `StartIntentSenderForResult` launcher to the connect flow — the same shape, and
+  for the same reason, as `AndroidFilePickerHost`. With no Activity attached the launch resolves to
+  `null`, which is the correct background outcome.
 
-#### Future Consideration (Google Drive on Android)
+`appDataFolder` is scoped **per Cloud project, not per OAuth client**, so adding an Android client
+alongside the existing desktop one leaves both devices reading and writing the same hidden folder —
+verified by listing `appDataFolder` from a second OAuth client in the same project and seeing the
+file the desktop app had created. Without that property, desktop and Android would silently sync to
+separate files.
 
-Bringing Google Drive support to Android is blocked by Google's own OAuth client-type policy rather than a general Android limitation. Evaluated paths and their blockers:
-
-- **Play services `AuthorizationClient`** — Google's recommended Android path for accessing Google user data. It requires a backend server to exchange the server auth code (`AuthorizationResult.getServerAuthCode()`) for a refresh token using `client_secret`; embedding that secret in the APK is not supported and would be extractable. It also adds a Play services runtime dependency, which conflicts with Keryx's local-first, no-account positioning. Additionally, `WorkManager` background sync has no `Activity`, so it cannot launch the interactive `PendingIntent` resolution that `AuthorizationClient.authorize()` may require when no existing authorization is present; an already-granted authorization can still be used from a `Context`.
-- **"Web application" OAuth client type** — Normally restricted to `https://` redirect URIs, with `http://localhost` / loopback addresses as documented exceptions. It still cannot use a custom URI scheme (`keryx://`), and Google's loopback policy blocks this flow for Android/Chrome-app client types, so it is unsuitable for a native Android app.
-- **"Desktop app" OAuth client type (used on desktop)** — Loopback redirect is deprecated for Android/Chrome-app clients, and sending `client_secret` from an embedded client is both discouraged and a security risk on a mobile APK.
-
-Until Google offers a backend-server-free OAuth flow for native Android apps (e.g., a true PKCE public client for Google Drive with custom-URI-scheme support), or until Keryx adopts an architecture that includes a backend token-exchange service, Google Drive support on Android remains a **future consideration** rather than a planned near-term feature.
 
 ### Token Storage
 
@@ -347,6 +377,13 @@ Until Google offers a backend-server-free OAuth flow for native Android apps (e.
     reporting `SECURE`.
 - macOS performs a **read-back verification** after writing (explicitly specifying login keychain), and falls back to file if persistence cannot be confirmed. **Write persistence is session-dependent**: packaged version (GUI login session) persists to login keychain, but `gradlew run` (detached session under Gradle daemon via launchd) may not persist even if `security add` returns success, so file is used. **Read is possible from either session** (once linked via packaged version, `gradlew run` can also reuse the connection).
 - **Android**:
+  - **Google Drive is the exception to everything in this section.** Its tokens are owned by Play
+    services, not by this app (see "Google Drive on Android" above): no refresh token is ever
+    stored, and the access token that *is* written here exists only so a restart still reports the
+    account as connected — the tokens actually used for requests are fetched from Play services on
+    demand. Everything below applies to it in mechanism (same `KeystoreTokenStorage`, same fallback
+    and outcome reporting) but guards a far less sensitive secret: a one-hour access token rather
+    than a long-lived refresh token.
   - **Encryption.** `KeystoreTokenStorage` encrypts the token JSON with an AES-256/GCM key held in
     the Android Keystore (one key alias per provider, derived from `CloudStorageType.id`; the key
     material itself never leaves the Keystore/TEE where the device supports it) and writes

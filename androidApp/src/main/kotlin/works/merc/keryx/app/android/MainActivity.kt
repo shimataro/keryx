@@ -13,6 +13,7 @@ import org.koin.mp.KoinPlatform
 import works.merc.keryx.app.App
 import works.merc.keryx.app.dispatchOAuthCallbackIfPresent
 import works.merc.keryx.app.handleOpmlOpenIfPresent
+import works.merc.keryx.app.platform.AndroidAuthorizationHost
 import works.merc.keryx.app.platform.AndroidFilePickerHost
 import works.merc.keryx.app.runAndroidStartupTasks
 
@@ -40,6 +41,15 @@ class MainActivity : ComponentActivity() {
         AndroidFilePickerHost.onCreateResult(uri)
     }
 
+    // Google Drive's consent screen (Play services' AuthorizationClient answers with a
+    // PendingIntent when the scope has not been granted yet). Registered here for the same reason
+    // as the two launchers above, and handed to the same kind of process-wide host — see
+    // AndroidAuthorizationHost's KDoc.
+    private val authorizationLauncher =
+        registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+            AndroidAuthorizationHost.onResult(result)
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -48,6 +58,7 @@ class MainActivity : ComponentActivity() {
         }
 
         AndroidFilePickerHost.attach(openDocumentLauncher, createDocumentLauncher)
+        AndroidAuthorizationHost.attach(authorizationLauncher)
 
         val koin = KoinPlatform.getKoin()
         dispatchIncomingViewIntent(koin)
@@ -64,6 +75,7 @@ class MainActivity : ComponentActivity() {
         // in-flight SAF picker that is still running independently — see AndroidFilePickerHost's
         // own KDoc for why a still-pending request must survive that, not just permanent finish.
         AndroidFilePickerHost.detach(retainPending = isChangingConfigurations)
+        AndroidAuthorizationHost.detach(retainPending = isChangingConfigurations)
         super.onDestroy()
     }
 

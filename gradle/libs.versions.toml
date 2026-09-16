@@ -46,6 +46,10 @@ compose-material3 = "1.9.0"
 androidx-activity-compose = "1.13.0"
 androidx-core-ktx = "1.19.0"
 androidx-work = "2.11.2"
+# Google Drive's Android authorization path (AuthorizationClient). Brings play-services-base in
+# transitively, which is where GoogleApiAvailability — the "is Google Drive offerable on this
+# device" check in CloudStorageAvailability.android.kt — lives.
+play-services-auth = "22.0.0"
 # Test-only, used by composeApp's androidDeviceTest source set (instrumented tests for
 # DatabaseMerger/DatabaseSnapshot's Android actuals, which need a real device/emulator to load
 # the bundled SQLite native library).
@@ -112,6 +116,7 @@ androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidx
 # work-runtime, not work-runtime-ktx: CoroutineWorker and the other Kotlin-specific APIs moved
 # into the main artifact as of 2.9.0, leaving work-runtime-ktx empty (see its own release notes).
 androidx-work = { module = "androidx.work:work-runtime", version.ref = "androidx-work" }
+play-services-auth = { module = "com.google.android.gms:play-services-auth", version.ref = "play-services-auth" }
 
 # --- Koin (dependency injection) ---
 koin-core = { module = "io.insert-koin:koin-core", version.ref = "koin" }
