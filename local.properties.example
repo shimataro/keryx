@@ -20,11 +20,12 @@ dropbox.app.key=
 #   Gradle property: -PgoogleDriveClientId=...
 #   Environment variable: GOOGLE_DRIVE_CLIENT_ID
 #   Default: (empty)
-# Leave empty (or omit) to disable Google Drive sync — the Google Drive
-# option is then hidden from the Setup / Settings screens.
-# Desktop only: Android reaches Google Drive through Play services instead, so its
-# availability there depends on the device having Google Play services, not on this
-# key. See docs/build.md's "Android" section.
+# Leave empty (or omit) to disable Google Drive sync on desktop — the Google Drive
+# option is then hidden from the Setup / Settings screens there.
+# This key is a desktop-only switch, not an Android feature gate: Android reaches Google
+# Drive through Play services instead, so its availability there depends on the device's
+# Google Play services being installed, enabled and up to date, not on this key.
+# See docs/build.md's "Android" section.
 # See docs/build.md for how to obtain a Client ID.
 googledrive.client.id=
 
