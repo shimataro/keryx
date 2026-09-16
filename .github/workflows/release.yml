@@ -486,10 +486,11 @@ jobs:
           echo "path=$keystore_path" >> "$GITHUB_OUTPUT"
 
       - name: Build Android release packages
-        # No GOOGLE_DRIVE_CLIENT_ID/SECRET here (unlike the desktop packaging jobs below): Google
-        # Drive has no Android provider (see CloudStorageAvailability.android.kt), and the client
-        # secret now generates into DesktopBuildConfig, which is only attached to desktopMain's
-        # srcDir — so it isn't a build input for :androidApp at all.
+        # No GOOGLE_DRIVE_CLIENT_ID/SECRET here (unlike the desktop packaging jobs below): Android's
+        # Google Drive provider carries neither, since Play services identifies the app by package
+        # name + signing certificate (see PlayServicesGoogleDriveAuth.kt), and the client secret now
+        # generates into DesktopBuildConfig, which is only attached to desktopMain's srcDir — so it
+        # isn't a build input for :androidApp at all.
         # androidReleaseSigningRequired turns a missing/half-configured secret above into a hard
         # build failure instead of androidApp/build.gradle.kts's own local-dev fallback (an
         # unsigned APK) — this job publishes its output, so it must never succeed unsigned.
