@@ -102,7 +102,7 @@ sealed class KeryxException(message: String) : Exception(message) {
 | --- | --- | --- |
 | `OpenUrl(url)` | 新バージョン通知（アプリ内アップデート経路が無い場合——`UpdatePlan.OpenReleasePage`/`NotOffered`。[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照） | リリースページを外部ブラウザで開く |
 | `ShowFeedDetail(feedId)` | フィード消失(410) / URL 変更(301/308) | フィード一覧で該当フィードを選択（一覧をクリックしたときと同じ）。狭い幅ではフィード一覧はペインではなくモーダルナビゲーションドロワーであり、バックグラウンドの通知でこれを不意に開くのは驚きの副作用になってしまうため、ドロワーには触れずそのフィードの記事一覧まで進む — `ui/home/HomePaneLayout.kt` の `paneForFeedDetail` を参照 |
-| `ShowSettingsTab(tabId)` | 同期エラー（`SchemaVersionException` は `updates`、その他は `cloud_sync`）；アプリ内アップデート経路がある場合の新バージョン通知（`updates`） | 設定ダイアログを該当タブで開く。`cloud_sync` タブは `SyncRepository.lastSyncError` を失敗理由として表示し、`updates` タブは開いた時点で自動的に更新確認を行う |
+| `ShowSettingsTab(tabId)` | 同期エラー（`SchemaVersionException` は `updates`、その他は `cloud_sync`）；アプリ内アップデート経路がある場合の新バージョン通知（`updates`） | 設定ダイアログを該当タブで開く。`cloud_sync` タブは `SyncRepository.lastSyncError` を失敗理由として表示し、その理由が認証失敗のとき（`SyncRepository.lastSyncAuthFailed`）は接続済みプロバイダの「同期データをリセット」に代えて**連携し直す**アクションを提示する。`updates` タブは開いた時点で自動的に更新確認を行う |
 | `ShowInfoDialog(detail)` | macOS の translocated 警告 | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
 | `ShowInfoDialog(detail)` | トークンが平文ファイルに残ったとき（`CloudSession`）——`TokenStorage.save()` が `TokenSaveOutcome.PLAINTEXT_FILE` を返した場合。OS のセキュアな認証情報ストアに到達できなかったか、（Android で）セキュアな書き込みは成功したが古い平文のコピーを削除できなかった場合 | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
 | `ShowInfoDialog(detail)` | トークンをどこにも保存できなかったとき（`CloudSession`）——セキュアストアにも平文フォールバックファイルにも書き込めず `TokenSaveOutcome.NOT_PERSISTED` が返った場合。再起動後に再接続が必要 | 原因と対処法の説明ダイアログを表示（画面遷移しない） |

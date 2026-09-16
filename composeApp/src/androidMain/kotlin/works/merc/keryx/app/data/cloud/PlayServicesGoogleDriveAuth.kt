@@ -167,9 +167,27 @@ internal fun tokenFrom(accessToken: String?, grantedScopes: List<String>): Resul
 class PlayServicesConnectFlow(
     private val authorization: PlayServicesAuthorization,
 ) : CloudConnectFlow {
-    override suspend fun connect(): Result<OAuthTokens> =
-        authorization.accessToken(allowUserInteraction = true)
+    /**
+     * Drops whatever token Play services still has cached *before* asking for one.
+     *
+     * Connecting is an explicit user action, so it must be authoritative rather than trusting Play
+     * services' cached view. When the grant was withdrawn outside this app — the user removing
+     * Keryx at myaccount.google.com/connections, say — Play services keeps answering with the
+     * token it cached, successfully and with `hasResolution()` clear. Without this, pressing
+     * "connect" (the obvious thing to do when sync reports an authentication failure) would appear
+     * to succeed while every Drive request kept failing with 401, and nothing the user could do
+     * from inside the app would fix it.
+     *
+     * Costs one extra Play services round trip per explicit connect, and nothing else: if the grant
+     * is still good, Play services simply mints a new token and no consent screen appears. This
+     * also covers a stale cache arriving by any other route, not just an external revoke.
+     */
+    override suspend fun connect(): Result<OAuthTokens> {
+        authorization.accessToken(allowUserInteraction = false).valueOrNull
+            ?.let { authorization.clearToken(it) }
+        return authorization.accessToken(allowUserInteraction = true)
             .map { OAuthTokens(accessToken = it, refreshToken = null, expiresAtMillis = null) }
+    }
 }
 
 /**

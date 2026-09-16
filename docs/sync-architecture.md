@@ -324,10 +324,29 @@ holds the whole of it.
   `KeystoreTokenStorage`, but only so `connectedType()` reports the account as connected after a
   restart; its `expiresAtMillis` is `null` because Play services does not report an expiry and
   guessing one would be worse than admitting it is unknown.
-- **Re-consent.** When the user withdraws the grant in their Google account, the token supply
-  answers `null`, `withCloudToken` turns that into `CloudAuthException`, and the existing sync
-  error path records it in the notification center with a `ShowSettingsTab("cloud_sync")` action —
-  the same treatment an expired Dropbox refresh token gets.
+- **Re-consent.** When the user withdraws the grant in their Google account, sync starts failing
+  with `CloudAuthException`, which the existing sync error path records in the notification center
+  with a `ShowSettingsTab("cloud_sync")` action — the same treatment an expired Dropbox refresh
+  token gets. Recovering from it needs more than pressing connect again, because a withdrawn grant
+  leaves the stored tokens untouched: `connectedType()` still reports the account as connected, so
+  the row has no connect button in the first place. What repairs it is a disconnect — that is what
+  clears Play services' cached token (see **Disconnect** above) — followed by a connect.
+  `CloudSyncTab` offers exactly that as one action: while `SyncRepository.lastSyncAuthFailed` holds,
+  the connected row's first action becomes **reconnect** (`SettingsViewModel.reconnect`, a teardown
+  plus a fresh connect to the same provider) in place of *reset sync data*. The two swap rather than
+  sitting side by side — a third button would change the row's child count with state and overrun
+  the width desktop's labelled buttons share with the provider name — and they are mutually
+  exclusive anyway: a reset needs a working authorization of its own, so it is precisely the wrong
+  recovery to offer while authorization is what broke. *Disconnect* stays beside it either way, so
+  leaving is never gated on repairing first. Verified on-device end to end.
+
+  `PlayServicesConnectFlow` clears the cached token before requesting one for the same reason,
+  covering the cases where the app is *not* connected but Play services' cache has outlived the
+  grant anyway — a `clearToken` that failed during an earlier disconnect, a reinstall, or app data
+  cleared while the Play services cache survived. Without it, connecting in that state silently
+  succeeds with a dead token. It costs one extra Play services round trip on an explicit user
+  action and changes nothing when the grant is healthy: a fresh token is minted and no consent
+  screen appears (also verified on-device).
 - **Disconnect.** `PlayServicesGoogleDriveAuthManager.revoke` ignores the stored access token (an
   hour old by then, so Google's revoke endpoint would reject it), fetches a fresh one without user
   interaction, and POSTs it to `GOOGLE_REVOKE_ENDPOINT` — the same endpoint desktop uses. If even

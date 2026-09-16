@@ -54,6 +54,7 @@ import works.merc.keryx.app.resources.settings_cloud_abort_connect_confirm_body
 import works.merc.keryx.app.resources.settings_cloud_abort_connect_confirm_title
 import works.merc.keryx.app.resources.settings_cloud_disconnect_confirm_body
 import works.merc.keryx.app.resources.settings_cloud_disconnect_confirm_title
+import works.merc.keryx.app.resources.settings_cloud_reconnect
 import works.merc.keryx.app.resources.settings_cloud_reset
 import works.merc.keryx.app.resources.settings_cloud_reset_confirm_action
 import works.merc.keryx.app.resources.settings_cloud_reset_confirm_body
@@ -116,6 +117,9 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                     // Only meaningful for the connected provider: it's why its background syncs
                     // are currently failing (an expired token, a transient outage, bad cloud data).
                     lastSyncErrorText = if (connected == type) vm.lastSyncErrorText else null,
+                    // Swaps this row's recovery action from "reset sync data" to "reconnect" — see
+                    // CloudProviderRow's own comment for why the two are mutually exclusive.
+                    authFailed = connected == type && vm.lastSyncAuthFailed,
                     resetting = vm.resetting,
                     // No provider connected yet: a fresh connect is low-risk, so do it directly. A
                     // different provider connected: confirm the switch first.
@@ -125,6 +129,7 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                     onCancel = { confirmingAbortConnect = type },
                     onDisconnect = { confirmingDisconnect = type },
                     onResetCloudData = { confirmingResetCloudData = true },
+                    onReconnect = { vm.reconnect() },
                 )
             }
         }
@@ -311,12 +316,14 @@ internal fun CloudProviderRow(
     failed: Boolean,
     lastSyncedAtText: String? = null,
     lastSyncErrorText: String? = null,
+    authFailed: Boolean = false,
     resetting: Boolean = false,
     iconOnly: Boolean = isTouchPrimary,
     onSelect: () -> Unit,
     onCancel: () -> Unit,
     onDisconnect: () -> Unit,
     onResetCloudData: () -> Unit,
+    onReconnect: () -> Unit = {},
 ) {
     // The connected row gets a step-up accent (same secondaryContainer/onSecondaryContainer
     // tokens desktop's settings-dialog tab bar, SecondaryScrollableTabRow, uses for its selected
@@ -362,15 +369,33 @@ internal fun CloudProviderRow(
                 // or a reset in progress, so neither destructive action can be re-triggered mid-op.
                 val enabled = idleEnabled && !resetting
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ProviderActionButton(
-                        label = stringResource(Res.string.settings_cloud_reset),
-                        icon = KeryxIcons.Delete,
-                        onClick = onResetCloudData,
-                        kind = IconButtonKind.Destructive,
-                        enabled = enabled,
-                        busy = resetting,
-                        iconOnly = iconOnly,
-                    )
+                    // One recovery slot, never two: a third button would both change this row's
+                    // child count with state (see the ui-guidelines skill's layout-stability rule)
+                    // and overrun the width desktop's labelled buttons have to share with the
+                    // provider name. The two are mutually exclusive anyway — resetting the cloud
+                    // data needs a working authorization of its own, so it is exactly the wrong
+                    // thing to offer while authorization is what broke. Disconnect stays beside it
+                    // either way, so leaving is never gated on repairing first.
+                    if (authFailed) {
+                        ProviderActionButton(
+                            label = stringResource(Res.string.settings_cloud_reconnect),
+                            icon = KeryxIcons.Refresh,
+                            onClick = onReconnect,
+                            kind = IconButtonKind.Primary,
+                            enabled = enabled,
+                            iconOnly = iconOnly,
+                        )
+                    } else {
+                        ProviderActionButton(
+                            label = stringResource(Res.string.settings_cloud_reset),
+                            icon = KeryxIcons.Delete,
+                            onClick = onResetCloudData,
+                            kind = IconButtonKind.Destructive,
+                            enabled = enabled,
+                            busy = resetting,
+                            iconOnly = iconOnly,
+                        )
+                    }
                     ProviderActionButton(
                         label = stringResource(type.disconnectLabel()),
                         icon = KeryxIcons.LinkOff,

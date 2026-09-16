@@ -193,6 +193,7 @@
     <string name="settings_cloud_switch_confirm_body">This will disconnect %1$s.</string>
     <string name="settings_cloud_switch_confirm_action">Switch</string>
     <string name="settings_cloud_reset">Reset sync data</string>
+    <string name="settings_cloud_reconnect">Reconnect</string>
     <string name="settings_cloud_reset_confirm_title">Reset the cloud sync data?</string>
     <string name="settings_cloud_reset_confirm_body">The cloud sync data will be renamed for safekeeping (keryx-&lt;date-time&gt;.db.bak) and rebuilt from this device’s data. If it can’t be renamed, it will be deleted instead. Safekept data is not removed automatically. Any unsynced changes on other devices may be lost.</string>
     <string name="settings_cloud_reset_confirm_action">Reset</string>
