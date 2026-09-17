@@ -516,3 +516,69 @@ The second was considered and **rejected**: it removes the menu's state indicati
 (or forces a platform-conditional menu shape) to erase a sub-frame artifact on one desktop
 environment. The dynamic label is correct and instant on macOS, Windows, KDE Plasma and the AWT
 fallback, and that is not worth trading away.
+
+## A feed body's own JavaScript runs inside the article reader
+
+**Status**: half fixed — the stylesheet half is closed (the reader's document declares a
+`style-src 'unsafe-inline'` CSP, so an external stylesheet a feed body reaches for is never
+fetched). The script half is deliberately left open: script-based SNS embeds need it, and
+`ArticleWebView`'s link interception exists precisely to keep those embeds working.
+
+### Symptom
+
+On Android, opening `https://alfalfalfa.com/articles/11110022.html` rendered correctly for one to
+two seconds and then restyled itself: the document padding disappeared, the title turned brownish
+red and moved up, the font shrank, headings grew a thick brown left bar, and a "続きを読む" link
+became a blue-violet button. Desktop did not reproduce it.
+
+### Diagnosis
+
+`ui/article/ArticleWebViewHtml.kt` embeds the feed body raw beneath a `<base href>` at the
+article's own origin, and the reader's WebView has JavaScript enabled (`composewebview`'s
+`WebSettings.isJavaScriptEnabled` defaults to `true`; the app overrides only
+`desktopWebSettings.dataDirectory`).
+
+That article's `content:encoded` carries a script that appends `/css/smartphone.css` to
+`document.head` when the user agent matches `/iPhone|iPod|Android.*Mobile|Windows Phone/i`, plus a
+`<link rel="stylesheet">` for the same file inside `<noscript>`, another for
+`https://blogroll.livedoor.net/css/default2.css`, and four ad `<script>` tags. On Android the user
+agent matches, `<base>` resolves the path to `https://alfalfalfa.com/css/smartphone.css`, and the
+sheet applies once fetched — later in the cascade than the reader's own `<style>`, so it wins.
+Every symptom maps to a rule in that sheet:
+
+| Symptom | Rule |
+| --- | --- |
+| padding gone, lines tighten | `html, body, h1, … {margin:0; padding:0}` / `body {line-height:1}` |
+| font shrinks | the same reset's `font-size:100%`, cancelling `html {font-size:N%}` |
+| title turns brownish red | `a:link {color:#a52a2a}` — same specificity as `.article-title a {color:inherit}`, declared later |
+| brown left bar on headings | `div.daily_popular_title {border-left:12px solid #8D4225; color:#532E0C}` |
+| "続きを読む" button | `.article_bodyfooter .readmore a {background:#444499; color:#fff}` |
+
+Desktop is spared only because its user agent fails that script's test, so `smartphone.css` is
+never injected there. The code path itself is shared `commonMain`.
+
+### What was fixed
+
+`articleDocument` now emits `<meta http-equiv="Content-Security-Policy" content="style-src
+'unsafe-inline'">`. With no URL source named for `style-src`, no external stylesheet is fetched —
+statically linked, `@import`ed, or appended by script alike — while `'unsafe-inline'` keeps the
+app's own `<style>` block and the body's `style=""` attributes working. The reader's chrome rules
+additionally carry `!important` as a fallback (see "Article Reader" in
+[app-architecture.md](app-architecture.md)).
+
+### What is deliberately left
+
+No `script-src` is declared, so the body's scripts still run: ad and analytics code executes and
+makes its own network requests, which does not sit comfortably with "no data sent to external
+servers" in [external-spec.md](external-spec.md) §10, and a script can still inject an inline
+`<style>` element (which `'unsafe-inline'` admits — this is what the `!important` chrome rules
+absorb). The trade is intentional: turning JavaScript off would also take script-based SNS embeds
+with it.
+
+### What a real fix would need
+
+Treating the body as untrusted markup rather than only containing its effects — stripping
+`<script>`, `<link>`, `<style>`, `<base>`, `<meta>`, `<noscript>` and `on*` attributes with ksoup
+and setting `isJavaScriptEnabled = false` (SNS embeds then degrade to the `<blockquote>` fallback
+their own embed code ships), or isolating the body in an `<iframe sandbox srcdoc>` so it cannot
+reach the reader's document at all.

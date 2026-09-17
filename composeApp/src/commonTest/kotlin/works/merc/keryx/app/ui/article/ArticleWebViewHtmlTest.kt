@@ -3,6 +3,7 @@ package works.merc.keryx.app.ui.article
 import androidx.compose.ui.graphics.Color
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class ArticleWebViewHtmlTest {
@@ -77,16 +78,18 @@ class ArticleWebViewHtmlTest {
     fun wrapArticleHtmlContainsExpectedColorsAndFontSize() {
         val customTheme = theme.copy(linkColor = Color(1f, 0f, 0f), fontScale = 1.5f)
         val result = wrapArticleHtml(customTheme, title = "", meta = "", body = "<p>body</p>")
-        assertTrue(result.contains("background-color: #ffffff;"))
-        assertTrue(result.contains("color: #000000;"))
+        assertTrue(result.contains("background-color: #ffffff !important;"))
+        assertTrue(result.contains("color: #000000 !important;"))
+        // The content-facing link rule stays plain (no !important) so a feed author's own
+        // style="" attribute can still override it — see articleDocument's <style> comment.
         assertTrue(result.contains("a { color: #ff0000; }"))
-        assertTrue(result.contains("font-size: 150%;"))
+        assertTrue(result.contains("font-size: 150% !important;"))
     }
 
     @Test
     fun wrapArticleHtmlComputesFontPercentForDefaultScale() {
         val result = wrapArticleHtml(theme, title = "", meta = "", body = "<p>body</p>")
-        assertTrue(result.contains("font-size: 100%;"))
+        assertTrue(result.contains("font-size: 100% !important;"))
     }
 
     @Test
@@ -98,7 +101,7 @@ class ArticleWebViewHtmlTest {
         val result = wrapArticleHtml(scaledTheme, title = "", meta = "", body = "<p>body</p>")
         val htmlOnlyRule = Regex("""html\s*\{[^}]*}""").find(result)?.value
         val sharedRule = Regex("""html,\s*body\s*\{[^}]*}""").find(result)?.value
-        assertTrue(htmlOnlyRule != null && htmlOnlyRule.contains("font-size: 150%;"))
+        assertTrue(htmlOnlyRule != null && htmlOnlyRule.contains("font-size: 150% !important;"))
         assertTrue(sharedRule != null && !sharedRule.contains("font-size"))
     }
 
@@ -216,9 +219,14 @@ class ArticleWebViewHtmlTest {
     @Test
     fun wrapArticleHtmlContainsTitleLinkStyles() {
         val result = wrapArticleHtml(theme, title = "My Title", meta = "", body = "<p>body</p>", titleUrl = "https://example.com/article")
-        assertTrue(result.contains(".article-title a { color: inherit; text-decoration: none; cursor: pointer; transition: opacity 0.15s ease; }"))
-        assertTrue(result.contains(".article-title a:hover { opacity: 0.7; }"))
-        assertTrue(result.contains(".article-title a:active { opacity: 0.5; }"))
+        assertTrue(
+            result.contains(
+                ".article-title a { color: inherit !important; text-decoration: none !important; " +
+                    "cursor: pointer !important; transition: opacity 0.15s ease !important; }",
+            ),
+        )
+        assertTrue(result.contains(".article-title a:hover { opacity: 0.7 !important; }"))
+        assertTrue(result.contains(".article-title a:active { opacity: 0.5 !important; }"))
     }
 
     @Test
@@ -264,9 +272,9 @@ class ArticleWebViewHtmlTest {
             articlePlaceholderHtml(scaledTheme, "placeholder"),
         )
         for (document in documents) {
-            assertTrue(document.contains("background-color: #ffffff;"))
-            assertTrue(document.contains("color: #000000;"))
-            assertTrue(document.contains("font-size: 150%;"))
+            assertTrue(document.contains("background-color: #ffffff !important;"))
+            assertTrue(document.contains("color: #000000 !important;"))
+            assertTrue(document.contains("font-size: 150% !important;"))
         }
     }
 
@@ -282,6 +290,61 @@ class ArticleWebViewHtmlTest {
         val c = styleBlockOf(articlePlaceholderHtml(theme, "placeholder"))
         assertEquals(a, b)
         assertEquals(b, c)
+    }
+
+    @Test
+    fun everyDocumentDeclaresAStyleOnlyCsp() {
+        // A feed body is embedded raw below a <base href> at the article's own origin, so it can
+        // load the source site's stylesheet — statically, or by appending a <link> to <head> from
+        // its own script — which would then win over the reader's own <style>. Naming no URL
+        // source for style-src blocks that; 'unsafe-inline' keeps this app's <style> block and the
+        // body's own style="" attributes working. The directive list is asserted exactly because
+        // what is *absent* matters as much as what is present: with no script-src and no
+        // default-src, the body's scripts — and the SNS embeds that need them — keep running.
+        val documents = listOf(
+            wrapArticleHtml(theme, title = "My Title", meta = "meta", body = "<p>body</p>"),
+            articleNoContentHtml(theme, title = "My Title", meta = "meta", message = "empty"),
+            articlePlaceholderHtml(theme, "placeholder"),
+        )
+        for (document in documents) {
+            val csp = Regex("""<meta http-equiv="Content-Security-Policy" content="([^"]*)" />""")
+                .find(document)?.groupValues?.get(1)
+            assertEquals("style-src 'unsafe-inline'", csp)
+        }
+    }
+
+    @Test
+    fun readerChromeRulesCarryImportant() {
+        // Second line of defense behind the CSP above: an engine that ignores a meta CSP, and an
+        // inline <style> the feed body carries (which 'unsafe-inline' still admits), must not be
+        // able to restyle the reader's own chrome. Deliberately limited to that chrome — the
+        // content-facing rules (a, img/video/iframe, table, td/th) stay plain so a feed author's
+        // own style="" attribute can still override them, as it can today.
+        val chromeSelectors = listOf(
+            "html",
+            "html, body",
+            ".article-title",
+            ".article-title a",
+            ".article-title a:hover",
+            ".article-title a:active",
+            ".article-meta",
+            ".article-notice",
+            ".article-placeholder",
+            "body.placeholder",
+        )
+        val document = wrapArticleHtml(theme, title = "My Title", meta = "meta", body = "<p>body</p>")
+        val style = document.substring(document.indexOf("<style>") + "<style>".length, document.indexOf("</style>"))
+        val rules = Regex("""([^{}]+)\{([^}]*)}""").findAll(style).associate { match ->
+            match.groupValues[1].trim().replace(Regex("""\s+"""), " ") to match.groupValues[2]
+        }
+        for (selector in chromeSelectors) {
+            val ruleBody = assertNotNull(rules[selector], "no rule found for selector `$selector`")
+            val declarations = ruleBody.split(";").map { it.trim() }.filter { it.isNotEmpty() }
+            assertTrue(declarations.isNotEmpty(), "rule `$selector` has no declarations")
+            for (declaration in declarations) {
+                assertTrue(declaration.endsWith("!important"), "`$selector` declaration is not !important: $declaration")
+            }
+        }
     }
 
     @Test
