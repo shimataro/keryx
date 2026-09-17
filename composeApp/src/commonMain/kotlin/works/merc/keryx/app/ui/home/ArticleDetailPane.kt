@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -22,6 +23,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -330,15 +332,16 @@ internal fun ArticleDetailPaneContent(
                 // whether the heavyweight pager mounts, so the invariant belongs at this level
                 // too, the same way swipeEnabled above already gates on it.
                 if (readerPaging != null && article != null && isTouchPrimary) {
+                    // Invisible: this Pager exists only to drive scroll physics, snapping, and
+                    // settle detection (pagerState.currentPage / currentPageOffsetFraction /
+                    // settledPage) — see ArticleWebViewCarousel below for why the real content
+                    // (and every WebView) lives outside its lazily-composed item slots.
                     HorizontalPager(
                         state = pagerState,
                         modifier = Modifier.fillMaxSize(),
                         // Page identity is the article, not the slot it happens to occupy — a sync
                         // merge or an "unread only" toggle reshuffles the list under the pager.
                         key = { index -> pages.getOrNull(index)?.id ?: index },
-                        // Load-bearing: at the default 0 a page is torn down the moment it leaves
-                        // the viewport, taking its WebView — and the reading position inside it —
-                        // with it, so swiping back would restart the previous article from the top.
                         beyondViewportPageCount = 1,
                         // The pager's own touch handling would fight the WebView, which is an
                         // interop view and does not take part in Compose's nested scroll. The
@@ -346,25 +349,21 @@ internal fun ArticleDetailPaneContent(
                         // It also disables the pager's own accessibility scroll actions, which
                         // articleSwipeAccessibilityActions below already replaces.
                         userScrollEnabled = false,
-                    ) { index ->
-                        val row = pages.getOrNull(index) ?: return@HorizontalPager
-                        LaunchedEffect(row.id) { readerPaging.requestContent(row.id) }
-                        val full = readerPaging.contents[row.id]
-                        val document = remember(theme, row, full, noTitleText, noContentText, openInBrowserTooltip) {
-                            readerDocument(theme, row, full, noTitleText, noContentText, openInBrowserTooltip)
-                        }
-                        // A page the user has not swiped to is held ready, not shown. It must not
-                        // be reachable by a screen reader's linear traversal (its WebView is a real
-                        // view, clipped rather than semantically hidden), and its own document must
-                        // not be able to send anyone to an external browser — see ArticleWebView.
-                        val active = row.id == selectedId
-                        Box(
-                            Modifier.fillMaxSize()
-                                .let { if (active) it else it.clearAndSetSemantics {} },
-                        ) {
-                            reader(document.html, document.body, document.articleUrl, active)
-                        }
-                    }
+                    ) { Box(Modifier.fillMaxSize()) }
+
+                    ArticleWebViewCarousel(
+                        pagerState = pagerState,
+                        pages = pages,
+                        contents = readerPaging.contents,
+                        selectedId = selectedId,
+                        requestContent = readerPaging.requestContent,
+                        widthPx = { swipeController.widthPx },
+                        theme = theme,
+                        noTitleText = noTitleText,
+                        noContentText = noContentText,
+                        openInBrowserTooltip = openInBrowserTooltip,
+                        reader = reader,
+                    )
                 } else {
                     val document = remember(theme, article, noTitleText, placeholderText, noContentText, openInBrowserTooltip) {
                         singleReaderDocument(theme, article, noTitleText, placeholderText, noContentText, openInBrowserTooltip)
@@ -530,6 +529,143 @@ private fun singleReaderDocument(
 ): ReaderDocument {
     if (article == null) return ReaderDocument(articlePlaceholderHtml(theme, placeholderText), body = "", articleUrl = null)
     return readerDocument(theme, article.toListRow(), article.toReaderRow(), noTitleText, noContentText, openInBrowserTooltip)
+}
+
+/**
+ * How many physical [ArticleWebView] instances the reader keeps alive at a narrow layout — one
+ * for the settled page and one for each neighbour [HorizontalPager]'s `beyondViewportPageCount = 1`
+ * keeps composed. See [ArticleWebViewCarousel] for why this must match that value.
+ */
+internal const val ARTICLE_READER_SLOT_COUNT = 3
+
+/**
+ * The always-alive `WebView`s the narrow-layout reader actually shows, positioned by hand to track
+ * [pagerState]'s own scroll rather than living inside its lazily-composed page slots.
+ *
+ * The [HorizontalPager] above this (see its call site's own comment) is invisible on purpose: a
+ * `LazyLayout` disposes a page's composition — and therefore any `AndroidView`-hosted native
+ * `WebView` inside it — the moment that page scrolls past `beyondViewportPageCount`, and recreates
+ * it from scratch when the page re-enters range. On Android that recreation briefly shows nothing
+ * (the article the user is mid-swipe on going blank for a couple of frames — confirmed on-device
+ * with frame-by-frame capture), because it tears down and rebuilds the real `android.webkit.WebView`
+ * behind it, not just its Compose content. Forward and backward swipes are asymmetric here for
+ * reasons rooted in the pager's own internals, not this app's code, which is why the flicker was
+ * only ever seen swiping towards the next article. See "Article Reader" in `docs/app-architecture.md`
+ * for the full investigation.
+ *
+ * This composable sidesteps the whole mechanism: [ARTICLE_READER_SLOT_COUNT] physical slots are
+ * composed unconditionally, at fixed call sites, for the life of this composable — the same
+ * "compose it once, never behind an `if`" idiom [ArticleDetailPaneContent] already uses for the
+ * `PaneLayout.Triple` reader — so their `AndroidView`-hosted `WebView`s are never disposed by
+ * ordinary paging. [slotIndex] assigns each slot the page index that shares its residue modulo
+ * [ARTICLE_READER_SLOT_COUNT]; since any three consecutive page indices always occupy three
+ * distinct residues, the settled page and both its neighbours are guaranteed distinct slots, and
+ * stepping to an adjacent page changes at most one slot's assignment — the two pages already
+ * resident (including the one just left) keep the exact same `WebView`, just repositioned via
+ * [ArticleWebViewSlot]'s own `Modifier.offset`. Reading position across a swipe survives for
+ * exactly the same reason it did before ([HorizontalPager]'s own `beyondViewportPageCount = 1`
+ * KDoc): a page more than one away from the settled one is no longer any slot's assignment, so its
+ * `WebView` gets reused for whatever page *is* newly in range — reloading fresh content — the same
+ * "two articles away and back loses position" limit `docs/testing.md` already documents.
+ */
+@Composable
+private fun ArticleWebViewCarousel(
+    pagerState: PagerState,
+    pages: List<ArticleListRow>,
+    contents: Map<String, ArticleReaderRow>,
+    selectedId: String?,
+    requestContent: (String) -> Unit,
+    widthPx: () -> Float,
+    theme: ArticleHtmlTheme,
+    noTitleText: String,
+    noContentText: String,
+    openInBrowserTooltip: String,
+    reader: @Composable (html: String, body: String, articleUrl: String?, active: Boolean) -> Unit,
+) {
+    for (slot in 0 until ARTICLE_READER_SLOT_COUNT) {
+        key(slot) {
+            ArticleWebViewSlot(
+                slot = slot,
+                pagerState = pagerState,
+                pages = pages,
+                contents = contents,
+                selectedId = selectedId,
+                requestContent = requestContent,
+                widthPx = widthPx,
+                theme = theme,
+                noTitleText = noTitleText,
+                noContentText = noContentText,
+                openInBrowserTooltip = openInBrowserTooltip,
+                reader = reader,
+            )
+        }
+    }
+}
+
+/**
+ * The page index [slot] should show right now, or `null` when no in-range page has that residue
+ * (an edge of the list — there is no page before the first one, or after the last).
+ *
+ * Only the settled page and its immediate neighbours (the same range
+ * `HorizontalPager`'s `beyondViewportPageCount = 1` used to compose) are ever candidates, so this
+ * never has to scan the whole list.
+ */
+internal fun slotIndex(slot: Int, currentPage: Int, pageCount: Int): Int? {
+    for (candidate in (currentPage - 1)..(currentPage + 1)) {
+        if (candidate !in 0 until pageCount) continue
+        val residue = ((candidate % ARTICLE_READER_SLOT_COUNT) + ARTICLE_READER_SLOT_COUNT) % ARTICLE_READER_SLOT_COUNT
+        if (residue == slot) return candidate
+    }
+    return null
+}
+
+/**
+ * One physical slot of [ArticleWebViewCarousel]: composed unconditionally so its [reader] (and the
+ * native `WebView` inside it) survives every ordinary page turn, tracking [pagerState]'s scroll
+ * through a lambda-based [Modifier.offset] — read at layout time, not recomposition, the same way
+ * the gesture's own rubber band already is (see [ArticleSwipeController.offset]'s call site).
+ *
+ * Nothing is emitted while [slotIndex] resolves to `null` (an edge of the list): the slot's own
+ * `WebView`, if it already exists from a previous assignment, simply keeps whatever it last showed,
+ * off in a position [slotIndex] will never place on screen while that remains true.
+ */
+@Composable
+private fun ArticleWebViewSlot(
+    slot: Int,
+    pagerState: PagerState,
+    pages: List<ArticleListRow>,
+    contents: Map<String, ArticleReaderRow>,
+    selectedId: String?,
+    requestContent: (String) -> Unit,
+    widthPx: () -> Float,
+    theme: ArticleHtmlTheme,
+    noTitleText: String,
+    noContentText: String,
+    openInBrowserTooltip: String,
+    reader: @Composable (html: String, body: String, articleUrl: String?, active: Boolean) -> Unit,
+) {
+    val index = slotIndex(slot, pagerState.currentPage, pages.size) ?: return
+    val row = pages.getOrNull(index) ?: return
+    LaunchedEffect(row.id) { requestContent(row.id) }
+    val full = contents[row.id]
+    val document = remember(theme, row, full, noTitleText, noContentText, openInBrowserTooltip) {
+        readerDocument(theme, row, full, noTitleText, noContentText, openInBrowserTooltip)
+    }
+    // A page the user has not swiped to is held ready, not shown. It must not be reachable by a
+    // screen reader's linear traversal (its WebView is a real view, clipped rather than
+    // semantically hidden), and its own document must not be able to send anyone to an external
+    // browser — see ArticleWebView.
+    val active = row.id == selectedId
+    Box(
+        Modifier.fillMaxSize()
+            .offset {
+                val offsetFraction = index - pagerState.currentPage - pagerState.currentPageOffsetFraction
+                IntOffset((offsetFraction * widthPx()).roundToInt(), 0)
+            }
+            .let { if (active) it else it.clearAndSetSemantics {} },
+    ) {
+        reader(document.html, document.body, document.articleUrl, active)
+    }
 }
 
 /**

@@ -3,6 +3,7 @@
 /build/
 /composeApp/build/
 /androidApp/build/
+/composeApp/unused
 
 # Local settings
 local.properties

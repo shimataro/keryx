@@ -317,7 +317,9 @@ app-wide freeze on click).
 
 **At a narrow layout the reader is a `HorizontalPager` instead** (`ui/home/ArticleDetailPane.kt`,
 shared `commonMain` composable) — a horizontal drag moves to the next/previous article, and the
-pages either side of the one on screen are real, mounted `WebView`s. `PaneLayout.Triple` (every
+pages either side of the one on screen are real, mounted `WebView`s, rendered through
+`ArticleWebViewCarousel` rather than the pager's own item content (see below for why).
+`PaneLayout.Triple` (every
 desktop window, and a wide tablet in landscape) keeps the single unconditionally-composed reader
 described above; the branch between the two forms checks `readerPaging != null && article != null
 && isTouchPrimary` — all three, not `readerPaging` alone. `article != null` keeps a `PaneLayout.Dual`
@@ -337,15 +339,48 @@ recompose the whole reader on every article write. The signal is `swipeNavigatio
 `onNavigateUp` — at `PaneLayout.Dual` the reader has no back control (`onNavigateUp` is `null`) but
 swipe must still work there (see "Home's adaptive pane layout" below).
 
-Three things about that pager are load-bearing:
+**The `HorizontalPager` itself renders no `WebView` — it is composed invisibly, purely to drive
+scroll physics, snapping, and settle detection** (`pagerState.currentPage` /
+`currentPageOffsetFraction` / `settledPage`); its own item content is an empty `Box`.
+`ArticleWebViewCarousel`, a sibling composed alongside it, is what actually shows the three pages:
+a fixed set of `ARTICLE_READER_SLOT_COUNT` (3) always-alive `ArticleWebView`s, composed
+unconditionally at fixed call sites — the same "compose it once, never behind an `if`" idiom used
+for the `PaneLayout.Triple` reader above — and positioned by hand (a lambda-based `Modifier.offset`
+reading `pagerState.currentPage`/`currentPageOffsetFraction`, read at layout time like the gesture's
+own rubber band) to track wherever the invisible pager says they should sit. `slotIndex` assigns
+each slot the page index sharing its residue modulo 3; since any three consecutive indices always
+land on three distinct residues, the settled page and both neighbours get distinct slots, and
+stepping to an adjacent page reassigns at most one of the three.
 
-- **`beyondViewportPageCount = 1`.** At the default `0` a page is torn down the moment it leaves the
-  viewport, taking its `WebView` — and the reading position inside it — with it, so swiping back
-  would restart the previous article from the top. This one setting is the entire mechanism behind
-  "a swipe away and back returns you where you were"; its limits follow from it directly (two
-  articles away and back loses the position, as does leaving for the article list or a layout
-  change, since those unmount the pane itself). Desktop, which never uses the pager, never restores
-  a reading position at all.
+This split exists because letting the *pager's own* lazily-composed item slots host the `WebView`s
+directly — as an earlier version of this code did — flickered on Android: a `LazyLayout` disposes a
+page's composition (and therefore any `AndroidView`-hosted native view inside it) the instant that
+page scrolls past `beyondViewportPageCount`, and recreates it from scratch when the page re-enters
+range. That recreation tears down and rebuilds the real `android.webkit.WebView`, not just its
+Compose content, and briefly shows nothing — confirmed on-device with frame-by-frame capture,
+reproducing every time on a forward swipe (never backward, and never at the last article) because
+of how Compose Foundation's own pager prefetch/disposal happens to be asymmetric between the two
+directions; disabling Compose's cache-window prefetch flag (`ComposeFoundationFlags`,
+`isCacheWindowForPagerEnabled`) did **not** fix it — the teardown/recreate cycle is inherent to
+`LazyLayout` item disposal, not that specific prefetch strategy. `ArticleWebViewCarousel` sidesteps
+the whole mechanism by keeping the `WebView`s outside any lazily-composed range in the first place.
+
+Four things about the (now invisible) pager, and the carousel that reads its state, are
+load-bearing:
+
+- **`slotIndex`'s modulo-3 residue assignment.** This — not `beyondViewportPageCount` — is what
+  makes "a swipe away and back returns you where you were" work now: the physical slot holding the
+  settled page keeps holding it (just repositioned) as the user steps to a neighbour and back, since
+  a 1-away step only ever reassigns the *other* slot. Its limits are the same as before (two
+  articles away and back loses the position — the slot gets reassigned to whatever newly falls in
+  range, reloading fresh content — as does leaving for the article list or a layout change, since
+  those unmount the pane itself). Desktop, which never uses the pager, never restores a reading
+  position at all.
+- **`beyondViewportPageCount = 1`** on the invisible pager. The carousel's own slot assignment does
+  not read this value, so it is no longer what preserves reading position — but it is kept anyway to
+  minimize how much of the pager's *other* internal behavior (precomposition scheduling, the
+  `LazyLayoutKeyIndexMap`-based remapping `key` relies on when the list shifts underneath) changes
+  from before this split, since those are exercised by tests that predate it.
 - **`userScrollEnabled = false`.** Android's `WebView` (embedded via `AndroidView`) is an ordinary
   in-tree view, but it consumes touch input on its own terms and takes no part in Compose's nested
   scroll, so the pager's own gesture handling would fight it. Instead the gesture is arbitrated the

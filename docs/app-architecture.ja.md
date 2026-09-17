@@ -332,7 +332,8 @@ WebView **内部**の HTML として描画する（`ui/article/ArticleWebViewHtm
 
 **狭いレイアウトではリーダーは `HorizontalPager` になる**（`ui/home/ArticleDetailPane.kt`。
 commonMain 共有のコンポーザブル） — 水平ドラッグで次/前の記事へ移動し、画面に出ているページの
-両隣は実際にマウントされた `WebView` である。`PaneLayout.Triple`（デスクトップの全ウインドウと、
+両隣は実際にマウントされた `WebView` であり、それはページャ自身の item content ではなく
+`ArticleWebViewCarousel` 経由で描画される（理由は下記）。`PaneLayout.Triple`（デスクトップの全ウインドウと、
 横持ちの大型タブレット）は上で述べた単一の無条件コンポーズのリーダーのままで、2 つの形態の分岐は
 `readerPaging != null && article != null && isTouchPrimary` の 3 つすべてを見る——`readerPaging`
 単独ではない。`article != null` があるのは、paging データはあるがまだ何も選択されていない
@@ -352,14 +353,46 @@ commonMain 共有のコンポーザブル） — 水平ドラッグで次/前の
 `PaneLayout.Dual` ではリーダーに戻るボタンが無い（`onNavigateUp` が `null`）がスワイプは有効で
 なければならないため（下記「Home's adaptive pane layout」参照）。
 
-このページャについて、次の 3 点は挙動を支える要である。
+**`HorizontalPager` 自身は `WebView` を一切描画しない — スクロール物理演算・スナップ・確定検知
+（`pagerState.currentPage` / `currentPageOffsetFraction` / `settledPage`）を駆動するためだけに
+不可視のまま組み込まれている**。その item content は空の `Box` である。ページャと並んで組み込まれる
+きょうだいの `ArticleWebViewCarousel` こそが、実際に 3 ページを表示している本体である:
+`ARTICLE_READER_SLOT_COUNT`（3）個の常時生存する `ArticleWebView` を固定の呼び出し位置で
+無条件にコンポーズし続ける — 上記の `PaneLayout.Triple` リーダーで使っている「一度コンポーズしたら
+`if` の裏に置かない」という同じ発想である — そして、不可視のページャが示す位置へ、手作業（ジェスチャー
+自身のラバーバンドと同様にレイアウト時に読む、ラムダ式の `Modifier.offset`。`pagerState.currentPage`/
+`currentPageOffsetFraction` を読む）で追従させる。`slotIndex` は各スロットに、3 を法として同じ剰余を
+持つページ index を割り当てる。連続する 3 つの index は常に 3 つの異なる剰余に落ちるため、確定ページと
+両隣は必ず別々のスロットになり、隣のページへ一歩進んでも 3 つのうち高々 1 つのスロットしか
+再割り当てされない。
 
-- **`beyondViewportPageCount = 1`。** 既定の `0` ではページがビューポートを離れた瞬間に破棄され、
-  その `WebView` — と、その中の読み位置 — も一緒に消えるため、スワイプで戻っても前の記事が
-  先頭から始まってしまう。「スワイプで離れて戻ると元の位置に戻る」という挙動はこの設定ひとつで
-  成立しており、制限もそこから直接導かれる（2 記事離れて戻ると位置は失われる。記事一覧へ戻った
-  場合やレイアウトが変わった場合も同様で、それらはペインごとアンマウントされるため）。ページャを
-  使わないデスクトップでは読み位置は一切復元されない。
+この分離が存在する理由は、*ページャ自身の* 遅延コンポーズされる item スロットに直接 `WebView` を
+持たせる — 本コードの以前のバージョンはそうしていた — と Android でちらつきが出たためである:
+`LazyLayout` は、ページが `beyondViewportPageCount` を超えて外れた瞬間にそのコンポジション（と、その
+内側にある `AndroidView` でホストされたネイティブビュー）を破棄し、そのページが範囲へ再び入ると
+ゼロから作り直す。その再生成は実際の `android.webkit.WebView` を（Compose のコンテンツだけでなく）
+丸ごと破棄・再構築し、一瞬何も表示しなくなる——実機でのフレーム単位のキャプチャで確認済みで、
+前方スワイプでは毎回再現し（後方では決して起きず、最終記事でも起きない）、これは Compose Foundation
+自身のページャの prefetch/破棄がたまたま両方向で非対称であることに起因する。Compose の
+cache-window prefetch フラグ（`ComposeFoundationFlags` の `isCacheWindowForPagerEnabled`）を無効化
+しても直らなかった — 破棄・再生成のサイクルはその特定の prefetch 戦略ではなく `LazyLayout` の
+item 破棄そのものに内在するものだった。`ArticleWebViewCarousel` は、そもそも `WebView` を遅延コンポーズ
+の範囲の外に置くことで、この仕組み全体を迂回している。
+
+この（今は不可視になった）ページャと、その状態を読み取るカルーセルについて、次の 4 点は挙動を支える要である。
+
+- **`slotIndex` による 3 を法とした剰余の割り当て。** 「スワイプで離れて戻ると元の位置に戻る」を
+  今支えているのはこれであって `beyondViewportPageCount` ではない: 確定ページを保持している物理
+  スロットは、ユーザーが隣へ一歩進んで戻ってきても（位置を変えるだけで）そのページを保持し続ける。
+  1 歩の移動では常に「もう片方」のスロットしか再割り当てされないためである。制限は以前と同じ
+  （2 記事離れて戻ると位置は失われる——スロットは新たに範囲へ入ってきたものへ再割り当てされ、
+  内容を読み込み直す。記事一覧へ戻った場合やレイアウトが変わった場合も同様で、それらはペインごと
+  アンマウントされるため）。ページャを使わないデスクトップでは読み位置は一切復元されない。
+- **不可視のページャに設定された `beyondViewportPageCount = 1`。** カルーセル自身のスロット割り当ては
+  この値を読まないため、もはや読み位置を保存しているのはこれではない——しかし、この分離より前から
+  ある他のテストが検証しているページャの*それ以外*の内部挙動（先行コンポーズのスケジューリング、
+  `key` が一覧の変化時に依拠する `LazyLayoutKeyIndexMap` ベースの再マッピング）を、この分離によって
+  できるだけ変えないために、あえてそのまま残してある。
 - **`userScrollEnabled = false`。** Android の `WebView`（`AndroidView` 経由で埋め込まれる）は
   通常の in-tree ビューだが、タッチ入力を自分自身で消費し、Compose の nested scroll にも参加
   しないため、ページャ自身のジェスチャー処理とぶつかる。代わりに、`platform/NativeMenu.android.kt`

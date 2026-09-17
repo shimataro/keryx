@@ -933,12 +933,16 @@ device/emulator unless a step says otherwise:
 - Scroll partway into a long article, swipe to the next one, swipe back: **it resumes at the same
   place**, not at the top.
 - Swipe two or more articles away and back: it starts from the top again (the expected limit of
-  `beyondViewportPageCount = 1` — see `app-architecture.md`).
+  `ArticleWebViewCarousel`'s slot reuse — see `app-architecture.md`).
 - Go back to the article list and reopen the same article: from the top again, likewise expected.
 - Flick down through a long article repeatedly, letting some flicks come out diagonal: the article
   never changes underneath.
 - During a swipe there is no blank band — the next article's own content is what comes in — and the
   drag tracks the finger smoothly.
+- Swipe forward (to the next article) repeatedly, including between the same two articles several
+  times in a row: the article being swiped away from never flashes blank at the start of the drag
+  (a past regression — the pager's own lazily-composed page slots tore down and rebuilt the native
+  `WebView` behind it; see `app-architecture.md`'s "Article Reader" section for the fix).
 - At the first and last article, the drag still gives a little and springs back on release.
 - With "unread only" on, keep swiping: the current page never disappears from under you and the
   pager never jumps.
