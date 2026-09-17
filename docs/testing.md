@@ -935,8 +935,15 @@ device/emulator unless a step says otherwise:
 - Swipe two or more articles away and back: it starts from the top again (the expected limit of
   `ArticleWebViewCarousel`'s slot reuse — see `app-architecture.md`).
 - Go back to the article list and reopen the same article: from the top again, likewise expected.
-- Flick down through a long article repeatedly, letting some flicks come out diagonal: the article
-  never changes underneath.
+- Flick down through a long article repeatedly, letting some flicks come out diagonal while still
+  travelling further vertically than horizontally — and let one of them start straight down and veer
+  sideways halfway: the article never changes underneath. A flick that lands in the middle of such a
+  run is refused on its start time alone (`SWIPE_AFTER_VERTICAL_LOCKOUT_MS`), whichever way it
+  points.
+- Then pause a beat and drag on a clear sideways slant: this one **does** turn the page — a diagonal
+  is only refused for being vertical enough, not for being diagonal. A slant only just past 45° is
+  still refused, since `swipeArmsHorizontally` wants horizontal travel comfortably past the vertical
+  (`SWIPE_DIRECTION_RATIO`), not merely greater than it.
 - During a swipe there is no blank band — the next article's own content is what comes in — and the
   drag tracks the finger smoothly.
 - Swipe forward (to the next article) repeatedly, including between the same two articles several
