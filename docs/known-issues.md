@@ -434,6 +434,59 @@ a feed with no `<item>`s. With nothing for `articleRepository.upsertParsed` to i
 call's post-mutex work is read-only, so there is no longer a second writer left to race the upgrade.
 See `docs/testing.md`'s note on concurrent-write tests for the general pattern.
 
+## CI-only: `UpdateDownloaderTest.progressArrivesWhileTheBodyIsStillStreaming` times out
+
+**Status**: root cause not identified. The test was changed to report what the download actually did
+instead of a bare timeout, so the next occurrence diagnoses itself — a diagnosability improvement,
+**not** a fix for the underlying trigger.
+
+### Symptom
+
+The desktop test task fails with nothing but:
+
+```text
+UpdateDownloaderTest[desktop] > progressArrivesWhileTheBodyIsStillStreaming[desktop] FAILED
+    kotlinx.coroutines.TimeoutCancellationException
+```
+
+Observed twice so far, on a different OS each time and never on more than one of the four jobs in
+the same run: `v0` @ `1cfb4993` (windows-latest, run 35158285213) and `fix/article-swipe-pager` @
+`0639f3b7` (ubuntu-latest, run 35179227601). Neither commit touches `UpdateDownloader` or its test.
+
+### Why the failure carried no information
+
+`UpdateDownloader.download` reports an ordinary failure as a `Result.Err` rather than throwing (see
+[error-design.md](error-design.md)), and its `Result.Err` paths log nothing. The test waited only on
+the progress `CompletableDeferred`, so a download that gave up before emitting any progress left
+that deferred uncompleted forever — and the enclosing `finally` then cancelled the `Deferred`
+holding the reason. `composeApp/build.gradle.kts` configures no `testLogging`, so even the one
+`Log.warn` path would not appear in CI output.
+
+### Ruled out
+
+- **Not reproducible locally**: 40 runs on an idle machine plus 15 more with the CPU oversubscribed
+  3× (macOS/arm64, JDK 26) — all green.
+- **Not write backpressure stalling the test's feeder.** Ktor 3.5.2's `ByteChannel` suspends a writer
+  only once its flush buffer passes `CHANNEL_MAX_SIZE` (1 MiB, `ktor-io`'s `ByteChannel.kt`); the
+  test writes 320 KiB, so `writeFully` returns without waiting for the reader at all.
+- **Not MockEngine buffering or duplicating the body.** `respond(ByteReadChannel, …)` passes the
+  test's own channel straight through as the response body (`ktor-client-mock`'s `MockUtils.kt`) —
+  no copy, no second reader.
+- **Not `UpdateDownloader`'s `timeout {}` overrides.** MockEngine declares `HttpTimeoutCapability`
+  and implements no timeout of its own, so `socketTimeoutMillis` never fires against it.
+
+### What the next occurrence will show
+
+`awaitFirstProgress` now races the progress reading against the download's own completion, so:
+
+- a download that finishes first fails with its `Result` (including an `Err`'s `UpdateException`
+  message),
+- a download that throws propagates that exception as itself, and
+- a genuine stall still times out, but reports whether the download coroutine is still running.
+
+That separates the two remaining hypotheses — an early silent `Result.Err` versus the download
+coroutine simply not being scheduled in time — which the bare timeout above cannot.
+
 ## Linux/GNOME: the tray menu briefly shows the previous label when it opens
 
 **Status**: not fixed — external (GNOME Shell AppIndicator extension) design limitation, and not

@@ -68,6 +68,38 @@ data class ArticleSearchResult(
     val titleMarked: String,
 )
 
+/**
+ * The columns the article reader renders, for an article it is holding ready but has not opened.
+ *
+ * Narrower than [works.merc.keryx.app.data.local.db.Articles] for the same reason [ArticleListRow]
+ * is: the reader's pager keeps several of these alive at once, and the full row also carries
+ * `search_text` — a second, HTML-stripped copy of `content` that nothing here ever reads — so
+ * retaining whole rows would hold roughly twice the body text it needs.
+ */
+data class ArticleReaderRow(
+    val id: String,
+    val url: String,
+    val title: String,
+    val author: String?,
+    val published_at: Long?,
+    val content: String?,
+    val summary: String?,
+)
+
+/** Narrows a full article row to the columns the reader renders. */
+fun Articles.toReaderRow(): ArticleReaderRow = ArticleReaderRow(
+    id = id,
+    url = url,
+    title = title,
+    author = author,
+    published_at = published_at,
+    content = content,
+    summary = summary,
+)
+
+/** The body the reader shows: [ArticleReaderRow.content] when it has one, else the summary. */
+fun ArticleReaderRow.readerBody(): String? = content?.takeIf { it.isNotBlank() } ?: summary
+
 /** An alive article's current read/starred flags, for revalidating an optimistic pin. */
 data class ArticleFlags(val isRead: Long, val isStarred: Long)
 

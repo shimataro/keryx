@@ -2,6 +2,8 @@ package works.merc.keryx.app.ui.home
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class ArticleSwipeNavTest {
 
@@ -133,5 +135,60 @@ class ArticleSwipeNavTest {
             canNext = true,
         )
         assertEquals(ArticleSwipeOutcome.Cancel, outcome)
+    }
+
+    // --- swipeArmsHorizontally ---
+
+    /** The platform touch slop these cases are measured against; any plausible value works. */
+    private val touchSlop = 20f
+
+    @Test
+    fun swipeArmsHorizontallyRequiresClearingTheTouchSlop() {
+        // Horizontal enough by ratio, but not yet a drag at all.
+        assertFalse(swipeArmsHorizontally(dx = touchSlop, dy = 0f, touchSlop = touchSlop))
+        assertTrue(swipeArmsHorizontally(dx = touchSlop + 1f, dy = 0f, touchSlop = touchSlop))
+    }
+
+    @Test
+    fun swipeArmsHorizontallyRejectsTheDiagonalThatTheOldRuleAccepted() {
+        // The previous gate was `abs(dx) > abs(dy)`, which this clears (30 > 25) — exactly the
+        // near-45-degree flick a user means as a scroll. The ratio gate needs 25 * 1.5 = 37.5.
+        assertFalse(swipeArmsHorizontally(dx = 30f, dy = 25f, touchSlop = touchSlop))
+        assertTrue(swipeArmsHorizontally(dx = 38f, dy = 25f, touchSlop = touchSlop))
+    }
+
+    @Test
+    fun swipeArmsHorizontallyAcceptsAClearlyHorizontalDragWithSomeWobble() {
+        assertTrue(swipeArmsHorizontally(dx = 100f, dy = 20f, touchSlop = touchSlop))
+    }
+
+    @Test
+    fun swipeArmsHorizontallyIgnoresDirection() {
+        // Towards the previous article is the same gesture mirrored; both axes are magnitudes.
+        assertTrue(swipeArmsHorizontally(dx = -100f, dy = -20f, touchSlop = touchSlop))
+        assertFalse(swipeArmsHorizontally(dx = -30f, dy = 25f, touchSlop = touchSlop))
+    }
+
+    // --- swipeLockedOut ---
+
+    @Test
+    fun swipeLockedOutIsFalseBeforeAnyVerticalGesture() {
+        assertFalse(swipeLockedOut(nowMillis = 1_000L, lastVerticalEndMillis = null, lockoutMs = 400L))
+    }
+
+    @Test
+    fun swipeLockedOutCoversTheWindowAndNotItsFarEdge() {
+        assertTrue(swipeLockedOut(nowMillis = 1_000L, lastVerticalEndMillis = 1_000L, lockoutMs = 400L))
+        assertTrue(swipeLockedOut(nowMillis = 1_399L, lastVerticalEndMillis = 1_000L, lockoutMs = 400L))
+        // The window is half-open: a gesture exactly one window later is free again.
+        assertFalse(swipeLockedOut(nowMillis = 1_400L, lastVerticalEndMillis = 1_000L, lockoutMs = 400L))
+        assertFalse(swipeLockedOut(nowMillis = 5_000L, lastVerticalEndMillis = 1_000L, lockoutMs = 400L))
+    }
+
+    @Test
+    fun swipeLockedOutTreatsANegativeSpanAsOutsideTheWindow() {
+        // Can only happen if the two times came from different clocks; refusing the swipe on a
+        // value that can't be reasoned about would strand the gesture for no defensible reason.
+        assertFalse(swipeLockedOut(nowMillis = 900L, lastVerticalEndMillis = 1_000L, lockoutMs = 400L))
     }
 }

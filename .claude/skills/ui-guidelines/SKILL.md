@@ -263,38 +263,64 @@ without one stealing the other's press. All of this works the same way whether `
 rendering as `Triple`'s sidebar or a narrow layout's drawer content — reordering, renaming,
 deleting, and the context menu are unaffected by which one it is.
 
-**Touch input on the article reader.** At a narrow layout, the article detail pane
-(`ui/home/ArticleDetailPane.kt`) also accepts a horizontal swipe to move to the next/previous
-article — `ui/home/ArticleSwipeNav.kt`'s `articleSwipeNavigation`, driven by
-`HomeViewModel.selectNext`/`selectPrevious`/`canSelectNext`/`canSelectPrevious` (the same calls
-desktop's J/K keyboard shortcut already used — see `ui/home/KeyboardNav.kt`) via an
-`ArticleSwipeNavigation` bundle. It is gated on `isTouchPrimary && swipeNavigation != null &&
-article != null`, not on `PaneLayout` or a phone/tablet distinction — and deliberately **not** on
-`onNavigateUp` either, despite that being this file's usual narrow-layout signal: `onNavigateUp` is
-`null` at `PaneLayout.Dual` (the reader is a permanent neighbor of the article list there, with no
-back button of its own, the same as Gmail's own tablet reading pane), but the swipe must still work
-there per `external-spec.md` §9 ("not only in portrait"). `swipeNavigation` is therefore its own,
-independent null boundary — non-null at every narrow layout regardless of whether that layout's
-reader happens to have a back button beside it — matching how Gmail/Feedly/Reeder-style readers
-treat the swipe as a property of the detail screen itself rather than of how many other panes
-happen to be visible beside it. It excludes only `PaneLayout.Triple`, where the reader is a
-permanent, keyboard-driven pane shared with desktop and has nowhere for a swipe gesture to go in
-the first place.
+**Touch input on the article reader.** At a narrow layout the article detail pane
+(`ui/home/ArticleDetailPane.kt`) renders as a `HorizontalPager` over
+`HomeViewModel.pagerArticles`, so a horizontal swipe moves to the next/previous article with that
+article's own content really coming in behind the finger. `PaneLayout.Triple` keeps the single,
+unconditionally-composed reader instead (see "Nothing Compose-drawn can appear over the article
+detail pane's content area" below for why that one must never be mounted conditionally).
 
-The reader's content is two nested `Box`es, not one: the outer one owns the gesture and the clip
-(so a sliding reader can't spill into a neighboring pane at `Dual`); the inner one carries the
-actual `Modifier.offset`, the existing `ARTICLE_READER_TEST_TAG`, and the accessibility actions
-below. Dragging past either end of the list still moves the content — heavily
-damped and capped — rather than refusing to move at all, so the boundary is felt as resistance
-instead of the gesture doing nothing.
+Two nullable parameters carry the narrow-layout signal, and they are always supplied together:
+`ArticleSwipeNavigation` (`ui/home/ArticleSwipeNav.kt`) for the callbacks, `ArticleReaderPaging`
+(`ui/home/ArticlePagerSync.kt`) for the pages and their bodies. They are separate because the first
+is a deliberately stable `remember`ed bundle whose identity must not churn, while the second changes
+as articles load — folding them together would invalidate the callbacks on every load. The branch
+between the two reader forms checks `readerPaging != null && article != null && isTouchPrimary` —
+all three, not `readerPaging` alone: `article != null` keeps a `PaneLayout.Dual` reader that has
+`readerPaging` but nothing selected yet on its HTML placeholder rather than silently showing
+whatever article the pager last happened to rest on, and `isTouchPrimary` is checked again here
+even though the caller already only builds `readerPaging` on a touch-primary platform — the
+composable that actually decides whether the heavyweight pager mounts is where that invariant has
+to hold, not just the caller above it. The gesture and the accessibility actions stay gated on the
+same three conditions. It is deliberately **not**
+gated on `onNavigateUp`, despite that being this file's usual narrow-layout signal: `onNavigateUp`
+is `null` at `PaneLayout.Dual` (the reader is a permanent neighbor of the article list there, with
+no back button of its own, the same as Gmail's own tablet reading pane), but the swipe must still
+work there per `external-spec.md` §9 — matching how Gmail/Feedly/Reeder-style readers treat the
+swipe as a property of the detail screen itself rather than of how many other panes happen to be
+visible beside it.
 
-Since Android's `WebView` (embedded via `AndroidView`) is an ordinary in-tree view that still
-consumes touch input on its own terms, the gesture is arbitrated the same way this file's touch
-drag/long-press sections above already do: a `pointerInput` loop watches
-`PointerEventPass.Initial` and leaves every event unconsumed until the drag is confirmed
-horizontal (past touch slop, and more horizontal than vertical travel), so the WebView's own
-scroll and link taps are untouched by an ordinary vertical gesture; only once confirmed does it
-start consuming, cancelling the WebView's own gesture in turn.
+Three pager settings are load-bearing; `app-architecture.md`'s "Article Reader (native WebView)"
+section has the full reasoning, and none of them should be changed without reading it:
+
+- `beyondViewportPageCount = 1` — the entire mechanism behind "swipe away and back and you are
+  still where you were reading". At the default `0` the neighbouring page's `WebView` is destroyed
+  the moment it leaves the viewport.
+- `userScrollEnabled = false` — the pager's own touch handling would fight the `WebView`, which is
+  an interop view and takes no part in Compose's nested scroll. The gesture is arbitrated the same
+  way this file's touch drag/long-press sections above already do: `articleSwipeNavigation`'s
+  `pointerInput` loop watches `PointerEventPass.Initial` and leaves every event unconsumed until
+  the drag is confirmed horizontal, then drives `PagerState` itself.
+- `key` = the article id, never the page index — the backing list is reshuffled by sync merges,
+  refreshes and the "unread only" toggle.
+
+**Confirming "horizontal" is a three-part rule, not just `abs(x) > abs(y)`** (`swipeArmsHorizontally`
+/ `swipeLockedOut`): the drag must be past the touch slop *and* more horizontal than vertical by
+`SWIPE_DIRECTION_RATIO`; a gesture that passes the slop while pointing more vertically is latched
+vertical for the rest of its life; and a gesture beginning within
+`SWIPE_AFTER_VERTICAL_LOCKOUT_MS` of a vertical one never arms. That lockout window is *extended*
+by every vertical gesture, including ones the window itself already refused to let arm — a run of
+scrolls faster than the window is otherwise a gap a stray diagonal flick could turn the page
+through. The plain `abs(x) > abs(y)` this replaced let a diagonal flick meant as a scroll turn the
+page. Keep any new pointer gate on this pane in the same shape.
+
+The reader's content is still two nested `Box`es, not one: the outer one owns the gesture and the
+clip (so nothing can spill into a neighboring pane at `Dual`); the inner one carries the
+`Modifier.offset`, the existing `ARTICLE_READER_TEST_TAG`, and the accessibility actions below.
+That offset is now **only** the rubber band for a drag pointing at an end of the list — heavily
+damped and capped, so the boundary is felt as resistance instead of the gesture doing nothing.
+It has to stay hand-rolled: `userScrollEnabled = false` takes the platform's own overscroll effect
+with it.
 
 Per "A pointer-only gesture … needs a `CustomAccessibilityAction` equivalent" under Accessibility
 below, the same next/previous navigation is exposed as `CustomAccessibilityAction`s
@@ -302,7 +328,9 @@ below, the same next/previous navigation is exposed as `CustomAccessibilityActio
 `reorderAccessibilityActions` in shape: a direction with nothing to move to
 (`canSelectNext`/`canSelectPrevious`) exposes no action for that direction at all, and the actions
 live on the same node `ARTICLE_READER_TEST_TAG` tags (not the outer gesture-owning `Box`), since
-that is the node a screen reader actually focuses.
+that is the node a screen reader actually focuses. These are not a nice-to-have here — disabling
+the pager's user scroll disables its own accessibility scroll actions too, so this is the only way
+a screen-reader user can move between articles.
 
 **Touch density.** Each pane's own click-to-focus background (a mouse-only affordance — see
 `ui/home/HomeCommon.kt`'s `paneActivation`) and every interactive list row's minimum height
@@ -1275,11 +1303,13 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   reader (`ArticleDetailPane.kt`) is a heavyweight native `SwingPanel` WebView, and a heavyweight
   AWT surface always composites above lightweight Compose content in the same window (the same
   limitation `KeryxDialogs.kt` documents for why dialogs are real `DialogWindow`s, not `Popup`).
-  The reader is composed unconditionally for the pane's whole lifetime — never behind an `if` —
-  because mounting/unmounting it (or moving its bounds) makes Compose Desktop's
-  `SwingInteropContainer` revalidate and repaint the *entire window*, not just this pane (see
-  `docs/known-issues.md`, "Selecting an article after none was selected flickered the whole
-  window"). Consequently, empty/error states for this pane (no article selected, no content) are
+  **At `PaneLayout.Triple` — which is every desktop window — the reader is composed
+  unconditionally for the pane's whole lifetime, never behind an `if`**, because
+  mounting/unmounting it (or moving its bounds) makes Compose Desktop's `SwingInteropContainer`
+  revalidate and repaint the *entire window*, not just this pane (see `docs/app-architecture.md`'s
+  "Article Reader (native WebView)"). A narrow layout renders a `HorizontalPager` instead, where
+  pages legitimately mount and unmount — that is an Android-only path, and Android's `WebView` is
+  an ordinary in-tree view with no such interop cost. Consequently, empty/error states for this pane (no article selected, no content) are
   rendered as HTML *inside* the WebView (`ui/article/ArticleWebViewHtml.kt`), not as Compose
   `Text`, and the toolbar above it keeps the exact same Compose structure (same buttons, only
   `enabled` toggles) across every state rather than conditionally hiding an action — hiding one

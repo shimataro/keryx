@@ -95,7 +95,7 @@ data exists in the cloud it is automatically merged (imported) during the initia
   SHA-256 digest before anything is installed. See [background-update.md](background-update.md)
   for the full design and [SECURITY.md](../SECURITY.md) for what that verification does and does
   not guarantee.
-- Article list / article view (reader view). **Articles are marked as read the instant they are selected**. An action to mark as unread is available.
+- Article list / article view (reader view). **Articles are marked as read the instant they are selected**. An action to mark as unread is available. Where the reader is swiped between articles (see §9), "selected" means the moment the swipe comes to rest on an article — the neighbouring articles the reader keeps ready are loaded but not selected, and stay unread until one is actually swiped to.
 - Stars (persistent), open in external browser
 - Local full-text search with SQLite FTS5 (trigram, 2+ characters — terms of 3+ characters use the trigram index, a query made up only of 2-character terms falls back to a `LIKE` scan ordered by recency; mixed queries with any 3+ character term use FTS5 relevance ranking; see [db-schema.md](db-schema.md)). Search narrows whichever subscription-list selection (all feeds, starred, a single feed, a folder, or a tag) is already active, rather than always searching everything — to search across every feed, select "All Feeds" first.
 - Desktop notifications, task tray residence (close minimizes to tray), notification center.
@@ -207,8 +207,18 @@ intermediate tap.
 At a narrow layout (both phone- and tablet-width), the article detail pane also gains a touch-only
 affordance with no desktop counterpart: a horizontal swipe on the reader moves to the next/previous
 article in the same order the list itself shows, following the finger as it drags and settling into
-place once released; dragging past either end of the list still moves the content a little before
-springing back, so the boundary is felt rather than the gesture simply doing nothing. This is
+place once released; the article being swiped towards is really there as the drag uncovers it,
+rather than a gap opening where the current one used to be. Dragging past either end of the list
+still moves the content a little before springing back, so the boundary is felt rather than the
+gesture simply doing nothing. **Swiping away from an article and straight back returns to where it
+was being read**, rather than to its top — the immediate neighbours on either side are kept ready,
+so the one just left is still exactly as it was. That memory covers one article in each direction
+and lasts as long as the reader stays on screen: swiping two or more articles away and back, going
+back to the article list, or rotating the device between phone and tablet width all start the
+article from the top again, as does reopening it later. A swipe whose vertical travel isn't clearly
+smaller than its horizontal travel is treated as a scroll rather than a page turn (a horizontal-
+dominant diagonal drag still turns the page), and a swipe is ignored for a moment after scrolling,
+so a flick meant to scroll does not change the article. This is
 available whenever the reader is on screen at all at a narrower-than-desktop width — a phone-width
 screen drilled into an article, and a tablet-width screen (in portrait, and in landscape on any
 tablet not wide enough for all three panes), where the reader is a permanent neighbor of the article
@@ -237,7 +247,10 @@ Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
 
 ## 10. Privacy & Security
 
-- No data sent to external servers, no account registration required, HTTPS only.
+- No data sent to external servers, no account registration required, HTTPS only. Note that the
+  reader keeps the articles either side of the one on screen ready to swipe to (§9), so their
+  content — including any images or embedded content they contain — is fetched before they are
+  opened, exactly as it would be on opening them. Nothing about them is marked read.
 - Each cloud provider's token (Dropbox, Google Drive, OneDrive) is stored separately in platform secure storage.
   On desktop: Keychain on macOS (via the `security` CLI), Credential Manager / Secret Service on Windows/Linux via
   java-keyring, or, inside the Snap package specifically, a local store encrypted with a per-app key from the
