@@ -922,6 +922,47 @@ confirmation, on all three desktop platforms (build with `createDistributable`/`
 - On all three: repeat while Keryx is already running (second launch) to confirm single-instance
   forwarding activates the existing window and imports without spawning a second process.
 
+### (Android) The article reader's swipe pager
+
+`ArticleSwipeNavTest.kt` / `ArticleSwipeGestureTest.kt` cover the gesture's own thresholds and
+`ArticlePagerSyncTest.kt` the page↔selection synchronization, but none of them hosts a real
+`WebView`: whether a reading position actually survives a page staying composed, and how three live
+`WebView`s behave on real hardware, can only be seen on a device. Confirm on a phone-sized
+device/emulator unless a step says otherwise:
+
+- Scroll partway into a long article, swipe to the next one, swipe back: **it resumes at the same
+  place**, not at the top.
+- Swipe two or more articles away and back: it starts from the top again (the expected limit of
+  `beyondViewportPageCount = 1` — see `app-architecture.md`).
+- Go back to the article list and reopen the same article: from the top again, likewise expected.
+- Flick down through a long article repeatedly, letting some flicks come out diagonal: the article
+  never changes underneath.
+- During a swipe there is no blank band — the next article's own content is what comes in — and the
+  drag tracks the finger smoothly.
+- At the first and last article, the drag still gives a little and springs back on release.
+- With "unread only" on, keep swiping: the current page never disappears from under you and the
+  pager never jumps.
+- Trigger a background refresh or a cloud sync mid-swipe: the article on screen does not change.
+- **Tablet width, right after launch** (two panes, nothing selected): the reader stays on its
+  placeholder and the first article is *not* silently marked read. Selecting one from the list
+  switches to the pager.
+- Rotate between phone and tablet width: the article on screen stays the same one (its reading
+  position is not expected to survive).
+- On the lowest-spec device available, page back and forth for a while: three live `WebView`s do not
+  make scrolling stutter or the app get killed.
+- **Desktop** (`PaneLayout.Triple`): selecting an article still does not flicker the whole window,
+  and J/K still moves between articles — that path keeps the single unconditionally-composed reader.
+- Drag past the commit threshold, then release without lifting past it (a cancelled swipe): the
+  article does not change, and its unread state (check the article list) is unaffected — a
+  neighbouring page's body is fetched but must never be marked read on its own.
+- Subscribe to a feed whose articles contain a self-navigating link or embed (e.g. a script that
+  sets `location.href`, or a meta-refresh): swiping so that article becomes a *neighbour* (without
+  swiping to it) never opens the system browser or navigates anywhere; it only does once the swipe
+  actually lands on it.
+- With TalkBack on: linear-swipe past the currently-open article's content — it must not continue
+  into a neighbouring, unopened article's body. Use the "next/previous article" custom actions to
+  move between articles — the destination's title is announced.
+
 ### (Android) The notification bell and the foreground alert Snackbar
 
 Where the bell is drawn is covered by `NotificationBellPlacementTest.kt` (it's always

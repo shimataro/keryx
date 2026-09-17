@@ -14,8 +14,11 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -23,6 +26,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -30,6 +34,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -49,12 +58,18 @@ import io.github.kdroidfilter.webview.web.rememberWebViewStateWithHTMLData
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.data.local.db.Articles
+import works.merc.keryx.app.domain.ArticleListRow
+import works.merc.keryx.app.domain.ArticleReaderRow
+import works.merc.keryx.app.domain.readerBody
+import works.merc.keryx.app.domain.toListRow
+import works.merc.keryx.app.domain.toReaderRow
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.WindowDragArea
 import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.platform.platformShowsOwnCopyConfirmation
+import works.merc.keryx.app.platform.setNativeWebViewImportantForAccessibility
 import works.merc.keryx.app.platform.setNativeWebViewVisible
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_copy_url
@@ -99,8 +114,38 @@ fun ArticleDetailPane(
     copyPulse: Int = 0,
     onNavigateUp: (() -> Unit)? = null,
     swipeNavigation: ArticleSwipeNavigation? = null,
+    // Overridable only so a desktopTest can exercise the touch-primary branch below without a real
+    // touch-primary platform to run on; every real call site relies on the default.
+    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
     val article by vm.selectedArticle.collectAsState()
+
+    // Built only where a swipe exists at all *and* the platform is touch-driven, which is what
+    // keeps the pager off desktop structurally rather than by way of a window-width constant: a
+    // transient pre-layout frame can resolve PaneLayout.Single there (see HomeScreen's own comment
+    // on BoxWithConstraints), and mounting even one frame of heavyweight AWT WebViews is exactly
+    // what this pane must never do. Collecting inside the branch also keeps a desktop composition
+    // from subscribing to pagerArticles at all — it is the one `WhileSubscribed` flow on the
+    // ViewModel for that reason.
+    val readerPaging = if (swipeNavigation != null && isTouchPrimary) {
+        val pages by vm.pagerArticles.collectAsState()
+        val contents by vm.articleContents.collectAsState()
+        // Remembered so the pane below can skip recomposition: ArticleReaderPaging holds a List and
+        // a Map and is therefore unstable, so a fresh instance every time would make every article
+        // write recompose the whole reader.
+        remember(pages, contents, article) {
+            ArticleReaderPaging(
+                pages = readerPages(pages, article),
+                contents = readerContents(contents, article),
+                requestContent = vm::requestArticleContent,
+                onPageSettled = vm::selectArticle,
+            )
+        }
+    } else {
+        null
+    }
+    // Nothing is holding these bodies open once the reader leaves the composition.
+    DisposableEffect(vm) { onDispose { vm.clearArticleContents() } }
 
     ArticleDetailPaneContent(
         article = article,
@@ -111,6 +156,8 @@ fun ArticleDetailPane(
         onMarkUnread = { vm.markSelectedUnread() },
         onNavigateUp = onNavigateUp,
         swipeNavigation = swipeNavigation,
+        readerPaging = readerPaging,
+        isTouchPrimary = isTouchPrimary,
     )
 }
 
@@ -143,9 +190,10 @@ internal fun ArticleDetailPaneContent(
     onMarkUnread: () -> Unit = {},
     onNavigateUp: (() -> Unit)? = null,
     swipeNavigation: ArticleSwipeNavigation? = null,
+    readerPaging: ArticleReaderPaging? = null,
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
-    reader: @Composable (html: String, body: String, articleUrl: String?) -> Unit =
-        { html, body, articleUrl -> ArticleWebView(html, body, articleUrl) },
+    reader: @Composable (html: String, body: String, articleUrl: String?, active: Boolean) -> Unit =
+        { html, body, articleUrl, active -> ArticleWebView(html, body, articleUrl, active) },
 ) {
     // Inline "copied" feedback for the toolbar copy button. Kept above any conditional so this
     // composable never leaves/re-enters composition — otherwise LaunchedEffect(copyPulse) would
@@ -186,23 +234,7 @@ internal fun ArticleDetailPaneContent(
         ArticleHtmlTheme(surface, onSurface, linkColor, mutedColor, fontScale)
     }
 
-    val body = article?.let {
-        it.content?.takeIf { content -> content.isNotBlank() } ?: it.summary
-    }
-    val title = article?.title?.ifBlank { noTitleText }.orEmpty()
-    val meta = remember(article?.author, article?.published_at) {
-        article?.let { articleMetaText(it.author, it.published_at) }.orEmpty()
-    }
-
     val openInBrowserTooltip = stringResource(Res.string.article_open_in_browser)
-    val html = remember(theme, article?.id, article?.url, title, meta, body, placeholderText, noContentText, openInBrowserTooltip) {
-        val articleUrl = article?.url
-        when {
-            article == null -> articlePlaceholderHtml(theme, placeholderText)
-            body.isNullOrBlank() -> articleNoContentHtml(theme, title, meta, noContentText, titleUrl = articleUrl, titleTooltip = openInBrowserTooltip)
-            else -> wrapArticleHtml(theme, title, meta, body, baseUrl = articleUrl, titleUrl = articleUrl, titleTooltip = openInBrowserTooltip)
-        }
-    }
 
     // Only enabled where the caller supplied sibling-article navigation (swipeNavigation != null
     // — see ArticleSwipeNavigation's own KDoc for why this, not onNavigateUp, is the swipe
@@ -211,13 +243,27 @@ internal fun ArticleDetailPaneContent(
     // exactly like J/K there — a swipe gesture has no place in that state, and no caller passes
     // swipeNavigation there.
     val swipeEnabled = isTouchPrimary && swipeNavigation != null && article != null
-    val currentArticleId by rememberUpdatedState(article?.id)
+    val selectedId = article?.id
+    val pages = readerPaging?.pages.orEmpty()
+    // Created unconditionally, with no pages at PaneLayout.Triple, so the controller below always
+    // has something to drive and this pane keeps one composition shape on every platform. A pager
+    // with no pages is inert; the one that renders is composed only where there is a selection.
+    // The initial page is resolved once — the scan is over every article in the list, and from
+    // here on ArticleReaderPagerSync is what follows the selection.
+    val pagerState = rememberPagerState(
+        initialPage = remember { pages.indexOfFirst { it.id == selectedId }.coerceAtLeast(0) },
+    ) { pages.size }
     val swipeController = rememberArticleSwipeController(
+        pagerState = pagerState,
         canSelectNext = swipeNavigation?.canSelectNext ?: { false },
         canSelectPrevious = swipeNavigation?.canSelectPrevious ?: { false },
-        onSelectNext = swipeNavigation?.onSelectNext ?: {},
-        onSelectPrevious = swipeNavigation?.onSelectPrevious ?: {},
-        currentArticleId = { currentArticleId },
+    )
+    ArticleReaderPagerSync(
+        pagerState = pagerState,
+        pages = pages,
+        selectedId = selectedId,
+        controller = swipeController,
+        onPageSettled = readerPaging?.onPageSettled,
     )
 
     Column(
@@ -263,6 +309,14 @@ internal fun ArticleDetailPaneContent(
                 Modifier.fillMaxSize()
                     .offset { IntOffset(offsetPx.roundToInt(), 0) }
                     .testTag(ARTICLE_READER_TEST_TAG)
+                    // The pager's own page-change announcement goes away with
+                    // userScrollEnabled = false, and the article body lives in the WebView's own
+                    // subtree, so without this a screen-reader user invoking the next/previous
+                    // action below would get no confirmation that anything happened.
+                    .semantics {
+                        article?.title?.takeIf { it.isNotBlank() }?.let { contentDescription = it }
+                        liveRegion = LiveRegionMode.Polite
+                    }
                     .articleSwipeAccessibilityActions(
                         enabled = swipeEnabled,
                         canNext = swipeEnabled && swipeNavigation?.canSelectNext?.invoke() == true,
@@ -271,7 +325,52 @@ internal fun ArticleDetailPaneContent(
                         onPrevious = swipeNavigation?.onSelectPrevious ?: {},
                     ),
             ) {
-                reader(html, body.orEmpty(), article?.url)
+                // isTouchPrimary is checked again here, not just by the caller building
+                // readerPaging conditionally: this is the composable that actually decides
+                // whether the heavyweight pager mounts, so the invariant belongs at this level
+                // too, the same way swipeEnabled above already gates on it.
+                if (readerPaging != null && article != null && isTouchPrimary) {
+                    HorizontalPager(
+                        state = pagerState,
+                        modifier = Modifier.fillMaxSize(),
+                        // Page identity is the article, not the slot it happens to occupy — a sync
+                        // merge or an "unread only" toggle reshuffles the list under the pager.
+                        key = { index -> pages.getOrNull(index)?.id ?: index },
+                        // Load-bearing: at the default 0 a page is torn down the moment it leaves
+                        // the viewport, taking its WebView — and the reading position inside it —
+                        // with it, so swiping back would restart the previous article from the top.
+                        beyondViewportPageCount = 1,
+                        // The pager's own touch handling would fight the WebView, which is an
+                        // interop view and does not take part in Compose's nested scroll. The
+                        // Initial-pass gate in articleSwipeNavigation drives pagerState instead.
+                        // It also disables the pager's own accessibility scroll actions, which
+                        // articleSwipeAccessibilityActions below already replaces.
+                        userScrollEnabled = false,
+                    ) { index ->
+                        val row = pages.getOrNull(index) ?: return@HorizontalPager
+                        LaunchedEffect(row.id) { readerPaging.requestContent(row.id) }
+                        val full = readerPaging.contents[row.id]
+                        val document = remember(theme, row, full, noTitleText, noContentText, openInBrowserTooltip) {
+                            readerDocument(theme, row, full, noTitleText, noContentText, openInBrowserTooltip)
+                        }
+                        // A page the user has not swiped to is held ready, not shown. It must not
+                        // be reachable by a screen reader's linear traversal (its WebView is a real
+                        // view, clipped rather than semantically hidden), and its own document must
+                        // not be able to send anyone to an external browser — see ArticleWebView.
+                        val active = row.id == selectedId
+                        Box(
+                            Modifier.fillMaxSize()
+                                .let { if (active) it else it.clearAndSetSemantics {} },
+                        ) {
+                            reader(document.html, document.body, document.articleUrl, active)
+                        }
+                    }
+                } else {
+                    val document = remember(theme, article, noTitleText, placeholderText, noContentText, openInBrowserTooltip) {
+                        singleReaderDocument(theme, article, noTitleText, placeholderText, noContentText, openInBrowserTooltip)
+                    }
+                    reader(document.html, document.body, document.articleUrl, true)
+                }
             }
         }
     }
@@ -372,12 +471,77 @@ internal fun articleMetaText(author: String?, publishedAt: Long?): String =
         .joinToString(" · ")
 
 /**
+ * One pager page's rendered document, plus the two values [ArticleWebView] needs alongside it.
+ *
+ * @property html The complete document to render.
+ * @property body The raw article body HTML, for resolving which link clicks escape to the browser.
+ * @property articleUrl The article's own URL.
+ */
+private data class ReaderDocument(val html: String, val body: String, val articleUrl: String?)
+
+/**
+ * Builds the document for one pager page from whatever is known about that article so far.
+ *
+ * A page composes as soon as it comes within the pager's reach, which is before its body has been
+ * read from the DB — [full] is `null` until then. That state renders the header alone rather than
+ * the "no content" notice: the body is on its way, and saying it does not exist would be wrong for
+ * the fraction of a second before it lands. The notice is kept for the case it actually describes,
+ * an article that genuinely has neither content nor summary.
+ *
+ * @param row The list row, which is all that is known about a page until its body loads.
+ * @param full The hydrated article, or `null` while its lookup is still in flight.
+ */
+private fun readerDocument(
+    theme: ArticleHtmlTheme,
+    row: ArticleListRow,
+    full: ArticleReaderRow?,
+    noTitleText: String,
+    noContentText: String,
+    openInBrowserTooltip: String,
+): ReaderDocument {
+    val url = full?.url ?: row.url
+    val title = (full?.title ?: row.title).ifBlank { noTitleText }
+    val meta = articleMetaText(full?.author, full?.published_at ?: row.published_at)
+    val body = full?.readerBody()
+    val html = when {
+        full == null -> wrapArticleHtml(theme, title, meta, body = "", baseUrl = url, titleUrl = url, titleTooltip = openInBrowserTooltip)
+        body.isNullOrBlank() -> articleNoContentHtml(theme, title, meta, noContentText, titleUrl = url, titleTooltip = openInBrowserTooltip)
+        else -> wrapArticleHtml(theme, title, meta, body, baseUrl = url, titleUrl = url, titleTooltip = openInBrowserTooltip)
+    }
+    return ReaderDocument(html, body.orEmpty(), url)
+}
+
+/**
+ * The document the single, non-pager reader renders — `PaneLayout.Triple`, and the narrow layouts'
+ * own "nothing selected" state.
+ *
+ * Routed through [readerDocument] rather than repeating its `when`: the two used to derive the body
+ * (and the content/summary fallback) separately, which is one edit away from the single reader and
+ * the pager disagreeing about how to render the same article. The only case this adds is the
+ * placeholder, which the pager has no equivalent of.
+ */
+private fun singleReaderDocument(
+    theme: ArticleHtmlTheme,
+    article: Articles?,
+    noTitleText: String,
+    placeholderText: String,
+    noContentText: String,
+    openInBrowserTooltip: String,
+): ReaderDocument {
+    if (article == null) return ReaderDocument(articlePlaceholderHtml(theme, placeholderText), body = "", articleUrl = null)
+    return readerDocument(theme, article.toListRow(), article.toReaderRow(), noTitleText, noContentText, openInBrowserTooltip)
+}
+
+/**
  * Displays a prebuilt HTML [html] document in a native web view.
  *
  * [html] is the complete, already-themed document to render (built by
  * [works.merc.keryx.app.ui.article.wrapArticleHtml] or one of its sibling builders); this
  * composable only owns the native WebView lifecycle. [body] is the raw article body HTML (not
  * the wrapped document) used to decide which link clicks should escape to the system browser.
+ * [active] is whether this is the page actually on screen; an inactive page (one the reader's
+ * pager is holding ready either side of it) is refused every navigation it attempts.
+ *
  * [articleUrl] is the article's own URL — the same value [html]'s `<base href>` was built from,
  * if any — and does double duty: resolving [body]'s relative `<a href>` values to the same
  * absolute form the WebView itself will navigate to, and (since the rendered title is itself a
@@ -385,12 +549,15 @@ internal fun articleMetaText(author: String?, publishedAt: Long?): String =
  * body links.
  */
 @Composable
-private fun ArticleWebView(html: String, body: String, articleUrl: String?) {
+private fun ArticleWebView(html: String, body: String, articleUrl: String?, active: Boolean) {
     // Only genuine outbound links from the article's own HTML are forwarded to the system
     // browser. A plain "any http(s) main-frame request" check would also catch SNS-embed
     // widgets' own internal requests (confirmed during the spike for the X/Twitter widget),
     // breaking the embed instead of letting it render in place.
     val knownLinks = remember { mutableStateOf(emptySet<String>()) }
+    // Read inside the interceptor, which is remembered once and therefore cannot capture the
+    // parameter directly.
+    val isActive = rememberUpdatedState(active)
     LaunchedEffect(body, articleUrl) {
         val links = extractLinks(body, articleUrl.orEmpty())
         knownLinks.value = articleUrl?.takeIf { isHttpOrHttpsUrl(it) }?.let { links + it } ?: links
@@ -399,6 +566,12 @@ private fun ArticleWebView(html: String, body: String, articleUrl: String?) {
     val interceptor = remember {
         object : RequestInterceptor {
             override fun onInterceptUrlRequest(request: WebRequest, navigator: WebViewNavigator): WebRequestInterceptResult {
+                // A page the reader is only holding ready has no business navigating anywhere: the
+                // library reports a script-driven `location.href` or a meta refresh through this
+                // same callback as a real tap, so without this an article the user has never opened
+                // could send them to an attacker-chosen page in their browser, or walk its own
+                // off-screen WebView onto an arbitrary remote origin in the shared profile.
+                if (!isActive.value) return WebRequestInterceptResult.Reject
                 return if (request.url in knownLinks.value) {
                     BrowserOpener.open(request.url)
                     WebRequestInterceptResult.Reject
@@ -456,6 +629,12 @@ private fun ArticleWebView(html: String, body: String, articleUrl: String?) {
             setNativeWebViewVisible(panel, true)
         }
     }
+    // A page the reader is only holding ready must not be reachable by a screen reader's linear
+    // traversal — see setNativeWebViewImportantForAccessibility's own KDoc for why the surrounding
+    // Box's clearAndSetSemantics{} is not enough on its own to guarantee that.
+    LaunchedEffect(active, nativePanel.value) {
+        nativePanel.value?.let { setNativeWebViewImportantForAccessibility(it, active) }
+    }
 
     WebView(
         state = webViewState,
@@ -467,6 +646,7 @@ private fun ArticleWebView(html: String, body: String, articleUrl: String?) {
         navigator = navigator,
         onCreated = { panel ->
             setNativeWebViewVisible(panel, false)
+            setNativeWebViewImportantForAccessibility(panel, active)
             nativePanel.value = panel
         },
     )

@@ -46,6 +46,7 @@ import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.AddFeedPreview
 import works.merc.keryx.app.domain.AddFeedPreviewResolver
 import works.merc.keryx.app.domain.ArticleListRow
+import works.merc.keryx.app.domain.ArticleReaderRow
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.ArticleSearchResult
 import works.merc.keryx.app.domain.toListRow
@@ -413,6 +414,25 @@ class HomeViewModel(
             if (unread) merged.filter { it.article.is_read == 0L || it.article.id in pinnedRead } else merged
         }.flowOn(dispatcher).stateIn(viewModelScope, started, emptyList())
 
+    /**
+     * The article rows the reader's pager pages through, in the order the list itself shows them.
+     *
+     * The Flow form of [currentArticles] — deliberately the same resolution, so the pager and
+     * [selectNext]/[selectPrevious] can never disagree about what "the next article" is. The
+     * imperative one stays for callers that need today's value synchronously ([moveSelection]
+     * steps from where the user actually is, not from whatever a Flow last emitted).
+     */
+    val pagerArticles: StateFlow<List<ArticleListRow>> =
+        combine(searchActive, articles, searchResults) { active, rows, results ->
+            if (active) results.map { it.article } else rows
+        }
+            .flowOn(dispatcher)
+            // The one flow here that is not `started` (Eagerly): only the reader's pager collects
+            // it, and only at a narrow layout, so on desktop — where the pager never exists — this
+            // would otherwise re-run `articles`' own list comparison on the main thread for every
+            // article write, for nobody.
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
+
     // Requests to move keyboard focus into whichever composable currently owns the search field —
     // FeedListPane's own KeryxTextField at PaneLayout.Triple, or ArticleListPane's
     // KeryxExpandedSearchBar at a narrow layout (Cmd+F, or tapping the search icon, both call
@@ -565,6 +585,40 @@ class HomeViewModel(
         browsingEpoch++
         settingsRepository.mutateLocalSettings { it.copy(lastFilter = filter.encode(), lastArticleId = null) }
     }
+
+    private val articleContentCache = ArticleContentCache(
+        scope = viewModelScope,
+        dispatcher = dispatcher,
+        load = { articleRepository.getArticleById(it) },
+    )
+
+    /**
+     * Article bodies the reader's pager is holding ready, keyed by article id — see
+     * [ArticleContentCache], which owns the loading, the bound and the eviction.
+     *
+     * Filled by [requestArticleContent]; never by [selectArticle], which is the one path that marks
+     * an article read. The article currently in [selectedArticle] may also appear here: the reader
+     * merges its own fully-loaded row in ahead of this map (see `ArticlePagerSync.readerContents`),
+     * so the copy on screen is always the authoritative one, while the copy kept here is what lets
+     * a page stay rendered after the selection has moved on to its neighbour.
+     */
+    val articleContents: StateFlow<Map<String, ArticleReaderRow>> = articleContentCache.rows
+
+    /**
+     * Loads [id]'s body into [articleContents], unless it is already there or already loading.
+     *
+     * Does **not** mark the article read and does not touch the selection — that is what lets the
+     * pager render a neighbouring page without it counting as opened.
+     *
+     * @param id The article to hydrate.
+     */
+    fun requestArticleContent(id: String) = articleContentCache.request(id)
+
+    /**
+     * Forgets every hydrated body — called when the reader leaves the composition, so a long
+     * reading session's article bodies do not stay resident for this ViewModel's whole life.
+     */
+    fun clearArticleContents() = articleContentCache.clear()
 
     /**
      * Selects an existing article, loads its full content, and marks it as read.

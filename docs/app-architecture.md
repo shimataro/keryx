@@ -299,8 +299,7 @@ ViewModels are registered as app-scope `single` and obtained via `koinInject()`.
 Edge WebView2 on Windows, WebKit on macOS, WebKitGTK on Linux), not a Compose-drawn texture. It is
 composed unconditionally for the pane's lifetime — never behind an `if` — because Compose Desktop's
 `SwingInteropContainer` revalidates and repaints the *whole window* whenever a heavyweight
-component is added, removed, or moved, not just this pane (see [known-issues.md](known-issues.md)
-for the investigation). Consequently, states that have no article to render — "no article
+component is added, removed, or moved, not just this pane. Consequently, states that have no article to render — "no article
 selected" and "no content" — are rendered as HTML *inside* the same WebView rather than as Compose
 `Text`, via `ui/article/ArticleWebViewHtml.kt`'s `articlePlaceholderHtml`/`articleNoContentHtml`
 (sharing one `<style>` block with the real-article `wrapArticleHtml` builder, so every state paints
@@ -316,27 +315,130 @@ see [known-issues.md](known-issues.md) for the investigation (an uncaught except
 creation also left the library's creation-retry timer running forever, which was the cause of an
 app-wide freeze on click).
 
-**Android's reader (`ui/home/ArticleDetailPane.kt`, shared `commonMain` composable) also grows
-swipe-to-navigate at a narrow layout** (`ui/home/ArticleSwipeNav.kt`) — a horizontal drag on the
-reader moves to the next/previous article, gated on `isTouchPrimary && swipeNavigation != null &&
-article != null`. The signal is `swipeNavigation`, not `onNavigateUp` — at `PaneLayout.Dual` the reader has no
-back control (`onNavigateUp` is `null`) but swipe must still work, so `swipeNavigation` is a separate,
-still-non-null signal there (see "Home's adaptive pane layout" below); it is inert only at `PaneLayout.Triple`
-and on desktop, where no caller passes it at all. Android's `WebView` (embedded via `AndroidView`) is an ordinary in-tree view, but it still
-consumes touch input on its own terms, so the gesture is arbitrated the same way
-`platform/NativeMenu.android.kt`'s long-press and `ui/home/FeedListDragGestures.kt`'s reorder drag
-already are: a `pointerInput` loop watches `PointerEventPass.Initial` (which reaches this ancestor
-before the WebView's own interop handling) and leaves every event unconsumed until the drag is
-confirmed horizontal (past touch slop, and more horizontal than vertical travel), so the WebView's
-own scroll and link taps are never interrupted for an ordinary vertical gesture; only once confirmed
-does it start consuming, which cancels the WebView's own gesture. A `HorizontalPager` was considered
-and rejected: it would need one `WebView` mounted per page, and preloading the adjacent pages' HTML
-would load their bodies (and, per the "selection marks read instantly" rule in `error-design.md`,
-mark them read) before the user ever swipes to them — the opposite of what `HomeViewModel.selectArticle`
-is designed to do. Instead, the gesture only drives `HomeViewModel.selectNext`/`selectPrevious` (the
-same calls desktop's J/K keyboard shortcut uses) once the drag commits, and the reader's own content
-slides via a plain `Modifier.offset` on the existing single WebView instance rather than swapping in
-a second one.
+**At a narrow layout the reader is a `HorizontalPager` instead** (`ui/home/ArticleDetailPane.kt`,
+shared `commonMain` composable) — a horizontal drag moves to the next/previous article, and the
+pages either side of the one on screen are real, mounted `WebView`s. `PaneLayout.Triple` (every
+desktop window, and a wide tablet in landscape) keeps the single unconditionally-composed reader
+described above; the branch between the two forms checks `readerPaging != null && article != null
+&& isTouchPrimary` — all three, not `readerPaging` alone. `article != null` keeps a `PaneLayout.Dual`
+reader that has paging data but nothing selected yet on its HTML placeholder, rather than resting
+the pager on whatever page it last happened to show; `isTouchPrimary` is checked again at this level
+even though `ArticleDetailPane` (the ViewModel-facing wrapper) already only builds `readerPaging` on
+a touch-primary platform — a transient pre-layout frame can resolve `PaneLayout.Single` even on
+desktop (see `HomeScreen`'s own comment on `BoxWithConstraints`), and the composable that actually
+decides whether the heavyweight pager mounts is where that invariant has to hold, not just the
+caller above it.
+
+`ArticleSwipeNavigation` and `ArticleReaderPaging` are the same "null means `PaneLayout.Triple`"
+signal, kept as separate parameters because the first is a deliberately stable, `remember`ed
+callback bundle while the second carries data that changes as articles load — `ArticleDetailPane`
+wraps its own construction in `remember(pages, contents, article)` so building it does not
+recompose the whole reader on every article write. The signal is `swipeNavigation`, not
+`onNavigateUp` — at `PaneLayout.Dual` the reader has no back control (`onNavigateUp` is `null`) but
+swipe must still work there (see "Home's adaptive pane layout" below).
+
+Three things about that pager are load-bearing:
+
+- **`beyondViewportPageCount = 1`.** At the default `0` a page is torn down the moment it leaves the
+  viewport, taking its `WebView` — and the reading position inside it — with it, so swiping back
+  would restart the previous article from the top. This one setting is the entire mechanism behind
+  "a swipe away and back returns you where you were"; its limits follow from it directly (two
+  articles away and back loses the position, as does leaving for the article list or a layout
+  change, since those unmount the pane itself). Desktop, which never uses the pager, never restores
+  a reading position at all.
+- **`userScrollEnabled = false`.** Android's `WebView` (embedded via `AndroidView`) is an ordinary
+  in-tree view, but it consumes touch input on its own terms and takes no part in Compose's nested
+  scroll, so the pager's own gesture handling would fight it. Instead the gesture is arbitrated the
+  same way `platform/NativeMenu.android.kt`'s long-press and `ui/home/FeedListDragGestures.kt`'s
+  reorder drag already are: `ui/home/ArticleSwipeNav.kt`'s `pointerInput` loop watches
+  `PointerEventPass.Initial` (which reaches this ancestor before the WebView's own interop handling)
+  and leaves every event unconsumed until the drag is confirmed horizontal, then drives the pager
+  itself. Disabling user scroll also removes the pager's own accessibility scroll actions, which
+  `articleSwipeAccessibilityActions` already replaces. It removes the platform's overscroll effect
+  too, which is why the reader keeps its own rubber band (`swipeDragOffset`, a plain
+  `Modifier.offset` on the pager) for a drag pointing at an end of the list.
+- **`key` is the article id, not the page index.** A sync merge, a feed refresh or an "unread only"
+  toggle reshuffles the backing list under the pager. `ui/home/ArticlePagerSync.kt` holds both
+  directions of the selection↔page synchronization, wired together by its own `@Composable`
+  `ArticleReaderPagerSync`:
+  - **Settle → selection** (`settledPageSelects`) only promotes a settle to `HomeViewModel.selectArticle`
+    (which is what marks the article read) when `ArticleSwipeController` itself recorded that page as
+    the target of a committed swipe (`pendingSelectionPage`/`consumePendingSelection`). `PagerState`
+    clamps its own current page whenever the backing list shrinks below it — a search, a sync-merge
+    tombstone, "unread only" hiding the article just read — with no swipe involved at all; without
+    this gate that clamp would select, and therefore mark read, whatever article happened to land at
+    the clamped index. It also refuses to act when nothing is selected yet, so a `PaneLayout.Dual`
+    reader sitting on page 0 beside an untouched list cannot open the first article by itself.
+  - **Selection → page** (`pageIndexToRestore`) follows a selection made elsewhere (the article
+    list, J/K, the reader's own accessibility actions) and re-anchors the pager when the list shifts
+    underneath it, standing down while `ArticleSwipeController.gestureInProgress` is `true`. That
+    flag, not `PagerState.isScrollInProgress`, is what the gate is measured against: the controller
+    holds it from the first confirmed drag sample through the end of the settle/turn animation,
+    covering the gap — after the finger lifts but before that animation starts — where
+    `isScrollInProgress` has already gone false but the swipe still owns the pager.
+
+  Both directions compare ids rather than indexes for the same reason `key` does.
+
+**The gesture drives the pager through a single scroll session per drag, not one `scrollBy` call
+per pointer sample.** `ScrollableState` mutations go through a `MutatorMutex`, which *cancels* a
+mutation already in flight rather than queueing behind it — calling `scrollBy` per sample would
+silently drop the delta of every sample that arrived while the previous one's mutation was still
+being cancelled, and because a pager scroll is a relative delta (unlike the absolute
+`Animatable.snapTo` the pre-pager reader used), a dropped delta is lost for good and the content
+drifts away from the finger. `ArticleSwipeController.onDragStart` instead opens one
+`PagerState.scroll { }` session and feeds it deltas through a `Channel`, closing it only at
+`onDragEnd`/`onDragCancel`; the settle/page-turn animation that follows joins that session first, so
+it is never racing a still-open one. Holding the session open for the gesture's whole duration is
+also what keeps `PagerState.isScrollInProgress` from going false mid-drag, which is why
+`gestureInProgress` (above) has to be tracked separately rather than reusing it.
+
+Pages are hydrated by `HomeViewModel.requestArticleContent`, which delegates to
+`ui/home/ArticleContentCache.kt` — a small, independently-testable collaborator, not inline
+`HomeViewModel` state — and fills `articleContents` (bounded at `ARTICLE_CONTENT_CACHE_LIMIT`,
+oldest evicted first) with a plain `getArticleById` read projected down to `ArticleReaderRow`
+(`domain/ArticleRepository.kt`) rather than the full `Articles` row: the full row also carries
+`search_text`, a second HTML-stripped copy of the body the reader never reads. **Loading a body is
+not selecting it**: `selectArticle` is the only path that marks an article read, so a neighbouring
+page renders without counting as opened. The cache deliberately does *not* skip the currently
+selected article — `ui/home/ArticlePagerSync.kt`'s `readerContents` merges the selection's own
+authoritative row in ahead of the cache, but the cache still holds its own copy, which is what keeps
+the page the user just swiped away from rendered (rather than blanking out and reloading) once the
+selection moves on to its neighbour. `readerPages` is the equivalent fallback on the list side: if
+the selected article is not in `pagerArticles` yet (that flow starts empty, being `WhileSubscribed`
+rather than `Eagerly` — see below) or has just been tombstoned, the pager renders a synthesized
+one-page list built from the selection alone rather than swapping between an empty pager and a
+populated one, which would tear down and rebuild the one page's `WebView`. `HomeViewModel.pagerArticles`
+is `WhileSubscribed`, unlike its `Eagerly` siblings, precisely because only the reader's pager (and
+therefore only a touch-primary platform, at a narrow layout) ever collects it; `ArticleContentCache`
+is cleared via `HomeViewModel.clearArticleContents` when the reader leaves the composition
+(`DisposableEffect` in `ArticleDetailPane`), so a long reading session does not hold every body it
+ever paged past for the ViewModel's whole life.
+
+Loading a neighbouring page's body does mean its images, embeds and scripts are fetched and
+rendered before the user has swiped to it; `external-spec.md` §10 records that. What it must not
+mean is that page acting as though it were on screen: `ArticleWebView`'s `active` parameter (`true`
+only for the page at the pager's current position) gates two things directly on the native view,
+independent of Compose's own semantics tree, since a native `WebView`'s accessibility nodes and
+navigation events bypass that tree entirely —
+- **Navigation.** An inactive page's `RequestInterceptor` rejects every URL, including ones the
+  library reports for a script-driven `location.href` or a meta refresh (it does not distinguish
+  those from a real tap). Without this, a feed's own auto-navigating or malicious content could open
+  the system browser, or drive an off-screen `WebView` to an arbitrary origin in the shared profile,
+  from an article the user has never opened.
+- **Accessibility.** `platform/NativeWebViewAccessibility.kt`'s `setNativeWebViewImportantForAccessibility`
+  sets Android's `IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS` on an inactive page's `WebView`,
+  removing its whole subtree — where the article body actually lives — from a screen reader's
+  linear traversal. The surrounding Compose `Box` also gets `clearAndSetSemantics {}`, but that
+  alone does not reach a native view's own accessibility nodes, which is why both exist. Desktop's
+  `actual` is a no-op: `PaneLayout.Triple` never mounts an inactive page. The active page's own
+  container instead carries a `liveRegion = Polite` announcement of the article title, since
+  disabling the pager's user scroll (above) also disables its built-in page-change announcement,
+  leaving `articleSwipeAccessibilityActions`'s custom actions as the only way a screen-reader user
+  can move between articles.
+
+(An earlier version of this section rejected `HorizontalPager` on the grounds that preloading
+adjacent pages would mark them read. That was wrong — read marking lives in `selectArticle`, not in
+`getArticleById` — and the rejection has been reversed.)
 
 ### Desktop Tray (platform branch)
 

@@ -22,6 +22,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import works.merc.keryx.app.core.ARTICLE_CONTENT_CACHE_LIMIT
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.DiscoveredFeedLink
@@ -256,6 +257,7 @@ class HomeViewModelTest {
         backgroundScope.launch { vm.starredUnreadCount.collect {} }
         backgroundScope.launch { vm.articles.collect {} }
         backgroundScope.launch { vm.searchResults.collect {} }
+        backgroundScope.launch { vm.pagerArticles.collect {} }
     }
 
     @Test
@@ -3178,6 +3180,166 @@ class HomeViewModelTest {
         assertTrue(addFeedAlreadySubscribed("https://feed/f1", feeds))
         // No scheme typed: withDefaultScheme prepends https:// before comparing.
         assertTrue(addFeedAlreadySubscribed("feed/f1", feeds))
+    }
+
+    // --- Reader pager: pagerArticles / articleContents / requestArticleContent ---
+
+    /**
+     * The pager and `selectNext`/`selectPrevious` must agree about what "the next article" is, so
+     * [HomeViewModel.pagerArticles] has to resolve exactly as `currentArticles()` does — including
+     * swapping to the search results while a search is running.
+     */
+    @Test
+    fun pagerArticlesFollowsTheVisibleListAndSwapsToSearchResults() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L, title = "Kotlin One")
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L, title = "Swift Two")
+        ftsManagerIndexed(driver)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf("a1", "a2"), vm.pagerArticles.value.map { it.id })
+
+        vm.setSearchBarVisible(true)
+        vm.setSearchQuery("Swift")
+        advanceForSearchDebounce()
+
+        assertTrue(vm.searchActive.value)
+        assertEquals(vm.searchResults.value.map { it.article.id }, vm.pagerArticles.value.map { it.id })
+        assertEquals(listOf("a2"), vm.pagerArticles.value.map { it.id })
+    }
+
+    /**
+     * The whole point of hydrating a neighbouring page separately from selecting it: the pager
+     * composes the articles either side of the one on screen, and those must not be marked read —
+     * `selectArticle` is the only path allowed to do that (external-spec §7).
+     */
+    @Test
+    fun requestArticleContentLoadsTheBodyWithoutMarkingItReadOrSelectingIt() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, content = "<p>neighbour</p>")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        vm.requestArticleContent("a1")
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("<p>neighbour</p>", vm.articleContents.value["a1"]?.content)
+        assertNull(vm.selectedArticle.value)
+        assertEquals(0L, vm.articles.value.single { it.id == "a1" }.is_read)
+    }
+
+    /**
+     * A sync merge can tombstone the row between the page composing and the lookup returning.
+     * Caching it would put deleted content on screen — the same race `selectArticle` guards.
+     */
+    @Test
+    fun requestArticleContentDiscardsARowTombstonedSinceThePageComposed() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, content = "<p>gone</p>")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        driver.stampArticleDeleted("a1", deletedAt = 10L)
+        vm.requestArticleContent("a1")
+        testScheduler.advanceUntilIdle()
+
+        assertFalse("a1" in vm.articleContents.value)
+    }
+
+    /**
+     * The cache does *not* skip the currently selected article — its body has to still be there
+     * after the selection moves on to a neighbour, or the page the user just swiped away from
+     * would blank out and reload, losing the reading position the pager exists to preserve
+     * (`ArticlePagerSync.readerContents` is what merges the selection's own authoritative row in
+     * ahead of this one while it is still current).
+     */
+    @Test
+    fun requestArticleContentAlsoLoadsTheCurrentlySelectedArticle() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, content = "<p>selected</p>")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(vm.articles.value.single())
+        testScheduler.advanceUntilIdle()
+
+        vm.requestArticleContent("a1")
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("<p>selected</p>", vm.articleContents.value["a1"]?.content)
+        assertEquals("<p>selected</p>", vm.selectedArticle.value?.content)
+    }
+
+    /**
+     * Bodies survive the selection moving to a neighbour — otherwise the page just swiped away
+     * from would blank out under the pager, exactly the regression this cache exists to prevent.
+     */
+    @Test
+    fun requestedContentSurvivesTheSelectionMovingElsewhere() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, content = "<p>first</p>")
+        db.insertArticle("a2", "f1", isRead = 0L, content = "<p>second</p>")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        val a1 = vm.articles.value.first { it.id == "a1" }
+        val a2 = vm.articles.value.first { it.id == "a2" }
+        vm.selectArticle(a1)
+        testScheduler.advanceUntilIdle()
+        vm.requestArticleContent("a1")
+        testScheduler.advanceUntilIdle()
+
+        vm.selectArticle(a2)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("<p>first</p>", vm.articleContents.value["a1"]?.content)
+    }
+
+    /** Forgetting the cache is what keeps a long reading session from holding every body it ever
+     * paged past for the ViewModel's whole life once the reader leaves the composition. */
+    @Test
+    fun clearArticleContentsForgetsEveryHeldBody() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, content = "<p>content</p>")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.requestArticleContent("a1")
+        testScheduler.advanceUntilIdle()
+        assertTrue("a1" in vm.articleContents.value)
+
+        vm.clearArticleContents()
+
+        assertTrue(vm.articleContents.value.isEmpty())
+    }
+
+    /**
+     * A long reading session must not accumulate every body it has ever paged past —
+     * `ARTICLE_CONTENT_CACHE_LIMIT` bounds the map, dropping the oldest entry first.
+     */
+    @Test
+    fun articleContentsEvictsTheOldestEntryPastTheCacheLimit() = runTest {
+        db.insertFeed("f1")
+        val ids = (1..ARTICLE_CONTENT_CACHE_LIMIT + 2).map { "a$it" }
+        ids.forEachIndexed { index, id ->
+            db.insertArticle(id, "f1", isRead = 0L, content = "<p>$id</p>", publishedAt = index.toLong(), createdAt = index.toLong())
+        }
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        ids.forEach { id ->
+            vm.requestArticleContent(id)
+            testScheduler.advanceUntilIdle()
+        }
+
+        assertEquals(ARTICLE_CONTENT_CACHE_LIMIT, vm.articleContents.value.size)
+        // The two requested first are the two dropped; the most recent are all still in hand.
+        assertEquals(ids.drop(2).toSet(), vm.articleContents.value.keys)
     }
 }
 
