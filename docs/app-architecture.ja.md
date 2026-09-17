@@ -323,6 +323,29 @@ WebView **内部**の HTML として描画する（`ui/article/ArticleWebViewHtm
 同様に常時表示し、未選択時はボタンを非表示にせず無効化する — これによりツールバーの Compose
 構造（ひいてはリーダーの計測済みバウンズ）が状態間で常に同一に保たれる。
 
+**フィード本文はサードパーティのコンテンツであり、文書はそれに耐えるよう組み立てている。** 本文は
+リッチマークアップを活かすため無加工で埋め込まれ、その上に記事自身のオリジンを指す `<base href>` が
+付く。このため本文は配信元サイトのスタイルシートにも到達できてしまう — 本文が持つ
+`<link rel="stylesheet">` からでも、本文中のスクリプトが `<head>` に追加したものからでも。この種の
+スタイルシートは初回描画の一拍あとに届き、カスケード上は後ろに来るため、共有の `<style>` ブロックに
+勝ってリーダーの体裁（余白・タイトル色・フォントスケール）を作り替えてしまう
+（[known-issues.ja.md](known-issues.ja.md) 参照）。そこで `articleDocument` は
+`<meta http-equiv="Content-Security-Policy" content="style-src 'unsafe-inline'">` を出力する。
+`style-src` に URL ソースを一切書かないので外部スタイルシートは決して取得されず、一方
+`'unsafe-inline'` によってアプリ自身の `<style>` ブロックと本文の `style=""` 属性は従来どおり効く。
+`script-src` も `default-src` も**意図的に**書いていない — 本文のスクリプトと、それを必要とする SNS
+埋め込み（上記のリンク横取りの記述を参照）はそのまま動き続ける。加えて、リーダー自身の**クローム**の
+ルールは全宣言に `!important` を付けており、より低い詳細度からの上書き — メタ CSP を解釈しない
+エンジンや、`'unsafe-inline'` では通ってしまう本文内のインライン `<style>` の通常のケース — に対して
+硬くしている。ただしこれは硬化であって隔離ではなく、効くのはここに列挙した宣言に対してだけである。
+どのルールも `!important` を付けていないプロパティ（`.article-title { display: none !important }` は
+タイトルごと消してしまう）はそのまま通り、同等以上の詳細度を持つ本文側の `!important` ルールは、
+本文が `<style>` ブロックより後ろに来る以上、出現順で勝つ。本文そのものを封じ込めるには
+サニタイズか描画境界の分離が必要で、[known-issues.ja.md](known-issues.ja.md) の
+「本当の修正に必要なこと」を参照。クロームに限っていること自体は意図的で、本文コンテンツ向けの
+ルール（`a`、`img`/`video`/`iframe`、`table`、`td`/`th`）は素のままで、記事筆者自身の `style=""` が
+引き続き勝てる。
+
 `ArticleWebView` は `webSettings.desktopWebSettings.dataDirectory` も明示的に設定しており、
 `AppDirs.cacheDir()` 配下の `webview` サブディレクトリを、デスクトップ 3 OS すべてに同一に適用している
 （OS 分岐なし）。デフォルトの `null` のままだと WebView2 は実行ファイルの隣に自分のデータフォルダを

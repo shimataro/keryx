@@ -574,3 +574,71 @@ Keryx 側は正しく動作しており、まずそこを検証済みである: 
 プラットフォームごとにメニューの形を変える）ことになるためである。動的なラベルは
 macOS・Windows・KDE Plasma・AWT フォールバックでは正しく即座に反映されており、それを
 手放すほどの価値はない。
+
+## フィード本文のスクリプトが記事リーダー内で実行される
+
+**状態**: 半分修正 — スタイルシート側は塞いだ（リーダーの文書が
+`style-src 'unsafe-inline'` の CSP を宣言しているため、本文が引き込もうとする外部スタイルシートは
+一切取得されない）。スクリプト側は意図的に残している。script 型の SNS 埋め込みがそれを必要として
+おり、`ArticleWebView` のリンク横取りもまさにその埋め込みを壊さないために存在するため。
+
+### 症状
+
+Android で `https://alfalfalfa.com/articles/11110022.html` を開くと、1〜2 秒は正常に描画された
+のち表示が作り替わる。文書の余白が消え、タイトルが赤茶色になって上に移動し、フォントが小さくなり、
+見出しに太い茶色の左バーが付き、「続きを読む」のリンクが青紫のボタンになる。デスクトップでは
+再現しない。
+
+### 診断
+
+`ui/article/ArticleWebViewHtml.kt` はフィード本文を、記事自身のオリジンを指す `<base href>` の下に
+無加工で埋め込んでおり、リーダーの WebView は JavaScript が有効（`composewebview` の
+`WebSettings.isJavaScriptEnabled` の既定が `true`。アプリは `desktopWebSettings.dataDirectory`
+しか上書きしていない）。
+
+当該記事の `content:encoded` には、UA が `/iPhone|iPod|Android.*Mobile|Windows Phone/i` に一致する
+とき `/css/smartphone.css` を `document.head` に追加するスクリプトに加え、`<noscript>` 内の同ファイル
+への `<link rel="stylesheet">`、`https://blogroll.livedoor.net/css/default2.css` への `<link>`、
+広告 `<script>` 4 個が含まれる。Android では UA が一致し、`<base>` によって
+`https://alfalfalfa.com/css/smartphone.css` に解決され、取得完了後に適用される — カスケード上は
+リーダー自身の `<style>` より後ろなので後勝ちになる。症状はすべてこのスタイルシートのルールに対応する:
+
+| 症状 | 該当ルール |
+| --- | --- |
+| 余白が消える・行間が詰まる | `html, body, h1, … {margin:0; padding:0}` / `body {line-height:1}` |
+| フォントが小さくなる | 同じリセットの `font-size:100%`（`html {font-size:N%}` を打ち消す） |
+| タイトルが赤茶色になる | `a:link {color:#a52a2a}` — `.article-title a {color:inherit}` と同詳細度で、後に宣言されている |
+| 見出しの茶色の左バー | `div.daily_popular_title {border-left:12px solid #8D4225; color:#532E0C}` |
+| 「続きを読む」ボタン | `.article_bodyfooter .readmore a {background:#444499; color:#fff}` |
+
+デスクトップで再現しないのは、UA がそのスクリプトの判定に一致せず `smartphone.css` が注入されない
+というだけの理由で、コードパス自体は commonMain 共通である。
+
+### 修正した内容
+
+`articleDocument` が `<meta http-equiv="Content-Security-Policy" content="style-src
+'unsafe-inline'">` を出力するようにした。`style-src` に URL ソースを一切書かないため、静的な
+リンク・`@import`・スクリプトによる追加のいずれであっても外部スタイルシートは取得されない。一方
+`'unsafe-inline'` によってアプリ自身の `<style>` ブロックと本文の `style=""` 属性は従来どおり効く。
+加えて、リーダーのクロームのルールには `!important` を付けており、そこに列挙した宣言を、より低い
+詳細度からの上書きに対して硬くしている（硬化であって隔離ではない。
+[app-architecture.ja.md](app-architecture.ja.md) の「記事リーダー」参照）。
+
+### 意図的に残している範囲
+
+`script-src` は宣言していないので、本文のスクリプトは引き続き実行される。広告・計測コードが動いて
+独自に外部リクエストを発行するため、[external-spec.ja.md](external-spec.ja.md) §10 の「外部サーバへ
+データを送信しない」とは厳密には折り合っていない。また、スクリプトがインラインの `<style>` 要素を
+注入する経路も残る（`'unsafe-inline'` の範囲内。通常のケースはクロームの `!important` で受け止めて
+いるが、受け止められるのは列挙済みの宣言だけで、どのルールも `!important` を付けていない
+プロパティや、本文側の同詳細度の `!important` ルールは、本文が `<style>` ブロックより後ろに来る
+以上そのままクロームを作り替える）。
+これは意図的なトレードオフで、JavaScript を無効にすると script 型の SNS 埋め込みも道連れになる。
+
+### 本当の修正に必要なこと
+
+影響を封じ込めるだけでなく、本文を信頼できないマークアップとして扱うこと — ksoup で `<script>` /
+`<link>` / `<style>` / `<base>` / `<meta>` / `<noscript>` / `on*` 属性を除去し
+`isJavaScriptEnabled = false` にする（SNS 埋め込みは埋め込みコード自身が持つ `<blockquote>`
+フォールバックに退化する）か、本文を `<iframe sandbox srcdoc>` に隔離してリーダーの文書に
+一切到達できないようにする。

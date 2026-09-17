@@ -307,6 +307,30 @@ the same theme colors). The toolbar above the reader is likewise always present,
 disabled rather than hidden when nothing is selected, keeping its Compose structure — and
 therefore the reader's measured bounds — identical across states.
 
+**The feed body is third-party content, and the document is built to survive it.** A body is
+embedded raw (so its rich markup renders) beneath a `<base href>` at the article's own origin,
+which also lets it reach the source site's own stylesheets — either a `<link rel="stylesheet">` it
+carries, or one its own script appends to `<head>`. Such a sheet arrives a beat after the first
+paint and, being later in the cascade, would otherwise win over the shared `<style>` block and
+restyle the reader around the article (padding, title color, font scale — see
+[known-issues.md](known-issues.md)). `articleDocument` therefore emits
+`<meta http-equiv="Content-Security-Policy" content="style-src 'unsafe-inline'">`: naming no URL
+source for `style-src` means no external stylesheet is ever fetched, while `'unsafe-inline'` keeps
+the app's own `<style>` block and the body's `style=""` attributes working. No `script-src` and no
+`default-src` are declared, deliberately — the body's scripts, and the SNS embeds that need them
+(see the link-interception note above), keep running. Every declaration in the reader's own
+*chrome* rules additionally carries `!important`, hardening it against a lower-specificity
+override — an engine that ignores a meta CSP, or the ordinary inline `<style>` the body carries
+(which `'unsafe-inline'` still admits). That is hardening, not isolation, and it covers only the
+declarations actually listed: a property none of them marks `!important` goes straight through
+(a body-supplied `.article-title { display: none !important }` hides the title outright), and an
+equally-or-more-specific `!important` rule of the body's own wins on document order, since the
+body follows the `<style>` block. Containing the body outright would take sanitization or a
+separate rendering boundary — see "What a real fix would need" in
+[known-issues.md](known-issues.md). The limit to chrome is itself deliberate: the content-facing
+rules (`a`, `img`/`video`/`iframe`, `table`, `td`/`th`) stay plain, so a feed author's own
+`style=""` can still override them.
+
 `ArticleWebView` also sets `webSettings.desktopWebSettings.dataDirectory` explicitly, to
 `AppDirs.cacheDir()` plus a `webview` subdirectory, applied identically on all three desktop
 platforms (no OS branch). Left at its `null` default, WebView2 tries to create its data folder next
