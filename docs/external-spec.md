@@ -215,9 +215,10 @@ was being read**, rather than to its top — the immediate neighbours on either 
 so the one just left is still exactly as it was. That memory covers one article in each direction
 and lasts as long as the reader stays on screen: swiping two or more articles away and back, going
 back to the article list, or rotating the device between phone and tablet width all start the
-article from the top again, as does reopening it later. A swipe that is at all diagonal is treated
-as a scroll rather than a page turn, and a swipe is ignored for a moment after scrolling, so a flick
-meant to scroll does not change the article. This is
+article from the top again, as does reopening it later. A swipe whose vertical travel isn't clearly
+smaller than its horizontal travel is treated as a scroll rather than a page turn (a horizontal-
+dominant diagonal drag still turns the page), and a swipe is ignored for a moment after scrolling,
+so a flick meant to scroll does not change the article. This is
 available whenever the reader is on screen at all at a narrower-than-desktop width — a phone-width
 screen drilled into an article, and a tablet-width screen (in portrait, and in landscape on any
 tablet not wide enough for all three panes), where the reader is a permanent neighbor of the article
