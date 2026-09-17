@@ -177,6 +177,86 @@ class ArticleReaderPagerSyncTest {
         assertEquals(2, pagerStateRef?.currentPage)
     }
 
+    /**
+     * Regression test for the race `settleJob?.cancel()` opens: cancellation does not wait for the
+     * cancelled job's `finally` to run, so a settle abandoned by a newer gesture can still clear
+     * [ArticleSwipeController.gestureInProgress] after that newer gesture has already set it `true`
+     * — see `ArticleSwipeController.gestureGeneration`'s own KDoc. The clock is frozen so the first
+     * settle is caught mid-flight (suspended in `animateScrollToPage`, before its `finally`), then
+     * stepped one frame at a time while a second gesture is in progress: the fixed code must never
+     * let the abandoned settle's own `finally` win that race.
+     */
+    @Test
+    fun aSettleCancelledByANewerGestureCannotClearItsGestureInProgress() = runDesktopComposeUiTest {
+        val pages = rows("a1", "a2", "a3")
+        var selectedId by mutableStateOf<String?>("a2")
+        var controllerRef: ArticleSwipeController? = null
+
+        setContent {
+            val pagerState = rememberPagerState(initialPage = 1) { pages.size }
+            val controller = rememberArticleSwipeController(pagerState, { true }, { true })
+            controllerRef = controller
+            ArticleReaderPagerSync(pagerState, pages, selectedId, controller) { row -> selectedId = row.id }
+            Box(
+                Modifier.testTag("root").size(hostWidthDp, 500.dp)
+                    .onSizeChanged { controller.widthPx = it.width.toFloat() }
+                    .articleSwipeNavigation(controller),
+            ) {
+                HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize(), userScrollEnabled = false) {
+                    Box(Modifier.fillMaxSize())
+                }
+            }
+        }
+        waitForIdle()
+        fun Dp.toPxOffset(): Float = with(density) { toPx() }
+        val start = Offset(hostWidthDp.toPxOffset() / 2, 250.dp.toPxOffset())
+
+        // A fast, short flick (see ArticleSwipeGestureTest's own
+        // aFastShortFlickBelowTheCommitDistanceStillTurnsThePageViaFlingVelocity) commits via
+        // velocity alone, leaving almost the whole pane width still to animate — unlike a drag that
+        // already crosses the commit fraction, whose settle has almost nowhere left to travel and
+        // can finish within a single evaluated frame. Freezing the clock right after is what turns
+        // that long remaining distance into a settle reliably caught mid-flight, before it ever
+        // reaches its `finally`.
+        mainClock.autoAdvance = false
+        onNodeWithTag("root").performTouchInput {
+            down(start)
+            advanceEventTime(4L)
+            moveBy(Offset((-50f).dp.toPxOffset(), 0f))
+            up()
+        }
+        waitForIdle()
+        assertTrue(controllerRef!!.gestureInProgress)
+
+        // A second gesture starts (and, via onDragStart, cancels the still-frozen first settle)
+        // before that settle's `finally` has ever run.
+        onNodeWithTag("root").performTouchInput {
+            down(start)
+            advanceEventTime(4L)
+            moveBy(Offset((-50f).dp.toPxOffset(), 0f))
+            up()
+        }
+        waitForIdle()
+
+        // Step the frozen clock: this is where the cancelled first settle's `finally` actually gets
+        // to run. The buggy code clears gestureInProgress here even though the second gesture's own
+        // settle is still in flight (it has just as much distance left to animate); the fix must not.
+        repeat(5) {
+            mainClock.advanceTimeByFrame()
+            waitForIdle()
+            assertTrue(controllerRef!!.gestureInProgress)
+        }
+
+        mainClock.autoAdvance = true
+        waitForIdle()
+
+        // The second swipe still resolves normally once let through to completion — both gestures
+        // dragged from the same still-frozen anchor (a2), so this is the second gesture's own
+        // settle actually landing, not the cancelled first one.
+        assertEquals("a3", selectedId)
+        assertTrue(!controllerRef!!.gestureInProgress)
+    }
+
     @Test
     fun aGestureInFlightIsNeverInterruptedByAConcurrentSelectionChange() = runDesktopComposeUiTest {
         val pages = rows("a1", "a2", "a3")

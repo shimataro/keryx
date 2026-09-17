@@ -207,9 +207,18 @@ internal class ArticleSwipeController(
      * `PagerState.isScrollInProgress`: the user owns the pager for the whole gesture, including the
      * gap between releasing the finger and the animation starting, and a list update arriving in
      * that gap must not yank the pager somewhere else.
+     *
+     * Only cleared by the settle job whose [gestureGeneration] is still current — `Job.cancel()`
+     * (see [onDragStart]) does not run the cancelled job's `finally` synchronously, so without that
+     * check a settle from an *already-abandoned* gesture could still flip this back to `false` after
+     * the new gesture has set it `true`, letting a list update steal the pager mid-drag.
      */
     var gestureInProgress by mutableStateOf(false)
         private set
+
+    /** Bumped on every [onDragStart], so a settle job cancelled by a newer gesture can tell it is
+     * no longer the one that owns [gestureInProgress] — see that property's own KDoc. */
+    private var gestureGeneration = 0L
 
     private var dragTotalPx = 0f
     private val velocityTracker = VelocityTracker()
@@ -306,6 +315,9 @@ internal class ArticleSwipeController(
         dragStartUptimeMillis = startUptimeMillis
         dragLastUptimeMillis = startUptimeMillis
         dragSampleCount = 0
+        // Before cancelling: cancel() does not wait for the old job's `finally` to run, so that
+        // `finally` (see animateToPage) has to be able to tell it no longer owns gestureInProgress.
+        gestureGeneration++
         // A settle still running from the previous gesture would otherwise wake up mid-drag and
         // scroll the pager back to where that gesture had left it.
         settleJob?.cancel()
@@ -415,6 +427,7 @@ internal class ArticleSwipeController(
      * list that shrank underneath mid-drag.
      */
     private fun animateToPage(page: Int) {
+        val generation = gestureGeneration
         settleJob = scope.launch {
             try {
                 // Let the drag session close out first, so the pager is not still held by it.
@@ -423,7 +436,10 @@ internal class ArticleSwipeController(
                 val lastPage = (pagerState.pageCount - 1).coerceAtLeast(0)
                 pagerState.animateScrollToPage(page.coerceIn(0, lastPage))
             } finally {
-                gestureInProgress = false
+                // A newer gesture has already started (and cancelled this job) by the time this
+                // runs: it owns gestureInProgress now, and this settle must not clear it out from
+                // under it.
+                if (gestureGeneration == generation) gestureInProgress = false
             }
         }
     }
