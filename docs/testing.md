@@ -952,9 +952,10 @@ device/emulator unless a step says otherwise:
   make scrolling stutter or the app get killed.
 - **Desktop** (`PaneLayout.Triple`): selecting an article still does not flicker the whole window,
   and J/K still moves between articles — that path keeps the single unconditionally-composed reader.
-- Drag past the commit threshold, then release without lifting past it (a cancelled swipe): the
-  article does not change, and its unread state (check the article list) is unaffected — a
-  neighbouring page's body is fetched but must never be marked read on its own.
+- Drag past the commit threshold (30% of the pane width), then slowly drag back below it and
+  release with a slow, deliberate lift (well under the fling-velocity threshold) — a cancelled
+  swipe: the article does not change, and its unread state (check the article list) is unaffected
+  — a neighbouring page's body is fetched but must never be marked read on its own.
 - Subscribe to a feed whose articles contain a self-navigating link or embed (e.g. a script that
   sets `location.href`, or a meta-refresh): swiping so that article becomes a *neighbour* (without
   swiping to it) never opens the system browser or navigates anywhere; it only does once the swipe
