@@ -66,12 +66,22 @@ internal class ArticleContentCache(
     private val inFlight = MutableStateFlow<Set<String>>(emptySet())
 
     /**
+     * Bumped by [clear], so a lookup that was already running when the cache was emptied can tell
+     * that its result is no longer wanted.
+     *
+     * A `MutableStateFlow` for the same reason [inFlight] is one: [request] is reachable through
+     * `HomeViewModel.requestArticleContent`, which a future caller could invoke off [scope].
+     */
+    private val generation = MutableStateFlow(0)
+
+    /**
      * Loads [id]'s body, unless it is already held or already loading.
      *
      * @param id The article to hydrate.
      */
     fun request(id: String) {
         if (id in _rows.value) return
+        val startedGeneration = generation.value
         var started = false
         inFlight.update { current ->
             if (id in current) current else { started = true; current + id }
@@ -81,8 +91,13 @@ internal class ArticleContentCache(
             val full = try {
                 withContext(dispatcher) { load(id) }
             } finally {
-                inFlight.update { it - id }
+                // A clear() has already emptied the whole set; removing this id would take out a
+                // lookup the returning reader has since started for the very same article.
+                if (generation.value == startedGeneration) inFlight.update { it - id }
             }
+            // The reader left the composition while this was reading: the body it asked for is not
+            // wanted any more, and inserting it would leave behind exactly what clear() dropped.
+            if (generation.value != startedGeneration) return@launch
             // A sync merge can tombstone the row between the page composing and this returning;
             // rendering it would put deleted content back on screen, the same thing
             // HomeViewModel.selectArticle's own guard prevents for the selection.
@@ -92,13 +107,19 @@ internal class ArticleContentCache(
     }
 
     /**
-     * Forgets every held body.
+     * Forgets every held body, and disowns every lookup still running.
      *
      * Called when the reader leaves the composition: nothing is holding these pages open any more,
      * and without this the bodies of every article paged past would stay resident for the
-     * ViewModel's whole life.
+     * ViewModel's whole life. A lookup in flight has to be disowned along with them, or it would
+     * insert its row *after* the map was emptied — leaving resident precisely the body this exists
+     * to drop. [inFlight] is emptied in the same breath: those disowned lookups no longer clear
+     * their own ids, and an id left behind there would refuse that article for good once the reader
+     * comes back.
      */
     fun clear() {
+        generation.update { it + 1 }
+        inFlight.value = emptySet()
         _rows.value = emptyMap()
     }
 }
