@@ -10,10 +10,12 @@ import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.writeFully
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withTimeoutOrNull
 import works.merc.keryx.app.core.MAX_REDIRECTS
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.UpdateException
@@ -27,6 +29,15 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlin.test.fail
+
+/**
+ * Ceiling on how long [UpdateDownloaderTest.progressArrivesWhileTheBodyIsStillStreaming] waits for
+ * the first progress reading. The reading is expected within milliseconds of the download starting,
+ * so this only bounds how long a stalled run takes to report; it is deliberately generous because a
+ * saturated CI runner's scheduling latency is not what that test is measuring.
+ */
+private const val FIRST_PROGRESS_TIMEOUT_MS = 30_000L
 
 /**
  * [UpdateDownloader] tests use [runBlocking] rather than `runTest`'s virtual time — its `timeout {}`
@@ -121,8 +132,8 @@ class UpdateDownloaderTest {
 
         try {
             body.writeFully(payload, 0, headBytes)
-            // Never completes if the body was buffered whole before download() could read any of it.
-            val (done, total) = withTimeout(10_000) { firstProgress.await() }
+            // Never arrives if the body was buffered whole before download() could read any of it.
+            val (done, total) = awaitFirstProgress(firstProgress, download)
             assertTrue(done in 1..headBytes.toLong(), "progress reported $done bytes, only $headBytes were sent")
             assertEquals(payload.size.toLong(), total)
 
@@ -135,6 +146,26 @@ class UpdateDownloaderTest {
             dest.delete()
         }
     }
+
+    /**
+     * Awaits the first progress reading, racing it against [download]'s own completion.
+     *
+     * Waiting on the reading alone discards the very failure it exists to catch: `download()`
+     * reports an ordinary failure as a `Result.Err` rather than throwing (`docs/error-design.md`),
+     * so a download that gives up before emitting anything leaves [firstProgress] uncompleted
+     * forever, and the caller's `finally` cancels the `Deferred` holding the reason — leaving a
+     * bare `TimeoutCancellationException` behind. Racing the two reports that `Result` instead, and
+     * lets a thrown exception propagate as itself.
+     */
+    private suspend fun awaitFirstProgress(
+        firstProgress: CompletableDeferred<Pair<Long, Long>>,
+        download: Deferred<Result<Unit>>,
+    ): Pair<Long, Long> = withTimeoutOrNull(FIRST_PROGRESS_TIMEOUT_MS) {
+        select<Pair<Long, Long>> {
+            firstProgress.onAwait { it }
+            download.onAwait { outcome -> fail("download finished before reporting any progress: $outcome") }
+        }
+    } ?: fail("no progress within $FIRST_PROGRESS_TIMEOUT_MS ms (download still running: ${download.isActive})")
 
     @Test
     fun digestMismatchFailsAndLeavesNoFileBehind() = runBlocking {

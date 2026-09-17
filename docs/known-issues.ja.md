@@ -435,6 +435,61 @@ read を行っている箇所:
 昇格と競合し得る 2 本目の書き込み側が存在しなくなる。並行書き込みテストの一般的な指針は
 `docs/testing.md` の該当箇所を参照。
 
+## CI でのみ `UpdateDownloaderTest.progressArrivesWhileTheBodyIsStillStreaming` がタイムアウトする
+
+**状態**: 根本原因は未特定。素のタイムアウトではなくダウンロードが実際に何をしたのかを報告するよう
+テストを組み替えたので、次に再現したときは失敗自体が原因を示す。これは**診断性の改善であって、
+引き金そのものの修正ではない**。
+
+### 症状
+
+desktop のテストタスクが、次の情報だけを残して失敗する:
+
+```text
+UpdateDownloaderTest[desktop] > progressArrivesWhileTheBodyIsStillStreaming[desktop] FAILED
+    kotlinx.coroutines.TimeoutCancellationException
+```
+
+これまでに 2 回観測。いずれも OS が異なり、同一 run 内の 4 ジョブのうち 1 つでしか起きていない:
+`v0` @ `1cfb4993`（windows-latest、run 35158285213）と `fix/article-swipe-pager` @ `0639f3b7`
+（ubuntu-latest、run 35179227601）。どちらのコミットも `UpdateDownloader` とそのテストには触れていない。
+
+### なぜ失敗から何も分からなかったのか
+
+`UpdateDownloader.download` は通常の失敗を例外ではなく `Result.Err` で報告し
+（[error-design.ja.md](error-design.ja.md) 参照）、`Result.Err` を返す経路はログも出さない。
+テストは進捗の `CompletableDeferred` だけを待っていたため、**進捗を 1 度も出さずにダウンロードが
+終わると Deferred は永久に未完了**になり、さらに外側の `finally` が理由を保持している `Deferred` を
+キャンセルしてしまう。`composeApp/build.gradle.kts` には `testLogging` 設定が無いので、唯一の
+`Log.warn` 経路すら CI の出力には現れない。
+
+### 切り分け済み（原因ではないもの）
+
+- **ローカルでは再現しない**: 無負荷で 40 回、さらに CPU を 3 倍に過負荷させた状態で 15 回
+  （macOS/arm64、JDK 26）——すべて成功。
+- **書き込み側の背圧でテストのフィーダーが止まっているわけではない。** Ktor 3.5.2 の `ByteChannel`
+  が書き手をサスペンドさせるのは flush バッファが `CHANNEL_MAX_SIZE`（1 MiB。`ktor-io` の
+  `ByteChannel.kt`）を超えてからで、テストが書くのは 320 KiB。つまり `writeFully` は読み手を
+  一切待たずに返る。
+- **MockEngine が本文をバッファリング／二重に読んでいるわけでもない。** `respond(ByteReadChannel, …)`
+  はテストが作ったチャネルをそのままレスポンス本文として渡す（`ktor-client-mock` の `MockUtils.kt`）。
+  コピーも 2 人目の読み手も存在しない。
+- **`UpdateDownloader` の `timeout {}` 指定でもない。** MockEngine は `HttpTimeoutCapability` を
+  宣言しているだけで自前のタイムアウトを実装していないため、`socketTimeoutMillis` は発火しない。
+
+### 次に再現したときに得られる情報
+
+`awaitFirstProgress` は進捗の到着とダウンロードの完了を競わせるようになったので:
+
+- ダウンロードが先に終われば、その `Result`（`Err` なら `UpdateException` のメッセージ込み）を
+  理由として失敗する
+- ダウンロードが例外で終われば、その例外がそのまま伝播する
+- 本当に停止している場合はタイムアウトするが、ダウンロード用コルーチンがまだ動いているかどうかを報告する
+
+これにより、残る 2 つの仮説——「進捗を出す前に無言で `Result.Err` を返した」のか「ダウンロード用
+コルーチンが時間内にスケジュールされなかっただけ」なのか——を区別できる。上記の素のタイムアウトでは
+区別できなかった。
+
 ## Linux/GNOME: トレイメニューを開いた瞬間、直前のラベルが一瞬表示される
 
 **状態**: 未修正 — 外部（GNOME Shell の AppIndicator 拡張）の設計上の制限であり、そもそも
