@@ -315,7 +315,7 @@ ViewModel はアプリスコープの `single` として登録し、`koinInject(
 おり、Compose が描画するテクスチャではない。ペインの生存期間中は `if` の下に置かず常時
 無条件でコンポーズする — Compose Desktop の `SwingInteropContainer` はヘビーウェイトな
 コンポーネントが追加・削除・移動されるたびに、このペインだけでなく**ウインドウ全体**を
-再検証＋再描画するため（調査の詳細は [known-issues.ja.md](known-issues.ja.md) 参照）。その帰結として、
+再検証＋再描画するため。その帰結として、
 描画すべき記事が無い状態（「記事未選択」「本文なし」）は Compose の `Text` ではなく、同じ
 WebView **内部**の HTML として描画する（`ui/article/ArticleWebViewHtml.kt` の
 `articlePlaceholderHtml`／`articleNoContentHtml`。実記事用の `wrapArticleHtml` と同じ
@@ -330,27 +330,167 @@ WebView **内部**の HTML として描画する（`ui/article/ArticleWebViewHtm
 [known-issues.ja.md](known-issues.ja.md) 参照（この生成失敗の例外が uncaught のまま伝播し、ライブラリの
 生成リトライタイマが止まらなくなることが、クリック時にアプリ全体がフリーズする原因でもあった）。
 
-**Android のリーダー（`ui/home/ArticleDetailPane.kt`。commonMain 共有のコンポーザブル）は、
-狭いレイアウトではスワイプによる前後移動も持つ**（`ui/home/ArticleSwipeNav.kt`） — リーダー上の
-水平ドラッグで次/前の記事へ移動する。有効化条件は `isTouchPrimary && swipeNavigation != null &&
-article != null`。シグナルは `onNavigateUp` ではなく `swipeNavigation` である——`PaneLayout.Dual` では
-リーダーに戻るボタンが無い（`onNavigateUp` が `null`）が、スワイプは有効なままである必要があるため、
-`swipeNavigation` はそこでも非 null の別シグナルとして存在する（下記「Home's adaptive pane layout」参照）。
-無効になるのは `PaneLayout.Triple` とデスクトップのみで、そこではどの呼び出し元もこのシグナルを渡さない。Android の `WebView`（`AndroidView` 経由で
-埋め込まれる）は通常の in-tree ビューだが、タッチ入力は自分自身で消費してしまうため、このジェスチャーは
-`platform/NativeMenu.android.kt` の長押しや `ui/home/FeedListDragGestures.kt` の並べ替えドラッグと
-同じ方式で調停する: `pointerInput` ループが `PointerEventPass.Initial`（この祖先ノードに WebView 側の
-interop 処理より先に届くパス）を監視し、ドラッグが水平方向であると確定する（touch slop を超え、かつ
-垂直方向より水平方向の移動量が大きい）までは一切イベントを consume しない。これにより通常の縦方向
-ジェスチャー（WebView 自体のスクロールやリンクタップ）は妨げられない。確定した時点で初めて consume を
-始め、WebView 側のジェスチャーをキャンセルさせる。`HorizontalPager` の採用は検討した上で見送った —
-ページごとに `WebView` を 1 つずつマウントする必要があり、隣接ページの本文を先読みすると、
-`error-design.md` の「選択した瞬間に既読」というルールに従って、ユーザーがまだスワイプしてすら
-いないページまで本文をロード（＝既読化）してしまう。これは `HomeViewModel.selectArticle` の設計意図に
-反する。代わりに、このジェスチャーはドラッグが確定した時点で `HomeViewModel.selectNext`/
-`selectPrevious`（デスクトップの J/K キーボードショートカットと同じ呼び出し）を駆動するだけで、
-リーダー本文のスライドは、2 つ目の WebView を差し替えるのではなく、既存の単一の WebView インスタンスに
-対する単純な `Modifier.offset` で行う。
+**狭いレイアウトではリーダーは `HorizontalPager` になる**（`ui/home/ArticleDetailPane.kt`。
+commonMain 共有のコンポーザブル） — 水平ドラッグで次/前の記事へ移動し、画面に出ているページの
+両隣は実際にマウントされた `WebView` であり、それはページャ自身の item content ではなく
+`ArticleWebViewCarousel` 経由で描画される（理由は下記）。`PaneLayout.Triple`（デスクトップの全ウインドウと、
+横持ちの大型タブレット）は上で述べた単一の無条件コンポーズのリーダーのままで、2 つの形態の分岐は
+`readerPaging != null && article != null && isTouchPrimary` の 3 つすべてを見る——`readerPaging`
+単独ではない。`article != null` があるのは、paging データはあるがまだ何も選択されていない
+`PaneLayout.Dual` のリーダーを、ページャがたまたま最後に表示していた記事のままにせず、
+プレースホルダの HTML に留めるため。`isTouchPrimary` をここでもう一度見ているのは、
+`ArticleDetailPane`（ViewModel 側のラッパー）がタッチ主体のプラットフォームでしか
+`readerPaging` を組み立てないにもかかわらず——レイアウト確定前の過渡フレームではデスクトップでも
+`PaneLayout.Single` に解決され得るためで（`HomeScreen` 自身の `BoxWithConstraints` に関する
+コメント参照）、重量級ページャを実際にマウントするかどうかを決めているのはこのコンポーザブル
+自身なので、この不変条件は呼び出し元だけでなくここでも保たれている必要がある。
+
+`ArticleSwipeNavigation` と `ArticleReaderPaging` は同じ「null = `PaneLayout.Triple`」のシグナル
+だが、前者が意図的に安定した `remember` 済みのコールバック束であるのに対し後者は記事のロードに
+応じて変化するデータを運ぶため、別パラメータに分けてある——`ArticleDetailPane` は自身の組み立てを
+`remember(pages, contents, article)` で包み、記事の書き込みのたびにリーダー全体を再コンポーズ
+しないようにしている。シグナルが `onNavigateUp` ではなく `swipeNavigation` なのは、
+`PaneLayout.Dual` ではリーダーに戻るボタンが無い（`onNavigateUp` が `null`）がスワイプは有効で
+なければならないため（下記「Home's adaptive pane layout」参照）。
+
+**`HorizontalPager` 自身は `WebView` を一切描画しない — スクロール物理演算・スナップ・確定検知
+（`pagerState.currentPage` / `currentPageOffsetFraction` / `settledPage`）を駆動するためだけに
+不可視のまま組み込まれている**。その item content は空の `Box` である。ページャと並んで組み込まれる
+きょうだいの `ArticleWebViewCarousel` こそが、実際に 3 ページを表示している本体である:
+`ARTICLE_READER_SLOT_COUNT`（3）個の常時生存する `ArticleWebView` を固定の呼び出し位置で
+無条件にコンポーズし続ける — 上記の `PaneLayout.Triple` リーダーで使っている「一度コンポーズしたら
+`if` の裏に置かない」という同じ発想である — そして、不可視のページャが示す位置へ、手作業（ジェスチャー
+自身のラバーバンドと同様にレイアウト時に読む、ラムダ式の `Modifier.offset`。`pagerState.currentPage`/
+`currentPageOffsetFraction` を読む）で追従させる。`slotIndex` は各スロットに、3 を法として同じ剰余を
+持つページ index を割り当てる。連続する 3 つの index は常に 3 つの異なる剰余に落ちるため、確定ページと
+両隣は必ず別々のスロットになり、隣のページへ一歩進んでも 3 つのうち高々 1 つのスロットしか
+再割り当てされない。
+
+この分離が存在する理由は、*ページャ自身の* 遅延コンポーズされる item スロットに直接 `WebView` を
+持たせる — 本コードの以前のバージョンはそうしていた — と Android でちらつきが出たためである:
+`LazyLayout` は、ページが `beyondViewportPageCount` を超えて外れた瞬間にそのコンポジション（と、その
+内側にある `AndroidView` でホストされたネイティブビュー）を破棄し、そのページが範囲へ再び入ると
+ゼロから作り直す。その再生成は実際の `android.webkit.WebView` を（Compose のコンテンツだけでなく）
+丸ごと破棄・再構築し、一瞬何も表示しなくなる——実機でのフレーム単位のキャプチャで確認済みで、
+前方スワイプでは毎回再現し（後方では決して起きず、最終記事でも起きない）、これは Compose Foundation
+自身のページャの prefetch/破棄がたまたま両方向で非対称であることに起因する。Compose の
+cache-window prefetch フラグ（`ComposeFoundationFlags` の `isCacheWindowForPagerEnabled`）を無効化
+しても直らなかった — 破棄・再生成のサイクルはその特定の prefetch 戦略ではなく `LazyLayout` の
+item 破棄そのものに内在するものだった。`ArticleWebViewCarousel` は、そもそも `WebView` を遅延コンポーズ
+の範囲の外に置くことで、この仕組み全体を迂回している。
+
+この（今は不可視になった）ページャと、その状態を読み取るカルーセルについて、次の 4 点は挙動を支える要である。
+
+- **`slotIndex` による 3 を法とした剰余の割り当て。** 「スワイプで離れて戻ると元の位置に戻る」を
+  今支えているのはこれであって `beyondViewportPageCount` ではない: 確定ページを保持している物理
+  スロットは、ユーザーが隣へ一歩進んで戻ってきても（位置を変えるだけで）そのページを保持し続ける。
+  1 歩の移動では常に「もう片方」のスロットしか再割り当てされないためである。制限は以前と同じ
+  （2 記事離れて戻ると位置は失われる——スロットは新たに範囲へ入ってきたものへ再割り当てされ、
+  内容を読み込み直す。記事一覧へ戻った場合やレイアウトが変わった場合も同様で、それらはペインごと
+  アンマウントされるため）。ページャを使わないデスクトップでは読み位置は一切復元されない。
+  なお、リストの端では 1 つのスロットが割り当てを持たず解放される（何も emit しないスロットは
+  Compose がコンポジションごと破棄するため）。ただしそのスロットが保持しているのは確定ページから
+  2 ページ以上離れたページだけなので、画面上のもの（およびスワイプ 1 回で出るもの）が破棄されることは
+  なく、保存対象の読み位置が失われることもない。
+- **不可視のページャに設定された `beyondViewportPageCount = 1`。** カルーセル自身のスロット割り当ては
+  この値を読まないため、もはや読み位置を保存しているのはこれではない——しかし、この分離より前から
+  ある他のテストが検証しているページャの*それ以外*の内部挙動（先行コンポーズのスケジューリング、
+  `key` が一覧の変化時に依拠する `LazyLayoutKeyIndexMap` ベースの再マッピング）を、この分離によって
+  できるだけ変えないために、あえてそのまま残してある。
+- **`userScrollEnabled = false`。** Android の `WebView`（`AndroidView` 経由で埋め込まれる）は
+  通常の in-tree ビューだが、タッチ入力を自分自身で消費し、Compose の nested scroll にも参加
+  しないため、ページャ自身のジェスチャー処理とぶつかる。代わりに、`platform/NativeMenu.android.kt`
+  の長押しや `ui/home/FeedListDragGestures.kt` の並べ替えドラッグと同じ方式で調停する:
+  `ui/home/ArticleSwipeNav.kt` の `pointerInput` ループが `PointerEventPass.Initial`（この祖先
+  ノードに WebView 側の interop 処理より先に届くパス）を監視し、水平方向が確定するまで一切
+  consume せず、確定後はページャ自身を駆動する。ユーザースクロールを無効にすると
+  ページャ自身のアクセシビリティ・スクロールアクションも消えるが、それは
+  `articleSwipeAccessibilityActions` が既に代替している。プラットフォーム標準のオーバースクロール
+  表現も出なくなるため、リストの端を指すドラッグ用に、リーダーは自前のラバーバンド
+  （`swipeDragOffset`。ページャ全体への単純な `Modifier.offset`）を持ち続けている。
+- **`key` はページ index ではなく記事 ID。** 同期マージ・フィード更新・「未読のみ」の切り替えは、
+  ページャの下で一覧を並べ替える。`ui/home/ArticlePagerSync.kt` が選択とページの同期を両方向とも
+  持ち、自身の `@Composable` である `ArticleReaderPagerSync` がそれを配線する:
+  - **確定 → 選択**（`settledPageSelects`）は、`ArticleSwipeController` 自身がそのページを
+    「確定したスワイプの遷移先」として記録していた場合（`pendingSelectionPage` /
+    `consumePendingSelection`）にだけ、`HomeViewModel.selectArticle`（既読化するのはここ）へ昇格
+    させる。`PagerState` は一覧がその現在ページより縮んだとき自身の現在ページをクランプする
+    ——検索、同期マージによるトゥームストーン、「未読のみ」が今読んだばかりの記事を隠す、など、
+    スワイプが一切絡まないケースで起こる——このゲートが無ければ、そのクランプはクランプ先に
+    たまたま来た記事を選択し既読化してしまう。未選択のときにも何もしないので、`PaneLayout.Dual`
+    で一覧に触れないままページ 0 に居るリーダーが、勝手に先頭記事を開いてしまうこともない。
+  - **選択 → ページ**（`pageIndexToRestore`）は、他所で行われた選択（記事一覧・J/K・リーダー
+    自身のアクセシビリティアクション）に追従し、一覧が下で変化したときにページャを再アンカーする。
+    `ArticleSwipeController.gestureInProgress` が `true` の間は手を出さない。このゲートが見るのは
+    `PagerState.isScrollInProgress` ではなくこのフラグである: コントローラは最初に確定した
+    ドラッグサンプルから settle/turn アニメーションの終了まで一貫してこれを保持するが、
+    `isScrollInProgress` は指を離した直後・アニメーション開始前の間隙で既に false になって
+    しまっており、その間もスワイプはまだページャを掌握している。
+
+  どちらの方向も、`key` と同じ理由で index ではなく ID を比較する。
+
+**ジェスチャーはドラッグ 1 回につき 1 つのスクロールセッションでページャを駆動し、ポインタサンプル
+ごとに `scrollBy` を呼ぶことはしない。** `ScrollableState` の変更は `MutatorMutex` を経由するが、
+これは直列化ではなく、進行中のミューテーションの**キャンセル**を行う——サンプルごとに `scrollBy`
+を呼ぶと、前のミューテーションがキャンセルされている間に届いたサンプルのデルタが黙って失われる。
+ページャのスクロールは相対デルタなので（旧実装の `Animatable.snapTo` は絶対値だった）、失われた
+デルタは二度と戻らず、コンテンツが指からずれていく。代わりに `ArticleSwipeController.onDragStart`
+は 1 つの `PagerState.scroll { }` セッションを開き、`Channel` 経由でデルタを流し込み、
+`onDragEnd`/`onDragCancel` で初めて閉じる。続く settle/ページ送りアニメーションはまずこの
+セッションの終了を待ってから走るので、開いたままのセッションと競合しない。セッションをジェスチャー
+の間ずっと開いたままにすることは、`PagerState.isScrollInProgress` がドラッグ中に false へ落ちる
+のを防ぐことでもあり、これが上記の `gestureInProgress` をこれとは別に追跡しなければならない理由
+でもある。
+
+各ページの本文は `HomeViewModel.requestArticleContent` が供給し、これは
+`ui/home/ArticleContentCache.kt`（`HomeViewModel` に直書きするのではなく、独立してテストできる
+小さな協力オブジェクト）に委譲する。`getArticleById` による純粋な読み取りを、`Articles` の全列
+ではなく `ArticleReaderRow`（`domain/ArticleRepository.kt`）に射影したうえで `articleContents`
+（上限 `ARTICLE_CONTENT_CACHE_LIMIT`、古いものから追い出し）へ格納する——全列には本文の
+HTML 除去済みコピーである `search_text` も含まれ、リーダーはそれを一切読まない。**本文のロードは
+選択ではない**: 既読化するのは `selectArticle` だけなので、隣のページは「開いた」ことにならずに
+描画される。キャッシュは選択中の記事をあえてスキップしない——`ui/home/ArticlePagerSync.kt` の
+`readerContents` が選択の正本をキャッシュより手前にマージするが、キャッシュ自身も自分のコピーを
+保持し続けており、これが選択が隣へ移った後も、直前までスワイプで見ていたページを（空白化・
+再読み込みさせず）描画され続けさせている。`readerPages` は一覧側の対になる仕組みで、選択中の
+記事がまだ `pagerArticles` に載っていない（この Flow は `Eagerly` ではなく `WhileSubscribed` な
+ので最初は空——後述）、あるいはちょうどトゥームストーンされた場合、ページャは空のページャと
+埋まったページャを切り替える代わりに、選択だけから合成した 1 ページのリストを描画する
+（切り替えるとその 1 ページの `WebView` が破棄・再構築されてしまう）。`HomeViewModel.pagerArticles`
+が兄弟の `Eagerly` と違って `WhileSubscribed` なのは、これを購読するのがリーダーのページャだけ
+（＝タッチ主体のプラットフォームの狭いレイアウトだけ）だから。`ArticleContentCache` は
+リーダーがコンポジションを離れると（`ArticleDetailPane` の `DisposableEffect`）
+`HomeViewModel.clearArticleContents` 経由で空になるので、長い閲覧セッションがページ送りした
+すべての本文を ViewModel の寿命いっぱい抱え続けることはない。
+
+隣接ページの本文をロードするということは、ユーザーがまだスワイプしていない段階でその画像・
+埋め込み・スクリプトが取得・描画されることを意味する——`external-spec.ja.md` §10 に記載している。
+そこで意味してはならないのは、そのページがあたかも画面に出ているかのように振る舞うことである:
+`ArticleWebView` の `active` パラメータ（ページャの現在位置にあるページだけが `true`）は、
+Compose 自身のセマンティクスツリーとは独立に、ネイティブビュー側で直接次の 2 つをゲートする
+——ネイティブ `WebView` のアクセシビリティノードとナビゲーションイベントは、どちらもこの
+ツリーを完全にバイパスするため——
+
+- **ナビゲーション。** 非アクティブなページの `RequestInterceptor` はあらゆる URL を拒否する。
+  これにはライブラリがスクリプト起点の `location.href` やメタリフレッシュを報告してくる場合も
+  含む（ライブラリはこれらを実タップと区別しない）。これが無ければ、フィード自身が自動遷移する
+  コンテンツや悪意あるコンテンツによって、ユーザーが一度も開いていない記事から外部ブラウザが
+  起動されたり、画面外の `WebView` が共有プロファイル上の任意のオリジンへ誘導されたりし得る。
+- **アクセシビリティ。** `platform/NativeWebViewAccessibility.kt` の
+  `setNativeWebViewImportantForAccessibility` は、非アクティブなページの `WebView` に Android の
+  `IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS` を設定し、記事本文が実際に存在するその
+  サブツリーごとスクリーンリーダーの線形移動から除外する。周囲の Compose `Box` にも
+  `clearAndSetSemantics {}` を付けているが、それだけではネイティブビュー自身のアクセシビリティ
+  ノードには届かないため、両方が必要になる。デスクトップの `actual` は no-op ——
+  `PaneLayout.Triple` は非アクティブなページを一切マウントしないため。アクティブなページ自身の
+  コンテナには代わりに `liveRegion = Polite` による記事タイトルのアナウンスを付けている——
+  ページャのユーザースクロールを無効化する（上記）と、その組み込みのページ変更アナウンスも
+  一緒に消えるため、スクリーンリーダー利用者が記事間を移動する手段は
+  `articleSwipeAccessibilityActions` のカスタムアクションだけになる。
+
+（本節の以前の版は、隣接ページの先読みが既読化を引き起こすことを理由に `HorizontalPager` を
+却下していた。これは誤りで — 既読化は `getArticleById` ではなく `selectArticle` にある —
+その却下は撤回した。）
 
 ### デスクトップトレイ（プラットフォーム分岐）
 

@@ -19,8 +19,12 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.data.local.db.Articles
+import works.merc.keryx.app.domain.ArticleListRow
+import works.merc.keryx.app.domain.toListRow
+import works.merc.keryx.app.domain.toReaderRow
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertContains
 import kotlin.test.assertTrue
 
 /**
@@ -41,7 +45,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = article,
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -60,7 +64,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = null,
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -76,7 +80,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = article,
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -95,7 +99,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = testArticle(url = ""),
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -110,7 +114,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = null,
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -127,7 +131,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = testArticle(content = "   ", summary = "fallback summary"),
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, body, _ -> capturedBody = body; Box(Modifier.fillMaxSize()) },
+                reader = { _, body, _, _ -> capturedBody = body; Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -144,7 +148,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = article,
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _, articleUrl -> capturedArticleUrl = articleUrl; Box(Modifier.fillMaxSize()) },
+                reader = { _, _, articleUrl, _ -> capturedArticleUrl = articleUrl; Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -160,7 +164,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = null,
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _, articleUrl -> capturedArticleUrl = articleUrl; Box(Modifier.fillMaxSize()) },
+                reader = { _, _, articleUrl, _ -> capturedArticleUrl = articleUrl; Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -176,7 +180,7 @@ class ArticleDetailPaneTest {
                 ArticleDetailPaneContent(
                     article = testArticle(),
                     modifier = Modifier.size(400.dp, 500.dp),
-                    reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
+                    reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
                 )
             }
         }
@@ -195,7 +199,7 @@ class ArticleDetailPaneTest {
             ArticleDetailPaneContent(
                 article = testArticle(),
                 modifier = Modifier.size(400.dp, 500.dp),
-                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -225,7 +229,7 @@ class ArticleDetailPaneTest {
                 onNavigateUp = {},
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
                 isTouchPrimary = true,
-                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -242,7 +246,7 @@ class ArticleDetailPaneTest {
                 onNavigateUp = {},
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
                 isTouchPrimary = false,
-                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -263,7 +267,7 @@ class ArticleDetailPaneTest {
                 onNavigateUp = {},
                 swipeNavigation = null,
                 isTouchPrimary = true,
-                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -285,7 +289,7 @@ class ArticleDetailPaneTest {
                 onNavigateUp = null,
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
                 isTouchPrimary = true,
-                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -302,7 +306,7 @@ class ArticleDetailPaneTest {
                 onNavigateUp = {},
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { false }, { true }),
                 isTouchPrimary = true,
-                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -320,7 +324,7 @@ class ArticleDetailPaneTest {
                 onNavigateUp = {},
                 swipeNavigation = ArticleSwipeNavigation({ invoked = true }, {}, { true }, { true }),
                 isTouchPrimary = true,
-                reader = { _, _, _ -> Box(Modifier.fillMaxSize()) },
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
         waitForIdle()
@@ -331,7 +335,130 @@ class ArticleDetailPaneTest {
         assertTrue(nextAction.action(), "custom action \"次の記事\" reported failure")
         assertTrue(invoked)
     }
+
+    // --- Pager form (narrow layouts) ---
+
+    /**
+     * The pager keeps the pages either side of the one on screen composed
+     * (`beyondViewportPageCount = 1`), which is the whole reason a swipe back lands on the previous
+     * article still scrolled where it was left: its WebView was never torn down.
+     */
+    @Test
+    fun theReaderPagerKeepsTheNeighbouringArticlesComposed() = runDesktopComposeUiTest {
+        val articles = listOf(testArticle("a1"), testArticle("a2"), testArticle("a3"))
+        val rendered = mutableSetOf<String>()
+
+        setContent {
+            ArticleDetailPaneContent(
+                article = articles[1],
+                modifier = Modifier.size(400.dp, 500.dp),
+                isTouchPrimary = true,
+                swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
+                readerPaging = pagingFor(articles, selected = articles[1]),
+                reader = { _, _, url, _ -> url?.let { rendered += it }; Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        assertEquals(articles.map { it.url }.toSet(), rendered)
+    }
+
+    /**
+     * A page whose body has not been read from the DB yet still renders its own header, so swiping
+     * towards an article never shows a blank pane while the lookup is in flight — and it must not
+     * claim the article has no content, which is a different state with a different message.
+     */
+    @Test
+    fun aPageWhoseBodyHasNotLoadedYetStillRendersItsHeader() = runDesktopComposeUiTest {
+        val selected = testArticle("a1", title = "Selected")
+        val neighbour = testArticle("a2", title = "Not loaded yet")
+        val htmlByUrl = mutableMapOf<String?, String>()
+
+        setContent {
+            ArticleDetailPaneContent(
+                article = selected,
+                modifier = Modifier.size(400.dp, 500.dp),
+                isTouchPrimary = true,
+                swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
+                // Only the selected article's own body is supplied, mirroring the moment a page
+                // composes and HomeViewModel.requestArticleContent has not returned yet.
+                readerPaging = pagingFor(listOf(selected, neighbour), selected = selected),
+                reader = { html, _, url, _ -> htmlByUrl[url] = html; Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        val pending = requireNotNull(htmlByUrl[neighbour.url])
+        assertContains(pending, "Not loaded yet")
+        assertContains(htmlByUrl.getValue(selected.url), "<p>content</p>")
+    }
+
+    /**
+     * `PaneLayout.Triple` (every desktop window, and a wide tablet in landscape) keeps the single
+     * unconditionally-composed reader it has always had — see this file's own header for why that
+     * surface must never be mounted conditionally there.
+     */
+    @Test
+    fun noPagerIsComposedWhenTheCallerSuppliedNoPaging() = runDesktopComposeUiTest {
+        var readerCalls = 0
+
+        setContent {
+            ArticleDetailPaneContent(
+                article = testArticle("a1"),
+                modifier = Modifier.size(400.dp, 500.dp),
+                reader = { _, _, _, _ -> readerCalls++; Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        assertEquals(1, readerCalls)
+    }
+
+    /**
+     * Regression test for the invariant this file's own header states: the heavyweight pager must
+     * never mount on a platform whose WebView is the interop AWT surface, even if a caller supplies
+     * `readerPaging`. `isTouchPrimary` is checked here too, not just by `ArticleDetailPane`'s own
+     * conditional construction of `readerPaging` — this is the composable that actually decides
+     * whether the pager mounts.
+     */
+    @Test
+    fun thePagerNeverMountsWhenNotTouchPrimaryEvenIfPagingWasSupplied() = runDesktopComposeUiTest {
+        val articles = listOf(testArticle("a1"), testArticle("a2"))
+        var readerCalls = 0
+
+        setContent {
+            ArticleDetailPaneContent(
+                article = articles[0],
+                modifier = Modifier.size(400.dp, 500.dp),
+                isTouchPrimary = false,
+                swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
+                readerPaging = pagingFor(articles, selected = articles[0]),
+                reader = { _, _, _, _ -> readerCalls++; Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        // Exactly one call — the single, unconditionally-composed reader — not the pager's own
+        // per-page calls (2, one for each page).
+        assertEquals(1, readerCalls)
+    }
 }
+
+/**
+ * An [ArticleReaderPaging] over [articles], with every body already hydrated except where
+ * [selected] is the only one supplied — the caller decides by passing a shorter list to
+ * [ArticleReaderPaging.contents] through this helper's own [hydrated] parameter.
+ */
+private fun pagingFor(
+    articles: List<Articles>,
+    selected: Articles,
+    hydrated: List<Articles> = listOf(selected),
+): ArticleReaderPaging = ArticleReaderPaging(
+    pages = articles.map { it.toListRow() },
+    contents = hydrated.associate { it.id to it.toReaderRow() },
+    requestContent = {},
+    onPageSettled = {},
+)
 
 private fun testArticle(
     id: String = "a1",

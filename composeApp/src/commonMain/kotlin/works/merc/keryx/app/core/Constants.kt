@@ -140,6 +140,17 @@ const val TRIGRAM_MIN_TERM_LENGTH = 3
 /** Result cap for a search whose terms are all below [TRIGRAM_MIN_TERM_LENGTH] (no FTS rank available, so results are ordered by `published_at` instead). */
 const val SEARCH_FALLBACK_RESULT_LIMIT = 200
 
+/**
+ * How many article bodies the reader's pager keeps hydrated at once (`HomeViewModel`'s
+ * `articleContents`).
+ *
+ * The pager itself only ever needs three — the page on screen plus the two it keeps composed
+ * either side (`beyondViewportPageCount = 1`) — so this is deliberately a few more than that,
+ * enough that swiping back and forth over a short run re-uses what is already in hand instead of
+ * re-reading it, while still bounding what a long reading session can accumulate.
+ */
+const val ARTICLE_CONTENT_CACHE_LIMIT = 8
+
 // --- sync_state keys ---
 const val SYNC_STATE_LAST_SYNCED_AT = "last_synced_at"
 const val SYNC_STATE_CLOUD_FILE_REV = "cloud_file_rev"
