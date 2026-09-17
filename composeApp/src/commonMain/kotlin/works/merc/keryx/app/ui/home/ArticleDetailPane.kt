@@ -556,8 +556,9 @@ internal const val ARTICLE_READER_SLOT_COUNT = 3
  * This composable sidesteps the whole mechanism: [ARTICLE_READER_SLOT_COUNT] physical slots are
  * composed unconditionally, at fixed call sites, for the life of this composable — the same
  * "compose it once, never behind an `if`" idiom [ArticleDetailPaneContent] already uses for the
- * `PaneLayout.Triple` reader — so their `AndroidView`-hosted `WebView`s are never disposed by
- * ordinary paging. [slotIndex] assigns each slot the page index that shares its residue modulo
+ * `PaneLayout.Triple` reader — so their `AndroidView`-hosted `WebView`s are never disposed by an
+ * ordinary page turn (see [ArticleWebViewSlot] for the one slot an edge of the list does release).
+ * [slotIndex] assigns each slot the page index that shares its residue modulo
  * [ARTICLE_READER_SLOT_COUNT]; since any three consecutive page indices always occupy three
  * distinct residues, the settled page and both its neighbours are guaranteed distinct slots, and
  * stepping to an adjacent page changes at most one slot's assignment — the two pages already
@@ -625,9 +626,14 @@ internal fun slotIndex(slot: Int, currentPage: Int, pageCount: Int): Int? {
  * through a lambda-based [Modifier.offset] — read at layout time, not recomposition, the same way
  * the gesture's own rubber band already is (see [ArticleSwipeController.offset]'s call site).
  *
- * Nothing is emitted while [slotIndex] resolves to `null` (an edge of the list): the slot's own
- * `WebView`, if it already exists from a previous assignment, simply keeps whatever it last showed,
- * off in a position [slotIndex] will never place on screen while that remains true.
+ * A slot with no assignment emits nothing at all, which disposes whatever it last held: Compose
+ * removes the child composition — and with it the native `WebView` — when a composable returns
+ * before emitting. That only happens at an edge of the list, where fewer than three pages are
+ * within reach, and only ever to a slot holding a page two or more away from the settled one; the
+ * settled page and both its neighbours always have an assignment, so nothing on screen (or one
+ * swipe from it) is ever torn down here. Such a page is already outside the reading position this
+ * carousel preserves, so the cost is one `WebView` rebuilt the next time the list edge is left,
+ * not a lost reading position.
  */
 @Composable
 private fun ArticleWebViewSlot(

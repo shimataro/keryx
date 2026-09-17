@@ -375,7 +375,10 @@ load-bearing:
   articles away and back loses the position — the slot gets reassigned to whatever newly falls in
   range, reloading fresh content — as does leaving for the article list or a layout change, since
   those unmount the pane itself). Desktop, which never uses the pager, never restores a reading
-  position at all.
+  position at all. At an edge of the list one slot has no assignment and is released — Compose
+  disposes a slot that emits nothing — but it only ever holds a page two or more away from the
+  settled one, so nothing on screen (or one swipe from it) is torn down and no preserved reading
+  position is lost.
 - **`beyondViewportPageCount = 1`** on the invisible pager. The carousel's own slot assignment does
   not read this value, so it is no longer what preserves reading position — but it is kept anyway to
   minimize how much of the pager's *other* internal behavior (precomposition scheduling, the
