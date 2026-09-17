@@ -620,15 +620,19 @@ Android で `https://alfalfalfa.com/articles/11110022.html` を開くと、1〜2
 'unsafe-inline'">` を出力するようにした。`style-src` に URL ソースを一切書かないため、静的な
 リンク・`@import`・スクリプトによる追加のいずれであっても外部スタイルシートは取得されない。一方
 `'unsafe-inline'` によってアプリ自身の `<style>` ブロックと本文の `style=""` 属性は従来どおり効く。
-加えて、リーダーのクロームのルールには保険として `!important` を付けている
-（[app-architecture.ja.md](app-architecture.ja.md) の「記事リーダー」参照）。
+加えて、リーダーのクロームのルールには `!important` を付けており、そこに列挙した宣言を、より低い
+詳細度からの上書きに対して硬くしている（硬化であって隔離ではない。
+[app-architecture.ja.md](app-architecture.ja.md) の「記事リーダー」参照）。
 
 ### 意図的に残している範囲
 
 `script-src` は宣言していないので、本文のスクリプトは引き続き実行される。広告・計測コードが動いて
 独自に外部リクエストを発行するため、[external-spec.ja.md](external-spec.ja.md) §10 の「外部サーバへ
 データを送信しない」とは厳密には折り合っていない。また、スクリプトがインラインの `<style>` 要素を
-注入する経路も残る（`'unsafe-inline'` の範囲内。これをクロームの `!important` で受け止めている）。
+注入する経路も残る（`'unsafe-inline'` の範囲内。通常のケースはクロームの `!important` で受け止めて
+いるが、受け止められるのは列挙済みの宣言だけで、どのルールも `!important` を付けていない
+プロパティや、本文側の同詳細度の `!important` ルールは、本文が `<style>` ブロックより後ろに来る
+以上そのままクロームを作り替える）。
 これは意図的なトレードオフで、JavaScript を無効にすると script 型の SNS 埋め込みも道連れになる。
 
 ### 本当の修正に必要なこと

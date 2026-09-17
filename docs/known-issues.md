@@ -616,7 +616,8 @@ never injected there. The code path itself is shared `commonMain`.
 'unsafe-inline'">`. With no URL source named for `style-src`, no external stylesheet is fetched —
 statically linked, `@import`ed, or appended by script alike — while `'unsafe-inline'` keeps the
 app's own `<style>` block and the body's `style=""` attributes working. The reader's chrome rules
-additionally carry `!important` as a fallback (see "Article Reader" in
+additionally carry `!important`, which hardens the declarations they actually list against a
+lower-specificity override — hardening, not isolation (see "Article Reader" in
 [app-architecture.md](app-architecture.md)).
 
 ### What is deliberately left
@@ -624,9 +625,11 @@ additionally carry `!important` as a fallback (see "Article Reader" in
 No `script-src` is declared, so the body's scripts still run: ad and analytics code executes and
 makes its own network requests, which does not sit comfortably with "no data sent to external
 servers" in [external-spec.md](external-spec.md) §10, and a script can still inject an inline
-`<style>` element (which `'unsafe-inline'` admits — this is what the `!important` chrome rules
-absorb). The trade is intentional: turning JavaScript off would also take script-based SNS embeds
-with it.
+`<style>` element (which `'unsafe-inline'` admits — the `!important` chrome rules absorb the
+ordinary case, but only for the declarations they list: a property none of them marks
+`!important`, or an equally-specific `!important` rule of the body's own, still restyles the
+chrome, since the body follows the reader's `<style>` block). The trade is intentional: turning
+JavaScript off would also take script-based SNS embeds with it.
 
 ### What a real fix would need
 

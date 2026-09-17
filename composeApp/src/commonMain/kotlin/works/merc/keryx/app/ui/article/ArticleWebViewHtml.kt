@@ -43,7 +43,8 @@ data class ArticleHtmlTheme(
  * together with it — this is what keeps a long title from permanently shrinking the content
  * area. They are plain feed text, so they are HTML-escaped; [body] stays raw, so its rich markup
  * renders — but it is third-party content, not trusted markup: see [articleDocument] for the CSP
- * and the `!important` rules that keep it from restyling the reader around it.
+ * that stops it pulling in the source site's own stylesheets, and for how far the `!important`
+ * chrome rules do — and don't — hold against inline styles it carries itself.
  *
  * [baseUrl], when non-blank, is the article's own URL and is emitted as a `<base href>` so
  * relative `src`/`href` values inside [body] (relative images, links) resolve against the
@@ -112,7 +113,7 @@ private fun articleDocument(theme: ArticleHtmlTheme, content: String, bodyClass:
     val fontPercent = (theme.fontScale * 100).toInt()
     val bodyTag = if (bodyClass.isBlank()) "<body>" else """<body class="$bodyClass">"""
     val baseTag = baseUrl?.takeIf { it.isNotBlank() }?.let { """<base href="${escapeHtml(it)}" />""" }.orEmpty()
-    // Two defenses against a feed body restyling the reader around it. A body is embedded raw
+    // Two layers of defense against a feed body restyling the reader around it. A body is embedded raw
     // (see wrapArticleHtml) below a base element at the article's own origin, so it can pull in
     // the source site's stylesheets — statically via a stylesheet link, or by appending one to
     // the head from its own script. Such a sheet arrives after the first paint and, being later
@@ -122,9 +123,15 @@ private fun articleDocument(theme: ArticleHtmlTheme, content: String, bodyClass:
     //    stylesheet is ever fetched, while 'unsafe-inline' keeps the style block below (and the
     //    body's own style attributes) working. No script-src and no default-src are declared, so
     //    the body's JavaScript — and the SNS embeds that need it — are left untouched.
-    // 2. The !important declarations are the fallback, for an engine that ignores a meta CSP and
-    //    for an inline style element the body carries (which 'unsafe-inline' still admits). They
-    //    are deliberately limited to the reader's own chrome: the content-facing rules (a,
+    // 2. The !important declarations harden the reader's own chrome against a lower-specificity
+    //    override — an engine that ignores a meta CSP, or the ordinary inline style element the
+    //    body carries (which 'unsafe-inline' still admits). That is hardening, not isolation,
+    //    and it covers only the declarations actually listed below: a property none of them
+    //    marks !important (.article-title { display: none !important }) goes straight through,
+    //    and an equally-or-more-specific !important rule of the body's own wins on document
+    //    order, since the body follows this style block. Containing the body outright would take
+    //    sanitization or a separate rendering boundary — see "What a real fix would need" in
+    //    known-issues.md. The limit to chrome is itself deliberate: the content-facing rules (a,
     //    img/video/iframe, table, td/th) stay plain defaults that a feed author's own style
     //    attribute is meant to be able to override, exactly as it can today.
     return """

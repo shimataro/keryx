@@ -318,11 +318,18 @@ restyle the reader around the article (padding, title color, font scale — see
 source for `style-src` means no external stylesheet is ever fetched, while `'unsafe-inline'` keeps
 the app's own `<style>` block and the body's `style=""` attributes working. No `script-src` and no
 `default-src` are declared, deliberately — the body's scripts, and the SNS embeds that need them
-(see the link-interception note above), keep running. As a fallback for an engine that ignores a
-meta CSP, and for an inline `<style>` the body carries (which `'unsafe-inline'` still admits),
-every declaration in the reader's own *chrome* rules carries `!important`; the content-facing rules
-(`a`, `img`/`video`/`iframe`, `table`, `td`/`th`) stay plain, so a feed author's own `style=""`
-can still override them.
+(see the link-interception note above), keep running. Every declaration in the reader's own
+*chrome* rules additionally carries `!important`, hardening it against a lower-specificity
+override — an engine that ignores a meta CSP, or the ordinary inline `<style>` the body carries
+(which `'unsafe-inline'` still admits). That is hardening, not isolation, and it covers only the
+declarations actually listed: a property none of them marks `!important` goes straight through
+(a body-supplied `.article-title { display: none !important }` hides the title outright), and an
+equally-or-more-specific `!important` rule of the body's own wins on document order, since the
+body follows the `<style>` block. Containing the body outright would take sanitization or a
+separate rendering boundary — see "What a real fix would need" in
+[known-issues.md](known-issues.md). The limit to chrome is itself deliberate: the content-facing
+rules (`a`, `img`/`video`/`iframe`, `table`, `td`/`th`) stay plain, so a feed author's own
+`style=""` can still override them.
 
 `ArticleWebView` also sets `webSettings.desktopWebSettings.dataDirectory` explicitly, to
 `AppDirs.cacheDir()` plus a `webview` subdirectory, applied identically on all three desktop
