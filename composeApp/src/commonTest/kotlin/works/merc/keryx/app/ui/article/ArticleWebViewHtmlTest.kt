@@ -331,6 +331,47 @@ class ArticleWebViewHtmlTest {
     }
 
     @Test
+    fun aSurfaceJustBelowTheDarkThresholdDeclaresDark() {
+        // Relative luminance ~0.484 (just under the 0.5 cutoff) — pins where the boundary actually
+        // sits, since pure black/white alone can't distinguish a 0.5 cutoff from e.g. 0.2 or 0.8.
+        val belowThreshold = theme.copy(surface = Color(0.73f, 0.73f, 0.73f))
+        val result = wrapArticleHtml(belowThreshold, title = "", meta = "", body = "<p>body</p>")
+        assertTrue(result.contains("color-scheme: dark;"))
+    }
+
+    @Test
+    fun aSurfaceJustAboveTheDarkThresholdDeclaresLight() {
+        // Relative luminance ~0.507 (just over the 0.5 cutoff) — the other side of the same pin.
+        val aboveThreshold = theme.copy(surface = Color(0.74f, 0.74f, 0.74f))
+        val result = wrapArticleHtml(aboveThreshold, title = "", meta = "", body = "<p>body</p>")
+        assertTrue(result.contains("color-scheme: light;"))
+    }
+
+    @Test
+    fun aMidGraySurfaceDeclaresDarkByLuminanceNotByChannelValue() {
+        // A 50%-channel gray has a relative luminance of only ~0.216 (the sRGB gamma curve is not
+        // linear), so this would wrongly read as "light" if isDark compared the raw channel value
+        // (0.5) against the threshold instead of the actual relative luminance.
+        val midGrayTheme = theme.copy(surface = Color(0.5f, 0.5f, 0.5f))
+        val result = wrapArticleHtml(midGrayTheme, title = "", meta = "", body = "<p>body</p>")
+        assertTrue(result.contains("color-scheme: dark;"))
+    }
+
+    @Test
+    fun aMaterialYouDarkSurfaceDeclaresDark() {
+        val dynamicDarkTheme = theme.copy(surface = Color(0xFF1C1B1F)) // M3's own default dark-scheme surface
+        val result = wrapArticleHtml(dynamicDarkTheme, title = "", meta = "", body = "<p>body</p>")
+        assertTrue(result.contains("color-scheme: dark;"))
+    }
+
+    @Test
+    fun aMaterialYouLightSurfaceDeclaresLight() {
+        val dynamicLightTheme = theme.copy(surface = Color(0xFFFEF7FF)) // M3's own default light-scheme surface
+        val result = wrapArticleHtml(dynamicLightTheme, title = "", meta = "", body = "<p>body</p>")
+        assertTrue(result.contains("color-scheme: light;"))
+    }
+
+    @Test
     fun theColorSchemeDeclarationAppliesToThePlaceholderToo() {
         // articleNoContentHtml / articlePlaceholderHtml share articleDocument() with
         // wrapArticleHtml, so a dark theme must never flash a light-default placeholder either.
