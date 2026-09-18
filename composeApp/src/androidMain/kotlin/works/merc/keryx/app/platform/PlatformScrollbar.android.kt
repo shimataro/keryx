@@ -52,28 +52,13 @@ private const val SCROLL_INDICATOR_FADE_OUT_MS = 250
 
 @Composable
 actual fun BoxScope.VerticalScrollbarIfNeeded(scrollState: ScrollState) {
-    val minLengthPx = with(LocalDensity.current) { SCROLL_INDICATOR_MIN_LENGTH.toPx() }
-    ScrollIndicatorOverlay(
-        state = scrollState,
-        thumb = { trackLengthPx ->
-            scrollState.scrollIndicatorState?.let { s ->
-                scrollIndicatorThumb(s.scrollOffset, s.contentSize, s.viewportSize, minLengthFraction(minLengthPx, trackLengthPx))
-            }
-        },
-        trackInsets = { 0f to 0f },
-    )
+    ScrollIndicatorOverlay(state = scrollState, trackInsets = { 0f to 0f })
 }
 
 @Composable
 actual fun BoxScope.VerticalScrollbarIfNeeded(listState: LazyListState) {
-    val minLengthPx = with(LocalDensity.current) { SCROLL_INDICATOR_MIN_LENGTH.toPx() }
     ScrollIndicatorOverlay(
         state = listState,
-        thumb = { trackLengthPx ->
-            listState.scrollIndicatorState?.let { s ->
-                scrollIndicatorThumb(s.scrollOffset, s.contentSize, s.viewportSize, minLengthFraction(minLengthPx, trackLengthPx))
-            }
-        },
         // Keeps the track clear of a LazyColumn's own contentPadding (e.g. the navigation-bar
         // inset ArticleListPane/FeedListPane apply as afterContentPadding), without reading
         // WindowInsets.safeDrawing here directly: a sibling Box's Modifier.windowInsetsPadding
@@ -91,13 +76,13 @@ actual fun BoxScope.VerticalScrollbarIfNeeded(listState: LazyListState) {
  * draw layer, opaque while [state] is scrolling and faded out [SCROLL_INDICATOR_HIDE_DELAY_MS] after
  * it last reported scrolling.
  *
- * [thumb] and [state]'s own scroll-in-progress flag are read only inside [snapshotFlow] / the draw
- * phase, never in composition — so a scroll never recomposes the pane hosting this indicator, which
- * matters given the article list's own LazyColumn item-reuse crash history (see known-issues.md).
- * The only node this adds is the one this composable itself creates; it carries no pointer input at
- * all, so it never enters hit testing and can never intercept a press meant for content or a drag
- * handle beneath it (see FeedListPane's own reorder-drag host, whose scrollbar sits beside it
- * exactly because of this).
+ * [state]'s own `scrollIndicatorState` and scroll-in-progress flag are read only inside
+ * [snapshotFlow] / the draw phase, never in composition — so a scroll never recomposes the pane
+ * hosting this indicator, which matters given the article list's own LazyColumn item-reuse crash
+ * history (see known-issues.md). The only node this adds is the one this composable itself creates;
+ * it carries no pointer input at all, so it never enters hit testing and can never intercept a press
+ * meant for content or a drag handle beneath it (see FeedListPane's own reorder-drag host, whose
+ * scrollbar sits beside it exactly because of this).
  *
  * The effect is keyed on [state] itself, not just once per call site: `ArticleListPane` passes
  * either its base or its search `LazyListState` through the same `VerticalScrollbarIfNeeded` call
@@ -116,9 +101,9 @@ actual fun BoxScope.VerticalScrollbarIfNeeded(listState: LazyListState) {
 @Composable
 private fun BoxScope.ScrollIndicatorOverlay(
     state: ScrollableState,
-    thumb: (trackLengthPx: Float) -> ScrollIndicatorThumb?,
     trackInsets: () -> Pair<Float, Float>,
 ) {
+    val minLengthPx = with(LocalDensity.current) { SCROLL_INDICATOR_MIN_LENGTH.toPx() }
     val fade = remember(state) { Animatable(0f) }
     LaunchedEffect(state) {
         snapshotFlow { state.isScrollInProgress }.collectLatest { scrolling ->
@@ -140,7 +125,13 @@ private fun BoxScope.ScrollIndicatorOverlay(
             val trackBottom = size.height - afterPadding - SCROLL_INDICATOR_TRACK_MARGIN.toPx()
             val trackLength = (trackBottom - trackTop).coerceAtLeast(0f)
             if (trackLength <= 0f) return@drawBehind
-            val t = thumb(trackLength) ?: return@drawBehind
+            val indicatorState = state.scrollIndicatorState ?: return@drawBehind
+            val thumbGeometry = scrollIndicatorThumb(
+                indicatorState.scrollOffset,
+                indicatorState.contentSize,
+                indicatorState.viewportSize,
+                minLengthFraction(minLengthPx, trackLength),
+            ) ?: return@drawBehind
             val thicknessPx = SCROLL_INDICATOR_THICKNESS.toPx()
             val x = if (layoutDirection == LayoutDirection.Ltr) {
                 size.width - SCROLL_INDICATOR_END_MARGIN.toPx() - thicknessPx
@@ -150,8 +141,8 @@ private fun BoxScope.ScrollIndicatorOverlay(
             drawRoundRect(
                 color = color,
                 alpha = alpha,
-                topLeft = Offset(x, trackTop + t.startFraction * trackLength),
-                size = Size(thicknessPx, t.lengthFraction * trackLength),
+                topLeft = Offset(x, trackTop + thumbGeometry.startFraction * trackLength),
+                size = Size(thicknessPx, thumbGeometry.lengthFraction * trackLength),
                 cornerRadius = CornerRadius(SCROLL_INDICATOR_CORNER_RADIUS.toPx()),
             )
         },
