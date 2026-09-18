@@ -512,6 +512,13 @@ A sibling `Box`'s own `Modifier.windowInsetsPadding` never consumes inset on thi
 so reading the raw inset there would shrink the track even where the list isn't actually padded by it
 (`FeedListPane`'s list has no bottom content padding at all).
 
+This inset handling is specific to the `LazyListState` overload. The `ScrollState` overload passes
+a hardcoded zero inset on both ends, relying on its sole caller (`SetupScreen`) already wrapping
+itself in `safeDrawingPadding()`. `VerticalScrollbarIfNeeded` does not clear insets on a caller's
+behalf in general — a new `ScrollState`-based screen that isn't already inset-padded would need to
+either wrap itself the same way `SetupScreen` does, or thread its own inset into a `ScrollState`
+overload change, before this indicator could be trusted to stay off the navigation bar there too.
+
 The article reader's own scrollbar is whatever the native WebView draws — see
 `app-architecture.md`'s "Article Reader (native WebView)" for why no `::-webkit-scrollbar` (or
 `scrollbar-width`/`scrollbar-color`) rule belongs in its CSS.
