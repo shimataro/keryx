@@ -92,16 +92,27 @@ class ScrollIndicatorGeometryTest {
     }
 
     @Test
-    fun anUnknownScrollOffsetClampsToTheTrackEnd() {
-        // Int.MAX_VALUE (ScrollIndicatorState's own "not known yet" sentinel) divided by any
-        // positive range is a huge ratio, which coerceIn(0f, 1f) simply clamps to 1 — the thumb
-        // lands at the track's end rather than at a wrong mid-track position. In practice this
-        // sentinel is never seen here without contentSize/viewportSize being unmeasured too (which
-        // scrollIndicatorLengthFraction already turns into a zero length upstream), so this pins
-        // the fallback behavior rather than a reachable production case.
+    fun anUnknownScrollOffsetStartsAtZeroRatherThanAWrongPosition() {
+        // Int.MAX_VALUE is ScrollIndicatorState's own "not known yet" sentinel for scrollOffset,
+        // the same one scrollIndicatorLengthFraction already checks for contentSize/viewportSize.
+        // Guarded explicitly here too (rather than left to fall out of the division-then-clamp
+        // arithmetic below, which would otherwise land the thumb at the track's end — a
+        // plausible-looking but wrong position for genuinely unknown scroll progress) even though,
+        // in practice, this sentinel is never seen here without contentSize/viewportSize being
+        // unmeasured too (which scrollIndicatorLengthFraction already turns into a zero length
+        // upstream, so this function is never even called with it in production).
         val length = scrollIndicatorLengthFraction(contentSize = 1000, viewportSize = 400, MIN_LENGTH_FRACTION)
         val start = scrollIndicatorStartFraction(scrollOffset = Int.MAX_VALUE, contentSize = 1000, viewportSize = 400, length)
-        assertApprox(1f, start + length)
+        assertApprox(0f, start)
+    }
+
+    @Test
+    fun noStartWhenContentFitsTheViewport() {
+        // contentSize <= viewportSize (range <= 0) is unreachable in practice — the caller never
+        // gets a positive lengthFraction to pass in for such a shape — but the guard itself is
+        // otherwise never exercised by any existing case here, all of which use a genuinely
+        // scrollable content/viewport pair.
+        assertApprox(0f, scrollIndicatorStartFraction(scrollOffset = 100, contentSize = 400, viewportSize = 400, lengthFraction = 0.4f))
     }
 
     @Test

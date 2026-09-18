@@ -40,6 +40,11 @@ internal fun scrollIndicatorLengthFraction(
  * the end of the track the moment a minimum length clamps a very long list's thumb — the same
  * reason Android's own `ScrollBarDrawable.setParameters(range, offset, extent)` distributes over
  * the remaining track.
+ *
+ * [scrollOffset] may be `Int.MAX_VALUE`, the same "not known yet" sentinel
+ * [scrollIndicatorLengthFraction] checks for [contentSize]/[viewportSize]; that yields `0f` here
+ * too, matching the guard symmetrically even though [contentSize]/[viewportSize] being known
+ * already implies [scrollOffset] is too in every `ScrollIndicatorState` this repository has seen.
  */
 internal fun scrollIndicatorStartFraction(
     scrollOffset: Int,
@@ -47,6 +52,7 @@ internal fun scrollIndicatorStartFraction(
     viewportSize: Int,
     lengthFraction: Float,
 ): Float {
+    if (scrollOffset == Int.MAX_VALUE) return 0f
     val range = contentSize - viewportSize
     if (range <= 0) return 0f
     val progress = (scrollOffset.toFloat() / range).coerceIn(0f, 1f)
