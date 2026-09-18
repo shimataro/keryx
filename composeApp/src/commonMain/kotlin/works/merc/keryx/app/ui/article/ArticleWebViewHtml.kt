@@ -43,7 +43,7 @@ data class ArticleHtmlTheme(
  * Material You palette (which can be dark at a luminance the fixed teal scheme never produces)
  * without a second source of truth.
  */
-internal val ArticleHtmlTheme.isDark: Boolean
+private val ArticleHtmlTheme.isDark: Boolean
     get() = surface.luminance() < 0.5f
 
 /**
