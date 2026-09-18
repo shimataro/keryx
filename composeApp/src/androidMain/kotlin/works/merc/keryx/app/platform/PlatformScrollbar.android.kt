@@ -18,11 +18,9 @@ actual fun BoxScope.VerticalScrollbarIfNeeded(scrollState: ScrollState) {
 actual fun BoxScope.VerticalScrollbarIfNeeded(listState: LazyListState) {
     ScrollIndicatorOverlay(
         state = listState,
-        // Keeps the track clear of a LazyColumn's own contentPadding (e.g. the navigation-bar
-        // inset ArticleListPane/FeedListPane apply as afterContentPadding), without reading
-        // WindowInsets.safeDrawing here directly: a sibling Box's Modifier.windowInsetsPadding
-        // never consumes inset for this indicator, so reading the raw inset would shrink the
-        // track even where the list itself isn't actually padded by it (FeedListPane has none).
+        // Keeps the track clear of a LazyColumn's own contentPadding via layoutInfo — see the
+        // ui-guidelines skill's "Scroll indicators" section for why, and why WindowInsets.safeDrawing
+        // must not be read here directly.
         trackStartInsetPx = { listState.layoutInfo.beforeContentPadding.toFloat() },
         trackEndInsetPx = { listState.layoutInfo.afterContentPadding.toFloat() },
     )
