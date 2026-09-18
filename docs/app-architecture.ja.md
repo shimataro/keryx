@@ -52,13 +52,14 @@ composeApp/src/
     AppDirs.appDataDir()/`Context.filesDir` とは別ディレクトリになる。db-schema.ja.md 参照）,
     InstallLocation（常に ANDROID_SIDELOADED か ANDROID_STORE のどちらか——下記「アプリ内アップデート」
     参照）,
-    PlatformScrollbar（`VerticalScrollbarIfNeeded` — `ScrollableState` と inset コールバックを
-    commonMain の `platform/ScrollIndicatorOverlay.kt` の `ScrollIndicatorOverlay` に渡すだけの薄い
-    actual 2 本。デスクトップのドラッグ可能な `VerticalScrollbar` ではなく、非操作でフェードする
-    オーバーレイ・スクロールインジケーター。契約の全体は `ui-guidelines` スキルの
-    「Scroll indicators」参照。そのオーバーレイの thumb 比率計算を担う純粋関数
-    `platform/ScrollIndicatorGeometry.kt` の `scrollIndicatorLengthFraction`／`scrollIndicatorStartFraction`
-    は、デスクトップからは一切呼ばれないのに commonMain に置かれている——理由は下記
+    PlatformScrollbar（`VerticalScrollbarIfNeeded` — `ScrollableState` と 2 つの inset コールバック
+    （`trackStartInsetPx`／`trackEndInsetPx`）を commonMain の `platform/ScrollIndicatorOverlay.kt` の
+    `ScrollIndicatorOverlay` に渡すだけの薄い actual 2 本。デスクトップのドラッグ可能な
+    `VerticalScrollbar` ではなく、非操作でフェードするオーバーレイ・スクロールインジケーター。契約の
+    全体は `ui-guidelines` スキルの「Scroll indicators」参照。そのオーバーレイの thumb 比率計算を担う
+    `platform/ScrollIndicatorGeometry.kt` の純粋関数群（`scrollIndicatorLengthFraction`／
+    `scrollIndicatorStartFraction`／`minLengthFraction`——それぞれの役割は `testing.ja.md` 参照）は、
+    デスクトップからは一切呼ばれないのに commonMain に置かれている——理由は下記
     `canInstallAndroidApkUpdate` と同じ）,
     AppDirs/BrowserOpener/ClipboardEntries（AndroidAppContext 経由 — KeryxApplication.onCreate
     で一度だけ設定される静的 Context ホルダ）, PlatformModule（Ktor OkHttp エンジン、Dropbox/OneDrive
@@ -281,9 +282,8 @@ interface——その実装自体は隣接する場所ではなく `platform/upd
 同意状態）だからである。それでも `UpdateInstallPolicy.kt` の `canInstallAndroidApkUpdate` は
 その*判断*自体を 1 つの boolean を受け取る純粋関数として切り出しており、`androidMain` 自体には
 JVM でテスト可能なユニットテストのソースセットが無いにもかかわらず `commonTest` でカバーされて
-いる（testing.ja.md 参照）。`platform/ScrollIndicatorGeometry.kt` の
-`scrollIndicatorLengthFraction`／`scrollIndicatorStartFraction` も同じ理由で同じ形を採っている
-——Android のスクロールインジケーターの thumb 比率計算は純粋なので commonMain に置かれ
+いる（testing.ja.md 参照）。`platform/ScrollIndicatorGeometry.kt` の純粋関数群も同じ理由で同じ形を
+採っている——Android のスクロールインジケーターの thumb 比率計算は純粋なので commonMain に置かれ
 commonTest でカバーされる。デスクトップ側からは一度も呼ばれないにもかかわらず、である。
 
 上記の `selectUpdateAsset` と `updatePlan` に並ぶもう 1 つの純粋関数が、意図的に `domain/` の

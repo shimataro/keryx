@@ -53,12 +53,14 @@ composeApp/src/
     a different directory than AppDirs.appDataDir()/`Context.filesDir`; see db-schema.md),
     InstallLocation (always ANDROID_SIDELOADED or ANDROID_STORE — see "In-App Update" below),
     PlatformScrollbar (`VerticalScrollbarIfNeeded` — two thin actuals that hand a `ScrollableState`
-    and an inset callback to `platform/ScrollIndicatorOverlay.kt`'s commonMain `ScrollIndicatorOverlay`,
-    a non-interactive, fading overlay scroll indicator rather than desktop's draggable
-    `VerticalScrollbar`; see the `ui-guidelines` skill's "Scroll indicators" for the full contract.
-    That overlay's pure thumb-fraction math lives in `platform/ScrollIndicatorGeometry.kt`'s
-    `scrollIndicatorLengthFraction`/`scrollIndicatorStartFraction`, in commonMain for the same
-    reason as `canInstallAndroidApkUpdate` below even though nothing on desktop calls them),
+    and two inset callbacks (`trackStartInsetPx`/`trackEndInsetPx`) to
+    `platform/ScrollIndicatorOverlay.kt`'s commonMain `ScrollIndicatorOverlay`, a non-interactive,
+    fading overlay scroll indicator rather than desktop's draggable `VerticalScrollbar`; see the
+    `ui-guidelines` skill's "Scroll indicators" for the full contract. That overlay's pure
+    thumb-fraction math lives in `platform/ScrollIndicatorGeometry.kt`'s pure functions
+    (`scrollIndicatorLengthFraction`/`scrollIndicatorStartFraction`/`minLengthFraction` — see
+    `testing.md` for what each covers), in commonMain for the same reason as
+    `canInstallAndroidApkUpdate` below even though nothing on desktop calls them),
     AppDirs/BrowserOpener/ClipboardEntries (via AndroidAppContext, a
     static Context holder set once from KeryxApplication.onCreate), PlatformModule (Ktor OkHttp
     engine, CloudSession with Dropbox/OneDrive providers plus Google Drive where Play services
@@ -266,10 +268,10 @@ platform `actual` gets to say "not right now" for a reason `updatePlan` itself h
 (Android's runtime install-consent state, most notably); `UpdateInstallPolicy.kt`'s
 `canInstallAndroidApkUpdate` still pulls the *decision* itself out as a pure function of one
 boolean, so it's covered by `commonTest` despite `androidMain` having no JVM-testable unit-test
-source set (see `testing.md`). `platform/ScrollIndicatorGeometry.kt`'s
-`scrollIndicatorLengthFraction`/`scrollIndicatorStartFraction` follow the same shape for the same
-reason: the Android scroll indicator's thumb-fraction arithmetic is pure. It lives in `commonMain`
-and is covered by `commonTest` even though nothing on desktop ever calls it.
+source set (see `testing.md`). `platform/ScrollIndicatorGeometry.kt`'s pure functions follow the
+same shape for the same reason: the Android scroll indicator's thumb-fraction arithmetic is pure.
+They live in `commonMain` and are covered by `commonTest` even though nothing on desktop ever calls
+them.
 
 Another pure function sits alongside `selectUpdateAsset` and `updatePlan` above but deliberately
 outside `domain/`: `ui/settings/ReleaseNotesText.kt`'s `plainTextReleaseNotes` (Markdown-to-plain-text for the Updates
