@@ -52,6 +52,11 @@ composeApp/src/
     AppDirs.appDataDir()/`Context.filesDir` とは別ディレクトリになる。db-schema.ja.md 参照）,
     InstallLocation（常に ANDROID_SIDELOADED か ANDROID_STORE のどちらか——下記「アプリ内アップデート」
     参照）,
+    PlatformScrollbar（`VerticalScrollbarIfNeeded` — デスクトップのドラッグ可能な `VerticalScrollbar`
+    ではなく、非操作でフェードするオーバーレイ・スクロールインジケーター。契約の全体は `ui-guidelines`
+    スキルの「Scroll indicators」参照。thumb の比率計算を担う純粋関数
+    `platform/ScrollIndicatorGeometry.kt` の `scrollIndicatorThumb` は、デスクトップからは一切呼ばれない
+    のに commonMain に置かれている——理由は下記 `canInstallAndroidApkUpdate` と同じ）,
     AppDirs/BrowserOpener/ClipboardEntries（AndroidAppContext 経由 — KeryxApplication.onCreate
     で一度だけ設定される静的 Context ホルダ）, PlatformModule（Ktor OkHttp エンジン、Dropbox/OneDrive
     プロバイダに加え Play 開発者サービスがある端末では Google Drive も登録した CloudSession — 下記
@@ -273,7 +278,10 @@ interface——その実装自体は隣接する場所ではなく `platform/upd
 同意状態）だからである。それでも `UpdateInstallPolicy.kt` の `canInstallAndroidApkUpdate` は
 その*判断*自体を 1 つの boolean を受け取る純粋関数として切り出しており、`androidMain` 自体には
 JVM でテスト可能なユニットテストのソースセットが無いにもかかわらず `commonTest` でカバーされて
-いる（testing.ja.md 参照）。
+いる（testing.ja.md 参照）。`platform/ScrollIndicatorGeometry.kt` の `scrollIndicatorThumb` も同じ
+理由で同じ形を採っている——Android のスクロールインジケーターの thumb 比率計算は純粋なので
+commonMain に置かれ commonTest でカバーされる。デスクトップ側からは一度も呼ばれないにも
+かかわらず、である。
 
 この 2 つと並ぶ 3 つ目の純粋関数は、意図的に `domain/` の外に置かれている:
 `ui/settings/ReleaseNotesText.kt` の `plainTextReleaseNotes`（Updates タブの読み取り専用サマリー
@@ -319,7 +327,15 @@ ViewModel はアプリスコープの `single` として登録し、`koinInject(
 描画すべき記事が無い状態（「記事未選択」「本文なし」）は Compose の `Text` ではなく、同じ
 WebView **内部**の HTML として描画する（`ui/article/ArticleWebViewHtml.kt` の
 `articlePlaceholderHtml`／`articleNoContentHtml`。実記事用の `wrapArticleHtml` と同じ
-`<style>` ブロックを共有し、どの状態でも同じテーマ色で塗られる）。リーダー上部のツールバーも
+`<style>` ブロックを共有し、どの状態でも同じテーマ色で塗られる）。この共有 `<style>` ブロックは
+`color-scheme`（`dark` か `light` のどちらか一方——`themeMode` から直接ではなく
+`ArticleHtmlTheme.surface` 自身の輝度から `ArticleHtmlTheme.isDark` 経由で導く。リーダーは
+`resolveDarkTheme` の入力にアクセスできないため）も宣言する——`light dark` 併記はしない。これに
+より、ブラウザは自身のフォームコントロールとスクロールバーを OS の設定を独自に追従させるのではなく
+アプリのテーマに合わせて描く。`::-webkit-scrollbar`（や `scrollbar-width`／`scrollbar-color`）の
+ルールは一切定義しない——そのいずれか 1 つでも定義するとブラウザはオーバーレイ・スクロールバーを
+やめ、レイアウト幅を消費するクラシックなものに切り替わり、本文が狭くなる。詳細は `ui-guidelines`
+スキルの「Scroll indicators」参照。リーダー上部のツールバーも
 同様に常時表示し、未選択時はボタンを非表示にせず無効化する — これによりツールバーの Compose
 構造（ひいてはリーダーの計測済みバウンズ）が状態間で常に同一に保たれる。
 

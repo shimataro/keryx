@@ -922,6 +922,37 @@ confirmation, on all three desktop platforms (build with `createDistributable`/`
 - On all three: repeat while Keryx is already running (second launch) to confirm single-instance
   forwarding activates the existing window and imports without spawning a second process.
 
+### (Android) The overlay scroll indicator
+
+`ScrollIndicatorGeometryTest.kt` covers the thumb-fraction arithmetic in isolation, but the actual
+`Spacer`/`drawBehind` overlay, its fade timing, and whether it stays out of the way of touch input
+can only be seen on a device or emulator. Confirm:
+
+- Flinging the article list shows a thin pill at the right edge immediately, opaque while the list
+  is still moving (including during fling deceleration, not just while a finger is down), then fades
+  out roughly a second after it actually comes to rest. In both light and dark theme it stays legible
+  over the article cards it overlaps.
+- Starting a new scroll while the indicator is mid-fade snaps it back to opaque rather than letting
+  it finish fading and reappear (no flicker).
+- Scrolling to the very end of the list brings the thumb to the track's bottom edge, and it never
+  dips under the navigation bar — check both three-button and gesture navigation.
+- The feed list (as the sidebar and as the drawer) shows the same indicator, stopping above the
+  drawer's own Settings footer row rather than covering it.
+- Pressing down directly on the thumb and dragging never starts a feed reorder drag — the indicator
+  carries no pointer input of its own, so the press reaches the list underneath and just scrolls.
+  Long-pressing the same spot still opens the row's context menu.
+- The feed list mixes row heights (sticky headers, folder headers, dividers), so the thumb's length
+  visibly breathes a little during a scroll — that's expected (it's an estimate, the same one
+  Android's own lists use) — but it must never overshoot the track or move opposite the scroll
+  direction.
+- Sending an article list forward with J/K or arrow keys (a tablet with a physical keyboard attached)
+  also flashes the indicator briefly — this is the same native behavior as a `RecyclerView`'s own
+  programmatic scroll, not a bug.
+- Scrolling the setup screen at the largest font size (1.4×) shows the same indicator, clear of the
+  status/navigation bars.
+- With TalkBack on, swiping linearly through the article list never stops on the indicator — it adds
+  no accessibility node of its own.
+
 ### (Android) The article reader's swipe pager
 
 `ArticleSwipeNavTest.kt` / `ArticleSwipeGestureTest.kt` cover the gesture's own thresholds and

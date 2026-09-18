@@ -468,6 +468,54 @@ touch density any more.
   [known-issues.md](../../../docs/known-issues.md) for the measurements and
   everything ruled out, rather than re-investigating it.
 
+## Scroll indicators
+
+`platform/PlatformScrollbar.kt`'s `VerticalScrollbarIfNeeded` (`ScrollState` and `LazyListState`
+overloads) is called unconditionally from three sites — `ArticleListPane`, `FeedListPane`,
+`SetupScreen` — always as a direct child of a `Box`, always as a **sibling** of the scrollable
+element rather than wrapping it. Callers never branch per platform; the `expect`/`actual` pair does
+that instead:
+
+- **Desktop**: a permanent, draggable `androidx.compose.foundation.VerticalScrollbar`
+  (`PlatformScrollbar.desktop.kt`), themed via `LocalScrollbarStyle` to `onSurface` alpha 0.12 idle /
+  0.5 hover.
+- **Android**: a non-interactive fading overlay (`PlatformScrollbar.android.kt`) — opaque while the
+  list is scrolling, faded out ~800ms after it stops. This is the same `SCROLLBARS_INSIDE_OVERLAY`
+  idiom Android's own View-based lists use, not a port of desktop's draggable thumb; Compose's
+  `LazyColumn`/`Modifier.verticalScroll` draw no scrollbar of their own, so without this Android has
+  no scroll-position cue at all. Thumb geometry comes from
+  `androidx.compose.foundation.ScrollIndicatorState` (`ScrollableState.scrollIndicatorState`),
+  reduced to fractions by the pure `scrollIndicatorThumb` in `platform/ScrollIndicatorGeometry.kt`.
+
+Three rules the Android `actual` must keep, all there to avoid disturbing the article list's own
+`LazyColumn` item-reuse crash history (see known-issues.md) and `FeedListPane`'s reorder-drag host:
+
+1. **No pointer input on the indicator itself.** It is a plain `Spacer` painted with
+   `Modifier.drawBehind` — no `pointerInput`, no click/drag modifier of any kind — so it never enters
+   hit testing and can never intercept a press meant for content or a drag handle beneath it. This is
+   *why* the sibling-not-child placement above is safe for `FeedListPane`'s reorder-drag host: an
+   ancestor is always in a hit-tested descendant's path, so a scrollbar nested *inside* the drag host
+   would risk turning a thumb press into a feed drag — a non-interactive sibling with no pointer input
+   cannot, but the placement is kept anyway so desktop's draggable scrollbar stays safe too.
+2. **Never read scroll state in composition.** `scrollIndicatorState`, `layoutInfo`,
+   `isScrollInProgress` etc. are read only inside `snapshotFlow` or the `drawBehind` draw phase, never
+   as a plain composable property read (and never through `derivedStateOf`, which would recompose the
+   pane on every scrolled pixel). A scroll must never recompose the pane hosting the indicator.
+3. **One node, and it's a sibling, not a list item.** The indicator adds exactly one `LayoutNode` per
+   pane, outside the `LazyColumn`/`verticalScroll` content entirely — never inside `items {}`. See
+   "Gaps and node count" above for why item-level node count is sensitive here.
+
+The track clears a `LazyColumn`'s own `contentPadding` (e.g. the navigation-bar inset
+`ArticleListPane`/`FeedListPane` apply as `afterContentPadding`) via `layoutInfo.beforeContentPadding`
+/ `afterContentPadding` directly — never by reading `WindowInsets.safeDrawing` in the `actual` itself.
+A sibling `Box`'s own `Modifier.windowInsetsPadding` never consumes inset on this indicator's behalf,
+so reading the raw inset there would shrink the track even where the list isn't actually padded by it
+(`FeedListPane`'s list has no bottom content padding at all).
+
+The article reader's own scrollbar is whatever the native WebView draws — see
+`app-architecture.md`'s "Article Reader (native WebView)" for why no `::-webkit-scrollbar` (or
+`scrollbar-width`/`scrollbar-color`) rule belongs in its CSS.
+
 ## Platform-native list rows
 
 `listRowSurface` (see above) is `expect`/`actual` and takes a `ListRowKind` — `NavItem` for

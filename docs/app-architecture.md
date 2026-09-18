@@ -52,6 +52,11 @@ composeApp/src/
     (bundled SQLite, see below), DatabaseFile (`databaseFilePath()` — `Context.getDatabasePath`,
     a different directory than AppDirs.appDataDir()/`Context.filesDir`; see db-schema.md),
     InstallLocation (always ANDROID_SIDELOADED or ANDROID_STORE — see "In-App Update" below),
+    PlatformScrollbar (`VerticalScrollbarIfNeeded` — a non-interactive, fading overlay scroll
+    indicator rather than desktop's draggable `VerticalScrollbar`; see the `ui-guidelines` skill's
+    "Scroll indicators" for the full contract, and `platform/ScrollIndicatorGeometry.kt`'s pure
+    `scrollIndicatorThumb` for the thumb-fraction math it shares with no desktop code but still
+    lives in commonMain for, per the same reasoning as `canInstallAndroidApkUpdate` below),
     AppDirs/BrowserOpener/ClipboardEntries (via AndroidAppContext, a
     static Context holder set once from KeryxApplication.onCreate), PlatformModule (Ktor OkHttp
     engine, CloudSession with Dropbox/OneDrive providers plus Google Drive where Play services
@@ -259,7 +264,10 @@ platform `actual` gets to say "not right now" for a reason `updatePlan` itself h
 (Android's runtime install-consent state, most notably); `UpdateInstallPolicy.kt`'s
 `canInstallAndroidApkUpdate` still pulls the *decision* itself out as a pure function of one
 boolean, so it's covered by `commonTest` despite `androidMain` having no JVM-testable unit-test
-source set (see `testing.md`).
+source set (see `testing.md`). `platform/ScrollIndicatorGeometry.kt`'s `scrollIndicatorThumb`
+follows the same shape for the same reason — the Android scroll indicator's thumb-fraction
+arithmetic is pure, so it lives in `commonMain` and is covered by `commonTest`, even though nothing
+on desktop ever calls it.
 
 A third pure function sits beside those two but deliberately outside `domain/`:
 `ui/settings/ReleaseNotesText.kt`'s `plainTextReleaseNotes` (Markdown-to-plain-text for the Updates
@@ -303,7 +311,14 @@ component is added, removed, or moved, not just this pane. Consequently, states 
 selected" and "no content" — are rendered as HTML *inside* the same WebView rather than as Compose
 `Text`, via `ui/article/ArticleWebViewHtml.kt`'s `articlePlaceholderHtml`/`articleNoContentHtml`
 (sharing one `<style>` block with the real-article `wrapArticleHtml` builder, so every state paints
-the same theme colors). The toolbar above the reader is likewise always present, with actions
+the same theme colors). That shared `<style>` block also declares a single `color-scheme` (`dark` or
+`light`, derived from `ArticleHtmlTheme.surface`'s own luminance via `ArticleHtmlTheme.isDark` rather
+than from `themeMode` directly, since the reader has no access to `resolveDarkTheme`'s inputs) —
+never `light dark` — so the browser paints its own form controls and scrollbar to match the app's
+theme instead of following the OS setting independently. No `::-webkit-scrollbar` (or
+`scrollbar-width`/`scrollbar-color`) rule is defined: any one of those switches the browser off its
+overlay scrollbar and onto a classic, layout-consuming one, narrowing the article body — see the
+`ui-guidelines` skill's "Scroll indicators". The toolbar above the reader is likewise always present, with actions
 disabled rather than hidden when nothing is selected, keeping its Compose structure — and
 therefore the reader's measured bounds — identical across states.
 
