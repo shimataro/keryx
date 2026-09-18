@@ -49,6 +49,7 @@ import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.ArticleReaderRow
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.ArticleSearchResult
+import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.domain.toListRow
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.FeedRepository
@@ -325,6 +326,16 @@ class HomeViewModel(
 
     private val _selectedArticle = MutableStateFlow<Articles?>(null)
     val selectedArticle: StateFlow<Articles?> = _selectedArticle
+
+    /** The display title of the feed that owns the currently selected article, if any. */
+    val selectedFeedName: StateFlow<String?> = combine(feeds, selectedArticle) { feeds, article ->
+        article?.let { a -> feeds.find { it.id == a.feed_id }?.displayTitle() }
+    }.stateIn(viewModelScope, started, null)
+
+    /** The favicon URL of the feed that owns the currently selected article, if any. */
+    val selectedFeedFaviconUrl: StateFlow<String?> = combine(feeds, selectedArticle) { feeds, article ->
+        article?.let { a -> feeds.find { it.id == a.feed_id }?.favicon_url }
+    }.stateIn(viewModelScope, started, null)
 
     /**
      * The list cursor for keyboard navigation, and the identity of the newest selection request.
