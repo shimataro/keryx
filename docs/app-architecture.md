@@ -318,11 +318,14 @@ the same theme colors). That shared `<style>` block also declares a single `colo
 than from `themeMode` directly, since the reader has no access to `resolveDarkTheme`'s inputs) —
 never `light dark` — so the browser paints its own form controls and scrollbar to match the app's
 theme instead of following the OS setting independently. No `::-webkit-scrollbar` (or
-`scrollbar-width`/`scrollbar-color`) rule is defined: any one of those switches the browser off its
-overlay scrollbar and onto a classic, layout-consuming one, narrowing the article body — see the
-`ui-guidelines` skill's "Scroll indicators". The toolbar above the reader is likewise always present, with actions
-disabled rather than hidden when nothing is selected, keeping its Compose structure — and
-therefore the reader's measured bounds — identical across states.
+`scrollbar-width`/`scrollbar-color`) rule is defined: on an engine that draws an overlay scrollbar
+in the first place (Android's WebView, WebKit on macOS/Linux), any one of those switches it off and
+onto a classic, layout-consuming one instead, narrowing the article body — see the `ui-guidelines`
+skill's "Scroll indicators". (Windows' WebView2 already renders a classic scrollbar by default, so
+the rule has nothing to switch off there, but is kept the same across all four engines rather than
+carved out as a per-platform exception.) The toolbar above the reader is likewise always present,
+with actions disabled rather than hidden when nothing is selected, keeping its Compose structure —
+and therefore the reader's measured bounds — identical across states.
 
 `ArticleWebView` also sets `webSettings.desktopWebSettings.dataDirectory` explicitly, to
 `AppDirs.cacheDir()` plus a `webview` subdirectory, applied identically on all three desktop
