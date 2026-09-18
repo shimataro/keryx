@@ -45,10 +45,6 @@ private val SCROLL_INDICATOR_END_MARGIN = 2.dp
 private val SCROLL_INDICATOR_TRACK_MARGIN = 2.dp
 private val SCROLL_INDICATOR_MIN_LENGTH = 32.dp
 
-/** Medium-emphasis alpha over onSurface — lower than desktop's 0.5f hover color, since this
- *  overlay always sits on top of content rather than beside it. */
-private const val SCROLL_INDICATOR_ALPHA = 0.38f
-
 /** Deliberately well above AOSP's own ~300ms default (ViewConfiguration.SCROLL_BAR_DEFAULT_DELAY)
  *  — the indicator is the only scroll-position cue on Android, so it stays a beat longer. */
 private const val SCROLL_INDICATOR_HIDE_DELAY_MS = 800L
@@ -117,11 +113,16 @@ internal fun BoxScope.ScrollIndicatorOverlay(
             }
         }
     }
-    val color = MaterialTheme.colorScheme.onSurface
+    // outline is M3's own contrast-guaranteed role for a decorative boundary/indicator against
+    // surface — at full alpha it clears WCAG 1.4.11's 3:1 non-text contrast minimum against the
+    // app's fixed teal palette (measured ~4.45:1 light / ~5.4:1 dark) and against Material You's
+    // dynamic palette, unlike a partly-transparent onSurface, which this indicator is the sole
+    // scroll-position cue on Android and has no hover-darkens-further fallback for.
+    val color = MaterialTheme.colorScheme.outline
     Spacer(
         Modifier.matchParentSize()
             .graphicsLayer {
-                alpha = fade.value * SCROLL_INDICATOR_ALPHA
+                alpha = fade.value
                 compositingStrategy = CompositingStrategy.ModulateAlpha
             }
             .drawBehind {
