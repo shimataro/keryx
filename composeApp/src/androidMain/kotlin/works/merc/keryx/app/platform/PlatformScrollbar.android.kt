@@ -3,6 +3,7 @@ package works.merc.keryx.app.platform
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.gestures.ScrollableState
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.lazy.LazyListState
@@ -63,7 +64,7 @@ private fun minLengthFraction(minLengthPx: Float, trackLengthPx: Float): Float =
 actual fun BoxScope.VerticalScrollbarIfNeeded(scrollState: ScrollState) {
     val minLengthPx = with(LocalDensity.current) { SCROLL_INDICATOR_MIN_LENGTH.toPx() }
     ScrollIndicatorOverlay(
-        isScrolling = { scrollState.isScrollInProgress },
+        state = scrollState,
         thumb = { trackLengthPx ->
             scrollState.scrollIndicatorState?.let { s ->
                 scrollIndicatorThumb(s.scrollOffset, s.contentSize, s.viewportSize, minLengthFraction(minLengthPx, trackLengthPx))
@@ -77,7 +78,7 @@ actual fun BoxScope.VerticalScrollbarIfNeeded(scrollState: ScrollState) {
 actual fun BoxScope.VerticalScrollbarIfNeeded(listState: LazyListState) {
     val minLengthPx = with(LocalDensity.current) { SCROLL_INDICATOR_MIN_LENGTH.toPx() }
     ScrollIndicatorOverlay(
-        isScrolling = { listState.isScrollInProgress },
+        state = listState,
         thumb = { trackLengthPx ->
             listState.scrollIndicatorState?.let { s ->
                 scrollIndicatorThumb(s.scrollOffset, s.contentSize, s.viewportSize, minLengthFraction(minLengthPx, trackLengthPx))
@@ -97,33 +98,40 @@ actual fun BoxScope.VerticalScrollbarIfNeeded(listState: LazyListState) {
 
 /**
  * A non-interactive vertical scroll-position indicator: a single [androidx.compose.foundation.Spacer]-like
- * draw layer, opaque while [isScrolling] and faded out [SCROLL_INDICATOR_HIDE_DELAY_MS] after it
- * last reported scrolling.
+ * draw layer, opaque while [state] is scrolling and faded out [SCROLL_INDICATOR_HIDE_DELAY_MS] after
+ * it last reported scrolling.
  *
- * [thumb] and [isScrolling] are read only inside [snapshotFlow] / the draw phase, never in
- * composition — so a scroll never recomposes the pane hosting this indicator, which matters given
- * the article list's own LazyColumn item-reuse crash history (see known-issues.md). The only node
- * this adds is the one this composable itself creates; it carries no pointer input at all, so it
- * never enters hit testing and can never intercept a press meant for content or a drag handle
- * beneath it (see FeedListPane's own reorder-drag host, whose scrollbar sits beside it exactly
- * because of this).
+ * [thumb] and [state]'s own scroll-in-progress flag are read only inside [snapshotFlow] / the draw
+ * phase, never in composition — so a scroll never recomposes the pane hosting this indicator, which
+ * matters given the article list's own LazyColumn item-reuse crash history (see known-issues.md).
+ * The only node this adds is the one this composable itself creates; it carries no pointer input at
+ * all, so it never enters hit testing and can never intercept a press meant for content or a drag
+ * handle beneath it (see FeedListPane's own reorder-drag host, whose scrollbar sits beside it
+ * exactly because of this).
+ *
+ * The effect is keyed on [state] itself, not just once per call site: `ArticleListPane` passes
+ * either its base or its search `LazyListState` through the same `VerticalScrollbarIfNeeded` call
+ * depending on `searchActive`, and keying on the state instance (rather than `Unit`/a `remember`ed
+ * `Animatable`) is what makes the effect restart — and start watching the *new* state's own
+ * scrolling — when that swap happens, instead of staying latched onto whichever state was current
+ * at first composition.
  *
  * No content-description or other semantics are attached: this is a decorative echo of state the
  * scrollable content's own semantics already expose, not a control of its own.
  *
- * [isScrolling] also reports `true` for a programmatic scroll (e.g. scrollToIndexIfNeeded, or a
- * keyboard J/K jump) — matching RecyclerView.smoothScrollBy's own native behavior, this is
- * intentional rather than a leak of desktop-only semantics.
+ * [state]'s `isScrollInProgress` also reports `true` for a programmatic scroll (e.g.
+ * `scrollToIndexIfNeeded`, or a keyboard J/K jump) — matching `RecyclerView.smoothScrollBy`'s own
+ * native behavior, this is intentional rather than a leak of desktop-only semantics.
  */
 @Composable
 private fun BoxScope.ScrollIndicatorOverlay(
-    isScrolling: () -> Boolean,
+    state: ScrollableState,
     thumb: (trackLengthPx: Float) -> ScrollIndicatorThumb?,
     trackInsets: () -> Pair<Float, Float>,
 ) {
-    val fade = remember { Animatable(0f) }
-    LaunchedEffect(fade) {
-        snapshotFlow(isScrolling).collectLatest { scrolling ->
+    val fade = remember(state) { Animatable(0f) }
+    LaunchedEffect(state) {
+        snapshotFlow { state.isScrollInProgress }.collectLatest { scrolling ->
             if (scrolling) {
                 fade.snapTo(1f) // matches View.awakenScrollBars(): snaps opaque, no fade-in
             } else {

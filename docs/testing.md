@@ -934,6 +934,10 @@ can only be seen on a device or emulator. Confirm:
   over the article cards it overlaps.
 - Starting a new scroll while the indicator is mid-fade snaps it back to opaque rather than letting
   it finish fading and reappear (no flicker).
+- Search the article list, let results show, then clear the query and fling the now-restored base
+  list — the indicator must still appear. `ArticleListPane` swaps between its base and search
+  `LazyListState` through the same call site, and the indicator's own effect must follow that swap
+  rather than staying latched onto whichever state was current the first time it composed.
 - Scrolling to the very end of the list brings the thumb to the track's bottom edge, and it never
   dips under the navigation bar — check both three-button and gesture navigation.
 - The feed list (as the sidebar and as the drawer) shows the same indicator, stopping above the
