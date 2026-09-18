@@ -488,7 +488,11 @@ does that instead:
   `androidx.compose.foundation.ScrollIndicatorState` (`ScrollableState.scrollIndicatorState`),
   reduced to fractions by the pure `scrollIndicatorLengthFraction`/`scrollIndicatorStartFraction` in
   `platform/ScrollIndicatorGeometry.kt` — split into two primitive-returning functions rather than
-  one data-class-returning one, so the draw phase allocates nothing per frame.
+  one data-class-returning one, so the draw phase allocates nothing per frame. That state is itself
+  an estimate for a `LazyListState` (derived from the average size of the currently visible items),
+  so a list with unevenly sized rows makes the thumb visibly breathe a little during a scroll —
+  accepted, since this is a non-interactive indicator rather than a precise position (see
+  `FeedListPane`'s own mixed row heights in `docs/app-architecture.md`).
 
 Three rules the Android `actual` must keep, all there to avoid disturbing the article list's own
 `LazyColumn` item-reuse crash history (see known-issues.md) and `FeedListPane`'s reorder-drag host:

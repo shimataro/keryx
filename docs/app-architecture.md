@@ -60,7 +60,12 @@ composeApp/src/
     thumb-fraction math lives in `platform/ScrollIndicatorGeometry.kt`'s pure functions
     (`scrollIndicatorLengthFraction`/`scrollIndicatorStartFraction`/`minLengthFraction` — see
     `testing.md` for what each covers), in commonMain for the same reason as
-    `canInstallAndroidApkUpdate` below even though nothing on desktop calls them),
+    `canInstallAndroidApkUpdate` below even though nothing on desktop calls them. The thumb's
+    position and length are an estimate derived from the average size of a `LazyListState`'s
+    currently *visible* items, so on a list with unevenly sized rows (`FeedListPane`'s sticky
+    headers/folder headers/dividers/feed rows) the thumb visibly breathes a little as scrolling
+    brings different rows into view — the same estimate Android's own lists make, and accepted for
+    the same reason: it's a non-interactive indicator, not a precise position),
     AppDirs/BrowserOpener/ClipboardEntries (via AndroidAppContext, a
     static Context holder set once from KeryxApplication.onCreate), PlatformModule (Ktor OkHttp
     engine, CloudSession with Dropbox/OneDrive providers plus Google Drive where Play services

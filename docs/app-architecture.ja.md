@@ -60,7 +60,11 @@ composeApp/src/
     `platform/ScrollIndicatorGeometry.kt` の純粋関数群（`scrollIndicatorLengthFraction`／
     `scrollIndicatorStartFraction`／`minLengthFraction`——それぞれの役割は `testing.ja.md` 参照）は、
     デスクトップからは一切呼ばれないのに commonMain に置かれている——理由は下記
-    `canInstallAndroidApkUpdate` と同じ）,
+    `canInstallAndroidApkUpdate` と同じ。つまみの位置・長さは、`LazyListState` の**画面内に見えている**
+    アイテムの平均サイズから導く推定値であるため、行の高さが不揃いなリスト（`FeedListPane` の
+    スティッキーヘッダー／フォルダーヘッダー／区切り線／フィード行の混在）ではスクロールに伴って
+    どの行が画面に入るかでつまみの長さがわずかに揺れる——Android 自身の一覧が使うのと同じ推定であり、
+    理由も同じ: これは非操作のインジケーターであって正確な位置指示ではないため受け入れる）,
     AppDirs/BrowserOpener/ClipboardEntries（AndroidAppContext 経由 — KeryxApplication.onCreate
     で一度だけ設定される静的 Context ホルダ）, PlatformModule（Ktor OkHttp エンジン、Dropbox/OneDrive
     プロバイダに加え Play 開発者サービスがある端末では Google Drive も登録した CloudSession — 下記
