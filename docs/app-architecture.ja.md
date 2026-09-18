@@ -52,11 +52,14 @@ composeApp/src/
     AppDirs.appDataDir()/`Context.filesDir` とは別ディレクトリになる。db-schema.ja.md 参照）,
     InstallLocation（常に ANDROID_SIDELOADED か ANDROID_STORE のどちらか——下記「アプリ内アップデート」
     参照）,
-    PlatformScrollbar（`VerticalScrollbarIfNeeded` — デスクトップのドラッグ可能な `VerticalScrollbar`
-    ではなく、非操作でフェードするオーバーレイ・スクロールインジケーター。契約の全体は `ui-guidelines`
-    スキルの「Scroll indicators」参照。thumb の比率計算を担う純粋関数
-    `platform/ScrollIndicatorGeometry.kt` の `scrollIndicatorThumb` は、デスクトップからは一切呼ばれない
-    のに commonMain に置かれている——理由は下記 `canInstallAndroidApkUpdate` と同じ）,
+    PlatformScrollbar（`VerticalScrollbarIfNeeded` — `ScrollableState` と inset コールバックを
+    commonMain の `platform/ScrollIndicatorOverlay.kt` の `ScrollIndicatorOverlay` に渡すだけの薄い
+    actual 2 本。デスクトップのドラッグ可能な `VerticalScrollbar` ではなく、非操作でフェードする
+    オーバーレイ・スクロールインジケーター。契約の全体は `ui-guidelines` スキルの
+    「Scroll indicators」参照。そのオーバーレイの thumb 比率計算を担う純粋関数
+    `platform/ScrollIndicatorGeometry.kt` の `scrollIndicatorLengthFraction`／`scrollIndicatorStartFraction`
+    は、デスクトップからは一切呼ばれないのに commonMain に置かれている——理由は下記
+    `canInstallAndroidApkUpdate` と同じ）,
     AppDirs/BrowserOpener/ClipboardEntries（AndroidAppContext 経由 — KeryxApplication.onCreate
     で一度だけ設定される静的 Context ホルダ）, PlatformModule（Ktor OkHttp エンジン、Dropbox/OneDrive
     プロバイダに加え Play 開発者サービスがある端末では Google Drive も登録した CloudSession — 下記

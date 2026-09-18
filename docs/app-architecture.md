@@ -52,11 +52,13 @@ composeApp/src/
     (bundled SQLite, see below), DatabaseFile (`databaseFilePath()` — `Context.getDatabasePath`,
     a different directory than AppDirs.appDataDir()/`Context.filesDir`; see db-schema.md),
     InstallLocation (always ANDROID_SIDELOADED or ANDROID_STORE — see "In-App Update" below),
-    PlatformScrollbar (`VerticalScrollbarIfNeeded` — a non-interactive, fading overlay scroll
-    indicator rather than desktop's draggable `VerticalScrollbar`; see the `ui-guidelines` skill's
-    "Scroll indicators" for the full contract, and `platform/ScrollIndicatorGeometry.kt`'s pure
-    `scrollIndicatorThumb` for the thumb-fraction math it shares with no desktop code but still
-    lives in commonMain for, per the same reasoning as `canInstallAndroidApkUpdate` below),
+    PlatformScrollbar (`VerticalScrollbarIfNeeded` — two thin actuals that hand a `ScrollableState`
+    and an inset callback to `platform/ScrollIndicatorOverlay.kt`'s commonMain `ScrollIndicatorOverlay`,
+    a non-interactive, fading overlay scroll indicator rather than desktop's draggable
+    `VerticalScrollbar`; see the `ui-guidelines` skill's "Scroll indicators" for the full contract.
+    That overlay's pure thumb-fraction math lives in `platform/ScrollIndicatorGeometry.kt`'s
+    `scrollIndicatorLengthFraction`/`scrollIndicatorStartFraction`, in commonMain for the same
+    reason as `canInstallAndroidApkUpdate` below even though nothing on desktop calls them),
     AppDirs/BrowserOpener/ClipboardEntries (via AndroidAppContext, a
     static Context holder set once from KeryxApplication.onCreate), PlatformModule (Ktor OkHttp
     engine, CloudSession with Dropbox/OneDrive providers plus Google Drive where Play services
