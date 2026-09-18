@@ -471,10 +471,11 @@ touch density any more.
 ## Scroll indicators
 
 `platform/PlatformScrollbar.kt`'s `VerticalScrollbarIfNeeded` (`ScrollState` and `LazyListState`
-overloads) is called unconditionally from three sites — `ArticleListPane`, `FeedListPane`,
-`SetupScreen` — always as a direct child of a `Box`, always as a **sibling** of the scrollable
-element rather than wrapping it. Callers never branch per platform; the `expect`/`actual` pair does
-that instead:
+overloads) is called from three sites — `ArticleListPane`, `FeedListPane`, `SetupScreen` — always as
+a direct child of a `Box`, always as a **sibling** of the scrollable element rather than wrapping it.
+(`ArticleListPane`'s call site only composes once `articles` is non-empty; `FeedListPane`'s and
+`SetupScreen`'s are unconditional.) None of the three branch per platform; the `expect`/`actual` pair
+does that instead:
 
 - **Desktop**: a permanent, draggable `androidx.compose.foundation.VerticalScrollbar`
   (`PlatformScrollbar.desktop.kt`), themed via `LocalScrollbarStyle` to `onSurface` alpha 0.12 idle /
