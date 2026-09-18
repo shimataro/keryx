@@ -80,11 +80,20 @@ private const val SCROLL_INDICATOR_FADE_OUT_MS = 250
  * [state]'s `isScrollInProgress` also reports `true` for a programmatic scroll (e.g.
  * `scrollToIndexIfNeeded`, or a keyboard J/K jump) — matching `RecyclerView.smoothScrollBy`'s own
  * native behavior, this is intentional rather than a leak of desktop-only semantics.
+ *
+ * The draw phase allocates nothing per frame: [trackStartInsetPx]/[trackEndInsetPx] and
+ * [scrollIndicatorLengthFraction]/[scrollIndicatorStartFraction] all take and return primitives
+ * rather than a `Pair` or a data class. `ScrollIndicatorState.scrollOffset`/`contentSize` do each
+ * still walk `LazyListState`'s visible items once (`visibleItemsAverageSize()`), so a `LazyListState`
+ * ends up computing that average twice per frame while scrolling — that duplication is on the
+ * framework side of [state], not something this composable can avoid, and is accepted rather than
+ * worked around here.
  */
 @Composable
 internal fun BoxScope.ScrollIndicatorOverlay(
     state: ScrollableState,
-    trackInsets: () -> Pair<Float, Float>,
+    trackStartInsetPx: () -> Float,
+    trackEndInsetPx: () -> Float,
 ) {
     val minLengthPx = with(LocalDensity.current) { SCROLL_INDICATOR_MIN_LENGTH.toPx() }
     val fade = remember(state) { Animatable(0f) }
@@ -103,18 +112,23 @@ internal fun BoxScope.ScrollIndicatorOverlay(
         Modifier.matchParentSize().drawBehind {
             val alpha = fade.value * SCROLL_INDICATOR_ALPHA
             if (alpha <= 0f) return@drawBehind
-            val (beforePadding, afterPadding) = trackInsets()
-            val trackTop = beforePadding + SCROLL_INDICATOR_TRACK_MARGIN.toPx()
-            val trackBottom = size.height - afterPadding - SCROLL_INDICATOR_TRACK_MARGIN.toPx()
+            val trackTop = trackStartInsetPx() + SCROLL_INDICATOR_TRACK_MARGIN.toPx()
+            val trackBottom = size.height - trackEndInsetPx() - SCROLL_INDICATOR_TRACK_MARGIN.toPx()
             val trackLength = (trackBottom - trackTop).coerceAtLeast(0f)
             if (trackLength <= 0f) return@drawBehind
             val indicatorState = state.scrollIndicatorState ?: return@drawBehind
-            val thumbGeometry = scrollIndicatorThumb(
-                indicatorState.scrollOffset,
+            val lengthFraction = scrollIndicatorLengthFraction(
                 indicatorState.contentSize,
                 indicatorState.viewportSize,
                 minLengthFraction(minLengthPx, trackLength),
-            ) ?: return@drawBehind
+            )
+            if (lengthFraction <= 0f) return@drawBehind
+            val startFraction = scrollIndicatorStartFraction(
+                indicatorState.scrollOffset,
+                indicatorState.contentSize,
+                indicatorState.viewportSize,
+                lengthFraction,
+            )
             val thicknessPx = SCROLL_INDICATOR_THICKNESS.toPx()
             val x = if (layoutDirection == LayoutDirection.Ltr) {
                 size.width - SCROLL_INDICATOR_END_MARGIN.toPx() - thicknessPx
@@ -124,8 +138,8 @@ internal fun BoxScope.ScrollIndicatorOverlay(
             drawRoundRect(
                 color = color,
                 alpha = alpha,
-                topLeft = Offset(x, trackTop + thumbGeometry.startFraction * trackLength),
-                size = Size(thicknessPx, thumbGeometry.lengthFraction * trackLength),
+                topLeft = Offset(x, trackTop + startFraction * trackLength),
+                size = Size(thicknessPx, lengthFraction * trackLength),
                 cornerRadius = CornerRadius(SCROLL_INDICATOR_CORNER_RADIUS.toPx()),
             )
         },

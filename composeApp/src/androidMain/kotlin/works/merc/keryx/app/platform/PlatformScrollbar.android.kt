@@ -11,7 +11,7 @@ import androidx.compose.runtime.Composable
 
 @Composable
 actual fun BoxScope.VerticalScrollbarIfNeeded(scrollState: ScrollState) {
-    ScrollIndicatorOverlay(state = scrollState, trackInsets = { 0f to 0f })
+    ScrollIndicatorOverlay(state = scrollState, trackStartInsetPx = { 0f }, trackEndInsetPx = { 0f })
 }
 
 @Composable
@@ -23,9 +23,7 @@ actual fun BoxScope.VerticalScrollbarIfNeeded(listState: LazyListState) {
         // WindowInsets.safeDrawing here directly: a sibling Box's Modifier.windowInsetsPadding
         // never consumes inset for this indicator, so reading the raw inset would shrink the
         // track even where the list itself isn't actually padded by it (FeedListPane has none).
-        trackInsets = {
-            val info = listState.layoutInfo
-            info.beforeContentPadding.toFloat() to info.afterContentPadding.toFloat()
-        },
+        trackStartInsetPx = { listState.layoutInfo.beforeContentPadding.toFloat() },
+        trackEndInsetPx = { listState.layoutInfo.afterContentPadding.toFloat() },
     )
 }

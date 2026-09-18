@@ -2,107 +2,118 @@ package works.merc.keryx.app.platform
 
 import kotlin.math.abs
 import kotlin.test.Test
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 private const val TOLERANCE = 1e-4f
+private const val MIN_LENGTH_FRACTION = 0.1f
 
 private fun assertApprox(expected: Float, actual: Float, message: String = "") =
     assertTrue(abs(expected - actual) < TOLERANCE, "$message: expected $expected, was $actual")
 
 class ScrollIndicatorGeometryTest {
     @Test
-    fun noThumbWhenContentFitsTheViewport() {
-        assertNull(scrollIndicatorThumb(scrollOffset = 0, contentSize = 1000, viewportSize = 1000, minLengthFraction = 0.1f))
+    fun noLengthWhenContentFitsTheViewport() {
+        assertApprox(0f, scrollIndicatorLengthFraction(contentSize = 1000, viewportSize = 1000, MIN_LENGTH_FRACTION))
     }
 
     @Test
-    fun noThumbWhenContentIsSmallerThanTheViewport() {
-        assertNull(scrollIndicatorThumb(scrollOffset = 0, contentSize = 500, viewportSize = 1000, minLengthFraction = 0.1f))
+    fun noLengthWhenContentIsSmallerThanTheViewport() {
+        assertApprox(0f, scrollIndicatorLengthFraction(contentSize = 500, viewportSize = 1000, MIN_LENGTH_FRACTION))
     }
 
     @Test
-    fun noThumbBeforeTheFirstMeasurePass() {
-        assertNull(scrollIndicatorThumb(scrollOffset = 0, contentSize = 1000, viewportSize = 0, minLengthFraction = 0.1f))
+    fun noLengthBeforeTheFirstMeasurePass() {
+        assertApprox(0f, scrollIndicatorLengthFraction(contentSize = 1000, viewportSize = 0, MIN_LENGTH_FRACTION))
     }
 
     @Test
-    fun noThumbWhenScrollOffsetIsUnknown() {
-        assertNull(scrollIndicatorThumb(scrollOffset = Int.MAX_VALUE, contentSize = 1000, viewportSize = 400, minLengthFraction = 0.1f))
+    fun noLengthWhenContentSizeIsUnknown() {
+        assertApprox(0f, scrollIndicatorLengthFraction(contentSize = Int.MAX_VALUE, viewportSize = 400, MIN_LENGTH_FRACTION))
     }
 
     @Test
-    fun noThumbWhenContentSizeIsUnknown() {
-        assertNull(scrollIndicatorThumb(scrollOffset = 0, contentSize = Int.MAX_VALUE, viewportSize = 400, minLengthFraction = 0.1f))
+    fun noLengthWhenViewportSizeIsUnknown() {
+        assertApprox(0f, scrollIndicatorLengthFraction(contentSize = 1000, viewportSize = Int.MAX_VALUE, MIN_LENGTH_FRACTION))
     }
 
     @Test
-    fun noThumbWhenViewportSizeIsUnknown() {
-        assertNull(scrollIndicatorThumb(scrollOffset = 0, contentSize = 1000, viewportSize = Int.MAX_VALUE, minLengthFraction = 0.1f))
+    fun noLengthWhenTheMinimumLengthCoversTheWholeTrack() {
+        assertApprox(0f, scrollIndicatorLengthFraction(contentSize = 1000, viewportSize = 400, minLengthFraction = 1f))
     }
 
     @Test
-    fun thumbAtTheTopStartsAtZero() {
-        val thumb = scrollIndicatorThumb(scrollOffset = 0, contentSize = 1000, viewportSize = 400, minLengthFraction = 0.1f)
-        assertApprox(0f, thumb!!.startFraction)
+    fun lengthIsTheVisibleFraction() {
+        assertApprox(0.4f, scrollIndicatorLengthFraction(contentSize = 1000, viewportSize = 400, MIN_LENGTH_FRACTION))
+    }
+
+    @Test
+    fun lengthIsClampedToTheMinimum() {
+        assertApprox(0.1f, scrollIndicatorLengthFraction(contentSize = 100_000, viewportSize = 100, MIN_LENGTH_FRACTION))
+    }
+
+    @Test
+    fun startAtTheTopIsZero() {
+        val length = scrollIndicatorLengthFraction(contentSize = 1000, viewportSize = 400, MIN_LENGTH_FRACTION)
+        assertApprox(0f, scrollIndicatorStartFraction(scrollOffset = 0, contentSize = 1000, viewportSize = 400, length))
     }
 
     @Test
     fun thumbAtTheBottomEndsAtTheTrackEnd() {
-        val thumb = scrollIndicatorThumb(scrollOffset = 600, contentSize = 1000, viewportSize = 400, minLengthFraction = 0.1f)
-        assertApprox(1f, thumb!!.startFraction + thumb.lengthFraction)
-    }
-
-    @Test
-    fun thumbLengthIsTheVisibleFraction() {
-        val thumb = scrollIndicatorThumb(scrollOffset = 0, contentSize = 1000, viewportSize = 400, minLengthFraction = 0.1f)
-        assertApprox(0.4f, thumb!!.lengthFraction)
+        val length = scrollIndicatorLengthFraction(contentSize = 1000, viewportSize = 400, MIN_LENGTH_FRACTION)
+        val start = scrollIndicatorStartFraction(scrollOffset = 600, contentSize = 1000, viewportSize = 400, length)
+        assertApprox(1f, start + length)
     }
 
     @Test
     fun thumbAtTheMidpointIsCenteredOnTheTrack() {
-        val thumb = scrollIndicatorThumb(scrollOffset = 300, contentSize = 1000, viewportSize = 400, minLengthFraction = 0.1f)
-        assertApprox((1f - thumb!!.lengthFraction) / 2f, thumb.startFraction)
-    }
-
-    @Test
-    fun thumbLengthIsClampedToTheMinimum() {
-        val thumb = scrollIndicatorThumb(scrollOffset = 0, contentSize = 100_000, viewportSize = 100, minLengthFraction = 0.1f)
-        assertApprox(0.1f, thumb!!.lengthFraction)
+        val length = scrollIndicatorLengthFraction(contentSize = 1000, viewportSize = 400, MIN_LENGTH_FRACTION)
+        val start = scrollIndicatorStartFraction(scrollOffset = 300, contentSize = 1000, viewportSize = 400, length)
+        assertApprox((1f - length) / 2f, start)
     }
 
     @Test
     fun aClampedThumbStillEndsExactlyAtTheTrackEnd() {
-        val thumb = scrollIndicatorThumb(scrollOffset = 99_900, contentSize = 100_000, viewportSize = 100, minLengthFraction = 0.1f)
-        assertApprox(1f, thumb!!.startFraction + thumb.lengthFraction, "clamped thumb must not overshoot the track")
-    }
-
-    @Test
-    fun noThumbWhenTheMinimumLengthCoversTheWholeTrack() {
-        assertNull(scrollIndicatorThumb(scrollOffset = 0, contentSize = 1000, viewportSize = 400, minLengthFraction = 1f))
+        val length = scrollIndicatorLengthFraction(contentSize = 100_000, viewportSize = 100, MIN_LENGTH_FRACTION)
+        val start = scrollIndicatorStartFraction(scrollOffset = 99_900, contentSize = 100_000, viewportSize = 100, length)
+        assertApprox(1f, start + length, "clamped thumb must not overshoot the track")
     }
 
     @Test
     fun scrollOffsetPastTheRangeIsClamped() {
-        val thumb = scrollIndicatorThumb(scrollOffset = 10_000, contentSize = 1000, viewportSize = 400, minLengthFraction = 0.1f)
-        assertApprox(1f, thumb!!.startFraction + thumb.lengthFraction)
+        val length = scrollIndicatorLengthFraction(contentSize = 1000, viewportSize = 400, MIN_LENGTH_FRACTION)
+        val start = scrollIndicatorStartFraction(scrollOffset = 10_000, contentSize = 1000, viewportSize = 400, length)
+        assertApprox(1f, start + length)
     }
 
     @Test
     fun negativeScrollOffsetIsClamped() {
-        val thumb = scrollIndicatorThumb(scrollOffset = -50, contentSize = 1000, viewportSize = 400, minLengthFraction = 0.1f)
-        assertApprox(0f, thumb!!.startFraction)
+        val length = scrollIndicatorLengthFraction(contentSize = 1000, viewportSize = 400, MIN_LENGTH_FRACTION)
+        assertApprox(0f, scrollIndicatorStartFraction(scrollOffset = -50, contentSize = 1000, viewportSize = 400, length))
+    }
+
+    @Test
+    fun anUnknownScrollOffsetClampsToTheTrackEnd() {
+        // Int.MAX_VALUE (ScrollIndicatorState's own "not known yet" sentinel) divided by any
+        // positive range is a huge ratio, which coerceIn(0f, 1f) simply clamps to 1 — the thumb
+        // lands at the track's end rather than at a wrong mid-track position. In practice this
+        // sentinel is never seen here without contentSize/viewportSize being unmeasured too (which
+        // scrollIndicatorLengthFraction already turns into a zero length upstream), so this pins
+        // the fallback behavior rather than a reachable production case.
+        val length = scrollIndicatorLengthFraction(contentSize = 1000, viewportSize = 400, MIN_LENGTH_FRACTION)
+        val start = scrollIndicatorStartFraction(scrollOffset = Int.MAX_VALUE, contentSize = 1000, viewportSize = 400, length)
+        assertApprox(1f, start + length)
     }
 
     @Test
     fun thumbStartIsMonotonicInScrollOffset() {
         val range = 600
+        val length = scrollIndicatorLengthFraction(contentSize = 1000, viewportSize = 400, MIN_LENGTH_FRACTION)
         var previous = -1f
         for (step in 0..20) {
             val offset = (range * step) / 20
-            val thumb = scrollIndicatorThumb(scrollOffset = offset, contentSize = 1000, viewportSize = 400, minLengthFraction = 0.1f)
-            assertTrue(thumb!!.startFraction >= previous - TOLERANCE, "thumb start regressed at step $step")
-            previous = thumb.startFraction
+            val start = scrollIndicatorStartFraction(offset, contentSize = 1000, viewportSize = 400, length)
+            assertTrue(start >= previous - TOLERANCE, "thumb start regressed at step $step")
+            previous = start
         }
     }
 
@@ -112,13 +123,9 @@ class ScrollIndicatorGeometryTest {
         // navigation bar inset — the same shape ArticleListPane's LazyColumn produces.
         val contentSize = 500 * 72 + 96
         val viewportSize = 1800
-        val thumb = scrollIndicatorThumb(
-            scrollOffset = contentSize - viewportSize,
-            contentSize = contentSize,
-            viewportSize = viewportSize,
-            minLengthFraction = 0.05f,
-        )
-        assertApprox(1f, thumb!!.startFraction + thumb.lengthFraction)
+        val length = scrollIndicatorLengthFraction(contentSize, viewportSize, minLengthFraction = 0.05f)
+        val start = scrollIndicatorStartFraction(contentSize - viewportSize, contentSize, viewportSize, length)
+        assertApprox(1f, start + length)
     }
 
     @Test
@@ -129,11 +136,12 @@ class ScrollIndicatorGeometryTest {
         val rowHeights = listOf(56, 12, 40, 56, 56, 12, 40, 56, 56)
         val contentSize = rowHeights.sum()
         val viewportSize = 200
+        val length = scrollIndicatorLengthFraction(contentSize, viewportSize, MIN_LENGTH_FRACTION)
+        assertTrue(length > 0f, "expected a drawable thumb for this content/viewport shape")
         for (offset in 0..(contentSize - viewportSize) step 7) {
-            val thumb = scrollIndicatorThumb(offset, contentSize, viewportSize, minLengthFraction = 0.1f)
-            assertTrue(thumb != null, "expected a thumb at offset $offset")
-            assertTrue(thumb.startFraction >= 0f, "start below 0 at offset $offset")
-            assertTrue(thumb.startFraction + thumb.lengthFraction <= 1f + TOLERANCE, "thumb overshoots at offset $offset")
+            val start = scrollIndicatorStartFraction(offset, contentSize, viewportSize, length)
+            assertTrue(start >= 0f, "start below 0 at offset $offset")
+            assertTrue(start + length <= 1f + TOLERANCE, "thumb overshoots at offset $offset")
         }
     }
 
