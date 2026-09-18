@@ -15,6 +15,8 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -88,6 +90,14 @@ private const val SCROLL_INDICATOR_FADE_OUT_MS = 250
  * ends up computing that average twice per frame while scrolling — that duplication is on the
  * framework side of [state], not something this composable can avoid, and is accepted rather than
  * worked around here.
+ *
+ * The fade animation's current value is read inside [graphicsLayer]'s block, not inside
+ * [drawBehind] — a `graphicsLayer` alpha update only invalidates that layer's own composited output,
+ * while a `drawBehind` read would invalidate this pane's whole display list on every animation
+ * frame of the ~250ms fade-out (this Spacer has no layer of its own otherwise, so that invalidation
+ * would propagate up to the nearest one — the pane hosting it). `CompositingStrategy.ModulateAlpha`
+ * avoids the extra offscreen buffer a plain alpha layer would otherwise allocate, which a single
+ * opaque shape like this thumb doesn't need.
  */
 @Composable
 internal fun BoxScope.ScrollIndicatorOverlay(
@@ -109,39 +119,41 @@ internal fun BoxScope.ScrollIndicatorOverlay(
     }
     val color = MaterialTheme.colorScheme.onSurface
     Spacer(
-        Modifier.matchParentSize().drawBehind {
-            val alpha = fade.value * SCROLL_INDICATOR_ALPHA
-            if (alpha <= 0f) return@drawBehind
-            val trackTop = trackStartInsetPx() + SCROLL_INDICATOR_TRACK_MARGIN.toPx()
-            val trackBottom = size.height - trackEndInsetPx() - SCROLL_INDICATOR_TRACK_MARGIN.toPx()
-            val trackLength = (trackBottom - trackTop).coerceAtLeast(0f)
-            if (trackLength <= 0f) return@drawBehind
-            val indicatorState = state.scrollIndicatorState ?: return@drawBehind
-            val lengthFraction = scrollIndicatorLengthFraction(
-                indicatorState.contentSize,
-                indicatorState.viewportSize,
-                minLengthFraction(minLengthPx, trackLength),
-            )
-            if (lengthFraction <= 0f) return@drawBehind
-            val startFraction = scrollIndicatorStartFraction(
-                indicatorState.scrollOffset,
-                indicatorState.contentSize,
-                indicatorState.viewportSize,
-                lengthFraction,
-            )
-            val thicknessPx = SCROLL_INDICATOR_THICKNESS.toPx()
-            val x = if (layoutDirection == LayoutDirection.Ltr) {
-                size.width - SCROLL_INDICATOR_END_MARGIN.toPx() - thicknessPx
-            } else {
-                SCROLL_INDICATOR_END_MARGIN.toPx()
+        Modifier.matchParentSize()
+            .graphicsLayer {
+                alpha = fade.value * SCROLL_INDICATOR_ALPHA
+                compositingStrategy = CompositingStrategy.ModulateAlpha
             }
-            drawRoundRect(
-                color = color,
-                alpha = alpha,
-                topLeft = Offset(x, trackTop + startFraction * trackLength),
-                size = Size(thicknessPx, lengthFraction * trackLength),
-                cornerRadius = CornerRadius(SCROLL_INDICATOR_CORNER_RADIUS.toPx()),
-            )
-        },
+            .drawBehind {
+                val trackTop = trackStartInsetPx() + SCROLL_INDICATOR_TRACK_MARGIN.toPx()
+                val trackBottom = size.height - trackEndInsetPx() - SCROLL_INDICATOR_TRACK_MARGIN.toPx()
+                val trackLength = (trackBottom - trackTop).coerceAtLeast(0f)
+                if (trackLength <= 0f) return@drawBehind
+                val indicatorState = state.scrollIndicatorState ?: return@drawBehind
+                val lengthFraction = scrollIndicatorLengthFraction(
+                    indicatorState.contentSize,
+                    indicatorState.viewportSize,
+                    minLengthFraction(minLengthPx, trackLength),
+                )
+                if (lengthFraction <= 0f) return@drawBehind
+                val startFraction = scrollIndicatorStartFraction(
+                    indicatorState.scrollOffset,
+                    indicatorState.contentSize,
+                    indicatorState.viewportSize,
+                    lengthFraction,
+                )
+                val thicknessPx = SCROLL_INDICATOR_THICKNESS.toPx()
+                val x = if (layoutDirection == LayoutDirection.Ltr) {
+                    size.width - SCROLL_INDICATOR_END_MARGIN.toPx() - thicknessPx
+                } else {
+                    SCROLL_INDICATOR_END_MARGIN.toPx()
+                }
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(x, trackTop + startFraction * trackLength),
+                    size = Size(thicknessPx, lengthFraction * trackLength),
+                    cornerRadius = CornerRadius(SCROLL_INDICATOR_CORNER_RADIUS.toPx()),
+                )
+            },
     )
 }
