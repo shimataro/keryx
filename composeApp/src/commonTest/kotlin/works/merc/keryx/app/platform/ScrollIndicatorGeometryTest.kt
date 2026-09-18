@@ -145,4 +145,19 @@ class ScrollIndicatorGeometryTest {
             thumb == null || thumb.startFraction + thumb.lengthFraction <= 1f + TOLERANCE
         })
     }
+
+    @Test
+    fun minLengthFractionIsOneWhenTheTrackIsNotYetMeasured() {
+        assertApprox(1f, minLengthFraction(minLengthPx = 32f, trackLengthPx = 0f))
+    }
+
+    @Test
+    fun minLengthFractionIsOneWhenTheFloorExceedsTheTrack() {
+        assertApprox(1f, minLengthFraction(minLengthPx = 500f, trackLengthPx = 100f))
+    }
+
+    @Test
+    fun minLengthFractionIsTheFloorOverTheTrackLength() {
+        assertApprox(0.32f, minLengthFraction(minLengthPx = 32f, trackLengthPx = 100f))
+    }
 }
