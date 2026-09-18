@@ -281,13 +281,13 @@ interface——その実装自体は隣接する場所ではなく `platform/upd
 同意状態）だからである。それでも `UpdateInstallPolicy.kt` の `canInstallAndroidApkUpdate` は
 その*判断*自体を 1 つの boolean を受け取る純粋関数として切り出しており、`androidMain` 自体には
 JVM でテスト可能なユニットテストのソースセットが無いにもかかわらず `commonTest` でカバーされて
-いる（testing.ja.md 参照）。`platform/ScrollIndicatorGeometry.kt` の `scrollIndicatorThumb` も同じ
-理由で同じ形を採っている——Android のスクロールインジケーターの thumb 比率計算は純粋なので
-commonMain に置かれ commonTest でカバーされる。デスクトップ側からは一度も呼ばれないにも
-かかわらず、である。
+いる（testing.ja.md 参照）。`platform/ScrollIndicatorGeometry.kt` の
+`scrollIndicatorLengthFraction`／`scrollIndicatorStartFraction` も同じ理由で同じ形を採っている
+——Android のスクロールインジケーターの thumb 比率計算は純粋なので commonMain に置かれ
+commonTest でカバーされる。デスクトップ側からは一度も呼ばれないにもかかわらず、である。
 
-この 2 つと並ぶ 3 つ目の純粋関数は、意図的に `domain/` の外に置かれている:
-`ui/settings/ReleaseNotesText.kt` の `plainTextReleaseNotes`（Updates タブの読み取り専用サマリー
+上記の `selectUpdateAsset` と `updatePlan` に並ぶもう 1 つの純粋関数が、意図的に `domain/` の
+外に置かれている: `ui/settings/ReleaseNotesText.kt` の `plainTextReleaseNotes`（Updates タブの読み取り専用サマリー
 向けの Markdown → プレーンテキスト変換）は更新ポリシーではなく UI 層の表示整形であり、
 `ui/home/HomeCommon.kt` の `formatTimestamp` や `ui/i18n/ErrorMessages.kt` が `domain/` の外に
 置かれているのと同じ理由による。唯一の呼び出し元も `ui/settings/UpdatesTab.kt` である。

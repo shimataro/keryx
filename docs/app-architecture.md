@@ -266,13 +266,13 @@ platform `actual` gets to say "not right now" for a reason `updatePlan` itself h
 (Android's runtime install-consent state, most notably); `UpdateInstallPolicy.kt`'s
 `canInstallAndroidApkUpdate` still pulls the *decision* itself out as a pure function of one
 boolean, so it's covered by `commonTest` despite `androidMain` having no JVM-testable unit-test
-source set (see `testing.md`). `platform/ScrollIndicatorGeometry.kt`'s `scrollIndicatorThumb`
-follows the same shape for the same reason — the Android scroll indicator's thumb-fraction
-arithmetic is pure, so it lives in `commonMain` and is covered by `commonTest`, even though nothing
-on desktop ever calls it.
+source set (see `testing.md`). `platform/ScrollIndicatorGeometry.kt`'s
+`scrollIndicatorLengthFraction`/`scrollIndicatorStartFraction` follow the same shape for the same
+reason: the Android scroll indicator's thumb-fraction arithmetic is pure. It lives in `commonMain`
+and is covered by `commonTest` even though nothing on desktop ever calls it.
 
-A third pure function sits beside those two but deliberately outside `domain/`:
-`ui/settings/ReleaseNotesText.kt`'s `plainTextReleaseNotes` (Markdown-to-plain-text for the Updates
+Another pure function sits alongside `selectUpdateAsset` and `updatePlan` above but deliberately
+outside `domain/`: `ui/settings/ReleaseNotesText.kt`'s `plainTextReleaseNotes` (Markdown-to-plain-text for the Updates
 tab's read-only summary) is UI-layer presentation formatting, not update policy — the same
 reasoning that keeps `ui/home/HomeCommon.kt`'s `formatTimestamp` and `ui/i18n/ErrorMessages.kt` out
 of `domain/` too, and its sole caller (`ui/settings/UpdatesTab.kt`).
