@@ -190,7 +190,7 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 - フィード一覧の行内リネーム編集（`commonTest` の `InlineRenameValidationTest` で「空欄はエラーではないが確定もできない」という共有バリデーション規則を、`HomeCommonTest.kt` で `toInlineEditTarget` を、`FeedListInlineRenameTest.kt` で実際にレンダリングしたコンポーザブルに対するエンドツーエンドの挙動をカバー——F2 で編集を開始し Enter で確定、Escape と「×」アイコンでのキャンセル、blur による確定、フォルダー名の重複が Enter をブロックし blur では静かに元へ戻ること、フォルダー名の空欄が単に確定不可であること、フィード名を空欄で確定すると `custom_title` がリセットされフィード自身のタイトルが `placeholder` に出ること、タグのリネームが色に触れないこと、タグの色ドットのポップオーバーがリネーム中かどうかに関わらず即座に色を反映すること、Feed メニューの `RenameFeed` コマンドが現在の選択に対して編集を開始すること）
 - 名前とタイムスタンプを並べるメタ行（`ArticleRowMetadataTest`：フィードタイトルが長くても省略されるのはタイトル側だけで、記事カードのタイムスタンプは幅を奪われず行の右端に揃ったまま表示される。`ArticleMetaTextTest`：`articleMetaText` が著者とタイムスタンプを結合すること、および null または空白のみの著者名を除去し先頭に区切りが残らないこと）
 - 記事リーダーのネイティブ WebView（`ArticleWebViewHtmlTest`：`extractLinks`、および 3 つの文書ビルダー `wrapArticleHtml`／`articleNoContentHtml`／`articlePlaceholderHtml`——すべての文書が同じ `<style>` ブロックを共有し、テーマの色・フォントスケールで塗られるためどれもデフォルトの白いページを一瞬出せないこと、共有 `<style>` ブロックが宣言する `color-scheme` が生のチャンネル値ではなく `ArticleHtmlTheme.surface` の相対輝度でライト/ダークを選ぶこと（閾値を両側から挟んで固定し、プレースホルダーにも適用されること）、`::-webkit-scrollbar`／`scrollbar-width`／`scrollbar-color` のルールが一切出力されないこと、を含む。`ArticleDetailLoadGuardTest`：`shouldLoadArticleHtml` のリロード判定——プレースホルダー／本文なし状態が実記事と WebView を共有するため、記事 ID ではなく描画された文書の文字列をキーにしていること。`ArticleDetailPaneTest`：リーダーが常にコンポーズされたままであること、選択状態が変わってもその計測済みバウンズが動かないこと、および未選択時、または選択中の記事に URL が無い場合にツールバーが非表示ではなく無効化されること）
-- Android のスクロールインジケーターの純粋な thumb 比率計算（`ScrollIndicatorGeometryTest`：`scrollIndicatorLengthFraction`／`scrollIndicatorStartFraction` の先頭・末尾・最小長クランプの不変条件、および `ScrollIndicatorState` が文書化する「未計測」センチネル `Int.MAX_VALUE`、加えて `minLengthFraction` のトラック長ガード——実際の `Spacer`／`drawBehind` オーバーレイ自体は実機かエミュレーターでしか確認できない。下記の手動 QA 節を参照）
+- Android のスクロールインジケーターの純粋な thumb 比率計算（`ScrollIndicatorGeometryTest`：`scrollIndicatorLengthFraction`／`scrollIndicatorStartFraction` の先頭・末尾・最小長クランプの不変条件、および `ScrollIndicatorState` が文書化する「未計測」センチネル `Int.MAX_VALUE`、加えて `minLengthFraction` のトラック長ガード）と composable 自体（`ScrollIndicatorOverlayTest`：スクロール開始前は非表示で開始と同時に不透明になること、コンポジション途中での `ScrollableState` の差し替えにフェードエフェクトが追従すること、自身のセマンティクスノードを追加しないこと——フェード**アウト**のタイミングとタッチ入力の挙動は実機かエミュレーターでしか確認できない。下記の手動 QA 節を参照）
 - AppFont（Linux の UI フォント用 Pango フォント記述のパース）
 - カスタム URI スキーム登録（`UriSchemeRegistration` の OS 別ディスパッチとパッケージ版ランチャー判定、`LinuxUriSchemeRegistrar` の `.desktop` 生成——`%u` フィールドコードを含む——、`mimeapps.list` の非破壊マージ、冪等性）
 - `.opml` ファイル関連付け（`LaunchArg` による OAuth URI と `.opml` パスの分類、`registerWindowsOpmlAssociation` の ProgID レジストリ書き込み、`LinuxOpmlAssociationRegistrar` の `.desktop` 生成——`%f` フィールドコードを含む——、その shared-mime-info パッケージ XML、冪等性、および `OpmlImporter` の追加/失敗件数カウントとフォルダー/タグの照合）
@@ -823,9 +823,20 @@ OS 側のルーティングではない）。パッケージ版をインスト�
 
 ### （Android）オーバーレイ・スクロールインジケーター
 
-thumb の比率計算そのものは `ScrollIndicatorGeometryTest.kt` が単体でカバーしているが、実際の
-`Spacer`／`drawBehind` オーバーレイ、そのフェードのタイミング、タッチ入力の邪魔をしないことは
-実機かエミュレーターでしか確認できない。以下を確認する:
+thumb の比率計算そのものは `ScrollIndicatorGeometryTest.kt` が単体でカバーしており、
+`ScrollIndicatorOverlayTest.kt`（`desktopTest`）は実際の `LazyListState` を使って
+`ScrollIndicatorOverlay` composable 自体をさらに 3 点自動化している: スクロール開始前は非表示で
+開始と同時に不透明になること、その反応がコンポジション途中での `ScrollableState` の差し替え
+（下記の検索一覧の切り替えに相当）に追従すること、そしてインジケーターが自身のセマンティクス
+ノードを一切追加しないこと。フェード**アウト**のタイミングと、タッチ入力の邪魔をしないことは、
+依然として実機かエミュレーターでしか確認できない——このプロジェクトの Compose Multiplatform
+バージョンに対する切り分け用の再現コードで確認した限り、`CompositingStrategy.ModulateAlpha` を
+使った `graphicsLayer.alpha` の変更は、同時にレイアウトの他の部分が変化していない状態
+（スクロールが実際に止まった後の `delay` + `animateTo` によるフェードアウトがまさにこれに当たる）
+で単独に起きた場合、`captureToImage()` には（不透明化・透明化どちらの方向でも）反映されない。
+スクロール**中**に不透明になる遷移は、スクロール自体が継続的にレイアウトを変化させ続けるため
+この問題の影響を受けない。これはテスト基盤側の制約であり実装側の不具合ではないため、残りは
+手動で確認する:
 
 - 記事一覧を勢いよくフリックすると、右端に細いピルが即座に現れ、一覧が実際に動いている間
   （指を離した後のフリング減速中も含む——指が触れている間だけではない）不透明を保ち、実際に
@@ -834,9 +845,11 @@ thumb の比率計算そのものは `ScrollIndicatorGeometryTest.kt` が単体�
 - フェードの途中で新たにスクロールを始めると、フェードしきって再び現れるのではなく即座に
   不透明へスナップバックすること（点滅しない）。
 - 記事一覧を検索し、結果を表示させてからクエリをクリアして元の一覧に戻し、その一覧を
-  フリックする——インジケーターが引き続き表示されること。`ArticleListPane` は同じ呼び出し位置で
-  ベースと検索の `LazyListState` を切り替えるため、インジケーター自身のエフェクトもその切り替えに
-  追従する必要があり、初回コンポジション時にたまたま渡された状態に固定されたままではならない。
+  フリックする——インジケーターが引き続き表示されること（`ScrollIndicatorOverlayTest.kt` が
+  composable レベルで自動化している切り替えの、実アプリでの実例にあたる: `ArticleListPane` は
+  同じ呼び出し位置でベースと検索の `LazyListState` を切り替えるため、インジケーター自身の
+  エフェクトもその切り替えに追従する必要があり、初回コンポジション時にたまたま渡された状態に
+  固定されたままではならない）。
 - 一覧の末尾までスクロールすると、つまみがトラックの下端に到達し、決してナビゲーションバーの
   下に潜り込まないこと——3 ボタンナビゲーションとジェスチャーナビゲーションの両方で確認する。
 - フィード一覧（サイドバーとしても、ドロワーとしても）で同じインジケーターが表示され、
@@ -855,7 +868,8 @@ thumb の比率計算そのものは `ScrollIndicatorGeometryTest.kt` が単体�
 - セットアップ画面を最大フォントサイズ（1.4×）でスクロールしても同じインジケーターが表示され、
   ステータスバー・ナビゲーションバーには掛からないこと。
 - TalkBack を有効にして記事一覧を線形にスワイプしても、インジケーター上で止まることはない
-  ——インジケーターは自身のアクセシビリティノードを一切持たない。
+  ——インジケーターは自身のアクセシビリティノードを一切持たない（`ScrollIndicatorOverlayTest.kt`
+  でも直接カバー済み）。
 
 ### （Android）記事リーダーのスワイプページャ
 

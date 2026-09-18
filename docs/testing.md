@@ -164,7 +164,7 @@ Project-wide, this is on top of the two Android suites above:
 - the feed list's in-row rename editor (`InlineRenameValidationTest` in `commonTest` for the shared blank-is-not-an-error validation rule and `toInlineEditTarget` in `HomeCommonTest.kt`; `FeedListInlineRenameTest.kt` for the real end-to-end flow against rendered composables — F2 opening the editor and Enter committing, Escape and the "×" icon cancelling, blur committing a valid name, a duplicate folder name blocking Enter and reverting silently on blur, a blank folder name simply not committing, a blank feed title resetting `custom_title` with the feed's own title shown as the placeholder, renaming a tag leaving its color alone, the tag color dot's popover applying a color immediately both outside and during a rename, and the Feed-menu `RenameFeed` command opening the editor for the current selection)
 - the metadata lines that pair a name with a timestamp (`ArticleRowMetadataTest`: a long feed title ellipsizes without eating the article card's timestamp, which stays at its full width pinned to the trailing edge; `ArticleMetaTextTest`: `articleMetaText`'s join of author and timestamp and its dropping of a null or blank author so no leading separator dangles)
 - the article reader's native WebView (`ArticleWebViewHtmlTest` for `extractLinks` and the three document builders `wrapArticleHtml`/`articleNoContentHtml`/`articlePlaceholderHtml` — including every document sharing one `<style>` block and painting the theme's colors/font scale so none of them can flash a default page, the shared document's `color-scheme` declaration choosing light/dark from `ArticleHtmlTheme.surface`'s relative luminance rather than a raw channel value (with the boundary pinned on both sides, applying to the placeholder too), and no `::-webkit-scrollbar`/`scrollbar-width`/`scrollbar-color` rule ever being emitted; `ArticleDetailLoadGuardTest` for `shouldLoadArticleHtml`'s reload decision, keyed on the rendered document string rather than an article id since the placeholder/no-content states share the WebView with real articles; `ArticleDetailPaneTest` for the reader staying composed and its measured bounds staying fixed across a selection change, plus the toolbar's disabled-rather-than-hidden treatment when nothing is selected or the selected article has no URL)
-- the Android scroll indicator's pure thumb-fraction math (`ScrollIndicatorGeometryTest`: `scrollIndicatorLengthFraction`/`scrollIndicatorStartFraction` for the top/bottom/clamped-minimum-length invariants and the `Int.MAX_VALUE` "not measured yet" sentinel `ScrollIndicatorState` documents, plus `minLengthFraction`'s track-length guard — the actual `Spacer`/`drawBehind` overlay itself can only be confirmed on a device or emulator, see the manual-QA section below)
+- the Android scroll indicator's pure thumb-fraction math (`ScrollIndicatorGeometryTest`: `scrollIndicatorLengthFraction`/`scrollIndicatorStartFraction` for the top/bottom/clamped-minimum-length invariants and the `Int.MAX_VALUE` "not measured yet" sentinel `ScrollIndicatorState` documents, plus `minLengthFraction`'s track-length guard) and the composable itself (`ScrollIndicatorOverlayTest`: hidden-until-scrolling then opaque, the fade effect following a `ScrollableState` swap made mid-composition, and no semantics node of its own — the fade-*out* timing and touch-input behavior can only be confirmed on a device or emulator, see the manual-QA section below)
 - AppFont (Pango font-description parsing for the Linux UI font)
 - custom URI scheme registration (`UriSchemeRegistration`'s per-OS dispatch and packaged-launcher gate, `LinuxUriSchemeRegistrar`'s desktop-entry generation including the `%u` field code, non-destructive `mimeapps.list` merge, and idempotency)
 - the `.opml` file association (`LaunchArg`'s classification of an OAuth URI vs. an `.opml` path, `registerWindowsOpmlAssociation`'s ProgID registry writes, `LinuxOpmlAssociationRegistrar`'s desktop-entry generation including the `%f` field code, its shared-mime-info package XML, and idempotency, and `OpmlImporter`'s added/failed counting and folder/tag reconciliation)
@@ -925,9 +925,19 @@ confirmation, on all three desktop platforms (build with `createDistributable`/`
 
 ### (Android) The overlay scroll indicator
 
-`ScrollIndicatorGeometryTest.kt` covers the thumb-fraction arithmetic in isolation, but the actual
-`Spacer`/`drawBehind` overlay, its fade timing, and whether it stays out of the way of touch input
-can only be seen on a device or emulator. Confirm:
+`ScrollIndicatorGeometryTest.kt` covers the thumb-fraction arithmetic in isolation, and
+`ScrollIndicatorOverlayTest.kt` (`desktopTest`) drives the real `ScrollIndicatorOverlay` composable
+through an actual `LazyListState` to automate three more things: the thumb staying hidden until
+scrolling starts and then becoming opaque, that reaction following a `ScrollableState` swap made
+mid-composition (the search-list-swap case below), and that the indicator adds no semantics node of
+its own. Its fade-*out* timing, and whether it stays out of the way of touch input, can still only be
+seen on a device or emulator — verified with an isolated repro against this project's Compose
+Multiplatform version, `captureToImage()` never reflects an isolated `graphicsLayer.alpha` change
+under `CompositingStrategy.ModulateAlpha` (in either direction) once nothing else in the layout is
+changing at the same time, which is exactly what the `delay` + `animateTo` fade-out is once scrolling
+has actually stopped; becoming opaque *while* scrolling is unaffected because the scroll's own
+continuous relayout carries the alpha change with it. This is a test-harness limitation, not a
+production one, so confirm the rest by hand:
 
 - Flinging the article list shows a thin pill at the right edge immediately, opaque while the list
   is still moving (including during fling deceleration, not just while a finger is down), then fades
@@ -936,9 +946,11 @@ can only be seen on a device or emulator. Confirm:
 - Starting a new scroll while the indicator is mid-fade snaps it back to opaque rather than letting
   it finish fading and reappear (no flicker).
 - Search the article list, let results show, then clear the query and fling the now-restored base
-  list — the indicator must still appear. `ArticleListPane` swaps between its base and search
-  `LazyListState` through the same call site, and the indicator's own effect must follow that swap
-  rather than staying latched onto whichever state was current the first time it composed.
+  list — the indicator must still appear (this is the real-app instance of the swap
+  `ScrollIndicatorOverlayTest.kt` automates at the composable level: `ArticleListPane` swaps between
+  its base and search `LazyListState` through the same call site, and the indicator's own effect must
+  follow that swap rather than staying latched onto whichever state was current the first time it
+  composed).
 - Scrolling to the very end of the list brings the thumb to the track's bottom edge, and it never
   dips under the navigation bar — check both three-button and gesture navigation.
 - The feed list (as the sidebar and as the drawer) shows the same indicator, stopping above the
@@ -956,7 +968,7 @@ can only be seen on a device or emulator. Confirm:
 - Scrolling the setup screen at the largest font size (1.4×) shows the same indicator, clear of the
   status/navigation bars.
 - With TalkBack on, swiping linearly through the article list never stops on the indicator — it adds
-  no accessibility node of its own.
+  no accessibility node of its own (also covered directly by `ScrollIndicatorOverlayTest.kt`).
 
 ### (Android) The article reader's swipe pager
 
