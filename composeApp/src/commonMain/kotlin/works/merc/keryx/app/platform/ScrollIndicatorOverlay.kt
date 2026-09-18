@@ -102,6 +102,9 @@ internal fun BoxScope.ScrollIndicatorOverlay(
     trackEndInsetPx: () -> Float,
 ) {
     val minLengthPx = with(LocalDensity.current) { SCROLL_INDICATOR_MIN_LENGTH.toPx() }
+    // 0f = hidden, 1f = fully opaque — read directly as the layer's own alpha below, with no
+    // separate max-alpha scaling: outline (unlike a partly-transparent onSurface) is already a
+    // contrast-safe color at full opacity, so "faded in" and "opaque" mean the same thing here.
     val fade = remember(state) { Animatable(0f) }
     LaunchedEffect(state) {
         snapshotFlow { state.isScrollInProgress }.collectLatest { scrolling ->
