@@ -485,7 +485,9 @@ that instead:
   `LazyColumn`/`Modifier.verticalScroll` draw no scrollbar of their own, so without this Android has
   no scroll-position cue at all. Thumb geometry comes from
   `androidx.compose.foundation.ScrollIndicatorState` (`ScrollableState.scrollIndicatorState`),
-  reduced to fractions by the pure `scrollIndicatorThumb` in `platform/ScrollIndicatorGeometry.kt`.
+  reduced to fractions by the pure `scrollIndicatorLengthFraction`/`scrollIndicatorStartFraction` in
+  `platform/ScrollIndicatorGeometry.kt` — split into two primitive-returning functions rather than
+  one data-class-returning one, so the draw phase allocates nothing per frame.
 
 Three rules the Android `actual` must keep, all there to avoid disturbing the article list's own
 `LazyColumn` item-reuse crash history (see known-issues.md) and `FeedListPane`'s reorder-drag host:
