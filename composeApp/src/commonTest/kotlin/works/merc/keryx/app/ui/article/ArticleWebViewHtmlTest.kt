@@ -314,4 +314,40 @@ class ArticleWebViewHtmlTest {
         // 128 / 255 -> 0x80
         assertEquals("#808080", Color(128f / 255f, 128f / 255f, 128f / 255f).toCssHex())
     }
+
+    @Test
+    fun darkThemeDeclaresADarkColorScheme() {
+        val darkTheme = theme.copy(surface = Color(0f, 0f, 0f))
+        val result = wrapArticleHtml(darkTheme, title = "", meta = "", body = "<p>body</p>")
+        assertTrue(result.contains("color-scheme: dark;"))
+    }
+
+    @Test
+    fun lightThemeDeclaresALightColorScheme() {
+        val lightTheme = theme.copy(surface = Color(1f, 1f, 1f))
+        val result = wrapArticleHtml(lightTheme, title = "", meta = "", body = "<p>body</p>")
+        assertTrue(result.contains("color-scheme: light;"))
+    }
+
+    @Test
+    fun theColorSchemeDeclarationAppliesToThePlaceholderToo() {
+        // articleNoContentHtml / articlePlaceholderHtml share articleDocument() with
+        // wrapArticleHtml, so a dark theme must never flash a light-default placeholder either.
+        val darkTheme = theme.copy(surface = Color(0f, 0f, 0f))
+        val noContent = articleNoContentHtml(darkTheme, title = "Title", meta = "", message = "No content")
+        val placeholder = articlePlaceholderHtml(darkTheme, "Select an article")
+        assertTrue(noContent.contains("color-scheme: dark;"))
+        assertTrue(placeholder.contains("color-scheme: dark;"))
+    }
+
+    @Test
+    fun noWebkitScrollbarRulesAreEmitted() {
+        // Defining any of these switches Chromium/WebKit off its overlay scrollbar and onto a
+        // classic, layout-consuming one, narrowing the article body — see the comment above the
+        // color-scheme declaration in articleDocument().
+        val result = wrapArticleHtml(theme, title = "", meta = "", body = "<p>body</p>")
+        assertTrue(!result.contains("::-webkit-scrollbar"))
+        assertTrue(!result.contains("scrollbar-width"))
+        assertTrue(!result.contains("scrollbar-color"))
+    }
 }
