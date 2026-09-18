@@ -53,9 +53,9 @@ private const val SCROLL_INDICATOR_HIDE_DELAY_MS = 800L
 private const val SCROLL_INDICATOR_FADE_OUT_MS = 250
 
 /**
- * A non-interactive vertical scroll-position indicator: a single [androidx.compose.foundation.Spacer]-like
- * draw layer, opaque while [state] is scrolling and faded out [SCROLL_INDICATOR_HIDE_DELAY_MS] after
- * it last reported scrolling.
+ * A non-interactive vertical scroll-position indicator: a single [Spacer] painted with
+ * [drawBehind], opaque while [state] is scrolling and faded out [SCROLL_INDICATOR_HIDE_DELAY_MS]
+ * after it last reported scrolling.
  *
  * [state]'s own `scrollIndicatorState` and scroll-in-progress flag are read only inside
  * [snapshotFlow] / the draw phase, never in composition — so a scroll never recomposes the pane
