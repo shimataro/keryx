@@ -204,9 +204,10 @@ is focused moves down into the result list instead of typing a caret movement th
 for, so a keyboard can move straight from typing a query to browsing its results without an
 intermediate tap.
 
-Scroll position is shown differently on each platform, following each one's own idiom. Desktop
-keeps a permanent, draggable scrollbar beside every scrollable list. Android instead shows a thin
-indicator that appears while a list is actually scrolling and fades away shortly after it stops,
+Scroll position is shown differently on each platform, following each one's own idiom, on the feed
+list, the article list, and the setup screen (a dialog's own scrollable content has no indicator on
+either platform). Desktop keeps a permanent, draggable scrollbar beside each. Android instead shows
+a thin indicator that appears while a list is actually scrolling and fades away shortly after it stops,
 deliberately **not** draggable — the same overlay behavior Android's own lists use, where scrolling
 is done by dragging the content rather than a scrollbar. It never covers the navigation bar. The
 article reader's own body scrolls inside a real web view, which brings its own equivalent
