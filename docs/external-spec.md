@@ -204,6 +204,19 @@ is focused moves down into the result list instead of typing a caret movement th
 for, so a keyboard can move straight from typing a query to browsing its results without an
 intermediate tap.
 
+Scroll position is shown differently on each platform, following each one's own idiom, on the feed
+list, the article list, and the setup screen (a dialog's own scrollable content has no indicator on
+either platform). Desktop keeps a permanent, draggable scrollbar beside each. Android instead shows
+a thin indicator that appears while a list is actually scrolling and fades away shortly after it stops,
+deliberately **not** draggable — the same overlay behavior Android's own lists use, where scrolling
+is done by dragging the content rather than a scrollbar. It never covers the navigation bar. The
+article reader's own body scrolls inside a real web view instead, which follows that engine's own
+default scroll-indicator behavior — see `app-architecture.md`'s "Article Reader (native WebView)"
+for how that differs per OS. Either way, it follows the in-app light/dark setting rather than the
+OS's, including the colors it paints its own scrollbar and form controls in — on Android that
+coloring reaches the scrollbar through a native call rather than through CSS, since that platform's
+WebView draws its own scrollbar outside the page's rendering engine (see `app-architecture.md`).
+
 At a narrow layout (both phone- and tablet-width), the article detail pane also gains a touch-only
 affordance with no desktop counterpart: a horizontal swipe on the reader moves to the next/previous
 article in the same order the list itself shows, following the finger as it drags and settling into

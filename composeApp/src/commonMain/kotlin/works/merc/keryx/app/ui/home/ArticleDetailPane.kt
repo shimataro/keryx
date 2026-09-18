@@ -75,6 +75,7 @@ import works.merc.keryx.app.platform.WindowDragArea
 import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.platform.platformShowsOwnCopyConfirmation
 import works.merc.keryx.app.platform.setNativeWebViewImportantForAccessibility
+import works.merc.keryx.app.platform.setNativeWebViewScrollbarColor
 import works.merc.keryx.app.platform.setNativeWebViewVisible
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_copy_url
@@ -808,6 +809,13 @@ private fun ArticleWebView(html: String, body: String, articleUrl: String?, acti
     // Box's clearAndSetSemantics{} is not enough on its own to guarantee that.
     LaunchedEffect(active, nativePanel.value) {
         nativePanel.value?.let { setNativeWebViewImportantForAccessibility(it, active) }
+    }
+    // See setNativeWebViewScrollbarColor's own KDoc — a no-op on desktop, where the document's own
+    // `color-scheme` already paints the scrollbar; load-bearing on Android, whose root-frame
+    // scrollbar the CSS never reaches.
+    val scrollbarColor = MaterialTheme.colorScheme.outline
+    LaunchedEffect(scrollbarColor, nativePanel.value) {
+        nativePanel.value?.let { setNativeWebViewScrollbarColor(it, scrollbarColor) }
     }
 
     WebView(

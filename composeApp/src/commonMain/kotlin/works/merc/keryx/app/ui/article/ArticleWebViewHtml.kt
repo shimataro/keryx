@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.article
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import com.fleeksoft.ksoup.Ksoup
 import works.merc.keryx.app.data.remote.UrlResolver
 import works.merc.keryx.app.ui.home.isHttpOrHttpsUrl
@@ -33,6 +34,17 @@ data class ArticleHtmlTheme(
     val mutedColor: Color,
     val fontScale: Float,
 )
+
+/**
+ * Whether the document should declare a dark `color-scheme`, derived from [ArticleHtmlTheme.surface]'s
+ * own luminance rather than from the app's `themeMode` setting: the reader has no access to
+ * `resolveDarkTheme`'s inputs (see `ui/theme/KeryxTheme.kt`), and deriving it from the color the
+ * page is actually painted with is strictly more correct anyway — it follows Android's dynamic
+ * Material You palette (which can be dark at a luminance the fixed teal scheme never produces)
+ * without a second source of truth.
+ */
+private val ArticleHtmlTheme.isDark: Boolean
+    get() = surface.luminance() < 0.5f
 
 /**
  * Wraps article [body] HTML in a minimal document that applies [theme] (background/text/link
@@ -111,6 +123,7 @@ private fun articleHeader(
  */
 private fun articleDocument(theme: ArticleHtmlTheme, content: String, bodyClass: String = "", baseUrl: String? = null): String {
     val fontPercent = (theme.fontScale * 100).toInt()
+    val colorScheme = if (theme.isDark) "dark" else "light"
     val bodyTag = if (bodyClass.isBlank()) "<body>" else """<body class="$bodyClass">"""
     val baseTag = baseUrl?.takeIf { it.isNotBlank() }?.let { """<base href="${escapeHtml(it)}" />""" }.orEmpty()
     // Two layers of defense against a feed body restyling the reader around it. A body is embedded raw
@@ -144,6 +157,14 @@ private fun articleDocument(theme: ArticleHtmlTheme, content: String, bodyClass:
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <style>
           html {
+            /* Declares a single value (never `light dark`) so Chromium/WebKit paints its own
+               form controls and scrollbars in the app's own theme rather than following the OS
+               setting independently — the in-app light/dark setting is authoritative here, not
+               the OS's. Deliberately no vendor-prefixed or standard scrollbar-styling rule below:
+               defining one switches the browser off its overlay scrollbar and onto a classic,
+               layout-consuming one, narrowing the article body (see ArticleWebViewHtmlTest's
+               regression test for this). */
+            color-scheme: $colorScheme !important;
             font-size: $fontPercent% !important;
           }
           html, body {

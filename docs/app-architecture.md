@@ -24,7 +24,7 @@ composeApp/src/
     data/opml/    OpmlCodec
     domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, StartupMaintenanceTasks (refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
     di/           AppModule (+ expect platformModule)
-    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor (all expect)
+    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor (mostly `expect` declarations, though InstallLocation.kt already mixes its one `expect fun` with plain data types — see also `ScrollIndicatorOverlay.kt`/`ScrollIndicatorGeometry.kt` in "Android" below, wholly platform-independent shared Compose code with no `expect` of their own that happens to live in this same directory)
     ui/           theme/, navigation/, setup/, home/ (adaptive 1/2/3-pane layout + search + notification
                   center), article/, settings/, i18n/, common/ (KeryxTextField/KeryxDialogs/KeryxIcons/
                   FlatButtons/FlatToggles/SegmentedControl/KeryxSearchBar/… — expect/actual-split, plain-M3-
@@ -52,6 +52,20 @@ composeApp/src/
     (bundled SQLite, see below), DatabaseFile (`databaseFilePath()` — `Context.getDatabasePath`,
     a different directory than AppDirs.appDataDir()/`Context.filesDir`; see db-schema.md),
     InstallLocation (always ANDROID_SIDELOADED or ANDROID_STORE — see "In-App Update" below),
+    PlatformScrollbar (`VerticalScrollbarIfNeeded` — two thin actuals that hand a `ScrollableState`
+    and two inset callbacks (`trackStartInsetPx`/`trackEndInsetPx`) to
+    `platform/ScrollIndicatorOverlay.kt`'s commonMain `ScrollIndicatorOverlay`, a non-interactive,
+    fading overlay scroll indicator rather than desktop's draggable `VerticalScrollbar`; see the
+    `ui-guidelines` skill's "Scroll indicators" for the full contract. That overlay's pure
+    thumb-fraction math lives in `platform/ScrollIndicatorGeometry.kt`'s pure functions
+    (`scrollIndicatorLengthFraction`/`scrollIndicatorStartFraction`/`minLengthFraction` — see
+    `testing.md` for what each covers), in commonMain for the same reason as
+    `canInstallAndroidApkUpdate` below even though nothing on desktop calls them. The thumb's
+    position and length are an estimate derived from the average size of a `LazyListState`'s
+    currently *visible* items, so on a list with unevenly sized rows (`FeedListPane`'s sticky
+    headers/folder headers/dividers/feed rows) the thumb visibly breathes a little as scrolling
+    brings different rows into view — the same estimate Android's own lists make, and accepted for
+    the same reason: it's a non-interactive indicator, not a precise position),
     AppDirs/BrowserOpener/ClipboardEntries (via AndroidAppContext, a
     static Context holder set once from KeryxApplication.onCreate), PlatformModule (Ktor OkHttp
     engine, CloudSession with Dropbox/OneDrive providers plus Google Drive where Play services
@@ -259,10 +273,13 @@ platform `actual` gets to say "not right now" for a reason `updatePlan` itself h
 (Android's runtime install-consent state, most notably); `UpdateInstallPolicy.kt`'s
 `canInstallAndroidApkUpdate` still pulls the *decision* itself out as a pure function of one
 boolean, so it's covered by `commonTest` despite `androidMain` having no JVM-testable unit-test
-source set (see `testing.md`).
+source set (see `testing.md`). `platform/ScrollIndicatorGeometry.kt`'s pure functions follow the
+same shape for the same reason: the Android scroll indicator's thumb-fraction arithmetic is pure.
+They live in `commonMain` and are covered by `commonTest` even though nothing on desktop ever calls
+them.
 
-A third pure function sits beside those two but deliberately outside `domain/`:
-`ui/settings/ReleaseNotesText.kt`'s `plainTextReleaseNotes` (Markdown-to-plain-text for the Updates
+Another pure function sits alongside `selectUpdateAsset` and `updatePlan` above but deliberately
+outside `domain/`: `ui/settings/ReleaseNotesText.kt`'s `plainTextReleaseNotes` (Markdown-to-plain-text for the Updates
 tab's read-only summary) is UI-layer presentation formatting, not update policy — the same
 reasoning that keeps `ui/home/HomeCommon.kt`'s `formatTimestamp` and `ui/i18n/ErrorMessages.kt` out
 of `domain/` too, and its sole caller (`ui/settings/UpdatesTab.kt`).
@@ -303,9 +320,37 @@ component is added, removed, or moved, not just this pane. Consequently, states 
 selected" and "no content" — are rendered as HTML *inside* the same WebView rather than as Compose
 `Text`, via `ui/article/ArticleWebViewHtml.kt`'s `articlePlaceholderHtml`/`articleNoContentHtml`
 (sharing one `<style>` block with the real-article `wrapArticleHtml` builder, so every state paints
-the same theme colors). The toolbar above the reader is likewise always present, with actions
-disabled rather than hidden when nothing is selected, keeping its Compose structure — and
-therefore the reader's measured bounds — identical across states.
+the same theme colors). That shared `<style>` block also declares a single `color-scheme` (`dark` or
+`light`, derived from `ArticleHtmlTheme.surface`'s own luminance via `ArticleHtmlTheme.isDark` rather
+than from `themeMode` directly, since the reader has no access to `resolveDarkTheme`'s inputs) —
+never `light dark` — so the browser paints its own form controls and scrollbar to match the app's
+theme instead of following the OS setting independently. No `::-webkit-scrollbar` (or
+`scrollbar-width`/`scrollbar-color`) rule is defined: on an engine that draws an overlay scrollbar
+in the first place (Android's WebView, WebKit on macOS/Linux), any one of those switches it off and
+onto a classic, layout-consuming one instead, narrowing the article body — see the `ui-guidelines`
+skill's "Scroll indicators". (Windows' WebView2 already renders a classic scrollbar by default, so
+the rule has nothing to switch off there, but is kept the same across all four engines rather than
+carved out as a per-platform exception.) The toolbar above the reader is likewise always present,
+with actions disabled rather than hidden when nothing is selected, keeping its Compose structure —
+and therefore the reader's measured bounds — identical across states.
+
+**`color-scheme` alone is not enough on Android.** `android.webkit.WebView`'s default style,
+`Widget.WebView`, sets `scrollbars="horizontal|vertical"`, so its root-frame scrollbar is drawn by
+the Android **View framework**, not by the rendering engine — no CSS, including `color-scheme`,
+reaches it. Its thumb is the platform's own drawable, tinted `?attr/colorControlNormal` resolved
+against the hosting Activity's theme, which `:androidApp` fixes to
+`Theme.Material.Light.NoActionBar` (the app's light/dark setting is its own, independent of the
+OS). Left alone, the thumb stays a light-theme dark grey over a dark reader background — all but
+invisible. `platform/NativeWebViewScrollbar.kt`'s `setNativeWebViewScrollbarColor` fixes this
+directly: on Android (API 29+ only — `setVerticalScrollbarThumbDrawable`/
+`setHorizontalScrollbarThumbDrawable` have no public equivalent below it) it replaces both the
+vertical and horizontal thumb drawable with a solid shape colored `MaterialTheme.colorScheme.outline`
+— the same role `platform/ScrollIndicatorOverlay.kt` uses for the article list's own indicator — so
+it tracks the in-app theme (and Material You's dynamic palette) the same way the CSS does for
+everything else in the document. `ArticleWebView` re-applies it in a `LaunchedEffect` keyed on the
+color, so a theme change while an article is already open still repaints it. The desktop `actual` is
+a no-op: WebView2/WebKit/WebKitGTK already paint their own scrollbar from `color-scheme`, so nothing
+else is needed there.
 
 **The feed body is third-party content, and the document is built to survive it.** A body is
 embedded raw (so its rich markup renders) beneath a `<base href>` at the article's own origin,

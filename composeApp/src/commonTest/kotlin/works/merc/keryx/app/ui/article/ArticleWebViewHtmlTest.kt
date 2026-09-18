@@ -3,6 +3,7 @@ package works.merc.keryx.app.ui.article
 import androidx.compose.ui.graphics.Color
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -376,5 +377,82 @@ class ArticleWebViewHtmlTest {
     fun toCssHexConvertsMidGray() {
         // 128 / 255 -> 0x80
         assertEquals("#808080", Color(128f / 255f, 128f / 255f, 128f / 255f).toCssHex())
+    }
+
+    @Test
+    fun darkThemeDeclaresADarkColorScheme() {
+        val darkTheme = theme.copy(surface = Color(0f, 0f, 0f))
+        val result = wrapArticleHtml(darkTheme, title = "", meta = "", body = "<p>body</p>")
+        assertTrue(result.contains("color-scheme: dark !important;"))
+    }
+
+    @Test
+    fun lightThemeDeclaresALightColorScheme() {
+        val lightTheme = theme.copy(surface = Color(1f, 1f, 1f))
+        val result = wrapArticleHtml(lightTheme, title = "", meta = "", body = "<p>body</p>")
+        assertTrue(result.contains("color-scheme: light !important;"))
+    }
+
+    @Test
+    fun aSurfaceJustBelowTheDarkThresholdDeclaresDark() {
+        // Relative luminance ~0.484 (just under the 0.5 cutoff) — pins where the boundary actually
+        // sits, since pure black/white alone can't distinguish a 0.5 cutoff from e.g. 0.2 or 0.8.
+        val belowThreshold = theme.copy(surface = Color(0.73f, 0.73f, 0.73f))
+        val result = wrapArticleHtml(belowThreshold, title = "", meta = "", body = "<p>body</p>")
+        assertTrue(result.contains("color-scheme: dark !important;"))
+    }
+
+    @Test
+    fun aSurfaceJustAboveTheDarkThresholdDeclaresLight() {
+        // Relative luminance ~0.507 (just over the 0.5 cutoff) — the other side of the same pin.
+        val aboveThreshold = theme.copy(surface = Color(0.74f, 0.74f, 0.74f))
+        val result = wrapArticleHtml(aboveThreshold, title = "", meta = "", body = "<p>body</p>")
+        assertTrue(result.contains("color-scheme: light !important;"))
+    }
+
+    @Test
+    fun aMidGraySurfaceDeclaresDarkByLuminanceNotByChannelValue() {
+        // A 50%-channel gray has a relative luminance of only ~0.216 (the sRGB gamma curve is not
+        // linear), so this would wrongly read as "light" if isDark compared the raw channel value
+        // (0.5) against the threshold instead of the actual relative luminance.
+        val midGrayTheme = theme.copy(surface = Color(0.5f, 0.5f, 0.5f))
+        val result = wrapArticleHtml(midGrayTheme, title = "", meta = "", body = "<p>body</p>")
+        assertTrue(result.contains("color-scheme: dark !important;"))
+    }
+
+    @Test
+    fun aMaterialYouDarkSurfaceDeclaresDark() {
+        val dynamicDarkTheme = theme.copy(surface = Color(0xFF1C1B1F)) // M3's own default dark-scheme surface
+        val result = wrapArticleHtml(dynamicDarkTheme, title = "", meta = "", body = "<p>body</p>")
+        assertTrue(result.contains("color-scheme: dark !important;"))
+    }
+
+    @Test
+    fun aMaterialYouLightSurfaceDeclaresLight() {
+        val dynamicLightTheme = theme.copy(surface = Color(0xFFFEF7FF)) // M3's own default light-scheme surface
+        val result = wrapArticleHtml(dynamicLightTheme, title = "", meta = "", body = "<p>body</p>")
+        assertTrue(result.contains("color-scheme: light !important;"))
+    }
+
+    @Test
+    fun theColorSchemeDeclarationAppliesToThePlaceholderToo() {
+        // articleNoContentHtml / articlePlaceholderHtml share articleDocument() with
+        // wrapArticleHtml, so a dark theme must never flash a light-default placeholder either.
+        val darkTheme = theme.copy(surface = Color(0f, 0f, 0f))
+        val noContent = articleNoContentHtml(darkTheme, title = "Title", meta = "", message = "No content")
+        val placeholder = articlePlaceholderHtml(darkTheme, "Select an article")
+        assertTrue(noContent.contains("color-scheme: dark !important;"))
+        assertTrue(placeholder.contains("color-scheme: dark !important;"))
+    }
+
+    @Test
+    fun noWebkitScrollbarRulesAreEmitted() {
+        // Defining any of these switches Chromium/WebKit off its overlay scrollbar and onto a
+        // classic, layout-consuming one, narrowing the article body — see the comment above the
+        // color-scheme declaration in articleDocument().
+        val result = wrapArticleHtml(theme, title = "", meta = "", body = "<p>body</p>")
+        assertFalse(result.contains("::-webkit-scrollbar"), "should not define ::-webkit-scrollbar, disabling the overlay scrollbar")
+        assertFalse(result.contains("scrollbar-width"), "should not define scrollbar-width, disabling the overlay scrollbar")
+        assertFalse(result.contains("scrollbar-color"), "should not define scrollbar-color, disabling the overlay scrollbar")
     }
 }

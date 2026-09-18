@@ -23,7 +23,7 @@ composeApp/src/
     data/opml/    OpmlCodec
     domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler（importOpmlAndNotify。デスクトップと Android の「`.opml` ファイル関連付け」で共有）, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, OAuthCallbackParams, StartupMaintenanceTasks（refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
     di/           AppModule（+ expect platformModule）
-    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor（すべて expect）
+    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor（大半が expect 宣言。InstallLocation.kt は既に唯一の `expect fun` をプレーンなデータ型と同居させている——下記「Android」の `ScrollIndicatorOverlay.kt`／`ScrollIndicatorGeometry.kt` も参照。こちらは同じディレクトリに置かれているだけの、自身の expect を持たないプラットフォーム非依存の共有 Compose コード）
     ui/           theme/, navigation/, setup/, home/（アダプティブな1/2/3ペインレイアウト + 検索 +
                   通知センター）, article/, settings/, i18n/, common/（KeryxTextField/KeryxDialogs/
                   KeryxIcons/FlatButtons/FlatToggles/SegmentedControl/KeryxSearchBar/… — expect/actual
@@ -52,6 +52,19 @@ composeApp/src/
     AppDirs.appDataDir()/`Context.filesDir` とは別ディレクトリになる。db-schema.ja.md 参照）,
     InstallLocation（常に ANDROID_SIDELOADED か ANDROID_STORE のどちらか——下記「アプリ内アップデート」
     参照）,
+    PlatformScrollbar（`VerticalScrollbarIfNeeded` — `ScrollableState` と 2 つの inset コールバック
+    （`trackStartInsetPx`／`trackEndInsetPx`）を commonMain の `platform/ScrollIndicatorOverlay.kt` の
+    `ScrollIndicatorOverlay` に渡すだけの薄い actual 2 本。デスクトップのドラッグ可能な
+    `VerticalScrollbar` ではなく、非操作でフェードするオーバーレイ・スクロールインジケーター。契約の
+    全体は `ui-guidelines` スキルの「Scroll indicators」参照。そのオーバーレイの thumb 比率計算を担う
+    `platform/ScrollIndicatorGeometry.kt` の純粋関数群（`scrollIndicatorLengthFraction`／
+    `scrollIndicatorStartFraction`／`minLengthFraction`——それぞれの役割は `testing.ja.md` 参照）は、
+    デスクトップからは一切呼ばれないのに commonMain に置かれている——理由は下記
+    `canInstallAndroidApkUpdate` と同じ。つまみの位置・長さは、`LazyListState` の**画面内に見えている**
+    アイテムの平均サイズから導く推定値であるため、行の高さが不揃いなリスト（`FeedListPane` の
+    スティッキーヘッダー／フォルダーヘッダー／区切り線／フィード行の混在）ではスクロールに伴って
+    どの行が画面に入るかでつまみの長さがわずかに揺れる——Android 自身の一覧が使うのと同じ推定であり、
+    理由も同じ: これは非操作のインジケーターであって正確な位置指示ではないため受け入れる）,
     AppDirs/BrowserOpener/ClipboardEntries（AndroidAppContext 経由 — KeryxApplication.onCreate
     で一度だけ設定される静的 Context ホルダ）, PlatformModule（Ktor OkHttp エンジン、Dropbox/OneDrive
     プロバイダに加え Play 開発者サービスがある端末では Google Drive も登録した CloudSession — 下記
@@ -273,10 +286,12 @@ interface——その実装自体は隣接する場所ではなく `platform/upd
 同意状態）だからである。それでも `UpdateInstallPolicy.kt` の `canInstallAndroidApkUpdate` は
 その*判断*自体を 1 つの boolean を受け取る純粋関数として切り出しており、`androidMain` 自体には
 JVM でテスト可能なユニットテストのソースセットが無いにもかかわらず `commonTest` でカバーされて
-いる（testing.ja.md 参照）。
+いる（testing.ja.md 参照）。`platform/ScrollIndicatorGeometry.kt` の純粋関数群も同じ理由で同じ形を
+採っている——Android のスクロールインジケーターの thumb 比率計算は純粋なので commonMain に置かれ
+commonTest でカバーされる。デスクトップ側からは一度も呼ばれないにもかかわらず、である。
 
-この 2 つと並ぶ 3 つ目の純粋関数は、意図的に `domain/` の外に置かれている:
-`ui/settings/ReleaseNotesText.kt` の `plainTextReleaseNotes`（Updates タブの読み取り専用サマリー
+上記の `selectUpdateAsset` と `updatePlan` に並ぶもう 1 つの純粋関数が、意図的に `domain/` の
+外に置かれている: `ui/settings/ReleaseNotesText.kt` の `plainTextReleaseNotes`（Updates タブの読み取り専用サマリー
 向けの Markdown → プレーンテキスト変換）は更新ポリシーではなく UI 層の表示整形であり、
 `ui/home/HomeCommon.kt` の `formatTimestamp` や `ui/i18n/ErrorMessages.kt` が `domain/` の外に
 置かれているのと同じ理由による。唯一の呼び出し元も `ui/settings/UpdatesTab.kt` である。
@@ -319,9 +334,38 @@ ViewModel はアプリスコープの `single` として登録し、`koinInject(
 描画すべき記事が無い状態（「記事未選択」「本文なし」）は Compose の `Text` ではなく、同じ
 WebView **内部**の HTML として描画する（`ui/article/ArticleWebViewHtml.kt` の
 `articlePlaceholderHtml`／`articleNoContentHtml`。実記事用の `wrapArticleHtml` と同じ
-`<style>` ブロックを共有し、どの状態でも同じテーマ色で塗られる）。リーダー上部のツールバーも
+`<style>` ブロックを共有し、どの状態でも同じテーマ色で塗られる）。この共有 `<style>` ブロックは
+`color-scheme`（`dark` か `light` のどちらか一方——`themeMode` から直接ではなく
+`ArticleHtmlTheme.surface` 自身の輝度から `ArticleHtmlTheme.isDark` 経由で導く。リーダーは
+`resolveDarkTheme` の入力にアクセスできないため）も宣言する——`light dark` 併記はしない。これに
+より、ブラウザは自身のフォームコントロールとスクロールバーを OS の設定を独自に追従させるのではなく
+アプリのテーマに合わせて描く。`::-webkit-scrollbar`（や `scrollbar-width`／`scrollbar-color`）の
+ルールは一切定義しない——そもそもオーバーレイ・スクロールバーを描くエンジン（Android の
+WebView、macOS/Linux の WebKit）では、そのいずれか 1 つでも定義するとブラウザはそれをやめ、
+レイアウト幅を消費するクラシックなものに切り替わり、本文が狭くなる。詳細は `ui-guidelines`
+スキルの「Scroll indicators」参照。（Windows の WebView2 は既定でクラシックなスクロールバーを
+描くため、このルールをやめさせる対象がそもそも無いが、プラットフォームごとの例外にはせず
+4 エンジン共通のルールとして扱う。）リーダー上部のツールバーも
 同様に常時表示し、未選択時はボタンを非表示にせず無効化する — これによりツールバーの Compose
 構造（ひいてはリーダーの計測済みバウンズ）が状態間で常に同一に保たれる。
+
+**Android では `color-scheme` だけでは足りない。** `android.webkit.WebView` の既定スタイル
+`Widget.WebView` は `scrollbars="horizontal|vertical"` を設定しており、そのルートフレームの
+スクロールバーは描画エンジンではなく Android の**View フレームワーク自身**が描く——
+`color-scheme` を含むいかなる CSS もそこには届かない。そのサムはプラットフォーム自身の
+drawable で、ホストする Activity のテーマに対して解決された `?attr/colorControlNormal` で
+ティントされる。`:androidApp` はそのテーマを固定で `Theme.Material.Light.NoActionBar` にしている
+（アプリのライト/ダーク設定は OS とは独立した自前の設定のため）。何もしなければサムは常に
+ライトテーマの暗いグレーのままとなり、ダークなリーダー背景の上ではほとんど見えない。
+`platform/NativeWebViewScrollbar.kt` の `setNativeWebViewScrollbarColor` がこれを直接修正する:
+Android（API 29 以降のみ——`setVerticalScrollbarThumbDrawable`／
+`setHorizontalScrollbarThumbDrawable` はそれより前には公開 API の代替が無い）では、縦横両方の
+サム drawable を `MaterialTheme.colorScheme.outline` で塗った単色の図形に差し替える——これは
+`platform/ScrollIndicatorOverlay.kt` が記事一覧自身のインジケーターに使うのと同じ色ロールで、
+ドキュメント中の他のすべてと同様にアプリ内テーマ（と Material You の動的パレット）に追従する。
+`ArticleWebView` はこの色をキーにした `LaunchedEffect` で再適用するため、記事を開いたまま
+テーマを切り替えても塗り直される。デスクトップ側の `actual` は no-op——WebView2/WebKit/WebKitGTK
+は既に `color-scheme` から自身のスクロールバーを描いているため、他に何もする必要がない。
 
 **フィード本文はサードパーティのコンテンツであり、文書はそれに耐えるよう組み立てている。** 本文は
 リッチマークアップを活かすため無加工で埋め込まれ、その上に記事自身のオリジンを指す `<base href>` が

@@ -468,6 +468,72 @@ touch density any more.
   [known-issues.md](../../../docs/known-issues.md) for the measurements and
   everything ruled out, rather than re-investigating it.
 
+## Scroll indicators
+
+`platform/PlatformScrollbar.kt`'s `VerticalScrollbarIfNeeded` (`ScrollState` and `LazyListState`
+overloads) is called from three sites — `ArticleListPane`, `FeedListPane`, `SetupScreen` — always as
+a direct child of a `Box`, always as a **sibling** of the scrollable element rather than wrapping it.
+(`ArticleListPane`'s call site only composes once `articles` is non-empty; `FeedListPane`'s and
+`SetupScreen`'s are unconditional.) None of the three branch per platform; the `expect`/`actual` pair
+does that instead:
+
+- **Desktop**: a permanent, draggable `androidx.compose.foundation.VerticalScrollbar`
+  (`PlatformScrollbar.desktop.kt`), themed via `LocalScrollbarStyle` to `onSurface` alpha 0.12 idle /
+  0.5 hover.
+- **Android**: a non-interactive fading overlay (`PlatformScrollbar.android.kt`) — opaque while the
+  list is scrolling, faded out ~800ms after it stops. This is the same `SCROLLBARS_INSIDE_OVERLAY`
+  idiom Android's own View-based lists use, not a port of desktop's draggable thumb; Compose's
+  `LazyColumn`/`Modifier.verticalScroll` draw no scrollbar of their own, so without this Android has
+  no scroll-position cue at all. Thumb geometry comes from
+  `androidx.compose.foundation.ScrollIndicatorState` (`ScrollableState.scrollIndicatorState`),
+  reduced to fractions by the pure `scrollIndicatorLengthFraction`/`scrollIndicatorStartFraction` in
+  `platform/ScrollIndicatorGeometry.kt` — split into two primitive-returning functions rather than
+  one data-class-returning one, so the draw phase allocates nothing per frame. That state is itself
+  an estimate for a `LazyListState` (derived from the average size of the currently visible items),
+  so a list with unevenly sized rows makes the thumb visibly breathe a little during a scroll —
+  accepted, since this is a non-interactive indicator rather than a precise position (see
+  `FeedListPane`'s own mixed row heights in `docs/app-architecture.md`).
+
+Three rules the Android `actual` must keep, all there to avoid disturbing the article list's own
+`LazyColumn` item-reuse crash history (see known-issues.md) and `FeedListPane`'s reorder-drag host:
+
+1. **No pointer input on the indicator itself.** It is a plain `Spacer` painted with
+   `Modifier.drawBehind` — no `pointerInput`, no click/drag modifier of any kind — so it never enters
+   hit testing and can never intercept a press meant for content or a drag handle beneath it. This is
+   *why* the sibling-not-child placement above is safe for `FeedListPane`'s reorder-drag host: an
+   ancestor is always in a hit-tested descendant's path, so a scrollbar nested *inside* the drag host
+   would risk turning a thumb press into a feed drag — a non-interactive sibling with no pointer input
+   cannot, but the placement is kept anyway so desktop's draggable scrollbar stays safe too.
+2. **Never read scroll state in composition.** `scrollIndicatorState`, `layoutInfo`,
+   `isScrollInProgress` etc. are read only inside `snapshotFlow` or the `drawBehind` draw phase, never
+   as a plain composable property read (and never through `derivedStateOf`, which would recompose the
+   pane on every scrolled pixel). A scroll must never recompose the pane hosting the indicator.
+3. **One node, and it's a sibling, not a list item.** The indicator adds exactly one `LayoutNode` per
+   pane, outside the `LazyColumn`/`verticalScroll` content entirely — never inside `items {}`. See
+   "Gaps and node count" above for why item-level node count is sensitive here.
+
+The track clears a `LazyColumn`'s own `contentPadding` (e.g. the navigation-bar inset
+`ArticleListPane`/`FeedListPane` apply as `afterContentPadding`) via `layoutInfo.beforeContentPadding`
+/ `afterContentPadding` directly — never by reading `WindowInsets.safeDrawing` in the `actual` itself.
+A sibling `Box`'s own `Modifier.windowInsetsPadding` never consumes inset on this indicator's behalf,
+so reading the raw inset there would shrink the track even where the list isn't actually padded by it
+(`FeedListPane`'s list has no bottom content padding at all).
+
+This inset handling is specific to the `LazyListState` overload. The `ScrollState` overload passes
+a hardcoded zero inset on both ends, relying on its sole caller (`SetupScreen`) already wrapping
+itself in `safeDrawingPadding()`. `VerticalScrollbarIfNeeded` does not clear insets on a caller's
+behalf in general — a new `ScrollState`-based screen that isn't already inset-padded would need to
+either wrap itself the same way `SetupScreen` does, or thread its own inset into a `ScrollState`
+overload change, before this indicator could be trusted to stay off the navigation bar there too.
+
+The article reader's own scrollbar is whatever the native WebView draws — see
+`app-architecture.md`'s "Article Reader (native WebView)" for why no `::-webkit-scrollbar` (or
+`scrollbar-width`/`scrollbar-color`) rule belongs in its CSS. Android is the one exception: its
+`WebView` draws that scrollbar outside the rendering engine, so no CSS (including `color-scheme`)
+reaches it, and `setNativeWebViewScrollbarColor` (`platform/NativeWebViewScrollbar.kt`) sets its
+thumb color natively to `MaterialTheme.colorScheme.outline` — the same role the article list's own
+indicator above uses — so the two read the same color instead of drifting apart.
+
 ## Platform-native list rows
 
 `listRowSurface` (see above) is `expect`/`actual` and takes a `ListRowKind` — `NavItem` for
