@@ -416,7 +416,10 @@ private fun ArticleDetailToolbar(
 
     val titleContent: (@Composable () -> Unit)? = if (feedName != null) {
         {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.padding(start = if (onNavigateUp != null) 4.dp else 0.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 FeedAvatar(title = feedName, faviconUrl = feedFaviconUrl)
                 Spacer(Modifier.width(6.dp))
                 Text(
