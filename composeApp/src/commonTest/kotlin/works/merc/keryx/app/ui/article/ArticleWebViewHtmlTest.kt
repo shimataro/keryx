@@ -3,6 +3,7 @@ package works.merc.keryx.app.ui.article
 import androidx.compose.ui.graphics.Color
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ArticleWebViewHtmlTest {
@@ -346,8 +347,8 @@ class ArticleWebViewHtmlTest {
         // classic, layout-consuming one, narrowing the article body — see the comment above the
         // color-scheme declaration in articleDocument().
         val result = wrapArticleHtml(theme, title = "", meta = "", body = "<p>body</p>")
-        assertTrue(!result.contains("::-webkit-scrollbar"))
-        assertTrue(!result.contains("scrollbar-width"))
-        assertTrue(!result.contains("scrollbar-color"))
+        assertFalse(result.contains("::-webkit-scrollbar"), "should not define ::-webkit-scrollbar, disabling the overlay scrollbar")
+        assertFalse(result.contains("scrollbar-width"), "should not define scrollbar-width, disabling the overlay scrollbar")
+        assertFalse(result.contains("scrollbar-color"), "should not define scrollbar-color, disabling the overlay scrollbar")
     }
 }

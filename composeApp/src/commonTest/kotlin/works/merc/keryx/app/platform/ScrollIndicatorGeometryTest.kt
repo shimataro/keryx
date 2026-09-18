@@ -2,7 +2,6 @@ package works.merc.keryx.app.platform
 
 import kotlin.math.abs
 import kotlin.test.Test
-import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -136,14 +135,6 @@ class ScrollIndicatorGeometryTest {
             assertTrue(thumb.startFraction >= 0f, "start below 0 at offset $offset")
             assertTrue(thumb.startFraction + thumb.lengthFraction <= 1f + TOLERANCE, "thumb overshoots at offset $offset")
         }
-    }
-
-    @Test
-    fun thumbStartPlusLengthNeverExceedsOne() {
-        assertEquals(true, listOf(0, 100, 500, 999, 1000).all { offset ->
-            val thumb = scrollIndicatorThumb(offset, contentSize = 1000, viewportSize = 400, minLengthFraction = 0.1f)
-            thumb == null || thumb.startFraction + thumb.lengthFraction <= 1f + TOLERANCE
-        })
     }
 
     @Test
