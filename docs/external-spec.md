@@ -210,9 +210,10 @@ either platform). Desktop keeps a permanent, draggable scrollbar beside each. An
 a thin indicator that appears while a list is actually scrolling and fades away shortly after it stops,
 deliberately **not** draggable — the same overlay behavior Android's own lists use, where scrolling
 is done by dragging the content rather than a scrollbar. It never covers the navigation bar. The
-article reader's own body scrolls inside a real web view, which brings its own equivalent
-indicator; that view follows the in-app light/dark setting rather than the OS's, including the
-colors it paints its own scrollbar and form controls in.
+article reader's own body scrolls inside a real web view instead, which follows that platform's own
+scroll-indicator convention rather than either of the two above — a permanent classic scrollbar on
+desktop, a fading overlay on Android — and, either way, follows the in-app light/dark setting
+rather than the OS's, including the colors it paints its own scrollbar and form controls in.
 
 At a narrow layout (both phone- and tablet-width), the article detail pane also gains a touch-only
 affordance with no desktop counterpart: a horizontal swipe on the reader moves to the next/previous
