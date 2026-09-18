@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,6 +19,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -44,6 +46,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
@@ -121,6 +124,8 @@ fun ArticleDetailPane(
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
     val article by vm.selectedArticle.collectAsState()
+    val feedName by vm.selectedFeedName.collectAsState()
+    val feedFaviconUrl by vm.selectedFeedFaviconUrl.collectAsState()
 
     // Built only where a swipe exists at all *and* the platform is touch-driven, which is what
     // keeps the pager off desktop structurally rather than by way of a window-width constant: a
@@ -151,6 +156,8 @@ fun ArticleDetailPane(
 
     ArticleDetailPaneContent(
         article = article,
+        feedName = feedName,
+        feedFaviconUrl = feedFaviconUrl,
         modifier = modifier,
         onActivated = onActivated,
         copyPulse = copyPulse,
@@ -185,6 +192,8 @@ fun ArticleDetailPane(
 @Composable
 internal fun ArticleDetailPaneContent(
     article: Articles?,
+    feedName: String? = null,
+    feedFaviconUrl: String? = null,
     modifier: Modifier = Modifier,
     onActivated: () -> Unit = {},
     copyPulse: Int = 0,
@@ -277,6 +286,8 @@ internal fun ArticleDetailPaneContent(
         WindowDragArea(Modifier.fillMaxWidth()) {
             ArticleDetailToolbar(
                 article = article,
+                feedName = feedName,
+                feedFaviconUrl = feedFaviconUrl,
                 showCopied = showCopied,
                 onToggleStar = onToggleStar,
                 onMarkUnread = onMarkUnread,
@@ -390,6 +401,8 @@ internal fun ArticleDetailPaneContent(
 @Composable
 private fun ArticleDetailToolbar(
     article: Articles?,
+    feedName: String?,
+    feedFaviconUrl: String?,
     showCopied: Boolean,
     onToggleStar: () -> Unit,
     onMarkUnread: () -> Unit,
@@ -401,8 +414,24 @@ private fun ArticleDetailToolbar(
     val url = article?.url.orEmpty()
     val copyOpenEnabled = hasArticle && hasUsableUrl(article.url)
 
+    val titleContent: (@Composable () -> Unit)? = if (feedName != null) {
+        {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                FeedAvatar(title = feedName, faviconUrl = feedFaviconUrl)
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    feedName,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    } else null
+
     KeryxPaneTopBar(
         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        titleContent = titleContent,
         navigationIcon = if (onNavigateUp == null) {
             null
         } else {
