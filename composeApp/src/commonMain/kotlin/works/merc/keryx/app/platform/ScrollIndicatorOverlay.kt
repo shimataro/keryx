@@ -41,8 +41,13 @@ import kotlinx.coroutines.flow.collectLatest
 
 private val SCROLL_INDICATOR_THICKNESS = 4.dp
 private val SCROLL_INDICATOR_CORNER_RADIUS = 2.dp
-private val SCROLL_INDICATOR_END_MARGIN = 2.dp
-private val SCROLL_INDICATOR_TRACK_MARGIN = 2.dp
+
+/** Horizontal gap between the thumb's outer edge and the pane's side (the end edge in LTR). */
+private val SCROLL_INDICATOR_SIDE_MARGIN = 2.dp
+
+/** Vertical gap between the track's top/bottom and the pane's own top/bottom (or its insets). */
+private val SCROLL_INDICATOR_TRACK_VERTICAL_MARGIN = 2.dp
+
 private val SCROLL_INDICATOR_MIN_LENGTH = 32.dp
 
 /** Deliberately well above AOSP's own ~300ms default (ViewConfiguration.SCROLL_BAR_DEFAULT_DELAY)
@@ -129,8 +134,8 @@ internal fun BoxScope.ScrollIndicatorOverlay(
                 compositingStrategy = CompositingStrategy.ModulateAlpha
             }
             .drawBehind {
-                val trackTop = trackStartInsetPx() + SCROLL_INDICATOR_TRACK_MARGIN.toPx()
-                val trackBottom = size.height - trackEndInsetPx() - SCROLL_INDICATOR_TRACK_MARGIN.toPx()
+                val trackTop = trackStartInsetPx() + SCROLL_INDICATOR_TRACK_VERTICAL_MARGIN.toPx()
+                val trackBottom = size.height - trackEndInsetPx() - SCROLL_INDICATOR_TRACK_VERTICAL_MARGIN.toPx()
                 val trackLength = (trackBottom - trackTop).coerceAtLeast(0f)
                 if (trackLength <= 0f) return@drawBehind
                 val indicatorState = state.scrollIndicatorState ?: return@drawBehind
@@ -148,9 +153,9 @@ internal fun BoxScope.ScrollIndicatorOverlay(
                 )
                 val thicknessPx = SCROLL_INDICATOR_THICKNESS.toPx()
                 val x = if (layoutDirection == LayoutDirection.Ltr) {
-                    size.width - SCROLL_INDICATOR_END_MARGIN.toPx() - thicknessPx
+                    size.width - SCROLL_INDICATOR_SIDE_MARGIN.toPx() - thicknessPx
                 } else {
-                    SCROLL_INDICATOR_END_MARGIN.toPx()
+                    SCROLL_INDICATOR_SIDE_MARGIN.toPx()
                 }
                 drawRoundRect(
                     color = color,
