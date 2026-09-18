@@ -60,10 +60,10 @@ private const val SCROLL_INDICATOR_FADE_OUT_MS = 250
  * [state]'s own `scrollIndicatorState` and scroll-in-progress flag are read only inside
  * [snapshotFlow] / the draw phase, never in composition — so a scroll never recomposes the pane
  * hosting this indicator, which matters given the article list's own LazyColumn item-reuse crash
- * history (see known-issues.md). The only node this adds is the one this composable itself creates;
- * it carries no pointer input at all, so it never enters hit testing and can never intercept a press
- * meant for content or a drag handle beneath it (see FeedListPane's own reorder-drag host, whose
- * scrollbar sits beside it exactly because of this).
+ * history (see known-issues.md). This is the only node the indicator adds, and it carries no
+ * pointer input at all, so it never enters hit testing — see the `ui-guidelines` skill's "Scroll
+ * indicators" section for the full set of rules this relies on, including why that matters to
+ * `FeedListPane`'s reorder-drag host specifically.
  *
  * The effect is keyed on [state] itself, not just once per call site: `ArticleListPane` passes
  * either its base or its search `LazyListState` through the same `VerticalScrollbarIfNeeded` call

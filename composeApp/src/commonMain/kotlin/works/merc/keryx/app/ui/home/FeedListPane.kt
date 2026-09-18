@@ -491,9 +491,6 @@ internal fun FeedListPane(
             // VerticalScrollbarIfNeeded is deliberately a *sibling* rather than a child: an
             // ancestor is always in a hit-tested descendant's path, so nested inside the drag host
             // a scrollbar-thumb press would turn into a feed drag once it passed the 4dp threshold.
-            // (Android's own overlay indicator carries no pointer input at all — see
-            // PlatformScrollbar.android.kt — so this can no longer actually happen there, but the
-            // sibling placement is kept anyway so desktop's draggable scrollbar stays safe too.)
             Box(
                 Modifier.fillMaxSize()
                     .testTag(FEED_LIST_DRAG_HOST_TEST_TAG)
