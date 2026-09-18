@@ -349,6 +349,24 @@ WebView、macOS/Linux の WebKit）では、そのいずれか 1 つでも定義
 同様に常時表示し、未選択時はボタンを非表示にせず無効化する — これによりツールバーの Compose
 構造（ひいてはリーダーの計測済みバウンズ）が状態間で常に同一に保たれる。
 
+**Android では `color-scheme` だけでは足りない。** `android.webkit.WebView` の既定スタイル
+`Widget.WebView` は `scrollbars="horizontal|vertical"` を設定しており、そのルートフレームの
+スクロールバーは描画エンジンではなく Android の**View フレームワーク自身**が描く——
+`color-scheme` を含むいかなる CSS もそこには届かない。そのサムはプラットフォーム自身の
+drawable で、ホストする Activity のテーマに対して解決された `?attr/colorControlNormal` で
+ティントされる。`:androidApp` はそのテーマを固定で `Theme.Material.Light.NoActionBar` にしている
+（アプリのライト/ダーク設定は OS とは独立した自前の設定のため）。何もしなければサムは常に
+ライトテーマの暗いグレーのままとなり、ダークなリーダー背景の上ではほとんど見えない。
+`platform/NativeWebViewScrollbar.kt` の `setNativeWebViewScrollbarColor` がこれを直接修正する:
+Android（API 29 以降のみ——`setVerticalScrollbarThumbDrawable`／
+`setHorizontalScrollbarThumbDrawable` はそれより前には公開 API の代替が無い）では、縦横両方の
+サム drawable を `MaterialTheme.colorScheme.outline` で塗った単色の図形に差し替える——これは
+`platform/ScrollIndicatorOverlay.kt` が記事一覧自身のインジケーターに使うのと同じ色ロールで、
+ドキュメント中の他のすべてと同様にアプリ内テーマ（と Material You の動的パレット）に追従する。
+`ArticleWebView` はこの色をキーにした `LaunchedEffect` で再適用するため、記事を開いたまま
+テーマを切り替えても塗り直される。デスクトップ側の `actual` は no-op——WebView2/WebKit/WebKitGTK
+は既に `color-scheme` から自身のスクロールバーを描いているため、他に何もする必要がない。
+
 `ArticleWebView` は `webSettings.desktopWebSettings.dataDirectory` も明示的に設定しており、
 `AppDirs.cacheDir()` 配下の `webview` サブディレクトリを、デスクトップ 3 OS すべてに同一に適用している
 （OS 分岐なし）。デフォルトの `null` のままだと WebView2 は実行ファイルの隣に自分のデータフォルダを

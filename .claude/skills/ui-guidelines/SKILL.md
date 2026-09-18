@@ -528,7 +528,11 @@ overload change, before this indicator could be trusted to stay off the navigati
 
 The article reader's own scrollbar is whatever the native WebView draws — see
 `app-architecture.md`'s "Article Reader (native WebView)" for why no `::-webkit-scrollbar` (or
-`scrollbar-width`/`scrollbar-color`) rule belongs in its CSS.
+`scrollbar-width`/`scrollbar-color`) rule belongs in its CSS. Android is the one exception: its
+`WebView` draws that scrollbar outside the rendering engine, so no CSS (including `color-scheme`)
+reaches it, and `setNativeWebViewScrollbarColor` (`platform/NativeWebViewScrollbar.kt`) sets its
+thumb color natively to `MaterialTheme.colorScheme.outline` — the same role the article list's own
+indicator above uses — so the two read the same color instead of drifting apart.
 
 ## Platform-native list rows
 

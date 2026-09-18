@@ -970,6 +970,29 @@ production one, so confirm the rest by hand:
 - With TalkBack on, swiping linearly through the article list never stops on the indicator — it adds
   no accessibility node of its own (also covered directly by `ScrollIndicatorOverlayTest.kt`).
 
+### (Android) The article reader's scrollbar
+
+`setNativeWebViewScrollbarColor` (`platform/NativeWebViewScrollbar.android.kt`) calls
+`View#setVerticalScrollbarThumbDrawable`/`setHorizontalScrollbarThumbDrawable` directly on the
+reader's `android.webkit.WebView` — no unit or instrumented test exercises this: it needs a real
+`WebView` (not available to a JVM unit test) painting an actual pixel a human can look at (not
+something an instrumented assertion can check either). Confirm by hand, on a device or emulator
+running API 29+ (below that, this code path is a no-op by design):
+
+- With the app theme set to dark, open an article with enough content to scroll — the scrollbar
+  thumb is clearly visible against the dark reader background (unlike before this fix, where it
+  stayed a light-theme grey and was nearly invisible there).
+- Switch the app theme between light/dark/system without restarting, with an article already open —
+  the thumb color follows immediately, matching the article list's own scroll indicator color.
+- Open an article whose content is wider than the screen (a `<table>` or a `<pre>` block) and scroll
+  it horizontally — the horizontal scrollbar thumb is colored the same way.
+- Swipe to a neighboring article and back — each of the three pages the carousel keeps mounted
+  (see "The article reader's swipe pager" below) shows the correctly colored scrollbar, not just the
+  one that was active when the theme last changed.
+- On a device with Material You (Android 12+), switch the wallpaper-derived dynamic color scheme —
+  the scrollbar thumb follows the new `outline` color the same way the article list's own indicator
+  does.
+
 ### (Android) The article reader's swipe pager
 
 `ArticleSwipeNavTest.kt` / `ArticleSwipeGestureTest.kt` cover the gesture's own thresholds and

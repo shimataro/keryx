@@ -334,6 +334,24 @@ carved out as a per-platform exception.) The toolbar above the reader is likewis
 with actions disabled rather than hidden when nothing is selected, keeping its Compose structure —
 and therefore the reader's measured bounds — identical across states.
 
+**`color-scheme` alone is not enough on Android.** `android.webkit.WebView`'s default style,
+`Widget.WebView`, sets `scrollbars="horizontal|vertical"`, so its root-frame scrollbar is drawn by
+the Android **View framework**, not by the rendering engine — no CSS, including `color-scheme`,
+reaches it. Its thumb is the platform's own drawable, tinted `?attr/colorControlNormal` resolved
+against the hosting Activity's theme, which `:androidApp` fixes to
+`Theme.Material.Light.NoActionBar` (the app's light/dark setting is its own, independent of the
+OS). Left alone, the thumb stays a light-theme dark grey over a dark reader background — all but
+invisible. `platform/NativeWebViewScrollbar.kt`'s `setNativeWebViewScrollbarColor` fixes this
+directly: on Android (API 29+ only — `setVerticalScrollbarThumbDrawable`/
+`setHorizontalScrollbarThumbDrawable` have no public equivalent below it) it replaces both the
+vertical and horizontal thumb drawable with a solid shape colored `MaterialTheme.colorScheme.outline`
+— the same role `platform/ScrollIndicatorOverlay.kt` uses for the article list's own indicator — so
+it tracks the in-app theme (and Material You's dynamic palette) the same way the CSS does for
+everything else in the document. `ArticleWebView` re-applies it in a `LaunchedEffect` keyed on the
+color, so a theme change while an article is already open still repaints it. The desktop `actual` is
+a no-op: WebView2/WebKit/WebKitGTK already paint their own scrollbar from `color-scheme`, so nothing
+else is needed there.
+
 `ArticleWebView` also sets `webSettings.desktopWebSettings.dataDirectory` explicitly, to
 `AppDirs.cacheDir()` plus a `webview` subdirectory, applied identically on all three desktop
 platforms (no OS branch). Left at its `null` default, WebView2 tries to create its data folder next
