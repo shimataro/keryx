@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -79,14 +80,16 @@ internal fun ArticleContentView(html: String, modifier: Modifier = Modifier) {
     val content = remember(html) { parseArticleContent(html) }
 
     content.centeredNotice?.let { notice ->
-        Box(modifier, contentAlignment = Alignment.Center) {
-            Text(
-                text = notice,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(16.dp),
-            )
+        SelectionContainer {
+            Box(modifier, contentAlignment = Alignment.Center) {
+                Text(
+                    text = notice,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(16.dp),
+                )
+            }
         }
         return
     }
@@ -97,32 +100,40 @@ internal fun ArticleContentView(html: String, modifier: Modifier = Modifier) {
     val listState = remember(html) { LazyListState() }
 
     Box(modifier) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(BLOCK_SPACING),
-        ) {
-            item {
-                Text(
-                    text = stringResource(Res.string.article_reader_simple_notice),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            content.title?.let { title ->
-                item { ArticleTitle(title, content.titleUrl) }
-            }
-            content.meta?.let { meta ->
+        // Wraps the whole article body (title, meta, and every block) so its text stays
+        // selectable/copyable the way the web-view reader's own document text is — the one
+        // affordance the block-by-block reproduction below doesn't get for free. Link taps
+        // (ArticleTitle, inline links in buildInlineString) still work inside it: they're
+        // carried by LinkAnnotation.Clickable rather than a competing Modifier.clickable, which
+        // is exactly the combination SelectionContainer is designed to coexist with.
+        SelectionContainer {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(BLOCK_SPACING),
+            ) {
                 item {
                     Text(
-                        text = meta,
-                        style = MaterialTheme.typography.bodySmall,
+                        text = stringResource(Res.string.article_reader_simple_notice),
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                content.title?.let { title ->
+                    item { ArticleTitle(title, content.titleUrl) }
+                }
+                content.meta?.let { meta ->
+                    item {
+                        Text(
+                            text = meta,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                items(content.blocks) { block -> ArticleBlockView(block) }
             }
-            items(content.blocks) { block -> ArticleBlockView(block) }
         }
         VerticalScrollbarIfNeeded(listState)
     }

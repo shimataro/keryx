@@ -560,7 +560,10 @@ body: the four reader states (placeholder, "no content", header-only while the b
 article) are already decided by the document builders above, so re-deriving them would duplicate
 that logic and let the two readers drift. It reproduces block structure, inline decorations and
 images; content that genuinely needs a browser engine — iframes, script-driven widgets, video —
-becomes a button that opens it externally. Note that almost none of the reader's own CSS is what
+becomes a button that opens it externally. The whole body is wrapped in a `SelectionContainer`, so
+its text stays selectable/copyable the way the web view's own document text is, coexisting with the
+title/inline links (`LinkAnnotation.Clickable`, not a competing `Modifier.clickable`). Note that
+almost none of the reader's own CSS is what
 has to be ported: the document declares only five content rules, and everything else a browser
 contributes implicitly (paragraph spacing, heading sizes, list markers, `pre` monospacing,
 blockquote indent) is what the Compose renderer has to state outright, mapped onto
