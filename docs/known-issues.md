@@ -710,11 +710,13 @@ fails. That fallback reproduces block structure, inline decorations and images; 
 that genuinely needs a browser engine (iframes, script-driven widgets, video) becomes a button that
 opens it externally.
 
-`-Dkeryx.reader.webview=false` forces the fallback on any machine — which is the only practical way
-to work on its appearance, since it otherwise appears on no platform this project builds on.
-`-Dkeryx.reader.webview=true` forces the web view back on, which matters if a library upgrade ever
-renames the probed class and turns the probe into a permanent false negative (that case logs a
-distinct warning).
+`-Dkeryx.reader.webview=false` forces the fallback on any desktop machine — which is the only
+practical way to work on its appearance, since it otherwise appears on no platform this project
+builds on. `-Dkeryx.reader.webview=true` forces the web view back on, which matters if a library
+upgrade ever renames the probed class and turns the probe into a permanent false negative (that
+case logs a distinct warning). Both properties are read only by the desktop (JVM) `actual`
+(`NativeWebViewSupport.desktop.kt`); Android's `actual` always reports the web view as available —
+`android.webkit.WebView` comes from the OS itself — so neither property has any effect there.
 
 ### What a real fix would need
 

@@ -715,11 +715,14 @@ Native library (linux-aarch64/libcomposewebview_wry.so) not found in resource pa
 フォールバックはブロック構造・インライン装飾・画像を再現する。ブラウザエンジンを本当に必要と
 する埋め込み（iframe、スクリプト駆動のウィジェット、動画）は、外部ブラウザで開くボタンになる。
 
-`-Dkeryx.reader.webview=false` を渡すと任意のマシンでフォールバックを強制できる。本プロジェクトが
-ビルドできるどのプラットフォームでも通常は発動しない経路なので、見た目を作り込むには事実上これしか
-手段がない。逆に `-Dkeryx.reader.webview=true` は WebView を強制的に使わせる。ライブラリ更新で
-プローブ対象のクラス名が変わり、プローブが恒常的な偽陰性になった場合に効く（そのケースは専用の
-警告をログに出す）。
+`-Dkeryx.reader.webview=false` を渡すと任意のデスクトップ環境でフォールバックを強制できる。
+本プロジェクトがビルドできるどのプラットフォームでも通常は発動しない経路なので、見た目を作り込む
+には事実上これしか手段がない。逆に `-Dkeryx.reader.webview=true` は WebView を強制的に使わせる。
+ライブラリ更新でプローブ対象のクラス名が変わり、プローブが恒常的な偽陰性になった場合に効く（その
+ケースは専用の警告をログに出す）。どちらのプロパティもデスクトップ（JVM）側の `actual`
+（`NativeWebViewSupport.desktop.kt`）でしか読まれない。Android の `actual` は常に WebView が
+利用可能だと報告する（`android.webkit.WebView` は OS 自身が提供するため）ので、どちらのプロパティ
+も Android には効果がない。
 
 ### 本当の修正に必要なこと
 
