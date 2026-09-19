@@ -357,6 +357,20 @@ indent past its own tag's name on a touch-primary platform. `feedRowIndent()` is
 constant (44dp on every platform) precisely because none of the columns it's built from depend on
 touch density any more.
 
+**A pane's own click-to-focus background must not use `Modifier.clickable`.** On a mouse platform,
+`clickable` takes real Compose focus for itself on the pointer-*down* (`isRequestFocusOnClickEnabled()`
+is `true` there), one `Main`-pass step after the node under the cursor has already handled that same
+down. Where the pane's content is a `SelectionContainer` — the Compose fallback article reader,
+`ui/article/ArticleContentView.kt` — that ordering silently breaks text selection: the container starts
+a selection on the down and takes focus for itself, the ancestor's `clickable` immediately takes it
+back, and `SelectionManager`'s own focus-loss handler releases the selection that was just started, so
+a click-and-drag selects nothing at all. `paneActivation` (`ui/home/HomeCommon.kt`) uses a bare
+`Modifier.pointerInput(Unit) { detectTapGestures { ... } }` instead, which wants no focus of its own —
+correct anyway, since the pane's own `onActivated` deliberately returns focus to the screen root
+(`HomeScreen`'s `activatePane`/`returnKeyboardFocusToRoot`), never to the pane background. Any future
+click-to-focus-style affordance wrapping content that might itself contain a `SelectionContainer`
+should follow the same pattern.
+
 ## Divider policy
 
 - **Between panes**: keep `ResizableDivider`, but de-emphasize it — idle
