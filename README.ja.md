@@ -28,6 +28,7 @@
 ## ダウンロード
 
 最新版は [リリースページ](https://github.com/shimataro/keryx/releases) から入手できます。
+Linux は x86_64・arm64 の両方に対応しています。
 
 > [!IMPORTANT]
 > **macOS**: 正式な署名付きリリースが提供されるまでの間、ダウンロードした `.dmg` / `.zip` は

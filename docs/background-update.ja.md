@@ -162,7 +162,14 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
   `domain/UpdateAsset.kt` の `selectUpdateAsset` がこのビルドのインストール形態に合致するものを
   1 つ選ぶ（GitHub がまだ処理を終えていないアセットや、検証可能な `sha256` digest を持たない
   アセットは絶対に選ばない——詳細は下記「完全性検証」）——`.aab` はどの `UpdateAssetKind` の
-  サフィックスにも一致しないため、そもそも候補になることがない。続いて `domain/UpdateInstallPolicy.kt`
+  サフィックスにも一致しないため、そもそも候補になることがない。Linux は2つ以上のアーキテクチャで
+  配布される唯一のプラットフォームなので、そのアセットサフィックスだけはアーキテクチャ別に選ばれる
+  （`platform/PlatformOs.kt` の `hostArchitecture`。デスクトップでは `os.arch` から求める——
+  `-linux-x86_64.zip` / `-linux-arm64.zip`）。このプロジェクトが対応するアセットを持たない
+  アーキテクチャ（`HostArchitecture.UNKNOWN`）では、`selectUpdateAsset` は実際にそのアセットが
+  存在しない場合と同じく「見つからない」を返す——一番近いものを推測することはない。macOS
+  （arm64 専用）と Windows（x86_64 専用）のアセット名は `hostArchitecture` に関わらず固定のまま。
+  続いて `domain/UpdateInstallPolicy.kt`
   の `updatePlan` が、そのアセットに対して実際に何をすべきかを、インストール場所
   （`platform/InstallLocation.kt` の `detectInstallLocation()`——macOS の `.app`、Windows/Linux の
   portable ZIP、Windows の MSI インストール、Android のサイドロード、……）と、すでに選択済みの

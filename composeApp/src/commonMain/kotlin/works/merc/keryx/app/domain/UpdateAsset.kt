@@ -2,6 +2,7 @@ package works.merc.keryx.app.domain
 
 import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.data.remote.ReleaseAsset
+import works.merc.keryx.app.platform.HostArchitecture
 import works.merc.keryx.app.platform.InstallKind
 import works.merc.keryx.app.platform.InstallLocation
 
@@ -28,28 +29,41 @@ data class UpdateAsset(
  */
 private const val MAX_PLAUSIBLE_UPDATE_ASSET_SIZE_BYTES = 1024L * 1024 * 1024 // 1 GiB
 
-/** The asset name suffix each [UpdateAssetKind] is matched by, e.g. `Keryx-0.14.0-macos-arm64.zip`
- * ([APP_NAME] is `"Keryx"`). */
-private val ASSET_SUFFIX_BY_KIND = mapOf(
-    UpdateAssetKind.MAC_APP_ZIP to "-macos-arm64.zip",
-    UpdateAssetKind.WINDOWS_MSI to "-windows-x86_64.msi",
-    UpdateAssetKind.WINDOWS_ZIP to "-windows-x86_64.zip",
-    UpdateAssetKind.LINUX_ZIP to "-linux-x86_64.zip",
-    UpdateAssetKind.ANDROID_APK to "-android-universal.apk",
-)
+/**
+ * The asset name suffix [UpdateAssetKind] is matched by, e.g. `Keryx-0.14.0-macos-arm64.zip`
+ * ([APP_NAME] is `"Keryx"`). Only [UpdateAssetKind.LINUX_ZIP] varies by [HostArchitecture] —
+ * `release.yml` publishes a Linux build per architecture (`-linux-x86_64.zip` / `-linux-arm64.zip`).
+ * The other kinds each ship a single architecture only (macOS: arm64 only; Windows: x86_64 only;
+ * Android: a universal APK), so keying them off [arch] too would let an Intel Mac or a 32-bit
+ * Windows host accidentally miss the one asset that actually exists for it. `null` when [arch] is
+ * [HostArchitecture.UNKNOWN] and [kind] is [UpdateAssetKind.LINUX_ZIP] — this build's architecture
+ * has no matching release asset at all, so [selectUpdateAsset] must find nothing rather than guess.
+ */
+private fun assetSuffix(kind: UpdateAssetKind, arch: HostArchitecture): String? = when (kind) {
+    UpdateAssetKind.MAC_APP_ZIP -> "-macos-arm64.zip"
+    UpdateAssetKind.WINDOWS_MSI -> "-windows-x86_64.msi"
+    UpdateAssetKind.WINDOWS_ZIP -> "-windows-x86_64.zip"
+    UpdateAssetKind.ANDROID_APK -> "-android-universal.apk"
+    UpdateAssetKind.LINUX_ZIP -> when (arch) {
+        HostArchitecture.X86_64 -> "-linux-x86_64.zip"
+        HostArchitecture.ARM64 -> "-linux-arm64.zip"
+        HostArchitecture.UNKNOWN -> null
+    }
+}
 
 /**
- * Full-match pattern each [UpdateAssetKind]'s asset name must satisfy — not just the prefix/suffix
+ * Full-match pattern the asset name for ([kind], [arch]) must satisfy — not just the prefix/suffix
  * [selectUpdateAsset] used to check alone. [UpdateAsset.name] ends up as a path component
  * ([works.merc.keryx.app.domain.UpdateRepository]'s `updateDownloadDir`/`destPath`), so this rejects
  * anything a path shouldn't see (`/`, `\`, `..`, shell metacharacters) rather than sanitizing it —
  * a release whose asset name doesn't match this exactly is treated the same as one with no matching
- * asset at all: [selectUpdateAsset] returns `null`, and no in-app update is offered.
+ * asset at all: [selectUpdateAsset] returns `null`, and no in-app update is offered. `null` when
+ * [assetSuffix] itself is `null` (no asset exists for this [kind]/[arch] pair).
  */
-private val ASSET_NAME_PATTERN_BY_KIND: Map<UpdateAssetKind, Regex> =
-    ASSET_SUFFIX_BY_KIND.mapValues { (_, suffix) ->
-        Regex("^${Regex.escape(APP_NAME)}-[A-Za-z0-9._+-]+${Regex.escape(suffix)}$")
-    }
+private fun assetNamePattern(kind: UpdateAssetKind, arch: HostArchitecture): Regex? {
+    val suffix = assetSuffix(kind, arch) ?: return null
+    return Regex("^${Regex.escape(APP_NAME)}-[A-Za-z0-9._+-]+${Regex.escape(suffix)}$")
+}
 
 /** The [UpdateAssetKind] this [InstallLocation] would need, or `null` when no in-app update path
  * applies to this install form at all (regardless of what the release actually shipped). */
@@ -80,17 +94,23 @@ internal fun parseSha256Digest(digest: String?): String? {
 }
 
 /**
- * Picks the one release asset appropriate for [location], or `null` when this build/install form
- * has no in-app update path here — no matching [InstallKind] ([assetKindFor]), no asset of that
- * kind in this release (e.g. a prerelease that omits the `.msi`), an upload GitHub hasn't finished
- * processing yet (`state` present and not `"uploaded"`), a size that's zero/negative or exceeds
- * [MAX_PLAUSIBLE_UPDATE_ASSET_SIZE_BYTES], or one with no verifiable `sha256` digest.
- * `.aab` is never matched (no [UpdateAssetKind] suffix ends in `.aab`) — it is a Play submission
- * format, not something [works.merc.keryx.app.domain.UpdateInstaller] can install.
+ * Picks the one release asset appropriate for [location] and [arch], or `null` when this
+ * build/install form has no in-app update path here — no matching [InstallKind] ([assetKindFor]),
+ * no matching asset name for this architecture ([assetNamePattern], `null` for an [HostArchitecture.UNKNOWN]
+ * Linux host), no asset of that kind in this release (e.g. a prerelease that omits the `.msi`), an
+ * upload GitHub hasn't finished processing yet (`state` present and not `"uploaded"`), a size that's
+ * zero/negative or exceeds [MAX_PLAUSIBLE_UPDATE_ASSET_SIZE_BYTES], or one with no verifiable
+ * `sha256` digest. `.aab` is never matched (no [UpdateAssetKind] suffix ends in `.aab`) — it is a
+ * Play submission format, not something [works.merc.keryx.app.domain.UpdateInstaller] can install.
+ *
+ * [arch] has no default — unlike [location], which callers may reasonably omit in a test — because
+ * a default would silently read the *test runner's own* architecture (`os.arch`), making a Linux
+ * asset-selection test's expected outcome depend on whether it happens to run on an x86_64 or arm64
+ * machine (or CI runner) rather than on what the test actually declares.
  */
-internal fun selectUpdateAsset(assets: List<ReleaseAsset>, location: InstallLocation): UpdateAsset? {
+internal fun selectUpdateAsset(assets: List<ReleaseAsset>, location: InstallLocation, arch: HostArchitecture): UpdateAsset? {
     val kind = assetKindFor(location) ?: return null
-    val namePattern = ASSET_NAME_PATTERN_BY_KIND.getValue(kind)
+    val namePattern = assetNamePattern(kind, arch) ?: return null
     val candidate = assets.firstOrNull { a ->
         (a.state == null || a.state == "uploaded") && namePattern.matches(a.name) &&
             a.sizeBytes in 1..MAX_PLAUSIBLE_UPDATE_ASSET_SIZE_BYTES

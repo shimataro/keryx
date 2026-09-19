@@ -648,9 +648,11 @@ Android で `https://alfalfalfa.com/articles/11110022.html` を開くと、1〜2
 **状態**: 回避済み（未修正） — WebView ライブラリがバイナリを同梱していないプラットフォーム／
 アーキテクチャの組み合わせでは、リーダーが Compose 描画の簡易表示にフォールバックする
 （`platform/NativeWebViewSupport.kt` と `ui/article/ArticleContentView.kt`）。本当の修正は arm64
-Linux バイナリを持つバックエンドへの移行だが、規模がまったく違う（後述）。なお Linux arm64 は
-そもそもサポート対象外であり（`build.md` の Linux は x86_64 のみ、CI も arm64 成果物を公開して
-いない）、これは配布ビルドではなく開発機の話である。
+Linux バイナリを持つバックエンドへの移行だが、規模がまったく違う（後述）。**Linux arm64 は今では
+サポート対象の出荷ターゲット**になっている（`build.md` の「リリース（CD）」に x86_64 と並んで
+記載され、CI も `-linux-arm64.{zip,deb,rpm,snap}` 成果物を公開している）— そのため、この
+回避策はもはや開発機だけの話ではなく、Linux arm64 の全ユーザーが出荷ビルドで簡易リーダーを
+使うことになる（ソースからビルドする一部のユーザーだけではない）。
 
 ### 症状
 
@@ -733,5 +735,7 @@ WebView に Nucleus Tao バックエンドが必須だと明記している — 
 Desktop without Tao will not host the WebView"* — アプリのエントリポイントは
 `nucleusApplication(backend = NucleusBackend.Tao)` になる。これは Compose Desktop 自身の
 `application` / `Window` を置き換えるものであり、`main.kt` はその上に SNI トレイ、AWT メニューバー、
-`WindowChrome`、`FilePicker`、macOS の `Desktop` ハンドラを積み上げている。独立した案件として、
-かつ Linux arm64 をサポート対象にする価値が出てきた場合にのみ着手する価値がある。
+`WindowChrome`、`FilePicker`、macOS の `Desktop` ハンドラを積み上げている。独立した案件としてのみ
+着手する価値がある — Linux arm64 が出荷ターゲットになった今（上記「状態」参照）は簡易リーダーの
+UX ギャップがより多くのユーザーの目に触れるようになるが、それだけでアプリのエントリポイント
+置き換えが正当化されるわけではない。

@@ -160,7 +160,13 @@ each a separate, explicit click (Updates tab button, or that menu item).
   `domain/UpdateAsset.kt`'s `selectUpdateAsset` picks the one matching this build's install form
   (never an asset GitHub hasn't finished processing, and never one with no verifiable `sha256`
   digest — see "Integrity verification" below) — `.aab` is never a candidate at all, since no
-  `UpdateAssetKind` suffix ends in it. `domain/UpdateInstallPolicy.kt`'s `updatePlan` then decides
+  `UpdateAssetKind` suffix ends in it. Linux is the one platform released for more than one
+  architecture (`platform/PlatformOs.kt`'s `hostArchitecture`, backed by `os.arch` on desktop), so
+  its asset suffix alone is picked per-architecture (`-linux-x86_64.zip` / `-linux-arm64.zip`); an
+  architecture this project ships no asset for (`HostArchitecture.UNKNOWN`) makes `selectUpdateAsset`
+  find nothing, the same as a release genuinely missing that asset — never a guess at the nearest
+  one. macOS (arm64-only) and Windows (x86_64-only) asset names stay fixed regardless of
+  `hostArchitecture`. `domain/UpdateInstallPolicy.kt`'s `updatePlan` then decides
   what an update should actually *do* with that asset, purely from the install location
   (`platform/InstallLocation.kt`'s `detectInstallLocation()` — a macOS `.app`, a Windows/Linux
   portable ZIP, a Windows MSI install, an Android sideload, …) and the already-selected asset (or

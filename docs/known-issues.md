@@ -644,9 +644,11 @@ reach the reader's document at all.
 **Status**: worked around, not fixed — the reader falls back to a Compose-drawn simplified view on
 any platform/architecture pair the web-view library ships no binary for
 (`platform/NativeWebViewSupport.kt` + `ui/article/ArticleContentView.kt`). The real fix is a
-backend that has an arm64 Linux binary, which is a much larger change (see below). Note that Linux
-arm64 is not a supported target in the first place — `build.md` lists Linux as x86_64 only, and CI
-publishes no arm64 artifacts — so this is about a development machine, not a shipped build.
+backend that has an arm64 Linux binary, which is a much larger change (see below). **Linux arm64 is
+now a supported, released target** (`build.md`'s "Release (CD)" lists it alongside x86_64, and CI
+publishes `-linux-arm64.{zip,deb,rpm,snap}` artifacts) — so this workaround is no longer only about
+a development machine; every Linux arm64 user gets the simplified reader in the shipped build, not
+just whoever happens to build from source.
 
 ### Symptom
 
@@ -727,5 +729,6 @@ requires the Nucleus Tao backend — *"Desktop is Tao-only … Swing/Compose Des
 not host the WebView"*, with the app's entry point becoming
 `nucleusApplication(backend = NucleusBackend.Tao)`. That replaces Compose Desktop's own
 `application`/`Window`, which `main.kt` builds the SNI tray, the AWT menu bar, `WindowChrome`,
-`FilePicker` and the macOS `Desktop` handlers on top of. Worth doing only as its own project, and
-only if Linux arm64 becomes a target worth supporting.
+`FilePicker` and the macOS `Desktop` handlers on top of. Worth doing only as its own project —
+Linux arm64 being a released target now (see "Status" above) makes the simplified reader's UX gap
+more visible, but doesn't by itself justify replacing the app's entry point.

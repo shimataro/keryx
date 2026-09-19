@@ -257,9 +257,10 @@ deb/rpm（上記「Linux パッケージのメタデータ」参照）と異な�
 `--destructive-mode`はサンドボックスなしでホスト上に直接ビルドするため、ホスト自体が
 `snap/snapcraft.yaml`の`base: core24`（Ubuntu 24.04）に一致している必要があり、
 root権限も必要になる——さらにホスト環境を変更してしまう可能性がある。CI（`release.yml`）は
-これを `ubuntu-24.04` に固定した専用の `package-snap` ジョブで実行している——`ubuntu-latest`
-だと GitHub がこのラベルをより新しい LTS へ切り替えた時点で `base: core24` から静かに
-乖離してしまうため。`base:` を上げるときはこの `runs-on:` も合わせて上げること。
+これを `ubuntu-24.04`/`ubuntu-24.04-arm`（アーキテクチャごとに1つの matrix レッグ）に固定した
+専用の `package-snap` ジョブで実行している——`ubuntu-latest` だと GitHub がこのラベルをより
+新しい LTS へ切り替えた時点で `base: core24` から静かに乖離してしまうため。`base:` を上げる
+ときは両方の `runs-on:` も合わせて上げること。
 別のホストでローカルビルドする場合は、代わりに分離されたLXDコンテナ内でビルドする
 `snapcraft pack --use-lxd`を使うこと——事前にLXDをインストール・初期化し、現在のユーザーから
 アクセスできる状態にしておく必要がある:
@@ -592,34 +593,47 @@ AppStream の `<launchable>` のために追加した — 上記「Linux パッ�
 ## リリース（CD）
 
 `.github/workflows/release.yml` がパッケージをビルドし、GitHub Release に添付する。
-**現状は macOS・Linux・Windows (x86_64、加えて macOS は arm64)、および Android (ユニバーサル APK/AAB)**（クロスコンパイル非対応のため、
-プラットフォームごとにランナーが必要）。
+**現状は macOS (arm64)・Linux (x86_64 と arm64)・Windows (x86_64)、および Android (ユニバーサル APK/AAB)**（クロスコンパイル非対応のため、
+アーキテクチャごとにランナーが必要）。
 
-Linux arm64 がこの一覧に無いのは意図的である。記事リーダーの WebView ライブラリが
-`linux-aarch64` バイナリを同梱しておらず、その環境ではリーダー自体が動作しない。そのマシンで
-ビルドした場合はフリーズせず、Compose 描画の簡易リーダーにフォールバックする —
-`known-issues.ja.md` を参照。
+Linux arm64 も `known-issues.ja.md` に記載の制約付きで出荷対象になっている: 記事リーダーの
+WebView ライブラリが `linux-aarch64` バイナリを同梱していないため、そのアーキテクチャでは
+リーダーがネイティブ WebView の代わりに Compose 描画の簡易リーダーにフォールバックする
+（フリーズはしない — ブロック構造・インライン装飾・画像を再現し、本物のブラウザエンジンが要る
+コンテンツは外部で開くボタンになる）。
 
 フロー:
 
 1. `vMAJOR.MINOR.PATCH` 形式のタグ（例: `v0.1.0`）で GitHub Release を公開する。SemVer 風の
    プレリリース接尾辞を任意で付けられる（例: `v1.2.0-beta.1`）。
 2. `release: published` で起動し、先頭の `v` を除去して `-PappVersion` に渡す。
-3. 5つの独立したジョブが並行して実行される:
+3. ジョブ定義は6つだが、実行数は8つになる — `package-linux` と `package-snap` はそれぞれ
+   `x86_64`/`arm64` の matrix になっているため（前者は `ubuntu-latest`/`ubuntu-24.04-arm`、
+   後者は `ubuntu-24.04`/`ubuntu-24.04-arm`。arm64 側のジョブは先に
+   `android-actions/setup-android@v3` を実行する — `:composeApp` の Android ターゲットは
+   *設定フェーズ*だけでも `ANDROID_HOME` を要求し、`ubuntu-24.04-arm` イメージは
+   `ubuntu-latest` と違って Android SDK を同梱していないため）:
 
    - macOS ランナーで `:composeApp:createDistributable :composeApp:packageDmg` を実行し（下の `.zip` の元になるアプリバンドルを確実に作るため `createDistributable` を `packageDmg` と並べて明示的に要求している）、`Keryx-<version>-macos-arm64.dmg` に加えて **`Keryx-<version>-macos-arm64.zip`** としても添付する。**プレリリースタグの場合は `packageDmg` をスキップし `createDistributable` のみ実行するため、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。
-   - Linux ランナーで（jpackage 用に `fakeroot`/`rpm` をインストールした上で）`:composeApp:packageDeb :composeApp:packageRpm` を実行し、`Keryx-<version>-linux-x86_64.deb` と `Keryx-<version>-linux-x86_64.rpm` に加えて **`Keryx-<version>-linux-x86_64.zip`** としても添付する。**プレリリースタグの場合は `packageDeb`/`packageRpm` をスキップし、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。
+   - Linux ランナーで（アーキテクチャごとに、jpackage 用の `fakeroot`/`rpm` をインストールした上で）`:composeApp:packageDeb :composeApp:packageRpm` を実行し、`x86_64`・`arm64` それぞれについて `Keryx-<version>-linux-<arch>.deb` と `Keryx-<version>-linux-<arch>.rpm` に加えて **`Keryx-<version>-linux-<arch>.zip`** としても添付する。**プレリリースタグの場合は `packageDeb`/`packageRpm` をスキップし、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。片方のアーキテクチャの失敗（`fail-fast: false`）はもう片方の成果物を道連れにしない。
    - `package-snap` は独立したジョブで、`snapcraft` の失敗が上記 deb/rpm/zip ジョブの成果物を
-     道連れにしないようにしてある（`ubuntu-latest` ではなく `ubuntu-24.04` 固定ランナーが必要な
-     理由は上記「Linux Snap パッケージ」参照）。
+     道連れにしないようにしてある（`ubuntu-latest` ではなく `ubuntu-24.04` 系の固定ランナーが必要な
+     理由は上記「Linux Snap パッケージ」参照）。こちらも `x86_64`/`arm64` の matrix。
      - **ビルドと添付。**（`sudo snap install snapcraft --classic` の後）`snap/snapcraft.yaml` に
-       対して `sudo snapcraft pack --destructive-mode --output "Keryx-$VERSION-linux-x86_64.snap"`
-       を実行し、生成された `Keryx-<version>-linux-x86_64.snap` を添付する — `.deb`/`.rpm` と異なり、
+       対して `sudo snapcraft pack --destructive-mode --platform <platform> --output "Keryx-$VERSION-linux-<arch>.snap"`
+       を実行し、生成された `Keryx-<version>-linux-<arch>.snap` を添付する — `.deb`/`.rpm` と異なり、
        snapcraft の `version:` フィールドは jpackage のパッケージメタデータのような
        `MAJOR.MINOR.PATCH` 限定ではないため、**プレリリースタグでもスキップせず添付する**。
+       `--platform`（`amd64`/`arm64` という snapcraft 自身の語彙 — 出力ファイル名の `<arch>` は
+       `.zip`/`.deb`/`.rpm` に合わせて `x86_64`/`arm64` と綴る）は、`snapcraft.yaml` の
+       `platforms:`（core24 での旧 `architectures:` の置き換え）に複数のエントリを宣言した時点で
+       必須になる: `--destructive-mode` はサンドボックス無しでホスト上に直接ビルドするため、
+       1回の実行で複数のスナップを作ることを拒否し、matrix の各レッグがどのプラットフォームを
+       ビルドしているかを明示する必要がある。
      - **Snap Store への公開。** GitHub Release への添付の後、同じジョブは**Snap Store へのスナップ
        公開**も行う（`snapcraft upload --release=<channel>`。後述の `SNAPCRAFT_STORE_CREDENTIALS`
-       シークレットが設定されている場合のみ実行）。
+       シークレットが設定されている場合のみ実行）— アーキテクチャごとに1回ずつ実行され、
+       それぞれがそのチャンネル配下に独自のリビジョンを作る。
      - **チャンネルの選択。** タグにプレリリース接尾辞が付いている**か** GitHub Release 自体が
        プレリリースとしてマークされている場合に `edge`、それ以外は `stable` になる（上記の
        deb/rpm/msi のスキップ判定はタグ接尾辞のみで決まるが、Snap Store のチャンネル判定だけは
