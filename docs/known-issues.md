@@ -658,7 +658,7 @@ installed on the same machine appeared to do nothing at all when launched.
 
 Both are the same failure. `keryx.0.log` records it:
 
-```
+```text
 java.lang.UnsatisfiedLinkError: Unable to load library 'composewebview_wry':
 Native library (linux-aarch64/libcomposewebview_wry.so) not found in resource path
     at io.github.kdroidfilter.webview.wry.WryWebViewPanel.<clinit>
@@ -674,7 +674,7 @@ an `Exception`, and it is raised from inside composition, so Compose's default w
 handler catches it and opens a **modal** error dialog. A thread dump taken while "frozen" shows the
 event-dispatch thread parked inside that dialog's own nested event loop, at ~0% CPU:
 
-```
+```text
 "AWT-EventQueue-0" ... java.lang.Thread.State: WAITING (parking)
     at java.awt.Dialog.show(Dialog.java:1051)
     at androidx.compose.ui.window.WindowExceptionHandlerFactory_desktopKt.showErrorDialog

@@ -662,7 +662,7 @@ ARM64 Ubuntu（M2 Mac の VMware Fusion ゲスト）で `./gradlew :composeApp:r
 
 どちらも同じ失敗である。`keryx.0.log` に記録が残る:
 
-```
+```text
 java.lang.UnsatisfiedLinkError: Unable to load library 'composewebview_wry':
 Native library (linux-aarch64/libcomposewebview_wry.so) not found in resource path
     at io.github.kdroidfilter.webview.wry.WryWebViewPanel.<clinit>
@@ -679,7 +679,7 @@ Native library (linux-aarch64/libcomposewebview_wry.so) not found in resource pa
 ダンプでは、イベントディスパッチスレッドがそのダイアログ自身のネストしたイベントループの中で
 待機しており、CPU 使用率はほぼ 0% である:
 
-```
+```text
 "AWT-EventQueue-0" ... java.lang.Thread.State: WAITING (parking)
     at java.awt.Dialog.show(Dialog.java:1051)
     at androidx.compose.ui.window.WindowExceptionHandlerFactory_desktopKt.showErrorDialog
