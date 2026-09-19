@@ -13,6 +13,7 @@
     <string name="common_ok">OK</string>
     <string name="common_back">Back</string>
     <string name="common_abort">Abort</string>
+    <string name="common_copy">Copy</string>
 
     <!-- accessibility -->
     <string name="accessibility_checked">Checked</string>

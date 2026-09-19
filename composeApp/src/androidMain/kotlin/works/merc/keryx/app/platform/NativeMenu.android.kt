@@ -119,6 +119,14 @@ actual fun Modifier.nativeContextMenu(
 }
 
 /**
+ * Android `actual`: a pass-through. Text selection here already opens the platform's own floating
+ * selection toolbar — an OS widget, not a Compose-drawn popup — so there is nothing to replace and
+ * no separate native menu system to route it through.
+ */
+@Composable
+actual fun NativeTextSelectionContextMenu(content: @Composable () -> Unit) = content()
+
+/**
  * Renders [items] as [DropdownMenuItem]s, drilling into a [NativeSubMenu] in place (its own items
  * replace the top level, with a leading "back" row) rather than opening a nested popup — there is
  * only ever one level of nesting in practice (see [NativeMenuEntry]'s KDoc), so a single nullable

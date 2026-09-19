@@ -827,14 +827,34 @@ Modifier.nativeContextMenu(
 
 ### Backends
 
-The desktop `actual` has two, chosen by platform — see the Look & Feel section
-below. macOS/Windows use `java.awt.PopupMenu`, which AWT maps onto a genuine
-`NSMenu`/Win32 menu. Linux uses `javax.swing.JPopupMenu`, because AWT's
-`PopupMenu` there is a heavyweight XAWT widget that ignores the Swing Look &
-Feel entirely and keeps a Motif-era appearance no matter how the app is themed.
+The desktop `actual` has two, chosen by platform in `defaultPopupHandle` — see
+the Look & Feel section below. macOS uses `java.awt.PopupMenu` (`AwtPopupHandle`),
+which AWT maps onto a genuine `NSMenu`. Windows and Linux use
+`javax.swing.JPopupMenu` (`SwingPopupHandle`), for unrelated reasons: on Linux
+AWT's `PopupMenu` is a heavyweight XAWT widget that ignores the Swing Look & Feel
+entirely and keeps a Motif-era appearance no matter how the app is themed, and on
+Windows the JDK's menu peer ignores display scaling, so above 100% it opens away
+from the cursor and paints its labels on top of each other (see `known-issues.md`).
 Swing popups are forced heavyweight (`isLightWeightPopupEnabled = false`) so
 they get their own window and paint *above* the article reader's native WebView
 rather than behind it.
+
+### Selected text
+
+A `SelectionContainer`'s own right-click menu (Copy) is built by Compose
+Foundation, not by this app, and its default is a Compose-drawn popup — the
+exact thing the rule above rejects. Wrap such a container in
+`NativeTextSelectionContextMenu` (`platform/NativeMenu.kt`) so the menu is drawn
+with the same native widgets instead; `ArticleContentView` is the reference call
+site. Only the widget is swapped — the items, the right-click detection
+(including macOS's select-the-word-under-the-cursor behavior) and when the menu
+opens stay Compose's, so it adds no gesture handling that could compete with the
+selection drag. It is the identical widget to a row menu's on every platform:
+the desktop `actual` plugs its own `ContextMenuRepresentation` into Compose
+rather than using Compose's ready-made `JPopupTextMenu` (which is hard-typed to
+a `javax.swing.JPopupMenu`), so the backend comes from the same
+`defaultPopupHandle` every row menu uses — `AwtPopupHandle` on macOS,
+`SwingPopupHandle` elsewhere.
 
 ## Swing Look & Feel (the non-Compose surfaces)
 
