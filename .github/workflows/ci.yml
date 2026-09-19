@@ -204,9 +204,13 @@ jobs:
           packages: "platform-tools"
 
       # Compose UI tests (runDesktopComposeUiTest) render real Skia/AWT and need a display; see the
-      # same step in the `build` job above.
-      - name: Install xvfb
-        run: sudo apt-get update && sudo apt-get install -y xvfb
+      # same step in the `build` job above. libegl1 is needed only here: libskiko-linux-arm64.so
+      # links directly against libEGL.so.1 (alongside libGL.so.1 / libX11.so.6 /
+      # libfontconfig.so.1, which are already present on this runner image), and unlike the
+      # ubuntu-latest image the ubuntu-24.04-arm one does not ship it — without it every Compose
+      # UI test dies inside skiko's LibraryLoader before rendering anything.
+      - name: Install xvfb and Skia's native dependencies
+        run: sudo apt-get update && sudo apt-get install -y xvfb libegl1
 
       # jpackage shells out to fakeroot for .deb and rpmbuild (package "rpm") for .rpm.
       - name: Install Linux packaging tools

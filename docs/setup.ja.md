@@ -144,6 +144,16 @@
   必須。`runDesktopComposeUiTest` が実際の Skia/AWT 描画を行うためディスプレイが必要になる。
   例: `sudo apt-get install -y xvfb` の上で
   `xvfb-run -a --server-args="-screen 0 1920x1080x24" ./gradlew build`。
+- **`libegl1`**: Skia のネイティブライブラリ（`libskiko-*.so`）は、Xvfb が提供するディスプレイとは
+  別に `libEGL.so.1` を直接リンクしている。他のネイティブ依存である `libGL.so.1` /
+  `libX11.so.6` / `libfontconfig.so.1` は通常、Linux デスクトップ環境やフル構成の CI ランナー
+  イメージには既に入っているが、`libEGL.so.1` は見落としやすく、欠けている場合はパッケージ不足
+  として分かりやすく現れず、`org.jetbrains.skiko.LibraryLoader` の内部で
+  `UnsatisfiedLinkError: ... libEGL.so.1: cannot open shared object file` として現れる。
+  x86_64 のデスクトップ環境や GitHub の `ubuntu-latest` ランナーイメージにはほとんどの場合
+  既に入っているが、Ubuntu arm64 の最小構成環境（素のコンテナや GitHub の
+  `ubuntu-24.04-arm` ランナー）には入っていないため、明示的なインストールが必要
+  （`sudo apt-get install -y libegl1`）。
 
 ### アプリの実行に必要なソフトウェア
 

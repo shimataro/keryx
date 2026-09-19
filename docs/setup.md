@@ -148,6 +148,15 @@ Split into what every target needs in common, and what's specific to the Android
   container, CI, etc.), since `runDesktopComposeUiTest` renders through real Skia/AWT and needs a
   display. Example: `sudo apt-get install -y xvfb`, then `xvfb-run -a --server-args="-screen 0
   1920x1080x24" ./gradlew build`.
+- **`libegl1`**: Skia's own native library (`libskiko-*.so`) links against `libEGL.so.1` directly,
+  separately from the display Xvfb provides. Its other native dependencies (`libGL.so.1` /
+  `libX11.so.6` / `libfontconfig.so.1`) are typically already present on a Linux desktop or a
+  full CI runner image, but `libEGL.so.1` is easy to miss, and its absence surfaces as
+  `UnsatisfiedLinkError: ... libEGL.so.1: cannot open shared object file` deep inside
+  `org.jetbrains.skiko.LibraryLoader` rather than as a missing-package error up front. Most
+  x86_64 desktops and the `ubuntu-latest` GitHub runner image already have it; a minimal Ubuntu
+  arm64 environment (a bare container, or the `ubuntu-24.04-arm` GitHub runner) does not, and
+  needs it installed explicitly (`sudo apt-get install -y libegl1`).
 
 ### Software Required to Run the App
 
