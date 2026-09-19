@@ -50,3 +50,18 @@ expect val hasSystemTray: Boolean
  * desktop, and Android below API 33, both of which get no such system-level feedback at all.
  */
 expect val platformShowsOwnCopyConfirmation: Boolean
+
+/**
+ * The CPU architecture this build is running on, as far as [works.merc.keryx.app.domain.UpdateAsset]
+ * needs to know which release asset to download. Not a general-purpose ABI abstraction — it exists
+ * solely to pick the right suffix among the assets `release.yml` publishes per architecture (today,
+ * only Linux ships more than one: `-linux-x86_64.zip` and `-linux-arm64.zip`).
+ */
+enum class HostArchitecture { X86_64, ARM64, UNKNOWN }
+
+/**
+ * Detected once per process. On desktop this reads `os.arch`; on Android, [android.os.Build.SUPPORTED_ABIS].
+ * [UNKNOWN] means this build genuinely has no matching release asset (a 32-bit host, for instance) —
+ * [works.merc.keryx.app.domain.selectUpdateAsset] must then find nothing rather than guess.
+ */
+expect val hostArchitecture: HostArchitecture

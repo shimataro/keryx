@@ -29,6 +29,7 @@ longer-term effort.
 ## Download
 
 Download the latest release from the [Releases page](https://github.com/shimataro/keryx/releases).
+Linux is available for both x86_64 and arm64.
 
 > [!IMPORTANT]
 > **macOS**: Until an officially signed release is available, downloaded `.dmg` / `.zip` files

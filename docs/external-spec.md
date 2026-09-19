@@ -216,6 +216,9 @@ for how that differs per OS. Either way, it follows the in-app light/dark settin
 OS's, including the colors it paints its own scrollbar and form controls in — on Android that
 coloring reaches the scrollbar through a native call rather than through CSS, since that platform's
 WebView draws its own scrollbar outside the page's rendering engine (see `app-architecture.md`).
+**On Linux arm64**, no native web view is available at all for the desktop build, so the reader
+falls back to a Compose-drawn simplified view (block structure, inline decorations, and images;
+content needing a real browser engine opens externally instead) — see `known-issues.md`.
 
 At a narrow layout (both phone- and tablet-width), the article detail pane also gains a touch-only
 affordance with no desktop counterpart: a horizontal swipe on the reader moves to the next/previous

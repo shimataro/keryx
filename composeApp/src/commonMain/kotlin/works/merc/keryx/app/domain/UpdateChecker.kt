@@ -14,8 +14,10 @@ import works.merc.keryx.app.core.isBelowStable
 import works.merc.keryx.app.core.isNewer
 import works.merc.keryx.app.data.remote.ReleaseFeedSource
 import works.merc.keryx.app.data.remote.ReleaseInfo
+import works.merc.keryx.app.platform.HostArchitecture
 import works.merc.keryx.app.platform.InstallLocation
 import works.merc.keryx.app.platform.detectInstallLocation
+import works.merc.keryx.app.platform.hostArchitecture
 
 private const val TAG = "UpdateChecker"
 
@@ -73,6 +75,11 @@ class UpdateChecker(
     // Defaulted (rather than injected via Koin) so every pre-existing call site keeps compiling
     // unchanged — see the KDoc on [UpdateStatus.Available]'s new fields for the same reasoning.
     private val location: InstallLocation = detectInstallLocation(),
+    // Not injected via Koin either, unlike [location]: that one exists as a DI singleton so three
+    // independent call sites (UpdateChecker/UpdateRepository/DesktopUpdateInstaller) don't each run
+    // their own live filesystem probe (InstallLocation.parentWritable creates and deletes a temp
+    // file). Reading `os.arch` has no such cost, so a defaulted constructor parameter is enough.
+    private val arch: HostArchitecture = hostArchitecture,
 ) {
     // The raw HTTP request/JSON parsing lives in data/remote/ReleaseFeedSource — this class keeps
     // only the policy above it (which candidate, whether it's newer, what to do with its asset).
@@ -119,7 +126,7 @@ class UpdateChecker(
             )
 
             if (isNewer(remoteVersion, currentVersion)) {
-                val asset = selectUpdateAsset(candidate.assets, location)
+                val asset = selectUpdateAsset(candidate.assets, location, arch)
                 UpdateStatus.Available(remoteVersion, htmlUrl, candidate.body, asset)
             } else {
                 UpdateStatus.UpToDate
