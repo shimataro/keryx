@@ -244,7 +244,7 @@ directly from `snap/snapcraft.yaml`, which `dump`s the same `createDistributable
 ```bash
 ./gradlew :composeApp:createDistributable
 sudo snap install snapcraft --classic   # if not already installed
-sudo env "PATH=$PATH" snapcraft pack --destructive-mode
+sudo env "PATH=$PATH" snapcraft pack --destructive-mode --platform <amd64-or-arm64>
 ```
 
 Unlike deb/rpm (see "Linux package metadata" above), `snap/snapcraft.yaml` needs no Gradle-side
@@ -257,7 +257,9 @@ exact key types).
 
 `--destructive-mode` builds directly on the host with no sandboxing, so the host itself
 must match `snap/snapcraft.yaml`'s `base: core24` (Ubuntu 24.04) and the command needs
-root access — and it can modify the host environment. CI (`release.yml`) already runs it
+root access — and it can modify the host environment. `platforms:` declares more than one
+entry (`amd64` and `arm64`), and destructive mode can only ever produce one snap per run, so
+`--platform` above must name the one matching the host's own architecture. CI (`release.yml`) already runs it
 in a dedicated `package-snap` job pinned to `ubuntu-24.04`/`ubuntu-24.04-arm` (one matrix
 leg per architecture — not `ubuntu-latest`, which would silently drift away from
 `base: core24` whenever GitHub retargets that label to a newer LTS). Bump `base:` and

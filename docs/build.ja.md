@@ -243,7 +243,7 @@ AppStream の metainfo は、`<launchable type="desktop-id">` で指すファイ
 ```bash
 ./gradlew :composeApp:createDistributable
 sudo snap install snapcraft --classic   # 未インストールの場合
-sudo env "PATH=$PATH" snapcraft pack --destructive-mode
+sudo env "PATH=$PATH" snapcraft pack --destructive-mode --platform <amd64-or-arm64>
 ```
 
 deb/rpm（上記「Linux パッケージのメタデータ」参照）と異なり、`snap/snapcraft.yaml` はライセンス・
@@ -256,7 +256,10 @@ deb/rpm（上記「Linux パッケージのメタデータ」参照）と異な�
 
 `--destructive-mode`はサンドボックスなしでホスト上に直接ビルドするため、ホスト自体が
 `snap/snapcraft.yaml`の`base: core24`（Ubuntu 24.04）に一致している必要があり、
-root権限も必要になる——さらにホスト環境を変更してしまう可能性がある。CI（`release.yml`）は
+root権限も必要になる——さらにホスト環境を変更してしまう可能性がある。`platforms:`には
+`amd64`と`arm64`の2エントリが宣言されており、destructiveモードは1回の実行につき1つの
+snapしか生成できないため、上記の`--platform`にはホスト自身のアーキテクチャを指定する
+必要がある。CI（`release.yml`）は
 これを `ubuntu-24.04`/`ubuntu-24.04-arm`（アーキテクチャごとに1つの matrix レッグ）に固定した
 専用の `package-snap` ジョブで実行している——`ubuntu-latest` だと GitHub がこのラベルをより
 新しい LTS へ切り替えた時点で `base: core24` から静かに乖離してしまうため。`base:` を上げる
