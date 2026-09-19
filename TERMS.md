@@ -2,7 +2,7 @@
 
 [日本語](TERMS.ja.md)
 
-**Effective date:** 2026-07-18 · **Applies to:** Keryx (desktop and Android)
+**Effective date:** 2026-09-20 · **Applies to:** Keryx (desktop and Android)
 
 These Terms of Service ("Terms") govern your use of Keryx, a free, open-source,
 local-first RSS reader. Please read them together with the
@@ -17,8 +17,9 @@ agree, please don't use the app.
 
 Keryx is free software: no account, no subscription fee, and no server operated by
 the developer. It runs locally on your device and optionally syncs your data through
-a cloud storage account you control (Dropbox, Google Drive, or OneDrive — Google Drive is not
-currently offered on Android) — see the [Privacy Policy](PRIVACY.md) for details on what that involves.
+a cloud storage account you control (Dropbox, Google Drive, or OneDrive — on Android, Google
+Drive requires Google Play services to be installed, enabled, and up to date) — see the
+[Privacy Policy](PRIVACY.md) for details on what that involves.
 
 ## Source code license (MIT) — unaffected by these Terms
 

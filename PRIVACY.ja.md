@@ -4,7 +4,7 @@
 
 ---
 
-**発効日:** 2026-07-18 · **対象：** Keryx（デスクトップ版・Android 版）
+**発効日:** 2026-09-20 · **対象：** Keryx（デスクトップ版・Android 版）
 
 Keryx はローカルファーストの RSS リーダーです。このドキュメントでは、アプリが扱う
 データの内容と行き先を明確に説明します。Keryx はオープンソースであり、以下の内容は
@@ -71,12 +71,19 @@ Android の OS 標準機能「バックアップ」（`allowBackup`）が Keryx 
 （同時に両方は接続しません）を接続した場合、実際に行われることは以下のとおりです。
 
 - **対応状況**: デスクトップでは3つとも利用できます。Android では Dropbox と
-  OneDrive が利用可能です。Google Drive は利用できません — モバイルアプリに
-  対する Google の OAuth ポリシー上、デスクトップ版と同じ認証方式を Android で
-  再利用できないため、Google Drive 同期は未提供です。
-- **認証**は OAuth 2.0（PKCE）を用い、**端末と Dropbox / Google / Microsoft 自身のサーバーとの間で直接**行われます。
-  ログイン時・トークンの更新時・同期通信そのもの、いずれの
-  段階でも Keryx が運営するサーバーを経由することはありません。
+  OneDrive は常に利用可能です。Google Drive は、Google Play services が導入・有効・
+  最新の状態である端末であれば利用できます（モバイルアプリに対する Google の
+  OAuth ポリシー上、デスクトップ版と同じリダイレクト方式の認証フローは
+  Android で再利用できないため、Android では代わりに Play services 自体の
+  認可 API 経由で Google Drive にアクセスします — 詳細は後述）。
+- **認証**は、Dropbox と OneDrive では OAuth 2.0（PKCE）を用い、**端末と Dropbox / Microsoft
+  自身のサーバーとの間で直接**行われます。ログイン時・トークンの更新時・同期通信
+  そのもの、いずれの段階でも Keryx が運営するサーバーを経由することはありません。
+  Android の Google Drive はこれとは異なり、Play services 自体の `AuthorizationClient`
+  を用います。こちらも端末と Google の間で直接行われ、有効期限の短いアクセス
+  トークンを発行する方式で、Keryx が運営するサーバーもリフレッシュトークンの
+  保存も発生しません。デスクトップ版の Google Drive は Dropbox / OneDrive と
+  同じ、直接の OAuth 2.0（PKCE）フローを使用します。
 - **同期されるもの**: 購読フィード、フォルダー、タグ、キャッシュされた記事
   （既読/スター状態を含む）、アプリ全体設定。
 - **同期されないもの**: デバイスローカル設定（`local_settings.json`）、OAuth
