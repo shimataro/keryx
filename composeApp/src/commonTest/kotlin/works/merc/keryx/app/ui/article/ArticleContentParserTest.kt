@@ -1,0 +1,240 @@
+package works.merc.keryx.app.ui.article
+
+import androidx.compose.ui.graphics.Color
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+/**
+ * The parser is fed the reader's own assembled documents rather than bare body fragments, since
+ * that is exactly what it receives in production — see [parseArticleContent]'s KDoc.
+ */
+class ArticleContentParserTest {
+    private val theme = ArticleHtmlTheme(
+        surface = Color(1f, 1f, 1f),
+        onSurface = Color(0f, 0f, 0f),
+        linkColor = Color(0f, 0f, 1f),
+        mutedColor = Color(0.5f, 0.5f, 0.5f),
+        fontScale = 1.0f,
+    )
+
+    private fun parseBody(body: String, baseUrl: String? = null): List<ArticleBlock> =
+        parseArticleContent(wrapArticleHtml(theme, title = "T", meta = "M", body = body, baseUrl = baseUrl)).blocks
+
+    private fun ArticleInline.plain(): String = spans.joinToString("") { it.text }
+
+    @Test
+    fun extractsTitleMetaAndTitleLinkWithoutLeakingThemIntoBlocks() {
+        val content = parseArticleContent(
+            wrapArticleHtml(
+                theme,
+                title = "Hello & goodbye",
+                meta = "Author · 2026-01-01",
+                body = "<p>body</p>",
+                baseUrl = "https://example.com/a",
+                titleUrl = "https://example.com/a",
+            ),
+        )
+
+        assertEquals("Hello & goodbye", content.title)
+        assertEquals("Author · 2026-01-01", content.meta)
+        assertEquals("https://example.com/a", content.titleUrl)
+        // The header is drawn separately, so it must not also appear as body content.
+        assertEquals(listOf("body"), content.blocks.map { (it as ArticleBlock.Paragraph).text.plain() })
+    }
+
+    @Test
+    fun placeholderDocumentBecomesCenteredNoticeOnly() {
+        val content = parseArticleContent(articlePlaceholderHtml(theme, "記事が選択されていません"))
+
+        assertEquals("記事が選択されていません", content.centeredNotice)
+        assertTrue(content.blocks.isEmpty())
+        assertNull(content.title)
+    }
+
+    @Test
+    fun noContentDocumentKeepsItsNoticeAsOrdinaryText() {
+        val content = parseArticleContent(
+            articleNoContentHtml(theme, title = "T", meta = "M", message = "本文がありません"),
+        )
+
+        assertNull(content.centeredNotice)
+        assertEquals("T", content.title)
+        assertEquals(
+            listOf("本文がありません"),
+            content.blocks.map { (it as ArticleBlock.Paragraph).text.plain() },
+        )
+    }
+
+    @Test
+    fun mapsHeadingLevels() {
+        val blocks = parseBody("<h2>Two</h2><h4>Four</h4>")
+
+        assertEquals(
+            listOf(2 to "Two", 4 to "Four"),
+            blocks.map { (it as ArticleBlock.Heading).let { h -> h.level to h.text.plain() } },
+        )
+    }
+
+    @Test
+    fun carriesInlineDecorations() {
+        val blocks = parseBody("<p>plain <b>bold</b> <i>italic</i> <code>code</code> <s>gone</s></p>")
+
+        val spans = (blocks.single() as ArticleBlock.Paragraph).text.spans
+        assertTrue(spans.any { it.text == "bold" && it.bold })
+        assertTrue(spans.any { it.text == "italic" && it.italic })
+        assertTrue(spans.any { it.text == "code" && it.code })
+        assertTrue(spans.any { it.text == "gone" && it.strikethrough })
+    }
+
+    @Test
+    fun nestedInlineElementsInheritOuterDecorations() {
+        val blocks = parseBody("""<p><b>bold <a href="https://example.com/x">link</a></b></p>""")
+
+        val link = (blocks.single() as ArticleBlock.Paragraph).text.spans.single { it.text == "link" }
+        assertTrue(link.bold)
+        assertEquals("https://example.com/x", link.link)
+    }
+
+    @Test
+    fun resolvesRelativeLinkAgainstTheDocumentBase() {
+        val blocks = parseBody("""<p><a href="/next">next</a></p>""", baseUrl = "https://example.com/article/1")
+
+        val span = (blocks.single() as ArticleBlock.Paragraph).text.spans.single()
+        assertEquals("https://example.com/next", span.link)
+    }
+
+    @Test
+    fun keepsTextOfAnUnresolvableLinkButDropsTheLinkItself() {
+        // No <base> is emitted without an article URL, so a relative href cannot be resolved.
+        val blocks = parseBody("""<p><a href="/next">next</a></p>""")
+
+        val span = (blocks.single() as ArticleBlock.Paragraph).text.spans.single()
+        assertEquals("next", span.text)
+        assertNull(span.link)
+    }
+
+    @Test
+    fun buildsNestedLists() {
+        val blocks = parseBody("<ul><li>one<ul><li>inner</li></ul></li><li>two</li></ul>")
+
+        val bullets = blocks.single() as ArticleBlock.Bullets
+        assertEquals(false, bullets.ordered)
+        assertEquals(2, bullets.items.size)
+        assertEquals("one", (bullets.items[0][0] as ArticleBlock.Paragraph).text.plain())
+        val inner = bullets.items[0][1] as ArticleBlock.Bullets
+        assertEquals("inner", (inner.items.single().single() as ArticleBlock.Paragraph).text.plain())
+    }
+
+    @Test
+    fun marksOrderedLists() {
+        val bullets = parseBody("<ol><li>first</li></ol>").single() as ArticleBlock.Bullets
+        assertTrue(bullets.ordered)
+    }
+
+    @Test
+    fun preservesWhitespaceInCodeBlocksOnly() {
+        val blocks = parseBody("<pre><code>fun main() {\n    println()\n}</code></pre><p>a\n    b</p>")
+
+        assertEquals("fun main() {\n    println()\n}", (blocks[0] as ArticleBlock.Code).text)
+        // Outside <pre>, source line breaks and indentation collapse the way a browser collapses them.
+        assertEquals("a b", (blocks[1] as ArticleBlock.Paragraph).text.plain())
+    }
+
+    @Test
+    fun dropsScriptAndStyleContent() {
+        val blocks = parseBody("<script>alert('x')</script><style>p{color:red}</style><p>real</p>")
+
+        assertEquals(listOf("real"), blocks.map { (it as ArticleBlock.Paragraph).text.plain() })
+    }
+
+    @Test
+    fun recursesThroughContainerElements() {
+        val blocks = parseBody("<div><section><p>deep</p></section></div>")
+
+        assertEquals("deep", (blocks.single() as ArticleBlock.Paragraph).text.plain())
+    }
+
+    @Test
+    fun keepsBareTextBetweenBlocksAsItsOwnParagraph() {
+        val blocks = parseBody("<div>loose text<p>in a p</p></div>")
+
+        assertEquals(
+            listOf("loose text", "in a p"),
+            blocks.map { (it as ArticleBlock.Paragraph).text.plain() },
+        )
+    }
+
+    @Test
+    fun resolvesImagesAndDropsUnresolvableOnes() {
+        val resolved = parseBody(
+            """<img src="/img.png" alt="shown">""",
+            baseUrl = "https://example.com/article/1",
+        ).single() as ArticleBlock.Picture
+        assertEquals("https://example.com/img.png", resolved.src)
+        assertEquals("shown", resolved.alt)
+
+        // Unresolvable: a broken image is worse than none.
+        assertTrue(parseBody("""<img src="/img.png">""").isEmpty())
+    }
+
+    @Test
+    fun treatsFigcaptionAsACaption() {
+        val blocks = parseBody(
+            """<figure><img src="https://example.com/i.png"><figcaption>cap</figcaption></figure>""",
+        )
+
+        assertTrue(blocks[0] is ArticleBlock.Picture)
+        assertEquals("cap", (blocks[1] as ArticleBlock.Caption).text.plain())
+    }
+
+    @Test
+    fun turnsEmbedsIntoEmbedBlocks() {
+        val blocks = parseBody("""<iframe src="https://www.youtube.com/embed/x"></iframe>""")
+
+        assertEquals("https://www.youtube.com/embed/x", (blocks.single() as ArticleBlock.Embed).url)
+    }
+
+    @Test
+    fun readsEmbedUrlFromAChildSourceElement() {
+        val blocks = parseBody("""<video><source src="https://example.com/v.mp4"></video>""")
+
+        assertEquals("https://example.com/v.mp4", (blocks.single() as ArticleBlock.Embed).url)
+    }
+
+    @Test
+    fun buildsTableRowsAcrossSectionElements() {
+        val table = parseBody(
+            "<table><thead><tr><th>h1</th><th>h2</th></tr></thead><tbody><tr><td>a</td><td>b</td></tr></tbody></table>",
+        ).single() as ArticleBlock.Table
+
+        assertEquals(listOf(listOf("h1", "h2"), listOf("a", "b")), table.rows.map { row -> row.map { it.plain() } })
+    }
+
+    @Test
+    fun mapsHorizontalRule() {
+        assertEquals(ArticleBlock.Rule, parseBody("<hr>").single())
+    }
+
+    @Test
+    fun decodesEntities() {
+        val blocks = parseBody("<p>a &amp; b &lt;c&gt; &#169;</p>")
+
+        assertEquals("a & b <c> ©", (blocks.single() as ArticleBlock.Paragraph).text.plain())
+    }
+
+    @Test
+    fun keepsAnInlineImagesAltTextInsideAParagraph() {
+        val blocks = parseBody("""<p>before <img src="https://example.com/i.png" alt="pic"> after</p>""")
+
+        val paragraph = assertNotNull(blocks.single() as? ArticleBlock.Paragraph)
+        assertTrue(paragraph.text.plain().contains("pic"))
+    }
+
+    @Test
+    fun ignoresEmptyBlocks() {
+        assertTrue(parseBody("<p></p><p>   </p><ul></ul><blockquote></blockquote>").isEmpty())
+    }
+}

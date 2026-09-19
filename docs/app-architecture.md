@@ -547,6 +547,35 @@ navigation events bypass that tree entirely —
 adjacent pages would mark them read. That was wrong — read marking lives in `selectArticle`, not in
 `getArticleById` — and the rejection has been reversed.)
 
+**Where the native web view cannot be created at all**, the reader falls back to drawing the
+article with Compose. `platform/NativeWebViewSupport.kt`'s `isNativeWebViewSupported()` probes the
+library's own native entry point once — the library ships one prebuilt binary per platform/
+architecture pair, and a pair it has no binary for fails with an `UnsatisfiedLinkError` that,
+raised from inside composition, freezes the window behind a modal error dialog. When the probe
+fails, `ArticleWebView` renders `ui/article/ArticleContentView.kt` instead of the `WebView`.
+
+That fallback takes the *same assembled document string* the web view would have received and
+re-parses it with ksoup (`ui/article/ArticleContentParser.kt`), rather than taking the raw article
+body: the four reader states (placeholder, "no content", header-only while the body loads, full
+article) are already decided by the document builders above, so re-deriving them would duplicate
+that logic and let the two readers drift. It reproduces block structure, inline decorations and
+images; content that genuinely needs a browser engine — iframes, script-driven widgets, video —
+becomes a button that opens it externally. The whole body is wrapped in a `SelectionContainer`, so
+its text stays selectable/copyable the way the web view's own document text is, coexisting with the
+title/inline links (`LinkAnnotation.Clickable`, not a competing `Modifier.clickable`). Note that
+almost none of the reader's own CSS is what
+has to be ported: the document declares only five content rules, and everything else a browser
+contributes implicitly (paragraph spacing, heading sizes, list markers, `pre` monospacing,
+blockquote indent) is what the Compose renderer has to state outright, mapped onto
+`MaterialTheme.typography`.
+
+None of the heavyweight-interop rules above apply on that path, because no AWT surface is created:
+nothing repaints the whole window, and Compose can draw freely over the pane. The branch sits
+inside the `reader` lambda, so the pane's own structure stays unconditional either way. The concrete
+platform this exists for today is Linux on arm64 — see `docs/known-issues.md` for the evidence, the
+`-Dkeryx.reader.webview` override, and why moving to a backend that does ship an arm64 Linux binary
+is a much larger change.
+
 ### Desktop Tray (platform branch)
 
 `tray/KeryxTray.kt` picks one of four implementations:

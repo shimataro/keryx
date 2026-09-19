@@ -92,3 +92,19 @@ expect fun Modifier.nativeContextMenu(
     items: () -> List<NativeMenuEntry>,
     onOpen: () -> Unit = {},
 ): Modifier
+
+/**
+ * Wraps [content] so that any `SelectionContainer` inside it shows its selection's own context
+ * menu (Copy) through this platform's native menu widgets — the same ones [nativeContextMenu]
+ * builds — instead of the Compose-drawn popup Compose Foundation shows by default.
+ *
+ * Selectable text is the one context menu the app does not build itself: the items, the
+ * right-click detection and the positioning all belong to Compose Foundation, so only the widget
+ * the menu is finally drawn with can be swapped. That is enough to keep it consistent with every
+ * other right-click menu in the app (see the `ui-guidelines` skill: a context menu is a real OS
+ * menu, never a Compose-drawn stand-in).
+ *
+ * A no-op on platforms with no such native menu system to plug into.
+ */
+@Composable
+expect fun NativeTextSelectionContextMenu(content: @Composable () -> Unit)

@@ -719,6 +719,14 @@ class ArticleListPaneTest {
         }
     }
 
+    /**
+     * `assertExists` rather than `assertIsDisplayed`, here and in the scoped-search test below:
+     * these two open the expanded search bar, whose desktop `actual` exists only so tests like this
+     * can render it (production desktop is always `PaneLayout.Triple` — see
+     * `KeryxExpandedSearchBar.desktop.kt`) and whose `TooltipIconButton` stretches to the full
+     * height the pane offers it, leaving the empty-state text laid out past the window's bottom
+     * edge. The hint's *content* is what these two are about, and that is what is asserted.
+     */
     @Test
     fun searchNoResultsHintShowsOnlyOneLineForAllFeedsScope() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
@@ -737,7 +745,7 @@ class ArticleListPaneTest {
             vm.setSearchQuery("nonexistentquery12345")
             waitForNoSearchResultsHint()
 
-            onNodeWithText("該当する記事がありません").assertIsDisplayed()
+            onNodeWithText("該当する記事がありません").assertExists()
             onNodeWithText("すべてのフィードから探すには", substring = true).assertDoesNotExist()
         }
     }
@@ -763,8 +771,8 @@ class ArticleListPaneTest {
             vm.setSearchQuery("nonexistentquery12345")
             waitForNoSearchResultsHint()
 
-            onNodeWithText("該当する記事がありません").assertIsDisplayed()
-            onNodeWithText("すべてのフィードから探すには", substring = true).assertIsDisplayed()
+            onNodeWithText("該当する記事がありません").assertExists()
+            onNodeWithText("すべてのフィードから探すには", substring = true).assertExists()
         }
     }
 

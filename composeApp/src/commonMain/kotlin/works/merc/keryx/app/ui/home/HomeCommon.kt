@@ -3,17 +3,18 @@ package works.merc.keryx.app.ui.home
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -108,6 +109,23 @@ internal val LocalSnackbarHostState = staticCompositionLocalOf<SnackbarHostState
  * would only add an unlabeled, full-size accessibility click node sitting behind every other
  * control in the pane.
  *
+ * Deliberately a bare tap detector rather than [Modifier.clickable], which would otherwise be the
+ * obvious choice here: on a mouse platform `clickable` grabs real Compose focus for *itself* on the
+ * pointer-down (`isRequestFocusOnClickEnabled()` is `true` on desktop), and it does so on the
+ * `Main` pass — i.e. one step *after* the deepest node under the cursor has already handled that
+ * same down. Where the pane's content is a `SelectionContainer` (the Compose fallback article
+ * reader, `ui/article/ArticleContentView.kt`), that ordering silently breaks text selection: the
+ * container starts a selection on the down and takes focus for itself, this modifier's `clickable`
+ * immediately takes it back, and `SelectionManager`'s own focus-loss handler releases the
+ * just-started selection — so a click-and-drag selects nothing at all and only the pane's own
+ * bookkeeping runs. A tap detector wants no focus of its own, which is exactly right here anyway:
+ * the pane's `onActivated` deliberately sends Compose focus to the *screen root* (see
+ * `HomeScreen`'s `activatePane`/`returnKeyboardFocusToRoot`), never to the pane background. It also
+ * drops the unlabeled full-size accessibility click node `clickable` would add, for the same reason
+ * the touch branch above avoids one. Cancellation semantics are unchanged: a consumed down (a row,
+ * a button) or a consumed drag (a text selection) never reaches [onActivated], just as
+ * `clickable`'s own click would not have.
+ *
  * @param isTouchPrimary Overridable for tests only (mirrors `feedListReorderDrag`'s own
  *   `isTouchPrimary` parameter) — production call sites always use the platform default from
  *   `platform/PlatformOs.kt`.
@@ -119,7 +137,8 @@ internal fun Modifier.paneActivation(
 ): Modifier = if (isTouchPrimary) {
     this
 } else {
-    this.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onActivated)
+    val activate = rememberUpdatedState(onActivated)
+    this.pointerInput(Unit) { detectTapGestures { activate.value() } }
 }
 
 /**

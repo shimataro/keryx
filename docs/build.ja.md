@@ -595,6 +595,11 @@ AppStream の `<launchable>` のために追加した — 上記「Linux パッ�
 **現状は macOS・Linux・Windows (x86_64、加えて macOS は arm64)、および Android (ユニバーサル APK/AAB)**（クロスコンパイル非対応のため、
 プラットフォームごとにランナーが必要）。
 
+Linux arm64 がこの一覧に無いのは意図的である。記事リーダーの WebView ライブラリが
+`linux-aarch64` バイナリを同梱しておらず、その環境ではリーダー自体が動作しない。そのマシンで
+ビルドした場合はフリーズせず、Compose 描画の簡易リーダーにフォールバックする —
+`known-issues.ja.md` を参照。
+
 フロー:
 
 1. `vMAJOR.MINOR.PATCH` 形式のタグ（例: `v0.1.0`）で GitHub Release を公開する。SemVer 風の
