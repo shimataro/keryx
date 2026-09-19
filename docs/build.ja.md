@@ -243,7 +243,8 @@ AppStream の metainfo は、`<launchable type="desktop-id">` で指すファイ
 ```bash
 ./gradlew :composeApp:createDistributable
 sudo snap install snapcraft --classic   # 未インストールの場合
-sudo env "PATH=$PATH" snapcraft pack --destructive-mode --platform <amd64-or-arm64>
+platform=amd64   # arm64 ホストでは arm64
+sudo env "PATH=$PATH" snapcraft pack --destructive-mode --platform "$platform"
 ```
 
 deb/rpm（上記「Linux パッケージのメタデータ」参照）と異なり、`snap/snapcraft.yaml` はライセンス・

@@ -244,7 +244,8 @@ directly from `snap/snapcraft.yaml`, which `dump`s the same `createDistributable
 ```bash
 ./gradlew :composeApp:createDistributable
 sudo snap install snapcraft --classic   # if not already installed
-sudo env "PATH=$PATH" snapcraft pack --destructive-mode --platform <amd64-or-arm64>
+platform=amd64   # arm64 on an arm64 host
+sudo env "PATH=$PATH" snapcraft pack --destructive-mode --platform "$platform"
 ```
 
 Unlike deb/rpm (see "Linux package metadata" above), `snap/snapcraft.yaml` needs no Gradle-side
