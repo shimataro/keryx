@@ -638,3 +638,92 @@ Treating the body as untrusted markup rather than only containing its effects �
 and setting `isJavaScriptEnabled = false` (SNS embeds then degrade to the `<blockquote>` fallback
 their own embed code ships), or isolating the body in an `<iframe sandbox srcdoc>` so it cannot
 reach the reader's document at all.
+
+## Linux on arm64: the article reader has no native web-view binary, and the window freezes
+
+**Status**: worked around, not fixed — the reader falls back to a Compose-drawn simplified view on
+any platform/architecture pair the web-view library ships no binary for
+(`platform/NativeWebViewSupport.kt` + `ui/article/ArticleContentView.kt`). The real fix is a
+backend that has an arm64 Linux binary, which is a much larger change (see below). Note that Linux
+arm64 is not a supported target in the first place — `build.md` lists Linux as x86_64 only, and CI
+publishes no arm64 artifacts — so this is about a development machine, not a shipped build.
+
+### Symptom
+
+On ARM64 Ubuntu (a VMware Fusion guest on an M2 Mac), `./gradlew :composeApp:run` opened the window
+and then froze it completely: nothing painted inside, nothing responded. A `.deb` built and
+installed on the same machine appeared to do nothing at all when launched.
+
+### Diagnosis
+
+Both are the same failure. `keryx.0.log` records it:
+
+```
+java.lang.UnsatisfiedLinkError: Unable to load library 'composewebview_wry':
+Native library (linux-aarch64/libcomposewebview_wry.so) not found in resource path
+    at io.github.kdroidfilter.webview.wry.WryWebViewPanel.<clinit>
+    at works.merc.keryx.app.ui.home.ArticleDetailPaneKt.ArticleWebView
+```
+
+`wrywebview-1.0.0-beta-02.jar` bundles exactly four native builds — `darwin-aarch64`,
+`darwin-x86-64`, `linux-x86-64`, `win32-x86-64`. There is no `linux-aarch64`. macOS gets an arm64
+build; Linux does not.
+
+The freeze itself is what that error does on its way out. `UnsatisfiedLinkError` is an `Error`, not
+an `Exception`, and it is raised from inside composition, so Compose's default window exception
+handler catches it and opens a **modal** error dialog. A thread dump taken while "frozen" shows the
+event-dispatch thread parked inside that dialog's own nested event loop, at ~0% CPU:
+
+```
+"AWT-EventQueue-0" ... java.lang.Thread.State: WAITING (parking)
+    at java.awt.Dialog.show(Dialog.java:1051)
+    at androidx.compose.ui.window.WindowExceptionHandlerFactory_desktopKt.showErrorDialog
+```
+
+The packaged `.deb` hits the identical error; it simply has no console to show it on.
+
+### Ruled out
+
+Recorded so they are not retried:
+
+- **Graphics / Skiko / OpenGL.** The obvious guess on a VM with no GPU passthrough, and wrong. The
+  guest's `glxinfo -B` reports `llvmpipe` with `direct rendering: Yes` and GL 4.5, and the thread
+  dump shows Skiko already running happily through `LinuxSoftwareRedrawer` /
+  `AbstractDirectSoftwareRedrawer`. `-Dskiko.renderApi=SOFTWARE` changes nothing because software
+  rendering is already in use.
+- **A missing jlink module in the packaged runtime.** There is precedent for that class of bug
+  (`jdk.security.auth`, `jdk.localedata` — see `composeApp/build.gradle.kts`'s `modules(...)`), so
+  it was the first suspicion for the `.deb`. The log shows the same `UnsatisfiedLinkError` under
+  `/opt/keryx/bin/Keryx`, so it is not that.
+- **The single-instance lock.** A frozen `./gradlew run` left holding the lock would make a second
+  launch forward its activation and exit silently, which looks exactly like "nothing happens". The
+  log line for that path (`Single-instance lock held by another instance`) does not appear; the
+  packaged run logs `Acquired single-instance lock` and then fails on the same error.
+- **AWT/X11 being broken in the guest.** A plain Swing `JFrame` with a button renders and responds
+  normally there.
+
+### The workaround
+
+`isNativeWebViewSupported()` probes the library's own UniFFI entry point once, before the reader
+would have loaded it anyway, and `ArticleWebView` renders the article with Compose when the probe
+fails. That fallback reproduces block structure, inline decorations and images; embedded content
+that genuinely needs a browser engine (iframes, script-driven widgets, video) becomes a button that
+opens it externally.
+
+`-Dkeryx.reader.webview=false` forces the fallback on any machine — which is the only practical way
+to work on its appearance, since it otherwise appears on no platform this project builds on.
+`-Dkeryx.reader.webview=true` forces the web view back on, which matters if a library upgrade ever
+renames the probed class and turns the probe into a permanent false negative (that case logs a
+distinct warning).
+
+### What a real fix would need
+
+The upstream library has moved to `dev.nucleusframework:composewebview`, and its current release
+**does** bundle `nucleus/native/linux-aarch64/libcompose_webview_linux.so`. Adopting it is not a
+version bump: the Wry desktop backend is gone, and its README states that the desktop web view now
+requires the Nucleus Tao backend — *"Desktop is Tao-only … Swing/Compose Desktop without Tao will
+not host the WebView"*, with the app's entry point becoming
+`nucleusApplication(backend = NucleusBackend.Tao)`. That replaces Compose Desktop's own
+`application`/`Window`, which `main.kt` builds the SNI tray, the AWT menu bar, `WindowChrome`,
+`FilePicker` and the macOS `Desktop` handlers on top of. Worth doing only as its own project, and
+only if Linux arm64 becomes a target worth supporting.

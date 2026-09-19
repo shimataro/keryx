@@ -70,6 +70,7 @@ import works.merc.keryx.app.domain.toListRow
 import works.merc.keryx.app.domain.toReaderRow
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.BrowserOpener
+import works.merc.keryx.app.platform.isNativeWebViewSupported
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.WindowDragArea
 import works.merc.keryx.app.platform.isTouchPrimary
@@ -90,6 +91,7 @@ import works.merc.keryx.app.resources.common_back
 import works.merc.keryx.app.resources.home_no_article_selected
 import works.merc.keryx.app.ui.article.ArticleHtmlTheme
 import works.merc.keryx.app.ui.article.articleNoContentHtml
+import works.merc.keryx.app.ui.article.ArticleContentView
 import works.merc.keryx.app.ui.article.articlePlaceholderHtml
 import works.merc.keryx.app.ui.article.extractLinks
 import works.merc.keryx.app.ui.article.wrapArticleHtml
@@ -725,6 +727,15 @@ private fun ArticleWebViewSlot(
  */
 @Composable
 private fun ArticleWebView(html: String, body: String, articleUrl: String?, active: Boolean) {
+    // Some platform/architecture pairs have no native web view binary at all, and letting the
+    // library's UnsatisfiedLinkError escape composition freezes the window (see
+    // isNativeWebViewSupported). Draw the article with Compose there instead. The value cannot
+    // change while the app runs, so returning early never reshapes an existing composition.
+    if (!isNativeWebViewSupported()) {
+        ArticleContentView(html = html, modifier = Modifier.fillMaxSize())
+        return
+    }
+
     // Only genuine outbound links from the article's own HTML are forwarded to the system
     // browser. A plain "any http(s) main-frame request" check would also catch SNS-embed
     // widgets' own internal requests (confirmed during the spike for the X/Twitter widget),

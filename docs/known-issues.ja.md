@@ -642,3 +642,93 @@ Android で `https://alfalfalfa.com/articles/11110022.html` を開くと、1〜2
 `isJavaScriptEnabled = false` にする（SNS 埋め込みは埋め込みコード自身が持つ `<blockquote>`
 フォールバックに退化する）か、本文を `<iframe sandbox srcdoc>` に隔離してリーダーの文書に
 一切到達できないようにする。
+
+## Linux arm64: 記事リーダーのネイティブ WebView バイナリが存在せず、ウインドウがフリーズする
+
+**状態**: 回避済み（未修正） — WebView ライブラリがバイナリを同梱していないプラットフォーム／
+アーキテクチャの組み合わせでは、リーダーが Compose 描画の簡易表示にフォールバックする
+（`platform/NativeWebViewSupport.kt` と `ui/article/ArticleContentView.kt`）。本当の修正は arm64
+Linux バイナリを持つバックエンドへの移行だが、規模がまったく違う（後述）。なお Linux arm64 は
+そもそもサポート対象外であり（`build.md` の Linux は x86_64 のみ、CI も arm64 成果物を公開して
+いない）、これは配布ビルドではなく開発機の話である。
+
+### 症状
+
+ARM64 Ubuntu（M2 Mac の VMware Fusion ゲスト）で `./gradlew :composeApp:run` を実行すると、
+ウインドウは開くがそこで完全に停止する。中身は何も描画されず、操作も一切受け付けない。同じマシンで
+ビルドしてインストールした `.deb` は、起動しても何も起きないように見える。
+
+### 診断
+
+どちらも同じ失敗である。`keryx.0.log` に記録が残る:
+
+```
+java.lang.UnsatisfiedLinkError: Unable to load library 'composewebview_wry':
+Native library (linux-aarch64/libcomposewebview_wry.so) not found in resource path
+    at io.github.kdroidfilter.webview.wry.WryWebViewPanel.<clinit>
+    at works.merc.keryx.app.ui.home.ArticleDetailPaneKt.ArticleWebView
+```
+
+`wrywebview-1.0.0-beta-02.jar` が同梱しているネイティブビルドはちょうど 4 つ — `darwin-aarch64`、
+`darwin-x86-64`、`linux-x86-64`、`win32-x86-64`。**`linux-aarch64` が無い**。macOS には arm64 版が
+あるが、Linux には無い。
+
+フリーズそのものは、このエラーが外に出る過程で起きている。`UnsatisfiedLinkError` は `Exception`
+ではなく `Error` であり、コンポジションの中から送出されるため、Compose の既定のウインドウ例外
+ハンドラがこれを捕捉して**モーダル**のエラーダイアログを開く。「フリーズ中」に採取したスレッド
+ダンプでは、イベントディスパッチスレッドがそのダイアログ自身のネストしたイベントループの中で
+待機しており、CPU 使用率はほぼ 0% である:
+
+```
+"AWT-EventQueue-0" ... java.lang.Thread.State: WAITING (parking)
+    at java.awt.Dialog.show(Dialog.java:1051)
+    at androidx.compose.ui.window.WindowExceptionHandlerFactory_desktopKt.showErrorDialog
+```
+
+パッケージ版の `.deb` もまったく同じエラーに当たっている。単にそれを表示するコンソールが無い
+だけである。
+
+### 除外した仮説
+
+再調査を繰り返さないための記録:
+
+- **グラフィックス / Skiko / OpenGL**。GPU パススルーの無い VM で真っ先に疑う筋だが、外れ。
+  ゲストの `glxinfo -B` は `llvmpipe`・`direct rendering: Yes`・GL 4.5 を報告しており、スレッド
+  ダンプでも Skiko は `LinuxSoftwareRedrawer` / `AbstractDirectSoftwareRedrawer` 経由で正常に
+  動作している。既にソフトウェアレンダリングを使っているので `-Dskiko.renderApi=SOFTWARE` は
+  何も変えない。
+- **パッケージ版ランタイムの jlink モジュール欠落**。この種の不具合には前例があり
+  （`jdk.security.auth`、`jdk.localedata` — `composeApp/build.gradle.kts` の `modules(...)` 参照）、
+  `.deb` の症状を見て最初に疑ったのもこれ。しかしログには `/opt/keryx/bin/Keryx` 配下でも同じ
+  `UnsatisfiedLinkError` が出ており、原因ではない。
+- **シングルインスタンスロック**。フリーズした `./gradlew run` がロックを保持したままだと、
+  2 回目の起動はアクティベーションを転送して黙って終了するため、まさに「何も起きない」ように
+  見える。しかしその経路のログ（`Single-instance lock held by another instance`）は出ておらず、
+  パッケージ版は `Acquired single-instance lock` を出してから同じエラーで失敗している。
+- **ゲスト側で AWT/X11 が壊れている**。ボタンを 1 つ置いた素の Swing `JFrame` は正常に表示され、
+  操作もできる。
+
+### 回避策
+
+`isNativeWebViewSupported()` が、リーダーがどのみち読み込むことになるネイティブライブラリを
+事前に 1 回だけプローブし、失敗した場合は `ArticleWebView` が記事を Compose で描画する。この
+フォールバックはブロック構造・インライン装飾・画像を再現する。ブラウザエンジンを本当に必要と
+する埋め込み（iframe、スクリプト駆動のウィジェット、動画）は、外部ブラウザで開くボタンになる。
+
+`-Dkeryx.reader.webview=false` を渡すと任意のマシンでフォールバックを強制できる。本プロジェクトが
+ビルドできるどのプラットフォームでも通常は発動しない経路なので、見た目を作り込むには事実上これしか
+手段がない。逆に `-Dkeryx.reader.webview=true` は WebView を強制的に使わせる。ライブラリ更新で
+プローブ対象のクラス名が変わり、プローブが恒常的な偽陰性になった場合に効く（そのケースは専用の
+警告をログに出す）。
+
+### 本当の修正に必要なこと
+
+上流のライブラリは `dev.nucleusframework:composewebview` に移行しており、現行リリースには
+`nucleus/native/linux-aarch64/libcompose_webview_linux.so` が**同梱されている**。ただし採用は
+バージョン上げでは済まない。Wry のデスクトップバックエンドは削除され、README はデスクトップの
+WebView に Nucleus Tao バックエンドが必須だと明記している — *"Desktop is Tao-only … Swing/Compose
+Desktop without Tao will not host the WebView"* — アプリのエントリポイントは
+`nucleusApplication(backend = NucleusBackend.Tao)` になる。これは Compose Desktop 自身の
+`application` / `Window` を置き換えるものであり、`main.kt` はその上に SNI トレイ、AWT メニューバー、
+`WindowChrome`、`FilePicker`、macOS の `Desktop` ハンドラを積み上げている。独立した案件として、
+かつ Linux arm64 をサポート対象にする価値が出てきた場合にのみ着手する価値がある。

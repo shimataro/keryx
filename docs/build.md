@@ -583,6 +583,10 @@ per platform:
 **macOS, Linux, Windows (x86_64, plus macOS arm64), and Android (universal APK/AAB)** (cross-compilation is not
 supported, so each platform needs its own runner).
 
+Linux arm64 is deliberately absent from that list. The article reader's web-view library ships no
+`linux-aarch64` binary, so the reader itself cannot run there; a build made on such a machine falls
+back to a Compose-drawn simplified reader instead of freezing — see `known-issues.md`.
+
 Flow:
 
 1. Publish a GitHub Release with a `vMAJOR.MINOR.PATCH` tag, optionally with a SemVer-style

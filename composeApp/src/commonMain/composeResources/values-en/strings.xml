@@ -132,6 +132,8 @@
     <string name="article_url_copied">URL copied</string>
     <string name="article_prev">Previous article</string>
     <string name="article_next">Next article</string>
+    <string name="article_reader_simple_notice">The web view is unavailable here, so the article is shown in simplified form.</string>
+    <string name="article_embed_open">Open embedded content in browser</string>
 
     <!-- settings -->
     <string name="settings_title">Settings</string>

@@ -131,6 +131,8 @@
     <string name="article_url_copied">URL をコピーしました</string>
     <string name="article_prev">前の記事</string>
     <string name="article_next">次の記事</string>
+    <string name="article_reader_simple_notice">この環境では WebView を利用できないため、簡易表示にしています</string>
+    <string name="article_embed_open">埋め込みコンテンツをブラウザーで開く</string>
 
     <!-- settings -->
     <string name="settings_title">設定</string>
