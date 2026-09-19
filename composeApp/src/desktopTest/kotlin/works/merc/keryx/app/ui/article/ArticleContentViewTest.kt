@@ -1,11 +1,15 @@
 package works.merc.keryx.app.ui.article
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
+import androidx.compose.ui.text.LinkAnnotation
 import kotlin.test.Test
+import kotlin.test.assertEquals
 
 /**
  * Renders the Compose fallback reader, which stands in for the native web view on platforms that
@@ -58,6 +62,22 @@ class ArticleContentViewTest {
         onNodeWithText("first item").assertIsDisplayed()
         onNodeWithText("quoted").assertIsDisplayed()
         onNodeWithText("code line").assertIsDisplayed()
+    }
+
+    @Test
+    fun exposesTheArticleTitleAsALink() = runDesktopComposeUiTest {
+        setContent {
+            ArticleContentView(document("<p>Body text here.</p>"))
+        }
+
+        val node = onNodeWithText("Article title").fetchSemanticsNode()
+        val links = node.config.getOrNull(SemanticsProperties.Text)
+            .orEmpty()
+            .flatMap { it.getLinkAnnotations(0, it.length) }
+        assertEquals(
+            listOf("https://example.com/a"),
+            links.map { (it.item as LinkAnnotation.Clickable).tag },
+        )
     }
 
     @Test

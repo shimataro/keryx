@@ -1,7 +1,6 @@
 package works.merc.keryx.app.ui.article
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -134,10 +133,20 @@ private fun ArticleTitle(title: String, titleUrl: String?) {
     val style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold)
     if (titleUrl == null) {
         Text(title, style = style)
-    } else {
-        // The web-view document makes the title a link to the article itself; keep that here.
-        Text(title, style = style, modifier = Modifier.clickable { BrowserOpener.open(titleUrl) })
+        return
     }
+    // The web-view document makes the title a link to the article itself; keep that here — as a
+    // real link annotation rather than a bare clickable, so it carries the same link semantics
+    // the inline links below do. No link styling is applied: the document's own CSS leaves the
+    // title's look alone too (`.article-title a { color: inherit; text-decoration: none }`).
+    val annotated = remember(title, titleUrl) {
+        buildAnnotatedString {
+            withLink(LinkAnnotation.Clickable(tag = titleUrl, linkInteractionListener = { BrowserOpener.open(titleUrl) })) {
+                append(title)
+            }
+        }
+    }
+    Text(annotated, style = style)
 }
 
 @Composable
